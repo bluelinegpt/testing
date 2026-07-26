@@ -24,6 +24,7 @@
     "db:migrate:prod": "node dist/infrastructure/database/run-migrations.js up",
     "dev:import-areas": "tsx src/platform/run-uae-area-import.ts",
     "db:verify": "tsx src/infrastructure/database/verify-schema.ts",
+    "db:reset:dev": "tsx src/platform/run-development-data-reset.ts",
     "security:bootstrap-platform": "tsx src/platform/run-platform-administrator-bootstrap.ts",
     "security:bootstrap-platform:prod": "node dist/platform/run-platform-administrator-bootstrap.js",
     "dev:bootstrap-company": "tsx src/platform/run-development-company-bootstrap.ts",
