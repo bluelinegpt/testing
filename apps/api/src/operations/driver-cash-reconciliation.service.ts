@@ -93,6 +93,41 @@ export interface ReconciliationDriver {
   readonly pendingOrderCount: number;
 }
 
+export interface DriverCollectionPrintData {
+  readonly actualReceived: string;
+  readonly businessDate: string;
+  readonly companyName: string;
+  readonly difference: string;
+  readonly driverExpenses: string;
+  readonly driverName: string;
+  readonly gross: string;
+  readonly netExpected: string;
+  readonly paymentMethod: "cash" | "visa";
+  readonly reconciliationNumber: string;
+  readonly totalOrders: number;
+  readonly totalTraders: number;
+  readonly traders: readonly {
+    readonly companyFees: string;
+    readonly gross: string;
+    readonly orderCount: number;
+    readonly orders: readonly {
+      readonly address: string;
+      readonly amountToCollect: string;
+      readonly areaNameAr: string;
+      readonly companyFees: string;
+      readonly customerMobile: string;
+      readonly customerName: string;
+      readonly notes: string | null;
+      readonly referenceNumber: string | null;
+      readonly serialNumber: string;
+      readonly status: string;
+      readonly traderPayable: string;
+    }[];
+    readonly traderName: string;
+    readonly traderPayable: string;
+  }[];
+}
+
 export interface EligibleOrderRow {
   readonly amountCollected: string;
   readonly areaName: string;
@@ -907,6 +942,140 @@ export class DriverCashReconciliationService {
         const payment = row as Record<string, unknown> & { paymentMethod: string };
         return { ...payment, paymentMethodLabel: paymentMethodLabel(payment.paymentMethod) };
       }),
+    };
+  }
+
+  // Read-only data for the Driver-collection print document (§12), grouped by Trader. No status,
+  // financial row or snapshot is modified. Internal UUIDs are never returned — only the business
+  // identifiers (serial/reference/collection numbers) that preserve leading zeros.
+  public async printData(reconciliationId: string): Promise<DriverCollectionPrintData> {
+    this.assertAnyPermission("reconciliations.create");
+    const { companyId } = this.tenants.current();
+    const header = (
+      await sql<{
+        actualReceived: string;
+        businessDate: string;
+        companyName: string;
+        driverExpenses: string;
+        driverName: string;
+        netExpected: string;
+        paymentMethod: string | null;
+        reconciliationNumber: string;
+      }>`
+        select r.reconciliation_number as "reconciliationNumber",
+               r.business_date::text as "businessDate",
+               r.collection_payment_method as "paymentMethod",
+               r.reconciliation_expenses::text as "driverExpenses",
+               r.net_amount_received::text as "netExpected",
+               d.name_en as "driverName",
+               coalesce(company.name_ar, company.name_en) as "companyName",
+               coalesce(pay.total, 0)::text as "actualReceived"
+          from driver_reconciliations r
+          join drivers d on d.id = r.driver_id and d.company_id = r.company_id
+          join companies company on company.id = r.company_id
+          left join lateral (
+            select coalesce(sum(p.amount), 0) as total from driver_reconciliation_payments p
+             where p.reconciliation_id = r.id and p.company_id = r.company_id
+          ) pay on true
+         where r.id = ${reconciliationId}::uuid and r.company_id = ${companyId}::uuid
+      `.execute(this.database)
+    ).rows[0];
+    if (header === undefined) {
+      throw new ApplicationException(
+        "reconciliation_not_found",
+        "Driver cash reconciliation not found",
+        HttpStatus.NOT_FOUND,
+      );
+    }
+    const rows = (
+      await sql<{
+        address: string;
+        amountToCollect: string;
+        areaNameAr: string;
+        companyFees: string;
+        customerMobile: string;
+        customerName: string;
+        notes: string | null;
+        referenceNumber: string | null;
+        serialNumber: string;
+        status: string;
+        traderName: string;
+        traderPayable: string;
+      }>`
+        select coalesce(t.name_ar, t.name_en) as "traderName",
+               coalesce(o.serial_number, o.order_number) as "serialNumber",
+               o.reference_number as "referenceNumber",
+               o.customer_name as "customerName",
+               o.customer_mobile_number as "customerMobile",
+               coalesce(o.customer_area_name_snapshot, a.name_ar, a.name_en, '') as "areaNameAr",
+               o.customer_address as "address",
+               o.customer_amount_due::text as "amountToCollect",
+               (o.customer_amount_due - o.trader_net_payable)::text as "companyFees",
+               o.trader_net_payable::text as "traderPayable",
+               o.delivery_status as "status",
+               o.notes
+          from driver_reconciliation_orders link
+          join orders o on o.id = link.order_id and o.company_id = link.company_id
+          join traders t on t.id = o.trader_id and t.company_id = o.company_id
+          left join areas a on a.id = o.area_id and a.company_id = o.company_id
+         where link.reconciliation_id = ${reconciliationId}::uuid
+           and link.company_id = ${companyId}::uuid
+         order by t.name_en, coalesce(o.serial_number, o.order_number)
+      `.execute(this.database)
+    ).rows;
+
+    const traderOrder: string[] = [];
+    const grouped = new Map<string, (typeof rows)[number][]>();
+    for (const row of rows) {
+      if (!grouped.has(row.traderName)) {
+        grouped.set(row.traderName, []);
+        traderOrder.push(row.traderName);
+      }
+      grouped.get(row.traderName)!.push(row);
+    }
+    const traders = traderOrder.map((traderName) => {
+      const traderRows = grouped.get(traderName)!;
+      const gross = traderRows.reduce((sum, r) => sum.plus(r.amountToCollect), new Decimal(0));
+      const companyFees = traderRows.reduce((sum, r) => sum.plus(r.companyFees), new Decimal(0));
+      const traderPayable = traderRows.reduce((sum, r) => sum.plus(r.traderPayable), new Decimal(0));
+      return {
+        companyFees: companyFees.toFixed(2),
+        gross: gross.toFixed(2),
+        orderCount: traderRows.length,
+        orders: traderRows.map((r) => ({
+          address: r.address,
+          amountToCollect: new Decimal(r.amountToCollect).toFixed(2),
+          areaNameAr: r.areaNameAr,
+          companyFees: new Decimal(r.companyFees).toFixed(2),
+          customerMobile: r.customerMobile,
+          customerName: r.customerName,
+          notes: r.notes,
+          referenceNumber: r.referenceNumber,
+          serialNumber: r.serialNumber,
+          status: r.status,
+          traderPayable: new Decimal(r.traderPayable).toFixed(2),
+        })),
+        traderName,
+        traderPayable: traderPayable.toFixed(2),
+      };
+    });
+    const gross = rows.reduce((sum, r) => sum.plus(r.amountToCollect), new Decimal(0));
+    const actualReceived = new Decimal(header.actualReceived);
+    const netExpected = new Decimal(header.netExpected);
+    return {
+      actualReceived: actualReceived.toFixed(2),
+      businessDate: header.businessDate,
+      companyName: header.companyName,
+      difference: actualReceived.minus(netExpected).toFixed(2),
+      driverExpenses: new Decimal(header.driverExpenses).toFixed(2),
+      driverName: header.driverName,
+      gross: gross.toFixed(2),
+      netExpected: netExpected.toFixed(2),
+      paymentMethod: header.paymentMethod === "visa" ? "visa" : "cash",
+      reconciliationNumber: header.reconciliationNumber,
+      totalOrders: rows.length,
+      totalTraders: traders.length,
+      traders,
     };
   }
 

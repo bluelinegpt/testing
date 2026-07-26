@@ -39,6 +39,11 @@ import { isUaeMobile, normalizeUaeMobile } from "../../domain/uae-mobile.js";
 import { formatCurrency, formatDate, formatDateTime } from "../../localization/formatters.js";
 import { normalizeLocale } from "../../localization/locale.js";
 import { CreateOrderDialog } from "./CreateOrderDialog.js";
+import {
+  type DriverCollectionPrintData,
+  type DriverCollectionPrintLabels,
+  openDriverCollectionPrint,
+} from "./driver-collection-print.js";
 import { openOrderWaybill, OrderBarcode } from "./OperationsWorkspace.js";
 import { materialFingerprint, useIdempotencyKey } from "./useIdempotencyKey.js";
 
@@ -1193,6 +1198,7 @@ function BulkStatusDialog({
 }
 
 interface CollectPreview {
+  readonly companyFees: string;
   readonly difference: string;
   readonly driverId: string;
   readonly expenseTotal: string;
@@ -1200,6 +1206,8 @@ interface CollectPreview {
   readonly netAmountExpected: string;
   readonly orderCount: number;
   readonly paymentTotal: string;
+  readonly traderCount: number;
+  readonly traderPayable: string;
 }
 interface CollectExpenseType {
   readonly id: string;
@@ -1223,8 +1231,9 @@ function CollectMoneyDialog({
 }) {
   const { i18n, t } = useTranslation();
   const locale = normalizeLocale(i18n.resolvedLanguage);
+  const [paymentMethod, setPaymentMethod] = useState<"cash" | "visa">("cash");
   const [expenses, setExpenses] = useState<
-    readonly { amount: string; expenseTypeId: string; notes: string }[]
+    readonly { amount: string; expenseTypeId: string; reason: string }[]
   >([]);
   const [cash, setCash] = useState("");
   const [cashTouched, setCashTouched] = useState(false);
@@ -1232,18 +1241,24 @@ function CollectMoneyDialog({
   const [preview, setPreview] = useState<CollectPreview>();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string>();
+  const [confirmed, setConfirmed] = useState<{
+    reconciliationId: string;
+    reconciliationNumber: string;
+  }>();
   const idempotency = useIdempotencyKey();
 
+  // Every entered expense must carry a reason (§9); rows still being filled in are ignored.
+  const filledExpenses = expenses.filter((row) => row.expenseTypeId !== "" && row.amount !== "");
   const cleanExpenses = useMemo(
     () =>
-      expenses
-        .filter((row) => row.expenseTypeId !== "" && row.amount !== "")
-        .map((row) => ({
-          amount: Number(twoDecimals(row.amount)),
-          expenseTypeId: row.expenseTypeId,
-          ...(row.notes.trim() === "" ? {} : { notes: row.notes.trim() }),
-        })),
-    [expenses],
+      filledExpenses.map((row) => ({
+        amount: Number(twoDecimals(row.amount)),
+        expenseTypeId: row.expenseTypeId,
+        reason: row.reason.trim(),
+      })),
+    // filledExpenses is rebuilt every render; key the memo on its serialized
+    // value so it only recomputes when an expense's content actually changes.
+    [JSON.stringify(filledExpenses)],
   );
 
   useEffect(() => {
@@ -1288,29 +1303,38 @@ function CollectMoneyDialog({
   const driverName = drivers.find((driver) => driver.id === preview?.driverId)?.name;
   const netExpected = preview === undefined ? 0 : Number(preview.netAmountExpected);
   const difference = twoDecimals(Number(twoDecimals(cash || 0)) - netExpected);
+  const expensesHaveReason = filledExpenses.every((row) => row.reason.trim() !== "");
   const confirmPayload = {
     ...selection,
+    // Authoritative Cash/Visa method for the whole collection (§6), stored on the collection
+    // and each Order. The tender amount is recorded as the money received.
+    collectionPaymentMethod: paymentMethod,
     expenses: cleanExpenses,
     payments:
       cash.trim() === "" ? [] : [{ amount: Number(twoDecimals(cash)), paymentMethod: "cash" }],
   };
-  const fingerprint = materialFingerprint({
+  const fingerprint = `${paymentMethod}|${materialFingerprint({
     excludedOrderIds: "excludedOrderIds" in selection ? selection.excludedOrderIds : [],
     expenses: cleanExpenses.map((row) => ({ ...row, amount: String(row.amount) })),
     orderIds: "orderIds" in selection ? selection.orderIds : [],
     payments: confirmPayload.payments.map((row) => ({ ...row, amount: String(row.amount) })),
     selectionMode: selection.selectionMode,
-  });
+  })}`;
 
   const submit = async () => {
     setSaving(true);
     setError(undefined);
     try {
-      await api.post("operations/cash/reconciliations/selected", confirmPayload, {
+      const result = await api.post<{
+        reconciliationId: string;
+        reconciliationNumber: string;
+      }>("operations/cash/reconciliations/selected", confirmPayload, {
         "X-Idempotency-Key": idempotency.keyFor(fingerprint),
       });
       idempotency.reset();
-      await onComplete();
+      // Keep the dialog open on success so the operator can print the collection; the list is
+      // refreshed when they close via Done.
+      setConfirmed(result);
     } catch (requestError) {
       setError(message(requestError, t("operations.reconciliationFailed")));
     } finally {
@@ -1318,8 +1342,24 @@ function CollectMoneyDialog({
     }
   };
 
+  const printConfirmed = async () => {
+    if (confirmed === undefined) return;
+    try {
+      const printData = await api.get<DriverCollectionPrintData>(
+        `operations/cash/reconciliations/${confirmed.reconciliationId}/print-data`,
+      );
+      openDriverCollectionPrint(printData, driverCollectionPrintLabels(t));
+    } catch (requestError) {
+      setError(message(requestError, t("operations.detailLoadFailed")));
+    }
+  };
+
   const canSubmit =
-    preview !== undefined && preview.orderCount > 0 && cash.trim() !== "" && !saving;
+    preview !== undefined &&
+    preview.orderCount > 0 &&
+    cash.trim() !== "" &&
+    expensesHaveReason &&
+    !saving;
 
   return (
     <Modal
@@ -1328,7 +1368,26 @@ function CollectMoneyDialog({
       title={t("operations.actions.collectMoney")}
       titleId="collect-money-title"
     >
-      {preview === undefined ? (
+      {confirmed !== undefined ? (
+        <div className="reconciliation-success">
+          <p>
+            {t("operations.collectionConfirmed", { number: confirmed.reconciliationNumber })}
+          </p>
+          {error === undefined ? null : <div className="alert alert-error">{error}</div>}
+          <div className="modal-actions">
+            <button
+              className="button button-secondary"
+              onClick={() => void printConfirmed()}
+              type="button"
+            >
+              {t("operations.printCollection")}
+            </button>
+            <button className="button button-primary" onClick={() => void onComplete()} type="button">
+              {t("common.close")}
+            </button>
+          </div>
+        </div>
+      ) : preview === undefined ? (
         error === undefined ? (
           <div className="loading-row">{t("common.loading")}</div>
         ) : (
@@ -1336,6 +1395,16 @@ function CollectMoneyDialog({
         )
       ) : (
         <>
+          <label className="field">
+            <span>{t("operations.paymentMethod")}</span>
+            <select
+              onChange={(event) => setPaymentMethod(event.target.value as "cash" | "visa")}
+              value={paymentMethod}
+            >
+              <option value="cash">{t("operations.paymentMethodCash")}</option>
+              <option value="visa">{t("operations.paymentMethodVisa")}</option>
+            </select>
+          </label>
           <dl className="reconciliation-summary">
             <div>
               <dt>{t("operations.driver")}</dt>
@@ -1346,8 +1415,20 @@ function CollectMoneyDialog({
               <dd>{preview.orderCount}</dd>
             </div>
             <div>
+              <dt>{t("operations.tradersRepresented")}</dt>
+              <dd>{preview.traderCount}</dd>
+            </div>
+            <div>
               <dt>{t("operations.receiveDriverMoney")}</dt>
               <dd>{formatCurrency(preview.grossCollections, "AED", locale)}</dd>
+            </div>
+            <div>
+              <dt>{t("operations.companyFees")}</dt>
+              <dd>{formatCurrency(preview.companyFees, "AED", locale)}</dd>
+            </div>
+            <div>
+              <dt>{t("operations.amountDueToTrader")}</dt>
+              <dd>{formatCurrency(preview.traderPayable, "AED", locale)}</dd>
             </div>
             <div>
               <dt>{t("operations.expenses")}</dt>
@@ -1370,7 +1451,7 @@ function CollectMoneyDialog({
                 onClick={() =>
                   setExpenses((current) => [
                     ...current,
-                    { amount: "", expenseTypeId: "", notes: "" },
+                    { amount: "", expenseTypeId: "", reason: "" },
                   ])
                 }
                 type="button"
@@ -1379,7 +1460,7 @@ function CollectMoneyDialog({
               </button>
             </div>
             {expenses.map((row, index) => (
-              <div className="collect-expense-row" key={index}>
+              <div className="collect-expense-row collect-expense-row-reason" key={index}>
                 <select
                   onChange={(event) =>
                     setExpenses((current) =>
@@ -1410,6 +1491,18 @@ function CollectMoneyDialog({
                   placeholder="0.00"
                   type="number"
                   value={row.amount}
+                />
+                <input
+                  aria-invalid={row.expenseTypeId !== "" && row.reason.trim() === ""}
+                  onChange={(event) =>
+                    setExpenses((current) =>
+                      current.map((item, itemIndex) =>
+                        itemIndex === index ? { ...item, reason: event.target.value } : item,
+                      ),
+                    )
+                  }
+                  placeholder={t("operations.expenseReasonPlaceholder")}
+                  value={row.reason}
                 />
                 <button
                   aria-label={t("common.remove")}
@@ -2467,6 +2560,41 @@ function money(value: string, locale: "ar" | "en"): string {
 }
 function twoDecimals(value: string | number): string {
   return (Math.round(Number(value || 0) * 100) / 100).toFixed(2);
+}
+function driverCollectionPrintLabels(t: Translate): DriverCollectionPrintLabels {
+  const p = (key: string): string => t(`operations.driverCollectionPrint.${key}`);
+  return {
+    actualReceived: p("actualReceived"),
+    address: p("address"),
+    amountToCollect: p("amountToCollect"),
+    area: p("area"),
+    cash: p("cash"),
+    collectionDate: p("collectionDate"),
+    collectionNumber: p("collectionNumber"),
+    companyFees: p("companyFees"),
+    companyReceiverSignature: p("companyReceiverSignature"),
+    customer: p("customer"),
+    difference: p("difference"),
+    driver: p("driver"),
+    driverExpenses: p("driverExpenses"),
+    driverSignature: p("driverSignature"),
+    grossCustomerCollections: p("grossCustomerCollections"),
+    mobile: p("mobile"),
+    netExpected: p("netExpected"),
+    notes: p("notes"),
+    numberOfOrders: p("numberOfOrders"),
+    orderStatus: p("orderStatus"),
+    paymentMethod: p("paymentMethod"),
+    referenceNumber: p("referenceNumber"),
+    serialNumber: p("serialNumber"),
+    signatureDate: p("signatureDate"),
+    title: p("title"),
+    totalOrders: p("totalOrders"),
+    totalTraders: p("totalTraders"),
+    trader: p("trader"),
+    traderPayable: p("traderPayable"),
+    visa: p("visa"),
+  };
 }
 function message(error: unknown, fallback: string): string {
   return error instanceof ApiError || error instanceof Error ? error.message : fallback;

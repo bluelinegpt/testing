@@ -383,6 +383,14 @@ export class OperationsController {
     return this.reconciliations.details(reconciliationId);
   }
 
+  @ApiOperation({ summary: "Read-only print data for the Driver collection document (grouped by Trader)" })
+  @Get("cash/reconciliations/:reconciliationId/print-data")
+  public driverReconciliationPrintData(
+    @Param("reconciliationId", new ParseUUIDPipe()) reconciliationId: string,
+  ): Promise<unknown> {
+    return this.reconciliations.printData(reconciliationId);
+  }
+
   @ApiOperation({ summary: "List delivered orders pending trader settlement" })
   @Get("settlements/pending")
   public pendingSettlementOrders(): Promise<readonly OperationsPendingSettlementOrder[]> {
