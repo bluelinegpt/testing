@@ -1,0 +1,333 @@
+# BluelineGPT PostgreSQL Schema Audit
+
+Audit date: 2026-07-15  
+Scope: repository migrations, Kysely schema inventory, bootstrap/seed paths, database configuration, application SQL, and the live development PostgreSQL catalog.  
+Method: read-only catalog queries executed inside `BEGIN READ ONLY`; no code, migration, schema, or data was changed.
+
+## A. Executive assessment
+
+The live database contains 52 application tables in `public`, exactly matching the table names in the Kysely `DatabaseSchema` inventory. Primary keys exist on every table. Foreign keys are enforced in PostgreSQL, nearly all tenant-owned relationships use `(business_id, company_id)` composite foreign keys, all money columns use `numeric`, operational timestamps use `timestamptz`, and destructive cascades are avoided through `ON DELETE RESTRICT`. Existing sample data passed read-only consistency checks for assignment history, status history, reconciliation totals, settlement totals, payment totals, and cross-company role assignment.
+
+The schema is a strong foundation, but it is not yet production-complete for strict financial and tenant integrity. The most important gaps are:
+
+1. **High:** no PostgreSQL row-level security (RLS) policy exists on any of the 52 tables. Application queries generally add `company_id`, but a missed predicate or direct SQL access can read another company.
+2. **High:** `order_status_history` and `order_assignments` are not database-immutable. History can be updated or deleted, and `orders.assigned_driver_id` can diverge from the active assignment row.
+3. **High:** no customer master entity exists. Customer identity/contact/address data is repeated in `orders` without a documented snapshot/master split.
+4. **High:** driver reconciliation and trader settlement headers duplicate line/payment totals, but PostgreSQL does not enforce header-to-line or header-to-payment agreement.
+5. **High:** order financial results are stored without enforced formulas or a pricing/VAT/currency snapshot. Current application calculations are traceable in code, not in the transaction itself.
+6. **High:** imports do not persist a source row identity or external order reference, so the database cannot prevent a repeated source row with a new generated order number. One current imported order has this structural exposure; no duplicate was observed.
+7. **Medium:** no sub-area hierarchy, driver-area coverage junction, or general trader-area coverage relation exists.
+8. **Medium:** settlement/reconciliation lifecycle history is represented by current state, audit events, and reversals, not dedicated append-only lifecycle events.
+9. **Medium:** Kysely table definitions are `Record<string, unknown>`, so the ORM layer provides no compile-time column/nullability/type contract.
+
+No **Critical** defect was found in the current data. The High findings should be corrected before production onboarding or external database access.
+
+### Audit evidence
+
+- Live tables: 52; RLS enabled: 0; forced RLS: 0.
+- Connected application role: not superuser, cannot create roles/databases, and does not bypass RLS.
+- Existing-data violations found: 0 cross-company role assigners; 0 active-assignment mismatches; 0 latest delivery-history mismatches; 0 reconciliation aggregate/payment mismatches; 0 settlement aggregate/payment mismatches.
+- Money types: `numeric(18,2)` for money and `numeric(7,4)` for VAT rate; no `real`, `double precision`, or SQL array business columns.
+- Time types: `timestamptz` for instants, `date` for business dates and expiry dates.
+
+## B. Table inventory
+
+Legend:
+
+- All tables are in schema `public`.
+- `PK` names the primary-key columns. `FK` lists every business foreign-key path; repeated direct `company_id -> companies.id` is shown as `company`.
+- `UQ` lists unique business rules. Every PK/UQ is backed by a PostgreSQL unique B-tree index.
+- `Nullable` is exhaustive; `none` means every column is `NOT NULL`.
+- `Indexes` lists additional named indexes beyond PK/UQ indexes.
+- `M1` = `20260713230000_core_tenancy_security.ts`; `M2` = `20260713230010_delivery_operations.ts`; `M3` = `20260713230020_finance_accounting.ts`; `M4` = `20260713230030_scope_and_financial_hardening.ts`; `M5` = `20260713230040_authentication_sessions.ts`; `M6` = `20260715005000_support_cases.ts`.
+
+### Identity, tenancy, and security
+
+| Table | Purpose | PK | FK | UQ | Check constraints | Nullable | Additional indexes | Migration |
+|---|---|---|---|---|---|---|---|---|
+| `companies` | Tenant/company master | `id` | `logo_file_id,id -> file_objects.id,company_id` | case-insensitive `code`; case-insensitive `subdomain` | nonempty code; subdomain format; status active/disabled; positive version | `name_ar,address_en,address_ar,telephone,email,logo_file_id,trade_license_number,trade_license_expiry_date,tax_registration_number,activated_at,disabled_at` | none | M1 |
+| `company_settings` | One settings row per company | `company_id` | company | none | AED currency; en/ar; VAT rate/mode/enable consistency; positive alert periods; positive version | `vat_rate,vat_price_mode,order_pending_alert_hours,document_expiry_alert_days` | none | M1 |
+| `company_bank_accounts` | Company payment/bank destinations | `id` | company; `gl_account_id,company_id -> chart_of_accounts` | `(id,company_id)`; case-insensitive IBAN per company when present | AED currency; positive version | `account_number_masked,iban,swift_code,gl_account_id` | partial `company_bank_accounts_iban_unique` | M1, M3 |
+| `accounts` | Login identity for platform/company/trader/driver | `id` | optional company | `(id,company_id)` nulls-not-distinct; username per company/platform | kind/scope agreement; status; language; login-attempt range; nonempty username/hash; positive version | `company_id,locked_until,password_changed_at,last_login_at,deactivated_at` | `accounts_company_username_unique`, `accounts_platform_username_unique`, `accounts_company_status_index` | M1 |
+| `permissions` | Global permission catalogue | `code` | none | PK | code format | none | none | M1; rows seeded M5 |
+| `roles` | Platform or company role | `id` | optional company | `(id,company_id)` nulls-not-distinct; code per company/platform | code format; positive version | `company_id` | `roles_company_code_unique`, `roles_platform_code_unique` | M1 |
+| `role_permissions` | Role-permission M:N junction | `(role_id,permission_code)` | role; permission | PK | none | none | none | M1 |
+| `account_roles` | Account-role M:N junction | `(account_id,role_id)` | account; role; scoped account; scoped role; optional assigning account | PK | trigger enforces account/role/company scope | `company_id,assigned_by_account_id` | none | M1, M4 |
+| `company_users` | Company-user profile | `id` | company; scoped account | `(id,company_id)`; account | positive version; trigger requires `company_user` account kind | `name_ar,email,mobile_number,notes,deactivated_at` | `company_users_company_active_index` | M1, M4 |
+| `employees` | Employee/HR record | `id` | company; optional scoped company user | `(id,company_id)`; employee number per company when present | nonnegative salary; date order; positive version | `company_user_id,employee_number,name_ar,mobile_number,address,hired_on,ended_on,notes,deactivated_at` | `employees_number_unique` | M1 |
+| `file_objects` | Stored-file metadata | `id` | company; optional scoped uploader | `(id,company_id)`; storage provider/key | size; classification; scan status; SHA-256 format | `sha256,uploaded_by_account_id,deleted_at` | `file_objects_company_created_index` | M1 |
+| `company_reference_counters` | Atomic company document numbering | `(company_id,reference_type)` | company | PK | supported type; positive next value; prefix format | none | none | M1 |
+| `idempotency_records` | Request replay protection | `id` | company | `(company_id,operation,idempotency_key)` | HTTP status range; expiry after creation | `response_status,resource_type,resource_id,completed_at` | `idempotency_records_expiry_index` | M1 |
+| `audit_events` | Append-only cross-domain audit trail | `id` | optional company; optional actor account | none | nonempty action/subject/correlation; actor-scope and immutability triggers | `company_id,actor_account_id,subject_id,reason,before_data,after_data,ip_address,user_agent` | `audit_events_company_time_index`, `audit_events_subject_index`, `audit_events_actor_index` | M1, M4 |
+| `account_sessions` | Authentication sessions | `id` | optional company; account | `(id,company_id)` nulls-not-distinct; token hash | token hash format; expiry after creation; scope trigger | `company_id,revoked_at,last_seen_at,created_ip,user_agent` | `account_sessions_account_active_index`, `account_sessions_expiry_index` | M5 |
+| `password_reset_tokens` | Password-reset credentials | `id` | optional company; account | `(id,company_id)` nulls-not-distinct; token hash | token hash format; expiry after creation; scope trigger | `company_id,used_at` | `password_reset_tokens_account_active_index` | M5 |
+
+### Delivery and operations
+
+| Table | Purpose | PK | FK | UQ | Check constraints | Nullable | Additional indexes | Migration |
+|---|---|---|---|---|---|---|---|---|
+| `areas` | Company delivery area | `id` | company | `(id,company_id)`; code per company; English name per company | nonempty code; positive version | `name_ar,deactivated_at` | `areas_code_unique`, `areas_name_en_unique` | M2 |
+| `traders` | Merchant/trader profile | `id` | company; scoped account | `(id,company_id)`; account; code per company | active/disabled; nonempty code/mobile; positive version; account-kind trigger | `name_ar,contact_person,telephone,email,address_en,address_ar,pickup_address,notes,deactivated_at` | `traders_code_unique`, `traders_company_status_index` | M2, M4 |
+| `trader_pricing` | Effective trader pricing header | `id` | company; scoped trader; scoped creator | `(id,company_id)`; one active row per trader | flat/by-area consistency; date order; positive version | `flat_service_fee,effective_to` | `trader_pricing_active_unique` | M2 |
+| `trader_area_prices` | Pricing-area M:N detail | `id` | company; scoped pricing; scoped area | `(id,company_id)`; `(company_id,trader_pricing_id,area_id)` | nonnegative fee; positive version | none | none beyond UQ | M2 |
+| `vehicles` | Company vehicle master | `id` | company | `(id,company_id)`; registration per company | positive version | `make,model,color,notes` | `vehicles_registration_unique` | M2 |
+| `drivers` | Driver profile and compensation setup | `id` | company; scoped account; optional employee; optional vehicle | `(id,company_id)`; account; code per company | driver type/profile consistency; commission rules; nonnegative outsourced fee; status; mobile; version; account-kind trigger | `employee_id,vehicle_id,name_ar,address,commission_type,commission_value,outsourced_fee_per_delivered_order,notes,deactivated_at` | `drivers_code_unique`, `drivers_company_type_status_index` | M2, M4 |
+| `driver_documents` | Driver compliance documents | `id` | company; scoped driver; optional scoped file | `(id,company_id)`; one document type per driver | allowed document type; positive version | `document_number,expiry_date,attachment_file_id` | `driver_documents_expiry_index` | M2 |
+| `third_party_delivery_companies` | International/outsource provider | `id` | company | `(id,company_id)`; name per company | nonnegative default cost; positive version | `contact_information,address,default_cost,notes` | `third_party_delivery_name_unique` | M2 |
+| `import_batches` | Bulk-import control/header | `id` | company; optional trader; source file; requester | `(id,company_id)`; import number per company | import type/status; row-count consistency | `trader_id,completed_at` | `import_batches_company_created_index` | M2 |
+| `import_errors` | Import row/column validation errors | `id` | company; scoped batch | `(id,company_id)` | positive row number | none | `import_errors_batch_row_index` | M2 |
+| `orders` | Delivery transaction and financial snapshot | `id` | company; trader; area; creator; optional import batch; optional assigned driver (all scoped) | `(id,company_id)`; order number per company | mode/payment/status enums; package/coordinates; nonnegative amounts; close/return rule; version | `import_batch_id,assigned_driver_id,customer_second_mobile_number,customer_latitude,customer_longitude,notes,delivery_reason,expected_delivery_date,delivered_at,closed_at` | `orders_company_status_date_index`, `orders_company_trader_date_index`, `orders_company_driver_status_index`, `orders_company_reconciliation_index`, `orders_company_settlement_index`, `orders_customer_mobile_index` | M2 |
+| `order_items` | Optional order line/package details | `id` | company; scoped order | `(id,company_id)` | positive quantity/package count | `description,package_count` | `order_items_order_index` | M2 |
+| `order_assignments` | Driver assignment/reassignment periods | `id` | company; scoped order/driver/actor | `(id,company_id)`; one active assignment per order | unassignment not before assignment | `unassigned_at,reason` | `order_assignments_active_unique`, `order_assignments_driver_index` | M2 |
+| `order_status_history` | Multi-dimension order status events | `id` | company; scoped order/actor | `(id,company_id)` | dimension enum only | `from_status,reason` | `order_status_history_order_time_index` | M2 |
+| `order_attachments` | Order-file junction with type/uploader | `id` | company; scoped order/file/actor | `(id,company_id)` | attachment type | none | none beyond UQ | M2 |
+| `international_shipments` | One international shipment per order | `id` | company; scoped order/provider | `(id,company_id)`; order | nonnegative amounts; date order; positive version; international-order trigger | `provider_reference_number,shipment_date,expected_delivery_date,delivery_date,notes` | unique order index | M2, M4 |
+| `tracking_tokens` | Public tracking credentials | `id` | company; scoped order | `(id,company_id)`; token hash | hash format; expiry after creation | `expires_at,revoked_at,last_accessed_at` | `tracking_tokens_order_index` | M2 |
+| `tracking_access_events` | Tracking-access log | `id` | company; scoped token | `(id,company_id)` | HTTP status range | `ip_address` | `tracking_access_events_token_time_index` | M2 |
+| `saas_usage_events` | Billable order-submission usage event | `id` | company; scoped order | `(id,company_id)`; order/event type; idempotency key | currently only `order_submitted` | none | `saas_usage_events_company_period_index` | M2 |
+
+### Finance and accounting
+
+| Table | Purpose | PK | FK | UQ | Check constraints | Nullable | Additional indexes | Migration |
+|---|---|---|---|---|---|---|---|---|
+| `expense_types` | Company expense category | `id` | company | `(id,company_id)`; code per company | positive version | `name_ar` | `expense_types_code_unique` | M3 |
+| `order_expenses` | Order-attributable financial expense | `id` | company; order; expense type; optional file; creator/confirmer; optional reversal (all scoped) | `(id,company_id)` | positive amount; draft/confirmed actor consistency; no self-reversal | `description,attachment_file_id,reversal_of_id,confirmed_by_account_id,confirmed_at` | `order_expenses_order_index` | M3 |
+| `operating_expenses` | General/driver/vehicle operating expense | `id` | company; expense type; optional driver/vehicle/file; creator/confirmer; optional reversal | `(id,company_id)`; expense number per company | positive amount; draft/confirmed consistency; no self-reversal | `driver_id,vehicle_id,description,attachment_file_id,reversal_of_id,confirmed_by_account_id,confirmed_at` | `operating_expenses_company_date_index` | M3 |
+| `driver_reconciliations` | Driver cash handover header | `id` | company; driver; creator/confirmer; optional reversal | `(id,company_id)`; reconciliation number per company | header amount equation; draft/confirmed consistency; no self-reversal | `reversal_of_id,confirmed_by_account_id,confirmed_at` | `driver_reconciliations_driver_date_index` | M3 |
+| `driver_reconciliation_orders` | Reconciled-order lines | `id` | company; reconciliation; order | `(id,company_id)`; order once per reconciliation | nonnegative line amounts; driver-match trigger | none | `driver_reconciliation_orders_order_index` | M3, M4 |
+| `driver_reconciliation_expenses` | Reconciliation expense lines | `id` | company; reconciliation; expense type; optional file | `(id,company_id)` | positive amount | `description,attachment_file_id` | none beyond UQ | M3, M4 |
+| `driver_reconciliation_payments` | Cash/bank handover payment lines | `id` | company; reconciliation; optional bank account | `(id,company_id)` | method; positive amount; bank-field consistency | `company_bank_account_id,bank_reference` | none beyond UQ | M3, M4 |
+| `trader_settlements` | Trader payable settlement header | `id` | company; trader; creator/confirmer; optional reversal | `(id,company_id)`; settlement number per company | header amount equation; draft/confirmed consistency; no self-reversal | `reversal_of_id,confirmed_by_account_id,confirmed_at` | `trader_settlements_trader_date_index` | M3 |
+| `trader_settlement_orders` | Settlement-order lines | `id` | company; settlement; order | `(id,company_id)`; order once per settlement | line amount equation; trader-match trigger | none | `trader_settlement_orders_order_index` | M3, M4 |
+| `trader_settlement_payments` | Settlement payment lines | `id` | company; settlement; optional bank account | `(id,company_id)` | method; positive amount; bank-field consistency | `company_bank_account_id,bank_reference` | none beyond UQ | M3, M4 |
+| `payroll_periods` | Payroll open/closed date range | `id` | company; optional closer | `(id,company_id)`; exact date range per company | date order; status/closer consistency | `closed_by_account_id,closed_at` | none beyond UQ | M3 |
+| `payroll_entries` | Employee payroll result | `id` | company; period; employee; creator/confirmer; optional reversal | `(id,company_id)`; payroll number; employee once per period | total equation; status/actor consistency; no self-reversal | `reversal_of_id,confirmed_by_account_id,confirmed_at` | none beyond UQ | M3 |
+| `accounting_periods` | Accounting open/closed date range | `id` | company; optional closer | `(id,company_id)`; exact date range per company | date order; status/closer consistency | `closed_by_account_id,closed_at` | none beyond UQ | M3 |
+| `chart_of_accounts` | Hierarchical general-ledger accounts | `id` | company; optional scoped parent account | `(id,company_id)`; code per company | account type; positive version | `parent_account_id,name_ar` | `chart_of_accounts_code_unique` | M3 |
+| `journal_entries` | Journal header/posting/reversal | `id` | company; accounting period; creator/poster; optional reversal | `(id,company_id)`; journal number per company | source/status; posting actor/time; no self-reversal; balance/period trigger | `source_id,reversal_of_id,posted_by_account_id,posted_at` | `journal_entries_company_date_index`, `journal_entries_source_index` | M3 |
+| `journal_lines` | Debit/credit journal lines | `id` | company; journal entry; GL account | `(id,company_id)` | exactly one positive debit or credit; posted-entry immutability trigger | `description` | `journal_lines_entry_index`, `journal_lines_account_index` | M3 |
+
+### Service management
+
+| Table | Purpose | PK | FK | UQ | Check constraints | Nullable | Additional indexes | Migration |
+|---|---|---|---|---|---|---|---|---|
+| `support_cases` | Company support case workflow | `id` | company; scoped creator; optional scoped assignee | `(id,company_id)`; case number per company | priority/status; nonempty title/description; resolution timestamp consistency; positive version | `assigned_to_account_id,resolution_notes,resolved_at,closed_at` | `support_cases_company_status_index`, `support_cases_company_created_index` | M6 |
+
+## C. Relationship map
+
+### One-to-one
+
+- `companies 1 -> 0..1 company_settings` because `company_settings.company_id` is both PK and FK.
+- `accounts 1 -> 0..1 company_users`, `accounts 1 -> 0..1 traders`, and `accounts 1 -> 0..1 drivers` through unique `account_id`; profile-kind triggers enforce the expected account kind.
+- `employees 1 -> 0..1 drivers` is intended by domain meaning, but **not database-enforced as one-to-one** because `drivers.employee_id` is not unique.
+- `vehicles 1 -> 0..N drivers` is allowed; the database does not prevent simultaneous vehicle sharing.
+- `orders 1 -> 0..1 international_shipments` through unique `international_shipments.order_id`.
+
+### One-to-many
+
+- `companies` own every tenant table except global `permissions` and the role-permission relation; platform-scoped `accounts`, `roles`, sessions, reset tokens, and audit events may have null company.
+- `companies -> accounts/roles/users/employees/files/areas/traders/drivers/vehicles/orders/configuration/finance/support`.
+- `traders -> trader_pricing -> trader_area_prices`; `traders -> orders`; `traders -> trader_settlements`.
+- `areas -> orders`; `areas -> trader_area_prices`.
+- `drivers -> driver_documents`, `order_assignments`, current assigned orders, and `driver_reconciliations`.
+- `orders -> order_items`, `order_assignments`, `order_status_history`, `order_attachments`, `tracking_tokens`, `order_expenses`, reconciliation lines, settlement lines, and usage events.
+- `import_batches -> import_errors` and `import_batches -> orders` (optional on each order).
+- `driver_reconciliations -> orders/expenses/payments`; `trader_settlements -> orders/payments`.
+- `payroll_periods -> payroll_entries`; `accounting_periods -> journal_entries -> journal_lines`.
+- `accounts -> support_cases` as creator and optional assignee.
+
+### Many-to-many
+
+- Accounts and roles: `account_roles` (correct junction; composite PK).
+- Roles and permissions: `role_permissions` (correct junction; composite PK).
+- Trader pricing and areas: `trader_area_prices` (correct junction for prices, not a general supported-area relation).
+- Reconciliations and orders: `driver_reconciliation_orders` (transactional junction with snapshot amounts).
+- Settlements and orders: `trader_settlement_orders` (transactional junction with snapshot amounts).
+- Drivers and operational areas: **not modeled**.
+- Traders and generally supported areas: **not modeled**; only area-specific pricing is modeled.
+
+### Optional and polymorphic relationships
+
+- Optional relationships use nullable FKs for company logos, files, profile links, vehicle/driver/employee links, bank GL accounts, import trader, order batch/driver, reversals, confirmers, and support assignee.
+- `audit_events(subject_type,subject_id)`, `idempotency_records(resource_type,resource_id)`, and `journal_entries(source_type,source_id)` are polymorphic and therefore have no target FK. This is flexible but permits dangling references.
+- No `customers` or sub-area entity exists, so those requested relationships cannot be verified.
+
+## D. Normalization assessment by table
+
+All 52 tables satisfy basic 1NF: values are atomic, there are no SQL arrays, and repeated business collections use child/junction rows. `jsonb` occurs only in `audit_events.before_data/after_data`, where preserving an event snapshot is appropriate.
+
+| Tables | 1NF | 2NF | 3NF assessment |
+|---|---|---|---|
+| `companies`, `company_settings`, `company_bank_accounts`, `accounts`, `permissions`, `roles`, `company_users`, `employees`, `file_objects` | Pass | Pass | Pass; bilingual/contact attributes belong to their entity. |
+| `role_permissions`, `account_roles`, `company_reference_counters` | Pass | Pass | Pass; non-key attributes depend on the full composite key. |
+| `idempotency_records`, `audit_events`, `account_sessions`, `password_reset_tokens` | Pass | Pass | Pass for technical/event data; polymorphic resource/subject references are intentionally weak, not fully relational. |
+| `areas` | Pass | Pass | Pass as a flat area master; fails the requested area/sub-area model because hierarchy is absent. |
+| `traders`, `trader_pricing`, `trader_area_prices`, `vehicles`, `drivers`, `driver_documents`, `third_party_delivery_companies` | Pass | Pass | Pass. Historical pricing is structurally possible, but one-active-pricing enforcement does not prevent overlapping inactive/effective ranges. |
+| `import_batches`, `import_errors` | Pass | Pass | Pass for batch/error data; source-row identity is missing from successful orders. |
+| `orders` | Pass | Pass | **Intentional/undocumented denormalization.** Customer data and many calculated financial totals are stored. Customer snapshots can be valid, but no customer master or snapshot policy exists. Formula inputs/results lack pricing, VAT-rate/mode, and currency snapshot provenance. |
+| `order_items`, `order_assignments`, `order_status_history`, `order_attachments`, `international_shipments`, `tracking_tokens`, `tracking_access_events`, `saas_usage_events` | Pass | Pass | Pass structurally. History immutability and status-value validation are separate integrity defects. |
+| `expense_types`, `order_expenses`, `operating_expenses` | Pass | Pass | Pass; confirmed transaction snapshots and reversal links justify stored values. |
+| `driver_reconciliations`, `trader_settlements` | Pass | Pass | **Controlled denormalization:** totals duplicate child rows. Header equations exist, but equality to child/payment sums is not enforced. |
+| `driver_reconciliation_orders`, `driver_reconciliation_expenses`, `driver_reconciliation_payments`, `trader_settlement_orders`, `trader_settlement_payments` | Pass | Pass | Pass; snapshot amounts are appropriate for finalized finance, provided header reconciliation is enforced. |
+| `payroll_periods`, `accounting_periods`, `chart_of_accounts`, `journal_entries`, `journal_lines` | Pass | Pass | Pass. Payroll totals are intentional snapshots with an equation check. Journal `source_id` is polymorphic and weakly referential. |
+| `payroll_entries` | Pass | Pass | Controlled denormalization; total is formula-constrained and confirmed rows are immutable. |
+| `support_cases` | Pass | Pass | Pass; status timestamps are constrained, although transition sequence is not. |
+
+## E. Constraint and referential-integrity findings
+
+### Strengths
+
+- **Pass:** every table has a PK.
+- **Pass:** all declared business relationships are PostgreSQL FKs, not ORM-only relations.
+- **Pass:** company-scoped business FKs usually include `company_id`, preventing a child in one company from referencing a parent in another.
+- **Pass:** company order numbers, trader codes, driver codes, journal/payroll/settlement/reconciliation numbers, and relevant file/token identities are unique.
+- **Pass:** amounts have nonnegative/positive checks where appropriate; status columns generally have enum-style checks.
+- **Pass:** all FKs use `ON DELETE RESTRICT`; no unsafe cascade deletion was found. `ON UPDATE` is the PostgreSQL default `NO ACTION`, suitable for immutable identifiers.
+- **Pass:** confirmed finance headers/children, posted journals/lines, and audit events have immutability triggers.
+
+### Findings
+
+1. **High - history can be rewritten.** `order_status_history`, `order_assignments`, `tracking_access_events`, and `saas_usage_events` have no append-only trigger. The first two are core operational history.
+2. **High - current assignment can diverge.** No database constraint/trigger guarantees that `orders.assigned_driver_id` equals the single active `order_assignments.driver_id`, or that both change atomically. Existing rows currently agree.
+3. **High - aggregate finance is not cross-checked.** Header equations do not verify sums of reconciliation/settlement lines or payments. Existing rows currently agree because the application writes them in one transaction.
+4. **High - import duplicate protection is incomplete.** `orders` has no `external_reference_id`, `import_row_number`, or source-row hash. `company_id + order_number` cannot detect a retried external row when a new order number is allocated.
+5. **Medium - status history accepts arbitrary values.** `order_status_history.status_dimension` is checked, but `from_status` and `to_status` are not validated against the selected dimension and are not checked against the current order state.
+6. **Medium - lifecycle transitions are not fully database-enforced.** Support cases, import batches, orders, periods, and draft finance rows have allowed status values but no general transition matrix. Application services enforce only implemented paths.
+7. **Medium - payment rows lack actor and business payment timestamp/reference uniqueness.** They store `created_at` and optional bank reference but no `created_by_account_id`, payment number, or unique bank reference rule.
+8. **Medium - role assignment actor scope is weak at FK level.** `account_roles.assigned_by_account_id` references only `accounts(id)`. The scope trigger validates account and role, but does not validate the assigning actor. Existing data has no violation.
+9. **Medium - weak polymorphic references.** Audit subjects, idempotent resources, and journal sources can reference nonexistent objects. Audit snapshots reduce the audit risk; journal sources need stronger control.
+10. **Low - no one-driver-per-employee or one-driver-per-vehicle rule.** Add uniqueness only if business rules require exclusive links.
+11. **Low - exact period overlap is not prevented.** Payroll/accounting periods cannot duplicate the exact range, but overlapping ranges are allowed.
+
+## F. Tenant/company-isolation findings
+
+### Coverage
+
+Forty-nine tables carry `company_id`. The three without it are `companies`, global `permissions`, and `role_permissions`; the latter is scoped indirectly through globally unique `role_id`. Platform accounts/roles/sessions/reset tokens/audit events intentionally permit null company. Reports are computed from tenant-scoped tables and have no persisted report table.
+
+Composite FKs correctly scope traders, drivers, orders, areas, files, finance, configuration, support cases, and most actors. Trigger guards additionally enforce profile account kind, role scope, token scope, audit actor scope, international-order mode, reconciliation driver ownership, and settlement trader ownership.
+
+### Findings
+
+1. **High - no RLS:** all 52 tables report `relrowsecurity = false`; no tenant policy exists. The application database role does not bypass RLS, so policies would be effective once introduced.
+2. **High - application-predicate dependence:** `TenantContextAccessor` supplies company identity and reviewed service queries generally filter `company_id`, but database sessions do not set a tenant variable and PostgreSQL cannot stop an accidentally unscoped `SELECT`.
+3. **Medium - unscoped assigning actor:** `account_roles.assigned_by_account_id` can point to an account in another company at database level.
+4. **Low - redundant plain FKs:** `account_roles.account_id/role_id` have both direct and scoped FKs. Sessions, reset tokens, and audit actor use direct FKs plus scope triggers. These are valid, but triggers are essential and must be preserved.
+
+## G. Monetary and timestamp findings
+
+### Monetary
+
+- **Pass:** no floating-point money columns exist.
+- **Pass:** money uses `numeric(18,2)`, quantities use `numeric(12,3)`, coordinates use `numeric(9,6)`, and VAT rate uses `numeric(7,4)`.
+- **Pass:** application calculations use `decimal.js` and round half-up to two decimals.
+- **Pass:** current schema is explicitly AED-only through company settings and bank-account checks.
+- **High:** orders do not store transaction currency, VAT rate, VAT mode, pricing record, or calculation version. A later company-setting/pricing change makes historical figures harder to reproduce.
+- **High:** order calculated fields (`customer_amount_due`, `trader_net_payable`, `company_revenue`, `order_profit`, and related totals) have nonnegative checks but no formula checks. Application code currently calculates them consistently.
+- **Medium:** percentage commission uses `numeric(18,2)` instead of a dedicated higher-scale percentage type; this may be acceptable but should be documented.
+
+### Dates and timestamps
+
+- **Pass:** operational instants consistently use `timestamp with time zone` (`timestamptz`).
+- **Pass:** business dates, expiry dates, and period boundaries use `date`.
+- **Pass:** company timezone is stored as text with `Asia/Dubai` default.
+- **Medium:** timezone text is not validated against `pg_timezone_names`.
+- **Medium:** several lifecycle timestamps depend on application behavior rather than constraints (for example delivered/closed consistency on orders and completion status/time on imports).
+
+## H. Index review
+
+### Good coverage
+
+- Company ownership is normally the first column of business unique and query indexes.
+- Orders are indexed for company/order number, delivery status/date, trader/date, driver/status, reconciliation status, settlement status, and customer mobile.
+- Settlement and reconciliation headers are indexed by company/entity/business date.
+- Order history, assignments, import errors, tracking, audit, files, support, and journal lines have useful join/time indexes.
+- Partial indexes are used appropriately for active assignments, active sessions, expiring documents, active pricing, and nullable identifiers.
+
+### Recommended additions, subject to `EXPLAIN (ANALYZE, BUFFERS)` on realistic data
+
+1. **High:** `driver_reconciliation_payments(company_id,reconciliation_id)`.
+2. **High:** `driver_reconciliation_expenses(company_id,reconciliation_id)`.
+3. **High:** `trader_settlement_payments(company_id,settlement_id)`.
+4. **Medium:** `order_attachments(company_id,order_id)` for order-detail loading.
+5. **Medium:** `orders(company_id,import_batch_id)` partial where batch is not null.
+6. **Medium:** `orders(company_id,area_id,order_date desc)` if area/date reporting is frequent.
+7. **Medium:** external-reference/import-row indexes after those columns are introduced.
+8. **Low:** `support_cases(company_id,assigned_to_account_id,status)` if assignee queues become common.
+
+Do not add separate `company_id` indexes everywhere: many existing composite unique/query indexes already begin with company, and small child tables do not justify extra write cost.
+
+## I. Critical defects
+
+No Critical defect was proven in current data or catalog state.
+
+### High-severity defects requiring approval for correction
+
+| ID | Defect | Risk |
+|---|---|---|
+| H1 | RLS absent from every application table | One missed company predicate or direct SQL query can expose cross-company data. |
+| H2 | Operational history mutable; assignment current/history not synchronized | Reassignment/status audit trail can be rewritten or become inconsistent. |
+| H3 | Customer master/snapshot model absent | Repeated customer details, no stable customer relationship, and no explicit snapshot policy. |
+| H4 | Reconciliation/settlement header totals not tied to lines/payments | Database can accept financially inconsistent aggregate records. |
+| H5 | Order monetary provenance/formulas incomplete | Historical VAT/pricing cannot be reproduced reliably; calculated totals can drift. |
+| H6 | Import row/external-reference identity absent | Retried imports can create duplicate business orders under new order numbers. |
+
+## J. Recommended corrections in priority order
+
+1. **High:** introduce database tenant context and RLS policies in a staged migration. Apply to tenant tables, define platform/admin access separately, use `FORCE ROW LEVEL SECURITY` where appropriate, and add cross-tenant negative tests.
+2. **High:** make `order_status_history` append-only; make assignment history immutable except a controlled close operation; add a deferred constraint trigger that synchronizes/validates the current assigned driver.
+3. **High:** decide and document the customer model. Recommended: company-owned `customers` plus immutable order snapshot columns or `order_customer_snapshots`, with optional `orders.customer_id` for identity.
+4. **High:** add deferred constraint triggers or a controlled confirmation procedure that validates reconciliation/settlement header totals, line totals, and payment totals before confirmation.
+5. **High:** snapshot `currency`, `vat_rate`, `vat_price_mode`, pricing source/version, and calculation version on orders; add formula checks where formulas are invariant.
+6. **High:** add `external_reference_id`, `import_row_number`, and/or canonical source-row hash with tenant/batch uniqueness. Preserve successful import row identity.
+7. **Medium:** create dedicated append-only settlement/reconciliation lifecycle events, or broaden immutable audit events with database-enforced event writes for create/confirm/pay/reverse/cancel actions.
+8. **Medium:** add an area hierarchy (`parent_area_id`) or `sub_areas`; add `driver_areas` and `trader_supported_areas` only if those business capabilities are approved.
+9. **Medium:** validate `order_status_history` values by dimension and enforce allowed transitions through a transition table or trigger.
+10. **Medium:** scope `account_roles.assigned_by_account_id` with company; add payment actor/reference/business timestamp and supporting indexes.
+11. **Medium:** replace the untyped Kysely schema inventory with generated or explicit table interfaces.
+12. **Low:** add timezone validation, period exclusion constraints, employee/vehicle uniqueness, and additional indexes only after confirming business rules and query plans.
+
+## K. Exact migrations and model files that would need changes
+
+Applied migrations must remain immutable. Corrections should be new forward-only migrations, not edits to M1-M6.
+
+### Proposed new migrations
+
+1. `database/migrations/<timestamp>_tenant_rls_policies.ts`
+   - RLS policies, tenant session context functions, platform access rules, and grants.
+2. `database/migrations/<timestamp>_operational_history_integrity.ts`
+   - append-only status trigger; controlled assignment closure; assignment/current-driver consistency; status-dimension validation.
+3. `database/migrations/<timestamp>_customer_and_area_model.ts`
+   - customer master/snapshot decision; optional area hierarchy and approved coverage junctions.
+4. `database/migrations/<timestamp>_financial_aggregate_integrity.ts`
+   - reconciliation/settlement confirmation validation, lifecycle events, payment actor/reference/time, and child lookup indexes.
+5. `database/migrations/<timestamp>_order_financial_provenance.ts`
+   - currency/VAT/pricing/calculation snapshots and invariant formula checks.
+6. `database/migrations/<timestamp>_import_idempotency_hardening.ts`
+   - external reference/source row/hash fields and uniqueness.
+
+### Existing application/model files affected by approved corrections
+
+- `apps/api/src/infrastructure/database/database.types.ts`: replace `UntypedTable` inventory with exact generated/explicit row contracts and add any new tables.
+- `apps/api/src/infrastructure/database/verify-schema.ts`: add RLS, trigger, constraint, and new-table verification.
+- `apps/api/src/infrastructure/database/database.module.ts`: set transaction-local tenant/platform context for RLS.
+- `apps/api/src/infrastructure/database/transaction-manager.ts`: guarantee tenant context is set for every transaction.
+- `apps/api/src/tenancy/tenant-context.ts`: expose the database-safe tenant context contract.
+- `apps/api/src/operations/operations.service.ts`: customer identity/snapshot handling, import identity, assignment workflow, financial snapshots, and confirmation procedures.
+- `apps/api/src/operations/operations.dto.ts`: external reference, customer, snapshot, and approved area fields.
+- `apps/api/src/users/user-administration.service.ts`: scoped assigning actor and immutable role-change event behavior.
+- `apps/api/src/roles/role.service.ts`: role/permission history integration if dedicated events are approved.
+- `apps/api/src/company-configuration/company-configuration.service.ts`: timezone validation and configuration-change history.
+- `apps/api/src/support/support.service.ts`: transition procedure if support workflow transitions become database-governed.
+- Relevant API database tests under `apps/api/src/**/*.database.test.ts`: cross-company RLS denial, history immutability, financial aggregate rejection, import duplicate rejection, and status transition tests.
+
+### Seed/bootstrap review
+
+- `apps/api/src/platform/run-development-company-bootstrap.ts` creates one active company, company-user account/profile, company-admin role, role permission, role assignment, and audit event in one transaction. It is development-only and rejects duplicate subdomain.
+- `apps/api/src/platform/platform-administrator-bootstrap.ts` creates a single platform administrator under an advisory lock and writes an audit event.
+- Permission catalogue rows are inserted by M5 with `ON CONFLICT DO NOTHING`.
+- No separate general seed-data framework or legacy baseline schema is present. `database/baseline` is intentionally empty.
+
+## Conclusion
+
+The current schema is relationally disciplined and materially safer than a typical early-stage SaaS schema: keys, scoped FKs, checks, immutable finalized finance, and timestamp/money choices are mostly sound. It should nevertheless be treated as **development-ready, not production-isolation-complete** until H1-H6 are reviewed and resolved. No correction has been implemented by this audit.

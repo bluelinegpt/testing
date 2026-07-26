@@ -1,0 +1,23 @@
+# syntax=docker/dockerfile:1
+FROM node:24-bookworm-slim AS build
+RUN corepack enable && corepack prepare pnpm@11.7.0 --activate
+WORKDIR /workspace
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
+COPY apps/web/package.json apps/web/package.json
+RUN pnpm install --frozen-lockfile --filter . --filter @blueline/web...
+
+COPY apps/web apps/web
+ARG VITE_API_BASE_URL
+RUN test -n "$VITE_API_BASE_URL" && pnpm --filter @blueline/web build
+
+FROM node:24-bookworm-slim AS runtime
+ENV NODE_ENV=production WEB_PORT=8080 WEB_ROOT=/opt/app/dist
+WORKDIR /opt/app
+COPY --chown=node:node --from=build /workspace/apps/web/dist ./dist
+COPY --chown=node:node apps/web/serve.mjs ./serve.mjs
+USER node
+EXPOSE 8080
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+  CMD ["node", "-e", "fetch('http://127.0.0.1:'+(process.env.WEB_PORT||8080)+'/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+CMD ["node", "serve.mjs"]

@@ -1,0 +1,45 @@
+import { Module } from "@nestjs/common";
+import { ConfigModule } from "@nestjs/config";
+import { APP_GUARD } from "@nestjs/core";
+import { ThrottlerGuard, ThrottlerModule } from "@nestjs/throttler";
+import { LoggerModule } from "nestjs-pino";
+
+import { configuration, validateEnvironment } from "./configuration/environment.js";
+import { AuthenticationModule } from "./authentication/authentication.module.js";
+import { CompanyConfigurationModule } from "./company-configuration/company-configuration.module.js";
+import { HealthModule } from "./health/health.module.js";
+import { DatabaseModule } from "./infrastructure/database/database.module.js";
+import { createHttpLoggerOptions } from "./logging/http-logger.config.js";
+import { OperationsModule } from "./operations/operations.module.js";
+import { RoleModule } from "./roles/role.module.js";
+import { SupportModule } from "./support/support.module.js";
+import { UserAdministrationModule } from "./users/user-administration.module.js";
+
+@Module({
+  imports: [
+    ConfigModule.forRoot({
+      cache: true,
+      envFilePath: [".env", "../../.env"],
+      isGlobal: true,
+      load: [configuration],
+      validate: validateEnvironment,
+    }),
+    LoggerModule.forRoot({ pinoHttp: createHttpLoggerOptions() }),
+    ThrottlerModule.forRoot([
+      {
+        limit: Number.parseInt(process.env.RATE_LIMIT_MAX ?? "100", 10),
+        ttl: Number.parseInt(process.env.RATE_LIMIT_TTL_MS ?? "60000", 10),
+      },
+    ]),
+    DatabaseModule,
+    AuthenticationModule,
+    CompanyConfigurationModule,
+    OperationsModule,
+    RoleModule,
+    SupportModule,
+    UserAdministrationModule,
+    HealthModule,
+  ],
+  providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
+})
+export class AppModule {}

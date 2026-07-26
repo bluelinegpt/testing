@@ -1,0 +1,117 @@
+name: Continuous Integration
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Quality and security gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm ci:validate
+
+  database:
+    name: PostgreSQL migration and integrity gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_DB: bluelinegpt_ci
+          POSTGRES_PASSWORD: blueline-ci-only
+          POSTGRES_USER: blueline
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U blueline -d bluelinegpt_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://blueline:blueline-ci-only@127.0.0.1:5432/bluelinegpt_ci
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @blueline/api db:migrate
+      - run: pnpm --filter @blueline/api db:verify
+      - run: pnpm --filter @blueline/api test:database
+        env:
+          RUN_DATABASE_INTEGRATION: "true"
+      - run: pnpm --filter @blueline/api test:administration:database
+        env:
+          RUN_ADMINISTRATION_INTEGRATION: "true"
+      - run: pnpm --filter @blueline/api test:integrity:database
+        env:
+          RUN_INTEGRITY_DATABASE: "true"
+      - run: pnpm --filter @blueline/api test:provisioning:database
+        env:
+          RUN_PROVISIONING_DATABASE: "true"
+      - run: pnpm --filter @blueline/api test:reconciliation:database
+        env:
+          RUN_RECONCILIATION_DATABASE: "true"
+      - run: pnpm --filter @blueline/api test:concurrency:database
+        env:
+          RUN_CONCURRENCY_DATABASE: "true"
+      - run: pnpm --filter @blueline/api test:history:database
+        env:
+          RUN_HISTORY_DATABASE: "true"
+      - run: pnpm --filter @blueline/api test:reconciliation:http
+        env:
+          RUN_RECONCILIATION_HTTP: "true"
+      - run: pnpm --filter @blueline/api test:fixture:database
+        env:
+          RUN_FIXTURE_DATABASE: "true"
+
+  containers:
+    name: Container build validation
+    needs: [quality, database]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      matrix:
+        include:
+          - dockerfile: Dockerfile.api
+            image: blueline-api:ci
+            build_args: ""
+          - dockerfile: Dockerfile.web
+            image: blueline-web:ci
+            build_args: --build-arg VITE_API_BASE_URL=https://api.invalid.example/api/v1
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Build ${{ matrix.image }}
+        run: docker build -f ${{ matrix.dockerfile }} ${{ matrix.build_args }} -t ${{ matrix.image }} .

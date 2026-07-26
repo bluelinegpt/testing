@@ -1,0 +1,51 @@
+name: bluelinegpt-local
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-bluelinegpt}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the local environment}
+      POSTGRES_USER: ${POSTGRES_USER:-blueline}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    environment:
+      API_PORT: 3000
+      CORS_ORIGINS: http://localhost:8080
+      DATABASE_URL: postgresql://${POSTGRES_USER:-blueline}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-bluelinegpt}
+      LOG_LEVEL: info
+      NODE_ENV: development
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:3000:3000"
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+      args:
+        VITE_API_BASE_URL: http://localhost:3000/api/v1
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      WEB_CONNECT_SRC: "'self' http://localhost:3000"
+    ports:
+      - "127.0.0.1:8080:8080"
+
+volumes:
+  postgres-data:

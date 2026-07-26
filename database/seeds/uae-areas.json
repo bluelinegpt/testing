@@ -1,0 +1,2167 @@
+[
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Abu Dhabi City",
+    "nameAr": "مدينة أبوظبي"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Abu Al Habl Island",
+    "nameAr": "جزيرة أبو الهبل"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Al Adla",
+    "nameAr": "العدلة"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Al Aman",
+    "nameAr": "الأمان"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Al Bahyah",
+    "nameAr": "الباهية"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Al Bandar",
+    "nameAr": "البندر"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Al Bateen",
+    "nameAr": "البطين"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Al Danah",
+    "nameAr": "الدانة"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Al Dhafra",
+    "nameAr": "الظفرة"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Al Falah",
+    "nameAr": "الفلاح"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Al Forsan Village",
+    "nameAr": "قرية الفرسان"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Al Ghadeer",
+    "nameAr": "الغدير"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Al Hudayriat Island",
+    "nameAr": "جزيرة الحديريات"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Al Karamah",
+    "nameAr": "الكرامة"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Al Khalidiyah",
+    "nameAr": "الخالدية"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Al Khaznah",
+    "nameAr": "الخزنة"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Al Maqtaa",
+    "nameAr": "المقطع"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Al Manaseer",
+    "nameAr": "المناصير"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Al Manhal",
+    "nameAr": "المنهل"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Al Markaziyah",
+    "nameAr": "المركزية"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Al Maryah Island",
+    "nameAr": "جزيرة المارية"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Al Matar",
+    "nameAr": "المطار"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Al Mina",
+    "nameAr": "الميناء"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Al Muneera",
+    "nameAr": "المنيرة"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Al Mushrif",
+    "nameAr": "المشرف"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Al Nahyan",
+    "nameAr": "آل نهيان"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Al Raha Beach",
+    "nameAr": "شاطئ الراحة"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Al Rahah",
+    "nameAr": "الراحة"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Al Rahba",
+    "nameAr": "الرحبة"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Al Ras Al Akhdar",
+    "nameAr": "الرأس الأخضر"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Al Rawdah",
+    "nameAr": "الروضة"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Al Reef",
+    "nameAr": "الريف"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Al Reem Island",
+    "nameAr": "جزيرة الريم"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Al Rowdah",
+    "nameAr": "الروضة"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Al Samha",
+    "nameAr": "السمحة"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Al Shamkha",
+    "nameAr": "الشامخة"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Al Shawamekh",
+    "nameAr": "الشوامخ"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Al Wathba",
+    "nameAr": "الوثبة"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Al Zaab",
+    "nameAr": "الزعاب"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Al Zahiyah",
+    "nameAr": "الزاهية"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Al Zeina",
+    "nameAr": "الزينة"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Bani Yas",
+    "nameAr": "بني ياس"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Bateen Airport Area",
+    "nameAr": "منطقة مطار البطين"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Breakwater",
+    "nameAr": "كاسر الأمواج"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Corniche Area",
+    "nameAr": "منطقة الكورنيش"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Eastern Mangroves",
+    "nameAr": "القرم الشرقي"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Ghantoot",
+    "nameAr": "غنتوت"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Hadbat Al Zaafran",
+    "nameAr": "هضبة الزعفران"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Khalifa City",
+    "nameAr": "مدينة خليفة"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Khalifa Industrial Zone",
+    "nameAr": "منطقة خليفة الصناعية"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Madinat Zayed",
+    "nameAr": "مدينة زايد"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Masdar City",
+    "nameAr": "مدينة مصدر"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Mohamed Bin Zayed City",
+    "nameAr": "مدينة محمد بن زايد"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Mussafah",
+    "nameAr": "مصفح"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Mussafah Industrial Area",
+    "nameAr": "منطقة مصفح الصناعية"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Rabdan",
+    "nameAr": "ربدان"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Saadiyat Island",
+    "nameAr": "جزيرة السعديات"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Shakhbout City",
+    "nameAr": "مدينة شخبوط"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Tourist Club Area",
+    "nameAr": "منطقة النادي السياحي"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Yas Island",
+    "nameAr": "جزيرة ياس"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Zayed City",
+    "nameAr": "مدينة زايد"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Al Ain",
+    "nameAr": "العين"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Al Bateen Al Ain",
+    "nameAr": "البطين - العين"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Al Foah",
+    "nameAr": "الفوعة"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Al Hili",
+    "nameAr": "الهيلي"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Al Jimi",
+    "nameAr": "الجيمي"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Al Khabisi",
+    "nameAr": "الخبيصي"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Al Maqam",
+    "nameAr": "المقام"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Al Mutarad",
+    "nameAr": "المطارد"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Al Muwaiji",
+    "nameAr": "المويجعي"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Al Nahil",
+    "nameAr": "الناهل"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Al Sarooj",
+    "nameAr": "الصاروج"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Al Towayya",
+    "nameAr": "الطوية"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Al Yahar",
+    "nameAr": "اليحر"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Falaj Hazza",
+    "nameAr": "فلج هزاع"
+  },
+  {
+    "emirateCode": "AUH",
+    "nameEn": "Zakher",
+    "nameAr": "زاخر"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Abu Hail",
+    "nameAr": "أبو هيل"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Academic City",
+    "nameAr": "المدينة الأكاديمية"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Al Awir",
+    "nameAr": "العوير"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Al Bada",
+    "nameAr": "البدع"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Al Baraha",
+    "nameAr": "البراحة"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Al Barari",
+    "nameAr": "البراري"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Al Barsha 1",
+    "nameAr": "البرشاء 1"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Al Barsha 2",
+    "nameAr": "البرشاء 2"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Al Barsha 3",
+    "nameAr": "البرشاء 3"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Al Barsha South",
+    "nameAr": "البرشاء جنوب"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Al Buteen",
+    "nameAr": "البطين"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Al Furjan",
+    "nameAr": "الفرجان"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Al Garhoud",
+    "nameAr": "القرهود"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Al Hamriya",
+    "nameAr": "الحمرية"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Al Hudaiba",
+    "nameAr": "الحضيبة"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Al Jaddaf",
+    "nameAr": "الجداف"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Al Jafiliya",
+    "nameAr": "الجافلية"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Al Karama",
+    "nameAr": "الكرامة"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Al Khawaneej 1",
+    "nameAr": "الخوانيج 1"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Al Khawaneej 2",
+    "nameAr": "الخوانيج 2"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Al Kifaf",
+    "nameAr": "الكفاف"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Al Mamzar",
+    "nameAr": "الممزر"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Al Manara",
+    "nameAr": "المنارة"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Al Mankhool",
+    "nameAr": "المنخول"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Al Mizhar 1",
+    "nameAr": "المزهر 1"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Al Mizhar 2",
+    "nameAr": "المزهر 2"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Al Muraqqabat",
+    "nameAr": "المرقبات"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Al Murar",
+    "nameAr": "المرر"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Al Nahda 1",
+    "nameAr": "النهدة 1"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Al Nahda 2",
+    "nameAr": "النهدة 2"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Al Qusais 1",
+    "nameAr": "القصيص 1"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Al Qusais 2",
+    "nameAr": "القصيص 2"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Al Qusais 3",
+    "nameAr": "القصيص 3"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Al Qusais Industrial Area 1",
+    "nameAr": "منطقة القصيص الصناعية 1"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Al Qusais Industrial Area 2",
+    "nameAr": "منطقة القصيص الصناعية 2"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Al Qusais Industrial Area 3",
+    "nameAr": "منطقة القصيص الصناعية 3"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Al Quoz 1",
+    "nameAr": "القوز 1"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Al Quoz 2",
+    "nameAr": "القوز 2"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Al Quoz 3",
+    "nameAr": "القوز 3"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Al Quoz 4",
+    "nameAr": "القوز 4"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Al Quoz Industrial Area 1",
+    "nameAr": "منطقة القوز الصناعية 1"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Al Quoz Industrial Area 2",
+    "nameAr": "منطقة القوز الصناعية 2"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Al Quoz Industrial Area 3",
+    "nameAr": "منطقة القوز الصناعية 3"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Al Quoz Industrial Area 4",
+    "nameAr": "منطقة القوز الصناعية 4"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Al Raffa",
+    "nameAr": "الرفاعة"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Al Ras",
+    "nameAr": "الراس"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Al Rashidiya",
+    "nameAr": "الراشدية"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Al Rigga",
+    "nameAr": "الرقة"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Al Safa 1",
+    "nameAr": "الصفا 1"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Al Safa 2",
+    "nameAr": "الصفا 2"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Al Satwa",
+    "nameAr": "السطوة"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Al Shindagha",
+    "nameAr": "الشندغة"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Al Sufouh 1",
+    "nameAr": "الصفوح 1"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Al Sufouh 2",
+    "nameAr": "الصفوح 2"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Al Twar 1",
+    "nameAr": "الطوار 1"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Al Twar 2",
+    "nameAr": "الطوار 2"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Al Twar 3",
+    "nameAr": "الطوار 3"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Al Warqa 1",
+    "nameAr": "الورقاء 1"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Al Warqa 2",
+    "nameAr": "الورقاء 2"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Al Warqa 3",
+    "nameAr": "الورقاء 3"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Al Warqa 4",
+    "nameAr": "الورقاء 4"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Al Warqa 5",
+    "nameAr": "الورقاء 5"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Al Wasl",
+    "nameAr": "الوصل"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Arabian Ranches",
+    "nameAr": "المرابع العربية"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Arabian Ranches 2",
+    "nameAr": "المرابع العربية 2"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Arabian Ranches 3",
+    "nameAr": "المرابع العربية 3"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Arjan",
+    "nameAr": "أرجان"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Barsha Heights",
+    "nameAr": "برشا هايتس"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Bluewaters Island",
+    "nameAr": "جزيرة بلوواترز"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Bur Dubai",
+    "nameAr": "بر دبي"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Business Bay",
+    "nameAr": "الخليج التجاري"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "City Walk",
+    "nameAr": "سيتي ووك"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Culture Village",
+    "nameAr": "قرية الثقافة"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Damac Hills",
+    "nameAr": "داماك هيلز"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Damac Hills 2",
+    "nameAr": "داماك هيلز 2"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Deira",
+    "nameAr": "ديرة"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Discovery Gardens",
+    "nameAr": "ديسكفري جاردنز"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Downtown Dubai",
+    "nameAr": "وسط مدينة دبي"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Dubai Festival City",
+    "nameAr": "دبي فستيفال سيتي"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Dubai Harbour",
+    "nameAr": "دبي هاربور"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Dubai Healthcare City",
+    "nameAr": "مدينة دبي الطبية"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Dubai Hills Estate",
+    "nameAr": "دبي هيلز استيت"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Dubai Industrial City",
+    "nameAr": "مدينة دبي الصناعية"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Dubai Internet City",
+    "nameAr": "مدينة دبي للإنترنت"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Dubai Investment Park 1",
+    "nameAr": "مجمع دبي للاستثمار 1"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Dubai Investment Park 2",
+    "nameAr": "مجمع دبي للاستثمار 2"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Dubai Marina",
+    "nameAr": "دبي مارينا"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Dubai Media City",
+    "nameAr": "مدينة دبي للإعلام"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Dubai Production City",
+    "nameAr": "مدينة دبي للإنتاج"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Dubai Science Park",
+    "nameAr": "مجمع دبي للعلوم"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Dubai Silicon Oasis",
+    "nameAr": "واحة دبي للسيليكون"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Dubai South",
+    "nameAr": "دبي الجنوب"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Dubai Sports City",
+    "nameAr": "مدينة دبي الرياضية"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Emirates Hills",
+    "nameAr": "تلال الإمارات"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Falcon City of Wonders",
+    "nameAr": "فالكون سيتي أوف وندرز"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Green Community",
+    "nameAr": "جرين كوميونيتي"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Hor Al Anz",
+    "nameAr": "هور العنز"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Hor Al Anz East",
+    "nameAr": "هور العنز شرق"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "International City",
+    "nameAr": "المدينة العالمية"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Jebel Ali",
+    "nameAr": "جبل علي"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Jebel Ali Free Zone",
+    "nameAr": "المنطقة الحرة لجبل علي"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Jumeirah 1",
+    "nameAr": "جميرا 1"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Jumeirah 2",
+    "nameAr": "جميرا 2"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Jumeirah 3",
+    "nameAr": "جميرا 3"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Jumeirah Beach Residence",
+    "nameAr": "مساكن شاطئ جميرا"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Jumeirah Golf Estates",
+    "nameAr": "عقارات جميرا للجولف"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Jumeirah Islands",
+    "nameAr": "جزر جميرا"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Jumeirah Lake Towers",
+    "nameAr": "أبراج بحيرات جميرا"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Jumeirah Park",
+    "nameAr": "جميرا بارك"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Jumeirah Village Circle",
+    "nameAr": "قرية جميرا الدائرية"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Jumeirah Village Triangle",
+    "nameAr": "مثلث قرية جميرا"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Liwan",
+    "nameAr": "ليوان"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Madinat Jumeirah",
+    "nameAr": "مدينة جميرا"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Meadows",
+    "nameAr": "ذا ميدوز"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Meydan",
+    "nameAr": "ميدان"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Mirdif",
+    "nameAr": "مردف"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Motor City",
+    "nameAr": "موتور سيتي"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Mudon",
+    "nameAr": "مدن"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Muhaisnah 1",
+    "nameAr": "محيصنة 1"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Muhaisnah 2",
+    "nameAr": "محيصنة 2"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Muhaisnah 3",
+    "nameAr": "محيصنة 3"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Muhaisnah 4",
+    "nameAr": "محيصنة 4"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Nad Al Hamar",
+    "nameAr": "ند الحمر"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Nad Al Sheba 1",
+    "nameAr": "ند الشبا 1"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Nad Al Sheba 2",
+    "nameAr": "ند الشبا 2"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Nad Al Sheba 3",
+    "nameAr": "ند الشبا 3"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Nad Al Sheba 4",
+    "nameAr": "ند الشبا 4"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Nad Shamma",
+    "nameAr": "ند شما"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Naif",
+    "nameAr": "نايف"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Oud Al Muteena",
+    "nameAr": "عود المطينة"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Palm Jebel Ali",
+    "nameAr": "نخلة جبل علي"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Palm Jumeirah",
+    "nameAr": "نخلة جميرا"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Port Rashid",
+    "nameAr": "ميناء راشد"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Ras Al Khor",
+    "nameAr": "رأس الخور"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Ras Al Khor Industrial Area",
+    "nameAr": "منطقة رأس الخور الصناعية"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Remraam",
+    "nameAr": "رمرام"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Springs",
+    "nameAr": "الينابيع"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "The Gardens",
+    "nameAr": "ذا جاردنز"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "The Greens",
+    "nameAr": "ذا جرينز"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "The Lakes",
+    "nameAr": "ذا ليكس"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "The Sustainable City",
+    "nameAr": "المدينة المستدامة"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "The Valley",
+    "nameAr": "ذا فالي"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "The Villa",
+    "nameAr": "ذا فيلا"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Tilal Al Ghaf",
+    "nameAr": "تلال الغاف"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Town Square",
+    "nameAr": "تاون سكوير"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Trade Centre 1",
+    "nameAr": "المركز التجاري 1"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Trade Centre 2",
+    "nameAr": "المركز التجاري 2"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Umm Al Sheif",
+    "nameAr": "أم الشيف"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Umm Hurair 1",
+    "nameAr": "أم هرير 1"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Umm Hurair 2",
+    "nameAr": "أم هرير 2"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Umm Ramool",
+    "nameAr": "أم رمول"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Umm Suqeim 1",
+    "nameAr": "أم سقيم 1"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Umm Suqeim 2",
+    "nameAr": "أم سقيم 2"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Umm Suqeim 3",
+    "nameAr": "أم سقيم 3"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Warsan 1",
+    "nameAr": "ورسان 1"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Warsan 2",
+    "nameAr": "ورسان 2"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Warsan 3",
+    "nameAr": "ورسان 3"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "Warsan 4",
+    "nameAr": "ورسان 4"
+  },
+  {
+    "emirateCode": "DXB",
+    "nameEn": "World Trade Centre",
+    "nameAr": "مركز دبي التجاري العالمي"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Abu Shagara",
+    "nameAr": "أبو شغارة"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Al Abar",
+    "nameAr": "العبار"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Al Azra",
+    "nameAr": "العزرة"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Al Bu Daniq",
+    "nameAr": "أبو دانيق"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Al Butina",
+    "nameAr": "البوطينة"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Al Darari",
+    "nameAr": "الدراري"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Al Fayha",
+    "nameAr": "الفيحاء"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Al Falaj",
+    "nameAr": "الفلج"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Al Fisht",
+    "nameAr": "الفشت"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Al Ghubaiba",
+    "nameAr": "الغبيبة"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Al Gharayen 1",
+    "nameAr": "القراين 1"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Al Gharayen 2",
+    "nameAr": "القراين 2"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Al Gharayen 3",
+    "nameAr": "القراين 3"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Al Goaz",
+    "nameAr": "القوز"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Al Hazana",
+    "nameAr": "الحزانة"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Al Jazzat",
+    "nameAr": "الجزات"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Al Juraina 1",
+    "nameAr": "الجرينة 1"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Al Juraina 2",
+    "nameAr": "الجرينة 2"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Al Juraina 3",
+    "nameAr": "الجرينة 3"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Al Juraina 4",
+    "nameAr": "الجرينة 4"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Al Khan",
+    "nameAr": "الخان"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Al Khaledia",
+    "nameAr": "الخالدية"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Al Layyah",
+    "nameAr": "اللية"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Al Majaz 1",
+    "nameAr": "المجاز 1"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Al Majaz 2",
+    "nameAr": "المجاز 2"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Al Majaz 3",
+    "nameAr": "المجاز 3"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Al Mamzar",
+    "nameAr": "الممزر"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Al Manakh",
+    "nameAr": "المناخ"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Al Mujarrah",
+    "nameAr": "المجرة"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Al Musalla",
+    "nameAr": "المصلى"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Al Nabba",
+    "nameAr": "النباعة"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Al Nahda",
+    "nameAr": "النهدة"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Al Nekhailat",
+    "nameAr": "النخيلات"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Al Noaf 1",
+    "nameAr": "النوف 1"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Al Noaf 2",
+    "nameAr": "النوف 2"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Al Noaf 3",
+    "nameAr": "النوف 3"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Al Noaf 4",
+    "nameAr": "النوف 4"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Al Qadisiya",
+    "nameAr": "القادسية"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Al Qasimia",
+    "nameAr": "القاسمية"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Al Qarayen",
+    "nameAr": "القراين"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Al Rahmaniya 1",
+    "nameAr": "الرحمانية 1"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Al Rahmaniya 2",
+    "nameAr": "الرحمانية 2"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Al Rahmaniya 3",
+    "nameAr": "الرحمانية 3"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Al Rahmaniya 4",
+    "nameAr": "الرحمانية 4"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Al Ramaqia",
+    "nameAr": "الرماقية"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Al Ramla",
+    "nameAr": "الرملة"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Al Ramtha",
+    "nameAr": "الرمثاء"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Al Rifah",
+    "nameAr": "الرفاع"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Al Riqqa",
+    "nameAr": "الرقة"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Al Sabkha",
+    "nameAr": "الصبخة"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Al Sajaa Industrial",
+    "nameAr": "الصجعة الصناعية"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Al Shahba",
+    "nameAr": "الشهباء"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Al Sharq",
+    "nameAr": "الشرق"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Al Soor",
+    "nameAr": "السور"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Al Sweihat",
+    "nameAr": "السويحات"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Al Taawun",
+    "nameAr": "التعاون"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Al Yarmook",
+    "nameAr": "اليرموك"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Halwan",
+    "nameAr": "حلوان"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Industrial Area 1",
+    "nameAr": "المنطقة الصناعية 1"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Industrial Area 2",
+    "nameAr": "المنطقة الصناعية 2"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Industrial Area 3",
+    "nameAr": "المنطقة الصناعية 3"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Industrial Area 4",
+    "nameAr": "المنطقة الصناعية 4"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Industrial Area 5",
+    "nameAr": "المنطقة الصناعية 5"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Industrial Area 6",
+    "nameAr": "المنطقة الصناعية 6"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Industrial Area 7",
+    "nameAr": "المنطقة الصناعية 7"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Industrial Area 8",
+    "nameAr": "المنطقة الصناعية 8"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Industrial Area 9",
+    "nameAr": "المنطقة الصناعية 9"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Industrial Area 10",
+    "nameAr": "المنطقة الصناعية 10"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Industrial Area 11",
+    "nameAr": "المنطقة الصناعية 11"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Industrial Area 12",
+    "nameAr": "المنطقة الصناعية 12"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Industrial Area 13",
+    "nameAr": "المنطقة الصناعية 13"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Industrial Area 15",
+    "nameAr": "المنطقة الصناعية 15"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Industrial Area 17",
+    "nameAr": "المنطقة الصناعية 17"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Industrial Area 18",
+    "nameAr": "المنطقة الصناعية 18"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Maysaloon",
+    "nameAr": "ميسلون"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Muwaileh",
+    "nameAr": "مويلح"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Muwaileh Commercial",
+    "nameAr": "مويلح التجارية"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Rolla",
+    "nameAr": "الرولة"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "University City",
+    "nameAr": "المدينة الجامعية"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Wasit",
+    "nameAr": "واسط"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Khor Fakkan",
+    "nameAr": "خورفكان"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Kalba",
+    "nameAr": "كلباء"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Dibba Al Hisn",
+    "nameAr": "دبا الحصن"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Al Dhaid",
+    "nameAr": "الذيد"
+  },
+  {
+    "emirateCode": "SHJ",
+    "nameEn": "Mleiha",
+    "nameAr": "مليحة"
+  },
+  {
+    "emirateCode": "AJM",
+    "nameEn": "Ajman City Centre",
+    "nameAr": "وسط مدينة عجمان"
+  },
+  {
+    "emirateCode": "AJM",
+    "nameEn": "Al Alia",
+    "nameAr": "العالية"
+  },
+  {
+    "emirateCode": "AJM",
+    "nameEn": "Al Ameera",
+    "nameAr": "الأميرة"
+  },
+  {
+    "emirateCode": "AJM",
+    "nameEn": "Al Bahia",
+    "nameAr": "الباهية"
+  },
+  {
+    "emirateCode": "AJM",
+    "nameEn": "Al Bustan",
+    "nameAr": "البستان"
+  },
+  {
+    "emirateCode": "AJM",
+    "nameEn": "Al Hamidiyah 1",
+    "nameAr": "الحميدية 1"
+  },
+  {
+    "emirateCode": "AJM",
+    "nameEn": "Al Hamidiyah 2",
+    "nameAr": "الحميدية 2"
+  },
+  {
+    "emirateCode": "AJM",
+    "nameEn": "Al Helio 1",
+    "nameAr": "الحليو 1"
+  },
+  {
+    "emirateCode": "AJM",
+    "nameEn": "Al Helio 2",
+    "nameAr": "الحليو 2"
+  },
+  {
+    "emirateCode": "AJM",
+    "nameEn": "Al Jurf 1",
+    "nameAr": "الجرف 1"
+  },
+  {
+    "emirateCode": "AJM",
+    "nameEn": "Al Jurf 2",
+    "nameAr": "الجرف 2"
+  },
+  {
+    "emirateCode": "AJM",
+    "nameEn": "Al Jurf 3",
+    "nameAr": "الجرف 3"
+  },
+  {
+    "emirateCode": "AJM",
+    "nameEn": "Al Mowaihat 1",
+    "nameAr": "المويهات 1"
+  },
+  {
+    "emirateCode": "AJM",
+    "nameEn": "Al Mowaihat 2",
+    "nameAr": "المويهات 2"
+  },
+  {
+    "emirateCode": "AJM",
+    "nameEn": "Al Mowaihat 3",
+    "nameAr": "المويهات 3"
+  },
+  {
+    "emirateCode": "AJM",
+    "nameEn": "Al Nakhil 1",
+    "nameAr": "النخيل 1"
+  },
+  {
+    "emirateCode": "AJM",
+    "nameEn": "Al Nakhil 2",
+    "nameAr": "النخيل 2"
+  },
+  {
+    "emirateCode": "AJM",
+    "nameEn": "Al Nuaimiya 1",
+    "nameAr": "النعيمية 1"
+  },
+  {
+    "emirateCode": "AJM",
+    "nameEn": "Al Nuaimiya 2",
+    "nameAr": "النعيمية 2"
+  },
+  {
+    "emirateCode": "AJM",
+    "nameEn": "Al Nuaimiya 3",
+    "nameAr": "النعيمية 3"
+  },
+  {
+    "emirateCode": "AJM",
+    "nameEn": "Al Owan",
+    "nameAr": "الروان"
+  },
+  {
+    "emirateCode": "AJM",
+    "nameEn": "Al Rashidiya 1",
+    "nameAr": "الراشدية 1"
+  },
+  {
+    "emirateCode": "AJM",
+    "nameEn": "Al Rashidiya 2",
+    "nameAr": "الراشدية 2"
+  },
+  {
+    "emirateCode": "AJM",
+    "nameEn": "Al Rashidiya 3",
+    "nameAr": "الراشدية 3"
+  },
+  {
+    "emirateCode": "AJM",
+    "nameEn": "Al Rawda 1",
+    "nameAr": "الروضة 1"
+  },
+  {
+    "emirateCode": "AJM",
+    "nameEn": "Al Rawda 2",
+    "nameAr": "الروضة 2"
+  },
+  {
+    "emirateCode": "AJM",
+    "nameEn": "Al Rawda 3",
+    "nameAr": "الروضة 3"
+  },
+  {
+    "emirateCode": "AJM",
+    "nameEn": "Al Rumaila 1",
+    "nameAr": "الرميلة 1"
+  },
+  {
+    "emirateCode": "AJM",
+    "nameEn": "Al Rumaila 2",
+    "nameAr": "الرميلة 2"
+  },
+  {
+    "emirateCode": "AJM",
+    "nameEn": "Al Rumaila 3",
+    "nameAr": "الرميلة 3"
+  },
+  {
+    "emirateCode": "AJM",
+    "nameEn": "Al Tallah 1",
+    "nameAr": "التلة 1"
+  },
+  {
+    "emirateCode": "AJM",
+    "nameEn": "Al Tallah 2",
+    "nameAr": "التلة 2"
+  },
+  {
+    "emirateCode": "AJM",
+    "nameEn": "Al Yasmeen",
+    "nameAr": "الياسمين"
+  },
+  {
+    "emirateCode": "AJM",
+    "nameEn": "Emirates City",
+    "nameAr": "مدينة الإمارات"
+  },
+  {
+    "emirateCode": "AJM",
+    "nameEn": "Garden City",
+    "nameAr": "جاردن سيتي"
+  },
+  {
+    "emirateCode": "AJM",
+    "nameEn": "Manama",
+    "nameAr": "المنامة"
+  },
+  {
+    "emirateCode": "AJM",
+    "nameEn": "Masfout",
+    "nameAr": "مصفوت"
+  },
+  {
+    "emirateCode": "AJM",
+    "nameEn": "Mushairif",
+    "nameAr": "مشيرف"
+  },
+  {
+    "emirateCode": "UAQ",
+    "nameEn": "Al Aahad",
+    "nameAr": "الأحد"
+  },
+  {
+    "emirateCode": "UAQ",
+    "nameEn": "Al Abraq",
+    "nameAr": "الأبرق"
+  },
+  {
+    "emirateCode": "UAQ",
+    "nameEn": "Al Dar Al Baida",
+    "nameAr": "الدار البيضاء"
+  },
+  {
+    "emirateCode": "UAQ",
+    "nameEn": "Al Haditha",
+    "nameAr": "الحديثة"
+  },
+  {
+    "emirateCode": "UAQ",
+    "nameEn": "Al Hamra",
+    "nameAr": "الحمراء"
+  },
+  {
+    "emirateCode": "UAQ",
+    "nameEn": "Al Humrah",
+    "nameAr": "الحُمرة"
+  },
+  {
+    "emirateCode": "UAQ",
+    "nameEn": "Al Khor",
+    "nameAr": "الخور"
+  },
+  {
+    "emirateCode": "UAQ",
+    "nameEn": "Al Maidan",
+    "nameAr": "الميدان"
+  },
+  {
+    "emirateCode": "UAQ",
+    "nameEn": "Al Raas 1",
+    "nameAr": "الرأس 1"
+  },
+  {
+    "emirateCode": "UAQ",
+    "nameEn": "Al Raas 2",
+    "nameAr": "الرأس 2"
+  },
+  {
+    "emirateCode": "UAQ",
+    "nameEn": "Al Raas 3",
+    "nameAr": "الرأس 3"
+  },
+  {
+    "emirateCode": "UAQ",
+    "nameEn": "Al Ramlah",
+    "nameAr": "الرملة"
+  },
+  {
+    "emirateCode": "UAQ",
+    "nameEn": "Al Salamah 1",
+    "nameAr": "السلامة 1"
+  },
+  {
+    "emirateCode": "UAQ",
+    "nameEn": "Al Salamah 2",
+    "nameAr": "السلامة 2"
+  },
+  {
+    "emirateCode": "UAQ",
+    "nameEn": "Al Salamah 3",
+    "nameAr": "السلامة 3"
+  },
+  {
+    "emirateCode": "UAQ",
+    "nameEn": "Al Serra",
+    "nameAr": "السرة"
+  },
+  {
+    "emirateCode": "UAQ",
+    "nameEn": "Al Shuwaib",
+    "nameAr": "الشويب"
+  },
+  {
+    "emirateCode": "UAQ",
+    "nameEn": "Al Surrah",
+    "nameAr": "السرة"
+  },
+  {
+    "emirateCode": "UAQ",
+    "nameEn": "Emirates Modern Industrial Area",
+    "nameAr": "منطقة الإمارات الصناعية الحديثة"
+  },
+  {
+    "emirateCode": "UAQ",
+    "nameEn": "Falaj Al Mualla",
+    "nameAr": "فلج المعلا"
+  },
+  {
+    "emirateCode": "UAQ",
+    "nameEn": "Old Town Area",
+    "nameAr": "منطقة المدينة القديمة"
+  },
+  {
+    "emirateCode": "UAQ",
+    "nameEn": "Umm Al Quwain Marina",
+    "nameAr": "مرسى أم القيوين"
+  },
+  {
+    "emirateCode": "RAK",
+    "nameEn": "Al Dhait North",
+    "nameAr": "الظيت الشمالي"
+  },
+  {
+    "emirateCode": "RAK",
+    "nameEn": "Al Dhait South",
+    "nameAr": "الظيت الجنوبي"
+  },
+  {
+    "emirateCode": "RAK",
+    "nameEn": "Al Hamra Village",
+    "nameAr": "قرية الحمراء"
+  },
+  {
+    "emirateCode": "RAK",
+    "nameEn": "Al Jazeera Al Hamra",
+    "nameAr": "الجزيرة الحمراء"
+  },
+  {
+    "emirateCode": "RAK",
+    "nameEn": "Al Juwais",
+    "nameAr": "الجويّس"
+  },
+  {
+    "emirateCode": "RAK",
+    "nameEn": "Al Kharran",
+    "nameAr": "الخران"
+  },
+  {
+    "emirateCode": "RAK",
+    "nameEn": "Al Mairid",
+    "nameAr": "المعيريض"
+  },
+  {
+    "emirateCode": "RAK",
+    "nameEn": "Al Mamourah",
+    "nameAr": "المعمورة"
+  },
+  {
+    "emirateCode": "RAK",
+    "nameEn": "Al Mataf",
+    "nameAr": "المطاف"
+  },
+  {
+    "emirateCode": "RAK",
+    "nameEn": "Al Nakheel",
+    "nameAr": "النخيل"
+  },
+  {
+    "emirateCode": "RAK",
+    "nameEn": "Al Qusaidat",
+    "nameAr": "القصيدات"
+  },
+  {
+    "emirateCode": "RAK",
+    "nameEn": "Al Rams",
+    "nameAr": "الرمس"
+  },
+  {
+    "emirateCode": "RAK",
+    "nameEn": "Al Seer",
+    "nameAr": "السير"
+  },
+  {
+    "emirateCode": "RAK",
+    "nameEn": "Al Uraibi",
+    "nameAr": "العريبي"
+  },
+  {
+    "emirateCode": "RAK",
+    "nameEn": "Dafan Al Khor",
+    "nameAr": "دفن الخور"
+  },
+  {
+    "emirateCode": "RAK",
+    "nameEn": "Dafan Al Nakheel",
+    "nameAr": "دفن النخيل"
+  },
+  {
+    "emirateCode": "RAK",
+    "nameEn": "Digdaga",
+    "nameAr": "الدقداقة"
+  },
+  {
+    "emirateCode": "RAK",
+    "nameEn": "Ghalilah",
+    "nameAr": "غليلة"
+  },
+  {
+    "emirateCode": "RAK",
+    "nameEn": "Julphar",
+    "nameAr": "جلفار"
+  },
+  {
+    "emirateCode": "RAK",
+    "nameEn": "Khatt",
+    "nameAr": "خت"
+  },
+  {
+    "emirateCode": "RAK",
+    "nameEn": "Khuzam",
+    "nameAr": "خزام"
+  },
+  {
+    "emirateCode": "RAK",
+    "nameEn": "Mina Al Arab",
+    "nameAr": "ميناء العرب"
+  },
+  {
+    "emirateCode": "RAK",
+    "nameEn": "Nakheel",
+    "nameAr": "النخيل"
+  },
+  {
+    "emirateCode": "RAK",
+    "nameEn": "Ras Al Khaimah City",
+    "nameAr": "مدينة رأس الخيمة"
+  },
+  {
+    "emirateCode": "RAK",
+    "nameEn": "Ras Al Khaimah Industrial Area",
+    "nameAr": "منطقة رأس الخيمة الصناعية"
+  },
+  {
+    "emirateCode": "RAK",
+    "nameEn": "Shamal",
+    "nameAr": "شمل"
+  },
+  {
+    "emirateCode": "RAK",
+    "nameEn": "Wadi Ammar",
+    "nameAr": "وادي عمار"
+  },
+  {
+    "emirateCode": "RAK",
+    "nameEn": "Wadi Shaam",
+    "nameAr": "وادي شعم"
+  },
+  {
+    "emirateCode": "RAK",
+    "nameEn": "Al Marjan Island",
+    "nameAr": "جزيرة المرجان"
+  },
+  {
+    "emirateCode": "RAK",
+    "nameEn": "Al Hamra Industrial Zone",
+    "nameAr": "منطقة الحمراء الصناعية"
+  },
+  {
+    "emirateCode": "FUJ",
+    "nameEn": "Al Aqah",
+    "nameAr": "العقة"
+  },
+  {
+    "emirateCode": "FUJ",
+    "nameEn": "Al Badiyah",
+    "nameAr": "البدية"
+  },
+  {
+    "emirateCode": "FUJ",
+    "nameEn": "Al Faseel",
+    "nameAr": "الفصيل"
+  },
+  {
+    "emirateCode": "FUJ",
+    "nameEn": "Al Furfara",
+    "nameAr": "الفرفار"
+  },
+  {
+    "emirateCode": "FUJ",
+    "nameEn": "Al Gurfa",
+    "nameAr": "الغرفة"
+  },
+  {
+    "emirateCode": "FUJ",
+    "nameEn": "Al Hail",
+    "nameAr": "الحيل"
+  },
+  {
+    "emirateCode": "FUJ",
+    "nameEn": "Al Hayl Industrial Area",
+    "nameAr": "منطقة الحيل الصناعية"
+  },
+  {
+    "emirateCode": "FUJ",
+    "nameEn": "Al Madhab",
+    "nameAr": "المضب"
+  },
+  {
+    "emirateCode": "FUJ",
+    "nameEn": "Al Mahatta",
+    "nameAr": "المحطة"
+  },
+  {
+    "emirateCode": "FUJ",
+    "nameEn": "Al Owaid",
+    "nameAr": "العويد"
+  },
+  {
+    "emirateCode": "FUJ",
+    "nameEn": "Al Taween",
+    "nameAr": "الطويين"
+  },
+  {
+    "emirateCode": "FUJ",
+    "nameEn": "Dibba Al Fujairah",
+    "nameAr": "دبا الفجيرة"
+  },
+  {
+    "emirateCode": "FUJ",
+    "nameEn": "Fujairah City",
+    "nameAr": "مدينة الفجيرة"
+  },
+  {
+    "emirateCode": "FUJ",
+    "nameEn": "Fujairah Free Zone",
+    "nameAr": "المنطقة الحرة بالفجيرة"
+  },
+  {
+    "emirateCode": "FUJ",
+    "nameEn": "Fujairah Port",
+    "nameAr": "ميناء الفجيرة"
+  },
+  {
+    "emirateCode": "FUJ",
+    "nameEn": "Ghub",
+    "nameAr": "الغوب"
+  },
+  {
+    "emirateCode": "FUJ",
+    "nameEn": "Madhab",
+    "nameAr": "مضب"
+  },
+  {
+    "emirateCode": "FUJ",
+    "nameEn": "Mirbah",
+    "nameAr": "مربح"
+  },
+  {
+    "emirateCode": "FUJ",
+    "nameEn": "Qidfa",
+    "nameAr": "قدفع"
+  },
+  {
+    "emirateCode": "FUJ",
+    "nameEn": "Sakamkam",
+    "nameAr": "سكمكم"
+  },
+  {
+    "emirateCode": "FUJ",
+    "nameEn": "Seih Al Hudaibah",
+    "nameAr": "سيح الحضيبة"
+  },
+  {
+    "emirateCode": "FUJ",
+    "nameEn": "Thoban",
+    "nameAr": "ثوبان"
+  },
+  {
+    "emirateCode": "FUJ",
+    "nameEn": "Wadi Al Wurayah",
+    "nameAr": "وادي الوريعة"
+  }
+]

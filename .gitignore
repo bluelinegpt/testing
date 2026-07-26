@@ -1,0 +1,63 @@
+# Dependencies and build output
+node_modules/
+dist/
+coverage/
+.turbo/
+.vite/
+*.tsbuildinfo
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.pfx
+
+# Sensitive company configuration (never commit)
+/Bluelineconfig/
+
+# Local pnpm content-addressable store
+.pnpm-store/
+
+# Local agent / editor tooling and settings
+.claude/
+
+# Stray development QA answer dumps
+expected_answers_*.json
+expected_answers_*.md
+
+# Logs and runtime files
+*.log
+logs/
+tmp/
+temp/
+
+# Editors and operating systems
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.DS_Store
+Thumbs.db
+
+# Flutter generated output
+apps/mobile/.dart_tool/
+apps/mobile/.flutter-plugins
+apps/mobile/.flutter-plugins-dependencies
+apps/mobile/build/
+
+# Document QA intermediates
+.docx_review/
+.docx_review_v2/
+.docx_review_v3/
+
+# Sensitive operational uploads
+uploads/
+private-files/
+
+# Local database backups and baselines (never commit)
+.backups/
+
+# Preserved test failure logs
+.test-failures/

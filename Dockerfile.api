@@ -1,0 +1,24 @@
+# syntax=docker/dockerfile:1
+FROM node:24-bookworm-slim AS build
+RUN corepack enable && corepack prepare pnpm@11.7.0 --activate
+WORKDIR /workspace
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
+COPY apps/api/package.json apps/api/package.json
+RUN pnpm install --frozen-lockfile --filter . --filter @blueline/api...
+
+COPY apps/api apps/api
+RUN pnpm --filter @blueline/api build \
+    && pnpm --filter @blueline/api deploy --legacy --prod /opt/api \
+    && find /opt/api/dist -type f \( -name '*.map' -o -name '*.d.ts' \) -delete
+
+FROM node:24-bookworm-slim AS runtime
+ENV NODE_ENV=production
+WORKDIR /opt/app/apps/api
+COPY --chown=node:node --from=build /opt/api ./
+COPY --chown=node:node database/migrations /opt/app/database/migrations
+USER node
+EXPOSE 3000
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD ["node", "-e", "fetch('http://127.0.0.1:'+(process.env.API_PORT||3000)+'/api/v1/health/live').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+CMD ["node", "dist/main.js"]

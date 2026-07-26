@@ -1,0 +1,12 @@
+.git
+.github
+.docx_review*
+.env*
+!.env.example
+**/coverage
+**/dist
+**/node_modules
+*.docx
+*.log
+private-files
+uploads
