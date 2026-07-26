@@ -49,10 +49,13 @@ const idempotencyOperation = "driver_reconciliations.create";
 interface EligibleOrder {
   readonly amountCollected: string;
   readonly assignedDriverId: string | null;
+  readonly customerAmountDue: string;
   readonly deliveryStatus: string;
   readonly driverReconciliationStatus: string;
   readonly id: string;
   readonly orderNumber: string;
+  readonly traderId: string;
+  readonly traderNetPayable: string;
 }
 
 export interface DriverReconciliationResult {
@@ -103,6 +106,7 @@ export interface EligibleOrderRow {
 }
 
 export interface DriverReconciliationPreview {
+  readonly companyFees: string;
   readonly difference: string;
   readonly driverId: string;
   readonly driverPayableDeduction: string;
@@ -111,6 +115,8 @@ export interface DriverReconciliationPreview {
   readonly netAmountExpected: string;
   readonly netBeforeExpenses: string;
   readonly orderCount: number;
+  readonly traderCount: number;
+  readonly traderPayable: string;
   readonly orders: readonly {
     readonly amountCollected: string;
     readonly cashStatus: string;
@@ -328,7 +334,15 @@ export class DriverCashReconciliationService {
     const expenseTotal = this.sumExpenses(input.expenses ?? []);
     const net = gross.minus(driverPayableDeduction).minus(expenseTotal);
     const paymentTotal = this.sumPayments(input.payments ?? []);
+    // Company Fees and Trader Payable are shown separately and never reduce the amount the Driver
+    // hands over (§8). Company Fees = Gross - Trader Payable.
+    const traderPayable = orders.reduce(
+      (total, order) => total.plus(order.traderNetPayable),
+      new Decimal(0),
+    );
+    const companyFees = gross.minus(traderPayable);
     return {
+      companyFees: companyFees.toFixed(2),
       difference: paymentTotal.minus(net).toFixed(2),
       driverId: orders[0]?.assignedDriverId ?? "",
       driverPayableDeduction: driverPayableDeduction.toFixed(2),
@@ -337,6 +351,8 @@ export class DriverCashReconciliationService {
       netAmountExpected: net.toFixed(2),
       netBeforeExpenses: gross.toFixed(2),
       orderCount: orders.length,
+      traderCount: new Set(orders.map((order) => order.traderId)).size,
+      traderPayable: traderPayable.toFixed(2),
       orders: orders.map((order) => ({
         amountCollected: order.amountCollected,
         cashStatus: order.driverReconciliationStatus,
@@ -459,11 +475,12 @@ export class DriverCashReconciliationService {
         insert into driver_reconciliations (
           company_id, reconciliation_number, driver_id, business_date,
           gross_collections, driver_payable_deduction, reconciliation_expenses,
-          net_amount_received, status, created_by_account_id
+          net_amount_received, status, created_by_account_id, collection_payment_method
         ) values (
           ${companyId}::uuid, ${reconciliationNumber}, ${driverId}::uuid, current_date,
           ${gross.toFixed(2)}, ${driverPayableDeduction.toFixed(2)}, ${expenseTotal.toFixed(2)},
-          ${net.toFixed(2)}, 'draft', ${identity.identityId}::uuid
+          ${net.toFixed(2)}, 'draft', ${identity.identityId}::uuid,
+          ${input.collectionPaymentMethod ?? null}
         ) returning id
       `.execute(transaction);
       const reconciliationId = header.rows[0]?.id;
@@ -473,10 +490,11 @@ export class DriverCashReconciliationService {
         await sql`
           insert into driver_reconciliation_orders (
             company_id, reconciliation_id, order_id, customer_collection_amount,
-            driver_payable_deduction
+            driver_payable_deduction, collection_payment_method
           ) values (
             ${companyId}::uuid, ${reconciliationId}::uuid, ${order.id}::uuid,
-            ${order.amountCollected}, ${driverPayableDeduction.toFixed(2)}
+            ${order.amountCollected}, ${driverPayableDeduction.toFixed(2)},
+            ${input.collectionPaymentMethod ?? null}
           )
         `.execute(transaction);
       }
@@ -484,12 +502,12 @@ export class DriverCashReconciliationService {
         await sql`
           insert into driver_reconciliation_expenses (
             company_id, reconciliation_id, expense_type_id, amount, description,
-            expense_reference, attachment_file_id, created_by_account_id
+            expense_reference, reason, attachment_file_id, created_by_account_id
           ) values (
             ${companyId}::uuid, ${reconciliationId}::uuid, ${expense.expenseTypeId}::uuid,
             ${new Decimal(expense.amount).toFixed(2)}, ${expense.notes?.trim() || null},
-            ${expense.reference?.trim() || null}, ${expense.attachmentFileId ?? null}::uuid,
-            ${identity.identityId}::uuid
+            ${expense.reference?.trim() || null}, ${expense.reason?.trim() || null},
+            ${expense.attachmentFileId ?? null}::uuid, ${identity.identityId}::uuid
           )
         `.execute(transaction);
       }
@@ -523,6 +541,27 @@ export class DriverCashReconciliationService {
         where company_id = ${companyId}::uuid
           and id in (${sql.join(orders.map((order) => sql`${order.id}::uuid`))})
       `.execute(transaction);
+
+      // Create one Trader payable grouping per Trader in this collection (§13). The relevant
+      // Orders are the collection's Orders for that Trader; the order-level payable/outstanding
+      // ledger already lives on the Orders. Trader payments/allocations are Phase 4.
+      const traderGroups = new Map<string, { count: number; total: Decimal }>();
+      for (const order of orders) {
+        const group = traderGroups.get(order.traderId) ?? { count: 0, total: new Decimal(0) };
+        group.count += 1;
+        group.total = group.total.plus(order.traderNetPayable);
+        traderGroups.set(order.traderId, group);
+      }
+      for (const [traderId, group] of traderGroups) {
+        await sql`
+          insert into driver_collection_trader_payables (
+            company_id, reconciliation_id, trader_id, order_count, total_payable
+          ) values (
+            ${companyId}::uuid, ${reconciliationId}::uuid, ${traderId}::uuid,
+            ${group.count}, ${group.total.toFixed(2)}
+          )
+        `.execute(transaction);
+      }
 
       const actorRole = await this.history.actorRole(transaction, companyId, identity.identityId);
       for (const order of orders) {
@@ -1022,7 +1061,10 @@ export class DriverCashReconciliationService {
         select id, order_number as "orderNumber", assigned_driver_id as "assignedDriverId",
                delivery_status as "deliveryStatus",
                driver_reconciliation_status as "driverReconciliationStatus",
-               amount_collected::text as "amountCollected"
+               amount_collected::text as "amountCollected",
+               customer_amount_due::text as "customerAmountDue",
+               trader_id as "traderId",
+               trader_net_payable::text as "traderNetPayable"
         from orders
         where company_id = ${companyId}::uuid
           and id in (${sql.join(ids.map((id) => sql`${id}::uuid`))})
@@ -1037,7 +1079,10 @@ export class DriverCashReconciliationService {
       select o.id, o.order_number as "orderNumber", o.assigned_driver_id as "assignedDriverId",
              o.delivery_status as "deliveryStatus",
              o.driver_reconciliation_status as "driverReconciliationStatus",
-             o.amount_collected::text as "amountCollected"
+             o.amount_collected::text as "amountCollected",
+             o.customer_amount_due::text as "customerAmountDue",
+             o.trader_id as "traderId",
+             o.trader_net_payable::text as "traderNetPayable"
       from orders o
       where o.company_id = ${companyId}::uuid
         and o.delivery_status = 'delivered'

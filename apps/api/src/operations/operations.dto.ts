@@ -227,12 +227,27 @@ export class ReconciliationExpenseDto {
   @MaxLength(80)
   public readonly reference?: string;
 
+  // Mandatory business reason for the expense (§9). Optional at the DTO level during the Phase 3
+  // rollout so existing callers keep working; the redesigned collection form requires it.
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  public readonly reason?: string;
+
   @IsOptional()
   @IsUUID()
   public readonly attachmentFileId?: string;
 }
 
+const collectionPaymentMethods = ["cash", "visa"] as const;
+
 export class CreateDriverReconciliationDto extends OrderSelectionDto {
+  // One payment method for the whole collection: Cash or Visa (Visa = customer paid by card).
+  // Optional during the Phase 3 rollout; the redesigned form always sends it.
+  @IsOptional()
+  @IsIn(collectionPaymentMethods)
+  public readonly collectionPaymentMethod?: (typeof collectionPaymentMethods)[number];
+
   @IsArray()
   @ArrayMaxSize(100)
   @ValidateNested({ each: true })
