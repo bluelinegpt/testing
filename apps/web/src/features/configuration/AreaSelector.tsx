@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useContext, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { ApiClient } from "../../api/api-client.js";
 import type { CompanyArea, Emirate } from "../../api/contracts.js";
+import { CompanyBrandingContext } from "../../app/CompanyBrandingContext.js";
 import { SearchCombobox } from "../../components/SearchCombobox.js";
 import { normalizeLocale } from "../../localization/locale.js";
+import { localizeName } from "../../localization/localize-name.js";
 
 import { AreaFormDialog } from "./AreaFormDialog.js";
 
@@ -47,7 +49,14 @@ export function AreaSelector({
   value: CompanyArea | undefined;
 }) {
   const { i18n, t } = useTranslation();
-  const locale = normalizeLocale(i18n.resolvedLanguage);
+  // Display follows the user's Text Language (read from the branding context,
+  // falling back to the UI language when no provider is present, e.g. in
+  // isolated tests). `arabicFirst` forces Arabic regardless. Reading the context
+  // directly — rather than via a hook that calls useTranslation again — keeps a
+  // single i18n subscription so this component's render timing is unchanged.
+  const branding = useContext(CompanyBrandingContext);
+  const textLanguage = branding?.textLanguage ?? normalizeLocale(i18n.resolvedLanguage);
+  const displayLanguage = arabicFirst ? "ar" : textLanguage;
 
   const [emirates, setEmirates] = useState<readonly Emirate[]>([]);
   const [emirateId, setEmirateId] = useState(value?.emirateId ?? "");
@@ -73,9 +82,8 @@ export function AreaSelector({
   }, [value]);
 
   const label = useCallback(
-    (area: CompanyArea) =>
-      arabicFirst || locale === "ar" ? (area.nameAr ?? area.nameEn) : area.nameEn,
-    [arabicFirst, locale],
+    (area: CompanyArea) => localizeName(displayLanguage, { ar: area.nameAr, en: area.nameEn }),
+    [displayLanguage],
   );
 
   const searchPath =
@@ -99,7 +107,9 @@ export function AreaSelector({
           <option value="">{loading ? t("common.loading") : t("areas.selectEmirate")}</option>
           {emirates.map((emirate) => (
             <option key={emirate.id} value={emirate.id}>
-              {locale === "ar" ? emirate.nameAr : emirate.nameEn}
+              {/* Emirate follows the Text Language; the `arabicFirst` override
+                  applies only to the Area label, matching prior behavior. */}
+              {localizeName(textLanguage, { ar: emirate.nameAr, en: emirate.nameEn })}
             </option>
           ))}
         </select>

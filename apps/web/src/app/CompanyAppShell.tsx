@@ -14,6 +14,7 @@ import {
   ShieldCheck,
   Store,
   Truck,
+  Type,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -23,7 +24,14 @@ import { NavLink, useLocation } from "react-router-dom";
 
 import type { LoginResponse } from "../api/contracts.js";
 import { normalizeLocale, storeLocale, type SupportedLocale } from "../localization/locale.js";
+import { useCompanyBranding } from "./CompanyBrandingContext.js";
 import { canAccessCompanyPath, firstAuthorizedCompanyPath } from "./company-access.js";
+
+function brandInitials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "•";
+  return ((parts[0]?.[0] ?? "") + (parts.length > 1 ? (parts.at(-1)?.[0] ?? "") : "")).toUpperCase();
+}
 
 type MenuGroupId =
   "orders" | "traders" | "drivers" | "finance" | "configuration" | "administration";
@@ -53,6 +61,7 @@ const routeTitles: Readonly<Record<string, string>> = {
   "/operations/driver-reconciliations/new": "operations.newReconciliation",
   "/cash-management": "nav.cashManagement",
   "/reports": "nav.reports",
+  "/configuration/company-profile": "nav.companyProfile",
   "/configuration/general": "nav.generalSettings",
   "/configuration/customers": "nav.customers",
   "/configuration/areas": "nav.areas",
@@ -82,7 +91,9 @@ export function CompanyAppShell({
 }) {
   const { i18n, t } = useTranslation();
   const location = useLocation();
+  const branding = useCompanyBranding();
   const currentLanguage = normalizeLocale(i18n.resolvedLanguage);
+  const companyName = branding.companyName === "" ? t("shell.companyPortal") : branding.companyName;
   const [collapsed, setCollapsed] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [expandedGroup, setExpandedGroup] = useState<MenuGroupId | undefined>(() =>
@@ -136,6 +147,7 @@ export function CompanyAppShell({
             id: "configuration",
             label: t("nav.configuration"),
             items: [
+              { label: t("nav.companyProfile"), path: "/configuration/company-profile" },
               { label: t("nav.generalSettings"), path: "/configuration/general" },
               { label: t("nav.tradersList"), path: "/configuration/traders" },
               { label: t("nav.customers"), path: "/configuration/customers" },
@@ -235,13 +247,19 @@ export function CompanyAppShell({
       ) : null}
       <aside aria-label={t("workspace.navigation")} className="app-sidebar" ref={drawerRef}>
         <div className="sidebar-brand-row">
-          <NavLink aria-label="BluelineGPT" className="sidebar-brand" to={homePath}>
-            <span className="brand-mark" aria-hidden="true">
-              B
-            </span>
+          <NavLink aria-label={companyName} className="sidebar-brand" to={homePath}>
+            {branding.logoUrl === undefined ? (
+              <span className="brand-mark" aria-hidden="true">
+                {brandInitials(companyName)}
+              </span>
+            ) : (
+              <img alt="" aria-hidden="true" className="brand-logo" src={branding.logoUrl} />
+            )}
             <span className="sidebar-brand-copy">
-              <strong>BluelineGPT</strong>
-              <small>{t("shell.subtitle")}</small>
+              <strong title={companyName}>{companyName}</strong>
+              {branding.companySubtitle === undefined ? null : (
+                <small title={branding.companySubtitle}>{branding.companySubtitle}</small>
+              )}
             </span>
           </NavLink>
           {drawerOpen ? (
@@ -307,6 +325,20 @@ export function CompanyAppShell({
               </button>
             ))}
           </div>
+          <div className="sidebar-language" aria-label={t("preferences.textLanguage")} role="group">
+            <Type aria-hidden="true" size={18} />
+            {languages.map((language) => (
+              <button
+                aria-label={`${t("preferences.textLanguage")}: ${language.label}`}
+                aria-pressed={branding.textLanguage === language.code}
+                key={language.code}
+                onClick={() => void branding.setTextLanguage(language.code)}
+                type="button"
+              >
+                {language.label}
+              </button>
+            ))}
+          </div>
           <div className="sidebar-user">
             <CircleUserRound aria-hidden="true" size={22} />
             <span className="sidebar-user-copy">
@@ -317,6 +349,7 @@ export function CompanyAppShell({
               <LogOut aria-hidden="true" size={18} />
             </button>
           </div>
+          <p className="powered-by">{t("shell.poweredBy")}</p>
         </div>
       </aside>
 
@@ -335,7 +368,7 @@ export function CompanyAppShell({
             )}
           </button>
           <div className="top-header-title">
-            <span>{t("shell.companyPortal")}</span>
+            <span title={companyName}>{companyName}</span>
             <strong>{pageTitle}</strong>
           </div>
           <div className="top-header-user">

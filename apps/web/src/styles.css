@@ -3851,3 +3851,85 @@ td {
 .no-spinner {
   appearance: textfield;
 }
+
+/* Company Profile branding (Phase B) */
+.sidebar-brand-copy strong {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.sidebar-brand .brand-logo {
+  width: 38px;
+  height: 38px;
+  flex: 0 0 38px;
+  border-radius: 8px;
+  object-fit: contain;
+  background: #fff;
+}
+.top-header-title span {
+  overflow: hidden;
+  max-width: 40ch;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.powered-by {
+  margin: 10px 0 0;
+  color: #8a98b0;
+  font-size: 10px;
+  text-align: center;
+}
+.form-success {
+  color: #157347;
+  font-weight: 600;
+}
+.company-logo-manager {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+  align-items: flex-start;
+}
+.company-logo-previews {
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+.company-logo-figure {
+  margin: 0;
+  display: grid;
+  gap: 6px;
+  justify-items: center;
+}
+.company-logo-figure figcaption {
+  font-size: 11px;
+  color: var(--muted, #64748b);
+}
+.company-logo-image,
+.company-logo-placeholder {
+  width: 96px;
+  height: 96px;
+  border-radius: 12px;
+  border: 1px solid var(--border, #d5dced);
+  object-fit: contain;
+  background: #fff;
+}
+.company-logo-placeholder {
+  display: grid;
+  place-items: center;
+  font-size: 34px;
+  font-weight: 700;
+  color: #fff;
+  background: linear-gradient(135deg, var(--shell-accent, #2563eb), var(--shell-accent-violet, #7c3aed));
+}
+.company-logo-controls {
+  display: grid;
+  gap: 10px;
+  min-width: 240px;
+}
+.company-logo-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.company-profile-form .order-form-columns {
+  margin-bottom: 16px;
+}

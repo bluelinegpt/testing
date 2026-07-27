@@ -23,6 +23,7 @@ const routePermissions: Readonly<Record<string, readonly string[]>> = {
     "settlements.reverse",
   ],
   "/reports": [manage, "reports.financial.view", "reports.export"],
+  "/configuration/company-profile": ["company_profile.manage"],
   "/configuration/general": [manage],
   "/configuration/traders": [manage],
   "/configuration/customers": [manage],

@@ -11,6 +11,7 @@ import {
   UsersConfigurationWorkspace,
 } from "../features/administration/UserRoleConfigurationWorkspace.js";
 import { CompanyConfigurationWorkspace } from "../features/configuration/CompanyConfigurationWorkspace.js";
+import { CompanyProfileWorkspace } from "../features/configuration/CompanyProfileWorkspace.js";
 import {
   CustomerConfigurationWorkspace,
   CustomerDetailWorkspace,
@@ -38,6 +39,7 @@ import {
 } from "../features/operations/OrdersModuleWorkspace.js";
 import { SupportWorkspace } from "../features/support/SupportWorkspace.js";
 import { CompanyAppShell } from "./CompanyAppShell.js";
+import { CompanyBrandingProvider } from "./CompanyBrandingContext.js";
 import { canAccessCompanyPath, firstAuthorizedCompanyPath } from "./company-access.js";
 
 const redirects: Readonly<Record<string, string>> = {
@@ -160,6 +162,8 @@ export function CompanyWorkspace({
         permissions={session.identity.permissions}
       />
     );
+  } else if (path === "/configuration/company-profile") {
+    content = <CompanyProfileWorkspace api={api} />;
   } else if (path === "/configuration/general") {
     content = <CompanyConfigurationWorkspace api={api} view="general" />;
   } else if (path === "/configuration/areas") {
@@ -274,9 +278,11 @@ export function CompanyWorkspace({
   }
 
   return (
-    <CompanyAppShell onLogout={onLogout} session={session}>
-      {content}
-    </CompanyAppShell>
+    <CompanyBrandingProvider api={api}>
+      <CompanyAppShell onLogout={onLogout} session={session}>
+        {content}
+      </CompanyAppShell>
+    </CompanyBrandingProvider>
   );
 }
 

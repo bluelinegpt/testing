@@ -249,6 +249,42 @@ export interface CompanyBankAccount {
   readonly swiftCode: string | null;
 }
 
+export interface CompanyLogoMetadata {
+  readonly fileId: string;
+  readonly mediaType: string;
+  readonly originalFilename: string;
+  readonly sizeBytes: number;
+  readonly updatedAt: string;
+}
+
+export interface CompanyProfile {
+  readonly logo: CompanyLogoMetadata | null;
+  readonly nameAr: string | null;
+  readonly nameEn: string;
+  readonly subtitleAr: string | null;
+  readonly subtitleEn: string | null;
+  readonly telephone: string | null;
+}
+
+export interface CompanyBranding {
+  readonly dataQuality: {
+    readonly nameArMissing: boolean;
+    readonly subtitleArMissing: boolean;
+    readonly subtitleEnMissing: boolean;
+  };
+  readonly hasLogo: boolean;
+  readonly logoFileId: string | null;
+  readonly nameAr: string | null;
+  readonly nameEn: string;
+  readonly subtitleAr: string | null;
+  readonly subtitleEn: string | null;
+  readonly telephone: string | null;
+}
+
+export interface AccountPreferences {
+  readonly textLanguage: "en" | "ar";
+}
+
 export interface WorkforcePage<T> {
   readonly items: readonly T[];
   readonly page: number;

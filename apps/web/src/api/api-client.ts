@@ -53,6 +53,43 @@ export class ApiClient {
     return this.request<TResponse>(path, { body, method: "PATCH" });
   }
 
+  public delete<TResponse>(path: string): Promise<TResponse> {
+    return this.request<TResponse>(path, { method: "DELETE" });
+  }
+
+  /**
+   * Upload multipart/form-data (e.g. a logo file). The browser sets the
+   * multipart boundary itself, so no Content-Type header is added here.
+   */
+  public postMultipart<TResponse>(path: string, form: FormData): Promise<TResponse> {
+    return this.request<TResponse>(path, { body: form, method: "POST" });
+  }
+
+  /** Fetch raw bytes (e.g. an authenticated logo stream) as a Blob. */
+  public async getBinary(path: string, signal?: AbortSignal): Promise<Blob> {
+    const controller = new AbortController();
+    const abortRequest = () => controller.abort(signal?.reason);
+    const timeout = globalThis.setTimeout(() => controller.abort(), this.timeoutMs);
+    if (signal?.aborted === true) abortRequest();
+    else signal?.addEventListener("abort", abortRequest, { once: true });
+    const headers: Record<string, string> = { Accept: "image/png,image/jpeg,*/*" };
+    if (this.accessToken !== undefined) headers.Authorization = `Bearer ${this.accessToken}`;
+    try {
+      const response = await fetch(`${webConfiguration.apiBaseUrl}/${path.replace(/^\//, "")}`, {
+        headers,
+        method: "GET",
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        throw new ApiError("The request could not be completed", "request_failed", response.status);
+      }
+      return await response.blob();
+    } finally {
+      globalThis.clearTimeout(timeout);
+      signal?.removeEventListener("abort", abortRequest);
+    }
+  }
+
   private async request<TResponse>(
     path: string,
     input: {
@@ -68,14 +105,21 @@ export class ApiClient {
     if (input.signal?.aborted === true) abortRequest();
     else input.signal?.addEventListener("abort", abortRequest, { once: true });
 
+    const isFormData = input.body instanceof FormData;
     const headers: Record<string, string> = { Accept: "application/json" };
     Object.assign(headers, input.headers);
     if (this.accessToken !== undefined) headers.Authorization = `Bearer ${this.accessToken}`;
-    if (input.body !== undefined) headers["Content-Type"] = "application/json";
+    // FormData sets its own multipart Content-Type (with boundary); JSON bodies
+    // are serialized and declared as application/json.
+    if (input.body !== undefined && !isFormData) headers["Content-Type"] = "application/json";
 
     try {
+      const body =
+        input.body === undefined
+          ? {}
+          : { body: isFormData ? (input.body as FormData) : JSON.stringify(input.body) };
       const response = await fetch(`${webConfiguration.apiBaseUrl}/${path.replace(/^\//, "")}`, {
-        ...(input.body === undefined ? {} : { body: JSON.stringify(input.body) }),
+        ...body,
         headers,
         method: input.method,
         signal: controller.signal,
