@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { vi } from "vitest";
 
 import { ApiError, type ApiClient } from "../../api/api-client.js";
@@ -188,17 +188,54 @@ async function selectTraderAndCustomer() {
   const traderInput = screen.getByPlaceholderText("Search by Trader code, name, or mobile");
   fireEvent.focus(traderInput);
   fireEvent.change(traderInput, { target: { value: "TR-1" } });
-  const traderOption = await screen.findByRole("option", { name: "TR-1 - Test Trader" });
+  const traderOption = await screen.findByRole("option", { name: /Test Trader/ });
   fireEvent.keyDown(traderInput, { key: "ArrowDown" });
   // Wait for the highlight to settle before Enter, then fire it synchronously
   // so no render can interleave. Guards the keyboard path against selecting
   // nothing when the option list is still settling under parallel test load.
   await waitFor(() => expect(traderOption).toHaveAttribute("aria-selected", "true"));
   fireEvent.keyDown(traderInput, { key: "Enter" });
-  const customerInput = screen.getByPlaceholderText("Search by code, name, or mobile");
+  const customerInput = screen.getByPlaceholderText("Search or type a new Customer Name");
   fireEvent.focus(customerInput);
   fireEvent.change(customerInput, { target: { value: "CUS-000001" } });
-  fireEvent.click(await screen.findByRole("option", { name: "CUS-000001 - Aisha - 971506468441" }));
+  fireEvent.click(await screen.findByRole("option", { name: /Aisha/ }));
+}
+
+// Selects only the Trader (and Serial), leaving the Customer to be typed as a
+// new record — the fast inline-capture path.
+async function selectTraderOnly() {
+  fireEvent.change(screen.getByLabelText("Serial Number"), { target: { value: "000123" } });
+  const traderInput = screen.getByPlaceholderText("Search by Trader code, name, or mobile");
+  fireEvent.focus(traderInput);
+  fireEvent.change(traderInput, { target: { value: "TR-1" } });
+  const traderOption = await screen.findByRole("option", { name: /Test Trader/ });
+  fireEvent.keyDown(traderInput, { key: "ArrowDown" });
+  await waitFor(() => expect(traderOption).toHaveAttribute("aria-selected", "true"));
+  fireEvent.keyDown(traderInput, { key: "Enter" });
+}
+
+// Types a new Customer Name without choosing a suggestion, then picks the
+// Emirate and Area (enabled because no existing Customer is selected).
+async function typeNewCustomerAndArea(name: string) {
+  const customerInput = screen.getByPlaceholderText("Search or type a new Customer Name");
+  fireEvent.focus(customerInput);
+  fireEvent.change(customerInput, { target: { value: name } });
+  fireEvent.blur(customerInput);
+  const emirate = await screen.findByLabelText("Emirate");
+  fireEvent.change(emirate, { target: { value: area.emirateId } });
+  const areaInput = screen.getByPlaceholderText("Search by Area name or code");
+  fireEvent.focus(areaInput);
+  fireEvent.change(areaInput, { target: { value: "DXB" } });
+  const container = document.querySelector('[data-field="area"]');
+  if (container === null) throw new Error("Area field container missing");
+  // Scope to the Area combobox listbox so the Emirate <select>'s identically
+  // named "Dubai" option is not matched.
+  await waitFor(() =>
+    expect(container.querySelector('[role="listbox"] [role="option"]')).not.toBeNull(),
+  );
+  const listbox = container.querySelector('[role="listbox"]');
+  if (listbox === null) throw new Error("Area listbox not open");
+  fireEvent.click(within(listbox as HTMLElement).getByRole("option", { name: "Dubai" }));
 }
 
 describe("CreateOrderDialog", () => {
@@ -224,42 +261,48 @@ describe("CreateOrderDialog", () => {
     if (context.task.result?.state === "fail") dumpTrace(context.task.name);
   });
 
-  it("shows the selected Customer's name read-only, not as a second editable field", async () => {
+  it("selecting an existing Customer populates its saved details in the Order form", async () => {
     setup();
-    // No customer chosen yet: the redundant name field is not rendered.
+    // There is no separate read-only name field: the Customer field itself is
+    // the single Name entry (searchable, and typeable for a new Customer).
     expect(screen.queryByTestId("customer-name")).not.toBeInTheDocument();
 
     await selectTraderAndCustomer();
 
-    // After selection the name is shown read-only and reflects the customer.
-    const name = await screen.findByTestId("customer-name");
-    expect(name).toHaveValue("Aisha");
-    expect(name).toHaveAttribute("readonly");
+    // The Customer field shows the selected name and the saved details populate.
+    expect(screen.getByPlaceholderText("Search or type a new Customer Name")).toHaveValue("Aisha");
+    expect(screen.getByLabelText("Customer address")).toHaveValue("Building 4, Dubai");
+    const mobile = screen.getAllByPlaceholderText(/9715XXXXXXXX/)[0];
+    expect(mobile).toHaveValue("971506468441");
   });
 
-  it("searches by keyboard, validates UAE mobile, creates unassigned, and prevents duplicates", async () => {
+  it("searches by keyboard, treats mobile format as advisory, creates unassigned, prevents duplicates", async () => {
     const { api, onSaved, resolve } = setup();
     await selectTraderAndCustomer();
-    fireEvent.change(screen.getByTestId("customer-name"), { target: { value: "Aisha" } });
     const mobile = screen.getAllByPlaceholderText(/9715XXXXXXXX/)[0];
     if (mobile === undefined) throw new Error("Primary mobile input was not rendered");
     fireEvent.change(mobile, { target: { value: "0406468441" } });
+    // An unconventional value is advisory only: warning guidance, not a blocking
+    // error, and the field is not marked invalid.
     expect(
-      screen.getByText("Enter a UAE mobile number, for example 0506468442 or 9715XXXXXXXX."),
+      screen.getByText("Recommended UAE format: 0506468442 or 971506468442."),
     ).toBeInTheDocument();
-    // A local 05X number is accepted and normalized to the canonical form on submit.
+    expect(mobile).not.toHaveAttribute("aria-invalid", "true");
+    // The mobile is sent exactly as typed (trimmed); the API normalizes it.
     fireEvent.change(mobile, { target: { value: "0506468441" } });
     fireEvent.change(screen.getByLabelText("Customer address"), { target: { value: "Dubai" } });
     fireEvent.change(screen.getByLabelText("COD amount"), { target: { value: "100" } });
 
-    await waitFor(() => expect(screen.getByRole("button", { name: "Create order" })).toBeEnabled());
+    // Wait for the pricing quote to resolve (Amount due to trader shown) before
+    // submitting; the button is enabled but validation requires a resolved fee.
+    await screen.findAllByText("AED 90.00");
     fireEvent.click(screen.getByRole("button", { name: "Create order" }));
-    fireEvent.click(screen.getByRole("button", { name: /Working/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Creating Order/ }));
     const creates = api.post.mock.calls.filter(([path]) => path === "operations/orders");
     expect(creates).toHaveLength(1);
     expect(creates[0]?.[1]).toMatchObject({
       additionalFees: 0,
-      customerMobileNumber: "971506468441",
+      customerMobileNumber: "0506468441",
       driverId: undefined,
       referenceNumber: "REF-A1",
       serialNumber: "000123",
@@ -277,9 +320,8 @@ describe("CreateOrderDialog", () => {
     fireEvent.change(screen.getByLabelText("Reference Number"), { target: { value: "   " } });
     fireEvent.change(screen.getByLabelText("COD amount"), { target: { value: "100" } });
 
-    const create = screen.getByRole("button", { name: "Create order" });
-    await waitFor(() => expect(create).toBeEnabled());
-    fireEvent.click(create);
+    await screen.findAllByText("AED 90.00");
+    fireEvent.click(screen.getByRole("button", { name: "Create order" }));
 
     await waitFor(() =>
       expect(api.post).toHaveBeenCalledWith(
@@ -374,7 +416,7 @@ describe("CreateOrderDialog", () => {
     await selectTraderAndCustomer();
 
     // The missing-price notice and manual fields appear instead of a dead end.
-    expect(await screen.findByText(/no configured price/i)).toBeInTheDocument();
+    expect(await screen.findByText(/could not be resolved/i)).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Service fee (manual)"), { target: { value: "15" } });
     fireEvent.change(screen.getByLabelText("Reason for manual fee"), {
       target: { value: "Agreed rate" },
@@ -443,7 +485,7 @@ describe("CreateOrderDialog", () => {
       />,
     );
     await selectTraderAndCustomer();
-    await screen.findByText(/no configured price/i);
+    await screen.findByText(/could not be resolved/i);
     // Fee alone, no reason — the quote must still succeed.
     fireEvent.change(screen.getByLabelText("Service fee (manual)"), { target: { value: "12.5" } });
     await waitFor(() =>
@@ -453,5 +495,267 @@ describe("CreateOrderDialog", () => {
       ),
     );
     await waitFor(() => expect(screen.getByLabelText("Service fee")).toHaveValue("12.5"));
+  });
+});
+
+describe("CreateOrderDialog validation (Phase 3)", () => {
+  beforeEach(async (context) => {
+    trace.length = 0;
+    sequence = 0;
+    mark("test start", { name: context.task.name.slice(0, 40) });
+    await i18nInstance.changeLanguage("en");
+  });
+  afterEach((context) => {
+    if (context.task.result?.state === "fail") dumpTrace(context.task.name);
+  });
+
+  it("keeps Create Order enabled and shows an accessible summary that focuses the first field", async () => {
+    setup();
+    const button = screen.getByRole("button", { name: "Create order" });
+    // The button is not silently disabled on an incomplete form.
+    expect(button).toBeEnabled();
+    fireEvent.click(button);
+
+    // The summary lists the missing fields and each item is actionable.
+    expect(
+      await screen.findByText(
+        "Unable to create the Order. Please complete or correct the following fields:",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Enter a Serial Number." })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Select a valid Trader." })).toBeInTheDocument();
+    // The first invalid field (Serial Number) receives focus.
+    expect(document.activeElement).toBe(document.getElementById("order-serial"));
+  });
+
+  it("clicking a summary item focuses the related field", async () => {
+    setup();
+    fireEvent.click(screen.getByRole("button", { name: "Create order" }));
+    const traderItem = await screen.findByRole("button", { name: "Select a valid Trader." });
+    fireEvent.click(traderItem);
+    expect(document.activeElement).toBe(
+      screen.getByPlaceholderText("Search by Trader code, name, or mobile"),
+    );
+  });
+
+  it("rejects a non-integer Package count", async () => {
+    setup();
+    await selectTraderAndCustomer();
+    fireEvent.change(screen.getByLabelText("COD amount"), { target: { value: "100" } });
+    await screen.findAllByText("AED 90.00");
+    fireEvent.change(screen.getByLabelText("Packages"), { target: { value: "1.5" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create order" }));
+    expect(
+      await screen.findByRole("button", { name: "Packages must be a whole number of 1 or more." }),
+    ).toBeInTheDocument();
+  });
+
+  it("shows an advisory for an unconventional second mobile without blocking", async () => {
+    setup();
+    const second = screen.getAllByPlaceholderText(/9715XXXXXXXX/)[1];
+    if (second === undefined) throw new Error("Second mobile input missing");
+    // Empty is fine; an unconventional value is advisory only, never invalid.
+    fireEvent.change(second, { target: { value: "123" } });
+    expect(
+      screen.getAllByText("Recommended UAE format: 0506468442 or 971506468442.").length,
+    ).toBeGreaterThan(0);
+    expect(second).not.toHaveAttribute("aria-invalid", "true");
+    fireEvent.change(second, { target: { value: "0506468442" } });
+    expect(second).toHaveValue("0506468442");
+  });
+
+  it("shows the full breakdown in the detail card and only the headline totals in the footer", async () => {
+    setup();
+    await selectTraderAndCustomer();
+    fireEvent.change(screen.getByLabelText("COD amount"), { target: { value: "100" } });
+    await screen.findAllByText("AED 90.00");
+
+    // The detailed card carries the full financial breakdown.
+    expect(screen.getByText("Total Deductions")).toBeInTheDocument();
+    // The headline totals are intentionally repeated in the sticky footer, so
+    // each of these two appears exactly twice (detail card + footer).
+    expect(screen.getAllByText("Amount due to Trader")).toHaveLength(2);
+    expect(screen.getAllByText("Total amount to collect")).toHaveLength(2);
+    // The de-duplicated footer does not repeat the deductions breakdown.
+    const footer = document.querySelector(".order-totals");
+    expect(footer?.textContent).not.toContain("Total Deductions");
+    expect(footer?.textContent).toContain("Amount due to Trader");
+    expect(footer?.textContent).toContain("Total amount to collect");
+  });
+
+  it("blocks creation when a Service Fee override has no reason", async () => {
+    const { api } = setup();
+    await selectTraderAndCustomer();
+    fireEvent.change(screen.getByLabelText("COD amount"), { target: { value: "100" } });
+    await screen.findAllByText("AED 90.00");
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Override configured service fee" }));
+    fireEvent.change(screen.getByLabelText("Overridden fee"), { target: { value: "15" } });
+    // Reason deliberately left blank.
+    fireEvent.click(screen.getByRole("button", { name: "Create order" }));
+
+    expect(
+      await screen.findByRole("button", { name: "Enter a reason for the Service Fee override." }),
+    ).toBeInTheDocument();
+    // The Order must not be submitted while the override is incomplete.
+    expect(api.post.mock.calls.filter(([path]) => path === "operations/orders")).toHaveLength(0);
+  });
+
+  it("offers recovery actions when the Trader has no configured price", async () => {
+    const api = {
+      get: vi.fn((path: string) => {
+        if (path.startsWith("operations/orders/identifier-availability")) {
+          return Promise.resolve({ referenceNumberAvailable: true, serialNumberAvailable: true });
+        }
+        if (path === "configuration/emirates") {
+          return Promise.resolve([
+            { code: "DXB", id: area.emirateId, nameAr: area.emirateNameAr, nameEn: area.emirateNameEn },
+          ]);
+        }
+        if (path.startsWith("configuration/customers/CUS-000001")) {
+          return Promise.resolve({ addresses: [{ ...customer, isActive: true, isDefault: true }] });
+        }
+        const items = path.startsWith("operations/traders")
+          ? [trader]
+          : path.startsWith("configuration/customers")
+            ? [customer]
+            : [area];
+        return Promise.resolve({ hasMore: false, items, total: 1 });
+      }),
+      post: vi.fn((path: string) => {
+        if (path.endsWith("/quote")) {
+          return Promise.reject(new ApiError("no price", "pricing_not_configured", 422));
+        }
+        return Promise.resolve({ orderNumber: "ORD-000300" });
+      }),
+    };
+    render(
+      <CreateOrderDialog
+        api={api as unknown as ApiClient}
+        drivers={[]}
+        onClose={vi.fn()}
+        onSaved={vi.fn().mockResolvedValue(undefined)}
+        permissions={["users_roles.manage"]}
+        searchDebounceMs={0}
+      />,
+    );
+    await selectTraderAndCustomer();
+
+    // The failure surfaces a clear message plus both recovery actions rather
+    // than a silent dead end.
+    expect(await screen.findByText(/could not be resolved/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Review Trader Pricing" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Select Another Area" })).toBeInTheDocument();
+  });
+
+  it("creates a new Customer inline from typed Order details, with no separate modal", async () => {
+    const { api, resolve } = setup();
+    await selectTraderOnly();
+    await typeNewCustomerAndArea("Mariam Buyer");
+    const mobile = screen.getAllByPlaceholderText(/9715XXXXXXXX/)[0];
+    if (mobile === undefined) throw new Error("Primary mobile input missing");
+    fireEvent.change(mobile, { target: { value: "0506468442" } });
+    fireEvent.change(screen.getByLabelText("Customer address"), {
+      target: { value: "Villa 9, Dubai" },
+    });
+    fireEvent.change(screen.getByLabelText("COD amount"), { target: { value: "100" } });
+    await screen.findAllByText("AED 90.00");
+
+    // The fast flow has no Add Customer button and opens no modal.
+    expect(screen.queryByRole("button", { name: /Add Customer/i })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Create order" }));
+    const creates = api.post.mock.calls.filter(([path]) => path === "operations/orders");
+    expect(creates).toHaveLength(1);
+    // Customer + Order go together via the atomic inline-customer payload, and
+    // the mobile is carried exactly as typed.
+    expect(creates[0]?.[1]).toMatchObject({
+      customerId: undefined,
+      customerMobileNumber: "0506468442",
+      customerName: "Mariam Buyer",
+      inlineCustomer: {
+        address: "Villa 9, Dubai",
+        areaId: area.id,
+        mobileNumber: "0506468442",
+        name: "Mariam Buyer",
+      },
+    });
+    resolve({ orderNumber: "ORD-000400", serialNumber: "000123" });
+  });
+
+  it("keeps an empty Primary Mobile blocking even for a typed new Customer", async () => {
+    setup();
+    await selectTraderOnly();
+    await typeNewCustomerAndArea("No Phone Buyer");
+    fireEvent.change(screen.getByLabelText("Customer address"), { target: { value: "Somewhere" } });
+    fireEvent.change(screen.getByLabelText("COD amount"), { target: { value: "100" } });
+    // Mobile deliberately left empty.
+    fireEvent.click(screen.getByRole("button", { name: "Create order" }));
+    expect(
+      await screen.findByRole("button", { name: "Enter a mobile number." }),
+    ).toBeInTheDocument();
+  });
+
+  it("maps a duplicate-Customer backend error to the Customer field and preserves values", async () => {
+    const api = {
+      get: vi.fn((path: string) => {
+        if (path.startsWith("operations/orders/identifier-availability")) {
+          return Promise.resolve({ referenceNumberAvailable: true, serialNumberAvailable: true });
+        }
+        if (path === "configuration/emirates") {
+          return Promise.resolve([
+            {
+              code: "DXB",
+              id: area.emirateId,
+              nameAr: area.emirateNameAr,
+              nameEn: area.emirateNameEn,
+            },
+          ]);
+        }
+        const items = path.startsWith("operations/traders")
+          ? [trader]
+          : path.startsWith("configuration/customers")
+            ? [customer]
+            : [area];
+        return Promise.resolve({ hasMore: false, items, total: 1 });
+      }),
+      post: vi.fn((path: string) => {
+        if (path.endsWith("/quote")) return Promise.resolve(quote);
+        if (path === "configuration/areas") return Promise.resolve(area);
+        return Promise.reject(new ApiError("dup", "customer_duplicate", 409));
+      }),
+    };
+    render(
+      <CreateOrderDialog
+        api={api as unknown as ApiClient}
+        drivers={[]}
+        onClose={vi.fn()}
+        onSaved={vi.fn().mockResolvedValue(undefined)}
+        permissions={["users_roles.manage"]}
+        searchDebounceMs={0}
+      />,
+    );
+    await selectTraderOnly();
+    await typeNewCustomerAndArea("Dup Buyer");
+    const mobile = screen.getAllByPlaceholderText(/9715XXXXXXXX/)[0];
+    if (mobile === undefined) throw new Error("Primary mobile input missing");
+    fireEvent.change(mobile, { target: { value: "0506468442" } });
+    fireEvent.change(screen.getByLabelText("Customer address"), { target: { value: "Villa 1" } });
+    fireEvent.change(screen.getByLabelText("COD amount"), { target: { value: "100" } });
+    await screen.findAllByText("AED 90.00");
+    fireEvent.click(screen.getByRole("button", { name: "Create order" }));
+
+    // The duplicate message is mapped to the Customer field (and echoed in the
+    // validation summary), not shown as an opaque banner.
+    expect(
+      (
+        await screen.findAllByText(
+          "A Customer with this mobile may already exist. Select the existing Customer or review the entered details.",
+        )
+      ).length,
+    ).toBeGreaterThan(0);
+    // Entered Order values are preserved after the failure.
+    expect(screen.getByLabelText("COD amount")).toHaveValue(100);
+    expect(mobile).toHaveValue("0506468442");
   });
 });

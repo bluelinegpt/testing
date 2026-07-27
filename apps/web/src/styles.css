@@ -3755,6 +3755,15 @@ td {
   color: #5b6b73;
 }
 
+/* Advisory (non-blocking) guidance — e.g. a mobile that does not match the
+   recommended UAE format. Warning/help styling, deliberately distinct from the
+   red .field-error so it never reads as a blocking validation failure. */
+.field-advisory {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-warning);
+}
+
 /* Spans both columns of a two-column modal form. */
 .form-grid .field-wide {
   grid-column: 1 / -1;
@@ -4036,4 +4045,87 @@ td {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
+}
+
+/* Create Order validation summary (Phase 3) */
+.validation-summary {
+  border: 1px solid #f1b0b0;
+  background: #fdecec;
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-bottom: 12px;
+}
+.validation-summary h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+  color: #b42318;
+}
+.validation-summary ul {
+  margin: 0;
+  padding-inline-start: 18px;
+}
+.validation-summary-item {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: #b42318;
+  text-decoration: underline;
+  cursor: pointer;
+  text-align: start;
+  font: inherit;
+}
+
+/* Create Order layout & financial UX (Phase 3 Checkpoint 3) */
+.order-modal-scroll {
+  padding-bottom: 28px;
+}
+@media (max-width: 820px) {
+  .order-form-columns {
+    grid-template-columns: 1fr;
+  }
+}
+/* Full-width, consistently sized controls across the form. */
+.order-form-columns .field select,
+.order-form-columns .field input,
+.order-form-columns .field textarea {
+  width: 100%;
+  box-sizing: border-box;
+}
+.order-form .input-with-action {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+.order-form .input-with-action .search-combobox {
+  flex: 1;
+  min-width: 0;
+}
+.order-form .input-with-action .search-combobox > input {
+  width: 100%;
+  box-sizing: border-box;
+}
+.order-form .input-with-action .icon-button {
+  flex: 0 0 auto;
+  align-self: center;
+}
+/* The Service Fee override drops the decorative vertical bar for a clean row. */
+.service-fee-override {
+  border-inline-start: none;
+  padding-inline-start: 0;
+}
+.pricing-missing .pricing-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.quote-loading {
+  color: var(--shell-muted, #64748b);
+}
+/* Detailed financial summary emphasis + invalid (negative Trader payable). */
+.quote-panel .summary-total strong {
+  font-weight: 800;
+}
+.quote-panel .summary-invalid strong,
+.order-totals .summary-invalid strong {
+  color: #b42318;
 }

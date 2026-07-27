@@ -9,7 +9,7 @@ import { DATABASE } from "../infrastructure/database/database.tokens.js";
 import type { DatabaseSchema } from "../infrastructure/database/database.types.js";
 import { KyselyTransactionManager } from "../infrastructure/database/transaction-manager.js";
 import { ApplicationException } from "../presentation/errors/application.exception.js";
-import { normalizeUaeMobile } from "../shared/uae-mobile.js";
+import { mobileComparisonKey, normalizeUaeMobile } from "../shared/uae-mobile.js";
 import { IdentityContextAccessor } from "../security/identity-context.js";
 import { TenantContextAccessor } from "../tenancy/tenant-context.js";
 import type {
@@ -3655,19 +3655,30 @@ export class OperationsService {
     }
 
     const draft = input.inlineCustomer;
+    // The mobile is stored exactly as entered (flexible text). Duplicate matching
+    // compares on a normalized key so equivalent forms (0506468442,
+    // 971506468442, +971 50 646 8442) still collide, while distinct international
+    // numbers do not. The key is used for the advisory lock and the lookup; the
+    // sentinel guards an empty key (e.g. a symbol-only value) from matching.
+    const primaryKey = mobileComparisonKey(draft.mobileNumber) || "__none__";
+    const secondKey =
+      draft.secondMobileNumber && draft.secondMobileNumber.trim() !== ""
+        ? mobileComparisonKey(draft.secondMobileNumber) || "__none__"
+        : "__none__";
     await sql`
       select pg_advisory_xact_lock(
         hashtext(${input.companyId}),
-        hashtext(${"customer-mobile:" + draft.mobileNumber})
+        hashtext(${"customer-mobile:" + primaryKey})
       )
     `.execute(transaction);
     const duplicate = await sql<{ code: string; name: string }>`
       select code,name from customers
       where company_id=${input.companyId}::uuid
         and (
-          mobile_number in (${draft.mobileNumber},${draft.secondMobileNumber ?? ""})
-          or coalesce(second_mobile_number,'') in (
-            ${draft.mobileNumber},${draft.secondMobileNumber ?? ""}
+          customer_mobile_comparison_key(mobile_number) in (${primaryKey},${secondKey})
+          or (
+            second_mobile_number is not null
+            and customer_mobile_comparison_key(second_mobile_number) in (${primaryKey},${secondKey})
           )
         )
       limit 1

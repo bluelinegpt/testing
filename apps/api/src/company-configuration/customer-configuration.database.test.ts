@@ -67,13 +67,48 @@ describe.skipIf(!runDatabaseTests)("Customer configuration database protections"
               ),
             "23514",
           );
+          // Mobile is now flexible text: a non-UAE value is accepted at the
+          // database level (checked in an isolated savepoint so it does not
+          // disturb later assertions).
+          await sql.raw("savepoint flexible_mobile").execute(transaction);
+          await sql`update customers set mobile_number='+44 7700 900123' where id=${customerId}::uuid`.execute(
+            transaction,
+          );
+          await sql.raw("rollback to savepoint flexible_mobile").execute(transaction);
+          await sql.raw("release savepoint flexible_mobile").execute(transaction);
+          // The safe constraint still rejects empty, over-length, and control
+          // characters (SQLSTATE 23514).
           await rejected(
             () =>
-              sql`update customers set mobile_number='0501234567' where id=${customerId}::uuid`.execute(
+              sql`update customers set mobile_number='' where id=${customerId}::uuid`.execute(
                 transaction,
               ),
             "23514",
           );
+          await rejected(
+            () =>
+              sql`update customers set mobile_number=repeat('9', 33) where id=${customerId}::uuid`.execute(
+                transaction,
+              ),
+            "23514",
+          );
+          await rejected(
+            () =>
+              sql`update customers set mobile_number='05' || chr(9) || '1234' where id=${customerId}::uuid`.execute(
+                transaction,
+              ),
+            "23514",
+          );
+          // The comparison key folds equivalent UAE forms together while keeping
+          // distinct international numbers apart.
+          const keyCheck = await sql<{ same: boolean; distinct: boolean }>`
+            select customer_mobile_comparison_key('0506468442')
+                   = customer_mobile_comparison_key('+971 50 646 8442') as same,
+                   customer_mobile_comparison_key('0506468442')
+                   <> customer_mobile_comparison_key('+44 7700 900123') as distinct
+          `.execute(transaction);
+          expect(keyCheck.rows[0]?.same).toBe(true);
+          expect(keyCheck.rows[0]?.distinct).toBe(true);
           await rejected(
             () =>
               sql`insert into customer_addresses(company_id,customer_id,area_id,address,created_by_account_id)

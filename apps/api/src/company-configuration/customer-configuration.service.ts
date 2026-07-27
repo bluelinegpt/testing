@@ -5,7 +5,7 @@ import { DATABASE } from "../infrastructure/database/database.tokens.js";
 import type { DatabaseSchema } from "../infrastructure/database/database.types.js";
 import { KyselyTransactionManager } from "../infrastructure/database/transaction-manager.js";
 import { ApplicationException } from "../presentation/errors/application.exception.js";
-import { normalizeUaeMobile } from "../shared/uae-mobile.js";
+import { mobileComparisonKey, normalizeUaeMobile } from "../shared/uae-mobile.js";
 import { IdentityContextAccessor } from "../security/identity-context.js";
 import { TenantContextAccessor } from "../tenancy/tenant-context.js";
 import type {
@@ -192,7 +192,7 @@ export class CustomerConfigurationService {
     this.validateMobiles(input.mobileNumber, input.secondMobileNumber);
     return this.transactions.execute(async (transaction) => {
       await this.validateArea(transaction, companyId, input.areaId);
-      await sql`select pg_advisory_xact_lock(hashtext(${companyId}),hashtext(${input.mobileNumber}))`.execute(
+      await sql`select pg_advisory_xact_lock(hashtext(${companyId}),hashtext(${"customer-mobile:" + (mobileComparisonKey(input.mobileNumber) || "__none__")}))`.execute(
         transaction,
       );
       const duplicates = await this.findDuplicates(
@@ -621,25 +621,50 @@ export class CustomerConfigurationService {
     secondMobile?: string | null,
     excludeId?: string,
   ): Promise<readonly Record<string, unknown>[]> {
+    // Match on the normalized comparison key (indexed) so equivalent forms of the
+    // same number collide while distinct numbers do not; a sentinel guards an
+    // empty key from matching.
+    const primaryKey = mobileComparisonKey(mobile) || "__none__";
+    const secondKey =
+      secondMobile && secondMobile.trim() !== ""
+        ? mobileComparisonKey(secondMobile) || "__none__"
+        : "__none__";
     const result = await sql<Record<string, unknown>>`
       select id,code,name,mobile_number as "mobileNumber" from customers
        where company_id=${companyId}::uuid and (${excludeId ?? null}::uuid is null or id<>${excludeId ?? null}::uuid)
-         and (mobile_number in (${mobile},${secondMobile ?? ""})
-              or coalesce(second_mobile_number,'') in (${mobile},${secondMobile ?? ""}))
+         and (
+           customer_mobile_comparison_key(mobile_number) in (${primaryKey},${secondKey})
+           or (
+             second_mobile_number is not null
+             and customer_mobile_comparison_key(second_mobile_number) in (${primaryKey},${secondKey})
+           )
+         )
        order by name limit 10
     `.execute(database);
     return result.rows;
   }
 
+  // Customer mobiles are flexible text (aligned with the Create Order path and
+  // the `customers_mobile_safe` DB constraint): required, bounded, no control
+  // characters. The UAE format is advisory in the UI only, not enforced here.
   private validateMobiles(mobile: string, second?: string | null): void {
-    if (!/^9715[0-9]{8}$/.test(mobile) || (second && !/^9715[0-9]{8}$/.test(second))) {
+    const primary = mobile.trim();
+    const secondary = second?.trim() ?? "";
+    const hasControl = (value: string): boolean =>
+      [...value].some((character) => {
+        const code = character.charCodeAt(0);
+        return code <= 0x1f || code === 0x7f;
+      });
+    const unsafe = (value: string): boolean => value.length > 32 || hasControl(value);
+    if (primary === "" || unsafe(primary) || (secondary !== "" && unsafe(secondary))) {
       throw new ApplicationException(
         "customer_mobile_invalid",
-        "Enter the mobile number in the format 9715XXXXXXXX.",
+        "Enter a valid mobile number, up to 32 characters and without control characters.",
         HttpStatus.BAD_REQUEST,
       );
     }
-    if (second && mobile === second)
+    const primaryKey = mobileComparisonKey(primary);
+    if (secondary !== "" && primaryKey !== "" && primaryKey === mobileComparisonKey(secondary))
       throw new ApplicationException(
         "customer_mobile_duplicate",
         "Primary and second mobile numbers must differ",

@@ -58,3 +58,20 @@ export function NormalizeUaeMobile(): PropertyDecorator {
     return normalizeUaeMobile(value) ?? value;
   });
 }
+
+/**
+ * Deterministic key for duplicate matching only — never stored. Mobile numbers
+ * are persisted exactly as entered (trimmed), but two customers "collide" when
+ * their numbers are equivalent: formatting is stripped to digits, and the UAE
+ * local / no-trunk-zero forms fold onto the canonical `9715XXXXXXXX`. Non-UAE
+ * numbers keep their digits (with any country code) so distinct international
+ * numbers do not falsely match. Mirrors the SQL `customer_mobile_comparison_key`
+ * function exactly so the value computed here can be compared against the
+ * functional index on the column.
+ */
+export function mobileComparisonKey(input: string | null | undefined): string {
+  const digits = (input ?? "").replace(/[^0-9]/g, "");
+  if (/^05[0-9]{8}$/.test(digits)) return `971${digits.slice(1)}`;
+  if (/^5[0-9]{8}$/.test(digits)) return `971${digits}`;
+  return digits;
+}

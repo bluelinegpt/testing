@@ -4,6 +4,7 @@ import {
   IsBoolean,
   IsEmail,
   IsIn,
+  IsInt,
   IsNumber,
   IsOptional,
   IsString,
@@ -22,6 +23,18 @@ import { NormalizeUaeMobile } from "../shared/uae-mobile.js";
 const uaeMobileMessage = {
   message: "Enter a UAE mobile number, for example 0506468442 or 9715XXXXXXXX.",
 };
+
+// The fast Create Order path keeps Mobile required (non-empty) but stores it as
+// flexible text: no UAE-format gate, exact entered value preserved (trimmed).
+// Only empty, over-length, and control-character input are rejected — matching
+// the `customers_mobile_safe` database constraint.
+const mobileRequiredMessage = { message: "Enter a mobile number." };
+const mobileMaxLength = 32;
+// Rejects ASCII control characters (C0 range and DEL); every other printable
+// character is allowed so international and formatted numbers pass.
+// eslint-disable-next-line no-control-regex
+const noControlChars = new RegExp("^[^\u0000-\u001f\u007f]+$");
+const mobileCharsMessage = { message: "Enter a valid mobile number without control characters." };
 
 const deliveryStatuses = [
   "in_branch",
@@ -269,16 +282,17 @@ export class InlineOrderCustomerDto {
   public readonly name!: string;
 
   @IsString()
-  @NormalizeUaeMobile()
-  @Matches(/^9715[0-9]{8}$/, uaeMobileMessage)
-  @MaxLength(12)
+  @TrimText()
+  @MinLength(1, mobileRequiredMessage)
+  @MaxLength(mobileMaxLength)
+  @Matches(noControlChars, mobileCharsMessage)
   public readonly mobileNumber!: string;
 
   @IsOptional()
   @IsString()
-  @NormalizeUaeMobile()
-  @Matches(/^9715[0-9]{8}$/, uaeMobileMessage)
-  @MaxLength(12)
+  @OptionalTrimmedText()
+  @MaxLength(mobileMaxLength)
+  @Matches(noControlChars, mobileCharsMessage)
   public readonly secondMobileNumber?: string;
 
   @IsUUID()
@@ -335,16 +349,17 @@ export class CreateOrderDto {
   public readonly customerName!: string;
 
   @IsString()
-  @NormalizeUaeMobile()
-  @Matches(/^9715[0-9]{8}$/, uaeMobileMessage)
-  @MaxLength(12)
+  @TrimText()
+  @MinLength(1, mobileRequiredMessage)
+  @MaxLength(mobileMaxLength)
+  @Matches(noControlChars, mobileCharsMessage)
   public readonly customerMobileNumber!: string;
 
   @IsOptional()
   @IsString()
-  @NormalizeUaeMobile()
-  @Matches(/^9715[0-9]{8}$/, uaeMobileMessage)
-  @MaxLength(12)
+  @OptionalTrimmedText()
+  @MaxLength(mobileMaxLength)
+  @Matches(noControlChars, mobileCharsMessage)
   public readonly customerSecondMobileNumber?: string;
 
   @IsString()
@@ -394,7 +409,7 @@ export class CreateOrderDto {
   public readonly serviceFeeOverrideReason?: string;
 
   @IsOptional()
-  @IsNumber()
+  @IsInt()
   @Min(1)
   public readonly packageCount?: number;
 
@@ -466,7 +481,7 @@ export class UpdateOrderDto {
   public readonly serviceFeeReason?: string;
 
   @IsOptional()
-  @IsNumber()
+  @IsInt()
   @Min(1)
   @Max(999)
   public readonly packageCount?: number;

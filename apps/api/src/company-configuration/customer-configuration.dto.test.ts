@@ -29,29 +29,35 @@ describe("Customer configuration DTOs", () => {
   });
 
   it.each([
-    ["0501234567", "971501234567"],
-    ["+971501234567", "971501234567"],
-    ["971501234567", "971501234567"],
-    ["050 123 4567", "971501234567"],
-  ])("accepts Customer mobile %s and stores it as %s", async (mobileNumber, stored) => {
-    // plainToInstance runs the same @Transform the ValidationPipe applies.
+    "0501234567",
+    "+971501234567",
+    "971501234567",
+    "050 123 4567",
+    "+44 7700 900123",
+    "00962 79 123 4567",
+  ])("accepts Customer mobile %s as flexible text, preserved exactly", async (mobileNumber) => {
     const input = plainToInstance(CreateCustomerDto, { ...validCustomer, mobileNumber });
     await expect(validate(input)).resolves.toEqual([]);
-    expect(input.mobileNumber).toBe(stored);
+    // No UAE normalization: the value is stored exactly as entered.
+    expect(input.mobileNumber).toBe(mobileNumber);
   });
 
-  it.each(["97150123456", "9715ABCDEF12", "042345678", "+966501234567"])(
-    "rejects invalid Customer mobile %s with the approved message",
-    async (mobileNumber) => {
-      const input = plainToInstance(CreateCustomerDto, { ...validCustomer, mobileNumber });
-      const messages = (await validate(input)).flatMap((error) =>
-        Object.values(error.constraints ?? {}),
-      );
-      expect(messages).toContain(
-        "Enter a UAE mobile number, for example 0506468442 or 9715XXXXXXXX.",
-      );
-    },
-  );
+  it("rejects an empty Customer mobile with the required message", async () => {
+    const input = plainToInstance(CreateCustomerDto, { ...validCustomer, mobileNumber: "" });
+    const messages = (await validate(input)).flatMap((error) =>
+      Object.values(error.constraints ?? {}),
+    );
+    expect(messages).toContain("Enter a mobile number.");
+  });
+
+  it("rejects a Customer mobile that exceeds the safe maximum length", async () => {
+    const input = plainToInstance(CreateCustomerDto, {
+      ...validCustomer,
+      mobileNumber: "9".repeat(33),
+    });
+    const errors = await validate(input);
+    expect(errors.some((error) => error.property === "mobileNumber")).toBe(true);
+  });
 
   it("requires reasons for status and address changes", async () => {
     const status = Object.assign(new ChangeCustomerStatusDto(), { isActive: false, reason: "" });

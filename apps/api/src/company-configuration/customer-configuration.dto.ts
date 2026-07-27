@@ -6,18 +6,20 @@ import {
   IsString,
   IsUUID,
   IsUrl,
-  Matches,
   Max,
   MaxLength,
   Min,
   MinLength,
 } from "class-validator";
 
-import { NormalizeUaeMobile } from "../shared/uae-mobile.js";
-
-const mobileOptions = {
-  message: "Enter a UAE mobile number, for example 0506468442 or 9715XXXXXXXX.",
+// Customer mobiles are stored as flexible text (aligned with the Create Order
+// path and the `customers_mobile_safe` DB constraint). The service layer and the
+// database enforce safe length and reject control characters; the UAE format is
+// advisory in the UI only, never a backend gate.
+const mobileRequiredOptions = {
+  message: "Enter a mobile number.",
 };
+const mobileMaxLength = 32;
 
 export class CustomerAddressDto {
   @IsUUID()
@@ -66,13 +68,14 @@ export class CreateCustomerDto extends CustomerAddressDto {
   @MaxLength(160)
   public readonly name!: string;
 
-  @NormalizeUaeMobile()
-  @Matches(/^9715[0-9]{8}$/, mobileOptions)
+  @IsString()
+  @MinLength(1, mobileRequiredOptions)
+  @MaxLength(mobileMaxLength)
   public readonly mobileNumber!: string;
 
   @IsOptional()
-  @NormalizeUaeMobile()
-  @Matches(/^9715[0-9]{8}$/, mobileOptions)
+  @IsString()
+  @MaxLength(mobileMaxLength)
   public readonly secondMobileNumber?: string;
 
   @IsOptional()
@@ -115,13 +118,14 @@ export class UpdateCustomerDto {
   public readonly name?: string;
 
   @IsOptional()
-  @NormalizeUaeMobile()
-  @Matches(/^9715[0-9]{8}$/, mobileOptions)
+  @IsString()
+  @MinLength(1, mobileRequiredOptions)
+  @MaxLength(mobileMaxLength)
   public readonly mobileNumber?: string;
 
   @IsOptional()
-  @NormalizeUaeMobile()
-  @Matches(/^9715[0-9]{8}$/, mobileOptions)
+  @IsString()
+  @MaxLength(mobileMaxLength)
   public readonly secondMobileNumber?: string | null;
 
   @IsOptional()

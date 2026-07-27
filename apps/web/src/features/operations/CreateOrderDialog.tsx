@@ -1,4 +1,4 @@
-import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { type FormEvent, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { UserPlus } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -13,20 +13,14 @@ import type {
   SearchPage,
 } from "../../api/contracts.js";
 import { Modal } from "../../components/Modal.js";
-import { isUaeMobile, normalizeUaeMobile } from "../../domain/uae-mobile.js";
+import { isUaeMobile } from "../../domain/uae-mobile.js";
 import { SearchCombobox } from "../../components/SearchCombobox.js";
 import { AreaSelector } from "../configuration/AreaSelector.js";
 import { TraderForm } from "../configuration/TraderConfigurationWorkspace.js";
+import { CompanyBrandingContext } from "../../app/CompanyBrandingContext.js";
 import { formatCurrency } from "../../localization/formatters.js";
 import { normalizeLocale } from "../../localization/locale.js";
-
-interface InlineCustomerDraft {
-  readonly address: string;
-  readonly area: CompanyArea;
-  readonly mobileNumber: string;
-  readonly name: string;
-  readonly secondMobileNumber?: string | undefined;
-}
+import { localizeName } from "../../localization/localize-name.js";
 
 export function CreateOrderDialog({
   api,
@@ -46,11 +40,14 @@ export function CreateOrderDialog({
 }) {
   const { i18n, t } = useTranslation();
   const locale = normalizeLocale(i18n.resolvedLanguage);
+  // Bilingual business data (Trader/Emirate/Area names) follows the user's
+  // Search-and-Display preference, independent of the UI language.
+  const branding = useContext(CompanyBrandingContext);
+  const textLanguage = branding?.textLanguage ?? locale;
   const canCreateArea = permissions.includes("users_roles.manage");
   const canOverrideFee = permissions.includes("orders.override_service_fee");
   const [trader, setTrader] = useState<OperationsTraderOption>();
   const [customer, setCustomer] = useState<CustomerOption>();
-  const [inlineCustomer, setInlineCustomer] = useState<InlineCustomerDraft>();
   const [customerAddresses, setCustomerAddresses] = useState<readonly Record<string, unknown>[]>(
     [],
   );
@@ -74,7 +71,6 @@ export function CreateOrderDialog({
   // the operator enters a fee and a reason, and the order is priced manually.
   const [manualFee, setManualFee] = useState("");
   const [manualReason, setManualReason] = useState("");
-  const [createCustomerOpen, setCreateCustomerOpen] = useState(false);
   const [createTraderOpen, setCreateTraderOpen] = useState(false);
   const [quote, setQuote] = useState<OperationsOrderQuote>();
   const [quoteLoading, setQuoteLoading] = useState(false);
@@ -93,11 +89,17 @@ export function CreateOrderDialog({
   const [error, setError] = useState<string>();
   const [createdOrder, setCreatedOrder] = useState<OperationsOrder>();
   const [identifierError, setIdentifierError] = useState<string>();
+  const [submitAttempted, setSubmitAttempted] = useState(false);
+  const [fieldErrorOverrides, setFieldErrorOverrides] = useState<Record<string, string>>({});
+  const formRef = useRef<HTMLFormElement>(null);
+  const summaryRef = useRef<HTMLDivElement>(null);
   const submittingRef = useRef(false);
   const idempotencyKeyRef = useRef(crypto.randomUUID());
-  // Accept 0506468442, 9715XXXXXXXX or +9715XXXXXXXX; normalized on submit.
-  const phoneValid = isUaeMobile(mobile);
-  const secondPhoneValid = secondMobile.trim() === "" || isUaeMobile(secondMobile);
+  // Mobile format is advisory on the Order form: a value that is not a
+  // recognisable UAE mobile is flagged as a recommendation, not an error, and
+  // never blocks Order creation. Only an empty Primary Mobile blocks.
+  const mobileAdvisory = mobile.trim() !== "" && !isUaeMobile(mobile);
+  const secondMobileAdvisory = secondMobile.trim() !== "" && !isUaeMobile(secondMobile);
   const overrideValid =
     !overrideEnabled ||
     (overrideFee !== "" && Number(overrideFee) >= 0 && overrideReason.trim() !== "");
@@ -109,26 +111,102 @@ export function CreateOrderDialog({
   const reasonInput = overriding ? overrideReason : manualReason;
   const enteredFee = feeInput.trim() === "" ? undefined : Number(feeInput);
   const enteredReason = reasonInput.trim() === "" ? undefined : reasonInput.trim();
-  // Only the fee is required for manual pricing; the reason is optional.
-  const manualValid = !pricingMissing || (manualFee !== "" && Number(manualFee) >= 0);
-  const moneyValid = Number(codAmount) >= 0;
-  const identifiersValid = serialNumber.trim().length > 0 && identifierError === undefined;
-  const valid =
-    trader !== undefined &&
-    (customer !== undefined || inlineCustomer !== undefined) &&
-    area !== undefined &&
-    customerName.trim() !== "" &&
-    phoneValid &&
-    secondPhoneValid &&
-    address.trim() !== "" &&
-    moneyValid &&
-    Number(additionalFees) >= 0 &&
-    identifiersValid &&
-    Number(packageCount) >= 1 &&
-    overrideValid &&
-    manualValid &&
-    quote !== undefined &&
-    quoteError === undefined;
+  // Ordered field keys used by the validation summary, focus management and the
+  // aria wiring. The order follows the visual reading order of the form.
+  const fieldOrder = [
+    "serialNumber",
+    "trader",
+    "customer",
+    "customerName",
+    "mobile",
+    "secondMobile",
+    "area",
+    "address",
+    "codAmount",
+    "additionalFees",
+    "packageCount",
+    "pricing",
+    "overrideFee",
+    "overrideReason",
+  ] as const;
+
+  // Structured field errors replace the single boolean gate: the Create Order
+  // button stays enabled and a full validation runs on submit, so the operator
+  // always sees exactly what is missing or invalid.
+  const validationErrors: Record<string, string> = {};
+  if (serialNumber.trim() === "")
+    validationErrors.serialNumber = t("operations.errors.serialRequired");
+  else if (identifierError !== undefined) validationErrors.serialNumber = identifierError;
+  if (trader === undefined) validationErrors.trader = t("operations.errors.traderRequired");
+  // A Customer is captured by typing a Name directly (new) or selecting a saved
+  // one; either way the Name must be present. No separate "select a Customer"
+  // gate and no UAE mobile-format gate — those are handled inline/advisory.
+  if (customerName.trim() === "")
+    validationErrors.customerName = t("operations.errors.customerNameRequired");
+  if (mobile.trim() === "") validationErrors.mobile = t("operations.errors.mobileRequired");
+  if (area === undefined) validationErrors.area = t("operations.errors.areaRequired");
+  if (address.trim() === "") validationErrors.address = t("operations.errors.addressRequired");
+  if (!(Number(codAmount) >= 0)) validationErrors.codAmount = t("operations.errors.codInvalid");
+  if (!(Number(additionalFees) >= 0))
+    validationErrors.additionalFees = t("operations.errors.additionalInvalid");
+  {
+    const packages = Number(packageCount);
+    if (!Number.isInteger(packages) || packages < 1)
+      validationErrors.packageCount = t("operations.errors.packagesInvalid");
+  }
+  if (pricingMissing) {
+    if (!(manualFee !== "" && Number(manualFee) >= 0))
+      validationErrors.pricing = t("operations.errors.manualFeeRequired");
+  } else if (quote === undefined || quoteError !== undefined) {
+    validationErrors.pricing = t("operations.errors.pricingUnresolved");
+  }
+  if (overrideEnabled) {
+    if (!(overrideFee !== "" && Number(overrideFee) >= 0))
+      validationErrors.overrideFee = t("operations.errors.overrideFeeInvalid");
+    if (overrideReason.trim() === "")
+      validationErrors.overrideReason = t("operations.errors.overrideReasonRequired");
+  }
+  // Server-mapped errors (from a failed submission) show alongside client-side
+  // ones; a fresh client-side error for the same field wins, and server errors
+  // are cleared when the user edits that field.
+  const errors: Record<string, string> = { ...fieldErrorOverrides, ...validationErrors };
+  const showErrors = submitAttempted || Object.keys(fieldErrorOverrides).length > 0;
+  const orderedErrorKeys = fieldOrder.filter((key) => errors[key] !== undefined);
+
+  const focusFieldSelectors: Record<string, string> = {
+    address: "#order-address",
+    additionalFees: "#order-additional",
+    area: '[data-field="area"] select, [data-field="area"] input',
+    codAmount: "#order-cod",
+    customer: '[data-field="customer"] input',
+    customerName: '[data-field="customer"] input',
+    mobile: "#order-mobile",
+    overrideFee: "#order-override-fee",
+    overrideReason: "#order-override-reason",
+    packageCount: "#order-packages",
+    pricing: "#order-manual-fee",
+    secondMobile: "#order-second-mobile",
+    serialNumber: "#order-serial",
+    trader: '[data-field="trader"] input',
+  };
+  const focusField = (key: string) => {
+    const selector = focusFieldSelectors[key];
+    const element = selector
+      ? (formRef.current?.querySelector<HTMLElement>(selector) ?? undefined)
+      : undefined;
+    element?.focus();
+    element?.scrollIntoView?.({ behavior: "smooth", block: "center" });
+  };
+  const errorFor = (key: string): string | undefined => (showErrors ? errors[key] : undefined);
+  const describedBy = (key: string): string | undefined =>
+    errorFor(key) === undefined ? undefined : `order-${key}-error`;
+  const clearServerError = (key: string) =>
+    setFieldErrorOverrides((current) => {
+      if (current[key] === undefined) return current;
+      const next = { ...current };
+      delete next[key];
+      return next;
+    });
   const dirty =
     trader !== undefined ||
     area !== undefined ||
@@ -146,24 +224,44 @@ export function CreateOrderDialog({
     additionalFees !== "0.00" ||
     packageCount !== "1";
 
+  // Trader results show the name in the Search-and-Display language plus mobile
+  // and pickup Area to distinguish duplicates; the internal code is never shown.
   const traderLabel = useCallback(
-    (option: OperationsTraderOption) =>
-      `${option.code} - ${locale === "ar" ? (option.nameAr ?? option.nameEn) : option.nameEn}`,
-    [locale],
+    (option: OperationsTraderOption) => {
+      const parts = [localizeName(textLanguage, { ar: option.nameAr, en: option.nameEn })];
+      if (option.mobileNumber) parts.push(option.mobileNumber);
+      const areaName = localizeName(textLanguage, {
+        ar: option.pickupAreaNameAr,
+        en: option.pickupAreaNameEn,
+      });
+      if (areaName !== "") parts.push(areaName);
+      return parts.filter(Boolean).join(" · ");
+    },
+    [textLanguage],
   );
   const traderSelectedLabel = useCallback(
     (option: OperationsTraderOption) =>
-      locale === "ar" ? (option.nameAr ?? option.nameEn) : option.nameEn,
-    [locale],
+      localizeName(textLanguage, { ar: option.nameAr, en: option.nameEn }),
+    [textLanguage],
   );
+  // Customers keep their single stored Name; results add mobile and Area to
+  // separate same-named customers. No internal code is shown.
   const customerLabel = useCallback(
-    (option: CustomerOption) => `${option.code} - ${option.name} - ${option.mobileNumber}`,
-    [],
+    (option: CustomerOption) => {
+      const parts = [option.name];
+      if (option.mobileNumber) parts.push(option.mobileNumber);
+      const areaName = localizeName(textLanguage, {
+        ar: option.areaNameAr,
+        en: option.areaName,
+      });
+      if (areaName !== "") parts.push(areaName);
+      return parts.filter(Boolean).join(" · ");
+    },
+    [textLanguage],
   );
   const customerSelectedLabel = useCallback((option: CustomerOption) => option.name, []);
   const applyCustomer = useCallback((option: CustomerOption) => {
     setCustomer(option);
-    setInlineCustomer(undefined);
     setCustomerName(option.name);
     setMobile(option.mobileNumber);
     setSecondMobile(option.secondMobileNumber ?? "");
@@ -216,7 +314,8 @@ export function CreateOrderDialog({
   useEffect(() => {
     setQuote(undefined);
     setQuoteError(undefined);
-    if (trader === undefined || area === undefined || !moneyValid || !overrideValid) return;
+    if (trader === undefined || area === undefined || Number(codAmount) < 0 || !overrideValid)
+      return;
     let active = true;
     const timer = window.setTimeout(() => {
       setQuoteLoading(true);
@@ -266,7 +365,6 @@ export function CreateOrderDialog({
     driverId,
     enteredFee,
     enteredReason,
-    moneyValid,
     overrideValid,
     requoteNonce,
     t,
@@ -332,15 +430,18 @@ export function CreateOrderDialog({
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!valid) {
-      event.currentTarget.querySelector<HTMLElement>(":invalid, [aria-invalid='true']")?.focus();
-      setError(t("operations.correctOrderErrors"));
+    setSubmitAttempted(true);
+    const firstError = fieldOrder.find((key) => validationErrors[key] !== undefined);
+    if (firstError !== undefined) {
+      setError(t("operations.errors.summaryHeading"));
+      focusField(firstError);
       return;
     }
     if (submittingRef.current || trader === undefined || area === undefined) return;
     submittingRef.current = true;
     setSaving(true);
     setError(undefined);
+    setFieldErrorOverrides({});
     try {
       const order = await api.post<OperationsOrder>(
         "operations/orders",
@@ -355,12 +456,12 @@ export function CreateOrderDialog({
           customerLatitude: customer?.latitude == null ? undefined : Number(customer.latitude),
           customerLocationLink: customer?.locationLink ?? undefined,
           customerLongitude: customer?.longitude == null ? undefined : Number(customer.longitude),
-          customerMobileNumber: normalizeUaeMobile(mobile) ?? mobile.trim(),
+          // Mobile is sent exactly as typed (trimmed only). The API normalizes
+          // recognisable UAE forms; it is not forced to a canonical shape here.
+          customerMobileNumber: mobile.trim(),
           customerName: customerName.trim(),
           customerSecondMobileNumber:
-            secondMobile.trim() === ""
-              ? undefined
-              : (normalizeUaeMobile(secondMobile) ?? secondMobile.trim()),
+            secondMobile.trim() === "" ? undefined : secondMobile.trim(),
           driverId: driverId || undefined,
           notes: notes.trim() || undefined,
           packageCount: Number(packageCount),
@@ -369,21 +470,19 @@ export function CreateOrderDialog({
           serviceFee: enteredFee,
           serviceFeeOverrideReason: enteredReason,
           traderId: trader.id,
-          ...(inlineCustomer === undefined
+          // No existing Customer selected: create one atomically from the typed
+          // Order details in the same transaction (no separate modal, no orphan).
+          ...(customer !== undefined
             ? {}
             : {
                 inlineCustomer: {
-                  address: inlineCustomer.address.trim(),
-                  areaId: inlineCustomer.area.id,
-                  mobileNumber:
-                    normalizeUaeMobile(inlineCustomer.mobileNumber) ??
-                    inlineCustomer.mobileNumber.trim(),
-                  name: inlineCustomer.name.trim(),
-                  secondMobileNumber:
-                    inlineCustomer.secondMobileNumber === undefined
-                      ? undefined
-                      : (normalizeUaeMobile(inlineCustomer.secondMobileNumber) ??
-                        inlineCustomer.secondMobileNumber.trim()),
+                  address: address.trim(),
+                  areaId: area.id,
+                  mobileNumber: mobile.trim(),
+                  name: customerName.trim(),
+                  ...(secondMobile.trim() === ""
+                    ? {}
+                    : { secondMobileNumber: secondMobile.trim() }),
                 },
               }),
         },
@@ -392,13 +491,72 @@ export function CreateOrderDialog({
       setCreatedOrder(order);
       await onSaved();
     } catch (requestError) {
-      setError(
-        requestError instanceof ApiError && requestError.code === "pricing_not_configured"
-          ? t("operations.pricingNotConfigured")
-          : requestError instanceof Error
-            ? requestError.message
-            : t("operations.createOrderFailed"),
-      );
+      const code = requestError instanceof ApiError ? requestError.code : undefined;
+      // Map backend error codes to the field the operator can act on, so the
+      // failure is shown next to that field rather than as an opaque banner.
+      const fieldForCode: Record<string, { field: string; message: string }> = {
+        area_not_found: { field: "area", message: t("operations.errors.areaNotFound") },
+        customer_address_not_found: {
+          field: "customer",
+          message: t("operations.errors.customerInvalid"),
+        },
+        customer_area_mismatch: { field: "area", message: t("operations.errors.areaMismatch") },
+        customer_duplicate: {
+          field: "customer",
+          message: t("operations.errors.customerDuplicate"),
+        },
+        customer_not_found: { field: "customer", message: t("operations.errors.customerInvalid") },
+        order_customer_selection_invalid: {
+          field: "customer",
+          message: t("operations.errors.customerRequired"),
+        },
+        order_deductions_exceed_cod: {
+          field: "codAmount",
+          message: t("operations.errors.deductionsExceedCod"),
+        },
+        order_identifier_invalid: {
+          field: "serialNumber",
+          message: t("operations.errors.serialInvalid"),
+        },
+        pricing_not_configured: {
+          field: "pricing",
+          message: t("operations.pricingNotConfigured"),
+        },
+        reference_number_exists: {
+          field: "serialNumber",
+          message: t("operations.referenceNumberExists"),
+        },
+        serial_number_exists: {
+          field: "serialNumber",
+          message: t("operations.serialNumberExists"),
+        },
+        service_fee_override_denied: {
+          field: "overrideReason",
+          message: t("operations.errors.overrideDenied"),
+        },
+        service_fee_override_reason_required: {
+          field: "overrideReason",
+          message: t("operations.errors.overrideReasonRequired"),
+        },
+        trader_not_found: { field: "trader", message: t("operations.errors.traderInvalid") },
+      };
+      const mapped = code === undefined ? undefined : fieldForCode[code];
+      if (mapped !== undefined) {
+        setFieldErrorOverrides({ [mapped.field]: mapped.message });
+        setSubmitAttempted(true);
+        setError(t("operations.errors.summaryHeading"));
+        focusField(mapped.field);
+      } else if (code === "invalid_session" || code === "authentication_required") {
+        setError(t("operations.errors.sessionExpired"));
+      } else if (code === "permission_denied" || code === "identity_kind_denied") {
+        setError(t("operations.errors.permissionDenied"));
+      } else {
+        // A safe, human-readable fallback; raw database/stack detail is never
+        // surfaced (the server already returns a sanitized message).
+        setError(
+          requestError instanceof Error ? requestError.message : t("operations.createOrderFailed"),
+        );
+      }
     } finally {
       submittingRef.current = false;
       setSaving(false);
@@ -406,6 +564,7 @@ export function CreateOrderDialog({
   };
 
   const money = (value: string | undefined) => formatCurrency(value ?? "0", "AED", locale);
+  const negativeTraderPayable = quote !== undefined && Number(quote.traderNetPayable) < 0;
 
   return (
     <>
@@ -417,9 +576,31 @@ export function CreateOrderDialog({
         titleId="create-order-title"
       >
         {createdOrder === undefined ? (
-          <form className="order-form" noValidate onSubmit={(event) => void submit(event)}>
+          <form
+            className="order-form"
+            noValidate
+            onSubmit={(event) => void submit(event)}
+            ref={formRef}
+          >
             <div className="order-modal-scroll">
-              {error === undefined ? null : (
+              {showErrors && orderedErrorKeys.length > 0 ? (
+                <div className="validation-summary" ref={summaryRef} role="alert" tabIndex={-1}>
+                  <h3 id="order-validation-heading">{t("operations.errors.summaryHeading")}</h3>
+                  <ul>
+                    {orderedErrorKeys.map((key) => (
+                      <li key={key}>
+                        <button
+                          className="validation-summary-item"
+                          onClick={() => focusField(key)}
+                          type="button"
+                        >
+                          {errors[key]}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : error === undefined ? null : (
                 <div className="alert alert-error" role="alert">
                   {error}
                 </div>
@@ -434,10 +615,15 @@ export function CreateOrderDialog({
                     <label className="field required-field">
                       <span>{t("operations.serialNumber")}</span>
                       <input
-                        aria-invalid={identifierError !== undefined}
+                        aria-describedby={describedBy("serialNumber")}
+                        aria-invalid={errorFor("serialNumber") !== undefined}
                         autoComplete="off"
+                        id="order-serial"
                         maxLength={100}
-                        onChange={(event) => setSerialNumber(event.target.value)}
+                        onChange={(event) => {
+                          setSerialNumber(event.target.value);
+                          clearServerError("serialNumber");
+                        }}
                         required
                         value={serialNumber}
                       />
@@ -453,14 +639,14 @@ export function CreateOrderDialog({
                       />
                     </label>
                   </div>
-                  {identifierError === undefined ? null : (
-                    <small className="field-error" role="alert">
-                      {identifierError}
+                  {errorFor("serialNumber") === undefined ? null : (
+                    <small className="field-error" id="order-serialNumber-error" role="alert">
+                      {errorFor("serialNumber")}
                     </small>
                   )}
                   <label className="field required-field">
                     <span>{t("operations.trader")}</span>
-                    <div className="input-with-action">
+                    <div className="input-with-action" data-field="trader">
                       <SearchCombobox
                         {...(searchDebounceMs === undefined
                           ? {}
@@ -474,25 +660,31 @@ export function CreateOrderDialog({
                         onChange={(selected) => {
                           setTrader(selected);
                           setOverrideEnabled(false);
+                          clearServerError("trader");
                         }}
                         path="operations/traders/search"
                         placeholder={t("operations.searchTrader")}
                         value={trader}
                       />
                       <button
-                        aria-label={t("operations.addNewTrader")}
+                        aria-label={t("operations.addTrader")}
                         className="icon-button"
                         onClick={() => setCreateTraderOpen(true)}
-                        title={t("operations.addNewTrader")}
+                        title={t("operations.addTrader")}
                         type="button"
                       >
                         <UserPlus size={18} />
                       </button>
                     </div>
+                    {errorFor("trader") === undefined ? null : (
+                      <small className="field-error" id="order-trader-error" role="alert">
+                        {errorFor("trader")}
+                      </small>
+                    )}
                   </label>
                   <label className="field required-field">
-                    <span>{t("customerConfig.customer")}</span>
-                    <div className="input-with-action">
+                    <span>{t("operations.customerName")}</span>
+                    <div data-field="customer">
                       <SearchCombobox
                         {...(searchDebounceMs === undefined
                           ? {}
@@ -501,8 +693,9 @@ export function CreateOrderDialog({
                         emptyText={t("customerConfig.noCustomers")}
                         getLabel={customerLabel}
                         getSelectedLabel={customerSelectedLabel}
-                        label={t("customerConfig.customer")}
+                        label={t("operations.customerName")}
                         onChange={(selected) => {
+                          clearServerError("customer");
                           if (selected) {
                             applyCustomer(selected);
                             void api
@@ -511,25 +704,32 @@ export function CreateOrderDialog({
                               )
                               .then((detail) => setCustomerAddresses(detail.addresses));
                           } else {
+                            // No suggestion chosen: the typed text is the new
+                            // Customer's Name (kept via onQueryChange), so only
+                            // the existing-Customer link is released here.
                             setCustomer(undefined);
-                            setInlineCustomer(undefined);
                             setCustomerAddresses([]);
                           }
                         }}
+                        onQueryChange={(query) => {
+                          setCustomerName(query);
+                          clearServerError("customerName");
+                        }}
                         path="configuration/customers/search"
-                        placeholder={t("customerConfig.searchPlaceholder")}
+                        placeholder={t("operations.customerSearchOrType")}
                         value={customer}
                       />
-                      <button
-                        aria-label={t("customerConfig.addNewFromOrder")}
-                        className="icon-button"
-                        onClick={() => setCreateCustomerOpen(true)}
-                        title={t("customerConfig.addNewFromOrder")}
-                        type="button"
-                      >
-                        <UserPlus size={18} />
-                      </button>
                     </div>
+                    <small className="field-hint">{t("operations.customerFieldHint")}</small>
+                    {errorFor("customerName") !== undefined ? (
+                      <small className="field-error" id="order-customerName-error" role="alert">
+                        {errorFor("customerName")}
+                      </small>
+                    ) : errorFor("customer") === undefined ? null : (
+                      <small className="field-error" id="order-customer-error" role="alert">
+                        {errorFor("customer")}
+                      </small>
+                    )}
                   </label>
                   {customer !== undefined && customerAddresses.length > 1 ? (
                     <label className="field required-field">
@@ -578,70 +778,104 @@ export function CreateOrderDialog({
                       </select>
                     </label>
                   ) : null}
-                  {/* The selected Customer's name is authoritative and shown
-                      read-only, not a second editable field. */}
-                  {customer === undefined && inlineCustomer === undefined ? null : (
-                    <label className="field">
-                      <span>{t("operations.customerName")}</span>
-                      <input data-testid="customer-name" readOnly value={customerName} />
-                    </label>
-                  )}
                   <div className="form-grid">
                     <label className="field required-field">
                       <span>{t("operations.mobile")}</span>
                       <input
-                        aria-describedby={mobile !== "" && !phoneValid ? "mobile-error" : undefined}
-                        aria-invalid={mobile !== "" && !phoneValid}
+                        aria-describedby={
+                          errorFor("mobile") !== undefined
+                            ? "order-mobile-error"
+                            : mobileAdvisory
+                              ? "order-mobile-advisory"
+                              : undefined
+                        }
+                        aria-invalid={errorFor("mobile") !== undefined}
                         autoComplete="tel"
+                        id="order-mobile"
                         inputMode="tel"
-                        maxLength={16}
-                        onChange={(event) => setMobile(event.target.value)}
+                        maxLength={32}
+                        onChange={(event) => {
+                          setMobile(event.target.value);
+                          clearServerError("mobile");
+                        }}
                         placeholder={t("common.mobilePlaceholder")}
                         required
                         value={mobile}
                       />
-                      {mobile !== "" && !phoneValid ? (
-                        <small className="field-error" id="mobile-error">
-                          {t("operations.mobileFormatError")}
+                      {errorFor("mobile") !== undefined ? (
+                        <small className="field-error" id="order-mobile-error">
+                          {errorFor("mobile")}
+                        </small>
+                      ) : mobileAdvisory ? (
+                        <small className="field-advisory" id="order-mobile-advisory">
+                          {t("operations.mobileAdvisory")}
                         </small>
                       ) : null}
                     </label>
                     <label className="field">
                       <span>{t("operations.secondMobile")}</span>
                       <input
-                        aria-invalid={!secondPhoneValid}
+                        aria-describedby={
+                          secondMobileAdvisory ? "order-secondMobile-advisory" : undefined
+                        }
                         autoComplete="tel"
+                        id="order-second-mobile"
                         inputMode="tel"
-                        maxLength={16}
-                        onChange={(event) => setSecondMobile(event.target.value)}
+                        maxLength={32}
+                        onChange={(event) => {
+                          setSecondMobile(event.target.value);
+                          clearServerError("secondMobile");
+                        }}
                         placeholder={t("common.mobilePlaceholder")}
                         value={secondMobile}
                       />
-                      {!secondPhoneValid ? (
-                        <small className="field-error">{t("operations.mobileFormatError")}</small>
+                      {errorFor("secondMobile") !== undefined ? (
+                        <small className="field-error" id="order-secondMobile-error">
+                          {errorFor("secondMobile")}
+                        </small>
+                      ) : secondMobileAdvisory ? (
+                        <small className="field-advisory" id="order-secondMobile-advisory">
+                          {t("operations.mobileAdvisory")}
+                        </small>
                       ) : null}
                     </label>
                   </div>
-                  <AreaSelector
-                    allowCreate={canCreateArea && customer === undefined}
-                    api={api}
-                    disabled={customer !== undefined}
-                    onChange={(selected) => {
-                      setArea(selected);
-                      setOverrideEnabled(false);
-                    }}
-                    {...(searchDebounceMs === undefined ? {} : { searchDebounceMs })}
-                    value={area}
-                  />
+                  <div data-field="area">
+                    <AreaSelector
+                      allowCreate={canCreateArea && customer === undefined}
+                      api={api}
+                      disabled={customer !== undefined}
+                      onChange={(selected) => {
+                        setArea(selected);
+                        setOverrideEnabled(false);
+                        clearServerError("area");
+                      }}
+                      {...(searchDebounceMs === undefined ? {} : { searchDebounceMs })}
+                      value={area}
+                    />
+                    {errorFor("area") === undefined ? null : (
+                      <small className="field-error" id="order-area-error" role="alert">
+                        {errorFor("area")}
+                      </small>
+                    )}
+                  </div>
                   <label className="field required-field field-grow">
                     <span>{t("operations.customerAddress")}</span>
                     <textarea
+                      aria-describedby={describedBy("address")}
+                      aria-invalid={errorFor("address") !== undefined}
+                      id="order-address"
                       maxLength={500}
                       onChange={(event) => setAddress(event.target.value)}
                       required
                       rows={3}
                       value={address}
                     />
+                    {errorFor("address") === undefined ? null : (
+                      <small className="field-error" id="order-address-error">
+                        {errorFor("address")}
+                      </small>
+                    )}
                   </label>
                   <label className="field field-grow">
                     <span>{t("customerConfig.deliveryInstructions")}</span>
@@ -685,14 +919,24 @@ export function CreateOrderDialog({
                     <label className="field required-field">
                       <span>{t("operations.codAmount")}</span>
                       <input
-                        aria-invalid={Number(codAmount) < 0}
+                        aria-describedby={describedBy("codAmount")}
+                        aria-invalid={errorFor("codAmount") !== undefined}
+                        id="order-cod"
                         min="0"
-                        onChange={(event) => setCodAmount(event.target.value)}
+                        onChange={(event) => {
+                          setCodAmount(event.target.value);
+                          clearServerError("codAmount");
+                        }}
                         required
                         step="0.01"
                         type="number"
                         value={codAmount}
                       />
+                      {errorFor("codAmount") === undefined ? null : (
+                        <small className="field-error" id="order-codAmount-error">
+                          {errorFor("codAmount")}
+                        </small>
+                      )}
                     </label>
                     <label className="field">
                       <span>{t("operations.serviceFee")}</span>
@@ -702,29 +946,45 @@ export function CreateOrderDialog({
                   <label className="field">
                     <span>{t("operations.additionalFees")}</span>
                     <input
-                      aria-invalid={Number(additionalFees) < 0}
+                      aria-describedby={describedBy("additionalFees")}
+                      aria-invalid={errorFor("additionalFees") !== undefined}
+                      id="order-additional"
                       min="0"
                       onChange={(event) => setAdditionalFees(event.target.value)}
                       step="0.01"
                       type="number"
                       value={additionalFees}
                     />
+                    {errorFor("additionalFees") === undefined ? null : (
+                      <small className="field-error" id="order-additionalFees-error">
+                        {errorFor("additionalFees")}
+                      </small>
+                    )}
                   </label>
                   {pricingMissing ? (
-                    <div className="fee-override">
-                      <p className="field-hint">{t("operations.manualPricingHint")}</p>
-                      {canCreateArea && !addPricingOpen ? (
+                    <div className="fee-override pricing-missing" role="group">
+                      <p className="field-hint">{t("operations.pricingFailureMessage")}</p>
+                      <div className="pricing-actions">
+                        {canCreateArea && !addPricingOpen ? (
+                          <button
+                            className="button button-secondary"
+                            onClick={() => {
+                              setPricingScope(hasEmirate ? "area" : "global");
+                              setAddPricingOpen(true);
+                            }}
+                            type="button"
+                          >
+                            {t("operations.reviewTraderPricing")}
+                          </button>
+                        ) : null}
                         <button
                           className="button button-secondary"
-                          onClick={() => {
-                            setPricingScope(hasEmirate ? "area" : "global");
-                            setAddPricingOpen(true);
-                          }}
+                          onClick={() => focusField("area")}
                           type="button"
                         >
-                          {t("operations.addPricing")}
+                          {t("operations.selectAnotherArea")}
                         </button>
-                      ) : null}
+                      </div>
                       {addPricingOpen ? (
                         <div className="inline-pricing">
                           <label className="field">
@@ -796,7 +1056,10 @@ export function CreateOrderDialog({
                           <label className="field required-field">
                             <span>{t("operations.manualServiceFee")}</span>
                             <input
+                              aria-describedby={describedBy("pricing")}
+                              aria-invalid={errorFor("pricing") !== undefined}
                               className="no-spinner"
+                              id="order-manual-fee"
                               inputMode="decimal"
                               min="0"
                               onChange={(event) => setManualFee(event.target.value)}
@@ -805,6 +1068,11 @@ export function CreateOrderDialog({
                               type="number"
                               value={manualFee}
                             />
+                            {errorFor("pricing") === undefined ? null : (
+                              <small className="field-error" id="order-pricing-error">
+                                {errorFor("pricing")}
+                              </small>
+                            )}
                           </label>
                           <label className="field">
                             <span>{t("operations.manualFeeReason")}</span>
@@ -820,7 +1088,7 @@ export function CreateOrderDialog({
                     </div>
                   ) : null}
                   {canOverrideFee && !pricingMissing ? (
-                    <div className="fee-override">
+                    <div className="fee-override service-fee-override">
                       <label className="checkbox-field">
                         <input
                           checked={overrideEnabled}
@@ -829,12 +1097,16 @@ export function CreateOrderDialog({
                         />
                         <span>{t("operations.overrideServiceFee")}</span>
                       </label>
+                      <p className="field-hint">{t("operations.overrideHint")}</p>
                       {overrideEnabled ? (
                         <>
                           <label className="field required-field">
                             <span>{t("operations.overriddenFee")}</span>
                             <input
+                              aria-describedby={describedBy("overrideFee")}
+                              aria-invalid={errorFor("overrideFee") !== undefined}
                               className="no-spinner"
+                              id="order-override-fee"
                               inputMode="decimal"
                               min="0"
                               onChange={(event) => setOverrideFee(event.target.value)}
@@ -843,16 +1115,32 @@ export function CreateOrderDialog({
                               type="number"
                               value={overrideFee}
                             />
+                            {errorFor("overrideFee") === undefined ? null : (
+                              <small className="field-error" id="order-overrideFee-error">
+                                {errorFor("overrideFee")}
+                              </small>
+                            )}
                           </label>
                           <label className="field required-field">
                             <span>{t("operations.overrideReason")}</span>
                             <textarea
+                              aria-describedby={describedBy("overrideReason")}
+                              aria-invalid={errorFor("overrideReason") !== undefined}
+                              id="order-override-reason"
                               maxLength={500}
-                              onChange={(event) => setOverrideReason(event.target.value)}
+                              onChange={(event) => {
+                                setOverrideReason(event.target.value);
+                                clearServerError("overrideReason");
+                              }}
                               required
                               rows={2}
                               value={overrideReason}
                             />
+                            {errorFor("overrideReason") === undefined ? null : (
+                              <small className="field-error" id="order-overrideReason-error">
+                                {errorFor("overrideReason")}
+                              </small>
+                            )}
                           </label>
                         </>
                       ) : null}
@@ -862,7 +1150,10 @@ export function CreateOrderDialog({
                     <label className="field required-field">
                       <span>{t("operations.packages")}</span>
                       <input
+                        aria-describedby={describedBy("packageCount")}
+                        aria-invalid={errorFor("packageCount") !== undefined}
                         className="input-compact"
+                        id="order-packages"
                         min="1"
                         onChange={(event) => setPackageCount(event.target.value)}
                         required
@@ -870,6 +1161,11 @@ export function CreateOrderDialog({
                         type="number"
                         value={packageCount}
                       />
+                      {errorFor("packageCount") === undefined ? null : (
+                        <small className="field-error" id="order-packageCount-error">
+                          {errorFor("packageCount")}
+                        </small>
+                      )}
                     </label>
                     {/* VAT is only relevant when the Company has it enabled. */}
                     {quote?.vatEnabled ? (
@@ -890,21 +1186,44 @@ export function CreateOrderDialog({
                   </label>
                   <div className="quote-panel" aria-live="polite">
                     {quoteLoading ? (
-                      <strong>{t("common.loading")}</strong>
+                      <strong className="quote-loading">{t("operations.pricingLoading")}</strong>
                     ) : quoteError === undefined ? (
                       <>
                         <div>
-                          <span>{t("operations.totalAmountToCollect")}</span>
-                          <strong>{money(quote?.customerAmountDue)}</strong>
+                          <span>{t("operations.codAmount")}</span>
+                          <strong>{money(quote?.codAmount ?? codAmount)}</strong>
                         </div>
                         <div>
-                          <span>{t("operations.amountDueToTrader")}</span>
-                          <strong>{money(quote?.traderNetPayable)}</strong>
+                          <span>{t("operations.serviceFee")}</span>
+                          <strong>{money(quote?.serviceFee)}</strong>
                         </div>
+                        <div>
+                          <span>{t("operations.additionalFees")}</span>
+                          <strong>{money(quote?.additionalFees)}</strong>
+                        </div>
+                        {quote?.vatEnabled ? (
+                          <div>
+                            <span>{t("operations.vatAmount")}</span>
+                            <strong>{money(quote.vatAmount)}</strong>
+                          </div>
+                        ) : null}
                         <div>
                           <span>{t("operations.totalDeductions")}</span>
                           <strong>{money(quote?.totalDeductions)}</strong>
                         </div>
+                        <div className={negativeTraderPayable ? "summary-invalid" : undefined}>
+                          <span>{t("operations.amountDueToTrader")}</span>
+                          <strong>{money(quote?.traderNetPayable)}</strong>
+                        </div>
+                        <div className="summary-total">
+                          <span>{t("operations.totalAmountToCollect")}</span>
+                          <strong>{money(quote?.customerAmountDue)}</strong>
+                        </div>
+                        {negativeTraderPayable ? (
+                          <small className="field-error">
+                            {t("operations.errors.deductionsExceedCod")}
+                          </small>
+                        ) : null}
                         {quote?.vatEnabled ? (
                           <small>
                             {t("operations.vatRateApplied", {
@@ -924,27 +1243,13 @@ export function CreateOrderDialog({
             </div>
             <footer className="order-action-bar">
               <div className="order-totals" aria-label={t("operations.orderSummary")}>
-                <span>
-                  <small>{t("operations.codAmount")}</small>
-                  <strong>{money(quote?.codAmount ?? codAmount)}</strong>
-                </span>
-                <span>
-                  <small>{t("operations.serviceFee")}</small>
-                  <strong>{money(quote?.serviceFee)}</strong>
-                </span>
-                <span>
-                  <small>{t("operations.additionalFees")}</small>
-                  <strong>{money(quote?.additionalFees)}</strong>
-                </span>
-                {quote?.vatEnabled ? (
-                  <span>
-                    <small>{t("operations.vatAmount")}</small>
-                    <strong>{money(quote.vatAmount)}</strong>
-                  </span>
-                ) : null}
                 <span className="total-due">
                   <small>{t("operations.totalAmountToCollect")}</small>
                   <strong>{money(quote?.customerAmountDue)}</strong>
+                </span>
+                <span className={negativeTraderPayable ? "summary-invalid" : undefined}>
+                  <small>{t("operations.amountDueToTrader")}</small>
+                  <strong>{money(quote?.traderNetPayable)}</strong>
                 </span>
               </div>
               <div className="modal-actions order-actions">
@@ -953,10 +1258,10 @@ export function CreateOrderDialog({
                 </button>
                 <button
                   className="button button-primary"
-                  disabled={!valid || saving || quoteLoading}
+                  disabled={saving || quoteLoading}
                   type="submit"
                 >
-                  {saving ? t("common.working") : t("operations.createOrder")}
+                  {saving ? t("operations.creatingOrder") : t("operations.createOrder")}
                 </button>
               </div>
             </footer>
@@ -976,31 +1281,6 @@ export function CreateOrderDialog({
           </div>
         )}
       </Modal>
-      {createCustomerOpen ? (
-        <InlineCustomerDialog
-          api={api}
-          canCreateArea={canCreateArea}
-          initial={{
-            address,
-            area,
-            mobileNumber: mobile,
-            name: customerName,
-            secondMobileNumber: secondMobile,
-          }}
-          onClose={() => setCreateCustomerOpen(false)}
-          onSaved={(created) => {
-            setCustomer(undefined);
-            setCustomerAddresses([]);
-            setInlineCustomer(created);
-            setCustomerName(created.name);
-            setMobile(created.mobileNumber);
-            setSecondMobile(created.secondMobileNumber ?? "");
-            setAddress(created.address);
-            setArea(created.area);
-            setCreateCustomerOpen(false);
-          }}
-        />
-      ) : null}
       {createTraderOpen ? (
         <TraderForm
           api={api}
@@ -1025,122 +1305,3 @@ export function CreateOrderDialog({
   );
 }
 
-function InlineCustomerDialog({
-  api,
-  canCreateArea,
-  initial,
-  onClose,
-  onSaved,
-}: {
-  api: ApiClient;
-  canCreateArea: boolean;
-  initial: {
-    readonly address: string;
-    readonly area: CompanyArea | undefined;
-    readonly mobileNumber: string;
-    readonly name: string;
-    readonly secondMobileNumber: string;
-  };
-  onClose: () => void;
-  onSaved: (draft: InlineCustomerDraft) => void;
-}) {
-  const { t } = useTranslation();
-  const [name, setName] = useState(initial.name);
-  const [mobileNumber, setMobileNumber] = useState(initial.mobileNumber);
-  const [secondMobileNumber, setSecondMobileNumber] = useState(initial.secondMobileNumber);
-  const [area, setArea] = useState(initial.area);
-  const [address, setAddress] = useState(initial.address);
-  const mobileValid = isUaeMobile(mobileNumber);
-  const secondValid = secondMobileNumber.trim() === "" || isUaeMobile(secondMobileNumber);
-  const valid =
-    name.trim() !== "" && mobileValid && secondValid && area !== undefined && address.trim() !== "";
-
-  return (
-    <Modal
-      closeLabel={t("common.close")}
-      onRequestClose={onClose}
-      title={t("customerConfig.addCustomer")}
-      titleId="inline-order-customer-title"
-    >
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          if (!valid || area === undefined) return;
-          onSaved({
-            address: address.trim(),
-            area,
-            mobileNumber: normalizeUaeMobile(mobileNumber) ?? mobileNumber.trim(),
-            name: name.trim(),
-            ...(secondMobileNumber.trim() === ""
-              ? {}
-              : {
-                  secondMobileNumber:
-                    normalizeUaeMobile(secondMobileNumber) ?? secondMobileNumber.trim(),
-                }),
-          });
-        }}
-      >
-        <div className="modal-form-grid">
-          <label className="field required-field">
-            <span>{t("operations.customerName")}</span>
-            <input
-              autoFocus
-              maxLength={200}
-              onChange={(event) => setName(event.target.value)}
-              required
-              value={name}
-            />
-          </label>
-          <label className="field required-field">
-            <span>{t("operations.mobile")}</span>
-            <input
-              aria-invalid={mobileNumber !== "" && !mobileValid}
-              inputMode="tel"
-              onChange={(event) => setMobileNumber(event.target.value)}
-              placeholder={t("common.mobilePlaceholder")}
-              required
-              value={mobileNumber}
-            />
-            {mobileNumber !== "" && !mobileValid ? (
-              <small className="field-error">{t("operations.mobileFormatError")}</small>
-            ) : null}
-          </label>
-          <label className="field">
-            <span>{t("operations.secondMobile")}</span>
-            <input
-              aria-invalid={!secondValid}
-              inputMode="tel"
-              onChange={(event) => setSecondMobileNumber(event.target.value)}
-              placeholder={t("common.mobilePlaceholder")}
-              value={secondMobileNumber}
-            />
-          </label>
-          <AreaSelector
-            allowCreate={canCreateArea}
-            api={api}
-            onChange={setArea}
-            value={area}
-          />
-          <label className="field required-field">
-            <span>{t("operations.customerAddress")}</span>
-            <textarea
-              maxLength={500}
-              onChange={(event) => setAddress(event.target.value)}
-              required
-              rows={3}
-              value={address}
-            />
-          </label>
-        </div>
-        <div className="modal-actions">
-          <button className="button button-secondary" onClick={onClose} type="button">
-            {t("common.cancel")}
-          </button>
-          <button className="button button-primary" disabled={!valid} type="submit">
-            {t("common.save")}
-          </button>
-        </div>
-      </form>
-    </Modal>
-  );
-}

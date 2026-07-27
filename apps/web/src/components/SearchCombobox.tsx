@@ -20,6 +20,7 @@ export function SearchCombobox<T extends SearchOption>({
   getSelectedLabel,
   label,
   onChange,
+  onQueryChange,
   path,
   placeholder,
   value,
@@ -32,6 +33,12 @@ export function SearchCombobox<T extends SearchOption>({
   getSelectedLabel?: ((option: T) => string) | undefined;
   label: string;
   onChange: (option: T | undefined) => void;
+  /**
+   * Optional: report the raw typed text on every keystroke and on selection.
+   * Lets a caller treat a free-typed value as new data (e.g. a new Customer
+   * name) instead of forcing an explicit "add" action.
+   */
+  onQueryChange?: ((query: string) => void) | undefined;
   path: string;
   placeholder: string;
   value: T | undefined;
@@ -89,7 +96,9 @@ export function SearchCombobox<T extends SearchOption>({
 
   const select = (option: T) => {
     onChange(option);
-    setQuery(selectedLabel(option));
+    const label = selectedLabel(option);
+    setQuery(label);
+    onQueryChange?.(label);
     setOpen(false);
   };
 
@@ -124,6 +133,7 @@ export function SearchCombobox<T extends SearchOption>({
         }}
         onChange={(event) => {
           setQuery(event.target.value);
+          onQueryChange?.(event.target.value);
           onChange(undefined);
           setOpen(true);
         }}
