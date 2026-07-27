@@ -63,9 +63,37 @@ describe("environment configuration", () => {
       CORS_ORIGINS: "https://app.example.test",
       DATABASE_URL:
         "postgresql://blueline:managed-password@db.example.test:5432/blueline?sslmode=require",
+      FILE_STORAGE_LOCAL_ROOT: "/srv/blueline/files",
       NODE_ENV: "production",
     });
     expect(result.NODE_ENV).toBe("production");
+  });
+
+  it("defaults file storage to the local provider and a resolved root in development", () => {
+    const result = configuration();
+    expect(result.files.provider).toBe("local");
+    expect(result.files.localRoot.length).toBeGreaterThan(0);
+  });
+
+  it("treats the historical 'unconfigured' file provider as local", () => {
+    process.env.FILE_STORAGE_PROVIDER = "unconfigured";
+    expect(configuration().files.provider).toBe("local");
+  });
+
+  it("rejects an unknown file storage provider", () => {
+    process.env.FILE_STORAGE_PROVIDER = "s3";
+    expect(() => configuration()).toThrow("FILE_STORAGE_PROVIDER");
+  });
+
+  it("requires an explicit file storage root in production", () => {
+    expect(() =>
+      validateEnvironment({
+        CORS_ORIGINS: "https://app.example.test",
+        DATABASE_URL:
+          "postgresql://blueline:managed-password@db.example.test:5432/blueline?sslmode=require",
+        NODE_ENV: "production",
+      }),
+    ).toThrow("FILE_STORAGE_LOCAL_ROOT");
   });
 
   it("rejects insecure production origins", () => {

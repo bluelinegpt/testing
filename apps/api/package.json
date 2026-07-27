@@ -31,7 +31,8 @@
     "test:history:database": "vitest run src/operations/operations-history.regression.test.ts",
     "test:reconciliation:http": "vitest run src/operations/reconciliation-http.database.test.ts",
     "dev:seed-reconciliation-demo": "tsx src/platform/run-reconciliation-demo-seed.ts",
-    "test:fixture:database": "vitest run src/platform/reconciliation-demo-seed.database.test.ts"
+    "test:fixture:database": "vitest run src/platform/reconciliation-demo-seed.database.test.ts",
+    "test:company-profile:database": "vitest run src/company-profile/company-profile.database.test.ts"
   },
   "dependencies": {
     "@nestjs/common": "^11.1.28",

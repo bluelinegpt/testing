@@ -7,6 +7,7 @@ import { LoggerModule } from "nestjs-pino";
 import { configuration, validateEnvironment } from "./configuration/environment.js";
 import { AuthenticationModule } from "./authentication/authentication.module.js";
 import { CompanyConfigurationModule } from "./company-configuration/company-configuration.module.js";
+import { CompanyProfileModule } from "./company-profile/company-profile.module.js";
 import { HealthModule } from "./health/health.module.js";
 import { DatabaseModule } from "./infrastructure/database/database.module.js";
 import { createHttpLoggerOptions } from "./logging/http-logger.config.js";
@@ -34,6 +35,7 @@ import { UserAdministrationModule } from "./users/user-administration.module.js"
     DatabaseModule,
     AuthenticationModule,
     CompanyConfigurationModule,
+    CompanyProfileModule,
     OperationsModule,
     RoleModule,
     SupportModule,

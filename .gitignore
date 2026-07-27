@@ -55,6 +55,8 @@ apps/mobile/build/
 # Sensitive operational uploads
 uploads/
 private-files/
+# Locally-stored private file bytes (Company logos, etc.)
+.file-storage/
 
 # Local database backups and baselines (never commit)
 .backups/

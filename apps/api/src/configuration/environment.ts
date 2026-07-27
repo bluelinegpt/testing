@@ -1,5 +1,9 @@
+import { isAbsolute, resolve } from "node:path";
+
 const environments = ["development", "test", "production"] as const;
 type ApplicationEnvironment = (typeof environments)[number];
+const fileStorageProviders = ["local"] as const;
+type FileStorageProvider = (typeof fileStorageProviders)[number];
 const logLevels = ["fatal", "error", "warn", "info", "debug", "trace", "silent"] as const;
 
 export interface AppConfiguration {
@@ -20,6 +24,16 @@ export interface AppConfiguration {
     poolMin: number;
     queryTimeoutMs: number;
     url: string;
+  };
+  files: {
+    /** Storage provider for private file objects (currently only "local"). */
+    provider: FileStorageProvider;
+    /**
+     * Absolute directory that holds privately-stored file bytes. It must live
+     * OUTSIDE any web root — nothing serves it statically; logos are streamed
+     * only through an authenticated, Company-scoped endpoint.
+     */
+    localRoot: string;
   };
   tenancy: {
     /**
@@ -154,6 +168,32 @@ function parseDevelopmentCompanySubdomain(
   return subdomain;
 }
 
+function parseFileStorageProvider(value: string | undefined): FileStorageProvider {
+  const provider = (value ?? "local").trim().toLowerCase();
+  // A local adapter now exists, so the historical placeholder "unconfigured"
+  // (and an empty value) resolve to the local provider rather than failing
+  // startup. Any other explicit value must name a real, supported provider.
+  const normalized = provider === "" || provider === "unconfigured" ? "local" : provider;
+  if (!fileStorageProviders.includes(normalized as FileStorageProvider)) {
+    throw new Error(`FILE_STORAGE_PROVIDER must be one of: ${fileStorageProviders.join(", ")}`);
+  }
+  return normalized as FileStorageProvider;
+}
+
+function parseFileStorageLocalRoot(
+  value: string | undefined,
+  environment: ApplicationEnvironment,
+): string {
+  const raw = value?.trim();
+  if (raw === undefined || raw.length === 0) {
+    if (environment === "production") {
+      throw new Error("FILE_STORAGE_LOCAL_ROOT is required in production");
+    }
+    return resolve(process.cwd(), ".file-storage");
+  }
+  return isAbsolute(raw) ? raw : resolve(process.cwd(), raw);
+}
+
 export function configuration(): AppConfiguration {
   const environment = parseEnvironment(process.env.NODE_ENV);
   const databasePoolMax = parseInteger(
@@ -229,6 +269,10 @@ export function configuration(): AppConfiguration {
         120_000,
       ),
       url: parseDatabaseUrl(process.env.DATABASE_URL, environment),
+    },
+    files: {
+      localRoot: parseFileStorageLocalRoot(process.env.FILE_STORAGE_LOCAL_ROOT, environment),
+      provider: parseFileStorageProvider(process.env.FILE_STORAGE_PROVIDER),
     },
   };
 }
