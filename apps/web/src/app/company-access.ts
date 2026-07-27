@@ -41,7 +41,9 @@ const landingPriority = ["/dashboard", "/orders", "/orders/create"] as const;
 
 export function canAccessCompanyPath(pathname: string, permissions: readonly string[]): boolean {
   const normalized = normalizePath(pathname);
-  if (normalized === "/no-access") return true;
+  // Self-service pages available to every authenticated Company user, with no
+  // permission gate. They only ever act on the caller's own data.
+  if (normalized === "/no-access" || normalized === "/preferences") return true;
   const route =
     routePermissions[normalized] === undefined
       ? Object.keys(routePermissions)

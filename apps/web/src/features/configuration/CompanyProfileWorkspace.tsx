@@ -177,10 +177,10 @@ export function CompanyProfileWorkspace({ api }: { api: ApiClient }) {
         </p>
       ) : null}
 
-      <section className="configuration-panel">
-        <h2>{t("companyProfile.identityHeading")}</h2>
-        <form className="settings-form company-profile-form" onSubmit={(event) => void submit(event)}>
-          <div className="order-form-columns">
+      <section className="configuration-panel company-profile-card">
+        <form className="company-profile-grid" onSubmit={(event) => void submit(event)}>
+          <h2>{t("companyProfile.identityHeading")}</h2>
+          <div className="cp-fields">
             <label className="field">
               <span>{t("companyProfile.nameEn")}</span>
               <input
@@ -231,15 +231,18 @@ export function CompanyProfileWorkspace({ api }: { api: ApiClient }) {
               />
             </label>
           </div>
-          <button className="button button-primary" disabled={saving} type="submit">
-            {saving ? t("common.working") : t("common.save")}
-          </button>
+          <div className="cp-actions">
+            <button className="button button-primary" disabled={saving} type="submit">
+              {saving ? t("common.working") : t("common.save")}
+            </button>
+          </div>
         </form>
-      </section>
 
-      <section className="configuration-panel">
-        <h2>{t("companyProfile.logoHeading")}</h2>
-        <div className="company-logo-manager">
+        <hr className="cp-divider" />
+
+        <div className="cp-logo-section">
+          <h2>{t("companyProfile.logoHeading")}</h2>
+          <div className="company-logo-manager">
           <div className="company-logo-previews">
             <figure className="company-logo-figure">
               <figcaption>{t("companyProfile.currentLogo")}</figcaption>
@@ -302,6 +305,7 @@ export function CompanyProfileWorkspace({ api }: { api: ApiClient }) {
               ) : null}
             </div>
           </div>
+        </div>
         </div>
       </section>
     </div>

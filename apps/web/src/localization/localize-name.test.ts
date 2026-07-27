@@ -23,4 +23,12 @@ describe("localizeName", () => {
     expect(localizeName("en", { ar: null, en: "  " })).toBe("");
     expect(localizeName("ar", {})).toBe("");
   });
+
+  it("falls back to English for AREA-000004 (Au Hail) which has no Arabic name", () => {
+    // Real data-quality record: name_ar is missing. Arabic preference must show
+    // the English value rather than a blank.
+    const auHail = { ar: null, en: "Au Hail" };
+    expect(localizeName("ar", auHail)).toBe("Au Hail");
+    expect(localizeName("en", auHail)).toBe("Au Hail");
+  });
 });

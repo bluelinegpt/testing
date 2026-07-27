@@ -3757,6 +3757,24 @@ td {
 [dir="rtl"] .area-selector-area {
   grid-template-columns: 1fr auto;
 }
+/* The Area combobox fills its column so it aligns with the Emirate control and
+   is never a tiny detached input. */
+.area-selector .search-combobox {
+  display: block;
+  width: 100%;
+}
+.area-selector .search-combobox > input {
+  width: 100%;
+  box-sizing: border-box;
+}
+/* Searchable, Emirate-aware Area filter in the Orders list filter bar. */
+.orders-area-filter {
+  min-width: 280px;
+  flex: 1 1 280px;
+}
+.orders-area-filter .area-selector {
+  gap: 8px;
+}
 
 /* Two-column modal forms -------------------------------------------------- */
 
@@ -3930,6 +3948,78 @@ td {
   gap: 10px;
   flex-wrap: wrap;
 }
-.company-profile-form .order-form-columns {
-  margin-bottom: 16px;
+.company-profile-card h2 {
+  margin: 0 0 12px;
+}
+.company-profile-grid {
+  display: grid;
+  gap: 4px;
+}
+.cp-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 20px;
+}
+.cp-fields .field {
+  margin: 0;
+  min-width: 0;
+}
+.cp-fields .field input {
+  width: 100%;
+  height: 40px;
+  box-sizing: border-box;
+}
+/* Field text direction follows the field's language, independent of UI direction. */
+.cp-fields .field input[dir="rtl"] {
+  text-align: right;
+}
+.cp-fields .field input[dir="ltr"] {
+  text-align: left;
+}
+.cp-actions {
+  margin-top: 16px;
+}
+.cp-actions .button {
+  width: auto;
+  min-width: 140px;
+}
+.cp-divider {
+  border: none;
+  border-top: 1px solid var(--border, #d5dced);
+  margin: 22px 0;
+}
+.cp-logo-section h2 {
+  margin: 0 0 12px;
+}
+@media (max-width: 720px) {
+  .cp-fields {
+    grid-template-columns: 1fr;
+  }
+}
+.sidebar-preferences {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  color: #cdd7ea;
+  font-size: 13px;
+  text-decoration: none;
+}
+.sidebar-preferences:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+.preferences-field {
+  display: grid;
+  gap: 10px;
+  max-width: 560px;
+}
+.preferences-label {
+  font-weight: 600;
+}
+.preferences-language {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
 }

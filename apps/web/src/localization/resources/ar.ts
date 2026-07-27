@@ -228,7 +228,11 @@ export const arabicTranslations = {
     subtitle: "نظام إدارة التوصيل",
   },
   preferences: {
-    textLanguage: "لغة النص",
+    title: "تفضيلاتي",
+    description:
+      "اختر اللغة المستخدمة للبحث عن بيانات العمل وعرضها في البوابة. لا يغيّر هذا لغة واجهة التطبيق أو اتجاه التخطيط.",
+    searchAndDisplayText: "لغة البحث وعرض البيانات",
+    saved: "تم حفظ التفضيل.",
   },
   companyProfile: {
     title: "ملف الشركة",

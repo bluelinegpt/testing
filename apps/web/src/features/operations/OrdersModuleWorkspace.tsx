@@ -21,7 +21,6 @@ import { useTranslation } from "react-i18next";
 
 import { ApiError, type ApiClient } from "../../api/api-client.js";
 import type {
-  AreaPage,
   CompanyArea,
   CustomerOption,
   OperationsDriver,
@@ -38,6 +37,7 @@ import { SearchCombobox } from "../../components/SearchCombobox.js";
 import { isUaeMobile, normalizeUaeMobile } from "../../domain/uae-mobile.js";
 import { formatCurrency, formatDate, formatDateTime } from "../../localization/formatters.js";
 import { normalizeLocale } from "../../localization/locale.js";
+import { AreaSelector } from "../configuration/AreaSelector.js";
 import { CreateOrderDialog } from "./CreateOrderDialog.js";
 import {
   type DriverCollectionPrintData,
@@ -106,7 +106,7 @@ export function OrdersModuleWorkspace({
   const [pageSize, setPageSize] = useState<25 | 50 | 100>(25);
   const [data, setData] = useState<OperationsOrderPage>();
   const [holdCount, setHoldCount] = useState(0);
-  const [areas, setAreas] = useState<readonly CompanyArea[]>([]);
+  const [filterArea, setFilterArea] = useState<CompanyArea>();
   const [drivers, setDrivers] = useState<readonly OperationsDriver[]>([]);
   const [traders, setTraders] = useState<readonly OperationsTrader[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -136,17 +136,14 @@ export function OrdersModuleWorkspace({
     setLoading(true);
     setError(undefined);
     try {
-      const [orders, holdOrders, loadedAreas, loadedDrivers, loadedTraders] = await Promise.all([
+      const [orders, holdOrders, loadedDrivers, loadedTraders] = await Promise.all([
         api.get<OperationsOrderPage>(`operations/orders?${query}`),
         api.get<OperationsOrderPage>("operations/orders?page=1&pageSize=25&quickView=hold"),
-        api.get<AreaPage>("configuration/areas?page=1&pageSize=100&status=active"),
         api.get<readonly OperationsDriver[]>("operations/drivers"),
         api.get<readonly OperationsTrader[]>("operations/traders"),
       ]);
       setData(orders);
       setHoldCount(holdOrders.filteredCount);
-      // The request already asks for active Areas only.
-      setAreas(loadedAreas.items);
       setDrivers(loadedDrivers.filter((driver) => driver.status === "active"));
       setTraders(loadedTraders.filter((trader) => trader.status === "active"));
     } catch (requestError) {
@@ -388,17 +385,18 @@ export function OrdersModuleWorkspace({
               </option>
             ))}
           </FilterSelect>
-          <FilterSelect
-            label={t("operations.areaField")}
-            onChange={(value) => updateFilters({ areaId: value })}
-            value={filters.areaId}
-          >
-            {areas.map((area) => (
-              <option key={area.id} value={area.id}>
-                {area.code} - {area.nameEn}
-              </option>
-            ))}
-          </FilterSelect>
+          <div className="orders-area-filter">
+            <AreaSelector
+              allowCreate={false}
+              api={api}
+              areaLabel={t("operations.areaField")}
+              onChange={(area) => {
+                setFilterArea(area);
+                updateFilters({ areaId: area?.id ?? "" });
+              }}
+              value={filterArea}
+            />
+          </div>
           <FilterSelect
             label={t("operations.deliveryStatus")}
             onChange={(value) => updateFilters({ deliveryStatus: value })}

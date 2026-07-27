@@ -625,7 +625,6 @@ export function CreateOrderDialog({
                   <AreaSelector
                     allowCreate={canCreateArea && customer === undefined}
                     api={api}
-                    arabicFirst
                     disabled={customer !== undefined}
                     onChange={(selected) => {
                       setArea(selected);
@@ -1119,7 +1118,6 @@ function InlineCustomerDialog({
           <AreaSelector
             allowCreate={canCreateArea}
             api={api}
-            arabicFirst
             onChange={setArea}
             value={area}
           />

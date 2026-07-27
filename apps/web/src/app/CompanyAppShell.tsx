@@ -12,9 +12,9 @@ import {
   PanelLeftOpen,
   Settings,
   ShieldCheck,
+  SlidersHorizontal,
   Store,
   Truck,
-  Type,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -72,6 +72,7 @@ const routeTitles: Readonly<Record<string, string>> = {
   "/configuration/users": "nav.users",
   "/configuration/roles": "nav.roles",
   "/support": "nav.supportCases",
+  "/preferences": "preferences.title",
   "/no-access": "shell.noAccessTitle",
 };
 
@@ -325,20 +326,6 @@ export function CompanyAppShell({
               </button>
             ))}
           </div>
-          <div className="sidebar-language" aria-label={t("preferences.textLanguage")} role="group">
-            <Type aria-hidden="true" size={18} />
-            {languages.map((language) => (
-              <button
-                aria-label={`${t("preferences.textLanguage")}: ${language.label}`}
-                aria-pressed={branding.textLanguage === language.code}
-                key={language.code}
-                onClick={() => void branding.setTextLanguage(language.code)}
-                type="button"
-              >
-                {language.label}
-              </button>
-            ))}
-          </div>
           <div className="sidebar-user">
             <CircleUserRound aria-hidden="true" size={22} />
             <span className="sidebar-user-copy">
@@ -349,6 +336,10 @@ export function CompanyAppShell({
               <LogOut aria-hidden="true" size={18} />
             </button>
           </div>
+          <NavLink className="sidebar-preferences" to="/preferences">
+            <SlidersHorizontal aria-hidden="true" size={16} />
+            <span>{t("preferences.title")}</span>
+          </NavLink>
           <p className="powered-by">{t("shell.poweredBy")}</p>
         </div>
       </aside>

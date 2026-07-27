@@ -12,6 +12,7 @@ import {
 } from "../features/administration/UserRoleConfigurationWorkspace.js";
 import { CompanyConfigurationWorkspace } from "../features/configuration/CompanyConfigurationWorkspace.js";
 import { CompanyProfileWorkspace } from "../features/configuration/CompanyProfileWorkspace.js";
+import { MyPreferencesWorkspace } from "../features/preferences/MyPreferencesWorkspace.js";
 import {
   CustomerConfigurationWorkspace,
   CustomerDetailWorkspace,
@@ -162,6 +163,8 @@ export function CompanyWorkspace({
         permissions={session.identity.permissions}
       />
     );
+  } else if (path === "/preferences") {
+    content = <MyPreferencesWorkspace />;
   } else if (path === "/configuration/company-profile") {
     content = <CompanyProfileWorkspace api={api} />;
   } else if (path === "/configuration/general") {

@@ -312,8 +312,10 @@ describe("CreateOrderDialog", () => {
         notes: "",
       }),
     );
-    // Area now shows the name (no internal code); the mock area has no Emirate.
-    expect(await screen.findByDisplayValue("Dubai")).toBeInTheDocument();
+    // The created Area is auto-selected in the Area combobox, shown by name and
+    // in the user's Search-and-Display language (English here) with no code.
+    const areaInput = await screen.findByPlaceholderText("Search by Area name or code");
+    await waitFor(() => expect(areaInput).toHaveValue("Dubai"));
   });
 
   it("lets the operator enter a manual fee when the Trader has no configured price", async () => {

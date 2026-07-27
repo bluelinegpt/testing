@@ -229,7 +229,11 @@ export const englishTranslations = {
     subtitle: "Delivery Management System",
   },
   preferences: {
-    textLanguage: "Text language",
+    title: "My Preferences",
+    description:
+      "Choose the language used to search and display business data across the portal. This does not change the application interface language or layout direction.",
+    searchAndDisplayText: "Search and Display Text",
+    saved: "Preference saved.",
   },
   companyProfile: {
     title: "Company Profile",

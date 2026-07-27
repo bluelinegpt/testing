@@ -250,4 +250,62 @@ describe("OrdersModuleWorkspace", () => {
     fireEvent.click(screen.getByRole("button", { name: "Order actions" }));
     expect(screen.getByRole("button", { name: "Send out for delivery" })).toBeVisible();
   });
+
+  it("uses a searchable Emirate-aware Area filter without internal Area codes", async () => {
+    const api = {
+      get: vi.fn((path: string) => {
+        if (path.startsWith("operations/orders?")) {
+          return Promise.resolve({
+            filteredCount: 1,
+            items: [order],
+            page: 1,
+            pageSize: 25,
+            totalCount: 1,
+          });
+        }
+        if (path === "configuration/emirates") {
+          return Promise.resolve([{ code: "DXB", id: "e1", nameAr: "دبي", nameEn: "Dubai" }]);
+        }
+        if (path.startsWith("configuration/areas/search")) {
+          return Promise.resolve({
+            hasMore: false,
+            items: [
+              {
+                code: "AREA-000068",
+                emirateCode: "DXB",
+                emirateId: "e1",
+                emirateNameAr: "دبي",
+                emirateNameEn: "Dubai",
+                id: "a1",
+                isActive: true,
+                nameAr: "البطين",
+                nameEn: "Al Bateen",
+                notes: null,
+                updatedAt: "2026-07-19T10:00:00.000Z",
+              },
+            ],
+            total: 1,
+          });
+        }
+        return Promise.resolve([]);
+      }),
+      post: vi.fn().mockResolvedValue({}),
+    };
+    render(
+      <OrdersModuleWorkspace
+        api={api as unknown as ApiClient}
+        onNavigate={vi.fn()}
+        permissions={["users_roles.manage"]}
+      />,
+    );
+    await screen.findByText("SER-000001");
+
+    // The Area filter is the shared Emirate-aware control, not a plain dropdown.
+    const emirate = screen.getByLabelText("Emirate");
+    fireEvent.change(emirate, { target: { value: "e1" } });
+    expect(await screen.findByPlaceholderText("Search by Area name or code")).toBeInTheDocument();
+
+    // Internal Area codes (AREA-xxxxxx) are never shown to operational users.
+    expect(screen.queryByText(/AREA-\d+/)).not.toBeInTheDocument();
+  });
 });

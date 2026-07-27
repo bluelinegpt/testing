@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -112,20 +112,16 @@ describe("CompanyAppShell branding", () => {
     expect(screen.queryByRole("link", { name: "Company profile" })).not.toBeInTheDocument();
   });
 
-  it("changes Text Language without touching the UI language or layout direction", async () => {
-    const api = makeApi(branding(), "en");
-    renderShell(api, ADMIN);
+  it("keeps only the UI-language selector in the sidebar and links to My Preferences", async () => {
+    renderShell(makeApi(branding()), ADMIN);
     await screen.findAllByText("Acme Logistics");
 
-    const group = screen.getByRole("group", { name: "Text language" });
-    fireEvent.click(within(group).getByRole("button", { name: /العربية/ }));
-
-    await waitFor(() =>
-      expect(api.patch).toHaveBeenCalledWith("me/preferences/text-language", {
-        textLanguage: "ar",
-      }),
-    );
-    // UI language and direction are unchanged by a Text Language switch.
+    // The UI-language control stays; the Search-and-Display control has moved
+    // out of the sidebar to the self-service My Preferences page.
+    expect(screen.getByRole("group", { name: "Language" })).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Text language" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "My Preferences" })).toBeInTheDocument();
+    // UI language and direction remain English/LTR.
     expect(i18nInstance.language).toBe("en");
     expect(document.documentElement.dir).toBe("ltr");
   });
