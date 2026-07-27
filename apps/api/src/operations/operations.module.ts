@@ -2,6 +2,7 @@ import { Module } from "@nestjs/common";
 
 import { AuthenticationModule } from "../authentication/authentication.module.js";
 import { PasswordHasher } from "../authentication/password-hasher.js";
+import { CompanyProfileModule } from "../company-profile/company-profile.module.js";
 import {
   OperationsController,
   PortalController,
@@ -13,7 +14,7 @@ import { OperationsService } from "./operations.service.js";
 import { OrdersWorkflowService } from "./orders-workflow.service.js";
 
 @Module({
-  imports: [AuthenticationModule],
+  imports: [AuthenticationModule, CompanyProfileModule],
   controllers: [OperationsController, PortalController, PublicTrackingController],
   providers: [
     DriverCashReconciliationService,

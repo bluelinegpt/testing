@@ -85,6 +85,7 @@ const expectedTriggers = [
   "expense_types_name_guard",
   "driver_reconciliation_orders_driver_guard",
   "driver_reconciliation_orders_immutable",
+  "driver_reconciliation_orders_single_active_link",
   "driver_reconciliation_payments_immutable",
   "driver_reconciliation_payments_reference_normalize",
   "driver_reconciliations_confirmation_guard",
@@ -168,6 +169,7 @@ const expectedFunctions = [
   "protect_order_manual_identifiers",
   "normalize_account_login_identifiers",
   "sync_account_login_identifiers_to_company_user",
+  "enforce_single_active_reconciliation_link",
 ] as const;
 
 const expectedConstraints = [
@@ -185,7 +187,7 @@ const expectedConstraints = [
 const expectedIndexes = [
   "driver_reconciliation_expenses_parent_index",
   "driver_reconciliation_expenses_actor_index",
-  "driver_reconciliation_orders_order_unique",
+  "driver_reconciliation_orders_order_lookup_index",
   "driver_reconciliation_payments_bank_reference_unique",
   "driver_reconciliation_payments_parent_index",
   "expense_types_display_name_unique",

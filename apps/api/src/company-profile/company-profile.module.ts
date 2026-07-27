@@ -10,6 +10,7 @@ import { CompanyProfileService } from "./company-profile.service.js";
 @Module({
   imports: [AuthenticationModule, FilesModule],
   controllers: [CompanyProfileController, AccountPreferencesController],
+  exports: [CompanyProfileService],
   providers: [CompanyProfileService, AccountPreferencesService],
 })
 export class CompanyProfileModule {}

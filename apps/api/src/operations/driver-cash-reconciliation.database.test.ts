@@ -5,7 +5,12 @@ import { config as loadEnvironment } from "dotenv";
 import { Kysely, PostgresDialect, type Transaction, sql } from "kysely";
 import { Pool } from "pg";
 
+import type { ConfigService } from "@nestjs/config";
+
+import { CompanyProfileService } from "../company-profile/company-profile.service.js";
+import type { AppConfiguration } from "../configuration/environment.js";
 import { configuration } from "../configuration/environment.js";
+import type { FileStoragePort } from "../files/file-storage.port.js";
 import type { DatabaseSchema } from "../infrastructure/database/database.types.js";
 import type {
   KyselyTransactionManager,
@@ -103,12 +108,21 @@ describe.skipIf(!runDatabaseTests)("driver cash reconciliation confirm()", () =>
           permissions: new Set(["reconciliations.create"]),
           sessionId: randomUUID(),
         });
+        const companyProfile = new CompanyProfileService(
+          transaction as unknown as Kysely<DatabaseSchema>,
+          manager as unknown as KyselyTransactionManager,
+          tenants as unknown as TenantContextAccessor,
+          identities as unknown as IdentityContextAccessor,
+          {} as unknown as FileStoragePort,
+          { get: () => "local" } as unknown as ConfigService<AppConfiguration, true>,
+        );
         const service = new DriverCashReconciliationService(
           transaction as unknown as Kysely<DatabaseSchema>,
           manager as unknown as KyselyTransactionManager,
           tenants as unknown as TenantContextAccessor,
           identities as unknown as IdentityContextAccessor,
           new OperationsHistoryWriter(),
+          companyProfile,
         );
 
         const createCompany = async (label: string): Promise<CompanyFixture> => {
@@ -147,12 +161,13 @@ describe.skipIf(!runDatabaseTests)("driver cash reconciliation confirm()", () =>
           `.execute(transaction);
           await sql`
             insert into drivers (
-              id, company_id, account_id, code, driver_type, name_en, mobile_number, account_status
+              id, company_id, account_id, code, driver_type, name_en, mobile_number,
+              account_status, outsourced_fee_per_delivered_order
             ) values
               (${driverId}::uuid, ${companyId}::uuid, ${driverAccountId}::uuid,
-               ${`DRV-${suffix}-1`}, 'outsourced', 'Primary Driver', '971500000001', 'active'),
+               ${`DRV-${suffix}-1`}, 'outsourced', 'Primary Driver', '971500000001', 'active', 7.5),
               (${secondDriverId}::uuid, ${companyId}::uuid, ${secondDriverAccountId}::uuid,
-               ${`DRV-${suffix}-2`}, 'outsourced', 'Second Driver', '971500000002', 'active')
+               ${`DRV-${suffix}-2`}, 'outsourced', 'Second Driver', '971500000002', 'active', 7.5)
           `.execute(transaction);
           await sql`
             insert into company_bank_accounts (id, company_id, bank_name, account_name) values
@@ -189,7 +204,7 @@ describe.skipIf(!runDatabaseTests)("driver cash reconciliation confirm()", () =>
             forcePasswordChange: false,
             identityId: company.accountId,
             kind: "company_user",
-            permissions: new Set(["reconciliations.create"]),
+            permissions: new Set(["reconciliations.create", "reconciliations.reverse"]),
             sessionId: randomUUID(),
           });
         };
@@ -203,6 +218,8 @@ describe.skipIf(!runDatabaseTests)("driver cash reconciliation confirm()", () =>
             readonly driverCost?: number;
             readonly driverId?: string;
             readonly cashStatus?: string;
+            readonly referenceNumber?: string;
+            readonly serialNumber?: string;
           },
         ): Promise<string> => {
           const orderId = randomUUID();
@@ -227,6 +244,8 @@ describe.skipIf(!runDatabaseTests)("driver cash reconciliation confirm()", () =>
                       ${`T${orderSequence}`}, ${`Trader ${orderSequence}`}, '971500000003', 'active')
           `.execute(transaction);
           const driver = options.driverId ?? company.driverId;
+          // Serial/Reference Number are immutable once set (orders_manual_identifiers_immutable),
+          // so they must be provided at insert time, never patched afterward.
           await sql`
             insert into orders (
               id, company_id, order_number, order_date, trader_id, area_id,
@@ -237,7 +256,7 @@ describe.skipIf(!runDatabaseTests)("driver cash reconciliation confirm()", () =>
               trader_charges, trader_adjustments, trader_net_payable,
               delivery_status, driver_reconciliation_status, trader_settlement_status,
               delivered_at, pricing_provenance_status, final_service_fee_snapshot,
-              customer_provenance_status
+              customer_provenance_status, serial_number, reference_number
             ) values (
               ${orderId}::uuid, ${company.companyId}::uuid, ${number}, current_date,
               ${traderId}::uuid, ${areaId}::uuid, ${company.accountId}::uuid, ${driver}::uuid,
@@ -245,7 +264,8 @@ describe.skipIf(!runDatabaseTests)("driver cash reconciliation confirm()", () =>
               ${options.collected}, ${options.collected}, ${options.driverCost ?? 7.5},
               ${options.collected}, 0, 0, 0, 0, ${options.collected},
               'assigned_to_driver', 'not_applicable', 'not_eligible', null,
-              'legacy_unattributed', 0, 'legacy_unattributed'
+              'legacy_unattributed', 0, 'legacy_unattributed',
+              ${options.serialNumber ?? null}, ${options.referenceNumber ?? null}
             )
           `.execute(transaction);
           await sql`
@@ -268,6 +288,9 @@ describe.skipIf(!runDatabaseTests)("driver cash reconciliation confirm()", () =>
           orderIds: readonly string[],
           overrides: Partial<CreateDriverReconciliationDto> = {},
         ): CreateDriverReconciliationDto => ({
+          // The collection method is mandatory (§5); default to Cash so existing
+          // cases exercise confirmation, and override per case where relevant.
+          collectionPaymentMethod: "cash",
           excludedOrderIds: [],
           expenses: [],
           orderIds: [...orderIds],
@@ -986,11 +1009,12 @@ describe.skipIf(!runDatabaseTests)("driver cash reconciliation confirm()", () =>
         `.execute(transaction);
         await sql`
           insert into drivers (
-            id, company_id, account_id, code, driver_type, name_en, mobile_number, account_status
+            id, company_id, account_id, code, driver_type, name_en, mobile_number, account_status,
+            outsourced_fee_per_delivered_order
           ) values (
             ${idleDriverId}::uuid, ${companyA.companyId}::uuid, ${idleDriverAccountId}::uuid,
             ${`DRV-IDLE-${companyA.companyId.slice(0, 4)}`}, 'outsourced', 'Idle Driver',
-            '971500000009', 'disabled'
+            '971500000009', 'disabled', 7.5
           )
         `.execute(transaction);
         const hidden = await service.searchDrivers({ pageSize: 50 });
@@ -1235,6 +1259,434 @@ describe.skipIf(!runDatabaseTests)("driver cash reconciliation confirm()", () =>
         );
         useCompany(companyA);
 
+        // --- Phase 4 CP2: Cash/Visa enforcement -------------------------------
+        useCompany(companyA);
+        const noMethodOrder = await createOrder(companyA, { collected: 40 });
+        await expectRejection(
+          () =>
+            service.confirm(
+              {
+                excludedOrderIds: [],
+                expenses: [],
+                orderIds: [noMethodOrder],
+                payments: [{ amount: 40, paymentMethod: "cash" }],
+                selectionMode: "ids",
+              },
+              randomUUID(),
+              `key-no-method-${randomUUID()}`,
+            ),
+          "reconciliation_payment_method_required",
+        );
+        // The Order is untouched by the rejected attempt.
+        expect((await statusOf(noMethodOrder)).cashStatus).toBe("pending");
+
+        const visaOrder = await createOrder(companyA, { collected: 60 });
+        const visaResult = await service.confirm(
+          selection([visaOrder], {
+            collectionPaymentMethod: "visa",
+            payments: [{ amount: 60, paymentMethod: "cash" }],
+          }),
+          randomUUID(),
+          `key-visa-${randomUUID()}`,
+        );
+        const visaMethods = await sql<{ headerMethod: string | null; linkMethod: string | null }>`
+          select r.collection_payment_method as "headerMethod",
+                 l.collection_payment_method as "linkMethod"
+            from driver_reconciliations r
+            join driver_reconciliation_orders l on l.reconciliation_id = r.id
+           where r.id = ${visaResult.reconciliationId}::uuid
+        `.execute(transaction);
+        expect(visaMethods.rows[0]?.headerMethod).toBe("visa");
+        expect(visaMethods.rows[0]?.linkMethod).toBe("visa");
+        // One collection carries exactly one method for every linked Order — the
+        // DTO has no per-Order method field, so Cash/Visa mixing within a single
+        // collection cannot even be expressed, let alone submitted.
+        const cashOrderForMix = await createOrder(companyA, { collected: 15 });
+        const mixedResult = await service.confirm(
+          selection([cashOrderForMix], {
+            collectionPaymentMethod: "cash",
+            payments: [{ amount: 15, paymentMethod: "cash" }],
+          }),
+          randomUUID(),
+          `key-cash-for-mix-${randomUUID()}`,
+        );
+        const mixedMethods = await sql<{ method: string | null }>`
+          select collection_payment_method as method from driver_reconciliation_orders
+           where reconciliation_id = ${mixedResult.reconciliationId}::uuid
+        `.execute(transaction);
+        expect(mixedMethods.rows.every((row) => row.method === "cash")).toBe(true);
+
+        // --- Phase 4 CP2: Reversal ---------------------------------------------
+        const reversalOrder = await createOrder(companyA, { collected: 75 });
+        const reversalTarget = await service.confirm(
+          selection([reversalOrder], {
+            collectionPaymentMethod: "cash",
+            payments: [{ amount: 75, paymentMethod: "cash" }],
+          }),
+          randomUUID(),
+          `key-reversal-target-${randomUUID()}`,
+        );
+        expect((await statusOf(reversalOrder)).cashStatus).toBe("reconciled");
+
+        // Reason is required.
+        await expectRejection(
+          () => service.reverse(reversalTarget.reconciliationId, "   ", randomUUID()),
+          "reconciliation_reversal_reason_required",
+        );
+
+        const reversal = await service.reverse(
+          reversalTarget.reconciliationId,
+          "Wrong Driver selected by mistake",
+          randomUUID(),
+        );
+        expect(reversal.orderCount).toBe(1);
+        expect(reversal.reversalReconciliationNumber).not.toBe(
+          reversalTarget.reconciliationNumber,
+        );
+
+        // The ORIGINAL reconciliation is preserved verbatim — never rewritten.
+        const originalAfterReversal = await sql<{
+          grossCollections: string;
+          netAmountReceived: string;
+          status: string;
+        }>`
+          select gross_collections::text as "grossCollections",
+                 net_amount_received::text as "netAmountReceived", status
+            from driver_reconciliations where id = ${reversalTarget.reconciliationId}::uuid
+        `.execute(transaction);
+        expect(originalAfterReversal.rows[0]).toEqual({
+          grossCollections: "75.00",
+          netAmountReceived: "75.00",
+          status: "confirmed",
+        });
+
+        // A compensating reversal record was created, linked via reversal_of_id,
+        // confirmed and zero-amount — never a destructive delete.
+        const reversalRow = await sql<{
+          grossCollections: string;
+          reversalOfId: string;
+          status: string;
+        }>`
+          select gross_collections::text as "grossCollections",
+                 reversal_of_id as "reversalOfId", status
+            from driver_reconciliations where id = ${reversal.reversalReconciliationId}::uuid
+        `.execute(transaction);
+        expect(reversalRow.rows[0]).toEqual({
+          grossCollections: "0.00",
+          reversalOfId: reversalTarget.reconciliationId,
+          status: "confirmed",
+        });
+
+        // The Order passed through 'reversed' (recorded in history) and ended at
+        // 'pending' — eligibility restored.
+        expect((await statusOf(reversalOrder)).cashStatus).toBe("pending");
+        const reversalHistory = await sql<{ fromStatus: string | null; toStatus: string }>`
+          select from_status as "fromStatus", to_status as "toStatus"
+            from order_status_history
+           where order_id = ${reversalOrder}::uuid and status_dimension = 'driver_reconciliation'
+           order by occurred_at
+        `.execute(transaction);
+        expect(
+          reversalHistory.rows.map((row) => `${row.fromStatus ?? "null"}->${row.toStatus}`),
+        ).toEqual(["pending->reconciled", "reconciled->reversed", "reversed->pending"]);
+        const reversalEvent = await sql<{ count: number }>`
+          select count(*)::int as count from order_events
+           where order_id = ${reversalOrder}::uuid and event_type = 'driver_cash.reversed'
+        `.execute(transaction);
+        expect(reversalEvent.rows[0]?.count).toBe(1);
+        const reversalAudit = await sql<{ count: number }>`
+          select count(*)::int as count from audit_events
+           where company_id = ${companyA.companyId}::uuid
+             and action = 'driver_reconciliation.reverse'
+             and subject_id = ${reversalTarget.reconciliationId}
+        `.execute(transaction);
+        expect(reversalAudit.rows[0]?.count).toBe(1);
+
+        // Restored eligibility: the Order reappears in the picker...
+        const eligibleAfterReversal = await service.eligibleOrders({
+          driverId: companyA.driverId,
+        });
+        expect(eligibleAfterReversal.items.some((row) => row.id === reversalOrder)).toBe(true);
+        // ...and can be reconciled again from scratch.
+        const reconfirmed = await service.confirm(
+          selection([reversalOrder], {
+            collectionPaymentMethod: "cash",
+            payments: [{ amount: 75, paymentMethod: "cash" }],
+          }),
+          randomUUID(),
+          `key-reversal-reconfirm-${randomUUID()}`,
+        );
+        expect(reconfirmed.orderCount).toBe(1);
+        expect((await statusOf(reversalOrder)).cashStatus).toBe("reconciled");
+
+        // A confirmed reconciliation cannot be reversed twice.
+        await expectRejection(
+          () => service.reverse(reversalTarget.reconciliationId, "second attempt", randomUUID()),
+          "reconciliation_already_reversed",
+        );
+        // A reversal entry cannot itself be reversed.
+        await expectRejection(
+          () => service.reverse(reversal.reversalReconciliationId, "undo the undo", randomUUID()),
+          "reconciliation_reversal_invalid",
+        );
+        // Unknown reconciliation.
+        await expectRejection(
+          () => service.reverse(randomUUID(), "does not exist", randomUUID()),
+          "reconciliation_not_found",
+        );
+        // A synthetic still-draft row (unreachable via the public API, but the
+        // guard is tested directly) cannot be reversed.
+        const draftId = randomUUID();
+        await sql`
+          insert into driver_reconciliations (
+            id, company_id, reconciliation_number, driver_id, business_date,
+            gross_collections, driver_payable_deduction, reconciliation_expenses,
+            net_amount_received, status, created_by_account_id
+          ) values (
+            ${draftId}::uuid, ${companyA.companyId}::uuid, ${`REC-DRAFT-${draftId.slice(0, 8)}`},
+            ${companyA.driverId}::uuid, current_date, 0, 0, 0, 0, 'draft',
+            ${companyA.accountId}::uuid
+          )
+        `.execute(transaction);
+        await expectRejection(
+          () => service.reverse(draftId, "not confirmed yet", randomUUID()),
+          "reconciliation_not_confirmed",
+        );
+        // A draft row (never immutable) is removed so it does not pollute the
+        // later list()/summary() assertions below.
+        await sql`delete from driver_reconciliations where id = ${draftId}::uuid`.execute(
+          transaction,
+        );
+
+        // Reversal is blocked once an Order has progressed to Trader settlement —
+        // it must never undo money already paid onward.
+        const settlementBlockedOrder = await createOrder(companyA, { collected: 90 });
+        const settlementBlockedResult = await service.confirm(
+          selection([settlementBlockedOrder], {
+            collectionPaymentMethod: "cash",
+            payments: [{ amount: 90, paymentMethod: "cash" }],
+          }),
+          randomUUID(),
+          `key-settlement-blocked-${randomUUID()}`,
+        );
+        await sql`
+          update orders set trader_settlement_status = 'money_sent_to_trader'
+           where id = ${settlementBlockedOrder}::uuid
+        `.execute(transaction);
+        await expectRejection(
+          () =>
+            service.reverse(
+              settlementBlockedResult.reconciliationId,
+              "trying anyway",
+              randomUUID(),
+            ),
+          "reconciliation_reversal_blocked_by_settlement",
+        );
+        // Blocked reversal leaves the Order exactly as it was — no partial effect.
+        expect((await statusOf(settlementBlockedOrder)).cashStatus).toBe("reconciled");
+
+        // Company isolation on reversal.
+        useCompany(companyB);
+        await expectRejection(
+          () => service.reverse(reversalTarget.reconciliationId, "cross-company", randomUUID()),
+          "reconciliation_not_found",
+        );
+        useCompany(companyA);
+
+        // Permission denial.
+        identities.set({
+          companyId: companyA.companyId,
+          forcePasswordChange: false,
+          identityId: companyA.accountId,
+          kind: "company_user",
+          permissions: new Set(["reconciliations.create"]),
+          sessionId: randomUUID(),
+        });
+        const permissionOrder = await createOrder(companyA, { collected: 20 });
+        const permissionTarget = await service.confirm(
+          selection([permissionOrder], {
+            collectionPaymentMethod: "cash",
+            payments: [{ amount: 20, paymentMethod: "cash" }],
+          }),
+          randomUUID(),
+          `key-permission-${randomUUID()}`,
+        );
+        await expectRejection(
+          () => service.reverse(permissionTarget.reconciliationId, "no permission", randomUUID()),
+          "permission_denied",
+        );
+        useCompany(companyA);
+
+        // --- Phase 4 CP2: Driver Collections summary ----------------------------
+        const summary = await service.summary({});
+        expect(Number(summary.cashTotal)).toBeGreaterThan(0);
+        expect(Number(summary.visaTotal)).toBeGreaterThanOrEqual(60);
+        expect(summary.reconciledCollectionsCount).toBeGreaterThan(0);
+        // The strict Difference=0 confirm() gate means every confirmed row is
+        // exactly reconciled — this metric is honestly always zero today.
+        expect(summary.collectionsWithDifferenceCount).toBe(0);
+        const pendingOrderForSummary = await createOrder(companyA, { collected: 33 });
+        const summaryAfterPending = await service.summary({});
+        expect(summaryAfterPending.pendingOrderCount).toBeGreaterThanOrEqual(1);
+        expect(Number(summaryAfterPending.pendingAmountToCollect)).toBeGreaterThanOrEqual(33);
+        expect(summaryAfterPending.outstandingFromDrivers).toBe(
+          summaryAfterPending.pendingAmountToCollect,
+        );
+        const visaOnlySummary = await service.summary({ collectionPaymentMethod: "visa" });
+        expect(Number(visaOnlySummary.visaTotal)).toBeGreaterThanOrEqual(60);
+        expect(visaOnlySummary.cashTotal).toBe("0.00");
+        // The Driver filter narrows the summary to only that Driver's confirmed
+        // collections (the earlier Disabled-Driver scenario confirmed AED 60.00
+        // cash for the second Driver; no Visa collection was ever made for them).
+        const secondDriverSummary = await service.summary({ driverId: companyA.secondDriverId });
+        expect(secondDriverSummary.cashTotal).toBe("60.00");
+        expect(secondDriverSummary.visaTotal).toBe("0.00");
+
+        // --- Phase 4 CP2: Comprehensive report-data endpoint --------------------
+        const reportSourceOrder = await createOrder(companyA, {
+          collected: 120,
+          referenceNumber: "REF-0001",
+          serialNumber: "RPT-0001",
+        });
+        const reportResult = await service.confirm(
+          selection([reportSourceOrder], {
+            collectionPaymentMethod: "cash",
+            expenses: [{ amount: 5, expenseTypeId: companyA.expenseTypes.PETROL ?? "" }],
+            notes: "End of day handover",
+            payments: [{ amount: 115, paymentMethod: "cash" }],
+          }),
+          randomUUID(),
+          `key-report-${randomUUID()}`,
+        );
+        const report = await service.reportData(reportResult.reconciliationId);
+        expect(report.header.reconciliationNumber).toBe(reportResult.reconciliationNumber);
+        expect(report.header.status).toBe("confirmed");
+        expect(report.header.collectionPaymentMethod).toBe("cash");
+        expect(report.header.driverType).toBe("outsourced");
+        expect(report.header.notes).toBe("End of day handover");
+        expect(report.header.isReversal).toBe(false);
+        expect(report.header.company.nameEn.length).toBeGreaterThan(0);
+        expect(report.orders).toHaveLength(1);
+        expect(report.orders[0]?.serialNumber).toBe("RPT-0001");
+        expect(report.orders[0]?.referenceNumber).toBe("REF-0001");
+        expect(report.orders[0]?.customerAmountToCollect).toBe("120.00");
+        expect(report.expenses).toHaveLength(1);
+        expect(report.expenses[0]?.amount).toBe("5.00");
+        expect(report.summary.orderCount).toBe(1);
+        expect(report.summary.grossCollections).toBe("120.00");
+        expect(report.summary.driverExpenses).toBe("5.00");
+        expect(report.summary.netExpected).toBe("115.00");
+        expect(report.summary.actualReceived).toBe("115.00");
+        expect(report.summary.difference).toBe("0.00");
+        // No internal database ID (the reconciliation's own primary key, or the
+        // Driver's/Order's) appears anywhere in the report payload.
+        const serialisedReport = JSON.stringify(report);
+        expect(serialisedReport.includes(reportResult.reconciliationId)).toBe(false);
+        expect(serialisedReport.includes(reportSourceOrder)).toBe(false);
+        expect(serialisedReport.includes(companyA.driverId)).toBe(false);
+
+        // reportData() reflects a reversed reconciliation's flags correctly.
+        const reversedReport = await service.reportData(reversalTarget.reconciliationId);
+        expect(reversedReport.header.isReversal).toBe(false);
+        expect(reversedReport.header.reversedByReconciliationNumber).toBe(
+          reversal.reversalReconciliationNumber,
+        );
+        const reversalEntryReport = await service.reportData(reversal.reversalReconciliationId);
+        expect(reversalEntryReport.header.isReversal).toBe(true);
+        expect(reversalEntryReport.header.reversesReconciliationNumber).toBe(
+          reversalTarget.reconciliationNumber,
+        );
+
+        // Company isolation and permission enforcement on the report endpoint.
+        useCompany(companyB);
+        await expectRejection(
+          () => service.reportData(reportResult.reconciliationId),
+          "reconciliation_not_found",
+        );
+        useCompany(companyA);
+        identities.set({
+          companyId: companyA.companyId,
+          forcePasswordChange: false,
+          identityId: companyA.accountId,
+          kind: "company_user",
+          permissions: new Set(),
+          sessionId: randomUUID(),
+        });
+        await expectRejection(
+          () => service.reportData(reportResult.reconciliationId),
+          "permission_denied",
+        );
+        useCompany(companyA);
+
+        // --- Phase 4 CP2: Extended list() filters --------------------------------
+        const dxbEmirate = await sql<{ id: string }>`
+          select id from emirates where code = 'DXB'
+        `.execute(transaction);
+        const emirateId = dxbEmirate.rows[0]?.id ?? "";
+        const byEmirate = await service.list({ emirateId, pageSize: 100 });
+        expect(byEmirate.items.some((row) => row.id === reportResult.reconciliationId)).toBe(true);
+
+        const bySerial = await service.list({ orderSerialNumber: "RPT-0001", pageSize: 50 });
+        expect(bySerial.items).toHaveLength(1);
+        expect(bySerial.items[0]?.id).toBe(reportResult.reconciliationId);
+
+        const byReference = await service.list({ referenceNumber: "REF-0001", pageSize: 50 });
+        expect(byReference.items).toHaveLength(1);
+        expect(byReference.items[0]?.id).toBe(reportResult.reconciliationId);
+
+        const byDriverType = await service.list({ driverType: "outsourced", pageSize: 100 });
+        expect(byDriverType.items.length).toBeGreaterThan(0);
+
+        const byCollectionVisa = await service.list({
+          collectionPaymentMethod: "visa",
+          pageSize: 50,
+        });
+        expect(byCollectionVisa.items.every((row) => row.collectionPaymentMethod === "visa")).toBe(
+          true,
+        );
+        expect(byCollectionVisa.items.some((row) => row.id === visaResult.reconciliationId)).toBe(
+          true,
+        );
+
+        const byCollectionNotAssigned = await service.list({
+          collectionPaymentMethod: "not_assigned",
+          pageSize: 50,
+        });
+        // The method is mandatory to confirm (§5), so no row is ever unassigned.
+        expect(byCollectionNotAssigned.items).toHaveLength(0);
+
+        const byStatusReversed = await service.list({
+          reconciliationStatus: "reversed",
+          pageSize: 50,
+        });
+        expect(
+          byStatusReversed.items.some((row) => row.id === reversalTarget.reconciliationId),
+        ).toBe(true);
+        expect(byStatusReversed.items.every((row) => row.isReversed)).toBe(true);
+        // The synthetic reversal-marker row never appears as its own list entry.
+        expect(
+          byStatusReversed.items.some((row) => row.id === reversal.reversalReconciliationId),
+        ).toBe(false);
+
+        const byStatusReconciled = await service.list({
+          reconciliationStatus: "reconciled",
+          pageSize: 100,
+        });
+        expect(
+          byStatusReconciled.items.some((row) => row.id === reversalTarget.reconciliationId),
+        ).toBe(false);
+        expect(byStatusReconciled.items.every((row) => !row.isReversed)).toBe(true);
+
+        const byDeliveredRange = await service.list({
+          deliveredFrom: new Date().toISOString().slice(0, 10),
+          deliveredTo: new Date().toISOString().slice(0, 10),
+          pageSize: 100,
+        });
+        expect(byDeliveredRange.items.some((row) => row.id === reportResult.reconciliationId)).toBe(
+          true,
+        );
+
+        void pendingOrderForSummary;
         throw rollbackMarker;
       });
     } catch (error) {

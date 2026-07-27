@@ -8,7 +8,12 @@ import { Kysely, PostgresDialect, sql } from "kysely";
 import { FileMigrationProvider, Migrator } from "kysely/migration";
 import { Pool } from "pg";
 
+import type { ConfigService } from "@nestjs/config";
+
+import { CompanyProfileService } from "../company-profile/company-profile.service.js";
+import type { AppConfiguration } from "../configuration/environment.js";
 import { configuration } from "../configuration/environment.js";
+import type { FileStoragePort } from "../files/file-storage.port.js";
 import type { DatabaseSchema } from "../infrastructure/database/database.types.js";
 import { KyselyTransactionManager } from "../infrastructure/database/transaction-manager.js";
 import type { IdentityContext, IdentityContextAccessor } from "../security/identity-context.js";
@@ -235,21 +240,31 @@ export function createCaller(
     });
   }
   const database = new Kysely<DatabaseSchema>({ dialect: new PostgresDialect({ pool }) });
+  const transactions = new KyselyTransactionManager(database);
   const tenants = new MutableTenantAccessor({ companyId, identityId: accountId });
   const identities = new MutableIdentityAccessor({
     companyId,
     forcePasswordChange: false,
     identityId: accountId,
     kind: "company_user",
-    permissions: new Set(["reconciliations.create"]),
+    permissions: new Set(["reconciliations.create", "reconciliations.reverse"]),
     sessionId: randomUUID(),
   });
+  const companyProfile = new CompanyProfileService(
+    database,
+    transactions,
+    tenants as unknown as TenantContextAccessor,
+    identities as unknown as IdentityContextAccessor,
+    {} as unknown as FileStoragePort,
+    { get: () => "local" } as unknown as ConfigService<AppConfiguration, true>,
+  );
   const service = new DriverCashReconciliationService(
     database,
-    new KyselyTransactionManager(database),
+    transactions,
     tenants as unknown as TenantContextAccessor,
     identities as unknown as IdentityContextAccessor,
     new OperationsHistoryWriter(),
+    companyProfile,
   );
   return { database, destroy: () => database.destroy(), service };
 }

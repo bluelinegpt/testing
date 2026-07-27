@@ -46,6 +46,8 @@ import {
 } from "./operations.service.js";
 import {
   DriverCashReconciliationService,
+  type DriverCollectionReportData,
+  type DriverCollectionsSummary,
   type DriverReconciliationPreview,
   type DriverReconciliationResult,
   type EligibleOrderRow,
@@ -69,6 +71,7 @@ import {
   BulkSettleTraderDto,
   CreateDriverReconciliationDto,
   CreateDriverDto,
+  DriverCollectionsSummaryQueryDto,
   DriverSearchQueryDto,
   EligibleOrdersQueryDto,
   ReconciliationListQueryDto,
@@ -81,6 +84,7 @@ import {
   RegisterInternationalShipmentDto,
   RegisterOrderAttachmentDto,
   OrderSelectionDto,
+  ReverseDriverReconciliationDto,
   UpdateOrderDto,
 } from "./operations.dto.js";
 
@@ -374,6 +378,18 @@ export class OperationsController {
     return this.reconciliations.list(query);
   }
 
+  // A static path segment ("summary") must be declared before the
+  // ":reconciliationId" route below, or the router would try to parse
+  // "summary" as a reconciliation ID first.
+  @RequireAnyPermission("reconciliations.create", "users_roles.manage")
+  @ApiOperation({ summary: "Server-calculated Driver Collections summary cards" })
+  @Get("cash/reconciliations/summary")
+  public driverCollectionsSummary(
+    @Query() query: DriverCollectionsSummaryQueryDto,
+  ): Promise<DriverCollectionsSummary> {
+    return this.reconciliations.summary(query);
+  }
+
   @RequireAnyPermission("reconciliations.create", "users_roles.manage")
   @ApiOperation({ summary: "Show one Driver cash reconciliation with Orders, payments and audit" })
   @Get("cash/reconciliations/:reconciliationId")
@@ -389,6 +405,32 @@ export class OperationsController {
     @Param("reconciliationId", new ParseUUIDPipe()) reconciliationId: string,
   ): Promise<unknown> {
     return this.reconciliations.printData(reconciliationId);
+  }
+
+  @RequireAnyPermission("reconciliations.create", "reports.export", "users_roles.manage")
+  @ApiOperation({
+    summary: "Comprehensive server-authoritative report data for the Driver Collection Report",
+  })
+  @Get("cash/reconciliations/:reconciliationId/report-data")
+  public driverReconciliationReportData(
+    @Param("reconciliationId", new ParseUUIDPipe()) reconciliationId: string,
+  ): Promise<DriverCollectionReportData> {
+    return this.reconciliations.reportData(reconciliationId);
+  }
+
+  @RequireAnyPermission("reconciliations.reverse", "users_roles.manage")
+  @ApiOperation({ summary: "Reverse a confirmed Driver cash reconciliation with a reason" })
+  @Post("cash/reconciliations/:reconciliationId/reverse")
+  public reverseDriverReconciliation(
+    @Param("reconciliationId", new ParseUUIDPipe()) reconciliationId: string,
+    @Body() input: ReverseDriverReconciliationDto,
+    @Req() request: Request,
+  ): Promise<unknown> {
+    return this.reconciliations.reverse(
+      reconciliationId,
+      input.reason,
+      this.correlationId(request),
+    );
   }
 
   @ApiOperation({ summary: "List delivered orders pending trader settlement" })

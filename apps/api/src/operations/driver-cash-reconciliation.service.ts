@@ -4,6 +4,7 @@ import { HttpStatus, Inject, Injectable } from "@nestjs/common";
 import { Decimal } from "decimal.js";
 import { type Kysely, sql } from "kysely";
 
+import { CompanyProfileService } from "../company-profile/company-profile.service.js";
 import { DATABASE } from "../infrastructure/database/database.tokens.js";
 import type { DatabaseSchema } from "../infrastructure/database/database.types.js";
 import { KyselyTransactionManager } from "../infrastructure/database/transaction-manager.js";
@@ -21,6 +22,8 @@ import {
 } from "./reconciliation-status.js";
 import type {
   CreateDriverReconciliationDto,
+  DriverCollectionsFilterDto,
+  DriverCollectionsSummaryQueryDto,
   DriverSearchQueryDto,
   EligibleOrdersQueryDto,
   FinancialPaymentDto,
@@ -165,6 +168,7 @@ export interface DriverReconciliationPreview {
 
 export interface ReconciliationListRow {
   readonly businessDate: string;
+  readonly collectionPaymentMethod: "cash" | "visa" | null;
   readonly confirmedAt: string | null;
   readonly confirmedBy: string;
   readonly driverName: string;
@@ -172,6 +176,7 @@ export interface ReconciliationListRow {
   readonly expenseTotal: string;
   readonly grossCollections: string;
   readonly id: string;
+  readonly isReversed: boolean;
   readonly netAmountReceived: string;
   readonly orderCount: number;
   readonly paymentTotal: string;
@@ -185,6 +190,94 @@ export interface ExpenseTypeOption {
   readonly id: string;
   readonly name: string;
   readonly requiresDescription: boolean;
+}
+
+/** Server-calculated Driver Collections workspace summary cards (§3). */
+export interface DriverCollectionsSummary {
+  readonly actualAmountReceived: string;
+  readonly cashTotal: string;
+  readonly collectionsWithDifferenceCount: number;
+  readonly driverExpenses: string;
+  readonly netExpectedFromDrivers: string;
+  readonly outstandingFromDrivers: string;
+  readonly pendingAmountToCollect: string;
+  readonly pendingOrderCount: number;
+  readonly reconciledCollectionsCount: number;
+  readonly visaTotal: string;
+}
+
+/**
+ * Comprehensive, server-authoritative, PDF-ready data for the Driver Collection
+ * Report (§10/§19). Built entirely from stored snapshots on the reconciliation,
+ * its linked Orders and its expenses — never from the current live catalog
+ * state, so a report regenerated later is byte-identical. No internal database
+ * IDs appear anywhere in this shape.
+ */
+export interface DriverCollectionReportData {
+  readonly expenses: readonly {
+    readonly amount: string;
+    readonly description: string | null;
+    readonly enteredBy: string;
+    readonly expenseType: string;
+    readonly reason: string | null;
+    readonly recordedAt: string;
+    readonly reference: string | null;
+  }[];
+  readonly header: {
+    readonly businessDate: string;
+    readonly collectionPaymentMethod: "cash" | "visa" | null;
+    readonly company: {
+      readonly hasLogo: boolean;
+      readonly nameAr: string | null;
+      readonly nameEn: string;
+      readonly subtitleAr: string | null;
+      readonly subtitleEn: string | null;
+      readonly telephone: string | null;
+    };
+    readonly confirmedAt: string | null;
+    readonly confirmedBy: string;
+    readonly createdAt: string;
+    readonly createdBy: string;
+    readonly driverName: string;
+    readonly driverType: "employee" | "outsourced";
+    readonly isReversal: boolean;
+    readonly notes: string | null;
+    readonly reconciliationNumber: string;
+    /** The reconciliation number this entry reverses, when `isReversal` is true. */
+    readonly reversesReconciliationNumber: string | null;
+    readonly reversedByReconciliationNumber: string | null;
+    readonly status: "confirmed" | "draft";
+    readonly statusLabel: string;
+  };
+  readonly orders: readonly {
+    readonly additionalFees: string;
+    readonly areaName: string;
+    readonly codAmount: string;
+    readonly customerAmountToCollect: string;
+    readonly customerName: string;
+    readonly deliveryDate: string | null;
+    readonly driverReconciliationStatus: string;
+    readonly driverReconciliationStatusLabel: string;
+    readonly emirateName: string | null;
+    readonly paymentMethod: "cash" | "visa" | null;
+    readonly referenceNumber: string | null;
+    readonly serialNumber: string;
+    readonly serviceFee: string;
+    readonly totalDeductions: string;
+    readonly traderName: string;
+    readonly traderPayable: string;
+    readonly vatAmount: string;
+  }[];
+  readonly summary: {
+    readonly actualReceived: string;
+    readonly cashTotal: string;
+    readonly difference: string;
+    readonly driverExpenses: string;
+    readonly grossCollections: string;
+    readonly netExpected: string;
+    readonly orderCount: number;
+    readonly visaTotal: string;
+  };
 }
 
 /**
@@ -203,6 +296,7 @@ export class DriverCashReconciliationService {
     @Inject(TenantContextAccessor) private readonly tenants: TenantContextAccessor,
     @Inject(IdentityContextAccessor) private readonly identities: IdentityContextAccessor,
     @Inject(OperationsHistoryWriter) private readonly history: OperationsHistoryWriter,
+    @Inject(CompanyProfileService) private readonly companyProfile: CompanyProfileService,
   ) {}
 
   public async expenseTypes(): Promise<readonly ExpenseTypeOption[]> {
@@ -286,20 +380,39 @@ export class DriverCashReconciliationService {
         : query.sortBy === "orderNumber"
           ? "o.order_number"
           : "o.delivered_at";
+    // The live `driver_reconciliation_status = 'pending'` column is the sole
+    // eligibility gate (matching `confirm()`'s own trust model in
+    // `resolveOrders`): once a Driver collection is reversed, `reverse()` moves
+    // the Order back to 'pending', and it must reappear here immediately. An
+    // extra "not already linked" check was removed because the historical link
+    // row to the (now reversed) original collection is permanent — checking it
+    // would incorrectly hide every restored Order forever.
     const filters = sql`
       o.company_id = ${companyId}::uuid
         and o.assigned_driver_id = ${query.driverId}::uuid
         and o.delivery_status = 'delivered'
         and o.driver_reconciliation_status = 'pending'
-        and not exists (
-          select 1 from driver_reconciliation_orders link
-           where link.order_id = o.id and link.company_id = o.company_id
-        )
-        and (${search}::text is null or o.order_number ilike '%' || ${search} || '%')
+        and (${search}::text is null
+             or o.order_number ilike '%' || ${search} || '%'
+             or o.serial_number ilike '%' || ${search} || '%'
+             or o.reference_number ilike '%' || ${search} || '%'
+             or o.customer_name ilike '%' || ${search} || '%'
+             or o.customer_mobile_number ilike '%' || ${search} || '%'
+             or exists (
+               select 1 from traders t
+                where t.id = o.trader_id and t.company_id = o.company_id
+                  and (t.name_en ilike '%' || ${search} || '%'
+                       or t.name_ar ilike '%' || ${search} || '%')
+             ))
         and (${query.traderId ?? null}::uuid is null
              or o.trader_id = ${query.traderId ?? null}::uuid)
         and (${query.areaId ?? null}::uuid is null
              or o.area_id = ${query.areaId ?? null}::uuid)
+        and (${query.emirateId ?? null}::uuid is null or exists (
+             select 1 from areas a
+              where a.id = o.area_id and a.company_id = o.company_id
+                and a.emirate_id = ${query.emirateId ?? null}::uuid
+        ))
         and (${query.deliveredFrom ?? null}::date is null
              or o.delivered_at::date >= ${query.deliveredFrom ?? null}::date)
         and (${query.deliveredTo ?? null}::date is null
@@ -468,6 +581,18 @@ export class DriverCashReconciliationService {
       const driverId = this.assertSingleEligibleDriver(orders);
       await this.assertDriverReconcilable(transaction, companyId, driverId, orders);
 
+      // §5: every Driver collection is either Cash or Visa — the collection method
+      // is mandatory and is carried onto the header and each linked Order so Cash
+      // and Visa can never be mixed within one reconciliation.
+      const collectionPaymentMethod = input.collectionPaymentMethod;
+      if (collectionPaymentMethod === undefined) {
+        throw new ApplicationException(
+          "reconciliation_payment_method_required",
+          "Select Cash or Visa for the Driver collection",
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+
       // 5. Recalculate totals from the locked rows, never from client input.
       const gross = this.sumCollections(orders);
       const expenseTotal = this.sumExpenses(input.expenses);
@@ -510,12 +635,12 @@ export class DriverCashReconciliationService {
         insert into driver_reconciliations (
           company_id, reconciliation_number, driver_id, business_date,
           gross_collections, driver_payable_deduction, reconciliation_expenses,
-          net_amount_received, status, created_by_account_id, collection_payment_method
+          net_amount_received, status, created_by_account_id, collection_payment_method, notes
         ) values (
           ${companyId}::uuid, ${reconciliationNumber}, ${driverId}::uuid, current_date,
           ${gross.toFixed(2)}, ${driverPayableDeduction.toFixed(2)}, ${expenseTotal.toFixed(2)},
           ${net.toFixed(2)}, 'draft', ${identity.identityId}::uuid,
-          ${input.collectionPaymentMethod ?? null}
+          ${collectionPaymentMethod}, ${input.notes?.trim() || null}
         ) returning id
       `.execute(transaction);
       const reconciliationId = header.rows[0]?.id;
@@ -529,7 +654,7 @@ export class DriverCashReconciliationService {
           ) values (
             ${companyId}::uuid, ${reconciliationId}::uuid, ${order.id}::uuid,
             ${order.amountCollected}, ${driverPayableDeduction.toFixed(2)},
-            ${input.collectionPaymentMethod ?? null}
+            ${collectionPaymentMethod}
           )
         `.execute(transaction);
       }
@@ -666,6 +791,221 @@ export class DriverCashReconciliationService {
   }
 
   /**
+   * Reverse a confirmed Driver collection (§8). The original record is immutable
+   * and preserved; a compensating reversal reconciliation is created (linked via
+   * `reversal_of_id`), the linked Orders move `reconciled → reversed`, and the
+   * action is audited with a mandatory reason. Reversal is blocked when any Order
+   * has already progressed to Trader settlement, so it can never undo money that
+   * was paid onward. Concurrent reversals serialise on the `for update` lock of
+   * the original row, and a prior reversal makes a second attempt a no-op error.
+   */
+  public async reverse(
+    reconciliationId: string,
+    reason: string,
+    correlationId: string,
+  ): Promise<{
+    orderCount: number;
+    reconciliationId: string;
+    reversalReconciliationId: string;
+    reversalReconciliationNumber: string;
+  }> {
+    this.assertAnyPermission("reconciliations.reverse");
+    const { companyId } = this.tenants.current();
+    const identity = this.identities.current();
+    const trimmedReason = reason.trim();
+    if (trimmedReason === "") {
+      throw new ApplicationException(
+        "reconciliation_reversal_reason_required",
+        "A reason is required to reverse a Driver collection",
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    return this.transactions.execute(async (transaction) => {
+      const original = (
+        await sql<{
+          driverId: string;
+          reconciliationNumber: string;
+          reversalOfId: string | null;
+          status: string;
+        }>`
+          select driver_id as "driverId", reconciliation_number as "reconciliationNumber",
+                 reversal_of_id as "reversalOfId", status
+            from driver_reconciliations
+           where id = ${reconciliationId}::uuid and company_id = ${companyId}::uuid
+           for update
+        `.execute(transaction)
+      ).rows[0];
+      if (original === undefined) {
+        throw new ApplicationException(
+          "reconciliation_not_found",
+          "Driver cash reconciliation not found",
+          HttpStatus.NOT_FOUND,
+        );
+      }
+      if (original.reversalOfId !== null) {
+        throw new ApplicationException(
+          "reconciliation_reversal_invalid",
+          "A reversal entry cannot itself be reversed",
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      if (original.status !== "confirmed") {
+        throw new ApplicationException(
+          "reconciliation_not_confirmed",
+          "Only a confirmed reconciliation can be reversed",
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      const existingReversal = (
+        await sql<{ id: string }>`
+          select id from driver_reconciliations
+           where company_id = ${companyId}::uuid and reversal_of_id = ${reconciliationId}::uuid
+           limit 1
+        `.execute(transaction)
+      ).rows[0];
+      if (existingReversal !== undefined) {
+        throw new ApplicationException(
+          "reconciliation_already_reversed",
+          "This reconciliation has already been reversed",
+          HttpStatus.CONFLICT,
+        );
+      }
+      const links = (
+        await sql<{
+          driverReconciliationStatus: string;
+          orderId: string;
+          traderSettlementStatus: string;
+        }>`
+          select o.id as "orderId",
+                 o.driver_reconciliation_status as "driverReconciliationStatus",
+                 o.trader_settlement_status as "traderSettlementStatus"
+            from driver_reconciliation_orders link
+            join orders o on o.id = link.order_id and o.company_id = link.company_id
+           where link.reconciliation_id = ${reconciliationId}::uuid
+             and link.company_id = ${companyId}::uuid
+           order by o.id
+           for update of o
+        `.execute(transaction)
+      ).rows;
+      const advancedSettlement = [
+        "partially_settled",
+        "settled",
+        "money_sent_to_trader",
+        "money_received_by_trader",
+      ];
+      if (links.some((link) => advancedSettlement.includes(link.traderSettlementStatus))) {
+        throw new ApplicationException(
+          "reconciliation_reversal_blocked_by_settlement",
+          "Cannot reverse: one or more Orders have already progressed to Trader settlement",
+          HttpStatus.CONFLICT,
+        );
+      }
+
+      const reversalNumber = await this.history.nextReferenceNumber(
+        transaction,
+        companyId,
+        "reconciliation",
+        "REC",
+      );
+      const reversalHeader = (
+        await sql<{ id: string }>`
+          insert into driver_reconciliations (
+            company_id, reconciliation_number, driver_id, business_date,
+            gross_collections, driver_payable_deduction, reconciliation_expenses,
+            net_amount_received, status, created_by_account_id,
+            confirmed_by_account_id, confirmed_at, reversal_of_id
+          ) values (
+            ${companyId}::uuid, ${reversalNumber}, ${original.driverId}::uuid, current_date,
+            0, 0, 0, 0, 'confirmed', ${identity.identityId}::uuid,
+            ${identity.identityId}::uuid, now(), ${reconciliationId}::uuid
+          ) returning id
+        `.execute(transaction)
+      ).rows[0];
+      const reversalId = reversalHeader?.id;
+      if (reversalId === undefined) throw new Error("Reversal reconciliation ID was not returned");
+
+      const actorRole = await this.history.actorRole(transaction, companyId, identity.identityId);
+      for (const link of links) {
+        // Defensive: only flip Orders still marked reconciled by this collection.
+        if (link.driverReconciliationStatus !== "reconciled") continue;
+        // Two-step transition, both recorded in the append-only status history:
+        // reconciled -> reversed (the reversal itself) -> pending (eligibility
+        // restored, safe because the settlement-progress guard above already
+        // rejected any Order that must not be re-collected). The Order's LIVE
+        // status ends at 'pending' so it reappears in `eligibleOrders()`
+        // immediately; the transient 'reversed' step is preserved in history and
+        // the order event below, never discarded.
+        await sql`
+          update orders set driver_reconciliation_status = 'pending',
+                            updated_at = now(), version = version + 1
+           where id = ${link.orderId}::uuid and company_id = ${companyId}::uuid
+        `.execute(transaction);
+        await this.history.statusHistory(transaction, {
+          actorId: identity.identityId,
+          companyId,
+          from: "reconciled",
+          orderId: link.orderId,
+          reason: trimmedReason,
+          statusDimension: "driver_reconciliation",
+          to: "reversed",
+        });
+        await this.history.statusHistory(transaction, {
+          actorId: identity.identityId,
+          companyId,
+          from: "reversed",
+          orderId: link.orderId,
+          reason: trimmedReason,
+          statusDimension: "driver_reconciliation",
+          to: "pending",
+        });
+        await this.history.orderEvent(transaction, {
+          actorId: identity.identityId,
+          actorRole,
+          category: "financial_change",
+          companyId,
+          correlationId,
+          eventType: "driver_cash.reversed",
+          fieldName: "driver_reconciliation_status",
+          newValue: {
+            reversalReconciliationNumber: reversalNumber,
+            reversedReconciliationNumber: original.reconciliationNumber,
+            restoredEligibility: true,
+            status: "reversed",
+          },
+          orderId: link.orderId,
+          previousValue: "reconciled",
+          reason: trimmedReason,
+          relatedDriverId: original.driverId,
+          relatedPaymentId: null,
+          relatedReconciliationId: reversalId,
+          source: "web_portal",
+        });
+      }
+      await this.history.audit(transaction, {
+        action: "driver_reconciliation.reverse",
+        actorId: identity.identityId,
+        after: {
+          orderCount: links.length,
+          reason: trimmedReason,
+          reversalReconciliationNumber: reversalNumber,
+          reversedReconciliationNumber: original.reconciliationNumber,
+        },
+        companyId,
+        correlationId,
+        subjectId: reconciliationId,
+        subjectType: "driver_reconciliation",
+      });
+
+      return {
+        orderCount: links.length,
+        reconciliationId,
+        reversalReconciliationId: reversalId,
+        reversalReconciliationNumber: reversalNumber,
+      };
+    });
+  }
+
+  /**
    * Compatibility wrapper for the retired single-Order endpoint.
    *
    * It holds no financial logic of its own: it resolves the Order's collected
@@ -714,6 +1054,10 @@ export class DriverCashReconciliationService {
         : {}),
     };
     const input: CreateDriverReconciliationDto = {
+      // This retired path predates Cash/Visa (§5); it always represented a
+      // physical cash handover, so it defaults to Cash rather than leaving the
+      // now-mandatory field unset.
+      collectionPaymentMethod: "cash",
       excludedOrderIds: [],
       expenses: [],
       orderIds: [orderId],
@@ -775,11 +1119,103 @@ export class DriverCashReconciliationService {
     return createHash("sha256").update(JSON.stringify(material)).digest("hex");
   }
 
+  /**
+   * Shared filter predicate for the Driver Collections list and summary
+   * endpoints (§2/§3), so the summary cards always describe the same slice the
+   * list shows. Assumes the caller aliases `driver_reconciliations` as `r` and
+   * joins `drivers d on d.id = r.driver_id and d.company_id = r.company_id`.
+   * Always excludes synthetic reversal-marker rows (`r.reversal_of_id is not
+   * null`) — a reversal is exposed as a flag on the ORIGINAL reconciliation,
+   * never as a row of its own.
+   */
+  private reconciliationFilters(
+    companyId: string,
+    query: DriverCollectionsFilterDto,
+  ): ReturnType<typeof sql> {
+    const search = query.search?.trim() || null;
+    return sql`
+      r.company_id = ${companyId}::uuid
+        and r.reversal_of_id is null
+        and (${query.driverId ?? null}::uuid is null
+             or r.driver_id = ${query.driverId ?? null}::uuid)
+        and (${query.driverType ?? null}::text is null
+             or d.driver_type = ${query.driverType ?? null})
+        and (${query.dateFrom ?? null}::date is null
+             or r.business_date >= ${query.dateFrom ?? null}::date)
+        and (${query.dateTo ?? null}::date is null
+             or r.business_date <= ${query.dateTo ?? null}::date)
+        and (${query.collectionPaymentMethod ?? null}::text is null or (
+          case ${query.collectionPaymentMethod ?? null}::text
+            when 'not_assigned' then r.collection_payment_method is null
+            else r.collection_payment_method = ${query.collectionPaymentMethod ?? null}::text
+          end
+        ))
+        and (${query.reconciliationStatus ?? null}::text is null
+             or ${query.reconciliationStatus ?? null}::text = 'all'
+             or (${query.reconciliationStatus ?? null}::text = 'pending' and r.status = 'draft')
+             or (
+               ${query.reconciliationStatus ?? null}::text = 'reconciled' and r.status = 'confirmed'
+               and not exists (
+                 select 1 from driver_reconciliations rv
+                  where rv.company_id = r.company_id and rv.reversal_of_id = r.id
+               )
+             )
+             or (
+               ${query.reconciliationStatus ?? null}::text = 'reversed' and r.status = 'confirmed'
+               and exists (
+                 select 1 from driver_reconciliations rv
+                  where rv.company_id = r.company_id and rv.reversal_of_id = r.id
+               )
+             )
+        )
+        and (${search}::text is null
+             or r.reconciliation_number ilike '%' || ${search} || '%'
+             or d.name_en ilike '%' || ${search} || '%'
+             or coalesce(d.name_ar, '') ilike '%' || ${search} || '%')
+        and (
+          (${query.traderId ?? null}::uuid is null
+           and ${query.emirateId ?? null}::uuid is null
+           and ${query.areaId ?? null}::uuid is null
+           and ${query.orderSerialNumber ?? null}::text is null
+           and ${query.referenceNumber ?? null}::text is null
+           and ${query.customerName ?? null}::text is null
+           and ${query.deliveredFrom ?? null}::date is null
+           and ${query.deliveredTo ?? null}::date is null
+           and ${query.orderStatus ?? null}::text is null)
+          or exists (
+            select 1
+              from driver_reconciliation_orders link
+              join orders o on o.id = link.order_id and o.company_id = link.company_id
+              left join areas a on a.id = o.area_id and a.company_id = o.company_id
+             where link.reconciliation_id = r.id and link.company_id = r.company_id
+               and (${query.traderId ?? null}::uuid is null
+                    or o.trader_id = ${query.traderId ?? null}::uuid)
+               and (${query.emirateId ?? null}::uuid is null
+                    or a.emirate_id = ${query.emirateId ?? null}::uuid)
+               and (${query.areaId ?? null}::uuid is null
+                    or o.area_id = ${query.areaId ?? null}::uuid)
+               and (${query.orderSerialNumber ?? null}::text is null
+                    or coalesce(o.serial_number, o.order_number)
+                       ilike '%' || ${query.orderSerialNumber ?? null} || '%')
+               and (${query.referenceNumber ?? null}::text is null
+                    or o.reference_number ilike '%' || ${query.referenceNumber ?? null} || '%')
+               and (${query.customerName ?? null}::text is null
+                    or o.customer_name ilike '%' || ${query.customerName ?? null} || '%')
+               and (${query.deliveredFrom ?? null}::date is null
+                    or o.delivered_at::date >= ${query.deliveredFrom ?? null}::date)
+               and (${query.deliveredTo ?? null}::date is null
+                    or o.delivered_at::date <= ${query.deliveredTo ?? null}::date)
+               and (${query.orderStatus ?? null}::text is null
+                    or o.delivery_status = ${query.orderStatus ?? null}::text)
+          )
+        )
+    `;
+  }
+
   public async list(query: ReconciliationListQueryDto): Promise<Page<ReconciliationListRow>> {
     this.assertAnyPermission("reconciliations.create");
     const { companyId } = this.tenants.current();
     const { limit, offset, page, pageSize } = this.pagination(query);
-    const search = query.search?.trim() || null;
     const direction = query.sortDirection === "asc" ? "asc" : "desc";
     const sortColumn =
       query.sortBy === "reconciliationNumber"
@@ -787,9 +1223,11 @@ export class DriverCashReconciliationService {
         : query.sortBy === "netAmountReceived"
           ? "r.net_amount_received"
           : "r.business_date";
+    const filters = this.reconciliationFilters(companyId, query);
     const result = await sql<ReconciliationListRow & { total: number }>`
       select r.id, r.reconciliation_number as "reconciliationNumber",
              r.business_date::text as "businessDate",
+             r.collection_payment_method as "collectionPaymentMethod",
              d.name_en as "driverName", d.driver_type as "driverType",
              r.gross_collections::text as "grossCollections",
              r.driver_payable_deduction::text as "driverPayableDeduction",
@@ -799,6 +1237,10 @@ export class DriverCashReconciliationService {
              coalesce(actor.username, ${legacyUnknown}) as "confirmedBy",
              coalesce(links.total, 0)::int as "orderCount",
              coalesce(payments.total, 0)::text as "paymentTotal",
+             exists (
+               select 1 from driver_reconciliations rv
+                where rv.company_id = r.company_id and rv.reversal_of_id = r.id
+             ) as "isReversed",
              count(*) over()::int as total
         from driver_reconciliations r
         join drivers d on d.id = r.driver_id and d.company_id = r.company_id
@@ -812,16 +1254,7 @@ export class DriverCashReconciliationService {
           select coalesce(sum(p.amount), 0) as total from driver_reconciliation_payments p
            where p.reconciliation_id = r.id and p.company_id = r.company_id
         ) payments on true
-       where r.company_id = ${companyId}::uuid
-         and (${search}::text is null
-              or r.reconciliation_number ilike '%' || ${search} || '%')
-         and (${query.driverId ?? null}::uuid is null
-              or r.driver_id = ${query.driverId ?? null}::uuid)
-         and (${query.dateFrom ?? null}::date is null
-              or r.business_date >= ${query.dateFrom ?? null}::date)
-         and (${query.dateTo ?? null}::date is null
-              or r.business_date <= ${query.dateTo ?? null}::date)
-         and (${query.status ?? null}::text is null or r.status = ${query.status ?? null})
+       where ${filters}
          and (${query.paymentMethod ?? null}::text is null or exists (
               select 1 from driver_reconciliation_payments p
                where p.reconciliation_id = r.id and p.company_id = r.company_id
@@ -835,6 +1268,126 @@ export class DriverCashReconciliationService {
       statusLabel: reconciliationStatusLabel(row.status),
     }));
     return this.page(items, page, pageSize);
+  }
+
+  /**
+   * Server-calculated Driver Collections summary cards (§3), honoring the same
+   * filters as `list()`. Pending/Outstanding figures come from Orders that have
+   * not yet been claimed by any (non-reversed) reconciliation; the remaining
+   * cards aggregate confirmed, non-reversed reconciliations.
+   */
+  public async summary(query: DriverCollectionsSummaryQueryDto): Promise<DriverCollectionsSummary> {
+    this.assertAnyPermission("reconciliations.create");
+    const { companyId } = this.tenants.current();
+    const search = query.search?.trim() || null;
+    // "Pending" / "Outstanding" apply to Orders not yet part of any active
+    // collection. Reconciliation-only concepts (collection method, business
+    // date range, reconciliation status) do not constrain this pool; Order-level
+    // filters (driver, trader, customer, Emirate, Area, dates, identifiers) do.
+    const pending = await sql<{ pendingAmount: string; pendingOrderCount: number }>`
+      select count(*)::int as "pendingOrderCount",
+             coalesce(sum(o.customer_amount_due), 0)::text as "pendingAmount"
+        from orders o
+        left join drivers drv on drv.id = o.assigned_driver_id and drv.company_id = o.company_id
+        left join areas a on a.id = o.area_id and a.company_id = o.company_id
+       where o.company_id = ${companyId}::uuid
+         and o.delivery_status = 'delivered'
+         and o.driver_reconciliation_status = 'pending'
+         and (${query.driverId ?? null}::uuid is null
+              or o.assigned_driver_id = ${query.driverId ?? null}::uuid)
+         and (${query.driverType ?? null}::text is null
+              or drv.driver_type = ${query.driverType ?? null}::text)
+         and (${query.traderId ?? null}::uuid is null or o.trader_id = ${query.traderId ?? null}::uuid)
+         and (${query.emirateId ?? null}::uuid is null
+              or a.emirate_id = ${query.emirateId ?? null}::uuid)
+         and (${query.areaId ?? null}::uuid is null or o.area_id = ${query.areaId ?? null}::uuid)
+         and (${query.orderSerialNumber ?? null}::text is null
+              or coalesce(o.serial_number, o.order_number)
+                 ilike '%' || ${query.orderSerialNumber ?? null} || '%')
+         and (${query.referenceNumber ?? null}::text is null
+              or o.reference_number ilike '%' || ${query.referenceNumber ?? null} || '%')
+         and (${query.customerName ?? null}::text is null
+              or o.customer_name ilike '%' || ${query.customerName ?? null} || '%')
+         and (${query.deliveredFrom ?? null}::date is null
+              or o.delivered_at::date >= ${query.deliveredFrom ?? null}::date)
+         and (${query.deliveredTo ?? null}::date is null
+              or o.delivered_at::date <= ${query.deliveredTo ?? null}::date)
+         and (${search}::text is null
+              or o.order_number ilike '%' || ${search} || '%'
+              or o.serial_number ilike '%' || ${search} || '%'
+              or o.reference_number ilike '%' || ${search} || '%'
+              or o.customer_name ilike '%' || ${search} || '%'
+              or coalesce(drv.name_en, '') ilike '%' || ${search} || '%')
+    `.execute(this.database);
+
+    const filters = this.reconciliationFilters(companyId, query);
+    const confirmed = await sql<{
+      actualAmountReceived: string;
+      cashTotal: string;
+      collectionsWithDifferenceCount: number;
+      driverExpenses: string;
+      netExpectedFromDrivers: string;
+      reconciledCollectionsCount: number;
+      visaTotal: string;
+    }>`
+      select
+        coalesce(sum(r.gross_collections) filter (
+          where r.status = 'confirmed' and r.collection_payment_method = 'cash'
+        ), 0)::text as "cashTotal",
+        coalesce(sum(r.gross_collections) filter (
+          where r.status = 'confirmed' and r.collection_payment_method = 'visa'
+        ), 0)::text as "visaTotal",
+        coalesce(sum(r.reconciliation_expenses) filter (where r.status = 'confirmed'), 0)::text
+          as "driverExpenses",
+        coalesce(sum(r.net_amount_received) filter (where r.status = 'confirmed'), 0)::text
+          as "netExpectedFromDrivers",
+        coalesce(sum(coalesce(payments.total, 0)) filter (where r.status = 'confirmed'), 0)::text
+          as "actualAmountReceived",
+        count(*) filter (
+          where r.status = 'confirmed' and not exists (
+            select 1 from driver_reconciliations rv
+             where rv.company_id = r.company_id and rv.reversal_of_id = r.id
+          )
+        )::int as "reconciledCollectionsCount",
+        count(*) filter (
+          where r.status = 'confirmed'
+            and abs(r.net_amount_received - coalesce(payments.total, 0)) <> 0
+        )::int as "collectionsWithDifferenceCount"
+        from driver_reconciliations r
+        join drivers d on d.id = r.driver_id and d.company_id = r.company_id
+        left join lateral (
+          select coalesce(sum(p.amount), 0) as total from driver_reconciliation_payments p
+           where p.reconciliation_id = r.id and p.company_id = r.company_id
+        ) payments on true
+       where ${filters}
+    `.execute(this.database);
+
+    const pendingRow = pending.rows[0] ?? { pendingAmount: "0.00", pendingOrderCount: 0 };
+    const confirmedRow = confirmed.rows[0] ?? {
+      actualAmountReceived: "0.00",
+      cashTotal: "0.00",
+      collectionsWithDifferenceCount: 0,
+      driverExpenses: "0.00",
+      netExpectedFromDrivers: "0.00",
+      reconciledCollectionsCount: 0,
+      visaTotal: "0.00",
+    };
+    return {
+      actualAmountReceived: new Decimal(confirmedRow.actualAmountReceived).toFixed(2),
+      cashTotal: new Decimal(confirmedRow.cashTotal).toFixed(2),
+      collectionsWithDifferenceCount: confirmedRow.collectionsWithDifferenceCount,
+      driverExpenses: new Decimal(confirmedRow.driverExpenses).toFixed(2),
+      netExpectedFromDrivers: new Decimal(confirmedRow.netExpectedFromDrivers).toFixed(2),
+      // Outstanding from Drivers and Pending Amount to Collect describe the same
+      // pool in this system (money for delivered Orders not yet reconciled) —
+      // there is no separate "confirmed but not yet handed over" state, since
+      // `confirm()` requires the payment total to already equal Net Expected.
+      outstandingFromDrivers: new Decimal(pendingRow.pendingAmount).toFixed(2),
+      pendingAmountToCollect: new Decimal(pendingRow.pendingAmount).toFixed(2),
+      pendingOrderCount: pendingRow.pendingOrderCount,
+      reconciledCollectionsCount: confirmedRow.reconciledCollectionsCount,
+      visaTotal: new Decimal(confirmedRow.visaTotal).toFixed(2),
+    };
   }
 
   public async details(reconciliationId: string): Promise<unknown> {
@@ -1076,6 +1629,233 @@ export class DriverCashReconciliationService {
       totalOrders: rows.length,
       totalTraders: traders.length,
       traders,
+    };
+  }
+
+  /**
+   * Comprehensive, server-authoritative report data for the Driver Collection
+   * Report (§10/§19/CP2 §1). Every value is read from the reconciliation's own
+   * stored snapshots and its linked Orders' financial snapshot columns — never
+   * from the current catalog — so a report regenerated later from the same
+   * reconciliation is identical. No internal database IDs are returned. Three
+   * queries total (header+company, orders, expenses): no N+1.
+   */
+  public async reportData(reconciliationId: string): Promise<DriverCollectionReportData> {
+    this.assertAnyPermission(["reconciliations.create", "reports.export"]);
+    const { companyId } = this.tenants.current();
+    const header = (
+      await sql<{
+        businessDate: string;
+        collectionPaymentMethod: "cash" | "visa" | null;
+        confirmedAt: string | null;
+        confirmedBy: string;
+        createdAt: string;
+        createdBy: string;
+        driverName: string;
+        driverType: "employee" | "outsourced";
+        isReversal: boolean;
+        notes: string | null;
+        reconciliationNumber: string;
+        reversedByReconciliationNumber: string | null;
+        reversesReconciliationNumber: string | null;
+        status: "confirmed" | "draft";
+      }>`
+        select r.reconciliation_number as "reconciliationNumber",
+               r.status,
+               r.collection_payment_method as "collectionPaymentMethod",
+               r.business_date::text as "businessDate",
+               r.created_at::text as "createdAt",
+               r.confirmed_at::text as "confirmedAt",
+               r.notes,
+               (r.reversal_of_id is not null) as "isReversal",
+               d.name_en as "driverName", d.driver_type as "driverType",
+               coalesce(creator.username, ${legacyUnknown}) as "createdBy",
+               coalesce(confirmer.username, ${legacyUnknown}) as "confirmedBy",
+               original.reconciliation_number as "reversesReconciliationNumber",
+               reversal.reconciliation_number as "reversedByReconciliationNumber"
+          from driver_reconciliations r
+          join drivers d on d.id = r.driver_id and d.company_id = r.company_id
+          left join accounts creator
+            on creator.id = r.created_by_account_id and creator.company_id = r.company_id
+          left join accounts confirmer
+            on confirmer.id = r.confirmed_by_account_id and confirmer.company_id = r.company_id
+          left join driver_reconciliations original
+            on original.id = r.reversal_of_id and original.company_id = r.company_id
+          left join driver_reconciliations reversal
+            on reversal.reversal_of_id = r.id and reversal.company_id = r.company_id
+         where r.id = ${reconciliationId}::uuid and r.company_id = ${companyId}::uuid
+      `.execute(this.database)
+    ).rows[0];
+    if (header === undefined) {
+      throw new ApplicationException(
+        "reconciliation_not_found",
+        "Driver cash reconciliation not found",
+        HttpStatus.NOT_FOUND,
+      );
+    }
+    const branding = await this.companyProfile.branding();
+
+    const orderRows = (
+      await sql<{
+        additionalFees: string;
+        areaName: string;
+        codAmount: string;
+        customerAmountToCollect: string;
+        customerName: string;
+        deliveryDate: string | null;
+        driverReconciliationStatus: string;
+        emirateName: string | null;
+        paymentMethod: "cash" | "visa" | null;
+        referenceNumber: string | null;
+        serialNumber: string;
+        serviceFee: string;
+        totalDeductions: string;
+        traderName: string;
+        traderPayable: string;
+        vatAmount: string;
+      }>`
+        select coalesce(o.serial_number, o.order_number) as "serialNumber",
+               o.reference_number as "referenceNumber",
+               o.delivered_at::text as "deliveryDate",
+               coalesce(t.name_ar, t.name_en) as "traderName",
+               o.customer_name as "customerName",
+               coalesce(e.name_ar, e.name_en) as "emirateName",
+               coalesce(o.customer_area_name_ar_snapshot, a.name_ar,
+                        o.customer_area_name_snapshot, a.name_en, '') as "areaName",
+               o.cod_amount::text as "codAmount",
+               o.customer_amount_due::text as "customerAmountToCollect",
+               o.service_fee::text as "serviceFee",
+               coalesce(o.additional_fees, 0)::text as "additionalFees",
+               coalesce(o.vat_amount, 0)::text as "vatAmount",
+               coalesce(o.total_deductions, o.customer_amount_due - o.trader_net_payable)::text
+                 as "totalDeductions",
+               o.trader_net_payable::text as "traderPayable",
+               link.collection_payment_method as "paymentMethod",
+               o.driver_reconciliation_status as "driverReconciliationStatus"
+          from driver_reconciliation_orders link
+          join orders o on o.id = link.order_id and o.company_id = link.company_id
+          join traders t on t.id = o.trader_id and t.company_id = o.company_id
+          left join areas a on a.id = o.area_id and a.company_id = o.company_id
+          left join emirates e on e.id = a.emirate_id
+         where link.reconciliation_id = ${reconciliationId}::uuid
+           and link.company_id = ${companyId}::uuid
+         order by coalesce(o.serial_number, o.order_number)
+      `.execute(this.database)
+    ).rows;
+
+    const expenseRows = (
+      await sql<{
+        amount: string;
+        description: string | null;
+        enteredBy: string;
+        expenseType: string;
+        reason: string | null;
+        recordedAt: string;
+        reference: string | null;
+      }>`
+        select coalesce(type.display_name, ${legacyUnknown}) as "expenseType",
+               ex.amount::text as amount, ex.description, ex.reason,
+               ex.expense_reference as reference, ex.recorded_at::text as "recordedAt",
+               coalesce(actor.username, ${legacyUnknown}) as "enteredBy"
+          from driver_reconciliation_expenses ex
+          left join expense_types type
+            on type.id = ex.expense_type_id and type.company_id = ex.company_id
+          left join accounts actor
+            on actor.id = ex.created_by_account_id and actor.company_id = ex.company_id
+         where ex.reconciliation_id = ${reconciliationId}::uuid
+           and ex.company_id = ${companyId}::uuid
+         order by ex.recorded_at
+      `.execute(this.database)
+    ).rows;
+
+    const paymentTotal = (
+      await sql<{ total: string }>`
+        select coalesce(sum(p.amount), 0)::text as total from driver_reconciliation_payments p
+         where p.reconciliation_id = ${reconciliationId}::uuid and p.company_id = ${companyId}::uuid
+      `.execute(this.database)
+    ).rows[0]?.total;
+    const actualReceived = new Decimal(paymentTotal ?? "0");
+
+    const grossCollections = orderRows.reduce(
+      (sum, order) => sum.plus(order.customerAmountToCollect),
+      new Decimal(0),
+    );
+    const cashTotal = orderRows
+      .filter((order) => order.paymentMethod === "cash")
+      .reduce((sum, order) => sum.plus(order.customerAmountToCollect), new Decimal(0));
+    const visaTotal = orderRows
+      .filter((order) => order.paymentMethod === "visa")
+      .reduce((sum, order) => sum.plus(order.customerAmountToCollect), new Decimal(0));
+    const driverExpenses = expenseRows.reduce(
+      (sum, expense) => sum.plus(expense.amount),
+      new Decimal(0),
+    );
+    const netExpected = grossCollections.minus(driverExpenses);
+
+    return {
+      expenses: expenseRows.map((row) => ({
+        amount: new Decimal(row.amount).toFixed(2),
+        description: row.description,
+        enteredBy: row.enteredBy,
+        expenseType: row.expenseType,
+        reason: row.reason,
+        recordedAt: row.recordedAt,
+        reference: row.reference,
+      })),
+      header: {
+        businessDate: header.businessDate,
+        collectionPaymentMethod: header.collectionPaymentMethod,
+        company: {
+          hasLogo: branding.hasLogo,
+          nameAr: branding.nameAr,
+          nameEn: branding.nameEn,
+          subtitleAr: branding.subtitleAr,
+          subtitleEn: branding.subtitleEn,
+          telephone: branding.telephone,
+        },
+        confirmedAt: header.confirmedAt,
+        confirmedBy: header.confirmedBy,
+        createdAt: header.createdAt,
+        createdBy: header.createdBy,
+        driverName: header.driverName,
+        driverType: header.driverType,
+        isReversal: header.isReversal,
+        notes: header.notes,
+        reconciliationNumber: header.reconciliationNumber,
+        reversedByReconciliationNumber: header.reversedByReconciliationNumber,
+        reversesReconciliationNumber: header.reversesReconciliationNumber,
+        status: header.status,
+        statusLabel: reconciliationStatusLabel(header.status),
+      },
+      orders: orderRows.map((row) => ({
+        additionalFees: new Decimal(row.additionalFees).toFixed(2),
+        areaName: row.areaName,
+        codAmount: new Decimal(row.codAmount).toFixed(2),
+        customerAmountToCollect: new Decimal(row.customerAmountToCollect).toFixed(2),
+        customerName: row.customerName,
+        deliveryDate: row.deliveryDate,
+        driverReconciliationStatus: row.driverReconciliationStatus,
+        driverReconciliationStatusLabel: driverCashStatusLabel(row.driverReconciliationStatus),
+        emirateName: row.emirateName,
+        paymentMethod: row.paymentMethod,
+        referenceNumber: row.referenceNumber,
+        serialNumber: row.serialNumber,
+        serviceFee: new Decimal(row.serviceFee).toFixed(2),
+        totalDeductions: new Decimal(row.totalDeductions).toFixed(2),
+        traderName: row.traderName,
+        traderPayable: new Decimal(row.traderPayable).toFixed(2),
+        vatAmount: new Decimal(row.vatAmount).toFixed(2),
+      })),
+      summary: {
+        actualReceived: actualReceived.toFixed(2),
+        cashTotal: cashTotal.toFixed(2),
+        difference: actualReceived.minus(netExpected).toFixed(2),
+        driverExpenses: driverExpenses.toFixed(2),
+        grossCollections: grossCollections.toFixed(2),
+        netExpected: netExpected.toFixed(2),
+        orderCount: orderRows.length,
+        visaTotal: visaTotal.toFixed(2),
+      },
     };
   }
 
@@ -1401,9 +2181,13 @@ export class DriverCashReconciliationService {
     return row;
   }
 
-  private assertAnyPermission(permission: string): void {
+  private assertAnyPermission(permission: string | readonly string[]): void {
     const permissions = this.identities.current().permissions;
-    if (!permissions.has("users_roles.manage") && !permissions.has(permission)) {
+    const required = Array.isArray(permission) ? permission : [permission];
+    if (
+      !permissions.has("users_roles.manage") &&
+      !required.some((candidate) => permissions.has(candidate))
+    ) {
       throw new ApplicationException(
         "permission_denied",
         "The authenticated account does not have permission for this operation",

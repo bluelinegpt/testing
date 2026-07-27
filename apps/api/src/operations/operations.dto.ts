@@ -255,8 +255,10 @@ export class ReconciliationExpenseDto {
 const collectionPaymentMethods = ["cash", "visa"] as const;
 
 export class CreateDriverReconciliationDto extends OrderSelectionDto {
-  // One payment method for the whole collection: Cash or Visa (Visa = customer paid by card).
-  // Optional during the Phase 3 rollout; the redesigned form always sends it.
+  // One payment method for the whole collection: Cash or Visa (Visa = customer paid
+  // by card/bank). Optional at the DTO level so a missing value produces the
+  // friendlier `reconciliation_payment_method_required` service error rather than
+  // a generic validation failure; §5 makes it mandatory to confirm.
   @IsOptional()
   @IsIn(collectionPaymentMethods)
   public readonly collectionPaymentMethod?: (typeof collectionPaymentMethods)[number];
@@ -272,6 +274,21 @@ export class CreateDriverReconciliationDto extends OrderSelectionDto {
   @ValidateNested({ each: true })
   @Type(() => ReconciliationExpenseDto)
   public readonly expenses!: readonly ReconciliationExpenseDto[];
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  public readonly notes?: string;
+}
+
+// Reversal of a confirmed Driver collection (§8): controlled, reason-required,
+// audited; never a destructive delete.
+export class ReverseDriverReconciliationDto {
+  @IsString()
+  @TrimText()
+  @MinLength(1, { message: "A reason is required to reverse a Driver collection." })
+  @MaxLength(500)
+  public readonly reason!: string;
 }
 
 export class InlineOrderCustomerDto {
@@ -642,6 +659,21 @@ const driverSearchStatuses = ["active", "all"] as const;
 const eligibleOrderSorts = ["orderNumber", "deliveredAt", "amountCollected"] as const;
 const reconciliationSorts = ["businessDate", "reconciliationNumber", "netAmountReceived"] as const;
 const sortDirections = ["asc", "desc"] as const;
+const driverTypeFilters = ["employee", "outsourced"] as const;
+// Collection method filter domain (§3): distinct from `paymentMethods` above, which
+// is the bank-tender method on a settlement payment line.
+const collectionPaymentMethodFilters = ["cash", "visa", "not_assigned"] as const;
+const reconciliationStatusFilters = ["pending", "reconciled", "reversed", "all"] as const;
+const orderStatusFilters = [
+  "new",
+  "assigned_to_driver",
+  "out_for_delivery",
+  "delivered",
+  "returned_to_branch",
+  "returned_to_trader",
+  "cancelled",
+  "closed",
+] as const;
 
 class PaginationQueryDto {
   @IsOptional()
@@ -690,6 +722,10 @@ export class EligibleOrdersQueryDto extends PaginationQueryDto {
   public readonly areaId?: string;
 
   @IsOptional()
+  @IsUUID()
+  public readonly emirateId?: string;
+
+  @IsOptional()
   @Matches(/^\d{4}-\d{2}-\d{2}$/)
   public readonly deliveredFrom?: string;
 
@@ -702,7 +738,10 @@ export class EligibleOrdersQueryDto extends PaginationQueryDto {
   public readonly sortBy?: (typeof eligibleOrderSorts)[number];
 }
 
-export class ReconciliationListQueryDto extends PaginationQueryDto {
+// Shared filter fields (§3) reused by both the reconciliation list and the
+// summary-cards endpoint so the cards always describe the same slice the list
+// shows. Every field is optional; the service applies each only when present.
+export class DriverCollectionsFilterDto {
   @IsOptional()
   @IsString()
   @MaxLength(120)
@@ -713,12 +752,89 @@ export class ReconciliationListQueryDto extends PaginationQueryDto {
   public readonly driverId?: string;
 
   @IsOptional()
+  @IsIn(driverTypeFilters)
+  public readonly driverType?: (typeof driverTypeFilters)[number];
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(160)
+  public readonly orderSerialNumber?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(160)
+  public readonly referenceNumber?: string;
+
+  @IsOptional()
+  @IsUUID()
+  public readonly traderId?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(160)
+  public readonly customerName?: string;
+
+  @IsOptional()
+  @IsUUID()
+  public readonly emirateId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  public readonly areaId?: string;
+
+  // Delivery Date range (Order.delivered_at) — distinct from Collection Date
+  // (the reconciliation's business_date, `dateFrom`/`dateTo` below).
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  public readonly deliveredFrom?: string;
+
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  public readonly deliveredTo?: string;
+
+  @IsOptional()
   @Matches(/^\d{4}-\d{2}-\d{2}$/)
   public readonly dateFrom?: string;
 
   @IsOptional()
   @Matches(/^\d{4}-\d{2}-\d{2}$/)
   public readonly dateTo?: string;
+
+  // Cash/Visa/Not Assigned — the collection method (§5), distinct from
+  // `paymentMethod` below (the bank-tender method on a payment line).
+  @IsOptional()
+  @IsIn(collectionPaymentMethodFilters)
+  public readonly collectionPaymentMethod?: (typeof collectionPaymentMethodFilters)[number];
+
+  @IsOptional()
+  @IsIn(reconciliationStatusFilters)
+  public readonly reconciliationStatus?: (typeof reconciliationStatusFilters)[number];
+
+  @IsOptional()
+  @IsIn(orderStatusFilters)
+  public readonly orderStatus?: (typeof orderStatusFilters)[number];
+
+  @IsOptional()
+  @Type(() => Boolean)
+  @IsBoolean()
+  public readonly outstandingOnly?: boolean;
+}
+
+export class ReconciliationListQueryDto extends DriverCollectionsFilterDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(1)
+  public readonly page?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsIn(reconciliationPageSizes)
+  public readonly pageSize?: (typeof reconciliationPageSizes)[number];
+
+  @IsOptional()
+  @IsIn(sortDirections)
+  public readonly sortDirection?: (typeof sortDirections)[number];
 
   @IsOptional()
   @IsIn(["draft", "confirmed"])
@@ -732,3 +848,6 @@ export class ReconciliationListQueryDto extends PaginationQueryDto {
   @IsIn(reconciliationSorts)
   public readonly sortBy?: (typeof reconciliationSorts)[number];
 }
+
+// Summary-cards endpoint (§2): no pagination, same filter vocabulary as the list.
+export class DriverCollectionsSummaryQueryDto extends DriverCollectionsFilterDto {}

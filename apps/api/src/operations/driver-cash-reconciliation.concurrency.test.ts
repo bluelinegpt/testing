@@ -65,10 +65,11 @@ describe.skipIf(!runConcurrencyTests)("driver cash reconciliation concurrency", 
       `.execute(transaction);
       await sql`
         insert into drivers (
-          id, company_id, account_id, code, driver_type, name_en, mobile_number, account_status
+          id, company_id, account_id, code, driver_type, name_en, mobile_number, account_status,
+          outsourced_fee_per_delivered_order
         ) values (
           ${driverId}::uuid, ${companyId}::uuid, ${driverAccountId}::uuid, ${`DRV-${suffix}`},
-          'outsourced', 'Concurrency Driver', '971500000001', 'active'
+          'outsourced', 'Concurrency Driver', '971500000001', 'active', 7.5
         )
       `.execute(transaction);
       await sql`
@@ -168,6 +169,9 @@ describe.skipIf(!runConcurrencyTests)("driver cash reconciliation concurrency", 
     orderIds: readonly string[],
     overrides: Partial<CreateDriverReconciliationDto> = {},
   ): CreateDriverReconciliationDto => ({
+    // The collection method is mandatory (§5); default to Cash so existing
+    // cases exercise confirmation, and override per case where relevant.
+    collectionPaymentMethod: "cash",
     excludedOrderIds: [],
     expenses: [],
     orderIds: [...orderIds],
