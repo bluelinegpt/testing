@@ -112,15 +112,15 @@ describe("CompanyAppShell branding", () => {
     expect(screen.queryByRole("link", { name: "Company profile" })).not.toBeInTheDocument();
   });
 
-  it("keeps only the UI-language selector in the sidebar and links to My Preferences", async () => {
+  it("keeps only the UI-language selector in the sidebar (no Text Language, no My Preferences)", async () => {
     renderShell(makeApi(branding()), ADMIN);
     await screen.findAllByText("Acme Logistics");
 
-    // The UI-language control stays; the Search-and-Display control has moved
-    // out of the sidebar to the self-service My Preferences page.
+    // Only the UI-language control remains; the Search-and-Display control now
+    // lives in General Settings (My Display Preferences), not the sidebar.
     expect(screen.getByRole("group", { name: "Language" })).toBeInTheDocument();
     expect(screen.queryByRole("group", { name: "Text language" })).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "My Preferences" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "My Preferences" })).not.toBeInTheDocument();
     // UI language and direction remain English/LTR.
     expect(i18nInstance.language).toBe("en");
     expect(document.documentElement.dir).toBe("ltr");

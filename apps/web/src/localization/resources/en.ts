@@ -314,6 +314,7 @@ export const englishTranslations = {
     deactivateBank: "Deactivate",
     deactivateArea: "Deactivate",
     defaultLanguage: "Default language",
+    myDisplayPreferences: "My Display Preferences",
     iban: "IBAN",
     noAreas: "No areas are configured yet.",
     noBanks: "No bank accounts are configured yet.",

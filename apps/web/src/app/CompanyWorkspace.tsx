@@ -12,7 +12,6 @@ import {
 } from "../features/administration/UserRoleConfigurationWorkspace.js";
 import { CompanyConfigurationWorkspace } from "../features/configuration/CompanyConfigurationWorkspace.js";
 import { CompanyProfileWorkspace } from "../features/configuration/CompanyProfileWorkspace.js";
-import { MyPreferencesWorkspace } from "../features/preferences/MyPreferencesWorkspace.js";
 import {
   CustomerConfigurationWorkspace,
   CustomerDetailWorkspace,
@@ -46,6 +45,7 @@ import { canAccessCompanyPath, firstAuthorizedCompanyPath } from "./company-acce
 const redirects: Readonly<Record<string, string>> = {
   "/configuration": "/configuration/general",
   "/operations": "/orders",
+  "/preferences": "/configuration/general",
   "/users": "/configuration/users",
   "/roles": "/configuration/roles",
 };
@@ -163,18 +163,16 @@ export function CompanyWorkspace({
         permissions={session.identity.permissions}
       />
     );
-  } else if (path === "/preferences") {
-    content = <MyPreferencesWorkspace />;
   } else if (path === "/configuration/company-profile") {
     content = <CompanyProfileWorkspace api={api} />;
   } else if (path === "/configuration/general") {
-    content = <CompanyConfigurationWorkspace api={api} view="general" />;
+    content = <CompanyConfigurationWorkspace api={api} permissions={session.identity.permissions} view="general" />;
   } else if (path === "/configuration/areas") {
-    content = <CompanyConfigurationWorkspace api={api} view="areas" />;
+    content = <CompanyConfigurationWorkspace api={api} permissions={session.identity.permissions} view="areas" />;
   } else if (path === "/configuration/bank-accounts") {
-    content = <CompanyConfigurationWorkspace api={api} view="bank-accounts" />;
+    content = <CompanyConfigurationWorkspace api={api} permissions={session.identity.permissions} view="bank-accounts" />;
   } else if (path === "/configuration/vat") {
-    content = <CompanyConfigurationWorkspace api={api} view="vat" />;
+    content = <CompanyConfigurationWorkspace api={api} permissions={session.identity.permissions} view="vat" />;
   } else if (path === "/configuration/employees") {
     content = (
       <WorkforceConfigurationWorkspace

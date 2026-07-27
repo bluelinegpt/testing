@@ -15,13 +15,23 @@ import {
   Truck,
   UserRoundCheck,
 } from "lucide-react";
-import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Fragment,
+  type ReactNode,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 
 import { ApiError, type ApiClient } from "../../api/api-client.js";
 import type {
   CompanyArea,
+  Emirate,
   CustomerOption,
   OperationsDriver,
   OperationsOrder,
@@ -37,7 +47,8 @@ import { SearchCombobox } from "../../components/SearchCombobox.js";
 import { isUaeMobile, normalizeUaeMobile } from "../../domain/uae-mobile.js";
 import { formatCurrency, formatDate, formatDateTime } from "../../localization/formatters.js";
 import { normalizeLocale } from "../../localization/locale.js";
-import { AreaSelector } from "../configuration/AreaSelector.js";
+import { CompanyBrandingContext } from "../../app/CompanyBrandingContext.js";
+import { localizeName } from "../../localization/localize-name.js";
 import { CreateOrderDialog } from "./CreateOrderDialog.js";
 import {
   type DriverCollectionPrintData,
@@ -101,11 +112,17 @@ export function OrdersModuleWorkspace({
 }) {
   const { i18n, t } = useTranslation();
   const locale = normalizeLocale(i18n.resolvedLanguage);
+  // Business-data display follows the user's Search-and-Display preference,
+  // falling back to the UI language when no branding provider is present.
+  const branding = useContext(CompanyBrandingContext);
+  const textLanguage = branding?.textLanguage ?? locale;
   const [filters, setFilters] = useState<OrderFilters>(initialFilters);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<25 | 50 | 100>(25);
   const [data, setData] = useState<OperationsOrderPage>();
   const [holdCount, setHoldCount] = useState(0);
+  const [emirates, setEmirates] = useState<readonly Emirate[]>([]);
+  const [filterEmirateId, setFilterEmirateId] = useState("");
   const [filterArea, setFilterArea] = useState<CompanyArea>();
   const [drivers, setDrivers] = useState<readonly OperationsDriver[]>([]);
   const [traders, setTraders] = useState<readonly OperationsTrader[]>([]);
@@ -154,6 +171,18 @@ export function OrdersModuleWorkspace({
   }, [api, query, t]);
 
   useEffect(() => void load(), [load]);
+
+  // Emirates scope the Area filter; load them once.
+  useEffect(() => {
+    let active = true;
+    void api
+      .get<readonly Emirate[]>("configuration/emirates")
+      .then((loaded) => active && setEmirates(Array.isArray(loaded) ? loaded : []))
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [api]);
   useEffect(() => {
     setPage(1);
     setSelectedIds(new Set());
@@ -385,18 +414,46 @@ export function OrdersModuleWorkspace({
               </option>
             ))}
           </FilterSelect>
-          <div className="orders-area-filter">
-            <AreaSelector
-              allowCreate={false}
-              api={api}
-              areaLabel={t("operations.areaField")}
-              onChange={(area) => {
-                setFilterArea(area);
-                updateFilters({ areaId: area?.id ?? "" });
-              }}
-              value={filterArea}
-            />
-          </div>
+          <FilterSelect
+            label={t("areas.emirate")}
+            onChange={(value) => {
+              setFilterEmirateId(value);
+              setFilterArea(undefined);
+              updateFilters({ areaId: "" });
+            }}
+            value={filterEmirateId}
+          >
+            {emirates.map((emirate) => (
+              <option key={emirate.id} value={emirate.id}>
+                {localizeName(textLanguage, { ar: emirate.nameAr, en: emirate.nameEn })}
+              </option>
+            ))}
+          </FilterSelect>
+          <label className="filter-select filter-area">
+            <span className="sr-only">{t("operations.areaField")}</span>
+            {filterEmirateId === "" ? (
+              <input disabled placeholder={t("areas.selectEmirateFirst")} readOnly value="" />
+            ) : (
+              <SearchCombobox<CompanyArea>
+                api={api}
+                emptyText={t("areas.noneFound")}
+                getLabel={(area) =>
+                  localizeName(textLanguage, { ar: area.nameAr, en: area.nameEn })
+                }
+                key={filterEmirateId}
+                label={t("operations.areaField")}
+                onChange={(area) => {
+                  setFilterArea(area);
+                  updateFilters({ areaId: area?.id ?? "" });
+                }}
+                path={`configuration/areas/search?emirateId=${encodeURIComponent(
+                  filterEmirateId,
+                )}&activeOnly=true`}
+                placeholder={t("areas.searchPlaceholder")}
+                value={filterArea}
+              />
+            )}
+          </label>
           <FilterSelect
             label={t("operations.deliveryStatus")}
             onChange={(value) => updateFilters({ deliveryStatus: value })}
@@ -459,7 +516,11 @@ export function OrdersModuleWorkspace({
           </label>
           <button
             className="button button-link"
-            onClick={() => setFilters(initialFilters)}
+            onClick={() => {
+              setFilters(initialFilters);
+              setFilterEmirateId("");
+              setFilterArea(undefined);
+            }}
             type="button"
           >
             {t("operations.clearFilters")}

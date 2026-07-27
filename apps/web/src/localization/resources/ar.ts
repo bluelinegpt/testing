@@ -313,6 +313,7 @@ export const arabicTranslations = {
     deactivateBank: "تعطيل",
     deactivateArea: "تعطيل",
     defaultLanguage: "اللغة الافتراضية",
+    myDisplayPreferences: "تفضيلات عرض البيانات",
     iban: "IBAN",
     noAreas: "لا توجد مناطق مضافة بعد.",
     noBanks: "لا توجد حسابات بنكية بعد.",

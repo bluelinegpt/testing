@@ -145,7 +145,11 @@ export function AdministrationWorkspace({
         ) : view === "operations" ? (
           <OperationsWorkspace api={api} initialView={operationsView} />
         ) : view === "configuration" ? (
-          <CompanyConfigurationWorkspace api={api} view="general" />
+          <CompanyConfigurationWorkspace
+            api={api}
+            permissions={session.identity.permissions}
+            view="general"
+          />
         ) : view === "support" ? (
           <SupportWorkspace api={api} />
         ) : (

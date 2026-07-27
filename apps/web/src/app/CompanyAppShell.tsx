@@ -12,7 +12,6 @@ import {
   PanelLeftOpen,
   Settings,
   ShieldCheck,
-  SlidersHorizontal,
   Store,
   Truck,
   X,
@@ -72,7 +71,6 @@ const routeTitles: Readonly<Record<string, string>> = {
   "/configuration/users": "nav.users",
   "/configuration/roles": "nav.roles",
   "/support": "nav.supportCases",
-  "/preferences": "preferences.title",
   "/no-access": "shell.noAccessTitle",
 };
 
@@ -336,10 +334,6 @@ export function CompanyAppShell({
               <LogOut aria-hidden="true" size={18} />
             </button>
           </div>
-          <NavLink className="sidebar-preferences" to="/preferences">
-            <SlidersHorizontal aria-hidden="true" size={16} />
-            <span>{t("preferences.title")}</span>
-          </NavLink>
           <p className="powered-by">{t("shell.poweredBy")}</p>
         </div>
       </aside>

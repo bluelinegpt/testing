@@ -5,17 +5,23 @@ import type { ApiClient } from "../../api/api-client.js";
 import type { CompanyBankAccount, CompanySettings } from "../../api/contracts.js";
 import { PageHeader } from "../../components/PageHeader.js";
 import { AreaWorkspace } from "./AreaWorkspace.js";
+import { MyDisplayPreferences } from "./MyDisplayPreferences.js";
 
 export type ConfigurationView = "general" | "areas" | "bank-accounts" | "vat";
 
 export function CompanyConfigurationWorkspace({
   api,
+  permissions,
   view,
 }: {
   api: ApiClient;
+  permissions: readonly string[];
   view: ConfigurationView;
 }) {
   const { t } = useTranslation();
+  // Company settings require the configuration permission; My Display
+  // Preferences (below) is self-service and shown to every authenticated user.
+  const canManageCompany = permissions.includes("users_roles.manage");
   const [settings, setSettings] = useState<CompanySettings>();
   const [bankAccounts, setBankAccounts] = useState<readonly CompanyBankAccount[]>([]);
   const [loading, setLoading] = useState(true);
@@ -26,20 +32,23 @@ export function CompanyConfigurationWorkspace({
     setLoading(true);
     setError(undefined);
     try {
-      if (view === "general" || view === "vat") {
+      // Company settings are only fetched when the user may manage them, so an
+      // ordinary user opening General Settings for their own preference never
+      // triggers a forbidden settings request.
+      if ((view === "general" || view === "vat") && canManageCompany) {
         setSettings(await api.get<CompanySettings>("configuration/settings"));
-      } else if (view !== "areas") {
-        // AreaWorkspace loads and paginates Areas itself.
+      } else if (view === "bank-accounts") {
         setBankAccounts(
           await api.get<readonly CompanyBankAccount[]>("configuration/bank-accounts"),
         );
       }
+      // AreaWorkspace loads and paginates Areas itself.
     } catch {
       setError(t("common.loadFailed"));
     } finally {
       setLoading(false);
     }
-  }, [api, t, view]);
+  }, [api, canManageCompany, t, view]);
 
   useEffect(() => void load(), [load]);
 
@@ -93,6 +102,7 @@ export function CompanyConfigurationWorkspace({
             onSaved={load}
           />
         )}
+        {view === "general" ? <MyDisplayPreferences /> : null}
         {view === "areas" ? <AreaWorkspace api={api} /> : null}
         {view === "bank-accounts" ? (
           <section className="stacked-section standalone-section">

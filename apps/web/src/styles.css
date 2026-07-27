@@ -67,13 +67,35 @@
   font-size: 12px;
 }
 .orders-filter-bar {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(185px, 1fr));
   align-items: end;
-  flex-wrap: wrap;
-  gap: 8px;
+  gap: 12px;
   padding: 14px 16px;
   background: #f8fafc;
   border-bottom: 1px solid var(--shell-border);
+}
+/* In the filter grid every control fills its cell for consistent widths. */
+.orders-filter-bar .orders-search {
+  width: 100%;
+}
+.orders-filter-bar .filter-select select,
+.orders-filter-bar .filter-date input,
+.orders-filter-bar .filter-area input {
+  width: 100%;
+  max-width: none;
+}
+.filter-area .search-combobox,
+.filter-area .search-combobox > input {
+  width: 100%;
+  box-sizing: border-box;
+}
+.filter-area input {
+  min-height: 38px;
+  border: 1px solid #cbd5e1;
+  border-radius: 5px;
+  background: #fff;
+  padding-inline: 8px;
 }
 .orders-search {
   width: min(310px, 100%);
@@ -3766,14 +3788,6 @@ td {
 .area-selector .search-combobox > input {
   width: 100%;
   box-sizing: border-box;
-}
-/* Searchable, Emirate-aware Area filter in the Orders list filter bar. */
-.orders-area-filter {
-  min-width: 280px;
-  flex: 1 1 280px;
-}
-.orders-area-filter .area-selector {
-  gap: 8px;
 }
 
 /* Two-column modal forms -------------------------------------------------- */
