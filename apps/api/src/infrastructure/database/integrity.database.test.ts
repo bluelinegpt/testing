@@ -556,4 +556,66 @@ describe.skipIf(!runDatabaseTests)("database integrity protections", () => {
       await database.destroy();
     }
   }, 30_000);
+
+  // Regression for 20260728100000_restore_hold_order_status_validation: a prior migration
+  // (20260726200100_trader_payable_ledger) redefined is_valid_order_status_value() to add
+  // Trader settlement statuses but silently dropped 'hold' from the 'delivery' case, which
+  // blocked any Order from ever transitioning into or out of Hold. is_valid_order_status_value
+  // is immutable/strict SQL with no side effects, so this needs no fixtures or rollback.
+  it("validates the Hold delivery status without breaking any other status value", async () => {
+    loadEnvironment({ path: resolve(process.cwd(), "../../.env") });
+    const settings = configuration();
+    const pool = new Pool({ connectionString: settings.database.url, max: 1 });
+    const database = new Kysely<DatabaseSchema>({ dialect: new PostgresDialect({ pool }) });
+
+    try {
+      const isValid = async (dimension: string, value: string): Promise<boolean> => {
+        const result = await sql<{ ok: boolean }>`
+          select is_valid_order_status_value(${dimension}, ${value}) as ok
+        `.execute(database);
+        return result.rows[0]?.ok ?? false;
+      };
+
+      // Hold is restored for the 'delivery' dimension.
+      expect(await isValid("delivery", "hold")).toBe(true);
+
+      // Every other currently-approved delivery status remains valid.
+      for (const status of [
+        "new",
+        "processing",
+        "assigned",
+        "returned",
+        "in_branch",
+        "assigned_to_driver",
+        "out_for_delivery",
+        "delivered",
+        "returned_to_branch",
+        "returned_to_trader",
+        "cancelled",
+        "closed",
+      ]) {
+        expect(await isValid("delivery", status)).toBe(true);
+      }
+
+      // Every current Trader settlement status remains valid.
+      for (const status of [
+        "not_eligible",
+        "unsettled",
+        "partially_settled",
+        "settled",
+        "money_sent_to_trader",
+        "money_received_by_trader",
+        "reversed",
+      ]) {
+        expect(await isValid("trader_settlement", status)).toBe(true);
+      }
+
+      // Invalid values, and values from a mismatched dimension, remain rejected.
+      expect(await isValid("delivery", "not_a_real_status")).toBe(false);
+      expect(await isValid("trader_settlement", "hold")).toBe(false);
+      expect(await isValid("not_a_real_dimension", "hold")).toBe(false);
+    } finally {
+      await database.destroy();
+    }
+  }, 15_000);
 });
