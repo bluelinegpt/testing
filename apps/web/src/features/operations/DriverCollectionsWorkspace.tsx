@@ -910,7 +910,6 @@ function CreateDriverCollectionDialog({
     // filledExpenses is rebuilt every render; key on its serialised content.
     [JSON.stringify(filledExpenses)],
   );
-  const expensesHaveReason = filledExpenses.every((row) => row.reason.trim() !== "");
   const expenseNeedingDescription = filledExpenses.find((row) => {
     const type = expenseTypes.find((option) => option.id === row.expenseTypeId);
     return type?.requiresDescription === true;
@@ -978,7 +977,6 @@ function CreateDriverCollectionDialog({
     selectedIds.size > 0 &&
     preview !== undefined &&
     preview.warnings.length === 0 &&
-    expensesHaveReason &&
     expenseNeedingDescription === undefined &&
     actualReceived.trim() !== "" &&
     Number(difference) === 0 &&
@@ -1261,7 +1259,6 @@ function CreateDriverCollectionDialog({
                       </label>
                       <label>
                         {t("operations.reason")}
-                        {type !== undefined ? " *" : ""}
                         <input
                           onChange={(event) =>
                             setExpenses(
@@ -1272,6 +1269,7 @@ function CreateDriverCollectionDialog({
                               ),
                             )
                           }
+                          placeholder={t("operations.expenseReasonPlaceholder")}
                           type="text"
                           value={row.reason}
                         />

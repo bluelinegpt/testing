@@ -616,7 +616,7 @@ export const englishTranslations = {
     paymentMethodVisa: "Visa (card / bank)",
     tradersRepresented: "Traders represented",
     companyFees: "Company fees",
-    expenseReasonPlaceholder: "Reason (required)",
+    expenseReasonPlaceholder: "Reason (optional)",
     pendingCash: "Pending cash",
     plan: "Plan",
     pickupAddress: "Pickup address",

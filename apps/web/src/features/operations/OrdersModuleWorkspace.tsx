@@ -1532,7 +1532,7 @@ function CollectMoneyDialog({
   const [pdfError, setPdfError] = useState<string>();
   const idempotency = useIdempotencyKey();
 
-  // Every entered expense must carry a reason (§9); rows still being filled in are ignored.
+  // Reason is optional; rows still being filled in (no type or amount yet) are ignored.
   const filledExpenses = expenses.filter((row) => row.expenseTypeId !== "" && row.amount !== "");
   const cleanExpenses = useMemo(
     () =>
@@ -1584,7 +1584,6 @@ function CollectMoneyDialog({
   const driverName = drivers.find((driver) => driver.id === preview?.driverId)?.name;
   const netExpected = preview === undefined ? 0 : Number(preview.netAmountExpected);
   const difference = twoDecimals(Number(twoDecimals(cash || 0)) - netExpected);
-  const expensesHaveReason = filledExpenses.every((row) => row.reason.trim() !== "");
   const confirmPayload = {
     ...selection,
     // Authoritative Cash/Visa method for the whole collection (§6), stored on the collection
@@ -1652,7 +1651,6 @@ function CollectMoneyDialog({
     preview.warnings.length === 0 &&
     cash.trim() !== "" &&
     Number(difference) === 0 &&
-    expensesHaveReason &&
     !saving;
 
   return (
@@ -1837,7 +1835,6 @@ function CollectMoneyDialog({
                   value={row.amount}
                 />
                 <input
-                  aria-invalid={row.expenseTypeId !== "" && row.reason.trim() === ""}
                   onChange={(event) =>
                     setExpenses((current) =>
                       current.map((item, itemIndex) =>

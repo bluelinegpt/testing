@@ -240,8 +240,8 @@ export class ReconciliationExpenseDto {
   @MaxLength(80)
   public readonly reference?: string;
 
-  // Mandatory business reason for the expense (§9). Optional at the DTO level during the Phase 3
-  // rollout so existing callers keep working; the redesigned collection form requires it.
+  // Optional business reason for the expense — the User may enter one, but
+  // confirmation is never blocked on it being present.
   @IsOptional()
   @IsString()
   @MaxLength(500)

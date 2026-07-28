@@ -605,7 +605,7 @@ export const arabicTranslations = {
     paymentMethodVisa: "فيزا (بطاقة / تحويل)",
     tradersRepresented: "عدد التجار",
     companyFees: "رسوم الشركة",
-    expenseReasonPlaceholder: "السبب (مطلوب)",
+    expenseReasonPlaceholder: "السبب (اختياري)",
     pendingCash: "نقدية معلقة",
     plan: "الخطة",
     pendingSettlements: "التسويات المعلقة",
