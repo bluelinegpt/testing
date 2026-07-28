@@ -5,6 +5,11 @@ import { Decimal } from "decimal.js";
 import { type Kysely, sql } from "kysely";
 
 import { CompanyProfileService } from "../company-profile/company-profile.service.js";
+import { DriverCollectionPdfService } from "./driver-collection-pdf.service.js";
+import {
+  buildDriverCollectionReportHtml,
+  type ReportLanguage,
+} from "./driver-collection-report-html.js";
 import { DATABASE } from "../infrastructure/database/database.tokens.js";
 import type { DatabaseSchema } from "../infrastructure/database/database.types.js";
 import { KyselyTransactionManager } from "../infrastructure/database/transaction-manager.js";
@@ -297,6 +302,7 @@ export class DriverCashReconciliationService {
     @Inject(IdentityContextAccessor) private readonly identities: IdentityContextAccessor,
     @Inject(OperationsHistoryWriter) private readonly history: OperationsHistoryWriter,
     @Inject(CompanyProfileService) private readonly companyProfile: CompanyProfileService,
+    @Inject(DriverCollectionPdfService) private readonly pdf: DriverCollectionPdfService,
   ) {}
 
   public async expenseTypes(): Promise<readonly ExpenseTypeOption[]> {
@@ -475,8 +481,23 @@ export class DriverCashReconciliationService {
       (order) =>
         order.deliveryStatus !== "delivered" || order.driverReconciliationStatus !== "pending",
     );
-    for (const order of ineligible) {
-      warnings.push(`${order.orderNumber} is no longer Delivered with Pending Collection`);
+    if (ineligible.length > 0) {
+      // A stale eligible-Orders selection is most often "already reconciled by
+      // someone else in the meantime" — name the conflicting reconciliation
+      // where one exists, rather than a generic "no longer eligible" warning.
+      const reconciliationByOrder = await this.findActiveReconciliationLinks(
+        this.database,
+        companyId,
+        ineligible,
+      );
+      for (const order of ineligible) {
+        const reconciliationNumber = reconciliationByOrder.get(order.orderNumber);
+        warnings.push(
+          reconciliationNumber === undefined
+            ? `${order.orderNumber} is no longer Delivered with Pending Collection`
+            : `${order.orderNumber}: This Order has already been included in Driver Collection ${reconciliationNumber}.`,
+        );
+      }
     }
     const gross = this.sumCollections(orders);
     const expenseTotal = this.sumExpenses(input.expenses ?? []);
@@ -577,7 +598,11 @@ export class DriverCashReconciliationService {
       // 3. Lock any existing reconciliation links for those Orders so a concurrent
       //    confirmation cannot claim the same Order between validation and write.
       await this.lockExistingLinks(transaction, companyId, orders);
-      // 4. Revalidate Company, Driver and statuses under the locks.
+      // 4. Revalidate Company, Driver and statuses under the locks. The
+      //    already-reconciled check runs first so a stale or direct-API
+      //    duplicate attempt names the conflicting reconciliation, rather
+      //    than falling into the generic ineligibility message below.
+      await this.assertOrdersNotAlreadyReconciled(transaction, companyId, orders);
       const driverId = this.assertSingleEligibleDriver(orders);
       await this.assertDriverReconcilable(transaction, companyId, driverId, orders);
 
@@ -1633,6 +1658,36 @@ export class DriverCashReconciliationService {
   }
 
   /**
+   * Resolves the active (non-reversed, confirmed) Driver Collection linked to
+   * one Order, so the Orders screen can open the exact same server-authoritative
+   * report/PDF the Driver Collections screen uses — never a second, Order-scoped
+   * report record. Returns null when the Order has no reconciliation yet.
+   */
+  public async reconciliationForOrder(
+    orderId: string,
+  ): Promise<{ reconciliationId: string; reconciliationNumber: string } | null> {
+    this.assertAnyPermission(["reconciliations.create", "reports.export"]);
+    const { companyId } = this.tenants.current();
+    const result = await sql<{ id: string; reconciliationNumber: string }>`
+      select r.id, r.reconciliation_number as "reconciliationNumber"
+        from driver_reconciliation_orders link
+        join driver_reconciliations r on r.id = link.reconciliation_id and r.company_id = link.company_id
+       where link.company_id = ${companyId}::uuid
+         and link.order_id = ${orderId}::uuid
+         and r.status = 'confirmed'
+         and not exists (
+           select 1 from driver_reconciliations rv
+            where rv.company_id = r.company_id and rv.reversal_of_id = r.id
+         )
+       limit 1
+    `.execute(this.database);
+    const row = result.rows[0];
+    return row === undefined
+      ? null
+      : { reconciliationId: row.id, reconciliationNumber: row.reconciliationNumber };
+  }
+
+  /**
    * Comprehensive, server-authoritative report data for the Driver Collection
    * Report (§10/§19/CP2 §1). Every value is read from the reconciliation's own
    * stored snapshots and its linked Orders' financial snapshot columns — never
@@ -1860,6 +1915,54 @@ export class DriverCashReconciliationService {
   }
 
   /**
+   * True, downloadable PDF file for the Driver Collection Report (§12/§19),
+   * server-authoritative end to end: the same `reportData()` snapshot backs
+   * both the JSON view and this PDF, rendered from server-built HTML via a
+   * headless browser — never from a User's DOM. A render failure only ever
+   * throws; the reconciliation itself is a separately-committed, already
+   * confirmed record and is never touched by this read-only path.
+   */
+  public async reportPdf(
+    reconciliationId: string,
+    language: ReportLanguage,
+    correlationId: string,
+  ): Promise<{ bytes: Buffer; filename: string }> {
+    this.assertAnyPermission(["reconciliations.create", "reports.export"]);
+    const { companyId } = this.tenants.current();
+    const identity = this.identities.current();
+    const data = await this.reportData(reconciliationId);
+    const generatedAt = new Intl.DateTimeFormat("en-GB", {
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      month: "2-digit",
+      timeZone: "Asia/Dubai",
+      year: "numeric",
+    }).format(new Date());
+    const html = buildDriverCollectionReportHtml(data, language, `${generatedAt} (UAE)`);
+    const footerTemplate =
+      language === "ar"
+        ? `<div style="font-size:9px;width:100%;text-align:center;color:#666;direction:rtl;">الصفحة <span class="pageNumber"></span> من <span class="totalPages"></span></div>`
+        : `<div style="font-size:9px;width:100%;text-align:center;color:#666;">Page <span class="pageNumber"></span> of <span class="totalPages"></span></div>`;
+    const bytes = await this.pdf.renderPdf(html, footerTemplate);
+    // Safe filename (§19): built only from the reconciliation number, which is
+    // always the `REC-XXXXXX` shape generated by `nextReferenceNumber` — the
+    // allowlist strips anything else defensively rather than trusting that.
+    const safeNumber = data.header.reconciliationNumber.replaceAll(/[^A-Za-z0-9-]/g, "");
+    const filename = `Driver-Collection-${safeNumber}.pdf`;
+    await this.history.audit(this.database, {
+      action: "driver_reconciliation.report_pdf_generated",
+      actorId: identity.identityId,
+      after: { language, reconciliationNumber: data.header.reconciliationNumber },
+      companyId,
+      correlationId,
+      subjectId: reconciliationId,
+      subjectType: "driver_reconciliation",
+    });
+    return { bytes, filename };
+  }
+
+  /**
    * Approved page sizes are 25, 50 and 100. Anything else normalises to 25,
    * matching the project-wide pagination policy; the DTO allowlist rejects
    * unsupported values at the HTTP boundary before reaching here.
@@ -1994,6 +2097,64 @@ export class DriverCashReconciliationService {
       order by id
       for update
     `.execute(database);
+  }
+
+  /**
+   * Last-mile duplicate-collection guard, run under the locks taken by
+   * `lockExistingLinks` so a concurrent confirmation cannot slip through: a
+   * stale client (or a direct API attempt) selecting an Order already claimed
+   * by a non-reversed confirmed reconciliation gets a specific error naming
+   * that reconciliation, not just a generic "ineligible" one.
+   */
+  private async assertOrdersNotAlreadyReconciled(
+    database: Kysely<DatabaseSchema>,
+    companyId: string,
+    orders: readonly EligibleOrder[],
+  ): Promise<void> {
+    if (orders.length === 0) return;
+    const reconciliationByOrder = await this.findActiveReconciliationLinks(
+      database,
+      companyId,
+      orders,
+    );
+    if (reconciliationByOrder.size === 0) return;
+    throw new ApplicationException(
+      "order_already_reconciled",
+      "One or more selected Orders have already been included in a Driver Collection",
+      HttpStatus.CONFLICT,
+      [...reconciliationByOrder].map(
+        ([orderNumber, reconciliationNumber]) =>
+          `${orderNumber}: This Order has already been included in Driver Collection ${reconciliationNumber}.`,
+      ),
+    );
+  }
+
+  /**
+   * Orders (from the given set) currently claimed by a non-reversed confirmed
+   * reconciliation, keyed by Order number. Shared by the `preview()` warning
+   * and the `confirm()` duplicate-collection guard so both name the same
+   * conflicting reconciliation the same way.
+   */
+  private async findActiveReconciliationLinks(
+    database: Kysely<DatabaseSchema>,
+    companyId: string,
+    orders: readonly EligibleOrder[],
+  ): Promise<Map<string, string>> {
+    if (orders.length === 0) return new Map();
+    const linked = await sql<{ orderNumber: string; reconciliationNumber: string }>`
+      select o.order_number as "orderNumber", r.reconciliation_number as "reconciliationNumber"
+        from driver_reconciliation_orders link
+        join driver_reconciliations r on r.id = link.reconciliation_id and r.company_id = link.company_id
+        join orders o on o.id = link.order_id and o.company_id = link.company_id
+       where link.company_id = ${companyId}::uuid
+         and link.order_id in (${sql.join(orders.map((order) => sql`${order.id}::uuid`))})
+         and r.status = 'confirmed'
+         and not exists (
+           select 1 from driver_reconciliations rv
+            where rv.company_id = r.company_id and rv.reversal_of_id = r.id
+         )
+    `.execute(database);
+    return new Map(linked.rows.map((row) => [row.orderNumber, row.reconciliationNumber]));
   }
 
   private async resolveOrders(

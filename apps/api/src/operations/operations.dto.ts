@@ -291,6 +291,12 @@ export class ReverseDriverReconciliationDto {
   public readonly reason!: string;
 }
 
+// Driver Shipment Manifest (§6-§9): built from selected Orders assigned to one
+// Driver, entirely independent of Driver cash reconciliation — no financial
+// eligibility is required, only that every selected Order belongs to the same
+// Driver and Company and is not cancelled.
+export class GenerateShipmentManifestDto extends OrderSelectionDto {}
+
 export class InlineOrderCustomerDto {
   @IsString()
   @MinLength(1)

@@ -703,6 +703,7 @@ textarea:focus-visible {
   color: #7d2029;
   background: #fff0f1;
   border: 1px solid #e5b6ba;
+  white-space: pre-line;
 }
 
 .admin-layout {
@@ -1840,6 +1841,101 @@ td {
   box-shadow: 0 8px 22px rgb(37 99 235 / 11%);
   transform: translateY(-1px);
 }
+tr.row-highlighted {
+  background: #fff7d6;
+}
+.financial-status-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.financial-status-cell [data-trader-settlement-status] {
+  color: var(--color-muted);
+  font-size: 12px;
+}
+
+/* Driver Collections: six primary cards (not ten), plus a compact secondary
+   indicator row below — an operational dashboard, not a configuration form. */
+.summary-primary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(150px, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.summary-secondary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+.metric-chip {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 8px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--color-muted);
+  font-size: 13px;
+}
+.metric-chip strong {
+  color: #172033;
+  font-size: 15px;
+}
+@media (max-width: 900px) {
+  .summary-primary {
+    grid-template-columns: repeat(2, minmax(140px, 1fr));
+  }
+}
+@media (max-width: 520px) {
+  .summary-primary {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* A responsive filter row for pages with many filters: consistent field
+   height, wraps instead of stacking one control per line. */
+.compact-filters {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(160px, 1fr));
+  gap: 12px 16px;
+  align-items: end;
+  margin-bottom: 16px;
+}
+.compact-filters .field {
+  margin-bottom: 0;
+  min-width: 0;
+}
+.filter-drawer {
+  margin-bottom: 16px;
+}
+.filter-drawer > summary {
+  cursor: pointer;
+  font-weight: 700;
+  color: #29434b;
+  margin-bottom: 12px;
+}
+.filter-drawer .compact-filters {
+  margin-top: 12px;
+  margin-bottom: 0;
+}
+@media (max-width: 1180px) {
+  .compact-filters {
+    grid-template-columns: repeat(3, minmax(160px, 1fr));
+  }
+}
+@media (max-width: 760px) {
+  .compact-filters {
+    grid-template-columns: repeat(2, minmax(140px, 1fr));
+  }
+}
+@media (max-width: 520px) {
+  .compact-filters {
+    grid-template-columns: 1fr;
+  }
+}
+
 .dashboard-summary-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

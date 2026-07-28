@@ -20,6 +20,7 @@ import type { IdentityContext, IdentityContextAccessor } from "../security/ident
 import type { TenantContext, TenantContextAccessor } from "../tenancy/tenant-context.js";
 
 import { DriverCashReconciliationService } from "./driver-cash-reconciliation.service.js";
+import type { DriverCollectionPdfService } from "./driver-collection-pdf.service.js";
 import { OperationsHistoryWriter } from "./operations-history.writer.js";
 
 /**
@@ -265,6 +266,7 @@ export function createCaller(
     identities as unknown as IdentityContextAccessor,
     new OperationsHistoryWriter(),
     companyProfile,
+    {} as unknown as DriverCollectionPdfService,
   );
   return { database, destroy: () => database.destroy(), service };
 }

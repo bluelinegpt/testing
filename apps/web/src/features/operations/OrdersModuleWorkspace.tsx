@@ -50,17 +50,15 @@ import { normalizeLocale } from "../../localization/locale.js";
 import { CompanyBrandingContext } from "../../app/CompanyBrandingContext.js";
 import { localizeName } from "../../localization/localize-name.js";
 import { CreateOrderDialog } from "./CreateOrderDialog.js";
-import {
-  type DriverCollectionPrintData,
-  type DriverCollectionPrintLabels,
-  openDriverCollectionPrint,
-} from "./driver-collection-print.js";
+import { DriverCashStatusLabel, useDriverCashStatusLabel } from "./DriverCashStatus.js";
+import { DriverCollectionDetailDialog } from "./DriverCollectionsWorkspace.js";
 import { openOrderWaybill, OrderBarcode } from "./OperationsWorkspace.js";
+import { type PdfAction, useReconciliationPdfActions } from "./reconciliation-pdf.js";
 import { materialFingerprint, useIdempotencyKey } from "./useIdempotencyKey.js";
 
 type QuickView = "active" | "all" | "hold" | "cancelled" | "closed";
 type OrderGrouping = "" | "status" | "driver";
-type BulkAction = "assign" | "collect" | "settle" | "status";
+type BulkAction = "assign" | "collect" | "manifest" | "settle" | "status";
 
 interface OrderFilters {
   areaId: string;
@@ -227,6 +225,11 @@ export function OrdersModuleWorkspace({
     isAdministrator || permissions.includes("orders.update_delivery_status");
   const canReconcile = isAdministrator || permissions.includes("reconciliations.create");
   const canSettle = isAdministrator || permissions.includes("settlements.create");
+  const canManifest =
+    isAdministrator ||
+    permissions.includes("reports.export") ||
+    canAssignDriver ||
+    canUpdateStatus;
   const canSelectOrders = canAssignDriver || canUpdateStatus || canReconcile || canSettle;
   const pageSelected =
     pageIds.length > 0 &&
@@ -320,7 +323,10 @@ export function OrdersModuleWorkspace({
         <td className="money-cell">{formatCurrency(order.traderNetPayable, "AED", locale)}</td>
         <td className="money-cell">{formatCurrency(order.customerAmountDue, "AED", locale)}</td>
         <td>
-          <OrderStatusBadge order={order} />
+          <DeliveryStatusBadge order={order} />
+        </td>
+        <td>
+          <FinancialStatusCell order={order} />
         </td>
         <td>
           <OrderRowActions
@@ -561,6 +567,12 @@ export function OrdersModuleWorkspace({
                   {t("operations.changeStatus")}
                 </button>
               ) : null}
+              {canManifest ? (
+                <button onClick={() => setBulkAction("manifest")} type="button">
+                  <Printer aria-hidden="true" size={17} />
+                  {t("operations.actions.printManifest")}
+                </button>
+              ) : null}
               <button className="button-link" onClick={clearSelection} type="button">
                 {t("common.clear")}
               </button>
@@ -593,7 +605,8 @@ export function OrdersModuleWorkspace({
                 <th>{t("operations.totalDeductions")}</th>
                 <th>{t("operations.amountDueToTrader")}</th>
                 <th>{t("operations.amountToCollect")}</th>
-                <th>{t("operations.status")}</th>
+                <th>{t("operations.deliveryStatus")}</th>
+                <th>{t("operations.financialStatusColumn")}</th>
                 <th>
                   <span className="sr-only">{t("common.actions")}</span>
                 </th>
@@ -621,7 +634,7 @@ export function OrdersModuleWorkspace({
                               />
                             ) : null}
                           </td>
-                          <td colSpan={11}>
+                          <td colSpan={12}>
                             <button
                               aria-expanded={expanded}
                               className="order-group-toggle"
@@ -653,7 +666,7 @@ export function OrdersModuleWorkspace({
                   })}
               {!loading && (data?.items.length ?? 0) === 0 ? (
                 <tr>
-                  <td className="empty-state" colSpan={12}>
+                  <td className="empty-state" colSpan={13}>
                     {t("operations.noOrders")}
                   </td>
                 </tr>
@@ -777,6 +790,13 @@ export function OrdersModuleWorkspace({
           selection={selection}
         />
       ) : null}
+      {bulkAction === "manifest" ? (
+        <DriverShipmentManifestDialog
+          api={api}
+          onClose={() => setBulkAction(undefined)}
+          selection={selection}
+        />
+      ) : null}
     </>
   );
 }
@@ -794,12 +814,27 @@ export function OrderDetailsWorkspace({
 }) {
   const { i18n, t } = useTranslation();
   const locale = normalizeLocale(i18n.resolvedLanguage);
+  const cashStatusLabel = useDriverCashStatusLabel();
   const [detail, setDetail] = useState<OperationsOrderDetail>();
   const [historyFilter, setHistoryFilter] = useState("all");
   const [editOpen, setEditOpen] = useState(false);
   const [holdOpen, setHoldOpen] = useState(false);
   const [statusBusy, setStatusBusy] = useState(false);
   const [error, setError] = useState<string>();
+  const [collectOpen, setCollectOpen] = useState(false);
+  const [viewCollectionId, setViewCollectionId] = useState<string>();
+  const [collectionError, setCollectionError] = useState<string>();
+  const [collectionSummary, setCollectionSummary] = useState<{
+    businessDate: string;
+    collectionPaymentMethod: "cash" | "visa" | null;
+    customerAmountToCollect: string;
+    driverName: string;
+    reconciliationId: string;
+    reconciliationNumber: string;
+    statusLabel: string;
+  }>();
+  const pdf = useReconciliationPdfActions(api);
+  const [pdfError, setPdfError] = useState<string>();
   const load = useCallback(async () => {
     setError(undefined);
     try {
@@ -815,6 +850,62 @@ export function OrderDetailsWorkspace({
     }
   }, [api, orderNumber, t]);
   useEffect(() => void load(), [load]);
+  // Eagerly resolve the compact Driver Collection summary shown on the Order
+  // detail page — the same server-authoritative report-data endpoint the
+  // Driver Collections screen uses, never a second report record.
+  useEffect(() => {
+    if (detail === undefined || detail.driverReconciliationStatus !== "reconciled") {
+      setCollectionSummary(undefined);
+      return;
+    }
+    let active = true;
+    void api
+      .get<{ reconciliationId: string; reconciliationNumber: string } | undefined>(
+        `operations/orders/${detail.id}/driver-collection`,
+      )
+      .then((link) => {
+        if (!active || link === undefined) return undefined;
+        return api.get<{
+          header: {
+            businessDate: string;
+            collectionPaymentMethod: "cash" | "visa" | null;
+            driverName: string;
+            statusLabel: string;
+          };
+          orders: readonly { customerAmountToCollect: string; serialNumber: string }[];
+        }>(`operations/cash/reconciliations/${link.reconciliationId}/report-data`).then((data) => {
+          if (!active) return;
+          const own = data.orders.find((row) => row.serialNumber === detail.serialNumber);
+          setCollectionSummary({
+            businessDate: data.header.businessDate,
+            collectionPaymentMethod: data.header.collectionPaymentMethod,
+            customerAmountToCollect: own?.customerAmountToCollect ?? "0.00",
+            driverName: data.header.driverName,
+            reconciliationId: link.reconciliationId,
+            reconciliationNumber: link.reconciliationNumber,
+            statusLabel: data.header.statusLabel,
+          });
+        });
+      })
+      .catch((requestError: unknown) => {
+        if (active) setCollectionError(message(requestError, t("operations.detailLoadFailed")));
+      });
+    return () => {
+      active = false;
+    };
+  }, [api, detail, t]);
+  const openConfirmedCollectionPdf = async (mode: PdfAction) => {
+    if (collectionSummary === undefined) return;
+    setPdfError(undefined);
+    const requestError = await pdf.run(
+      `operations/cash/reconciliations/${collectionSummary.reconciliationId}/pdf?language=en`,
+      `Driver-Collection-${collectionSummary.reconciliationNumber}.pdf`,
+      mode,
+    );
+    if (requestError !== undefined) {
+      setPdfError(message(requestError, t("operations.pdfGenerationFailed")));
+    }
+  };
   if (error !== undefined)
     return (
       <section className="route-message" role="alert">
@@ -899,11 +990,22 @@ export function OrderDetailsWorkspace({
             {t("operations.printWaybill")}
           </button>
           <TrackingButton api={api} detail={detail} />
+          {detail.driverReconciliationStatus === "pending" &&
+          (permissions.includes("reconciliations.create") ||
+            permissions.includes("users_roles.manage")) ? (
+            <button
+              className="button button-secondary"
+              onClick={() => setCollectOpen(true)}
+              type="button"
+            >
+              {t("operations.actions.collectMoney")}
+            </button>
+          ) : null}
         </div>
       </div>
       <div className="order-current-status">
         <span>{t("operations.currentOrderStatus")}</span>
-        <OrderStatusBadge large order={detail} />
+        <DeliveryStatusBadge large order={detail} />
       </div>
       <main className="order-detail-layout">
         <DetailSection
@@ -970,6 +1072,85 @@ export function OrderDetailsWorkspace({
             [t("operations.profit"), money(detail.orderProfit, locale)] as const,
           ]}
         />
+        <DetailSection
+          title={t("operations.financialStatusColumn")}
+          rows={[
+            [t("operations.driverCashStatus"), cashStatusLabel(detail.driverReconciliationStatus)],
+            [t("operations.settlementStatus"), t(`statuses.${detail.traderSettlementStatus}`)],
+          ]}
+        />
+        {collectionSummary === undefined ? null : (
+          <section className="order-detail-section">
+            <h2>{t("operations.collectionDetail")}</h2>
+            <dl>
+              <div>
+                <dt>{t("operations.reconciliationNumber")}</dt>
+                <dd>{collectionSummary.reconciliationNumber}</dd>
+              </div>
+              <div>
+                <dt>{t("operations.driver")}</dt>
+                <dd>{collectionSummary.driverName}</dd>
+              </div>
+              <div>
+                <dt>{t("operations.collectionDateColumn")}</dt>
+                <dd>{collectionSummary.businessDate}</dd>
+              </div>
+              <div>
+                <dt>{t("operations.paymentMethod")}</dt>
+                <dd>
+                  {collectionSummary.collectionPaymentMethod === null
+                    ? t("operations.paymentMethodNotAssigned")
+                    : t(
+                        `operations.paymentMethod${collectionSummary.collectionPaymentMethod === "cash" ? "Cash" : "Visa"}`,
+                      )}
+                </dd>
+              </div>
+              <div>
+                <dt>{t("operations.customerAmountToCollect")}</dt>
+                <dd>{money(collectionSummary.customerAmountToCollect, locale)}</dd>
+              </div>
+              <div>
+                <dt>{t("operations.status")}</dt>
+                <dd>{collectionSummary.statusLabel}</dd>
+              </div>
+            </dl>
+            {pdfError === undefined ? null : (
+              <div className="alert alert-error" role="alert">
+                {pdfError}
+              </div>
+            )}
+            <div className="modal-actions">
+              <button
+                disabled={pdf.busy !== undefined}
+                onClick={() => setViewCollectionId(collectionSummary.reconciliationId)}
+                type="button"
+              >
+                {t("operations.actions.viewCollection")}
+              </button>
+              <button
+                disabled={pdf.busy !== undefined}
+                onClick={() => void openConfirmedCollectionPdf("preview")}
+                type="button"
+              >
+                {pdf.busy === "preview" ? t("common.loading") : t("operations.previewReport")}
+              </button>
+              <button
+                disabled={pdf.busy !== undefined}
+                onClick={() => void openConfirmedCollectionPdf("print")}
+                type="button"
+              >
+                {pdf.busy === "print" ? t("common.loading") : t("common.print")}
+              </button>
+              <button
+                disabled={pdf.busy !== undefined}
+                onClick={() => void openConfirmedCollectionPdf("download")}
+                type="button"
+              >
+                {pdf.busy === "download" ? t("common.loading") : t("operations.downloadPdf")}
+              </button>
+            </div>
+          </section>
+        )}
         <section className="order-detail-section order-detail-wide">
           <h2>{t("operations.attachments")}</h2>
           {detail.attachments.length === 0 ? (
@@ -1080,6 +1261,53 @@ export function OrderDetailsWorkspace({
           title={t("operations.actions.hold")}
         />
       ) : null}
+      {collectionError === undefined ? null : (
+        <div className="alert alert-error" role="alert">
+          {collectionError}
+        </div>
+      )}
+      {collectOpen ? (
+        <CollectMoneyDialog
+          api={api}
+          drivers={
+            detail.assignedDriverId === null
+              ? []
+              : [
+                  {
+                    activeOrders: 0,
+                    code: "",
+                    deliveredOrders: 0,
+                    id: detail.assignedDriverId,
+                    mobileNumber: detail.assignedDriverMobile ?? "",
+                    name: detail.assignedDriverName ?? "",
+                    pendingCashOrders: 0,
+                    status: "active",
+                    type: "",
+                  },
+                ]
+          }
+          onClose={() => setCollectOpen(false)}
+          onComplete={async () => {
+            setCollectOpen(false);
+            await load();
+          }}
+          selection={singleSelection(detail.id)}
+        />
+      ) : null}
+      {viewCollectionId === undefined ? null : (
+        <DriverCollectionDetailDialog
+          api={api}
+          {...(detail.serialNumber === null
+            ? {}
+            : { highlightOrderSerialNumber: detail.serialNumber })}
+          onClose={() => setViewCollectionId(undefined)}
+          onReversed={async () => {
+            setViewCollectionId(undefined);
+            await load();
+          }}
+          reconciliationId={viewCollectionId}
+        />
+      )}
     </>
   );
 }
@@ -1267,6 +1495,7 @@ interface CollectPreview {
   readonly paymentTotal: string;
   readonly traderCount: number;
   readonly traderPayable: string;
+  readonly warnings: readonly string[];
 }
 interface CollectExpenseType {
   readonly id: string;
@@ -1290,20 +1519,29 @@ function CollectMoneyDialog({
 }) {
   const { i18n, t } = useTranslation();
   const locale = normalizeLocale(i18n.resolvedLanguage);
+  const branding = useContext(CompanyBrandingContext);
+  const reportLanguage = branding?.textLanguage === "ar" ? "ar" : "en";
   const [paymentMethod, setPaymentMethod] = useState<"cash" | "visa">("cash");
   const [expenses, setExpenses] = useState<
     readonly { amount: string; expenseTypeId: string; reason: string }[]
   >([]);
+  // Never pre-filled from Net Expected: the operator enters what the Driver actually
+  // handed over, so the Difference correctly reads negative until they do.
   const [cash, setCash] = useState("");
-  const [cashTouched, setCashTouched] = useState(false);
   const [expenseTypes, setExpenseTypes] = useState<readonly CollectExpenseType[]>([]);
   const [preview, setPreview] = useState<CollectPreview>();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string>();
   const [confirmed, setConfirmed] = useState<{
+    driverName: string;
+    grossCollections: string;
+    orderCount: number;
+    paymentMethod: "cash" | "visa";
     reconciliationId: string;
     reconciliationNumber: string;
   }>();
+  const pdf = useReconciliationPdfActions(api);
+  const [pdfError, setPdfError] = useState<string>();
   const idempotency = useIdempotencyKey();
 
   // Every entered expense must carry a reason (§9); rows still being filled in are ignored.
@@ -1355,10 +1593,6 @@ function CollectMoneyDialog({
     };
   }, [api, cleanExpenses, selection, t]);
 
-  useEffect(() => {
-    if (preview !== undefined && !cashTouched) setCash(preview.netAmountExpected);
-  }, [cashTouched, preview]);
-
   const driverName = drivers.find((driver) => driver.id === preview?.driverId)?.name;
   const netExpected = preview === undefined ? 0 : Number(preview.netAmountExpected);
   const difference = twoDecimals(Number(twoDecimals(cash || 0)) - netExpected);
@@ -1381,6 +1615,7 @@ function CollectMoneyDialog({
   })}`;
 
   const submit = async () => {
+    if (preview === undefined) return;
     setSaving(true);
     setError(undefined);
     try {
@@ -1391,9 +1626,18 @@ function CollectMoneyDialog({
         "X-Idempotency-Key": idempotency.keyFor(fingerprint),
       });
       idempotency.reset();
-      // Keep the dialog open on success so the operator can print the collection; the list is
-      // refreshed when they close via Done.
-      setConfirmed(result);
+      // Keep the dialog open on success so the operator can preview/print/download
+      // the confirmed collection; the list is refreshed when they close via Done.
+      // Uses the reconciliation ID the backend just returned — never the number
+      // alone — for every subsequent report/PDF request.
+      setConfirmed({
+        driverName: driverName ?? "",
+        grossCollections: preview.grossCollections,
+        orderCount: preview.orderCount,
+        paymentMethod,
+        reconciliationId: result.reconciliationId,
+        reconciliationNumber: result.reconciliationNumber,
+      });
     } catch (requestError) {
       setError(message(requestError, t("operations.reconciliationFailed")));
     } finally {
@@ -1401,22 +1645,25 @@ function CollectMoneyDialog({
     }
   };
 
-  const printConfirmed = async () => {
+  const openConfirmedPdf = async (mode: PdfAction) => {
     if (confirmed === undefined) return;
-    try {
-      const printData = await api.get<DriverCollectionPrintData>(
-        `operations/cash/reconciliations/${confirmed.reconciliationId}/print-data`,
-      );
-      openDriverCollectionPrint(printData, driverCollectionPrintLabels(t));
-    } catch (requestError) {
-      setError(message(requestError, t("operations.detailLoadFailed")));
+    setPdfError(undefined);
+    const requestError = await pdf.run(
+      `operations/cash/reconciliations/${confirmed.reconciliationId}/pdf?language=${reportLanguage}`,
+      `Driver-Collection-${confirmed.reconciliationNumber}.pdf`,
+      mode,
+    );
+    if (requestError !== undefined) {
+      setPdfError(message(requestError, t("operations.pdfGenerationFailed")));
     }
   };
 
   const canSubmit =
     preview !== undefined &&
     preview.orderCount > 0 &&
+    preview.warnings.length === 0 &&
     cash.trim() !== "" &&
+    Number(difference) === 0 &&
     expensesHaveReason &&
     !saving;
 
@@ -1428,18 +1675,58 @@ function CollectMoneyDialog({
       titleId="collect-money-title"
     >
       {confirmed !== undefined ? (
-        <div className="reconciliation-success">
+        <div className="reconciliation-success" role="status">
           <p>
             {t("operations.collectionConfirmed", { number: confirmed.reconciliationNumber })}
           </p>
-          {error === undefined ? null : <div className="alert alert-error">{error}</div>}
+          <dl className="reconciliation-summary">
+            <div className="detail-line">
+              <dt>{t("operations.reconciliationNumber")}</dt>
+              <dd>{confirmed.reconciliationNumber}</dd>
+            </div>
+            <div className="detail-line">
+              <dt>{t("operations.driver")}</dt>
+              <dd>{confirmed.driverName}</dd>
+            </div>
+            <div className="detail-line">
+              <dt>{t("operations.orders")}</dt>
+              <dd>{confirmed.orderCount}</dd>
+            </div>
+            <div className="detail-line">
+              <dt>{t("operations.grossCustomerCollections")}</dt>
+              <dd>{formatCurrency(confirmed.grossCollections, "AED", locale)}</dd>
+            </div>
+            <div className="detail-line">
+              <dt>{t("operations.paymentMethod")}</dt>
+              <dd>
+                {t(
+                  `operations.paymentMethod${confirmed.paymentMethod === "cash" ? "Cash" : "Visa"}`,
+                )}
+              </dd>
+            </div>
+          </dl>
+          {pdfError === undefined ? null : <div className="alert alert-error">{pdfError}</div>}
           <div className="modal-actions">
             <button
-              className="button button-secondary"
-              onClick={() => void printConfirmed()}
+              disabled={pdf.busy !== undefined}
+              onClick={() => void openConfirmedPdf("preview")}
               type="button"
             >
-              {t("operations.printCollection")}
+              {pdf.busy === "preview" ? t("common.loading") : t("operations.previewReport")}
+            </button>
+            <button
+              disabled={pdf.busy !== undefined}
+              onClick={() => void openConfirmedPdf("print")}
+              type="button"
+            >
+              {pdf.busy === "print" ? t("common.loading") : t("common.print")}
+            </button>
+            <button
+              disabled={pdf.busy !== undefined}
+              onClick={() => void openConfirmedPdf("download")}
+              type="button"
+            >
+              {pdf.busy === "download" ? t("common.loading") : t("operations.downloadPdf")}
             </button>
             <button className="button button-primary" onClick={() => void onComplete()} type="button">
               {t("common.close")}
@@ -1454,6 +1741,16 @@ function CollectMoneyDialog({
         )
       ) : (
         <>
+          {preview.warnings.length === 0 ? null : (
+            <div className="alert alert-error" role="alert">
+              <p>{t("operations.mixedEligibilityWarning")}</p>
+              <ul>
+                {preview.warnings.map((warning) => (
+                  <li key={warning}>{warning}</li>
+                ))}
+              </ul>
+            </div>
+          )}
           <label className="field">
             <span>{t("operations.paymentMethod")}</span>
             <select
@@ -1478,7 +1775,7 @@ function CollectMoneyDialog({
               <dd>{preview.traderCount}</dd>
             </div>
             <div>
-              <dt>{t("operations.receiveDriverMoney")}</dt>
+              <dt>{t("operations.grossCustomerCollections")}</dt>
               <dd>{formatCurrency(preview.grossCollections, "AED", locale)}</dd>
             </div>
             <div>
@@ -1577,14 +1874,11 @@ function CollectMoneyDialog({
             ))}
           </div>
           <label className="field required-field">
-            <span>{t("operations.receiveDriverMoney")}</span>
+            <span>{t("operations.actualReceived")}</span>
             <input
               className="no-spinner"
               inputMode="decimal"
-              onChange={(event) => {
-                setCashTouched(true);
-                setCash(event.target.value);
-              }}
+              onChange={(event) => setCash(event.target.value)}
               type="number"
               value={cash}
             />
@@ -1719,6 +2013,119 @@ function SettleTraderDialog({
   );
 }
 
+function DriverShipmentManifestDialog({
+  api,
+  onClose,
+  selection,
+}: {
+  api: ApiClient;
+  onClose: () => void;
+  selection: SelectionPayload;
+}) {
+  const { i18n, t } = useTranslation();
+  const locale = normalizeLocale(i18n.resolvedLanguage);
+  const branding = useContext(CompanyBrandingContext);
+  const reportLanguage = branding?.textLanguage === "ar" ? "ar" : "en";
+  const [preview, setPreview] = useState<{
+    header: { driverMobile: string; driverName: string; orderCount: number };
+    summary: { totalCod: string; totalOrders: number; totalPackages: number };
+  }>();
+  const [error, setError] = useState<string>();
+  const pdf = useReconciliationPdfActions(api);
+
+  useEffect(() => {
+    let active = true;
+    void api
+      .post<{
+        header: { driverMobile: string; driverName: string; orderCount: number };
+        summary: { totalCod: string; totalOrders: number; totalPackages: number };
+      }>("operations/cash/driver-shipment-manifest/data", selection)
+      .then((result) => active && setPreview(result))
+      .catch((requestError) =>
+        active ? setError(message(requestError, t("operations.manifestPreviewFailed"))) : undefined,
+      );
+    return () => {
+      active = false;
+    };
+  }, [api, selection, t]);
+
+  const filename = `Driver-Manifest-${(preview?.header.driverName ?? "").replaceAll(/[^A-Za-z0-9]+/g, "-")}.pdf`;
+
+  const run = async (mode: PdfAction) => {
+    setError(undefined);
+    const requestError = await pdf.run(
+      `operations/cash/driver-shipment-manifest/pdf?language=${reportLanguage}`,
+      filename,
+      mode,
+      selection,
+    );
+    if (requestError !== undefined) {
+      setError(message(requestError, t("operations.manifestPreviewFailed")));
+    }
+  };
+
+  return (
+    <Modal
+      closeLabel={t("common.close")}
+      onRequestClose={onClose}
+      title={t("operations.actions.printManifest")}
+      titleId="driver-manifest-title"
+    >
+      {preview === undefined ? (
+        error === undefined ? (
+          <div className="loading-row">{t("common.loading")}</div>
+        ) : (
+          <div className="alert alert-error">{error}</div>
+        )
+      ) : (
+        <>
+          <dl className="reconciliation-summary">
+            <div>
+              <dt>{t("operations.driver")}</dt>
+              <dd>{preview.header.driverName}</dd>
+            </div>
+            <div>
+              <dt>{t("operations.selectedOrders")}</dt>
+              <dd>{preview.header.orderCount}</dd>
+            </div>
+            <div>
+              <dt>{t("operations.manifestTotalCod")}</dt>
+              <dd>{formatCurrency(preview.summary.totalCod, "AED", locale)}</dd>
+            </div>
+            <div>
+              <dt>{t("operations.manifestTotalPackages")}</dt>
+              <dd>{preview.summary.totalPackages}</dd>
+            </div>
+          </dl>
+          {error === undefined ? null : <div className="alert alert-error">{error}</div>}
+          <div className="modal-actions">
+            <button
+              disabled={pdf.busy !== undefined}
+              onClick={() => void run("preview")}
+              type="button"
+            >
+              {pdf.busy === "preview" ? t("common.loading") : t("operations.previewReport")}
+            </button>
+            <button disabled={pdf.busy !== undefined} onClick={() => void run("print")} type="button">
+              {pdf.busy === "print" ? t("common.loading") : t("common.print")}
+            </button>
+            <button
+              disabled={pdf.busy !== undefined}
+              onClick={() => void run("download")}
+              type="button"
+            >
+              {pdf.busy === "download" ? t("common.loading") : t("operations.downloadPdf")}
+            </button>
+            <button className="button button-primary" onClick={onClose} type="button">
+              {t("common.close")}
+            </button>
+          </div>
+        </>
+      )}
+    </Modal>
+  );
+}
+
 function FilterSelect({
   children,
   label,
@@ -1785,19 +2192,31 @@ function orderStatusLabel(t: TFunction, key: OrderStatusKey): string {
     : t(`statuses.${key}`);
 }
 
-function OrderStatusBadge({
-  large = false,
-  order,
-}: {
-  large?: boolean;
-  order: OperationsOrder;
-}) {
+// The true Delivery Status, on its own — never overridden by a later financial
+// event (Money Collected, Money Sent to Trader, ...). Delivery, Driver
+// Collection and Trader Settlement are three independent dimensions in
+// storage and must stay visibly independent here too.
+function DeliveryStatusBadge({ large = false, order }: { large?: boolean; order: OperationsOrder }) {
   const { t } = useTranslation();
-  const { key, tone } = deriveOrderStatus(order);
+  const tone = order.deliveryStatus === "cancelled" ? "disabled" : "neutral";
   return (
     <span className={`status status-${tone}${large ? " order-status-large" : ""}`}>
-      {orderStatusLabel(t, key)}
+      {t(`statuses.${order.deliveryStatus}`)}
     </span>
+  );
+}
+
+function FinancialStatusCell({ order }: { order: OperationsOrder }) {
+  const { t } = useTranslation();
+  return (
+    <div className="financial-status-cell">
+      <DriverCashStatusLabel value={order.driverReconciliationStatus} />
+      {order.traderSettlementStatus === "not_eligible" ? null : (
+        <span data-trader-settlement-status={order.traderSettlementStatus}>
+          {t(`statuses.${order.traderSettlementStatus}`)}
+        </span>
+      )}
+    </div>
   );
 }
 
@@ -1810,6 +2229,7 @@ type RowAction =
   | "returnToBranch"
   | "returnToTrader"
   | "collectMoney"
+  | "viewCollection"
   | "moneyOut"
   | "close"
   | "cancel";
@@ -1844,36 +2264,42 @@ function availableActions(order: OperationsOrder): readonly RowAction[] {
   const settleDone = ["money_sent_to_trader", "money_received_by_trader", "not_eligible"].includes(
     settle,
   );
-  switch (order.deliveryStatus) {
-    case "new":
-      return ["markInBranch", "assignDriver", "hold", "cancel"];
-    case "in_branch":
-      return ["assignDriver", "cancel"];
-    case "assigned_to_driver":
-      return ["markOutForDelivery", "hold", "cancel"];
-    case "out_for_delivery":
-      return ["markDelivered", "hold", "returnToBranch", "cancel"];
-    case "hold":
-      return [
-        ...(order.assignedDriverId === null ? (["assignDriver"] as const) : []),
-        ...(order.assignedDriverId === null ? [] : (["markOutForDelivery"] as const)),
-        "markDelivered",
-        "returnToTrader",
-        "cancel",
-      ];
-    case "delivered":
-      return [
-        ...(cashDone ? [] : (["collectMoney"] as const)),
-        ...(settleDone ? [] : (["moneyOut"] as const)),
-        "close",
-      ];
-    case "returned_to_branch":
-      return ["returnToTrader"];
-    case "returned_to_trader":
-      return [...(settleDone ? [] : (["moneyOut"] as const)), "close"];
-    default:
-      return [];
-  }
+  const base = ((): readonly RowAction[] => {
+    switch (order.deliveryStatus) {
+      case "new":
+        return ["markInBranch", "assignDriver", "hold", "cancel"];
+      case "in_branch":
+        return ["assignDriver", "cancel"];
+      case "assigned_to_driver":
+        return ["markOutForDelivery", "hold", "cancel"];
+      case "out_for_delivery":
+        return ["markDelivered", "hold", "returnToBranch", "cancel"];
+      case "hold":
+        return [
+          ...(order.assignedDriverId === null ? (["assignDriver"] as const) : []),
+          ...(order.assignedDriverId === null ? [] : (["markOutForDelivery"] as const)),
+          "markDelivered",
+          "returnToTrader",
+          "cancel",
+        ];
+      case "delivered":
+        return [
+          ...(cashDone ? [] : (["collectMoney"] as const)),
+          ...(settleDone ? [] : (["moneyOut"] as const)),
+          "close",
+        ];
+      case "returned_to_branch":
+        return ["returnToTrader"];
+      case "returned_to_trader":
+        return [...(settleDone ? [] : (["moneyOut"] as const)), "close"];
+      default:
+        return [];
+    }
+  })();
+  // A reconciled Order keeps its Driver Collection report reachable regardless
+  // of later delivery-status moves (e.g. Delivered → Closed) — the money event
+  // already happened and outlives the delivery lifecycle it happened during.
+  return recon === "reconciled" ? [...base, "viewCollection"] : base;
 }
 
 function singleSelection(orderId: string): SelectionPayload {
@@ -1902,6 +2328,9 @@ function OrderRowActions({
   const [reasonFor, setReasonFor] = useState<RowAction>();
   const [assignOpen, setAssignOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
+  const [collectOpen, setCollectOpen] = useState(false);
+  const [viewCollectionId, setViewCollectionId] = useState<string>();
+  const [viewCollectionBusy, setViewCollectionBusy] = useState(false);
   const canAssign =
     permissions.includes("orders.assign_driver") || permissions.includes("users_roles.manage");
   const canUpdateStatus =
@@ -1941,6 +2370,25 @@ function OrderRowActions({
     }
   };
 
+  const openViewCollection = async () => {
+    setViewCollectionBusy(true);
+    setError(undefined);
+    try {
+      const link = await api.get<
+        { reconciliationId: string; reconciliationNumber: string } | undefined
+      >(`operations/orders/${order.id}/driver-collection`);
+      if (link === undefined) {
+        setError(t("operations.noLinkedCollection"));
+        return;
+      }
+      setViewCollectionId(link.reconciliationId);
+    } catch (requestError) {
+      setError(message(requestError, t("operations.detailLoadFailed")));
+    } finally {
+      setViewCollectionBusy(false);
+    }
+  };
+
   const perform = (action: RowAction) => {
     setError(undefined);
     if (action === "assignDriver") {
@@ -1949,7 +2397,13 @@ function OrderRowActions({
       return;
     }
     if (action === "collectMoney") {
-      onNavigate("/operations/driver-reconciliations/new");
+      setOpen(false);
+      setCollectOpen(true);
+      return;
+    }
+    if (action === "viewCollection") {
+      setOpen(false);
+      void openViewCollection();
       return;
     }
     if (action === "moneyOut") {
@@ -1989,7 +2443,7 @@ function OrderRowActions({
         >
           <p className="row-actions-heading">
             <strong>{order.orderNumber}</strong>
-            <OrderStatusBadge order={order} />
+            <DeliveryStatusBadge order={order} />
           </p>
           <div className="row-actions-list">
             <button
@@ -2086,6 +2540,33 @@ function OrderRowActions({
           orderNumber={order.orderNumber}
         />
       ) : null}
+      {collectOpen ? (
+        <CollectMoneyDialog
+          api={api}
+          drivers={drivers}
+          onClose={() => setCollectOpen(false)}
+          onComplete={async () => {
+            setCollectOpen(false);
+            await onChanged();
+          }}
+          selection={singleSelection(order.id)}
+        />
+      ) : null}
+      {viewCollectionId === undefined ? null : (
+        <DriverCollectionDetailDialog
+          api={api}
+          {...(order.serialNumber === null
+            ? {}
+            : { highlightOrderSerialNumber: order.serialNumber })}
+          onClose={() => setViewCollectionId(undefined)}
+          onReversed={async () => {
+            setViewCollectionId(undefined);
+            await onChanged();
+          }}
+          reconciliationId={viewCollectionId}
+        />
+      )}
+      {!viewCollectionBusy ? null : <div className="loading-row">{t("common.loading")}</div>}
     </div>
   );
 }
@@ -2620,43 +3101,13 @@ function money(value: string, locale: "ar" | "en"): string {
 function twoDecimals(value: string | number): string {
   return (Math.round(Number(value || 0) * 100) / 100).toFixed(2);
 }
-function driverCollectionPrintLabels(t: Translate): DriverCollectionPrintLabels {
-  const p = (key: string): string => t(`operations.driverCollectionPrint.${key}`);
-  return {
-    actualReceived: p("actualReceived"),
-    address: p("address"),
-    amountToCollect: p("amountToCollect"),
-    area: p("area"),
-    cash: p("cash"),
-    collectionDate: p("collectionDate"),
-    collectionNumber: p("collectionNumber"),
-    companyFees: p("companyFees"),
-    companyReceiverSignature: p("companyReceiverSignature"),
-    customer: p("customer"),
-    difference: p("difference"),
-    driver: p("driver"),
-    driverExpenses: p("driverExpenses"),
-    driverSignature: p("driverSignature"),
-    grossCustomerCollections: p("grossCustomerCollections"),
-    mobile: p("mobile"),
-    netExpected: p("netExpected"),
-    notes: p("notes"),
-    numberOfOrders: p("numberOfOrders"),
-    orderStatus: p("orderStatus"),
-    paymentMethod: p("paymentMethod"),
-    referenceNumber: p("referenceNumber"),
-    serialNumber: p("serialNumber"),
-    signatureDate: p("signatureDate"),
-    title: p("title"),
-    totalOrders: p("totalOrders"),
-    totalTraders: p("totalTraders"),
-    trader: p("trader"),
-    traderPayable: p("traderPayable"),
-    visa: p("visa"),
-  };
-}
 function message(error: unknown, fallback: string): string {
-  return error instanceof ApiError || error instanceof Error ? error.message : fallback;
+  if (error instanceof ApiError) {
+    return error.details === undefined || error.details.length === 0
+      ? error.message
+      : `${error.message}\n${error.details.join("\n")}`;
+  }
+  return error instanceof Error ? error.message : fallback;
 }
 type AuditEvent = OperationsOrderDetail["events"][number];
 type Translate = TFunction;

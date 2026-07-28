@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Headers,
+  HttpStatus,
   Inject,
   Param,
   ParseUUIDPipe,
@@ -10,9 +11,10 @@ import {
   Post,
   Query,
   Req,
+  Res,
 } from "@nestjs/common";
 import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
-import type { Request } from "express";
+import type { Request, Response } from "express";
 
 import {
   Public,
@@ -62,6 +64,8 @@ import {
   type BulkActionResult,
   OrdersWorkflowService,
 } from "./orders-workflow.service.js";
+import { DriverShipmentManifestService } from "./driver-shipment-manifest.service.js";
+import type { ManifestData } from "./driver-shipment-manifest-html.js";
 // Runtime class values are required for Nest validation metadata.
 // eslint-disable-next-line @typescript-eslint/consistent-type-imports
 import {
@@ -86,6 +90,7 @@ import {
   OrderSelectionDto,
   ReverseDriverReconciliationDto,
   UpdateOrderDto,
+  GenerateShipmentManifestDto,
 } from "./operations.dto.js";
 
 @ApiTags("operations")
@@ -99,6 +104,8 @@ export class OperationsController {
     @Inject(OrdersWorkflowService) private readonly ordersWorkflow: OrdersWorkflowService,
     @Inject(DriverCashReconciliationService)
     private readonly reconciliations: DriverCashReconciliationService,
+    @Inject(DriverShipmentManifestService)
+    private readonly manifest: DriverShipmentManifestService,
   ) {}
 
   @ApiOperation({ summary: "Show operational totals for the authenticated Company" })
@@ -293,6 +300,26 @@ export class OperationsController {
     return this.operations.orderDetailByNumber(orderNumber);
   }
 
+  @RequireAnyPermission("reconciliations.create", "reports.export", "users_roles.manage")
+  @ApiOperation({
+    summary: "Resolve the active Driver Collection linked to one Order, if any",
+  })
+  @Get("orders/:orderId/driver-collection")
+  public async orderDriverCollection(
+    @Param("orderId", new ParseUUIDPipe()) orderId: string,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<{ reconciliationId: string; reconciliationNumber: string } | undefined> {
+    const link = await this.reconciliations.reconciliationForOrder(orderId);
+    // A bare `null` body is indistinguishable from an empty/no-content-type
+    // response once it reaches the client, so "no linked collection" is
+    // signalled with a real 204 instead.
+    if (link === null) {
+      response.status(HttpStatus.NO_CONTENT);
+      return undefined;
+    }
+    return link;
+  }
+
   @ApiOperation({ summary: "Create a public tracking link for one order" })
   @Post("orders/:orderId/tracking-links")
   public createTrackingLink(
@@ -416,6 +443,64 @@ export class OperationsController {
     @Param("reconciliationId", new ParseUUIDPipe()) reconciliationId: string,
   ): Promise<DriverCollectionReportData> {
     return this.reconciliations.reportData(reconciliationId);
+  }
+
+  @RequireAnyPermission("reconciliations.create", "reports.export", "users_roles.manage")
+  @ApiOperation({ summary: "True downloadable PDF file for the Driver Collection Report" })
+  @Get("cash/reconciliations/:reconciliationId/pdf")
+  public async driverReconciliationPdf(
+    @Param("reconciliationId", new ParseUUIDPipe()) reconciliationId: string,
+    @Query("language") language: string | undefined,
+    @Req() request: Request,
+    @Res() response: Response,
+  ): Promise<void> {
+    const resolvedLanguage = language === "ar" ? "ar" : "en";
+    const { bytes, filename } = await this.reconciliations.reportPdf(
+      reconciliationId,
+      resolvedLanguage,
+      this.correlationId(request),
+    );
+    response.setHeader("Content-Type", "application/pdf");
+    response.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    response.setHeader("X-Content-Type-Options", "nosniff");
+    response.setHeader("Cache-Control", "private, max-age=0, must-revalidate");
+    response.send(bytes);
+  }
+
+  @RequireAnyPermission(
+    "reports.export",
+    "orders.assign_driver",
+    "orders.update_delivery_status",
+    "users_roles.manage",
+  )
+  @ApiOperation({
+    summary: "Server-authoritative data for the Driver Shipment Manifest, from selected Orders",
+  })
+  @Post("cash/driver-shipment-manifest/data")
+  public driverShipmentManifestData(@Body() input: GenerateShipmentManifestDto): Promise<ManifestData> {
+    return this.manifest.manifestData(input);
+  }
+
+  @RequireAnyPermission(
+    "reports.export",
+    "orders.assign_driver",
+    "orders.update_delivery_status",
+    "users_roles.manage",
+  )
+  @ApiOperation({ summary: "True downloadable PDF file for the Driver Shipment Manifest" })
+  @Post("cash/driver-shipment-manifest/pdf")
+  public async driverShipmentManifestPdf(
+    @Body() input: GenerateShipmentManifestDto,
+    @Query("language") language: string | undefined,
+    @Res() response: Response,
+  ): Promise<void> {
+    const resolvedLanguage = language === "ar" ? "ar" : "en";
+    const { bytes, filename } = await this.manifest.manifestPdf(input, resolvedLanguage);
+    response.setHeader("Content-Type", "application/pdf");
+    response.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    response.setHeader("X-Content-Type-Options", "nosniff");
+    response.setHeader("Cache-Control", "private, max-age=0, must-revalidate");
+    response.send(bytes);
   }
 
   @RequireAnyPermission("reconciliations.reverse", "users_roles.manage")

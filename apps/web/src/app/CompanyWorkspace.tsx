@@ -28,7 +28,7 @@ import {
   DashboardWorkspace,
   type DashboardDrillDown,
 } from "../features/dashboard/DashboardWorkspace.js";
-import { DriverReconciliationWorkspace } from "../features/operations/DriverReconciliationWorkspace.js";
+import { DriverCollectionsWorkspace } from "../features/operations/DriverCollectionsWorkspace.js";
 import {
   OperationsWorkspace,
   type OperationsView,
@@ -44,6 +44,12 @@ import { canAccessCompanyPath, firstAuthorizedCompanyPath } from "./company-acce
 
 const redirects: Readonly<Record<string, string>> = {
   "/configuration": "/configuration/general",
+  // Both retired stand-alone Driver-reconciliation entry points: Driver
+  // Collections is now the single Drivers-menu destination (its own "New
+  // Collection" dialog owns creation) — these preserve old bookmarks rather
+  // than duplicating UI or leaving three different Driver entries in the nav.
+  "/driver-cash-reconciliation": "/drivers",
+  "/operations/driver-reconciliations/new": "/drivers",
   "/operations": "/orders",
   "/preferences": "/configuration/general",
   "/users": "/configuration/users",
@@ -70,12 +76,6 @@ const operationRoutes: Readonly<
   >
 > = {
   "/cash-management": { sectionKey: "nav.finance", titleKey: "nav.cashManagement", view: "cash" },
-  "/driver-cash-reconciliation": {
-    sectionKey: "nav.drivers",
-    titleKey: "nav.driverCashReconciliation",
-    view: "cash",
-  },
-  "/drivers": { view: "drivers" },
   "/orders": { view: "orders" },
   "/orders/create": { intent: "create-order", view: "orders" },
   "/orders/import": { intent: "import-orders", view: "orders" },
@@ -134,10 +134,8 @@ export function CompanyWorkspace({
         permissions={session.identity.permissions}
       />
     );
-  } else if (path === "/operations/driver-reconciliations/new") {
-    content = (
-      <DriverReconciliationWorkspace api={api} onNavigate={(target) => void navigate(target)} />
-    );
+  } else if (path === "/drivers") {
+    content = <DriverCollectionsWorkspace api={api} />;
   } else if (operationRoutes[path] !== undefined) {
     const route = operationRoutes[path];
     content = (

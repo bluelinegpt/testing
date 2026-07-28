@@ -161,6 +161,24 @@ describe("App", () => {
     expect(await screen.findByLabelText("Default language")).toBeInTheDocument();
     expect(screen.queryByLabelText("VAT rate")).not.toBeInTheDocument();
   });
+
+  it("redirects both retired Driver-reconciliation routes to Driver Collections", async () => {
+    vi.stubGlobal("fetch", createFetchMock());
+    const router = renderApp("/driver-cash-reconciliation");
+    await signIn();
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Driver Collections" })).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/drivers");
+  });
+
+  it("redirects the retired New driver reconciliation route to Driver Collections", async () => {
+    vi.stubGlobal("fetch", createFetchMock());
+    const router = renderApp("/operations/driver-reconciliations/new");
+    await signIn();
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Driver Collections" })).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/drivers");
+  });
 });
 
 function renderApp(path = "/") {

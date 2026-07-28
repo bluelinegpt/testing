@@ -1,12 +1,15 @@
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 
+import { ConfigService } from "@nestjs/config";
 import { Test } from "@nestjs/testing";
 import { config as loadEnvironment } from "dotenv";
 import { Kysely, PostgresDialect, type Transaction, sql } from "kysely";
 import { Pool } from "pg";
 
+import { CompanyProfileService } from "../company-profile/company-profile.service.js";
 import { configuration } from "../configuration/environment.js";
+import { FileStoragePort } from "../files/file-storage.port.js";
 import { DATABASE } from "../infrastructure/database/database.tokens.js";
 import type { DatabaseSchema } from "../infrastructure/database/database.types.js";
 import {
@@ -17,6 +20,7 @@ import { type IdentityContext, IdentityContextAccessor } from "../security/ident
 import { type TenantContext, TenantContextAccessor } from "../tenancy/tenant-context.js";
 
 import { DriverCashReconciliationService } from "./driver-cash-reconciliation.service.js";
+import { DriverCollectionPdfService } from "./driver-collection-pdf.service.js";
 import { OperationsHistoryWriter } from "./operations-history.writer.js";
 import { OrdersWorkflowService } from "./orders-workflow.service.js";
 
@@ -543,9 +547,13 @@ describe.skipIf(!runDatabaseTests)("OperationsHistoryWriter consumers", () => {
           useValue: { current: () => context, run: async (_c: unknown, op: () => unknown) => op() },
         },
         { provide: IdentityContextAccessor, useValue: { current: () => identity } },
+        { provide: FileStoragePort, useValue: {} },
+        { provide: ConfigService, useValue: { get: () => "local" } },
         KyselyTransactionManager,
         OperationsHistoryWriter,
         OrdersWorkflowService,
+        CompanyProfileService,
+        { provide: DriverCollectionPdfService, useValue: {} },
         DriverCashReconciliationService,
       ],
     }).compile();

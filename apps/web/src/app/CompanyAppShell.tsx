@@ -126,14 +126,7 @@ export function CompanyAppShell({
             icon: Truck,
             id: "drivers",
             label: t("nav.drivers"),
-            items: [
-              { label: t("nav.driversList"), path: "/drivers" },
-              { label: t("nav.driverCashReconciliation"), path: "/driver-cash-reconciliation" },
-              {
-                label: t("operations.newReconciliation"),
-                path: "/operations/driver-reconciliations/new",
-              },
-            ],
+            items: [{ label: t("nav.driversList"), path: "/drivers" }],
           },
           {
             icon: Banknote,

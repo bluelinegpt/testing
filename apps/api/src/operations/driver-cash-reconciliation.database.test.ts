@@ -20,6 +20,7 @@ import type { IdentityContext, IdentityContextAccessor } from "../security/ident
 import type { TenantContext, TenantContextAccessor } from "../tenancy/tenant-context.js";
 
 import { DriverCashReconciliationService } from "./driver-cash-reconciliation.service.js";
+import type { DriverCollectionPdfService } from "./driver-collection-pdf.service.js";
 import { OperationsHistoryWriter } from "./operations-history.writer.js";
 import type { CreateDriverReconciliationDto } from "./operations.dto.js";
 
@@ -123,6 +124,7 @@ describe.skipIf(!runDatabaseTests)("driver cash reconciliation confirm()", () =>
           identities as unknown as IdentityContextAccessor,
           new OperationsHistoryWriter(),
           companyProfile,
+          {} as unknown as DriverCollectionPdfService,
         );
 
         const createCompany = async (label: string): Promise<CompanyFixture> => {
@@ -455,7 +457,11 @@ describe.skipIf(!runDatabaseTests)("driver cash reconciliation confirm()", () =>
           "reconciliation_order_ineligible",
         );
 
-        // Already reconciled Order cannot be reconciled again.
+        // Already reconciled Order cannot be reconciled again: the specific,
+        // reconciliation-number-naming error fires before the generic
+        // ineligibility check (§1 duplicate-collection prevention), and its
+        // details name the conflicting reconciliation so the operator (or a
+        // stale/direct API caller) sees exactly which collection it belongs to.
         await expectRejection(
           () =>
             service.confirm(
@@ -463,8 +469,27 @@ describe.skipIf(!runDatabaseTests)("driver cash reconciliation confirm()", () =>
               randomUUID(),
               `key-again-${randomUUID()}`,
             ),
-          "reconciliation_order_ineligible",
+          "order_already_reconciled",
         );
+        try {
+          await service.confirm(
+            selection([single], { payments: [{ amount: 100, paymentMethod: "cash" }] }),
+            randomUUID(),
+            `key-again-detail-${randomUUID()}`,
+          );
+          expect.unreachable("expected order_already_reconciled to throw");
+        } catch (thrown) {
+          const rejection = thrown as { errorCode?: string; validationDetails?: readonly string[] };
+          expect(rejection.errorCode).toBe("order_already_reconciled");
+          expect(rejection.validationDetails).toHaveLength(1);
+          expect(rejection.validationDetails?.[0]).toContain(singleResult.reconciliationNumber);
+          expect(rejection.validationDetails?.[0]).toContain(
+            "This Order has already been included in Driver Collection",
+          );
+        }
+        // The rejected re-attempt did not touch the already-reconciled Order.
+        expect((await statusOf(single)).cashStatus).toBe("reconciled");
+        expect(await countsFor(single)).toEqual({ events: 1, history: 1, links: 1 });
 
         // One invalid Order rejects the entire request.
         const validOfPair = await createOrder(companyA, { collected: 40 });
@@ -1125,7 +1150,8 @@ describe.skipIf(!runDatabaseTests)("driver cash reconciliation confirm()", () =>
         expect(afterPreview.rows[0]).toEqual(previewCounts.rows[0]);
         expect((await statusOf(strandedOrder)).cashStatus).toBe("pending");
 
-        // Stale selection surfaces a warning rather than silently recalculating.
+        // Stale selection surfaces a warning naming the conflicting reconciliation,
+        // rather than a generic "ineligible" message (§1/§2 mixed-selection UX).
         const staleWarning = await service.preview({
           excludedOrderIds: [],
           expenses: [],
@@ -1134,6 +1160,9 @@ describe.skipIf(!runDatabaseTests)("driver cash reconciliation confirm()", () =>
           selectionMode: "ids",
         });
         expect(staleWarning.warnings.length).toBeGreaterThan(0);
+        expect(
+          staleWarning.warnings.some((warning) => warning.includes(singleResult.reconciliationNumber)),
+        ).toBe(true);
 
         // Reconciliation list: pagination, filters, sorting and labels.
         const list = await service.list({ page: 1, pageSize: 25 });
@@ -1248,9 +1277,10 @@ describe.skipIf(!runDatabaseTests)("driver cash reconciliation confirm()", () =>
           legacyKey,
         );
         expect(legacyReplay.reconciliationId).toBe(legacyResult.reconciliationId);
+        // Same duplicate-collection guard applies through the legacy single-order path.
         await expectRejection(
           () => service.confirmSingleOrder(legacyOrder, { paymentMethod: "cash" }, randomUUID()),
-          "reconciliation_order_ineligible",
+          "order_already_reconciled",
         );
         useCompany(companyB);
         await expectRejection(
@@ -1677,9 +1707,15 @@ describe.skipIf(!runDatabaseTests)("driver cash reconciliation confirm()", () =>
         ).toBe(false);
         expect(byStatusReconciled.items.every((row) => !row.isReversed)).toBe(true);
 
+        // delivered_at is compared as ::date in the Asia/Dubai session timezone
+        // (the DB connection's TimeZone), so "today" must be computed the same
+        // way — not via UTC — or this flips near the UTC/Dubai day boundary.
+        const uaeToday = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Dubai" }).format(
+          new Date(),
+        );
         const byDeliveredRange = await service.list({
-          deliveredFrom: new Date().toISOString().slice(0, 10),
-          deliveredTo: new Date().toISOString().slice(0, 10),
+          deliveredFrom: uaeToday,
+          deliveredTo: uaeToday,
           pageSize: 100,
         });
         expect(byDeliveredRange.items.some((row) => row.id === reportResult.reconciliationId)).toBe(

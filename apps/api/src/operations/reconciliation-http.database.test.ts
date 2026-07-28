@@ -111,7 +111,7 @@ describe.skipIf(!runHttpTests)("reconciliation HTTP boundary", () => {
               .set("Host", `${subdomain}.blueline.test`)
               .send({ identifier: "administrator", password })
               .expect(200);
-            return { companyId, token: String(login.body.accessToken) };
+            return { accountId, companyId, token: String(login.body.accessToken) };
           };
 
           const admin = await makeCompany("a", "users_roles.manage");
@@ -253,6 +253,288 @@ describe.skipIf(!runHttpTests)("reconciliation HTTP boundary", () => {
             .set("Authorization", `Bearer ${unprivileged.token}`)
             .send({ paymentMethod: "cash" })
             .expect(403);
+
+          // --- Driver Shipment Manifest and Driver Collection report endpoints ---
+          const createDriver = async (label: string) => {
+            const driverId = randomUUID();
+            const driverAccountId = randomUUID();
+            const suffix = randomUUID().slice(0, 8);
+            await sql`
+              insert into accounts (id, company_id, account_kind, username, password_hash)
+              values (${driverAccountId}::uuid, ${admin.companyId}::uuid, 'driver',
+                      ${`http.driver.${label}.${suffix}`}, 'test-only')
+            `.execute(transaction);
+            await sql`
+              insert into drivers (
+                id, company_id, account_id, code, driver_type, name_en, mobile_number,
+                account_status, outsourced_fee_per_delivered_order
+              ) values (
+                ${driverId}::uuid, ${admin.companyId}::uuid, ${driverAccountId}::uuid,
+                ${`HDRV-${label}-${suffix}`}, 'outsourced', ${`HTTP Driver ${label}`},
+                '971500000005', 'active', 7.5
+              )
+            `.execute(transaction);
+            return driverId;
+          };
+
+          const createManifestOrder = async (options: {
+            readonly driverId: string;
+            readonly deliveryStatus?: string;
+          }) => {
+            const orderId = randomUUID();
+            const traderId = randomUUID();
+            const areaId = randomUUID();
+            const traderAccountId = randomUUID();
+            const suffix = orderId.slice(0, 8);
+            await sql`
+              insert into areas (id, company_id, emirate_id, code, name_en)
+              values (${areaId}::uuid, ${admin.companyId}::uuid,
+                      (select id from emirates where code='DXB'), ${`HA-${suffix}`}, ${`HTTP Area ${suffix}`})
+            `.execute(transaction);
+            await sql`
+              insert into accounts (id, company_id, account_kind, username, password_hash)
+              values (${traderAccountId}::uuid, ${admin.companyId}::uuid, 'trader',
+                      ${`http.trader.${suffix}`}, 'test-only')
+            `.execute(transaction);
+            await sql`
+              insert into traders (
+                id, company_id, account_id, code, name_en, mobile_number, account_status
+              ) values (${traderId}::uuid, ${admin.companyId}::uuid, ${traderAccountId}::uuid,
+                        ${`HT-${suffix}`}, ${`HTTP Trader ${suffix}`}, '971500000006', 'active')
+            `.execute(transaction);
+            await sql`
+              insert into orders (
+                id, company_id, order_number, order_date, trader_id, area_id,
+                created_by_account_id, assigned_driver_id, customer_name,
+                customer_mobile_number, customer_address, package_count, payment_condition,
+                amount_collected, customer_amount_due, driver_cost,
+                trader_gross_payable, trader_paid_service_fee, trader_deductions,
+                trader_charges, trader_adjustments, trader_net_payable,
+                delivery_status, driver_reconciliation_status, trader_settlement_status,
+                delivered_at, pricing_provenance_status, final_service_fee_snapshot,
+                customer_provenance_status
+              ) values (
+                ${orderId}::uuid, ${admin.companyId}::uuid, ${`HTTP-${suffix}`}, current_date,
+                ${traderId}::uuid, ${areaId}::uuid, ${admin.accountId}::uuid, ${options.driverId}::uuid,
+                'HTTP Customer', '971500000007', 'HTTP Address', 2, 'customer_pays_cod_and_fee',
+                0, 55, 7.5, 55, 0, 0, 0, 0, 55,
+                'assigned_to_driver', 'not_applicable', 'not_eligible', null,
+                'legacy_unattributed', 0, 'legacy_unattributed'
+              )
+            `.execute(transaction);
+            await sql`
+              insert into order_assignments (company_id, order_id, driver_id, assigned_by_account_id)
+              values (${admin.companyId}::uuid, ${orderId}::uuid, ${options.driverId}::uuid,
+                      ${admin.accountId}::uuid)
+            `.execute(transaction);
+            // Assignment can only be inserted while the Order is newly-assigned or
+            // held, so status transitions like Cancelled are applied afterward.
+            if (options.deliveryStatus !== undefined && options.deliveryStatus !== "assigned_to_driver") {
+              await sql`
+                update orders set delivery_status = ${options.deliveryStatus} where id = ${orderId}::uuid
+              `.execute(transaction);
+            }
+            return orderId;
+          };
+
+          const manifestDriverOne = await createDriver("one");
+          const manifestDriverTwo = await createDriver("two");
+          const manifestOrderOne = await createManifestOrder({ driverId: manifestDriverOne });
+          const manifestOrderTwo = await createManifestOrder({ driverId: manifestDriverOne });
+          const manifestOrderOtherDriver = await createManifestOrder({ driverId: manifestDriverTwo });
+          const manifestOrderCancelled = await createManifestOrder({
+            deliveryStatus: "cancelled",
+            driverId: manifestDriverOne,
+          });
+
+          // Guard wiring and permission gating on the new Manifest endpoints.
+          await request(server)
+            .post("/api/v1/operations/cash/driver-shipment-manifest/data")
+            .send({ orderIds: [manifestOrderOne], selectionMode: "ids" })
+            .expect(401);
+          // "scoped" only holds reconciliations.create, which the Manifest guard
+          // does not accept (it needs reports.export/orders.assign_driver/
+          // orders.update_delivery_status/users_roles.manage).
+          await post(scoped.token, "/operations/cash/driver-shipment-manifest/data", {
+            orderIds: [manifestOrderOne],
+            selectionMode: "ids",
+          }).expect(403);
+
+          // DTO validation on the shared OrderSelectionDto shape.
+          await post(admin.token, "/operations/cash/driver-shipment-manifest/data", {
+            orderIds: [manifestOrderOne],
+            selectionMode: "sideways",
+          }).expect(400);
+
+          // Empty selection is a clear business rejection, not a 500.
+          const empty = await post(admin.token, "/operations/cash/driver-shipment-manifest/data", {
+            orderIds: [],
+            selectionMode: "ids",
+          });
+          expect(empty.status).toBe(400);
+          expect(empty.body.error?.code).toBe("manifest_empty");
+
+          // Mixed-Driver selection is rejected with the exact business message.
+          const mixedDrivers = await post(
+            admin.token,
+            "/operations/cash/driver-shipment-manifest/data",
+            { orderIds: [manifestOrderOne, manifestOrderOtherDriver], selectionMode: "ids" },
+          );
+          expect(mixedDrivers.status).toBe(409);
+          expect(mixedDrivers.body.error?.code).toBe("manifest_driver_mismatch");
+
+          // A Cancelled Order is rejected and named in the details.
+          const withCancelled = await post(
+            admin.token,
+            "/operations/cash/driver-shipment-manifest/data",
+            { orderIds: [manifestOrderOne, manifestOrderCancelled], selectionMode: "ids" },
+          );
+          expect(withCancelled.status).toBe(409);
+          expect(withCancelled.body.error?.code).toBe("manifest_order_cancelled");
+          expect(withCancelled.body.error?.details).toEqual(
+            expect.arrayContaining([expect.stringContaining("HTTP-")]),
+          );
+
+          // A valid same-Driver selection returns real, server-computed totals.
+          const manifestData = await post(
+            admin.token,
+            "/operations/cash/driver-shipment-manifest/data",
+            { orderIds: [manifestOrderOne, manifestOrderTwo], selectionMode: "ids" },
+          ).expect(201);
+          expect(manifestData.body.header.orderCount).toBe(2);
+          expect(manifestData.body.summary.totalOrders).toBe(2);
+          expect(manifestData.body.summary.totalCod).toBe("110.00");
+          expect(manifestData.body.orders).toHaveLength(2);
+          // No internal Order/Driver ids are ever exposed in report data.
+          expect(JSON.stringify(manifestData.body)).not.toContain(manifestDriverOne);
+
+          // "Select all matching" filter-mode selection: resolves the same way
+          // the Orders list filters (by Driver here), and stays scoped to
+          // Orders actually assigned to that Driver — driverTwo's Order and the
+          // Cancelled Order (same Driver) are excluded by the filter query
+          // itself, without needing an explicit exclusion or error.
+          const filterAllForDriverOne = await post(
+            admin.token,
+            "/operations/cash/driver-shipment-manifest/data",
+            { driverId: manifestDriverOne, selectionMode: "filter" },
+          ).expect(201);
+          expect(filterAllForDriverOne.body.header.orderCount).toBe(2);
+          expect(filterAllForDriverOne.body.orders).toHaveLength(2);
+          expect(
+            filterAllForDriverOne.body.orders.every(
+              (row: { deliveryStatusLabel: string }) => row.deliveryStatusLabel !== "Cancelled",
+            ),
+          ).toBe(true);
+
+          // Explicitly excluding one Order from the filtered set narrows it
+          // further, exactly as the Orders list "select all matching" does.
+          const filterExcludingOne = await post(
+            admin.token,
+            "/operations/cash/driver-shipment-manifest/data",
+            {
+              driverId: manifestDriverOne,
+              excludedOrderIds: [manifestOrderTwo],
+              selectionMode: "filter",
+            },
+          ).expect(201);
+          expect(filterExcludingOne.body.header.orderCount).toBe(1);
+
+          // The true PDF bytes are real, not just the JSON preview (never trust
+          // report-data alone as proof that printing works).
+          const manifestPdf = await request(server)
+            .post("/api/v1/operations/cash/driver-shipment-manifest/pdf?language=en")
+            .set("Authorization", `Bearer ${admin.token}`)
+            .responseType("blob")
+            .send({ orderIds: [manifestOrderOne, manifestOrderTwo], selectionMode: "ids" })
+            .expect(201);
+          expect(manifestPdf.headers["content-type"]).toContain("application/pdf");
+          expect(manifestPdf.headers["content-disposition"]).toContain("Driver-Manifest-");
+          expect(manifestPdf.headers["content-disposition"]).toContain(".pdf");
+          const manifestBytes: Buffer = Buffer.isBuffer(manifestPdf.body)
+            ? manifestPdf.body
+            : Buffer.from(manifestPdf.body);
+          expect(manifestBytes.subarray(0, 5).toString("latin1")).toBe("%PDF-");
+          expect(manifestBytes.length).toBeGreaterThan(1000);
+
+          // --- Order -> Driver Collection lookup, and the collection PDF itself ---
+          await request(server)
+            .get(`/api/v1/operations/orders/${manifestOrderOne}/driver-collection`)
+            .expect(401);
+          await request(server)
+            .get(`/api/v1/operations/orders/${manifestOrderOne}/driver-collection`)
+            .set("Authorization", `Bearer ${unprivileged.token}`)
+            .expect(403);
+
+          // No reconciliation exists yet: the lookup is a real 204, not a 200
+          // with an ambiguous empty body (which the API client cannot tell
+          // apart from a non-JSON error response).
+          await authed(admin.token)(
+            `/operations/orders/${manifestOrderOne}/driver-collection`,
+          ).expect(204);
+
+          // Confirm a real Driver Collection through the HTTP boundary, then the
+          // lookup and the report PDF must both reflect it.
+          await sql`
+            update orders
+               set delivery_status = 'delivered', driver_reconciliation_status = 'pending',
+                   amount_collected = 55, trader_settlement_status = 'unsettled', delivered_at = now()
+             where id in (${manifestOrderOne}::uuid, ${manifestOrderTwo}::uuid)
+          `.execute(transaction);
+          const confirmResponse = await post(
+            admin.token,
+            "/operations/cash/reconciliations/selected",
+            {
+              collectionPaymentMethod: "cash",
+              excludedOrderIds: [],
+              expenses: [],
+              orderIds: [manifestOrderOne],
+              payments: [{ amount: 55, paymentMethod: "cash" }],
+              selectionMode: "ids",
+            },
+          )
+            .set("X-Idempotency-Key", `http-manifest-${randomUUID()}`)
+            .expect(201);
+          const reconciliationId = String(confirmResponse.body.reconciliationId);
+          const reconciliationNumber = String(confirmResponse.body.reconciliationNumber);
+
+          const linkedCollection = await authed(admin.token)(
+            `/operations/orders/${manifestOrderOne}/driver-collection`,
+          ).expect(200);
+          expect(linkedCollection.body).toEqual({
+            reconciliationId,
+            reconciliationNumber,
+          });
+
+          const collectionPdf = await request(server)
+            .get(`/api/v1/operations/cash/reconciliations/${reconciliationId}/pdf?language=en`)
+            .set("Authorization", `Bearer ${admin.token}`)
+            .responseType("blob")
+            .expect(200);
+          expect(collectionPdf.headers["content-type"]).toContain("application/pdf");
+          expect(collectionPdf.headers["content-disposition"]).toContain(reconciliationNumber);
+          const collectionBytes: Buffer = Buffer.isBuffer(collectionPdf.body)
+            ? collectionPdf.body
+            : Buffer.from(collectionPdf.body);
+          expect(collectionBytes.subarray(0, 5).toString("latin1")).toBe("%PDF-");
+          expect(collectionBytes.length).toBeGreaterThan(1000);
+
+          // A direct duplicate-collection attempt on the already-reconciled Order
+          // is rejected with the specific, reconciliation-naming error (§1).
+          const duplicateAttempt = await post(
+            admin.token,
+            "/operations/cash/reconciliations/selected",
+            {
+              collectionPaymentMethod: "cash",
+              excludedOrderIds: [],
+              expenses: [],
+              orderIds: [manifestOrderOne],
+              payments: [{ amount: 55, paymentMethod: "cash" }],
+              selectionMode: "ids",
+            },
+          ).set("X-Idempotency-Key", `http-manifest-dup-${randomUUID()}`);
+          expect(duplicateAttempt.status).toBe(409);
+          expect(duplicateAttempt.body.error?.code).toBe("order_already_reconciled");
+          expect(duplicateAttempt.body.error?.details?.[0]).toContain(reconciliationNumber);
 
           throw rollbackMarker;
         } finally {

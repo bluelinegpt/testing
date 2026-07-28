@@ -5,6 +5,7 @@ const defaultTimeoutMs = 10_000;
 interface ApiErrorPayload {
   readonly error?: {
     readonly code?: string;
+    readonly details?: readonly string[];
     readonly message?: string;
   };
 }
@@ -14,6 +15,7 @@ export class ApiError extends Error {
     message: string,
     public readonly code: string,
     public readonly status: number,
+    public readonly details?: readonly string[],
   ) {
     super(message);
     this.name = "ApiError";
@@ -67,17 +69,34 @@ export class ApiClient {
 
   /** Fetch raw bytes (e.g. an authenticated logo stream) as a Blob. */
   public async getBinary(path: string, signal?: AbortSignal): Promise<Blob> {
+    return this.requestBinary(path, { method: "GET", signal });
+  }
+
+  /**
+   * Fetch raw bytes for a report that needs a request body (e.g. a PDF built
+   * from a selected-Order list too large for a query string).
+   */
+  public async postBinary(path: string, body: unknown, signal?: AbortSignal): Promise<Blob> {
+    return this.requestBinary(path, { body, method: "POST", signal });
+  }
+
+  private async requestBinary(
+    path: string,
+    input: { body?: unknown; method: string; signal?: AbortSignal | undefined },
+  ): Promise<Blob> {
     const controller = new AbortController();
-    const abortRequest = () => controller.abort(signal?.reason);
+    const abortRequest = () => controller.abort(input.signal?.reason);
     const timeout = globalThis.setTimeout(() => controller.abort(), this.timeoutMs);
-    if (signal?.aborted === true) abortRequest();
-    else signal?.addEventListener("abort", abortRequest, { once: true });
-    const headers: Record<string, string> = { Accept: "image/png,image/jpeg,*/*" };
+    if (input.signal?.aborted === true) abortRequest();
+    else input.signal?.addEventListener("abort", abortRequest, { once: true });
+    const headers: Record<string, string> = { Accept: "application/pdf,image/png,image/jpeg,*/*" };
     if (this.accessToken !== undefined) headers.Authorization = `Bearer ${this.accessToken}`;
+    if (input.body !== undefined) headers["Content-Type"] = "application/json";
     try {
       const response = await fetch(`${webConfiguration.apiBaseUrl}/${path.replace(/^\//, "")}`, {
+        ...(input.body === undefined ? {} : { body: JSON.stringify(input.body) }),
         headers,
-        method: "GET",
+        method: input.method,
         signal: controller.signal,
       });
       if (!response.ok) {
@@ -86,7 +105,7 @@ export class ApiClient {
       return await response.blob();
     } finally {
       globalThis.clearTimeout(timeout);
-      signal?.removeEventListener("abort", abortRequest);
+      input.signal?.removeEventListener("abort", abortRequest);
     }
   }
 
@@ -132,6 +151,7 @@ export class ApiClient {
           payload?.error?.message ?? "The request could not be completed",
           payload?.error?.code ?? "request_failed",
           response.status,
+          payload?.error?.details,
         );
       }
       if (response.status === 204) return undefined as TResponse;

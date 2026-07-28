@@ -264,10 +264,15 @@ describe.skipIf(!runConcurrencyTests)("driver cash reconciliation concurrency", 
       const rejected = [first, second].filter((result) => result.status === "rejected");
       expect(fulfilled).toHaveLength(1);
       expect(rejected).toHaveLength(1);
-      // The loser must fail with a business conflict, not an internal error.
-      expect(["reconciliation_order_ineligible", "reconciliation_empty", "23505"]).toContain(
-        errorCodeOf((rejected[0] as PromiseRejectedResult).reason),
-      );
+      // The loser must fail with a business conflict, not an internal error. Whether
+      // the winner's link is visible yet when the loser re-validates determines
+      // which of these two business codes it sees.
+      expect([
+        "order_already_reconciled",
+        "reconciliation_order_ineligible",
+        "reconciliation_empty",
+        "23505",
+      ]).toContain(errorCodeOf((rejected[0] as PromiseRejectedResult).reason));
       expect(await countsFor(orderId)).toEqual({
         audits: 1,
         events: 1,

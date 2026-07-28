@@ -112,6 +112,19 @@ describe("CompanyAppShell branding", () => {
     expect(screen.queryByRole("link", { name: "Company profile" })).not.toBeInTheDocument();
   });
 
+  it("keeps only Driver Collections under Drivers — no duplicate reconciliation entries", async () => {
+    renderShell(makeApi(branding()), ADMIN);
+    await screen.findAllByText("Acme Logistics");
+    fireEvent.click(screen.getByRole("button", { name: "Drivers" }));
+    expect(screen.getByRole("link", { name: "Driver Collections" })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: "Driver cash reconciliation" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: "New driver cash reconciliation" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("keeps only the UI-language selector in the sidebar (no Text Language, no My Preferences)", async () => {
     renderShell(makeApi(branding()), ADMIN);
     await screen.findAllByText("Acme Logistics");

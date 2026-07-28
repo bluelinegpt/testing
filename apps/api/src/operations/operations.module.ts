@@ -9,6 +9,8 @@ import {
   PublicTrackingController,
 } from "./operations.controller.js";
 import { DriverCashReconciliationService } from "./driver-cash-reconciliation.service.js";
+import { DriverCollectionPdfService } from "./driver-collection-pdf.service.js";
+import { DriverShipmentManifestService } from "./driver-shipment-manifest.service.js";
 import { OperationsHistoryWriter } from "./operations-history.writer.js";
 import { OperationsService } from "./operations.service.js";
 import { OrdersWorkflowService } from "./orders-workflow.service.js";
@@ -18,6 +20,8 @@ import { OrdersWorkflowService } from "./orders-workflow.service.js";
   controllers: [OperationsController, PortalController, PublicTrackingController],
   providers: [
     DriverCashReconciliationService,
+    DriverCollectionPdfService,
+    DriverShipmentManifestService,
     OperationsHistoryWriter,
     OperationsService,
     OrdersWorkflowService,
