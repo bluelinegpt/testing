@@ -698,7 +698,7 @@ export const arabicTranslations = {
       markDelivered: "تحديد كمُسلّم",
       markInBranch: "تحديد الصنف في الفرع",
       markOutForDelivery: "إرسال للتوصيل",
-      moneyOut: "تحويل المبلغ للتاجر",
+      moneyOut: "تسويات التجار",
       printManifest: "طباعة كشف شحنات السائق",
       returnToBranch: "إرجاع إلى الفرع",
       returnToTrader: "إرجاع إلى التاجر",

@@ -144,7 +144,114 @@ Deferred from that phase:
 - direct User permissions
 - more granular administration permissions
 
+## Recently Completed Phase: Driver Collections and Trader Settlements (Phase 4)
+
+Both features below are complete and committed. The "Current Phase: Driver Cash
+Reconciliation" section further below is **superseded** by this section — the
+reconciliation review it describes evolved into the Driver Collections
+workspace documented here; that older section is kept only as historical
+record of the decisions that shaped it, not as the current state.
+
+### Driver Collections
+
+Purpose: one authoritative workspace where a Company records the cash/visa
+money a Driver hands over for the Orders they delivered, replacing the two
+older, competing reconciliation workflows described later in this document.
+
+- Route: `/drivers` (single nav entry, "Driver Collections").
+- Workflow: select Driver → server-paginated, filterable eligible Orders
+  (`driver_reconciliation_status = 'pending'`) → optional expenses → payments
+  → atomic confirm. Backend: `POST operations/cash/reconciliations/selected`
+  (preview: `.../preview`), fully server-authoritative (Decimal.js), row
+  locking, idempotency, one confirmed reconciliation per Order enforced at
+  the database level.
+- Reversal: `POST operations/cash/reconciliations/:id/reverse` restores the
+  linked Orders' `driver_reconciliation_status` to `pending` (so they
+  reappear in the eligible-Orders list); the original reconciliation record
+  is preserved, never rewritten.
+- Duplicate prevention: enforced on both ends — the eligible-Orders query
+  excludes already-reconciled Orders, and the confirm path independently
+  rejects any Order whose status has changed since the client fetched it.
+- Driver Collection Report: `GET operations/cash/reconciliations/:id/pdf`,
+  server-rendered (Playwright/Chromium via the shared `DriverCollectionPdfService`),
+  Preview/Print/Download available from the collection success screen, the
+  Driver Collections list/detail, and the Order row/detail.
+- Driver Shipment Manifest: a separate document (`POST
+  cash/driver-shipment-manifest/pdf`), reusing the same PDF renderer but with
+  its own HTML template — triggered only from an Orders bulk action, never
+  merged with the Driver Collection Report.
+
+Main files: `apps/api/src/operations/driver-cash-reconciliation.service.ts`,
+`apps/api/src/operations/driver-collection-pdf.service.ts`,
+`apps/api/src/operations/driver-collection-report-html.ts`,
+`apps/api/src/operations/driver-shipment-manifest.service.ts`,
+`apps/api/src/operations/driver-shipment-manifest-html.ts`,
+`apps/web/src/features/operations/DriverCollectionsWorkspace.tsx`.
+
+### Trader Settlements
+
+Purpose: the authoritative workspace for money the Company sends **to** a
+Trader against delivered, reconciled Orders — replacing the earlier
+per-Order and bulk "Settle Trader" UI, both fully removed.
+
+- Route: `/trader-settlements` (single nav entry). `/traders` redirects here.
+- **Positive balance only.** The New Settlement Trader picker shows a Trader
+  only when their server-computed `unsettledNetPayable` (from `GET
+  operations/traders`) is strictly greater than zero, sorted highest-due
+  first. A zero balance (nothing to settle) or a negative balance (the
+  Trader owes the Company — see limitation below) never appears in this
+  workflow.
+- Full and partial payment: one payment can cover one or many eligible
+  Orders, fully or partially; the same Order can be paid across several
+  settlements over time.
+- Oldest-first allocation: `POST settlements/payments/propose-allocation` is
+  the sole source of the proposed per-Order amounts (by delivery date,
+  oldest first); the frontend never computes this itself and only allows
+  editing the server-proposed lines within server-reported outstanding
+  limits.
+- Money Sent vs Money Received: two distinct, separately confirmed states.
+  Money Sent is created by `POST settlements/payments` (the payment itself).
+  Money Received is a later, separate confirmation —
+  `POST settlements/payments/:id/confirm-receipt` — recording that the
+  Trader has acknowledged receipt.
+- Reversal: `POST settlements/payments/:id/reverse` requires a reason and is
+  blocked once Money Received has been confirmed (`settlement_reversal_blocked_by_receipt`);
+  the frontend hides the Reverse action in that state rather than working
+  around the backend block.
+- Trader Settlement Statement: `GET settlements/payments/:id/pdf`, its own
+  HTML template (`trader-settlement-report-html.ts`), reusing the same
+  shared PDF renderer as Driver Collections — never merged with the Driver
+  Collection Report or Driver Shipment Manifest. Preview/Print/Download
+  available from the settlement success screen and the Trader Settlements
+  list/detail.
+
+Main files: `apps/api/src/operations/trader-settlement.service.ts`,
+`apps/api/src/operations/trader-settlement-report-html.ts`,
+`apps/web/src/features/operations/TraderSettlementsWorkspace.tsx`.
+
+### Explicit limitation: Trader Receivable does not exist
+
+"Collect Money from Trader" (money flowing **from** a Trader **to** the
+Company, when a Trader's balance would be negative) is **not implemented**.
+The current payable schema does not support it: `orders.trader_net_payable`
+and the derived `trader_outstanding_balance` are both floored at zero by
+base-table CHECK constraints, so a Trader cannot currently owe the Company
+anything representable in this schema. Building it is a separate, future
+feature requiring its own schema (a new table, not a relaxation of the
+existing non-negative constraints), its own status domain (`Outstanding /
+Partially Collected / Collected / Reversed` — never overloading the existing
+`unsettled` / `money_sent_to_trader` / `money_received_by_trader` statuses),
+its own service/routes, and its own `Trader Payment Receipt` document,
+structurally separate from the Trader Settlement Statement. Do not design
+this into the current Trader Settlement implementation beyond this note.
+
 ## Current Phase: Driver Cash Reconciliation
+
+**Superseded** — see "Recently Completed Phase: Driver Collections and
+Trader Settlements" above. This section is retained only as the historical
+record of the decisions that shaped the eventual Driver Collections design;
+the "Decisions Awaiting User Approval" below were resolved and implemented
+during that work, not left pending.
 
 The latest prompt requested a review before implementation. The review is complete, but implementation has not started because the prompt explicitly requires business decisions and approval first.
 

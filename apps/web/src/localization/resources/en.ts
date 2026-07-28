@@ -710,7 +710,7 @@ export const englishTranslations = {
       markDelivered: "Mark delivered",
       markInBranch: "Mark item in branch",
       markOutForDelivery: "Send out for delivery",
-      moneyOut: "Money out to trader",
+      moneyOut: "Trader settlements",
       printManifest: "Print Driver Shipment Manifest",
       returnToBranch: "Return to branch",
       returnToTrader: "Return to trader",
@@ -1245,7 +1245,7 @@ export const englishTranslations = {
     actionPreviewStatement: "Preview Statement",
     actionPrint: "Print",
     actionDownloadPdf: "Download PDF",
-    actionConfirmMoneyReceived: "Confirm Money Received",
+    actionConfirmMoneyReceived: "Confirm Money Received by Trader",
     actionReverse: "Reverse",
     // Workflow steps
     stepSelectTrader: "Select Trader",

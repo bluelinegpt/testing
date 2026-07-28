@@ -267,8 +267,7 @@ export function TraderSettlementsWorkspace({
   const isAdministrator = permissions.includes("users_roles.manage");
   const canManage = isAdministrator || permissions.includes("settlements.create");
   const canReverse = isAdministrator || permissions.includes("settlements.reverse");
-  const canViewReport =
-    canManage || isAdministrator || permissions.includes("reports.export");
+  const canViewReport = canManage || permissions.includes("reports.export");
 
   const [summary, setSummary] = useState<TraderSettlementSummary>();
   const [filters, setFilters] = useState<Filters>({
