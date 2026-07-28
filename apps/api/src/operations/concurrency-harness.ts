@@ -22,6 +22,7 @@ import type { TenantContext, TenantContextAccessor } from "../tenancy/tenant-con
 import { DriverCashReconciliationService } from "./driver-cash-reconciliation.service.js";
 import type { DriverCollectionPdfService } from "./driver-collection-pdf.service.js";
 import { OperationsHistoryWriter } from "./operations-history.writer.js";
+import { TraderSettlementService } from "./trader-settlement.service.js";
 
 /**
  * Disposable schema for real multi-connection concurrency tests.
@@ -224,6 +225,7 @@ export interface Caller {
   readonly database: Kysely<DatabaseSchema>;
   destroy: () => Promise<void>;
   readonly service: DriverCashReconciliationService;
+  readonly traderSettlementService: TraderSettlementService;
 }
 
 export function createCaller(
@@ -248,7 +250,12 @@ export function createCaller(
     forcePasswordChange: false,
     identityId: accountId,
     kind: "company_user",
-    permissions: new Set(["reconciliations.create", "reconciliations.reverse"]),
+    permissions: new Set([
+      "reconciliations.create",
+      "reconciliations.reverse",
+      "settlements.create",
+      "settlements.reverse",
+    ]),
     sessionId: randomUUID(),
   });
   const companyProfile = new CompanyProfileService(
@@ -268,5 +275,18 @@ export function createCaller(
     companyProfile,
     {} as unknown as DriverCollectionPdfService,
   );
-  return { database, destroy: () => database.destroy(), service };
+  const traderSettlementService = new TraderSettlementService(
+    database,
+    transactions,
+    tenants as unknown as TenantContextAccessor,
+    identities as unknown as IdentityContextAccessor,
+    new OperationsHistoryWriter(),
+    companyProfile,
+  );
+  return {
+    database,
+    destroy: () => database.destroy(),
+    service,
+    traderSettlementService,
+  };
 }

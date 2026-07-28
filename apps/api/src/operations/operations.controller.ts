@@ -66,6 +66,17 @@ import {
 } from "./orders-workflow.service.js";
 import { DriverShipmentManifestService } from "./driver-shipment-manifest.service.js";
 import type { ManifestData } from "./driver-shipment-manifest-html.js";
+import {
+  TraderSettlementService,
+  type CreateTraderSettlementResult,
+  type Page as TraderSettlementPage,
+  type TraderAllocationProposal,
+  type TraderEligibleOrderRow,
+  type TraderSettlementDetail,
+  type TraderSettlementListRow,
+  type TraderSettlementReportData,
+  type TraderSettlementSummary,
+} from "./trader-settlement.service.js";
 // Runtime class values are required for Nest validation metadata.
 // eslint-disable-next-line @typescript-eslint/consistent-type-imports
 import {
@@ -73,12 +84,16 @@ import {
   BulkAssignDriverDto,
   BulkChangeOrderStatusDto,
   BulkSettleTraderDto,
+  ConfirmTraderSettlementReceiptDto,
   CreateDriverReconciliationDto,
   CreateDriverDto,
+  CreateTraderSettlementDto,
   DriverCollectionsSummaryQueryDto,
   DriverSearchQueryDto,
   EligibleOrdersQueryDto,
+  ProposeTraderAllocationDto,
   ReconciliationListQueryDto,
+  ReverseTraderSettlementDto,
   CreateOrderDto,
   CreateTraderDto,
   FinancialPaymentDto,
@@ -89,6 +104,9 @@ import {
   RegisterOrderAttachmentDto,
   OrderSelectionDto,
   ReverseDriverReconciliationDto,
+  TraderSettlementEligibleOrdersQueryDto,
+  TraderSettlementListQueryDto,
+  TraderSettlementSummaryQueryDto,
   UpdateOrderDto,
   GenerateShipmentManifestDto,
 } from "./operations.dto.js";
@@ -106,6 +124,8 @@ export class OperationsController {
     private readonly reconciliations: DriverCashReconciliationService,
     @Inject(DriverShipmentManifestService)
     private readonly manifest: DriverShipmentManifestService,
+    @Inject(TraderSettlementService)
+    private readonly traderSettlementService: TraderSettlementService,
   ) {}
 
   @ApiOperation({ summary: "Show operational totals for the authenticated Company" })
@@ -518,18 +538,21 @@ export class OperationsController {
     );
   }
 
+  @RequireAnyPermission("settlements.create", "reports.export", "users_roles.manage")
   @ApiOperation({ summary: "List delivered orders pending trader settlement" })
   @Get("settlements/pending")
   public pendingSettlementOrders(): Promise<readonly OperationsPendingSettlementOrder[]> {
     return this.operations.pendingSettlementOrders();
   }
 
+  @RequireAnyPermission("settlements.create", "reports.export", "users_roles.manage")
   @ApiOperation({ summary: "List recent trader settlements" })
   @Get("settlements")
   public traderSettlements(): Promise<readonly OperationsTraderSettlement[]> {
     return this.operations.traderSettlements();
   }
 
+  @RequireAnyPermission("settlements.create", "reports.export", "users_roles.manage")
   @ApiOperation({ summary: "Show one trader settlement with orders and payments" })
   @Get("settlements/:settlementId")
   public traderSettlementDetail(
@@ -617,6 +640,7 @@ export class OperationsController {
     );
   }
 
+  @RequireAnyPermission("settlements.create", "users_roles.manage")
   @ApiOperation({ summary: "Confirm trader settlement for one order" })
   @Post("orders/:orderId/settle-trader")
   public settleOrderTrader(
@@ -648,6 +672,118 @@ export class OperationsController {
     @Req() request: Request,
   ): Promise<OperationsOrder> {
     return this.operations.confirmTraderReceipt(orderId, this.correlationId(request));
+  }
+
+  // -------------------------------------------------------------------
+  // Trader Settlement (Phase 4 Checkpoint 4): full/partial payment,
+  // oldest-first allocation, Money Sent/Received, reversal, list/summary/
+  // detail/report-data. Kept under a distinct `settlements/payments` prefix
+  // so no route here can ever be shadowed by the legacy single-segment
+  // `settlements/:settlementId` route above.
+  // -------------------------------------------------------------------
+
+  @RequireAnyPermission("settlements.create", "users_roles.manage")
+  @ApiOperation({ summary: "Eligible Orders for one Trader's settlement, paginated" })
+  @Get("settlements/payments/eligible-orders")
+  public traderSettlementEligibleOrders(
+    @Query() query: TraderSettlementEligibleOrdersQueryDto,
+  ): Promise<TraderSettlementPage<TraderEligibleOrderRow>> {
+    return this.traderSettlementService.eligibleOrders(query);
+  }
+
+  @RequireAnyPermission("settlements.create", "users_roles.manage")
+  @ApiOperation({ summary: "Server-authoritative summary cards for Trader settlements" })
+  @Get("settlements/payments/summary")
+  public traderSettlementSummary(
+    @Query() query: TraderSettlementSummaryQueryDto,
+  ): Promise<TraderSettlementSummary> {
+    return this.traderSettlementService.summary(query);
+  }
+
+  @RequireAnyPermission("settlements.create", "users_roles.manage")
+  @ApiOperation({ summary: "List Trader settlements, paginated" })
+  @Get("settlements/payments/list")
+  public traderSettlementPaymentsList(
+    @Query() query: TraderSettlementListQueryDto,
+  ): Promise<TraderSettlementPage<TraderSettlementListRow>> {
+    return this.traderSettlementService.list(query);
+  }
+
+  @RequireAnyPermission("settlements.create", "users_roles.manage")
+  @ApiOperation({ summary: "Oldest-first default allocation proposal for a Trader payment" })
+  @Post("settlements/payments/propose-allocation")
+  public proposeTraderAllocation(
+    @Body() input: ProposeTraderAllocationDto,
+  ): Promise<TraderAllocationProposal> {
+    return this.traderSettlementService.proposeAllocation(input);
+  }
+
+  @RequireAnyPermission("settlements.create", "users_roles.manage")
+  @ApiOperation({ summary: "Create a full or partial Trader payment with explicit allocation" })
+  @Post("settlements/payments")
+  public createTraderSettlementPayment(
+    @Body() input: CreateTraderSettlementDto,
+    @Headers("x-idempotency-key") idempotencyKey: string | undefined,
+    @Req() request: Request,
+  ): Promise<CreateTraderSettlementResult> {
+    return this.traderSettlementService.createPayment(
+      input,
+      this.correlationId(request),
+      idempotencyKey,
+    );
+  }
+
+  @RequireAnyPermission("settlements.create", "users_roles.manage")
+  @ApiOperation({ summary: "Show one Trader settlement payment in full detail" })
+  @Get("settlements/payments/:settlementId")
+  public traderSettlementPaymentDetail(
+    @Param("settlementId", new ParseUUIDPipe()) settlementId: string,
+  ): Promise<TraderSettlementDetail> {
+    return this.traderSettlementService.detail(settlementId);
+  }
+
+  @RequireAnyPermission("settlements.create", "reports.export", "users_roles.manage")
+  @ApiOperation({
+    summary: "Server-authoritative report data for the Trader Settlement Statement",
+  })
+  @Get("settlements/payments/:settlementId/report-data")
+  public traderSettlementReportData(
+    @Param("settlementId", new ParseUUIDPipe()) settlementId: string,
+  ): Promise<TraderSettlementReportData> {
+    return this.traderSettlementService.reportData(settlementId);
+  }
+
+  @RequireAnyPermission("settlements.create", "users_roles.manage")
+  @ApiOperation({ summary: "Confirm that the Trader received a previously sent settlement" })
+  @Post("settlements/payments/:settlementId/confirm-receipt")
+  public confirmTraderSettlementReceipt(
+    @Param("settlementId", new ParseUUIDPipe()) settlementId: string,
+    @Body() input: ConfirmTraderSettlementReceiptDto,
+    @Headers("x-idempotency-key") idempotencyKey: string | undefined,
+    @Req() request: Request,
+  ): Promise<{ readonly orderCount: number; readonly settlementId: string }> {
+    return this.traderSettlementService.confirmMoneyReceived(
+      settlementId,
+      input,
+      this.correlationId(request),
+      idempotencyKey,
+    );
+  }
+
+  @RequireAnyPermission("settlements.reverse", "users_roles.manage")
+  @ApiOperation({ summary: "Reverse a confirmed Trader settlement payment with a reason" })
+  @Post("settlements/payments/:settlementId/reverse")
+  public reverseTraderSettlementPayment(
+    @Param("settlementId", new ParseUUIDPipe()) settlementId: string,
+    @Body() input: ReverseTraderSettlementDto,
+    @Req() request: Request,
+  ): Promise<{
+    readonly orderCount: number;
+    readonly reversalSettlementId: string;
+    readonly reversalSettlementNumber: string;
+    readonly settlementId: string;
+  }> {
+    return this.traderSettlementService.reverse(settlementId, input.reason, this.correlationId(request));
   }
 
   private correlationId(request: Request): string {

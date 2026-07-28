@@ -14,6 +14,7 @@ import { DriverShipmentManifestService } from "./driver-shipment-manifest.servic
 import { OperationsHistoryWriter } from "./operations-history.writer.js";
 import { OperationsService } from "./operations.service.js";
 import { OrdersWorkflowService } from "./orders-workflow.service.js";
+import { TraderSettlementService } from "./trader-settlement.service.js";
 
 @Module({
   imports: [AuthenticationModule, CompanyProfileModule],
@@ -26,6 +27,7 @@ import { OrdersWorkflowService } from "./orders-workflow.service.js";
     OperationsService,
     OrdersWorkflowService,
     PasswordHasher,
+    TraderSettlementService,
   ],
 })
 export class OperationsModule {}

@@ -29,6 +29,7 @@ export interface OrderEventInput {
   readonly relatedDriverId?: string | null;
   readonly relatedPaymentId?: string | null;
   readonly relatedReconciliationId?: string | null;
+  readonly relatedSettlementId?: string | null;
   readonly source: string;
 }
 
@@ -90,7 +91,7 @@ export class OperationsHistoryWriter {
       insert into order_events (
         company_id, order_id, event_type, event_category, field_name,
         previous_value, new_value, actor_account_id, actor_role, source, reason,
-        related_driver_id, related_reconciliation_id, related_payment_id,
+        related_driver_id, related_reconciliation_id, related_settlement_id, related_payment_id,
         correlation_id, bulk_action_id
       ) values (
         ${input.companyId}::uuid, ${input.orderId}::uuid, ${input.eventType},
@@ -100,6 +101,7 @@ export class OperationsHistoryWriter {
         ${input.actorRole}, ${input.source}, ${input.reason ?? null},
         ${input.relatedDriverId ?? null}::uuid,
         ${input.relatedReconciliationId ?? null}::uuid,
+        ${input.relatedSettlementId ?? null}::uuid,
         ${input.relatedPaymentId ?? null}::uuid, ${input.correlationId},
         ${input.bulkActionId ?? null}::uuid
       )
