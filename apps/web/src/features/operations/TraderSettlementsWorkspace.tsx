@@ -1,0 +1,2178 @@
+import { useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
+
+import { ApiError, type ApiClient } from "../../api/api-client.js";
+import type { CompanyBankAccount, OperationsTrader, PagedResponse } from "../../api/contracts.js";
+import { CompanyBrandingContext } from "../../app/CompanyBrandingContext.js";
+import { Modal } from "../../components/Modal.js";
+import { PageHeader } from "../../components/PageHeader.js";
+import { AreaSelector } from "../configuration/AreaSelector.js";
+
+import { type PdfAction, useReconciliationPdfActions } from "./reconciliation-pdf.js";
+import { useIdempotencyKey } from "./useIdempotencyKey.js";
+
+// ---- Server response shapes (mirror trader-settlement.service.ts). ----
+
+interface TraderSettlementSummary {
+  readonly eligibleOrders: number;
+  readonly eligibleTraderPayable: string;
+  readonly moneyReceivedAmount: string;
+  readonly moneySentAmount: string;
+  readonly partiallySettledAmount: string;
+  readonly remainingOutstanding: string;
+  readonly reversedPayments: number;
+  readonly tradersWithOutstandingBalance: number;
+  readonly unsettledAmount: string;
+}
+
+interface TraderSettlementListRow {
+  readonly confirmedBy: string;
+  readonly createdBy: string;
+  readonly isReversed: boolean;
+  readonly moneyReceivedAt: string | null;
+  readonly moneyReceivedConfirmed: boolean;
+  readonly moneySentAt: string | null;
+  readonly orderCount: number;
+  readonly paymentAmount: string;
+  readonly paymentDate: string;
+  readonly paymentMethod: "bank_transfer" | "cash";
+  readonly paymentReference: string | null;
+  readonly previouslyPaid: string;
+  readonly remainingOutstanding: string;
+  readonly settlementId: string;
+  readonly settlementNumber: string;
+  readonly status: "confirmed" | "reversed";
+  readonly traderName: string;
+}
+
+interface TraderEligibleOrderRow {
+  readonly additionalFees: string;
+  readonly areaName: string;
+  readonly codAmount: string;
+  readonly customerName: string;
+  readonly deliveryDate: string | null;
+  readonly emirateName: string | null;
+  readonly id: string;
+  readonly originalAmountDueToTrader: string;
+  readonly outstandingBalance: string;
+  readonly previouslyPaid: string;
+  readonly referenceNumber: string | null;
+  readonly serialNumber: string;
+  readonly settlementStatus: string;
+  readonly totalDeductions: string;
+  readonly vatAmount: string;
+}
+
+interface TraderAllocationProposalLine {
+  readonly allocatedAmount: string;
+  readonly orderId: string;
+  readonly orderNumber: string;
+  readonly outstandingAfter: string;
+  readonly outstandingBefore: string;
+  readonly serialNumber: string;
+}
+
+interface TraderAllocationProposal {
+  readonly allocations: readonly TraderAllocationProposalLine[];
+  readonly requestedAmount: string;
+  readonly totalAllocated: string;
+  readonly traderId: string;
+  readonly unallocatedAmount: string;
+}
+
+interface CreateTraderSettlementResult {
+  readonly amount: string;
+  readonly orderCount: number;
+  readonly paymentMethod: "bank_transfer" | "cash";
+  readonly settlementId: string;
+  readonly settlementNumber: string;
+  readonly traderId: string;
+  readonly traderName: string;
+}
+
+interface MaskedBankSnapshot {
+  readonly accountName: string;
+  readonly accountNumberMasked: string;
+  readonly bankName: string;
+  readonly ibanMasked: string;
+  readonly swiftCode: string | null;
+}
+
+interface TraderSettlementDetailOrder {
+  readonly additionalFees: string;
+  readonly amountPaidNow: string;
+  readonly areaName: string;
+  readonly codAmount: string;
+  readonly customerName: string;
+  readonly deliveryDate: string | null;
+  readonly emirateName: string | null;
+  readonly orderSettlementStatus: string;
+  readonly originalTraderPayable: string;
+  readonly previouslyPaid: string;
+  readonly referenceNumber: string | null;
+  readonly remainingOutstanding: string;
+  readonly serialNumber: string;
+  readonly serviceFee: string;
+  readonly totalDeductions: string;
+  readonly vatAmount: string;
+}
+
+interface TraderSettlementSummaryTotals {
+  readonly amountPaidNow: string;
+  readonly orderCount: number;
+  readonly previouslyPaid: string;
+  readonly remainingOutstanding: string;
+  readonly totalAdditionalFees: string;
+  readonly totalCod: string;
+  readonly totalDeductions: string;
+  readonly totalOriginalTraderPayable: string;
+  readonly totalServiceFees: string;
+  readonly totalVat: string;
+}
+
+interface TraderSettlementDetail {
+  readonly beneficiaryBank: MaskedBankSnapshot | null;
+  readonly confirmedBy: string;
+  readonly createdBy: string;
+  readonly moneyReceivedBy: string | null;
+  readonly moneyReceivedDate: string | null;
+  readonly moneyReceivedNotes: string | null;
+  readonly moneyReceivedReference: string | null;
+  readonly moneySentAt: string | null;
+  readonly notes: string | null;
+  readonly orders: readonly TraderSettlementDetailOrder[];
+  readonly paymentDate: string;
+  readonly paymentMethod: "bank_transfer" | "cash";
+  readonly paymentReference: string | null;
+  readonly reversalDate: string | null;
+  readonly reversalOfSettlementNumber: string | null;
+  readonly reversalReason: string | null;
+  readonly reversedBy: string | null;
+  readonly reversedBySettlementNumber: string | null;
+  readonly settlementId: string;
+  readonly settlementNumber: string;
+  readonly sourceBank: { readonly accountName: string; readonly bankName: string } | null;
+  readonly status: "confirmed" | "reversed";
+  readonly summary: TraderSettlementSummaryTotals;
+  readonly traderName: string;
+}
+
+interface TraderBankAccountOption {
+  readonly accountName: string;
+  readonly accountNumber?: string;
+  readonly bankName: string;
+  readonly iban?: string | null;
+  readonly id: string;
+  readonly isActive: boolean;
+  readonly isDefault: boolean;
+}
+
+// ---------------------------------------------------------------------------
+
+const emptyFilters = {
+  deliveredFrom: "",
+  deliveredTo: "",
+  moneyReceivedStatus: "",
+  orderSerialNumber: "",
+  outstandingOnly: false,
+  paymentDateFrom: "",
+  paymentDateTo: "",
+  paymentMethod: "",
+  paymentReference: "",
+  referenceNumber: "",
+  settlementNumber: "",
+  settlementStatus: "",
+  traderId: "",
+};
+
+type Filters = typeof emptyFilters;
+
+function money(value: string | number | undefined): string {
+  return (Math.round(Number(value ?? 0) * 100) / 100).toFixed(2);
+}
+
+function message(error: unknown, fallback: string): string {
+  if (error instanceof ApiError) {
+    return error.details === undefined || error.details.length === 0
+      ? error.message
+      : `${error.message}\n${error.details.join("\n")}`;
+  }
+  return error instanceof Error ? error.message : fallback;
+}
+
+function filterQuery(filters: Readonly<Record<string, boolean | string>>): URLSearchParams {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(filters)) {
+    if (typeof value === "boolean") {
+      if (value) params.set(key, "true");
+      continue;
+    }
+    if (value.trim() !== "") params.set(key, value.trim());
+  }
+  return params;
+}
+
+const emptyEligibleOrderFilters = {
+  areaId: "",
+  deliveredFrom: "",
+  deliveredTo: "",
+  emirateId: "",
+  outstandingOnly: false,
+  referenceNumber: "",
+  serialNumber: "",
+  settlementStatus: "",
+};
+
+type EligibleOrderFilters = typeof emptyEligibleOrderFilters;
+
+// The per-Order settlement-status domain a User can filter Eligible Orders by.
+// "not_eligible" is intentionally excluded — the eligible-orders endpoint
+// never returns such an Order, so offering it as a filter would only ever
+// produce an empty result.
+const orderSettlementStatuses = [
+  "unsettled",
+  "partially_settled",
+  "settled",
+  "money_sent_to_trader",
+  "money_received_by_trader",
+  "reversed",
+] as const;
+
+function maskAccountNumber(value: string | undefined): string {
+  if (value === undefined || value.trim() === "") return "";
+  const digits = value.trim();
+  return digits.length <= 4 ? digits : `${"*".repeat(digits.length - 4)}${digits.slice(-4)}`;
+}
+
+/**
+ * Trader Settlement operational workspace (Phase 4 Checkpoint 5). The single
+ * authoritative screen for money-out payments to Traders: full/partial
+ * payment, oldest-first allocation, Money Sent, Money Received, reversal, and
+ * the Trader Settlement Statement PDF. Replaces the legacy pending/recent
+ * settlement UI previously split across the Orders table's bulk "Settle"
+ * dialog and the old OperationsWorkspace settlements view.
+ */
+export function TraderSettlementsWorkspace({
+  api,
+  permissions,
+  presetTraderId,
+}: {
+  api: ApiClient;
+  permissions: readonly string[];
+  presetTraderId?: string;
+}) {
+  const { t } = useTranslation();
+  const branding = useContext(CompanyBrandingContext);
+  const reportLanguage = branding?.textLanguage === "ar" ? "ar" : "en";
+  const isAdministrator = permissions.includes("users_roles.manage");
+  const canManage = isAdministrator || permissions.includes("settlements.create");
+  const canReverse = isAdministrator || permissions.includes("settlements.reverse");
+  const canViewReport =
+    canManage || isAdministrator || permissions.includes("reports.export");
+
+  const [summary, setSummary] = useState<TraderSettlementSummary>();
+  const [filters, setFilters] = useState<Filters>({
+    ...emptyFilters,
+    traderId: presetTraderId ?? "",
+  });
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState<25 | 50 | 100>(25);
+  const [listPage, setListPage] = useState<PagedResponse<TraderSettlementListRow>>();
+  const [listError, setListError] = useState<string>();
+  const [newSettlementOpen, setNewSettlementOpen] = useState(false);
+  const [detailId, setDetailId] = useState<string>();
+  const [receiptTarget, setReceiptTarget] = useState<TraderSettlementListRow>();
+  const [reverseTarget, setReverseTarget] = useState<TraderSettlementListRow>();
+  const pdf = useReconciliationPdfActions(api);
+  const [pdfError, setPdfError] = useState<string>();
+  const [pdfBusyId, setPdfBusyId] = useState<string>();
+
+  const applyFilter = (change: Partial<Filters>) => {
+    setPage(1);
+    setFilters((current) => ({ ...current, ...change }));
+  };
+  const clearFilters = () => {
+    setPage(1);
+    setPageSize(25);
+    setFilters(emptyFilters);
+  };
+
+  const refresh = useCallback(() => {
+    if (!canManage) return;
+    setListError(undefined);
+    void api
+      .get<TraderSettlementSummary>(
+        `operations/settlements/payments/summary?${filterQuery(filters)}`,
+      )
+      .then(setSummary)
+      .catch(() => setListError(t("traderSettlements.detailLoadFailed")));
+    const params = filterQuery(filters);
+    params.set("page", String(page));
+    params.set("pageSize", String(pageSize));
+    void api
+      .get<PagedResponse<TraderSettlementListRow>>(
+        `operations/settlements/payments/list?${params.toString()}`,
+      )
+      .then(setListPage)
+      .catch(() => setListError(t("traderSettlements.detailLoadFailed")));
+  }, [api, canManage, filters, page, pageSize, t]);
+
+  useEffect(() => refresh(), [refresh]);
+
+  const rows = listPage?.items ?? [];
+  const total = listPage?.total ?? 0;
+  const pageCount = total === 0 ? 1 : Math.ceil(total / pageSize);
+
+  const openRowPdf = async (row: TraderSettlementListRow, mode: PdfAction) => {
+    setPdfError(undefined);
+    setPdfBusyId(row.settlementId);
+    const requestError = await pdf.run(
+      `operations/settlements/payments/${row.settlementId}/pdf?language=${reportLanguage}`,
+      `Trader-Settlement-${row.settlementNumber}.pdf`,
+      mode,
+    );
+    setPdfBusyId(undefined);
+    if (requestError !== undefined) {
+      setPdfError(message(requestError, t("traderSettlements.pdfGenerationFailed")));
+    }
+  };
+
+  if (!canManage) {
+    return (
+      <>
+        <PageHeader
+          eyebrow={t("nav.traderSettlements")}
+          title={t("traderSettlements.pageTitle")}
+        />
+        <div className="alert alert-error" role="alert">
+          {t("traderSettlements.permissionDenied")}
+        </div>
+      </>
+    );
+  }
+
+  return (
+    <>
+      <PageHeader
+        actions={
+          <>
+            <button
+              className="button button-primary"
+              onClick={() => setNewSettlementOpen(true)}
+              type="button"
+            >
+              {t("traderSettlements.newSettlement")}
+            </button>
+            <button className="button button-secondary" onClick={refresh} type="button">
+              {t("common.refresh")}
+            </button>
+          </>
+        }
+        description={t("traderSettlements.pageSubtitle")}
+        eyebrow={t("nav.traderSettlements")}
+        title={t("traderSettlements.pageTitle")}
+      />
+
+      {listError === undefined ? null : (
+        <div className="alert alert-error" role="alert">
+          {listError}
+        </div>
+      )}
+      {pdfError === undefined ? null : (
+        <div className="alert alert-error" role="alert">
+          {pdfError}
+        </div>
+      )}
+
+      {summary === undefined ? null : <SummaryCards summary={summary} />}
+
+      <FilterBar api={api} filters={filters} onChange={applyFilter} onClear={clearFilters} />
+
+      <section aria-labelledby="trader-settlements-list-heading">
+        <h2 id="trader-settlements-list-heading">{t("traderSettlements.pageTitle")}</h2>
+        <div className="table-scroll-x">
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">{t("traderSettlements.columnSettlementNumber")}</th>
+              <th scope="col">{t("traderSettlements.columnTrader")}</th>
+              <th scope="col">{t("traderSettlements.columnPaymentDate")}</th>
+              <th scope="col">{t("traderSettlements.columnPaymentMethod")}</th>
+              <th scope="col">{t("traderSettlements.columnPaymentReference")}</th>
+              <th scope="col">{t("traderSettlements.columnOrders")}</th>
+              <th scope="col">{t("traderSettlements.columnPaymentAmount")}</th>
+              <th scope="col">{t("traderSettlements.columnRemainingOutstanding")}</th>
+              <th scope="col">{t("traderSettlements.columnMoneySent")}</th>
+              <th scope="col">{t("traderSettlements.columnMoneyReceived")}</th>
+              <th scope="col">{t("traderSettlements.columnStatus")}</th>
+              <th scope="col">
+                <span className="sr-only">{t("common.actions")}</span>
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.settlementId}>
+                <td className="mono">
+                  <button className="link-button" onClick={() => setDetailId(row.settlementId)} type="button">
+                    {row.settlementNumber}
+                  </button>
+                </td>
+                <td>{row.traderName}</td>
+                <td>{row.paymentDate}</td>
+                <td>
+                  {t(
+                    row.paymentMethod === "cash"
+                      ? "traderSettlements.paymentMethodCash"
+                      : "traderSettlements.paymentMethodBankTransfer",
+                  )}
+                </td>
+                <td className="mono">{row.paymentReference ?? "-"}</td>
+                <td>{row.orderCount}</td>
+                <td>{money(row.paymentAmount)}</td>
+                <td>{money(row.remainingOutstanding)}</td>
+                <td>{row.moneySentAt === null ? "-" : row.moneySentAt.slice(0, 10)}</td>
+                <td>{row.moneyReceivedAt === null ? "-" : row.moneyReceivedAt.slice(0, 10)}</td>
+                <td>
+                  {t(row.status === "reversed" ? "traderSettlements.statusReversed" : "traderSettlements.statusConfirmed")}
+                  {row.isReversed && row.status !== "reversed" ? (
+                    <span className="badge badge-warning">{t("traderSettlements.reversedIndicator")}</span>
+                  ) : null}
+                </td>
+                <td className="row-actions">
+                  <button onClick={() => setDetailId(row.settlementId)} type="button">
+                    {t("traderSettlements.actionView")}
+                  </button>
+                  {!canViewReport ? null : (
+                    <>
+                      <button
+                        disabled={pdfBusyId === row.settlementId}
+                        onClick={() => void openRowPdf(row, "preview")}
+                        type="button"
+                      >
+                        {pdfBusyId === row.settlementId && pdf.busy === "preview"
+                          ? t("common.loading")
+                          : t("traderSettlements.actionPreviewStatement")}
+                      </button>
+                      <button
+                        disabled={pdfBusyId === row.settlementId}
+                        onClick={() => void openRowPdf(row, "print")}
+                        type="button"
+                      >
+                        {pdfBusyId === row.settlementId && pdf.busy === "print"
+                          ? t("common.loading")
+                          : t("traderSettlements.actionPrint")}
+                      </button>
+                      <button
+                        disabled={pdfBusyId === row.settlementId}
+                        onClick={() => void openRowPdf(row, "download")}
+                        type="button"
+                      >
+                        {pdfBusyId === row.settlementId && pdf.busy === "download"
+                          ? t("common.loading")
+                          : t("traderSettlements.actionDownloadPdf")}
+                      </button>
+                    </>
+                  )}
+                  {row.status === "reversed" || row.moneyReceivedConfirmed ? null : (
+                    <button onClick={() => setReceiptTarget(row)} type="button">
+                      {t("traderSettlements.actionConfirmMoneyReceived")}
+                    </button>
+                  )}
+                  {!canReverse || row.status === "reversed" || row.moneyReceivedConfirmed ? null : (
+                    <button onClick={() => setReverseTarget(row)} type="button">
+                      {t("traderSettlements.actionReverse")}
+                    </button>
+                  )}
+                </td>
+              </tr>
+            ))}
+            {rows.length === 0 ? (
+              <tr>
+                <td className="empty-state" colSpan={12}>
+                  {t("traderSettlements.noSettlements")}
+                </td>
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
+        </div>
+        <nav aria-label={t("common.pagination")} className="pagination">
+          <button disabled={page <= 1} onClick={() => setPage(page - 1)} type="button">
+            {t("common.previous")}
+          </button>
+          <span>{t("common.pageOf", { page, pageCount })}</span>
+          <button disabled={page >= pageCount} onClick={() => setPage(page + 1)} type="button">
+            {t("common.next")}
+          </button>
+        </nav>
+      </section>
+
+      {!newSettlementOpen ? null : (
+        <NewSettlementDialog
+          api={api}
+          {...(presetTraderId === undefined ? {} : { initialTraderId: presetTraderId })}
+          onClose={() => setNewSettlementOpen(false)}
+          onCreated={(settlementId) => {
+            setNewSettlementOpen(false);
+            refresh();
+            setDetailId(settlementId);
+          }}
+          reportLanguage={reportLanguage}
+        />
+      )}
+
+      {detailId === undefined ? null : (
+        <SettlementDetailDialog
+          api={api}
+          canReverse={canReverse}
+          canViewReport={canViewReport}
+          onClose={() => setDetailId(undefined)}
+          onReversed={() => {
+            setDetailId(undefined);
+            refresh();
+          }}
+          reportLanguage={reportLanguage}
+          settlementId={detailId}
+        />
+      )}
+
+      {receiptTarget === undefined ? null : (
+        <MoneyReceivedDialog
+          api={api}
+          onClose={() => setReceiptTarget(undefined)}
+          onConfirmed={refresh}
+          settlement={receiptTarget}
+        />
+      )}
+
+      {reverseTarget === undefined ? null : (
+        <ReverseSettlementDialog
+          api={api}
+          onClose={() => setReverseTarget(undefined)}
+          onReversed={refresh}
+          settlement={reverseTarget}
+        />
+      )}
+    </>
+  );
+}
+
+function SummaryCards({ summary }: { summary: TraderSettlementSummary }) {
+  const { t } = useTranslation();
+  const primaryCards: readonly { label: string; value: string }[] = [
+    { label: t("traderSettlements.summaryEligiblePayable"), value: money(summary.eligibleTraderPayable) },
+    { label: t("traderSettlements.summaryUnsettled"), value: money(summary.unsettledAmount) },
+    { label: t("traderSettlements.summaryPartiallySettled"), value: money(summary.partiallySettledAmount) },
+    { label: t("traderSettlements.summaryMoneySent"), value: money(summary.moneySentAmount) },
+    { label: t("traderSettlements.summaryMoneyReceived"), value: money(summary.moneyReceivedAmount) },
+    { label: t("traderSettlements.summaryRemainingOutstanding"), value: money(summary.remainingOutstanding) },
+  ];
+  const secondaryCards: readonly { label: string; value: string }[] = [
+    { label: t("traderSettlements.summaryEligibleOrders"), value: String(summary.eligibleOrders) },
+    {
+      label: t("traderSettlements.summaryTradersOutstanding"),
+      value: String(summary.tradersWithOutstandingBalance),
+    },
+    { label: t("traderSettlements.summaryReversedPayments"), value: String(summary.reversedPayments) },
+  ];
+  return (
+    <>
+      <div className="summary-primary" data-testid="trader-settlements-summary">
+        {primaryCards.map((card) => (
+          <article className="kpi-card" key={card.label}>
+            <span>{card.label}</span>
+            <strong>{card.value}</strong>
+          </article>
+        ))}
+      </div>
+      <div className="summary-secondary" data-testid="trader-settlements-summary-secondary">
+        {secondaryCards.map((card) => (
+          <div className="metric-chip" key={card.label}>
+            <span>{card.label}</span>
+            <strong>{card.value}</strong>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
+function FilterBar({
+  api,
+  filters,
+  onChange,
+  onClear,
+}: {
+  api: ApiClient;
+  filters: Filters;
+  onChange: (change: Partial<Filters>) => void;
+  onClear: () => void;
+}) {
+  const { t } = useTranslation();
+  const [traders, setTraders] = useState<readonly OperationsTrader[]>([]);
+  useEffect(() => {
+    void api
+      .get<readonly OperationsTrader[]>("operations/traders")
+      .then(setTraders)
+      .catch(() => setTraders([]));
+  }, [api]);
+
+  return (
+    <section aria-label={t("traderSettlements.pageTitle")}>
+      <div className="compact-filters">
+        <label className="field">
+          <span>{t("traderSettlements.filterTrader")}</span>
+          <select onChange={(event) => onChange({ traderId: event.target.value })} value={filters.traderId}>
+            <option value="">{t("common.all")}</option>
+            {traders.map((trader) => (
+              <option key={trader.id} value={trader.id}>
+                {trader.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>{t("traderSettlements.filterSettlementNumber")}</span>
+          <input
+            onChange={(event) => onChange({ settlementNumber: event.target.value })}
+            type="search"
+            value={filters.settlementNumber}
+          />
+        </label>
+        <label className="field">
+          <span>{t("traderSettlements.filterPaymentMethod")}</span>
+          <select
+            onChange={(event) => onChange({ paymentMethod: event.target.value })}
+            value={filters.paymentMethod}
+          >
+            <option value="">{t("common.all")}</option>
+            <option value="cash">{t("traderSettlements.paymentMethodCash")}</option>
+            <option value="bank_transfer">{t("traderSettlements.paymentMethodBankTransfer")}</option>
+          </select>
+        </label>
+        <label className="field">
+          <span>{t("traderSettlements.filterSettlementStatus")}</span>
+          <select
+            onChange={(event) => onChange({ settlementStatus: event.target.value })}
+            value={filters.settlementStatus}
+          >
+            <option value="">{t("traderSettlements.statusAll")}</option>
+            <option value="confirmed">{t("traderSettlements.statusConfirmed")}</option>
+            <option value="reversed">{t("traderSettlements.statusReversed")}</option>
+          </select>
+        </label>
+        <label className="field">
+          <span>{t("traderSettlements.filterPaymentDateFrom")}</span>
+          <input
+            onChange={(event) => onChange({ paymentDateFrom: event.target.value })}
+            type="date"
+            value={filters.paymentDateFrom}
+          />
+        </label>
+        <label className="field">
+          <span>{t("traderSettlements.filterPaymentDateTo")}</span>
+          <input
+            onChange={(event) => onChange({ paymentDateTo: event.target.value })}
+            type="date"
+            value={filters.paymentDateTo}
+          />
+        </label>
+        <label className="field">
+          <span>{t("traderSettlements.filterPaymentReference")}</span>
+          <input
+            onChange={(event) => onChange({ paymentReference: event.target.value })}
+            type="search"
+            value={filters.paymentReference}
+          />
+        </label>
+        <div className="filter-actions">
+          <button className="button button-secondary" onClick={onClear} type="button">
+            {t("traderSettlements.clearFilters")}
+          </button>
+        </div>
+      </div>
+
+      <details className="filter-drawer">
+        <summary>{t("traderSettlements.moreFilters")}</summary>
+        <div className="compact-filters">
+          <label className="field">
+            <span>{t("traderSettlements.filterOrderSerialNumber")}</span>
+            <input
+              onChange={(event) => onChange({ orderSerialNumber: event.target.value })}
+              type="search"
+              value={filters.orderSerialNumber}
+            />
+          </label>
+          <label className="field">
+            <span>{t("traderSettlements.filterExternalReference")}</span>
+            <input
+              onChange={(event) => onChange({ referenceNumber: event.target.value })}
+              type="search"
+              value={filters.referenceNumber}
+            />
+          </label>
+          <label className="field">
+            <span>{t("traderSettlements.filterDeliveryDateFrom")}</span>
+            <input
+              onChange={(event) => onChange({ deliveredFrom: event.target.value })}
+              type="date"
+              value={filters.deliveredFrom}
+            />
+          </label>
+          <label className="field">
+            <span>{t("traderSettlements.filterDeliveryDateTo")}</span>
+            <input
+              onChange={(event) => onChange({ deliveredTo: event.target.value })}
+              type="date"
+              value={filters.deliveredTo}
+            />
+          </label>
+          <label className="field">
+            <span>{t("traderSettlements.filterMoneyReceivedStatus")}</span>
+            <select
+              onChange={(event) => onChange({ moneyReceivedStatus: event.target.value })}
+              value={filters.moneyReceivedStatus}
+            >
+              <option value="">{t("traderSettlements.moneyReceivedAll")}</option>
+              <option value="received">{t("traderSettlements.moneyReceivedReceived")}</option>
+              <option value="not_received">{t("traderSettlements.moneyReceivedNotReceived")}</option>
+            </select>
+          </label>
+          <label className="field field-checkbox">
+            <input
+              checked={filters.outstandingOnly}
+              onChange={(event) => onChange({ outstandingOnly: event.target.checked })}
+              type="checkbox"
+            />
+            <span>{t("traderSettlements.filterOutstandingOnly")}</span>
+          </label>
+        </div>
+      </details>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// New Settlement guided workflow: Select Trader -> Eligible Orders -> Payment
+// Details (incl. bank accounts) -> Oldest-First Allocation Proposal -> Manual
+// Allocation Editing -> Review -> Confirm Money Sent -> Success.
+// ---------------------------------------------------------------------------
+
+function NewSettlementDialog({
+  api,
+  initialTraderId,
+  onClose,
+  onCreated,
+  reportLanguage,
+}: {
+  api: ApiClient;
+  initialTraderId?: string;
+  onClose: () => void;
+  onCreated: (settlementId: string) => void;
+  reportLanguage: "ar" | "en";
+}) {
+  const { t } = useTranslation();
+
+  // Step 1 — Trader.
+  const [traderSearch, setTraderSearch] = useState("");
+  const [traders, setTraders] = useState<readonly OperationsTrader[]>([]);
+  const [trader, setTrader] = useState<OperationsTrader>();
+
+  // Step 2 — Eligible Orders (loaded once a Trader is selected).
+  const [eligibleOrdersPage, setEligibleOrdersPage] = useState<PagedResponse<TraderEligibleOrderRow>>();
+  const [ordersError, setOrdersError] = useState<string>();
+  const [orderFilters, setOrderFilters] = useState<EligibleOrderFilters>(emptyEligibleOrderFilters);
+  const [ordersPage, setOrdersPage] = useState(1);
+  const eligibleOrders = eligibleOrdersPage?.items ?? [];
+  const ordersTotal = eligibleOrdersPage?.total ?? 0;
+  const ordersPageCount = ordersTotal === 0 ? 1 : Math.ceil(ordersTotal / 50);
+
+  // Step 3 — Payment Details.
+  const [amount, setAmount] = useState("");
+  const [paymentDate, setPaymentDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [paymentMethod, setPaymentMethod] = useState<"bank_transfer" | "cash">("cash");
+  const [companyBanks, setCompanyBanks] = useState<readonly CompanyBankAccount[]>([]);
+  const [traderBanks, setTraderBanks] = useState<readonly TraderBankAccountOption[]>([]);
+  const [sourceBankId, setSourceBankId] = useState("");
+  const [beneficiaryBankId, setBeneficiaryBankId] = useState("");
+  const [bankReference, setBankReference] = useState("");
+  const [notes, setNotes] = useState("");
+
+  // Step 4/5 — Allocation proposal + manual editing.
+  const [proposal, setProposal] = useState<TraderAllocationProposal>();
+  const [proposalError, setProposalError] = useState<string>();
+  const [allocations, setAllocations] = useState<readonly { amount: string; orderId: string }[]>([]);
+
+  const [saving, setSaving] = useState(false);
+  const [confirmError, setConfirmError] = useState<string>();
+  const [confirmed, setConfirmed] = useState<CreateTraderSettlementResult>();
+  const idempotency = useIdempotencyKey();
+  const pdf = useReconciliationPdfActions(api);
+  const [pdfError, setPdfError] = useState<string>();
+
+  useEffect(() => {
+    void api
+      .get<readonly OperationsTrader[]>("operations/traders")
+      .then((rows) => setTraders(rows.filter((row) => row.status === "active")))
+      .catch(() => setTraders([]));
+  }, [api]);
+
+  useEffect(() => {
+    if (initialTraderId === undefined || traders.length === 0) return;
+    const preset = traders.find((row) => row.id === initialTraderId);
+    if (preset !== undefined) setTrader(preset);
+    // Only ever auto-select once, when the preset Trader first appears.
+  }, [traders, initialTraderId]);
+
+  const loadOrders = useCallback(() => {
+    if (trader === undefined) return;
+    setOrdersError(undefined);
+    const params = filterQuery(orderFilters);
+    params.set("traderId", trader.id);
+    params.set("page", String(ordersPage));
+    params.set("pageSize", "50");
+    void api
+      .get<PagedResponse<TraderEligibleOrderRow>>(
+        `operations/settlements/payments/eligible-orders?${params.toString()}`,
+      )
+      .then(setEligibleOrdersPage)
+      .catch(() => setOrdersError(t("common.loadFailed")));
+  }, [api, trader, orderFilters, ordersPage, t]);
+
+  useEffect(() => loadOrders(), [loadOrders]);
+
+  const applyOrderFilter = (change: Partial<EligibleOrderFilters>) => {
+    setOrdersPage(1);
+    setOrderFilters((current) => ({ ...current, ...change }));
+  };
+  const clearOrderFilters = () => {
+    setOrdersPage(1);
+    setOrderFilters(emptyEligibleOrderFilters);
+  };
+
+  useEffect(() => {
+    if (trader === undefined) {
+      setCompanyBanks([]);
+      setTraderBanks([]);
+      return;
+    }
+    void api
+      .get<readonly CompanyBankAccount[]>("configuration/bank-accounts")
+      .then((accounts) => {
+        const active = accounts.filter((account) => account.isActive);
+        setCompanyBanks(active);
+        setSourceBankId((current) =>
+          current !== "" && active.some((account) => account.id === current)
+            ? current
+            : (active[0]?.id ?? ""),
+        );
+      })
+      .catch(() => setCompanyBanks([]));
+    void api
+      .get<readonly TraderBankAccountOption[]>(
+        `configuration/traders/${trader.id}/bank-accounts`,
+      )
+      .then((accounts) => {
+        const active = accounts.filter((account) => account.isActive);
+        setTraderBanks(active);
+        const preferred = active.find((account) => account.isDefault) ?? active[0];
+        setBeneficiaryBankId(preferred?.id ?? "");
+      })
+      .catch(() => setTraderBanks([]));
+  }, [api, trader]);
+
+  const chooseTrader = (next: OperationsTrader) => {
+    if (allocations.length > 0 && trader !== undefined && trader.id !== next.id) {
+      if (!window.confirm(t("traderSettlements.changeTraderWarning"))) return;
+    }
+    setTrader(next);
+    setAmount("");
+    setProposal(undefined);
+    setAllocations([]);
+    setBankReference("");
+    setOrderFilters(emptyEligibleOrderFilters);
+    setOrdersPage(1);
+    idempotency.reset();
+  };
+
+  // Debounced oldest-first allocation proposal: fires whenever the Payment
+  // Amount (a valid positive number) changes, mirroring how partial payments
+  // must always originate from the server, never a client-side computation.
+  useEffect(() => {
+    const parsed = Number(amount);
+    if (trader === undefined || amount.trim() === "" || !(parsed > 0)) {
+      setProposal(undefined);
+      setAllocations([]);
+      return;
+    }
+    let active = true;
+    const timer = window.setTimeout(() => {
+      void api
+        .post<TraderAllocationProposal>("operations/settlements/payments/propose-allocation", {
+          amount: parsed,
+          traderId: trader.id,
+        })
+        .then((result) => {
+          if (!active) return;
+          setProposal(result);
+          setProposalError(undefined);
+          setAllocations(
+            result.allocations
+              .filter((line) => Number(line.allocatedAmount) > 0)
+              .map((line) => ({ amount: line.allocatedAmount, orderId: line.orderId })),
+          );
+        })
+        .catch((error: unknown) => {
+          if (!active) return;
+          setProposal(undefined);
+          setAllocations([]);
+          setProposalError(message(error, t("traderSettlements.settlementFailed")));
+        });
+    }, 300);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [api, amount, trader, t]);
+
+  // Delivery date is display-only, for the allocation table's Delivery Date
+  // column — the proposal/allocation endpoints don't return it. Looked up
+  // from whichever page of Eligible Orders happens to be loaded; a row that
+  // isn't on the current page falls back to "-" rather than blocking review,
+  // since delivery date is never load-bearing for any total or validation.
+  const orderById = useMemo(
+    () => new Map(eligibleOrders.map((row) => [row.id, row])),
+    [eligibleOrders],
+  );
+  // Source of truth for the allocation table and every total/validation
+  // below: the server's own proposal lines, never the (possibly paginated,
+  // possibly filtered) Eligible Orders list.
+  const proposalLineById = useMemo(
+    () => new Map((proposal?.allocations ?? []).map((line) => [line.orderId, line])),
+    [proposal],
+  );
+
+  const setLineAmount = (orderId: string, value: string) => {
+    setAllocations((current) => {
+      const existing = current.find((line) => line.orderId === orderId);
+      if (existing === undefined) return [...current, { amount: value, orderId }];
+      return current.map((line) => (line.orderId === orderId ? { ...line, amount: value } : line));
+    });
+  };
+
+  const allocatedTotal = allocations.reduce((sum, line) => sum + Number(line.amount || 0), 0);
+  const requestedAmount = Number(amount || 0);
+  const unallocated = money(requestedAmount - allocatedTotal);
+  const allocationErrors: string[] = [];
+  const seenOrders = new Set<string>();
+  for (const line of allocations) {
+    if (seenOrders.has(line.orderId)) allocationErrors.push(t("traderSettlements.allocationDuplicateOrder"));
+    seenOrders.add(line.orderId);
+    const lineAmount = Number(line.amount || 0);
+    if (lineAmount < 0) allocationErrors.push(t("traderSettlements.allocationNegative"));
+    const proposedLine = proposalLineById.get(line.orderId);
+    if (proposedLine !== undefined && lineAmount > Number(proposedLine.outstandingBefore) + 0.001) {
+      allocationErrors.push(t("traderSettlements.allocationExceedsOutstanding"));
+    }
+  }
+  if (amount.trim() !== "" && Math.abs(Number(unallocated)) > 0.005) {
+    allocationErrors.push(t("traderSettlements.allocationTotalMismatch"));
+  }
+
+  const activeAllocations = allocations.filter((line) => Number(line.amount || 0) > 0);
+  const remainingAfter = (proposal?.allocations ?? []).reduce((sum, line) => {
+    const current = allocations.find((row) => row.orderId === line.orderId)?.amount;
+    const paidNow = current === undefined ? Number(line.allocatedAmount) : Number(current || 0);
+    return sum + Math.max(0, Number(line.outstandingBefore) - paidNow);
+  }, 0);
+
+  const canProceedToReview =
+    trader !== undefined &&
+    requestedAmount > 0 &&
+    activeAllocations.length > 0 &&
+    allocationErrors.length === 0 &&
+    (paymentMethod === "cash" ||
+      (sourceBankId !== "" && beneficiaryBankId !== "" && bankReference.trim() !== ""));
+
+  const fingerprint = JSON.stringify({
+    allocations: [...activeAllocations].sort((left, right) => left.orderId.localeCompare(right.orderId)),
+    amount: money(requestedAmount),
+    bankReference: bankReference.trim(),
+    beneficiaryBankId,
+    notes: notes.trim(),
+    paymentDate,
+    paymentMethod,
+    sourceBankId,
+    traderId: trader?.id,
+  });
+
+  const confirm = async () => {
+    if (!canProceedToReview || saving || trader === undefined) return;
+    setSaving(true);
+    setConfirmError(undefined);
+    try {
+      const result = await api.post<CreateTraderSettlementResult>(
+        "operations/settlements/payments",
+        {
+          allocations: activeAllocations.map((line) => ({
+            amount: Number(money(line.amount)),
+            orderId: line.orderId,
+          })),
+          amount: Number(money(requestedAmount)),
+          ...(paymentMethod === "bank_transfer"
+            ? { bankAccountId: sourceBankId, bankReference: bankReference.trim(), traderBankAccountId: beneficiaryBankId }
+            : {}),
+          notes: notes.trim() === "" ? undefined : notes.trim(),
+          paymentDate,
+          paymentMethod,
+          traderId: trader.id,
+        },
+        { "X-Idempotency-Key": idempotency.keyFor(fingerprint) },
+      );
+      setConfirmed(result);
+      idempotency.reset();
+    } catch (error) {
+      setConfirmError(message(error, t("traderSettlements.settlementFailed")));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const openConfirmedPdf = async (mode: PdfAction) => {
+    if (confirmed === undefined) return;
+    setPdfError(undefined);
+    const requestError = await pdf.run(
+      `operations/settlements/payments/${confirmed.settlementId}/pdf?language=${reportLanguage}`,
+      `Trader-Settlement-${confirmed.settlementNumber}.pdf`,
+      mode,
+    );
+    if (requestError !== undefined) setPdfError(message(requestError, t("traderSettlements.pdfGenerationFailed")));
+  };
+
+  const filteredTraders = traders.filter((row) =>
+    traderSearch.trim() === ""
+      ? true
+      : `${row.name} ${row.code}`.toLowerCase().includes(traderSearch.trim().toLowerCase()),
+  );
+
+  return (
+    <Modal
+      className="modal-wide"
+      closeLabel={t("common.close")}
+      onRequestClose={onClose}
+      title={t("traderSettlements.newSettlement")}
+      titleId="new-settlement-title"
+    >
+      {confirmed !== undefined ? (
+        <div className="reconciliation-success" role="status">
+          <p>{t("traderSettlements.settlementConfirmed", { number: confirmed.settlementNumber })}</p>
+          <dl className="reconciliation-summary">
+            <div className="detail-line">
+              <dt>{t("traderSettlements.columnSettlementNumber")}</dt>
+              <dd>{confirmed.settlementNumber}</dd>
+            </div>
+            <div className="detail-line">
+              <dt>{t("traderSettlements.filterTrader")}</dt>
+              <dd>{confirmed.traderName}</dd>
+            </div>
+            <div className="detail-line">
+              <dt>{t("traderSettlements.paymentDate")}</dt>
+              <dd>{paymentDate}</dd>
+            </div>
+            <div className="detail-line">
+              <dt>{t("traderSettlements.filterPaymentMethod")}</dt>
+              <dd>
+                {t(
+                  confirmed.paymentMethod === "cash"
+                    ? "traderSettlements.paymentMethodCash"
+                    : "traderSettlements.paymentMethodBankTransfer",
+                )}
+              </dd>
+            </div>
+            {confirmed.paymentMethod !== "bank_transfer" ? null : (
+              <div className="detail-line">
+                <dt>{t("traderSettlements.columnPaymentReference")}</dt>
+                <dd>{bankReference}</dd>
+              </div>
+            )}
+            <div className="detail-line">
+              <dt>{t("traderSettlements.paymentAmount")}</dt>
+              <dd>{money(confirmed.amount)}</dd>
+            </div>
+            <div className="detail-line">
+              <dt>{t("traderSettlements.columnOrders")}</dt>
+              <dd>{confirmed.orderCount}</dd>
+            </div>
+            <div className="detail-line">
+              <dt>{t("traderSettlements.columnRemainingOutstanding")}</dt>
+              <dd>{money(remainingAfter)}</dd>
+            </div>
+          </dl>
+          {pdfError === undefined ? null : (
+            <div className="alert alert-error" role="alert">
+              {pdfError}
+            </div>
+          )}
+          <div className="modal-actions">
+            <button disabled={pdf.busy !== undefined} onClick={() => void openConfirmedPdf("preview")} type="button">
+              {pdf.busy === "preview" ? t("common.loading") : t("traderSettlements.actionPreviewStatement")}
+            </button>
+            <button disabled={pdf.busy !== undefined} onClick={() => void openConfirmedPdf("print")} type="button">
+              {pdf.busy === "print" ? t("common.loading") : t("traderSettlements.actionPrint")}
+            </button>
+            <button disabled={pdf.busy !== undefined} onClick={() => void openConfirmedPdf("download")} type="button">
+              {pdf.busy === "download" ? t("common.loading") : t("traderSettlements.actionDownloadPdf")}
+            </button>
+            <button
+              className="button button-secondary"
+              onClick={() => onCreated(confirmed.settlementId)}
+              type="button"
+            >
+              {t("traderSettlements.viewSettlement")}
+            </button>
+            <button className="button button-primary" onClick={() => onCreated(confirmed.settlementId)} type="button">
+              {t("common.done")}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <form onSubmit={(event) => void (event.preventDefault(), confirm())}>
+          {confirmError === undefined ? null : (
+            <div className="alert alert-error" role="alert">
+              {confirmError}
+            </div>
+          )}
+
+          {/* Step 1 — Select Trader */}
+          <section className="workspace-step">
+            <h3>{t("traderSettlements.stepSelectTrader")}</h3>
+            {trader === undefined ? (
+              <>
+                <label className="field">
+                  <span>{t("traderSettlements.searchTraders")}</span>
+                  <input
+                    onChange={(event) => setTraderSearch(event.target.value)}
+                    placeholder={t("traderSettlements.searchTraders")}
+                    type="search"
+                    value={traderSearch}
+                  />
+                </label>
+                <ul className="option-list">
+                  {filteredTraders.map((option) => (
+                    <li key={option.id}>
+                      <button onClick={() => chooseTrader(option)} type="button">
+                        {option.name} — {money(option.unsettledNetPayable)}
+                      </button>
+                    </li>
+                  ))}
+                  {filteredTraders.length === 0 ? (
+                    <li className="empty-state">{t("traderSettlements.noTraders")}</li>
+                  ) : null}
+                </ul>
+              </>
+            ) : (
+              <div className="detail-line">
+                <span>{trader.name}</span>
+                <button onClick={() => setTrader(undefined)} type="button">
+                  {t("common.change")}
+                </button>
+              </div>
+            )}
+          </section>
+
+          {trader === undefined ? null : (
+            <>
+              {/* Step 2 — Eligible Orders */}
+              <section className="workspace-step">
+                <h3>{t("traderSettlements.stepEligibleOrders")}</h3>
+                {ordersError === undefined ? null : <div className="alert alert-error">{ordersError}</div>}
+                <div className="compact-filters">
+                  <label className="field">
+                    <span>{t("traderSettlements.filterOrderSerialNumber")}</span>
+                    <input
+                      onChange={(event) => applyOrderFilter({ serialNumber: event.target.value })}
+                      type="search"
+                      value={orderFilters.serialNumber}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>{t("traderSettlements.filterExternalReference")}</span>
+                    <input
+                      onChange={(event) => applyOrderFilter({ referenceNumber: event.target.value })}
+                      type="search"
+                      value={orderFilters.referenceNumber}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>{t("traderSettlements.filterDeliveryDateFrom")}</span>
+                    <input
+                      onChange={(event) => applyOrderFilter({ deliveredFrom: event.target.value })}
+                      type="date"
+                      value={orderFilters.deliveredFrom}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>{t("traderSettlements.filterDeliveryDateTo")}</span>
+                    <input
+                      onChange={(event) => applyOrderFilter({ deliveredTo: event.target.value })}
+                      type="date"
+                      value={orderFilters.deliveredTo}
+                    />
+                  </label>
+                  <div className="field" data-field="area">
+                    <span>{t("areas.emirate")}</span>
+                    <AreaSelector
+                      allowCreate={false}
+                      api={api}
+                      onChange={(area) =>
+                        applyOrderFilter({ areaId: area?.id ?? "", emirateId: area?.emirateId ?? "" })
+                      }
+                      value={undefined}
+                    />
+                  </div>
+                  <label className="field">
+                    <span>{t("traderSettlements.filterSettlementStatus")}</span>
+                    <select
+                      onChange={(event) => applyOrderFilter({ settlementStatus: event.target.value })}
+                      value={orderFilters.settlementStatus}
+                    >
+                      <option value="">{t("common.all")}</option>
+                      {orderSettlementStatuses.map((status) => (
+                        <option key={status} value={status}>
+                          {t(`traderSettlements.orderStatus${statusKey(status)}`)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="field field-checkbox">
+                    <input
+                      checked={orderFilters.outstandingOnly}
+                      onChange={(event) =>
+                        applyOrderFilter({ outstandingOnly: event.target.checked })
+                      }
+                      type="checkbox"
+                    />
+                    <span>{t("traderSettlements.filterOutstandingOnly")}</span>
+                  </label>
+                  <div className="filter-actions">
+                    <button
+                      className="button button-secondary"
+                      onClick={clearOrderFilters}
+                      type="button"
+                    >
+                      {t("traderSettlements.clearFilters")}
+                    </button>
+                  </div>
+                </div>
+                <div className="table-scroll-x">
+                <table>
+                  <thead>
+                    <tr>
+                      <th scope="col">{t("traderSettlements.filterOrderSerialNumber")}</th>
+                      <th scope="col">{t("traderSettlements.filterExternalReference")}</th>
+                      <th scope="col">{t("traderSettlements.filterDeliveryDateFrom")}</th>
+                      <th scope="col">{t("common.name")}</th>
+                      <th scope="col">{t("traderSettlements.columnOriginalAmountDue")}</th>
+                      <th scope="col">{t("traderSettlements.columnPreviouslyPaid")}</th>
+                      <th scope="col">{t("traderSettlements.columnOutstandingBalance")}</th>
+                      <th scope="col">{t("traderSettlements.orderSettlementStatus")}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {eligibleOrders.map((order) => (
+                      <tr key={order.id}>
+                        <td className="mono">{order.serialNumber}</td>
+                        <td className="mono">{order.referenceNumber ?? "-"}</td>
+                        <td>{order.deliveryDate === null ? "-" : order.deliveryDate.slice(0, 10)}</td>
+                        <td>{order.customerName}</td>
+                        <td>{money(order.originalAmountDueToTrader)}</td>
+                        <td>{money(order.previouslyPaid)}</td>
+                        <td>{money(order.outstandingBalance)}</td>
+                        <td>{t(`traderSettlements.orderStatus${statusKey(order.settlementStatus)}`)}</td>
+                      </tr>
+                    ))}
+                    {eligibleOrders.length === 0 && ordersError === undefined ? (
+                      <tr>
+                        <td className="empty-state" colSpan={8}>
+                          {t("traderSettlements.noEligibleOrders")}
+                        </td>
+                      </tr>
+                    ) : null}
+                  </tbody>
+                </table>
+                </div>
+                {ordersTotal <= 50 ? null : (
+                  <nav aria-label={t("common.pagination")} className="pagination">
+                    <button
+                      disabled={ordersPage <= 1}
+                      onClick={() => setOrdersPage(ordersPage - 1)}
+                      type="button"
+                    >
+                      {t("common.previous")}
+                    </button>
+                    <span>{t("common.pageOf", { page: ordersPage, pageCount: ordersPageCount })}</span>
+                    <button
+                      disabled={ordersPage >= ordersPageCount}
+                      onClick={() => setOrdersPage(ordersPage + 1)}
+                      type="button"
+                    >
+                      {t("common.next")}
+                    </button>
+                  </nav>
+                )}
+              </section>
+
+              {/* Step 3 — Payment Details */}
+              <section className="workspace-step">
+                <h3>{t("traderSettlements.stepPaymentDetails")}</h3>
+                <label className="field required-field">
+                  <span>{t("traderSettlements.paymentAmount")}</span>
+                  <input
+                    inputMode="decimal"
+                    onChange={(event) => setAmount(event.target.value)}
+                    type="number"
+                    value={amount}
+                  />
+                </label>
+                <label className="field required-field">
+                  <span>{t("traderSettlements.paymentDate")}</span>
+                  <input
+                    onChange={(event) => setPaymentDate(event.target.value)}
+                    type="date"
+                    value={paymentDate}
+                  />
+                </label>
+                <label className="field required-field">
+                  <span>{t("traderSettlements.filterPaymentMethod")}</span>
+                  <select
+                    onChange={(event) => setPaymentMethod(event.target.value as "bank_transfer" | "cash")}
+                    value={paymentMethod}
+                  >
+                    <option value="cash">{t("traderSettlements.paymentMethodCash")}</option>
+                    <option value="bank_transfer">{t("traderSettlements.paymentMethodBankTransfer")}</option>
+                  </select>
+                </label>
+                {paymentMethod !== "bank_transfer" ? null : (
+                  <>
+                    <label className="field required-field">
+                      <span>{t("traderSettlements.sourceBankAccount")}</span>
+                      <select
+                        onChange={(event) => setSourceBankId(event.target.value)}
+                        value={sourceBankId}
+                      >
+                        <option value="">{t("traderSettlements.selectBankAccount")}</option>
+                        {companyBanks.map((account) => (
+                          <option key={account.id} value={account.id}>
+                            {account.bankName} — {account.accountName}
+                            {account.accountNumberMasked === null ? "" : ` (${account.accountNumberMasked})`}
+                          </option>
+                        ))}
+                      </select>
+                      {companyBanks.length === 0 ? (
+                        <span className="field-hint">{t("traderSettlements.noActiveBankAccounts")}</span>
+                      ) : null}
+                    </label>
+                    <label className="field required-field">
+                      <span>{t("traderSettlements.beneficiaryBankAccount")}</span>
+                      <select
+                        onChange={(event) => setBeneficiaryBankId(event.target.value)}
+                        value={beneficiaryBankId}
+                      >
+                        <option value="">{t("traderSettlements.selectBankAccount")}</option>
+                        {traderBanks.map((account) => (
+                          <option key={account.id} value={account.id}>
+                            {account.bankName} — {account.accountName} (
+                            {maskAccountNumber(account.accountNumber)})
+                          </option>
+                        ))}
+                      </select>
+                      {traderBanks.length === 0 ? (
+                        <span className="field-hint">{t("traderSettlements.noActiveBankAccounts")}</span>
+                      ) : null}
+                    </label>
+                    <label className="field required-field">
+                      <span>{t("traderSettlements.bankReference")}</span>
+                      <input
+                        onChange={(event) => setBankReference(event.target.value)}
+                        type="text"
+                        value={bankReference}
+                      />
+                    </label>
+                  </>
+                )}
+                <label className="field">
+                  <span>{t("traderSettlements.notes")}</span>
+                  <textarea onChange={(event) => setNotes(event.target.value)} value={notes} />
+                </label>
+              </section>
+
+              {/* Step 4/5 — Oldest-first allocation proposal + manual editing */}
+              {amount.trim() === "" ? null : (
+                <section className="workspace-step">
+                  <h3>{t("traderSettlements.stepAllocation")}</h3>
+                  {proposalError === undefined ? null : (
+                    <div className="alert alert-error">{proposalError}</div>
+                  )}
+                  {allocationErrors.length === 0 ? null : (
+                    <div className="alert alert-error" role="alert">
+                      {[...new Set(allocationErrors)].map((line) => (
+                        <p key={line}>{line}</p>
+                      ))}
+                    </div>
+                  )}
+                  <div className="table-scroll-x">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th scope="col">{t("traderSettlements.filterOrderSerialNumber")}</th>
+                        <th scope="col">{t("traderSettlements.filterDeliveryDateFrom")}</th>
+                        <th scope="col">{t("traderSettlements.columnOutstandingBefore")}</th>
+                        <th scope="col">{t("traderSettlements.columnProposedAmount")}</th>
+                        <th scope="col">{t("traderSettlements.columnOutstandingAfter")}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(proposal?.allocations ?? []).map((line) => {
+                        const deliveryDate = orderById.get(line.orderId)?.deliveryDate;
+                        const current =
+                          allocations.find((row) => row.orderId === line.orderId)?.amount ??
+                          line.allocatedAmount;
+                        const after = money(Number(line.outstandingBefore) - Number(current || 0));
+                        return (
+                          <tr key={line.orderId}>
+                            <td className="mono">{line.serialNumber}</td>
+                            <td>{deliveryDate === undefined || deliveryDate === null ? "-" : deliveryDate.slice(0, 10)}</td>
+                            <td>{money(line.outstandingBefore)}</td>
+                            <td>
+                              <input
+                                inputMode="decimal"
+                                onChange={(event) => setLineAmount(line.orderId, event.target.value)}
+                                type="number"
+                                value={current}
+                              />
+                            </td>
+                            <td>{after}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                  </div>
+                  <dl className="reconciliation-summary">
+                    <div className="detail-line">
+                      <dt>{t("traderSettlements.allocationPaymentAmount")}</dt>
+                      <dd>{money(requestedAmount)}</dd>
+                    </div>
+                    <div className="detail-line">
+                      <dt>{t("traderSettlements.allocationAllocatedAmount")}</dt>
+                      <dd>{money(allocatedTotal)}</dd>
+                    </div>
+                    <div className="detail-line">
+                      <dt>{t("traderSettlements.allocationUnallocatedAmount")}</dt>
+                      <dd>{unallocated}</dd>
+                    </div>
+                    <div className="detail-line">
+                      <dt>{t("traderSettlements.allocationOrderCount")}</dt>
+                      <dd>{activeAllocations.length}</dd>
+                    </div>
+                    <div className="detail-line">
+                      <dt>{t("traderSettlements.allocationRemainingAfter")}</dt>
+                      <dd>{money(remainingAfter)}</dd>
+                    </div>
+                  </dl>
+                </section>
+              )}
+
+              {/* Step 6/7 — Review + Confirm */}
+              {!canProceedToReview ? null : (
+                <section className="workspace-step">
+                  <h3>{t("traderSettlements.stepReview")}</h3>
+                  <dl className="reconciliation-summary">
+                    <div className="detail-line">
+                      <dt>{t("traderSettlements.filterTrader")}</dt>
+                      <dd>{trader.name}</dd>
+                    </div>
+                    <div className="detail-line">
+                      <dt>{t("traderSettlements.paymentAmount")}</dt>
+                      <dd>{money(requestedAmount)}</dd>
+                    </div>
+                    <div className="detail-line">
+                      <dt>{t("traderSettlements.paymentDate")}</dt>
+                      <dd>{paymentDate}</dd>
+                    </div>
+                    <div className="detail-line">
+                      <dt>{t("traderSettlements.filterPaymentMethod")}</dt>
+                      <dd>
+                        {t(
+                          paymentMethod === "cash"
+                            ? "traderSettlements.paymentMethodCash"
+                            : "traderSettlements.paymentMethodBankTransfer",
+                        )}
+                      </dd>
+                    </div>
+                    {paymentMethod !== "bank_transfer" ? null : (
+                      <>
+                        <div className="detail-line">
+                          <dt>{t("traderSettlements.sourceBankAccount")}</dt>
+                          <dd>
+                            {companyBanks.find((account) => account.id === sourceBankId)?.bankName}
+                          </dd>
+                        </div>
+                        <div className="detail-line">
+                          <dt>{t("traderSettlements.beneficiaryBankAccount")}</dt>
+                          <dd>
+                            {traderBanks.find((account) => account.id === beneficiaryBankId)?.bankName}
+                          </dd>
+                        </div>
+                        <div className="detail-line">
+                          <dt>{t("traderSettlements.bankReference")}</dt>
+                          <dd>{bankReference}</dd>
+                        </div>
+                      </>
+                    )}
+                    <div className="detail-line">
+                      <dt>{t("traderSettlements.columnOrders")}</dt>
+                      <dd>{activeAllocations.length}</dd>
+                    </div>
+                    <div className="detail-line">
+                      <dt>{t("traderSettlements.reviewTotalPaidNow")}</dt>
+                      <dd>{money(allocatedTotal)}</dd>
+                    </div>
+                    <div className="detail-line">
+                      <dt>{t("traderSettlements.reviewTotalRemaining")}</dt>
+                      <dd>{money(remainingAfter)}</dd>
+                    </div>
+                  </dl>
+                  <div className="modal-actions">
+                    <button className="button button-secondary" onClick={onClose} type="button">
+                      {t("common.cancel")}
+                    </button>
+                    <button className="button button-primary" disabled={saving} type="submit">
+                      {saving ? t("common.saving") : t("traderSettlements.confirmMoneySent")}
+                    </button>
+                  </div>
+                </section>
+              )}
+            </>
+          )}
+        </form>
+      )}
+    </Modal>
+  );
+}
+
+function statusKey(status: string): string {
+  return status
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join("");
+}
+
+// ---------------------------------------------------------------------------
+// Money Received confirmation
+// ---------------------------------------------------------------------------
+
+function MoneyReceivedDialog({
+  api,
+  onClose,
+  onConfirmed,
+  settlement,
+}: {
+  api: ApiClient;
+  onClose: () => void;
+  onConfirmed: () => void;
+  settlement: TraderSettlementListRow;
+}) {
+  const { t } = useTranslation();
+  const [receivedDate, setReceivedDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [reference, setReference] = useState("");
+  const [notes, setNotes] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string>();
+  const [confirmed, setConfirmed] = useState(false);
+  const idempotency = useIdempotencyKey();
+
+  const confirm = async () => {
+    setSaving(true);
+    setError(undefined);
+    const fingerprint = JSON.stringify({ notes: notes.trim(), receivedDate, reference: reference.trim() });
+    try {
+      await api.post(
+        `operations/settlements/payments/${settlement.settlementId}/confirm-receipt`,
+        {
+          notes: notes.trim() === "" ? undefined : notes.trim(),
+          receivedDate,
+          reference: reference.trim() === "" ? undefined : reference.trim(),
+        },
+        { "X-Idempotency-Key": idempotency.keyFor(fingerprint) },
+      );
+      idempotency.reset();
+      // Refreshes the list/detail behind this dialog immediately; the dialog
+      // itself stays open on a success message until the User dismisses it,
+      // rather than vanishing the instant the request resolves.
+      onConfirmed();
+      setConfirmed(true);
+    } catch (submitError) {
+      setError(message(submitError, t("traderSettlements.settlementFailed")));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal
+      closeLabel={t("common.close")}
+      onRequestClose={onClose}
+      title={t("traderSettlements.confirmMoneyReceivedTitle")}
+      titleId="money-received-title"
+    >
+      {error === undefined ? null : (
+        <div className="alert alert-error" role="alert">
+          {error}
+        </div>
+      )}
+      <dl className="reconciliation-summary">
+        <div className="detail-line">
+          <dt>{t("traderSettlements.columnSettlementNumber")}</dt>
+          <dd>{settlement.settlementNumber}</dd>
+        </div>
+        <div className="detail-line">
+          <dt>{t("traderSettlements.filterTrader")}</dt>
+          <dd>{settlement.traderName}</dd>
+        </div>
+        <div className="detail-line">
+          <dt>{t("traderSettlements.paymentAmount")}</dt>
+          <dd>{money(settlement.paymentAmount)}</dd>
+        </div>
+        <div className="detail-line">
+          <dt>{t("traderSettlements.paymentDate")}</dt>
+          <dd>{settlement.paymentDate}</dd>
+        </div>
+      </dl>
+      {confirmed ? (
+        <div className="reconciliation-success" role="status">
+          <p>{t("traderSettlements.moneyReceivedConfirmed")}</p>
+          <div className="modal-actions">
+            <button className="button button-primary" onClick={onClose} type="button">
+              {t("common.close")}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <form onSubmit={(event) => void (event.preventDefault(), confirm())}>
+          <label className="field">
+            <span>{t("traderSettlements.receivedDate")}</span>
+            <input onChange={(event) => setReceivedDate(event.target.value)} type="date" value={receivedDate} />
+          </label>
+          <label className="field">
+            <span>{t("traderSettlements.receivedReference")}</span>
+            <input onChange={(event) => setReference(event.target.value)} type="text" value={reference} />
+          </label>
+          <label className="field">
+            <span>{t("traderSettlements.receivedNotes")}</span>
+            <textarea onChange={(event) => setNotes(event.target.value)} value={notes} />
+          </label>
+          <div className="modal-actions">
+            <button className="button button-secondary" onClick={onClose} type="button">
+              {t("common.cancel")}
+            </button>
+            <button className="button button-primary" disabled={saving} type="submit">
+              {saving ? t("common.saving") : t("traderSettlements.actionConfirmMoneyReceived")}
+            </button>
+          </div>
+        </form>
+      )}
+    </Modal>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Reversal
+// ---------------------------------------------------------------------------
+
+function ReverseSettlementDialog({
+  api,
+  onClose,
+  onReversed,
+  settlement,
+}: {
+  api: ApiClient;
+  onClose: () => void;
+  onReversed: () => void;
+  settlement: TraderSettlementListRow;
+}) {
+  const { t } = useTranslation();
+  const [reason, setReason] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string>();
+  const [reversed, setReversed] = useState(false);
+
+  const reverse = async () => {
+    if (reason.trim() === "") {
+      setError(t("traderSettlements.reverseReasonRequired"));
+      return;
+    }
+    setSaving(true);
+    setError(undefined);
+    try {
+      await api.post(`operations/settlements/payments/${settlement.settlementId}/reverse`, {
+        reason: reason.trim(),
+      });
+      // Refreshes the list/detail behind this dialog immediately; the dialog
+      // itself stays open on a success message until the User dismisses it.
+      onReversed();
+      setReversed(true);
+    } catch (submitError) {
+      setError(message(submitError, t("traderSettlements.settlementFailed")));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal
+      closeLabel={t("common.close")}
+      onRequestClose={onClose}
+      title={t("traderSettlements.reverseSettlementTitle")}
+      titleId="reverse-settlement-title"
+    >
+      {error === undefined ? null : (
+        <div className="alert alert-error" role="alert">
+          {error}
+        </div>
+      )}
+      <dl className="reconciliation-summary">
+        <div className="detail-line">
+          <dt>{t("traderSettlements.columnSettlementNumber")}</dt>
+          <dd>{settlement.settlementNumber}</dd>
+        </div>
+        <div className="detail-line">
+          <dt>{t("traderSettlements.filterTrader")}</dt>
+          <dd>{settlement.traderName}</dd>
+        </div>
+        <div className="detail-line">
+          <dt>{t("traderSettlements.paymentAmount")}</dt>
+          <dd>{money(settlement.paymentAmount)}</dd>
+        </div>
+        <div className="detail-line">
+          <dt>{t("common.status")}</dt>
+          <dd>
+            {t(
+              settlement.status === "reversed"
+                ? "traderSettlements.statusReversed"
+                : "traderSettlements.statusConfirmed",
+            )}
+          </dd>
+        </div>
+      </dl>
+      {reversed ? (
+        <div className="reconciliation-success" role="status">
+          <p>{t("traderSettlements.settlementReversed", { number: settlement.settlementNumber })}</p>
+          <div className="modal-actions">
+            <button className="button button-primary" onClick={onClose} type="button">
+              {t("common.close")}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <>
+          <p className="field-hint">{t("traderSettlements.reverseWarning")}</p>
+          <form onSubmit={(event) => void (event.preventDefault(), reverse())}>
+            <label className="field required-field">
+              <span>{t("common.reason")}</span>
+              <textarea onChange={(event) => setReason(event.target.value)} value={reason} />
+            </label>
+            <div className="modal-actions">
+              <button className="button button-secondary" onClick={onClose} type="button">
+                {t("common.cancel")}
+              </button>
+              <button className="button button-primary" disabled={saving} type="submit">
+                {saving ? t("common.saving") : t("traderSettlements.actionReverse")}
+              </button>
+            </div>
+          </form>
+        </>
+      )}
+    </Modal>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Settlement detail
+// ---------------------------------------------------------------------------
+
+function SettlementDetailDialog({
+  api,
+  canReverse,
+  canViewReport,
+  onClose,
+  onReversed,
+  reportLanguage,
+  settlementId,
+}: {
+  api: ApiClient;
+  canReverse: boolean;
+  canViewReport: boolean;
+  onClose: () => void;
+  onReversed: () => void;
+  reportLanguage: "ar" | "en";
+  settlementId: string;
+}) {
+  const { t } = useTranslation();
+  const [detail, setDetail] = useState<TraderSettlementDetail>();
+  const [error, setError] = useState<string>();
+  const [receiptOpen, setReceiptOpen] = useState(false);
+  const [reverseOpen, setReverseOpen] = useState(false);
+  const pdf = useReconciliationPdfActions(api);
+  const [pdfError, setPdfError] = useState<string>();
+
+  const load = useCallback(() => {
+    setError(undefined);
+    void api
+      .get<TraderSettlementDetail>(`operations/settlements/payments/${settlementId}`)
+      .then(setDetail)
+      .catch(() => setError(t("traderSettlements.detailLoadFailed")));
+  }, [api, settlementId, t]);
+
+  useEffect(() => load(), [load]);
+
+  const openPdf = async (mode: PdfAction) => {
+    setPdfError(undefined);
+    const requestError = await pdf.run(
+      `operations/settlements/payments/${settlementId}/pdf?language=${reportLanguage}`,
+      `Trader-Settlement-${detail?.settlementNumber ?? settlementId}.pdf`,
+      mode,
+    );
+    if (requestError !== undefined) setPdfError(message(requestError, t("traderSettlements.pdfGenerationFailed")));
+  };
+
+  const moneyReceivedConfirmed = detail?.moneyReceivedDate !== null && detail?.moneyReceivedDate !== undefined;
+
+  return (
+    <Modal
+      className="modal-wide"
+      closeLabel={t("common.close")}
+      onRequestClose={onClose}
+      title={t("traderSettlements.detailTitle")}
+      titleId="settlement-detail-title"
+    >
+      {error === undefined ? null : (
+        <div className="alert alert-error" role="alert">
+          {error}
+        </div>
+      )}
+      {pdfError === undefined ? null : (
+        <div className="alert alert-error" role="alert">
+          {pdfError}
+        </div>
+      )}
+      {detail === undefined ? (
+        error === undefined ? <div className="loading-row">{t("common.loading")}</div> : null
+      ) : (
+        <>
+          <dl className="reconciliation-summary">
+            <div className="detail-line">
+              <dt>{t("traderSettlements.columnSettlementNumber")}</dt>
+              <dd>{detail.settlementNumber}</dd>
+            </div>
+            <div className="detail-line">
+              <dt>{t("traderSettlements.filterTrader")}</dt>
+              <dd>{detail.traderName}</dd>
+            </div>
+            <div className="detail-line">
+              <dt>{t("common.status")}</dt>
+              <dd>
+                {t(
+                  detail.status === "reversed"
+                    ? "traderSettlements.statusReversed"
+                    : "traderSettlements.statusConfirmed",
+                )}
+              </dd>
+            </div>
+            <div className="detail-line">
+              <dt>{t("traderSettlements.paymentDate")}</dt>
+              <dd>{detail.paymentDate}</dd>
+            </div>
+            <div className="detail-line">
+              <dt>{t("traderSettlements.filterPaymentMethod")}</dt>
+              <dd>
+                {t(
+                  detail.paymentMethod === "cash"
+                    ? "traderSettlements.paymentMethodCash"
+                    : "traderSettlements.paymentMethodBankTransfer",
+                )}
+              </dd>
+            </div>
+            <div className="detail-line">
+              <dt>{t("traderSettlements.columnPaymentReference")}</dt>
+              <dd>{detail.paymentReference ?? "-"}</dd>
+            </div>
+            {detail.sourceBank === null ? null : (
+              <div className="detail-line">
+                <dt>{t("traderSettlements.sourceBankAccount")}</dt>
+                <dd>
+                  {detail.sourceBank.bankName} — {detail.sourceBank.accountName}
+                </dd>
+              </div>
+            )}
+            {detail.beneficiaryBank === null ? null : (
+              <div className="detail-line">
+                <dt>{t("traderSettlements.beneficiaryBankAccount")}</dt>
+                <dd>
+                  {detail.beneficiaryBank.bankName} — {detail.beneficiaryBank.accountName} (
+                  {detail.beneficiaryBank.ibanMasked || detail.beneficiaryBank.accountNumberMasked})
+                </dd>
+              </div>
+            )}
+            <div className="detail-line">
+              <dt>{t("traderSettlements.createdBy")}</dt>
+              <dd>{detail.createdBy}</dd>
+            </div>
+            <div className="detail-line">
+              <dt>{t("traderSettlements.confirmedBy")}</dt>
+              <dd>{detail.confirmedBy}</dd>
+            </div>
+            <div className="detail-line">
+              <dt>{t("traderSettlements.moneySentDate")}</dt>
+              <dd>{detail.moneySentAt === null ? "-" : detail.moneySentAt.slice(0, 10)}</dd>
+            </div>
+            <div className="detail-line">
+              <dt>{t("traderSettlements.moneyReceivedDate")}</dt>
+              <dd>{detail.moneyReceivedDate === null ? "-" : detail.moneyReceivedDate.slice(0, 10)}</dd>
+            </div>
+            {detail.moneyReceivedBy === null ? null : (
+              <div className="detail-line">
+                <dt>{t("traderSettlements.moneyReceivedBy")}</dt>
+                <dd>{detail.moneyReceivedBy}</dd>
+              </div>
+            )}
+            {detail.moneyReceivedReference === null ? null : (
+              <div className="detail-line">
+                <dt>{t("traderSettlements.moneyReceivedReference")}</dt>
+                <dd>{detail.moneyReceivedReference}</dd>
+              </div>
+            )}
+            {detail.moneyReceivedNotes === null ? null : (
+              <div className="detail-line">
+                <dt>{t("traderSettlements.moneyReceivedNotes")}</dt>
+                <dd>{detail.moneyReceivedNotes}</dd>
+              </div>
+            )}
+            {detail.notes === null ? null : (
+              <div className="detail-line">
+                <dt>{t("traderSettlements.notes")}</dt>
+                <dd>{detail.notes}</dd>
+              </div>
+            )}
+            {detail.reversalDate === null ? null : (
+              <div className="detail-line">
+                <dt>{t("traderSettlements.reversalDate")}</dt>
+                <dd>{detail.reversalDate.slice(0, 16).replace("T", " ")}</dd>
+              </div>
+            )}
+            {detail.reversedBy === null ? null : (
+              <div className="detail-line">
+                <dt>{t("traderSettlements.reversedByUser")}</dt>
+                <dd>{detail.reversedBy}</dd>
+              </div>
+            )}
+            {detail.reversalReason === null ? null : (
+              <div className="detail-line">
+                <dt>{t("traderSettlements.reversalReason")}</dt>
+                <dd>{detail.reversalReason}</dd>
+              </div>
+            )}
+            {detail.reversalOfSettlementNumber === null ? null : (
+              <div className="detail-line">
+                <dt>{t("traderSettlements.reversalOf")}</dt>
+                <dd>{detail.reversalOfSettlementNumber}</dd>
+              </div>
+            )}
+            {detail.reversedBySettlementNumber === null ? null : (
+              <div className="detail-line">
+                <dt>{t("traderSettlements.reversedBy")}</dt>
+                <dd>{detail.reversedBySettlementNumber}</dd>
+              </div>
+            )}
+          </dl>
+
+          <div className="table-scroll-x">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">{t("traderSettlements.filterOrderSerialNumber")}</th>
+                <th scope="col">{t("traderSettlements.filterExternalReference")}</th>
+                <th scope="col">{t("traderSettlements.filterDeliveryDateFrom")}</th>
+                <th scope="col">{t("common.name")}</th>
+                <th scope="col">{t("traderSettlements.columnCod")}</th>
+                <th scope="col">{t("traderSettlements.totalServiceFees")}</th>
+                <th scope="col">{t("traderSettlements.totalAdditionalFees")}</th>
+                <th scope="col">{t("traderSettlements.totalVat")}</th>
+                <th scope="col">{t("traderSettlements.columnTotalDeductions")}</th>
+                <th scope="col">{t("traderSettlements.originalTraderPayable")}</th>
+                <th scope="col">{t("traderSettlements.columnPreviouslyPaid")}</th>
+                <th scope="col">{t("traderSettlements.amountPaidNow")}</th>
+                <th scope="col">{t("traderSettlements.columnOutstandingBalance")}</th>
+                <th scope="col">{t("traderSettlements.orderSettlementStatus")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {detail.orders.map((order) => (
+                <tr key={order.serialNumber}>
+                  <td className="mono">{order.serialNumber}</td>
+                  <td className="mono">{order.referenceNumber ?? "-"}</td>
+                  <td>{order.deliveryDate === null ? "-" : order.deliveryDate.slice(0, 10)}</td>
+                  <td>{order.customerName}</td>
+                  <td>{money(order.codAmount)}</td>
+                  <td>{money(order.serviceFee)}</td>
+                  <td>{money(order.additionalFees)}</td>
+                  <td>{money(order.vatAmount)}</td>
+                  <td>{money(order.totalDeductions)}</td>
+                  <td>{money(order.originalTraderPayable)}</td>
+                  <td>{money(order.previouslyPaid)}</td>
+                  <td>{money(order.amountPaidNow)}</td>
+                  <td>{money(order.remainingOutstanding)}</td>
+                  <td>{t(`traderSettlements.orderStatus${statusKey(order.orderSettlementStatus)}`)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          </div>
+
+          <dl className="reconciliation-summary">
+            <div className="detail-line">
+              <dt>{t("traderSettlements.numberOfOrders")}</dt>
+              <dd>{detail.summary.orderCount}</dd>
+            </div>
+            <div className="detail-line">
+              <dt>{t("traderSettlements.totalCod")}</dt>
+              <dd>{money(detail.summary.totalCod)}</dd>
+            </div>
+            <div className="detail-line">
+              <dt>{t("traderSettlements.totalServiceFees")}</dt>
+              <dd>{money(detail.summary.totalServiceFees)}</dd>
+            </div>
+            <div className="detail-line">
+              <dt>{t("traderSettlements.totalAdditionalFees")}</dt>
+              <dd>{money(detail.summary.totalAdditionalFees)}</dd>
+            </div>
+            <div className="detail-line">
+              <dt>{t("traderSettlements.totalVat")}</dt>
+              <dd>{money(detail.summary.totalVat)}</dd>
+            </div>
+            <div className="detail-line">
+              <dt>{t("traderSettlements.totalDeductions")}</dt>
+              <dd>{money(detail.summary.totalDeductions)}</dd>
+            </div>
+            <div className="detail-line">
+              <dt>{t("traderSettlements.originalTraderPayable")}</dt>
+              <dd>{money(detail.summary.totalOriginalTraderPayable)}</dd>
+            </div>
+            <div className="detail-line">
+              <dt>{t("traderSettlements.columnPreviouslyPaid")}</dt>
+              <dd>{money(detail.summary.previouslyPaid)}</dd>
+            </div>
+            <div className="detail-line">
+              <dt>{t("traderSettlements.amountPaidNow")}</dt>
+              <dd>{money(detail.summary.amountPaidNow)}</dd>
+            </div>
+            <div className="detail-line">
+              <dt>{t("traderSettlements.columnRemainingOutstanding")}</dt>
+              <dd>{money(detail.summary.remainingOutstanding)}</dd>
+            </div>
+          </dl>
+
+          <div className="modal-actions">
+            {!canViewReport ? null : (
+              <>
+                <button disabled={pdf.busy !== undefined} onClick={() => void openPdf("preview")} type="button">
+                  {pdf.busy === "preview" ? t("common.loading") : t("traderSettlements.actionPreviewStatement")}
+                </button>
+                <button disabled={pdf.busy !== undefined} onClick={() => void openPdf("print")} type="button">
+                  {pdf.busy === "print" ? t("common.loading") : t("traderSettlements.actionPrint")}
+                </button>
+                <button disabled={pdf.busy !== undefined} onClick={() => void openPdf("download")} type="button">
+                  {pdf.busy === "download" ? t("common.loading") : t("traderSettlements.actionDownloadPdf")}
+                </button>
+              </>
+            )}
+            {detail.status === "reversed" || moneyReceivedConfirmed ? null : (
+              <button onClick={() => setReceiptOpen(true)} type="button">
+                {t("traderSettlements.actionConfirmMoneyReceived")}
+              </button>
+            )}
+            {!canReverse || detail.status === "reversed" || moneyReceivedConfirmed ? null : (
+              <button onClick={() => setReverseOpen(true)} type="button">
+                {t("traderSettlements.actionReverse")}
+              </button>
+            )}
+            <button className="button button-secondary" onClick={onClose} type="button">
+              {t("common.close")}
+            </button>
+          </div>
+        </>
+      )}
+
+      {!receiptOpen || detail === undefined ? null : (
+        <MoneyReceivedDialog
+          api={api}
+          onClose={() => setReceiptOpen(false)}
+          onConfirmed={() => {
+            setReceiptOpen(false);
+            load();
+          }}
+          settlement={{
+            confirmedBy: detail.confirmedBy,
+            createdBy: detail.createdBy,
+            isReversed: detail.status === "reversed",
+            moneyReceivedAt: detail.moneyReceivedDate,
+            moneyReceivedConfirmed,
+            moneySentAt: detail.moneySentAt,
+            orderCount: detail.summary.orderCount,
+            paymentAmount: detail.summary.amountPaidNow,
+            paymentDate: detail.paymentDate,
+            paymentMethod: detail.paymentMethod,
+            paymentReference: detail.paymentReference,
+            previouslyPaid: detail.summary.previouslyPaid,
+            remainingOutstanding: detail.summary.remainingOutstanding,
+            settlementId: detail.settlementId,
+            settlementNumber: detail.settlementNumber,
+            status: detail.status,
+            traderName: detail.traderName,
+          }}
+        />
+      )}
+
+      {!reverseOpen || detail === undefined ? null : (
+        <ReverseSettlementDialog
+          api={api}
+          onClose={() => setReverseOpen(false)}
+          onReversed={() => {
+            setReverseOpen(false);
+            onReversed();
+          }}
+          settlement={{
+            confirmedBy: detail.confirmedBy,
+            createdBy: detail.createdBy,
+            isReversed: detail.status === "reversed",
+            moneyReceivedAt: detail.moneyReceivedDate,
+            moneyReceivedConfirmed,
+            moneySentAt: detail.moneySentAt,
+            orderCount: detail.summary.orderCount,
+            paymentAmount: detail.summary.amountPaidNow,
+            paymentDate: detail.paymentDate,
+            paymentMethod: detail.paymentMethod,
+            paymentReference: detail.paymentReference,
+            previouslyPaid: detail.summary.previouslyPaid,
+            remainingOutstanding: detail.summary.remainingOutstanding,
+            settlementId: detail.settlementId,
+            settlementNumber: detail.settlementNumber,
+            status: detail.status,
+            traderName: detail.traderName,
+          }}
+        />
+      )}
+    </Modal>
+  );
+}

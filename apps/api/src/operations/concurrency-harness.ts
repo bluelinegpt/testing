@@ -282,6 +282,7 @@ export function createCaller(
     identities as unknown as IdentityContextAccessor,
     new OperationsHistoryWriter(),
     companyProfile,
+    {} as unknown as DriverCollectionPdfService,
   );
   return {
     database,

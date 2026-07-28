@@ -1936,6 +1936,36 @@ tr.row-highlighted {
   }
 }
 
+/* One step of a guided in-modal workflow (Select Trader, Payment Details,
+   Allocation, Review, ...) — a divider between steps keeps a long form
+   scannable without a heavier card per step. */
+.workspace-step {
+  margin-bottom: 20px;
+  padding-top: 20px;
+  border-top: 1px solid var(--color-border);
+}
+.workspace-step:first-of-type {
+  padding-top: 0;
+  border-top: none;
+}
+.workspace-step h3 {
+  margin: 0 0 12px;
+  font-size: 16px;
+  color: #29434b;
+}
+.workspace-step table {
+  margin-bottom: 12px;
+}
+
+/* Standalone horizontal-scroll wrapper for a many-column table (the eligible
+   Orders / allocation review tables) inside a fixed-width modal — the table
+   itself never shrinks its columns, so on a narrow modal/viewport it scrolls
+   sideways within its own box instead of overflowing the page. */
+.table-scroll-x {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
 .dashboard-summary-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -3849,6 +3879,21 @@ tr.row-highlighted {
   font-size: 13px;
   font-weight: 400;
   color: #5b6b73;
+}
+
+/* A checkbox field reads label-beside-control, not label-above-control —
+   .field's grid/full-width input rules would stretch the checkbox and stack
+   the label above it, so this overrides layout only, not typography. */
+.field-checkbox {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+.field-checkbox input {
+  width: auto;
+  min-height: 0;
+  flex: none;
 }
 
 /* Advisory (non-blocking) guidance — e.g. a mobile that does not match the

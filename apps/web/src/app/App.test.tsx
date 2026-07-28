@@ -179,6 +179,17 @@ describe("App", () => {
     expect(await screen.findByRole("heading", { level: 1, name: "Driver Collections" })).toBeInTheDocument();
     expect(router.state.location.pathname).toBe("/drivers");
   });
+
+  it("redirects the retired /traders route to the Trader Settlements workspace", async () => {
+    vi.stubGlobal("fetch", createFetchMock());
+    const router = renderApp("/traders");
+    await signIn();
+
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Trader Settlements" }),
+    ).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/trader-settlements");
+  });
 });
 
 function renderApp(path = "/") {

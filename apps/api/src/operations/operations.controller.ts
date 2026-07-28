@@ -753,6 +753,28 @@ export class OperationsController {
     return this.traderSettlementService.reportData(settlementId);
   }
 
+  @RequireAnyPermission("settlements.create", "reports.export", "users_roles.manage")
+  @ApiOperation({ summary: "True downloadable PDF file for the Trader Settlement Statement" })
+  @Get("settlements/payments/:settlementId/pdf")
+  public async traderSettlementPdf(
+    @Param("settlementId", new ParseUUIDPipe()) settlementId: string,
+    @Query("language") language: string | undefined,
+    @Req() request: Request,
+    @Res() response: Response,
+  ): Promise<void> {
+    const resolvedLanguage = language === "ar" ? "ar" : "en";
+    const { bytes, filename } = await this.traderSettlementService.settlementPdf(
+      settlementId,
+      resolvedLanguage,
+      this.correlationId(request),
+    );
+    response.setHeader("Content-Type", "application/pdf");
+    response.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    response.setHeader("X-Content-Type-Options", "nosniff");
+    response.setHeader("Cache-Control", "private, max-age=0, must-revalidate");
+    response.send(bytes);
+  }
+
   @RequireAnyPermission("settlements.create", "users_roles.manage")
   @ApiOperation({ summary: "Confirm that the Trader received a previously sent settlement" })
   @Post("settlements/payments/:settlementId/confirm-receipt")

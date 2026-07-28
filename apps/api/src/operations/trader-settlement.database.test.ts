@@ -19,6 +19,7 @@ import type {
 import type { IdentityContext, IdentityContextAccessor } from "../security/identity-context.js";
 import type { TenantContext, TenantContextAccessor } from "../tenancy/tenant-context.js";
 
+import type { DriverCollectionPdfService } from "./driver-collection-pdf.service.js";
 import { OperationsHistoryWriter } from "./operations-history.writer.js";
 import type { CreateTraderSettlementDto } from "./operations.dto.js";
 import { TraderSettlementService } from "./trader-settlement.service.js";
@@ -118,6 +119,7 @@ describe.skipIf(!runDatabaseTests)("trader settlement", () => {
           identities as unknown as IdentityContextAccessor,
           new OperationsHistoryWriter(),
           companyProfile,
+          {} as unknown as DriverCollectionPdfService,
         );
 
         const createCompany = async (label: string): Promise<CompanyFixture> => {

@@ -37,6 +37,7 @@ import {
   OrderDetailsWorkspace,
   OrdersModuleWorkspace,
 } from "../features/operations/OrdersModuleWorkspace.js";
+import { TraderSettlementsWorkspace } from "../features/operations/TraderSettlementsWorkspace.js";
 import { SupportWorkspace } from "../features/support/SupportWorkspace.js";
 import { CompanyAppShell } from "./CompanyAppShell.js";
 import { CompanyBrandingProvider } from "./CompanyBrandingContext.js";
@@ -52,6 +53,10 @@ const redirects: Readonly<Record<string, string>> = {
   "/operations/driver-reconciliations/new": "/drivers",
   "/operations": "/orders",
   "/preferences": "/configuration/general",
+  // Legacy route: the operational Trader view is now part of the Trader
+  // Settlements workspace itself (outstanding balance is visible per Trader
+  // there), so a dedicated /traders screen is no longer authoritative.
+  "/traders": "/trader-settlements",
   "/users": "/configuration/users",
   "/roles": "/configuration/roles",
 };
@@ -60,8 +65,10 @@ const dashboardTargets: Readonly<Record<DashboardDrillDown, string>> = {
   cash: "/cash-management",
   drivers: "/drivers",
   orders: "/orders",
+  // Both drill-down tiles land on the one authoritative Trader Settlements
+  // workspace — routed directly rather than through the /traders redirect.
   settlements: "/trader-settlements",
-  traders: "/traders",
+  traders: "/trader-settlements",
 };
 
 const operationRoutes: Readonly<
@@ -80,8 +87,6 @@ const operationRoutes: Readonly<
   "/orders/create": { intent: "create-order", view: "orders" },
   "/orders/import": { intent: "import-orders", view: "orders" },
   "/reports": { view: "reports" },
-  "/trader-settlements": { view: "settlements" },
-  "/traders": { view: "traders" },
 };
 
 export function CompanyWorkspace({
@@ -136,6 +141,10 @@ export function CompanyWorkspace({
     );
   } else if (path === "/drivers") {
     content = <DriverCollectionsWorkspace api={api} />;
+  } else if (path === "/trader-settlements") {
+    content = (
+      <TraderSettlementsWorkspace api={api} permissions={session.identity.permissions} />
+    );
   } else if (operationRoutes[path] !== undefined) {
     const route = operationRoutes[path];
     content = (

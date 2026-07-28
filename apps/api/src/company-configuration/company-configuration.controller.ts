@@ -13,6 +13,7 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
 import type { Request } from "express";
 
 import {
+  RequireAnyPermission,
   RequireIdentityKinds,
   RequirePermissions,
 } from "../authentication/authentication.decorators.js";
@@ -57,6 +58,15 @@ export class CompanyConfigurationController {
 
   // Areas moved to AreaConfigurationController (Emirate-aware, paginated).
 
+  // Read-only: widened so the Trader Settlement payment form (which runs on
+  // settlements.create, not users_roles.manage) can list source bank accounts
+  // to select from. Every write route on this controller keeps the class-level
+  // users_roles.manage-only gate. RequirePermissions and RequireAnyPermission
+  // are independent, AND'd checks (different metadata keys) — the empty
+  // RequirePermissions() clears the class-level all-of requirement for this
+  // one route so RequireAnyPermission below is the only gate that applies.
+  @RequirePermissions()
+  @RequireAnyPermission("settlements.create", "users_roles.manage")
   @ApiOperation({ summary: "List Company bank accounts" })
   @Get("bank-accounts")
   public bankAccounts(): Promise<readonly CompanyBankAccount[]> {

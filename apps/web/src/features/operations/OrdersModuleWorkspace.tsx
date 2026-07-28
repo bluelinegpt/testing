@@ -58,7 +58,7 @@ import { materialFingerprint, useIdempotencyKey } from "./useIdempotencyKey.js";
 
 type QuickView = "active" | "all" | "hold" | "cancelled" | "closed";
 type OrderGrouping = "" | "status" | "driver";
-type BulkAction = "assign" | "collect" | "manifest" | "settle" | "status";
+type BulkAction = "assign" | "collect" | "manifest" | "status";
 
 interface OrderFilters {
   areaId: string;
@@ -556,7 +556,7 @@ export function OrdersModuleWorkspace({
                 </button>
               ) : null}
               {canSettle ? (
-                <button onClick={() => setBulkAction("settle")} type="button">
+                <button onClick={() => onNavigate("/trader-settlements")} type="button">
                   <Banknote aria-hidden="true" size={17} />
                   {t("operations.actions.moneyOut")}
                 </button>
@@ -769,18 +769,6 @@ export function OrdersModuleWorkspace({
         <CollectMoneyDialog
           api={api}
           drivers={drivers}
-          onClose={() => setBulkAction(undefined)}
-          onComplete={async () => {
-            setBulkAction(undefined);
-            clearSelection();
-            await load();
-          }}
-          selection={selection}
-        />
-      ) : null}
-      {bulkAction === "settle" ? (
-        <SettleTraderDialog
-          api={api}
           onClose={() => setBulkAction(undefined)}
           onComplete={async () => {
             setBulkAction(undefined);
@@ -1899,116 +1887,6 @@ function CollectMoneyDialog({
           </div>
         </>
       )}
-    </Modal>
-  );
-}
-
-// Money out to the trader for the selected delivered orders, as one settlement (paid in cash).
-// The backend requires every selected order to belong to the same trader.
-function SettleTraderDialog({
-  api,
-  onClose,
-  onComplete,
-  selection,
-}: {
-  api: ApiClient;
-  onClose: () => void;
-  onComplete: () => Promise<void>;
-  selection: SelectionPayload;
-}) {
-  const { i18n, t } = useTranslation();
-  const locale = normalizeLocale(i18n.resolvedLanguage);
-  const [preview, setPreview] = useState<{
-    netPayable: string;
-    orderCount: number;
-    traderMismatch: boolean;
-    traderName: string;
-  }>();
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string>();
-
-  useEffect(() => {
-    let active = true;
-    void api
-      .post<{
-        netPayable: string;
-        orderCount: number;
-        traderMismatch: boolean;
-        traderName: string;
-      }>("operations/settlements/selected/preview", selection)
-      .then((result) => active && setPreview(result))
-      .catch((requestError) =>
-        active ? setError(message(requestError, t("operations.bulkActionFailed"))) : undefined,
-      );
-    return () => {
-      active = false;
-    };
-  }, [api, selection, t]);
-
-  const submit = async () => {
-    setSaving(true);
-    setError(undefined);
-    try {
-      await api.post("operations/settlements/selected", { ...selection, paymentMethod: "cash" });
-      await onComplete();
-    } catch (requestError) {
-      setError(message(requestError, t("operations.bulkActionFailed")));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const blocked = preview !== undefined && (preview.traderMismatch || preview.orderCount === 0);
-
-  return (
-    <Modal
-      closeLabel={t("common.close")}
-      onRequestClose={onClose}
-      title={t("operations.actions.moneyOut")}
-      titleId="settle-trader-title"
-    >
-      {preview === undefined ? (
-        error === undefined ? (
-          <div className="loading-row">{t("common.loading")}</div>
-        ) : (
-          <div className="alert alert-error">{error}</div>
-        )
-      ) : preview.traderMismatch ? (
-        <div className="alert alert-error">{t("operations.settlementTraderMismatch")}</div>
-      ) : preview.orderCount === 0 ? (
-        <div className="alert alert-error">{t("operations.noSettleableOrders")}</div>
-      ) : (
-        <dl className="reconciliation-summary">
-          <div>
-            <dt>{t("operations.trader")}</dt>
-            <dd>{preview.traderName}</dd>
-          </div>
-          <div>
-            <dt>{t("operations.selectedOrders")}</dt>
-            <dd>{preview.orderCount}</dd>
-          </div>
-          <div>
-            <dt>{t("operations.amountDueToTrader")}</dt>
-            <dd>{formatCurrency(preview.netPayable, "AED", locale)}</dd>
-          </div>
-        </dl>
-      )}
-      {preview === undefined || error === undefined ? null : (
-        <div className="alert alert-error">{error}</div>
-      )}
-      <div className="modal-actions">
-        <button className="button button-secondary" onClick={onClose} type="button">
-          {t("common.cancel")}
-        </button>
-        <button
-          className="button button-primary"
-          disabled={preview === undefined || blocked || saving}
-          onClick={() => void submit()}
-          type="button"
-        >
-          {saving ? t("common.working") : t("operations.actions.moneyOut")}
-        </button>
-      </div>
     </Modal>
   );
 }

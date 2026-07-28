@@ -498,6 +498,8 @@ describe.skipIf(!runHttpTests)("trader settlement HTTP boundary", () => {
           ).expect(200);
           expect(detail.body.settlementId).toBe(fullSettlementId);
           expect(detail.body.orders).toHaveLength(1);
+          expect(detail.body.createdBy).toBeDefined();
+          expect(detail.body.createdBy).not.toBe("");
           // Not found.
           const notFound = await authed(settlementUser.token)(
             `/operations/settlements/payments/${randomUUID()}`,
@@ -551,6 +553,72 @@ describe.skipIf(!runHttpTests)("trader settlement HTTP boundary", () => {
               JSON.stringify(report.body),
             ),
           ).toBe(false);
+
+          // =====================================================================
+          // 7b. GET pdf — Trader Settlement Statement
+          // =====================================================================
+          const pdfResponse = await request(server)
+            .get(`/api/v1/operations/settlements/payments/${fullSettlementId}/pdf?language=en`)
+            .set("Authorization", `Bearer ${settlementUser.token}`)
+            .buffer(true)
+            .parse((response, callback) => {
+              const chunks: Buffer[] = [];
+              response.on("data", (chunk: Buffer) => chunks.push(chunk));
+              response.on("end", () => callback(null, Buffer.concat(chunks)));
+            })
+            .expect(200);
+          expect(pdfResponse.headers["content-type"]).toContain("application/pdf");
+          expect(pdfResponse.headers["content-disposition"]).toContain("Trader-Settlement-");
+          expect(pdfResponse.headers["content-disposition"]).toContain(".pdf");
+          expect((pdfResponse.body as Buffer).subarray(0, 5).toString("latin1")).toBe("%PDF-");
+          // reports.export alone is sufficient, without settlements.create.
+          await request(server)
+            .get(`/api/v1/operations/settlements/payments/${fullSettlementId}/pdf?language=ar`)
+            .set("Authorization", `Bearer ${reportUser.token}`)
+            .expect(200);
+          // Permission denied.
+          await authed(unprivileged.token)(
+            `/operations/settlements/payments/${fullSettlementId}/pdf`,
+          ).expect(403);
+          // Cross-Company access denied.
+          const crossPdf = await authed(adminB.token)(
+            `/operations/settlements/payments/${fullSettlementId}/pdf`,
+          ).expect(404);
+          expect(crossPdf.body.error?.code).toBe("settlement_not_found");
+
+          // =====================================================================
+          // 7c. Bank-account picker access — settlements.create must be able to
+          // list Company source banks and a Trader's beneficiary banks (the
+          // Checkpoint 5A gap fixed in this checkpoint), without gaining any
+          // write access on those routes.
+          // =====================================================================
+          const companyBanks = await authed(settlementUser.token)(
+            "/configuration/bank-accounts",
+          ).expect(200);
+          expect(Array.isArray(companyBanks.body)).toBe(true);
+          expect(
+            companyBanks.body.some((row: { id: string }) => row.id === companyBankAccountId),
+          ).toBe(true);
+          const traderBanks = await authed(settlementUser.token)(
+            `/configuration/traders/${traderA}/bank-accounts`,
+          ).expect(200);
+          expect(Array.isArray(traderBanks.body)).toBe(true);
+          expect(
+            traderBanks.body.some((row: { id: string }) => row.id === traderBankAccountId),
+          ).toBe(true);
+          // Permission denied for a User with neither settlements.create nor
+          // users_roles.manage.
+          await authed(unprivileged.token)("/configuration/bank-accounts").expect(403);
+          await authed(unprivileged.token)(
+            `/configuration/traders/${traderA}/bank-accounts`,
+          ).expect(403);
+          // The write routes on the same controllers remain users_roles.manage-only
+          // — settlements.create must not have gained write access.
+          await post(settlementUser.token, "/configuration/bank-accounts", {
+            accountName: "Should Not Be Created",
+            bankName: "Should Not Be Created",
+            currency: "AED",
+          }).expect(403);
 
           // =====================================================================
           // 8. POST confirm-receipt

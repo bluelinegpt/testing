@@ -53,7 +53,6 @@ const routeTitles: Readonly<Record<string, string>> = {
   "/orders": "nav.ordersList",
   "/orders/create": "nav.createOrder",
   "/orders/import": "nav.importOrders",
-  "/traders": "nav.tradersList",
   "/trader-settlements": "nav.traderSettlements",
   "/drivers": "nav.driversList",
   "/driver-cash-reconciliation": "nav.driverCashReconciliation",
@@ -402,7 +401,7 @@ function NavigationGroup({
 
 function groupForPath(pathname: string): MenuGroupId | undefined {
   if (pathname.startsWith("/orders")) return "orders";
-  if (pathname === "/traders" || pathname === "/trader-settlements") return "traders";
+  if (pathname === "/trader-settlements") return "traders";
   if (pathname === "/drivers" || pathname === "/driver-cash-reconciliation") return "drivers";
   if (pathname === "/cash-management") return "finance";
   if (pathname.startsWith("/configuration")) return "configuration";

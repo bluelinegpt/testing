@@ -109,6 +109,11 @@ export class TraderConfigurationController {
     return this.traders.relatedOrders(traderId, Number(page), Number(pageSize));
   }
 
+  // Read-only: widened so the Trader Settlement payment form (which runs on
+  // settlements.create, not users_roles.manage) can list a Trader's beneficiary
+  // bank accounts to select from. Every write route on this controller keeps
+  // the class-level users_roles.manage-only gate.
+  @RequireAnyPermission("settlements.create", "users_roles.manage")
   @Get(":traderId/bank-accounts")
   public banks(
     @Param("traderId", new ParseUUIDPipe()) traderId: string,

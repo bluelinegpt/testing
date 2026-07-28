@@ -8,7 +8,6 @@ import type { ApiClient } from "../../api/api-client.js";
 import type {
   AreaPage,
   CompanyArea,
-  CompanyBankAccount,
   OperationsDriverReconciliation,
   OperationsDriverReconciliationDetail,
   PagedResponse,
@@ -23,10 +22,7 @@ import type {
   OperationsOrder,
   OperationsOrderPage,
   OperationsPendingCashOrder,
-  OperationsPendingSettlementOrder,
   OperationsTrackingLink,
-  OperationsTraderSettlementDetail,
-  OperationsTraderSettlement,
   OperationsTrader,
 } from "../../api/contracts.js";
 import { PageHeader } from "../../components/PageHeader.js";
@@ -34,7 +30,7 @@ import { formatDate } from "../../localization/formatters.js";
 import { normalizeLocale } from "../../localization/locale.js";
 import { CreateOrderDialog as ModernCreateOrderDialog } from "./CreateOrderDialog.js";
 
-export type OperationsView = "orders" | "cash" | "settlements" | "traders" | "drivers" | "reports";
+export type OperationsView = "orders" | "cash" | "drivers" | "reports";
 
 interface OrderFilters {
   readonly areaId: string;
@@ -47,17 +43,6 @@ interface OrderFilters {
   readonly settlementStatus: string;
   readonly traderId: string;
 }
-
-interface FinancialPaymentInput {
-  readonly bankAccountId?: string;
-  readonly bankReference?: string;
-  readonly paymentMethod: "bank_transfer" | "cash";
-}
-
-type FinancialPaymentTarget = {
-  readonly kind: "settlement";
-  readonly order: OperationsPendingSettlementOrder;
-};
 
 export function OperationsWorkspace({
   api,
@@ -81,16 +66,9 @@ export function OperationsWorkspace({
   const [billing, setBilling] = useState<OperationsBillingSummary>();
   const [orders, setOrders] = useState<readonly OperationsOrder[]>([]);
   const [areas, setAreas] = useState<readonly CompanyArea[]>([]);
-  const [bankAccounts, setBankAccounts] = useState<readonly CompanyBankAccount[]>([]);
   const [traders, setTraders] = useState<readonly OperationsTrader[]>([]);
   const [drivers, setDrivers] = useState<readonly OperationsDriver[]>([]);
   const [pendingCashOrders, setPendingCashOrders] = useState<readonly OperationsPendingCashOrder[]>(
-    [],
-  );
-  const [pendingSettlementOrders, setPendingSettlementOrders] = useState<
-    readonly OperationsPendingSettlementOrder[]
-  >([]);
-  const [traderSettlements, setTraderSettlements] = useState<readonly OperationsTraderSettlement[]>(
     [],
   );
   const [orderFilters, setOrderFilters] = useState<OrderFilters>({
@@ -108,8 +86,6 @@ export function OperationsWorkspace({
   const [error, setError] = useState<string>();
   const [createOrderOpen, setCreateOrderOpen] = useState(false);
   const [importOrdersOpen, setImportOrdersOpen] = useState(false);
-  const [createTraderOpen, setCreateTraderOpen] = useState(false);
-  const [paymentTarget, setPaymentTarget] = useState<FinancialPaymentTarget>();
   const locale = normalizeLocale(i18n.resolvedLanguage);
   const canViewOrders =
     permissions.includes("users_roles.manage") ||
@@ -141,37 +117,22 @@ export function OperationsWorkspace({
       return;
     }
     try {
-      const [
-        loadedBilling,
-        loadedOrders,
-        loadedAreas,
-        loadedBankAccounts,
-        loadedTraders,
-        loadedDrivers,
-        loadedCash,
-        loadedSettlements,
-        loadedSettlementHistory,
-      ] = await Promise.all([
-        api.get<OperationsBillingSummary>("operations/billing/summary"),
-        api.get<OperationsOrderPage>(operationsOrdersPath(orderFilters)),
-        api.get<AreaPage>("configuration/areas?page=1&pageSize=100&status=active"),
-        api.get<readonly CompanyBankAccount[]>("configuration/bank-accounts"),
-        api.get<readonly OperationsTrader[]>("operations/traders"),
-        api.get<readonly OperationsDriver[]>("operations/drivers"),
-        api.get<readonly OperationsPendingCashOrder[]>("operations/cash/pending"),
-        api.get<readonly OperationsPendingSettlementOrder[]>("operations/settlements/pending"),
-        api.get<readonly OperationsTraderSettlement[]>("operations/settlements"),
-      ]);
+      const [loadedBilling, loadedOrders, loadedAreas, loadedTraders, loadedDrivers, loadedCash] =
+        await Promise.all([
+          api.get<OperationsBillingSummary>("operations/billing/summary"),
+          api.get<OperationsOrderPage>(operationsOrdersPath(orderFilters)),
+          api.get<AreaPage>("configuration/areas?page=1&pageSize=100&status=active"),
+          api.get<readonly OperationsTrader[]>("operations/traders"),
+          api.get<readonly OperationsDriver[]>("operations/drivers"),
+          api.get<readonly OperationsPendingCashOrder[]>("operations/cash/pending"),
+        ]);
       setBilling(loadedBilling);
       setOrders(loadedOrders.items);
       // The request already asks for active Areas only.
       setAreas(loadedAreas.items);
-      setBankAccounts(loadedBankAccounts.filter((account) => account.isActive));
       setTraders(loadedTraders);
       setDrivers(loadedDrivers);
       setPendingCashOrders(loadedCash);
-      setPendingSettlementOrders(loadedSettlements);
-      setTraderSettlements(loadedSettlementHistory);
     } catch {
       setError(t("common.loadFailed"));
     } finally {
@@ -189,23 +150,6 @@ export function OperationsWorkspace({
       setView("orders");
     } catch {
       setError(t("operations.workflowFailed"));
-    }
-  };
-
-  const confirmSettlement = async (
-    settlementOrder: OperationsPendingSettlementOrder,
-    payment: FinancialPaymentInput,
-  ) => {
-    setError(undefined);
-    try {
-      await api.post<OperationsOrder>(
-        `operations/orders/${settlementOrder.id}/settle-trader`,
-        payment,
-      );
-      await load();
-      setView("settlements");
-    } catch {
-      setError(t("operations.settlementConfirmFailed"));
     }
   };
 
@@ -241,15 +185,6 @@ export function OperationsWorkspace({
                 </button>
               </>
             ) : null}
-            {view === "traders" ? (
-              <button
-                className="button button-primary"
-                onClick={() => setCreateTraderOpen(true)}
-                type="button"
-              >
-                {t("operations.createTrader")}
-              </button>
-            ) : null}
             {view === "drivers" ? (
               <button
                 className="button button-primary"
@@ -284,17 +219,6 @@ export function OperationsWorkspace({
             onNavigate={(target) => onNavigate?.(target)}
             orders={pendingCashOrders}
           />
-        ) : view === "settlements" ? (
-          <SettlementsTable
-            api={api}
-            settlements={traderSettlements}
-            orders={pendingSettlementOrders}
-            onConfirm={(settlementOrder) =>
-              setPaymentTarget({ kind: "settlement", order: settlementOrder })
-            }
-          />
-        ) : view === "traders" ? (
-          <TradersTable traders={traders} />
         ) : view === "drivers" ? (
           <DriversTable drivers={drivers} />
         ) : (
@@ -341,28 +265,6 @@ export function OperationsWorkspace({
           }}
         />
       ) : null}
-      {createTraderOpen ? (
-        <CreateTraderDialog
-          api={api}
-          onClose={() => setCreateTraderOpen(false)}
-          onSaved={async () => {
-            setCreateTraderOpen(false);
-            await load();
-            setView("traders");
-          }}
-        />
-      ) : null}
-      {paymentTarget === undefined ? null : (
-        <FinancialPaymentDialog
-          bankAccounts={bankAccounts}
-          onClose={() => setPaymentTarget(undefined)}
-          onConfirm={async (payment) => {
-            await confirmSettlement(paymentTarget.order, payment);
-            setPaymentTarget(undefined);
-          }}
-          title={t("operations.confirmSettlement")}
-        />
-      )}
     </>
   );
 }
@@ -653,8 +555,6 @@ function operationsTitleKey(view: OperationsView): string {
     drivers: "operations.drivers",
     orders: "operations.orders",
     reports: "operations.reports",
-    settlements: "operations.settlements",
-    traders: "operations.traders",
   }[view];
 }
 
@@ -664,8 +564,6 @@ function operationsSectionKey(view: OperationsView): string {
     drivers: "nav.drivers",
     orders: "nav.orders",
     reports: "nav.reports",
-    settlements: "nav.traders",
-    traders: "nav.traders",
   }[view];
 }
 
@@ -1677,151 +1575,6 @@ function CashTable({
   );
 }
 
-function SettlementsTable({
-  api,
-  onConfirm,
-  orders,
-  settlements,
-}: {
-  api: ApiClient;
-  onConfirm: (order: OperationsPendingSettlementOrder) => void;
-  orders: readonly OperationsPendingSettlementOrder[];
-  settlements: readonly OperationsTraderSettlement[];
-}) {
-  const { t } = useTranslation();
-  const [detail, setDetail] = useState<OperationsTraderSettlementDetail>();
-  const [detailError, setDetailError] = useState<string>();
-  const toggleDetail = async (settlement: OperationsTraderSettlement) => {
-    if (detail?.id === settlement.id) {
-      setDetail(undefined);
-      return;
-    }
-    setDetailError(undefined);
-    try {
-      setDetail(
-        await api.get<OperationsTraderSettlementDetail>(`operations/settlements/${settlement.id}`),
-      );
-    } catch {
-      setDetailError(t("operations.detailLoadFailed"));
-    }
-  };
-  return (
-    <div className="stacked-tables">
-      <section>
-        <h2>{t("operations.pendingSettlements")}</h2>
-        <table>
-          <thead>
-            <tr>
-              <th>{t("operations.order")}</th>
-              <th>{t("operations.trader")}</th>
-              <th>{t("operations.customer")}</th>
-              <th>{t("operations.grossPayable")}</th>
-              <th>{t("operations.serviceFee")}</th>
-              <th>{t("operations.netPayable")}</th>
-              <th>
-                <span className="sr-only">{t("common.actions")}</span>
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {orders.map((order) => (
-              <tr key={order.id}>
-                <td>
-                  <strong>{order.orderNumber}</strong>
-                </td>
-                <td>{order.traderName}</td>
-                <td>{order.customerName}</td>
-                <td>{formatMoney(order.grossPayable)}</td>
-                <td>{formatMoney(order.serviceFee)}</td>
-                <td>{formatMoney(order.netPayable)}</td>
-                <td>
-                  <div className="row-actions">
-                    <button onClick={() => onConfirm(order)} type="button">
-                      {t("operations.confirmSettlement")}
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-            {orders.length === 0 ? (
-              <tr>
-                <td className="empty-state" colSpan={7}>
-                  {t("operations.noPendingSettlements")}
-                </td>
-              </tr>
-            ) : null}
-          </tbody>
-        </table>
-      </section>
-      <section>
-        <h2>{t("operations.recentSettlements")}</h2>
-        <table>
-          <thead>
-            <tr>
-              <th>{t("operations.settlement")}</th>
-              <th>{t("operations.trader")}</th>
-              <th>{t("operations.businessDate")}</th>
-              <th>{t("operations.orders")}</th>
-              <th>{t("operations.grossPayable")}</th>
-              <th>{t("operations.serviceFee")}</th>
-              <th>{t("operations.netPayable")}</th>
-              <th>{t("operations.status")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {settlements.map((settlement) => (
-              <Fragment key={settlement.id}>
-                <tr>
-                  <td>
-                    <strong>{settlement.settlementNumber}</strong>
-                  </td>
-                  <td>{settlement.traderName}</td>
-                  <td>{settlement.businessDate}</td>
-                  <td>{settlement.orderCount}</td>
-                  <td>{formatMoney(settlement.grossPayable)}</td>
-                  <td>{formatMoney(settlement.serviceFeeDeductions)}</td>
-                  <td>{formatMoney(settlement.netPayable)}</td>
-                  <td>
-                    <span>{t(`statuses.${settlement.status}`)}</span>
-                    <div className="row-actions row-actions-inline">
-                      <button onClick={() => void toggleDetail(settlement)} type="button">
-                        {detail?.id === settlement.id
-                          ? t("operations.hideDetails")
-                          : t("operations.viewDetails")}
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-                {detail?.id === settlement.id ? (
-                  <tr>
-                    <td className="detail-cell" colSpan={8}>
-                      <SettlementDetail detail={detail} />
-                    </td>
-                  </tr>
-                ) : null}
-              </Fragment>
-            ))}
-            {settlements.length === 0 ? (
-              <tr>
-                <td className="empty-state" colSpan={8}>
-                  {t("operations.noSettlements")}
-                </td>
-              </tr>
-            ) : null}
-            {detailError === undefined ? null : (
-              <tr>
-                <td className="empty-state" colSpan={8}>
-                  {detailError}
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </section>
-    </div>
-  );
-}
-
 function ReconciliationDetail({
   companyName,
   detail,
@@ -1979,233 +1732,6 @@ function CashBreakdown({
       {formatMoney(order.serviceFee)} | {t("operations.vatAmount")}: {formatMoney(order.vatAmount)}{" "}
       | {t("operations.customerAmountDue")}: {formatMoney(order.customerAmountDue)}
     </span>
-  );
-}
-
-function SettlementDetail({ detail }: { detail: OperationsTraderSettlementDetail }) {
-  const { t } = useTranslation();
-  return (
-    <div className="detail-grid">
-      <section>
-        <h3>{t("operations.orders")}</h3>
-        {detail.orders.map((order) => (
-          <div className="detail-line" key={order.orderId}>
-            <span>
-              <strong>{order.orderNumber}</strong> {order.customerName}
-              <SettlementBreakdown order={order} />
-            </span>
-            <span>{formatMoney(order.netPayable)}</span>
-          </div>
-        ))}
-      </section>
-      <section>
-        <h3>{t("operations.payments")}</h3>
-        {detail.payments.map((payment, index) => (
-          <PaymentDetailLine key={`${payment.method}-${index}`} payment={payment} />
-        ))}
-      </section>
-    </div>
-  );
-}
-
-function SettlementBreakdown({
-  order,
-}: {
-  order: {
-    readonly grossPayable: string;
-    readonly netPayable: string;
-    readonly serviceFee: string;
-  };
-}) {
-  const { t } = useTranslation();
-  return (
-    <span className="cell-secondary">
-      {t("operations.grossPayable")}: {formatMoney(order.grossPayable)} |{" "}
-      {t("operations.serviceFee")}: {formatMoney(order.serviceFee)} | {t("operations.netPayable")}:{" "}
-      {formatMoney(order.netPayable)}
-    </span>
-  );
-}
-
-function PaymentDetailLine({
-  payment,
-}: {
-  payment: {
-    readonly amount: string;
-    readonly bankAccountName: string | null;
-    readonly bankReference: string | null;
-    readonly method: string;
-  };
-}) {
-  const { t } = useTranslation();
-  return (
-    <div className="detail-line">
-      <span>
-        <strong>{t(`paymentMethods.${payment.method}`)}</strong>
-        {payment.bankAccountName === null ? null : (
-          <span className="cell-secondary">{payment.bankAccountName}</span>
-        )}
-        {payment.bankReference === null ? null : (
-          <span className="cell-secondary">{payment.bankReference}</span>
-        )}
-      </span>
-      <span>{formatMoney(payment.amount)}</span>
-    </div>
-  );
-}
-
-function FinancialPaymentDialog({
-  bankAccounts,
-  onClose,
-  onConfirm,
-  title,
-}: {
-  bankAccounts: readonly CompanyBankAccount[];
-  onClose: () => void;
-  onConfirm: (payment: FinancialPaymentInput) => Promise<void>;
-  title: string;
-}) {
-  const { t } = useTranslation();
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string>();
-  const [method, setMethod] = useState<"bank_transfer" | "cash">("cash");
-
-  const submit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    setSaving(true);
-    setError(undefined);
-    try {
-      await onConfirm(
-        method === "cash"
-          ? { paymentMethod: "cash" }
-          : {
-              bankAccountId: String(form.get("bankAccountId") ?? ""),
-              bankReference: String(form.get("bankReference") ?? ""),
-              paymentMethod: "bank_transfer",
-            },
-      );
-    } catch {
-      setError(t("operations.paymentConfirmFailed"));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <div className="modal-backdrop">
-      <section
-        aria-labelledby="financial-payment-title"
-        aria-modal="true"
-        className="modal modal-small"
-        role="dialog"
-      >
-        <div className="modal-heading">
-          <h2 id="financial-payment-title">{title}</h2>
-          <button
-            aria-label={t("common.close")}
-            className="close-button"
-            onClick={onClose}
-            type="button"
-          >
-            &times;
-          </button>
-        </div>
-        <form onSubmit={(event) => void submit(event)}>
-          {error === undefined ? null : <div className="alert alert-error">{error}</div>}
-          <label className="field">
-            <span>{t("operations.paymentMethod")}</span>
-            <select
-              name="paymentMethod"
-              onChange={(event) =>
-                setMethod(event.target.value === "bank_transfer" ? "bank_transfer" : "cash")
-              }
-              value={method}
-            >
-              <option value="cash">{t("operations.cash")}</option>
-              <option value="bank_transfer">{t("operations.bankTransfer")}</option>
-            </select>
-          </label>
-          {method === "bank_transfer" ? (
-            <>
-              <label className="field">
-                <span>{t("operations.bankAccount")}</span>
-                <select disabled={bankAccounts.length === 0} name="bankAccountId" required>
-                  {bankAccounts.map((account) => (
-                    <option key={account.id} value={account.id}>
-                      {account.bankName} - {account.accountName}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="field">
-                <span>{t("operations.bankReference")}</span>
-                <input maxLength={80} name="bankReference" required />
-              </label>
-              {bankAccounts.length === 0 ? (
-                <div className="alert alert-error">{t("operations.noActiveBankAccounts")}</div>
-              ) : null}
-            </>
-          ) : null}
-          <div className="modal-actions">
-            <button className="button button-secondary" onClick={onClose} type="button">
-              {t("common.cancel")}
-            </button>
-            <button
-              className="button button-primary"
-              disabled={saving || (method === "bank_transfer" && bankAccounts.length === 0)}
-              type="submit"
-            >
-              {saving ? t("common.working") : t("common.save")}
-            </button>
-          </div>
-        </form>
-      </section>
-    </div>
-  );
-}
-
-function TradersTable({ traders }: { traders: readonly OperationsTrader[] }) {
-  const { t } = useTranslation();
-  return (
-    <table>
-      <thead>
-        <tr>
-          <th>{t("operations.trader")}</th>
-          <th>{t("operations.status")}</th>
-          <th>{t("operations.totalOrders")}</th>
-          <th>{t("operations.openOrders")}</th>
-          <th>{t("operations.unsettledNet")}</th>
-        </tr>
-      </thead>
-      <tbody>
-        {traders.map((trader) => (
-          <tr key={trader.id}>
-            <td>
-              <strong>{trader.name}</strong>
-              <span className="cell-secondary">
-                {trader.code} · {trader.mobileNumber}
-              </span>
-            </td>
-            <td>
-              <span className={`status status-${trader.status}`}>
-                {t(`statuses.${trader.status}`)}
-              </span>
-            </td>
-            <td>{trader.totalOrders}</td>
-            <td>{trader.openOrders}</td>
-            <td>{formatMoney(trader.unsettledNetPayable)}</td>
-          </tr>
-        ))}
-        {traders.length === 0 ? (
-          <tr>
-            <td className="empty-state" colSpan={5}>
-              {t("operations.noTraders")}
-            </td>
-          </tr>
-        ) : null}
-      </tbody>
-    </table>
   );
 }
 
@@ -2497,100 +2023,6 @@ function ImportOrdersDialog({
             </button>
             <button className="button button-primary" disabled={saving} type="submit">
               {saving ? t("common.working") : t("operations.importOrders")}
-            </button>
-          </div>
-        </form>
-      </section>
-    </div>
-  );
-}
-
-function CreateTraderDialog({
-  api,
-  onClose,
-  onSaved,
-}: {
-  api: ApiClient;
-  onClose: () => void;
-  onSaved: () => Promise<void>;
-}) {
-  const { t } = useTranslation();
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string>();
-
-  const submit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    setSaving(true);
-    setError(undefined);
-    try {
-      await api.post<OperationsTrader>("operations/traders", {
-        code: String(form.get("code") ?? ""),
-        contactPerson: optionalString(form.get("contactPerson")),
-        email: optionalString(form.get("email")),
-        mobileNumber: String(form.get("mobileNumber") ?? ""),
-        nameEn: String(form.get("nameEn") ?? ""),
-        pickupAddress: optionalString(form.get("pickupAddress")),
-      });
-      await onSaved();
-    } catch {
-      setError(t("common.saveFailed"));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <div className="modal-backdrop">
-      <section
-        aria-labelledby="create-trader-title"
-        aria-modal="true"
-        className="modal modal-small"
-        role="dialog"
-      >
-        <div className="modal-heading">
-          <h2 id="create-trader-title">{t("operations.createTrader")}</h2>
-          <button
-            aria-label={t("common.close")}
-            className="close-button"
-            onClick={onClose}
-            type="button"
-          >
-            ×
-          </button>
-        </div>
-        <form onSubmit={(event) => void submit(event)}>
-          {error === undefined ? null : <div className="alert alert-error">{error}</div>}
-          <label className="field">
-            <span>{t("operations.code")}</span>
-            <input name="code" pattern="[A-Za-z0-9_-]{2,32}" required />
-          </label>
-          <label className="field">
-            <span>{t("operations.name")}</span>
-            <input maxLength={160} name="nameEn" required />
-          </label>
-          <label className="field">
-            <span>{t("operations.mobile")}</span>
-            <input maxLength={32} name="mobileNumber" required />
-          </label>
-          <label className="field">
-            <span>{t("operations.contactPerson")}</span>
-            <input maxLength={160} name="contactPerson" />
-          </label>
-          <label className="field">
-            <span>{t("operations.email")}</span>
-            <input maxLength={160} name="email" type="email" />
-          </label>
-          <label className="field">
-            <span>{t("operations.pickupAddress")}</span>
-            <textarea maxLength={300} name="pickupAddress" rows={3} />
-          </label>
-          <div className="modal-actions">
-            <button className="button button-secondary" onClick={onClose} type="button">
-              {t("common.cancel")}
-            </button>
-            <button className="button button-primary" disabled={saving} type="submit">
-              {saving ? t("common.working") : t("common.save")}
             </button>
           </div>
         </form>

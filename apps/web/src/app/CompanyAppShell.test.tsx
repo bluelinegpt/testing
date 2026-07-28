@@ -125,6 +125,15 @@ describe("CompanyAppShell branding", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("keeps exactly one Trader Settlements entry under the Traders nav group", async () => {
+    renderShell(makeApi(branding()), ADMIN);
+    await screen.findAllByText("Acme Logistics");
+    fireEvent.click(screen.getByRole("button", { name: "Traders" }));
+    const links = screen.getAllByRole("link", { name: "Trader settlements" });
+    expect(links).toHaveLength(1);
+    expect(links[0]).toHaveAttribute("href", "/trader-settlements");
+  });
+
   it("keeps only the UI-language selector in the sidebar (no Text Language, no My Preferences)", async () => {
     renderShell(makeApi(branding()), ADMIN);
     await screen.findAllByText("Acme Logistics");

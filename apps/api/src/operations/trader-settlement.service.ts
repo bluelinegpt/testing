@@ -12,6 +12,7 @@ import { IdentityContextAccessor } from "../security/identity-context.js";
 import { TenantContextAccessor } from "../tenancy/tenant-context.js";
 
 import { CompanyProfileService } from "../company-profile/company-profile.service.js";
+import { DriverCollectionPdfService } from "./driver-collection-pdf.service.js";
 import { OperationsHistoryWriter } from "./operations-history.writer.js";
 import { traderSettlementPageSizes } from "./operations.dto.js";
 import type {
@@ -24,6 +25,10 @@ import type {
   TraderSettlementListQueryDto,
   TraderSettlementSummaryQueryDto,
 } from "./operations.dto.js";
+import {
+  buildTraderSettlementStatementHtml,
+  type ReportLanguage,
+} from "./trader-settlement-report-html.js";
 
 const defaultPageSize = 25;
 const idempotencyKeyPattern = /^[A-Za-z0-9._:-]{16,128}$/;
@@ -177,17 +182,21 @@ interface TraderSettlementSummaryTotals {
 export interface TraderSettlementDetail {
   readonly beneficiaryBank: MaskedBankSnapshot | null;
   readonly confirmedBy: string;
+  readonly createdBy: string;
   readonly moneyReceivedBy: string | null;
   readonly moneyReceivedDate: string | null;
   readonly moneyReceivedNotes: string | null;
   readonly moneyReceivedReference: string | null;
+  readonly moneySentAt: string | null;
   readonly notes: string | null;
   readonly orders: readonly TraderSettlementDetailOrder[];
   readonly paymentDate: string;
   readonly paymentMethod: "bank_transfer" | "cash";
   readonly paymentReference: string | null;
+  readonly reversalDate: string | null;
   readonly reversalOfSettlementNumber: string | null;
   readonly reversalReason: string | null;
+  readonly reversedBy: string | null;
   readonly reversedBySettlementNumber: string | null;
   readonly settlementId: string;
   readonly settlementNumber: string;
@@ -215,9 +224,15 @@ export interface TraderSettlementReportData {
     readonly moneyReceivedDate: string | null;
     readonly moneyReceivedNotes: string | null;
     readonly moneyReceivedReference: string | null;
+    readonly moneySentAt: string | null;
     readonly paymentDate: string;
     readonly paymentMethod: "bank_transfer" | "cash";
     readonly paymentReference: string | null;
+    readonly reversalDate: string | null;
+    readonly reversalOfSettlementNumber: string | null;
+    readonly reversalReason: string | null;
+    readonly reversedBy: string | null;
+    readonly reversedBySettlementNumber: string | null;
     readonly settlementNumber: string;
     readonly sourceBank: { readonly accountName: string; readonly bankName: string } | null;
     readonly status: "confirmed" | "reversed";
@@ -247,6 +262,7 @@ export class TraderSettlementService {
     @Inject(IdentityContextAccessor) private readonly identities: IdentityContextAccessor,
     @Inject(OperationsHistoryWriter) private readonly history: OperationsHistoryWriter,
     @Inject(CompanyProfileService) private readonly companyProfile: CompanyProfileService,
+    @Inject(DriverCollectionPdfService) private readonly pdf: DriverCollectionPdfService,
   ) {}
 
   /**
@@ -1232,17 +1248,21 @@ export class TraderSettlementService {
     return {
       beneficiaryBank: header.beneficiaryBank,
       confirmedBy: header.confirmedBy,
+      createdBy: header.createdBy,
       moneyReceivedBy: header.moneyReceivedBy,
       moneyReceivedDate: header.moneyReceivedDate,
       moneyReceivedNotes: header.moneyReceivedNotes,
       moneyReceivedReference: header.moneyReceivedReference,
+      moneySentAt: header.moneySentAt,
       notes: header.notes,
       orders: orders.lines,
       paymentDate: header.paymentDate,
       paymentMethod: header.paymentMethod,
       paymentReference: header.paymentReference,
+      reversalDate: header.reversalDate,
       reversalOfSettlementNumber: header.reversalOfSettlementNumber,
       reversalReason: header.reversalReason,
+      reversedBy: header.reversedBy,
       reversedBySettlementNumber: header.reversedBySettlementNumber,
       settlementId,
       settlementNumber: header.settlementNumber,
@@ -1291,9 +1311,15 @@ export class TraderSettlementService {
         moneyReceivedDate: header.moneyReceivedDate,
         moneyReceivedNotes: header.moneyReceivedNotes,
         moneyReceivedReference: header.moneyReceivedReference,
+        moneySentAt: header.moneySentAt,
         paymentDate: header.paymentDate,
         paymentMethod: header.paymentMethod,
         paymentReference: header.paymentReference,
+        reversalDate: header.reversalDate,
+        reversalOfSettlementNumber: header.reversalOfSettlementNumber,
+        reversalReason: header.reversalReason,
+        reversedBy: header.reversedBy,
+        reversedBySettlementNumber: header.reversedBySettlementNumber,
         settlementNumber: header.settlementNumber,
         sourceBank: header.sourceBank,
         status: header.status,
@@ -1302,6 +1328,46 @@ export class TraderSettlementService {
       orders: orders.lines,
       summary: orders.summary,
     };
+  }
+
+  /**
+   * True, downloadable PDF file for the Trader Settlement Statement (§19-23),
+   * server-authoritative end to end: the same `reportData()` snapshot backs
+   * both the JSON view and this PDF, rendered from server-built HTML via the
+   * shared headless-Chromium renderer already used by the Driver Collection
+   * Report and Driver Shipment Manifest — no second PDF engine, no PDF bytes
+   * ever stored, always regenerated from the immutable settlement snapshot.
+   */
+  public async settlementPdf(
+    settlementId: string,
+    language: ReportLanguage,
+    correlationId: string,
+  ): Promise<{ bytes: Buffer; filename: string }> {
+    this.assertAnyPermission(["settlements.create", "reports.export"]);
+    const { companyId } = this.tenants.current();
+    const identity = this.identities.current();
+    const data = await this.reportData(settlementId);
+    const html = buildTraderSettlementStatementHtml(data, language);
+    const footerTemplate =
+      language === "ar"
+        ? `<div style="font-size:9px;width:100%;text-align:center;color:#666;direction:rtl;">الصفحة <span class="pageNumber"></span> من <span class="totalPages"></span></div>`
+        : `<div style="font-size:9px;width:100%;text-align:center;color:#666;">Page <span class="pageNumber"></span> of <span class="totalPages"></span></div>`;
+    const bytes = await this.pdf.renderPdf(html, footerTemplate);
+    // Safe filename (§20): built only from the settlement number, which is
+    // always the `SET-XXXXXX` shape generated by `nextReferenceNumber` — the
+    // allowlist strips anything else defensively rather than trusting that.
+    const safeNumber = data.header.settlementNumber.replaceAll(/[^A-Za-z0-9-]/g, "");
+    const filename = `Trader-Settlement-${safeNumber}.pdf`;
+    await this.history.audit(this.database, {
+      action: "trader_settlement.report_pdf_generated",
+      actorId: identity.identityId,
+      after: { language, settlementNumber: data.header.settlementNumber },
+      companyId,
+      correlationId,
+      subjectId: settlementId,
+      subjectType: "trader_settlement",
+    });
+    return { bytes, filename };
   }
 
   // ---------------------------------------------------------------------
@@ -1319,12 +1385,15 @@ export class TraderSettlementService {
     readonly moneyReceivedDate: string | null;
     readonly moneyReceivedNotes: string | null;
     readonly moneyReceivedReference: string | null;
+    readonly moneySentAt: string | null;
     readonly notes: string | null;
     readonly paymentDate: string;
     readonly paymentMethod: "bank_transfer" | "cash";
     readonly paymentReference: string | null;
+    readonly reversalDate: string | null;
     readonly reversalOfSettlementNumber: string | null;
     readonly reversalReason: string | null;
+    readonly reversedBy: string | null;
     readonly reversedBySettlementNumber: string | null;
     readonly settlementNumber: string;
     readonly sourceBank: { readonly accountName: string; readonly bankName: string } | null;
@@ -1341,6 +1410,7 @@ export class TraderSettlementService {
         businessDate: string;
         confirmedBy: string;
         createdBy: string;
+        moneySentAt: string | null;
         paymentMethod: "bank_transfer" | "cash" | null;
         paymentReference: string | null;
         reversalOfSettlementNumber: string | null;
@@ -1355,6 +1425,7 @@ export class TraderSettlementService {
                s.business_date::text as "businessDate", t.name_en as "traderName",
                coalesce(creator.username, 'Legacy/Unknown') as "createdBy",
                coalesce(confirmer.username, 'Legacy/Unknown') as "confirmedBy",
+               s.confirmed_at::text as "moneySentAt",
                p.payment_method as "paymentMethod", p.bank_reference as "paymentReference",
                cb.bank_name as "sourceBankName", cb.account_name as "sourceAccountName",
                p.trader_bank_account_snapshot ->> 'bankName' as "beneficiaryBankName",
@@ -1414,16 +1485,24 @@ export class TraderSettlementService {
     ).rows[0];
     // `reverse()` records the reason against the ORIGINAL settlement's own
     // audit trail (subject_id = the settlement that was reversed), so this
-    // only resolves when the record being viewed is that original.
+    // only resolves when the record being viewed is that original. Reversal
+    // date and actor are read from the same append-only audit_events row —
+    // occurred_at and actor_account_id already exist there, so no new table
+    // or column is needed and no historical row is rewritten.
     const reversal =
       row.reversedBySettlementNumber === null
         ? undefined
         : (
-            await sql<{ reason: string | null }>`
-              select after_data ->> 'reason' as reason from audit_events
-               where company_id = ${companyId}::uuid and subject_type = 'trader_settlement'
-                 and subject_id = ${settlementId} and action = 'trader_settlement.reverse'
-               order by occurred_at desc limit 1
+            await sql<{ reason: string | null; reversalDate: string; reversedBy: string }>`
+              select ae.after_data ->> 'reason' as reason,
+                     ae.occurred_at::text as "reversalDate",
+                     coalesce(actor.username, 'Legacy/Unknown') as "reversedBy"
+                from audit_events ae
+                left join accounts actor
+                  on actor.id = ae.actor_account_id and actor.company_id = ae.company_id
+               where ae.company_id = ${companyId}::uuid and ae.subject_type = 'trader_settlement'
+                 and ae.subject_id = ${settlementId} and ae.action = 'trader_settlement.reverse'
+               order by ae.occurred_at desc limit 1
             `.execute(this.database)
           ).rows[0];
     return {
@@ -1443,12 +1522,15 @@ export class TraderSettlementService {
       moneyReceivedDate: receipt?.occurredAt ?? null,
       moneyReceivedNotes: receipt?.notes ?? null,
       moneyReceivedReference: receipt?.reference ?? null,
+      moneySentAt: row.moneySentAt,
       notes: created?.notes ?? null,
       paymentDate: row.businessDate,
       paymentMethod: row.paymentMethod ?? "cash",
       paymentReference: row.paymentReference,
+      reversalDate: reversal?.reversalDate ?? null,
       reversalOfSettlementNumber: row.reversalOfSettlementNumber,
       reversalReason: reversal?.reason ?? null,
+      reversedBy: reversal?.reversedBy ?? null,
       reversedBySettlementNumber: row.reversedBySettlementNumber,
       settlementNumber: row.settlementNumber,
       sourceBank:

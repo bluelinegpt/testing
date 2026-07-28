@@ -138,7 +138,12 @@ export function AdministrationWorkspace({
           <DashboardWorkspace
             api={api}
             onDrillDown={(target: DashboardDrillDown) => {
-              setOperationsView(target);
+              // Trader Settlements now lives in its own workspace outside the
+              // OperationsView tab set; this embedded shell has no equivalent
+              // tab to drill into, so those two targets fall back to Orders.
+              setOperationsView(
+                target === "settlements" || target === "traders" ? "orders" : target,
+              );
               setView("operations");
             }}
           />
