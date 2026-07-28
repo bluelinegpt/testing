@@ -1101,3 +1101,256 @@ export class TraderSettlementListQueryDto extends TraderSettlementFilterDto {
 
 // Summary-cards endpoint (§16): no pagination, same filter vocabulary as the list.
 export class TraderSettlementSummaryQueryDto extends TraderSettlementFilterDto {}
+
+// ---------------------------------------------------------------------------
+// Trader Receivable (Collect Money from Trader) — the reverse money-flow
+// direction from Trader Settlement. Kept fully separate: its own page-size
+// list, status/source-type domains, and DTOs, none shared with Trader
+// Settlement, Money Sent/Received, or Driver Collections.
+// ---------------------------------------------------------------------------
+
+export const traderReceivablePageSizes = [25, 50, 100] as const;
+
+const traderReceivableSourceTypes = [
+  "manual_adjustment",
+  "trader_penalty",
+  "overpayment_recovery",
+  "refund_due",
+  "service_charge",
+  "damaged_or_lost_shipment_recovery",
+  "other",
+] as const;
+
+const traderReceivableStatuses = [
+  "outstanding",
+  "partially_collected",
+  "collected",
+  "cancelled",
+  "reversed",
+] as const;
+
+const traderCollectionHeaderStatuses = ["confirmed", "reversed", "all"] as const;
+const traderReceivableEligibleSorts = ["businessDate", "receivableNumber", "outstandingAmount"] as const;
+const traderCollectionListSorts = ["paymentDate", "collectionNumber"] as const;
+
+export class CreateTraderReceivableDto {
+  @IsUUID()
+  public readonly traderId!: string;
+
+  @IsIn(traderReceivableSourceTypes)
+  public readonly sourceType!: (typeof traderReceivableSourceTypes)[number];
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(160)
+  public readonly sourceReference?: string;
+
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  public readonly businessDate!: string;
+
+  @IsNumber()
+  @Min(0.01)
+  public readonly amountDue!: number;
+
+  @IsString()
+  @MinLength(1)
+  @MaxLength(500)
+  @TrimText()
+  public readonly reason!: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  public readonly notes?: string;
+}
+
+export class CancelTraderReceivableDto {
+  @IsString()
+  @MinLength(1)
+  @MaxLength(500)
+  @TrimText()
+  public readonly reason!: string;
+}
+
+export class TraderReceivableEligibleQueryDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(1)
+  public readonly page?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsIn(traderReceivablePageSizes)
+  public readonly pageSize?: (typeof traderReceivablePageSizes)[number];
+
+  @IsOptional()
+  @IsIn(sortDirections)
+  public readonly sortDirection?: (typeof sortDirections)[number];
+
+  @IsOptional()
+  @IsIn(traderReceivableEligibleSorts)
+  public readonly sortBy?: (typeof traderReceivableEligibleSorts)[number];
+
+  @IsOptional()
+  @IsUUID()
+  public readonly traderId?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(160)
+  public readonly receivableNumber?: string;
+
+  @IsOptional()
+  @IsIn(traderReceivableSourceTypes)
+  public readonly sourceType?: (typeof traderReceivableSourceTypes)[number];
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(160)
+  public readonly sourceReference?: string;
+
+  @IsOptional()
+  @IsIn(traderReceivableStatuses)
+  public readonly status?: (typeof traderReceivableStatuses)[number];
+
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  public readonly businessDateFrom?: string;
+
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  public readonly businessDateTo?: string;
+
+  @IsOptional()
+  @Type(() => Boolean)
+  @IsBoolean()
+  public readonly outstandingOnly?: boolean;
+}
+
+// Oldest-first allocation proposal: read-only, writes nothing.
+export class ProposeTraderReceivableAllocationDto {
+  @IsUUID()
+  public readonly traderId!: string;
+
+  @IsNumber()
+  @Min(0.01)
+  public readonly amount!: number;
+}
+
+export class TraderCollectionAllocationLineDto {
+  @IsUUID()
+  public readonly receivableId!: string;
+
+  // Zero-value rows are accepted at the DTO level and filtered out by the
+  // service before writing, matching the Trader Settlement allocation shape.
+  @IsNumber()
+  @Min(0)
+  public readonly amount!: number;
+}
+
+export class CreateTraderCollectionDto {
+  @IsUUID()
+  public readonly traderId!: string;
+
+  @IsNumber()
+  @Min(0.01)
+  public readonly amountReceived!: number;
+
+  @IsArray()
+  @ArrayMaxSize(500)
+  @ValidateNested({ each: true })
+  @Type(() => TraderCollectionAllocationLineDto)
+  public readonly allocations!: readonly TraderCollectionAllocationLineDto[];
+
+  @IsOptional()
+  @IsIn(paymentMethods)
+  public readonly paymentMethod?: (typeof paymentMethods)[number];
+
+  @IsOptional()
+  @IsUUID()
+  public readonly bankAccountId?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  public readonly paymentReference?: string;
+
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  public readonly paymentDate?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  public readonly notes?: string;
+}
+
+export class ReverseTraderCollectionDto {
+  @IsString()
+  @MinLength(1)
+  @MaxLength(500)
+  @TrimText()
+  public readonly reason!: string;
+}
+
+export class TraderCollectionFilterDto {
+  @IsOptional()
+  @IsUUID()
+  public readonly traderId?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(160)
+  public readonly collectionNumber?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(160)
+  public readonly receivableNumber?: string;
+
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  public readonly paymentDateFrom?: string;
+
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  public readonly paymentDateTo?: string;
+
+  @IsOptional()
+  @IsIn(paymentMethods)
+  public readonly paymentMethod?: (typeof paymentMethods)[number];
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  public readonly paymentReference?: string;
+
+  @IsOptional()
+  @IsIn(traderCollectionHeaderStatuses)
+  public readonly status?: (typeof traderCollectionHeaderStatuses)[number];
+}
+
+export class TraderCollectionListQueryDto extends TraderCollectionFilterDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(1)
+  public readonly page?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsIn(traderReceivablePageSizes)
+  public readonly pageSize?: (typeof traderReceivablePageSizes)[number];
+
+  @IsOptional()
+  @IsIn(sortDirections)
+  public readonly sortDirection?: (typeof sortDirections)[number];
+
+  @IsOptional()
+  @IsIn(traderCollectionListSorts)
+  public readonly sortBy?: (typeof traderCollectionListSorts)[number];
+}
+
+// Summary-cards endpoint: no pagination, same filter vocabulary as the list.
+export class TraderCollectionSummaryQueryDto extends TraderCollectionFilterDto {}

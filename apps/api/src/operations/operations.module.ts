@@ -14,11 +14,18 @@ import { DriverShipmentManifestService } from "./driver-shipment-manifest.servic
 import { OperationsHistoryWriter } from "./operations-history.writer.js";
 import { OperationsService } from "./operations.service.js";
 import { OrdersWorkflowService } from "./orders-workflow.service.js";
+import { TraderReceivableController } from "./trader-receivable.controller.js";
+import { TraderReceivableService } from "./trader-receivable.service.js";
 import { TraderSettlementService } from "./trader-settlement.service.js";
 
 @Module({
   imports: [AuthenticationModule, CompanyProfileModule],
-  controllers: [OperationsController, PortalController, PublicTrackingController],
+  controllers: [
+    OperationsController,
+    PortalController,
+    PublicTrackingController,
+    TraderReceivableController,
+  ],
   providers: [
     DriverCashReconciliationService,
     DriverCollectionPdfService,
@@ -27,6 +34,7 @@ import { TraderSettlementService } from "./trader-settlement.service.js";
     OperationsService,
     OrdersWorkflowService,
     PasswordHasher,
+    TraderReceivableService,
     TraderSettlementService,
   ],
 })
