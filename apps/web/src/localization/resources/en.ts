@@ -1255,6 +1255,8 @@ export const englishTranslations = {
     stepReview: "Review",
     searchTraders: "Search Traders",
     noTraders: "No Traders found.",
+    traderBalanceDue: "AED {{amount}} due",
+    noTradersWithBalance: "No Traders currently have an outstanding payable balance.",
     changeTraderWarning:
       "Changing the Trader will discard the allocations you have already edited. Continue?",
     // Eligible Orders

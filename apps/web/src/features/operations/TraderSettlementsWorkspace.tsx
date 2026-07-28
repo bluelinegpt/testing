@@ -1050,11 +1050,19 @@ function NewSettlementDialog({
     if (requestError !== undefined) setPdfError(message(requestError, t("traderSettlements.pdfGenerationFailed")));
   };
 
-  const filteredTraders = traders.filter((row) =>
-    traderSearch.trim() === ""
-      ? true
-      : `${row.name} ${row.code}`.toLowerCase().includes(traderSearch.trim().toLowerCase()),
-  );
+  // Money Sent to Trader only ever pays down a positive balance (the Company
+  // owes the Trader) — a zero balance has nothing to settle, and a negative
+  // balance means the Trader owes the Company, which is a different workflow
+  // (Trader receivable / Collect Money from Trader, not yet built) and must
+  // never appear here as something payable.
+  const filteredTraders = traders
+    .filter((row) => Number(row.unsettledNetPayable) > 0)
+    .filter((row) =>
+      traderSearch.trim() === ""
+        ? true
+        : `${row.name} ${row.code}`.toLowerCase().includes(traderSearch.trim().toLowerCase()),
+    )
+    .sort((left, right) => Number(right.unsettledNetPayable) - Number(left.unsettledNetPayable));
 
   return (
     <Modal
@@ -1162,12 +1170,15 @@ function NewSettlementDialog({
                   {filteredTraders.map((option) => (
                     <li key={option.id}>
                       <button onClick={() => chooseTrader(option)} type="button">
-                        {option.name} — {money(option.unsettledNetPayable)}
+                        {option.name} —{" "}
+                        {t("traderSettlements.traderBalanceDue", {
+                          amount: money(option.unsettledNetPayable),
+                        })}
                       </button>
                     </li>
                   ))}
                   {filteredTraders.length === 0 ? (
-                    <li className="empty-state">{t("traderSettlements.noTraders")}</li>
+                    <li className="empty-state">{t("traderSettlements.noTradersWithBalance")}</li>
                   ) : null}
                 </ul>
               </>

@@ -1239,6 +1239,8 @@ export const arabicTranslations = {
     stepReview: "المراجعة",
     searchTraders: "بحث عن التجار",
     noTraders: "لم يتم العثور على تجار.",
+    traderBalanceDue: "مستحق {{amount}} درهم",
+    noTradersWithBalance: "لا يوجد حالياً أي مبالغ مستحقة الدفع للتجار.",
     changeTraderWarning: "تغيير التاجر سيؤدي لفقدان التوزيعات التي عدّلتها. هل تريد المتابعة؟",
     // Eligible Orders
     columnOriginalAmountDue: "المبلغ الأصلي المستحق للتاجر",
