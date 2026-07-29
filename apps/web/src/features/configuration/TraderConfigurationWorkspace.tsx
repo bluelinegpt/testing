@@ -565,11 +565,15 @@ export function TraderForm({
   detail,
   onClose,
   onSaved,
+  primaryLabel,
+  title,
 }: {
   api: ApiClient;
   detail?: Detail;
   onClose: () => void;
   onSaved: (created?: Record<string, unknown>) => void;
+  primaryLabel?: string;
+  title?: string;
 }) {
   const { t } = useTranslation();
   const [pickupArea, setPickupArea] = useState<CompanyArea | undefined>();
@@ -637,7 +641,7 @@ export function TraderForm({
       className="modal-wide trader-modal"
       closeLabel={t("common.close")}
       onRequestClose={onClose}
-      title={detail ? t("traderConfig.edit") : t("traderConfig.create")}
+      title={title ?? (detail ? t("traderConfig.edit") : t("traderConfig.create"))}
       titleId="trader-form-title"
     >
       <form onSubmit={(e) => void submit(e)}>
@@ -724,7 +728,7 @@ export function TraderForm({
             {t("common.cancel")}
           </button>
           <button className="button button-primary" disabled={saving} type="submit">
-            {saving ? t("common.saving") : t("common.save")}
+            {saving ? t("common.saving") : (primaryLabel ?? t("common.save"))}
           </button>
         </div>
       </form>
@@ -737,18 +741,22 @@ export function TraderForm({
  * is an Emirate default and "All Emirates" is the single global (flat) price.
  * Editing keeps the scope fixed and only changes the fee and reason.
  */
-function PricingDialog({
+export function PricingDialog({
   api,
   editing,
   trader,
   onClose,
   onSaved,
+  primaryLabel,
+  title,
 }: {
   api: ApiClient;
   editing?: PricingRow | undefined;
-  trader: Detail;
+  trader: Pick<Detail, "code" | "id" | "name">;
   onClose: () => void;
   onSaved: () => void;
+  primaryLabel?: string;
+  title?: string;
 }) {
   const { i18n, t } = useTranslation();
   const locale = normalizeLocale(i18n.resolvedLanguage);
@@ -821,7 +829,7 @@ function PricingDialog({
       className="modal-small"
       closeLabel={t("common.close")}
       onRequestClose={onClose}
-      title={isEdit ? t("traderConfig.editPricing") : t("traderConfig.addPricing")}
+      title={title ?? (isEdit ? t("traderConfig.editPricing") : t("traderConfig.addPricing"))}
       titleId="pricing-title"
     >
       <form className="form-grid-single" onSubmit={(event) => void submit(event)}>
@@ -899,7 +907,7 @@ function PricingDialog({
             {t("common.cancel")}
           </button>
           <button className="button button-primary" disabled={saving} type="submit">
-            {saving ? t("common.working") : t("common.save")}
+            {saving ? t("common.working") : (primaryLabel ?? t("common.save"))}
           </button>
         </div>
       </form>

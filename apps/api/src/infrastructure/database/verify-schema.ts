@@ -200,7 +200,7 @@ const expectedIndexes = [
   "company_users_company_email_unique",
   "roles_company_name_unique",
   "employees_company_user_unique",
-  "orders_serial_number_normalized_unique",
+  "orders_daily_serial_number_unique",
   "orders_reference_number_normalized_unique",
   "accounts_company_normalized_username_unique",
   "accounts_platform_normalized_username_unique",

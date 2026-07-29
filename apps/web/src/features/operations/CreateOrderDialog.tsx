@@ -16,7 +16,10 @@ import { Modal } from "../../components/Modal.js";
 import { isUaeMobile } from "../../domain/uae-mobile.js";
 import { SearchCombobox } from "../../components/SearchCombobox.js";
 import { AreaSelector } from "../configuration/AreaSelector.js";
-import { TraderForm } from "../configuration/TraderConfigurationWorkspace.js";
+import {
+  PricingDialog,
+  TraderForm,
+} from "../configuration/TraderConfigurationWorkspace.js";
 import { CompanyBrandingContext } from "../../app/CompanyBrandingContext.js";
 import { formatCurrency } from "../../localization/formatters.js";
 import { normalizeLocale } from "../../localization/locale.js";
@@ -45,6 +48,7 @@ export function CreateOrderDialog({
   const branding = useContext(CompanyBrandingContext);
   const textLanguage = branding?.textLanguage ?? locale;
   const canCreateArea = permissions.includes("users_roles.manage");
+  const canManageTraders = permissions.includes("users_roles.manage");
   const canOverrideFee = permissions.includes("orders.override_service_fee");
   const [trader, setTrader] = useState<OperationsTraderOption>();
   const [customer, setCustomer] = useState<CustomerOption>();
@@ -72,6 +76,11 @@ export function CreateOrderDialog({
   const [manualFee, setManualFee] = useState("");
   const [manualReason, setManualReason] = useState("");
   const [createTraderOpen, setCreateTraderOpen] = useState(false);
+  const [createdTrader, setCreatedTrader] = useState<{
+    code: string;
+    id: string;
+    name: string;
+  }>();
   const [quote, setQuote] = useState<OperationsOrderQuote>();
   const [quoteLoading, setQuoteLoading] = useState(false);
   const [quoteError, setQuoteError] = useState<string>();
@@ -281,6 +290,21 @@ export function CreateOrderDialog({
       updatedAt: "",
     });
   }, []);
+
+  const selectCreatedTrader = useCallback(
+    async (created: { code: string; id: string; name: string }) => {
+      const page = await api.get<SearchPage<OperationsTraderOption>>(
+        `operations/traders/search?search=${encodeURIComponent(created.code)}&limit=10&offset=0`,
+      );
+      const option = page.items.find((item) => item.id === created.id) ?? page.items[0];
+      if (option !== undefined) {
+        setTrader(option);
+        setOverrideEnabled(false);
+        clearServerError("trader");
+      }
+    },
+    [api],
+  );
 
   useEffect(() => {
     setIdentifierError(undefined);
@@ -530,6 +554,10 @@ export function CreateOrderDialog({
           field: "serialNumber",
           message: t("operations.serialNumberExists"),
         },
+        order_serial_already_exists_for_date: {
+          field: "serialNumber",
+          message: t("operations.serialNumberExistsForDate"),
+        },
         service_fee_override_denied: {
           field: "overrideReason",
           message: t("operations.errors.overrideDenied"),
@@ -666,15 +694,20 @@ export function CreateOrderDialog({
                         placeholder={t("operations.searchTrader")}
                         value={trader}
                       />
-                      <button
-                        aria-label={t("operations.addTrader")}
-                        className="icon-button"
-                        onClick={() => setCreateTraderOpen(true)}
-                        title={t("operations.addTrader")}
-                        type="button"
-                      >
-                        <UserPlus size={18} />
-                      </button>
+                      {canManageTraders ? (
+                        <button
+                          aria-label={t("operations.addTrader")}
+                          className="icon-button"
+                          onClick={() => {
+                            setCreatedTrader(undefined);
+                            setCreateTraderOpen(true);
+                          }}
+                          title={t("operations.addTrader")}
+                          type="button"
+                        >
+                          <UserPlus size={18} />
+                        </button>
+                      ) : null}
                     </div>
                     {errorFor("trader") === undefined ? null : (
                       <small className="field-error" id="order-trader-error" role="alert">
@@ -1281,27 +1314,44 @@ export function CreateOrderDialog({
           </div>
         )}
       </Modal>
-      {createTraderOpen ? (
+      {createTraderOpen && createdTrader === undefined ? (
         <TraderForm
           api={api}
           onClose={() => setCreateTraderOpen(false)}
           onSaved={(created) => {
-            setCreateTraderOpen(false);
             if (created === undefined) return;
-            // Return with the new Trader selected, like the Customer flow.
-            const code = String(created.code ?? "");
-            void api
-              .get<SearchPage<OperationsTraderOption>>(
-                `operations/traders/search?search=${encodeURIComponent(code)}&limit=1&offset=0`,
-              )
-              .then((page) => {
-                const option = page.items[0];
-                if (option) setTrader(option);
-              });
+            setCreatedTrader({
+              code: String(created.code ?? ""),
+              id: String(created.id ?? ""),
+              name: String(created.name ?? created.nameEn ?? ""),
+            });
           }}
+          primaryLabel={t("operations.nextSetPricing")}
+          title={t("operations.traderInformation")}
+        />
+      ) : null}
+      {createTraderOpen && createdTrader !== undefined ? (
+        <PricingDialog
+          api={api}
+          onClose={() => {
+            const created = createdTrader;
+            setCreateTraderOpen(false);
+            setCreatedTrader(undefined);
+            void selectCreatedTrader(created);
+          }}
+          onSaved={() => {
+            const created = createdTrader;
+            setCreateTraderOpen(false);
+            setCreatedTrader(undefined);
+            void selectCreatedTrader(created).then(() =>
+              setRequoteNonce((nonce) => nonce + 1),
+            );
+          }}
+          primaryLabel={t("operations.savePricingAndUseTrader")}
+          title={t("operations.pricingSetup")}
+          trader={createdTrader}
         />
       ) : null}
     </>
   );
 }
-

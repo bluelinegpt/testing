@@ -2054,11 +2054,17 @@ export class OperationsService {
       input.referenceNumber === undefined || input.referenceNumber.trim() === ""
         ? null
         : this.normalizeOrderIdentifier(input.referenceNumber);
+    // Serial Number availability is scoped to today's Business Date
+    // (`order_date`, always `current_date` at creation), matching
+    // `assertOrderIdentifiersAvailable`'s authoritative check; External
+    // Reference Number availability is intentionally left company-wide
+    // forever, unchanged.
     const result = await sql<{ referenceExists: boolean; serialExists: boolean }>`
       select
         (${serial}::text is not null and exists(
           select 1 from orders
-          where company_id=${companyId}::uuid and serial_number_normalized=${serial}
+          where company_id=${companyId}::uuid and order_date = current_date
+            and serial_number_normalized=${serial}
         )) as "serialExists",
         (${reference}::text is not null and exists(
           select 1 from orders
@@ -3528,10 +3534,16 @@ export class OperationsService {
       serialNumberNormalized: string;
     },
   ): Promise<void> {
+    // Serial Number uniqueness is scoped to the Order's own Business Date
+    // (`orders.order_date`, always `current_date` at creation — there is no
+    // separate Business Date column). `current_date` is referenced from SQL
+    // rather than computed in JS so the lock key, the duplicate check, and
+    // the eventual INSERT's own `current_date` can never disagree due to a
+    // clock or timezone mismatch between the app process and the database.
     await sql`
       select pg_advisory_xact_lock(
         hashtext(${companyId}),
-        hashtext(${"order-serial:" + input.serialNumberNormalized})
+        hashtext('order-serial:' || current_date::text || ':' || ${input.serialNumberNormalized})
       )
     `.execute(transaction);
     if (input.referenceNumberNormalized !== null) {
@@ -3542,11 +3554,13 @@ export class OperationsService {
         )
       `.execute(transaction);
     }
-    const duplicate = await sql<{ referenceExists: boolean; serialExists: boolean }>`
+    const duplicate = await sql<{ orderDate: string; referenceExists: boolean; serialExists: boolean }>`
       select
+        current_date::text as "orderDate",
         exists(
           select 1 from orders
           where company_id=${companyId}::uuid
+            and order_date = current_date
             and serial_number_normalized=${input.serialNumberNormalized}
         ) as "serialExists",
         exists(
@@ -3558,8 +3572,8 @@ export class OperationsService {
     `.execute(transaction);
     if (duplicate.rows[0]?.serialExists) {
       throw new ApplicationException(
-        "serial_number_exists",
-        `Serial Number "${input.serialNumber}" is already used`,
+        "order_serial_already_exists_for_date",
+        `Serial Number "${input.serialNumber}" already exists for ${duplicate.rows[0].orderDate}.`,
         HttpStatus.CONFLICT,
       );
     }
