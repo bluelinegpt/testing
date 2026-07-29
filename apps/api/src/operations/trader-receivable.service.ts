@@ -239,6 +239,7 @@ export interface TraderCollectionReportData {
     readonly collectionNumber: string;
     readonly company: {
       readonly hasLogo: boolean;
+      readonly logoDataUri?: string | null;
       readonly nameAr: string | null;
       readonly nameEn: string;
       readonly subtitleAr: string | null;
@@ -1171,6 +1172,15 @@ export class TraderReceivableService {
     const header = await this.collectionHeader(companyId, collectionId);
     const allocations = await this.collectionAllocations(companyId, collectionId);
     const branding = await this.companyProfile.branding();
+    const logoDataUri = branding.hasLogo
+      ? await this.companyProfile
+          .logoContent()
+          .then(
+            (logo) =>
+              `data:${logo.mediaType};base64,${logo.bytes.toString("base64")}`,
+          )
+          .catch(() => null)
+      : null;
     const generatedAt = new Intl.DateTimeFormat("en-GB", {
       day: "2-digit",
       hour: "2-digit",
@@ -1184,6 +1194,7 @@ export class TraderReceivableService {
         collectionNumber: header.collectionNumber,
         company: {
           hasLogo: branding.hasLogo,
+          logoDataUri,
           nameAr: branding.nameAr,
           nameEn: branding.nameEn,
           subtitleAr: branding.subtitleAr,

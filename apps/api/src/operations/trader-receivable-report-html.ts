@@ -305,7 +305,9 @@ export function buildTraderPaymentReceiptHtml(
   const reportHeader =
     `<header class="report-header">` +
     `<div class="company-block">` +
-    (header.company.hasLogo ? `<div class="logo-placeholder"></div>` : "") +
+    (header.company.logoDataUri == null
+      ? ""
+      : `<img class="company-logo" alt="" src="${escapeHtml(header.company.logoDataUri)}">`) +
     `<div class="company-identity">` +
     `<div class="company-name">${escapeHtml(header.company.nameEn)}` +
     (header.company.nameAr === null ? "" : ` / ${escapeHtml(header.company.nameAr)}`) +
@@ -378,7 +380,7 @@ export function buildTraderPaymentReceiptHtml(
     body { font-family: "Segoe UI", Tahoma, Arial, sans-serif; color: #111; margin: 0; font-size: 11px; }
     .report-header { border-bottom: 2px solid #333; margin-bottom: 10px; padding-bottom: 8px; }
     .company-block { display: flex; align-items: center; gap: 10px; }
-    .logo-placeholder { width: 40px; height: 40px; border: 1px solid #ccc; border-radius: 4px; }
+    .company-logo { width: 52px; height: 52px; object-fit: contain; }
     .company-name { font-size: 16px; font-weight: 800; }
     .company-subtitle, .company-telephone { font-size: 11px; color: #444; }
     .report-title { font-size: 18px; margin: 8px 0 6px; }
