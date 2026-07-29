@@ -54,6 +54,7 @@ const routeTitles: Readonly<Record<string, string>> = {
   "/orders/create": "nav.createOrder",
   "/orders/import": "nav.importOrders",
   "/trader-settlements": "nav.traderSettlements",
+  "/trader-receivables": "nav.traderReceivables",
   "/drivers": "nav.driversList",
   "/cash-management": "nav.cashManagement",
   "/reports": "nav.reports",
@@ -118,7 +119,10 @@ export function CompanyAppShell({
             icon: Store,
             id: "traders",
             label: t("nav.traders"),
-            items: [{ label: t("nav.traderSettlements"), path: "/trader-settlements" }],
+            items: [
+              { label: t("nav.traderSettlements"), path: "/trader-settlements" },
+              { label: t("nav.traderReceivables"), path: "/trader-receivables" },
+            ],
           },
           {
             icon: Truck,
@@ -400,7 +404,7 @@ function NavigationGroup({
 
 function groupForPath(pathname: string): MenuGroupId | undefined {
   if (pathname.startsWith("/orders")) return "orders";
-  if (pathname === "/trader-settlements") return "traders";
+  if (pathname === "/trader-settlements" || pathname === "/trader-receivables") return "traders";
   if (pathname === "/drivers" || pathname === "/driver-cash-reconciliation") return "drivers";
   if (pathname === "/cash-management") return "finance";
   if (pathname.startsWith("/configuration")) return "configuration";

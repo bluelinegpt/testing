@@ -204,6 +204,7 @@ export const arabicTranslations = {
     reports: "التقارير",
     roles: "الأدوار والصلاحيات",
     supportCases: "حالات الدعم",
+    traderReceivables: "مبالغ مستحقة من التجار",
     traderSettlements: "تسويات التجار",
     traders: "التجار",
     tradersList: "جميع التجار",
@@ -1172,6 +1173,209 @@ export const arabicTranslations = {
     passwordPolicy: "استخدم 8 أحرف على الأقل ولا تعد استخدام كلمة المرور الحالية.",
     changePassword: "تغيير كلمة المرور",
     passwordChangeHelp: "اختر كلمة مرور جديدة قبل متابعة استخدام BluelineGPT.",
+  },
+  traderReceivables: {
+    // Page
+    pageTitle: "مبالغ مستحقة من التجار",
+    pageSubtitle: "تتبع وتحصيل المبالغ المستحقة للشركة من التجار.",
+    permissionDenied: "لا تملك صلاحية عرض المبالغ المستحقة من التجار.",
+    detailLoadFailed: "تعذر تحميل هذه المعلومات. حاول مرة أخرى.",
+
+    // Tabs
+    tabOutstandingReceivables: "المبالغ المستحقة",
+    tabCollections: "التحصيلات",
+
+    // Header actions
+    newReceivable: "مستحق جديد",
+    collectMoney: "تحصيل مبلغ من التاجر",
+
+    // Summary cards
+    summaryTotalOutstanding: "إجمالي المبالغ المستحقة",
+    summaryPartiallyCollected: "المبلغ المحصل جزئياً",
+    summaryCollectedThisPeriod: "المحصل خلال هذه الفترة",
+    summaryTotalRemainingDue: "إجمالي الرصيد المتبقي",
+    summaryOutstandingCount: "عدد المبالغ المستحقة",
+    summaryTradersOutstanding: "عدد التجار المدينين",
+    summaryReversedCollections: "التحصيلات المعكوسة",
+
+    // Shared columns
+    columnReceivableNumber: "رقم المستحق",
+    columnTrader: "التاجر",
+    columnBusinessDate: "تاريخ العملية",
+    columnSourceType: "نوع المصدر",
+    columnSourceReference: "المرجع",
+    columnReason: "السبب",
+    columnOriginalAmountDue: "المبلغ المستحق الأصلي",
+    columnPreviouslyCollected: "محصل سابقاً",
+    columnOutstandingAmount: "المبلغ المتبقي",
+    columnStatus: "الحالة",
+    columnCollectionNumber: "رقم التحصيل",
+    columnPaymentDate: "تاريخ الدفعة",
+    columnPaymentMethod: "طريقة الدفع",
+    columnPaymentReference: "المرجع البنكي",
+    columnReceivables: "المبالغ المستحقة",
+    columnAmountReceived: "المبلغ المستلم",
+    columnReceivedBy: "استلمه",
+    columnReversed: "معكوس",
+
+    // Receivable filters
+    filterTrader: "التاجر",
+    filterReceivableNumber: "رقم المستحق",
+    filterSourceType: "نوع المصدر",
+    filterSourceReference: "المرجع",
+    filterStatus: "الحالة",
+    filterBusinessDateFrom: "تاريخ العملية من",
+    filterBusinessDateTo: "تاريخ العملية إلى",
+    filterOutstandingOnly: "المستحقة فقط",
+    clearFilters: "مسح الفلاتر",
+
+    // Collection filters
+    filterCollectionNumber: "رقم التحصيل",
+    filterPaymentDateFrom: "تاريخ الدفعة من",
+    filterPaymentDateTo: "تاريخ الدفعة إلى",
+    filterPaymentMethod: "طريقة الدفع",
+    filterPaymentReference: "المرجع البنكي",
+    filterCollectionStatus: "حالة التحصيل",
+
+    // Row actions / empty states
+    actionView: "عرض",
+    actionCollectMoney: "تحصيل مبلغ",
+    actionCancel: "إلغاء",
+    actionPreviewReceipt: "معاينة الإيصال",
+    actionPrint: "طباعة",
+    actionDownloadPdf: "تنزيل PDF",
+    actionReverse: "عكس",
+    noReceivables: "لا توجد مبالغ مستحقة من التجار.",
+    noCollections: "لا توجد تحصيلات من التجار.",
+
+    // Statuses
+    statusAll: "الكل",
+    statusOutstanding: "مستحق",
+    statusPartiallyCollected: "محصل جزئياً",
+    statusCollected: "محصل بالكامل",
+    statusCancelled: "ملغى",
+    statusReversed: "معكوس",
+    statusConfirmed: "مؤكد",
+
+    // Payment methods
+    paymentMethodCash: "نقدي",
+    paymentMethodBankTransfer: "تحويل بنكي",
+
+    // Source types
+    sourceTypeManualAdjustment: "تسوية يدوية",
+    sourceTypeTraderPenalty: "غرامة تاجر",
+    sourceTypeOverpaymentRecovery: "استرداد دفعة زائدة",
+    sourceTypeRefundDue: "مبلغ مسترد مستحق",
+    sourceTypeServiceCharge: "رسوم خدمة",
+    sourceTypeDamagedOrLostShipmentRecovery: "استرداد شحنة تالفة أو مفقودة",
+    sourceTypeOther: "أخرى",
+
+    // New Receivable dialog
+    fieldTrader: "التاجر",
+    fieldSourceType: "نوع المصدر",
+    fieldSourceReference: "المرجع",
+    fieldBusinessDate: "تاريخ العملية",
+    fieldAmountDue: "المبلغ المستحق",
+    fieldReason: "السبب",
+    fieldNotes: "ملاحظات",
+    selectSourceType: "اختر نوع المصدر",
+    confirmCreateReceivable: "إنشاء مستحق من التاجر",
+    receivableCreated: "تم إنشاء المستحق {{number}}.",
+    viewReceivable: "عرض المستحق",
+    receivableFailed: "تعذر حفظ المستحق من التاجر. حاول مرة أخرى.",
+
+    // Cancel dialog
+    cancelReceivableTitle: "إلغاء مستحق من التاجر",
+    cancelWarning: "بعد الإلغاء لن يكون هذا المستحق قابلاً للتحصيل بعد الآن. لا يمكن التراجع عن هذا الإجراء.",
+    confirmCancel: "إلغاء المستحق",
+    receivableCancelled: "تم إلغاء المستحق {{number}}.",
+
+    // Collect Money from Trader workflow
+    collectMoneyTitle: "تحصيل مبلغ من التاجر",
+    stepSelectTrader: "اختيار التاجر",
+    stepOutstandingReceivables: "المبالغ المستحقة",
+    stepAmountAllocation: "المبلغ والتوزيع",
+    stepPaymentDetails: "تفاصيل الدفع",
+    stepReview: "المراجعة والتأكيد",
+    searchTraders: "بحث عن تاجر",
+    traderBalanceDue: "مستحق عليه {{amount}} درهم",
+    noTradersWithBalance: "لا يوجد حالياً أي مبالغ مستحقة على التجار للشركة.",
+    changeTraderWarning: "سيؤدي تغيير التاجر إلى مسح التوزيع الحالي. هل تريد المتابعة؟",
+    noEligibleReceivables: "لا توجد مبالغ مستحقة على هذا التاجر.",
+
+    // Amount and allocation
+    fieldAmountReceived: "المبلغ المستلم",
+    allocationExceedsOutstanding: "بعض المبالغ الموزعة تتجاوز الرصيد المتبقي للمستحق.",
+    allocationDuplicateReceivable: "لا يمكن توزيع المبلغ على نفس المستحق مرتين.",
+    allocationNegative: "لا يمكن أن يكون المبلغ الموزع سالباً.",
+    allocationTotalMismatch: "يجب أن يساوي إجمالي التوزيع المبلغ المستلم تماماً.",
+    allocationAboveTotalOutstanding: "لا يمكن أن يتجاوز المبلغ المستلم إجمالي المبالغ المستحقة على التاجر.",
+    columnOutstandingBefore: "الرصيد قبل التحصيل",
+    columnProposedAmount: "المبلغ المقترح",
+    columnRemainingAfter: "الرصيد بعد التحصيل",
+    allocationAmountReceived: "المبلغ المستلم",
+    allocationAllocatedAmount: "المبلغ الموزع",
+    allocationUnallocatedAmount: "المبلغ غير الموزع",
+    allocationReceivableCount: "عدد المبالغ المستحقة",
+    allocationRemainingDue: "الرصيد المتبقي بعد التحصيل",
+
+    // Payment details
+    fieldPaymentDate: "تاريخ الدفعة",
+    fieldPaymentMethod: "طريقة الدفع",
+    fieldCompanyBankAccount: "حساب الشركة البنكي",
+    fieldPaymentReference: "المرجع البنكي",
+    selectBankAccount: "اختر الحساب البنكي",
+    noActiveBankAccounts: "لا توجد حسابات بنكية نشطة للشركة.",
+
+    // Review / confirm
+    reviewTrader: "التاجر",
+    reviewAmountReceived: "المبلغ المستلم",
+    reviewPaymentDate: "تاريخ الدفعة",
+    reviewPaymentMethod: "طريقة الدفع",
+    reviewPaymentReference: "المرجع البنكي",
+    reviewCompanyBankAccount: "حساب الشركة البنكي",
+    reviewNotes: "ملاحظات",
+    reviewReceivableCount: "عدد المبالغ المستحقة",
+    reviewTotalRemainingDue: "إجمالي الرصيد المتبقي",
+    confirmMoneyReceived: "تأكيد استلام المبلغ من التاجر",
+    collectionFailed: "تعذر تأكيد التحصيل من التاجر. حاول مرة أخرى.",
+
+    // Success screen
+    collectionConfirmed: "تم تأكيد التحصيل {{number}}.",
+    viewCollection: "عرض التحصيل",
+
+    // Receivable detail
+    receivableDetailTitle: "تفاصيل المستحق من التاجر",
+    createdBy: "أنشأه",
+    createdDate: "تاريخ الإنشاء",
+    cancelledDate: "تاريخ الإلغاء",
+    cancelledReason: "سبب الإلغاء",
+    collectionHistory: "سجل التحصيلات",
+    noCollectionHistory: "لم يتم تطبيق أي تحصيل على هذا المستحق بعد.",
+
+    // Collection detail
+    collectionDetailTitle: "تفاصيل تحصيل التاجر",
+    notes: "ملاحظات",
+    reversalDate: "تاريخ العكس",
+    reversalReason: "سبب العكس",
+    reversedByUser: "تم العكس بواسطة",
+    numberOfReceivables: "عدد المبالغ المستحقة",
+    totalOriginalAmountDue: "إجمالي المبلغ المستحق الأصلي",
+    amountCollectedNow: "المبلغ المحصل الآن",
+    receivableStatus: "حالة المستحق",
+
+    // Reversal
+    reverseCollectionTitle: "عكس تحصيل من التاجر",
+    reverseWarning: "سيؤدي عكس هذا التحصيل إلى استعادة الرصيد المستحق على كل مستحق تم تخفيضه. لا يمكن التراجع عن هذا الإجراء.",
+    reverseReasonRequired: "يلزم إدخال سبب لعكس هذا التحصيل.",
+    collectionReversed: "تم عكس تحصيل التاجر بنجاح.",
+
+    // PDF
+    pdfGenerationFailed: "تعذر إنشاء الإيصال. حاول مرة أخرى.",
+
+    // Errors
+    traderNotFound: "التاجر غير موجود.",
+    submissionInProgress: "جارٍ معالجة هذا الطلب بالفعل.",
   },
   traderSettlements: {
     // Page

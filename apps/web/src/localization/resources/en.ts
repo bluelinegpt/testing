@@ -208,6 +208,7 @@ export const englishTranslations = {
     reports: "Reports",
     roles: "Roles and permissions",
     supportCases: "Support cases",
+    traderReceivables: "Trader Receivables",
     traderSettlements: "Trader settlements",
     traders: "Traders",
     tradersList: "All traders",
@@ -1188,6 +1189,209 @@ export const englishTranslations = {
     passwordPolicy: "Use at least 8 characters and do not reuse your current password.",
     changePassword: "Change Password",
     passwordChangeHelp: "Choose a new password before continuing to BluelineGPT.",
+  },
+  traderReceivables: {
+    // Page
+    pageTitle: "Trader Receivables",
+    pageSubtitle: "Track and collect money owed to the Company by Traders.",
+    permissionDenied: "You do not have permission to view Trader Receivables.",
+    detailLoadFailed: "Could not load this information. Try again.",
+
+    // Tabs
+    tabOutstandingReceivables: "Outstanding Receivables",
+    tabCollections: "Collections",
+
+    // Header actions
+    newReceivable: "New Receivable",
+    collectMoney: "Collect Money from Trader",
+
+    // Summary cards
+    summaryTotalOutstanding: "Total Outstanding Receivables",
+    summaryPartiallyCollected: "Partially Collected Amount",
+    summaryCollectedThisPeriod: "Collected This Period",
+    summaryTotalRemainingDue: "Total Remaining Due",
+    summaryOutstandingCount: "Outstanding Receivables",
+    summaryTradersOutstanding: "Traders with Outstanding Receivables",
+    summaryReversedCollections: "Reversed Collections",
+
+    // Shared columns
+    columnReceivableNumber: "Receivable Number",
+    columnTrader: "Trader",
+    columnBusinessDate: "Business Date",
+    columnSourceType: "Source Type",
+    columnSourceReference: "Source Reference",
+    columnReason: "Reason",
+    columnOriginalAmountDue: "Original Amount Due",
+    columnPreviouslyCollected: "Previously Collected",
+    columnOutstandingAmount: "Outstanding Amount",
+    columnStatus: "Status",
+    columnCollectionNumber: "Collection Number",
+    columnPaymentDate: "Payment Date",
+    columnPaymentMethod: "Payment Method",
+    columnPaymentReference: "Payment Reference",
+    columnReceivables: "Receivables",
+    columnAmountReceived: "Amount Received",
+    columnReceivedBy: "Received By",
+    columnReversed: "Reversed",
+
+    // Receivable filters
+    filterTrader: "Trader",
+    filterReceivableNumber: "Receivable Number",
+    filterSourceType: "Source Type",
+    filterSourceReference: "Source Reference",
+    filterStatus: "Status",
+    filterBusinessDateFrom: "Business Date From",
+    filterBusinessDateTo: "Business Date To",
+    filterOutstandingOnly: "Outstanding only",
+    clearFilters: "Clear filters",
+
+    // Collection filters
+    filterCollectionNumber: "Collection Number",
+    filterPaymentDateFrom: "Payment Date From",
+    filterPaymentDateTo: "Payment Date To",
+    filterPaymentMethod: "Payment Method",
+    filterPaymentReference: "Payment Reference",
+    filterCollectionStatus: "Collection Status",
+
+    // Row actions / empty states
+    actionView: "View",
+    actionCollectMoney: "Collect Money",
+    actionCancel: "Cancel",
+    actionPreviewReceipt: "Preview Receipt",
+    actionPrint: "Print",
+    actionDownloadPdf: "Download PDF",
+    actionReverse: "Reverse",
+    noReceivables: "No Trader receivables found.",
+    noCollections: "No Trader collections found.",
+
+    // Statuses
+    statusAll: "All",
+    statusOutstanding: "Outstanding",
+    statusPartiallyCollected: "Partially Collected",
+    statusCollected: "Collected",
+    statusCancelled: "Cancelled",
+    statusReversed: "Reversed",
+    statusConfirmed: "Confirmed",
+
+    // Payment methods
+    paymentMethodCash: "Cash",
+    paymentMethodBankTransfer: "Bank Transfer",
+
+    // Source types
+    sourceTypeManualAdjustment: "Manual Adjustment",
+    sourceTypeTraderPenalty: "Trader Penalty",
+    sourceTypeOverpaymentRecovery: "Overpayment Recovery",
+    sourceTypeRefundDue: "Refund Due",
+    sourceTypeServiceCharge: "Service Charge",
+    sourceTypeDamagedOrLostShipmentRecovery: "Damaged or Lost Shipment Recovery",
+    sourceTypeOther: "Other",
+
+    // New Receivable dialog
+    fieldTrader: "Trader",
+    fieldSourceType: "Source Type",
+    fieldSourceReference: "Source Reference",
+    fieldBusinessDate: "Business Date",
+    fieldAmountDue: "Amount Due",
+    fieldReason: "Reason",
+    fieldNotes: "Notes",
+    selectSourceType: "Select source type",
+    confirmCreateReceivable: "Create Trader Receivable",
+    receivableCreated: "Trader receivable {{number}} created.",
+    viewReceivable: "View Receivable",
+    receivableFailed: "The Trader receivable could not be saved. Try again.",
+
+    // Cancel dialog
+    cancelReceivableTitle: "Cancel Trader Receivable",
+    cancelWarning: "This receivable will no longer be collectible once cancelled. This cannot be undone.",
+    confirmCancel: "Cancel Receivable",
+    receivableCancelled: "Trader receivable {{number}} cancelled.",
+
+    // Collect Money from Trader workflow
+    collectMoneyTitle: "Collect Money from Trader",
+    stepSelectTrader: "Select Trader",
+    stepOutstandingReceivables: "Outstanding Receivables",
+    stepAmountAllocation: "Amount and Allocation",
+    stepPaymentDetails: "Payment Details",
+    stepReview: "Review and Confirm",
+    searchTraders: "Search Traders",
+    traderBalanceDue: "AED {{amount}} due",
+    noTradersWithBalance: "No Traders currently owe money to the Company.",
+    changeTraderWarning: "Changing the Trader will clear the current allocation. Continue?",
+    noEligibleReceivables: "No outstanding receivables for this Trader.",
+
+    // Amount and allocation
+    fieldAmountReceived: "Amount Received",
+    allocationExceedsOutstanding: "One or more allocations exceed the receivable's outstanding balance.",
+    allocationDuplicateReceivable: "The same receivable cannot receive two allocation rows.",
+    allocationNegative: "An allocation cannot be negative.",
+    allocationTotalMismatch: "The total allocation must equal Amount Received exactly.",
+    allocationAboveTotalOutstanding: "Amount Received cannot exceed the Trader's total outstanding receivables.",
+    columnOutstandingBefore: "Outstanding Before",
+    columnProposedAmount: "Proposed Amount",
+    columnRemainingAfter: "Remaining After",
+    allocationAmountReceived: "Amount Received",
+    allocationAllocatedAmount: "Allocated Amount",
+    allocationUnallocatedAmount: "Unallocated Amount",
+    allocationReceivableCount: "Number of Receivables",
+    allocationRemainingDue: "Remaining Due After Collection",
+
+    // Payment details
+    fieldPaymentDate: "Payment Date",
+    fieldPaymentMethod: "Payment Method",
+    fieldCompanyBankAccount: "Company Bank Account",
+    fieldPaymentReference: "Payment Reference",
+    selectBankAccount: "Select bank account",
+    noActiveBankAccounts: "No active Company bank accounts.",
+
+    // Review / confirm
+    reviewTrader: "Trader",
+    reviewAmountReceived: "Amount Received",
+    reviewPaymentDate: "Payment Date",
+    reviewPaymentMethod: "Payment Method",
+    reviewPaymentReference: "Payment Reference",
+    reviewCompanyBankAccount: "Company Bank Account",
+    reviewNotes: "Notes",
+    reviewReceivableCount: "Number of Receivables",
+    reviewTotalRemainingDue: "Total Remaining Due",
+    confirmMoneyReceived: "Confirm Money Received from Trader",
+    collectionFailed: "The Trader collection could not be confirmed. Try again.",
+
+    // Success screen
+    collectionConfirmed: "Trader collection {{number}} confirmed.",
+    viewCollection: "View Collection",
+
+    // Receivable detail
+    receivableDetailTitle: "Trader Receivable Detail",
+    createdBy: "Created By",
+    createdDate: "Created Date",
+    cancelledDate: "Cancelled Date",
+    cancelledReason: "Cancellation Reason",
+    collectionHistory: "Collection History",
+    noCollectionHistory: "No collections have been applied to this receivable yet.",
+
+    // Collection detail
+    collectionDetailTitle: "Trader Collection Detail",
+    notes: "Notes",
+    reversalDate: "Reversal Date",
+    reversalReason: "Reversal Reason",
+    reversedByUser: "Reversed By",
+    numberOfReceivables: "Number of Receivables",
+    totalOriginalAmountDue: "Total Original Amount Due",
+    amountCollectedNow: "Amount Collected Now",
+    receivableStatus: "Receivable Status",
+
+    // Reversal
+    reverseCollectionTitle: "Reverse Trader Collection",
+    reverseWarning: "Reversing this collection will restore the outstanding balance on every receivable it paid down. This cannot be undone.",
+    reverseReasonRequired: "A reason is required to reverse this collection.",
+    collectionReversed: "Trader collection reversed successfully.",
+
+    // PDF
+    pdfGenerationFailed: "The receipt could not be generated. Try again.",
+
+    // Errors
+    traderNotFound: "Trader not found.",
+    submissionInProgress: "This submission is already being processed.",
   },
   traderSettlements: {
     // Page

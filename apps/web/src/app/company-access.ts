@@ -11,6 +11,7 @@ const routePermissions: Readonly<Record<string, readonly string[]>> = {
   "/orders/create": [manage, "orders.create"],
   "/orders/import": [manage, "orders.create"],
   "/trader-settlements": [manage, "settlements.create", "settlements.reverse"],
+  "/trader-receivables": [manage, "trader_receivables.create", "trader_receivables.reverse"],
   "/drivers": [manage, "orders.assign_driver", "orders.update_delivery_status"],
   "/driver-cash-reconciliation": [manage, "reconciliations.create", "reconciliations.reverse"],
   "/operations/driver-reconciliations/new": [manage, "reconciliations.create"],

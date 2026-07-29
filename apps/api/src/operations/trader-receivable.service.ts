@@ -12,6 +12,7 @@ import { IdentityContextAccessor } from "../security/identity-context.js";
 import { TenantContextAccessor } from "../tenancy/tenant-context.js";
 
 import { CompanyProfileService } from "../company-profile/company-profile.service.js";
+import { DriverCollectionPdfService } from "./driver-collection-pdf.service.js";
 import { OperationsHistoryWriter } from "./operations-history.writer.js";
 import { traderReceivablePageSizes } from "./operations.dto.js";
 import type {
@@ -25,6 +26,10 @@ import type {
   TraderCollectionSummaryQueryDto,
   TraderReceivableEligibleQueryDto,
 } from "./operations.dto.js";
+import {
+  buildTraderPaymentReceiptHtml,
+  type ReportLanguage,
+} from "./trader-receivable-report-html.js";
 
 const defaultPageSize = 25;
 const idempotencyKeyPattern = /^[A-Za-z0-9._:-]{16,128}$/;
@@ -70,6 +75,35 @@ export interface CreateTraderReceivableResult {
   readonly traderName: string;
 }
 
+export interface TraderReceivableCollectionHistoryLine {
+  readonly amountCollected: string;
+  readonly collectionDate: string;
+  readonly collectionId: string;
+  readonly collectionNumber: string;
+  readonly status: "confirmed" | "reversed";
+}
+
+export interface TraderReceivableDetail {
+  readonly amountCollected: string;
+  readonly businessDate: string;
+  readonly cancelledAt: string | null;
+  readonly cancelledReason: string | null;
+  readonly collections: readonly TraderReceivableCollectionHistoryLine[];
+  readonly createdAt: string;
+  readonly createdBy: string;
+  readonly notes: string | null;
+  readonly originalAmountDue: string;
+  readonly outstandingAmount: string;
+  readonly reason: string;
+  readonly receivableId: string;
+  readonly receivableNumber: string;
+  readonly sourceReference: string | null;
+  readonly sourceType: string;
+  readonly status: string;
+  readonly traderId: string;
+  readonly traderName: string;
+}
+
 export interface TraderReceivableEligibleRow {
   readonly businessDate: string;
   readonly id: string;
@@ -81,6 +115,7 @@ export interface TraderReceivableEligibleRow {
   readonly sourceReference: string | null;
   readonly sourceType: string;
   readonly status: string;
+  readonly traderId: string;
   readonly traderName: string;
 }
 
@@ -143,6 +178,12 @@ export interface TraderReceivableSummary {
   readonly totalOutstandingReceivables: string;
   readonly totalRemainingDue: string;
   readonly tradersWithOutstandingReceivables: number;
+}
+
+export interface TraderWithBalance {
+  readonly outstandingAmount: string;
+  readonly traderId: string;
+  readonly traderName: string;
 }
 
 interface MaskedBankSnapshot {
@@ -238,6 +279,7 @@ export class TraderReceivableService {
     @Inject(IdentityContextAccessor) private readonly identities: IdentityContextAccessor,
     @Inject(OperationsHistoryWriter) private readonly history: OperationsHistoryWriter,
     @Inject(CompanyProfileService) private readonly companyProfile: CompanyProfileService,
+    @Inject(DriverCollectionPdfService) private readonly pdf: DriverCollectionPdfService,
   ) {}
 
   /**
@@ -440,6 +482,99 @@ export class TraderReceivableService {
   }
 
   /**
+   * Full detail for one Trader receivable (§18): header, cancellation
+   * details where present, and every Collection that has ever allocated
+   * against it (including reversed ones, which restored this receivable's
+   * balance but are still shown so the operator can see the full history).
+   */
+  public async receivableDetail(receivableId: string): Promise<TraderReceivableDetail> {
+    this.assertAnyPermission("trader_receivables.create");
+    const { companyId } = this.tenants.current();
+    const row = (
+      await sql<{
+        amountCollected: string;
+        businessDate: string;
+        createdAt: string;
+        createdBy: string;
+        notes: string | null;
+        originalAmountDue: string;
+        outstandingAmount: string;
+        reason: string;
+        receivableNumber: string;
+        sourceReference: string | null;
+        sourceType: string;
+        status: string;
+        traderId: string;
+        traderName: string;
+      }>`
+        select r.receivable_number as "receivableNumber", r.trader_id as "traderId",
+               t.name_en as "traderName", r.source_type as "sourceType",
+               r.source_reference as "sourceReference", r.business_date::text as "businessDate",
+               r.original_amount_due::text as "originalAmountDue",
+               r.amount_collected::text as "amountCollected",
+               r.outstanding_amount::text as "outstandingAmount", r.status, r.reason, r.notes,
+               r.created_at::text as "createdAt",
+               coalesce(creator.username, 'Legacy/Unknown') as "createdBy"
+          from trader_receivables r
+          join traders t on t.id = r.trader_id and t.company_id = r.company_id
+          left join accounts creator
+            on creator.id = r.created_by_account_id and creator.company_id = r.company_id
+         where r.id = ${receivableId}::uuid and r.company_id = ${companyId}::uuid
+      `.execute(this.database)
+    ).rows[0];
+    if (row === undefined) {
+      throw new ApplicationException(
+        "trader_receivable_not_found",
+        "Trader receivable not found",
+        HttpStatus.NOT_FOUND,
+      );
+    }
+    const cancellation =
+      row.status !== "cancelled"
+        ? undefined
+        : (
+            await sql<{ occurredAt: string; reason: string | null }>`
+              select occurred_at::text as "occurredAt", after_data ->> 'reason' as reason
+                from audit_events
+               where company_id = ${companyId}::uuid and subject_type = 'trader_receivable'
+                 and subject_id = ${receivableId} and action = 'trader_receivable.cancel'
+               order by occurred_at desc limit 1
+            `.execute(this.database)
+          ).rows[0];
+    const collections = (
+      await sql<TraderReceivableCollectionHistoryLine>`
+        select c.id as "collectionId", c.collection_number as "collectionNumber",
+               c.payment_date::text as "collectionDate", alloc.amount_allocated::text as "amountCollected",
+               c.status
+          from trader_collection_allocations alloc
+          join trader_collections c on c.id = alloc.collection_id and c.company_id = alloc.company_id
+         where alloc.receivable_id = ${receivableId}::uuid and alloc.company_id = ${companyId}::uuid
+         order by c.created_at
+      `.execute(this.database)
+    ).rows;
+    return {
+      amountCollected: row.amountCollected,
+      businessDate: row.businessDate,
+      cancelledAt: cancellation?.occurredAt ?? null,
+      cancelledReason: cancellation?.reason ?? null,
+      collections,
+      createdAt: row.createdAt,
+      createdBy: row.createdBy,
+      notes: row.notes,
+      originalAmountDue: row.originalAmountDue,
+      outstandingAmount: row.outstandingAmount,
+      reason: row.reason,
+      receivableId,
+      receivableNumber: row.receivableNumber,
+      sourceReference: row.sourceReference,
+      sourceType: row.sourceType,
+      status: row.status,
+      traderId: row.traderId,
+      traderName: row.traderName,
+    };
+  }
+
+  /**
    * Eligible receivables (§3), paginated: always restricted server-side to
    * `outstanding` / `partially_collected` — a caller-supplied `status` filter
    * outside that pair simply narrows to zero rows rather than being trusted.
@@ -474,7 +609,8 @@ export class TraderReceivableService {
         and (${query.outstandingOnly === true} = false or r.outstanding_amount > 0)
     `;
     const result = await sql<TraderReceivableEligibleRow & { total: number }>`
-      select r.id, r.receivable_number as "receivableNumber", t.name_en as "traderName",
+      select r.id, r.receivable_number as "receivableNumber", r.trader_id as "traderId",
+             t.name_en as "traderName",
              r.business_date::text as "businessDate", r.source_type as "sourceType",
              r.source_reference as "sourceReference", r.reason,
              r.original_amount_due::text as "originalAmountDue",
@@ -1069,6 +1205,72 @@ export class TraderReceivableService {
       lines: allocations.lines,
       summary: { ...allocations.summary, notes: header.notes },
     };
+  }
+
+  /**
+   * True, downloadable PDF file for the Trader Payment Receipt. The same
+   * `reportData()` snapshot backs both the JSON detail view and this PDF,
+   * rendered from server-built HTML via the shared headless-Chromium
+   * renderer already used by the Trader Settlement Statement, the Driver
+   * Collection Report and the Driver Shipment Manifest — no second PDF
+   * engine, no PDF bytes ever stored, always regenerated from the immutable
+   * collection snapshot. Never mutates the collection it describes.
+   */
+  public async collectionPdf(
+    collectionId: string,
+    language: ReportLanguage,
+    correlationId: string,
+  ): Promise<{ bytes: Buffer; filename: string }> {
+    this.assertAnyPermission(["trader_receivables.create", "reports.export"]);
+    const { companyId } = this.tenants.current();
+    const identity = this.identities.current();
+    const data = await this.reportData(collectionId);
+    const html = buildTraderPaymentReceiptHtml(data, language);
+    const footerTemplate =
+      language === "ar"
+        ? `<div style="font-size:9px;width:100%;text-align:center;color:#666;direction:rtl;">الصفحة <span class="pageNumber"></span> من <span class="totalPages"></span></div>`
+        : `<div style="font-size:9px;width:100%;text-align:center;color:#666;">Page <span class="pageNumber"></span> of <span class="totalPages"></span></div>`;
+    const bytes = await this.pdf.renderPdf(html, footerTemplate);
+    // Safe filename: built only from the collection number, which is always
+    // the `COL-XXXXXX` shape generated by `nextReferenceNumber` — the
+    // allowlist strips anything else defensively rather than trusting that.
+    const safeNumber = data.header.collectionNumber.replaceAll(/[^A-Za-z0-9-]/g, "");
+    const filename = `Trader-Receipt-${safeNumber}.pdf`;
+    await this.history.audit(this.database, {
+      action: "trader_collection.report_pdf_generated",
+      actorId: identity.identityId,
+      after: { collectionNumber: data.header.collectionNumber, language },
+      companyId,
+      correlationId,
+      subjectId: collectionId,
+      subjectType: "trader_collection",
+    });
+    return { bytes, filename };
+  }
+
+  /**
+   * Traders currently owing the Company money (§11), sorted by highest
+   * outstanding balance first — server-aggregated, never derived by the
+   * frontend from a paginated receivable list. Zero-balance Traders are
+   * never returned. Entirely independent of `operations/traders`'
+   * `unsettledNetPayable` (a Trader Settlement concept, the opposite money
+   * direction) — this reads only `trader_receivables`.
+   */
+  public async tradersWithBalance(): Promise<readonly TraderWithBalance[]> {
+    this.assertAnyPermission("trader_receivables.create");
+    const { companyId } = this.tenants.current();
+    const result = await sql<TraderWithBalance>`
+      select t.id as "traderId", t.name_en as "traderName",
+             sum(r.outstanding_amount)::text as "outstandingAmount"
+        from trader_receivables r
+        join traders t on t.id = r.trader_id and t.company_id = r.company_id
+       where r.company_id = ${companyId}::uuid
+         and r.status in ('outstanding', 'partially_collected')
+       group by t.id, t.name_en
+      having sum(r.outstanding_amount) > 0
+       order by sum(r.outstanding_amount) desc, t.name_en asc
+    `.execute(this.database);
+    return result.rows;
   }
 
   // ---------------------------------------------------------------------

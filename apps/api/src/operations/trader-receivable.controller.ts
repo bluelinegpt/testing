@@ -1,6 +1,18 @@
-import { Body, Controller, Get, Headers, Inject, Param, ParseUUIDPipe, Post, Query, Req } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Get,
+  Headers,
+  Inject,
+  Param,
+  ParseUUIDPipe,
+  Post,
+  Query,
+  Req,
+  Res,
+} from "@nestjs/common";
 import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
-import type { Request } from "express";
+import type { Request, Response } from "express";
 
 import { RequireAnyPermission, RequireIdentityKinds } from "../authentication/authentication.decorators.js";
 // Runtime class values are required for Nest validation metadata.
@@ -25,8 +37,10 @@ import {
   type TraderCollectionListRow,
   type TraderCollectionReportData,
   TraderReceivableService,
+  type TraderReceivableDetail,
   type TraderReceivableEligibleRow,
   type TraderReceivableSummary,
+  type TraderWithBalance,
 } from "./trader-receivable.service.js";
 
 /**
@@ -35,7 +49,9 @@ import {
  * controller under its own `operations/trader-receivables` prefix, never
  * `operations/settlements/*`, so no route here can ever be confused with or
  * shadow a Trader Settlement, Money Sent/Received, or Driver Collection
- * route. No PDF endpoint exists yet — `report-data` returns JSON only.
+ * route. The Trader Payment Receipt PDF is its own report, never merged with
+ * the Trader Settlement Statement, Driver Collection Report, or Driver
+ * Shipment Manifest.
  */
 @ApiTags("operations")
 @ApiBearerAuth()
@@ -53,6 +69,13 @@ export class TraderReceivableController {
     @Query() query: TraderCollectionSummaryQueryDto,
   ): Promise<TraderReceivableSummary> {
     return this.traderReceivables.summary(query);
+  }
+
+  @RequireAnyPermission("trader_receivables.create", "users_roles.manage")
+  @ApiOperation({ summary: "Traders currently owing the Company money, highest balance first" })
+  @Get("traders-with-balance")
+  public tradersWithBalance(): Promise<readonly TraderWithBalance[]> {
+    return this.traderReceivables.tradersWithBalance();
   }
 
   @RequireAnyPermission("trader_receivables.create", "users_roles.manage")
@@ -94,6 +117,15 @@ export class TraderReceivableController {
   }
 
   @RequireAnyPermission("trader_receivables.create", "users_roles.manage")
+  @ApiOperation({ summary: "Show one Trader receivable in full detail" })
+  @Get("receivables/:receivableId")
+  public receivableDetail(
+    @Param("receivableId", new ParseUUIDPipe()) receivableId: string,
+  ): Promise<TraderReceivableDetail> {
+    return this.traderReceivables.receivableDetail(receivableId);
+  }
+
+  @RequireAnyPermission("trader_receivables.create", "users_roles.manage")
   @ApiOperation({ summary: "Cancel a Trader receivable before anything has been collected" })
   @Post("receivables/:receivableId/cancel")
   public cancelReceivable(
@@ -131,6 +163,28 @@ export class TraderReceivableController {
     @Param("collectionId", new ParseUUIDPipe()) collectionId: string,
   ): Promise<TraderCollectionReportData> {
     return this.traderReceivables.reportData(collectionId);
+  }
+
+  @RequireAnyPermission("trader_receivables.create", "reports.export", "users_roles.manage")
+  @ApiOperation({ summary: "True downloadable PDF file for the Trader Payment Receipt" })
+  @Get("collections/:collectionId/pdf")
+  public async collectionPdf(
+    @Param("collectionId", new ParseUUIDPipe()) collectionId: string,
+    @Query("language") language: string | undefined,
+    @Req() request: Request,
+    @Res() response: Response,
+  ): Promise<void> {
+    const resolvedLanguage = language === "ar" ? "ar" : "en";
+    const { bytes, filename } = await this.traderReceivables.collectionPdf(
+      collectionId,
+      resolvedLanguage,
+      this.correlationId(request),
+    );
+    response.setHeader("Content-Type", "application/pdf");
+    response.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    response.setHeader("X-Content-Type-Options", "nosniff");
+    response.setHeader("Cache-Control", "private, max-age=0, must-revalidate");
+    response.send(bytes);
   }
 
   @RequireAnyPermission("trader_receivables.reverse", "users_roles.manage")

@@ -37,6 +37,7 @@ import {
   OrderDetailsWorkspace,
   OrdersModuleWorkspace,
 } from "../features/operations/OrdersModuleWorkspace.js";
+import { TraderReceivablesWorkspace } from "../features/operations/TraderReceivablesWorkspace.js";
 import { TraderSettlementsWorkspace } from "../features/operations/TraderSettlementsWorkspace.js";
 import { SupportWorkspace } from "../features/support/SupportWorkspace.js";
 import { CompanyAppShell } from "./CompanyAppShell.js";
@@ -144,6 +145,10 @@ export function CompanyWorkspace({
   } else if (path === "/trader-settlements") {
     content = (
       <TraderSettlementsWorkspace api={api} permissions={session.identity.permissions} />
+    );
+  } else if (path === "/trader-receivables") {
+    content = (
+      <TraderReceivablesWorkspace api={api} permissions={session.identity.permissions} />
     );
   } else if (operationRoutes[path] !== undefined) {
     const route = operationRoutes[path];
