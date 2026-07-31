@@ -210,13 +210,14 @@ function PayDriverDialog({api,canExport,initialDriverId,language,money,onClose,o
   useEffect(()=>{void loadOutstanding()},[loadOutstanding]);
 
   const numeric=parseMoney(amount);
-  const allocations=proposal?.allocations.map(row=>({
+  const proposalAllocations=Array.isArray(proposal?.allocations)?proposal.allocations:[];
+  const allocations=proposalAllocations.map(row=>({
     accrualId:row.accrualId,
     amount:parseMoney(manual[row.accrualId]??row.amount)??0,
   }))??[];
   const allocated=allocations.reduce((sum,row)=>sum+row.amount,0);
-  const manualOverride=proposal!==undefined&&proposal.allocations.some(row=>Math.abs((parseMoney(manual[row.accrualId]??row.amount)??-1)-Number(row.amount))>.001);
-  const canConfirm=proposal!==undefined&&proposal.allocations.length>0&&numeric!==undefined&&numeric>0&&allocated>0&&Math.abs(allocated-numeric)<=.001&&!busy;
+  const manualOverride=proposal!==undefined&&proposalAllocations.some(row=>Math.abs((parseMoney(manual[row.accrualId]??row.amount)??-1)-Number(row.amount))>.001);
+  const canConfirm=proposal!==undefined&&proposalAllocations.length>0&&numeric!==undefined&&numeric>0&&allocated>0&&Math.abs(allocated-numeric)<=.001&&!busy;
 
   const generate=async()=>{
     if(!driverId||numeric===undefined||numeric<=0){
@@ -224,10 +225,13 @@ function PayDriverDialog({api,canExport,initialDriverId,language,money,onClose,o
       return;
     }
     setError(undefined);
+    setProposal(undefined);
+    setManual({});
     try{
       const result=await api.post<Proposal>("operations/payroll/outsourced-driver-fees/payments/proposal",{driverId,amount:numeric});
-      setProposal(result);
-      setManual(Object.fromEntries(result.allocations.map(row=>[row.accrualId,row.amount])));
+      const normalizedAllocations=Array.isArray(result.allocations)?result.allocations:[];
+      setProposal({...result,allocations:normalizedAllocations});
+      setManual(Object.fromEntries(normalizedAllocations.map(row=>[row.accrualId,row.amount])));
     }catch(issue){
       setError(errorText(issue,t("payroll.driverFees.errors.operation")));
     }
@@ -285,10 +289,10 @@ function PayDriverDialog({api,canExport,initialDriverId,language,money,onClose,o
         <button className="button button-secondary driver-fee-oldest-first" onClick={()=>void generate()} type="button">{t("payroll.driverFees.actions.oldestFirst")}</button>
       </div>
       {proposal?<>
-        {proposal.allocations.length===0?<div className="alert alert-warning">{t("payroll.driverFees.pay.noAccruals")}</div>:<div className="table-scroll-x">
+        {proposalAllocations.length===0?<div className="alert alert-warning">{t("payroll.driverFees.pay.noAccruals")}</div>:<div className="table-scroll-x">
           <table>
             <thead><tr><th>{t("payroll.driverFees.fields.order")}</th><th>{t("payroll.driverFees.columns.outstanding")}</th><th>{t("payroll.driverFees.columns.amount")}</th><th>{t("payroll.driverFees.columns.remaining")}</th><th>{t("common.actions")}</th></tr></thead>
-            <tbody>{proposal.allocations.map(row=><tr key={row.accrualId}><td>{row.orderNumber}</td><td>{money(row.outstandingBefore)}</td><td><input inputMode="decimal" value={manual[row.accrualId]??row.amount} onChange={e=>setManual({...manual,[row.accrualId]:e.target.value})}/></td><td>{money(Math.max(0,Number(row.outstandingBefore)-Number(manual[row.accrualId]??row.amount)))}</td><td><button className="button button-secondary" onClick={()=>{const next={...manual,[row.accrualId]:"0.00"};const nextAmount=proposal.allocations.reduce((sum,line)=>sum+(parseMoney(line.accrualId===row.accrualId?"0.00":next[line.accrualId]??line.amount)??0),0);setManual(next);setAmount(nextAmount.toFixed(2));setAmountEdited(true)}} type="button">{t("common.remove")}</button></td></tr>)}</tbody>
+            <tbody>{proposalAllocations.map(row=><tr key={row.accrualId}><td>{row.orderNumber}</td><td>{money(row.outstandingBefore)}</td><td><input inputMode="decimal" value={manual[row.accrualId]??row.amount} onChange={e=>setManual({...manual,[row.accrualId]:e.target.value})}/></td><td>{money(Math.max(0,Number(row.outstandingBefore)-Number(manual[row.accrualId]??row.amount)))}</td><td><button className="button button-secondary" onClick={()=>{const next={...manual,[row.accrualId]:"0.00"};const nextAmount=proposalAllocations.reduce((sum,line)=>sum+(parseMoney(line.accrualId===row.accrualId?"0.00":next[line.accrualId]??line.amount)??0),0);setManual(next);setAmount(nextAmount.toFixed(2));setAmountEdited(true)}} type="button">{t("common.remove")}</button></td></tr>)}</tbody>
           </table>
         </div>}
         {manualOverride?<div className="alert alert-warning">{t("payroll.driverFees.pay.overrideWarning")}</div>:null}
