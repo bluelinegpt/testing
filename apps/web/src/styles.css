@@ -6064,3 +6064,18 @@ tr.row-highlighted {
 :root[data-theme="dark"] .fast-entry-row-created {
   color: #111827;
 }
+
+:root[data-theme="dark"] .workspace-tabs button[aria-selected="true"],
+:root[data-theme="dark"] .segmented-control button[aria-pressed="true"],
+:root[data-theme="dark"] .preferences-language button[aria-pressed="true"] {
+  color: #111827;
+}
+
+:root[data-theme="dark"] .metric-card,
+:root[data-theme="dark"] .metric-card strong {
+  color: #111827;
+}
+
+:root[data-theme="dark"] .metric-card span {
+  color: #475569;
+}
