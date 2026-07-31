@@ -5724,3 +5724,210 @@ tr.row-highlighted {
   border-radius: var(--radius-lg);
   box-shadow: none;
 }
+
+/* Phase B shared sweep: configuration, administration, reports, login, and
+   older generic panels inherit the same refined navy surfaces instead of the
+   legacy flat white/gray treatment. */
+.company-content > section,
+.company-content > article,
+.configuration-workspace,
+.administration-workspace,
+.support-workspace,
+.reports-workspace,
+.accounting-workspace,
+.payroll-workspace,
+.driver-fees-workspace {
+  color: var(--text-primary);
+}
+
+.company-content h1,
+.company-content h2,
+.company-content h3,
+.modal h2,
+.modal h3 {
+  color: var(--text-primary);
+}
+
+.company-content p,
+.company-content small,
+.field-hint,
+.report-actions p,
+.accounting-report-card span {
+  color: var(--text-secondary);
+}
+
+.company-content input,
+.company-content select,
+.company-content textarea,
+.modal input,
+.modal select,
+.modal textarea,
+.login-form input {
+  background: var(--surface-color);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  transition: border-color 150ms ease, box-shadow 150ms ease, background-color 150ms ease;
+}
+
+.company-content input:focus,
+.company-content select:focus,
+.company-content textarea:focus,
+.modal input:focus,
+.modal select:focus,
+.modal textarea:focus,
+.login-form input:focus {
+  border-color: color-mix(in srgb, var(--primary-color) 62%, var(--border-color));
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary-color) 16%, transparent);
+  outline: none;
+}
+
+.company-content input::placeholder,
+.company-content textarea::placeholder,
+.modal input::placeholder,
+.modal textarea::placeholder,
+.login-form input::placeholder {
+  color: var(--text-muted);
+}
+
+.company-content table,
+.modal table {
+  color: var(--text-primary);
+}
+
+.company-content thead,
+.modal thead {
+  background: var(--surface-subtle);
+}
+
+.company-content th,
+.modal th {
+  color: var(--text-muted);
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.035em;
+  text-transform: uppercase;
+}
+
+[dir="rtl"] .company-content th,
+[dir="rtl"] .modal th {
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.company-content tbody tr,
+.modal tbody tr {
+  border-color: var(--border-color);
+}
+
+.company-content tbody tr:hover,
+.modal tbody tr:hover {
+  background: color-mix(in srgb, var(--primary-color) 5%, var(--surface-color));
+}
+
+.workspace-tabs,
+.segmented-control,
+.preferences-language {
+  background: var(--surface-subtle);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  padding: 4px;
+}
+
+.workspace-tabs button,
+.segmented-control button,
+.preferences-language button {
+  border-radius: var(--radius-md);
+}
+
+.badge,
+.status-badge,
+.expiry-badge {
+  border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+  border-radius: 999px;
+  font-weight: 700;
+}
+
+.accounting-report-card,
+.report-card,
+.role-card,
+.tracking-panel,
+.business-access-panel,
+.settings-card,
+.configuration-card {
+  background: var(--surface-color);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-sm);
+}
+
+.accounting-report-card:hover,
+.report-card:hover,
+.role-card:hover {
+  border-color: color-mix(in srgb, var(--primary-color) 36%, var(--border-color));
+  box-shadow: var(--shadow-md);
+}
+
+.login-main {
+  background:
+    radial-gradient(circle at 18% 16%, color-mix(in srgb, var(--primary-color) 18%, transparent), transparent 30%),
+    radial-gradient(circle at 88% 12%, color-mix(in srgb, var(--primary-strong) 14%, transparent), transparent 24%),
+    var(--app-bg);
+}
+
+.login-tool {
+  background: var(--surface-color);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-md);
+}
+
+.login-form {
+  background: var(--surface-raised);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-sm);
+}
+
+.login-brand-block span,
+.login-brand-block strong {
+  color: var(--text-primary);
+}
+
+.public-topbar,
+.company-top-header {
+  background: color-mix(in srgb, var(--surface-color) 92%, transparent);
+  border-bottom: 1px solid var(--border-color);
+  color: var(--text-primary);
+}
+
+.top-header-title span,
+.top-header-user,
+.sidebar-user-copy small {
+  color: var(--text-secondary);
+}
+
+.top-header-title strong,
+.sidebar-user-copy strong {
+  color: var(--text-primary);
+}
+
+.modal {
+  background: var(--surface-color);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+}
+
+.modal-backdrop {
+  backdrop-filter: blur(10px);
+}
+
+.modal-actions {
+  background: var(--surface-color);
+}
+
+.data-preview {
+  background: var(--surface-subtle);
+  color: var(--text-primary);
+}
