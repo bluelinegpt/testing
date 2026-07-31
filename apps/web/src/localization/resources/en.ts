@@ -169,6 +169,12 @@ export const englishTranslations = {
     valid: "Valid",
   },
   language: { label: "Language" },
+  theme: {
+    label: "Theme",
+    light: "Light",
+    dark: "Dark",
+    system: "System",
+  },
   areas: {
     addInline: "Add Area",
     allEmirates: "All Emirates",

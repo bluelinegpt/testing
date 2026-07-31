@@ -3543,6 +3543,34 @@ tr.row-highlighted {
   background: rgb(255 255 255 / 4%);
 }
 
+.sidebar-theme {
+  min-height: 34px;
+  padding: 3px;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  border: 1px solid rgb(255 255 255 / 12%);
+  border-radius: 7px;
+  background: rgb(255 255 255 / 4%);
+}
+
+.sidebar-theme button {
+  min-width: 0;
+  min-height: 26px;
+  padding: 4px 6px;
+  flex: 1;
+  border: 0;
+  border-radius: 5px;
+  color: #aebbd1;
+  background: transparent;
+  font-size: 11px;
+}
+
+.sidebar-theme button[aria-pressed="true"] {
+  color: #fff;
+  background: #263755;
+}
+
 .sidebar-language > svg {
   margin-inline: 3px 4px;
   flex: 0 0 auto;
@@ -3669,12 +3697,52 @@ tr.row-highlighted {
 
 .top-header-user {
   min-width: 0;
-  margin-inline-start: auto;
   display: flex;
   align-items: center;
   gap: 8px;
   color: #4b5870;
   font-size: 13px;
+}
+
+.top-header-controls {
+  margin-inline-start: auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  min-width: 0;
+}
+
+.top-header-language,
+.theme-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--surface-subtle);
+  box-shadow: var(--shadow-sm);
+}
+
+.top-header-language button,
+.theme-control button {
+  min-height: 30px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 4px 10px;
+}
+
+.top-header-language button[aria-pressed="true"],
+.theme-control button[aria-pressed="true"] {
+  color: #fff;
+  background: linear-gradient(135deg, var(--primary-color), var(--primary-strong));
+  box-shadow: 0 8px 18px rgb(79 99 246 / 20%);
 }
 
 .company-content {
@@ -4086,6 +4154,7 @@ tr.row-highlighted {
 .company-shell-collapsed .nav-chevron,
 .company-shell-collapsed .nav-submenu,
 .company-shell-collapsed .sidebar-language button,
+.company-shell-collapsed .sidebar-theme,
 .company-shell-collapsed .sidebar-user-copy,
 .company-shell-collapsed .sidebar-user > button {
   display: none;
@@ -4111,6 +4180,18 @@ tr.row-highlighted {
 
 .company-shell-collapsed .sidebar-user {
   grid-template-columns: 24px;
+}
+
+@media (max-width: 1100px) {
+  .top-header-language {
+    display: none;
+  }
+}
+
+@media (max-width: 980px) {
+  .theme-control button {
+    padding-inline: 7px;
+  }
 }
 
 .mobile-menu-button,
@@ -4161,6 +4242,14 @@ tr.row-highlighted {
   .mobile-drawer-close,
   .mobile-menu-button {
     display: grid;
+  }
+
+  .top-header-controls {
+    gap: 8px;
+  }
+
+  .theme-control {
+    display: none;
   }
 
   .mobile-menu-button {

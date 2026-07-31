@@ -168,6 +168,12 @@ export const arabicTranslations = {
     valid: "ساري",
   },
   language: { label: "اللغة" },
+  theme: {
+    label: "المظهر",
+    light: "فاتح",
+    dark: "داكن",
+    system: "النظام",
+  },
   areas: {
     addInline: "إضافة منطقة",
     allEmirates: "كل الإمارات",

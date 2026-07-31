@@ -23,6 +23,7 @@ import { NavLink, useLocation } from "react-router-dom";
 
 import type { LoginResponse } from "../api/contracts.js";
 import { normalizeLocale, storeLocale, type SupportedLocale } from "../localization/locale.js";
+import type { ThemePreference } from "../theme/theme-preference.js";
 import { useCompanyBranding } from "./CompanyBrandingContext.js";
 import { canAccessCompanyPath, firstAuthorizedCompanyPath } from "./company-access.js";
 
@@ -79,6 +80,12 @@ const languages = [
   { code: "en", label: "English" },
   { code: "ar", label: "العربية" },
 ] as const;
+
+const themeOptions: readonly { code: ThemePreference; labelKey: string }[] = [
+  { code: "light", labelKey: "theme.light" },
+  { code: "dark", labelKey: "theme.dark" },
+  { code: "system", labelKey: "theme.system" },
+];
 
 export function CompanyAppShell({
   children,
@@ -234,6 +241,10 @@ export function CompanyAppShell({
     storeLocale(locale, globalThis.localStorage);
   };
 
+  const changeTheme = async (theme: ThemePreference) => {
+    await branding.setThemePreference(theme);
+  };
+
   return (
     <div
       className={`company-shell${collapsed ? " company-shell-collapsed" : ""}${drawerOpen ? " drawer-is-open" : ""}`}
@@ -334,6 +345,18 @@ export function CompanyAppShell({
               </button>
             ))}
           </div>
+          <div className="sidebar-theme" aria-label={t("theme.label")} role="group">
+            {themeOptions.map((theme) => (
+              <button
+                aria-pressed={branding.themePreference === theme.code}
+                key={theme.code}
+                onClick={() => void changeTheme(theme.code)}
+                type="button"
+              >
+                {t(theme.labelKey)}
+              </button>
+            ))}
+          </div>
           <div className="sidebar-user">
             <CircleUserRound aria-hidden="true" size={22} />
             <span className="sidebar-user-copy">
@@ -366,9 +389,35 @@ export function CompanyAppShell({
             <span title={companyName}>{companyName}</span>
             <strong>{pageTitle}</strong>
           </div>
-          <div className="top-header-user">
-            <CircleUserRound aria-hidden="true" size={20} />
-            <span title={session.identity.username}>{signedInDisplayName}</span>
+          <div className="top-header-controls">
+            <div className="top-header-language" aria-label={t("language.label")} role="group">
+              {languages.map((language) => (
+                <button
+                  aria-pressed={currentLanguage === language.code}
+                  key={language.code}
+                  onClick={() => void changeLanguage(language.code)}
+                  type="button"
+                >
+                  {language.label}
+                </button>
+              ))}
+            </div>
+            <div className="theme-control" aria-label={t("theme.label")} role="group">
+              {themeOptions.map((theme) => (
+                <button
+                  aria-pressed={branding.themePreference === theme.code}
+                  key={theme.code}
+                  onClick={() => void changeTheme(theme.code)}
+                  type="button"
+                >
+                  {t(theme.labelKey)}
+                </button>
+              ))}
+            </div>
+            <div className="top-header-user">
+              <CircleUserRound aria-hidden="true" size={20} />
+              <span title={session.identity.username}>{signedInDisplayName}</span>
+            </div>
           </div>
         </header>
         <main className="company-content" id="main-content" ref={mainRef} tabIndex={-1}>
