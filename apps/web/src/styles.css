@@ -2935,8 +2935,25 @@ tr.row-highlighted {
   height: calc(100vh - 10vh);
   max-height: calc(100vh - 10vh);
   max-width: calc(100vw - 10vw);
-  overflow: hidden;
+  overflow-y: auto;
+  scrollbar-color: #94a3b8 var(--surface-subtle);
+  scrollbar-gutter: stable;
+  scrollbar-width: auto;
   width: calc(100vw - 10vw);
+}
+
+.driver-fee-payment-modal::-webkit-scrollbar {
+  width: 12px;
+}
+
+.driver-fee-payment-modal::-webkit-scrollbar-track {
+  background: var(--surface-subtle);
+}
+
+.driver-fee-payment-modal::-webkit-scrollbar-thumb {
+  background: #94a3b8;
+  border: 2px solid var(--surface-subtle);
+  border-radius: 999px;
 }
 
 .driver-fee-payment-modal > :not(.modal-heading) {
