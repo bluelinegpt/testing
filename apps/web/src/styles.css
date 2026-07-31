@@ -831,13 +831,25 @@
 }
 .fast-entry-workspace {
   display: grid;
-  gap: 14px;
+  gap: 10px;
+}
+.fast-entry-workspace > .form-hint {
+  margin: 0;
 }
 .fast-entry-toolbar {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 10px;
+}
+.fast-entry-add-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #526079;
+}
+.fast-entry-add-count input {
+  width: 72px;
 }
 .fast-entry-paste {
   padding: 12px;
@@ -852,12 +864,12 @@
 }
 .fast-entry-table-scroll {
   overflow: auto;
-  max-height: min(58vh, 620px);
+  max-height: min(50vh, 520px);
   border: 1px solid #d8e0ef;
   border-radius: 10px;
 }
 .fast-entry-table {
-  min-width: 2200px;
+  min-width: 1560px;
   border-collapse: collapse;
 }
 .fast-entry-table th,
@@ -879,26 +891,26 @@
 .fast-entry-table input,
 .fast-entry-table select {
   width: 100%;
-  min-width: 130px;
+  min-width: 112px;
 }
 .fast-entry-table td:nth-child(1) {
   width: 44px;
   color: #64748b;
 }
-.fast-entry-table td:nth-child(10) input {
-  min-width: 240px;
+.fast-entry-table td:nth-child(9) input {
+  min-width: 220px;
 }
 .fast-entry-override-reason {
   margin-top: 6px;
 }
-.fast-entry-status-cell {
-  min-width: 220px;
-}
-.fast-entry-status-cell span {
+.fast-entry-row-message {
   display: block;
-  color: #64748b;
+  max-width: 220px;
+  margin-bottom: 6px;
+  color: #7f1d1d;
   font-size: 12px;
   line-height: 1.35;
+  white-space: normal;
 }
 .fast-entry-row-error {
   background: #fff7f7;
@@ -1997,8 +2009,14 @@ td:last-child {
   width: min(1120px, calc(100vw - 48px));
 }
 .fast-entry-modal {
-  width: min(1680px, calc(100vw - 24px));
-  max-height: calc(100vh - 24px);
+  justify-self: center;
+  align-self: center;
+  width: min(1480px, calc(100vw - 72px));
+  max-height: calc(100vh - 72px);
+  padding: 16px;
+}
+.fast-entry-modal > .modal-heading {
+  margin-bottom: 8px;
 }
 .modal-heading {
   display: flex;

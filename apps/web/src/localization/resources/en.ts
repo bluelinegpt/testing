@@ -497,21 +497,28 @@ export const englishTranslations = {
     createOrder: "Create order",
     createOrderFailed: "The order could not be created. Your entered values have been preserved.",
     fastEntry: "Fast entry",
-    fastEntryAddRows: "Add 5 rows",
+    fastEntryAddRows: "Add rows",
     fastEntryAutoFee: "Auto",
     fastEntryAutoFeeHint: "Leave blank to use the configured Trader pricing.",
-    fastEntryCreateValid: "Create valid orders",
+    fastEntryCreateValid: "Create orders",
     fastEntryCreated: "Created",
     fastEntryCreatedCount: "{{count}} order(s) created.",
     fastEntryDuplicateReference: "This Reference Number is repeated in the fast-entry sheet.",
     fastEntryDuplicateSerial: "This Serial Number is repeated in the fast-entry sheet.",
+    fastEntryFixRowsBeforeCreate:
+      "{{count}} row(s) need review. Fix the highlighted rows, then create again.",
     fastEntryHelp:
-      "Enter multiple orders like a spreadsheet. Each valid row is submitted through the normal Create Order validation.",
+      "Enter multiple orders like a spreadsheet. Click Create orders to validate the entered rows first; if any row has an error, creation stops.",
+    fastEntryExistingCustomerAddressMismatch:
+      "This mobile number belongs to an existing Customer, but the entered Area or Address does not match the saved Customer address. Select the Customer in the normal Create Order form or update the Customer address first.",
+    fastEntryMobileInvalid: "Enter a mobile number without control characters, up to 32 characters.",
+    fastEntryNoRowsToCreate: "Enter at least one order row before creating.",
     fastEntryPasteHelp:
-      "Paste Excel or CSV rows in this column order: Serial, Reference, Trader ID, Customer, Mobile, Second Mobile, Emirate ID, Area ID, Address, Driver ID, COD, Service Fee, Additional Fees, Packages, Notes.",
+      "Paste Excel or CSV rows in this column order: Serial, Reference, Trader ID, Customer, Mobile, Emirate ID, Area ID, Address, COD, Service Fee, Additional Fees, Packages, Notes.",
     fastEntryPasteTitle: "Paste from Excel or CSV",
     fastEntryReady: "Ready",
     fastEntryRowsReady: "{{count}} row(s) are ready to create.",
+    fastEntryRowsToAdd: "Rows to add",
     fastEntryStatus: {
       created: "Created",
       draft: "Draft",

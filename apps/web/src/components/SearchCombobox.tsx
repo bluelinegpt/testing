@@ -76,8 +76,8 @@ export function SearchCombobox<T extends SearchOption>({
           // after a newer query and blank the list. Gate every state write on
           // this request still being the current one.
           if (controller.signal.aborted) return;
-          setOptions(page.items);
-          setHasMore(page.hasMore);
+          setOptions(Array.isArray(page.items) ? page.items : []);
+          setHasMore(Boolean(page.hasMore));
           setActiveIndex(0);
         })
         .catch((error: unknown) => {
@@ -176,8 +176,8 @@ export function SearchCombobox<T extends SearchOption>({
                     `${path}${path.includes("?") ? "&" : "?"}search=${encodeURIComponent(query)}&limit=20&offset=${options.length}`,
                   )
                   .then((page) => {
-                    setOptions((current) => [...current, ...page.items]);
-                    setHasMore(page.hasMore);
+                    setOptions((current) => [...current, ...(Array.isArray(page.items) ? page.items : [])]);
+                    setHasMore(Boolean(page.hasMore));
                   })
                   .catch(() => setHasMore(false))
                   .finally(() => setLoading(false));

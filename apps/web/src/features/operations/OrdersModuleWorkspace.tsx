@@ -41,7 +41,7 @@ import type {
   OperationsTrader,
   OperationsTraderOption,
   OperationsTrackingLink,
-  AreaPage,
+  SearchPage,
 } from "../../api/contracts.js";
 import { Modal } from "../../components/Modal.js";
 import { PageHeader } from "../../components/PageHeader.js";
@@ -162,10 +162,13 @@ export function OrdersModuleWorkspace({
         api.get<readonly OperationsDriver[]>("operations/drivers"),
         api.get<readonly OperationsTrader[]>("operations/traders"),
       ]);
-      setData(orders);
+      setData({
+        ...orders,
+        items: Array.isArray(orders.items) ? orders.items : [],
+      });
       setHoldCount(holdOrders.filteredCount);
-      setDrivers(loadedDrivers.filter((driver) => driver.status === "active"));
-      setTraders(loadedTraders.filter((trader) => trader.status === "active"));
+      setDrivers((Array.isArray(loadedDrivers) ? loadedDrivers : []).filter((driver) => driver.status === "active"));
+      setTraders((Array.isArray(loadedTraders) ? loadedTraders : []).filter((trader) => trader.status === "active"));
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : t("common.loadFailed"));
     } finally {
@@ -223,7 +226,11 @@ export function OrdersModuleWorkspace({
 
   const updateFilters = (change: Partial<OrderFilters>) =>
     setFilters((current) => ({ ...current, ...change }));
-  const pageIds = data?.items.map((order) => order.id) ?? [];
+  const orderItems = Array.isArray(data?.items) ? data.items : [];
+  const traderFilterOptions = Array.isArray(traders) ? traders : [];
+  const driverFilterOptions = Array.isArray(drivers) ? drivers : [];
+  const emirateFilterOptions = Array.isArray(emirates) ? emirates : [];
+  const pageIds = orderItems.map((order) => order.id);
   const isAdministrator = permissions.includes("users_roles.manage");
   const canAssignDriver = isAdministrator || permissions.includes("orders.assign_driver");
   const canUpdateStatus =
@@ -260,8 +267,8 @@ export function OrdersModuleWorkspace({
   };
   const orderSelected = (id: string) => (allMatching ? !excludedIds.has(id) : selectedIds.has(id));
   const groups = useMemo(
-    () => groupVisibleOrders(data?.items ?? [], grouping, t),
-    [data?.items, grouping, t],
+    () => groupVisibleOrders(orderItems, grouping, t),
+    [orderItems, grouping, t],
   );
   const changeGrouping = (next: OrderGrouping) => {
     if (allMatching) {
@@ -415,7 +422,7 @@ export function OrdersModuleWorkspace({
             onChange={(value) => updateFilters({ traderId: value })}
             value={filters.traderId}
           >
-            {traders.map((trader) => (
+            {traderFilterOptions.map((trader) => (
               <option key={trader.id} value={trader.id}>
                 {trader.code} - {trader.name}
               </option>
@@ -426,7 +433,7 @@ export function OrdersModuleWorkspace({
             onChange={(value) => updateFilters({ driverId: value })}
             value={filters.driverId}
           >
-            {drivers.map((driver) => (
+            {driverFilterOptions.map((driver) => (
               <option key={driver.id} value={driver.id}>
                 {driver.code} - {driver.name}
               </option>
@@ -441,7 +448,7 @@ export function OrdersModuleWorkspace({
             }}
             value={filterEmirateId}
           >
-            {emirates.map((emirate) => (
+            {emirateFilterOptions.map((emirate) => (
               <option key={emirate.id} value={emirate.id}>
                 {localizeName(textLanguage, { ar: emirate.nameAr, en: emirate.nameEn })}
               </option>
@@ -626,7 +633,7 @@ export function OrdersModuleWorkspace({
             </thead>
             <tbody>
               {grouping === ""
-                ? (data?.items ?? []).map(renderOrderRow)
+                ? orderItems.map(renderOrderRow)
                 : groups.map((group) => {
                     const ids = group.orders.map((order) => order.id);
                     const selectedInGroup = ids.filter(orderSelected).length;
@@ -676,7 +683,7 @@ export function OrdersModuleWorkspace({
                       </Fragment>
                     );
                   })}
-              {!loading && (data?.items.length ?? 0) === 0 ? (
+              {!loading && orderItems.length === 0 ? (
                 <tr>
                   <td className="empty-state" colSpan={13}>
                     {t("operations.noOrders")}
@@ -755,7 +762,6 @@ export function OrdersModuleWorkspace({
       {fastEntryOpen ? (
         <FastOrderEntryDialog
           api={api}
-          drivers={drivers}
           emirates={emirates}
           onClose={() => setFastEntryOpen(false)}
           onSaved={load}
@@ -817,21 +823,23 @@ type FastEntryStatus = "draft" | "ready" | "created" | "error";
 interface FastEntryRow {
   additionalFees: string;
   areaId: string;
+  areaOption: CompanyArea | undefined;
   codAmount: string;
   customerAddress: string;
+  customerOption: CustomerOption | undefined;
   customerName: string;
-  driverId: string;
   emirateId: string;
   id: string;
   notes: string;
   overrideReason: string;
   packageCount: string;
   referenceNumber: string;
-  secondMobile: string;
+  resolvedServiceFee: string;
   serialNumber: string;
   serviceFee: string;
   status: FastEntryStatus;
   traderId: string;
+  traderOption: OperationsTraderOption | undefined;
   mobile: string;
   message?: string;
 }
@@ -842,11 +850,9 @@ const fastEntryColumns = [
   "traderId",
   "customerName",
   "mobile",
-  "secondMobile",
   "emirateId",
   "areaId",
   "customerAddress",
-  "driverId",
   "codAmount",
   "serviceFee",
   "additionalFees",
@@ -858,10 +864,11 @@ function createFastEntryRow(serialNumber = ""): FastEntryRow {
   return {
     additionalFees: "0.00",
     areaId: "",
+    areaOption: undefined,
     codAmount: "0.00",
     customerAddress: "",
+    customerOption: undefined,
     customerName: "",
-    driverId: "",
     emirateId: "",
     id:
       typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -871,11 +878,12 @@ function createFastEntryRow(serialNumber = ""): FastEntryRow {
     overrideReason: "",
     packageCount: "1",
     referenceNumber: "",
-    secondMobile: "",
+    resolvedServiceFee: "",
     serialNumber,
     serviceFee: "",
     status: "draft",
     traderId: "",
+    traderOption: undefined,
     mobile: "",
   };
 }
@@ -894,6 +902,22 @@ function parseFastEntryMoney(value: string, required = false): number | undefine
   return parsed.ok ? parsed.value : undefined;
 }
 
+function isFastEntryMobileValid(value: string): boolean {
+  const trimmed = value.trim();
+  return trimmed.length > 0 && trimmed.length <= 32 && /^[^\u0000-\u001f\u007f]+$/.test(trimmed);
+}
+
+function mobileComparisonKey(input: string | null | undefined): string {
+  const digits = (input ?? "").replace(/[^0-9]/g, "");
+  if (/^05[0-9]{8}$/.test(digits)) return `971${digits.slice(1)}`;
+  if (/^5[0-9]{8}$/.test(digits)) return `971${digits}`;
+  return digits;
+}
+
+function normalizedAddress(value: string): string {
+  return value.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
 function rowHasFastEntryContent(row: FastEntryRow): boolean {
   return fastEntryColumns.some(
     (column) =>
@@ -906,38 +930,51 @@ function rowHasFastEntryContent(row: FastEntryRow): boolean {
 }
 
 function resolveApiMessage(requestError: unknown, fallback: string): string {
+  const sanitize = (message: string) =>
+    message.includes("Cannot read properties of undefined") ? fallback : message;
   if (requestError instanceof ApiError) {
-    return requestError.details?.[0] ?? requestError.message;
+    return sanitize(requestError.details?.[0] ?? requestError.message);
   }
-  return requestError instanceof Error ? requestError.message : fallback;
+  return requestError instanceof Error ? sanitize(requestError.message) : fallback;
 }
 
 function FastOrderEntryDialog({
   api,
-  drivers,
   emirates,
   onClose,
   onSaved,
   textLanguage,
-  traders,
 }: {
   api: ApiClient;
-  drivers: readonly OperationsDriver[];
   emirates: readonly Emirate[];
   onClose: () => void;
   onSaved: () => Promise<void> | void;
   textLanguage: "ar" | "en";
-  traders: readonly OperationsTrader[];
 }) {
   const { i18n, t } = useTranslation();
   const locale = normalizeLocale(i18n.resolvedLanguage);
-  const [rows, setRows] = useState<FastEntryRow[]>(() =>
-    Array.from({ length: 8 }, () => createFastEntryRow()),
+  const emirateOptions = Array.isArray(emirates) ? emirates : [];
+  const fastEntryTraderLabel = useCallback(
+    (option: OperationsTraderOption) =>
+      localizeName(textLanguage, { ar: option.nameAr, en: option.nameEn }),
+    [textLanguage],
   );
-  const [areaCache, setAreaCache] = useState<Record<string, readonly CompanyArea[]>>({});
+  const [rows, setRows] = useState<FastEntryRow[]>(() =>
+    Array.from({ length: 3 }, () => createFastEntryRow()),
+  );
   const [pasteText, setPasteText] = useState("");
+  const [rowsToAdd, setRowsToAdd] = useState("5");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string>();
+  const tableScrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const scrollContainer = tableScrollRef.current;
+    if (scrollContainer !== null) {
+      scrollContainer.scrollLeft = 0;
+      scrollContainer.scrollTop = 0;
+    }
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -958,37 +995,32 @@ function FastOrderEntryDialog({
     };
   }, [api]);
 
-  const loadAreas = useCallback(
-    async (emirateId: string) => {
-      if (emirateId === "" || areaCache[emirateId] !== undefined) return;
-      try {
-        const page = await api.get<AreaPage>(
-          `configuration/areas?emirateId=${encodeURIComponent(
-            emirateId,
-          )}&status=active&page=1&pageSize=100`,
-        );
-        setAreaCache((current) => ({ ...current, [emirateId]: page.items }));
-      } catch {
-        setAreaCache((current) => ({ ...current, [emirateId]: [] }));
-      }
-    },
-    [api, areaCache],
-  );
-
   const updateRow = (id: string, change: Partial<FastEntryRow>) => {
     setRows((current) =>
       current.map((row) =>
-        row.id === id ? { ...row, ...change, status: row.status === "created" ? "created" : "draft", message: undefined } : row,
+        row.id === id
+          ? {
+              ...row,
+              ...change,
+              message: undefined,
+              resolvedServiceFee:
+                change.resolvedServiceFee !== undefined || row.status === "created"
+                  ? (change.resolvedServiceFee ?? row.resolvedServiceFee)
+                  : "",
+              status: row.status === "created" ? "created" : "draft",
+            }
+          : row,
       ),
     );
   };
 
   const addRows = (count: number) => {
+    const safeCount = Number.isFinite(count) && count > 0 ? Math.min(Math.floor(count), 100) : 5;
     setRows((current) => {
       const lastSerial = [...current].reverse().find((row) => row.serialNumber.trim() !== "")?.serialNumber ?? "";
       return [
         ...current,
-        ...Array.from({ length: count }, (_, index) =>
+        ...Array.from({ length: safeCount }, (_, index) =>
           createFastEntryRow(incrementSerial(lastSerial, index + 1)),
         ),
       ];
@@ -1054,10 +1086,8 @@ function FastOrderEntryDialog({
           if (row.traderId === "") errors.push(t("operations.errors.traderRequired"));
           if (row.customerName.trim() === "") errors.push(t("operations.errors.customerNameRequired"));
           if (row.mobile.trim() === "") errors.push(t("operations.errors.mobileRequired"));
-          if (row.mobile.trim() !== "" && !isUaeMobile(row.mobile.trim()))
-            errors.push(t("operations.mobileFormatError"));
-          if (row.secondMobile.trim() !== "" && !isUaeMobile(row.secondMobile.trim()))
-            errors.push(t("operations.mobileFormatError"));
+          if (row.mobile.trim() !== "" && !isFastEntryMobileValid(row.mobile))
+            errors.push(t("operations.fastEntryMobileInvalid"));
           if (row.emirateId === "") errors.push(t("areas.selectEmirate"));
           if (row.areaId === "") errors.push(t("operations.errors.areaRequired"));
           if (row.customerAddress.trim() === "") errors.push(t("operations.errors.addressRequired"));
@@ -1068,6 +1098,32 @@ function FastOrderEntryDialog({
           if (row.serviceFee.trim() !== "" && row.overrideReason.trim() === "")
             errors.push(t("operations.errors.overrideReasonRequired"));
           if (!packages.ok) errors.push(t("operations.errors.packagesInvalid"));
+
+          let customerOption: CustomerOption | undefined;
+          if (errors.length === 0) {
+            try {
+              const page = await api.get<SearchPage<CustomerOption>>(
+                `configuration/customers/search?search=${encodeURIComponent(row.mobile.trim())}&limit=10&offset=0`,
+              );
+              const requestedMobileKey = mobileComparisonKey(row.mobile);
+              customerOption = (Array.isArray(page.items) ? page.items : []).find(
+                (option) =>
+                  mobileComparisonKey(option.mobileNumber) === requestedMobileKey ||
+                  mobileComparisonKey(option.secondMobileNumber) === requestedMobileKey,
+              );
+              if (customerOption !== undefined) {
+                const sameArea = customerOption.areaId === row.areaId;
+                const sameAddress =
+                  normalizedAddress(customerOption.address) === normalizedAddress(row.customerAddress);
+                if (!sameArea || !sameAddress) {
+                  errors.push(t("operations.fastEntryExistingCustomerAddressMismatch"));
+                  customerOption = undefined;
+                }
+              }
+            } catch {
+              errors.push(t("operations.fastEntryValidationFailed"));
+            }
+          }
 
           if (errors.length === 0 && serial !== "") {
             try {
@@ -1086,16 +1142,19 @@ function FastOrderEntryDialog({
 
           if (errors.length === 0 && row.traderId !== "" && row.areaId !== "" && cod !== undefined) {
             try {
-              await api.post<OperationsOrderQuote>("operations/orders/quote", {
+              const quote = await api.post<OperationsOrderQuote>("operations/orders/quote", {
                 additionalFees: additionalFees ?? 0,
                 areaId: row.areaId,
                 codAmount: cod,
-                driverId: row.driverId || undefined,
                 serviceFee,
                 serviceFeeOverrideReason:
                   row.serviceFee.trim() === "" ? undefined : row.overrideReason.trim(),
                 traderId: row.traderId,
               });
+              row = {
+                ...row,
+                resolvedServiceFee: quote.serviceFee,
+              };
             } catch (requestError) {
               errors.push(resolveApiMessage(requestError, t("operations.quoteFailed")));
             }
@@ -1103,6 +1162,7 @@ function FastOrderEntryDialog({
 
           return {
             ...row,
+            customerOption,
             message: errors.length === 0 ? t("operations.fastEntryReady") : errors.join(" "),
             status: errors.length === 0 ? "ready" : "error",
           };
@@ -1112,59 +1172,71 @@ function FastOrderEntryDialog({
     [api, t],
   );
 
-  const validateAndSetRows = async () => {
-    setBusy(true);
-    setMessage(undefined);
-    try {
-      const validated = await validateRows(rows);
-      setRows(validated);
-      const readyCount = validated.filter((row) => row.status === "ready").length;
-      setMessage(t("operations.fastEntryRowsReady", { count: readyCount }));
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const createOrders = async () => {
     setBusy(true);
     setMessage(undefined);
     try {
       const validated = await validateRows(rows);
+      const activeValidatedRows = validated.filter(
+        (row) => rowHasFastEntryContent(row) && row.status !== "created",
+      );
+      const rowsWithErrors = activeValidatedRows.filter((row) => row.status === "error");
+      if (activeValidatedRows.length === 0) {
+        setRows(validated);
+        setMessage(t("operations.fastEntryNoRowsToCreate"));
+        return;
+      }
+      if (rowsWithErrors.length > 0) {
+        setRows(validated);
+        setMessage(t("operations.fastEntryFixRowsBeforeCreate", { count: rowsWithErrors.length }));
+        return;
+      }
       const nextRows = [...validated];
+      let stoppedOnCreateError = false;
       for (let index = 0; index < nextRows.length; index += 1) {
         const row = nextRows[index];
         if (row.status !== "ready") continue;
         const cod = parseFastEntryMoney(row.codAmount, true) ?? 0;
         const additionalFees = parseFastEntryMoney(row.additionalFees) ?? 0;
-        const serviceFee =
-          row.serviceFee.trim() === "" ? undefined : (parseFastEntryMoney(row.serviceFee) ?? 0);
+        const serviceFee = row.serviceFee.trim() === "" ? undefined : parseFastEntryMoney(row.serviceFee);
         const packages = parseNumericInput(row.packageCount, {
           allowZero: false,
           required: true,
           wholeNumber: true,
         });
         try {
+          const existingCustomer = row.customerOption;
+          const customerPayload =
+            existingCustomer === undefined
+              ? {
+                  customerAddressId: undefined,
+                  customerId: undefined,
+                  inlineCustomer: {
+                    address: row.customerAddress.trim(),
+                    areaId: row.areaId,
+                    mobileNumber: row.mobile.trim(),
+                    name: row.customerName.trim(),
+                  },
+                }
+              : {
+                  customerAddressId: existingCustomer.addressId,
+                  customerId: existingCustomer.id,
+                  inlineCustomer: undefined,
+                };
           await api.post<OperationsOrder>(
             "operations/orders",
             {
               additionalFees,
               areaId: row.areaId,
               codAmount: cod,
+              customerAddressId: customerPayload.customerAddressId,
               customerAddress: row.customerAddress.trim(),
+              customerId: customerPayload.customerId,
               customerMobileNumber: row.mobile.trim(),
               customerName: row.customerName.trim(),
-              customerSecondMobileNumber:
-                row.secondMobile.trim() === "" ? undefined : row.secondMobile.trim(),
-              driverId: row.driverId || undefined,
-              inlineCustomer: {
-                address: row.customerAddress.trim(),
-                areaId: row.areaId,
-                mobileNumber: row.mobile.trim(),
-                name: row.customerName.trim(),
-                ...(row.secondMobile.trim() === ""
-                  ? {}
-                  : { secondMobileNumber: row.secondMobile.trim() }),
-              },
+              customerSecondMobileNumber: undefined,
+              driverId: undefined,
+              inlineCustomer: customerPayload.inlineCustomer,
               notes: row.notes.trim() || undefined,
               packageCount: packages.ok ? packages.value : 1,
               referenceNumber: row.referenceNumber.trim() || undefined,
@@ -1176,9 +1248,16 @@ function FastOrderEntryDialog({
             },
             {
               "X-Idempotency-Key": materialFingerprint({
+                additionalFees,
+                areaId: row.areaId,
+                cod,
+                customerAddress: row.customerAddress.trim(),
                 customerName: row.customerName.trim(),
                 mobile: row.mobile.trim(),
+                packageCount: packages.ok ? packages.value : 1,
+                referenceNumber: row.referenceNumber.trim(),
                 serialNumber: row.serialNumber.trim(),
+                serviceFee: serviceFee ?? null,
                 traderId: row.traderId,
               }),
             },
@@ -1194,10 +1273,15 @@ function FastOrderEntryDialog({
             message: resolveApiMessage(requestError, t("operations.createOrderFailed")),
             status: "error",
           };
+          setRows([...nextRows]);
+          setMessage(resolveApiMessage(requestError, t("operations.createOrderFailed")));
+          stoppedOnCreateError = true;
+          break;
         }
         setRows([...nextRows]);
       }
       await onSaved();
+      if (stoppedOnCreateError) return;
       const createdCount = nextRows.filter((row) => row.status === "created").length;
       setMessage(t("operations.fastEntryCreatedCount", { count: createdCount }));
     } finally {
@@ -1221,11 +1305,23 @@ function FastOrderEntryDialog({
         <p className="form-hint">{t("operations.fastEntryHelp")}</p>
         {message === undefined ? null : <div className="alert alert-info">{message}</div>}
         <div className="fast-entry-toolbar">
-          <button disabled={busy} onClick={() => addRows(5)} type="button">
+          <label className="fast-entry-add-count">
+            <span>{t("operations.fastEntryRowsToAdd")}</span>
+            <input
+              min="1"
+              max="100"
+              onChange={(event) => setRowsToAdd(event.target.value)}
+              step="1"
+              type="number"
+              value={rowsToAdd}
+            />
+          </label>
+          <button
+            disabled={busy}
+            onClick={() => addRows(Number.parseInt(rowsToAdd, 10))}
+            type="button"
+          >
             {t("operations.fastEntryAddRows")}
-          </button>
-          <button disabled={busy} onClick={() => void validateAndSetRows()} type="button">
-            {t("operations.fastEntryValidate")}
           </button>
           <button
             className="button button-primary"
@@ -1255,7 +1351,7 @@ function FastOrderEntryDialog({
             {t("operations.fastEntryUsePastedRows")}
           </button>
         </details>
-        <div className="fast-entry-table-scroll">
+        <div className="fast-entry-table-scroll" ref={tableScrollRef}>
           <table className="fast-entry-table">
             <thead>
               <tr>
@@ -1265,24 +1361,19 @@ function FastOrderEntryDialog({
                 <th>{t("operations.trader")}</th>
                 <th>{t("operations.customerName")}</th>
                 <th>{t("operations.mobile")}</th>
-                <th>{t("operations.secondMobile")}</th>
                 <th>{t("areas.emirate")}</th>
                 <th>{t("operations.areaField")}</th>
                 <th>{t("operations.customerAddress")}</th>
-                <th>{t("operations.assignedDriver")}</th>
                 <th>{t("operations.codAmount")}</th>
                 <th>{t("operations.serviceFee")}</th>
                 <th>{t("operations.additionalFees")}</th>
                 <th>{t("operations.packages")}</th>
                 <th>{t("operations.notes")}</th>
-                <th>{t("operations.status")}</th>
                 <th>{t("common.actions")}</th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((row, index) => {
-                const areas = areaCache[row.emirateId] ?? [];
-                return (
+              {rows.map((row, index) => (
                   <tr className={`fast-entry-row-${row.status}`} key={row.id}>
                     <td>{index + 1}</td>
                     <td>
@@ -1298,17 +1389,22 @@ function FastOrderEntryDialog({
                       />
                     </td>
                     <td>
-                      <select
-                        value={row.traderId}
-                        onChange={(event) => updateRow(row.id, { traderId: event.target.value })}
-                      >
-                        <option value="">{t("operations.selectTrader")}</option>
-                        {traders.map((trader) => (
-                          <option key={trader.id} value={trader.id}>
-                            {trader.code} - {trader.name}
-                          </option>
-                        ))}
-                      </select>
+                      <SearchCombobox<OperationsTraderOption>
+                        api={api}
+                        emptyText={t("operations.noTradersFound")}
+                        getLabel={fastEntryTraderLabel}
+                        getSelectedLabel={fastEntryTraderLabel}
+                        label={t("operations.trader")}
+                        onChange={(trader) =>
+                          updateRow(row.id, {
+                            traderId: trader?.id ?? "",
+                            traderOption: trader,
+                          })
+                        }
+                        path="operations/traders/search"
+                        placeholder={t("operations.searchTrader")}
+                        value={row.traderOption}
+                      />
                     </td>
                     <td>
                       <input
@@ -1323,22 +1419,15 @@ function FastOrderEntryDialog({
                       />
                     </td>
                     <td>
-                      <input
-                        value={row.secondMobile}
-                        onChange={(event) => updateRow(row.id, { secondMobile: event.target.value })}
-                      />
-                    </td>
-                    <td>
                       <select
                         value={row.emirateId}
                         onChange={(event) => {
                           const emirateId = event.target.value;
-                          updateRow(row.id, { areaId: "", emirateId });
-                          void loadAreas(emirateId);
+                          updateRow(row.id, { areaId: "", areaOption: undefined, emirateId });
                         }}
                       >
                         <option value="">{t("areas.selectEmirate")}</option>
-                        {emirates.map((emirate) => (
+                        {emirateOptions.map((emirate) => (
                           <option key={emirate.id} value={emirate.id}>
                             {localizeName(textLanguage, { ar: emirate.nameAr, en: emirate.nameEn })}
                           </option>
@@ -1346,41 +1435,35 @@ function FastOrderEntryDialog({
                       </select>
                     </td>
                     <td>
-                      <select
-                        disabled={row.emirateId === ""}
-                        value={row.areaId}
-                        onChange={(event) => updateRow(row.id, { areaId: event.target.value })}
-                      >
-                        <option value="">
-                          {row.emirateId === ""
-                            ? t("areas.selectEmirateFirst")
-                            : t("operations.selectArea")}
-                        </option>
-                        {areas.map((area) => (
-                          <option key={area.id} value={area.id}>
-                            {area.code} - {localizeName(textLanguage, { ar: area.nameAr, en: area.nameEn })}
-                          </option>
-                        ))}
-                      </select>
+                      <SearchCombobox<CompanyArea>
+                        api={api}
+                        emptyText={t("areas.noneFound")}
+                        getLabel={(area) =>
+                          localizeName(textLanguage, { ar: area.nameAr, en: area.nameEn })
+                        }
+                        label={t("operations.areaField")}
+                        key={`${row.id}-${row.emirateId}`}
+                        onChange={(area) =>
+                          updateRow(row.id, {
+                            areaId: area?.id ?? "",
+                            areaOption: area,
+                            emirateId: area?.emirateId ?? row.emirateId,
+                          })
+                        }
+                        path={
+                          row.emirateId === ""
+                            ? "configuration/areas/search"
+                            : `configuration/areas/search?emirateId=${encodeURIComponent(row.emirateId)}`
+                        }
+                        placeholder={t("operations.selectArea")}
+                        value={row.areaOption}
+                      />
                     </td>
                     <td>
                       <input
                         value={row.customerAddress}
                         onChange={(event) => updateRow(row.id, { customerAddress: event.target.value })}
                       />
-                    </td>
-                    <td>
-                      <select
-                        value={row.driverId}
-                        onChange={(event) => updateRow(row.id, { driverId: event.target.value })}
-                      >
-                        <option value="">{t("operations.unassigned")}</option>
-                        {drivers.map((driver) => (
-                          <option key={driver.id} value={driver.id}>
-                            {driver.code} - {driver.name}
-                          </option>
-                        ))}
-                      </select>
                     </td>
                     <td>
                       <input
@@ -1397,7 +1480,7 @@ function FastOrderEntryDialog({
                         placeholder={t("operations.fastEntryAutoFee")}
                         step="0.01"
                         type="number"
-                        value={row.serviceFee}
+                        value={row.serviceFee || row.resolvedServiceFee}
                         onChange={(event) => updateRow(row.id, { serviceFee: event.target.value })}
                         title={row.serviceFee.trim() === "" ? t("operations.fastEntryAutoFeeHint") : undefined}
                       />
@@ -1434,11 +1517,10 @@ function FastOrderEntryDialog({
                         onChange={(event) => updateRow(row.id, { notes: event.target.value })}
                       />
                     </td>
-                    <td className="fast-entry-status-cell">
-                      <strong>{t(`operations.fastEntryStatus.${row.status}`)}</strong>
-                      {row.message === undefined ? null : <span>{row.message}</span>}
-                    </td>
                     <td>
+                      {row.message === undefined ? null : (
+                        <span className="fast-entry-row-message">{row.message}</span>
+                      )}
                       <button
                         disabled={busy}
                         onClick={() =>
@@ -1454,12 +1536,11 @@ function FastOrderEntryDialog({
                       </button>
                     </td>
                   </tr>
-                );
-              })}
+              ))}
             </tbody>
             <tfoot>
               <tr>
-                <td colSpan={18}>
+                <td colSpan={15}>
                   {t("operations.fastEntryTotalCod", {
                     amount: formatCurrency(
                       rows
@@ -2220,6 +2301,7 @@ function AssignDriverDialog({
   selection: SelectionPayload;
 }) {
   const { t } = useTranslation();
+  const driverOptions = Array.isArray(drivers) ? drivers : [];
   const [driverId, setDriverId] = useState("");
   const [preview, setPreview] = useState<SelectionSummary>();
   const [error, setError] = useState<string>();
@@ -2264,7 +2346,7 @@ function AssignDriverDialog({
         <span>{t("operations.driver")}</span>
         <select autoFocus onChange={(event) => setDriverId(event.target.value)} value={driverId}>
           <option value="">{t("operations.selectDriver")}</option>
-          {drivers.map((driver) => (
+          {driverOptions.map((driver) => (
             <option key={driver.id} value={driver.id}>
               {driver.code} - {driver.name}
             </option>

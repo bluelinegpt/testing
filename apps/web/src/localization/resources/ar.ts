@@ -363,21 +363,28 @@ export const arabicTranslations = {
   },
   operations: {
     fastEntry: "إدخال سريع",
-    fastEntryAddRows: "إضافة 5 صفوف",
+    fastEntryAddRows: "إضافة صفوف",
     fastEntryAutoFee: "تلقائي",
     fastEntryAutoFeeHint: "اتركه فارغاً لاستخدام تسعير التاجر المعتمد.",
-    fastEntryCreateValid: "إنشاء الطلبات الصحيحة",
+    fastEntryCreateValid: "إنشاء الطلبات",
     fastEntryCreated: "تم الإنشاء",
     fastEntryCreatedCount: "تم إنشاء {{count}} طلب.",
     fastEntryDuplicateReference: "رقم المرجع مكرر داخل جدول الإدخال السريع.",
     fastEntryDuplicateSerial: "الرقم التسلسلي مكرر داخل جدول الإدخال السريع.",
+    fastEntryFixRowsBeforeCreate:
+      "{{count}} صف يحتاج إلى مراجعة. صحح الصفوف المحددة ثم حاول الإنشاء مرة أخرى.",
     fastEntryHelp:
-      "أدخل عدة طلبات بشكل جدولي. كل صف صحيح يتم إرساله عبر نفس تحقق إنشاء الطلب العادي.",
+      "أدخل عدة طلبات بشكل جدولي. عند الضغط على إنشاء الطلبات يتم التحقق من الصفوف المدخلة أولاً، وإذا وُجد خطأ يتوقف الإنشاء.",
+    fastEntryExistingCustomerAddressMismatch:
+      "رقم الجوال يخص عميلاً موجوداً، لكن الإمارة أو العنوان المدخل لا يطابق عنوان العميل المحفوظ. استخدم نموذج إنشاء الطلب العادي لاختيار العميل أو حدّث عنوان العميل أولاً.",
+    fastEntryMobileInvalid: "أدخل رقم جوال بدون رموز تحكم وبحد أقصى 32 خانة.",
+    fastEntryNoRowsToCreate: "أدخل صف طلب واحد على الأقل قبل الإنشاء.",
     fastEntryPasteHelp:
-      "الصق صفوف Excel أو CSV بالترتيب التالي: التسلسلي، المرجع، معرف التاجر، العميل، الجوال، الجوال الثاني، معرف الإمارة، معرف المنطقة، العنوان، معرف السائق، مبلغ COD، رسوم الخدمة، الرسوم الإضافية، عدد الطرود، الملاحظات.",
+      "الصق صفوف Excel أو CSV بهذا الترتيب: التسلسلي، المرجع، معرف التاجر، العميل، الجوال، معرف الإمارة، معرف المنطقة، العنوان، مبلغ COD، رسوم الخدمة، الرسوم الإضافية، عدد الطرود، الملاحظات.",
     fastEntryPasteTitle: "لصق من Excel أو CSV",
     fastEntryReady: "جاهز",
     fastEntryRowsReady: "{{count}} صف جاهز للإنشاء.",
+    fastEntryRowsToAdd: "عدد الصفوف",
     fastEntryStatus: {
       created: "تم الإنشاء",
       draft: "مسودة",
