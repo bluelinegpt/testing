@@ -49,8 +49,11 @@ interface FeePaymentDetail extends FeePayment {
   readonly allocations: readonly Record<string, unknown>[]; readonly notes: string | null;
   readonly reversal_reason?: string | null; readonly reversedBy?: string | null;
 }
+interface ProposalAllocation {
+  readonly accrualId: string; readonly amount: string; readonly orderNumber: string; readonly outstandingBefore: string; readonly remainingOutstanding: string;
+}
 interface Proposal {
-  readonly allocations: readonly { readonly accrualId: string; readonly amount: string; readonly orderNumber: string; readonly outstandingBefore: string; readonly remainingOutstanding: string }[];
+  readonly allocations: readonly ProposalAllocation[];
   readonly driverId: string; readonly remainingOutstanding: string; readonly totalAmount: string;
 }
 interface ReconcileResult {
@@ -76,6 +79,13 @@ function parseMoney(value: string): number | undefined {
   const number=Number(value); return Number.isFinite(number)&&number>=0&&number<=9999999999999999?number:undefined;
 }
 function dubaiToday() { return new Intl.DateTimeFormat("en-CA",{day:"2-digit",month:"2-digit",timeZone:"Asia/Dubai",year:"numeric"}).format(new Date()); }
+function pageItems<T>(page: Page<T>|undefined): readonly T[] {
+  return Array.isArray(page?.items)?page.items:[];
+}
+function proposalRows(value: Proposal|readonly ProposalAllocation[]|undefined): readonly ProposalAllocation[] {
+  if (Array.isArray(value)) return value;
+  return Array.isArray(value?.allocations)?value.allocations:[];
+}
 
 export function OutsourcedDriverFeesWorkspace({api,permissions}:{api:ApiClient;permissions:readonly string[]}) {
   const {t,i18n}=useTranslation(); const language=i18n.resolvedLanguage?.startsWith("ar")?"ar":"en";
@@ -173,7 +183,7 @@ function PayDriverDialog({api,canExport,initialDriverId,language,money,onClose,o
     void api.get<Page<Accrual>>(`operations/payroll/outsourced-driver-fees/accruals?${qs({outstandingOnly:true,page:1,pageSize:500})}`)
       .then(page=>{
         const byId=new Map<string,Driver>();
-        page.items.forEach(row=>{
+        pageItems(page).forEach(row=>{
           if(!byId.has(row.driverId)){
             byId.set(row.driverId,{code:row.driverCode,driverType:"outsourced",id:row.driverId,name:row.driverName});
           }
@@ -193,9 +203,10 @@ function PayDriverDialog({api,canExport,initialDriverId,language,money,onClose,o
     setOutstandingLoading(true);
     try{
       const page=await api.get<Page<Accrual>>(`operations/payroll/outsourced-driver-fees/accruals?${qs({driverId,outstandingOnly:true,page:1,pageSize:500})}`);
-      const total=page.items.reduce((sum,row)=>sum+(parseMoney(row.outstandingAmount)??0),0);
+      const items=pageItems(page);
+      const total=items.reduce((sum,row)=>sum+(parseMoney(row.outstandingAmount)??0),0);
       const nextAmount=total.toFixed(2);
-      setOutstanding({amount:nextAmount,count:page.total});
+      setOutstanding({amount:nextAmount,count:page.total??items.length});
       if(!amountEdited){
         setAmount(nextAmount);
         setProposal(undefined);
@@ -210,7 +221,7 @@ function PayDriverDialog({api,canExport,initialDriverId,language,money,onClose,o
   useEffect(()=>{void loadOutstanding()},[loadOutstanding]);
 
   const numeric=parseMoney(amount);
-  const proposalAllocations=Array.isArray(proposal?.allocations)?proposal.allocations:[];
+  const proposalAllocations=proposalRows(proposal);
   const allocations=proposalAllocations.map(row=>({
     accrualId:row.accrualId,
     amount:parseMoney(manual[row.accrualId]??row.amount)??0,
@@ -229,8 +240,8 @@ function PayDriverDialog({api,canExport,initialDriverId,language,money,onClose,o
     setManual({});
     try{
       const result=await api.post<Proposal>("operations/payroll/outsourced-driver-fees/payments/proposal",{driverId,amount:numeric});
-      const normalizedAllocations=Array.isArray(result.allocations)?result.allocations:[];
-      setProposal({...result,allocations:normalizedAllocations});
+      const normalizedAllocations=proposalRows(result);
+      setProposal({allocations:normalizedAllocations,driverId:result.driverId??driverId,remainingOutstanding:result.remainingOutstanding??"0.00",totalAmount:result.totalAmount??numeric.toFixed(2)});
       setManual(Object.fromEntries(normalizedAllocations.map(row=>[row.accrualId,row.amount])));
     }catch(issue){
       setError(errorText(issue,t("payroll.driverFees.errors.operation")));
@@ -277,7 +288,7 @@ function PayDriverDialog({api,canExport,initialDriverId,language,money,onClose,o
           <span>{t("payroll.driverFees.fields.driver")}</span>
           <select value={driverId} onChange={e=>{setDriverId(e.target.value);setAmountEdited(false);setAmount("");setOutstanding(undefined);setProposal(undefined)}}>
             <option value="">{t("common.select")}</option>
-            {drivers.map(d=><option key={d.id} value={d.id}>{d.name}</option>)}
+            {(Array.isArray(drivers)?drivers:[]).map(d=><option key={d.id} value={d.id}>{d.name}</option>)}
           </select>
           {drivers.length===0?<small>{t("payroll.driverFees.pay.noPayableDrivers")}</small>:null}
         </label>
