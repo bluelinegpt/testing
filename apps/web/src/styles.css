@@ -5542,3 +5542,184 @@ tr.row-highlighted {
     break-inside: avoid;
   }
 }
+
+/* Phase B: carry the approved Dashboard/Orders visual language through the
+   operational financial workspaces. These selectors intentionally target the
+   shared building blocks used by Trader Settlements, settlement details,
+   receivables, driver collections, and related report/detail modals. */
+.data-surface,
+.stacked-tables,
+.workspace-step,
+.reports-panel,
+.accounting-report-filters,
+.business-access-panel {
+  background: var(--surface-color);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-sm);
+}
+
+.data-surface {
+  overflow: hidden;
+}
+
+.data-surface > .table-scroll-x,
+.workspace-step > .table-scroll-x {
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  background: var(--surface-color);
+}
+
+.table-toolbar,
+.compact-filters,
+.accounting-report-filters {
+  background: var(--surface-subtle);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  padding: 14px;
+}
+
+.table-toolbar {
+  border-width: 0 0 1px;
+  border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+}
+
+.filter-drawer {
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  background: var(--surface-color);
+  padding: 12px 14px;
+}
+
+.filter-drawer > summary,
+.workspace-step h3,
+.stacked-tables h2 {
+  color: var(--text-primary);
+}
+
+.filter-drawer > summary {
+  margin: 0;
+}
+
+.workspace-step {
+  padding: 18px;
+}
+
+.workspace-step + .workspace-step {
+  margin-top: 16px;
+}
+
+.reconciliation-summary,
+.detail-grid {
+  background: var(--border-color);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  gap: 1px;
+  overflow: hidden;
+}
+
+.reconciliation-summary > div,
+.detail-grid > div,
+.detail-line {
+  background: var(--surface-color);
+}
+
+.reconciliation-summary span,
+.reconciliation-summary dt,
+.detail-grid dt,
+.detail-line dt,
+.detail-line span {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+[dir="rtl"] .reconciliation-summary span,
+[dir="rtl"] .reconciliation-summary dt,
+[dir="rtl"] .detail-grid dt,
+[dir="rtl"] .detail-line dt,
+[dir="rtl"] .detail-line span {
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.reconciliation-summary strong,
+.reconciliation-summary dd,
+.detail-grid dd,
+.detail-line dd,
+.detail-line strong {
+  color: var(--text-primary);
+  font-weight: 700;
+}
+
+.option-list {
+  display: grid;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.option-list li,
+.option-list button {
+  width: 100%;
+}
+
+.option-list button {
+  background: var(--surface-color);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  cursor: pointer;
+  padding: 12px 14px;
+  text-align: start;
+}
+
+.option-list button:hover,
+.option-list button:focus-visible {
+  background: var(--primary-subtle);
+  border-color: color-mix(in srgb, var(--primary-color) 34%, var(--border-color));
+  color: var(--primary-color);
+}
+
+.row-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.link-button {
+  background: transparent;
+  border: 0;
+  color: var(--primary-color);
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.link-button:hover {
+  color: var(--primary-strong);
+}
+
+.empty-state,
+.loading-row {
+  color: var(--text-muted);
+}
+
+.reconciliation-success,
+.success-panel {
+  background: color-mix(in srgb, var(--color-success) 10%, var(--surface-color));
+  border: 1px solid color-mix(in srgb, var(--color-success) 30%, var(--border-color));
+  border-radius: var(--radius-lg);
+  color: var(--text-primary);
+  padding: 14px;
+}
+
+.alert {
+  border-radius: var(--radius-lg);
+  box-shadow: none;
+}
