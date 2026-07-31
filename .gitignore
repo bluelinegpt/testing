@@ -63,3 +63,7 @@ private-files/
 
 # Preserved test failure logs
 .test-failures/
+
+# Generated local accounting artifacts
+Dana/*.xlsx
+outputs/
