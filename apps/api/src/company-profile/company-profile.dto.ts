@@ -41,3 +41,8 @@ export class UpdateTextLanguageDto {
   @IsIn(["en", "ar"])
   public readonly textLanguage!: "en" | "ar";
 }
+
+export class UpdateThemeDto {
+  @IsIn(["light", "dark", "system"])
+  public readonly theme!: "light" | "dark" | "system";
+}

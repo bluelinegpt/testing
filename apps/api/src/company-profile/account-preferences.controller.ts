@@ -6,7 +6,7 @@ import { RequireIdentityKinds } from "../authentication/authentication.decorator
 import { type AccountPreferences, AccountPreferencesService } from "./account-preferences.service.js";
 // Runtime class value is required for Nest validation metadata.
 // eslint-disable-next-line @typescript-eslint/consistent-type-imports
-import { UpdateTextLanguageDto } from "./company-profile.dto.js";
+import { UpdateTextLanguageDto, UpdateThemeDto } from "./company-profile.dto.js";
 
 @ApiTags("account-preferences")
 @ApiBearerAuth()
@@ -31,6 +31,18 @@ export class AccountPreferencesController {
   ): Promise<AccountPreferences> {
     return this.preferences.updateTextLanguage(
       input.textLanguage,
+      String(request.id ?? request.headers["x-correlation-id"] ?? "unknown"),
+    );
+  }
+
+  @ApiOperation({ summary: "Update the signed-in user's visual theme preference" })
+  @Patch("theme")
+  public updateTheme(
+    @Body() input: UpdateThemeDto,
+    @Req() request: Request,
+  ): Promise<AccountPreferences> {
+    return this.preferences.updateTheme(
+      input.theme,
       String(request.id ?? request.headers["x-correlation-id"] ?? "unknown"),
     );
   }

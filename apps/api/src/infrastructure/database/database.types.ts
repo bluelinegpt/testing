@@ -17,6 +17,7 @@ interface AccountTable {
   password_hash: string;
   status: string;
   preferred_language: "en" | "ar";
+  preferred_theme: "light" | "dark" | "system";
   failed_login_attempts: number;
   locked_until: TimestampColumn | null;
   force_password_change: Generated<boolean>;

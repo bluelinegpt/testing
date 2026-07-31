@@ -7,16 +7,19 @@ import { KyselyTransactionManager } from "../infrastructure/database/transaction
 import { ApplicationException } from "../presentation/errors/application.exception.js";
 import { IdentityContextAccessor } from "../security/identity-context.js";
 
+export type AccountTheme = "light" | "dark" | "system";
+
 export interface AccountPreferences {
   /** Per-user business-data display language (separate from UI layout language). */
   readonly textLanguage: "en" | "ar";
+  /** Per-user visual theme preference. `system` follows the client operating system. */
+  readonly theme: AccountTheme;
 }
 
 /**
- * Self-service preferences for the signed-in account. The per-user Text
- * Language reuses the existing `accounts.preferred_language` column. A user may
- * only ever read and change their own preference — the account is taken from
- * the authenticated identity, never from the request body.
+ * Self-service preferences for the signed-in account. A user may only ever read
+ * and change their own preferences: the account is taken from the authenticated
+ * identity, never from the request body.
  */
 @Injectable()
 export class AccountPreferencesService {
@@ -28,8 +31,8 @@ export class AccountPreferencesService {
 
   public async myPreferences(): Promise<AccountPreferences> {
     const identity = this.identities.current();
-    const result = await sql<{ textLanguage: "en" | "ar" }>`
-      select preferred_language as "textLanguage"
+    const result = await sql<{ textLanguage: "en" | "ar"; theme: AccountTheme }>`
+      select preferred_language as "textLanguage", preferred_theme as theme
       from accounts
       where id = ${identity.identityId}::uuid
     `.execute(this.database);
@@ -37,7 +40,7 @@ export class AccountPreferencesService {
     if (row === undefined) {
       throw new ApplicationException("account_not_found", "Account not found", HttpStatus.NOT_FOUND);
     }
-    return { textLanguage: row.textLanguage };
+    return { textLanguage: row.textLanguage, theme: row.theme };
   }
 
   public async updateTextLanguage(
@@ -72,6 +75,38 @@ export class AccountPreferencesService {
         `.execute(transaction);
       }
     });
-    return { textLanguage };
+    return this.myPreferences();
+  }
+
+  public async updateTheme(theme: AccountTheme, correlationId: string): Promise<AccountPreferences> {
+    const identity = this.identities.current();
+    await this.transactions.execute(async (transaction) => {
+      const result = await sql<{ id: string }>`
+        update accounts
+           set preferred_theme = ${theme}, updated_at = now(), version = version + 1
+         where id = ${identity.identityId}::uuid
+         returning id
+      `.execute(transaction);
+      if (result.rows[0] === undefined) {
+        throw new ApplicationException(
+          "account_not_found",
+          "Account not found",
+          HttpStatus.NOT_FOUND,
+        );
+      }
+      if (identity.companyId !== null) {
+        await sql`
+          insert into audit_events (
+            company_id, actor_account_id, action, subject_type, subject_id,
+            after_data, correlation_id
+          ) values (
+            ${identity.companyId}::uuid, ${identity.identityId}::uuid,
+            'account.theme_update', 'account', ${identity.identityId},
+            ${JSON.stringify({ theme })}::jsonb, ${correlationId}
+          )
+        `.execute(transaction);
+      }
+    });
+    return this.myPreferences();
   }
 }

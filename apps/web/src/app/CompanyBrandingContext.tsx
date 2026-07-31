@@ -13,6 +13,15 @@ import type { ApiClient } from "../api/api-client.js";
 import type { AccountPreferences, CompanyBranding } from "../api/contracts.js";
 import type { SupportedLocale } from "../localization/locale.js";
 import { type BilingualName, localizeName } from "../localization/localize-name.js";
+import {
+  applyResolvedTheme,
+  applyThemePreference,
+  isThemePreference,
+  resolveThemePreference,
+  type ResolvedTheme,
+  type ThemePreference,
+  writeCachedResolvedTheme,
+} from "../theme/theme-preference.js";
 
 interface CompanyBrandingContextValue {
   readonly branding: CompanyBranding | undefined;
@@ -21,8 +30,11 @@ interface CompanyBrandingContextValue {
   readonly localize: (name: BilingualName) => string;
   readonly logoUrl: string | undefined;
   readonly refreshBranding: () => Promise<void>;
+  readonly resolvedTheme: ResolvedTheme;
   readonly setTextLanguage: (language: SupportedLocale) => Promise<void>;
+  readonly setThemePreference: (theme: ThemePreference) => Promise<void>;
   readonly textLanguage: SupportedLocale;
+  readonly themePreference: ThemePreference;
 }
 
 export const CompanyBrandingContext = createContext<CompanyBrandingContextValue | undefined>(
@@ -38,6 +50,8 @@ export function CompanyBrandingProvider({
 }) {
   const [branding, setBranding] = useState<CompanyBranding>();
   const [textLanguage, setTextLanguageState] = useState<SupportedLocale>("en");
+  const [themePreference, setThemePreferenceState] = useState<ThemePreference>("system");
+  const [resolvedTheme, setResolvedTheme] = useState<ResolvedTheme>(() => resolveThemePreference("system"));
   const [logoUrl, setLogoUrl] = useState<string | undefined>(undefined);
   const logoUrlRef = useRef<string | undefined>(undefined);
 
@@ -58,13 +72,30 @@ export function CompanyBrandingProvider({
     api
       .get<AccountPreferences>("me/preferences")
       .then((preferences) => {
-        if (!cancelled) setTextLanguageState(preferences.textLanguage);
+        if (cancelled) return;
+        setTextLanguageState(preferences.textLanguage);
+        const preference = isThemePreference(preferences.theme) ? preferences.theme : "system";
+        setThemePreferenceState(preference);
+        setResolvedTheme(applyThemePreference(preference));
       })
       .catch(() => undefined);
     return () => {
       cancelled = true;
     };
   }, [api]);
+
+  useEffect(() => {
+    if (themePreference !== "system") return undefined;
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const handleSystemThemeChange = () => {
+      const next = resolveThemePreference("system");
+      setResolvedTheme(next);
+      writeCachedResolvedTheme(next);
+      applyResolvedTheme(next);
+    };
+    media.addEventListener("change", handleSystemThemeChange);
+    return () => media.removeEventListener("change", handleSystemThemeChange);
+  }, [themePreference]);
 
   // Load the logo bytes through the authenticated endpoint and expose an object
   // URL. Keyed on the file id so a replaced logo is re-fetched (cache-bust) and
@@ -121,6 +152,22 @@ export function CompanyBrandingProvider({
     [api],
   );
 
+  const setThemePreference = useCallback(
+    async (theme: ThemePreference) => {
+      setThemePreferenceState(theme);
+      setResolvedTheme(applyThemePreference(theme));
+      try {
+        const preferences = await api.patch<AccountPreferences>("me/preferences/theme", { theme });
+        const nextTheme = isThemePreference(preferences.theme) ? preferences.theme : theme;
+        setThemePreferenceState(nextTheme);
+        setResolvedTheme(applyThemePreference(nextTheme));
+      } catch {
+        // Keep the optimistic value; the next load reconciles from the server.
+      }
+    },
+    [api],
+  );
+
   const localize = useCallback(
     (name: BilingualName) => localizeName(textLanguage, name),
     [textLanguage],
@@ -141,10 +188,25 @@ export function CompanyBrandingProvider({
       localize,
       logoUrl,
       refreshBranding,
+      resolvedTheme,
       setTextLanguage,
+      setThemePreference,
       textLanguage,
+      themePreference,
     }),
-    [branding, companyName, companySubtitle, localize, logoUrl, refreshBranding, setTextLanguage, textLanguage],
+    [
+      branding,
+      companyName,
+      companySubtitle,
+      localize,
+      logoUrl,
+      refreshBranding,
+      resolvedTheme,
+      setTextLanguage,
+      setThemePreference,
+      textLanguage,
+      themePreference,
+    ],
   );
 
   return <CompanyBrandingContext.Provider value={value}>{children}</CompanyBrandingContext.Provider>;

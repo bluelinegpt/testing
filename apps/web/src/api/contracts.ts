@@ -290,6 +290,7 @@ export interface CompanyBranding {
 
 export interface AccountPreferences {
   readonly textLanguage: "en" | "ar";
+  readonly theme: "light" | "dark" | "system";
 }
 
 export interface WorkforcePage<T> {
