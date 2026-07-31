@@ -6020,3 +6020,112 @@ tr.row-highlighted {
   background: var(--surface-subtle);
   color: var(--text-primary);
 }
+
+/* Dark-mode contrast guardrails.
+   These rules keep form captions, disabled actions, and table headers readable
+   across legacy screens that still use older hard-coded light-theme colors. */
+:root[data-theme="dark"] {
+  --text-primary: #ffffff;
+  --text-secondary: #eef4ff;
+  --text-muted: #d7def0;
+  --color-muted: #d7def0;
+}
+
+:root[data-theme="dark"] .company-content label,
+:root[data-theme="dark"] .company-content legend,
+:root[data-theme="dark"] .company-content .field,
+:root[data-theme="dark"] .company-content .field-hint,
+:root[data-theme="dark"] .company-content .form-hint,
+:root[data-theme="dark"] .company-content .form-section-heading h3,
+:root[data-theme="dark"] .company-content .modal-subtitle,
+:root[data-theme="dark"] .company-content .quote-loading,
+:root[data-theme="dark"] .modal label,
+:root[data-theme="dark"] .modal legend,
+:root[data-theme="dark"] .modal .field,
+:root[data-theme="dark"] .modal .field-hint,
+:root[data-theme="dark"] .modal .form-hint,
+:root[data-theme="dark"] .modal .form-section-heading h3,
+:root[data-theme="dark"] .modal .modal-subtitle,
+:root[data-theme="dark"] .modal .quote-loading,
+:root[data-theme="dark"] .order-totals small,
+:root[data-theme="dark"] .fast-entry-add-count,
+:root[data-theme="dark"] .fast-entry-row-created,
+:root[data-theme="dark"] .order-group-toggle span {
+  color: #ffffff;
+}
+
+:root[data-theme="dark"] .company-content input,
+:root[data-theme="dark"] .company-content select,
+:root[data-theme="dark"] .company-content textarea,
+:root[data-theme="dark"] .modal input,
+:root[data-theme="dark"] .modal select,
+:root[data-theme="dark"] .modal textarea,
+:root[data-theme="dark"] .login-form input {
+  background: #11182b;
+  border-color: #344466;
+  color: #ffffff;
+}
+
+:root[data-theme="dark"] .company-content input::placeholder,
+:root[data-theme="dark"] .company-content textarea::placeholder,
+:root[data-theme="dark"] .modal input::placeholder,
+:root[data-theme="dark"] .modal textarea::placeholder,
+:root[data-theme="dark"] .login-form input::placeholder {
+  color: #d7def0;
+  opacity: 1;
+}
+
+:root[data-theme="dark"] .company-content button,
+:root[data-theme="dark"] .modal button,
+:root[data-theme="dark"] .login-form button {
+  color: #ffffff;
+}
+
+:root[data-theme="dark"] .company-content .button-secondary,
+:root[data-theme="dark"] .company-content .close-button,
+:root[data-theme="dark"] .company-content .icon-button,
+:root[data-theme="dark"] .modal .button-secondary,
+:root[data-theme="dark"] .modal .close-button,
+:root[data-theme="dark"] .modal .icon-button {
+  background: #ffffff;
+  border-color: #ffffff;
+  color: #111827;
+}
+
+:root[data-theme="dark"] .company-content button:disabled,
+:root[data-theme="dark"] .company-content .button:disabled,
+:root[data-theme="dark"] .modal button:disabled,
+:root[data-theme="dark"] .modal .button:disabled,
+:root[data-theme="dark"] .login-form button:disabled {
+  color: #ffffff;
+  opacity: 0.72;
+}
+
+:root[data-theme="dark"] .company-content .button-secondary:disabled,
+:root[data-theme="dark"] .modal .button-secondary:disabled {
+  background: #e5e7eb;
+  border-color: #e5e7eb;
+  color: #111827;
+  opacity: 0.82;
+}
+
+:root[data-theme="dark"] .company-content thead,
+:root[data-theme="dark"] .modal thead,
+:root[data-theme="dark"] .orders-table th,
+:root[data-theme="dark"] .fast-entry-table thead th {
+  background: #f8fafc;
+}
+
+:root[data-theme="dark"] .company-content th,
+:root[data-theme="dark"] .modal th,
+:root[data-theme="dark"] .orders-table th,
+:root[data-theme="dark"] .fast-entry-table thead th {
+  color: #111827;
+}
+
+:root[data-theme="dark"] .fast-entry-paste,
+:root[data-theme="dark"] .fast-entry-row-error,
+:root[data-theme="dark"] .fast-entry-row-ready,
+:root[data-theme="dark"] .fast-entry-row-created {
+  color: #111827;
+}
