@@ -86,6 +86,9 @@ interface ReportData {
     readonly driverName: string;
     readonly driverType: string;
     readonly isReversal: boolean;
+    readonly linkedDriverFeePaymentId: string | null;
+    readonly linkedDriverFeePaymentNumber: string | null;
+    readonly linkedDriverFeePaymentStatus: "confirmed" | "reversed" | null;
     readonly notes: string | null;
     readonly reconciliationNumber: string;
     readonly reversedByReconciliationNumber: string | null;
@@ -98,6 +101,7 @@ interface ReportData {
     readonly actualReceived: string;
     readonly cashTotal: string;
     readonly difference: string;
+    readonly driverFeeOffset: string;
     readonly driverExpenses: string;
     readonly grossCollections: string;
     readonly netExpected: string;
@@ -136,10 +140,30 @@ interface DriverOption {
 interface PreviewResult {
   readonly difference: string;
   readonly driverId: string;
+  readonly driverFeeAllocations: readonly {
+    readonly accrualId: string;
+    readonly amount: string;
+    readonly orderNumber: string;
+    readonly outstandingBefore: string;
+    readonly remainingOutstanding: string;
+  }[];
+  readonly driverPayableDeduction: string;
+  readonly eligibleDriverFeeAccrualCount: number;
   readonly expenseTotal: string;
   readonly grossCollections: string;
   readonly netAmountExpected: string;
+  readonly oldestFirstDriverFeeProposal: readonly {
+    readonly accrualId: string;
+    readonly amount: string;
+    readonly orderNumber: string;
+    readonly outstandingBefore: string;
+    readonly remainingOutstanding: string;
+  }[];
   readonly orderCount: number;
+  readonly remainingDriverFeeOutstanding: string;
+  readonly requestedDriverFeeOffset: string;
+  readonly safeMaximumDriverFeeOffset: string;
+  readonly totalOutstandingDriverFees: string;
   readonly warnings: readonly string[];
 }
 
@@ -164,7 +188,9 @@ const emptyFilters = {
 type Filters = typeof emptyFilters;
 
 function money(value: string | number | undefined): string {
-  return (Math.round(Number(value ?? 0) * 100) / 100).toFixed(2);
+  const numeric = Number(value ?? 0);
+  if (!Number.isFinite(numeric)) return "0.00";
+  return (Math.round(numeric * 100) / 100).toFixed(2);
 }
 
 function message(error: unknown, fallback: string): string {
@@ -206,6 +232,11 @@ export function DriverCollectionsWorkspace({ api }: { api: ApiClient }) {
   const [outstandingOpen, setOutstandingOpen] = useState(false);
   const [pdfBusy, setPdfBusy] = useState<{ id: string; mode: "download" | "preview" }>();
   const [pdfError, setPdfError] = useState<string>();
+
+  useEffect(() => {
+    const linkedId = new URLSearchParams(window.location.search).get("reconciliationId");
+    if (linkedId !== null && /^[0-9a-f-]{36}$/i.test(linkedId)) setDetailId(linkedId);
+  }, []);
 
   const applyFilter = (change: Partial<Filters>) => {
     setPage(1);
@@ -829,15 +860,23 @@ function CreateDriverCollectionDialog({
   // from Net Expected: the operator must enter what the Driver actually handed
   // over, so the Difference correctly reads negative until they do (§8).
   const [actualReceived, setActualReceived] = useState("");
+  const [driverFeeOffset, setDriverFeeOffset] = useState("0.00");
+  const [manualDriverFeeAllocations, setManualDriverFeeAllocations] = useState<
+    readonly { accrualId: string; amount: number }[] | undefined
+  >();
   const [preview, setPreview] = useState<PreviewResult>();
   const [previewError, setPreviewError] = useState<string>();
   const [saving, setSaving] = useState(false);
   const [confirmError, setConfirmError] = useState<string>();
   const [confirmed, setConfirmed] = useState<{
+    driverFeeOffset: string;
+    driverFeePaymentId: string | null;
+    driverFeePaymentNumber: string | null;
     grossCollections: string;
     id: string;
     number: string;
     orderCount: number;
+    remainingDriverFeeOutstanding: string;
   }>();
   const idempotency = useIdempotencyKey();
   const branding = useContext(CompanyBrandingContext);
@@ -878,6 +917,8 @@ function CreateDriverCollectionDialog({
     setSelectedIds(new Set());
     setPreview(undefined);
     setActualReceived("");
+    setDriverFeeOffset("0.00");
+    setManualDriverFeeAllocations(undefined);
     idempotency.reset();
   };
 
@@ -888,11 +929,13 @@ function CreateDriverCollectionDialog({
     setPaymentMethod(next);
     setSelectedIds(new Set());
     setPreview(undefined);
+    setManualDriverFeeAllocations(undefined);
     loadOrders();
   };
 
   const toggleOrder = (id: string) =>
     setSelectedIds((current) => {
+      setManualDriverFeeAllocations(undefined);
       const next = new Set(current);
       if (next.has(id)) next.delete(id);
       else next.add(id);
@@ -930,6 +973,8 @@ function CreateDriverCollectionDialog({
       void api
         .post<PreviewResult>("operations/cash/reconciliations/preview", {
           ...selection,
+          driverFeeAllocations: manualDriverFeeAllocations,
+          driverFeeOffsetAmount: Number(money(driverFeeOffset)),
           expenses: cleanExpenses,
           payments: [],
         })
@@ -950,7 +995,14 @@ function CreateDriverCollectionDialog({
     };
     // cleanExpenses is a derived array recomputed every render; JSON-stringify
     // it in the dependency list so the effect only reruns on real content change.
-  }, [api, JSON.stringify(cleanExpenses), selection, t]);
+  }, [
+    api,
+    JSON.stringify(cleanExpenses),
+    JSON.stringify(manualDriverFeeAllocations),
+    selection,
+    t,
+    driverFeeOffset,
+  ]);
 
   const netExpected = preview === undefined ? 0 : Number(preview.netAmountExpected);
   const difference = money(Number(money(actualReceived || 0)) - netExpected);
@@ -958,6 +1010,8 @@ function CreateDriverCollectionDialog({
   const confirmPayload = {
     ...selection,
     collectionPaymentMethod: paymentMethod,
+    driverFeeAllocations: manualDriverFeeAllocations,
+    driverFeeOffsetAmount: Number(money(driverFeeOffset)),
     expenses: cleanExpenses,
     payments:
       actualReceived.trim() === ""
@@ -969,6 +1023,8 @@ function CreateDriverCollectionDialog({
     expenses: cleanExpenses.map((row) => ({ ...row, amount: String(row.amount) })),
     orderIds: [...selectedIds],
     payments: confirmPayload.payments.map((row) => ({ ...row, amount: String(row.amount) })),
+    driverFeeOffsetAmount: driverFeeOffset,
+    driverFeeAllocations: manualDriverFeeAllocations,
     selectionMode: "ids",
   })}`;
 
@@ -987,7 +1043,14 @@ function CreateDriverCollectionDialog({
     setSaving(true);
     setConfirmError(undefined);
     try {
-      const result = await api.post<{ reconciliationId: string; reconciliationNumber: string }>(
+      const result = await api.post<{
+        driverFeePaymentId: string | null;
+        driverFeePaymentNumber: string | null;
+        driverPayableDeduction: string;
+        reconciliationId: string;
+        reconciliationNumber: string;
+        remainingDriverFeeOutstanding: string;
+      }>(
         "operations/cash/reconciliations/selected",
         confirmPayload,
         { "X-Idempotency-Key": idempotency.keyFor(fingerprint) },
@@ -997,6 +1060,10 @@ function CreateDriverCollectionDialog({
         id: result.reconciliationId,
         number: result.reconciliationNumber,
         orderCount: preview?.orderCount ?? selectedIds.size,
+        driverFeeOffset: result.driverPayableDeduction,
+        driverFeePaymentId: result.driverFeePaymentId,
+        driverFeePaymentNumber: result.driverFeePaymentNumber,
+        remainingDriverFeeOutstanding: result.remainingDriverFeeOutstanding,
       });
       idempotency.reset();
     } catch (error) {
@@ -1046,6 +1113,18 @@ function CreateDriverCollectionDialog({
             <div className="detail-line">
               <dt>{t("operations.selectedCollections")}</dt>
               <dd>{money(confirmed.grossCollections)}</dd>
+            </div>
+            <div className="detail-line">
+              <dt>{t("operations.driverFeeOffset.title")}</dt>
+              <dd>{money(confirmed.driverFeeOffset)}</dd>
+            </div>
+            <div className="detail-line">
+              <dt>{t("operations.driverFeeOffset.linkedPayment")}</dt>
+              <dd>{confirmed.driverFeePaymentNumber ?? t("operations.driverFeeOffset.none")}</dd>
+            </div>
+            <div className="detail-line">
+              <dt>{t("operations.driverFeeOffset.remaining")}</dt>
+              <dd>{money(confirmed.remainingDriverFeeOutstanding)}</dd>
             </div>
             <div className="detail-line">
               <dt>{t("operations.paymentMethod")}</dt>
@@ -1298,6 +1377,85 @@ function CreateDriverCollectionDialog({
                 </button>
               </section>
 
+              {driver.driverType === "outsourced" ? (
+                <section className="workspace-step driver-fee-offset">
+                  <h3>{t("operations.driverFeeOffset.title")}</h3>
+                  <p className="field-hint">{t("operations.driverFeeOffset.help")}</p>
+                  <dl className="reconciliation-summary">
+                    <div className="detail-line">
+                      <dt>{t("operations.driverFeeOffset.totalOutstanding")}</dt>
+                      <dd>{money(preview?.totalOutstandingDriverFees)}</dd>
+                    </div>
+                    <div className="detail-line">
+                      <dt>{t("operations.driverFeeOffset.eligibleAccruals")}</dt>
+                      <dd>{preview?.eligibleDriverFeeAccrualCount ?? 0}</dd>
+                    </div>
+                    <div className="detail-line">
+                      <dt>{t("operations.driverFeeOffset.safeMaximum")}</dt>
+                      <dd>{money(preview?.safeMaximumDriverFeeOffset)}</dd>
+                    </div>
+                    <div className="detail-line">
+                      <dt><label htmlFor="driver-fee-offset">{t("operations.driverFeeOffset.selected")}</label></dt>
+                      <dd><input id="driver-fee-offset" inputMode="decimal" min="0" onChange={(event) => { setDriverFeeOffset(event.target.value); setManualDriverFeeAllocations(undefined); }} step="0.01" type="number" value={driverFeeOffset} /></dd>
+                    </div>
+                    <div className="detail-line">
+                      <dt>{t("operations.driverFeeOffset.remaining")}</dt>
+                      <dd>{money(preview?.remainingDriverFeeOutstanding)}</dd>
+                    </div>
+                  </dl>
+                  <div className="heading-actions">
+                    <button onClick={() => { setDriverFeeOffset(preview?.safeMaximumDriverFeeOffset ?? "0.00"); setManualDriverFeeAllocations(undefined); }} type="button">{t("operations.driverFeeOffset.applyAll")}</button>
+                    <button onClick={() => { setDriverFeeOffset("0.00"); setManualDriverFeeAllocations(undefined); }} type="button">{t("operations.driverFeeOffset.applyNone")}</button>
+                    {manualDriverFeeAllocations === undefined ? null : (
+                      <button onClick={() => setManualDriverFeeAllocations(undefined)} type="button">{t("payroll.driverFees.actions.oldestFirst")}</button>
+                    )}
+                  </div>
+                  {manualDriverFeeAllocations === undefined ? null : (
+                    <div className="alert alert-warning">
+                      {t("payroll.driverFees.pay.overrideWarning")}
+                    </div>
+                  )}
+                  {(preview?.driverFeeAllocations.length ?? 0) === 0 ? null : (
+                    <div className="table-scroll-x"><table><thead><tr>
+                      <th>{t("operations.order")}</th>
+                      <th>{t("operations.driverFeeOffset.outstandingBefore")}</th>
+                      <th>{t("operations.driverFeeOffset.proposed")}</th>
+                      <th>{t("operations.driverFeeOffset.remainingAfter")}</th>
+                    </tr></thead><tbody>{preview?.driverFeeAllocations.map((line) => (
+                      <tr key={line.accrualId}><td>{line.orderNumber}</td><td>{money(line.outstandingBefore)}</td><td>
+                        <input
+                          inputMode="decimal"
+                          min="0"
+                          onChange={(event) => {
+                            const nextAmount = Number(money(event.target.value));
+                            const current =
+                              manualDriverFeeAllocations ??
+                              preview.driverFeeAllocations.map((item) => ({
+                                accrualId: item.accrualId,
+                                amount: Number(money(item.amount)),
+                              }));
+                            setManualDriverFeeAllocations(
+                              current.map((item) =>
+                                item.accrualId === line.accrualId
+                                  ? { ...item, amount: nextAmount }
+                                  : item,
+                              ),
+                            );
+                          }}
+                          step="0.01"
+                          type="number"
+                          value={
+                            manualDriverFeeAllocations?.find(
+                              (item) => item.accrualId === line.accrualId,
+                            )?.amount ?? line.amount
+                          }
+                        />
+                      </td><td>{money(line.remainingOutstanding)}</td></tr>
+                    ))}</tbody></table></div>
+                  )}
+                </section>
+              ) : null}
+
               {/* Step 5 — Totals */}
               <section className="workspace-step">
                 <h3>{t("operations.collectionStepReview")}</h3>
@@ -1320,6 +1478,10 @@ function CreateDriverCollectionDialog({
                   <div className="detail-line">
                     <dt>{t("operations.expenses")}</dt>
                     <dd>{money(preview?.expenseTotal)}</dd>
+                  </div>
+                  <div className="detail-line">
+                    <dt>{t("operations.driverFeeOffset.title")}</dt>
+                    <dd>{money(preview?.driverPayableDeduction)}</dd>
                   </div>
                   <div className="detail-line detail-line-total">
                     <dt>{t("operations.netExpected")}</dt>
@@ -1396,6 +1558,8 @@ export function DriverCollectionDetailDialog({
   const [data, setData] = useState<ReportData>();
   const [error, setError] = useState<string>();
   const [reverseOpen, setReverseOpen] = useState(false);
+  const [linkedPayment, setLinkedPayment] = useState<Record<string, unknown>>();
+  const [linkedPaymentOpen, setLinkedPaymentOpen] = useState(false);
   // Explicit report-language selection (§15), defaulted from the Company's
   // Search-and-Display Text preference but always changeable by the User.
   const [reportLanguage, setReportLanguage] = useState<"ar" | "en">(
@@ -1422,6 +1586,22 @@ export function DriverCollectionDetailDialog({
     );
     if (requestError !== undefined) {
       setError(message(requestError, t("operations.pdfGenerationFailed")));
+    }
+  };
+
+  const openLinkedPayment = async () => {
+    const paymentId = data?.header.linkedDriverFeePaymentId;
+    if (paymentId === null || paymentId === undefined) return;
+    setError(undefined);
+    try {
+      setLinkedPayment(
+        await api.get<Record<string, unknown>>(
+          `operations/payroll/outsourced-driver-fees/payments/${paymentId}`,
+        ),
+      );
+      setLinkedPaymentOpen(true);
+    } catch (requestError) {
+      setError(message(requestError, t("payroll.driverFees.errors.load")));
     }
   };
 
@@ -1515,6 +1695,25 @@ export function DriverCollectionDetailDialog({
               <dt>{t("operations.expenses")}</dt>
               <dd>{money(data.summary.driverExpenses)}</dd>
             </div>
+            {Number(data.summary.driverFeeOffset) === 0 ? null : (
+              <>
+                <div className="detail-line">
+                  <dt>{t("operations.driverFeeOffset.title")}</dt>
+                  <dd>{money(data.summary.driverFeeOffset)}</dd>
+                </div>
+                <div className="detail-line">
+                  <dt>{t("operations.driverFeeOffset.linkedPayment")}</dt>
+                  <dd>
+                    {data.header.linkedDriverFeePaymentNumber ?? t("operations.driverFeeOffset.none")}
+                    {data.header.linkedDriverFeePaymentStatus === null ? null : (
+                      <span className={`badge fee-status-${data.header.linkedDriverFeePaymentStatus}`}>
+                        {t(`payroll.driverFees.status.${data.header.linkedDriverFeePaymentStatus}`)}
+                      </span>
+                    )}
+                  </dd>
+                </div>
+              </>
+            )}
             <div className="detail-line detail-line-total">
               <dt>{t("operations.netExpected")}</dt>
               <dd>
@@ -1627,6 +1826,39 @@ export function DriverCollectionDetailDialog({
             >
               {pdf.busy === "download" ? t("common.loading") : t("operations.downloadPdf")}
             </button>
+            {data.header.linkedDriverFeePaymentId === null ? null : (
+              <>
+                <button onClick={() => void openLinkedPayment()} type="button">
+                  {t("operations.driverFeeOffset.openPayment")}
+                </button>
+                <button
+                  disabled={pdf.busy !== undefined}
+                  onClick={() =>
+                    void pdf.run(
+                      `operations/payroll/outsourced-driver-fees/payments/${data.header.linkedDriverFeePaymentId}/receipt/pdf?language=${reportLanguage}`,
+                      `Driver-Fee-Payment-${data.header.linkedDriverFeePaymentNumber ?? reconciliationId}.pdf`,
+                      "preview",
+                    )
+                  }
+                  type="button"
+                >
+                  {t("operations.driverFeeOffset.receipt")}
+                </button>
+                <button
+                  disabled={pdf.busy !== undefined}
+                  onClick={() =>
+                    void pdf.run(
+                      `operations/payroll/outsourced-driver-fees/payments/${data.header.linkedDriverFeePaymentId}/receipt/pdf?language=${reportLanguage}`,
+                      `Driver-Fee-Payment-${data.header.linkedDriverFeePaymentNumber ?? reconciliationId}.pdf`,
+                      "download",
+                    )
+                  }
+                  type="button"
+                >
+                  {t("operations.driverFeeOffset.downloadReceipt")}
+                </button>
+              </>
+            )}
             {data.header.status !== "confirmed" ||
             data.header.isReversal ||
             data.header.reversedByReconciliationNumber !== null ? null : (
@@ -1651,11 +1883,36 @@ export function DriverCollectionDetailDialog({
           collection={{
             driverName: data.header.driverName,
             id: reconciliationId,
+            linkedDriverFeePaymentNumber: data.header.linkedDriverFeePaymentNumber,
             reconciliationNumber: data.header.reconciliationNumber,
           }}
           onClose={() => setReverseOpen(false)}
           onReversed={onReversed}
         />
+      )}
+      {!linkedPaymentOpen || linkedPayment === undefined ? null : (
+        <Modal
+          closeLabel={t("common.close")}
+          onRequestClose={() => setLinkedPaymentOpen(false)}
+          title={t("payroll.driverFees.payments.detail")}
+          titleId="linked-driver-fee-payment"
+        >
+          <dl className="reconciliation-summary">
+            {Object.entries(linkedPayment)
+              .filter(([key]) => key !== "allocations")
+              .map(([key, value]) => (
+                <div className="detail-line" key={key}>
+                  <dt>{t(`payroll.driverFees.columns.${key}`)}</dt>
+                  <dd>{String(value ?? "-")}</dd>
+                </div>
+              ))}
+          </dl>
+          <div className="modal-actions">
+            <button onClick={() => setLinkedPaymentOpen(false)} type="button">
+              {t("common.close")}
+            </button>
+          </div>
+        </Modal>
       )}
     </Modal>
   );
@@ -1668,7 +1925,12 @@ function ReverseCollectionDialog({
   onReversed,
 }: {
   api: ApiClient;
-  collection: { readonly driverName: string; readonly id: string; readonly reconciliationNumber: string };
+  collection: {
+    readonly driverName: string;
+    readonly id: string;
+    readonly linkedDriverFeePaymentNumber: string | null;
+    readonly reconciliationNumber: string;
+  };
   onClose: () => void;
   onReversed: () => void;
 }) {
@@ -1687,7 +1949,12 @@ function ReverseCollectionDialog({
       });
       onReversed();
     } catch (requestError) {
-      setError(message(requestError, t("operations.reversalFailed")));
+      setError(
+        requestError instanceof ApiError &&
+          requestError.code === "outsourced_driver_fee_recovery_workflow_required"
+          ? t("payroll.driverFees.errors.recoveryWorkflow")
+          : message(requestError, t("operations.reversalFailed")),
+      );
     } finally {
       setSaving(false);
     }
@@ -1705,6 +1972,11 @@ function ReverseCollectionDialog({
           driver: collection.driverName,
           number: collection.reconciliationNumber,
         })}
+        {collection.linkedDriverFeePaymentNumber === null
+          ? ""
+          : ` ${t("operations.driverFeeOffset.reverseLinkedWarning", {
+              payment: collection.linkedDriverFeePaymentNumber,
+            })}`}
       </p>
       {error === undefined ? null : <div className="alert alert-error">{error}</div>}
       <label className="field required-field">

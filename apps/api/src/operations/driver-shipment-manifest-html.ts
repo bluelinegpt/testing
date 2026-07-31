@@ -32,6 +32,7 @@ export interface ManifestData {
   readonly header: {
     readonly company: {
       readonly hasLogo: boolean;
+      readonly logoDataUri: string | null;
       readonly nameAr: string | null;
       readonly nameEn: string;
       readonly subtitleAr: string | null;
@@ -216,19 +217,15 @@ export function buildDriverShipmentManifestHtml(
         "<tr>" +
         `<td class="num">${index + 1}</td>` +
         `<td class="mono">${escapeHtml(order.serialNumber)}</td>` +
-        `<td class="mono">${order.referenceNumber === null ? "" : escapeHtml(order.referenceNumber)}</td>` +
         `<td>${escapeHtml(order.traderName)}</td>` +
         `<td>${escapeHtml(order.customerName)}</td>` +
         `<td class="mono">${escapeHtml(order.customerMobileNumber)}</td>` +
-        `<td class="mono">${order.customerSecondMobileNumber === null ? "" : escapeHtml(order.customerSecondMobileNumber)}</td>` +
         `<td>${order.emirateName === null ? "" : escapeHtml(order.emirateName)}</td>` +
         `<td>${escapeHtml(order.areaName)}</td>` +
         `<td>${escapeHtml(order.customerAddress)}</td>` +
         `<td class="num">${money(order.codAmount)}</td>` +
-        `<td class="num">${order.packageCount}</td>` +
         `<td>${order.deliveryInstructions === null ? "" : escapeHtml(order.deliveryInstructions)}</td>` +
         `<td>${order.notes === null ? "" : escapeHtml(order.notes)}</td>` +
-        `<td>${escapeHtml(order.deliveryStatusLabel)}</td>` +
         "</tr>",
     )
     .join("");
@@ -237,19 +234,15 @@ export function buildDriverShipmentManifestHtml(
     [
       labels.lineNumber,
       labels.orderSerial,
-      labels.externalReference,
       labels.trader,
       labels.customer,
       labels.mobile,
-      labels.secondMobile,
       labels.emirate,
       labels.area,
       labels.address,
       labels.cod,
-      labels.packages,
       labels.deliveryInstructions,
       labels.notes,
-      labels.deliveryStatus,
     ]
       .map((label) => `<th>${escapeHtml(label)}</th>`)
       .join("") +
@@ -262,7 +255,9 @@ export function buildDriverShipmentManifestHtml(
   const header =
     `<header class="report-header">` +
     `<div class="company-block">` +
-    (data.header.company.hasLogo ? `<div class="logo-placeholder"></div>` : "") +
+    (data.header.company.logoDataUri == null
+      ? ""
+      : `<img class="company-logo" alt="" src="${escapeHtml(data.header.company.logoDataUri)}">`) +
     `<div class="company-identity">` +
     `<div class="company-name">${escapeHtml(data.header.company.nameEn)}` +
     (data.header.company.nameAr === null ? "" : ` / ${escapeHtml(data.header.company.nameAr)}`) +
@@ -298,13 +293,6 @@ export function buildDriverShipmentManifestHtml(
     `<h2 class="section-title">${escapeHtml(labels.numberOfOrders)}</h2>` +
     summaryLine(labels.totalOrders, String(data.summary.totalOrders)) +
     summaryLine(labels.totalCod, money(data.summary.totalCod)) +
-    summaryLine(labels.totalPackages, String(data.summary.totalPackages)) +
-    summaryLine(labels.newStatus, String(data.summary.countNew)) +
-    summaryLine(labels.driver, String(data.summary.countAssignedToDriver)) +
-    summaryLine(labels.outForDelivery, String(data.summary.countOutForDelivery)) +
-    summaryLine(labels.delivered, String(data.summary.countDelivered)) +
-    summaryLine(labels.returned, String(data.summary.countReturned)) +
-    summaryLine(labels.cancelled, String(data.summary.countCancelled)) +
     `</section>`;
 
   const signatures =
@@ -315,31 +303,42 @@ export function buildDriverShipmentManifestHtml(
     `</div>`;
 
   const style = `
-    @page { size: A4 landscape; margin: 12mm 10mm 16mm; }
+    @page { size: A4 portrait; margin: 10mm 7mm 14mm; }
     * { box-sizing: border-box; }
-    body { font-family: "Segoe UI", Tahoma, Arial, sans-serif; color: #111; margin: 0; font-size: 10px; }
+    body { font-family: "Segoe UI", Tahoma, Arial, sans-serif; color: #111; margin: 0; font-size: 9px; }
     .report-header { border-bottom: 2px solid #333; margin-bottom: 10px; padding-bottom: 8px; }
     .company-block { display: flex; align-items: center; gap: 10px; }
-    .logo-placeholder { width: 40px; height: 40px; border: 1px solid #ccc; border-radius: 4px; }
-    .company-name { font-size: 16px; font-weight: 800; }
-    .company-subtitle, .company-telephone { font-size: 11px; color: #444; }
-    .report-title { font-size: 18px; margin: 8px 0 6px; }
-    .meta-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px 16px; font-size: 11px; }
+    .company-logo { width: 44px; height: 44px; object-fit: contain; }
+    .company-name { font-size: 14px; font-weight: 800; }
+    .company-subtitle, .company-telephone { font-size: 9px; color: #444; }
+    .report-title { font-size: 16px; margin: 6px 0 5px; }
+    .meta-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px 10px; font-size: 8.5px; }
     .meta-item { display: flex; justify-content: space-between; border-bottom: 1px dotted #ccc; padding: 2px 0; }
     .meta-label { color: #555; }
     .meta-value { font-weight: 600; }
     .section-title { font-size: 13px; margin: 14px 0 6px; }
-    table.grid { width: 100%; border-collapse: collapse; font-size: 9px; margin-bottom: 10px; }
-    table.grid th, table.grid td { border: 1px solid #999; padding: 3px 4px; text-align: start; }
+    table.grid { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 6.8px; margin-bottom: 8px; }
+    table.grid th, table.grid td { border: 1px solid #999; padding: 1.5px 2px; text-align: start; overflow-wrap: anywhere; line-height: 1.15; }
     table.grid thead { display: table-header-group; }
     table.grid thead th { background: #f0f0f0; }
     table.grid td.num, table.grid th.num { text-align: end; white-space: nowrap; }
     .mono { font-variant-numeric: tabular-nums; }
+    table.grid th:nth-child(1), table.grid td:nth-child(1) { width: 14px; }
+    table.grid th:nth-child(2), table.grid td:nth-child(2) { width: 24px; }
+    table.grid th:nth-child(3), table.grid td:nth-child(3) { width: 44px; }
+    table.grid th:nth-child(4), table.grid td:nth-child(4) { width: 48px; }
+    table.grid th:nth-child(5), table.grid td:nth-child(5) { width: 46px; }
+    table.grid th:nth-child(6), table.grid td:nth-child(6) { width: 36px; }
+    table.grid th:nth-child(7), table.grid td:nth-child(7) { width: 42px; }
+    table.grid th:nth-child(8), table.grid td:nth-child(8) { width: 56px; }
+    table.grid th:nth-child(9), table.grid td:nth-child(9) { width: 40px; }
+    table.grid th:nth-child(10), table.grid td:nth-child(10),
+    table.grid th:nth-child(11), table.grid td:nth-child(11) { width: 46px; }
     .summary-section { margin-top: 12px; max-width: 360px; }
-    .summary-line { display: flex; justify-content: space-between; border-bottom: 1px solid #ddd; padding: 4px 0; font-size: 12px; }
-    .signatures { display: flex; justify-content: space-between; gap: 24px; margin-top: 48px; }
-    .sign-box { flex: 1; text-align: center; font-size: 11px; }
-    .sign-line { border-top: 1px solid #333; margin-bottom: 6px; height: 40px; }
+    .summary-line { display: flex; justify-content: space-between; border-bottom: 1px solid #ddd; padding: 3px 0; font-size: 10px; }
+    .signatures { display: flex; justify-content: space-between; gap: 18px; margin-top: 32px; }
+    .sign-box { flex: 1; text-align: center; font-size: 9px; }
+    .sign-line { border-top: 1px solid #333; margin-bottom: 5px; height: 30px; }
     tr { break-inside: avoid; }
   `;
 

@@ -262,9 +262,6 @@ export function buildTraderSettlementStatementHtml(
         `<td>${escapeHtml(order.areaName)}</td>` +
         `<td class="num">${money(order.codAmount)}</td>` +
         `<td class="num">${money(order.serviceFee)}</td>` +
-        `<td class="num">${money(order.additionalFees)}</td>` +
-        `<td class="num">${money(order.vatAmount)}</td>` +
-        `<td class="num">${money(order.totalDeductions)}</td>` +
         `<td class="num">${money(order.originalTraderPayable)}</td>` +
         `<td class="num">${money(order.previouslyPaid)}</td>` +
         `<td class="num">${money(order.amountPaidNow)}</td>` +
@@ -285,9 +282,6 @@ export function buildTraderSettlementStatementHtml(
       labels.area,
       labels.cod,
       labels.serviceFee,
-      labels.additionalFees,
-      labels.vat,
-      labels.totalDeductions,
       labels.originalTraderPayable,
       labels.previouslyPaid,
       labels.amountPaidNow,
@@ -328,7 +322,9 @@ export function buildTraderSettlementStatementHtml(
   const reportHeader =
     `<header class="report-header">` +
     `<div class="company-block">` +
-    (header.company.hasLogo ? `<div class="logo-placeholder"></div>` : "") +
+    (header.company.logoDataUri == null
+      ? ""
+      : `<img class="company-logo" alt="" src="${escapeHtml(header.company.logoDataUri)}">`) +
     `<div class="company-identity">` +
     `<div class="company-name">${escapeHtml(header.company.nameEn)}` +
     (header.company.nameAr === null ? "" : ` / ${escapeHtml(header.company.nameAr)}`) +
@@ -411,9 +407,6 @@ export function buildTraderSettlementStatementHtml(
     `<h2 class="section-title">${escapeHtml(labels.numberOfOrders)}: ${data.summary.orderCount}</h2>` +
     summaryLine(labels.cod, money(data.summary.totalCod)) +
     summaryLine(labels.serviceFee, money(data.summary.totalServiceFees)) +
-    summaryLine(labels.additionalFees, money(data.summary.totalAdditionalFees)) +
-    summaryLine(labels.vat, money(data.summary.totalVat)) +
-    summaryLine(labels.totalDeductions, money(data.summary.totalDeductions)) +
     summaryLine(labels.originalTraderPayable, money(data.summary.totalOriginalTraderPayable)) +
     summaryLine(labels.previouslyPaid, money(data.summary.previouslyPaid)) +
     summaryLine(labels.amountPaidNow, money(data.summary.amountPaidNow)) +
@@ -433,7 +426,7 @@ export function buildTraderSettlementStatementHtml(
     body { font-family: "Segoe UI", Tahoma, Arial, sans-serif; color: #111; margin: 0; font-size: 11px; }
     .report-header { border-bottom: 2px solid #333; margin-bottom: 10px; padding-bottom: 8px; }
     .company-block { display: flex; align-items: center; gap: 10px; }
-    .logo-placeholder { width: 40px; height: 40px; border: 1px solid #ccc; border-radius: 4px; }
+    .company-logo { width: 52px; height: 52px; object-fit: contain; }
     .company-name { font-size: 16px; font-weight: 800; }
     .company-subtitle, .company-telephone { font-size: 11px; color: #444; }
     .report-title { font-size: 18px; margin: 8px 0 6px; }

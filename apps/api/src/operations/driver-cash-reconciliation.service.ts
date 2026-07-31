@@ -16,6 +16,7 @@ import { KyselyTransactionManager } from "../infrastructure/database/transaction
 import { ApplicationException } from "../presentation/errors/application.exception.js";
 import { IdentityContextAccessor } from "../security/identity-context.js";
 import { TenantContextAccessor } from "../tenancy/tenant-context.js";
+import { OutsourcedDriverFeeService } from "../payroll/outsourced-driver-fee.service.js";
 
 import { OperationsHistoryWriter } from "./operations-history.writer.js";
 import { reconciliationPageSizes } from "./operations.dto.js";
@@ -39,20 +40,15 @@ import type {
 } from "./operations.dto.js";
 
 /**
- * Driver Payable Deduction is always AED 0.00 during Driver Cash Reconciliation.
- *
- * Driver compensation — `orders.driver_cost`, Employee Driver commission,
- * Outsourced Driver commission and payroll accrual — is paid through the
- * separate commission, payroll and outsourced-payment workflows. Reconciliation
- * represents cash received from the Driver only, so deducting here would pay the
- * Driver twice for the same delivery.
+ * Driver Payable Deduction remains zero unless the operator explicitly applies
+ * an Outsourced Driver fee offset. The offset is backed by locked accrual
+ * allocations and never changes Order COD, Trader payable, or payment method.
  */
-const driverPayableDeduction = new Decimal(0);
-
 const defaultPageSize = 25;
 
 const idempotencyKeyPattern = /^[A-Za-z0-9._:-]{16,128}$/;
 const idempotencyOperation = "driver_reconciliations.create";
+const reversalIdempotencyOperation = "driver_reconciliations.reverse";
 
 interface EligibleOrder {
   readonly amountCollected: string;
@@ -67,6 +63,13 @@ interface EligibleOrder {
 }
 
 export interface DriverReconciliationResult {
+  readonly driverFeeAllocations: readonly {
+    readonly accrualId: string;
+    readonly amount: string;
+  }[];
+  readonly driverFeePaymentId: string | null;
+  readonly driverFeePaymentNumber: string | null;
+  readonly remainingDriverFeeOutstanding: string;
   readonly driverId: string;
   readonly driverPayableDeduction: string;
   readonly expenseTotal: string;
@@ -153,6 +156,8 @@ export interface DriverReconciliationPreview {
   readonly difference: string;
   readonly driverId: string;
   readonly driverPayableDeduction: string;
+  readonly driverFeeAllocations: readonly unknown[];
+  readonly eligibleDriverFeeAccrualCount: number;
   readonly expenseTotal: string;
   readonly grossCollections: string;
   readonly netAmountExpected: string;
@@ -168,6 +173,11 @@ export interface DriverReconciliationPreview {
     readonly orderNumber: string;
   }[];
   readonly paymentTotal: string;
+  readonly remainingDriverFeeOutstanding: string;
+  readonly requestedDriverFeeOffset: string;
+  readonly safeMaximumDriverFeeOffset: string;
+  readonly totalOutstandingDriverFees: string;
+  readonly oldestFirstDriverFeeProposal: readonly unknown[];
   readonly warnings: readonly string[];
 }
 
@@ -245,6 +255,9 @@ export interface DriverCollectionReportData {
     readonly createdBy: string;
     readonly driverName: string;
     readonly driverType: "employee" | "outsourced";
+    readonly linkedDriverFeePaymentId?: string | null;
+    readonly linkedDriverFeePaymentNumber?: string | null;
+    readonly linkedDriverFeePaymentStatus?: "confirmed" | "reversed" | null;
     readonly isReversal: boolean;
     readonly notes: string | null;
     readonly reconciliationNumber: string;
@@ -277,6 +290,7 @@ export interface DriverCollectionReportData {
     readonly actualReceived: string;
     readonly cashTotal: string;
     readonly difference: string;
+    readonly driverFeeOffset?: string;
     readonly driverExpenses: string;
     readonly grossCollections: string;
     readonly netExpected: string;
@@ -303,6 +317,8 @@ export class DriverCashReconciliationService {
     @Inject(OperationsHistoryWriter) private readonly history: OperationsHistoryWriter,
     @Inject(CompanyProfileService) private readonly companyProfile: CompanyProfileService,
     @Inject(DriverCollectionPdfService) private readonly pdf: DriverCollectionPdfService,
+    @Inject(OutsourcedDriverFeeService)
+    private readonly outsourcedDriverFees: OutsourcedDriverFeeService,
   ) {}
 
   public async expenseTypes(): Promise<readonly ExpenseTypeOption[]> {
@@ -501,7 +517,17 @@ export class DriverCashReconciliationService {
     }
     const gross = this.sumCollections(orders);
     const expenseTotal = this.sumExpenses(input.expenses ?? []);
-    const net = gross.minus(driverPayableDeduction).minus(expenseTotal);
+    const requestedOffset = new Decimal(input.driverFeeOffsetAmount ?? 0);
+    const feeOffset = await this.outsourcedDriverFees.collectionOffsetProposal(
+      this.database,
+      companyId,
+      orders[0]?.assignedDriverId ?? "",
+      gross.minus(expenseTotal),
+      requestedOffset,
+      input.driverFeeAllocations,
+    );
+    const selectedDriverFeeOffset = new Decimal(feeOffset.requestedOffset);
+    const net = gross.minus(selectedDriverFeeOffset).minus(expenseTotal);
     const paymentTotal = this.sumPayments(input.payments ?? []);
     // Company Fees and Trader Payable are shown separately and never reduce the amount the Driver
     // hands over (§8). Company Fees = Gross - Trader Payable.
@@ -514,7 +540,9 @@ export class DriverCashReconciliationService {
       companyFees: companyFees.toFixed(2),
       difference: paymentTotal.minus(net).toFixed(2),
       driverId: orders[0]?.assignedDriverId ?? "",
-      driverPayableDeduction: driverPayableDeduction.toFixed(2),
+      driverPayableDeduction: selectedDriverFeeOffset.toFixed(2),
+      driverFeeAllocations: feeOffset.allocations,
+      eligibleDriverFeeAccrualCount: feeOffset.eligibleAccrualCount,
       expenseTotal: expenseTotal.toFixed(2),
       grossCollections: gross.toFixed(2),
       netAmountExpected: net.toFixed(2),
@@ -530,6 +558,11 @@ export class DriverCashReconciliationService {
         orderNumber: order.orderNumber,
       })),
       paymentTotal: paymentTotal.toFixed(2),
+      remainingDriverFeeOutstanding: feeOffset.remainingDriverOutstanding,
+      requestedDriverFeeOffset: feeOffset.requestedOffset,
+      safeMaximumDriverFeeOffset: feeOffset.safeMaximumOffset,
+      totalOutstandingDriverFees: feeOffset.totalOutstanding,
+      oldestFirstDriverFeeProposal: feeOffset.oldestFirstProposal,
       warnings,
     };
   }
@@ -621,7 +654,18 @@ export class DriverCashReconciliationService {
       // 5. Recalculate totals from the locked rows, never from client input.
       const gross = this.sumCollections(orders);
       const expenseTotal = this.sumExpenses(input.expenses);
-      const net = gross.minus(driverPayableDeduction).minus(expenseTotal);
+      const requestedOffset = new Decimal(input.driverFeeOffsetAmount ?? 0);
+      const feeOffset = await this.outsourcedDriverFees.collectionOffsetProposal(
+        transaction,
+        companyId,
+        driverId,
+        gross.minus(expenseTotal),
+        requestedOffset,
+        input.driverFeeAllocations,
+        true,
+      );
+      const selectedDriverFeeOffset = new Decimal(feeOffset.requestedOffset);
+      const net = gross.minus(selectedDriverFeeOffset).minus(expenseTotal);
       if (net.isNegative()) {
         throw new ApplicationException(
           "reconciliation_negative_net",
@@ -656,29 +700,30 @@ export class DriverCashReconciliationService {
         "reconciliation",
         "REC",
       );
-      const header = await sql<{ id: string }>`
+      const header = await sql<{ businessDate: string; id: string }>`
         insert into driver_reconciliations (
           company_id, reconciliation_number, driver_id, business_date,
           gross_collections, driver_payable_deduction, reconciliation_expenses,
           net_amount_received, status, created_by_account_id, collection_payment_method, notes
         ) values (
-          ${companyId}::uuid, ${reconciliationNumber}, ${driverId}::uuid, current_date,
-          ${gross.toFixed(2)}, ${driverPayableDeduction.toFixed(2)}, ${expenseTotal.toFixed(2)},
+          ${companyId}::uuid, ${reconciliationNumber}, ${driverId}::uuid,
+          (now() at time zone 'Asia/Dubai')::date,
+          ${gross.toFixed(2)}, ${selectedDriverFeeOffset.toFixed(2)}, ${expenseTotal.toFixed(2)},
           ${net.toFixed(2)}, 'draft', ${identity.identityId}::uuid,
           ${collectionPaymentMethod}, ${input.notes?.trim() || null}
-        ) returning id
+        ) returning id,business_date::text as "businessDate"
       `.execute(transaction);
       const reconciliationId = header.rows[0]?.id;
       if (reconciliationId === undefined) throw new Error("Reconciliation ID was not returned");
 
-      for (const order of orders) {
+      for (const [orderIndex, order] of orders.entries()) {
         await sql`
           insert into driver_reconciliation_orders (
             company_id, reconciliation_id, order_id, customer_collection_amount,
             driver_payable_deduction, collection_payment_method
           ) values (
             ${companyId}::uuid, ${reconciliationId}::uuid, ${order.id}::uuid,
-            ${order.amountCollected}, ${driverPayableDeduction.toFixed(2)},
+            ${order.amountCollected}, ${orderIndex === 0 ? selectedDriverFeeOffset.toFixed(2) : "0.00"},
             ${collectionPaymentMethod}
           )
         `.execute(transaction);
@@ -712,6 +757,18 @@ export class DriverCashReconciliationService {
         const paymentId = inserted.rows[0]?.id;
         if (paymentId !== undefined) paymentIds.push(paymentId);
       }
+      const feePayment = await this.outsourcedDriverFees.confirmCollectionOffset(transaction, {
+        actorId: identity.identityId,
+        allocations: input.driverFeeAllocations,
+        amount: selectedDriverFeeOffset,
+        companyId,
+        correlationId,
+        driverId,
+        idempotencyKey: key,
+        paymentDate: header.rows[0]!.businessDate,
+        reconciliationId,
+        safeCollectionAmount: gross.minus(expenseTotal),
+      });
       await sql`
         update driver_reconciliations
            set status = 'confirmed', confirmed_by_account_id = ${identity.identityId}::uuid,
@@ -779,7 +836,7 @@ export class DriverCashReconciliationService {
         action: "driver_reconciliation.confirm",
         actorId: identity.identityId,
         after: {
-          driverPayableDeduction: driverPayableDeduction.toFixed(2),
+          driverPayableDeduction: selectedDriverFeeOffset.toFixed(2),
           expenseTotal: expenseTotal.toFixed(2),
           grossCollections: gross.toFixed(2),
           netAmountExpected: net.toFixed(2),
@@ -802,8 +859,17 @@ export class DriverCashReconciliationService {
       `.execute(transaction);
 
       return {
+        driverFeeAllocations:
+          feePayment?.allocations.map((line) => ({
+            accrualId: line.accrualId,
+            amount: line.amount,
+          })) ?? [],
+        driverFeePaymentId: feePayment?.paymentId ?? null,
+        driverFeePaymentNumber: feePayment?.paymentNumber ?? null,
+        remainingDriverFeeOutstanding:
+          feePayment?.remainingDriverOutstanding ?? feeOffset.remainingDriverOutstanding,
         driverId,
-        driverPayableDeduction: driverPayableDeduction.toFixed(2),
+        driverPayableDeduction: selectedDriverFeeOffset.toFixed(2),
         expenseTotal: expenseTotal.toFixed(2),
         grossCollections: gross.toFixed(2),
         netAmountExpected: net.toFixed(2),
@@ -828,8 +894,11 @@ export class DriverCashReconciliationService {
     reconciliationId: string,
     reason: string,
     correlationId: string,
+    idempotencyKey?: string,
   ): Promise<{
+    linkedDriverFeePaymentReversed: boolean;
     orderCount: number;
+    restoredDriverFeeAccrualIds: readonly string[];
     reconciliationId: string;
     reversalReconciliationId: string;
     reversalReconciliationNumber: string;
@@ -837,6 +906,14 @@ export class DriverCashReconciliationService {
     this.assertAnyPermission("reconciliations.reverse");
     const { companyId } = this.tenants.current();
     const identity = this.identities.current();
+    const key = idempotencyKey?.trim() || `reverse:${reconciliationId}`;
+    if (!idempotencyKeyPattern.test(key)) {
+      throw new ApplicationException(
+        "idempotency_key_invalid",
+        "A valid idempotency key is required",
+        HttpStatus.BAD_REQUEST,
+      );
+    }
     const trimmedReason = reason.trim();
     if (trimmedReason === "") {
       throw new ApplicationException(
@@ -846,6 +923,50 @@ export class DriverCashReconciliationService {
       );
     }
     return this.transactions.execute(async (transaction) => {
+      const requestHash = createHash("sha256")
+        .update(JSON.stringify({ reason: trimmedReason, reconciliationId }))
+        .digest("hex");
+      const reserved = await sql<{ id: string }>`
+        insert into idempotency_records(
+          company_id,operation,idempotency_key,request_hash,expires_at
+        ) values(
+          ${companyId}::uuid,${reversalIdempotencyOperation},${key},${requestHash},
+          now()+interval '24 hours'
+        ) on conflict(company_id,operation,idempotency_key) do nothing returning id
+      `.execute(transaction);
+      if (reserved.rows[0] === undefined) {
+        const replay = await sql<{
+          requestHash: string;
+          responseBody: {
+            linkedDriverFeePaymentReversed: boolean;
+            orderCount: number;
+            reconciliationId: string;
+            restoredDriverFeeAccrualIds: readonly string[];
+            reversalReconciliationId: string;
+            reversalReconciliationNumber: string;
+          } | null;
+        }>`
+          select request_hash as "requestHash",response_body as "responseBody"
+          from idempotency_records where company_id=${companyId}::uuid
+            and operation=${reversalIdempotencyOperation} and idempotency_key=${key}
+          for update
+        `.execute(transaction);
+        if (replay.rows[0]?.requestHash !== requestHash) {
+          throw new ApplicationException(
+            "idempotency_key_reused",
+            "This submission key was already used for a different reversal",
+            HttpStatus.CONFLICT,
+          );
+        }
+        if (replay.rows[0]?.responseBody !== null && replay.rows[0]?.responseBody !== undefined) {
+          return replay.rows[0].responseBody;
+        }
+        throw new ApplicationException(
+          "reconciliation_submission_in_progress",
+          "This reversal is already being processed",
+          HttpStatus.CONFLICT,
+        );
+      }
       const original = (
         await sql<{
           driverId: string;
@@ -925,6 +1046,14 @@ export class DriverCashReconciliationService {
           HttpStatus.CONFLICT,
         );
       }
+      const reversedFeePayment = await this.outsourcedDriverFees.reverseCollectionOffset(
+        transaction,
+        companyId,
+        identity.identityId,
+        reconciliationId,
+        trimmedReason,
+        correlationId,
+      );
 
       const reversalNumber = await this.history.nextReferenceNumber(
         transaction,
@@ -1021,12 +1150,23 @@ export class DriverCashReconciliationService {
         subjectType: "driver_reconciliation",
       });
 
-      return {
+      const response = {
+        linkedDriverFeePaymentReversed: reversedFeePayment !== null,
         orderCount: links.length,
+        restoredDriverFeeAccrualIds: reversedFeePayment?.restoredAccrualIds ?? [],
         reconciliationId,
         reversalReconciliationId: reversalId,
         reversalReconciliationNumber: reversalNumber,
       };
+      await sql`
+        update idempotency_records set response_status=200,
+          resource_type='driver_reconciliation_reversal',
+          resource_id=${reversalId}::uuid,response_body=${JSON.stringify(response)}::jsonb,
+          completed_at=now()
+        where company_id=${companyId}::uuid and operation=${reversalIdempotencyOperation}
+          and idempotency_key=${key}
+      `.execute(transaction);
+      return response;
     });
   }
 
@@ -1708,7 +1848,11 @@ export class DriverCashReconciliationService {
         createdBy: string;
         driverName: string;
         driverType: "employee" | "outsourced";
+        driverPayableDeduction: string;
         isReversal: boolean;
+        linkedDriverFeePaymentId: string | null;
+        linkedDriverFeePaymentNumber: string | null;
+        linkedDriverFeePaymentStatus: "confirmed" | "reversed" | null;
         notes: string | null;
         reconciliationNumber: string;
         reversedByReconciliationNumber: string | null;
@@ -1721,11 +1865,15 @@ export class DriverCashReconciliationService {
                r.business_date::text as "businessDate",
                r.created_at::text as "createdAt",
                r.confirmed_at::text as "confirmedAt",
+               r.driver_payable_deduction::text as "driverPayableDeduction",
                r.notes,
                (r.reversal_of_id is not null) as "isReversal",
                d.name_en as "driverName", d.driver_type as "driverType",
                coalesce(creator.username, ${legacyUnknown}) as "createdBy",
                coalesce(confirmer.username, ${legacyUnknown}) as "confirmedBy",
+               fee_payment.id as "linkedDriverFeePaymentId",
+               fee_payment.payment_number as "linkedDriverFeePaymentNumber",
+               fee_payment.status as "linkedDriverFeePaymentStatus",
                original.reconciliation_number as "reversesReconciliationNumber",
                reversal.reconciliation_number as "reversedByReconciliationNumber"
           from driver_reconciliations r
@@ -1738,6 +1886,14 @@ export class DriverCashReconciliationService {
             on original.id = r.reversal_of_id and original.company_id = r.company_id
           left join driver_reconciliations reversal
             on reversal.reversal_of_id = r.id and reversal.company_id = r.company_id
+          left join lateral (
+            select payment.id, payment.payment_number, payment.status
+              from outsourced_driver_fee_payments payment
+             where payment.company_id = r.company_id
+               and payment.linked_driver_reconciliation_id = r.id
+             order by payment.created_at
+             limit 1
+          ) fee_payment on true
          where r.id = ${reconciliationId}::uuid and r.company_id = ${companyId}::uuid
       `.execute(this.database)
     ).rows[0];
@@ -1845,7 +2001,8 @@ export class DriverCashReconciliationService {
       (sum, expense) => sum.plus(expense.amount),
       new Decimal(0),
     );
-    const netExpected = grossCollections.minus(driverExpenses);
+    const driverFeeOffset = new Decimal(header.driverPayableDeduction);
+    const netExpected = grossCollections.minus(driverExpenses).minus(driverFeeOffset);
 
     return {
       expenses: expenseRows.map((row) => ({
@@ -1874,6 +2031,9 @@ export class DriverCashReconciliationService {
         createdBy: header.createdBy,
         driverName: header.driverName,
         driverType: header.driverType,
+        linkedDriverFeePaymentId: header.linkedDriverFeePaymentId,
+        linkedDriverFeePaymentNumber: header.linkedDriverFeePaymentNumber,
+        linkedDriverFeePaymentStatus: header.linkedDriverFeePaymentStatus,
         isReversal: header.isReversal,
         notes: header.notes,
         reconciliationNumber: header.reconciliationNumber,
@@ -1905,6 +2065,7 @@ export class DriverCashReconciliationService {
         actualReceived: actualReceived.toFixed(2),
         cashTotal: cashTotal.toFixed(2),
         difference: actualReceived.minus(netExpected).toFixed(2),
+        driverFeeOffset: driverFeeOffset.toFixed(2),
         driverExpenses: driverExpenses.toFixed(2),
         grossCollections: grossCollections.toFixed(2),
         netExpected: netExpected.toFixed(2),
@@ -2317,7 +2478,11 @@ export class DriverCashReconciliationService {
              r.reconciliation_expenses::text as "expenseTotal",
              r.net_amount_received::text as "netAmountExpected",
              coalesce(payments.total, 0)::text as "paymentTotal",
-             coalesce(reconciled_orders.total, 0)::int as "orderCount"
+             coalesce(reconciled_orders.total, 0)::int as "orderCount",
+             fee_payment.id as "driverFeePaymentId",
+             fee_payment.payment_number as "driverFeePaymentNumber",
+             coalesce(fee_outstanding.total,0)::text as "remainingDriverFeeOutstanding",
+             coalesce(fee_allocations.items,'[]'::jsonb) as "driverFeeAllocations"
       from driver_reconciliations r
       left join lateral (
         select count(*)::int as total
@@ -2329,6 +2494,20 @@ export class DriverCashReconciliationService {
         from driver_reconciliation_payments p
         where p.reconciliation_id = r.id and p.company_id = r.company_id
       ) payments on true
+      left join outsourced_driver_fee_payments fee_payment
+        on fee_payment.company_id=r.company_id and fee_payment.linked_driver_reconciliation_id=r.id
+      left join lateral (
+        select jsonb_agg(jsonb_build_object('accrualId',a.accrual_id,'amount',a.allocated_amount)
+          order by a.allocation_order) as items
+        from outsourced_driver_fee_payment_allocations a
+        where a.company_id=r.company_id and a.payment_id=fee_payment.id
+      ) fee_allocations on true
+      left join lateral (
+        select sum(a.outstanding_amount) as total
+        from outsourced_driver_fee_accruals a
+        where a.company_id=r.company_id and a.driver_id=r.driver_id
+          and a.status in ('accrued','partially_paid')
+      ) fee_outstanding on true
       where r.id = ${reconciliationId}::uuid and r.company_id = ${companyId}::uuid
     `.execute(database);
     const row = result.rows[0];

@@ -6,6 +6,11 @@ import type { CompanyBankAccount, OperationsTrader, PagedResponse } from "../../
 import { CompanyBrandingContext } from "../../app/CompanyBrandingContext.js";
 import { Modal } from "../../components/Modal.js";
 import { PageHeader } from "../../components/PageHeader.js";
+import {
+  formatMoneyValue,
+  parseMoneyInput,
+  safeMoneyValue,
+} from "../../utils/numeric-input.js";
 
 import { type PdfAction, useReconciliationPdfActions } from "./reconciliation-pdf.js";
 import { useIdempotencyKey } from "./useIdempotencyKey.js";
@@ -215,7 +220,7 @@ const emptyCollectionFilters = {
 type CollectionFilters = typeof emptyCollectionFilters;
 
 function money(value: string | number | undefined): string {
-  return (Math.round(Number(value ?? 0) * 100) / 100).toFixed(2);
+  return formatMoneyValue(value);
 }
 
 function message(error: unknown, fallback: string): string {
@@ -1064,11 +1069,12 @@ function NewReceivableDialog({
       .catch(() => setTraders([]));
   }, [api]);
 
+  const parsedAmountDue = parseMoneyInput(amountDue, { allowZero: false });
   const canSubmit =
     traderId !== "" &&
     sourceType !== "" &&
     businessDate.trim() !== "" &&
-    Number(amountDue) > 0 &&
+    parsedAmountDue.ok &&
     reason.trim() !== "" &&
     !saving;
 
@@ -1090,7 +1096,7 @@ function NewReceivableDialog({
       const result = await api.post<CreateTraderReceivableResult>(
         "operations/trader-receivables/receivables",
         {
-          amountDue: Number(money(amountDue)),
+          amountDue: parsedAmountDue.ok ? parsedAmountDue.value : 0,
           businessDate,
           notes: notes.trim() === "" ? undefined : notes.trim(),
           reason: reason.trim(),
@@ -1204,6 +1210,7 @@ function NewReceivableDialog({
               inputMode="decimal"
               min="0.01"
               onChange={(event) => setAmountDue(event.target.value)}
+              step="0.01"
               type="number"
               value={amountDue}
             />
@@ -1668,8 +1675,8 @@ function CollectMoneyDialog({
   // Received (a valid positive number) changes — the backend is always the
   // source of truth for allocation, never a client-side computation.
   useEffect(() => {
-    const parsed = Number(amount);
-    if (trader === undefined || amount.trim() === "" || !(parsed > 0)) {
+    const parsed = parseMoneyInput(amount, { allowZero: false });
+    if (trader === undefined || !parsed.ok) {
       setProposal(undefined);
       setAllocations([]);
       return;
@@ -1678,7 +1685,7 @@ function CollectMoneyDialog({
     const timer = window.setTimeout(() => {
       void api
         .post<TraderAllocationProposal>("operations/trader-receivables/allocation-proposal", {
-          amount: parsed,
+          amount: parsed.value,
           traderId: trader.traderId,
         })
         .then((result) => {
@@ -1687,7 +1694,7 @@ function CollectMoneyDialog({
           setProposalError(undefined);
           setAllocations(
             result.allocations
-              .filter((line) => Number(line.proposedAmount) > 0)
+              .filter((line) => safeMoneyValue(line.proposedAmount) > 0)
               .map((line) => ({ amount: line.proposedAmount, receivableId: line.receivableId })),
           );
         })
@@ -1719,8 +1726,12 @@ function CollectMoneyDialog({
     });
   };
 
-  const allocatedTotal = allocations.reduce((sum, line) => sum + Number(line.amount || 0), 0);
-  const requestedAmount = Number(amount || 0);
+  const parsedRequestedAmount = parseMoneyInput(amount, { allowZero: false });
+  const allocatedTotal = allocations.reduce((sum, line) => {
+    const parsed = parseMoneyInput(line.amount);
+    return sum + (parsed.ok ? parsed.value : 0);
+  }, 0);
+  const requestedAmount = parsedRequestedAmount.ok ? parsedRequestedAmount.value : 0;
   const unallocated = money(requestedAmount - allocatedTotal);
   const allocationErrors: string[] = [];
   const seenReceivables = new Set<string>();
@@ -1729,22 +1740,29 @@ function CollectMoneyDialog({
       allocationErrors.push(t("traderReceivables.allocationDuplicateReceivable"));
     }
     seenReceivables.add(line.receivableId);
-    const lineAmount = Number(line.amount || 0);
+    const parsedLineAmount = parseMoneyInput(line.amount);
+    const lineAmount = parsedLineAmount.ok ? parsedLineAmount.value : 0;
+    if (!parsedLineAmount.ok) allocationErrors.push(t("traderReceivables.invalidAmount"));
     if (lineAmount < 0) allocationErrors.push(t("traderReceivables.allocationNegative"));
     const proposedLine = proposalLineById.get(line.receivableId);
-    if (proposedLine !== undefined && lineAmount > Number(proposedLine.outstandingBefore) + 0.001) {
+    if (proposedLine !== undefined && lineAmount > safeMoneyValue(proposedLine.outstandingBefore) + 0.001) {
       allocationErrors.push(t("traderReceivables.allocationExceedsOutstanding"));
     }
   }
-  if (amount.trim() !== "" && Math.abs(Number(unallocated)) > 0.005) {
+  if (!parsedRequestedAmount.ok && amount.trim() !== "") {
+    allocationErrors.push(t("traderReceivables.invalidAmount"));
+  } else if (amount.trim() !== "" && Math.abs(safeMoneyValue(unallocated)) > 0.005) {
     allocationErrors.push(t("traderReceivables.allocationTotalMismatch"));
   }
 
-  const activeAllocations = allocations.filter((line) => Number(line.amount || 0) > 0);
+  const activeAllocations = allocations.filter((line) => {
+    const parsed = parseMoneyInput(line.amount, { allowZero: false });
+    return parsed.ok;
+  });
   const remainingDueAfter = (proposal?.allocations ?? []).reduce((sum, line) => {
     const current = allocations.find((row) => row.receivableId === line.receivableId)?.amount;
-    const paidNow = current === undefined ? Number(line.proposedAmount) : Number(current || 0);
-    return sum + Math.max(0, Number(line.outstandingBefore) - paidNow);
+    const paidNow = current === undefined ? safeMoneyValue(line.proposedAmount) : safeMoneyValue(current);
+    return sum + Math.max(0, safeMoneyValue(line.outstandingBefore) - paidNow);
   }, 0);
 
   const canProceedToReview =
@@ -1776,10 +1794,10 @@ function CollectMoneyDialog({
         "operations/trader-receivables/collections",
         {
           allocations: activeAllocations.map((line) => ({
-            amount: Number(money(line.amount)),
+            amount: safeMoneyValue(line.amount),
             receivableId: line.receivableId,
           })),
-          amountReceived: Number(money(requestedAmount)),
+          amountReceived: requestedAmount,
           ...(paymentMethod === "bank_transfer"
             ? { bankAccountId, paymentReference: paymentReference.trim() }
             : {}),
@@ -2076,7 +2094,9 @@ function CollectMoneyDialog({
                   <span>{t("traderReceivables.fieldAmountReceived")}</span>
                   <input
                     inputMode="decimal"
+                    min="0.01"
                     onChange={(event) => setAmount(event.target.value)}
+                    step="0.01"
                     type="number"
                     value={amount}
                   />
@@ -2116,7 +2136,9 @@ function CollectMoneyDialog({
                                 <td>
                                   <input
                                     inputMode="decimal"
+                                    min="0"
                                     onChange={(event) => setLineAmount(line.receivableId, event.target.value)}
+                                    step="0.01"
                                     type="number"
                                     value={current}
                                   />

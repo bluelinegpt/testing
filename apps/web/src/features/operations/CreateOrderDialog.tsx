@@ -24,6 +24,7 @@ import { CompanyBrandingContext } from "../../app/CompanyBrandingContext.js";
 import { formatCurrency } from "../../localization/formatters.js";
 import { normalizeLocale } from "../../localization/locale.js";
 import { localizeName } from "../../localization/localize-name.js";
+import { parseMoneyInput, parseNumericInput } from "../../utils/numeric-input.js";
 
 export function CreateOrderDialog({
   api,
@@ -109,16 +110,27 @@ export function CreateOrderDialog({
   // never blocks Order creation. Only an empty Primary Mobile blocks.
   const mobileAdvisory = mobile.trim() !== "" && !isUaeMobile(mobile);
   const secondMobileAdvisory = secondMobile.trim() !== "" && !isUaeMobile(secondMobile);
+  const codInput = parseMoneyInput(codAmount, { required: true });
+  const additionalFeesInput = parseMoneyInput(additionalFees, { required: true });
+  const packageCountInput = parseNumericInput(packageCount, {
+    maxAbsolute: 1_000_000,
+    required: true,
+    wholeNumber: true,
+  });
+  const overrideFeeInput = parseMoneyInput(overrideFee, { required: true });
+  const manualFeeInput = parseMoneyInput(manualFee, { required: true });
+  const pricingFeeInput = parseMoneyInput(pricingFee, { required: true });
   const overrideValid =
     !overrideEnabled ||
-    (overrideFee !== "" && Number(overrideFee) >= 0 && overrideReason.trim() !== "");
+    (overrideFee !== "" && overrideFeeInput.ok && overrideReason.trim() !== "");
 
   // One fee-entry path: an operator either overrides a configured price, or
   // enters a manual price when none is configured. Both send serviceFee + reason.
   const overriding = overrideEnabled && canOverrideFee;
   const feeInput = overriding ? overrideFee : manualFee;
   const reasonInput = overriding ? overrideReason : manualReason;
-  const enteredFee = feeInput.trim() === "" ? undefined : Number(feeInput);
+  const parsedFee = parseMoneyInput(feeInput, { required: true });
+  const enteredFee = feeInput.trim() === "" || !parsedFee.ok ? undefined : parsedFee.value;
   const enteredReason = reasonInput.trim() === "" ? undefined : reasonInput.trim();
   // Ordered field keys used by the validation summary, focus management and the
   // aria wiring. The order follows the visual reading order of the form.
@@ -155,22 +167,19 @@ export function CreateOrderDialog({
   if (mobile.trim() === "") validationErrors.mobile = t("operations.errors.mobileRequired");
   if (area === undefined) validationErrors.area = t("operations.errors.areaRequired");
   if (address.trim() === "") validationErrors.address = t("operations.errors.addressRequired");
-  if (!(Number(codAmount) >= 0)) validationErrors.codAmount = t("operations.errors.codInvalid");
-  if (!(Number(additionalFees) >= 0))
+  if (!codInput.ok) validationErrors.codAmount = t("operations.errors.codInvalid");
+  if (!additionalFeesInput.ok)
     validationErrors.additionalFees = t("operations.errors.additionalInvalid");
-  {
-    const packages = Number(packageCount);
-    if (!Number.isInteger(packages) || packages < 1)
-      validationErrors.packageCount = t("operations.errors.packagesInvalid");
-  }
+  if (!packageCountInput.ok || packageCountInput.value < 1)
+    validationErrors.packageCount = t("operations.errors.packagesInvalid");
   if (pricingMissing) {
-    if (!(manualFee !== "" && Number(manualFee) >= 0))
+    if (!(manualFee !== "" && manualFeeInput.ok))
       validationErrors.pricing = t("operations.errors.manualFeeRequired");
   } else if (quote === undefined || quoteError !== undefined) {
     validationErrors.pricing = t("operations.errors.pricingUnresolved");
   }
   if (overrideEnabled) {
-    if (!(overrideFee !== "" && Number(overrideFee) >= 0))
+    if (!(overrideFee !== "" && overrideFeeInput.ok))
       validationErrors.overrideFee = t("operations.errors.overrideFeeInvalid");
     if (overrideReason.trim() === "")
       validationErrors.overrideReason = t("operations.errors.overrideReasonRequired");
@@ -307,6 +316,20 @@ export function CreateOrderDialog({
   );
 
   useEffect(() => {
+    let active = true;
+    void api
+      .get<{ serialNumber: string }>("operations/orders/next-serial-number")
+      .then((result) => {
+        if (!active) return;
+        setSerialNumber((current) => (current.trim() === "" ? result.serialNumber : current));
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [api]);
+
+  useEffect(() => {
     setIdentifierError(undefined);
     if (serialNumber.trim() === "") return;
     let active = true;
@@ -338,7 +361,13 @@ export function CreateOrderDialog({
   useEffect(() => {
     setQuote(undefined);
     setQuoteError(undefined);
-    if (trader === undefined || area === undefined || Number(codAmount) < 0 || !overrideValid)
+    if (
+      trader === undefined ||
+      area === undefined ||
+      !codInput.ok ||
+      !additionalFeesInput.ok ||
+      !overrideValid
+    )
       return;
     let active = true;
     const timer = window.setTimeout(() => {
@@ -346,8 +375,8 @@ export function CreateOrderDialog({
       void api
         .post<OperationsOrderQuote>("operations/orders/quote", {
           areaId: area.id,
-          additionalFees: Number(additionalFees),
-          codAmount: Number(codAmount),
+          additionalFees: additionalFeesInput.value,
+          codAmount: codInput.value,
           driverId: driverId || undefined,
           serviceFee: enteredFee,
           serviceFeeOverrideReason: enteredReason,
@@ -411,7 +440,7 @@ export function CreateOrderDialog({
   // Creates a reusable trader service price for the chosen scope, then re-quotes so
   // the order picks up the configured price instead of a one-off manual fee.
   const savePricing = async () => {
-    if (trader === undefined || area === undefined || pricingFee === "" || Number(pricingFee) < 0) {
+    if (trader === undefined || area === undefined || pricingFee === "" || !pricingFeeInput.ok) {
       return;
     }
     setPricingSaving(true);
@@ -419,7 +448,7 @@ export function CreateOrderDialog({
     try {
       const payload: Record<string, unknown> = {
         reason: pricingReason.trim() || undefined,
-        serviceFee: Number(pricingFee),
+        serviceFee: pricingFeeInput.value,
       };
       if (pricingScope === "area") {
         payload.emirateId = area.emirateId;
@@ -470,9 +499,9 @@ export function CreateOrderDialog({
       const order = await api.post<OperationsOrder>(
         "operations/orders",
         {
-          additionalFees: Number(additionalFees),
+          additionalFees: additionalFeesInput.ok ? additionalFeesInput.value : 0,
           areaId: area.id,
-          codAmount: Number(codAmount),
+          codAmount: codInput.ok ? codInput.value : 0,
           customerAddress: address.trim(),
           customerAddressId: customer?.addressId,
           customerDeliveryNotes: customerDeliveryNotes.trim() || undefined,
@@ -488,7 +517,7 @@ export function CreateOrderDialog({
             secondMobile.trim() === "" ? undefined : secondMobile.trim(),
           driverId: driverId || undefined,
           notes: notes.trim() || undefined,
-          packageCount: Number(packageCount),
+          packageCount: packageCountInput.ok ? packageCountInput.value : 0,
           referenceNumber: referenceNumber.trim() || undefined,
           serialNumber: serialNumber.trim(),
           serviceFee: enteredFee,
@@ -1075,7 +1104,7 @@ export function CreateOrderDialog({
                             <button
                               className="button button-primary"
                               disabled={
-                                pricingSaving || pricingFee === "" || Number(pricingFee) < 0
+                                pricingSaving || pricingFee === "" || !pricingFeeInput.ok
                               }
                               onClick={() => void savePricing()}
                               type="button"

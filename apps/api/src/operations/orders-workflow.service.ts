@@ -10,6 +10,7 @@ import { KyselyTransactionManager } from "../infrastructure/database/transaction
 import { ApplicationException } from "../presentation/errors/application.exception.js";
 import { IdentityContextAccessor } from "../security/identity-context.js";
 import { TenantContextAccessor } from "../tenancy/tenant-context.js";
+import { OutsourcedDriverFeeService } from "../payroll/outsourced-driver-fee.service.js";
 import { OperationsHistoryWriter } from "./operations-history.writer.js";
 import type {
   BulkAssignDriverDto,
@@ -51,6 +52,8 @@ export class OrdersWorkflowService {
     @Inject(TenantContextAccessor) private readonly tenants: TenantContextAccessor,
     @Inject(IdentityContextAccessor) private readonly identities: IdentityContextAccessor,
     @Inject(OperationsHistoryWriter) private readonly history: OperationsHistoryWriter,
+    @Inject(OutsourcedDriverFeeService)
+    private readonly outsourcedDriverFees: OutsourcedDriverFeeService,
   ) {}
 
   public async assignmentPreview(input: BulkAssignDriverDto): Promise<BulkActionPreview> {
@@ -392,6 +395,14 @@ export class OrdersWorkflowService {
       reason: input.reason,
       source: "web_portal",
     });
+    if (status === "delivered") {
+      await this.outsourcedDriverFees.createForDeliveredOrder(
+        database,
+        order.id,
+        input.actorId,
+        input.correlationId,
+      );
+    }
   }
 
   private async resolveSelection(

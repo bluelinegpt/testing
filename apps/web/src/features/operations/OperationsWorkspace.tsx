@@ -598,6 +598,12 @@ function ReportsPanel({
         <button className="button button-primary" onClick={() => void exportOrders()} type="button">
           {t("operations.exportOrdersCsv")}
         </button>
+        <a
+          className="button button-secondary"
+          href="/trader-settlements?openStatement=true"
+        >
+          {t("traderSettlements.accountStatement")}
+        </a>
       </section>
       {error === undefined ? null : <div className="alert alert-error">{error}</div>}
       <section className="report-grid">
@@ -948,6 +954,7 @@ function OrderDetail({
             defaultValue="0"
             min="0"
             name="sizeBytes"
+            step="1"
             type="number"
           />
           <button

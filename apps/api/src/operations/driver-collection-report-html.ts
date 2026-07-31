@@ -33,6 +33,7 @@ interface Labels {
   readonly difference: string;
   readonly driver: string;
   readonly driverExpenses: string;
+  readonly driverFeeOffset: string;
   readonly driverSignature: string;
   readonly driverType: string;
   readonly driverTypeEmployee: string;
@@ -91,6 +92,7 @@ const LABELS: Record<ReportLanguage, Labels> = {
     difference: "الفرق",
     driver: "السائق",
     driverExpenses: "مصاريف السائق",
+    driverFeeOffset: "خصم رسوم السائق الخارجي",
     driverSignature: "توقيع السائق",
     driverType: "نوع السائق",
     driverTypeEmployee: "موظف",
@@ -147,6 +149,7 @@ const LABELS: Record<ReportLanguage, Labels> = {
     difference: "Difference",
     driver: "Driver",
     driverExpenses: "Driver Expenses",
+    driverFeeOffset: "Outsourced Driver Fee Offset",
     driverSignature: "Driver",
     driverType: "Driver Type",
     driverTypeEmployee: "Employee",
@@ -358,6 +361,7 @@ export function buildDriverCollectionReportHtml(
     summaryLine(labels.cashTotal, money(data.summary.cashTotal)) +
     summaryLine(labels.visaTotal, money(data.summary.visaTotal)) +
     summaryLine(labels.driverExpenses, money(data.summary.driverExpenses)) +
+    summaryLine(labels.driverFeeOffset, money(data.summary.driverFeeOffset ?? "0")) +
     summaryLine(labels.netExpected, money(data.summary.netExpected)) +
     summaryLine(labels.amount, money(data.summary.actualReceived)) +
     summaryLine(labels.difference, money(data.summary.difference)) +

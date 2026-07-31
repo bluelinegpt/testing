@@ -13,6 +13,7 @@ import { useTranslation } from "react-i18next";
 
 import type { ApiClient } from "../../api/api-client.js";
 import type { CompanyArea, Emirate, TraderPage, TraderSummary } from "../../api/contracts.js";
+import { BusinessAccessPanel } from "../administration/BusinessAccessPanel.js";
 import { normalizeLocale } from "../../localization/locale.js";
 import { normalizeUaeMobile } from "../../domain/uae-mobile.js";
 import { Modal } from "../../components/Modal.js";
@@ -329,7 +330,7 @@ export function TraderDetailWorkspace({
         </p>
       </>
     );
-  const tabs = ["overview", "pricing", "banks", "orders", "settlements", "audit"];
+  const tabs = ["overview", "portalUsers", "pricing", "banks", "orders", "settlements", "audit"];
   return (
     <>
       <PageHeader
@@ -357,6 +358,12 @@ export function TraderDetailWorkspace({
               <Plus size={17} />
               {t("traderConfig.addPricing")}
             </button>
+            <a
+              className="button button-secondary"
+              href={`/trader-settlements?openStatement=true&statementTraderId=${encodeURIComponent(detail.id)}`}
+            >
+              {t("traderSettlements.accountStatement")}
+            </a>
           </>
         }
       />
@@ -418,6 +425,14 @@ export function TraderDetailWorkspace({
             setPricingEdit(row);
             setDialog("pricing");
           }}
+        />
+      ) : null}
+      {tab === "portalUsers" ? (
+        <BusinessAccessPanel
+          api={api}
+          entityId={String(detail.id)}
+          kind="trader"
+          onNavigate={(path) => globalThis.location.assign(path)}
         />
       ) : null}
       {tab === "banks" ? (

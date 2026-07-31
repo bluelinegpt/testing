@@ -12,11 +12,13 @@ import { ApplicationException } from "../presentation/errors/application.excepti
 import { mobileComparisonKey, normalizeUaeMobile } from "../shared/uae-mobile.js";
 import { IdentityContextAccessor } from "../security/identity-context.js";
 import { TenantContextAccessor } from "../tenancy/tenant-context.js";
+import { OutsourcedDriverFeeService } from "../payroll/outsourced-driver-fee.service.js";
 import type {
   BulkSettleTraderDto,
   ChangeOrderStatusDto,
   CreateDriverDto,
   CreateOrderDto,
+  CreateTraderPortalOrderDto,
   CreateTraderDto,
   FinancialPaymentDto,
   ImportOrdersCsvDto,
@@ -254,6 +256,7 @@ export interface PublicOrderTracking {
 
 export interface PortalOrder {
   readonly amountCollected: string;
+  readonly areaId: string;
   readonly areaName: string;
   readonly codAmount: string;
   readonly customerAmountDue: string;
@@ -262,11 +265,32 @@ export interface PortalOrder {
   readonly customerName: string;
   readonly deliveryStatus: string;
   readonly id: string;
+  readonly notes: string | null;
   readonly orderDate: string;
   readonly orderNumber: string;
+  readonly packageCount: number;
+  readonly referenceNumber: string | null;
+  readonly serialNumber: string;
   readonly serviceFee: string;
   readonly traderName: string;
   readonly traderSettlementStatus: string;
+}
+
+export interface TraderPortalProfile {
+  readonly code: string;
+  readonly email: string | null;
+  readonly id: string;
+  readonly mobileNumber: string;
+  readonly name: string;
+}
+
+export interface TraderPortalArea {
+  readonly emirateId: string;
+  readonly emirateNameAr: string | null;
+  readonly emirateNameEn: string;
+  readonly id: string;
+  readonly nameAr: string | null;
+  readonly nameEn: string;
 }
 
 export interface OperationsOrderImportResult {
@@ -438,6 +462,8 @@ export class OperationsService {
     @Inject(TenantContextAccessor) private readonly tenants: TenantContextAccessor,
     @Inject(IdentityContextAccessor) private readonly identities: IdentityContextAccessor,
     @Inject(PasswordHasher) private readonly passwords: PasswordHasher,
+    @Inject(OutsourcedDriverFeeService)
+    private readonly outsourcedDriverFees: OutsourcedDriverFeeService,
   ) {}
 
   public async overview(filters: OperationsOverviewFilters = {}): Promise<OperationsOverview> {
@@ -1088,6 +1114,95 @@ export class OperationsService {
     return publicTracking;
   }
 
+  public async traderPortalProfile(): Promise<TraderPortalProfile> {
+    const identity = this.identities.current();
+    if (identity.companyId === null) {
+      throw new ApplicationException(
+        "tenant_required",
+        "A Company account is required",
+        HttpStatus.FORBIDDEN,
+      );
+    }
+    const trader = await this.traderForAccount(identity.companyId, identity.identityId, identity.profileId);
+    const result = await sql<TraderPortalProfile>`
+      select id,code,name_en as name,mobile_number as "mobileNumber",email
+        from traders
+       where id=${trader.id}::uuid and company_id=${identity.companyId}::uuid
+       limit 1
+    `.execute(this.database);
+    return result.rows[0]!;
+  }
+
+  public async traderPortalAreas(): Promise<readonly TraderPortalArea[]> {
+    const identity = this.identities.current();
+    if (identity.companyId === null) {
+      throw new ApplicationException(
+        "tenant_required",
+        "A Company account is required",
+        HttpStatus.FORBIDDEN,
+      );
+    }
+    await this.traderForAccount(identity.companyId, identity.identityId, identity.profileId);
+    const result = await sql<TraderPortalArea>`
+      select a.id,a.name_en as "nameEn",a.name_ar as "nameAr",
+             e.id as "emirateId",e.name_en as "emirateNameEn",
+             e.name_ar as "emirateNameAr"
+        from areas a
+        join emirates e on e.id=a.emirate_id
+       where a.company_id=${identity.companyId}::uuid and a.is_active
+       order by e.display_order,lower(a.name_en),a.id
+    `.execute(this.database);
+    return result.rows;
+  }
+
+  public async createTraderPortalOrder(
+    input: CreateTraderPortalOrderDto,
+    correlationId: string,
+    idempotencyKey?: string,
+  ): Promise<OperationsOrder> {
+    const identity = this.identities.current();
+    if (identity.companyId === null) {
+      throw new ApplicationException(
+        "tenant_required",
+        "A Company account is required",
+        HttpStatus.FORBIDDEN,
+      );
+    }
+    const trader = await this.traderForAccount(
+      identity.companyId,
+      identity.identityId,
+      identity.profileId,
+    );
+    return this.createOrder(
+      { ...input, traderId: trader.id },
+      correlationId,
+      idempotencyKey,
+    );
+  }
+
+  public async updateTraderPortalOrder(
+    orderId: string,
+    input: UpdateOrderDto,
+    correlationId: string,
+  ): Promise<OperationsOrder> {
+    const identity = this.identities.current();
+    if (identity.companyId === null) {
+      throw new ApplicationException(
+        "tenant_required",
+        "A Company account is required",
+        HttpStatus.FORBIDDEN,
+      );
+    }
+    const trader = await this.traderForAccount(
+      identity.companyId,
+      identity.identityId,
+      identity.profileId,
+    );
+    const { traderId: _ignoredTraderId, ...safeInput } = input;
+    void _ignoredTraderId;
+    return this.updateOrder(orderId, safeInput, correlationId, trader.id);
+  }
+
   public async traderPortalOrders(): Promise<readonly PortalOrder[]> {
     const identity = this.identities.current();
     if (identity.companyId === null) {
@@ -1097,11 +1212,16 @@ export class OperationsService {
         HttpStatus.FORBIDDEN,
       );
     }
-    const trader = await this.traderForAccount(identity.companyId, identity.identityId);
+    const trader = await this.traderForAccount(identity.companyId, identity.identityId, identity.profileId);
     const result = await sql<PortalOrder>`
       select o.id,
              o.order_number as "orderNumber",
              o.order_date::text as "orderDate",
+             o.serial_number as "serialNumber",
+             o.reference_number as "referenceNumber",
+             o.area_id as "areaId",
+             o.package_count as "packageCount",
+             o.notes,
              t.name_en as "traderName",
              coalesce(o.customer_area_name_ar_snapshot,a.name_ar,
                       o.customer_area_name_snapshot,a.name_en) as "areaName",
@@ -1134,11 +1254,16 @@ export class OperationsService {
         HttpStatus.FORBIDDEN,
       );
     }
-    const driver = await this.driverForAccount(identity.companyId, identity.identityId);
+    const driver = await this.driverForAccount(identity.companyId, identity.identityId, identity.profileId);
     const result = await sql<PortalOrder>`
       select o.id,
              o.order_number as "orderNumber",
              o.order_date::text as "orderDate",
+             o.serial_number as "serialNumber",
+             o.reference_number as "referenceNumber",
+             o.area_id as "areaId",
+             o.package_count as "packageCount",
+             o.notes,
              t.name_en as "traderName",
              coalesce(o.customer_area_name_ar_snapshot,a.name_ar,
                       o.customer_area_name_snapshot,a.name_en) as "areaName",
@@ -1178,17 +1303,25 @@ export class OperationsService {
         HttpStatus.FORBIDDEN,
       );
     }
-    const driver = await this.driverForAccount(identity.companyId, identity.identityId);
+    const driver = await this.driverForAccount(identity.companyId, identity.identityId, identity.profileId);
     const current = await sql<{ driverId: string | null }>`
       select assigned_driver_id as "driverId"
       from orders
-      where id = ${orderId}::uuid and company_id = ${identity.companyId}::uuid
+      where id = ${orderId}::uuid
+        and company_id = ${identity.companyId}::uuid
+        and assigned_driver_id = ${driver.id}::uuid
       limit 1
     `.execute(this.database);
-    if (current.rows[0]?.driverId !== driver.id) {
+    if (current.rows[0] === undefined) {
+      await sql`
+        insert into audit_events(company_id,actor_account_id,action,subject_type,subject_id,
+          after_data,correlation_id,actor_role,source)
+        values(${identity.companyId}::uuid,${identity.identityId}::uuid,'driver.order_access_blocked',
+          'order',${orderId},'{"reason":"profile_scope"}'::jsonb,${correlationId},'driver','portal')
+      `.execute(this.database);
       throw new ApplicationException(
-        "driver_order_not_found",
-        "The order is not assigned to this driver",
+        "driver_order_access_denied",
+        "The order was not found",
         HttpStatus.NOT_FOUND,
       );
     }
@@ -1210,7 +1343,12 @@ export class OperationsService {
              t.account_status as status,
              count(o.id)::int as "totalOrders",
              count(o.id) filter (where o.delivery_status in ('new', 'assigned_to_driver', 'out_for_delivery'))::int as "openOrders",
-             coalesce(sum(o.trader_net_payable) filter (where o.trader_settlement_status = 'unsettled'), 0)::text as "unsettledNetPayable"
+             coalesce(sum(o.trader_outstanding_balance) filter (
+               where o.delivery_status = 'delivered'
+                 and o.driver_reconciliation_status in ('reconciled', 'not_applicable')
+                 and o.trader_settlement_status not in ('not_eligible', 'reversed')
+                 and o.trader_outstanding_balance > 0
+             ), 0)::text as "unsettledNetPayable"
       from traders t
       left join orders o on o.trader_id = t.id and o.company_id = t.company_id
       where t.company_id = ${companyId}::uuid
@@ -1294,6 +1432,7 @@ export class OperationsService {
       from drivers d
       left join orders o on o.assigned_driver_id = d.id and o.company_id = d.company_id
       where d.company_id = ${companyId}::uuid
+        and d.account_status = 'active'
       group by d.id
       order by lower(d.name_en), d.code
       limit 100
@@ -1571,6 +1710,12 @@ export class OperationsService {
   ): Promise<OperationsOrder> {
     const { companyId } = this.tenants.current();
     const identity = this.identities.current();
+    const actorRole =
+      identity.kind === "trader"
+        ? "Trader"
+        : identity.kind === "driver"
+          ? "Driver"
+          : "Company User";
     const key = idempotencyKey?.trim() ?? "";
     if (!/^[A-Za-z0-9._:-]{16,128}$/.test(key)) {
       throw new ApplicationException(
@@ -1854,7 +1999,7 @@ export class OperationsService {
         ) values (
           ${companyId}::uuid, ${orderId}::uuid, 'order.created', 'user_action',
           'delivery_status', to_jsonb(${deliveryStatus}::text), ${identity.identityId}::uuid,
-          'Company User', 'web_portal', ${correlationId}, ${driverRow?.id ?? null}::uuid
+          ${actorRole}, 'web_portal', ${correlationId}, ${driverRow?.id ?? null}::uuid
         )
       `.execute(transaction);
       if (driverRow !== undefined) {
@@ -1866,7 +2011,7 @@ export class OperationsService {
           ) values (
             ${companyId}::uuid, ${orderId}::uuid, 'order.driver_assigned',
             'driver_assignment', 'assigned_driver_id', to_jsonb(${driverRow.id}::text),
-            ${identity.identityId}::uuid, 'Company User', 'web_portal', ${correlationId},
+            ${identity.identityId}::uuid, ${actorRole}, 'web_portal', ${correlationId},
             ${driverRow.id}::uuid
           )
         `.execute(transaction);
@@ -1920,7 +2065,7 @@ export class OperationsService {
             'financial_change', 'service_fee',
             to_jsonb(${pricing.configuredFee.toFixed(2)}::text),
             to_jsonb(${pricing.finalFee.toFixed(2)}::text), ${identity.identityId}::uuid,
-            'Company User', 'web_portal', ${pricing.overrideReason}, ${correlationId}
+              ${actorRole}, 'web_portal', ${pricing.overrideReason}, ${correlationId}
           )
         `.execute(transaction);
       }
@@ -2077,6 +2222,19 @@ export class OperationsService {
     };
   }
 
+  public async nextSerialNumber(): Promise<{ serialNumber: string }> {
+    const { companyId } = this.tenants.current();
+    const result = await sql<{ serialNumber: string }>`
+      select (coalesce(max(serial_number::bigint), 0) + 1)::text as "serialNumber"
+        from orders
+       where company_id=${companyId}::uuid
+         and order_date=current_date
+         and serial_number ~ '^[0-9]+$'
+    `.execute(this.database);
+
+    return { serialNumber: result.rows[0]?.serialNumber ?? "1" };
+  }
+
   public async importOrdersCsv(
     input: ImportOrdersCsvDto,
     correlationId: string,
@@ -2184,6 +2342,7 @@ export class OperationsService {
     orderId: string,
     input: UpdateOrderDto,
     correlationId: string,
+    requiredTraderId?: string,
   ): Promise<OperationsOrder> {
     const { companyId } = this.tenants.current();
     const identity = this.identities.current();
@@ -2254,6 +2413,8 @@ export class OperationsService {
           from orders o
           join traders t on t.id = o.trader_id and t.company_id = o.company_id
           where o.id = ${orderId}::uuid and o.company_id = ${companyId}::uuid
+            and (${requiredTraderId ?? null}::uuid is null
+              or o.trader_id=${requiredTraderId ?? null}::uuid)
           for update of o
         `.execute(transaction)
       ).rows[0];
@@ -2682,7 +2843,12 @@ export class OperationsService {
                return_status as "returnStatus",
                trader_settlement_status as "settlementStatus"
         from orders
-        where id = ${orderId}::uuid and company_id = ${companyId}::uuid
+        where id = ${orderId}::uuid
+          and company_id = ${companyId}::uuid
+          and (
+            ${identity.kind} <> 'driver'
+            or assigned_driver_id = ${identity.profileId ?? null}::uuid
+          )
         for update
       `.execute(transaction);
       const order = current.rows[0];
@@ -2848,6 +3014,14 @@ export class OperationsService {
         subjectId: orderId,
         subjectType: "order",
       });
+      if (status === "delivered") {
+        await this.outsourcedDriverFees.createForDeliveredOrder(
+          transaction,
+          orderId,
+          identity.identityId,
+          correlationId,
+        );
+      }
     });
     return this.orderById(companyId, orderId);
   }
@@ -3492,20 +3666,21 @@ export class OperationsService {
   private async traderForAccount(
     companyId: string,
     accountId: string,
+    profileId?: string,
   ): Promise<{ readonly id: string }> {
     const result = await sql<{ id: string }>`
-      select id
-      from traders
-      where company_id = ${companyId}::uuid
-        and account_id = ${accountId}::uuid
-        and account_status = 'active'
+      select t.id from traders t
+      join user_business_links l on l.company_id=t.company_id and l.entity_type='trader'
+        and l.entity_id=t.id and l.account_id=${accountId}::uuid and l.access_status='active'
+      where t.company_id = ${companyId}::uuid
+        and t.id=${profileId ?? null}::uuid and t.account_status = 'active'
       limit 1
     `.execute(this.database);
     const trader = result.rows[0];
     if (trader === undefined) {
       throw new ApplicationException(
-        "trader_profile_not_found",
-        "The trader profile is not active",
+        profileId === undefined ? "profile_scope_required" : "profile_access_inactive",
+        profileId === undefined ? "An authenticated profile is required" : "The profile is not active",
         HttpStatus.FORBIDDEN,
       );
     }
@@ -3762,20 +3937,21 @@ export class OperationsService {
   private async driverForAccount(
     companyId: string,
     accountId: string,
+    profileId?: string,
   ): Promise<{ readonly id: string }> {
     const result = await sql<{ id: string }>`
-      select id
-      from drivers
-      where company_id = ${companyId}::uuid
-        and account_id = ${accountId}::uuid
-        and account_status = 'active'
+      select d.id from drivers d
+      join user_business_links l on l.company_id=d.company_id and l.entity_type='driver'
+        and l.entity_id=d.id and l.account_id=${accountId}::uuid and l.access_status='active'
+      where d.company_id = ${companyId}::uuid
+        and d.id=${profileId ?? null}::uuid and d.account_status = 'active'
       limit 1
     `.execute(this.database);
     const driver = result.rows[0];
     if (driver === undefined) {
       throw new ApplicationException(
-        "driver_profile_not_found",
-        "The driver profile is not active",
+        profileId === undefined ? "profile_scope_required" : "profile_access_inactive",
+        profileId === undefined ? "An authenticated profile is required" : "The profile is not active",
         HttpStatus.FORBIDDEN,
       );
     }

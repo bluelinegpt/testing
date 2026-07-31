@@ -17,6 +17,7 @@ import {
   ValidateNested,
 } from "class-validator";
 import { Transform, Type } from "class-transformer";
+import { OmitType } from "@nestjs/swagger";
 
 import { NormalizeUaeMobile } from "../shared/uae-mobile.js";
 
@@ -254,6 +255,15 @@ export class ReconciliationExpenseDto {
 
 const collectionPaymentMethods = ["cash", "visa"] as const;
 
+export class DriverFeeOffsetAllocationDto {
+  @IsUUID()
+  public readonly accrualId!: string;
+
+  @IsNumber({ allowInfinity: false, allowNaN: false, maxDecimalPlaces: 2 })
+  @Min(0.01)
+  public readonly amount!: number;
+}
+
 export class CreateDriverReconciliationDto extends OrderSelectionDto {
   // One payment method for the whole collection: Cash or Visa (Visa = customer paid
   // by card/bank). Optional at the DTO level so a missing value produces the
@@ -279,6 +289,18 @@ export class CreateDriverReconciliationDto extends OrderSelectionDto {
   @IsString()
   @MaxLength(1000)
   public readonly notes?: string;
+
+  @IsOptional()
+  @IsNumber({ allowInfinity: false, allowNaN: false, maxDecimalPlaces: 2 })
+  @Min(0)
+  public readonly driverFeeOffsetAmount?: number;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(500)
+  @ValidateNested({ each: true })
+  @Type(() => DriverFeeOffsetAllocationDto)
+  public readonly driverFeeAllocations?: readonly DriverFeeOffsetAllocationDto[];
 }
 
 // Reversal of a confirmed Driver collection (§8): controlled, reason-required,
@@ -293,8 +315,8 @@ export class ReverseDriverReconciliationDto {
 
 // Driver Shipment Manifest (§6-§9): built from selected Orders assigned to one
 // Driver, entirely independent of Driver cash reconciliation — no financial
-// eligibility is required, only that every selected Order belongs to the same
-// Driver and Company and is not cancelled.
+// eligibility is required. Explicit historical selections may include an Order
+// whose status later became cancelled; its status is displayed in the report.
 export class GenerateShipmentManifestDto extends OrderSelectionDto {}
 
 export class InlineOrderCustomerDto {
@@ -441,6 +463,13 @@ export class CreateOrderDto {
   @MaxLength(1000)
   public readonly notes?: string;
 }
+
+// The authenticated Trader is always resolved from the active portal profile.
+// Accepting a Trader identifier from the browser would allow an unsafe
+// cross-profile selection, so it is deliberately absent from this contract.
+export class CreateTraderPortalOrderDto extends OmitType(CreateOrderDto, [
+  "traderId",
+] as const) {}
 
 // Partial edit of an existing order's business fields before delivery. Every field is
 // optional; only the provided fields change. Changing the Trader, or the Customer + address
@@ -936,7 +965,8 @@ export class ProposeTraderAllocationDto {
   @IsUUID()
   public readonly traderId!: string;
 
-  @IsNumber()
+  @IsNumber({ allowInfinity: false, allowNaN: false, maxDecimalPlaces: 2 })
+  @Max(9999999999999.99)
   @Min(0.01)
   public readonly amount!: number;
 }
@@ -947,7 +977,8 @@ export class TraderSettlementAllocationLineDto {
 
   // Zero-value rows are accepted at the DTO level (§7: "may be omitted from
   // persistence") and filtered out by the service before writing.
-  @IsNumber()
+  @IsNumber({ allowInfinity: false, allowNaN: false, maxDecimalPlaces: 2 })
+  @Max(9999999999999.99)
   @Min(0)
   public readonly amount!: number;
 }
@@ -956,7 +987,8 @@ export class CreateTraderSettlementDto {
   @IsUUID()
   public readonly traderId!: string;
 
-  @IsNumber()
+  @IsNumber({ allowInfinity: false, allowNaN: false, maxDecimalPlaces: 2 })
+  @Max(9999999999999.99)
   @Min(0.01)
   public readonly amount!: number;
 
@@ -991,6 +1023,47 @@ export class CreateTraderSettlementDto {
   @IsString()
   @MaxLength(1000)
   public readonly notes?: string;
+}
+
+export class TraderAccountStatementQueryDto {
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}$/)
+  public readonly month?: string;
+
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  public readonly from?: string;
+
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  public readonly to?: string;
+
+  @IsOptional()
+  @IsIn(["all", "order", "payment", "reversal"])
+  public readonly transactionType?: "all" | "order" | "payment" | "reversal";
+
+  @IsOptional()
+  @IsIn(["all", "confirmed", "reversed"])
+  public readonly settlementStatus?: "all" | "confirmed" | "reversed";
+
+  @IsOptional()
+  @Type(() => Boolean)
+  @IsBoolean()
+  public readonly paidOnly?: boolean;
+
+  @IsOptional()
+  @Type(() => Boolean)
+  @IsBoolean()
+  public readonly outstandingOnly?: boolean;
+
+  @IsOptional()
+  @Type(() => Boolean)
+  @IsBoolean()
+  public readonly reversedOnly?: boolean;
+
+  @IsOptional()
+  @IsIn(["en", "ar"])
+  public readonly language?: "en" | "ar";
 }
 
 // Money Received confirmation (§12): separate from Money Sent (payment creation).
@@ -1148,7 +1221,8 @@ export class CreateTraderReceivableDto {
   @Matches(/^\d{4}-\d{2}-\d{2}$/)
   public readonly businessDate!: string;
 
-  @IsNumber()
+  @IsNumber({ allowInfinity: false, allowNaN: false, maxDecimalPlaces: 2 })
+  @Max(9999999999999.99)
   @Min(0.01)
   public readonly amountDue!: number;
 
@@ -1233,7 +1307,8 @@ export class ProposeTraderReceivableAllocationDto {
   @IsUUID()
   public readonly traderId!: string;
 
-  @IsNumber()
+  @IsNumber({ allowInfinity: false, allowNaN: false, maxDecimalPlaces: 2 })
+  @Max(9999999999999.99)
   @Min(0.01)
   public readonly amount!: number;
 }
@@ -1244,7 +1319,8 @@ export class TraderCollectionAllocationLineDto {
 
   // Zero-value rows are accepted at the DTO level and filtered out by the
   // service before writing, matching the Trader Settlement allocation shape.
-  @IsNumber()
+  @IsNumber({ allowInfinity: false, allowNaN: false, maxDecimalPlaces: 2 })
+  @Max(9999999999999.99)
   @Min(0)
   public readonly amount!: number;
 }
@@ -1253,7 +1329,8 @@ export class CreateTraderCollectionDto {
   @IsUUID()
   public readonly traderId!: string;
 
-  @IsNumber()
+  @IsNumber({ allowInfinity: false, allowNaN: false, maxDecimalPlaces: 2 })
+  @Max(9999999999999.99)
   @Min(0.01)
   public readonly amountReceived!: number;
 

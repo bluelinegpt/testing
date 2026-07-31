@@ -1,9 +1,6 @@
-import { randomUUID } from "node:crypto";
-
 import { HttpStatus, Inject, Injectable } from "@nestjs/common";
 import { type Kysely, sql } from "kysely";
 
-import { PasswordHasher } from "../authentication/password-hasher.js";
 import { DATABASE } from "../infrastructure/database/database.tokens.js";
 import type { DatabaseSchema } from "../infrastructure/database/database.types.js";
 import { KyselyTransactionManager } from "../infrastructure/database/transaction-manager.js";
@@ -50,7 +47,6 @@ export class TraderConfigurationService {
     @Inject(KyselyTransactionManager) private readonly transactions: KyselyTransactionManager,
     @Inject(TenantContextAccessor) private readonly tenants: TenantContextAccessor,
     @Inject(IdentityContextAccessor) private readonly identities: IdentityContextAccessor,
-    @Inject(PasswordHasher) private readonly passwords: PasswordHasher,
   ) {}
 
   public async traders(query: Record<string, string>): Promise<TraderPage<TraderSummary>> {
@@ -153,15 +149,11 @@ export class TraderConfigurationService {
     return this.transactions.execute(async (transaction) => {
       await this.validateArea(transaction, companyId, input.pickupAreaId);
       const code = await this.nextCode(transaction, companyId, "trader", "TRD");
-      const accountId = randomUUID();
-      await sql`insert into accounts(id,company_id,account_kind,username,password_hash,status,password_changed_at)
-        values(${accountId}::uuid,${companyId}::uuid,'trader',${`trader.${code.toLowerCase()}`},
-        ${await this.passwords.hash(randomUUID())},'active',now())`.execute(transaction);
       const result = await sql<Record<string, unknown>>`
-        insert into traders(company_id,account_id,code,name_en,contact_person,mobile_number,
+        insert into traders(company_id,code,name_en,contact_person,mobile_number,
           second_mobile_number,email,commercial_number,tax_registration_number,pickup_area_id,
           pickup_address,location_link,latitude,longitude,notes,created_by_account_id)
-        values(${companyId}::uuid,${accountId}::uuid,${code},${input.name.trim()},
+        values(${companyId}::uuid,${code},${input.name.trim()},
           ${input.contactPerson?.trim() || null},${input.mobileNumber.trim()},
           ${input.secondMobileNumber?.trim() || null},${input.email?.trim() || null},
           ${input.commercialNumber?.trim() || null},${input.taxRegistrationNumber?.trim() || null},
@@ -263,7 +255,7 @@ export class TraderConfigurationService {
     const actorId = this.identities.current().identityId;
     return this.transactions.execute(async (transaction) => {
       const current = await sql<{
-        accountId: string;
+        accountId: string | null;
         status: string;
       }>`select account_id as "accountId",account_status as status from traders where id=${traderId}::uuid and company_id=${companyId}::uuid for update`.execute(
         transaction,
@@ -276,9 +268,11 @@ export class TraderConfigurationService {
       >`update traders set account_status=${status},deactivated_at=case when ${input.isActive} then null else now() end,updated_at=now(),version=version+1 where id=${traderId}::uuid and company_id=${companyId}::uuid returning id,code,name_en as name,account_status as status`.execute(
         transaction,
       );
-      await sql`update accounts set status=${status},updated_at=now(),version=version+1 where id=${before!.accountId}::uuid and company_id=${companyId}::uuid`.execute(
-        transaction,
-      );
+      if (before!.accountId !== null) {
+        await sql`update accounts set status=${status},updated_at=now(),version=version+1 where id=${before!.accountId}::uuid and company_id=${companyId}::uuid`.execute(
+          transaction,
+        );
+      }
       const after = result.rows[0]!;
       await this.audit(
         transaction,
@@ -640,8 +634,8 @@ export class TraderConfigurationService {
     const { companyId } = this.tenants.current();
     const [summary, history] = await Promise.all([
       sql<Record<string, unknown>>`select
-        coalesce((select sum(o.trader_net_payable) from orders o where o.company_id=t.company_id and o.trader_id=t.id and o.trader_settlement_status='unsettled'),0)::text as "outstandingAmount",
-        (select count(*)::int from orders o where o.company_id=t.company_id and o.trader_id=t.id and o.trader_settlement_status='unsettled') as "unsettledOrders",
+        coalesce((select sum(o.trader_outstanding_balance) from orders o where o.company_id=t.company_id and o.trader_id=t.id and o.delivery_status='delivered' and o.driver_reconciliation_status in ('reconciled','not_applicable') and o.trader_settlement_status not in ('not_eligible','reversed') and o.trader_outstanding_balance > 0),0)::text as "outstandingAmount",
+        (select count(*)::int from orders o where o.company_id=t.company_id and o.trader_id=t.id and o.delivery_status='delivered' and o.driver_reconciliation_status in ('reconciled','not_applicable') and o.trader_settlement_status not in ('not_eligible','reversed') and o.trader_outstanding_balance > 0) as "unsettledOrders",
         coalesce((select sum(s.net_payable) from trader_settlements s where s.company_id=t.company_id and s.trader_id=t.id and s.status='confirmed'),0)::text as "moneySent",
         (select max(s.confirmed_at)::text from trader_settlements s where s.company_id=t.company_id and s.trader_id=t.id) as "lastSettlementDate"
         from traders t where t.company_id=${companyId}::uuid and t.id=${traderId}::uuid`.execute(

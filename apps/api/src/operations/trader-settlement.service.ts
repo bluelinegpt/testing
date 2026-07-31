@@ -204,6 +204,7 @@ export interface TraderSettlementDetail {
   readonly status: "confirmed" | "reversed";
   readonly summary: TraderSettlementSummaryTotals;
   readonly traderName: string;
+  readonly traderId: string;
 }
 
 export interface TraderSettlementReportData {
@@ -211,6 +212,7 @@ export interface TraderSettlementReportData {
     readonly beneficiaryBank: MaskedBankSnapshot | null;
     readonly company: {
       readonly hasLogo: boolean;
+      readonly logoDataUri: string | null;
       readonly nameAr: string | null;
       readonly nameEn: string;
       readonly subtitleAr: string | null;
@@ -487,6 +489,57 @@ export class TraderSettlementService {
         );
       }
 
+      // Serialize settlement creation per Trader before reading eligible
+      // balances. This makes the oldest-first comparison and the subsequent
+      // selected-Order locks one coherent financial decision.
+      const trader = (
+        await sql<{ id: string }>`
+          select id from traders
+           where id = ${input.traderId}::uuid and company_id = ${companyId}::uuid
+           for update
+        `.execute(transaction)
+      ).rows[0];
+      if (trader === undefined) {
+        throw new ApplicationException(
+          "trader_not_found",
+          "Trader not found",
+          HttpStatus.NOT_FOUND,
+        );
+      }
+      const eligibleBeforePayment = await this.resolveEligibleOrdersForTrader(
+        transaction,
+        companyId,
+        input.traderId,
+        false,
+      );
+      const expectedOldestFirst = new Map<string, string>();
+      let expectedRemaining = this.money(new Decimal(input.amount));
+      for (const order of eligibleBeforePayment) {
+        if (expectedRemaining.lessThanOrEqualTo(0)) break;
+        const expected = Decimal.min(expectedRemaining, new Decimal(order.outstandingBalance));
+        if (expected.greaterThan(0)) {
+          expectedOldestFirst.set(order.id, this.money(expected).toFixed(2));
+          expectedRemaining = expectedRemaining.minus(expected);
+        }
+      }
+      const submitted = new Map(
+        allocated.map((line) => [line.orderId, this.money(new Decimal(line.amount)).toFixed(2)]),
+      );
+      const manualAllocationOverride =
+        expectedOldestFirst.size !== submitted.size ||
+        [...expectedOldestFirst].some(
+          ([orderId, amount]) => submitted.get(orderId) !== amount,
+        );
+      const skippedOlderOrders = manualAllocationOverride
+        ? eligibleBeforePayment
+            .filter((order) => expectedOldestFirst.has(order.id) && !submitted.has(order.id))
+            .map((order) => ({
+              orderId: order.id,
+              orderNumber: order.orderNumber,
+              outstandingBalance: this.money(new Decimal(order.outstandingBalance)).toFixed(2),
+            }))
+        : [];
+
       // 2. Lock the allocated Orders in a deterministic order, then revalidate
       //    everything against the locked, current values.
       const orders = await this.lockOrdersForSettlement(transaction, companyId, orderIds);
@@ -659,6 +712,29 @@ export class TraderSettlementService {
         subjectId: settlementId,
         subjectType: "trader_settlement",
       });
+      if (manualAllocationOverride) {
+        await this.history.audit(transaction, {
+          action: "trader_settlement.manual_allocation_override",
+          actorId: identity.identityId,
+          after: {
+            allocations: allocated.map((line) => ({
+              amount: this.money(new Decimal(line.amount)).toFixed(2),
+              orderId: line.orderId,
+            })),
+            expectedOldestFirst: [...expectedOldestFirst].map(([orderId, amount]) => ({
+              amount,
+              orderId,
+            })),
+            skippedOlderOrders,
+            settlementNumber,
+            traderId: input.traderId,
+          },
+          companyId,
+          correlationId,
+          subjectId: settlementId,
+          subjectType: "trader_settlement",
+        });
+      }
       await sql`
         update idempotency_records
            set response_status = 201, resource_type = 'trader_settlement',
@@ -1118,7 +1194,7 @@ export class TraderSettlementService {
              coalesce(lines."previouslyPaid", 0)::text as "previouslyPaid",
              coalesce(lines."remainingOutstanding", 0)::text as "remainingOutstanding",
              s.confirmed_at::text as "moneySentAt",
-             (received.id is not null) as "moneyReceivedConfirmed",
+             (received.id is not null or coalesce(lines."allMoneyReceivedByTrader", false)) as "moneyReceivedConfirmed",
              received.occurred_at::text as "moneyReceivedAt",
              coalesce(creator.username, 'Legacy/Unknown') as "createdBy",
              coalesce(confirmer.username, 'Legacy/Unknown') as "confirmedBy",
@@ -1140,7 +1216,8 @@ export class TraderSettlementService {
         left join lateral (
           select count(*)::int as total,
                  coalesce(sum(o.trader_paid_amount - link.allocated_amount), 0) as "previouslyPaid",
-                 coalesce(sum(o.trader_outstanding_balance), 0) as "remainingOutstanding"
+                 coalesce(sum(o.trader_outstanding_balance), 0) as "remainingOutstanding",
+                 bool_and(o.trader_settlement_status = 'money_received_by_trader') as "allMoneyReceivedByTrader"
             from trader_settlement_orders link
             join orders o on o.id = link.order_id and o.company_id = link.company_id
            where link.settlement_id = s.id and link.company_id = s.company_id
@@ -1269,8 +1346,27 @@ export class TraderSettlementService {
       sourceBank: header.sourceBank,
       status: header.status,
       summary: orders.summary,
+      traderId: header.traderId,
       traderName: header.traderName,
     };
+  }
+
+  public async settlementForOrder(
+    orderId: string,
+  ): Promise<{ readonly settlementId: string; readonly settlementNumber: string } | null> {
+    this.assertAnyPermission(["settlements.create", "reports.export"]);
+    const { companyId } = this.tenants.current();
+    const row = (
+      await sql<{ settlementId: string; settlementNumber: string }>`
+        select s.id as "settlementId", s.settlement_number as "settlementNumber"
+          from trader_settlement_orders link
+          join trader_settlements s on s.id = link.settlement_id and s.company_id = link.company_id
+         where link.company_id = ${companyId}::uuid and link.order_id = ${orderId}::uuid
+         order by s.created_at desc, s.id desc
+         limit 1
+      `.execute(this.database)
+    ).rows[0];
+    return row ?? null;
   }
 
   /**
@@ -1285,6 +1381,12 @@ export class TraderSettlementService {
     const header = await this.settlementHeader(companyId, settlementId);
     const orders = await this.settlementOrders(companyId, settlementId);
     const branding = await this.companyProfile.branding();
+    const logoDataUri = branding.hasLogo
+      ? await this.companyProfile
+          .logoContent()
+          .then((logo) => `data:${logo.mediaType};base64,${logo.bytes.toString("base64")}`)
+          .catch(() => null)
+      : null;
     const generatedAt = new Intl.DateTimeFormat("en-GB", {
       day: "2-digit",
       hour: "2-digit",
@@ -1298,6 +1400,7 @@ export class TraderSettlementService {
         beneficiaryBank: header.beneficiaryBank,
         company: {
           hasLogo: branding.hasLogo,
+          logoDataUri,
           nameAr: branding.nameAr,
           nameEn: branding.nameEn,
           subtitleAr: branding.subtitleAr,
@@ -1399,6 +1502,7 @@ export class TraderSettlementService {
     readonly sourceBank: { readonly accountName: string; readonly bankName: string } | null;
     readonly status: "confirmed" | "reversed";
     readonly traderName: string;
+    readonly traderId: string;
   }> {
     const row = (
       await sql<{
@@ -1420,9 +1524,11 @@ export class TraderSettlementService {
         sourceBankName: string | null;
         status: string;
         traderName: string;
+        traderId: string;
       }>`
         select s.settlement_number as "settlementNumber", s.status,
                s.business_date::text as "businessDate", t.name_en as "traderName",
+               s.trader_id as "traderId",
                coalesce(creator.username, 'Legacy/Unknown') as "createdBy",
                coalesce(confirmer.username, 'Legacy/Unknown') as "confirmedBy",
                s.confirmed_at::text as "moneySentAt",
@@ -1539,6 +1645,7 @@ export class TraderSettlementService {
           : { accountName: row.sourceAccountName ?? "", bankName: row.sourceBankName },
       status: row.reversedBySettlementNumber === null ? "confirmed" : "reversed",
       traderName: row.traderName,
+      traderId: row.traderId,
     };
   }
 
@@ -1759,7 +1866,7 @@ export class TraderSettlementService {
          and o.driver_reconciliation_status in ('reconciled', 'not_applicable')
          and o.trader_settlement_status in ('unsettled', 'partially_settled')
          and o.trader_outstanding_balance > 0
-       order by o.delivered_at asc nulls last,
+       order by o.delivered_at asc nulls last, o.created_at asc,
                 coalesce(o.serial_number, o.order_number) asc, o.id asc
        ${sql.raw(lock ? "for update of o" : "")}
     `.execute(database);

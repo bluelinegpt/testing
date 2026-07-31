@@ -73,9 +73,10 @@ export class DriverShipmentManifestService {
 
   /**
    * Resolves and validates the selected Orders for a Manifest: current Company
-   * ownership, every Order assigned to the same Driver, none Cancelled, at
-   * least one Order. No financial eligibility is required — the Manifest is a
-   * pre-delivery/operational document, independent of Driver cash reconciliation.
+   * ownership, every Order assigned to the same Driver, and at least one Order.
+   * No collection or reconciliation eligibility is required. Explicit Order-ID
+   * selections remain reportable after delivery, collection, reconciliation,
+   * closure, return, or cancellation.
    */
   private async resolveOrders(
     companyId: string,
@@ -89,15 +90,6 @@ export class DriverShipmentManifestService {
         "manifest_empty",
         "Select at least one Order",
         HttpStatus.BAD_REQUEST,
-      );
-    }
-    const cancelled = rows.filter((row) => row.deliveryStatus === "cancelled");
-    if (cancelled.length > 0) {
-      throw new ApplicationException(
-        "manifest_order_cancelled",
-        "Cancelled Orders cannot be included in a Driver Shipment Manifest",
-        HttpStatus.CONFLICT,
-        cancelled.map((row) => row.orderNumber),
       );
     }
     const driverIds = new Set(rows.map((row) => row.assignedDriverId));
@@ -156,9 +148,9 @@ export class DriverShipmentManifestService {
   /**
    * Resolves a "select all matching" filter selection the same way the Orders
    * list itself filters (driver/area/trader/date range), scoped to Orders
-   * currently assigned to a Driver — Cancelled Orders are excluded here rather
-   * than surfaced as an error, matching what the operator actually sees as
-   * "matching" in the list view.
+   * currently assigned to a Driver. Unlike collection eligibility, these
+   * predicates mirror the Orders list selection itself, including historical
+   * quick views and financial-status filters.
    */
   private async resolveOrdersByFilter(
     companyId: string,
@@ -182,7 +174,24 @@ export class DriverShipmentManifestService {
         left join emirates e on e.id = a.emirate_id
        where o.company_id = ${companyId}::uuid
          and o.assigned_driver_id is not null
-         and o.delivery_status != 'cancelled'
+         and (${input.search?.trim() || null}::text is null
+           or o.order_number ilike '%' || ${input.search?.trim() || null} || '%'
+           or o.serial_number ilike '%' || ${input.search?.trim() || null} || '%'
+           or o.customer_name ilike '%' || ${input.search?.trim() || null} || '%'
+           or o.customer_mobile_number ilike '%' || ${input.search?.trim() || null} || '%'
+           or t.name_en ilike '%' || ${input.search?.trim() || null} || '%')
+         and (${input.quickView ?? "active"} = 'all'
+           or (${input.quickView ?? "active"} = 'active'
+             and o.delivery_status not in ('hold', 'closed', 'cancelled'))
+           or (${input.quickView ?? "active"} = 'hold' and o.delivery_status = 'hold')
+           or (${input.quickView ?? "active"} = 'closed' and o.delivery_status = 'closed')
+           or (${input.quickView ?? "active"} = 'cancelled' and o.delivery_status = 'cancelled'))
+         and (${input.deliveryStatus?.trim() || null}::text is null
+           or o.delivery_status = ${input.deliveryStatus?.trim() || null})
+         and (${input.cashStatus?.trim() || null}::text is null
+           or o.driver_reconciliation_status = ${input.cashStatus?.trim() || null})
+         and (${input.settlementStatus?.trim() || null}::text is null
+           or o.trader_settlement_status = ${input.settlementStatus?.trim() || null})
          and (${input.driverId ?? null}::uuid is null
            or o.assigned_driver_id = ${input.driverId ?? null}::uuid)
          and (${input.areaId ?? null}::uuid is null or o.area_id = ${input.areaId ?? null}::uuid)
@@ -226,6 +235,12 @@ export class DriverShipmentManifestService {
       select username from accounts where id = ${identity.identityId}::uuid and company_id = ${companyId}::uuid
     `.execute(this.database);
     const branding = await this.companyProfile.branding();
+    const logoDataUri = branding.hasLogo
+      ? await this.companyProfile
+          .logoContent()
+          .then((logo) => `data:${logo.mediaType};base64,${logo.bytes.toString("base64")}`)
+          .catch(() => null)
+      : null;
     const totalCod = orders.reduce((sum, row) => sum.plus(row.codAmount), new Decimal(0));
     const totalPackages = orders.reduce((sum, row) => sum + row.packageCount, 0);
     const countBy = (status: string) => orders.filter((row) => row.deliveryStatus === status).length;
@@ -236,6 +251,7 @@ export class DriverShipmentManifestService {
       header: {
         company: {
           hasLogo: branding.hasLogo,
+          logoDataUri,
           nameAr: branding.nameAr,
           nameEn: branding.nameEn,
           subtitleAr: branding.subtitleAr,

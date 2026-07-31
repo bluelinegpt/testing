@@ -39,6 +39,8 @@ import {
   type OperationsTrackingLink,
   OperationsService,
   type PortalOrder,
+  type TraderPortalArea,
+  type TraderPortalProfile,
   type PublicOrderTracking,
   type OperationsTraderSettlementDetail,
   type OperationsTraderSettlement,
@@ -66,6 +68,10 @@ import {
 } from "./orders-workflow.service.js";
 import { DriverShipmentManifestService } from "./driver-shipment-manifest.service.js";
 import type { ManifestData } from "./driver-shipment-manifest-html.js";
+import {
+  TraderAccountStatementService,
+  type TraderAccountStatement,
+} from "./trader-account-statement.service.js";
 import {
   TraderSettlementService,
   type CreateTraderSettlementResult,
@@ -95,6 +101,7 @@ import {
   ReconciliationListQueryDto,
   ReverseTraderSettlementDto,
   CreateOrderDto,
+  CreateTraderPortalOrderDto,
   CreateTraderDto,
   FinancialPaymentDto,
   ImportOrdersCsvDto,
@@ -107,6 +114,7 @@ import {
   TraderSettlementEligibleOrdersQueryDto,
   TraderSettlementListQueryDto,
   TraderSettlementSummaryQueryDto,
+  TraderAccountStatementQueryDto,
   UpdateOrderDto,
   GenerateShipmentManifestDto,
 } from "./operations.dto.js";
@@ -126,6 +134,8 @@ export class OperationsController {
     private readonly manifest: DriverShipmentManifestService,
     @Inject(TraderSettlementService)
     private readonly traderSettlementService: TraderSettlementService,
+    @Inject(TraderAccountStatementService)
+    private readonly traderAccountStatementService: TraderAccountStatementService,
   ) {}
 
   @ApiOperation({ summary: "Show operational totals for the authenticated Company" })
@@ -287,6 +297,13 @@ export class OperationsController {
     return this.operations.identifierAvailability(query);
   }
 
+  @ApiOperation({ summary: "Get the next editable Order Serial Number for today's Business Date" })
+  @RequireAnyPermission("orders.create", "users_roles.manage")
+  @Get("orders/next-serial-number")
+  public nextSerialNumber(): Promise<{ serialNumber: string }> {
+    return this.operations.nextSerialNumber();
+  }
+
   @ApiOperation({ summary: "Search active Traders for order entry" })
   @RequireAnyPermission("orders.create", "users_roles.manage")
   @Get("traders/search")
@@ -333,6 +350,23 @@ export class OperationsController {
     // A bare `null` body is indistinguishable from an empty/no-content-type
     // response once it reaches the client, so "no linked collection" is
     // signalled with a real 204 instead.
+    if (link === null) {
+      response.status(HttpStatus.NO_CONTENT);
+      return undefined;
+    }
+    return link;
+  }
+
+  @RequireAnyPermission("settlements.create", "reports.export", "users_roles.manage")
+  @ApiOperation({
+    summary: "Resolve the active Trader Settlement linked to one Order, if any",
+  })
+  @Get("orders/:orderId/trader-settlement")
+  public async orderTraderSettlement(
+    @Param("orderId", new ParseUUIDPipe()) orderId: string,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<{ settlementId: string; settlementNumber: string } | undefined> {
+    const link = await this.traderSettlementService.settlementForOrder(orderId);
     if (link === null) {
       response.status(HttpStatus.NO_CONTENT);
       return undefined;
@@ -529,12 +563,14 @@ export class OperationsController {
   public reverseDriverReconciliation(
     @Param("reconciliationId", new ParseUUIDPipe()) reconciliationId: string,
     @Body() input: ReverseDriverReconciliationDto,
+    @Headers("x-idempotency-key") idempotencyKey: string | undefined,
     @Req() request: Request,
   ): Promise<unknown> {
     return this.reconciliations.reverse(
       reconciliationId,
       input.reason,
       this.correlationId(request),
+      idempotencyKey,
     );
   }
 
@@ -640,7 +676,7 @@ export class OperationsController {
     );
   }
 
-  @RequireAnyPermission("settlements.create", "users_roles.manage")
+  @RequireAnyPermission("settlements.create", "reports.export", "users_roles.manage")
   @ApiOperation({ summary: "Confirm trader settlement for one order" })
   @Post("orders/:orderId/settle-trader")
   public settleOrderTrader(
@@ -731,6 +767,37 @@ export class OperationsController {
       this.correlationId(request),
       idempotencyKey,
     );
+  }
+
+  @RequireAnyPermission("settlements.create", "users_roles.manage")
+  @ApiOperation({ summary: "Trader account statement with running payable balance" })
+  @Get("settlements/payments/traders/:traderId/account-statement")
+  public traderAccountStatement(
+    @Param("traderId", new ParseUUIDPipe()) traderId: string,
+    @Query() query: TraderAccountStatementQueryDto,
+  ): Promise<TraderAccountStatement> {
+    return this.traderAccountStatementService.statement(traderId, query);
+  }
+
+  @RequireAnyPermission("settlements.create", "reports.export", "users_roles.manage")
+  @ApiOperation({ summary: "Download the Trader account statement as a PDF" })
+  @Get("settlements/payments/traders/:traderId/account-statement/pdf")
+  public async traderAccountStatementPdf(
+    @Param("traderId", new ParseUUIDPipe()) traderId: string,
+    @Query() query: TraderAccountStatementQueryDto,
+    @Req() request: Request,
+    @Res() response: Response,
+  ): Promise<void> {
+    const { bytes, filename } = await this.traderAccountStatementService.statementPdf(
+      traderId,
+      query,
+      this.correlationId(request),
+    );
+    response.setHeader("Content-Type", "application/pdf");
+    response.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    response.setHeader("X-Content-Type-Options", "nosniff");
+    response.setHeader("Cache-Control", "private, max-age=0, must-revalidate");
+    response.send(bytes);
   }
 
   @RequireAnyPermission("settlements.create", "users_roles.manage")
@@ -833,10 +900,54 @@ export class PortalController {
   public constructor(@Inject(OperationsService) private readonly operations: OperationsService) {}
 
   @RequireIdentityKinds("trader")
+  @ApiOperation({ summary: "Show the authenticated Trader profile" })
+  @Get("trader/profile")
+  public traderProfile(): Promise<TraderPortalProfile> {
+    return this.operations.traderPortalProfile();
+  }
+
+  @RequireIdentityKinds("trader")
+  @ApiOperation({ summary: "List active delivery Areas available to the authenticated Trader" })
+  @Get("trader/areas")
+  public traderAreas(): Promise<readonly TraderPortalArea[]> {
+    return this.operations.traderPortalAreas();
+  }
+
+  @RequireIdentityKinds("trader")
   @ApiOperation({ summary: "List orders for the authenticated Trader" })
   @Get("trader/orders")
   public traderOrders(): Promise<readonly PortalOrder[]> {
     return this.operations.traderPortalOrders();
+  }
+
+  @RequireIdentityKinds("trader")
+  @ApiOperation({ summary: "Create an Order owned by the authenticated Trader" })
+  @Post("trader/orders")
+  public createTraderOrder(
+    @Body() input: CreateTraderPortalOrderDto,
+    @Headers("x-idempotency-key") idempotencyKey: string | undefined,
+    @Req() request: Request,
+  ): Promise<unknown> {
+    return this.operations.createTraderPortalOrder(
+      input,
+      this.correlationId(request),
+      idempotencyKey,
+    );
+  }
+
+  @RequireIdentityKinds("trader")
+  @ApiOperation({ summary: "Edit an eligible Order owned by the authenticated Trader" })
+  @Patch("trader/orders/:orderId")
+  public updateTraderOrder(
+    @Param("orderId", new ParseUUIDPipe()) orderId: string,
+    @Body() input: UpdateOrderDto,
+    @Req() request: Request,
+  ): Promise<unknown> {
+    return this.operations.updateTraderPortalOrder(
+      orderId,
+      input,
+      this.correlationId(request),
+    );
   }
 
   @RequireIdentityKinds("driver")
