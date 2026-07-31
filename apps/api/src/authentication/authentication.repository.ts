@@ -9,6 +9,7 @@ export interface AccountLoginRecord {
   readonly accountStatus: string;
   readonly companyId: string | null;
   readonly companyStatus: string | null;
+  readonly displayName?: string;
   readonly failedLoginAttempts: number;
   readonly id: string;
   readonly kind: IdentityKind;
@@ -25,6 +26,15 @@ export interface AuthenticatedSessionRecord {
   readonly kind: IdentityKind;
   readonly sessionId: string;
   readonly forcePasswordChange: boolean;
+  readonly profileLinkId: string | null;
+  readonly profileType: "employee" | "driver" | "trader" | null;
+  readonly profileId: string | null;
+}
+
+export interface ActiveProfileRecord {
+  readonly linkId: string;
+  readonly profileId: string;
+  readonly profileType: "employee" | "driver" | "trader";
 }
 
 @Injectable()
@@ -41,6 +51,23 @@ export class AuthenticationRepository {
              a.company_id as "companyId",
              a.account_kind as kind,
              a.username,
+             coalesce(
+               (select t.name_en
+                  from user_business_links l
+                  join traders t on t.id=l.entity_id and t.company_id=l.company_id
+                 where l.company_id=a.company_id and l.account_id=a.id
+                   and l.entity_type='trader' and l.access_status in ('invited','active','suspended')
+                 order by l.is_primary desc,l.created_at limit 1),
+               (select d.name_en
+                  from user_business_links l
+                  join drivers d on d.id=l.entity_id and d.company_id=l.company_id
+                 where l.company_id=a.company_id and l.account_id=a.id
+                   and l.entity_type='driver' and l.access_status in ('invited','active','suspended')
+                 order by l.is_primary desc,l.created_at limit 1),
+               (select cu.display_name from company_users cu
+                 where cu.company_id=a.company_id and cu.account_id=a.id limit 1),
+               a.username
+             ) as "displayName",
              a.password_hash as "passwordHash",
              a.status as "accountStatus",
              a.failed_login_attempts as "failedLoginAttempts",
@@ -71,6 +98,7 @@ export class AuthenticationRepository {
              a.company_id as "companyId",
              a.account_kind as kind,
              a.username,
+             a.username as "displayName",
              a.password_hash as "passwordHash",
              a.status as "accountStatus",
              a.failed_login_attempts as "failedLoginAttempts",
@@ -122,17 +150,20 @@ export class AuthenticationRepository {
     expiresAt: Date;
     tokenHash: string;
     userAgent?: string | undefined;
+    profile?: ActiveProfileRecord | undefined;
   }): Promise<string> {
     const result = await sql<{ id: string }>`
       insert into account_sessions (
-        account_id, company_id, token_hash, expires_at, created_ip, user_agent
+        account_id, company_id, token_hash, expires_at, created_ip, user_agent,
+        profile_link_id,profile_type,profile_id
       ) values (
         ${input.accountId}::uuid,
         ${input.companyId}::uuid,
         ${input.tokenHash},
         ${input.expiresAt},
         ${input.createdIp ?? null}::inet,
-        ${input.userAgent?.slice(0, 1_000) ?? null}
+        ${input.userAgent?.slice(0, 1_000) ?? null},
+        ${input.profile?.linkId ?? null}::uuid,${input.profile?.profileType ?? null},${input.profile?.profileId ?? null}::uuid
       )
       returning id
     `.execute(this.database);
@@ -156,17 +187,44 @@ export class AuthenticationRepository {
              a.company_id as "companyId",
              a.account_kind as kind
              ,a.force_password_change as "forcePasswordChange"
+             ,s.profile_link_id as "profileLinkId",s.profile_type as "profileType",s.profile_id as "profileId"
         from account_sessions s
         join accounts a on a.id = s.account_id
         left join companies c on c.id = a.company_id
+        left join user_business_links l
+          on l.id = s.profile_link_id
+         and l.company_id = s.company_id
+         and l.account_id = s.account_id
+         and l.entity_type = s.profile_type
+         and l.entity_id = s.profile_id
+         and l.access_status = 'active'
        where s.token_hash = ${tokenHash}
          and s.revoked_at is null
          and s.expires_at > now()
          and a.status = 'active'
          and (a.company_id is null or c.status = 'active')
+         and (
+           (s.profile_link_id is null and a.account_kind not in ('driver','trader'))
+           or l.id is not null
+         )
        limit 1
     `.execute(this.database);
     return result.rows[0];
+  }
+
+  public async activeProfile(
+    accountId: string,
+    companyId: string | null,
+    kind: IdentityKind,
+  ): Promise<ActiveProfileRecord | undefined> {
+    const preferred = kind === "driver" ? "driver" : kind === "trader" ? "trader" : "employee";
+    const result = await sql<ActiveProfileRecord>`
+      select id as "linkId",entity_type as "profileType",entity_id as "profileId"
+        from user_business_links where account_id=${accountId}::uuid
+          and company_id=${companyId}::uuid and entity_type=${preferred}
+          and access_status='active' order by is_primary desc,created_at asc limit 2
+    `.execute(this.database);
+    return result.rows.length === 1 ? result.rows[0] : undefined;
   }
 
   public async passwordHash(accountId: string): Promise<string | undefined> {

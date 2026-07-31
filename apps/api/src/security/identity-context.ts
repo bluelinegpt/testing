@@ -7,6 +7,9 @@ export interface IdentityContext {
   readonly companyId: string | null;
   readonly sessionId: string;
   readonly forcePasswordChange: boolean;
+  readonly profileLinkId?: string;
+  readonly profileType?: "employee" | "driver" | "trader";
+  readonly profileId?: string;
 }
 
 export abstract class IdentityContextAccessor {

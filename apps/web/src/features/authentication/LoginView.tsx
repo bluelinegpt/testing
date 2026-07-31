@@ -14,7 +14,6 @@ export function LoginView({
   const { t } = useTranslation();
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
-  const [passwordVisible, setPasswordVisible] = useState(false);
   const [error, setError] = useState<string>();
   const [submitting, setSubmitting] = useState(false);
 
@@ -87,23 +86,14 @@ export function LoginView({
           </label>
           <label className="field">
             <span>{t("auth.password")}</span>
-            <span className="password-field">
-              <input
-                autoComplete="current-password"
-                minLength={8}
-                onChange={(event) => setPassword(event.target.value)}
-                required
-                type={passwordVisible ? "text" : "password"}
-                value={password}
-              />
-              <button
-                aria-label={passwordVisible ? t("auth.hidePassword") : t("auth.showPassword")}
-                onClick={() => setPasswordVisible((visible) => !visible)}
-                type="button"
-              >
-                {passwordVisible ? t("auth.hide") : t("auth.show")}
-              </button>
-            </span>
+            <input
+              autoComplete="current-password"
+              minLength={8}
+              onChange={(event) => setPassword(event.target.value)}
+              required
+              type="password"
+              value={password}
+            />
           </label>
           <button className="button button-primary button-wide" disabled={submitting} type="submit">
             {submitting ? t("common.working") : t("auth.signIn")}

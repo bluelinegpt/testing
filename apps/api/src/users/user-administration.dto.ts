@@ -28,6 +28,7 @@ const uaeMobileMessage = {
 
 export class UserListQueryDto {
   @IsOptional() @IsString() @Length(1, 128) public search?: string;
+  @IsOptional() @IsIn(["company_user", "driver", "trader", "all"]) public accountKind?: string;
   @IsOptional() @IsIn(["active", "disabled", "locked", "all"]) public status?: string;
   @IsOptional() @IsUUID("4") public roleId?: string;
   @IsOptional() @IsIn(["linked", "unlinked", "all"]) public employee?: string;
@@ -85,7 +86,6 @@ export class EditUserDto {
   @Matches(/^9715[0-9]{8}$/, uaeMobileMessage)
   public mobileNumber?: string | null;
   @IsOptional() @IsIn(["en", "ar"]) public preferredLanguage?: "en" | "ar";
-  @IsOptional() @IsUUID("4") public employeeId?: string | null;
 }
 
 export class AssignUserRolesDto {

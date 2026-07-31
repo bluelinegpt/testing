@@ -14,6 +14,7 @@ export interface LoginResult {
   readonly expiresAt: string;
   readonly identity: {
     readonly companyId: string | null;
+    readonly displayName: string;
     readonly id: string;
     readonly kind: string;
     readonly permissions: readonly string[];
@@ -86,6 +87,9 @@ export class AuthenticationService {
       permissions,
       sessionId: session.sessionId,
       forcePasswordChange: session.forcePasswordChange,
+      ...(session.profileLinkId === null ? {} : { profileLinkId: session.profileLinkId }),
+      ...(session.profileType === null ? {} : { profileType: session.profileType }),
+      ...(session.profileId === null ? {} : { profileId: session.profileId }),
     };
   }
 
@@ -155,6 +159,14 @@ export class AuthenticationService {
 
     const expiresAt = new Date(Date.now() + this.sessionTtlMinutes * 60_000);
     const sessionToken = this.sessionTokens.create();
+    const profile = await this.repository.activeProfile(
+      account.id,
+      account.companyId,
+      account.kind,
+    );
+    if ((account.kind === "driver" || account.kind === "trader") && profile === undefined) {
+      throw this.invalidCredentials();
+    }
     await this.repository.resetLoginSecurity(account.id);
     await this.repository.createSession({
       accountId: account.id,
@@ -163,6 +175,7 @@ export class AuthenticationService {
       expiresAt,
       tokenHash: sessionToken.hash,
       userAgent: input.userAgent,
+      profile,
     });
     const permissions = await this.repository.findPermissions(account.id);
     return {
@@ -170,6 +183,7 @@ export class AuthenticationService {
       expiresAt: expiresAt.toISOString(),
       identity: {
         companyId: account.companyId,
+        displayName: account.displayName ?? account.username,
         id: account.id,
         kind: account.kind,
         permissions: [...permissions].sort(),

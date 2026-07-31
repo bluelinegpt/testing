@@ -1,4 +1,4 @@
-import { Eye, EyeOff, KeyRound } from "lucide-react";
+import { KeyRound } from "lucide-react";
 import { type FormEvent, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -9,11 +9,6 @@ export function PasswordChangeView({ api, onChanged }: { api: ApiClient; onChang
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [visible, setVisible] = useState({
-    confirm: false,
-    current: false,
-    next: false,
-  });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string>();
   const submit = async (event: FormEvent) => {
@@ -47,45 +42,32 @@ export function PasswordChangeView({ api, onChanged }: { api: ApiClient; onChang
         <form onSubmit={(event) => void submit(event)}>
           <label className="field" htmlFor="current-password">
             <span>{t("userAdmin.currentPassword")}</span>
-            <span className="password-field">
-              <input
+            <input
                 autoComplete="current-password"
                 id="current-password"
                 minLength={8}
                 onChange={(e) => setCurrentPassword(e.target.value)}
                 required
-                type={visible.current ? "text" : "password"}
+                type="password"
                 value={currentPassword}
               />
-              <VisibilityButton
-                visible={visible.current}
-                onToggle={() => setVisible((value) => ({ ...value, current: !value.current }))}
-              />
-            </span>
           </label>
           <label className="field" htmlFor="new-password">
             <span>{t("userAdmin.newPassword")}</span>
-            <span className="password-field">
-              <input
+            <input
                 aria-describedby="password-policy"
                 autoComplete="new-password"
                 id="new-password"
                 minLength={8}
                 onChange={(e) => setNewPassword(e.target.value)}
                 required
-                type={visible.next ? "text" : "password"}
+                type="password"
                 value={newPassword}
               />
-              <VisibilityButton
-                visible={visible.next}
-                onToggle={() => setVisible((value) => ({ ...value, next: !value.next }))}
-              />
-            </span>
           </label>
           <label className="field" htmlFor="confirm-password">
             <span>{t("userAdmin.confirmNewPassword")}</span>
-            <span className="password-field">
-              <input
+            <input
                 aria-describedby={
                   confirmPassword !== "" && newPassword !== confirmPassword
                     ? "password-mismatch"
@@ -97,14 +79,9 @@ export function PasswordChangeView({ api, onChanged }: { api: ApiClient; onChang
                 minLength={8}
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 required
-                type={visible.confirm ? "text" : "password"}
+                type="password"
                 value={confirmPassword}
               />
-              <VisibilityButton
-                visible={visible.confirm}
-                onToggle={() => setVisible((value) => ({ ...value, confirm: !value.confirm }))}
-              />
-            </span>
             {confirmPassword !== "" && newPassword !== confirmPassword ? (
               <small className="field-error" id="password-mismatch">
                 {t("userAdmin.passwordMismatch")}
@@ -118,18 +95,5 @@ export function PasswordChangeView({ api, onChanged }: { api: ApiClient; onChang
         </form>
       </section>
     </main>
-  );
-}
-
-function VisibilityButton({ onToggle, visible }: { onToggle: () => void; visible: boolean }) {
-  const { t } = useTranslation();
-  return (
-    <button
-      aria-label={visible ? t("auth.hidePassword") : t("auth.showPassword")}
-      onClick={onToggle}
-      type="button"
-    >
-      {visible ? <EyeOff aria-hidden="true" size={17} /> : <Eye aria-hidden="true" size={17} />}
-    </button>
   );
 }

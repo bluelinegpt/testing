@@ -11,6 +11,7 @@ import { IdentityContextAccessor } from "../security/identity-context.js";
 import { TenantContextAccessor } from "../tenancy/tenant-context.js";
 
 export interface UserListInput {
+  readonly accountKind?: string;
   readonly direction?: "asc" | "desc";
   readonly employee?: string;
   readonly page: number;
@@ -22,6 +23,7 @@ export interface UserListInput {
 }
 
 export interface CompanyUserSummary {
+  readonly accountKind: string;
   readonly accountId: string;
   readonly displayName: string;
   readonly email: string | null;
@@ -47,8 +49,9 @@ export interface UserPage {
 
 interface UserActionContext {
   readonly accountId: string;
+  readonly accountKind: string;
   readonly companyId: string;
-  readonly companyUserId: string;
+  readonly companyUserId: string | null;
   readonly forcePasswordChange: boolean;
   readonly status: string;
 }
@@ -74,11 +77,11 @@ export class UserAdministrationService {
       createdAt: "a.created_at",
       email: "a.email",
       lastLoginAt: "a.last_login_at",
-      name: "cu.display_name",
+      name: "coalesce(cu.display_name,a.username)",
       status: "a.status",
       username: "a.username",
     };
-    const orderBy = sortColumns[input.sort ?? "name"] ?? "cu.display_name";
+    const orderBy = sortColumns[input.sort ?? "name"] ?? "coalesce(cu.display_name,a.username)";
     const direction = input.direction === "desc" ? "desc" : "asc";
     const filters = sql`
       ${
@@ -86,34 +89,55 @@ export class UserAdministrationService {
           ? sql``
           : sql`and (
         a.username ilike ${`%${search}%`} or cu.display_name ilike ${`%${search}%`}
+        or linked_trader.name_en ilike ${`%${search}%`}
+        or linked_driver.name_en ilike ${`%${search}%`}
+        or linked_trader.email ilike ${`%${search}%`}
+        or linked_trader.mobile_number ilike ${`%${search}%`}
         or a.email ilike ${`%${search}%`} or a.mobile_number ilike ${`%${search}%`}
       )`
       }
       ${input.status === undefined || input.status === "all" ? sql`` : input.status === "locked" ? sql`and (a.status = 'locked' or a.locked_until > now())` : sql`and a.status = ${input.status} and (a.locked_until is null or a.locked_until <= now())`}
       ${input.roleId === undefined ? sql`` : sql`and exists (select 1 from account_roles f_ar where f_ar.account_id = a.id and f_ar.role_id = ${input.roleId}::uuid)`}
       ${input.employee === undefined || input.employee === "all" ? sql`` : input.employee === "linked" ? sql`and e.id is not null` : sql`and e.id is null`}
+      ${input.accountKind === undefined || input.accountKind === "all" ? sql`` : sql`and a.account_kind=${input.accountKind}`}
     `;
     const totalResult = await sql<{ total: number }>`
-      select count(*)::int as total
-        from accounts a join company_users cu on cu.account_id = a.id and cu.company_id = a.company_id
+      select count(distinct a.id)::int as total
+        from accounts a left join company_users cu on cu.account_id = a.id and cu.company_id = a.company_id
         left join employees e on e.company_user_id = cu.id and e.company_id = cu.company_id
-       where a.company_id = ${companyId}::uuid and a.account_kind = 'company_user' ${filters}
+        left join user_business_links profile_link on profile_link.account_id=a.id
+          and profile_link.company_id=a.company_id
+          and profile_link.access_status in ('invited','active','suspended')
+        left join traders linked_trader on profile_link.entity_type='trader'
+          and linked_trader.id=profile_link.entity_id and linked_trader.company_id=profile_link.company_id
+        left join drivers linked_driver on profile_link.entity_type='driver'
+          and linked_driver.id=profile_link.entity_id and linked_driver.company_id=profile_link.company_id
+       where a.company_id = ${companyId}::uuid and a.account_kind<>'platform_user' ${filters}
     `.execute(this.database);
     const result = await sql<CompanyUserSummary>`
-      select a.id as "accountId", a.username,
+      select a.id as "accountId", a.account_kind as "accountKind",a.username,
              case when a.status = 'active' and a.locked_until > now() then 'locked' else a.status end as status,
              a.failed_login_attempts as "failedLoginAttempts", a.locked_until as "lockedUntil",
              a.last_login_at as "lastLoginAt", a.force_password_change as "forcePasswordChange",
-             cu.display_name as "displayName", a.email, a.mobile_number as "mobileNumber",
+             coalesce(cu.display_name,linked_trader.name_en,linked_driver.name_en,a.username) as "displayName",
+             coalesce(a.email,linked_trader.email) as email,
+             coalesce(a.mobile_number,linked_trader.mobile_number) as "mobileNumber",
              e.employee_number as "employeeCode", e.name_en as "employeeName",
              coalesce(array_agg(distinct r.id order by r.id) filter (where r.id is not null), array[]::uuid[])::text[] as "roleIds",
              coalesce(array_agg(distinct r.name order by r.name) filter (where r.id is not null), array[]::text[]) as "roleNames"
-        from accounts a join company_users cu on cu.account_id = a.id and cu.company_id = a.company_id
+        from accounts a left join company_users cu on cu.account_id = a.id and cu.company_id = a.company_id
         left join employees e on e.company_user_id = cu.id and e.company_id = cu.company_id
+        left join user_business_links profile_link on profile_link.account_id=a.id
+          and profile_link.company_id=a.company_id
+          and profile_link.access_status in ('invited','active','suspended')
+        left join traders linked_trader on profile_link.entity_type='trader'
+          and linked_trader.id=profile_link.entity_id and linked_trader.company_id=profile_link.company_id
+        left join drivers linked_driver on profile_link.entity_type='driver'
+          and linked_driver.id=profile_link.entity_id and linked_driver.company_id=profile_link.company_id
         left join account_roles ar on ar.account_id = a.id and ar.company_id = a.company_id
         left join roles r on r.id = ar.role_id
-       where a.company_id = ${companyId}::uuid and a.account_kind = 'company_user' ${filters}
-       group by a.id, cu.id, e.id
+       where a.company_id = ${companyId}::uuid and a.account_kind<>'platform_user' ${filters}
+       group by a.id, cu.id, e.id, linked_trader.id, linked_driver.id
        order by ${sql.raw(orderBy)} ${sql.raw(direction)}, a.id
        limit ${input.pageSize} offset ${offset}
     `.execute(this.database);
@@ -128,23 +152,35 @@ export class UserAdministrationService {
   public async details(accountId: string): Promise<object> {
     const { companyId } = this.tenants.current();
     const userResult = await sql<Record<string, unknown>>`
-      select a.id as "accountId", a.username, a.status, a.preferred_language as "preferredLanguage",
+      select a.id as "accountId",a.account_kind as "accountKind",a.username,a.status,
+             a.preferred_language as "preferredLanguage",
              a.failed_login_attempts as "failedLoginAttempts", a.locked_until as "lockedUntil",
              a.last_failed_login_at as "lastFailedLoginAt", a.last_login_at as "lastLoginAt",
              a.password_changed_at as "passwordChangedAt", a.force_password_change as "forcePasswordChange",
              a.temporary_password_expires_at as "temporaryPasswordExpiresAt",
              a.administrative_lock_reason as "lockReason", a.created_at as "createdAt", a.updated_at as "updatedAt",
-             cu.id as "companyUserId", cu.display_name as "displayName", a.email,
-             a.mobile_number as "mobileNumber", cu.name_en as "legacyNameEn", cu.name_ar as "legacyNameAr",
+             cu.id as "companyUserId",
+             coalesce(cu.display_name,linked_trader.name_en,linked_driver.name_en,a.username) as "displayName",
+             coalesce(a.email,linked_trader.email) as email,
+             coalesce(a.mobile_number,linked_trader.mobile_number) as "mobileNumber",
+             cu.name_en as "legacyNameEn", cu.name_ar as "legacyNameAr",
              e.id as "employeeId", e.employee_number as "employeeCode", e.name_en as "employeeName",
              e.job_title as "employeeJobTitle", case when e.is_active then 'active' else 'disabled' end as "employeeStatus"
-        from accounts a join company_users cu on cu.account_id = a.id and cu.company_id = a.company_id
+        from accounts a left join company_users cu on cu.account_id = a.id and cu.company_id = a.company_id
         left join employees e on e.company_user_id = cu.id and e.company_id = cu.company_id
-       where a.id = ${accountId}::uuid and a.company_id = ${companyId}::uuid and a.account_kind = 'company_user'
+        left join user_business_links profile_link on profile_link.account_id=a.id
+          and profile_link.company_id=a.company_id
+          and profile_link.access_status in ('invited','active','suspended')
+        left join traders linked_trader on profile_link.entity_type='trader'
+          and linked_trader.id=profile_link.entity_id and linked_trader.company_id=profile_link.company_id
+        left join drivers linked_driver on profile_link.entity_type='driver'
+          and linked_driver.id=profile_link.entity_id and linked_driver.company_id=profile_link.company_id
+       where a.id=${accountId}::uuid and a.company_id=${companyId}::uuid
+         and a.account_kind<>'platform_user'
     `.execute(this.database);
     const user = userResult.rows[0];
     if (user === undefined) throw this.notFound();
-    const [roles, permissions, sessions, audits] = await Promise.all([
+    const [roles, permissions, sessions, audits, profiles] = await Promise.all([
       sql<
         Record<string, unknown>
       >`select r.id, r.code, r.name, r.is_active as "isActive" from account_roles ar join roles r on r.id=ar.role_id where ar.account_id=${accountId}::uuid and ar.company_id=${companyId}::uuid order by lower(r.name)`.execute(
@@ -157,6 +193,20 @@ export class UserAdministrationService {
       ),
       this.sessions(accountId),
       this.auditHistory(accountId, 1, 50),
+      sql<Record<string,unknown>>`
+        select l.id,l.entity_type as "profileType",l.entity_id as "profileId",
+          l.access_status as "accessStatus",l.created_at as "createdAt",l.updated_at as "updatedAt",
+          coalesce(e.employee_number,d.code,t.code) as code,
+          coalesce(e.name_en,d.name_en,t.name_en) as name,
+          coalesce(case when e.is_active then 'active' when e.id is not null then 'disabled' end,
+                   d.account_status,t.account_status) as "businessStatus"
+        from user_business_links l
+        left join employees e on l.entity_type='employee' and e.id=l.entity_id and e.company_id=l.company_id
+        left join drivers d on l.entity_type='driver' and d.id=l.entity_id and d.company_id=l.company_id
+        left join traders t on l.entity_type='trader' and t.id=l.entity_id and t.company_id=l.company_id
+        where l.company_id=${companyId}::uuid and l.account_id=${accountId}::uuid
+        order by l.created_at
+      `.execute(this.database),
     ]);
     return {
       ...user,
@@ -164,6 +214,7 @@ export class UserAdministrationService {
       effectivePermissions: permissions.rows,
       sessions,
       audit: audits.items,
+      linkedProfiles: profiles.rows,
     };
   }
 
@@ -304,7 +355,6 @@ export class UserAdministrationService {
     input: {
       displayName?: string;
       email?: string;
-      employeeId?: string | null;
       mobileNumber?: string | null;
       preferredLanguage?: string;
     },
@@ -314,19 +364,26 @@ export class UserAdministrationService {
     const actorId = this.identities.current().identityId;
     await this.transactions.execute(async (transaction) => {
       const user = await this.lockCompanyUser(transaction, companyId, accountId);
-      const before = await sql<
-        Record<string, unknown>
-      >`select cu.display_name as "displayName",a.email,a.mobile_number as "mobileNumber",a.preferred_language as "preferredLanguage",e.id as "employeeId" from company_users cu join accounts a on a.id=cu.account_id left join employees e on e.company_user_id=cu.id where cu.id=${user.companyUserId}::uuid`.execute(
-        transaction,
-      );
+      const before = await sql<Record<string, unknown>>`
+        select coalesce(cu.display_name,a.username) as "displayName",a.email,
+               a.mobile_number as "mobileNumber",a.preferred_language as "preferredLanguage",
+               e.id as "employeeId"
+          from accounts a
+          left join company_users cu on cu.account_id=a.id and cu.company_id=a.company_id
+          left join employees e on e.company_user_id=cu.id and e.company_id=cu.company_id
+         where a.id=${accountId}::uuid and a.company_id=${companyId}::uuid
+      `.execute(transaction);
       await this.assertIdentifiersAvailable(transaction, companyId, {
         excludeAccountId: accountId,
         ...(input.email === undefined ? {} : { email: input.email }),
         ...(input.mobileNumber == null ? {} : { mobileNumber: input.mobileNumber }),
       });
-      await sql`update company_users set display_name=coalesce(${input.displayName ?? null},display_name), updated_at=now(),version=version+1 where id=${user.companyUserId}::uuid`.execute(
-        transaction,
-      );
+      if (user.companyUserId !== null) await sql`
+        update company_users
+           set display_name=coalesce(${input.displayName ?? null},display_name),
+               updated_at=now(),version=version+1
+         where id=${user.companyUserId}::uuid
+      `.execute(transaction);
       await sql`
         update accounts
            set email = case when ${input.email !== undefined}
@@ -340,15 +397,8 @@ export class UserAdministrationService {
                version = version + 1
          where id = ${accountId}::uuid
       `.execute(transaction);
-      if (Object.hasOwn(input, "employeeId")) {
-        await sql`update employees set company_user_id=null,updated_at=now(),version=version+1 where company_id=${companyId}::uuid and company_user_id=${user.companyUserId}::uuid`.execute(
-          transaction,
-        );
-        if (input.employeeId)
-          await this.linkEmployee(transaction, companyId, user.companyUserId, input.employeeId);
-      }
       await this.audit(transaction, {
-        action: "company_user.update",
+        action: `${user.accountKind}.update`,
         actorId,
         before: before.rows[0] ?? {},
         after: input,
@@ -356,20 +406,6 @@ export class UserAdministrationService {
         correlationId,
         subjectId: accountId,
       });
-      const previousEmployeeId = before.rows[0]?.employeeId ?? null;
-      if (Object.hasOwn(input, "employeeId") && previousEmployeeId !== (input.employeeId ?? null)) {
-        await this.audit(transaction, {
-          action: input.employeeId
-            ? "company_user.employee_linked"
-            : "company_user.employee_unlinked",
-          actorId,
-          before: { employeeId: previousEmployeeId },
-          after: { employeeId: input.employeeId ?? null },
-          companyId,
-          correlationId,
-          subjectId: accountId,
-        });
-      }
     });
   }
 
@@ -384,6 +420,11 @@ export class UserAdministrationService {
     await this.transactions.execute(async (transaction) => {
       await this.lockCompany(transaction, companyId);
       const account = await this.lockCompanyUser(transaction, companyId, accountId);
+      if (account.accountKind !== "company_user") throw new ApplicationException(
+        "account_kind_roles_not_supported",
+        "Roles can only be assigned to Company User accounts",
+        HttpStatus.CONFLICT,
+      );
       await this.assertRoles(transaction, companyId, requested, account.status === "active");
       const current = await sql<{
         roleId: string;
@@ -468,7 +509,7 @@ export class UserAdministrationService {
       );
       await this.revokeAll(tx, accountId);
       await this.audit(tx, {
-        action: "company_user.lock",
+        action: `${account.accountKind}.lock`,
         actorId: actor.identityId,
         before: { status: account.status },
         after: { status: "locked" },
@@ -495,7 +536,7 @@ export class UserAdministrationService {
         tx,
       );
       await this.audit(tx, {
-        action: "company_user.unlock",
+        action: `${account.accountKind}.unlock`,
         actorId: actor.identityId,
         before: { status: account.status, failedLoginAttempts: account.failedLoginAttempts },
         after: { status: "active", failedLoginAttempts: 0 },
@@ -516,9 +557,9 @@ export class UserAdministrationService {
     const temporaryPassword = this.temporaryPasswords.create();
     const hash = await this.passwordHasher.hash(temporaryPassword);
     await this.transactions.execute(async (tx) => {
-      await this.lockCompanyUser(tx, companyId, accountId);
+      const account = await this.lockCompanyUser(tx, companyId, accountId);
       await this.audit(tx, {
-        action: "company_user.password_reset_requested",
+        action: `${account.accountKind}.password_reset_requested`,
         actorId: actor.identityId,
         before: {},
         after: {},
@@ -532,7 +573,7 @@ export class UserAdministrationService {
       );
       await this.revokeAll(tx, accountId);
       await this.audit(tx, {
-        action: "company_user.temporary_password_generated",
+        action: `${account.accountKind}.temporary_password_generated`,
         actorId: actor.identityId,
         before: {},
         after: { forcePasswordChange: true, expiresInHours: 24 },
@@ -562,7 +603,7 @@ export class UserAdministrationService {
         tx,
       );
       await this.audit(tx, {
-        action: "company_user.force_password_change",
+        action: `${user.accountKind}.force_password_change`,
         actorId: actor.identityId,
         before: { required: user.forcePasswordChange },
         after: { required },
@@ -594,7 +635,7 @@ export class UserAdministrationService {
     const { companyId } = this.tenants.current();
     const actor = this.identities.current();
     await this.transactions.execute(async (tx) => {
-      await this.lockCompanyUser(tx, companyId, accountId);
+      const account = await this.lockCompanyUser(tx, companyId, accountId);
       const changed = await sql<{
         id: string;
       }>`update account_sessions set revoked_at=coalesce(revoked_at,now()) where id=${sessionId}::uuid and account_id=${accountId}::uuid and company_id=${companyId}::uuid returning id`.execute(
@@ -607,7 +648,7 @@ export class UserAdministrationService {
           HttpStatus.NOT_FOUND,
         );
       await this.audit(tx, {
-        action: "company_user.session_revoked",
+        action: `${account.accountKind}.session_revoked`,
         actorId: actor.identityId,
         before: {},
         after: { sessionId },
@@ -627,12 +668,12 @@ export class UserAdministrationService {
     const { companyId } = this.tenants.current();
     const actor = this.identities.current();
     await this.transactions.execute(async (tx) => {
-      await this.lockCompanyUser(tx, companyId, accountId);
+      const account = await this.lockCompanyUser(tx, companyId, accountId);
       await sql`update account_sessions set revoked_at=coalesce(revoked_at,now()) where account_id=${accountId}::uuid and company_id=${companyId}::uuid ${preserveCurrent && accountId === actor.identityId ? sql`and id<>${actor.sessionId}::uuid` : sql``}`.execute(
         tx,
       );
       await this.audit(tx, {
-        action: "company_user.sessions_revoked",
+        action: `${account.accountKind}.sessions_revoked`,
         actorId: actor.identityId,
         before: {},
         after: { preserveCurrent },
@@ -686,7 +727,8 @@ export class UserAdministrationService {
     await this.transactions.execute(async (tx) => {
       await this.lockCompany(tx, companyId);
       const account = await this.lockCompanyUser(tx, companyId, accountId);
-      if (status === "active") await this.assertUserHasActiveRole(tx, companyId, accountId);
+      if (status === "active" && account.accountKind === "company_user")
+        await this.assertUserHasActiveRole(tx, companyId, accountId);
       else if (await this.accountHasManagement(tx, companyId, accountId))
         await this.assertAnotherAdministrator(tx, companyId, accountId);
       await sql`update accounts set status=${status},deactivated_at=${status === "disabled" ? sql`now()` : null},updated_at=now(),version=version+1 where id=${accountId}::uuid`.execute(
@@ -697,7 +739,7 @@ export class UserAdministrationService {
       );
       if (status === "disabled") await this.revokeAll(tx, accountId);
       await this.audit(tx, {
-        action: `company_user.${status === "active" ? "reactivate" : "deactivate"}`,
+        action: `${account.accountKind}.${status === "active" ? "reactivate" : "deactivate"}`,
         actorId: actor.identityId,
         before: { status: account.status },
         after: { status },
@@ -718,7 +760,13 @@ export class UserAdministrationService {
   ): Promise<UserActionContext & { failedLoginAttempts: number }> {
     const result = await sql<
       UserActionContext & { failedLoginAttempts: number }
-    >`select a.id as "accountId",a.company_id as "companyId",cu.id as "companyUserId",a.status,a.force_password_change as "forcePasswordChange",a.failed_login_attempts as "failedLoginAttempts" from accounts a join company_users cu on cu.account_id=a.id and cu.company_id=a.company_id where a.id=${accountId}::uuid and a.company_id=${companyId}::uuid and a.account_kind='company_user' for update of a,cu`.execute(
+    >`select a.id as "accountId",a.account_kind as "accountKind",a.company_id as "companyId",
+             cu.id as "companyUserId",a.status,a.force_password_change as "forcePasswordChange",
+             a.failed_login_attempts as "failedLoginAttempts"
+        from accounts a
+        left join company_users cu on cu.account_id=a.id and cu.company_id=a.company_id
+       where a.id=${accountId}::uuid and a.company_id=${companyId}::uuid
+         and a.account_kind<>'platform_user' for update of a`.execute(
       tx,
     );
     const row = result.rows[0];
@@ -728,7 +776,8 @@ export class UserAdministrationService {
   private async ensureUser(accountId: string, companyId: string): Promise<void> {
     const r = await sql<{
       exists: boolean;
-    }>`select exists(select 1 from accounts where id=${accountId}::uuid and company_id=${companyId}::uuid and account_kind='company_user') as exists`.execute(
+    }>`select exists(select 1 from accounts where id=${accountId}::uuid
+          and company_id=${companyId}::uuid and account_kind<>'platform_user') as exists`.execute(
       this.database,
     );
     if (!r.rows[0]?.exists) throw this.notFound();

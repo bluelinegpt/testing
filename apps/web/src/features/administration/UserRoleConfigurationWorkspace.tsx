@@ -30,12 +30,15 @@ import type {
 import { Modal } from "../../components/Modal.js";
 import { PageHeader } from "../../components/PageHeader.js";
 import { isUaeMobile, normalizeUaeMobile } from "../../domain/uae-mobile.js";
+import { LegacyBusinessLinkSyncPanel } from "./LegacyBusinessLinkSyncPanel.js";
 
 export function UsersConfigurationWorkspace({
   api,
+  initiallyCreating = false,
   onNavigate,
 }: {
   api: ApiClient;
+  initiallyCreating?: boolean;
   onNavigate: (path: string) => void;
 }) {
   const { t } = useTranslation();
@@ -43,6 +46,7 @@ export function UsersConfigurationWorkspace({
   const [pageSize, setPageSize] = useState(25);
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("all");
+  const [accountKind, setAccountKind] = useState("all");
   const [employee, setEmployee] = useState("all");
   const [roleId, setRoleId] = useState("");
   const [sortOrder, setSortOrder] = useState("name:asc");
@@ -50,7 +54,7 @@ export function UsersConfigurationWorkspace({
   const [roles, setRoles] = useState<readonly Role[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
-  const [creating, setCreating] = useState(false);
+  const [creating, setCreating] = useState(initiallyCreating);
   const [temp, setTemp] = useState<{
     temporaryPassword: string;
     temporaryPasswordExpiresAt: string;
@@ -64,6 +68,7 @@ export function UsersConfigurationWorkspace({
         page: String(page),
         pageSize: String(pageSize),
         status,
+        accountKind,
         employee,
         sort,
         direction,
@@ -81,7 +86,7 @@ export function UsersConfigurationWorkspace({
     } finally {
       setLoading(false);
     }
-  }, [api, employee, page, pageSize, roleId, search, sortOrder, status, t]);
+  }, [accountKind, api, employee, page, pageSize, roleId, search, sortOrder, status, t]);
   useEffect(() => {
     void load();
   }, [load]);
@@ -122,6 +127,19 @@ export function UsersConfigurationWorkspace({
           <option value="active">{t("userAdmin.active")}</option>
           <option value="disabled">{t("userAdmin.disabled")}</option>
           <option value="locked">{t("userAdmin.locked")}</option>
+        </select>
+        <select
+          aria-label={t("userAdmin.accountKind")}
+          onChange={(e) => {
+            setAccountKind(e.target.value);
+            setPage(1);
+          }}
+          value={accountKind}
+        >
+          <option value="all">{t("userAdmin.allAccountKinds")}</option>
+          <option value="company_user">{t("userAdmin.accountKinds.company_user")}</option>
+          <option value="driver">{t("userAdmin.accountKinds.driver")}</option>
+          <option value="trader">{t("userAdmin.accountKinds.trader")}</option>
         </select>
         <select
           aria-label={t("userAdmin.sort")}
@@ -182,6 +200,7 @@ export function UsersConfigurationWorkspace({
           <thead>
             <tr>
               <th>{t("userAdmin.username")}</th>
+              <th>{t("userAdmin.accountKind")}</th>
               <th>{t("common.name")}</th>
               <th>{t("userAdmin.email")}</th>
               <th>{t("userAdmin.employee")}</th>
@@ -194,13 +213,13 @@ export function UsersConfigurationWorkspace({
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={8} className="empty-cell">
+                <td colSpan={9} className="empty-cell">
                   {t("common.loading")}
                 </td>
               </tr>
             ) : data?.items.length === 0 ? (
               <tr>
-                <td colSpan={8} className="empty-cell">
+                <td colSpan={9} className="empty-cell">
                   {t("userAdmin.noUsers")}
                 </td>
               </tr>
@@ -213,6 +232,7 @@ export function UsersConfigurationWorkspace({
                       <small className="table-note">{t("userAdmin.passwordRequired")}</small>
                     ) : null}
                   </td>
+                  <td>{t(`userAdmin.accountKinds.${user.accountKind}`)}</td>
                   <td>{user.displayName}</td>
                   <td>
                     {user.email ?? "-"}
@@ -260,6 +280,7 @@ export function UsersConfigurationWorkspace({
           setPage(1);
         }}
       />
+      <LegacyBusinessLinkSyncPanel api={api} />
       {creating ? (
         <UserForm
           api={api}
@@ -281,10 +302,12 @@ export function UserDetailsWorkspace({
   api,
   accountId,
   onBack,
+  onNavigate,
 }: {
   api: ApiClient;
   accountId: string;
   onBack: () => void;
+  onNavigate: (path: string) => void;
 }) {
   const { t } = useTranslation();
   const [user, setUser] = useState<UserDetails>();
@@ -403,7 +426,7 @@ export function UserDetailsWorkspace({
         ))}
       </div>
       {tab === "overview" ? (
-        <Overview user={user} />
+        <Overview onNavigate={onNavigate} user={user} />
       ) : tab === "access" ? (
         <Access user={user} onAssign={() => setModal("roles")} />
       ) : tab === "activity" ? (
@@ -811,7 +834,7 @@ function UserForm({
   const [selectedRoles, setSelectedRoles] = useState<readonly string[]>(
     editing?.roles.map((r) => r.id) ?? [],
   );
-  const [employeeId, setEmployeeId] = useState(editing?.employeeId ?? "");
+  const [employeeId, setEmployeeId] = useState("");
   const [force, setForce] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string>();
@@ -821,8 +844,10 @@ function UserForm({
     usernameAvailable: true,
   });
   useEffect(() => {
-    void api.get<readonly EmployeeOption[]>("users/employees/available").then(setEmployees);
-  }, [api]);
+    if (editing === undefined) {
+      void api.get<readonly EmployeeOption[]>("users/employees/available").then(setEmployees);
+    }
+  }, [api, editing]);
   useEffect(() => {
     const params = new URLSearchParams();
     if (!editing && /^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$/.test(username.trim())) {
@@ -863,10 +888,9 @@ function UserForm({
     try {
       if (editing) {
         const changes: Record<string, unknown> = {
-          displayName: name,
           preferredLanguage: language,
-          employeeId: employeeId || null,
         };
+        if (editing.accountKind === "company_user") changes.displayName = name;
         if (email !== editing.email) changes.email = email;
         if (mobile !== (editing.mobileNumber ?? ""))
           changes.mobileNumber = mobile ? (normalizeUaeMobile(mobile) ?? mobile) : null;
@@ -906,6 +930,12 @@ function UserForm({
       <form className="admin-form" onSubmit={(event) => void submit(event)}>
         {error ? <div className="alert alert-error">{error}</div> : null}
         <div className="form-grid">
+          {editing ? (
+            <label className="field">
+              <span>{t("userAdmin.accountKind")}</span>
+              <input disabled value={t(`userAdmin.accountKinds.${editing.accountKind}`)} />
+            </label>
+          ) : null}
           <label className="field">
             <span>{t("userAdmin.username")}</span>
             <input
@@ -922,7 +952,12 @@ function UserForm({
           </label>
           <label className="field">
             <span>{t("common.name")}</span>
-            <input required value={name} onChange={(e) => setName(e.target.value)} />
+            <input
+              disabled={editing !== undefined && editing.accountKind !== "company_user"}
+              required
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+            />
           </label>
           <label className="field">
             <span>{t("userAdmin.email")}</span>
@@ -965,22 +1000,17 @@ function UserForm({
               <option value="ar">العربية</option>
             </select>
           </label>
-          <label className="field">
+          {!editing ? <label className="field">
             <span>{t("userAdmin.linkEmployee")}</span>
             <select value={employeeId} onChange={(e) => setEmployeeId(e.target.value)}>
               <option value="">{t("userAdmin.noEmployee")}</option>
-              {editing?.employeeId ? (
-                <option value={editing.employeeId}>
-                  {editing.employeeCode} - {editing.employeeName}
-                </option>
-              ) : null}
               {employees.map((employee) => (
                 <option key={employee.id} value={employee.id}>
                   {employee.code} - {employee.name}
                 </option>
               ))}
             </select>
-          </label>
+          </label> : null}
         </div>
         {!editing ? (
           <>
@@ -1433,11 +1463,12 @@ function DuplicateRole({
   );
 }
 
-function Overview({ user }: { user: UserDetails }) {
+function Overview({ user, onNavigate }: { user: UserDetails; onNavigate: (path: string) => void }) {
   const { t } = useTranslation();
   return (
-    <dl className="detail-grid">
+    <><dl className="detail-grid">
       <Detail label={t("userAdmin.username")} value={user.username} />
+      <Detail label={t("userAdmin.accountKind")} value={t(`userAdmin.accountKinds.${user.accountKind}`)} />
       <Detail label={t("common.name")} value={user.displayName} />
       <Detail label={t("userAdmin.email")} value={user.email} />
       <Detail label={t("userAdmin.mobile")} value={user.mobileNumber} />
@@ -1453,6 +1484,23 @@ function Overview({ user }: { user: UserDetails }) {
       <Detail label={t("userAdmin.createdAt")} value={dateTime(user.createdAt, "-")} />
       <Detail label={t("userAdmin.updatedAt")} value={dateTime(user.updatedAt, "-")} />
     </dl>
+    <section className="detail-section">
+      <h2>{t("access.linkedProfiles")}</h2>
+      {user.linkedProfiles.length===0?<p>{t("access.noLinkedUser")}</p>:<div className="table-scroll-x"><table>
+        <thead><tr><th>{t("access.columns.profile")}</th><th>{t("workforce.code")}</th>
+          <th>{t("common.name")}</th><th>{t("access.columns.status")}</th><th>{t("common.status")}</th>
+          <th>{t("access.linkCreated")}</th><th>{t("access.linkUpdated")}</th><th>{t("access.columns.actions")}</th></tr></thead>
+        <tbody>{user.linkedProfiles.map(profile=><tr key={profile.id}><td>{t(`access.profile.${profile.profileType}`)}</td>
+          <td><bdi>{profile.code??"—"}</bdi></td><td>{profile.name??"—"}</td>
+          <td>{t(`access.status.${profile.accessStatus}`)}</td><td>{profile.businessStatus??"—"}</td>
+          <td>{dateTime(profile.createdAt,"—")}</td><td>{dateTime(profile.updatedAt,"—")}</td>
+          <td><button type="button" onClick={()=>onNavigate(
+            profile.profileType==="trader"
+              ? `/configuration/traders/${encodeURIComponent(profile.code??profile.profileId)}`
+              : `/configuration/${profile.profileType}s/${encodeURIComponent(profile.code??profile.profileId)}`
+          )}>{t("access.openProfile")}</button></td></tr>)}</tbody>
+      </table></div>}
+    </section></>
   );
 }
 function Access({ user, onAssign }: { user: UserDetails; onAssign: () => void }) {
@@ -1461,9 +1509,11 @@ function Access({ user, onAssign }: { user: UserDetails; onAssign: () => void })
     <div className="detail-section">
       <div className="section-heading">
         <h2>{t("userAdmin.roles")}</h2>
-        <button className="button button-secondary" onClick={onAssign}>
-          {t("users.assignRoles")}
-        </button>
+        {user.accountKind === "company_user" ? (
+          <button className="button button-secondary" onClick={onAssign}>
+            {t("users.assignRoles")}
+          </button>
+        ) : null}
       </div>
       <div className="tag-list">
         {user.roles.map((role) => (
