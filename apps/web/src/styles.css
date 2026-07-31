@@ -3532,96 +3532,26 @@ tr.row-highlighted {
   border-top: 1px solid rgb(255 255 255 / 10%);
 }
 
-.sidebar-language {
-  min-height: 38px;
-  padding: 3px 5px;
+.sidebar-logout-button {
+  min-height: 42px;
+  padding: 9px 11px;
   display: flex;
   align-items: center;
-  gap: 3px;
+  gap: 10px;
   border: 1px solid rgb(255 255 255 / 12%);
   border-radius: 7px;
+  color: #eef4ff;
   background: rgb(255 255 255 / 4%);
+  font-size: 14px;
+  font-weight: 700;
+  text-align: start;
 }
 
-.sidebar-theme {
-  min-height: 34px;
-  padding: 3px;
-  display: flex;
-  align-items: center;
-  gap: 3px;
-  border: 1px solid rgb(255 255 255 / 12%);
-  border-radius: 7px;
-  background: rgb(255 255 255 / 4%);
-}
-
-.sidebar-theme button {
-  min-width: 0;
-  min-height: 26px;
-  padding: 4px 6px;
-  flex: 1;
-  border: 0;
-  border-radius: 5px;
-  color: #aebbd1;
-  background: transparent;
-  font-size: 11px;
-}
-
-.sidebar-theme button[aria-pressed="true"] {
+.sidebar-logout-button:hover {
   color: #fff;
-  background: #263755;
+  background: rgb(255 255 255 / 9%);
 }
 
-.sidebar-language > svg {
-  margin-inline: 3px 4px;
-  flex: 0 0 auto;
-  color: #9eacc2;
-}
-
-.sidebar-language button {
-  min-width: 0;
-  min-height: 28px;
-  padding: 4px 7px;
-  flex: 1;
-  border: 0;
-  border-radius: 5px;
-  color: #aebbd1;
-  background: transparent;
-  font-size: 12px;
-}
-
-.sidebar-language button[aria-pressed="true"] {
-  color: #fff;
-  background: #263755;
-}
-
-.sidebar-user {
-  min-height: 50px;
-  padding: 7px 6px;
-  display: grid;
-  grid-template-columns: 24px minmax(0, 1fr) 30px;
-  align-items: center;
-  gap: 8px;
-}
-
-.sidebar-user-copy {
-  min-width: 0;
-  display: grid;
-}
-
-.sidebar-user-copy small {
-  color: #8f9db4;
-  font-size: 10px;
-}
-
-.sidebar-user-copy strong {
-  overflow: hidden;
-  color: #fff;
-  font-size: 13px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.sidebar-user > button,
 .sidebar-icon-button,
 .sidebar-collapse-button,
 .mobile-menu-button {
@@ -3634,13 +3564,12 @@ tr.row-highlighted {
   border-radius: 6px;
 }
 
-.sidebar-user > button,
-.sidebar-icon-button {
+.sidebar-icon-button,
+.sidebar-collapse-button {
   color: #b9c5d8;
   background: transparent;
 }
 
-.sidebar-user > button:hover,
 .sidebar-icon-button:hover {
   color: #fff;
   background: rgb(255 255 255 / 8%);
@@ -4153,17 +4082,13 @@ tr.row-highlighted {
 .company-shell-collapsed .nav-group-button span,
 .company-shell-collapsed .nav-chevron,
 .company-shell-collapsed .nav-submenu,
-.company-shell-collapsed .sidebar-language button,
-.company-shell-collapsed .sidebar-theme,
-.company-shell-collapsed .sidebar-user-copy,
-.company-shell-collapsed .sidebar-user > button {
+.company-shell-collapsed .sidebar-logout-button span {
   display: none;
 }
 
 .company-shell-collapsed .sidebar-brand-row,
 .company-shell-collapsed .sidebar-brand,
-.company-shell-collapsed .sidebar-language,
-.company-shell-collapsed .sidebar-user {
+.company-shell-collapsed .sidebar-logout-button {
   justify-content: center;
 }
 
@@ -4171,15 +4096,6 @@ tr.row-highlighted {
 .company-shell-collapsed .nav-group-button {
   grid-template-columns: 20px;
   justify-content: center;
-}
-
-.company-shell-collapsed .sidebar-language {
-  border-color: transparent;
-  background: transparent;
-}
-
-.company-shell-collapsed .sidebar-user {
-  grid-template-columns: 24px;
 }
 
 @media (max-width: 1100px) {
@@ -4288,9 +4204,7 @@ tr.row-highlighted {
   .company-shell-collapsed .nav-direct-link span,
   .company-shell-collapsed .nav-group-button span,
   .company-shell-collapsed .nav-chevron,
-  .company-shell-collapsed .sidebar-language button,
-  .company-shell-collapsed .sidebar-user-copy,
-  .company-shell-collapsed .sidebar-user > button {
+  .company-shell-collapsed .sidebar-logout-button span {
     display: initial;
   }
 
@@ -4304,8 +4218,8 @@ tr.row-highlighted {
     grid-template-columns: 20px minmax(0, 1fr);
   }
 
-  .company-shell-collapsed .sidebar-user {
-    grid-template-columns: 24px minmax(0, 1fr) 30px;
+  .company-shell-collapsed .sidebar-logout-button {
+    justify-content: flex-start;
   }
 }
 
@@ -5992,13 +5906,11 @@ tr.row-highlighted {
 }
 
 .top-header-title span,
-.top-header-user,
-.sidebar-user-copy small {
+.top-header-user {
   color: var(--text-secondary);
 }
 
-.top-header-title strong,
-.sidebar-user-copy strong {
+.top-header-title strong {
   color: var(--text-primary);
 }
 

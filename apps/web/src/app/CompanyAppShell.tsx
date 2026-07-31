@@ -5,7 +5,6 @@ import {
   FileBarChart,
   Landmark,
   Gauge,
-  Languages,
   LogOut,
   Menu,
   PanelLeftClose,
@@ -332,41 +331,10 @@ export function CompanyAppShell({
         </nav>
 
         <div className="sidebar-footer">
-          <div className="sidebar-language" aria-label={t("language.label")} role="group">
-            <Languages aria-hidden="true" size={18} />
-            {languages.map((language) => (
-              <button
-                aria-pressed={currentLanguage === language.code}
-                key={language.code}
-                onClick={() => void changeLanguage(language.code)}
-                type="button"
-              >
-                {language.label}
-              </button>
-            ))}
-          </div>
-          <div className="sidebar-theme" aria-label={t("theme.label")} role="group">
-            {themeOptions.map((theme) => (
-              <button
-                aria-pressed={branding.themePreference === theme.code}
-                key={theme.code}
-                onClick={() => void changeTheme(theme.code)}
-                type="button"
-              >
-                {t(theme.labelKey)}
-              </button>
-            ))}
-          </div>
-          <div className="sidebar-user">
-            <CircleUserRound aria-hidden="true" size={22} />
-            <span className="sidebar-user-copy">
-              <small>{t("shell.signedInAs")}</small>
-              <strong title={session.identity.username}>{signedInDisplayName}</strong>
-            </span>
-            <button aria-label={t("auth.logout")} onClick={() => void onLogout()} type="button">
-              <LogOut aria-hidden="true" size={18} />
-            </button>
-          </div>
+          <button className="sidebar-logout-button" onClick={() => void onLogout()} type="button">
+            <LogOut aria-hidden="true" size={18} />
+            <span>{t("auth.logout")}</span>
+          </button>
           <p className="powered-by">{t("shell.poweredBy")}</p>
         </div>
       </aside>
