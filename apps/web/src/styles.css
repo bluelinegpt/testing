@@ -2651,7 +2651,7 @@ td {
   transform: translateY(-1px);
 }
 tr.row-highlighted {
-  background: #fff7d6;
+  background: color-mix(in srgb, var(--color-warning) 14%, var(--surface-color));
 }
 .financial-status-cell {
   display: flex;
@@ -2659,12 +2659,12 @@ tr.row-highlighted {
   gap: 2px;
 }
 .financial-status-label {
-  color: var(--color-muted);
+  color: var(--text-muted);
   font-size: 12px;
   font-weight: 600;
 }
 .financial-status-cell [data-trader-settlement-status] {
-  color: var(--color-muted);
+  color: var(--text-muted);
   font-size: 12px;
 }
 
@@ -2687,14 +2687,15 @@ tr.row-highlighted {
   align-items: baseline;
   gap: 6px;
   padding: 8px 14px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-surface);
-  color: var(--color-muted);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  background: var(--surface-color);
+  color: var(--text-muted);
   font-size: 13px;
+  box-shadow: var(--shadow-sm);
 }
 .metric-chip strong {
-  color: #172033;
+  color: var(--text-primary);
   font-size: 15px;
 }
 @media (max-width: 900px) {
