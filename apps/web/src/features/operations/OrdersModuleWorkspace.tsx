@@ -837,6 +837,7 @@ interface FastEntryRow {
   resolvedServiceFee: string;
   serialNumber: string;
   serviceFee: string;
+  submissionKey: string;
   status: FastEntryStatus;
   traderId: string;
   traderOption: OperationsTraderOption | undefined;
@@ -860,6 +861,12 @@ const fastEntryColumns = [
   "notes",
 ] as const;
 
+function createFastEntrySubmissionKey(): string {
+  return typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `fast-entry-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
 function createFastEntryRow(serialNumber = ""): FastEntryRow {
   return {
     additionalFees: "0.00",
@@ -881,6 +888,7 @@ function createFastEntryRow(serialNumber = ""): FastEntryRow {
     resolvedServiceFee: "",
     serialNumber,
     serviceFee: "",
+    submissionKey: createFastEntrySubmissionKey(),
     status: "draft",
     traderId: "",
     traderOption: undefined,
@@ -933,9 +941,21 @@ function resolveApiMessage(requestError: unknown, fallback: string): string {
   const sanitize = (message: string) =>
     message.includes("Cannot read properties of undefined") ? fallback : message;
   if (requestError instanceof ApiError) {
-    return sanitize(requestError.details?.[0] ?? requestError.message);
+    const details = Array.isArray(requestError.details) ? requestError.details.filter(Boolean) : [];
+    const message = details.length > 0 ? `${requestError.message}: ${details.join(" ")}` : requestError.message;
+    if (requestError.code === "idempotency_key_reused") {
+      return tSafeOrderMessage(
+        "This row was already submitted with different details. Change the row or remove it and add it again.",
+        fallback,
+      );
+    }
+    return sanitize(message);
   }
   return requestError instanceof Error ? sanitize(requestError.message) : fallback;
+}
+
+function tSafeOrderMessage(message: string, fallback: string): string {
+  return message.trim() === "" ? fallback : message;
 }
 
 function FastOrderEntryDialog({
@@ -1007,6 +1027,10 @@ function FastOrderEntryDialog({
                 change.resolvedServiceFee !== undefined || row.status === "created"
                   ? (change.resolvedServiceFee ?? row.resolvedServiceFee)
                   : "",
+              submissionKey:
+                row.status === "created" || change.status !== undefined
+                  ? row.submissionKey
+                  : createFastEntrySubmissionKey(),
               status: row.status === "created" ? "created" : "draft",
             }
           : row,
@@ -1247,19 +1271,7 @@ function FastOrderEntryDialog({
               traderId: row.traderId,
             },
             {
-              "X-Idempotency-Key": materialFingerprint({
-                additionalFees,
-                areaId: row.areaId,
-                cod,
-                customerAddress: row.customerAddress.trim(),
-                customerName: row.customerName.trim(),
-                mobile: row.mobile.trim(),
-                packageCount: packages.ok ? packages.value : 1,
-                referenceNumber: row.referenceNumber.trim(),
-                serialNumber: row.serialNumber.trim(),
-                serviceFee: serviceFee ?? null,
-                traderId: row.traderId,
-              }),
+              "X-Idempotency-Key": row.submissionKey,
             },
           );
           nextRows[index] = {
