@@ -2947,6 +2947,10 @@ tr.row-highlighted {
   flex: 0 0 auto;
 }
 
+.driver-fee-payment-modal > .table-scroll-x {
+  flex: 1 1 260px;
+}
+
 .driver-fee-payment-modal .alert {
   margin-block: 16px;
 }
@@ -2974,10 +2978,30 @@ tr.row-highlighted {
 }
 
 .driver-fee-payment-modal .table-scroll-x {
-  flex: 1 1 auto;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  flex: 1 1 260px;
   margin-block: 16px;
-  min-height: 160px;
+  max-height: min(38vh, 420px);
+  min-height: 230px;
   overflow: auto;
+  scrollbar-color: #94a3b8 var(--surface-subtle);
+  scrollbar-width: auto;
+}
+
+.driver-fee-payment-modal .table-scroll-x::-webkit-scrollbar {
+  height: 12px;
+  width: 12px;
+}
+
+.driver-fee-payment-modal .table-scroll-x::-webkit-scrollbar-track {
+  background: var(--surface-subtle);
+}
+
+.driver-fee-payment-modal .table-scroll-x::-webkit-scrollbar-thumb {
+  background: #94a3b8;
+  border: 2px solid var(--surface-subtle);
+  border-radius: 999px;
 }
 
 .driver-fee-payment-modal table {
@@ -3024,9 +3048,8 @@ tr.row-highlighted {
   margin-inline: 0;
   margin-top: 20px;
   padding: 16px 22px 18px;
-  position: sticky;
-  bottom: 0;
-  background: #fff;
+  position: static;
+  background: var(--surface-color);
   z-index: 1;
 }
 
