@@ -51,13 +51,13 @@ export function DashboardWorkspace({
   const maxStatus = Math.max(1, ...(overview?.deliveryStatuses.map((item) => item.count) ?? [1]));
 
   return (
-    <>
+    <div className="dashboard-workspace">
       <div className="page-heading dashboard-heading">
         <div>
           <p className="eyebrow">{t("dashboard.area")}</p>
           <h1>{t("dashboard.title")}</h1>
         </div>
-        <button className="button button-secondary" onClick={() => void load()} type="button">
+        <button className="button button-secondary dashboard-refresh" onClick={() => void load()} type="button">
           {t("common.refresh")}
         </button>
       </div>
@@ -214,7 +214,7 @@ export function DashboardWorkspace({
           {t("common.loading")}
         </div>
       ) : null}
-    </>
+    </div>
   );
 }
 
