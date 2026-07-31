@@ -632,29 +632,44 @@
 /* Orders operational workspace */
 .orders-workspace {
   min-width: 0;
-  background: #fff;
-  border: 1px solid var(--shell-border);
-  border-radius: 6px;
+  background: var(--surface-color);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-sm);
   overflow: hidden;
 }
 .orders-quick-views {
   display: flex;
-  gap: 2px;
-  padding: 12px 16px 0;
-  border-bottom: 1px solid var(--shell-border);
+  gap: 8px;
+  padding: 12px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--border-color);
+  background: linear-gradient(135deg, var(--surface-color), var(--surface-subtle));
 }
 .orders-quick-views button {
-  min-height: 40px;
-  padding: 0 14px;
-  border: 0;
-  border-bottom: 3px solid transparent;
+  min-height: 42px;
+  padding: 0 16px;
+  border: 1px solid transparent;
+  border-radius: 999px;
   background: transparent;
-  color: var(--shell-muted);
+  color: var(--text-secondary);
   font-weight: 700;
+  white-space: nowrap;
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    color 160ms ease,
+    box-shadow 160ms ease;
 }
 .orders-quick-views button.active {
-  border-bottom-color: var(--shell-accent-violet);
-  color: #4338ca;
+  border-color: var(--primary-color);
+  color: var(--primary-strong);
+  background: var(--primary-subtle);
+  box-shadow: inset 0 0 0 1px rgb(79 99 246 / 12%);
+}
+.orders-quick-views button:hover {
+  color: var(--primary-strong);
+  background: var(--primary-subtle);
 }
 .tab-count {
   display: inline-grid;
@@ -663,8 +678,8 @@
   margin-inline-start: 7px;
   place-items: center;
   border-radius: 11px;
-  background: #e2e8f0;
-  color: #334155;
+  background: var(--surface-raised);
+  color: var(--text-primary);
   font-size: 12px;
 }
 .orders-filter-bar {
@@ -672,9 +687,9 @@
   grid-template-columns: repeat(auto-fill, minmax(185px, 1fr));
   align-items: end;
   gap: 12px;
-  padding: 14px 16px;
-  background: #f8fafc;
-  border-bottom: 1px solid var(--shell-border);
+  padding: 16px;
+  background: var(--surface-subtle);
+  border-bottom: 1px solid var(--border-color);
 }
 /* In the filter grid every control fills its cell for consistent widths. */
 .orders-filter-bar .orders-search {
@@ -693,9 +708,9 @@
 }
 .filter-area input {
   min-height: 38px;
-  border: 1px solid #cbd5e1;
-  border-radius: 5px;
-  background: #fff;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--surface-color);
   padding-inline: 8px;
 }
 .orders-search {
@@ -705,28 +720,31 @@
   align-items: center;
   gap: 8px;
   padding-inline: 10px;
-  background: #fff;
-  border: 1px solid #cbd5e1;
-  border-radius: 5px;
+  color: var(--text-muted);
+  background: var(--surface-color);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  box-shadow: 0 1px 0 rgb(15 31 61 / 4%);
 }
 .orders-search input {
   width: 100%;
   border: 0;
   outline: 0;
+  background: transparent;
 }
 .filter-select select,
 .filter-date input,
 .orders-pagination select {
   min-height: 38px;
   max-width: 185px;
-  border: 1px solid #cbd5e1;
-  border-radius: 5px;
-  background: #fff;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--surface-color);
 }
 .filter-date {
   display: grid;
   gap: 3px;
-  color: var(--shell-muted);
+  color: var(--text-secondary);
   font-size: 12px;
 }
 .bulk-toolbar {
@@ -735,10 +753,10 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 8px 16px;
-  color: #172033;
-  background: #eef2ff;
-  border-bottom: 1px solid #c7d2fe;
+  padding: 10px 16px;
+  color: var(--text-primary);
+  background: var(--primary-subtle);
+  border-bottom: 1px solid rgb(79 99 246 / 24%);
 }
 .bulk-toolbar > div,
 .bulk-actions {
@@ -752,21 +770,42 @@
   align-items: center;
   gap: 6px;
   border: 0;
-  color: #3730a3;
+  color: var(--primary-strong);
   background: transparent;
   font-weight: 700;
 }
 .orders-table-scroll {
   overflow-x: auto;
+  background: var(--surface-color);
 }
 .orders-table {
   min-width: 1280px;
+  border-collapse: separate;
+  border-spacing: 0;
 }
 .orders-table th,
 .orders-table td {
   vertical-align: middle;
   min-width: 0;
-  padding: 8px 10px;
+  padding: 12px 14px;
+  border-color: var(--border-color);
+}
+.orders-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  color: var(--text-secondary);
+  background: var(--surface-subtle);
+  font-size: 12px;
+  letter-spacing: 0.03em;
+}
+.orders-table tbody tr {
+  transition:
+    background-color 140ms ease,
+    box-shadow 140ms ease;
+}
+.orders-table tbody tr:hover {
+  background: var(--surface-subtle);
 }
 /* The first column is a checkbox and the last is a compact actions button, so
    they don't need the wide default minimums used by content-heavy tables. */
@@ -781,14 +820,14 @@
   width: 46px;
 }
 .orders-table tr:has(input[type="checkbox"]:checked) {
-  background: #f5f7ff;
+  background: var(--primary-subtle);
 }
 .orders-table .order-group-row {
-  background: #eef2ff;
+  background: var(--primary-subtle);
 }
 .orders-table .order-group-row > td {
-  border-block-start: 1px solid #c7d2fe;
-  border-block-end: 1px solid #c7d2fe;
+  border-block-start: 1px solid rgb(79 99 246 / 24%);
+  border-block-end: 1px solid rgb(79 99 246 / 24%);
 }
 .fast-entry-workspace {
   display: grid;
@@ -883,16 +922,21 @@
   text-align: start;
 }
 .order-group-toggle span {
-  color: #64748b;
+  color: var(--text-muted);
   font-size: 12px;
 }
 .order-number-link {
   display: block;
   padding: 0;
   border: 0;
-  color: #3730a3;
+  color: var(--primary-strong);
   background: none;
   font-weight: 800;
+}
+.order-number-link:hover {
+  color: var(--primary-color);
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 .money-cell {
   white-space: nowrap;
@@ -900,10 +944,10 @@
 }
 .select-all-matching {
   width: 100%;
-  padding: 10px;
+  padding: 12px;
   border: 0;
-  color: #3730a3;
-  background: #eef2ff;
+  color: var(--primary-strong);
+  background: var(--primary-subtle);
   font-weight: 700;
 }
 .orders-pagination {
@@ -1629,11 +1673,11 @@ td:last-child {
 .cell-secondary {
   display: block;
   margin-top: 2px;
-  color: #718087;
+  color: var(--text-muted);
   font-size: 12px;
 }
 .muted {
-  color: #7a898e;
+  color: var(--text-muted);
 }
 .status {
   display: inline-flex;
