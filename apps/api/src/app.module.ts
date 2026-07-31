@@ -4,6 +4,7 @@ import { APP_GUARD } from "@nestjs/core";
 import { ThrottlerGuard, ThrottlerModule } from "@nestjs/throttler";
 import { LoggerModule } from "nestjs-pino";
 
+import { AccountingModule } from "./accounting/accounting.module.js";
 import { configuration, validateEnvironment } from "./configuration/environment.js";
 import { AuthenticationModule } from "./authentication/authentication.module.js";
 import { CompanyConfigurationModule } from "./company-configuration/company-configuration.module.js";
@@ -34,6 +35,7 @@ import { UserAdministrationModule } from "./users/user-administration.module.js"
     ]),
     DatabaseModule,
     AuthenticationModule,
+    AccountingModule,
     CompanyConfigurationModule,
     CompanyProfileModule,
     OperationsModule,

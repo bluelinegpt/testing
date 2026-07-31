@@ -29,6 +29,8 @@ import {
   type DashboardDrillDown,
 } from "../features/dashboard/DashboardWorkspace.js";
 import { DriverCollectionsWorkspace } from "../features/operations/DriverCollectionsWorkspace.js";
+import { PayrollWorkspace } from "../features/payroll/PayrollWorkspace.js";
+import { AccountingWorkspace } from "../features/accounting/AccountingWorkspace.js";
 import {
   OperationsWorkspace,
   type OperationsView,
@@ -43,6 +45,7 @@ import { SupportWorkspace } from "../features/support/SupportWorkspace.js";
 import { CompanyAppShell } from "./CompanyAppShell.js";
 import { CompanyBrandingProvider } from "./CompanyBrandingContext.js";
 import { canAccessCompanyPath, firstAuthorizedCompanyPath } from "./company-access.js";
+import { WorkflowErrorBoundary } from "./WorkflowErrorBoundary.js";
 
 const redirects: Readonly<Record<string, string>> = {
   "/configuration": "/configuration/general",
@@ -143,12 +146,33 @@ export function CompanyWorkspace({
   } else if (path === "/drivers") {
     content = <DriverCollectionsWorkspace api={api} />;
   } else if (path === "/trader-settlements") {
+    const statementTraderId =
+      new URLSearchParams(location.search).get("statementTraderId") ?? undefined;
     content = (
-      <TraderSettlementsWorkspace api={api} permissions={session.identity.permissions} />
+      <TraderSettlementsWorkspace
+        api={api}
+        initialStatementOpen={
+          new URLSearchParams(location.search).get("openStatement") === "true"
+        }
+        permissions={session.identity.permissions}
+        presetTraderId={statementTraderId}
+      />
     );
   } else if (path === "/trader-receivables") {
     content = (
       <TraderReceivablesWorkspace api={api} permissions={session.identity.permissions} />
+    );
+  } else if (path === "/payroll") {
+    content = <PayrollWorkspace api={api} permissions={session.identity.permissions} />;
+  } else if (path === "/accounting" || path.startsWith("/accounting/")) {
+    content = (
+      <AccountingWorkspace
+        api={api}
+        companyId={session.identity.companyId}
+        onNavigate={(target) => void navigate(target)}
+        path={path}
+        permissions={session.identity.permissions}
+      />
     );
   } else if (operationRoutes[path] !== undefined) {
     const route = operationRoutes[path];
@@ -171,6 +195,7 @@ export function CompanyWorkspace({
       <OrderDetailsWorkspace
         api={api}
         onBack={() => void navigate("/orders")}
+        onNavigate={(target) => void navigate(target)}
         orderNumber={orderNumber}
         permissions={session.identity.permissions}
       />
@@ -203,7 +228,11 @@ export function CompanyWorkspace({
     );
   } else if (path === "/configuration/users") {
     content = (
-      <UsersConfigurationWorkspace api={api} onNavigate={(target) => void navigate(target)} />
+      <UsersConfigurationWorkspace
+        api={api}
+        initiallyCreating={new URLSearchParams(location.search).get("create") === "true"}
+        onNavigate={(target) => void navigate(target)}
+      />
     );
   } else if (path.startsWith("/configuration/users/")) {
     content = (
@@ -211,6 +240,7 @@ export function CompanyWorkspace({
         api={api}
         accountId={decodeURIComponent(path.slice("/configuration/users/".length))}
         onBack={() => void navigate("/configuration/users")}
+        onNavigate={(target) => void navigate(target)}
       />
     );
   } else if (path === "/configuration/roles") {
@@ -293,7 +323,14 @@ export function CompanyWorkspace({
   return (
     <CompanyBrandingProvider api={api}>
       <CompanyAppShell onLogout={onLogout} session={session}>
-        {content}
+        <WorkflowErrorBoundary
+          fallbackDescription={t("shell.workflowErrorDescription")}
+          fallbackTitle={t("shell.workflowErrorTitle")}
+          resetKey={path}
+          retryLabel={t("common.tryAgain")}
+        >
+          {content}
+        </WorkflowErrorBoundary>
       </CompanyAppShell>
     </CompanyBrandingProvider>
   );

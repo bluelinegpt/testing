@@ -131,6 +131,27 @@ export class SaveEmployeeDto {
   public readonly basicSalary?: number;
 
   @IsOptional()
+  @IsBoolean()
+  public readonly payrollEligible?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  public readonly salaryHold?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  public readonly salaryHoldReason?: string;
+
+  @IsOptional()
+  @IsDateString()
+  public readonly salaryHoldFrom?: string;
+
+  @IsOptional()
+  @IsDateString()
+  public readonly salaryHoldTo?: string;
+
+  @IsOptional()
   @IsDateString()
   public readonly salaryEffectiveFrom?: string;
 

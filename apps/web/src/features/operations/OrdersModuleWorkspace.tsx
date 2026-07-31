@@ -35,11 +35,13 @@ import type {
   CustomerOption,
   OperationsDriver,
   OperationsOrder,
+  OperationsOrderQuote,
   OperationsOrderDetail,
   OperationsOrderPage,
   OperationsTrader,
   OperationsTraderOption,
   OperationsTrackingLink,
+  AreaPage,
 } from "../../api/contracts.js";
 import { Modal } from "../../components/Modal.js";
 import { PageHeader } from "../../components/PageHeader.js";
@@ -49,11 +51,13 @@ import { formatCurrency, formatDate, formatDateTime } from "../../localization/f
 import { normalizeLocale } from "../../localization/locale.js";
 import { CompanyBrandingContext } from "../../app/CompanyBrandingContext.js";
 import { localizeName } from "../../localization/localize-name.js";
+import { formatMoneyValue, parseMoneyInput, parseNumericInput } from "../../utils/numeric-input.js";
 import { CreateOrderDialog } from "./CreateOrderDialog.js";
 import { DriverCashStatusLabel, useDriverCashStatusLabel } from "./DriverCashStatus.js";
 import { DriverCollectionDetailDialog } from "./DriverCollectionsWorkspace.js";
 import { openOrderWaybill, OrderBarcode } from "./OperationsWorkspace.js";
 import { type PdfAction, useReconciliationPdfActions } from "./reconciliation-pdf.js";
+import { SettlementDetailDialog } from "./TraderSettlementsWorkspace.js";
 import { materialFingerprint, useIdempotencyKey } from "./useIdempotencyKey.js";
 
 type QuickView = "active" | "all" | "hold" | "cancelled" | "closed";
@@ -132,6 +136,7 @@ export function OrdersModuleWorkspace({
   const [summary, setSummary] = useState<SelectionSummary>();
   const [bulkAction, setBulkAction] = useState<BulkAction>();
   const [createOpen, setCreateOpen] = useState(false);
+  const [fastEntryOpen, setFastEntryOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
 
@@ -361,6 +366,13 @@ export function OrdersModuleWorkspace({
               type="button"
             >
               <Plus aria-hidden="true" size={18} /> {t("operations.createOrder")}
+            </button>
+            <button
+              className="button"
+              onClick={() => setFastEntryOpen(true)}
+              type="button"
+            >
+              {t("operations.fastEntry")}
             </button>
           </>
         }
@@ -740,6 +752,17 @@ export function OrdersModuleWorkspace({
           onSaved={load}
         />
       ) : null}
+      {fastEntryOpen ? (
+        <FastOrderEntryDialog
+          api={api}
+          drivers={drivers}
+          emirates={emirates}
+          onClose={() => setFastEntryOpen(false)}
+          onSaved={load}
+          textLanguage={textLanguage}
+          traders={traders}
+        />
+      ) : null}
       {bulkAction === "assign" ? (
         <AssignDriverDialog
           api={api}
@@ -789,19 +812,690 @@ export function OrdersModuleWorkspace({
   );
 }
 
+type FastEntryStatus = "draft" | "ready" | "created" | "error";
+
+interface FastEntryRow {
+  additionalFees: string;
+  areaId: string;
+  codAmount: string;
+  customerAddress: string;
+  customerName: string;
+  driverId: string;
+  emirateId: string;
+  id: string;
+  notes: string;
+  overrideReason: string;
+  packageCount: string;
+  referenceNumber: string;
+  secondMobile: string;
+  serialNumber: string;
+  serviceFee: string;
+  status: FastEntryStatus;
+  traderId: string;
+  mobile: string;
+  message?: string;
+}
+
+const fastEntryColumns = [
+  "serialNumber",
+  "referenceNumber",
+  "traderId",
+  "customerName",
+  "mobile",
+  "secondMobile",
+  "emirateId",
+  "areaId",
+  "customerAddress",
+  "driverId",
+  "codAmount",
+  "serviceFee",
+  "additionalFees",
+  "packageCount",
+  "notes",
+] as const;
+
+function createFastEntryRow(serialNumber = ""): FastEntryRow {
+  return {
+    additionalFees: "0.00",
+    areaId: "",
+    codAmount: "0.00",
+    customerAddress: "",
+    customerName: "",
+    driverId: "",
+    emirateId: "",
+    id:
+      typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random()}`,
+    notes: "",
+    overrideReason: "",
+    packageCount: "1",
+    referenceNumber: "",
+    secondMobile: "",
+    serialNumber,
+    serviceFee: "",
+    status: "draft",
+    traderId: "",
+    mobile: "",
+  };
+}
+
+function incrementSerial(base: string, offset: number): string {
+  const value = base.trim();
+  if (value === "" || offset === 0) return value;
+  const match = /^(.*?)(\d+)$/.exec(value);
+  if (match === null) return value;
+  const [, prefix, digits] = match;
+  return `${prefix}${String(Number(digits) + offset).padStart(digits.length, "0")}`;
+}
+
+function parseFastEntryMoney(value: string, required = false): number | undefined {
+  const parsed = parseMoneyInput(value, { allowZero: !required, required });
+  return parsed.ok ? parsed.value : undefined;
+}
+
+function rowHasFastEntryContent(row: FastEntryRow): boolean {
+  return fastEntryColumns.some(
+    (column) =>
+      column !== "serialNumber" &&
+      column !== "referenceNumber" &&
+      row[column].trim() !== "" &&
+      row[column] !== "0.00" &&
+      row[column] !== "1",
+  );
+}
+
+function resolveApiMessage(requestError: unknown, fallback: string): string {
+  if (requestError instanceof ApiError) {
+    return requestError.details?.[0] ?? requestError.message;
+  }
+  return requestError instanceof Error ? requestError.message : fallback;
+}
+
+function FastOrderEntryDialog({
+  api,
+  drivers,
+  emirates,
+  onClose,
+  onSaved,
+  textLanguage,
+  traders,
+}: {
+  api: ApiClient;
+  drivers: readonly OperationsDriver[];
+  emirates: readonly Emirate[];
+  onClose: () => void;
+  onSaved: () => Promise<void> | void;
+  textLanguage: "ar" | "en";
+  traders: readonly OperationsTrader[];
+}) {
+  const { i18n, t } = useTranslation();
+  const locale = normalizeLocale(i18n.resolvedLanguage);
+  const [rows, setRows] = useState<FastEntryRow[]>(() =>
+    Array.from({ length: 8 }, () => createFastEntryRow()),
+  );
+  const [areaCache, setAreaCache] = useState<Record<string, readonly CompanyArea[]>>({});
+  const [pasteText, setPasteText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string>();
+
+  useEffect(() => {
+    let active = true;
+    void api
+      .get<{ serialNumber: string }>("operations/orders/next-serial-number")
+      .then((result) => {
+        if (!active) return;
+        setRows((current) =>
+          current.map((row, index) => ({
+            ...row,
+            serialNumber: row.serialNumber.trim() === "" ? incrementSerial(result.serialNumber, index) : row.serialNumber,
+          })),
+        );
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [api]);
+
+  const loadAreas = useCallback(
+    async (emirateId: string) => {
+      if (emirateId === "" || areaCache[emirateId] !== undefined) return;
+      try {
+        const page = await api.get<AreaPage>(
+          `configuration/areas?emirateId=${encodeURIComponent(
+            emirateId,
+          )}&status=active&page=1&pageSize=100`,
+        );
+        setAreaCache((current) => ({ ...current, [emirateId]: page.items }));
+      } catch {
+        setAreaCache((current) => ({ ...current, [emirateId]: [] }));
+      }
+    },
+    [api, areaCache],
+  );
+
+  const updateRow = (id: string, change: Partial<FastEntryRow>) => {
+    setRows((current) =>
+      current.map((row) =>
+        row.id === id ? { ...row, ...change, status: row.status === "created" ? "created" : "draft", message: undefined } : row,
+      ),
+    );
+  };
+
+  const addRows = (count: number) => {
+    setRows((current) => {
+      const lastSerial = [...current].reverse().find((row) => row.serialNumber.trim() !== "")?.serialNumber ?? "";
+      return [
+        ...current,
+        ...Array.from({ length: count }, (_, index) =>
+          createFastEntryRow(incrementSerial(lastSerial, index + 1)),
+        ),
+      ];
+    });
+  };
+
+  const importPastedRows = () => {
+    const lines = pasteText
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line !== "");
+    if (lines.length === 0) return;
+    const imported = lines.map((line) => {
+      const parts = line.includes("\t") ? line.split("\t") : line.split(",");
+      const row = createFastEntryRow();
+      fastEntryColumns.forEach((column, index) => {
+        const raw = parts[index]?.trim() ?? "";
+        if (raw !== "") {
+          Object.assign(row, { [column]: raw });
+        }
+      });
+      row.additionalFees = row.additionalFees.trim() === "" ? "0.00" : row.additionalFees;
+      row.packageCount = row.packageCount.trim() === "" ? "1" : row.packageCount;
+      row.codAmount = row.codAmount.trim() === "" ? "0.00" : row.codAmount;
+      return row;
+    });
+    setRows((current) => [...current.filter(rowHasFastEntryContent), ...imported]);
+    setPasteText("");
+  };
+
+  const validateRows = useCallback(
+    async (targetRows: readonly FastEntryRow[]) => {
+      const serialCounts = new Map<string, number>();
+      const referenceCounts = new Map<string, number>();
+      for (const row of targetRows) {
+        if (!rowHasFastEntryContent(row) || row.status === "created") continue;
+        const serial = row.serialNumber.trim();
+        if (serial !== "") serialCounts.set(serial, (serialCounts.get(serial) ?? 0) + 1);
+        const reference = row.referenceNumber.trim();
+        if (reference !== "") referenceCounts.set(reference, (referenceCounts.get(reference) ?? 0) + 1);
+      }
+
+      return Promise.all(
+        targetRows.map(async (row): Promise<FastEntryRow> => {
+          if (!rowHasFastEntryContent(row) || row.status === "created") return row;
+          const errors: string[] = [];
+          const serial = row.serialNumber.trim();
+          const reference = row.referenceNumber.trim();
+          const cod = parseFastEntryMoney(row.codAmount, true);
+          const additionalFees = parseFastEntryMoney(row.additionalFees);
+          const serviceFee =
+            row.serviceFee.trim() === "" ? undefined : parseFastEntryMoney(row.serviceFee);
+          const packages = parseNumericInput(row.packageCount, {
+            allowZero: false,
+            required: true,
+            wholeNumber: true,
+          });
+
+          if (serial === "") errors.push(t("operations.errors.serialRequired"));
+          if ((serialCounts.get(serial) ?? 0) > 1) errors.push(t("operations.fastEntryDuplicateSerial"));
+          if (reference !== "" && (referenceCounts.get(reference) ?? 0) > 1)
+            errors.push(t("operations.fastEntryDuplicateReference"));
+          if (row.traderId === "") errors.push(t("operations.errors.traderRequired"));
+          if (row.customerName.trim() === "") errors.push(t("operations.errors.customerNameRequired"));
+          if (row.mobile.trim() === "") errors.push(t("operations.errors.mobileRequired"));
+          if (row.mobile.trim() !== "" && !isUaeMobile(row.mobile.trim()))
+            errors.push(t("operations.mobileFormatError"));
+          if (row.secondMobile.trim() !== "" && !isUaeMobile(row.secondMobile.trim()))
+            errors.push(t("operations.mobileFormatError"));
+          if (row.emirateId === "") errors.push(t("areas.selectEmirate"));
+          if (row.areaId === "") errors.push(t("operations.errors.areaRequired"));
+          if (row.customerAddress.trim() === "") errors.push(t("operations.errors.addressRequired"));
+          if (cod === undefined) errors.push(t("operations.errors.codInvalid"));
+          if (additionalFees === undefined) errors.push(t("operations.errors.additionalInvalid"));
+          if (serviceFee === undefined && row.serviceFee.trim() !== "")
+            errors.push(t("operations.errors.overrideFeeInvalid"));
+          if (row.serviceFee.trim() !== "" && row.overrideReason.trim() === "")
+            errors.push(t("operations.errors.overrideReasonRequired"));
+          if (!packages.ok) errors.push(t("operations.errors.packagesInvalid"));
+
+          if (errors.length === 0 && serial !== "") {
+            try {
+              const query = new URLSearchParams({ serialNumber: serial });
+              if (reference !== "") query.set("referenceNumber", reference);
+              const availability = await api.get<{
+                referenceNumberAvailable: boolean;
+                serialNumberAvailable: boolean;
+              }>(`operations/orders/identifier-availability?${query.toString()}`);
+              if (!availability.serialNumberAvailable) errors.push(t("operations.serialNumberExists"));
+              if (!availability.referenceNumberAvailable) errors.push(t("operations.referenceNumberExists"));
+            } catch {
+              errors.push(t("operations.fastEntryValidationFailed"));
+            }
+          }
+
+          if (errors.length === 0 && row.traderId !== "" && row.areaId !== "" && cod !== undefined) {
+            try {
+              await api.post<OperationsOrderQuote>("operations/orders/quote", {
+                additionalFees: additionalFees ?? 0,
+                areaId: row.areaId,
+                codAmount: cod,
+                driverId: row.driverId || undefined,
+                serviceFee,
+                serviceFeeOverrideReason:
+                  row.serviceFee.trim() === "" ? undefined : row.overrideReason.trim(),
+                traderId: row.traderId,
+              });
+            } catch (requestError) {
+              errors.push(resolveApiMessage(requestError, t("operations.quoteFailed")));
+            }
+          }
+
+          return {
+            ...row,
+            message: errors.length === 0 ? t("operations.fastEntryReady") : errors.join(" "),
+            status: errors.length === 0 ? "ready" : "error",
+          };
+        }),
+      );
+    },
+    [api, t],
+  );
+
+  const validateAndSetRows = async () => {
+    setBusy(true);
+    setMessage(undefined);
+    try {
+      const validated = await validateRows(rows);
+      setRows(validated);
+      const readyCount = validated.filter((row) => row.status === "ready").length;
+      setMessage(t("operations.fastEntryRowsReady", { count: readyCount }));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const createOrders = async () => {
+    setBusy(true);
+    setMessage(undefined);
+    try {
+      const validated = await validateRows(rows);
+      const nextRows = [...validated];
+      for (let index = 0; index < nextRows.length; index += 1) {
+        const row = nextRows[index];
+        if (row.status !== "ready") continue;
+        const cod = parseFastEntryMoney(row.codAmount, true) ?? 0;
+        const additionalFees = parseFastEntryMoney(row.additionalFees) ?? 0;
+        const serviceFee =
+          row.serviceFee.trim() === "" ? undefined : (parseFastEntryMoney(row.serviceFee) ?? 0);
+        const packages = parseNumericInput(row.packageCount, {
+          allowZero: false,
+          required: true,
+          wholeNumber: true,
+        });
+        try {
+          await api.post<OperationsOrder>(
+            "operations/orders",
+            {
+              additionalFees,
+              areaId: row.areaId,
+              codAmount: cod,
+              customerAddress: row.customerAddress.trim(),
+              customerMobileNumber: row.mobile.trim(),
+              customerName: row.customerName.trim(),
+              customerSecondMobileNumber:
+                row.secondMobile.trim() === "" ? undefined : row.secondMobile.trim(),
+              driverId: row.driverId || undefined,
+              inlineCustomer: {
+                address: row.customerAddress.trim(),
+                areaId: row.areaId,
+                mobileNumber: row.mobile.trim(),
+                name: row.customerName.trim(),
+                ...(row.secondMobile.trim() === ""
+                  ? {}
+                  : { secondMobileNumber: row.secondMobile.trim() }),
+              },
+              notes: row.notes.trim() || undefined,
+              packageCount: packages.ok ? packages.value : 1,
+              referenceNumber: row.referenceNumber.trim() || undefined,
+              serialNumber: row.serialNumber.trim(),
+              serviceFee,
+              serviceFeeOverrideReason:
+                row.serviceFee.trim() === "" ? undefined : row.overrideReason.trim(),
+              traderId: row.traderId,
+            },
+            {
+              "X-Idempotency-Key": materialFingerprint({
+                customerName: row.customerName.trim(),
+                mobile: row.mobile.trim(),
+                serialNumber: row.serialNumber.trim(),
+                traderId: row.traderId,
+              }),
+            },
+          );
+          nextRows[index] = {
+            ...row,
+            message: t("operations.fastEntryCreated"),
+            status: "created",
+          };
+        } catch (requestError) {
+          nextRows[index] = {
+            ...row,
+            message: resolveApiMessage(requestError, t("operations.createOrderFailed")),
+            status: "error",
+          };
+        }
+        setRows([...nextRows]);
+      }
+      await onSaved();
+      const createdCount = nextRows.filter((row) => row.status === "created").length;
+      setMessage(t("operations.fastEntryCreatedCount", { count: createdCount }));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const readyRows = rows.filter((row) => row.status === "ready").length;
+  const createdRows = rows.filter((row) => row.status === "created").length;
+  const activeRows = rows.filter((row) => rowHasFastEntryContent(row) && row.status !== "created");
+
+  return (
+    <Modal
+      className="fast-entry-modal"
+      closeLabel={t("common.close")}
+      onRequestClose={onClose}
+      title={t("operations.fastEntryTitle")}
+      titleId="fast-order-entry-title"
+    >
+      <div className="fast-entry-workspace">
+        <p className="form-hint">{t("operations.fastEntryHelp")}</p>
+        {message === undefined ? null : <div className="alert alert-info">{message}</div>}
+        <div className="fast-entry-toolbar">
+          <button disabled={busy} onClick={() => addRows(5)} type="button">
+            {t("operations.fastEntryAddRows")}
+          </button>
+          <button disabled={busy} onClick={() => void validateAndSetRows()} type="button">
+            {t("operations.fastEntryValidate")}
+          </button>
+          <button
+            className="button button-primary"
+            disabled={busy || activeRows.length === 0}
+            onClick={() => void createOrders()}
+            type="button"
+          >
+            {t("operations.fastEntryCreateValid")}
+          </button>
+          <span>
+            {t("operations.fastEntrySummary", {
+              created: createdRows,
+              ready: readyRows,
+              total: rows.length,
+            })}
+          </span>
+        </div>
+        <details className="fast-entry-paste">
+          <summary>{t("operations.fastEntryPasteTitle")}</summary>
+          <p className="form-hint">{t("operations.fastEntryPasteHelp")}</p>
+          <textarea
+            onChange={(event) => setPasteText(event.target.value)}
+            rows={4}
+            value={pasteText}
+          />
+          <button disabled={pasteText.trim() === "" || busy} onClick={importPastedRows} type="button">
+            {t("operations.fastEntryUsePastedRows")}
+          </button>
+        </details>
+        <div className="fast-entry-table-scroll">
+          <table className="fast-entry-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>{t("operations.serialNumber")}</th>
+                <th>{t("operations.referenceNumber")}</th>
+                <th>{t("operations.trader")}</th>
+                <th>{t("operations.customerName")}</th>
+                <th>{t("operations.mobile")}</th>
+                <th>{t("operations.secondMobile")}</th>
+                <th>{t("areas.emirate")}</th>
+                <th>{t("operations.areaField")}</th>
+                <th>{t("operations.customerAddress")}</th>
+                <th>{t("operations.assignedDriver")}</th>
+                <th>{t("operations.codAmount")}</th>
+                <th>{t("operations.serviceFee")}</th>
+                <th>{t("operations.additionalFees")}</th>
+                <th>{t("operations.packages")}</th>
+                <th>{t("operations.notes")}</th>
+                <th>{t("operations.status")}</th>
+                <th>{t("common.actions")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, index) => {
+                const areas = areaCache[row.emirateId] ?? [];
+                return (
+                  <tr className={`fast-entry-row-${row.status}`} key={row.id}>
+                    <td>{index + 1}</td>
+                    <td>
+                      <input
+                        value={row.serialNumber}
+                        onChange={(event) => updateRow(row.id, { serialNumber: event.target.value })}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        value={row.referenceNumber}
+                        onChange={(event) => updateRow(row.id, { referenceNumber: event.target.value })}
+                      />
+                    </td>
+                    <td>
+                      <select
+                        value={row.traderId}
+                        onChange={(event) => updateRow(row.id, { traderId: event.target.value })}
+                      >
+                        <option value="">{t("operations.selectTrader")}</option>
+                        {traders.map((trader) => (
+                          <option key={trader.id} value={trader.id}>
+                            {trader.code} - {trader.name}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td>
+                      <input
+                        value={row.customerName}
+                        onChange={(event) => updateRow(row.id, { customerName: event.target.value })}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        value={row.mobile}
+                        onChange={(event) => updateRow(row.id, { mobile: event.target.value })}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        value={row.secondMobile}
+                        onChange={(event) => updateRow(row.id, { secondMobile: event.target.value })}
+                      />
+                    </td>
+                    <td>
+                      <select
+                        value={row.emirateId}
+                        onChange={(event) => {
+                          const emirateId = event.target.value;
+                          updateRow(row.id, { areaId: "", emirateId });
+                          void loadAreas(emirateId);
+                        }}
+                      >
+                        <option value="">{t("areas.selectEmirate")}</option>
+                        {emirates.map((emirate) => (
+                          <option key={emirate.id} value={emirate.id}>
+                            {localizeName(textLanguage, { ar: emirate.nameAr, en: emirate.nameEn })}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td>
+                      <select
+                        disabled={row.emirateId === ""}
+                        value={row.areaId}
+                        onChange={(event) => updateRow(row.id, { areaId: event.target.value })}
+                      >
+                        <option value="">
+                          {row.emirateId === ""
+                            ? t("areas.selectEmirateFirst")
+                            : t("operations.selectArea")}
+                        </option>
+                        {areas.map((area) => (
+                          <option key={area.id} value={area.id}>
+                            {area.code} - {localizeName(textLanguage, { ar: area.nameAr, en: area.nameEn })}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td>
+                      <input
+                        value={row.customerAddress}
+                        onChange={(event) => updateRow(row.id, { customerAddress: event.target.value })}
+                      />
+                    </td>
+                    <td>
+                      <select
+                        value={row.driverId}
+                        onChange={(event) => updateRow(row.id, { driverId: event.target.value })}
+                      >
+                        <option value="">{t("operations.unassigned")}</option>
+                        {drivers.map((driver) => (
+                          <option key={driver.id} value={driver.id}>
+                            {driver.code} - {driver.name}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td>
+                      <input
+                        min="0"
+                        step="0.01"
+                        type="number"
+                        value={row.codAmount}
+                        onChange={(event) => updateRow(row.id, { codAmount: event.target.value })}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        min="0"
+                        placeholder={t("operations.fastEntryAutoFee")}
+                        step="0.01"
+                        type="number"
+                        value={row.serviceFee}
+                        onChange={(event) => updateRow(row.id, { serviceFee: event.target.value })}
+                        title={row.serviceFee.trim() === "" ? t("operations.fastEntryAutoFeeHint") : undefined}
+                      />
+                      {row.serviceFee.trim() === "" ? null : (
+                        <input
+                          className="fast-entry-override-reason"
+                          placeholder={t("operations.overrideReason")}
+                          value={row.overrideReason}
+                          onChange={(event) => updateRow(row.id, { overrideReason: event.target.value })}
+                        />
+                      )}
+                    </td>
+                    <td>
+                      <input
+                        min="0"
+                        step="0.01"
+                        type="number"
+                        value={row.additionalFees}
+                        onChange={(event) => updateRow(row.id, { additionalFees: event.target.value })}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        min="1"
+                        step="1"
+                        type="number"
+                        value={row.packageCount}
+                        onChange={(event) => updateRow(row.id, { packageCount: event.target.value })}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        value={row.notes}
+                        onChange={(event) => updateRow(row.id, { notes: event.target.value })}
+                      />
+                    </td>
+                    <td className="fast-entry-status-cell">
+                      <strong>{t(`operations.fastEntryStatus.${row.status}`)}</strong>
+                      {row.message === undefined ? null : <span>{row.message}</span>}
+                    </td>
+                    <td>
+                      <button
+                        disabled={busy}
+                        onClick={() =>
+                          setRows((current) =>
+                            current.length <= 1
+                              ? [createFastEntryRow()]
+                              : current.filter((candidate) => candidate.id !== row.id),
+                          )
+                        }
+                        type="button"
+                      >
+                        {t("common.remove")}
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+            <tfoot>
+              <tr>
+                <td colSpan={18}>
+                  {t("operations.fastEntryTotalCod", {
+                    amount: formatCurrency(
+                      rows
+                        .reduce((sum, row) => sum + (parseFastEntryMoney(row.codAmount) ?? 0), 0)
+                        .toFixed(2),
+                      "AED",
+                      locale,
+                    ),
+                  })}
+                </td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 export function OrderDetailsWorkspace({
   api,
   onBack,
+  onNavigate,
   orderNumber,
   permissions = [],
 }: {
   api: ApiClient;
   onBack: () => void;
+  onNavigate?: (path: string) => void;
   orderNumber: string;
   permissions?: readonly string[];
 }) {
   const { i18n, t } = useTranslation();
   const locale = normalizeLocale(i18n.resolvedLanguage);
+  const branding = useContext(CompanyBrandingContext);
+  const reportLanguage = branding?.textLanguage === "ar" ? "ar" : "en";
   const cashStatusLabel = useDriverCashStatusLabel();
   const [detail, setDetail] = useState<OperationsOrderDetail>();
   const [historyFilter, setHistoryFilter] = useState("all");
@@ -821,7 +1515,21 @@ export function OrderDetailsWorkspace({
     reconciliationNumber: string;
     statusLabel: string;
   }>();
+  const [viewSettlementId, setViewSettlementId] = useState<string>();
+  const [settlementError, setSettlementError] = useState<string>();
+  const [settlementSummary, setSettlementSummary] = useState<{
+    amountPaidNow: string;
+    moneyReceivedDate: string | null;
+    moneySentAt: string | null;
+    paymentDate: string;
+    paymentMethod: "bank_transfer" | "cash";
+    settlementId: string;
+    settlementNumber: string;
+    status: "confirmed" | "reversed";
+    traderName: string;
+  }>();
   const pdf = useReconciliationPdfActions(api);
+  const settlementPdf = useReconciliationPdfActions(api);
   const [pdfError, setPdfError] = useState<string>();
   const load = useCallback(async () => {
     setError(undefined);
@@ -882,12 +1590,78 @@ export function OrderDetailsWorkspace({
       active = false;
     };
   }, [api, detail, t]);
+
+  useEffect(() => {
+    if (
+      detail === undefined ||
+      ["not_eligible", "unsettled"].includes(detail.traderSettlementStatus)
+    ) {
+      setSettlementSummary(undefined);
+      return;
+    }
+    let active = true;
+    setSettlementError(undefined);
+    void api
+      .get<{ settlementId: string; settlementNumber: string } | undefined>(
+        `operations/orders/${detail.id}/trader-settlement`,
+      )
+      .then((link) => {
+        if (!active || link === undefined) return undefined;
+        return api
+          .get<{
+            header: {
+              moneyReceivedDate: string | null;
+              moneySentAt: string | null;
+              paymentDate: string;
+              paymentMethod: "bank_transfer" | "cash";
+              settlementNumber: string;
+              status: "confirmed" | "reversed";
+              traderName: string;
+            };
+            summary: { amountPaidNow: string };
+          }>(`operations/settlements/payments/${link.settlementId}/report-data`)
+          .then((data) => {
+            if (!active) return;
+            setSettlementSummary({
+              amountPaidNow: data.summary.amountPaidNow,
+              moneyReceivedDate: data.header.moneyReceivedDate,
+              moneySentAt: data.header.moneySentAt,
+              paymentDate: data.header.paymentDate,
+              paymentMethod: data.header.paymentMethod,
+              settlementId: link.settlementId,
+              settlementNumber: data.header.settlementNumber,
+              status: data.header.status,
+              traderName: data.header.traderName,
+            });
+          });
+      })
+      .catch((requestError: unknown) => {
+        if (active) setSettlementError(message(requestError, t("operations.detailLoadFailed")));
+      });
+    return () => {
+      active = false;
+    };
+  }, [api, detail, t]);
+
   const openConfirmedCollectionPdf = async (mode: PdfAction) => {
     if (collectionSummary === undefined) return;
     setPdfError(undefined);
     const requestError = await pdf.run(
       `operations/cash/reconciliations/${collectionSummary.reconciliationId}/pdf?language=en`,
       `Driver-Collection-${collectionSummary.reconciliationNumber}.pdf`,
+      mode,
+    );
+    if (requestError !== undefined) {
+      setPdfError(message(requestError, t("operations.pdfGenerationFailed")));
+    }
+  };
+
+  const openConfirmedSettlementPdf = async (mode: PdfAction) => {
+    if (settlementSummary === undefined) return;
+    setPdfError(undefined);
+    const requestError = await settlementPdf.run(
+      `operations/settlements/payments/${settlementSummary.settlementId}/pdf?language=${reportLanguage}`,
+      `Trader-Settlement-${settlementSummary.settlementNumber}.pdf`,
       mode,
     );
     if (requestError !== undefined) {
@@ -909,6 +1683,14 @@ export function OrderDetailsWorkspace({
     historyFilter === "all"
       ? detail.events
       : detail.events.filter((event) => event.category === historyFilter);
+  const canViewSettlementReport =
+    permissions.includes("settlements.create") ||
+    permissions.includes("reports.export") ||
+    permissions.includes("users_roles.manage");
+  const canViewSettlementDetail =
+    permissions.includes("settlements.create") || permissions.includes("users_roles.manage");
+  const canReverseSettlement =
+    permissions.includes("settlements.reverse") || permissions.includes("users_roles.manage");
   return (
     <>
       <div className="order-detail-header">
@@ -1139,6 +1921,105 @@ export function OrderDetailsWorkspace({
             </div>
           </section>
         )}
+        {settlementSummary === undefined ? null : (
+          <section className="order-detail-section">
+            <h2>{t("traderSettlements.detailTitle")}</h2>
+            <dl>
+              <div>
+                <dt>{t("traderSettlements.columnSettlementNumber")}</dt>
+                <dd>{settlementSummary.settlementNumber}</dd>
+              </div>
+              <div>
+                <dt>{t("operations.trader")}</dt>
+                <dd>{settlementSummary.traderName}</dd>
+              </div>
+              <div>
+                <dt>{t("traderSettlements.paymentDate")}</dt>
+                <dd>{settlementSummary.paymentDate}</dd>
+              </div>
+              <div>
+                <dt>{t("operations.paymentMethod")}</dt>
+                <dd>
+                  {t(
+                    settlementSummary.paymentMethod === "cash"
+                      ? "traderSettlements.paymentMethodCash"
+                      : "traderSettlements.paymentMethodBankTransfer",
+                  )}
+                </dd>
+              </div>
+              <div>
+                <dt>{t("traderSettlements.amountPaidNow")}</dt>
+                <dd>{money(settlementSummary.amountPaidNow, locale)}</dd>
+              </div>
+              <div>
+                <dt>{t("traderSettlements.moneySentDate")}</dt>
+                <dd>
+                  {settlementSummary.moneySentAt === null
+                    ? "-"
+                    : settlementSummary.moneySentAt.slice(0, 10)}
+                </dd>
+              </div>
+              <div>
+                <dt>{t("traderSettlements.moneyReceivedDate")}</dt>
+                <dd>
+                  {settlementSummary.moneyReceivedDate === null
+                    ? "-"
+                    : settlementSummary.moneyReceivedDate.slice(0, 10)}
+                </dd>
+              </div>
+              <div>
+                <dt>{t("operations.status")}</dt>
+                <dd>
+                  {t(
+                    settlementSummary.status === "reversed"
+                      ? "traderSettlements.statusReversed"
+                      : "traderSettlements.statusConfirmed",
+                  )}
+                </dd>
+              </div>
+            </dl>
+            <div className="modal-actions">
+              {!canViewSettlementDetail ? null : (
+                <button
+                  disabled={settlementPdf.busy !== undefined}
+                  onClick={() => setViewSettlementId(settlementSummary.settlementId)}
+                  type="button"
+                >
+                  {t("traderSettlements.actionView")}
+                </button>
+              )}
+              {!canViewSettlementReport ? null : (
+                <>
+                  <button
+                    disabled={settlementPdf.busy !== undefined}
+                    onClick={() => void openConfirmedSettlementPdf("preview")}
+                    type="button"
+                  >
+                    {settlementPdf.busy === "preview"
+                      ? t("common.loading")
+                      : t("traderSettlements.actionPreviewStatement")}
+                  </button>
+                  <button
+                    disabled={settlementPdf.busy !== undefined}
+                    onClick={() => void openConfirmedSettlementPdf("print")}
+                    type="button"
+                  >
+                    {settlementPdf.busy === "print" ? t("common.loading") : t("common.print")}
+                  </button>
+                  <button
+                    disabled={settlementPdf.busy !== undefined}
+                    onClick={() => void openConfirmedSettlementPdf("download")}
+                    type="button"
+                  >
+                    {settlementPdf.busy === "download"
+                      ? t("common.loading")
+                      : t("operations.downloadPdf")}
+                  </button>
+                </>
+              )}
+            </div>
+          </section>
+        )}
         <section className="order-detail-section order-detail-wide">
           <h2>{t("operations.attachments")}</h2>
           {detail.attachments.length === 0 ? (
@@ -1254,6 +2135,11 @@ export function OrderDetailsWorkspace({
           {collectionError}
         </div>
       )}
+      {settlementError === undefined ? null : (
+        <div className="alert alert-error" role="alert">
+          {settlementError}
+        </div>
+      )}
       {collectOpen ? (
         <CollectMoneyDialog
           api={api}
@@ -1294,6 +2180,26 @@ export function OrderDetailsWorkspace({
             await load();
           }}
           reconciliationId={viewCollectionId}
+        />
+      )}
+      {viewSettlementId === undefined ? null : (
+        <SettlementDetailDialog
+          api={api}
+          canReverse={canReverseSettlement}
+          canViewReport={canViewSettlementReport}
+          onClose={() => setViewSettlementId(undefined)}
+          onOpenAccountStatement={(traderId) => {
+            setViewSettlementId(undefined);
+            onNavigate?.(
+              `/trader-settlements?openStatement=true&statementTraderId=${encodeURIComponent(traderId)}`,
+            );
+          }}
+          onReversed={async () => {
+            setViewSettlementId(undefined);
+            await load();
+          }}
+          reportLanguage={reportLanguage}
+          settlementId={viewSettlementId}
         />
       )}
     </>
@@ -1823,6 +2729,7 @@ function CollectMoneyDialog({
                 <input
                   className="no-spinner"
                   inputMode="decimal"
+                  min="0.01"
                   onChange={(event) =>
                     setExpenses((current) =>
                       current.map((item, itemIndex) =>
@@ -1831,6 +2738,7 @@ function CollectMoneyDialog({
                     )
                   }
                   placeholder="0.00"
+                  step="0.01"
                   type="number"
                   value={row.amount}
                 />
@@ -1863,7 +2771,9 @@ function CollectMoneyDialog({
             <input
               className="no-spinner"
               inputMode="decimal"
+              min="0"
               onChange={(event) => setCash(event.target.value)}
+              step="0.01"
               type="number"
               value={cash}
             />
@@ -1908,6 +2818,19 @@ function DriverShipmentManifestDialog({
   const [error, setError] = useState<string>();
   const pdf = useReconciliationPdfActions(api);
 
+  const loadPreview = useCallback(async () => {
+    setError(undefined);
+    try {
+      const result = await api.post<{
+        header: { driverMobile: string; driverName: string; orderCount: number };
+        summary: { totalCod: string; totalOrders: number; totalPackages: number };
+      }>("operations/cash/driver-shipment-manifest/data", selection);
+      setPreview(result);
+    } catch (requestError) {
+      setError(message(requestError, t("operations.manifestPreviewFailed")));
+    }
+  }, [api, selection, t]);
+
   useEffect(() => {
     let active = true;
     void api
@@ -1950,7 +2873,17 @@ function DriverShipmentManifestDialog({
         error === undefined ? (
           <div className="loading-row">{t("common.loading")}</div>
         ) : (
-          <div className="alert alert-error">{error}</div>
+          <>
+            <div className="alert alert-error">{error}</div>
+            <div className="modal-actions">
+              <button onClick={() => void loadPreview()} type="button">
+                {t("common.refresh")}
+              </button>
+              <button className="button button-primary" onClick={onClose} type="button">
+                {t("common.close")}
+              </button>
+            </div>
+          </>
         )
       ) : (
         <>
@@ -2034,6 +2967,7 @@ type OrderStatusKey =
   | "returned_to_trader"
   | "money_collected"
   | "money_sent_to_trader"
+  | "money_received_by_trader"
   | "settlement_reversed"
   | "closed"
   | "cancelled";
@@ -2047,10 +2981,10 @@ function deriveOrderStatus(order: OperationsOrder): { key: OrderStatusKey; tone:
   if (order.traderSettlementStatus === "reversed") {
     return { key: "settlement_reversed", tone: "warning" };
   }
-  if (
-    order.traderSettlementStatus === "money_sent_to_trader" ||
-    order.traderSettlementStatus === "money_received_by_trader"
-  ) {
+  if (order.traderSettlementStatus === "money_received_by_trader") {
+    return { key: "money_received_by_trader", tone: "active" };
+  }
+  if (order.traderSettlementStatus === "money_sent_to_trader") {
     return { key: "money_sent_to_trader", tone: "progress" };
   }
   if (order.driverReconciliationStatus === "reconciled") {
@@ -2062,6 +2996,7 @@ function deriveOrderStatus(order: OperationsOrder): { key: OrderStatusKey; tone:
 function orderStatusLabel(t: TFunction, key: OrderStatusKey): string {
   return key === "money_collected" ||
     key === "money_sent_to_trader" ||
+    key === "money_received_by_trader" ||
     key === "settlement_reversed"
     ? t(`operations.orderStatusLabels.${key}`)
     : t(`statuses.${key}`);
@@ -2085,9 +3020,13 @@ function FinancialStatusCell({ order }: { order: OperationsOrder }) {
   const { t } = useTranslation();
   return (
     <div className="financial-status-cell">
-      <DriverCashStatusLabel value={order.driverReconciliationStatus} />
+      <span>
+        <span className="financial-status-label">{t("operations.driverCashShortLabel")}: </span>
+        <DriverCashStatusLabel value={order.driverReconciliationStatus} />
+      </span>
       {order.traderSettlementStatus === "not_eligible" ? null : (
         <span data-trader-settlement-status={order.traderSettlementStatus}>
+          <span className="financial-status-label">{t("operations.traderSettlementShortLabel")}: </span>
           {t(`statuses.${order.traderSettlementStatus}`)}
         </span>
       )}
@@ -2125,7 +3064,7 @@ function closeEligible(order: OperationsOrder): boolean {
   return (
     ["delivered", "returned_to_trader"].includes(status) &&
     ["reconciled", "not_applicable"].includes(order.driverReconciliationStatus) &&
-    ["money_sent_to_trader", "money_received_by_trader", "not_eligible"].includes(
+    ["money_received_by_trader", "not_eligible"].includes(
       order.traderSettlementStatus,
     ) &&
     (status !== "returned_to_trader" || order.returnStatus === "returned_to_trader")
@@ -2754,7 +3693,9 @@ function EditOrderDialog({
               <input
                 className="no-spinner"
                 inputMode="numeric"
+                min="1"
                 onChange={(event) => update({ packageCount: event.target.value })}
+                step="1"
                 type="number"
                 value={form.packageCount}
               />
@@ -2771,7 +3712,9 @@ function EditOrderDialog({
               <input
                 className="no-spinner"
                 inputMode="decimal"
+                min="0"
                 onChange={(event) => update({ codAmount: event.target.value })}
+                step="0.01"
                 type="number"
                 value={form.codAmount}
               />
@@ -2781,7 +3724,9 @@ function EditOrderDialog({
               <input
                 className="no-spinner"
                 inputMode="decimal"
+                min="0"
                 onChange={(event) => update({ serviceFee: event.target.value })}
+                step="0.01"
                 type="number"
                 value={form.serviceFee}
               />
@@ -2974,7 +3919,7 @@ function money(value: string, locale: "ar" | "en"): string {
   return formatCurrency(value, "AED", locale);
 }
 function twoDecimals(value: string | number): string {
-  return (Math.round(Number(value || 0) * 100) / 100).toFixed(2);
+  return formatMoneyValue(value);
 }
 function message(error: unknown, fallback: string): string {
   if (error instanceof ApiError) {

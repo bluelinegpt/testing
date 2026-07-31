@@ -47,12 +47,20 @@ export class ApiClient {
     return this.request<TResponse>(path, { body, headers, method: "POST" });
   }
 
-  public put<TResponse>(path: string, body?: unknown): Promise<TResponse> {
-    return this.request<TResponse>(path, { body, method: "PUT" });
+  public put<TResponse>(
+    path: string,
+    body?: unknown,
+    headers?: Readonly<Record<string, string>>,
+  ): Promise<TResponse> {
+    return this.request<TResponse>(path, { body, headers, method: "PUT" });
   }
 
-  public patch<TResponse>(path: string, body?: unknown): Promise<TResponse> {
-    return this.request<TResponse>(path, { body, method: "PATCH" });
+  public patch<TResponse>(
+    path: string,
+    body?: unknown,
+    headers?: Readonly<Record<string, string>>,
+  ): Promise<TResponse> {
+    return this.request<TResponse>(path, { body, headers, method: "PATCH" });
   }
 
   public delete<TResponse>(path: string): Promise<TResponse> {
@@ -95,12 +103,21 @@ export class ApiClient {
     try {
       const response = await fetch(`${webConfiguration.apiBaseUrl}/${path.replace(/^\//, "")}`, {
         ...(input.body === undefined ? {} : { body: JSON.stringify(input.body) }),
+        cache: "no-store",
         headers,
         method: input.method,
         signal: controller.signal,
       });
       if (!response.ok) {
-        throw new ApiError("The request could not be completed", "request_failed", response.status);
+        const payload = this.isJson(response.headers.get("content-type"))
+          ? ((await response.json()) as ApiErrorPayload)
+          : undefined;
+        throw new ApiError(
+          payload?.error?.message ?? "The request could not be completed",
+          payload?.error?.code ?? "request_failed",
+          response.status,
+          payload?.error?.details,
+        );
       }
       return await response.blob();
     } finally {
@@ -139,6 +156,7 @@ export class ApiClient {
           : { body: isFormData ? (input.body as FormData) : JSON.stringify(input.body) };
       const response = await fetch(`${webConfiguration.apiBaseUrl}/${path.replace(/^\//, "")}`, {
         ...body,
+        cache: "no-store",
         headers,
         method: input.method,
         signal: controller.signal,
@@ -155,7 +173,10 @@ export class ApiClient {
         );
       }
       if (response.status === 204) return undefined as TResponse;
-      if (!this.isJson(response.headers.get("content-type"))) {
+      const contentType = response.headers.get("content-type");
+      if (!this.isJson(contentType)) {
+        const text = await response.text();
+        if (text.trim() === "") return undefined as TResponse;
         throw new Error("The API returned an unsupported content type");
       }
       return (await response.json()) as TResponse;

@@ -73,6 +73,45 @@ interface AccountSessionTable {
   created_ip: string | null;
   user_agent: string | null;
   created_at: Generated<TimestampColumn>;
+  profile_link_id: string | null;
+  profile_type: "employee" | "driver" | "trader" | null;
+  profile_id: string | null;
+}
+
+interface PasswordResetTokenTable {
+  id: Generated<string>;
+  company_id: string | null;
+  account_id: string;
+  token_hash: string;
+  expires_at: TimestampColumn;
+  used_at: TimestampColumn | null;
+  revoked_at: TimestampColumn | null;
+  requested_ip_hash: string | null;
+  requested_user_agent: string | null;
+  created_at: Generated<TimestampColumn>;
+  created_by_source: Generated<"self_service" | "administrator">;
+  version: Generated<number>;
+}
+
+interface UserBusinessLinkTable {
+  id: Generated<string>;
+  company_id: string;
+  account_id: string;
+  entity_type: "employee" | "driver" | "trader";
+  entity_id: string;
+  access_status: Generated<"invited" | "active" | "suspended" | "revoked">;
+  is_primary: Generated<boolean>;
+  created_by_account_id: string;
+  created_at: Generated<TimestampColumn>;
+  updated_by_account_id: string | null;
+  updated_at: Generated<TimestampColumn>;
+  suspended_by_account_id: string | null;
+  suspended_at: TimestampColumn | null;
+  suspension_reason: string | null;
+  revoked_by_account_id: string | null;
+  revoked_at: TimestampColumn | null;
+  revocation_reason: string | null;
+  version: Generated<number>;
 }
 
 interface DriverReconciliationPaymentTable {
@@ -108,7 +147,13 @@ interface TraderSettlementPaymentTable {
 export interface DatabaseSchema {
   account_roles: UntypedTable;
   account_sessions: AccountSessionTable;
+  account_mappings: UntypedTable;
+  accounting_configuration_history: UntypedTable;
+  accounting_configurations: UntypedTable;
+  accounting_event_components: UntypedTable;
+  accounting_events: UntypedTable;
   accounting_periods: UntypedTable;
+  accounting_zero_opening_confirmations: UntypedTable;
   accounts: AccountTable;
   allowance_types: UntypedTable;
   areas: UntypedTable;
@@ -116,6 +161,7 @@ export interface DatabaseSchema {
   chart_of_accounts: UntypedTable;
   companies: UntypedTable;
   company_bank_accounts: UntypedTable;
+  company_cash_accounts: UntypedTable;
   company_reference_counters: UntypedTable;
   company_settings: UntypedTable;
   company_users: CompanyUserTable;
@@ -136,6 +182,15 @@ export interface DatabaseSchema {
   employees: UntypedTable;
   expense_types: UntypedTable;
   file_objects: UntypedTable;
+  fiscal_years: UntypedTable;
+  general_expense_attachments: UntypedTable;
+  general_expense_categories: UntypedTable;
+  general_expense_lines: UntypedTable;
+  general_expense_payment_rows: UntypedTable;
+  general_expense_payments: UntypedTable;
+  general_expenses: UntypedTable;
+  cash_bank_movements: UntypedTable;
+  cash_bank_movement_attachments: UntypedTable;
   hr_document_attachments: UntypedTable;
   hr_documents: UntypedTable;
   idempotency_records: UntypedTable;
@@ -145,6 +200,8 @@ export interface DatabaseSchema {
   journal_entries: UntypedTable;
   journal_lines: UntypedTable;
   operating_expenses: UntypedTable;
+  opening_balance_batches: UntypedTable;
+  opening_balance_lines: UntypedTable;
   order_assignments: UntypedTable;
   order_attachments: UntypedTable;
   order_expenses: UntypedTable;
@@ -153,11 +210,21 @@ export interface DatabaseSchema {
   order_status_history: UntypedTable;
   orders: UntypedTable;
   outsourced_driver_payments: UntypedTable;
+  outsourced_driver_fee_accruals: UntypedTable;
+  outsourced_driver_fee_payment_allocations: UntypedTable;
+  outsourced_driver_fee_payments: UntypedTable;
+  outsourced_driver_fee_versions: UntypedTable;
+  payroll_adjustments: UntypedTable;
+  payroll_calculation_exceptions: UntypedTable;
   payroll_commission_links: UntypedTable;
   payroll_entries: UntypedTable;
+  payroll_line_allowances: UntypedTable;
+  payroll_payment_allocations: UntypedTable;
+  payroll_payments: UntypedTable;
   payroll_periods: UntypedTable;
   permissions: UntypedTable;
-  password_reset_tokens: UntypedTable;
+  password_reset_tokens: PasswordResetTokenTable;
+  user_business_links: UserBusinessLinkTable;
   role_permissions: UntypedTable;
   roles: RoleTable;
   saas_usage_events: UntypedTable;

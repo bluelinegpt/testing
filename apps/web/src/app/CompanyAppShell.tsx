@@ -1,9 +1,9 @@
 import {
-  Banknote,
   ChevronDown,
   CircleUserRound,
   ClipboardList,
   FileBarChart,
+  Landmark,
   Gauge,
   Languages,
   LogOut,
@@ -33,7 +33,7 @@ function brandInitials(name: string): string {
 }
 
 type MenuGroupId =
-  "orders" | "traders" | "drivers" | "finance" | "configuration" | "administration";
+  "orders" | "traders" | "drivers" | "accounting" | "configuration" | "administration";
 
 interface MenuItem {
   readonly icon?: LucideIcon;
@@ -57,7 +57,9 @@ const routeTitles: Readonly<Record<string, string>> = {
   "/trader-receivables": "nav.traderReceivables",
   "/drivers": "nav.driversList",
   "/cash-management": "nav.cashManagement",
+  "/payroll": "nav.payroll",
   "/reports": "nav.reports",
+  "/accounting": "nav.accounting",
   "/configuration/company-profile": "nav.companyProfile",
   "/configuration/general": "nav.generalSettings",
   "/configuration/traders": "nav.tradersList",
@@ -92,6 +94,7 @@ export function CompanyAppShell({
   const branding = useCompanyBranding();
   const currentLanguage = normalizeLocale(i18n.resolvedLanguage);
   const companyName = branding.companyName === "" ? t("shell.companyPortal") : branding.companyName;
+  const signedInDisplayName = session.identity.displayName?.trim() || session.identity.username;
   const [collapsed, setCollapsed] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [expandedGroup, setExpandedGroup] = useState<MenuGroupId | undefined>(() =>
@@ -131,10 +134,20 @@ export function CompanyAppShell({
             items: [{ label: t("nav.driversList"), path: "/drivers" }],
           },
           {
-            icon: Banknote,
-            id: "finance",
-            label: t("nav.finance"),
-            items: [{ label: t("nav.cashManagement"), path: "/cash-management" }],
+            icon: Landmark,
+            id: "accounting",
+            label: t("nav.accounting"),
+            items: [
+              { label: t("accounting.sections.overview"), path: "/accounting" },
+              { label: t("nav.cashManagement"), path: "/cash-management" },
+              { label: t("nav.payroll"), path: "/payroll" },
+              { label: t("accounting.sections.chart-of-accounts"), path: "/accounting/chart-of-accounts" },
+              { label: t("accounting.sections.journals"), path: "/accounting/journals" },
+              { label: t("accounting.sections.events"), path: "/accounting/events" },
+              { label: t("accounting.sections.expenses"), path: "/accounting/expenses" },
+              { label: t("accounting.sections.cash-bank-movements"), path: "/accounting/cash-bank-movements" },
+              { label: t("accounting.sections.reconciliation"), path: "/accounting/reconciliation" },
+            ],
           },
           {
             icon: Settings,
@@ -176,7 +189,9 @@ export function CompanyAppShell({
     ? "nav.users"
     : normalizedPath.startsWith("/configuration/roles/")
       ? "nav.roles"
-      : undefined;
+      : normalizedPath.startsWith("/accounting")
+        ? "nav.accounting"
+        : undefined;
   const pageTitle = t(routeTitles[normalizedPath] ?? detailRouteTitle ?? "nav.dashboard");
 
   useEffect(() => {
@@ -323,7 +338,7 @@ export function CompanyAppShell({
             <CircleUserRound aria-hidden="true" size={22} />
             <span className="sidebar-user-copy">
               <small>{t("shell.signedInAs")}</small>
-              <strong>{session.identity.username}</strong>
+              <strong title={session.identity.username}>{signedInDisplayName}</strong>
             </span>
             <button aria-label={t("auth.logout")} onClick={() => void onLogout()} type="button">
               <LogOut aria-hidden="true" size={18} />
@@ -353,7 +368,7 @@ export function CompanyAppShell({
           </div>
           <div className="top-header-user">
             <CircleUserRound aria-hidden="true" size={20} />
-            <span>{session.identity.username}</span>
+            <span title={session.identity.username}>{signedInDisplayName}</span>
           </div>
         </header>
         <main className="company-content" id="main-content" ref={mainRef} tabIndex={-1}>
@@ -406,7 +421,8 @@ function groupForPath(pathname: string): MenuGroupId | undefined {
   if (pathname.startsWith("/orders")) return "orders";
   if (pathname === "/trader-settlements" || pathname === "/trader-receivables") return "traders";
   if (pathname === "/drivers" || pathname === "/driver-cash-reconciliation") return "drivers";
-  if (pathname === "/cash-management") return "finance";
+  if (pathname === "/cash-management" || pathname === "/payroll") return "accounting";
+  if (pathname.startsWith("/accounting")) return "accounting";
   if (pathname.startsWith("/configuration")) return "configuration";
   if (["/support"].includes(normalizePath(pathname))) return "administration";
   return undefined;

@@ -76,7 +76,9 @@ export function App() {
         </div>
         <div className="topbar-actions">
           {session === undefined ? null : (
-            <span className="signed-in-user">{session.identity.username}</span>
+            <span className="signed-in-user">
+              {session.identity.displayName ?? session.identity.username}
+            </span>
           )}
           <div className="language-control" aria-label={t("language.label")} role="group">
             {languages.map((language) => (
@@ -93,7 +95,7 @@ export function App() {
           </div>
         </div>
       </header>
-      {session?.identity.kind === "company_user" && session.identity.forcePasswordChange ? (
+      {session?.identity.forcePasswordChange ? (
         <PasswordChangeView
           api={api}
           onChanged={() => {
@@ -101,7 +103,9 @@ export function App() {
               ...session,
               identity: { ...session.identity, forcePasswordChange: false },
             });
-            navigate(firstAuthorizedCompanyPath(session.identity.permissions), { replace: true });
+            if (session.identity.kind === "company_user") {
+              navigate(firstAuthorizedCompanyPath(session.identity.permissions), { replace: true });
+            }
           }}
         />
       ) : trackingToken !== undefined ? (

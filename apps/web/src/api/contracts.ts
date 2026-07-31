@@ -3,6 +3,7 @@ export interface LoginResponse {
   readonly expiresAt: string;
   readonly identity: {
     readonly companyId: string;
+    readonly displayName?: string;
     readonly id: string;
     readonly kind: string;
     readonly permissions: readonly string[];
@@ -95,6 +96,7 @@ export interface Role {
 }
 
 export interface CompanyUser {
+  readonly accountKind: "company_user" | "driver" | "trader";
   readonly accountId: string;
   readonly email: string | null;
   readonly failedLoginAttempts: number;
@@ -151,6 +153,11 @@ export interface UserDetails extends CompanyUser {
   }[];
   readonly sessions: readonly AdministrationSession[];
   readonly audit: readonly AdministrationAuditEvent[];
+  readonly linkedProfiles: readonly {
+    readonly id: string; readonly profileType: "employee"|"driver"|"trader";
+    readonly profileId: string; readonly accessStatus: string; readonly businessStatus: string|null;
+    readonly code: string|null; readonly name: string|null; readonly createdAt: string; readonly updatedAt: string;
+  }[];
 }
 
 export interface AdministrationSession {
@@ -477,6 +484,7 @@ export interface PublicOrderTracking {
 
 export interface PortalOrder {
   readonly amountCollected: string;
+  readonly areaId: string;
   readonly areaName: string;
   readonly codAmount: string;
   readonly customerAmountDue: string;
@@ -485,8 +493,12 @@ export interface PortalOrder {
   readonly customerName: string;
   readonly deliveryStatus: string;
   readonly id: string;
+  readonly notes: string | null;
   readonly orderDate: string;
   readonly orderNumber: string;
+  readonly packageCount: number;
+  readonly referenceNumber: string | null;
+  readonly serialNumber: string;
   readonly serviceFee: string;
   readonly traderName: string;
   readonly traderSettlementStatus: string;

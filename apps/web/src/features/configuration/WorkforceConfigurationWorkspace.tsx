@@ -10,10 +10,12 @@ import {
 import { type FormEvent, useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import type { ApiClient } from "../../api/api-client.js";
+import { ApiError, type ApiClient } from "../../api/api-client.js";
 import type { DriverSummary, EmployeeSummary, WorkforcePage } from "../../api/contracts.js";
 import { Modal } from "../../components/Modal.js";
 import { PageHeader } from "../../components/PageHeader.js";
+import { BusinessAccessPanel } from "../administration/BusinessAccessPanel.js";
+import { parseMoneyInput } from "../../utils/numeric-input.js";
 
 type WorkforceKind = "employees" | "drivers";
 type Detail = Record<string, unknown>;
@@ -224,19 +226,21 @@ export function WorkforceConfigurationWorkspace({
                     >
                       <Pencil size={16} />
                     </button>
-                    <button
-                      aria-label={t(
-                        item.status === "active" ? "workforce.disable" : "workforce.activate",
-                      )}
-                      onClick={() => setStatusTarget(item)}
-                      type="button"
-                    >
-                      {item.status === "active" ? (
-                        <UserRoundX size={17} />
-                      ) : (
-                        <UserRoundCheck size={17} />
-                      )}
-                    </button>
+                    {kind === "drivers" ? (
+                      <button
+                        aria-label={t(
+                          item.status === "active" ? "workforce.disable" : "workforce.activate",
+                        )}
+                        onClick={() => setStatusTarget(item)}
+                        type="button"
+                      >
+                        {item.status === "active" ? (
+                          <UserRoundX size={17} />
+                        ) : (
+                          <UserRoundCheck size={17} />
+                        )}
+                      </button>
+                    ) : null}
                   </div>
                 </td>
               </tr>
@@ -419,9 +423,13 @@ function WorkforceForm({
   // reads it from the linked Driver's type.
   const [engagement, setEngagement] = useState(String(detail?.driver_type ?? "employee"));
   const [addRoleOpen, setAddRoleOpen] = useState(false);
+  const initialEmployeeActive = detail?.is_active !== false;
+  const [employeeActive, setEmployeeActive] = useState(initialEmployeeActive);
   const selectedRole = roles.find((role) => String(role.id) === roleId);
   const isDriverRole = Boolean(selectedRole?.isDriverRole);
   const salaried = !isDriverRole || engagement === "employee";
+  const employeeStatusChanged =
+    mode === "create" ? !employeeActive : employeeActive !== initialEmployeeActive;
 
   useEffect(() => {
     void api
@@ -437,11 +445,34 @@ function WorkforceForm({
     setSaving(true);
     setError(undefined);
     try {
+      if (mode === "edit" && employeeStatusChanged) {
+        const id = String(detail?.id ?? "");
+        await api.patch(`configuration/employees/${id}/status`, {
+          isActive: employeeActive,
+          reason: String(data.get("statusReason") ?? ""),
+        });
+        await onSaved();
+        return;
+      }
+      const basicSalary = parseMoneyInput(String(data.get("basicSalary") ?? "0"));
+      const outsourcedFee = parseMoneyInput(String(data.get("outsourcedFee") ?? "0"));
+      const allowanceAmounts = Array.from({ length: 4 }, (_, index) =>
+        parseMoneyInput(String(data.get(`allowanceAmount${index}`) ?? "0")),
+      );
+      if (
+        !basicSalary.ok ||
+        !outsourcedFee.ok ||
+        allowanceAmounts.some((amount) => !amount.ok)
+      ) {
+        setError(t("workforce.invalidAmount"));
+        return;
+      }
       const common = {
         // The code is backend-generated and never submitted.
         address: optional(data, "address"),
         areaId: optional(data, "areaId"),
         email: optional(data, "email"),
+        joiningDate: optional(data, "joiningDate"),
         mobileNumber: String(data.get("mobileNumber") ?? ""),
         name: String(data.get("name") ?? ""),
         notes: optional(data, "notes"),
@@ -449,13 +480,16 @@ function WorkforceForm({
       };
       // Salary + allowances, shared by employees and employee-type Drivers.
       const compensation = {
-        allowances: Array.from({ length: 4 }, (_, index) => ({
-          allowanceTypeId: optional(data, `allowanceType${index}`),
-          amount: Number(data.get(`allowanceAmount${index}`) ?? 0),
-          effectiveFrom: String(data.get(`allowanceFrom${index}`) ?? today()),
-          effectiveTo: optional(data, `allowanceTo${index}`),
-        })).filter((item) => item.allowanceTypeId !== undefined && item.amount >= 0),
-        basicSalary: Number(data.get("basicSalary") ?? 0),
+        allowances: Array.from({ length: 4 }, (_, index) => {
+          const allowanceAmount = allowanceAmounts[index];
+          return {
+            allowanceTypeId: optional(data, `allowanceType${index}`),
+            amount: allowanceAmount?.ok === true ? allowanceAmount.value : 0,
+            effectiveFrom: String(data.get(`allowanceFrom${index}`) ?? today()),
+            effectiveTo: optional(data, `allowanceTo${index}`),
+          };
+        }).filter((item) => item.allowanceTypeId !== undefined && item.amount >= 0),
+        basicSalary: basicSalary.value,
         department: optional(data, "department"),
         jobTitle: optional(data, "jobTitle"),
         salaryEffectiveFrom: String(data.get("salaryEffectiveFrom") ?? today()),
@@ -468,19 +502,35 @@ function WorkforceForm({
       const payload = {
         ...common,
         employeeRoleId: roleId,
+        payrollEligible: salaried && data.get("payrollEligible") === "on",
         ...(isDriverRole ? { engagement } : {}),
         ...(salaried
           ? compensation
-          : { outsourcedFeePerDeliveredOrder: Number(data.get("outsourcedFee") ?? 0) }),
+          : { outsourcedFeePerDeliveredOrder: outsourcedFee.value }),
       };
       const id = String(detail?.id ?? "");
       // Everything is created through the Employee endpoint; a driver-role
       // Employee is turned into an operational Driver on the server.
-      if (mode === "create") await api.post("configuration/employees", payload);
-      else await api.patch(`configuration/employees/${id}`, payload);
+      const saved =
+        mode === "create"
+          ? await api.post<Detail>("configuration/employees", payload)
+          : await api.patch<Detail>(`configuration/employees/${id}`, payload);
+      if (employeeStatusChanged) {
+        await api.patch(`configuration/employees/${String(saved.id ?? id)}/status`, {
+          isActive: employeeActive,
+          reason: String(data.get("statusReason") ?? ""),
+        });
+      }
       await onSaved();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : t("common.saveFailed"));
+      setError(
+        caught instanceof ApiError &&
+          caught.code === "employee_salary_effective_date_overlap"
+          ? t("workforce.salaryEffectiveDateConflict")
+          : caught instanceof Error
+            ? caught.message
+            : t("common.saveFailed"),
+      );
     } finally {
       setSaving(false);
     }
@@ -559,6 +609,27 @@ function WorkforceForm({
                 />
               </label>
             ) : null}
+            <label className="field">
+              <span>{t("workforce.employeeStatus")}</span>
+              <select
+                name="employeeStatus"
+                onChange={(event) => setEmployeeActive(event.target.value === "active")}
+                value={employeeActive ? "active" : "disabled"}
+              >
+                <option value="active">{t("status.active")}</option>
+                <option value="disabled">{t("status.disabled")}</option>
+              </select>
+            </label>
+            {employeeStatusChanged ? (
+              <label className="field">
+                <span>{t("workforce.statusChangeReason")}</span>
+                <textarea
+                  maxLength={500}
+                  name="statusReason"
+                  required
+                />
+              </label>
+            ) : null}
           </fieldset>
           <fieldset>
             <legend>{t("workforce.contact")}</legend>
@@ -603,6 +674,14 @@ function WorkforceForm({
                 <span>{t("workforce.department")}</span>
                 <input defaultValue={String(detail?.department ?? "")} name="department" />
               </label>
+              <label className="field">
+                <span>{t("workforce.joiningDate")}</span>
+                <input
+                  defaultValue={String(detail?.hired_on ?? "")}
+                  name="joiningDate"
+                  type="date"
+                />
+              </label>
             </fieldset>
           ) : null}
           {salaried ? (
@@ -621,8 +700,22 @@ function WorkforceForm({
               </label>
               <label className="field">
                 <span>{t("workforce.effectiveFrom")}</span>
-                <input defaultValue={today()} name="salaryEffectiveFrom" type="date" required />
+                <input
+                  defaultValue={String(detail?.salary_effective_from ?? today())}
+                  name="salaryEffectiveFrom"
+                  type="date"
+                  required
+                />
               </label>
+              <label className="field-checkbox">
+                <input
+                  defaultChecked={detail?.payroll_eligible === true}
+                  name="payrollEligible"
+                  type="checkbox"
+                />
+                <span>{t("workforce.payrollEligible")}</span>
+              </label>
+              <p className="field-help">{t("workforce.payrollEligibleHint")}</p>
               {allowanceTypes.length === 0 ? (
                 <p className="field-help">{t("workforce.allowanceDeferredHint")}</p>
               ) : (
@@ -950,6 +1043,15 @@ export function WorkforceDetailWorkspace({
           )}
         </dl>
       </section>
+      <BusinessAccessPanel
+        api={api}
+        entityId={String(detail.id)}
+        kind={kind === "employees" ? "employee" : "driver"}
+        onNavigate={onNavigate}
+        profileCode={String(detail.employee_number ?? detail.code ?? "")}
+        profileMobileNumber={String(detail.mobile_number ?? "")}
+        profileName={String(detail.name_en ?? "")}
+      />
       <DetailTable
         title={t("workforce.documents")}
         rows={documents}

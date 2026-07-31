@@ -224,13 +224,38 @@ export class WorkforceConfigurationService {
         2,
       );
       const effectiveFrom = input.salaryEffectiveFrom ?? null;
+      const salaryHold = input.salaryHold ?? false;
+      const salaryHoldReason = input.salaryHoldReason?.trim() || null;
+      const requestedPayrollEligible =
+        engagement === "outsourced" ? false : (input.payrollEligible ?? false);
+      let effectivePayrollEligible = requestedPayrollEligible;
+      let effectiveSalaryHold = engagement === "outsourced" ? false : salaryHold;
+      if (salaryHold && (salaryHoldReason === null || input.salaryHoldFrom === undefined)) {
+        throw new ApplicationException(
+          "salary_hold_details_required",
+          "A reason and start date are required to activate Salary Hold",
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      if (
+        input.salaryHoldFrom !== undefined &&
+        input.salaryHoldTo !== undefined &&
+        input.salaryHoldTo < input.salaryHoldFrom
+      ) {
+        throw new ApplicationException(
+          "salary_hold_dates_invalid",
+          "Salary Hold end date cannot be earlier than its start date",
+          HttpStatus.BAD_REQUEST,
+        );
+      }
 
       if (id === undefined) {
         employeeCode = await this.nextGeneratedCode(transaction, companyId, "employee", "EMP");
         await sql`insert into employees (
           id, company_id, company_user_id, employee_role_id, employee_number, name_en, mobile_number,
           second_mobile_number, email, address, area_id, date_of_birth, nationality,
-          hired_on, job_title, department, basic_salary, notes
+          hired_on, job_title, department, basic_salary, payroll_eligible,
+          salary_hold, salary_hold_reason, salary_hold_from, salary_hold_to, notes
         ) values (
           ${employeeId}::uuid, ${companyId}::uuid, ${input.userId ?? null}::uuid,
           ${input.employeeRoleId}::uuid, ${employeeCode}, ${input.name.trim()}, ${input.mobileNumber.trim()},
@@ -238,10 +263,18 @@ export class WorkforceConfigurationService {
           ${input.address?.trim() || null}, ${input.areaId ?? null}::uuid, ${input.dateOfBirth ?? null}::date,
           ${input.nationality?.trim() || null}, ${input.joiningDate ?? null}::date,
           ${input.jobTitle?.trim() || null}, ${input.department?.trim() || null},
-          ${salary}, ${input.notes?.trim() || null}
+          ${salary}, ${requestedPayrollEligible}, ${effectiveSalaryHold}, ${salaryHoldReason},
+          ${input.salaryHoldFrom ?? null}::date, ${input.salaryHoldTo ?? null}::date,
+          ${input.notes?.trim() || null}
         )`.execute(transaction);
       } else {
-        await this.lockEmployee(transaction, companyId, employeeId);
+        const beforeEmployee = await this.lockEmployee(transaction, companyId, employeeId);
+        const targetPayrollEligible =
+          engagement === "outsourced" ? false : (input.payrollEligible ?? beforeEmployee.payrollEligible);
+        const targetSalaryHold =
+          engagement === "outsourced" ? false : (input.salaryHold ?? beforeEmployee.salaryHold);
+        effectivePayrollEligible = targetPayrollEligible;
+        effectiveSalaryHold = targetSalaryHold;
         const current = await sql<{ code: string }>`
           select employee_number as code from employees
            where id=${employeeId}::uuid and company_id=${companyId}::uuid
@@ -254,47 +287,73 @@ export class WorkforceConfigurationService {
           date_of_birth=${input.dateOfBirth ?? null}::date, nationality=${input.nationality?.trim() || null},
           hired_on=${input.joiningDate ?? null}::date, job_title=${input.jobTitle?.trim() || null},
           department=${input.department?.trim() || null},
-          basic_salary=${salary}, notes=${input.notes?.trim() || null},
+          basic_salary=${salary},
+          payroll_eligible=${targetPayrollEligible},
+          salary_hold=${targetSalaryHold},
+          salary_hold_reason=case when ${input.salaryHold ?? null}::boolean is true then ${salaryHoldReason}
+            else coalesce(salary_hold_reason, ${salaryHoldReason}) end,
+          salary_hold_from=case when ${input.salaryHold ?? null}::boolean is true then ${input.salaryHoldFrom ?? null}::date
+            else coalesce(salary_hold_from, ${input.salaryHoldFrom ?? null}::date) end,
+          salary_hold_to=case when ${input.salaryHold ?? null}::boolean is true then ${input.salaryHoldTo ?? null}::date
+            else coalesce(salary_hold_to, ${input.salaryHoldTo ?? null}::date) end,
+          notes=${input.notes?.trim() || null},
           updated_at=now(), version=version+1 where id=${employeeId}::uuid and company_id=${companyId}::uuid`.execute(
           transaction,
         );
-        await sql`update employee_allowances set is_active=false, updated_at=now(), version=version+1
+        if (beforeEmployee.payrollEligible !== targetPayrollEligible) {
+          await this.audit(transaction, {
+            action: targetPayrollEligible
+              ? "employee.payroll_eligibility_enabled"
+              : "employee.payroll_eligibility_disabled",
+            actorId,
+            after: { payrollEligible: targetPayrollEligible },
+            companyId,
+            correlationId,
+            subjectId: employeeId,
+            subjectType: "employee",
+          });
+        }
+        if (beforeEmployee.salaryHold !== targetSalaryHold) {
+          await this.audit(transaction, {
+            action: targetSalaryHold
+              ? "employee.salary_hold_activated"
+              : "employee.salary_hold_removed",
+            actorId,
+            after: {
+              salaryHold: targetSalaryHold,
+              salaryHoldFrom: input.salaryHoldFrom ?? beforeEmployee.salaryHoldFrom,
+              salaryHoldReason: salaryHoldReason ?? beforeEmployee.salaryHoldReason,
+              salaryHoldTo: input.salaryHoldTo ?? beforeEmployee.salaryHoldTo,
+            },
+            companyId,
+            correlationId,
+            reason: salaryHoldReason ?? undefined,
+            subjectId: employeeId,
+            subjectType: "employee",
+          });
+        }
+        await sql`update employee_allowances set is_active=false,
+          updated_by_account_id=${actorId}::uuid, updated_at=now(), version=version+1
           where company_id=${companyId}::uuid and employee_id=${employeeId}::uuid and is_active`.execute(
           transaction,
         );
       }
 
-      // Record the salary as a version. If one already starts on this effective
-      // date, update it in place; otherwise close any strictly-earlier open
-      // version and open a new one. Closing is guarded by `effective_from <`
-      // the new date so a version is never end-dated before its own start,
-      // which would violate the date-range check.
-      const sameDay = await sql<{ id: string }>`
-        select id from employee_salary_versions
-         where company_id=${companyId}::uuid and employee_id=${employeeId}::uuid
-           and effective_from=coalesce(${effectiveFrom}::date, current_date)
-      `.execute(transaction);
-      if (sameDay.rows[0] !== undefined) {
-        await sql`update employee_salary_versions set basic_salary=${salary}
-           where id=${sameDay.rows[0].id}::uuid and company_id=${companyId}::uuid`.execute(
+      if (engagement !== "outsourced") {
+        await this.writeSalaryVersion(
           transaction,
+          companyId,
+          employeeId,
+          actorId,
+          salary,
+          effectiveFrom,
         );
-      } else {
-        await sql`update employee_salary_versions
-           set effective_to=coalesce(${effectiveFrom}::date, current_date) - 1
-           where company_id=${companyId}::uuid and employee_id=${employeeId}::uuid
-             and effective_to is null
-             and effective_from < coalesce(${effectiveFrom}::date, current_date)`.execute(transaction);
-        await sql`insert into employee_salary_versions (company_id,employee_id,basic_salary,effective_from,created_by_account_id)
-          values (${companyId}::uuid,${employeeId}::uuid,${salary},coalesce(${effectiveFrom}::date, current_date),${actorId}::uuid)`.execute(
-          transaction,
-        );
-      }
-      for (const allowance of input.allowances ?? []) {
-        await sql`insert into employee_allowances (company_id,employee_id,allowance_type_id,amount,effective_from,effective_to,created_by_account_id)
-          values (${companyId}::uuid,${employeeId}::uuid,${allowance.allowanceTypeId}::uuid,${new Decimal(allowance.amount).toFixed(2)},${allowance.effectiveFrom}::date,${allowance.effectiveTo ?? null}::date,${actorId}::uuid)`.execute(
-          transaction,
-        );
+        for (const allowance of input.allowances ?? []) {
+          await sql`insert into employee_allowances (company_id,employee_id,allowance_type_id,amount,effective_from,effective_to,created_by_account_id)
+            values (${companyId}::uuid,${employeeId}::uuid,${allowance.allowanceTypeId}::uuid,${new Decimal(allowance.amount).toFixed(2)},${allowance.effectiveFrom}::date,${allowance.effectiveTo ?? null}::date,${actorId}::uuid)`.execute(
+            transaction,
+          );
+        }
       }
 
       // A driver-role Employee is also an operational Driver.
@@ -303,15 +362,25 @@ export class WorkforceConfigurationService {
           transaction,
           companyId,
           employeeId,
+          actorId,
           input,
           engagement,
+          effectiveFrom,
         );
       }
 
       await this.audit(transaction, {
         action: id === undefined ? "employee.create" : "employee.update",
         actorId,
-        after: { code: employeeCode, engagement, name: input.name, salary },
+        after: {
+          code: employeeCode,
+          engagement,
+          name: input.name,
+          payrollEligible: effectivePayrollEligible,
+          salary,
+          salaryEffectiveFrom: effectiveFrom,
+          salaryHold: effectiveSalaryHold,
+        },
         companyId,
         correlationId,
         subjectId: employeeId,
@@ -330,8 +399,10 @@ export class WorkforceConfigurationService {
     transaction: Kysely<DatabaseSchema>,
     companyId: string,
     employeeId: string,
+    actorId: string,
     input: SaveEmployeeDto,
     engagement: "employee" | "outsourced",
+    effectiveFrom: string | null,
   ): Promise<void> {
     const outsourcedFee =
       engagement === "outsourced"
@@ -343,15 +414,26 @@ export class WorkforceConfigurationService {
 
     if (existing.rows[0] === undefined) {
       const code = await this.nextGeneratedCode(transaction, companyId, "driver", "DRV");
-      await sql`insert into drivers (company_id, employee_id, code, name_en, mobile_number,
+      const created = await sql<{ id: string }>`insert into drivers (company_id, employee_id, code, name_en, mobile_number,
         second_mobile_number, email, address, area_id, driver_type, account_status,
         outsourced_fee_per_delivered_order, notes)
         values (${companyId}::uuid, ${employeeId}::uuid, ${code}, ${input.name.trim()},
         ${input.mobileNumber.trim()}, ${input.secondMobileNumber?.trim() || null},
         ${input.email?.trim() || null}, ${input.address?.trim() || null}, ${input.areaId ?? null}::uuid,
-        ${engagement}, 'active', ${outsourcedFee}, ${input.notes?.trim() || null})`.execute(
+        ${engagement}, 'active', ${outsourcedFee}, ${input.notes?.trim() || null})
+        returning id`.execute(
         transaction,
       );
+      if (engagement === "outsourced" && outsourcedFee !== null) {
+        await this.syncOutsourcedDriverFeeVersion(
+          transaction,
+          companyId,
+          created.rows[0]!.id,
+          actorId,
+          outsourcedFee,
+          effectiveFrom,
+        );
+      }
     } else {
       await sql`update drivers set name_en=${input.name.trim()}, mobile_number=${input.mobileNumber.trim()},
         second_mobile_number=${input.secondMobileNumber?.trim() || null}, email=${input.email?.trim() || null},
@@ -359,7 +441,124 @@ export class WorkforceConfigurationService {
         driver_type=${engagement}, outsourced_fee_per_delivered_order=${outsourcedFee},
         notes=${input.notes?.trim() || null}, updated_at=now(), version=version+1
         where id=${existing.rows[0].id}::uuid and company_id=${companyId}::uuid`.execute(transaction);
+      if (engagement === "outsourced" && outsourcedFee !== null) {
+        await this.syncOutsourcedDriverFeeVersion(
+          transaction,
+          companyId,
+          existing.rows[0].id,
+          actorId,
+          outsourcedFee,
+          effectiveFrom,
+        );
+      }
     }
+  }
+
+  /**
+   * Employee setup exposes the outsourced Driver's per-delivery fee, while the
+   * Payroll fee engine accrues from effective-dated fee versions. Keep those
+   * two records aligned so a delivered Order can become payable without the
+   * operator having to maintain a separate hidden rate screen.
+   */
+  private async syncOutsourcedDriverFeeVersion(
+    transaction: Kysely<DatabaseSchema>,
+    companyId: string,
+    driverId: string,
+    actorId: string,
+    feePerOrder: string,
+    effectiveFrom: string | null,
+  ): Promise<void> {
+    const requestedFee = new Decimal(feePerOrder);
+    if (requestedFee.isNegative()) {
+      throw new ApplicationException(
+        "outsourced_driver_fee_invalid",
+        "Outsourced Driver fee cannot be negative",
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    const effective = await sql<{ value: string }>`
+      select coalesce(${effectiveFrom}::date, current_date)::text as value
+    `.execute(transaction);
+    const requestedEffectiveFrom = effective.rows[0]!.value;
+
+    const active = await sql<{
+      readonly effectiveFrom: string;
+      readonly effectiveTo: string | null;
+      readonly feePerOrder: string;
+      readonly id: string;
+    }>`
+      select id,
+             effective_from::text as "effectiveFrom",
+             effective_to::text as "effectiveTo",
+             fee_per_order::text as "feePerOrder"
+        from outsourced_driver_fee_versions
+       where company_id=${companyId}::uuid
+         and driver_id=${driverId}::uuid
+         and status='active'
+       order by effective_from desc
+       for update
+    `.execute(transaction);
+
+    const matching = active.rows.find((row) => {
+      const startsBeforeRequested = row.effectiveFrom <= requestedEffectiveFrom;
+      const endsAfterRequested =
+        row.effectiveTo === null || row.effectiveTo >= requestedEffectiveFrom;
+      return (
+        startsBeforeRequested &&
+        endsAfterRequested &&
+        new Decimal(row.feePerOrder).equals(requestedFee)
+      );
+    });
+
+    if (matching !== undefined) return;
+
+    await sql`
+      update outsourced_driver_fee_versions
+         set status='superseded',
+             effective_to=least(coalesce(effective_to, ${requestedEffectiveFrom}::date - interval '1 day')::date,
+                                (${requestedEffectiveFrom}::date - interval '1 day')::date),
+             updated_by_account_id=${actorId}::uuid,
+             updated_at=now(),
+             version=version+1
+       where company_id=${companyId}::uuid
+         and driver_id=${driverId}::uuid
+         and status='active'
+         and effective_from < ${requestedEffectiveFrom}::date
+    `.execute(transaction);
+
+    await sql`
+      update outsourced_driver_fee_versions
+         set status='superseded',
+             updated_by_account_id=${actorId}::uuid,
+             updated_at=now(),
+             version=version+1
+       where company_id=${companyId}::uuid
+         and driver_id=${driverId}::uuid
+         and status='active'
+         and effective_from >= ${requestedEffectiveFrom}::date
+    `.execute(transaction);
+
+    await sql`
+      insert into outsourced_driver_fee_versions (
+        company_id,
+        driver_id,
+        effective_from,
+        fee_per_order,
+        status,
+        notes,
+        created_by_account_id
+      )
+      values (
+        ${companyId}::uuid,
+        ${driverId}::uuid,
+        ${requestedEffectiveFrom}::date,
+        ${requestedFee.toFixed(2)},
+        'active',
+        'Created from Employee outsourced Driver setup',
+        ${actorId}::uuid
+      )
+    `.execute(transaction);
   }
 
   public async employeeRoles(): Promise<readonly Record<string, unknown>[]> {
@@ -500,6 +699,16 @@ export class WorkforceConfigurationService {
           transaction,
         );
       }
+      if (input.driverType === "outsourced" && outsourcedFee !== null) {
+        await this.syncOutsourcedDriverFeeVersion(
+          transaction,
+          companyId,
+          driverId,
+          actorId,
+          outsourcedFee,
+          null,
+        );
+      }
       await this.audit(transaction, {
         action: id === undefined ? "driver.create" : "driver.update",
         actorId,
@@ -544,7 +753,7 @@ export class WorkforceConfigurationService {
         ${salary}, ${input.notes?.trim() || null}
       )`.execute(transaction);
     } else {
-      const before = await this.lockEmployee(transaction, companyId, id);
+      await this.lockEmployee(transaction, companyId, id);
       await sql`update employees set company_user_id=${input.userId ?? null}::uuid,
         name_en=${input.name.trim()}, mobile_number=${input.mobileNumber.trim()},
         second_mobile_number=${input.secondMobileNumber?.trim() || null},
@@ -553,32 +762,21 @@ export class WorkforceConfigurationService {
         department=${input.department?.trim() || null}, basic_salary=${salary},
         notes=${input.notes?.trim() || null}, updated_at=now(), version=version+1
         where id=${id}::uuid and company_id=${companyId}::uuid`.execute(transaction);
-      if (!new Decimal(before.basicSalary).equals(salary)) {
-        await sql`update employee_salary_versions
-          set effective_to=coalesce(${effectiveFrom}::date, current_date) - 1
-          where company_id=${companyId}::uuid and employee_id=${id}::uuid and effective_to is null`.execute(
-          transaction,
-        );
-      }
-      await sql`update employee_allowances set is_active=false, updated_at=now(), version=version+1
+      await sql`update employee_allowances set is_active=false,
+        updated_by_account_id=${actorId}::uuid, updated_at=now(), version=version+1
         where company_id=${companyId}::uuid and employee_id=${id}::uuid and is_active`.execute(
         transaction,
       );
     }
 
-    const salaryExists = await sql<{ exists: boolean }>`
-      select exists(
-        select 1 from employee_salary_versions
-         where company_id=${companyId}::uuid and employee_id=${id}::uuid
-           and effective_from=coalesce(${effectiveFrom}::date, current_date)
-      ) as exists
-    `.execute(transaction);
-    if (!salaryExists.rows[0]?.exists) {
-      await sql`insert into employee_salary_versions (company_id,employee_id,basic_salary,effective_from,created_by_account_id)
-        values (${companyId}::uuid,${id}::uuid,${salary},coalesce(${effectiveFrom}::date, current_date),${actorId}::uuid)`.execute(
-        transaction,
-      );
-    }
+    await this.writeSalaryVersion(
+      transaction,
+      companyId,
+      id,
+      actorId,
+      salary,
+      effectiveFrom,
+    );
     for (const allowance of input.allowances ?? []) {
       await sql`insert into employee_allowances (company_id,employee_id,allowance_type_id,amount,effective_from,effective_to,created_by_account_id)
         values (${companyId}::uuid,${id}::uuid,${allowance.allowanceTypeId}::uuid,${new Decimal(allowance.amount).toFixed(2)},${allowance.effectiveFrom}::date,${allowance.effectiveTo ?? null}::date,${actorId}::uuid)`.execute(
@@ -606,6 +804,224 @@ export class WorkforceConfigurationService {
     return `${counter.prefix}-${counter.nextValue.padStart(6, "0")}`;
   }
 
+  /**
+   * Adds an effective-dated salary without rewriting a later historical
+   * version. A retroactive version is bounded by the next known version, while
+   * a preceding version is closed immediately before the requested date.
+   */
+  private async writeSalaryVersion(
+    transaction: Kysely<DatabaseSchema>,
+    companyId: string,
+    employeeId: string,
+    actorId: string,
+    salary: string,
+    effectiveFrom: string | null,
+  ): Promise<void> {
+    try {
+      const versions = await sql<{
+        basicSalary: string;
+        effectiveFrom: string;
+        effectiveTo: string | null;
+        id: string;
+        usedByApprovedPayroll: boolean;
+      }>`
+        select s.id,s.basic_salary::text as "basicSalary",
+               s.effective_from::text as "effectiveFrom",
+               s.effective_to::text as "effectiveTo",
+               exists(
+                 select 1 from payroll_entries p
+                  where p.company_id=s.company_id and p.salary_version_id=s.id
+                    and p.status in ('approved','partially_paid','paid','held','reversed')
+               ) as "usedByApprovedPayroll"
+          from employee_salary_versions s
+         where company_id=${companyId}::uuid and employee_id=${employeeId}::uuid
+         order by effective_from
+         for update
+      `.execute(transaction);
+      const requestedDate =
+        effectiveFrom ??
+        (
+          await sql<{ today: string }>`select current_date::text as today`.execute(transaction)
+        ).rows[0]!.today;
+
+      // Repeated edits from the Employee form may have produced several
+      // contiguous versions with the same salary. Treat a date-only edit as a
+      // correction of that unapproved tail: keep one version, move any
+      // draft/calculated Payroll references to it, and remove only the
+      // redundant unused versions. Approved history is never consolidated.
+      let trailingStart = versions.rows.length;
+      while (
+        trailingStart > 0 &&
+        versions.rows[trailingStart - 1]?.basicSalary === salary
+      ) {
+        trailingStart -= 1;
+      }
+      const trailingSameSalary = versions.rows.slice(trailingStart);
+      const precedingDifferentSalary = versions.rows[trailingStart - 1];
+      if (
+        trailingSameSalary.length > 1 &&
+        (precedingDifferentSalary === undefined ||
+          precedingDifferentSalary.effectiveFrom < requestedDate)
+      ) {
+        if (trailingSameSalary.some((version) => version.usedByApprovedPayroll)) {
+          throw new ApplicationException(
+            "employee_salary_history_immutable",
+            "This salary history is already used by approved Payroll and its effective date cannot be changed",
+            HttpStatus.CONFLICT,
+          );
+        }
+        const targetVersion =
+          trailingSameSalary.find((version) => version.effectiveFrom === requestedDate) ??
+          trailingSameSalary.at(-1)!;
+        for (const redundantVersion of trailingSameSalary) {
+          if (redundantVersion.id === targetVersion.id) continue;
+          await sql`
+            update payroll_entries
+               set salary_version_id=${targetVersion.id}::uuid,
+                   updated_at=now(),version=version+1
+             where company_id=${companyId}::uuid
+               and salary_version_id=${redundantVersion.id}::uuid
+               and status in ('draft','calculated')
+          `.execute(transaction);
+          await sql`
+            delete from employee_salary_versions
+             where id=${redundantVersion.id}::uuid and company_id=${companyId}::uuid
+          `.execute(transaction);
+        }
+
+        const moveLater = requestedDate > targetVersion.effectiveFrom;
+        if (moveLater) {
+          await sql`
+            update employee_salary_versions
+               set effective_from=${requestedDate}::date,effective_to=null,
+                   updated_by_account_id=${actorId}::uuid,updated_at=now(),version=version+1
+             where id=${targetVersion.id}::uuid and company_id=${companyId}::uuid
+          `.execute(transaction);
+        }
+        if (precedingDifferentSalary !== undefined) {
+          await sql`
+            update employee_salary_versions
+               set effective_to=${requestedDate}::date - 1,
+                   updated_by_account_id=${actorId}::uuid,updated_at=now(),version=version+1
+             where id=${precedingDifferentSalary.id}::uuid and company_id=${companyId}::uuid
+          `.execute(transaction);
+        }
+        if (!moveLater) {
+          await sql`
+            update employee_salary_versions
+               set effective_from=${requestedDate}::date,effective_to=null,
+                   updated_by_account_id=${actorId}::uuid,updated_at=now(),version=version+1
+             where id=${targetVersion.id}::uuid and company_id=${companyId}::uuid
+          `.execute(transaction);
+        }
+        return;
+      }
+
+      const sameDay = versions.rows.find((version) => version.effectiveFrom === requestedDate);
+      if (sameDay !== undefined) {
+        if (sameDay.basicSalary === salary) return;
+        if (sameDay.usedByApprovedPayroll) {
+          throw new ApplicationException(
+            "employee_salary_history_immutable",
+            "This salary version is already used by approved Payroll and cannot be changed",
+            HttpStatus.CONFLICT,
+          );
+        }
+        await sql`
+          update employee_salary_versions
+             set basic_salary=${salary},updated_by_account_id=${actorId}::uuid,
+                 updated_at=now(),version=version+1
+           where id=${sameDay.id}::uuid and company_id=${companyId}::uuid
+        `.execute(transaction);
+        return;
+      }
+
+      // Changing only the date in the Employee form is a correction of the
+      // latest salary version, not a request to create a duplicate historical
+      // salary with the same amount. Preserve approved Payroll snapshots and
+      // adjust the preceding range without creating an overlap.
+      const latestVersion = versions.rows.at(-1);
+      const previousVersion = versions.rows.at(-2);
+      if (
+        latestVersion !== undefined &&
+        latestVersion.basicSalary === salary &&
+        (previousVersion === undefined || previousVersion.effectiveFrom < requestedDate)
+      ) {
+        if (latestVersion.usedByApprovedPayroll) {
+          throw new ApplicationException(
+            "employee_salary_history_immutable",
+            "This salary version is already used by approved Payroll and its effective date cannot be changed",
+            HttpStatus.CONFLICT,
+          );
+        }
+        const moveLater = requestedDate > latestVersion.effectiveFrom;
+        if (moveLater) {
+          await sql`
+            update employee_salary_versions
+               set effective_from=${requestedDate}::date,
+                   updated_by_account_id=${actorId}::uuid,updated_at=now(),version=version+1
+             where id=${latestVersion.id}::uuid and company_id=${companyId}::uuid
+          `.execute(transaction);
+        }
+        if (previousVersion !== undefined) {
+          await sql`
+            update employee_salary_versions
+               set effective_to=${requestedDate}::date - 1,
+                   updated_by_account_id=${actorId}::uuid,updated_at=now(),version=version+1
+             where id=${previousVersion.id}::uuid and company_id=${companyId}::uuid
+          `.execute(transaction);
+        }
+        if (!moveLater) {
+          await sql`
+            update employee_salary_versions
+               set effective_from=${requestedDate}::date,
+                   updated_by_account_id=${actorId}::uuid,updated_at=now(),version=version+1
+             where id=${latestVersion.id}::uuid and company_id=${companyId}::uuid
+          `.execute(transaction);
+        }
+        return;
+      }
+
+      const nextVersion = versions.rows.find((version) => version.effectiveFrom > requestedDate);
+      await sql`
+        update employee_salary_versions
+           set effective_to=${requestedDate}::date - 1,
+               updated_by_account_id=${actorId}::uuid,updated_at=now(),version=version+1
+         where company_id=${companyId}::uuid and employee_id=${employeeId}::uuid
+           and effective_from < ${requestedDate}::date
+           and (effective_to is null or effective_to >= ${requestedDate}::date)
+      `.execute(transaction);
+      await sql`
+        insert into employee_salary_versions (
+          company_id,employee_id,basic_salary,effective_from,effective_to,created_by_account_id
+        ) values (
+          ${companyId}::uuid,${employeeId}::uuid,${salary},${requestedDate}::date,
+          ${nextVersion?.effectiveFrom ?? null}::date - 1,${actorId}::uuid
+        )
+      `.execute(transaction);
+    } catch (error) {
+      const code =
+        typeof error === "object" && error !== null && "code" in error
+          ? String(error.code)
+          : "";
+      const message =
+        typeof error === "object" && error !== null && "message" in error
+          ? String(error.message)
+          : "";
+      if (
+        ["23505", "23P01"].includes(code) &&
+        message.toLowerCase().includes("salary")
+      ) {
+        throw new ApplicationException(
+          "employee_salary_effective_date_overlap",
+          "The selected salary effective date overlaps an existing salary period",
+          HttpStatus.CONFLICT,
+        );
+      }
+      throw error;
+    }
+  }
+
   public async changeStatus(
     kind: "employee" | "driver",
     id: string,
@@ -625,7 +1041,8 @@ export class WorkforceConfigurationService {
       if (kind === "employee") {
         const result = await sql<{
           id: string;
-        }>`update employees set is_active=${isActive},deactivated_at=case when ${isActive} then null else now() end,updated_at=now(),version=version+1 where id=${id}::uuid and company_id=${companyId}::uuid returning id`.execute(
+          companyUserId: string | null;
+        }>`update employees set is_active=${isActive},deactivated_at=case when ${isActive} then null else now() end,updated_at=now(),version=version+1 where id=${id}::uuid and company_id=${companyId}::uuid returning id, company_user_id as "companyUserId"`.execute(
           transaction,
         );
         if (result.rows[0] === undefined)
@@ -634,6 +1051,49 @@ export class WorkforceConfigurationService {
             "Employee not found",
             HttpStatus.NOT_FOUND,
           );
+        await sql`
+          update drivers
+             set account_status=${isActive ? "active" : "disabled"},
+                 deactivated_at=case when ${isActive} then null else coalesce(deactivated_at, now()) end,
+                 updated_at=now(),
+                 version=version+1
+           where employee_id=${id}::uuid
+             and company_id=${companyId}::uuid
+             and account_status is distinct from ${isActive ? "active" : "disabled"}
+        `.execute(transaction);
+        if (result.rows[0].companyUserId !== null) {
+          await sql`
+            update company_users
+               set is_active=${isActive},
+                   deactivated_at=case when ${isActive} then null else coalesce(deactivated_at, now()) end,
+                   updated_at=now(),
+                   version=version+1
+             where id=${result.rows[0].companyUserId}::uuid
+               and company_id=${companyId}::uuid
+          `.execute(transaction);
+          await sql`
+            update accounts a
+               set status=${isActive ? "active" : "disabled"},
+                   updated_at=now(),
+                   version=a.version+1
+              from company_users cu
+             where cu.id=${result.rows[0].companyUserId}::uuid
+               and cu.company_id=${companyId}::uuid
+               and a.id=cu.account_id
+               and a.company_id=cu.company_id
+               and (${isActive} or a.status <> 'locked')
+          `.execute(transaction);
+          await sql`
+            update account_sessions s
+               set revoked_at=coalesce(s.revoked_at, now())
+              from company_users cu
+             where cu.id=${result.rows[0].companyUserId}::uuid
+               and cu.company_id=${companyId}::uuid
+               and s.account_id=cu.account_id
+               and s.company_id=cu.company_id
+               and s.revoked_at is null
+          `.execute(transaction);
+        }
       } else {
         const result = await sql<{
           id: string;
@@ -959,9 +1419,18 @@ export class WorkforceConfigurationService {
       kind === "employee"
         ? await sql<
             Record<string, unknown>
-          >`select e.*,a.id as "linked_account_id",a.username as "linked_username",cu.display_name as "linked_user_name"
-              from employees e left join company_users cu on cu.id=e.company_user_id and cu.company_id=e.company_id
-              left join accounts a on a.id=cu.account_id and a.company_id=cu.company_id
+          >`select e.*,a.id as "linked_account_id",a.username as "linked_username",
+                     cu.display_name as "linked_user_name",
+                     salary.effective_from::text as salary_effective_from,
+                     d.driver_type,d.outsourced_fee_per_delivered_order
+               from employees e left join company_users cu on cu.id=e.company_user_id and cu.company_id=e.company_id
+               left join accounts a on a.id=cu.account_id and a.company_id=cu.company_id
+               left join drivers d on d.employee_id=e.id and d.company_id=e.company_id
+               left join lateral (
+                select effective_from from employee_salary_versions
+                 where company_id=e.company_id and employee_id=e.id
+                 order by effective_from desc limit 1
+              ) salary on true
              where e.company_id=${companyId}::uuid and lower(e.employee_number)=lower(${code})`.execute(
             this.database,
           )
@@ -1061,10 +1530,25 @@ export class WorkforceConfigurationService {
     database: Kysely<DatabaseSchema>,
     companyId: string,
     id: string,
-  ): Promise<{ basicSalary: string }> {
+  ): Promise<{
+    basicSalary: string;
+    payrollEligible: boolean;
+    salaryHold: boolean;
+    salaryHoldFrom: string | null;
+    salaryHoldReason: string | null;
+    salaryHoldTo: string | null;
+  }> {
     const result = await sql<{
       basicSalary: string;
-    }>`select basic_salary::text as "basicSalary" from employees where id=${id}::uuid and company_id=${companyId}::uuid for update`.execute(
+      payrollEligible: boolean;
+      salaryHold: boolean;
+      salaryHoldFrom: string | null;
+      salaryHoldReason: string | null;
+      salaryHoldTo: string | null;
+    }>`select basic_salary::text as "basicSalary", payroll_eligible as "payrollEligible",
+              salary_hold as "salaryHold", salary_hold_reason as "salaryHoldReason",
+              salary_hold_from::text as "salaryHoldFrom", salary_hold_to::text as "salaryHoldTo"
+         from employees where id=${id}::uuid and company_id=${companyId}::uuid for update`.execute(
       database,
     );
     if (result.rows[0] === undefined)
@@ -1087,7 +1571,8 @@ export class WorkforceConfigurationService {
   ) {
     const salary = await sql<{
       amount: string;
-    }>`select basic_salary::text as amount from employee_salary_versions where company_id=${companyId}::uuid and employee_id=${employeeId}::uuid and effective_from<=${end}::date and coalesce(effective_to,'infinity'::date)>=${end}::date order by effective_from desc limit 1`.execute(
+      id: string;
+    }>`select id,basic_salary::text as amount from employee_salary_versions where company_id=${companyId}::uuid and employee_id=${employeeId}::uuid and effective_from<=${end}::date and coalesce(effective_to,'infinity'::date)>=${end}::date order by effective_from desc limit 1`.execute(
       database,
     );
     const allowances = await sql<{
@@ -1097,13 +1582,52 @@ export class WorkforceConfigurationService {
     );
     const basic = new Decimal(salary.rows[0]?.amount ?? 0);
     const allowance = new Decimal(allowances.rows[0]?.amount ?? 0);
+    const employee = await sql<{
+      employeeNumber: string;
+      employeeType: string | null;
+      nameAr: string | null;
+      nameEn: string;
+      salaryHold: boolean;
+    }>`select employee_number as "employeeNumber",name_en as "nameEn",name_ar as "nameAr",
+              employee_type as "employeeType",salary_hold as "salaryHold"
+         from employees where id=${employeeId}::uuid and company_id=${companyId}::uuid`.execute(
+      database,
+    );
+    const employeeSnapshot = employee.rows[0]!;
+    const gross = basic.plus(allowance).plus(commission);
     const period = await sql<{
       id: string;
-    }>`insert into payroll_periods(company_id,period_start,period_end) values(${companyId}::uuid,${start}::date,${end}::date) on conflict(company_id,period_start,period_end) do update set period_start=excluded.period_start returning id`.execute(
+    }>`insert into payroll_periods(company_id,period_reference,payroll_month,period_start,period_end,created_by_account_id)
+       values(${companyId}::uuid,${`PAY-${start.slice(0, 7)}`},date_trunc('month',${start}::date)::date,${start}::date,${end}::date,${actorId}::uuid)
+       on conflict(company_id,period_start,period_end) do update set period_start=excluded.period_start
+       returning id`.execute(
       database,
     );
     const payrollId = randomUUID();
-    await sql`insert into payroll_entries(id,company_id,payroll_number,payroll_period_id,employee_id,basic_salary,delivered_order_commission,allowances,deductions,advances,total_salary,status,created_by_account_id) values(${payrollId}::uuid,${companyId}::uuid,${`PAY-${start.slice(0, 7).replace("-", "")}-${employeeId.slice(0, 6).toUpperCase()}`},${period.rows[0]!.id}::uuid,${employeeId}::uuid,${basic.toFixed(2)},${commission.toFixed(2)},${allowance.toFixed(2)},0,0,${basic.plus(allowance).plus(commission).toFixed(2)},'draft',${actorId}::uuid) on conflict(company_id,payroll_period_id,employee_id) do update set delivered_order_commission=payroll_entries.delivered_order_commission+excluded.delivered_order_commission,total_salary=payroll_entries.total_salary+excluded.delivered_order_commission returning id`.execute(
+    await sql`insert into payroll_entries(
+      id,company_id,payroll_number,payroll_period_id,employee_id,
+      employee_number_snapshot,employee_name_snapshot,employee_name_ar_snapshot,
+      employment_type_snapshot,salary_version_id,basic_salary_snapshot,
+      employee_driver_commission,allowance_total,earning_adjustments_total,
+      deduction_adjustments_total,advances,gross_earnings,net_salary,amount_paid,
+      outstanding_amount,salary_hold_snapshot,status,source_marker,
+      created_by_account_id,calculated_by_account_id,calculated_at
+    ) values(
+      ${payrollId}::uuid,${companyId}::uuid,
+      ${`PAY-${start.slice(0, 7).replace("-", "")}-${employeeId.slice(0, 6).toUpperCase()}`},
+      ${period.rows[0]!.id}::uuid,${employeeId}::uuid,
+      ${employeeSnapshot.employeeNumber},${employeeSnapshot.nameEn},${employeeSnapshot.nameAr},
+      ${employeeSnapshot.employeeType},${salary.rows[0]?.id ?? null}::uuid,${basic.toFixed(2)},
+      ${commission.toFixed(2)},${allowance.toFixed(2)},0,0,0,${gross.toFixed(2)},
+      ${gross.toFixed(2)},0,${gross.toFixed(2)},${employeeSnapshot.salaryHold},
+      'draft','legacy',${actorId}::uuid,${actorId}::uuid,now()
+    ) on conflict(company_id,payroll_period_id,employee_id) do update set
+      employee_driver_commission=payroll_entries.employee_driver_commission+excluded.employee_driver_commission,
+      gross_earnings=payroll_entries.gross_earnings+excluded.employee_driver_commission,
+      net_salary=payroll_entries.net_salary+excluded.employee_driver_commission,
+      outstanding_amount=payroll_entries.outstanding_amount+excluded.employee_driver_commission,
+      updated_at=now(),version=payroll_entries.version+1
+    returning id`.execute(
       database,
     );
     const actual = await sql<{
@@ -1111,7 +1635,7 @@ export class WorkforceConfigurationService {
     }>`select id from payroll_entries where company_id=${companyId}::uuid and payroll_period_id=${period.rows[0]!.id}::uuid and employee_id=${employeeId}::uuid`.execute(
       database,
     );
-    await sql`insert into payroll_commission_links(company_id,payroll_entry_id,commission_calculation_id,amount) values(${companyId}::uuid,${actual.rows[0]!.id}::uuid,${calculationId}::uuid,${commission.toFixed(2)})`.execute(
+    await sql`insert into payroll_commission_links(company_id,payroll_entry_id,commission_calculation_id,amount,source_marker) values(${companyId}::uuid,${actual.rows[0]!.id}::uuid,${calculationId}::uuid,${commission.toFixed(2)},'legacy')`.execute(
       database,
     );
   }
