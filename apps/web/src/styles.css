@@ -2886,8 +2886,16 @@ tr.row-highlighted {
   display: grid;
   place-items: center;
   border-radius: var(--radius-sm);
-  color: #475569;
-  background: #f1f5f9;
+  color: var(--text-secondary);
+  background: var(--surface-subtle);
+  border: 1px solid transparent;
+  transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease;
+}
+
+.close-button:hover {
+  background: var(--primary-subtle);
+  border-color: color-mix(in srgb, var(--primary-color) 26%, transparent);
+  color: var(--primary-color);
 }
 .order-modal {
   width: min(1320px, 90vw);
@@ -2902,7 +2910,8 @@ tr.row-highlighted {
   flex: 0 0 auto;
   margin: 0;
   padding: 18px 22px;
-  border-bottom: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--border-color);
+  background: var(--surface-color);
 }
 .order-form {
   min-height: 0;
@@ -2915,6 +2924,7 @@ tr.row-highlighted {
   flex: 1;
   overflow-y: auto;
   padding: 20px 22px;
+  background: var(--app-bg);
 }
 
 .driver-fee-payment-modal {
@@ -3024,9 +3034,10 @@ tr.row-highlighted {
 }
 
 .combobox-options {
-  background: #fff;
-  border: 1px solid #cbd5e1;
-  box-shadow: 0 8px 20px rgb(15 23 42 / 14%);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
   inset-inline: 0;
   max-height: 220px;
   overflow-y: auto;
@@ -3037,9 +3048,9 @@ tr.row-highlighted {
 
 .combobox-option,
 .combobox-empty {
-  background: #fff;
+  background: var(--surface-raised);
   border: 0;
-  color: #172033;
+  color: var(--text-primary);
   display: block;
   padding: 10px 12px;
   text-align: start;
@@ -3048,8 +3059,8 @@ tr.row-highlighted {
 
 .combobox-option:hover,
 .combobox-option.active {
-  background: #eef2ff;
-  color: #4338ca;
+  background: var(--primary-subtle);
+  color: var(--primary-color);
 }
 
 .inline-create-area,
@@ -3063,9 +3074,9 @@ tr.row-highlighted {
   display: grid;
   gap: 10px;
   padding: 10px 12px;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
-  border-radius: 6px;
+  background: var(--surface-subtle);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
 }
 .collect-expenses {
   display: grid;
@@ -3095,9 +3106,10 @@ tr.row-highlighted {
 .order-form-group {
   min-width: 0;
   padding: 18px;
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
-  background: #fbfdff;
+  background: var(--surface-color);
+  box-shadow: var(--shadow-sm);
 }
 .form-section-heading {
   display: flex;
@@ -3112,7 +3124,7 @@ tr.row-highlighted {
   place-items: center;
   border-radius: 50%;
   color: var(--color-primary);
-  background: #eaf2ff;
+  background: var(--primary-subtle);
   font-size: 11px;
   font-weight: 800;
 }
@@ -3128,9 +3140,9 @@ tr.row-highlighted {
   grid-template-columns: 1fr 1fr;
   gap: 10px;
   padding: 15px;
-  border: 1px solid #c9ddff;
+  border: 1px solid color-mix(in srgb, var(--primary-color) 26%, var(--border-color));
   border-radius: var(--radius-md);
-  background: #eff6ff;
+  background: var(--primary-subtle);
 }
 .quote-panel div {
   display: grid;
@@ -3138,7 +3150,7 @@ tr.row-highlighted {
 }
 .quote-panel span,
 .quote-panel small {
-  color: #526176;
+  color: var(--text-secondary);
   font-size: 12px;
 }
 .quote-panel strong {
@@ -3155,8 +3167,8 @@ tr.row-highlighted {
   align-items: center;
   justify-content: space-between;
   gap: 20px;
-  border-top: 1px solid var(--color-border);
-  background: #fff;
+  border-top: 1px solid var(--border-color);
+  background: var(--surface-color);
   box-shadow: 0 -8px 24px rgb(15 31 61 / 7%);
 }
 .order-totals {
@@ -3169,7 +3181,7 @@ tr.row-highlighted {
   gap: 2px;
 }
 .order-totals small {
-  color: var(--color-muted);
+  color: var(--text-muted);
   font-size: 11px;
   text-transform: uppercase;
 }
