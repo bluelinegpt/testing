@@ -14,7 +14,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "test:database": "vitest run src/authentication/authentication.database.test.ts",
-    "test:communication:database": "vitest run src/communication/communication.customer-session.database.test.ts",
+    "test:communication:database": "vitest run src/communication/communication.customer-session.database.test.ts src/communication/communication.customer-rest.database.test.ts src/communication/communication.customer-websocket.database.test.ts src/communication/communication.cross-role.database.test.ts src/communication/communication.message-integrity.database.test.ts src/communication/communication.replay-outbox.database.test.ts src/communication/communication.cleanup-verification.database.test.ts",
     "test:administration:database": "vitest run src/platform/administration.database.test.ts",
     "test:platform:database": "vitest run src/platform/platform-administration.database.test.ts",
     "test:platform-company:database": "vitest run src/platform/platform-company.database.test.ts",

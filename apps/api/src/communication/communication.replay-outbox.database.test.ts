@@ -116,7 +116,7 @@ describe.skipIf(!enabled)("guarded communication outbox and replay security", ()
       });
 
       const recipients = await outboxRecipients(transaction, company.companyId, message.id);
-      expect(recipients.sort()).toEqual([officeOne.accountId, officeTwo.accountId].sort());
+      expect([...recipients].sort()).toEqual([officeOne.accountId, officeTwo.accountId].sort());
       expect(recipients).not.toContain(trader.accountId);
       return undefined;
     });

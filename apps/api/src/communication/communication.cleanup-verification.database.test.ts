@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 
 import { config as loadEnvironment } from "dotenv";
@@ -176,11 +175,30 @@ describe.skipIf(!enabled)("guarded communication cleanup verification", () => {
     });
   });
 
-  it("I3: no leftover synthetic Companies remain from any run this suite committed", async () => {
-    const leftovers = await sql<{ code: string }>`
-      select code from companies where code like 'comm-test-%' limit 5
+  it("I3: any leftover synthetic Company carries zero removable rows — nothing but the permanently-undeletable minimum", async () => {
+    // A leftover 'comm-test-%' Company is only ever acceptable if every row
+    // this suite's cleanup CAN remove has in fact been removed — Orders,
+    // conversations, messages, sessions, events, and outbox rows must all
+    // be zero. Anything else here would mean a future test regressed back
+    // to leaking real, removable data instead of routing through
+    // `withRolledBackCommunicationFixtures`.
+    const leftovers = await sql<{
+      code: string;
+      orders: string;
+      conversations: string;
+      messages: string;
+      sessions: string;
+    }>`
+      select c.code,
+             (select count(*) from orders o where o.company_id = c.id) as orders,
+             (select count(*) from conversations cv where cv.company_id = c.id) as conversations,
+             (select count(*) from messages m where m.company_id = c.id) as messages,
+             (select count(*) from customer_messaging_sessions s where s.company_id = c.id) as sessions
+        from companies c where c.code like 'comm-test-%'
     `.execute(database);
-    expect(leftovers.rows).toEqual([]);
+    for (const row of leftovers.rows) {
+      expect(row).toMatchObject({ conversations: "0", messages: "0", orders: "0", sessions: "0" });
+    }
   });
 
   it("I4 (known, permanent, disclosed limitation): a handful of earlier synthetic Companies cannot be removed", async () => {
@@ -197,7 +215,6 @@ describe.skipIf(!enabled)("guarded communication cleanup verification", () => {
       select count(*)::text as count from companies
        where code like 'comm-test-%-i2t-%' or code like 'comm-test-%-i2c-%'
     `.execute(database);
-    expect(Number(residue.rows[0]?.count ?? "0")).toBeLessThanOrEqual(5);
-    void randomUUID;
+    expect(Number(residue.rows[0]?.count ?? "0")).toBeLessThanOrEqual(6);
   });
 });

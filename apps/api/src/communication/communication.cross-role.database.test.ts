@@ -33,7 +33,7 @@ function identityFor(
     identityId: accountId,
     kind,
     permissions: new Set(permissions),
-    profileId,
+    ...(profileId === undefined ? {} : { profileId }),
     sessionId: `session-${accountId}`,
   };
 }
