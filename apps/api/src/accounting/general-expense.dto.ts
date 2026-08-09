@@ -300,9 +300,18 @@ export class GeneralExpensePaymentRowDto {
   @Matches(moneyPattern)
   public readonly amount!: string;
 
+  /**
+   * The Company Cash Account the money left -- a `company_cash_accounts` id,
+   * symmetrical with `companyBankAccountId`.
+   *
+   * It replaces the GL account id this field used to carry. A GL id identifies
+   * what the payment credits, not which drawer paid it, and two Cash Accounts
+   * may share one GL code. The GL account is now derived server-side from this
+   * Cash Account's own link and is never accepted from the client.
+   */
   @IsOptional()
   @IsUUID()
-  public readonly cashAccountId?: string;
+  public readonly companyCashAccountId?: string;
 
   @IsOptional()
   @IsUUID()
@@ -315,6 +324,24 @@ export class GeneralExpensePaymentRowDto {
 }
 
 export class CreateGeneralExpensePaymentDto {
+  /**
+   * Why this payment may take one of its funding accounts below the permitted
+   * floor.
+   *
+   * One reason covers the whole payment, not one per row: a split payment is
+   * confirmed or refused as a single act, and the person authorising it is
+   * explaining that act. Which accounts actually needed the override is
+   * recorded per account in the audit, from the decision itself.
+   *
+   * Optional here and conditional in the backend, which is the only place the
+   * condition can be evaluated: whether an override is needed depends on the
+   * balances at confirmation and the Company policy in force.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  public readonly balanceOverrideReason?: string;
+
   @IsDateString()
   public readonly paymentDate!: string;
 
@@ -394,20 +421,113 @@ export class GeneralExpenseListQueryDto {
 }
 
 export class GeneralExpensePaymentListQueryDto {
-  @IsOptional() @IsString() @MaxLength(150)
+  @IsOptional()
+  @IsString()
+  @MaxLength(150)
   public readonly search?: string;
-  @IsOptional() @IsIn(["cash", "visa"])
+  @IsOptional()
+  @IsIn(["cash", "visa"])
   public readonly paymentMethod?: string;
-  @IsOptional() @IsIn(["confirmed", "reversed"])
+  @IsOptional()
+  @IsIn(["confirmed", "reversed"])
   public readonly status?: string;
-  @IsOptional() @IsDateString()
+  @IsOptional()
+  @IsDateString()
   public readonly dateFrom?: string;
-  @IsOptional() @IsDateString()
+  @IsOptional()
+  @IsDateString()
   public readonly dateTo?: string;
-  @IsOptional() @Type(() => Number) @IsInt() @Min(1)
+  /** Business reference filters — no identifier is ever typed by the User. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  public readonly expenseNumber?: string;
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  public readonly paymentNumber?: string;
+  @IsOptional()
+  @IsString()
+  @MaxLength(150)
+  public readonly payee?: string;
+  @IsOptional()
+  @IsString()
+  @Matches(moneyPattern)
+  public readonly amountFrom?: string;
+  @IsOptional()
+  @IsString()
+  @Matches(moneyPattern)
+  public readonly amountTo?: string;
+  /** Accounting Event state of the Payment, shown as Pending/Posted/Failed. */
+  @IsOptional()
+  @IsIn(["pending", "posted", "failed"])
+  public readonly accountingStatus?: string;
+  @IsOptional()
+  @IsIn(["paymentDate", "paymentNumber", "amount", "expenseNumber", "payee"])
+  public readonly sortBy?: string;
+  @IsOptional()
+  @IsIn(["asc", "desc"])
+  public readonly sortDirection?: string;
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
   public readonly page?: number;
-  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(200)
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(200)
   public readonly pageSize?: number;
+}
+
+/** Searchable selector source for "Expense to Pay" — eligible Expenses only. */
+export class PayableGeneralExpenseQueryDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(150)
+  public readonly search?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(200)
+  public readonly limit?: number;
+
+  /**
+   * Keeps an already-selected Expense in the option list even when it falls
+   * outside the search text, so a preselected Expense never disappears.
+   */
+  @IsOptional()
+  @IsUUID()
+  public readonly includeExpenseId?: string;
+}
+
+/**
+ * Read-only Payment preview input. Mirrors the confirmation payload without
+ * the version, because a preview never writes.
+ */
+export class GeneralExpensePaymentPreviewQueryDto {
+  @IsString()
+  @Matches(moneyPattern)
+  public readonly amount!: string;
+
+  @IsIn(["cash", "visa"])
+  public readonly paymentMethod!: "cash" | "visa";
+
+  /** A `company_cash_accounts` id, matching the confirmation contract. */
+  @IsOptional()
+  @IsUUID()
+  public readonly companyCashAccountId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  public readonly companyBankAccountId?: string;
+
+  @IsOptional()
+  @IsDateString()
+  public readonly accountingDate?: string;
 }
 
 export class GeneralExpenseBackfillPreviewDto {

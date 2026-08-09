@@ -56,7 +56,9 @@ export function parseAccountingMoney(value: unknown, allowZero = true): Decimal 
 
 export function parseAccountingExchangeRate(value: unknown): Decimal {
   const rate = decimalFromInput(value, exchangeRatePattern, "accounting_invalid_exchange_rate");
-  if (!rate.isPositive()) {
+  // Decimal.isPositive() is a SIGN check that returns true for zero, so it can
+  // never enforce "greater than zero" — compare against zero explicitly.
+  if (!rate.greaterThan(0)) {
     throw new ApplicationException(
       "accounting_invalid_exchange_rate",
       "The Accounting exchange rate must be greater than zero",
@@ -110,7 +112,11 @@ export function assertJournalLineAmounts(
 ): void {
   const debitAmount = parseAccountingMoney(debit);
   const creditAmount = parseAccountingMoney(credit);
-  if (debitAmount.isPositive() && creditAmount.isPositive()) {
+  // greaterThan(0), not isPositive(): Decimal.isPositive() is a sign check
+  // that returns true for zero, which made every single-sided line (e.g.
+  // debit 5000 / credit 0) read as "both sides entered" and rejected all
+  // Manual Journal lines.
+  if (debitAmount.greaterThan(0) && creditAmount.greaterThan(0)) {
     throw new ApplicationException(
       "accounting_journal_line_both_sides_entered",
       "A Journal Line cannot contain both a Debit and a Credit",
@@ -139,7 +145,7 @@ export function accountingJournalTotals(
       badRequest,
     );
   }
-  const totals = lines.reduce(
+  const totals = lines.reduce<{ credit: Decimal; debit: Decimal }>(
     (sum, line) => {
       assertJournalLineAmounts(line.debit, line.credit);
       return {
@@ -149,7 +155,7 @@ export function accountingJournalTotals(
     },
     { credit: new Decimal(0), debit: new Decimal(0) },
   );
-  if (!totals.debit.isPositive() || !totals.credit.isPositive()) {
+  if (!totals.debit.greaterThan(0) || !totals.credit.greaterThan(0)) {
     throw new ApplicationException(
       "accounting_journal_zero_total",
       "Journal Debit and Credit totals must be greater than zero",

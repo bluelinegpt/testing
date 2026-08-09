@@ -27,6 +27,21 @@ export class PayrollOperationSupport {
     };
   }
 
+  /**
+   * The actor's permissions, for a service that must PASS them to a decider
+   * rather than assert one itself.
+   *
+   * Balance override authorisation is BalanceControlService's rule, keyed on a
+   * permission name stored in the Company policy. This accessor hands over the
+   * raw set so that rule stays in one place; it deliberately does not apply the
+   * `users_roles.manage` escalation that `assertPermission` uses, because
+   * whether a super-permission authorises a negative balance is the policy's
+   * question to answer, not this accessor's to presume.
+   */
+  public permissions(): readonly string[] {
+    return [...this.identities.current().permissions];
+  }
+
   public assertPermission(permission: string): void {
     const permissions = this.identities.current().permissions;
     if (!permissions.has(permission) && !permissions.has("users_roles.manage")) {
@@ -74,9 +89,7 @@ export class PayrollOperationSupport {
         HttpStatus.BAD_REQUEST,
       );
     }
-    const requestHash = createHash("sha256")
-      .update(JSON.stringify(input.payload))
-      .digest("hex");
+    const requestHash = createHash("sha256").update(JSON.stringify(input.payload)).digest("hex");
     const inserted = await sql<{ id: string }>`
       insert into idempotency_records (
         company_id, operation, idempotency_key, request_hash, expires_at
@@ -145,7 +158,10 @@ export class PayrollOperationSupport {
     `.execute(database);
   }
 
-  public pagination(input: { page?: number; pageSize?: number }, defaultSize = 50): {
+  public pagination(
+    input: { page?: number; pageSize?: number },
+    defaultSize = 50,
+  ): {
     readonly limit: number;
     readonly offset: number;
     readonly page: number;

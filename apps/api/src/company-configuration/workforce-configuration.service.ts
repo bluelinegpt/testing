@@ -220,9 +220,9 @@ export class WorkforceConfigurationService {
       const engagement =
         isDriverRole && input.engagement === "outsourced" ? "outsourced" : "employee";
       // Outsourced staff carry no salary.
-      const salary = new Decimal(engagement === "outsourced" ? 0 : (input.basicSalary ?? 0)).toFixed(
-        2,
-      );
+      const salary = new Decimal(
+        engagement === "outsourced" ? 0 : (input.basicSalary ?? 0),
+      ).toFixed(2);
       const effectiveFrom = input.salaryEffectiveFrom ?? null;
       const salaryHold = input.salaryHold ?? false;
       const salaryHoldReason = input.salaryHoldReason?.trim() || null;
@@ -270,7 +270,9 @@ export class WorkforceConfigurationService {
       } else {
         const beforeEmployee = await this.lockEmployee(transaction, companyId, employeeId);
         const targetPayrollEligible =
-          engagement === "outsourced" ? false : (input.payrollEligible ?? beforeEmployee.payrollEligible);
+          engagement === "outsourced"
+            ? false
+            : (input.payrollEligible ?? beforeEmployee.payrollEligible);
         const targetSalaryHold =
           engagement === "outsourced" ? false : (input.salaryHold ?? beforeEmployee.salaryHold);
         effectivePayrollEligible = targetPayrollEligible;
@@ -327,7 +329,7 @@ export class WorkforceConfigurationService {
             },
             companyId,
             correlationId,
-            reason: salaryHoldReason ?? undefined,
+            ...(salaryHoldReason == null ? {} : { reason: salaryHoldReason }),
             subjectId: employeeId,
             subjectType: "employee",
           });
@@ -414,16 +416,16 @@ export class WorkforceConfigurationService {
 
     if (existing.rows[0] === undefined) {
       const code = await this.nextGeneratedCode(transaction, companyId, "driver", "DRV");
-      const created = await sql<{ id: string }>`insert into drivers (company_id, employee_id, code, name_en, mobile_number,
+      const created = await sql<{
+        id: string;
+      }>`insert into drivers (company_id, employee_id, code, name_en, mobile_number,
         second_mobile_number, email, address, area_id, driver_type, account_status,
         outsourced_fee_per_delivered_order, notes)
         values (${companyId}::uuid, ${employeeId}::uuid, ${code}, ${input.name.trim()},
         ${input.mobileNumber.trim()}, ${input.secondMobileNumber?.trim() || null},
         ${input.email?.trim() || null}, ${input.address?.trim() || null}, ${input.areaId ?? null}::uuid,
         ${engagement}, 'active', ${outsourcedFee}, ${input.notes?.trim() || null})
-        returning id`.execute(
-        transaction,
-      );
+        returning id`.execute(transaction);
       if (engagement === "outsourced" && outsourcedFee !== null) {
         await this.syncOutsourcedDriverFeeVersion(
           transaction,
@@ -440,7 +442,9 @@ export class WorkforceConfigurationService {
         address=${input.address?.trim() || null}, area_id=${input.areaId ?? null}::uuid,
         driver_type=${engagement}, outsourced_fee_per_delivered_order=${outsourcedFee},
         notes=${input.notes?.trim() || null}, updated_at=now(), version=version+1
-        where id=${existing.rows[0].id}::uuid and company_id=${companyId}::uuid`.execute(transaction);
+        where id=${existing.rows[0].id}::uuid and company_id=${companyId}::uuid`.execute(
+        transaction,
+      );
       if (engagement === "outsourced" && outsourcedFee !== null) {
         await this.syncOutsourcedDriverFeeVersion(
           transaction,
@@ -512,6 +516,40 @@ export class WorkforceConfigurationService {
     });
 
     if (matching !== undefined) return;
+
+    /* Once an accrual exists, "a rate used by an accrual is immutable"
+       (Documentation/Payroll/PAYROLL_FOUNDATIONS.md) — narrowing the version's
+       effective_to must never leave that accrual's own business date outside
+       the window it was priced from. The database trigger enforces this too
+       and is what actually protects every caller, but failing here first turns
+       a raw constraint violation into a business answer the operator can act
+       on, matching how the rest of this service reports conflicts. */
+    const orphaning = await sql<{ orderNumber: string }>`
+      select o.order_number as "orderNumber"
+        from outsourced_driver_fee_accruals a
+        join outsourced_driver_fee_versions v
+          on v.id = a.fee_rate_version_id and v.company_id = a.company_id
+        join orders o on o.id = a.order_id and o.company_id = a.company_id
+       where v.company_id=${companyId}::uuid
+         and v.driver_id=${driverId}::uuid
+         and v.status='active'
+         and v.effective_from < ${requestedEffectiveFrom}::date
+         and a.status not in ('reversed','recovery_required')
+         and a.accrual_business_date >= ${requestedEffectiveFrom}::date
+       order by o.order_number
+       limit 5
+    `.execute(transaction);
+    if (orphaning.rows.length > 0) {
+      throw new ApplicationException(
+        "outsourced_driver_fee_narrowing_would_orphan_accrual",
+        `This effective date would leave an already-accrued Driver fee (${orphaning.rows
+          .map((row) => row.orderNumber)
+          .join(
+            ", ",
+          )}) without a valid rate for its date. Choose a later effective date, or resolve those accruals first.`,
+        HttpStatus.CONFLICT,
+      );
+    }
 
     await sql`
       update outsourced_driver_fee_versions
@@ -587,7 +625,11 @@ export class WorkforceConfigurationService {
       );
     // Derive a stable code from the name; the operator only types the name.
     const code =
-      name.toUpperCase().replace(/[^A-Z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 40) || "ROLE";
+      name
+        .toUpperCase()
+        .replace(/[^A-Z0-9]+/g, "_")
+        .replace(/^_+|_+$/g, "")
+        .slice(0, 40) || "ROLE";
     try {
       const result = await sql<Record<string, unknown>>`
         insert into employee_roles (company_id, code, name_en, is_driver_role)
@@ -660,12 +702,12 @@ export class WorkforceConfigurationService {
       const existingEmployeeId =
         id === undefined
           ? undefined
-          : (
+          : ((
               await sql<{ employeeId: string | null }>`
                 select employee_id as "employeeId" from drivers
                  where id=${driverId}::uuid and company_id=${companyId}::uuid
               `.execute(transaction)
-            ).rows[0]?.employeeId ?? undefined;
+            ).rows[0]?.employeeId ?? undefined);
 
       const employeeId =
         input.driverType === "employee"
@@ -769,14 +811,7 @@ export class WorkforceConfigurationService {
       );
     }
 
-    await this.writeSalaryVersion(
-      transaction,
-      companyId,
-      id,
-      actorId,
-      salary,
-      effectiveFrom,
-    );
+    await this.writeSalaryVersion(transaction, companyId, id, actorId, salary, effectiveFrom);
     for (const allowance of input.allowances ?? []) {
       await sql`insert into employee_allowances (company_id,employee_id,allowance_type_id,amount,effective_from,effective_to,created_by_account_id)
         values (${companyId}::uuid,${id}::uuid,${allowance.allowanceTypeId}::uuid,${new Decimal(allowance.amount).toFixed(2)},${allowance.effectiveFrom}::date,${allowance.effectiveTo ?? null}::date,${actorId}::uuid)`.execute(
@@ -840,9 +875,8 @@ export class WorkforceConfigurationService {
       `.execute(transaction);
       const requestedDate =
         effectiveFrom ??
-        (
-          await sql<{ today: string }>`select current_date::text as today`.execute(transaction)
-        ).rows[0]!.today;
+        (await sql<{ today: string }>`select current_date::text as today`.execute(transaction))
+          .rows[0]!.today;
 
       // Repeated edits from the Employee form may have produced several
       // contiguous versions with the same salary. Treat a date-only edit as a
@@ -850,10 +884,7 @@ export class WorkforceConfigurationService {
       // draft/calculated Payroll references to it, and remove only the
       // redundant unused versions. Approved history is never consolidated.
       let trailingStart = versions.rows.length;
-      while (
-        trailingStart > 0 &&
-        versions.rows[trailingStart - 1]?.basicSalary === salary
-      ) {
+      while (trailingStart > 0 && versions.rows[trailingStart - 1]?.basicSalary === salary) {
         trailingStart -= 1;
       }
       const trailingSameSalary = versions.rows.slice(trailingStart);
@@ -1001,17 +1032,12 @@ export class WorkforceConfigurationService {
       `.execute(transaction);
     } catch (error) {
       const code =
-        typeof error === "object" && error !== null && "code" in error
-          ? String(error.code)
-          : "";
+        typeof error === "object" && error !== null && "code" in error ? String(error.code) : "";
       const message =
         typeof error === "object" && error !== null && "message" in error
           ? String(error.message)
           : "";
-      if (
-        ["23505", "23P01"].includes(code) &&
-        message.toLowerCase().includes("salary")
-      ) {
+      if (["23505", "23P01"].includes(code) && message.toLowerCase().includes("salary")) {
         throw new ApplicationException(
           "employee_salary_effective_date_overlap",
           "The selected salary effective date overlaps an existing salary period",
@@ -1600,9 +1626,7 @@ export class WorkforceConfigurationService {
     }>`insert into payroll_periods(company_id,period_reference,payroll_month,period_start,period_end,created_by_account_id)
        values(${companyId}::uuid,${`PAY-${start.slice(0, 7)}`},date_trunc('month',${start}::date)::date,${start}::date,${end}::date,${actorId}::uuid)
        on conflict(company_id,period_start,period_end) do update set period_start=excluded.period_start
-       returning id`.execute(
-      database,
-    );
+       returning id`.execute(database);
     const payrollId = randomUUID();
     await sql`insert into payroll_entries(
       id,company_id,payroll_number,payroll_period_id,employee_id,
@@ -1627,9 +1651,7 @@ export class WorkforceConfigurationService {
       net_salary=payroll_entries.net_salary+excluded.employee_driver_commission,
       outstanding_amount=payroll_entries.outstanding_amount+excluded.employee_driver_commission,
       updated_at=now(),version=payroll_entries.version+1
-    returning id`.execute(
-      database,
-    );
+    returning id`.execute(database);
     const actual = await sql<{
       id: string;
     }>`select id from payroll_entries where company_id=${companyId}::uuid and payroll_period_id=${period.rows[0]!.id}::uuid and employee_id=${employeeId}::uuid`.execute(

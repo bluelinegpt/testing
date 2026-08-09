@@ -41,7 +41,9 @@ describe.skipIf(!runDatabaseTests)("Trader service pricing hierarchy", () => {
           );
           await sql`insert into accounts(id,company_id,account_kind,username,password_hash) values
             (${actor}::uuid,${company}::uuid,'company_user',${`tp.a.${actor}`},'x'),
-            (${traderAccount}::uuid,${company}::uuid,'trader',${`tp.t.${trader}`},'x')`.execute(transaction);
+            (${traderAccount}::uuid,${company}::uuid,'trader',${`tp.t.${trader}`},'x')`.execute(
+            transaction,
+          );
           await sql`insert into traders(id,company_id,account_id,code,name_en,mobile_number,created_by_account_id)
             values(${trader}::uuid,${company}::uuid,${traderAccount}::uuid,'TRD-000001','Pricing Trader','971501234567',${actor}::uuid)`.execute(
             transaction,

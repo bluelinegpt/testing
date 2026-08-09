@@ -144,10 +144,7 @@ export class AccountingQueryService {
           }, {});
         return `${parts.year}-${parts.month}-${parts.day}`;
       })();
-    const mappings = await this.repository.effectiveMappings(
-      companyId,
-      date,
-    );
+    const mappings = await this.repository.effectiveMappings(companyId, date);
     const configured = new Set(mappings.map((mapping) => mapping.mappingKey));
     const issuesByKey = new Map<string, AccountingMappingIssue[]>();
     for (const mapping of mappings) {

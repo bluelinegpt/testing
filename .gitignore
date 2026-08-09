@@ -46,6 +46,13 @@ apps/mobile/.dart_tool/
 apps/mobile/.flutter-plugins
 apps/mobile/.flutter-plugins-dependencies
 apps/mobile/build/
+mobile_app/.dart_tool/
+mobile_app/.flutter-plugins
+mobile_app/.flutter-plugins-dependencies
+mobile_app/build/
+
+# Workspace-local development toolchains
+.tools/
 
 # Document QA intermediates
 .docx_review/
@@ -67,3 +74,6 @@ private-files/
 # Generated local accounting artifacts
 Dana/*.xlsx
 outputs/
+
+# Store server bundle
+apps/store/dist-server/

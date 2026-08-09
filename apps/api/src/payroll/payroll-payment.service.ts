@@ -7,6 +7,9 @@ import { type Kysely, sql } from "kysely";
 import { DATABASE } from "../infrastructure/database/database.tokens.js";
 import type { DatabaseSchema } from "../infrastructure/database/database.types.js";
 import { KyselyTransactionManager } from "../infrastructure/database/transaction-manager.js";
+import { BalanceEnforcementCoordinator } from "../accounting/balance-enforcement.coordinator.js";
+import type { BalanceEnforcementResult } from "../accounting/balance-enforcement.coordinator.js";
+import { PaymentFundingAccountService } from "../accounting/payment-funding-account.service.js";
 import { OperationsHistoryWriter } from "../operations/operations-history.writer.js";
 import { ApplicationException } from "../presentation/errors/application.exception.js";
 import type {
@@ -43,6 +46,22 @@ export interface PayrollPaymentProposal {
 }
 
 export interface PayrollPaymentResult {
+  /**
+   * The balance this payment was judged against omits confirmed payments that
+   * never recorded which account funded them. ADVISORY -- it never blocks.
+   *
+   * Optional because only a freshly confirmed payment has it: a replay resolved
+   * from the payment row rather than the stored response body cannot
+   * reconstruct the coverage that applied at the time, and inventing one would
+   * be worse than omitting it.
+   */
+  readonly balanceCoverage?: {
+    readonly generalExpenseCashRowsWithoutCompanyCashAccount: number;
+    readonly outsourcedDriverFeeCashPaymentsWithoutCashAccount: number;
+    readonly payrollPaymentsWithoutCashAccount: number;
+    readonly traderSettlementCashPaymentsWithoutCashAccount: number;
+  };
+  readonly balanceCoverageIncomplete?: boolean;
   readonly paymentId: string;
   readonly paymentNumber: string;
   readonly periodId: string;
@@ -60,6 +79,10 @@ export class PayrollPaymentService {
     @Inject(PayrollOperationalRepository)
     private readonly repository: PayrollOperationalRepository,
     @Inject(OperationsHistoryWriter) private readonly history: OperationsHistoryWriter,
+    @Inject(PaymentFundingAccountService)
+    private readonly fundingAccounts: PaymentFundingAccountService,
+    @Inject(BalanceEnforcementCoordinator)
+    private readonly balanceEnforcement: BalanceEnforcementCoordinator,
   ) {}
 
   public async proposal(input: PayrollPaymentProposalDto): Promise<PayrollPaymentProposal> {
@@ -89,15 +112,19 @@ export class PayrollPaymentService {
       acknowledgementType: input.acknowledgementType,
       acknowledgementValue: input.acknowledgementValue?.trim() ?? "",
       allocations,
+      // Part of the request identity, alongside accountId. Re-sending one key
+      // with a different override reason is a DIFFERENT request -- it asks for
+      // a payment to be authorised on different grounds -- and must be rejected
+      // as a reused key rather than silently replayed as the original.
+      balanceOverrideReason: input.balanceOverrideReason?.trim() ?? "",
       cashVoucherReference: input.cashVoucherReference.trim(),
       externalReference: input.externalReference?.trim() ?? "",
       notes: input.notes?.trim() ?? "",
       paymentDate: input.paymentDate,
       periodId: input.periodId,
+      accountId: input.accountId,
     };
-    const requestHash = createHash("sha256")
-      .update(JSON.stringify(requestMaterial))
-      .digest("hex");
+    const requestHash = createHash("sha256").update(JSON.stringify(requestMaterial)).digest("hex");
 
     return this.transactions.execute(async (transaction) => {
       const reservation = await this.support.reserveIdempotency<PayrollPaymentResult>(transaction, {
@@ -163,23 +190,70 @@ export class PayrollPaymentService {
         "payroll_payment",
         "PAYPMT",
       );
+      // Immediately before the insert: an account deactivated or removed
+      // between proposal and confirmation must fail here, not silently fund
+      // a payment. Throwing inside the transaction rolls back everything
+      // written so far in it.
+      const fundingAccount = await this.fundingAccounts.payrollAccount(input.accountId);
+      // Balance control. The coordinator LOCKS the Cash account, then reads its
+      // balance behind that lock, then judges -- in that order, in this
+      // transaction. Reading before locking would decide against a figure two
+      // concurrent payments could each see and each spend.
+      //
+      // It is called AFTER the funding-account validation above (which is
+      // unchanged) and BEFORE the insert below, so a blocked payment throws
+      // while nothing has been written: the throw rolls back the reference
+      // number and every prior statement in this transaction.
+      const enforcement = await this.balanceEnforcement.evaluate(transaction, {
+        actorId,
+        actorPermissions: this.support.permissions(),
+        deductions: [
+          { accountId: fundingAccount.accountId, amount: total.toFixed(2), kind: "cash" },
+        ],
+        sourceReference: paymentNumber,
+        sourceType: "payroll_payment",
+        ...(input.balanceOverrideReason === undefined
+          ? {}
+          : { overrideReason: input.balanceOverrideReason }),
+      });
+      if (!enforcement.allowed) this.balanceBlocked(enforcement);
       const created = await sql<{ id: string }>`
         insert into payroll_payments (
           company_id, payroll_period_id, payment_number, payment_date,
           payment_method, total_amount, cash_voucher_reference, external_reference,
           acknowledgement_type, acknowledgement_value, notes, status,
-          paid_by_account_id, idempotency_key, request_hash
+          paid_by_account_id, idempotency_key, request_hash, confirmed_at,
+          company_cash_account_id
         ) values (
           ${companyId}::uuid, ${input.periodId}::uuid, ${paymentNumber},
           ${input.paymentDate}::date, 'cash', ${total.toFixed(2)},
           ${input.cashVoucherReference.trim()}, ${input.externalReference?.trim() || null},
           ${input.acknowledgementType}, ${input.acknowledgementValue?.trim() || null},
           ${input.notes?.trim() || null}, 'confirmed', ${actorId}::uuid,
-          ${idempotencyKey!.trim()}, ${requestHash}
+          ${idempotencyKey!.trim()}, ${requestHash},
+          -- Created already confirmed, so the server clock at insert is the
+          -- authoritative confirmation instant. payment_date stays the
+          -- accounting day and is unaffected.
+          now(),
+          ${fundingAccount.accountId}::uuid
         )
         returning id
       `.execute(transaction);
       const paymentId = created.rows[0]!.id;
+      // The override audit is written only now, with the payment row it
+      // justifies already inserted and its id known. Written before the insert
+      // it would survive as an accusation about money that never moved if
+      // anything below rolled the payment back.
+      if (enforcement.requiresOverrideAudit) {
+        await this.balanceEnforcement.recordOverrides(transaction, {
+          actorId,
+          overrideReason: input.balanceOverrideReason ?? "",
+          result: enforcement,
+          sourceEntityId: paymentId,
+          sourceReference: paymentNumber,
+          sourceType: "payroll_payment",
+        });
+      }
       for (let index = 0; index < allocations.length; index += 1) {
         const allocation = allocations[index]!;
         const allocationCreated = await sql<{ id: string }>`
@@ -241,7 +315,9 @@ export class PayrollPaymentService {
         subjectId: paymentId,
         subjectType: "payroll_payment",
       });
-      const result = {
+      const result: PayrollPaymentResult = {
+        balanceCoverage: enforcement.coverage,
+        balanceCoverageIncomplete: enforcement.balanceCoverageIncomplete,
         paymentId,
         paymentNumber,
         periodId: input.periodId,
@@ -460,9 +536,10 @@ export class PayrollPaymentService {
         HttpStatus.CONFLICT,
       );
     }
-    const explicit = input.allocations === undefined
-      ? new Map<string, Decimal>()
-      : new Map(input.allocations.map((line) => [line.lineId, new Decimal(line.amount)]));
+    const explicit =
+      input.allocations === undefined
+        ? new Map<string, Decimal>()
+        : new Map(input.allocations.map((line) => [line.lineId, new Decimal(line.amount)]));
     if (
       input.allocations !== undefined &&
       (explicit.size !== input.allocations.length ||
@@ -550,6 +627,33 @@ export class PayrollPaymentService {
         HttpStatus.BAD_REQUEST,
       );
     }
+  }
+
+  /**
+   * Reject a payment the balance policy will not permit.
+   *
+   * Throwing rather than returning is what guarantees the "no payment, no
+   * Event, no Journal, no audit" outcome: this runs inside the confirmation
+   * transaction and before the insert, so the rollback undoes the reference
+   * number and every statement taken so far, and nothing downstream ever runs.
+   *
+   * The details are the figures the person needs in order to act -- their own
+   * balance, what they tried to pay, where it would land, and the rule that
+   * stopped it. They are business facts about the User's own Company, not
+   * internals: no account ids, no policy row id, no SQL, no coverage internals
+   * beyond the fact that a gap exists and how many records it spans.
+   */
+  private balanceBlocked(enforcement: BalanceEnforcementResult): never {
+    throw new ApplicationException(
+      enforcement.failureCode ?? "balance_would_go_negative",
+      enforcement.failureReason ?? "This payment is not permitted by the balance policy",
+      HttpStatus.CONFLICT,
+      // Formatting comes from the coordinator, which owns the figures. The
+      // local copy this replaced could only describe ONE account and could not
+      // say which; the shared version labels every account by kind, so a
+      // workflow that later funds from two says which one refused.
+      this.balanceEnforcement.blockedDetails(enforcement),
+    );
   }
 
   private async paymentResult(

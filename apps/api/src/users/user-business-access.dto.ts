@@ -15,7 +15,7 @@ import {
 
 import { NormalizeUaeMobile } from "../shared/uae-mobile.js";
 
-const trim = ({ value }: { value: unknown }) => typeof value === "string" ? value.trim() : value;
+const trim = ({ value }: { value: unknown }) => (typeof value === "string" ? value.trim() : value);
 
 export class LinkBusinessUserDto {
   @IsUUID("4") public readonly accountId!: string;
@@ -27,10 +27,15 @@ export class CreateBusinessUserDto {
   @Matches(/^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$/)
   public readonly username!: string;
 
-  @Transform(trim) @IsString() @Length(1, 200)
+  @Transform(trim)
+  @IsString()
+  @Length(1, 200)
   public readonly displayName!: string;
 
-  @IsOptional() @Transform(trim) @IsEmail() @Length(3, 320)
+  @IsOptional()
+  @Transform(trim)
+  @IsEmail()
+  @Length(3, 320)
   public readonly email?: string;
 
   @IsOptional()
@@ -53,12 +58,17 @@ export class CreateBusinessUserDto {
 }
 
 export class EligibleBusinessUsersQueryDto {
-  @IsOptional() @Transform(trim) @IsString() @Length(1, 128)
+  @IsOptional()
+  @Transform(trim)
+  @IsString()
+  @Length(1, 128)
   public readonly search?: string;
 }
 
 export class LegacyBusinessLinkSyncDto {
-  @Transform(trim) @IsString() @Length(64, 64)
+  @Transform(trim)
+  @IsString()
+  @Length(64, 64)
   public readonly previewIdentity!: string;
 
   @IsArray()

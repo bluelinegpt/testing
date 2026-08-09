@@ -99,11 +99,19 @@ export class ApiClient {
     else input.signal?.addEventListener("abort", abortRequest, { once: true });
     const headers: Record<string, string> = { Accept: "application/pdf,image/png,image/jpeg,*/*" };
     if (this.accessToken !== undefined) headers.Authorization = `Bearer ${this.accessToken}`;
+    // Names the request as coming from this application. A cross-site form
+    // cannot set it, which is what makes the HttpOnly session cookie safe to
+    // rely on for state-changing calls.
+    headers["X-Blueline-Session"] = "cookie";
     if (input.body !== undefined) headers["Content-Type"] = "application/json";
     try {
       const response = await fetch(`${webConfiguration.apiBaseUrl}/${path.replace(/^\//, "")}`, {
         ...(input.body === undefined ? {} : { body: JSON.stringify(input.body) }),
         cache: "no-store",
+        // Carries the HttpOnly session cookie, which is what survives a
+        // reload, a pasted URL and a new tab. The token itself is never
+        // readable by page scripts.
+        credentials: "include",
         headers,
         method: input.method,
         signal: controller.signal,
@@ -145,6 +153,10 @@ export class ApiClient {
     const headers: Record<string, string> = { Accept: "application/json" };
     Object.assign(headers, input.headers);
     if (this.accessToken !== undefined) headers.Authorization = `Bearer ${this.accessToken}`;
+    // Names the request as coming from this application. A cross-site form
+    // cannot set it, which is what makes the HttpOnly session cookie safe to
+    // rely on for state-changing calls.
+    headers["X-Blueline-Session"] = "cookie";
     // FormData sets its own multipart Content-Type (with boundary); JSON bodies
     // are serialized and declared as application/json.
     if (input.body !== undefined && !isFormData) headers["Content-Type"] = "application/json";
@@ -157,6 +169,10 @@ export class ApiClient {
       const response = await fetch(`${webConfiguration.apiBaseUrl}/${path.replace(/^\//, "")}`, {
         ...body,
         cache: "no-store",
+        // Carries the HttpOnly session cookie, which is what survives a
+        // reload, a pasted URL and a new tab. The token itself is never
+        // readable by page scripts.
+        credentials: "include",
         headers,
         method: input.method,
         signal: controller.signal,

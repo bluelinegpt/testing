@@ -40,12 +40,15 @@ export class PayrollPeriodService {
     const { actorId, companyId } = this.support.context();
     const range = this.support.monthRange(payrollMonth);
     return this.transactions.execute(async (transaction) => {
-      const reservation = await this.support.reserveIdempotency<PayrollPeriodMutationResult>(transaction, {
-        companyId,
-        idempotencyKey,
-        operation: payrollIdempotencyOperations.periodCreate,
-        payload: { notes: notes?.trim() ?? "", payrollMonth },
-      });
+      const reservation = await this.support.reserveIdempotency<PayrollPeriodMutationResult>(
+        transaction,
+        {
+          companyId,
+          idempotencyKey,
+          operation: payrollIdempotencyOperations.periodCreate,
+          payload: { notes: notes?.trim() ?? "", payrollMonth },
+        },
+      );
       if (reservation.replayResponse !== undefined) return reservation.replayResponse;
       if (reservation.replayResourceId !== undefined) {
         return this.periodResult(transaction, companyId, reservation.replayResourceId);
@@ -120,12 +123,15 @@ export class PayrollPeriodService {
     this.support.assertPermission("payroll.approve");
     const { actorId, companyId } = this.support.context();
     return this.transactions.execute(async (transaction) => {
-      const reservation = await this.support.reserveIdempotency<PayrollPeriodMutationResult>(transaction, {
-        companyId,
-        idempotencyKey,
-        operation: payrollIdempotencyOperations.approval,
-        payload: { periodId },
-      });
+      const reservation = await this.support.reserveIdempotency<PayrollPeriodMutationResult>(
+        transaction,
+        {
+          companyId,
+          idempotencyKey,
+          operation: payrollIdempotencyOperations.approval,
+          payload: { periodId },
+        },
+      );
       if (reservation.replayResponse !== undefined) return reservation.replayResponse;
       if (reservation.replayResourceId !== undefined) {
         return this.periodResult(transaction, companyId, reservation.replayResourceId);
@@ -239,12 +245,15 @@ export class PayrollPeriodService {
     this.support.assertPermission("payroll.approve");
     const { actorId, companyId } = this.support.context();
     return this.transactions.execute(async (transaction) => {
-      const reservation = await this.support.reserveIdempotency<PayrollPeriodMutationResult>(transaction, {
-        companyId,
-        idempotencyKey,
-        operation: payrollIdempotencyOperations.periodClose,
-        payload: { periodId },
-      });
+      const reservation = await this.support.reserveIdempotency<PayrollPeriodMutationResult>(
+        transaction,
+        {
+          companyId,
+          idempotencyKey,
+          operation: payrollIdempotencyOperations.periodClose,
+          payload: { periodId },
+        },
+      );
       if (reservation.replayResponse !== undefined) return reservation.replayResponse;
       if (reservation.replayResourceId !== undefined) {
         return this.periodResult(transaction, companyId, reservation.replayResourceId);
@@ -340,12 +349,15 @@ export class PayrollPeriodService {
     }
     const { actorId, companyId } = this.support.context();
     return this.transactions.execute(async (transaction) => {
-      const reservation = await this.support.reserveIdempotency<PayrollPeriodMutationResult>(transaction, {
-        companyId,
-        idempotencyKey,
-        operation: payrollIdempotencyOperations.periodReversal,
-        payload: { periodId, reason: reason.trim() },
-      });
+      const reservation = await this.support.reserveIdempotency<PayrollPeriodMutationResult>(
+        transaction,
+        {
+          companyId,
+          idempotencyKey,
+          operation: payrollIdempotencyOperations.periodReversal,
+          payload: { periodId, reason: reason.trim() },
+        },
+      );
       if (reservation.replayResponse !== undefined) return reservation.replayResponse;
       if (reservation.replayResourceId !== undefined) {
         return this.periodResult(transaction, companyId, reservation.replayResourceId);

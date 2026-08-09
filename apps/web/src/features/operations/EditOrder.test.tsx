@@ -42,6 +42,11 @@ const detail: OperationsOrderDetail = {
   orderDate: "2026-07-20",
   orderNumber: "ORD-000001",
   orderProfit: "10.00",
+  outsourcedDriverFeeAmount: "0.00",
+  outsourcedDriverFeeOutstanding: "0.00",
+  outsourcedDriverFeePaid: "0.00",
+  outsourcedDriverFeePaymentNumbers: "",
+  outsourcedDriverFeeStatus: "not_applicable",
   returnStatus: "not_applicable",
   serviceFee: "10.00",
   totalDeductions: "10.00",
@@ -62,6 +67,7 @@ describe("Edit order", () => {
     render(
       <OrderDetailsWorkspace
         api={api as unknown as ApiClient}
+        companyId="00000000-0000-4000-8000-000000000001"
         onBack={vi.fn()}
         orderNumber="ORD-000001"
       />,
@@ -90,6 +96,7 @@ describe("Edit order", () => {
     render(
       <OrderDetailsWorkspace
         api={api as unknown as ApiClient}
+        companyId="00000000-0000-4000-8000-000000000001"
         onBack={vi.fn()}
         orderNumber="ORD-000001"
       />,

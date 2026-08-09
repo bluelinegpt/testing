@@ -24,4 +24,26 @@ export abstract class FileStoragePort {
   public abstract readPrivate(companyId: string, storageKey: string): Promise<Uint8Array>;
 
   public abstract deletePrivate(companyId: string, storageKey: string): Promise<void>;
+
+  /**
+   * Write Commerce bytes at a server-generated key.
+   *
+   * Separate from `storePrivate` because the two scope their keys differently
+   * and must not be able to reach each other's namespace: Company objects live
+   * under `logos/{companyId}/`, Commerce objects under
+   * `commerce/{traderCommerceId}/`. Sharing one method would mean one caller's
+   * mistake could write a Commerce file into a Company's tree.
+   *
+   * The key is produced by `commerceStorageKey` and passed in, rather than
+   * derived here, because it encodes the Storefront and Product the upload was
+   * authorised against — facts this adapter has no way to know.
+   */
+  public abstract storeCommerce(
+    storageKey: string,
+    content: Uint8Array,
+  ): Promise<StoredFileReference>;
+
+  public abstract readCommerce(storageKey: string): Promise<Uint8Array>;
+
+  public abstract deleteCommerce(storageKey: string): Promise<void>;
 }

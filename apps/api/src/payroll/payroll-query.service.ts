@@ -25,7 +25,9 @@ export class PayrollQueryService {
     @Inject(PayrollOperationSupport) private readonly support: PayrollOperationSupport,
   ) {}
 
-  public async periods(query: PayrollPeriodListQueryDto): Promise<PayrollPage<Record<string, unknown>>> {
+  public async periods(
+    query: PayrollPeriodListQueryDto,
+  ): Promise<PayrollPage<Record<string, unknown>>> {
     this.support.assertPermission("payroll.view");
     const { companyId } = this.support.context();
     const page = this.support.pagination(query);
@@ -101,7 +103,11 @@ export class PayrollQueryService {
         left join accounts reverser on reverser.id=p.reversed_by_account_id and reverser.company_id=p.company_id
        where p.id=${periodId}::uuid and p.company_id=${companyId}::uuid
     `.execute(this.database);
-    return this.required(result.rows[0], "payroll_period_not_found", "The Payroll period was not found");
+    return this.required(
+      result.rows[0],
+      "payroll_period_not_found",
+      "The Payroll period was not found",
+    );
   }
 
   public async periodSummary(periodId: string): Promise<Record<string, unknown>> {
@@ -197,6 +203,7 @@ export class PayrollQueryService {
              l.basic_salary_snapshot::text as "basicSalary",
              l.allowance_total::text as "allowanceTotal",
              l.employee_driver_commission::text as "driverCommission",
+             l.delivered_order_earnings::text as "deliveredOrderEarnings",
              l.earning_adjustments_total::text as "earningAdjustments",
              (l.deduction_adjustments_total+l.advances)::text as deductions,
              l.gross_earnings::text as "grossEarnings", l.net_salary::text as "netSalary",
@@ -235,6 +242,18 @@ export class PayrollQueryService {
               where link.company_id=l.company_id and link.payroll_entry_id=l.id),'[]'::jsonb)
                as "driverCommissionSources",
              coalesce((select jsonb_agg(jsonb_build_object(
+               'earningId', eoe.id,
+               'orderId', eoe.order_id,
+               'orderNumber', eoe.order_number,
+               'deliveredAt', eoe.delivered_at,
+               'appliedAmount', eoe.applied_amount::text,
+               'ruleId', eoe.rule_id,
+               'allocatedAt', eoe.allocated_at
+             ) order by eoe.delivered_at, eoe.id)
+               from employee_order_earnings eoe
+              where eoe.company_id=l.company_id and eoe.payroll_entry_id=l.id),'[]'::jsonb)
+               as "deliveredOrderEarningSources",
+             coalesce((select jsonb_agg(jsonb_build_object(
                'code', a.allowance_code_snapshot, 'name', a.allowance_name_snapshot,
                'nameAr', a.allowance_name_ar_snapshot, 'amount', a.amount::text,
                'sourceEmployeeAllowanceId', a.source_employee_allowance_id
@@ -267,7 +286,11 @@ export class PayrollQueryService {
           and approver.company_id=l.company_id
        where l.id=${lineId}::uuid and l.company_id=${companyId}::uuid
     `.execute(this.database);
-    return this.required(result.rows[0], "payroll_line_not_found", "The Payroll line was not found");
+    return this.required(
+      result.rows[0],
+      "payroll_line_not_found",
+      "The Payroll line was not found",
+    );
   }
 
   public async exceptions(periodId: string): Promise<readonly Record<string, unknown>[]> {
@@ -286,7 +309,9 @@ export class PayrollQueryService {
     return result.rows;
   }
 
-  public async payments(query: PayrollPaymentListQueryDto): Promise<PayrollPage<Record<string, unknown>>> {
+  public async payments(
+    query: PayrollPaymentListQueryDto,
+  ): Promise<PayrollPage<Record<string, unknown>>> {
     this.support.assertPermission("payroll.view");
     const { companyId } = this.support.context();
     const page = this.support.pagination(query);
@@ -360,6 +385,7 @@ export class PayrollQueryService {
              coalesce((select jsonb_agg(jsonb_build_object(
                'allocationId', a.id, 'employeeId', a.employee_id,
                'employee', l.employee_name_snapshot,
+               'employeeNameAr', l.employee_name_ar_snapshot,
                'employeeNumber', l.employee_number_snapshot,
                'payrollLineReference', l.payroll_number,
                'netSalary', l.net_salary::text,
@@ -392,13 +418,42 @@ export class PayrollQueryService {
                from payroll_payment_allocations a
                join payroll_entries l on l.id=a.payroll_line_id and l.company_id=a.company_id
               where a.company_id=pay.company_id and a.payroll_payment_id=pay.id),'[]'::jsonb)
-               as allocations
+               as allocations,
+             -- Summary values, aggregated in this one query rather than summed
+             -- in the browser: Total Applied is what this Payment allocated,
+             -- Unapplied is whatever it paid beyond that (clamped at zero,
+             -- because over-allocation is prevented upstream and a negative
+             -- would only ever be a rounding artefact), and the employee count
+             -- is the number of allocations it carries.
+             coalesce((select sum(a.allocated_amount) from payroll_payment_allocations a
+                        where a.company_id=pay.company_id
+                          and a.payroll_payment_id=pay.id),0)::text as "totalApplied",
+             greatest(0, pay.total_amount - coalesce((
+               select sum(a.allocated_amount) from payroll_payment_allocations a
+                where a.company_id=pay.company_id and a.payroll_payment_id=pay.id
+             ),0))::text as "unappliedAmount",
+             coalesce((select count(*)::integer from payroll_payment_allocations a
+                        where a.company_id=pay.company_id
+                          and a.payroll_payment_id=pay.id),0) as "employeeCount",
+             -- The whole Period's outstanding balance, so the screen can show
+             -- what remains after this Payment without a second request.
+             p.total_outstanding::text as "remainingPayrollOutstanding",
+             -- Payroll DOES store a separate reversal Payment record, unlike
+             -- Trader Collections, so this relationship is real.
+             pay.reversal_of_payment_id as "reversalOfPaymentId",
+             original.payment_number as "reversalOfPaymentNumber",
+             reversing.id as "reversedByPaymentId",
+             reversing.payment_number as "reversedByPaymentNumber"
         from payroll_payments pay
         join payroll_periods p on p.id=pay.payroll_period_id and p.company_id=pay.company_id
         join companies company on company.id=pay.company_id
         left join accounts payer on payer.id=pay.paid_by_account_id and payer.company_id=pay.company_id
         left join accounts reverser on reverser.id=pay.reversed_by_account_id
           and reverser.company_id=pay.company_id
+        left join payroll_payments original
+          on original.id=pay.reversal_of_payment_id and original.company_id=pay.company_id
+        left join payroll_payments reversing
+          on reversing.reversal_of_payment_id=pay.id and reversing.company_id=pay.company_id
        where pay.id=${paymentId}::uuid and pay.company_id=${companyId}::uuid
     `.execute(this.database);
     return this.required(

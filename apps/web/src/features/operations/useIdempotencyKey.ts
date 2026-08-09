@@ -43,6 +43,9 @@ export function useIdempotencyKey(
  * does not look like a different submission.
  */
 export function materialFingerprint(payload: {
+  driverFeeAllocations?:
+    readonly { readonly accrualId: string; readonly amount: string | number }[] | undefined;
+  driverFeeOffsetAmount?: string;
   excludedOrderIds?: readonly string[];
   expenses: readonly {
     amount: string;
@@ -62,6 +65,10 @@ export function materialFingerprint(payload: {
 }): string {
   const money = (value: string) => (Math.round(Number(value || 0) * 100) / 100).toFixed(2);
   return JSON.stringify({
+    driverFeeAllocations: [...(payload.driverFeeAllocations ?? [])]
+      .map((allocation) => `${allocation.accrualId}|${money(String(allocation.amount))}`)
+      .sort(),
+    driverFeeOffsetAmount: money(payload.driverFeeOffsetAmount ?? "0"),
     excludedOrderIds: [...(payload.excludedOrderIds ?? [])].sort(),
     expenses: payload.expenses
       .map((expense) =>

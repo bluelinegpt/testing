@@ -15,6 +15,7 @@ import { OperationsHistoryWriter } from "../operations/operations-history.writer
 import { ApplicationException } from "../presentation/errors/application.exception.js";
 import { AccountingOperationSupport } from "./accounting-operation.support.js";
 import { GeneralExpenseAccountingEventWriter } from "./general-expense-accounting-event.writer.js";
+import { GeneralExpenseQueryService } from "./general-expense-query.service.js";
 import type {
   CreateGeneralExpenseCategoryDto,
   CreateGeneralExpenseDto,
@@ -83,7 +84,11 @@ function decimal(value: string, code: string): Decimal {
     if (!result.isFinite()) throw new Error("non-finite");
     return result;
   } catch {
-    throw new ApplicationException(code, "A valid decimal value is required", HttpStatus.BAD_REQUEST);
+    throw new ApplicationException(
+      code,
+      "A valid decimal value is required",
+      HttpStatus.BAD_REQUEST,
+    );
   }
 }
 
@@ -99,23 +104,23 @@ export class GeneralExpenseService {
     @Inject(AccountingOperationSupport) private readonly support: AccountingOperationSupport,
     @Inject(GeneralExpenseAccountingEventWriter)
     private readonly eventWriter: GeneralExpenseAccountingEventWriter,
+    @Inject(GeneralExpenseQueryService)
+    private readonly queries: GeneralExpenseQueryService,
     @Inject(FileStoragePort) private readonly storage: FileStoragePort,
     @Inject(ConfigService) configuration: ConfigService<AppConfiguration, true>,
   ) {
     this.storageProvider = configuration.get("files.provider", { infer: true });
   }
 
-  public async createCategory(
-    input: CreateGeneralExpenseCategoryDto,
-    idempotencyKey?: string,
-  ) {
+  public async createCategory(input: CreateGeneralExpenseCategoryDto, idempotencyKey?: string) {
     this.support.assertPermission("accounting.manage");
     const context = this.support.context();
     return this.transactions.execute(async (transaction) => {
-      const reservation = await this.support.reserveIdempotency(
-        transaction,
-        { idempotencyKey, operation: "general_expense_category.create", payload: input },
-      );
+      const reservation = await this.support.reserveIdempotency(transaction, {
+        idempotencyKey,
+        operation: "general_expense_category.create",
+        payload: input,
+      });
       if (reservation.replayResponse !== undefined) return reservation.replayResponse;
       await this.assertCategoryMapping(
         transaction,
@@ -312,9 +317,10 @@ export class GeneralExpenseService {
         "general_expense",
         "EXP",
       );
-      const headerCategory = input.categoryId === undefined
-        ? undefined
-        : await this.category(transaction, input.categoryId, input.expenseDate, false);
+      const headerCategory =
+        input.categoryId === undefined
+          ? undefined
+          : await this.category(transaction, input.categoryId, input.expenseDate, false);
       const created = await sql<{ correlationId: string; id: string }>`
         insert into general_expenses (
           company_id,expense_number,expense_date,accounting_date,category_id,
@@ -363,11 +369,7 @@ export class GeneralExpenseService {
     });
   }
 
-  public async update(
-    expenseId: string,
-    input: UpdateGeneralExpenseDto,
-    idempotencyKey?: string,
-  ) {
+  public async update(expenseId: string, input: UpdateGeneralExpenseDto, idempotencyKey?: string) {
     this.support.assertPermission("accounting.manage");
     const context = this.support.context();
     return this.transactions.execute(async (transaction) => {
@@ -384,9 +386,10 @@ export class GeneralExpenseService {
       if (Number(current.version) !== input.version) {
         this.conflict("accounting_general_expense_stale_version");
       }
-      const headerCategory = input.categoryId === undefined
-        ? undefined
-        : await this.category(transaction, input.categoryId, input.expenseDate, false);
+      const headerCategory =
+        input.categoryId === undefined
+          ? undefined
+          : await this.category(transaction, input.categoryId, input.expenseDate, false);
       await sql`
         update general_expenses
            set expense_date=${input.expenseDate ?? null}::date,
@@ -416,7 +419,11 @@ export class GeneralExpenseService {
       const response = await this.detailFrom(transaction, expenseId);
       await this.support.audit(transaction, {
         action: "general_expense_updated",
-        after: { status: response.status, totalAmount: response.totalAmount, version: response.version },
+        after: {
+          status: response.status,
+          totalAmount: response.totalAmount,
+          version: response.version,
+        },
         correlationId: current.correlationId,
         subjectId: expenseId,
         subjectType: "general_expense",
@@ -461,11 +468,7 @@ export class GeneralExpenseService {
     return this.transition(expenseId, input, key, "cancel");
   }
 
-  public async approve(
-    expenseId: string,
-    input: GeneralExpenseReasonDto,
-    idempotencyKey?: string,
-  ) {
+  public async approve(expenseId: string, input: GeneralExpenseReasonDto, idempotencyKey?: string) {
     this.support.assertPermission("accounting.approve");
     const context = this.support.context();
     return this.transactions.execute(async (transaction) => {
@@ -476,8 +479,10 @@ export class GeneralExpenseService {
       });
       if (reservation.replayResponse !== undefined) return reservation.replayResponse;
       const expense = await this.lockedExpense(transaction, expenseId);
-      if (expense.status !== "submitted") this.conflict("accounting_general_expense_not_approvable");
-      if (Number(expense.version) !== input.version) this.conflict("accounting_general_expense_stale_version");
+      if (expense.status !== "submitted")
+        this.conflict("accounting_general_expense_not_approvable");
+      if (Number(expense.version) !== input.version)
+        this.conflict("accounting_general_expense_stale_version");
       const issues = await this.validationIssues(transaction, expense);
       if (issues.length > 0) {
         throw new ApplicationException(
@@ -537,11 +542,7 @@ export class GeneralExpenseService {
     });
   }
 
-  public async reverse(
-    expenseId: string,
-    input: GeneralExpenseReasonDto,
-    idempotencyKey?: string,
-  ) {
+  public async reverse(expenseId: string, input: GeneralExpenseReasonDto, idempotencyKey?: string) {
     this.support.assertPermission("accounting.reverse");
     const context = this.support.context();
     return this.transactions.execute(async (transaction) => {
@@ -559,7 +560,8 @@ export class GeneralExpenseService {
             : "accounting_general_expense_not_reversible",
         );
       }
-      if (Number(expense.version) !== input.version) this.conflict("accounting_general_expense_stale_version");
+      if (Number(expense.version) !== input.version)
+        this.conflict("accounting_general_expense_stale_version");
       if (!new Decimal(expense.paidAmount).isZero()) {
         this.conflict("accounting_general_expense_active_payments_block_reversal");
       }
@@ -659,7 +661,8 @@ export class GeneralExpenseService {
            where id=${input.paymentId}::uuid and company_id=${context.companyId}::uuid
              and general_expense_id=${expenseId}::uuid
         `.execute(transaction);
-        if (payment.rows[0] === undefined) this.conflict("accounting_general_expense_payment_not_found");
+        if (payment.rows[0] === undefined)
+          this.conflict("accounting_general_expense_payment_not_found");
       }
       const inserted = await sql<{ id: string }>`
         insert into general_expense_attachments (
@@ -901,9 +904,7 @@ export class GeneralExpenseService {
     idempotencyKey: string | undefined,
     action: "cancel" | "reject" | "return_to_draft" | "submit" | "withdraw",
   ) {
-    this.support.assertPermission(
-      action === "reject" ? "accounting.approve" : "accounting.manage",
-    );
+    this.support.assertPermission(action === "reject" ? "accounting.approve" : "accounting.manage");
     const context = this.support.context();
     const transitions = {
       cancel: { allowed: ["draft", "submitted", "rejected"], target: "cancelled" },
@@ -921,10 +922,13 @@ export class GeneralExpenseService {
       });
       if (reservation.replayResponse !== undefined) return reservation.replayResponse;
       const expense = await this.lockedExpense(transaction, expenseId);
-      if (Number(expense.version) !== input.version) this.conflict("accounting_general_expense_stale_version");
+      if (Number(expense.version) !== input.version)
+        this.conflict("accounting_general_expense_stale_version");
       const rule = transitions[action];
       if (!(rule.allowed as readonly string[]).includes(expense.status)) {
-        this.conflict(`accounting_general_expense_not_${action === "submit" ? "submittable" : action + "able"}`);
+        this.conflict(
+          `accounting_general_expense_not_${action === "submit" ? "submittable" : action + "able"}`,
+        );
       }
       if (action === "submit") {
         const issues = await this.validationIssues(transaction, expense);
@@ -1013,8 +1017,7 @@ export class GeneralExpenseService {
           ${line.vatAmount}::numeric,${line.recoverableVatAmount}::numeric,
           ${line.nonrecoverableVatAmount}::numeric,${line.grossAmount}::numeric,
           ${line.expenseCostAmount}::numeric,
-          ${line.input.expenseAccountMappingKey?.trim()
-            || line.category.defaultExpenseMappingKey},
+          ${line.input.expenseAccountMappingKey?.trim() || line.category.defaultExpenseMappingKey},
           ${line.input.traderId ?? null}::uuid,${line.input.driverId ?? null}::uuid,
           ${line.input.employeeId ?? null}::uuid,${line.input.orderId ?? null}::uuid,
           ${context.actorId}::uuid,${context.actorId}::uuid
@@ -1057,18 +1060,21 @@ export class GeneralExpenseService {
     const quantity = decimal(input.quantity, "accounting_general_expense_invalid_quantity");
     const unit = decimal(input.unitAmount, "accounting_general_expense_invalid_unit_amount");
     const net = quantity.mul(unit).toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
+    // greaterThan(0): Quantity and Net must be strictly positive, and
+    // Decimal.isPositive() is a sign check that accepts zero — a zero-value
+    // Expense line would later emit a zero Accounting component and be
+    // rejected at posting time. Unit stays "not negative" so a zero unit
+    // amount is caught through Net rather than on its own.
     if (
-      !quantity.isPositive()
-      || unit.isNegative()
-      || !net.isPositive()
-      || net.greaterThan("9999999999999999.99")
+      !quantity.greaterThan(0) ||
+      unit.isNegative() ||
+      !net.greaterThan(0) ||
+      net.greaterThan("9999999999999999.99")
     ) {
       this.conflict("accounting_general_expense_invalid_line");
     }
     let vatRate = decimal(input.vatRate, "accounting_general_expense_vat_rate_invalid");
-    if (
-      ["zero_rated", "exempt", "out_of_scope"].includes(input.vatTreatment)
-    ) {
+    if (["zero_rated", "exempt", "out_of_scope"].includes(input.vatTreatment)) {
       vatRate = new Decimal(0);
     }
     if (vatRate.isNegative() || vatRate.greaterThan(100)) {
@@ -1174,6 +1180,36 @@ export class GeneralExpenseService {
       if (!(categoryState.rows[0]?.valid ?? false)) {
         issues.push("category_inactive_or_not_effective");
       }
+    }
+    // Accounts must resolve BEFORE approval. Without this the Expense is
+    // approved first and only fails later, during Accounting Event
+    // processing, leaving an approved Expense with no Journal.
+    const accountingDate = expense.accountingDate ?? expense.expenseDate;
+    if (accountingDate !== null) {
+      const mappingKeys = await sql<{ mappingKey: string | null }>`
+        select distinct expense_account_mapping_key as "mappingKey"
+          from general_expense_lines
+         where company_id=${context.companyId}::uuid
+           and general_expense_id=${expense.id}::uuid
+      `.execute(database);
+      for (const { mappingKey } of mappingKeys.rows) {
+        const account = await this.queries.resolveMappingAccount(
+          database,
+          context.companyId,
+          mappingKey,
+          accountingDate,
+          "debit",
+        );
+        if (account.issue !== null) issues.push(`expense_account_${account.status}`);
+      }
+      const payable = await this.queries.resolveMappingAccount(
+        database,
+        context.companyId,
+        "general_expense_payable",
+        accountingDate,
+        "credit",
+      );
+      if (payable.issue !== null) issues.push(`payable_account_${payable.status}`);
     }
     if (row.payeeId !== null && row.payeeType !== null) {
       const entityTables: Readonly<Record<string, string>> = {
@@ -1301,7 +1337,11 @@ export class GeneralExpenseService {
   }
 
   private conflict(code: string): never {
-    throw new ApplicationException(code, "The General Expense operation is not allowed", HttpStatus.CONFLICT);
+    throw new ApplicationException(
+      code,
+      "The General Expense operation is not allowed",
+      HttpStatus.CONFLICT,
+    );
   }
 
   private attachmentMediaType(bytes: Buffer, claimed?: string): string {
@@ -1315,13 +1355,12 @@ export class GeneralExpenseService {
     const detected =
       bytes.subarray(0, 5).toString("ascii") === "%PDF-"
         ? "application/pdf"
-        : bytes.length >= 8
-          && bytes.subarray(0, 8).equals(
-            Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-          )
+        : bytes.length >= 8 &&
+            bytes
+              .subarray(0, 8)
+              .equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
           ? "image/png"
-          : bytes.length >= 3
-            && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff
+          : bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff
             ? "image/jpeg"
             : undefined;
     if (detected === undefined || (claimed !== undefined && claimed !== detected)) {
@@ -1335,9 +1374,8 @@ export class GeneralExpenseService {
   }
 
   private safeAttachmentFilename(value: string | undefined, mediaType: string): string {
-    const extension = mediaType === "application/pdf"
-      ? ".pdf"
-      : mediaType === "image/png" ? ".png" : ".jpg";
+    const extension =
+      mediaType === "application/pdf" ? ".pdf" : mediaType === "image/png" ? ".png" : ".jpg";
     const cleaned = basename(value?.trim() || `expense-evidence${extension}`)
       .replace(/[^A-Za-z0-9._ -]/g, "_")
       .slice(0, 180);
@@ -1347,6 +1385,10 @@ export class GeneralExpenseService {
   }
 
   private staleOrMissing(code: string): never {
-    throw new ApplicationException(code, "The record was not found or has changed", HttpStatus.CONFLICT);
+    throw new ApplicationException(
+      code,
+      "The record was not found or has changed",
+      HttpStatus.CONFLICT,
+    );
   }
 }

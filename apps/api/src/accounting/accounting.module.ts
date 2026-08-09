@@ -1,6 +1,7 @@
 import { Module } from "@nestjs/common";
 
 import { AuthenticationModule } from "../authentication/authentication.module.js";
+import { CompanyConfigurationModule } from "../company-configuration/company-configuration.module.js";
 import { CompanyProfileModule } from "../company-profile/company-profile.module.js";
 import { FilesModule } from "../files/files.module.js";
 import { DriverCollectionPdfService } from "../operations/driver-collection-pdf.service.js";
@@ -34,14 +35,40 @@ import { CashBankController } from "./cash-bank.controller.js";
 import { CashBankManagementService } from "./cash-bank-management.service.js";
 import { CashBankQueryService } from "./cash-bank-query.service.js";
 import { AccountingReportController } from "./accounting-report.controller.js";
+import { BalanceControlController } from "./balance-control.controller.js";
+import { AccountingClosingController } from "./accounting-closing.controller.js";
+import { AccountingBatchController } from "./accounting-batch.controller.js";
+import { AccountingBatchService } from "./accounting-batch.service.js";
+import { AccountingDashboardController } from "./accounting-dashboard.controller.js";
+import { AccountingDashboardService } from "./accounting-dashboard.service.js";
+import { AccountingRecoveryController } from "./accounting-recovery.controller.js";
+import { AccountingRecoveryService } from "./accounting-recovery.service.js";
+import { AccountingReprocessPrecheckService } from "./accounting-reprocess-precheck.service.js";
+import { AccountingClosingReadinessService } from "./accounting-closing-readiness.service.js";
+import { AccountingClosingService } from "./accounting-closing.service.js";
+import { AccountingYearEndService } from "./accounting-year-end.service.js";
+import { BalanceControlService } from "./balance-control.service.js";
+import { BalanceEnforcementCoordinator } from "./balance-enforcement.coordinator.js";
+import { DailyCashActivityController } from "./daily-cash-activity.controller.js";
+import { FundingAccountBalanceService } from "./funding-account-balance.service.js";
+import { FundingAccountLockService } from "./funding-account-lock.service.js";
+import { PaymentFundingAccountService } from "./payment-funding-account.service.js";
+import { PaymentPositionController } from "./payment-position.controller.js";
+import { PaymentPositionService } from "./payment-position.service.js";
+import { DailyCashActivityService } from "./daily-cash-activity.service.js";
 import { AccountingReportExportService } from "./accounting-report-export.service.js";
 import { AccountingReportService } from "./accounting-report.service.js";
 import { AccountingSetupController } from "./accounting-setup.controller.js";
 import { AccountingSetupService } from "./accounting-setup.service.js";
 
 @Module({
-  imports: [AuthenticationModule, CompanyProfileModule, FilesModule],
+  imports: [AuthenticationModule, CompanyConfigurationModule, CompanyProfileModule, FilesModule],
   controllers: [
+    AccountingBatchController,
+    AccountingClosingController,
+    AccountingRecoveryController,
+    AccountingDashboardController,
+    BalanceControlController,
     AccountingManagementController,
     AccountingIntegrationController,
     AccountingController,
@@ -50,10 +77,17 @@ import { AccountingSetupService } from "./accounting-setup.service.js";
     GeneralExpenseController,
     CashBankController,
     AccountingReportController,
+    DailyCashActivityController,
+    PaymentPositionController,
     AccountingSetupController,
   ],
   exports: [
     AccountingFoundationRepository,
+    BalanceControlService,
+    BalanceEnforcementCoordinator,
+    FundingAccountBalanceService,
+    FundingAccountLockService,
+    PaymentFundingAccountService,
     AccountingFoundationService,
     AccountingManagementService,
     AccountingQueryService,
@@ -67,6 +101,20 @@ import { AccountingSetupService } from "./accounting-setup.service.js";
     AccountingReportService,
   ],
   providers: [
+    AccountingBatchService,
+    AccountingDashboardService,
+    AccountingRecoveryService,
+    AccountingReprocessPrecheckService,
+    AccountingClosingReadinessService,
+    AccountingClosingService,
+    AccountingYearEndService,
+    BalanceControlService,
+    BalanceEnforcementCoordinator,
+    DailyCashActivityService,
+    FundingAccountBalanceService,
+    FundingAccountLockService,
+    PaymentFundingAccountService,
+    PaymentPositionService,
     AccountingFoundationRepository,
     AccountMappingResolver,
     AccountingEventProcessor,

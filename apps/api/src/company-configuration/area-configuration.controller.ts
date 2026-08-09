@@ -82,10 +82,7 @@ export class AreaConfigurationController {
 
   @ApiOperation({ summary: "Create an Area under an Emirate" })
   @Post("areas")
-  public create(
-    @Body() input: CreateAreaDto,
-    @Req() request: Request,
-  ): Promise<ConfiguredArea> {
+  public create(@Body() input: CreateAreaDto, @Req() request: Request): Promise<ConfiguredArea> {
     return this.areas.create(input, this.correlationId(request));
   }
 

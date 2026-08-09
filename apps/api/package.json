@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "files": [
-    "dist"
+    "dist",
+    "resources"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
@@ -13,7 +14,11 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "test:database": "vitest run src/authentication/authentication.database.test.ts",
+    "test:communication:database": "vitest run src/communication/communication.customer-session.database.test.ts",
     "test:administration:database": "vitest run src/platform/administration.database.test.ts",
+    "test:platform:database": "vitest run src/platform/platform-administration.database.test.ts",
+    "test:platform-company:database": "vitest run src/platform/platform-company.database.test.ts",
+    "test:platform-company-user:database": "vitest run src/platform/platform-company-user.database.test.ts",
     "test:integrity:database": "vitest run src/infrastructure/database/integrity.database.test.ts",
     "test:provisioning:database": "vitest run src/platform/company-defaults.database.test.ts src/platform/development-company-bootstrap.database.test.ts",
     "test:reconciliation:database": "vitest run src/operations/driver-cash-reconciliation.database.test.ts",
@@ -25,14 +30,28 @@
     "dev:import-areas": "tsx src/platform/run-uae-area-import.ts",
     "db:verify": "tsx src/infrastructure/database/verify-schema.ts",
     "db:reset:dev": "tsx src/platform/run-development-data-reset.ts",
+    "reset:test-data": "tsx src/platform/reset-company-test-data.cli.ts",
+    "accounting:template:export": "tsx src/accounting-template/export-accounting-template.cli.ts",
+    "test:accounting-template": "vitest run src/accounting-template",
+    "test:accounting-template:database": "vitest run src/accounting-template/accounting-template.database.test.ts",
+    "test:reset-tool": "vitest run src/platform/reset-company-test-data.safety.test.ts src/platform/reset-company-test-data.guards.test.ts",
+    "test:reset:database": "vitest run src/platform/reset-company-test-data.database.test.ts",
     "security:bootstrap-platform": "tsx src/platform/run-platform-administrator-bootstrap.ts",
     "security:bootstrap-platform:prod": "node dist/platform/run-platform-administrator-bootstrap.js",
+    "dev:seed-taxonomy": "tsx src/platform/run-marketplace-taxonomy-seed.ts",
+    "dev:seed-commerce": "tsx src/platform/run-commerce-development-seed.ts",
+    "dev:seed-commerce-media": "tsx src/platform/run-commerce-media-seed.ts",
     "dev:bootstrap-company": "tsx src/platform/run-development-company-bootstrap.ts",
     "test:history:database": "vitest run src/operations/operations-history.regression.test.ts",
     "test:reconciliation:http": "vitest run src/operations/reconciliation-http.database.test.ts",
     "dev:seed-reconciliation-demo": "tsx src/platform/run-reconciliation-demo-seed.ts",
     "test:fixture:database": "vitest run src/platform/reconciliation-demo-seed.database.test.ts",
-    "test:company-profile:database": "vitest run src/company-profile/company-profile.database.test.ts"
+    "test:company-profile:database": "vitest run src/company-profile/company-profile.database.test.ts",
+    "test:commerce:database": "vitest run src/storefront/trader-commerce.database.test.ts",
+    "test:commerce-ownership:database": "vitest run src/storefront/trader-commerce-ownership.database.test.ts",
+    "test:commerce-upload:database": "vitest run src/storefront/commerce-media-upload.database.test.ts",
+    "test:marketplace:database": "vitest run src/marketplace/marketplace-taxonomy.database.test.ts",
+    "test:commerce-media:database": "vitest run src/storefront/commerce-media-ownership.database.test.ts"
   },
   "dependencies": {
     "@nestjs/common": "^11.1.28",
@@ -54,7 +73,8 @@
     "pino-http": "^11.0.0",
     "playwright": "^1.62.0",
     "reflect-metadata": "^0.2.2",
-    "rxjs": "^7.8.2"
+    "rxjs": "^7.8.2",
+    "ws": "^8.21.1"
   },
   "devDependencies": {
     "@nestjs/testing": "^11.1.28",
@@ -62,6 +82,7 @@
     "@types/node": "^26.1.1",
     "@types/pg": "^8.20.0",
     "@types/supertest": "^7.2.0",
+    "@types/ws": "^8.18.1",
     "@vitest/coverage-v8": "^4.1.10",
     "supertest": "^7.2.2",
     "tsx": "^4.23.0",

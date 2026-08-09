@@ -353,7 +353,8 @@ export function buildTraderPaymentReceiptHtml(
         `</div>`,
     );
   }
-  const noticeSection = notices.length === 0 ? "" : `<div class="notices">${notices.join("")}</div>`;
+  const noticeSection =
+    notices.length === 0 ? "" : `<div class="notices">${notices.join("")}</div>`;
 
   const summaryLine = (label: string, value: string) =>
     `<div class="summary-line"><span>${escapeHtml(label)}</span><span>${value}</span></div>`;

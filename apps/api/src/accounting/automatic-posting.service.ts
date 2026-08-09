@@ -40,11 +40,13 @@ export class AutomaticPostingService {
              automatic_posting_change_reason as "changeReason",version::text as version
         from accounting_configurations where company_id=${companyId}::uuid
     `.execute(this.database);
-    return result.rows[0] ?? {
-      accountingEnabled: false,
-      automaticPostingEnabled: false,
-      enabledAreas: [],
-    };
+    return (
+      result.rows[0] ?? {
+        accountingEnabled: false,
+        automaticPostingEnabled: false,
+        enabledAreas: [],
+      }
+    );
   }
 
   public async readiness(
@@ -140,30 +142,30 @@ export class AutomaticPostingService {
            and m.effective_from<=${activationDate}::date
            and coalesce(m.effective_to,'infinity'::date)>=${activationDate}::date
       `.execute(database);
-      const mappingAccounts = await Promise.all(required.map(async (key) => {
-        const definition = accountingMandatoryMappings.find((item) => item.key === key);
-        const matchingMappings = mappings.rows.filter((row) => row.key === key);
-        const mapping = matchingMappings[0];
-        const accountId = definition === undefined || mapping === undefined
-          ? null
-          : mapping[definition.field];
-        if (definition === undefined || accountId === null || matchingMappings.length !== 1) {
-          return {
-            accountId,
-            compatible: false,
-            duplicate: matchingMappings.length > 1,
-            key,
-          };
-        }
-        const account = await sql<{
-          accountClass: string;
-          accountType: string;
-          active: boolean;
-          control: boolean;
-          controlType: string | null;
-          normalBalance: string;
-          posting: boolean;
-        }>`
+      const mappingAccounts = await Promise.all(
+        required.map(async (key) => {
+          const definition = accountingMandatoryMappings.find((item) => item.key === key);
+          const matchingMappings = mappings.rows.filter((row) => row.key === key);
+          const mapping = matchingMappings[0];
+          const accountId =
+            definition === undefined || mapping === undefined ? null : mapping[definition.field];
+          if (definition === undefined || accountId === null || matchingMappings.length !== 1) {
+            return {
+              accountId,
+              compatible: false,
+              duplicate: matchingMappings.length > 1,
+              key,
+            };
+          }
+          const account = await sql<{
+            accountClass: string;
+            accountType: string;
+            active: boolean;
+            control: boolean;
+            controlType: string | null;
+            normalBalance: string;
+            posting: boolean;
+          }>`
           select account_type as "accountType",account_class as "accountClass",
                  is_active as active,is_posting_account as posting,
                  is_control_account as control,control_account_type as "controlType",
@@ -171,32 +173,34 @@ export class AutomaticPostingService {
             from chart_of_accounts
            where company_id=${companyId}::uuid and id=${accountId}::uuid
         `.execute(database);
-        const selected = account.rows[0];
-        return {
-          accountId,
-          compatible: selected !== undefined
-            && selected.active
-            && selected.posting
-            && selected.accountType === definition.accountType
-            && definition.accountClasses.includes(selected.accountClass)
-            && selected.normalBalance === (
-              ["asset", "expense"].includes(definition.accountType) ? "debit" : "credit"
-            )
-            && (definition.controlType === undefined
-              || (selected.control && selected.controlType === definition.controlType)),
-          duplicate: false,
-          key,
-        };
-      }));
-      const configured = new Set(mappingAccounts
-        .filter((row) => row.accountId !== null)
-        .map((row) => row.key));
+          const selected = account.rows[0];
+          return {
+            accountId,
+            compatible:
+              selected !== undefined &&
+              selected.active &&
+              selected.posting &&
+              selected.accountType === definition.accountType &&
+              definition.accountClasses.includes(selected.accountClass) &&
+              selected.normalBalance ===
+                (["asset", "expense"].includes(definition.accountType) ? "debit" : "credit") &&
+              (definition.controlType === undefined ||
+                (selected.control && selected.controlType === definition.controlType)),
+            duplicate: false,
+            key,
+          };
+        }),
+      );
+      const configured = new Set(
+        mappingAccounts.filter((row) => row.accountId !== null).map((row) => row.key),
+      );
       const missingMappings = required.filter((key) => !configured.has(key));
       const invalidMappings = mappingAccounts
         .filter((row) => (row.accountId !== null || row.duplicate) && !row.compatible)
         .map((row) => ({ accountId: row.accountId, mappingKey: row.key }));
-      const financialAccountReadiness = area === "cash_bank_management"
-        ? await sql<{ invalid: string; total: string }>`
+      const financialAccountReadiness =
+        area === "cash_bank_management"
+          ? await sql<{ invalid: string; total: string }>`
             select count(*)::text as total,
                    count(*) filter(where a.id is null or not a.is_active
                      or not a.is_posting_account or a.account_type<>'asset'
@@ -211,19 +215,19 @@ export class AutomaticPostingService {
               left join chart_of_accounts a
                 on a.id=f.linked_gl_account_id and a.company_id=f.company_id
           `.execute(database)
-        : undefined;
+          : undefined;
       const blockers = [
         ...(config?.accountingEnabled ? [] : ["manual_accounting_disabled"]),
         ...(config?.baseCurrency === "AED" ? [] : ["base_currency_not_aed"]),
         ...(period.rows[0]?.available ? [] : ["open_fiscal_period_missing"]),
         ...(missingMappings.length === 0 ? [] : ["required_mapping_missing"]),
         ...(invalidMappings.length === 0 ? [] : ["required_mapping_invalid"]),
-        ...(financialAccountReadiness === undefined
-          || financialAccountReadiness.rows[0]?.total !== "0"
+        ...(financialAccountReadiness === undefined ||
+        financialAccountReadiness.rows[0]?.total !== "0"
           ? []
           : ["cash_bank_account_master_missing"]),
-        ...(financialAccountReadiness === undefined
-          || financialAccountReadiness.rows[0]?.invalid === "0"
+        ...(financialAccountReadiness === undefined ||
+        financialAccountReadiness.rows[0]?.invalid === "0"
           ? []
           : ["cash_bank_linked_gl_invalid"]),
       ];
@@ -236,9 +240,10 @@ export class AutomaticPostingService {
         ready: blockers.length === 0,
         requiredMappings: required,
         status: blockers.length === 0 ? "ready" : "not_ready",
-        warnings: area === "driver_expenses"
-          ? ["Driver Collection-owned expenses are posted within the Driver Collection Event"]
-          : [],
+        warnings:
+          area === "driver_expenses"
+            ? ["Driver Collection-owned expenses are posted within the Driver Collection Event"]
+            : [],
       });
     }
     return {
@@ -341,12 +346,7 @@ export class AutomaticPostingService {
     });
   }
 
-  public async setArea(
-    area: string,
-    enabled: boolean,
-    reason: string,
-    idempotencyKey?: string,
-  ) {
+  public async setArea(area: string, enabled: boolean, reason: string, idempotencyKey?: string) {
     this.support.assertPermission("accounting.configuration.manage");
     if (!accountingOperationalAreas.includes(area as AccountingOperationalArea)) {
       throw new ApplicationException(

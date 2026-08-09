@@ -13,10 +13,9 @@ import {
 import { RequestSecurityContextMiddleware } from "../security/request-security-context.middleware.js";
 import { CompanyHostResolver } from "../tenancy/company-host-resolver.js";
 import { TENANT_CONTEXT_ACCESSOR, TenantContextAccessor } from "../tenancy/tenant-context.js";
-import {
-  AuthenticationController,
-  PlatformAuthenticationController,
-} from "./authentication.controller.js";
+import { AccountSetupController } from "./account-setup.controller.js";
+import { AccountSetupService } from "./account-setup.service.js";
+import { AuthenticationController } from "./authentication.controller.js";
 import { AuthenticationGuard } from "./authentication.guard.js";
 import { AuthenticationRepository } from "./authentication.repository.js";
 import { AuthenticationService } from "./authentication.service.js";
@@ -25,14 +24,23 @@ import { SessionTokenService } from "./session-token.service.js";
 import { TemporaryPasswordService } from "./temporary-password.service.js";
 
 @Module({
-  controllers: [AuthenticationController, PlatformAuthenticationController],
+  controllers: [AuthenticationController, AccountSetupController],
   exports: [
     IdentityContextAccessor,
+    AuthenticationService,
     PasswordHasher,
     TemporaryPasswordService,
     TenantContextAccessor,
+    AccountSetupService,
+    // The Platform target-Company guard writes the resolved Company into the
+    // request store. It is exported rather than re-provided so both modules
+    // share the one AsyncLocalStorage instance — two instances would mean the
+    // guard wrote a target the rest of the request could not see.
+    RequestSecurityContextStore,
+    CompanyHostResolver,
   ],
   providers: [
+    AccountSetupService,
     AuthenticationRepository,
     CompanyHostResolver,
     AuthenticationService,

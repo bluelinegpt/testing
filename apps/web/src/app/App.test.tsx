@@ -24,7 +24,9 @@ describe("App", () => {
     vi.stubGlobal("fetch", createFetchMock());
     renderApp();
 
-    expect(screen.getByRole("heading", { name: "Sign in" })).toBeInTheDocument();
+    // The app asks the server whether a session exists before deciding what to
+    // render, so Sign in appears once that answer arrives — never before.
+    expect(await screen.findByRole("heading", { name: "Sign in" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "العربية" }));
 
     expect(await screen.findByRole("heading", { name: "تسجيل الدخول" })).toBeInTheDocument();
@@ -63,18 +65,23 @@ describe("App", () => {
     );
   });
 
-  it("lands on the dashboard after login regardless of the requested route", async () => {
+  it("returns to the requested authorized route after login", async () => {
     const fetchMock = createFetchMock();
     vi.stubGlobal("fetch", fetchMock);
-    // Even when the address bar points elsewhere (e.g. after a reload destroyed
-    // the in-memory session), a fresh sign-in opens the dashboard rather than
-    // resuming whatever path happened to be in the URL.
+    // A deep link that survives the login round trip: when a reload destroys
+    // the in-memory session, signing back in resumes the path the User asked
+    // for rather than dumping them on the default workspace. `landingPath`
+    // still runs the requested path through `canAccessCompanyPath`, so this
+    // only holds for a route the User is authorized to open.
     const router = renderApp("/configuration/areas");
 
     await signIn();
 
-    expect(await screen.findByRole("heading", { level: 1, name: "Dashboard" })).toBeInTheDocument();
-    expect(router.state.location.pathname).toBe("/dashboard");
+    // Both halves matter: the router actually moved there, and the screen for
+    // that route rendered. Asserting only the pathname would pass even if the
+    // page failed to mount.
+    expect(router.state.location.pathname).toBe("/configuration/areas");
+    expect(await screen.findByRole("heading", { level: 1, name: "Areas" })).toBeInTheDocument();
     expect(localStorage.getItem("accessToken")).toBeNull();
   });
 
@@ -167,7 +174,9 @@ describe("App", () => {
     const router = renderApp("/driver-cash-reconciliation");
     await signIn();
 
-    expect(await screen.findByRole("heading", { level: 1, name: "Driver Collections" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Driver Collections" }),
+    ).toBeInTheDocument();
     expect(router.state.location.pathname).toBe("/drivers");
   });
 
@@ -176,7 +185,9 @@ describe("App", () => {
     const router = renderApp("/operations/driver-reconciliations/new");
     await signIn();
 
-    expect(await screen.findByRole("heading", { level: 1, name: "Driver Collections" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Driver Collections" }),
+    ).toBeInTheDocument();
     expect(router.state.location.pathname).toBe("/drivers");
   });
 
@@ -217,8 +228,14 @@ function createFetchMock(permissions: readonly string[] = ["users_roles.manage"]
       status,
     });
 
+  // No session exists until a sign-in happens in the test, which is what the
+  // browser sees on a first visit. The app now asks `auth/me` on load, so a
+  // stub that always answered would render the workspace before any login.
+  let signedIn = false;
+
   return vi.fn().mockImplementation((url: string) => {
     if (url.endsWith("/auth/login")) {
+      signedIn = true;
       return Promise.resolve(
         json({
           accessToken: "t".repeat(43),
@@ -236,6 +253,11 @@ function createFetchMock(permissions: readonly string[] = ["users_roles.manage"]
       );
     }
     if (url.endsWith("/auth/me")) {
+      if (!signedIn) {
+        return Promise.resolve(
+          json({ error: { code: "authentication_required", message: "No session" } }, 401),
+        );
+      }
       return Promise.resolve(
         json({
           companyId: "10000000-0000-4000-8000-000000000001",

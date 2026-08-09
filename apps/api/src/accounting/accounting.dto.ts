@@ -30,6 +30,7 @@ import {
 
 const datePattern = /^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])$/;
 const accountCodePattern = /^[\p{L}\p{N}._/-]+(?: [\p{L}\p{N}._/-]+)*$/u;
+const maxSafeMoneyAmount = 9999999999999.99;
 
 export class AccountingConfigurationDto {
   @IsOptional()
@@ -49,6 +50,16 @@ export class AccountingConfigurationDto {
   @IsOptional()
   @IsIn(["accrual", "cash"])
   public readonly defaultAccountingMethod?: "accrual" | "cash";
+
+  /**
+   * Segregation of Duties for the whole Accounting module. See
+   * `accountingSegregationPolicies` — `strict` always requires a second
+   * authorized user, `conditional` requires one only while another is
+   * available, `single_user` lets one accountant perform every step.
+   */
+  @IsOptional()
+  @IsIn(["strict", "conditional", "single_user"])
+  public readonly segregationPolicy?: "conditional" | "single_user" | "strict";
 
   @IsOptional()
   @IsUUID()
@@ -316,13 +327,18 @@ export class JournalLineDto {
   public readonly lineNumber!: number;
   @IsUUID()
   public readonly accountId!: string;
+  @IsOptional()
+  @IsIn(["debit", "credit"])
+  public readonly amountSide?: "debit" | "credit";
+  @IsOptional()
   @IsNumber({ allowInfinity: false, allowNaN: false, maxDecimalPlaces: 2 })
   @Min(0)
-  @Max(9999999999999999.99)
+  @Max(maxSafeMoneyAmount)
   public readonly debit!: number;
+  @IsOptional()
   @IsNumber({ allowInfinity: false, allowNaN: false, maxDecimalPlaces: 2 })
   @Min(0)
-  @Max(9999999999999999.99)
+  @Max(maxSafeMoneyAmount)
   public readonly credit!: number;
   @IsOptional()
   @IsString()
@@ -428,6 +444,17 @@ export class UpdateJournalDto {
   @IsString()
   @MaxLength(2000)
   public readonly notes?: string | null;
+  // When present, the header update and the full line replacement commit in
+  // ONE transaction (mirroring create-with-lines), so a validation failure on
+  // either side leaves the Journal completely untouched — never a header
+  // change with stale or missing Lines.
+  @IsOptional()
+  @IsArray()
+  @ArrayMinSize(2)
+  @ArrayMaxSize(500)
+  @ValidateNested({ each: true })
+  @Type(() => JournalLineDto)
+  public readonly lines?: readonly JournalLineDto[];
 }
 
 export class ReplaceJournalLinesDto {
@@ -459,7 +486,11 @@ export class ReverseJournalDto extends AccountingReasonDto {
 
 export class JournalListQueryDto {
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) public readonly page?: number;
-  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(200)
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(200)
   public readonly pageSize?: number;
   @IsOptional() @IsString() @MaxLength(100) public readonly journalNumber?: string;
   @IsOptional() @Matches(datePattern) public readonly dateFrom?: string;
@@ -482,15 +513,33 @@ export class JournalListQueryDto {
   @IsOptional() @IsUUID() public readonly postedBy?: string;
   @IsOptional() @IsBoolean() public readonly reversedOnly?: boolean;
   @IsOptional() @IsBoolean() public readonly cancelledOnly?: boolean;
+  // Business sort keys, not column names. An unrecognised value falls back to
+  // the list default rather than erroring, so a stale bookmark still loads.
+  @IsOptional()
+  @IsIn([
+    "businessDate",
+    "createdAt",
+    "description",
+    "journalNumber",
+    "status",
+    "totalCredit",
+    "totalDebit",
+  ])
+  public readonly sortBy?: string;
+  @IsOptional() @IsIn(["asc", "desc"]) public readonly sortDirection?: string;
 }
 
 export class OpeningBalanceLineDto {
   @IsInt() @Min(1) @Max(9999) public readonly lineNumber!: number;
   @IsUUID() public readonly accountId!: string;
   @IsNumber({ allowInfinity: false, allowNaN: false, maxDecimalPlaces: 2 })
-  @Min(0) @Max(9999999999999999.99) public readonly debit!: number;
+  @Min(0)
+  @Max(maxSafeMoneyAmount)
+  public readonly debit!: number;
   @IsNumber({ allowInfinity: false, allowNaN: false, maxDecimalPlaces: 2 })
-  @Min(0) @Max(9999999999999999.99) public readonly credit!: number;
+  @Min(0)
+  @Max(maxSafeMoneyAmount)
+  public readonly credit!: number;
   @IsOptional() @IsString() @MaxLength(1000) public readonly description?: string;
   @IsOptional() @IsString() @MaxLength(80) public readonly subledgerType?: string;
   @IsOptional() @IsUUID() public readonly subledgerId?: string;
@@ -505,22 +554,51 @@ export class CreateOpeningBalanceDto {
   @IsIn(["AED"]) public readonly currency!: "AED";
   @IsOptional() @IsString() @MaxLength(2000) public readonly notes?: string;
   @IsOptional()
-  @IsArray() @ArrayMinSize(2) @ArrayMaxSize(500)
-  @ValidateNested({ each: true }) @Type(() => OpeningBalanceLineDto)
+  @IsNumber({ allowInfinity: false, allowNaN: false, maxDecimalPlaces: 2 })
+  @Min(0.01)
+  @Max(maxSafeMoneyAmount)
+  public readonly openingBalanceAmount?: number;
+  @IsOptional() @IsUUID() public readonly openingBalanceDebitAccountId?: string;
+  @IsOptional() @IsUUID() public readonly openingBalanceCreditAccountId?: string;
+  @IsOptional()
+  @IsArray()
+  @ArrayMinSize(2)
+  @ArrayMaxSize(500)
+  @ValidateNested({ each: true })
+  @Type(() => OpeningBalanceLineDto)
   public readonly lines?: readonly OpeningBalanceLineDto[];
 }
 
 export class UpdateOpeningBalanceDto {
   @IsOptional() @Matches(datePattern) public readonly effectiveDate?: string;
-  @IsOptional() @IsString() @MinLength(1) @MaxLength(1000)
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  @MaxLength(1000)
   public readonly description?: string;
   @IsOptional() @IsString() @MaxLength(2000) public readonly notes?: string | null;
 }
 
 export class ReplaceOpeningBalanceLinesDto {
-  @IsArray() @ArrayMinSize(2) @ArrayMaxSize(500)
-  @ValidateNested({ each: true }) @Type(() => OpeningBalanceLineDto)
-  public readonly lines!: readonly OpeningBalanceLineDto[];
+  @IsOptional()
+  @IsNumber({ allowInfinity: false, allowNaN: false, maxDecimalPlaces: 2 })
+  @Min(0.01)
+  @Max(maxSafeMoneyAmount)
+  public readonly openingBalanceAmount?: number;
+  @IsOptional() @IsUUID() public readonly openingBalanceDebitAccountId?: string;
+  @IsOptional() @IsUUID() public readonly openingBalanceCreditAccountId?: string;
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  @MaxLength(1000)
+  public readonly description?: string;
+  @IsOptional()
+  @IsArray()
+  @ArrayMinSize(2)
+  @ArrayMaxSize(500)
+  @ValidateNested({ each: true })
+  @Type(() => OpeningBalanceLineDto)
+  public readonly lines?: readonly OpeningBalanceLineDto[];
 }
 
 export class ReverseOpeningBalanceDto extends AccountingReasonDto {
@@ -528,16 +606,34 @@ export class ReverseOpeningBalanceDto extends AccountingReasonDto {
   public readonly reversalDate!: string;
 }
 
+/**
+ * Deleting a Draft Batch carries its reason as a query parameter: the shared
+ * `ApiClient.delete` sends neither a body nor headers, and widening it for one
+ * accounting screen would touch every caller. No column stores the reason —
+ * it reaches `audit_events.after_data` and nowhere else — so it is optional.
+ */
+export class DeleteOpeningBalanceQueryDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  public readonly reason?: string;
+}
+
 export class OpeningBalanceListQueryDto {
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) public readonly page?: number;
-  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(200)
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(200)
   public readonly pageSize?: number;
   @IsOptional() @IsString() @MaxLength(100) public readonly batchNumber?: string;
   @IsOptional() @Matches(datePattern) public readonly dateFrom?: string;
   @IsOptional() @Matches(datePattern) public readonly dateTo?: string;
   @IsOptional() @IsUUID() public readonly fiscalYearId?: string;
   @IsOptional() @IsUUID() public readonly fiscalPeriodId?: string;
-  @IsOptional() @IsIn(["draft","validated","approved","posted","reversed"])
+  @IsOptional()
+  @IsIn(["draft", "validated", "approved", "posted", "reversed"])
   public readonly status?: string;
   @IsOptional() @IsUUID() public readonly accountId?: string;
   @IsOptional() @IsUUID() public readonly traderId?: string;
@@ -547,6 +643,10 @@ export class OpeningBalanceListQueryDto {
   @IsOptional() @IsUUID() public readonly approvedBy?: string;
   @IsOptional() @IsUUID() public readonly postedBy?: string;
   @IsOptional() @IsBoolean() public readonly reversedOnly?: boolean;
+  @IsOptional()
+  @IsIn(["batchNumber", "effectiveDate", "status", "totalCredit", "totalDebit"])
+  public readonly sortBy?: string;
+  @IsOptional() @IsIn(["asc", "desc"]) public readonly sortDirection?: string;
 }
 
 export class FiscalCalendarListQueryDto {

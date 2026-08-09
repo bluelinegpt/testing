@@ -21,10 +21,7 @@ export const outsourcedDriverFeeAccrualSources = [
   "authorized_backfill",
 ] as const;
 export const outsourcedDriverFeePaymentMethods = ["cash", "collection_offset"] as const;
-export const outsourcedDriverFeePaymentSources = [
-  "separate_payment",
-  "driver_collection",
-] as const;
+export const outsourcedDriverFeePaymentSources = ["separate_payment", "driver_collection"] as const;
 export const outsourcedDriverFeePaymentStatuses = ["confirmed", "reversed"] as const;
 export const outsourcedDriverFeePermissionCodes = [
   "outsourced_driver_fees.view",
@@ -51,8 +48,7 @@ export const outsourcedDriverFeeEligibilityOutcomes = [
 ] as const;
 export type OutsourcedDriverFeeEligibilityOutcome =
   (typeof outsourcedDriverFeeEligibilityOutcomes)[number];
-export type OutsourcedDriverFeeAccrualStatus =
-  (typeof outsourcedDriverFeeAccrualStatuses)[number];
+export type OutsourcedDriverFeeAccrualStatus = (typeof outsourcedDriverFeeAccrualStatuses)[number];
 
 export interface OutsourcedDriverFeeEligibilityInput {
   readonly activeOrHistoricalAccrualExists: boolean;

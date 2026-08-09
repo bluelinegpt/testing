@@ -37,6 +37,7 @@ const baseData: ManifestData = {
   header: {
     company: {
       hasLogo: false,
+      logoDataUri: null,
       nameAr: null,
       nameEn: "Test Company",
       subtitleAr: null,

@@ -212,7 +212,11 @@ export function AreaWorkspace({ api }: { api: ApiClient }) {
             ))}
           </select>
         </label>
-        <button disabled={page <= 1} onClick={() => setPage((current) => current - 1)} type="button">
+        <button
+          disabled={page <= 1}
+          onClick={() => setPage((current) => current - 1)}
+          type="button"
+        >
           {t("common.previous")}
         </button>
         <span>{t("common.pageOf", { page: result.page, pageCount: lastPage })}</span>

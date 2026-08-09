@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { config as loadEnvironment } from "dotenv";
 import { Pool, type PoolClient } from "pg";
 
+import { accountingJournalSources } from "../../accounting/accounting.constants.js";
 import { configuration } from "../../configuration/environment.js";
 
 const expectedTables = [
@@ -303,9 +304,14 @@ const expectedFunctions = [
   "validate_active_role_permissions",
   "reject_administration_delete",
   "protect_order_manual_identifiers",
-  "trader_collections_accounting_event_capture",
-  "trader_receivables_accounting_event_capture",
-  "trader_settlements_accounting_event_capture",
+  // These three are the TRIGGER names, not the function names. The functions
+  // installed by 20260801120000_accounting_operational_integration are
+  // `capture_trader_*_accounting_event`; verifying the trigger names in a
+  // function list could only ever fail. Corrected to the real function names,
+  // which the migration and the live schema agree on.
+  "capture_trader_collection_accounting_event",
+  "capture_trader_receivable_accounting_event",
+  "capture_trader_settlement_accounting_event",
   "normalize_account_login_identifiers",
   "sync_account_login_identifiers_to_company_user",
   "enforce_single_active_reconciliation_link",
@@ -360,6 +366,8 @@ const expectedConstraints = [
   "general_expense_lines_values_check",
   "general_expense_payments_amount_check",
   "general_expense_payment_rows_destination_check",
+  "general_expense_payment_rows_company_cash_account_fk",
+  "general_expense_payment_rows_company_cash_shape_check",
   "general_expense_attachments_active_check",
   "journal_lines_general_expense_fk",
   "journal_lines_general_expense_payment_fk",
@@ -416,6 +424,7 @@ const expectedIndexes = [
   "general_expense_lines_header_index",
   "general_expense_payments_header_index",
   "general_expense_payment_rows_payment_index",
+  "general_expense_payment_rows_company_cash_account_index",
   "general_expense_attachments_active_unique",
   "company_cash_accounts_code_unique",
   "company_bank_accounts_code_unique",
@@ -458,6 +467,7 @@ const expectedColumns = [
   "accounting_configurations.automatic_posting_areas",
   "accounting_configurations.manual_accounting_activation_date",
   "accounting_configurations.manual_accounting_enabled_at",
+  "accounting_configurations.segregation_policy",
   "accounting_zero_opening_confirmations.effective_date",
   "accounting_zero_opening_confirmations.revoked_at",
   "accounting_events.operational_area",
@@ -571,6 +581,8 @@ const expectedColumns = [
   "general_expense_lines.expense_cost_amount",
   "general_expense_payments.payment_number",
   "general_expense_payment_rows.payment_method",
+  // The drawer a cash row was funded from, distinct from its GL account.
+  "general_expense_payment_rows.company_cash_account_id",
   "fiscal_years.version",
   "opening_balance_batches.version",
   "opening_balance_lines.account_code_snapshot",
@@ -665,6 +677,27 @@ try {
   if (missingConstraints.length > 0) {
     throw new Error(`Missing expected integrity constraints: ${missingConstraints.join(", ")}`);
   }
+  // Enum drift guard, read-only: a closed CHECK list that the application also
+  // declares in code must permit every value the code can emit. Checking names
+  // alone cannot catch this — `journal_entries_source_check` existed and passed
+  // while silently rejecting `cash_bank_management`, so every Cash and Bank
+  // Movement Journal failed on INSERT with 23514.
+  const journalSourceCheck = await client.query<{ definition: string }>(
+    `select pg_get_constraintdef(oid) as definition
+       from pg_constraint
+      where connamespace = 'public'::regnamespace
+        and conname = 'journal_entries_source_check'`,
+  );
+  const journalSourceDefinition = journalSourceCheck.rows[0]?.definition ?? "";
+  const unpermittedJournalSources = accountingJournalSources.filter(
+    (source) => !journalSourceDefinition.includes(`'${source}'`),
+  );
+  if (unpermittedJournalSources.length > 0) {
+    throw new Error(
+      "journal_entries_source_check does not permit every declared Journal source: " +
+        `${unpermittedJournalSources.join(", ")}`,
+    );
+  }
   const indexResult = await client.query<{ indexname: string }>(
     "select indexname from pg_indexes where schemaname = 'public'",
   );
@@ -693,7 +726,9 @@ try {
     (code) => !actualPayrollPermissions.has(code),
   );
   if (missingPayrollPermissions.length > 0) {
-    throw new Error(`Missing expected Payroll permissions: ${missingPayrollPermissions.join(", ")}`);
+    throw new Error(
+      `Missing expected Payroll permissions: ${missingPayrollPermissions.join(", ")}`,
+    );
   }
   const actualAccountingPermissions = new Set(permissionResult.rows.map((row) => row.code));
   const missingAccountingPermissions = expectedAccountingPermissions.filter(

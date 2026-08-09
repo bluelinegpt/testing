@@ -11,7 +11,10 @@ import { TenantContextAccessor } from "../tenancy/tenant-context.js";
 
 import { DriverCollectionPdfService } from "./driver-collection-pdf.service.js";
 import type { ReportLanguage } from "./driver-collection-report-html.js";
-import { buildDriverShipmentManifestHtml, type ManifestData } from "./driver-shipment-manifest-html.js";
+import {
+  buildDriverShipmentManifestHtml,
+  type ManifestData,
+} from "./driver-shipment-manifest-html.js";
 import type { GenerateShipmentManifestDto } from "./operations.dto.js";
 
 const deliveryStatusLabels: Record<string, string> = {
@@ -212,9 +215,22 @@ export class DriverShipmentManifestService {
     companyId: string,
     input: GenerateShipmentManifestDto,
   ): Promise<ManifestData> {
-    this.assertAnyPermission(["reports.export", "orders.assign_driver", "orders.update_delivery_status"]);
+    this.assertAnyPermission([
+      "reports.export",
+      "orders.assign_driver",
+      "orders.update_delivery_status",
+    ]);
     const identity = this.identities.current();
     const { driverId, orders } = await this.resolveOrders(companyId, input);
+    const cancelledOrders = orders.filter((order) => order.deliveryStatus === "cancelled");
+    if (cancelledOrders.length > 0) {
+      throw new ApplicationException(
+        "manifest_order_cancelled",
+        "Cancelled Orders cannot be included in a Driver shipment manifest",
+        HttpStatus.CONFLICT,
+        cancelledOrders.map((order) => order.orderNumber),
+      );
+    }
     const driverResult = await sql<{
       driverType: "employee" | "outsourced";
       mobileNumber: string;
@@ -243,7 +259,8 @@ export class DriverShipmentManifestService {
       : null;
     const totalCod = orders.reduce((sum, row) => sum.plus(row.codAmount), new Decimal(0));
     const totalPackages = orders.reduce((sum, row) => sum + row.packageCount, 0);
-    const countBy = (status: string) => orders.filter((row) => row.deliveryStatus === status).length;
+    const countBy = (status: string) =>
+      orders.filter((row) => row.deliveryStatus === status).length;
     // A short, non-persisted reference for display only — the Manifest is
     // regenerated from live Order data on every request, never stored.
     const manifestNumber = `MAN-${Date.now().toString(36).toUpperCase()}`;
@@ -324,7 +341,9 @@ export class DriverShipmentManifestService {
     // Safe filename (§9): built only from the Driver's name and today's UAE
     // date, both allowlist-stripped defensively rather than trusted as-is.
     const safeDriverName = data.header.driverName.replaceAll(/[^A-Za-z0-9]+/g, "-");
-    const dateStamp = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Dubai" }).format(new Date());
+    const dateStamp = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Dubai" }).format(
+      new Date(),
+    );
     const filename = `Driver-Manifest-${safeDriverName}-${dateStamp}.pdf`;
     return { bytes, filename };
   }

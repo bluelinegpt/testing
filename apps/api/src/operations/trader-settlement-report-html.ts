@@ -231,8 +231,8 @@ function dateOnly(value: string | null): string {
   return value === null ? "" : value.slice(0, 10);
 }
 
-function dateTime(value: string | null): string {
-  return value === null ? "" : value.slice(0, 16).replace("T", " ");
+function dateTime(value: string | null | undefined): string {
+  return value == null ? "" : value.slice(0, 16).replace("T", " ");
 }
 
 /**
@@ -308,7 +308,12 @@ export function buildTraderSettlementStatementHtml(
       : `<div class="bank-section">` +
         (header.sourceBank === null
           ? ""
-          : bankLine(labels.sourceBank, header.sourceBank.bankName, header.sourceBank.accountName, null)) +
+          : bankLine(
+              labels.sourceBank,
+              header.sourceBank.bankName,
+              header.sourceBank.accountName,
+              null,
+            )) +
         (header.beneficiaryBank === null
           ? ""
           : bankLine(
@@ -398,7 +403,8 @@ export function buildTraderSettlementStatementHtml(
         `</div>`,
     );
   }
-  const noticeSection = notices.length === 0 ? "" : `<div class="notices">${notices.join("")}</div>`;
+  const noticeSection =
+    notices.length === 0 ? "" : `<div class="notices">${notices.join("")}</div>`;
 
   const summaryLine = (label: string, value: string) =>
     `<div class="summary-line"><span>${escapeHtml(label)}</span><span>${value}</span></div>`;

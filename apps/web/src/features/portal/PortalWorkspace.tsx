@@ -221,7 +221,9 @@ export function PortalWorkspace({
                         <strong>
                           <bdi>{order.orderNumber}</bdi>
                         </strong>
-                        <span className="cell-secondary">{formatDate(order.orderDate, locale)}</span>
+                        <span className="cell-secondary">
+                          {formatDate(order.orderDate, locale)}
+                        </span>
                       </td>
                       <td>
                         {order.customerName}
@@ -318,8 +320,7 @@ function OrderDetailModal({
   readonly order: PortalOrder;
   readonly onClose: () => void;
 }) {
-  const { i18n, t } = useTranslation();
-  const locale = normalizeLocale(i18n.resolvedLanguage);
+  const { t } = useTranslation();
   const rows = [
     [t("operations.order"), order.orderNumber],
     [t("portal.serialNumber"), order.serialNumber],
@@ -374,9 +375,7 @@ function TraderOrderForm({
 }) {
   const { i18n, t } = useTranslation();
   const locale = normalizeLocale(i18n.resolvedLanguage);
-  const initialArea = order
-    ? areas.find((area) => area.id === order.areaId)
-    : areas[0];
+  const initialArea = order ? areas.find((area) => area.id === order.areaId) : areas[0];
   const [serialNumber, setSerialNumber] = useState(order?.serialNumber ?? "");
   const [referenceNumber, setReferenceNumber] = useState(order?.referenceNumber ?? "");
   const [customerName, setCustomerName] = useState(order?.customerName ?? "");
@@ -397,10 +396,7 @@ function TraderOrderForm({
         area.emirateId,
         {
           id: area.emirateId,
-          name:
-            locale === "ar"
-              ? area.emirateNameAr ?? area.emirateNameEn
-              : area.emirateNameEn,
+          name: locale === "ar" ? (area.emirateNameAr ?? area.emirateNameEn) : area.emirateNameEn,
         },
       ]),
     ).values(),
@@ -529,9 +525,7 @@ function TraderOrderForm({
                 onChange={(event) => {
                   const nextEmirateId = event.target.value;
                   setEmirateId(nextEmirateId);
-                  setAreaId(
-                    areas.find((area) => area.emirateId === nextEmirateId)?.id ?? "",
-                  );
+                  setAreaId(areas.find((area) => area.emirateId === nextEmirateId)?.id ?? "");
                 }}
                 required
                 value={emirateId}
@@ -546,15 +540,11 @@ function TraderOrderForm({
             </label>
             <label className="field">
               <span>{t("portal.deliveryArea")} *</span>
-              <select
-                onChange={(event) => setAreaId(event.target.value)}
-                required
-                value={areaId}
-              >
+              <select onChange={(event) => setAreaId(event.target.value)} required value={areaId}>
                 <option value="">{t("common.select")}</option>
                 {filteredAreas.map((area) => (
                   <option key={area.id} value={area.id}>
-                    {locale === "ar" ? area.nameAr ?? area.nameEn : area.nameEn}
+                    {locale === "ar" ? (area.nameAr ?? area.nameEn) : area.nameEn}
                   </option>
                 ))}
               </select>

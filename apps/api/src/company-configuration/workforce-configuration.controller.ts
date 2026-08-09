@@ -22,6 +22,15 @@ import type {
   DriverSummary,
   WorkforcePage,
 } from "./workforce-configuration.service.js";
+import type { Kysely } from "kysely";
+
+import { DATABASE } from "../infrastructure/database/database.tokens.js";
+import type { DatabaseSchema } from "../infrastructure/database/database.types.js";
+import {
+  EmployeeVariableEarningService,
+  type VariableEarningRule,
+  type VariableEarningRules,
+} from "./employee-variable-earning.service.js";
 import { WorkforceConfigurationService } from "./workforce-configuration.service.js";
 // Runtime classes are required by Nest validation metadata.
 // eslint-disable-next-line @typescript-eslint/consistent-type-imports
@@ -33,6 +42,8 @@ import {
   CreateCommissionRuleDto,
   CreateHrDocumentDto,
   RunCommissionCalculationDto,
+  SaveCollectionEarningRuleDto,
+  SaveDeliveryEarningRuleDto,
   SaveDriverDto,
   SaveEmployeeDto,
 } from "./workforce-configuration.dto.js";
@@ -46,6 +57,9 @@ export class WorkforceConfigurationController {
   public constructor(
     @Inject(WorkforceConfigurationService)
     private readonly workforce: WorkforceConfigurationService,
+    @Inject(EmployeeVariableEarningService)
+    private readonly variableEarningRules: EmployeeVariableEarningService,
+    @Inject(DATABASE) private readonly database: Kysely<DatabaseSchema>,
   ) {}
 
   @Get("employees")
@@ -89,6 +103,45 @@ export class WorkforceConfigurationController {
       employeeId,
       input.isActive,
       input.reason,
+      this.correlationId(request),
+    );
+  }
+
+  /*
+   * Employee Driver variable earnings. Read the timeline, or start a new dated
+   * rate; there is deliberately no update or delete route, because a rate is
+   * history and correcting it means superseding it, not rewriting it.
+   */
+  @Get("employees/:employeeId/variable-earnings")
+  @ApiOperation({ summary: "Delivery and collection earning rules for one Employee" })
+  public variableEarnings(
+    @Param("employeeId", new ParseUUIDPipe()) employeeId: string,
+  ): Promise<VariableEarningRules> {
+    return this.variableEarningRules.rules(this.database, employeeId);
+  }
+
+  @Post("employees/:employeeId/variable-earnings/delivery")
+  public setDeliveryEarningRule(
+    @Param("employeeId", new ParseUUIDPipe()) employeeId: string,
+    @Body() input: SaveDeliveryEarningRuleDto,
+    @Req() request: Request,
+  ): Promise<VariableEarningRule> {
+    return this.variableEarningRules.setDeliveryRule(
+      employeeId,
+      input,
+      this.correlationId(request),
+    );
+  }
+
+  @Post("employees/:employeeId/variable-earnings/collection")
+  public setCollectionEarningRule(
+    @Param("employeeId", new ParseUUIDPipe()) employeeId: string,
+    @Body() input: SaveCollectionEarningRuleDto,
+    @Req() request: Request,
+  ): Promise<VariableEarningRule> {
+    return this.variableEarningRules.setCollectionRule(
+      employeeId,
+      input,
       this.correlationId(request),
     );
   }

@@ -46,8 +46,7 @@ export class GeneralExpenseAccountingEventWriter {
       sourceReference: input.sourceReference,
     };
     const eventHash = createHash("sha256").update(stableJson(identity)).digest("hex");
-    const idempotencyKey =
-      `general-expense:${input.eventType}:${input.sourceEntityId}:v1`;
+    const idempotencyKey = `general-expense:${input.eventType}:${input.sourceEntityId}:v1`;
     const inserted = await sql<{ id: string }>`
       insert into accounting_events (
         company_id,event_type,event_version,source_entity_type,source_entity_id,

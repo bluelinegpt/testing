@@ -1,16 +1,25 @@
 import { useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { useSessionAccess } from "../../app/SessionAccessContext.js";
+import { useListState } from "../accounting/use-list-state.js";
+import { formatDate } from "../../localization/formatters.js";
+import { normalizeLocale } from "../../localization/locale.js";
+
+import {
+  businessDateFilterDefaults,
+  BusinessDateFilterControls,
+} from "./BusinessDateFilterControls.js";
+
 import { ApiError, type ApiClient } from "../../api/api-client.js";
 import type { CompanyBankAccount, OperationsTrader, PagedResponse } from "../../api/contracts.js";
 import { CompanyBrandingContext } from "../../app/CompanyBrandingContext.js";
 import { Modal } from "../../components/Modal.js";
+import { useRouteDetail } from "../../app/use-route-detail.js";
+import { OperationalReference, partyDisplayLabel } from "./OperationalReference.js";
+import { AccountingRelatedPanel } from "../accounting/AccountingRelatedPanel.js";
 import { PageHeader } from "../../components/PageHeader.js";
-import {
-  formatMoneyValue,
-  parseMoneyInput,
-  safeMoneyValue,
-} from "../../utils/numeric-input.js";
+import { formatMoneyValue, parseMoneyInput, safeMoneyValue } from "../../utils/numeric-input.js";
 
 import { type PdfAction, useReconciliationPdfActions } from "./reconciliation-pdf.js";
 import { useIdempotencyKey } from "./useIdempotencyKey.js";
@@ -30,7 +39,9 @@ interface TraderReceivableSummary {
 interface TraderWithBalance {
   readonly outstandingAmount: string;
   readonly traderId: string;
+  readonly traderCode?: string | null;
   readonly traderName: string;
+  readonly traderNameAr?: string | null;
 }
 
 interface TraderReceivableEligibleRow {
@@ -45,10 +56,20 @@ interface TraderReceivableEligibleRow {
   readonly sourceType: string;
   readonly status: string;
   readonly traderId: string;
+  readonly traderCode?: string | null;
   readonly traderName: string;
+  readonly traderNameAr?: string | null;
 }
 
 interface TraderCollectionListRow {
+  /**
+   * Transaction Business Date, from the Collection confirmation instant.
+   *
+   * Deliberately NOT the same thing as the Trader Receivable business date,
+   * which is a separate date-only field with its own meaning.
+   */
+  readonly confirmationBusinessDate?: string | null;
+  readonly confirmedAt?: string | null;
   readonly amountReceived: string;
   readonly collectionId: string;
   readonly collectionNumber: string;
@@ -60,7 +81,9 @@ interface TraderCollectionListRow {
   readonly receivableCount: number;
   readonly receivedBy: string;
   readonly status: "confirmed" | "reversed";
+  readonly traderCode?: string | null;
   readonly traderName: string;
+  readonly traderNameAr?: string | null;
 }
 
 interface TraderAllocationProposalLine {
@@ -87,7 +110,9 @@ interface CreateTraderReceivableResult {
   readonly sourceType: string;
   readonly status: string;
   readonly traderId: string;
+  readonly traderCode?: string | null;
   readonly traderName: string;
+  readonly traderNameAr?: string | null;
 }
 
 interface CreateTraderCollectionResult {
@@ -98,8 +123,13 @@ interface CreateTraderCollectionResult {
   readonly paymentMethod: "bank_transfer" | "cash";
   readonly receivableCount: number;
   readonly remainingDue: string;
+  readonly totalApplied?: string;
+  readonly traderOutstandingBalance?: string;
+  readonly unappliedAmount?: string;
   readonly traderId: string;
+  readonly traderCode?: string | null;
   readonly traderName: string;
+  readonly traderNameAr?: string | null;
 }
 
 interface TraderReceivableCollectionHistoryLine {
@@ -107,6 +137,10 @@ interface TraderReceivableCollectionHistoryLine {
   readonly collectionDate: string;
   readonly collectionId: string;
   readonly collectionNumber: string;
+  /** Domain union, not free text: the backend declares exactly these two. */
+  readonly paymentMethod: "bank_transfer" | "cash";
+  /** Receivable balance remaining after this allocation. Money-as-text. */
+  readonly remainingBalance: string;
   readonly status: "confirmed" | "reversed";
 }
 
@@ -128,7 +162,9 @@ interface TraderReceivableDetail {
   readonly sourceType: string;
   readonly status: string;
   readonly traderId: string;
+  readonly traderCode?: string | null;
   readonly traderName: string;
+  readonly traderNameAr?: string | null;
 }
 
 interface MaskedBankSnapshot {
@@ -145,6 +181,7 @@ interface TraderCollectionAllocationDetail {
   readonly originalAmountDue: string;
   readonly previouslyCollected: string;
   readonly reason: string;
+  readonly receivableId: string;
   readonly receivableNumber: string;
   readonly receivableStatus: string;
   readonly remainingDue: string;
@@ -157,7 +194,13 @@ interface TraderCollectionSummaryTotals {
   readonly previouslyCollected: string;
   readonly receivableCount: number;
   readonly remainingDue: string;
+  /** Sum of what this Collection allocated across its Receivables. */
+  readonly totalApplied?: string;
   readonly totalOriginalAmountDue: string;
+  /** The Trader's total outstanding Receivable balance, all Receivables. */
+  readonly traderOutstandingBalance?: string;
+  /** Amount Received less Total Applied; never negative. */
+  readonly unappliedAmount?: string;
 }
 
 interface TraderCollectionDetail {
@@ -176,7 +219,9 @@ interface TraderCollectionDetail {
   readonly reversedBy: string | null;
   readonly status: "confirmed" | "reversed";
   readonly summary: TraderCollectionSummaryTotals;
+  readonly traderCode?: string | null;
   readonly traderName: string;
+  readonly traderNameAr?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -191,7 +236,13 @@ const sourceTypes = [
   "other",
 ] as const;
 
-const receivableStatuses = ["outstanding", "partially_collected", "collected", "cancelled", "reversed"] as const;
+const receivableStatuses = [
+  "outstanding",
+  "partially_collected",
+  "collected",
+  "cancelled",
+  "reversed",
+] as const;
 
 const emptyReceivableFilters = {
   businessDateFrom: "",
@@ -207,6 +258,7 @@ const emptyReceivableFilters = {
 type ReceivableFilters = typeof emptyReceivableFilters;
 
 const emptyCollectionFilters = {
+  ...businessDateFilterDefaults,
   collectionNumber: "",
   paymentDateFrom: "",
   paymentDateTo: "",
@@ -218,6 +270,22 @@ const emptyCollectionFilters = {
 };
 
 type CollectionFilters = typeof emptyCollectionFilters;
+
+/**
+ * Collection filter names this screen puts in the URL. Module-level and built
+ * once: `useListState` memoizes on this array, so a literal created during
+ * render would produce new state every render and re-fire the request effect.
+ *
+ * ONLY the Collections tab is URL-backed. Receivables keeps local state, and
+ * that is deliberate: the two models share key names (`traderId`,
+ * `receivableNumber`, `status`, `paymentDateFrom`/`To`), so putting both in one
+ * flat query string under their own names would make each ambiguous. Migrating
+ * Receivables later needs distinct keys, not a second hook over the same ones.
+ */
+const collectionFilterKeys = Object.keys(emptyCollectionFilters);
+
+/** Sort keys the Trader Collections endpoint accepts. */
+const collectionSortKeys = new Set(["paymentDate", "collectionNumber"]);
 
 function money(value: string | number | undefined): string {
   return formatMoneyValue(value);
@@ -269,12 +337,19 @@ function receivableStatusLabel(t: (key: string) => string, status: string): stri
  */
 export function TraderReceivablesWorkspace({
   api,
+  collectionDetailId: routeCollectionId,
   permissions,
+  receivableDetailId: routeReceivableId,
 }: {
   api: ApiClient;
+  /** Collection opened by `/trader-receivables/collections/:id`. */
+  collectionDetailId?: string | undefined;
   permissions: readonly string[];
+  /** Receivable opened by `/trader-receivables/:id`. */
+  receivableDetailId?: string | undefined;
 }) {
-  const { t } = useTranslation();
+  const { i18n, t } = useTranslation();
+  const locale = normalizeLocale(i18n.language);
   const branding = useContext(CompanyBrandingContext);
   const reportLanguage = branding?.textLanguage === "ar" ? "ar" : "en";
   const isAdministrator = permissions.includes("users_roles.manage");
@@ -282,27 +357,71 @@ export function TraderReceivablesWorkspace({
   const canReverse = isAdministrator || permissions.includes("trader_receivables.reverse");
   const canViewReport = canManage || permissions.includes("reports.export");
 
-  const [tab, setTab] = useState<"collections" | "receivables">("receivables");
+  // Opening a Collection-filtered URL must land on the Collections tab, or the
+  // restored filters would be invisible. Computed once from the initial query in
+  // a useState initializer — deriving it on every render would fight the User's
+  // own tab clicks.
+  //
+  // This reads the ROUTE PROP, not the `collectionDetailId` returned by
+  // `useRouteDetail` further down. Two reasons, and the first one is fatal:
+  // that binding is a `const` declared after this line, so touching it here
+  // threw `Cannot access 'collectionDetailId' before initialization` on every
+  // render and the whole workspace failed to mount. The second is that they are
+  // the same value at this moment anyway — `useRouteDetail` returns
+  // `routeId ?? localId` and `localId` is undefined on the first render — so
+  // reading the prop is what the initializer always meant.
+  const [tab, setTab] = useState<"collections" | "receivables">(() => {
+    if (routeCollectionId !== undefined) return "collections";
+    const initial = new URLSearchParams(window.location.search);
+    return collectionFilterKeys.some((key) => (initial.get(key)?.trim() ?? "") !== "")
+      ? "collections"
+      : "receivables";
+  });
   const [summary, setSummary] = useState<TraderReceivableSummary>();
   const [summaryError, setSummaryError] = useState<string>();
 
-  const [receivableFilters, setReceivableFilters] = useState<ReceivableFilters>(emptyReceivableFilters);
+  const [receivableFilters, setReceivableFilters] =
+    useState<ReceivableFilters>(emptyReceivableFilters);
   const [receivablePage, setReceivablePage] = useState(1);
   const [receivablePageSize, setReceivablePageSize] = useState<25 | 50 | 100>(25);
-  const [receivableListPage, setReceivableListPage] = useState<PagedResponse<TraderReceivableEligibleRow>>();
+  const [receivableListPage, setReceivableListPage] =
+    useState<PagedResponse<TraderReceivableEligibleRow>>();
   const [receivableListError, setReceivableListError] = useState<string>();
 
-  const [collectionFilters, setCollectionFilters] = useState<CollectionFilters>(emptyCollectionFilters);
-  const [collectionPage, setCollectionPage] = useState(1);
-  const [collectionPageSize, setCollectionPageSize] = useState<25 | 50 | 100>(25);
-  const [collectionListPage, setCollectionListPage] = useState<PagedResponse<TraderCollectionListRow>>();
+  // The URL is the authoritative Collections list state. No parallel local or
+  // session copy of these fields remains to drift out of step with it.
+  const session = useSessionAccess();
+  const collectionList = useListState({
+    companyId: session?.companyId,
+    defaultSortBy: "paymentDate",
+    filterKeys: collectionFilterKeys,
+  });
+  // `useListState` omits empty filters and stores everything as text; the panel
+  // and `filterQuery` expect every key present.
+  const collectionFilters = useMemo<CollectionFilters>(
+    () => ({ ...emptyCollectionFilters, ...collectionList.filters }),
+    [collectionList.filters],
+  );
+  const collectionPage = collectionList.page;
+  const setCollectionPage = collectionList.setPage;
+  const collectionPageSize = collectionList.pageSize;
+  const [collectionListPage, setCollectionListPage] =
+    useState<PagedResponse<TraderCollectionListRow>>();
   const [collectionListError, setCollectionListError] = useState<string>();
 
   const [newReceivableOpen, setNewReceivableOpen] = useState(false);
   const [collectMoneyOpen, setCollectMoneyOpen] = useState(false);
   const [collectMoneyPresetTraderId, setCollectMoneyPresetTraderId] = useState<string>();
-  const [receivableDetailId, setReceivableDetailId] = useState<string>();
-  const [collectionDetailId, setCollectionDetailId] = useState<string>();
+  const {
+    close: closeReceivable,
+    detailId: receivableDetailId,
+    open: openReceivable,
+  } = useRouteDetail("trader_receivable", routeReceivableId);
+  const {
+    close: closeCollection,
+    detailId: collectionDetailId,
+    open: openCollection,
+  } = useRouteDetail("trader_collection", routeCollectionId);
   const [cancelTarget, setCancelTarget] = useState<TraderReceivableEligibleRow>();
   const [reverseTarget, setReverseTarget] = useState<TraderCollectionListRow>();
 
@@ -345,13 +464,31 @@ export function TraderReceivablesWorkspace({
     const params = filterQuery(collectionFilters);
     params.set("page", String(collectionPage));
     params.set("pageSize", String(collectionPageSize));
+    // Allowlisted before it leaves the browser, so a hand-edited URL cannot
+    // send the API a sort key it does not support.
+    if (
+      collectionSortKeys.has(collectionList.sortBy) &&
+      collectionList.sortBy !== "paymentDate"
+    ) {
+      params.set("sortBy", collectionList.sortBy);
+      params.set("sortDirection", collectionList.sortDirection);
+    }
     void api
       .get<PagedResponse<TraderCollectionListRow>>(
         `operations/trader-receivables/collections?${params.toString()}`,
       )
       .then(setCollectionListPage)
       .catch(() => setCollectionListError(t("traderReceivables.detailLoadFailed")));
-  }, [api, canManage, collectionFilters, collectionPage, collectionPageSize, t]);
+  }, [
+    api,
+    canManage,
+    collectionFilters,
+    collectionList.sortBy,
+    collectionList.sortDirection,
+    collectionPage,
+    collectionPageSize,
+    t,
+  ]);
 
   useEffect(() => {
     if (tab === "collections") refreshCollections();
@@ -373,23 +510,23 @@ export function TraderReceivablesWorkspace({
     setReceivableFilters(emptyReceivableFilters);
   };
 
+  // One write, not one per key: switching Date Mode changes several filters
+  // together, and separate writes would each start from stale state. The hook
+  // resets the page to 1 itself.
   const applyCollectionFilter = (change: Partial<CollectionFilters>) => {
-    setCollectionPage(1);
-    setCollectionFilters((current) => ({ ...current, ...change }));
+    collectionList.setFilters(change as Record<string, string>);
   };
-  const clearCollectionFilters = () => {
-    setCollectionPage(1);
-    setCollectionPageSize(25);
-    setCollectionFilters(emptyCollectionFilters);
-  };
+  const clearCollectionFilters = () => collectionList.clearFilters();
 
   const receivableRows = receivableListPage?.items ?? [];
   const receivableTotal = receivableListPage?.total ?? 0;
-  const receivablePageCount = receivableTotal === 0 ? 1 : Math.ceil(receivableTotal / receivablePageSize);
+  const receivablePageCount =
+    receivableTotal === 0 ? 1 : Math.ceil(receivableTotal / receivablePageSize);
 
   const collectionRows = collectionListPage?.items ?? [];
   const collectionTotal = collectionListPage?.total ?? 0;
-  const collectionPageCount = collectionTotal === 0 ? 1 : Math.ceil(collectionTotal / collectionPageSize);
+  const collectionPageCount =
+    collectionTotal === 0 ? 1 : Math.ceil(collectionTotal / collectionPageSize);
 
   const openCollectionPdf = async (row: TraderCollectionListRow, mode: PdfAction) => {
     setPdfError(undefined);
@@ -433,7 +570,11 @@ export function TraderReceivablesWorkspace({
             >
               {t("traderReceivables.newReceivable")}
             </button>
-            <button className="button button-primary" onClick={() => openCollectMoney()} type="button">
+            <button
+              className="button button-primary"
+              onClick={() => openCollectMoney()}
+              type="button"
+            >
               {t("traderReceivables.collectMoney")}
             </button>
             <button className="button button-secondary" onClick={refreshAll} type="button">
@@ -460,10 +601,18 @@ export function TraderReceivablesWorkspace({
       {summary === undefined ? null : <SummaryCards summary={summary} />}
 
       <div className="segmented-control" role="group">
-        <button aria-pressed={tab === "receivables"} onClick={() => setTab("receivables")} type="button">
+        <button
+          aria-pressed={tab === "receivables"}
+          onClick={() => setTab("receivables")}
+          type="button"
+        >
           {t("traderReceivables.tabOutstandingReceivables")}
         </button>
-        <button aria-pressed={tab === "collections"} onClick={() => setTab("collections")} type="button">
+        <button
+          aria-pressed={tab === "collections"}
+          onClick={() => setTab("collections")}
+          type="button"
+        >
           {t("traderReceivables.tabCollections")}
         </button>
       </div>
@@ -508,7 +657,7 @@ export function TraderReceivablesWorkspace({
                       <td className="mono">
                         <button
                           className="link-button"
-                          onClick={() => setReceivableDetailId(row.id)}
+                          onClick={() => openReceivable(row.id)}
                           type="button"
                         >
                           {row.receivableNumber}
@@ -524,7 +673,7 @@ export function TraderReceivablesWorkspace({
                       <td>{money(row.outstandingAmount)}</td>
                       <td>{receivableStatusLabel(t, row.status)}</td>
                       <td className="row-actions">
-                        <button onClick={() => setReceivableDetailId(row.id)} type="button">
+                        <button onClick={() => openReceivable(row.id)} type="button">
                           {t("traderReceivables.actionView")}
                         </button>
                         <button onClick={() => openCollectMoney(row.traderId)} type="button">
@@ -556,7 +705,9 @@ export function TraderReceivablesWorkspace({
               >
                 {t("common.previous")}
               </button>
-              <span>{t("common.pageOf", { page: receivablePage, pageCount: receivablePageCount })}</span>
+              <span>
+                {t("common.pageOf", { page: receivablePage, pageCount: receivablePageCount })}
+              </span>
               <button
                 disabled={receivablePage >= receivablePageCount}
                 onClick={() => setReceivablePage(receivablePage + 1)}
@@ -580,6 +731,16 @@ export function TraderReceivablesWorkspace({
             onChange={applyCollectionFilter}
             onClear={clearCollectionFilters}
           />
+          {/* Date Mode sits beside the list rather than inside the filter bar:
+              the summary it renders describes the response, so it belongs where
+              the response is. All three screens share this one component. */}
+          <BusinessDateFilterControls
+            applied={collectionListPage?.appliedDateMode}
+            businessDateFrom={collectionFilters.businessDateFrom}
+            businessDateTo={collectionFilters.businessDateTo}
+            dateMode={collectionFilters.dateMode}
+            onChange={(patch) => applyCollectionFilter(patch)}
+          />
           <section aria-labelledby="trader-collections-list-heading">
             <h2 id="trader-collections-list-heading">{t("traderReceivables.tabCollections")}</h2>
             <div className="table-scroll-x">
@@ -589,6 +750,11 @@ export function TraderReceivablesWorkspace({
                     <th scope="col">{t("traderReceivables.columnCollectionNumber")}</th>
                     <th scope="col">{t("traderReceivables.columnTrader")}</th>
                     <th scope="col">{t("traderReceivables.columnPaymentDate")}</th>
+                    {/* Never just "Business Date": Trader Receivables carry a
+                        separate date-only business date of their own. */}
+                    <th scope="col">
+                      {t("configuration.businessDay.transactionBusinessDate")}
+                    </th>
                     <th scope="col">{t("traderReceivables.columnPaymentMethod")}</th>
                     <th scope="col">{t("traderReceivables.columnPaymentReference")}</th>
                     <th scope="col">{t("traderReceivables.columnReceivables")}</th>
@@ -607,7 +773,7 @@ export function TraderReceivablesWorkspace({
                       <td className="mono">
                         <button
                           className="link-button"
-                          onClick={() => setCollectionDetailId(row.collectionId)}
+                          onClick={() => openCollection(row.collectionId)}
                           type="button"
                         >
                           {row.collectionNumber}
@@ -615,6 +781,11 @@ export function TraderReceivablesWorkspace({
                       </td>
                       <td>{row.traderName}</td>
                       <td>{row.paymentDate.slice(0, 10)}</td>
+                      <td dir="ltr">
+                        {row.confirmationBusinessDate == null
+                          ? t("configuration.businessDay.historicalTimestampUnavailable")
+                          : formatDate(row.confirmationBusinessDate, locale)}
+                      </td>
                       <td>
                         {t(
                           row.paymentMethod === "cash"
@@ -635,13 +806,18 @@ export function TraderReceivablesWorkspace({
                       <td>{row.receivedBy}</td>
                       <td>
                         {row.isReversed ? (
-                          <span className="badge badge-warning">{t("traderReceivables.columnReversed")}</span>
+                          <span className="badge badge-warning">
+                            {t("traderReceivables.columnReversed")}
+                          </span>
                         ) : (
                           "-"
                         )}
                       </td>
                       <td className="row-actions">
-                        <button onClick={() => setCollectionDetailId(row.collectionId)} type="button">
+                        <button
+                          onClick={() => openCollection(row.collectionId)}
+                          type="button"
+                        >
                           {t("traderReceivables.actionView")}
                         </button>
                         {!canViewReport ? null : (
@@ -701,7 +877,9 @@ export function TraderReceivablesWorkspace({
               >
                 {t("common.previous")}
               </button>
-              <span>{t("common.pageOf", { page: collectionPage, pageCount: collectionPageCount })}</span>
+              <span>
+                {t("common.pageOf", { page: collectionPage, pageCount: collectionPageCount })}
+              </span>
               <button
                 disabled={collectionPage >= collectionPageCount}
                 onClick={() => setCollectionPage(collectionPage + 1)}
@@ -721,7 +899,7 @@ export function TraderReceivablesWorkspace({
           onCreated={(receivableId) => {
             setNewReceivableOpen(false);
             refreshAll();
-            setReceivableDetailId(receivableId);
+            openReceivable(receivableId);
           }}
         />
       )}
@@ -729,12 +907,14 @@ export function TraderReceivablesWorkspace({
       {!collectMoneyOpen ? null : (
         <CollectMoneyDialog
           api={api}
-          {...(collectMoneyPresetTraderId === undefined ? {} : { initialTraderId: collectMoneyPresetTraderId })}
+          {...(collectMoneyPresetTraderId === undefined
+            ? {}
+            : { initialTraderId: collectMoneyPresetTraderId })}
           onClose={() => setCollectMoneyOpen(false)}
           onCollected={(collectionId) => {
             setCollectMoneyOpen(false);
             refreshAll();
-            setCollectionDetailId(collectionId);
+            openCollection(collectionId);
           }}
           reportLanguage={reportLanguage}
         />
@@ -743,9 +923,9 @@ export function TraderReceivablesWorkspace({
       {receivableDetailId === undefined ? null : (
         <ReceivableDetailDialog
           api={api}
-          onClose={() => setReceivableDetailId(undefined)}
+          onClose={() => closeReceivable()}
           onCollectMoney={(traderId) => {
-            setReceivableDetailId(undefined);
+            closeReceivable();
             openCollectMoney(traderId);
           }}
           receivableId={receivableDetailId}
@@ -758,9 +938,9 @@ export function TraderReceivablesWorkspace({
           canReverse={canReverse}
           canViewReport={canViewReport}
           collectionId={collectionDetailId}
-          onClose={() => setCollectionDetailId(undefined)}
+          onClose={() => closeCollection()}
           onReversed={() => {
-            setCollectionDetailId(undefined);
+            closeCollection();
             refreshAll();
           }}
           reportLanguage={reportLanguage}
@@ -791,18 +971,36 @@ export function TraderReceivablesWorkspace({
 function SummaryCards({ summary }: { summary: TraderReceivableSummary }) {
   const { t } = useTranslation();
   const primaryCards: readonly { label: string; value: string }[] = [
-    { label: t("traderReceivables.summaryTotalOutstanding"), value: money(summary.totalOutstandingReceivables) },
-    { label: t("traderReceivables.summaryPartiallyCollected"), value: money(summary.partiallyCollectedAmount) },
-    { label: t("traderReceivables.summaryCollectedThisPeriod"), value: money(summary.collectedThisPeriod) },
-    { label: t("traderReceivables.summaryTotalRemainingDue"), value: money(summary.totalRemainingDue) },
+    {
+      label: t("traderReceivables.summaryTotalOutstanding"),
+      value: money(summary.totalOutstandingReceivables),
+    },
+    {
+      label: t("traderReceivables.summaryPartiallyCollected"),
+      value: money(summary.partiallyCollectedAmount),
+    },
+    {
+      label: t("traderReceivables.summaryCollectedThisPeriod"),
+      value: money(summary.collectedThisPeriod),
+    },
+    {
+      label: t("traderReceivables.summaryTotalRemainingDue"),
+      value: money(summary.totalRemainingDue),
+    },
   ];
   const secondaryCards: readonly { label: string; value: string }[] = [
-    { label: t("traderReceivables.summaryOutstandingCount"), value: String(summary.outstandingReceivablesCount) },
+    {
+      label: t("traderReceivables.summaryOutstandingCount"),
+      value: String(summary.outstandingReceivablesCount),
+    },
     {
       label: t("traderReceivables.summaryTradersOutstanding"),
       value: String(summary.tradersWithOutstandingReceivables),
     },
-    { label: t("traderReceivables.summaryReversedCollections"), value: String(summary.reversedCollections) },
+    {
+      label: t("traderReceivables.summaryReversedCollections"),
+      value: String(summary.reversedCollections),
+    },
   ];
   return (
     <>
@@ -851,7 +1049,10 @@ function ReceivableFilterBar({
       <div className="compact-filters">
         <label className="field">
           <span>{t("traderReceivables.filterTrader")}</span>
-          <select onChange={(event) => onChange({ traderId: event.target.value })} value={filters.traderId}>
+          <select
+            onChange={(event) => onChange({ traderId: event.target.value })}
+            value={filters.traderId}
+          >
             <option value="">{t("common.all")}</option>
             {traders.map((trader) => (
               <option key={trader.id} value={trader.id}>
@@ -870,7 +1071,10 @@ function ReceivableFilterBar({
         </label>
         <label className="field">
           <span>{t("traderReceivables.filterSourceType")}</span>
-          <select onChange={(event) => onChange({ sourceType: event.target.value })} value={filters.sourceType}>
+          <select
+            onChange={(event) => onChange({ sourceType: event.target.value })}
+            value={filters.sourceType}
+          >
             <option value="">{t("common.all")}</option>
             {sourceTypes.map((type) => (
               <option key={type} value={type}>
@@ -889,7 +1093,10 @@ function ReceivableFilterBar({
         </label>
         <label className="field">
           <span>{t("traderReceivables.filterStatus")}</span>
-          <select onChange={(event) => onChange({ status: event.target.value })} value={filters.status}>
+          <select
+            onChange={(event) => onChange({ status: event.target.value })}
+            value={filters.status}
+          >
             <option value="">{t("traderReceivables.statusAll")}</option>
             {receivableStatuses.map((status) => (
               <option key={status} value={status}>
@@ -957,7 +1164,10 @@ function CollectionFilterBar({
       <div className="compact-filters">
         <label className="field">
           <span>{t("traderReceivables.filterTrader")}</span>
-          <select onChange={(event) => onChange({ traderId: event.target.value })} value={filters.traderId}>
+          <select
+            onChange={(event) => onChange({ traderId: event.target.value })}
+            value={filters.traderId}
+          >
             <option value="">{t("common.all")}</option>
             {traders.map((trader) => (
               <option key={trader.id} value={trader.id}>
@@ -982,12 +1192,17 @@ function CollectionFilterBar({
           >
             <option value="">{t("common.all")}</option>
             <option value="cash">{t("traderReceivables.paymentMethodCash")}</option>
-            <option value="bank_transfer">{t("traderReceivables.paymentMethodBankTransfer")}</option>
+            <option value="bank_transfer">
+              {t("traderReceivables.paymentMethodBankTransfer")}
+            </option>
           </select>
         </label>
         <label className="field">
           <span>{t("traderReceivables.filterCollectionStatus")}</span>
-          <select onChange={(event) => onChange({ status: event.target.value })} value={filters.status}>
+          <select
+            onChange={(event) => onChange({ status: event.target.value })}
+            value={filters.status}
+          >
             <option value="">{t("traderReceivables.statusAll")}</option>
             <option value="confirmed">{t("traderReceivables.statusConfirmed")}</option>
             <option value="reversed">{t("traderReceivables.statusReversed")}</option>
@@ -1155,7 +1370,11 @@ function NewReceivableDialog({
             >
               {t("traderReceivables.viewReceivable")}
             </button>
-            <button className="button button-primary" onClick={() => onCreated(created.receivableId)} type="button">
+            <button
+              className="button button-primary"
+              onClick={() => onCreated(created.receivableId)}
+              type="button"
+            >
               {t("common.close")}
             </button>
           </div>
@@ -1181,7 +1400,9 @@ function NewReceivableDialog({
           <label className="field required-field">
             <span>{t("traderReceivables.fieldSourceType")}</span>
             <select
-              onChange={(event) => setSourceType(event.target.value as (typeof sourceTypes)[number])}
+              onChange={(event) =>
+                setSourceType(event.target.value as (typeof sourceTypes)[number])
+              }
               value={sourceType}
             >
               <option value="">{t("traderReceivables.selectSourceType")}</option>
@@ -1202,7 +1423,11 @@ function NewReceivableDialog({
           </label>
           <label className="field required-field">
             <span>{t("traderReceivables.fieldBusinessDate")}</span>
-            <input onChange={(event) => setBusinessDate(event.target.value)} type="date" value={businessDate} />
+            <input
+              onChange={(event) => setBusinessDate(event.target.value)}
+              type="date"
+              value={businessDate}
+            />
           </label>
           <label className="field required-field">
             <span>{t("traderReceivables.fieldAmountDue")}</span>
@@ -1250,7 +1475,10 @@ function CancelReceivableDialog({
   api: ApiClient;
   onCancelled: () => void;
   onClose: () => void;
-  receivable: Pick<TraderReceivableEligibleRow, "id" | "originalAmountDue" | "receivableNumber" | "status" | "traderName">;
+  receivable: Pick<
+    TraderReceivableEligibleRow,
+    "id" | "originalAmountDue" | "receivableNumber" | "status" | "traderName"
+  >;
 }) {
   const { t } = useTranslation();
   const [reason, setReason] = useState("");
@@ -1307,7 +1535,9 @@ function CancelReceivableDialog({
       </dl>
       {cancelled ? (
         <div className="reconciliation-success" role="status">
-          <p>{t("traderReceivables.receivableCancelled", { number: receivable.receivableNumber })}</p>
+          <p>
+            {t("traderReceivables.receivableCancelled", { number: receivable.receivableNumber })}
+          </p>
           <div className="modal-actions">
             <button className="button button-primary" onClick={onClose} type="button">
               {t("common.close")}
@@ -1326,7 +1556,11 @@ function CancelReceivableDialog({
               <button className="button button-secondary" onClick={onClose} type="button">
                 {t("common.cancel")}
               </button>
-              <button className="button button-primary" disabled={saving || reason.trim() === ""} type="submit">
+              <button
+                className="button button-primary"
+                disabled={saving || reason.trim() === ""}
+                type="submit"
+              >
                 {saving ? t("common.saving") : t("traderReceivables.confirmCancel")}
               </button>
             </div>
@@ -1352,7 +1586,8 @@ function ReceivableDetailDialog({
   onCollectMoney: (traderId: string) => void;
   receivableId: string;
 }) {
-  const { t } = useTranslation();
+  const { i18n, t } = useTranslation();
+  const reportLanguage = i18n.resolvedLanguage ?? "en";
   const [detail, setDetail] = useState<TraderReceivableDetail>();
   const [error, setError] = useState<string>();
   const [cancelOpen, setCancelOpen] = useState(false);
@@ -1383,7 +1618,9 @@ function ReceivableDetailDialog({
         </div>
       )}
       {detail === undefined ? (
-        error === undefined ? <div className="loading-row">{t("common.loading")}</div> : null
+        error === undefined ? (
+          <div className="loading-row">{t("common.loading")}</div>
+        ) : null
       ) : (
         <>
           <dl className="reconciliation-summary">
@@ -1393,7 +1630,18 @@ function ReceivableDetailDialog({
             </div>
             <div className="detail-line">
               <dt>{t("traderReceivables.fieldTrader")}</dt>
-              <dd>{detail.traderName}</dd>
+              <dd>
+                <OperationalReference
+                  identifier={detail.traderCode}
+                  reference={partyDisplayLabel(
+                    detail.traderCode,
+                    detail.traderName,
+                    detail.traderNameAr,
+                    reportLanguage,
+                  )}
+                  type="trader"
+                />
+              </dd>
             </div>
             <div className="detail-line">
               <dt>{t("traderReceivables.columnSourceType")}</dt>
@@ -1456,7 +1704,9 @@ function ReceivableDetailDialog({
           </dl>
 
           <section aria-labelledby="receivable-collection-history-heading">
-            <h3 id="receivable-collection-history-heading">{t("traderReceivables.collectionHistory")}</h3>
+            <h3 id="receivable-collection-history-heading">
+              {t("traderReceivables.collectionHistory")}
+            </h3>
             {detail.collections.length === 0 ? (
               <p className="empty-state">{t("traderReceivables.noCollectionHistory")}</p>
             ) : (
@@ -1466,16 +1716,36 @@ function ReceivableDetailDialog({
                     <tr>
                       <th scope="col">{t("traderReceivables.columnCollectionNumber")}</th>
                       <th scope="col">{t("traderReceivables.columnPaymentDate")}</th>
+                      <th scope="col">{t("traderReceivables.columnPaymentMethod")}</th>
                       <th scope="col">{t("traderReceivables.amountCollectedNow")}</th>
+                      <th scope="col">{t("traderReceivables.columnOutstandingAmount")}</th>
                       <th scope="col">{t("common.status")}</th>
                     </tr>
                   </thead>
                   <tbody>
                     {detail.collections.map((line) => (
                       <tr key={line.collectionId}>
-                        <td className="mono">{line.collectionNumber}</td>
+                        <td className="mono">
+                          <OperationalReference
+                            identifier={line.collectionId}
+                            reference={line.collectionNumber}
+                            type="trader_collection"
+                          />
+                        </td>
                         <td>{line.collectionDate.slice(0, 10)}</td>
+                        <td>
+                          {line.paymentMethod === undefined
+                            ? "—"
+                            : t(
+                                line.paymentMethod === "cash"
+                                  ? "traderReceivables.paymentMethodCash"
+                                  : "traderReceivables.paymentMethodBankTransfer",
+                              )}
+                        </td>
                         <td>{money(line.amountCollected)}</td>
+                        {/* Receivable balance remaining after this allocation,
+                            computed by the backend. */}
+                        <td>{line.remainingBalance === undefined ? "—" : money(line.remainingBalance)}</td>
                         <td>
                           {t(
                             line.status === "reversed"
@@ -1490,6 +1760,14 @@ function ReceivableDetailDialog({
               </div>
             )}
           </section>
+
+          {/* Additive Accounting link-through; renders nothing for a User
+              without Accounting access. */}
+          <AccountingRelatedPanel
+            api={api}
+            sourceId={receivableId}
+            sourceType="trader_receivable"
+          />
 
           <div className="modal-actions">
             {!collectible ? null : (
@@ -1556,7 +1834,7 @@ function CollectMoneyDialog({
   reportLanguage,
 }: {
   api: ApiClient;
-  initialTraderId?: string;
+  initialTraderId?: string | undefined;
   onClose: () => void;
   onCollected: (collectionId: string) => void;
   reportLanguage: "ar" | "en";
@@ -1569,9 +1847,11 @@ function CollectMoneyDialog({
   const [trader, setTrader] = useState<TraderWithBalance>();
 
   // Step 2 — Outstanding receivables (server-paginated, filterable).
-  const [outstandingPage, setOutstandingPage] = useState<PagedResponse<TraderReceivableEligibleRow>>();
+  const [outstandingPage, setOutstandingPage] =
+    useState<PagedResponse<TraderReceivableEligibleRow>>();
   const [outstandingError, setOutstandingError] = useState<string>();
-  const [outstandingFilters, setOutstandingFilters] = useState<OutstandingFilters>(emptyOutstandingFilters);
+  const [outstandingFilters, setOutstandingFilters] =
+    useState<OutstandingFilters>(emptyOutstandingFilters);
   const [outstandingPageIndex, setOutstandingPageIndex] = useState(1);
   const outstandingRows = outstandingPage?.items ?? [];
   const outstandingTotal = outstandingPage?.total ?? 0;
@@ -1581,7 +1861,9 @@ function CollectMoneyDialog({
   const [amount, setAmount] = useState("");
   const [proposal, setProposal] = useState<TraderAllocationProposal>();
   const [proposalError, setProposalError] = useState<string>();
-  const [allocations, setAllocations] = useState<readonly { amount: string; receivableId: string }[]>([]);
+  const [allocations, setAllocations] = useState<
+    readonly { amount: string; receivableId: string }[]
+  >([]);
 
   // Step 4 — Payment details.
   const [paymentDate, setPaymentDate] = useState(() => new Date().toISOString().slice(0, 10));
@@ -1745,7 +2027,10 @@ function CollectMoneyDialog({
     if (!parsedLineAmount.ok) allocationErrors.push(t("traderReceivables.invalidAmount"));
     if (lineAmount < 0) allocationErrors.push(t("traderReceivables.allocationNegative"));
     const proposedLine = proposalLineById.get(line.receivableId);
-    if (proposedLine !== undefined && lineAmount > safeMoneyValue(proposedLine.outstandingBefore) + 0.001) {
+    if (
+      proposedLine !== undefined &&
+      lineAmount > safeMoneyValue(proposedLine.outstandingBefore) + 0.001
+    ) {
       allocationErrors.push(t("traderReceivables.allocationExceedsOutstanding"));
     }
   }
@@ -1761,7 +2046,8 @@ function CollectMoneyDialog({
   });
   const remainingDueAfter = (proposal?.allocations ?? []).reduce((sum, line) => {
     const current = allocations.find((row) => row.receivableId === line.receivableId)?.amount;
-    const paidNow = current === undefined ? safeMoneyValue(line.proposedAmount) : safeMoneyValue(current);
+    const paidNow =
+      current === undefined ? safeMoneyValue(line.proposedAmount) : safeMoneyValue(current);
     return sum + Math.max(0, safeMoneyValue(line.outstandingBefore) - paidNow);
   }, 0);
 
@@ -1825,11 +2111,14 @@ function CollectMoneyDialog({
       `Trader-Receipt-${confirmed.collectionNumber}.pdf`,
       mode,
     );
-    if (requestError !== undefined) setPdfError(message(requestError, t("traderReceivables.pdfGenerationFailed")));
+    if (requestError !== undefined)
+      setPdfError(message(requestError, t("traderReceivables.pdfGenerationFailed")));
   };
 
   const filteredTraders = (tradersWithBalance ?? []).filter((row) =>
-    traderSearch.trim() === "" ? true : row.traderName.toLowerCase().includes(traderSearch.trim().toLowerCase()),
+    traderSearch.trim() === ""
+      ? true
+      : row.traderName.toLowerCase().includes(traderSearch.trim().toLowerCase()),
   );
 
   return (
@@ -1842,7 +2131,9 @@ function CollectMoneyDialog({
     >
       {confirmed !== undefined ? (
         <div className="reconciliation-success" role="status">
-          <p>{t("traderReceivables.collectionConfirmed", { number: confirmed.collectionNumber })}</p>
+          <p>
+            {t("traderReceivables.collectionConfirmed", { number: confirmed.collectionNumber })}
+          </p>
           <dl className="reconciliation-summary">
             <div className="detail-line">
               <dt>{t("traderReceivables.columnCollectionNumber")}</dt>
@@ -1891,14 +2182,30 @@ function CollectMoneyDialog({
             </div>
           )}
           <div className="modal-actions">
-            <button disabled={pdf.busy !== undefined} onClick={() => void openConfirmedPdf("preview")} type="button">
-              {pdf.busy === "preview" ? t("common.loading") : t("traderReceivables.actionPreviewReceipt")}
+            <button
+              disabled={pdf.busy !== undefined}
+              onClick={() => void openConfirmedPdf("preview")}
+              type="button"
+            >
+              {pdf.busy === "preview"
+                ? t("common.loading")
+                : t("traderReceivables.actionPreviewReceipt")}
             </button>
-            <button disabled={pdf.busy !== undefined} onClick={() => void openConfirmedPdf("print")} type="button">
+            <button
+              disabled={pdf.busy !== undefined}
+              onClick={() => void openConfirmedPdf("print")}
+              type="button"
+            >
               {pdf.busy === "print" ? t("common.loading") : t("traderReceivables.actionPrint")}
             </button>
-            <button disabled={pdf.busy !== undefined} onClick={() => void openConfirmedPdf("download")} type="button">
-              {pdf.busy === "download" ? t("common.loading") : t("traderReceivables.actionDownloadPdf")}
+            <button
+              disabled={pdf.busy !== undefined}
+              onClick={() => void openConfirmedPdf("download")}
+              type="button"
+            >
+              {pdf.busy === "download"
+                ? t("common.loading")
+                : t("traderReceivables.actionDownloadPdf")}
             </button>
             <button
               className="button button-secondary"
@@ -1907,7 +2214,11 @@ function CollectMoneyDialog({
             >
               {t("traderReceivables.viewCollection")}
             </button>
-            <button className="button button-primary" onClick={() => onCollected(confirmed.collectionId)} type="button">
+            <button
+              className="button button-primary"
+              onClick={() => onCollected(confirmed.collectionId)}
+              type="button"
+            >
               {t("common.done")}
             </button>
           </div>
@@ -1939,7 +2250,9 @@ function CollectMoneyDialog({
                     <li key={option.traderId}>
                       <button onClick={() => chooseTrader(option)} type="button">
                         {option.traderName} —{" "}
-                        {t("traderReceivables.traderBalanceDue", { amount: money(option.outstandingAmount) })}
+                        {t("traderReceivables.traderBalanceDue", {
+                          amount: money(option.outstandingAmount),
+                        })}
                       </button>
                     </li>
                   ))}
@@ -1963,12 +2276,16 @@ function CollectMoneyDialog({
               {/* Step 2 — Outstanding Receivables */}
               <section className="workspace-step">
                 <h3>{t("traderReceivables.stepOutstandingReceivables")}</h3>
-                {outstandingError === undefined ? null : <div className="alert alert-error">{outstandingError}</div>}
+                {outstandingError === undefined ? null : (
+                  <div className="alert alert-error">{outstandingError}</div>
+                )}
                 <div className="compact-filters">
                   <label className="field">
                     <span>{t("traderReceivables.filterReceivableNumber")}</span>
                     <input
-                      onChange={(event) => applyOutstandingFilter({ receivableNumber: event.target.value })}
+                      onChange={(event) =>
+                        applyOutstandingFilter({ receivableNumber: event.target.value })
+                      }
                       type="search"
                       value={outstandingFilters.receivableNumber}
                     />
@@ -1976,7 +2293,9 @@ function CollectMoneyDialog({
                   <label className="field">
                     <span>{t("traderReceivables.filterSourceType")}</span>
                     <select
-                      onChange={(event) => applyOutstandingFilter({ sourceType: event.target.value })}
+                      onChange={(event) =>
+                        applyOutstandingFilter({ sourceType: event.target.value })
+                      }
                       value={outstandingFilters.sourceType}
                     >
                       <option value="">{t("common.all")}</option>
@@ -1990,7 +2309,9 @@ function CollectMoneyDialog({
                   <label className="field">
                     <span>{t("traderReceivables.filterSourceReference")}</span>
                     <input
-                      onChange={(event) => applyOutstandingFilter({ sourceReference: event.target.value })}
+                      onChange={(event) =>
+                        applyOutstandingFilter({ sourceReference: event.target.value })
+                      }
                       type="search"
                       value={outstandingFilters.sourceReference}
                     />
@@ -1998,7 +2319,9 @@ function CollectMoneyDialog({
                   <label className="field">
                     <span>{t("traderReceivables.filterBusinessDateFrom")}</span>
                     <input
-                      onChange={(event) => applyOutstandingFilter({ businessDateFrom: event.target.value })}
+                      onChange={(event) =>
+                        applyOutstandingFilter({ businessDateFrom: event.target.value })
+                      }
                       type="date"
                       value={outstandingFilters.businessDateFrom}
                     />
@@ -2006,7 +2329,9 @@ function CollectMoneyDialog({
                   <label className="field">
                     <span>{t("traderReceivables.filterBusinessDateTo")}</span>
                     <input
-                      onChange={(event) => applyOutstandingFilter({ businessDateTo: event.target.value })}
+                      onChange={(event) =>
+                        applyOutstandingFilter({ businessDateTo: event.target.value })
+                      }
                       type="date"
                       value={outstandingFilters.businessDateTo}
                     />
@@ -2014,13 +2339,19 @@ function CollectMoneyDialog({
                   <label className="field field-checkbox">
                     <input
                       checked={outstandingFilters.outstandingOnly}
-                      onChange={(event) => applyOutstandingFilter({ outstandingOnly: event.target.checked })}
+                      onChange={(event) =>
+                        applyOutstandingFilter({ outstandingOnly: event.target.checked })
+                      }
                       type="checkbox"
                     />
                     <span>{t("traderReceivables.filterOutstandingOnly")}</span>
                   </label>
                   <div className="filter-actions">
-                    <button className="button button-secondary" onClick={clearOutstandingFilters} type="button">
+                    <button
+                      className="button button-secondary"
+                      onClick={clearOutstandingFilters}
+                      type="button"
+                    >
                       {t("traderReceivables.clearFilters")}
                     </button>
                   </div>
@@ -2074,7 +2405,10 @@ function CollectMoneyDialog({
                       {t("common.previous")}
                     </button>
                     <span>
-                      {t("common.pageOf", { page: outstandingPageIndex, pageCount: outstandingPageCount })}
+                      {t("common.pageOf", {
+                        page: outstandingPageIndex,
+                        pageCount: outstandingPageCount,
+                      })}
                     </span>
                     <button
                       disabled={outstandingPageIndex >= outstandingPageCount}
@@ -2103,7 +2437,9 @@ function CollectMoneyDialog({
                 </label>
                 {amount.trim() === "" ? null : (
                   <>
-                    {proposalError === undefined ? null : <div className="alert alert-error">{proposalError}</div>}
+                    {proposalError === undefined ? null : (
+                      <div className="alert alert-error">{proposalError}</div>
+                    )}
                     {allocationErrors.length === 0 ? null : (
                       <div className="alert alert-error" role="alert">
                         {[...new Set(allocationErrors)].map((line) => (
@@ -2125,9 +2461,11 @@ function CollectMoneyDialog({
                         <tbody>
                           {(proposal?.allocations ?? []).map((line) => {
                             const current =
-                              allocations.find((row) => row.receivableId === line.receivableId)?.amount ??
-                              line.proposedAmount;
-                            const after = money(Number(line.outstandingBefore) - Number(current || 0));
+                              allocations.find((row) => row.receivableId === line.receivableId)
+                                ?.amount ?? line.proposedAmount;
+                            const after = money(
+                              Number(line.outstandingBefore) - Number(current || 0),
+                            );
                             return (
                               <tr key={line.receivableId}>
                                 <td className="mono">{line.receivableNumber}</td>
@@ -2137,7 +2475,9 @@ function CollectMoneyDialog({
                                   <input
                                     inputMode="decimal"
                                     min="0"
-                                    onChange={(event) => setLineAmount(line.receivableId, event.target.value)}
+                                    onChange={(event) =>
+                                      setLineAmount(line.receivableId, event.target.value)
+                                    }
                                     step="0.01"
                                     type="number"
                                     value={current}
@@ -2181,33 +2521,48 @@ function CollectMoneyDialog({
                 <h3>{t("traderReceivables.stepPaymentDetails")}</h3>
                 <label className="field required-field">
                   <span>{t("traderReceivables.fieldPaymentDate")}</span>
-                  <input onChange={(event) => setPaymentDate(event.target.value)} type="date" value={paymentDate} />
+                  <input
+                    onChange={(event) => setPaymentDate(event.target.value)}
+                    type="date"
+                    value={paymentDate}
+                  />
                 </label>
                 <label className="field required-field">
                   <span>{t("traderReceivables.fieldPaymentMethod")}</span>
                   <select
-                    onChange={(event) => setPaymentMethod(event.target.value as "bank_transfer" | "cash")}
+                    onChange={(event) =>
+                      setPaymentMethod(event.target.value as "bank_transfer" | "cash")
+                    }
                     value={paymentMethod}
                   >
                     <option value="cash">{t("traderReceivables.paymentMethodCash")}</option>
-                    <option value="bank_transfer">{t("traderReceivables.paymentMethodBankTransfer")}</option>
+                    <option value="bank_transfer">
+                      {t("traderReceivables.paymentMethodBankTransfer")}
+                    </option>
                   </select>
                 </label>
                 {paymentMethod !== "bank_transfer" ? null : (
                   <>
                     <label className="field required-field">
                       <span>{t("traderReceivables.fieldCompanyBankAccount")}</span>
-                      <select onChange={(event) => setBankAccountId(event.target.value)} value={bankAccountId}>
+                      <select
+                        onChange={(event) => setBankAccountId(event.target.value)}
+                        value={bankAccountId}
+                      >
                         <option value="">{t("traderReceivables.selectBankAccount")}</option>
                         {companyBanks.map((account) => (
                           <option key={account.id} value={account.id}>
                             {account.bankName} — {account.accountName}
-                            {account.accountNumberMasked === null ? "" : ` (${account.accountNumberMasked})`}
+                            {account.accountNumberMasked === null
+                              ? ""
+                              : ` (${account.accountNumberMasked})`}
                           </option>
                         ))}
                       </select>
                       {companyBanks.length === 0 ? (
-                        <span className="field-hint">{t("traderReceivables.noActiveBankAccounts")}</span>
+                        <span className="field-hint">
+                          {t("traderReceivables.noActiveBankAccounts")}
+                        </span>
                       ) : null}
                     </label>
                     <label className="field required-field">
@@ -2257,7 +2612,9 @@ function CollectMoneyDialog({
                       <>
                         <div className="detail-line">
                           <dt>{t("traderReceivables.reviewCompanyBankAccount")}</dt>
-                          <dd>{companyBanks.find((account) => account.id === bankAccountId)?.bankName}</dd>
+                          <dd>
+                            {companyBanks.find((account) => account.id === bankAccountId)?.bankName}
+                          </dd>
                         </div>
                         <div className="detail-line">
                           <dt>{t("traderReceivables.reviewPaymentReference")}</dt>
@@ -2343,7 +2700,8 @@ function CollectionDetailDialog({
       `Trader-Receipt-${detail?.collectionNumber ?? collectionId}.pdf`,
       mode,
     );
-    if (requestError !== undefined) setPdfError(message(requestError, t("traderReceivables.pdfGenerationFailed")));
+    if (requestError !== undefined)
+      setPdfError(message(requestError, t("traderReceivables.pdfGenerationFailed")));
   };
 
   return (
@@ -2365,7 +2723,9 @@ function CollectionDetailDialog({
         </div>
       )}
       {detail === undefined ? (
-        error === undefined ? <div className="loading-row">{t("common.loading")}</div> : null
+        error === undefined ? (
+          <div className="loading-row">{t("common.loading")}</div>
+        ) : null
       ) : (
         <>
           <dl className="reconciliation-summary">
@@ -2375,7 +2735,18 @@ function CollectionDetailDialog({
             </div>
             <div className="detail-line">
               <dt>{t("traderReceivables.fieldTrader")}</dt>
-              <dd>{detail.traderName}</dd>
+              <dd>
+                <OperationalReference
+                  identifier={detail.traderCode}
+                  reference={partyDisplayLabel(
+                    detail.traderCode,
+                    detail.traderName,
+                    detail.traderNameAr,
+                    reportLanguage,
+                  )}
+                  type="trader"
+                />
+              </dd>
             </div>
             <div className="detail-line">
               <dt>{t("common.status")}</dt>
@@ -2410,7 +2781,9 @@ function CollectionDetailDialog({
                 <dt>{t("traderReceivables.fieldCompanyBankAccount")}</dt>
                 <dd>
                   {detail.companyBankAccount.bankName} — {detail.companyBankAccount.accountName} (
-                  {detail.companyBankAccount.ibanMasked || detail.companyBankAccount.accountNumberMasked})
+                  {detail.companyBankAccount.ibanMasked ||
+                    detail.companyBankAccount.accountNumberMasked}
+                  )
                 </dd>
               </div>
             )}
@@ -2467,7 +2840,15 @@ function CollectionDetailDialog({
               <tbody>
                 {detail.allocations.map((line) => (
                   <tr key={line.receivableNumber}>
-                    <td className="mono">{line.receivableNumber}</td>
+                    <td className="mono">
+                      {/* The Receivable route takes its identifier; the
+                          Receivable Number stays what the User reads. */}
+                      <OperationalReference
+                        identifier={line.receivableId}
+                        reference={line.receivableNumber}
+                        type="trader_receivable"
+                      />
+                    </td>
                     <td>{sourceTypeLabel(t, line.sourceType)}</td>
                     <td className="mono">{line.sourceReference ?? "-"}</td>
                     <td>{line.businessDate.slice(0, 10)}</td>
@@ -2504,19 +2885,66 @@ function CollectionDetailDialog({
               <dt>{t("traderReceivables.reviewTotalRemainingDue")}</dt>
               <dd>{money(detail.summary.remainingDue)}</dd>
             </div>
+            {/* Total Applied is the sum this Collection allocated; Unapplied is
+                whatever the Trader paid beyond it. Both come from the backend,
+                which clamps Unapplied at zero. */}
+            {detail.summary.totalApplied === undefined ? null : (
+              <div className="detail-line">
+                <dt>{t("traderReceivables.totalApplied")}</dt>
+                <dd>{money(detail.summary.totalApplied)}</dd>
+              </div>
+            )}
+            {detail.summary.unappliedAmount === undefined ? null : (
+              <div className="detail-line">
+                <dt>{t("traderReceivables.unappliedAmount")}</dt>
+                <dd>{money(detail.summary.unappliedAmount)}</dd>
+              </div>
+            )}
+            {detail.summary.traderOutstandingBalance === undefined ? null : (
+              <div className="detail-line detail-line-total">
+                <dt>{t("traderReceivables.traderOutstandingBalance")}</dt>
+                <dd>
+                  <strong>{money(detail.summary.traderOutstandingBalance)}</strong>
+                </dd>
+              </div>
+            )}
           </dl>
+
+          {/* Additive Accounting link-through; renders nothing for a User
+              without Accounting access. */}
+          <AccountingRelatedPanel
+            api={api}
+            sourceId={collectionId}
+            sourceType="trader_collection"
+          />
 
           <div className="modal-actions">
             {!canViewReport ? null : (
               <>
-                <button disabled={pdf.busy !== undefined} onClick={() => void openPdf("preview")} type="button">
-                  {pdf.busy === "preview" ? t("common.loading") : t("traderReceivables.actionPreviewReceipt")}
+                <button
+                  disabled={pdf.busy !== undefined}
+                  onClick={() => void openPdf("preview")}
+                  type="button"
+                >
+                  {pdf.busy === "preview"
+                    ? t("common.loading")
+                    : t("traderReceivables.actionPreviewReceipt")}
                 </button>
-                <button disabled={pdf.busy !== undefined} onClick={() => void openPdf("print")} type="button">
+                <button
+                  disabled={pdf.busy !== undefined}
+                  onClick={() => void openPdf("print")}
+                  type="button"
+                >
                   {pdf.busy === "print" ? t("common.loading") : t("traderReceivables.actionPrint")}
                 </button>
-                <button disabled={pdf.busy !== undefined} onClick={() => void openPdf("download")} type="button">
-                  {pdf.busy === "download" ? t("common.loading") : t("traderReceivables.actionDownloadPdf")}
+                <button
+                  disabled={pdf.busy !== undefined}
+                  onClick={() => void openPdf("download")}
+                  type="button"
+                >
+                  {pdf.busy === "download"
+                    ? t("common.loading")
+                    : t("traderReceivables.actionDownloadPdf")}
                 </button>
               </>
             )}
@@ -2589,9 +3017,12 @@ function ReverseCollectionDialog({
     setSaving(true);
     setError(undefined);
     try {
-      await api.post(`operations/trader-receivables/collections/${collection.collectionId}/reverse`, {
-        reason: reason.trim(),
-      });
+      await api.post(
+        `operations/trader-receivables/collections/${collection.collectionId}/reverse`,
+        {
+          reason: reason.trim(),
+        },
+      );
       onReversed();
       setReversed(true);
     } catch (submitError) {

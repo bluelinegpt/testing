@@ -1,0 +1,611 @@
+/*
+ * Platform Portal styling.
+ *
+ * Deliberately its own small stylesheet rather than a shared design package.
+ * The Prompt 1 audit found no `packages/` workspace convention in this
+ * repository — `apps/store` also carries its own CSS — so extracting one now
+ * would mean inventing a workspace shape and touching the Company Portal's
+ * styling to prove it, for the sake of a handful of primitives.
+ *
+ * The Portal is visually distinct on purpose. An administrator who can act
+ * across every Company should never be one glance away from believing they are
+ * in an ordinary Company workspace.
+ */
+
+/*
+ * -------------------------------------------------------------------------
+ * THEMING
+ * -------------------------------------------------------------------------
+ *
+ * Dark is the default, matching what the Portal has always looked like and
+ * what it shows before any preference exists. `:root[data-theme="light"]`
+ * overrides it; `src/theme/theme-preference.ts` sets that attribute, exactly
+ * as the Company Portal does.
+ *
+ * Every colour used anywhere below is a variable, including the status
+ * colours. They used to be literals, which was fine while the Portal was
+ * dark-only -- but `#7ee2a8` on white is unreadable, so a literal is a colour
+ * that silently cannot be themed. Naming them by MEANING rather than by hue
+ * (`--platform-ok-*`, not `--platform-green-*`) is what lets light pick
+ * genuinely different values instead of lightening the dark ones.
+ */
+:root {
+  --platform-surface: #0b1220;
+  --platform-surface-raised: #131c2e;
+  --platform-border: #26324a;
+  --platform-text: #eef2f9;
+  --platform-muted: #97a3ba;
+  --platform-accent: #4c8dff;
+  /* Text placed ON the accent. Not a shade of the accent: it has to stay
+     readable against it in both themes, so it is its own variable. */
+  --platform-on-accent: #06101f;
+  --platform-danger: #ff6b6b;
+
+  --platform-ok-border: #2f7a52;
+  --platform-ok-text: #7ee2a8;
+  --platform-warn-border: #8a6d1f;
+  --platform-warn-text: #f0c674;
+  --platform-bad-border: #6b2f2f;
+  --platform-bad-text: #ff9b9b;
+  --platform-alert-border: #8a3b3b;
+  --platform-alert-text: #ffb4b4;
+
+  color-scheme: dark;
+}
+
+/*
+ * The light palette is not the dark one inverted.
+ *
+ * Inverting produces grey-on-grey text and washed-out status colours: the dark
+ * theme's #7ee2a8 exists to glow against #0b1220 and has nowhere near enough
+ * contrast on white. Light therefore uses darker, more saturated status text
+ * with pale borders, so both themes clear WCAG AA on body text and on every
+ * badge.
+ *
+ * The accent darkens for the same reason -- #4c8dff carries white text badly
+ * -- and `--platform-on-accent` flips to white, which is why it is a variable
+ * rather than a literal on the button.
+ */
+:root[data-theme="light"] {
+  --platform-surface: #f4f6fb;
+  --platform-surface-raised: #ffffff;
+  --platform-border: #d3dae8;
+  --platform-text: #16203a;
+  --platform-muted: #5a6884;
+  --platform-accent: #2563eb;
+  --platform-on-accent: #ffffff;
+  --platform-danger: #c02626;
+
+  --platform-ok-border: #9fd8b8;
+  --platform-ok-text: #17693f;
+  --platform-warn-border: #e2c98a;
+  --platform-warn-text: #7a5a06;
+  --platform-bad-border: #e8b0b0;
+  --platform-bad-text: #a32020;
+  --platform-alert-border: #e0a0a0;
+  --platform-alert-text: #96201f;
+
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--platform-surface);
+  color: var(--platform-text);
+  font-family:
+    "Segoe UI",
+    system-ui,
+    -apple-system,
+    sans-serif;
+  font-size: 15px;
+}
+
+.platform-loading,
+.platform-login {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 24px;
+}
+
+.platform-login__card {
+  width: 100%;
+  max-width: 380px;
+  padding: 32px;
+  border: 1px solid var(--platform-border);
+  border-radius: 12px;
+  background: var(--platform-surface-raised);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.platform-login__eyebrow {
+  margin: 0;
+  color: var(--platform-accent);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.platform-login__title {
+  margin: 0;
+  font-size: 22px;
+}
+
+.platform-login__subtitle,
+.platform-muted {
+  margin: 0;
+  color: var(--platform-muted);
+  font-size: 13px;
+}
+
+.platform-login__error {
+  margin: 0;
+  color: var(--platform-danger);
+  font-size: 13px;
+}
+
+.platform-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.platform-field input {
+  padding: 10px 12px;
+  border: 1px solid var(--platform-border);
+  border-radius: 8px;
+  background: var(--platform-surface);
+  color: var(--platform-text);
+  font-size: 15px;
+}
+
+.platform-field input:focus-visible,
+.platform-button:focus-visible,
+.platform-nav__link:focus-visible {
+  outline: 2px solid var(--platform-accent);
+  outline-offset: 2px;
+}
+
+.platform-button {
+  padding: 10px 16px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: var(--platform-accent);
+  color: var(--platform-on-accent);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.platform-button[disabled] {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.platform-button--quiet {
+  background: transparent;
+  border-color: var(--platform-border);
+  color: var(--platform-text);
+  font-weight: 500;
+}
+
+.platform-shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.platform-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 24px;
+  border-bottom: 1px solid var(--platform-border);
+  background: var(--platform-surface-raised);
+}
+
+.platform-header__eyebrow {
+  margin: 0;
+  color: var(--platform-accent);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.platform-header__title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.platform-header__account {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 14px;
+}
+
+.platform-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.platform-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 200px;
+  padding: 16px 12px;
+  border-right: 1px solid var(--platform-border);
+}
+
+.platform-nav__link {
+  padding: 8px 12px;
+  border-radius: 8px;
+  color: var(--platform-muted);
+  font-size: 14px;
+  text-decoration: none;
+}
+
+.platform-nav__link--active {
+  background: var(--platform-surface-raised);
+  color: var(--platform-text);
+}
+
+.platform-content {
+  flex: 1;
+  padding: 24px;
+  min-width: 0;
+}
+
+.platform-panel {
+  max-width: 900px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.platform-panel h2 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.platform-panel h3 {
+  margin: 8px 0 0;
+  font-size: 14px;
+  color: var(--platform-muted);
+}
+
+.platform-permission-list {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+}
+
+.platform-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.platform-table th,
+.platform-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--platform-border);
+  text-align: start;
+}
+
+.platform-table th {
+  color: var(--platform-muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* ---------------------------------------------------------------------------
+ * Company management
+ * ------------------------------------------------------------------------ */
+
+.platform-panel__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.platform-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+}
+
+.platform-filters .platform-field {
+  min-width: 180px;
+}
+
+.platform-field select {
+  padding: 9px 10px;
+  border: 1px solid var(--platform-border);
+  border-radius: 8px;
+  background: var(--platform-surface);
+  color: var(--platform-text);
+  font-size: 14px;
+}
+
+.platform-field small {
+  font-size: 12px;
+}
+
+.platform-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 520px;
+}
+
+.platform-form h3 {
+  margin: 10px 0 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--platform-border);
+}
+
+.platform-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.platform-pager {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.platform-review {
+  display: grid;
+  grid-template-columns: minmax(140px, 200px) 1fr;
+  gap: 6px 16px;
+  margin: 0;
+  font-size: 14px;
+}
+
+.platform-review > div {
+  display: contents;
+}
+
+.platform-review dt {
+  color: var(--platform-muted);
+}
+
+.platform-review dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/*
+ * Status and environment badges.
+ *
+ * `production` is the only value given a warning colour: it is the property a
+ * future destructive-maintenance guard reads, so it should be the one an
+ * administrator notices without looking for it.
+ */
+.platform-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border: 1px solid var(--platform-border);
+  border-radius: 999px;
+  font-size: 12px;
+  text-transform: capitalize;
+}
+
+.platform-badge--active,
+.platform-badge--complete {
+  border-color: var(--platform-ok-border);
+  color: var(--platform-ok-text);
+}
+
+.platform-badge--draft,
+.platform-badge--optional {
+  color: var(--platform-muted);
+}
+
+.platform-badge--suspended,
+.platform-badge--incomplete {
+  border-color: var(--platform-warn-border);
+  color: var(--platform-warn-text);
+}
+
+.platform-badge--disabled {
+  border-color: var(--platform-bad-border);
+  color: var(--platform-bad-text);
+}
+
+.platform-badge--production {
+  border-color: var(--platform-alert-border);
+  color: var(--platform-alert-text);
+}
+
+.platform-field-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.platform-sort {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-transform: inherit;
+  letter-spacing: inherit;
+  cursor: pointer;
+}
+
+.platform-badge--live,
+.platform-badge--ready_to_activate {
+  border-color: var(--platform-ok-border);
+  color: var(--platform-ok-text);
+}
+
+.platform-badge--closed {
+  border-color: var(--platform-bad-border);
+  color: var(--platform-bad-text);
+}
+
+/* Company administrators and one-time credential links */
+
+.platform-linkbox {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid var(--platform-accent);
+  border-radius: 10px;
+  background: var(--platform-surface-raised);
+}
+
+.platform-link {
+  padding: 8px 10px;
+  border: 1px solid var(--platform-border);
+  border-radius: 6px;
+  background: var(--platform-surface);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.platform-rowactions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.platform-rowactions .platform-button {
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.platform-truncate {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.platform-warning {
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--platform-warn-border);
+  border-radius: 8px;
+  color: var(--platform-warn-text);
+  font-size: 13px;
+}
+
+.platform-badge--invitation_pending {
+  border-color: var(--platform-warn-border);
+  color: var(--platform-warn-text);
+}
+
+/* -------------------------------------------------------------------------
+   Audit browser
+   ------------------------------------------------------------------------- */
+
+.platform-pagination {
+  align-items: center;
+  display: flex;
+  gap: 0.75rem;
+  justify-content: flex-end;
+  margin-top: 1rem;
+}
+
+/*
+ * Structured before/after detail. `overflow-wrap` matters here: the values are
+ * JSON with no spaces, so without it a single long entry pushes the whole
+ * table sideways.
+ */
+.platform-audit__detail {
+  display: grid;
+  gap: 0.25rem 0.75rem;
+  grid-template-columns: auto 1fr;
+  margin: 0.5rem 0 0;
+  overflow-wrap: anywhere;
+}
+
+.platform-audit__detail dt {
+  color: var(--platform-muted);
+  font-size: 0.8rem;
+}
+
+.platform-audit__detail dd {
+  font-size: 0.8rem;
+  margin: 0;
+}
+
+/*
+ * Available to screen readers, invisible on screen. Used for the audit table
+ * caption, which names the table for anyone navigating by landmark but would
+ * merely repeat the visible heading for anyone reading it.
+ */
+.platform-visually-hidden {
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  height: 1px;
+  overflow: hidden;
+  position: absolute;
+  white-space: nowrap;
+  width: 1px;
+}
+
+/* -------------------------------------------------------------------------
+   Theme control
+   ------------------------------------------------------------------------- */
+
+/*
+ * Segmented Light / Dark / System control, the same shape as the Company
+ * Portal's. `aria-pressed` carries the selected state rather than a class, so
+ * a screen reader announces which one is active without the styling having to
+ * be understood.
+ */
+.platform-theme-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--platform-border);
+  border-radius: 8px;
+  background: var(--platform-surface);
+}
+
+.platform-theme-control button {
+  padding: 4px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--platform-muted);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.platform-theme-control button:hover {
+  color: var(--platform-text);
+}
+
+.platform-theme-control button[aria-pressed="true"] {
+  background: var(--platform-accent);
+  color: var(--platform-on-accent);
+}

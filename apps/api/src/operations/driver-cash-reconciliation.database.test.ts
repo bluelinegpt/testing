@@ -1,4 +1,8 @@
 import { randomUUID } from "node:crypto";
+import {
+  createBusinessDayServiceStub,
+  createCalendarDateReportModeServiceStub,
+} from "../test/business-day-stubs.js";
 import { resolve } from "node:path";
 
 import { config as loadEnvironment } from "dotenv";
@@ -21,6 +25,7 @@ import type { TenantContext, TenantContextAccessor } from "../tenancy/tenant-con
 
 import { DriverCashReconciliationService } from "./driver-cash-reconciliation.service.js";
 import type { DriverCollectionPdfService } from "./driver-collection-pdf.service.js";
+import { EmployeeCollectionEarningService } from "../payroll/employee-collection-earning.service.js";
 import { OperationsHistoryWriter } from "./operations-history.writer.js";
 import type { CreateDriverReconciliationDto } from "./operations.dto.js";
 
@@ -121,10 +126,29 @@ describe.skipIf(!runDatabaseTests)("driver cash reconciliation confirm()", () =>
           transaction as unknown as Kysely<DatabaseSchema>,
           manager as unknown as KyselyTransactionManager,
           tenants as unknown as TenantContextAccessor,
+          createCalendarDateReportModeServiceStub(),
+          createBusinessDayServiceStub(),
           identities as unknown as IdentityContextAccessor,
           new OperationsHistoryWriter(),
           companyProfile,
           {} as unknown as DriverCollectionPdfService,
+          {
+            collectionOffsetProposal: () =>
+              Promise.resolve({
+                allocations: [],
+                eligibleAccrualCount: 0,
+                oldestFirstProposal: [],
+                remainingDriverOutstanding: "0.00",
+                requestedOffset: "0.00",
+                safeMaximumOffset: "0.00",
+                totalOutstanding: "0.00",
+              }),
+            confirmCollectionOffset: () => Promise.resolve(null),
+            reverseCollectionOffset: () => Promise.resolve(null),
+          } as never,
+          // Collection-fact capture. The real service, not a stub: these suites
+          // must prove confirmation still behaves with it wired in.
+          new EmployeeCollectionEarningService(tenants as unknown as TenantContextAccessor),
         );
 
         const createCompany = async (label: string): Promise<CompanyFixture> => {
@@ -172,8 +196,8 @@ describe.skipIf(!runDatabaseTests)("driver cash reconciliation confirm()", () =>
                ${`DRV-${suffix}-2`}, 'outsourced', 'Second Driver', '971500000002', 'active', 7.5)
           `.execute(transaction);
           await sql`
-            insert into company_bank_accounts (id, company_id, bank_name, account_name) values
-              (${bankAccountId}::uuid, ${companyId}::uuid, 'Reconciliation Bank', 'Main Account')
+            insert into company_bank_accounts (id, company_id, bank_account_code, bank_name, account_name) values
+              (${bankAccountId}::uuid, ${companyId}::uuid, ${`REC-BANK-${suffix}`}, 'Reconciliation Bank', 'Main Account')
           `.execute(transaction);
           await sql`
             insert into expense_types (company_id, code, name_en, display_name)
@@ -250,7 +274,7 @@ describe.skipIf(!runDatabaseTests)("driver cash reconciliation confirm()", () =>
           // so they must be provided at insert time, never patched afterward.
           await sql`
             insert into orders (
-              id, company_id, order_number, order_date, trader_id, area_id,
+              service_fee_override_reason, id, company_id, order_number, order_date, trader_id, area_id,
               created_by_account_id, assigned_driver_id, customer_name,
               customer_mobile_number, customer_address, package_count, payment_condition,
               amount_collected, customer_amount_due, driver_cost,
@@ -260,7 +284,7 @@ describe.skipIf(!runDatabaseTests)("driver cash reconciliation confirm()", () =>
               delivered_at, pricing_provenance_status, final_service_fee_snapshot,
               customer_provenance_status, serial_number, reference_number
             ) values (
-              ${orderId}::uuid, ${company.companyId}::uuid, ${number}, current_date,
+              'Zero configured Service Fee (fixture)', ${orderId}::uuid, ${company.companyId}::uuid, ${number}, current_date,
               ${traderId}::uuid, ${areaId}::uuid, ${company.accountId}::uuid, ${driver}::uuid,
               'Customer', '971500000004', 'Address', 1, 'customer_pays_cod_and_fee',
               ${options.collected}, ${options.collected}, ${options.driverCost ?? 7.5},
@@ -1001,7 +1025,6 @@ describe.skipIf(!runDatabaseTests)("driver cash reconciliation confirm()", () =>
           "idempotency_key_invalid",
         );
 
-
         // --- 12. Stage 5 read APIs -------------------------------------------
         // Driver search: Active by default, with pending counts and totals.
         const driverPage = await service.searchDrivers({ page: 1, pageSize: 50 });
@@ -1161,7 +1184,9 @@ describe.skipIf(!runDatabaseTests)("driver cash reconciliation confirm()", () =>
         });
         expect(staleWarning.warnings.length).toBeGreaterThan(0);
         expect(
-          staleWarning.warnings.some((warning) => warning.includes(singleResult.reconciliationNumber)),
+          staleWarning.warnings.some((warning) =>
+            warning.includes(singleResult.reconciliationNumber),
+          ),
         ).toBe(true);
 
         // Reconciliation list: pagination, filters, sorting and labels.
@@ -1174,7 +1199,9 @@ describe.skipIf(!runDatabaseTests)("driver cash reconciliation confirm()", () =>
           driverId: companyA.secondDriverId,
           pageSize: 50,
         });
-        expect(filteredByDriver.items.every((row) => row.driverName === "Second Driver")).toBe(true);
+        expect(filteredByDriver.items.every((row) => row.driverName === "Second Driver")).toBe(
+          true,
+        );
         const bankFiltered = await service.list({ pageSize: 50, paymentMethod: "bank_transfer" });
         expect(bankFiltered.items.some((row) => row.id === bankResult.reconciliationId)).toBe(true);
         const cashOnly = await service.list({ pageSize: 50, paymentMethod: "cash" });
@@ -1255,7 +1282,9 @@ describe.skipIf(!runDatabaseTests)("driver cash reconciliation confirm()", () =>
           "PETROL",
         ]);
         expect(availableTypes.find((row) => row.code === "OTHER")?.requiresDescription).toBe(true);
-        expect(availableTypes.find((row) => row.code === "PETROL")?.requiresDescription).toBe(false);
+        expect(availableTypes.find((row) => row.code === "PETROL")?.requiresDescription).toBe(
+          false,
+        );
         expect(availableTypes.every((row) => row.name.length > 0)).toBe(true);
 
         // Legacy wrapper delegates to the authoritative service.
@@ -1370,9 +1399,7 @@ describe.skipIf(!runDatabaseTests)("driver cash reconciliation confirm()", () =>
           randomUUID(),
         );
         expect(reversal.orderCount).toBe(1);
-        expect(reversal.reversalReconciliationNumber).not.toBe(
-          reversalTarget.reconciliationNumber,
-        );
+        expect(reversal.reversalReconciliationNumber).not.toBe(reversalTarget.reconciliationNumber);
 
         // The ORIGINAL reconciliation is preserved verbatim — never rewritten.
         const originalAfterReversal = await sql<{
@@ -1451,7 +1478,13 @@ describe.skipIf(!runDatabaseTests)("driver cash reconciliation confirm()", () =>
 
         // A confirmed reconciliation cannot be reversed twice.
         await expectRejection(
-          () => service.reverse(reversalTarget.reconciliationId, "second attempt", randomUUID()),
+          () =>
+            service.reverse(
+              reversalTarget.reconciliationId,
+              "second attempt",
+              randomUUID(),
+              `key-reversal-second-${randomUUID()}`,
+            ),
           "reconciliation_already_reversed",
         );
         // A reversal entry cannot itself be reversed.

@@ -16,10 +16,7 @@ import { Modal } from "../../components/Modal.js";
 import { isUaeMobile } from "../../domain/uae-mobile.js";
 import { SearchCombobox } from "../../components/SearchCombobox.js";
 import { AreaSelector } from "../configuration/AreaSelector.js";
-import {
-  PricingDialog,
-  TraderForm,
-} from "../configuration/TraderConfigurationWorkspace.js";
+import { PricingDialog, TraderForm } from "../configuration/TraderConfigurationWorkspace.js";
 import { CompanyBrandingContext } from "../../app/CompanyBrandingContext.js";
 import { formatCurrency } from "../../localization/formatters.js";
 import { normalizeLocale } from "../../localization/locale.js";
@@ -86,6 +83,11 @@ export function CreateOrderDialog({
   const [quoteLoading, setQuoteLoading] = useState(false);
   const [quoteError, setQuoteError] = useState<string>();
   const [pricingMissing, setPricingMissing] = useState(false);
+  /* A deliberate free delivery. Kept as its own state rather than inferred from
+     a zero COD and a zero fee: those two numbers also describe a pricing gap,
+     and the operator's intent is what the backend stores and audits. */
+  const [isFreeOrder, setIsFreeOrder] = useState(false);
+  const [freeOrderReason, setFreeOrderReason] = useState("");
   // Inline "add pricing": create a reusable trader service price for this
   // Emirate/Area instead of pricing the single order manually.
   const [addPricingOpen, setAddPricingOpen] = useState(false);
@@ -121,8 +123,7 @@ export function CreateOrderDialog({
   const manualFeeInput = parseMoneyInput(manualFee, { required: true });
   const pricingFeeInput = parseMoneyInput(pricingFee, { required: true });
   const overrideValid =
-    !overrideEnabled ||
-    (overrideFee !== "" && overrideFeeInput.ok && overrideReason.trim() !== "");
+    !overrideEnabled || (overrideFee !== "" && overrideFeeInput.ok && overrideReason.trim() !== "");
 
   // One fee-entry path: an operator either overrides a configured price, or
   // enters a manual price when none is configured. Both send serviceFee + reason.
@@ -146,6 +147,7 @@ export function CreateOrderDialog({
     "codAmount",
     "additionalFees",
     "packageCount",
+    "freeOrderReason",
     "pricing",
     "overrideFee",
     "overrideReason",
@@ -166,13 +168,22 @@ export function CreateOrderDialog({
     validationErrors.customerName = t("operations.errors.customerNameRequired");
   if (mobile.trim() === "") validationErrors.mobile = t("operations.errors.mobileRequired");
   if (area === undefined) validationErrors.area = t("operations.errors.areaRequired");
-  if (address.trim() === "") validationErrors.address = t("operations.errors.addressRequired");
+  /* Address is optional on every path. A NEW Customer captured without one gets
+     no saved address record at all, rather than a placeholder -- so there is no
+     longer an inline-create case that needs to ask for it. */
   if (!codInput.ok) validationErrors.codAmount = t("operations.errors.codInvalid");
   if (!additionalFeesInput.ok)
     validationErrors.additionalFees = t("operations.errors.additionalInvalid");
   if (!packageCountInput.ok || packageCountInput.value < 1)
     validationErrors.packageCount = t("operations.errors.packagesInvalid");
-  if (pricingMissing) {
+  if (isFreeOrder) {
+    /* Pricing is deliberately NOT validated here. A Free Order is an intentional
+       override, not a missing-pricing failure, so an unpriced Trader/Area must
+       not block it -- that blocker is exactly the problem this feature removes.
+       The backend skips resolution for the same reason. */
+    if (freeOrderReason.trim() === "")
+      validationErrors.freeOrderReason = t("operations.errors.freeOrderReasonRequired");
+  } else if (pricingMissing) {
     if (!(manualFee !== "" && manualFeeInput.ok))
       validationErrors.pricing = t("operations.errors.manualFeeRequired");
   } else if (quote === undefined || quoteError !== undefined) {
@@ -196,6 +207,7 @@ export function CreateOrderDialog({
     additionalFees: "#order-additional",
     area: '[data-field="area"] select, [data-field="area"] input',
     codAmount: "#order-cod",
+    freeOrderReason: "#order-free-reason",
     customer: '[data-field="customer"] input',
     customerName: '[data-field="customer"] input',
     mobile: "#order-mobile",
@@ -361,6 +373,13 @@ export function CreateOrderDialog({
   useEffect(() => {
     setQuote(undefined);
     setQuoteError(undefined);
+    // A Free Order is an approved business decision, not a pricing request.
+    // Stop any pending quote state immediately so it cannot disable submission
+    // or reintroduce an unresolved-pricing validation error.
+    if (isFreeOrder) {
+      setQuoteLoading(false);
+      return;
+    }
     if (
       trader === undefined ||
       area === undefined ||
@@ -418,6 +437,7 @@ export function CreateOrderDialog({
     driverId,
     enteredFee,
     enteredReason,
+    isFreeOrder,
     overrideValid,
     requoteNonce,
     t,
@@ -499,9 +519,13 @@ export function CreateOrderDialog({
       const order = await api.post<OperationsOrder>(
         "operations/orders",
         {
-          additionalFees: additionalFeesInput.ok ? additionalFeesInput.value : 0,
+          additionalFees: isFreeOrder ? 0 : additionalFeesInput.ok ? additionalFeesInput.value : 0,
           areaId: area.id,
-          codAmount: codInput.ok ? codInput.value : 0,
+          codAmount: isFreeOrder ? 0 : codInput.ok ? codInput.value : 0,
+          // The backend forces both to zero regardless; sending them honestly
+          // keeps the request readable in a network log.
+          isFreeOrder,
+          ...(isFreeOrder ? { freeOrderReason: freeOrderReason.trim() } : {}),
           customerAddress: address.trim(),
           customerAddressId: customer?.addressId,
           customerDeliveryNotes: customerDeliveryNotes.trim() || undefined,
@@ -513,8 +537,7 @@ export function CreateOrderDialog({
           // recognisable UAE forms; it is not forced to a canonical shape here.
           customerMobileNumber: mobile.trim(),
           customerName: customerName.trim(),
-          customerSecondMobileNumber:
-            secondMobile.trim() === "" ? undefined : secondMobile.trim(),
+          customerSecondMobileNumber: secondMobile.trim() === "" ? undefined : secondMobile.trim(),
           driverId: driverId || undefined,
           notes: notes.trim() || undefined,
           packageCount: packageCountInput.ok ? packageCountInput.value : 0,
@@ -640,28 +663,6 @@ export function CreateOrderDialog({
             ref={formRef}
           >
             <div className="order-modal-scroll">
-              {showErrors && orderedErrorKeys.length > 0 ? (
-                <div className="validation-summary" ref={summaryRef} role="alert" tabIndex={-1}>
-                  <h3 id="order-validation-heading">{t("operations.errors.summaryHeading")}</h3>
-                  <ul>
-                    {orderedErrorKeys.map((key) => (
-                      <li key={key}>
-                        <button
-                          className="validation-summary-item"
-                          onClick={() => focusField(key)}
-                          type="button"
-                        >
-                          {errors[key]}
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ) : error === undefined ? null : (
-                <div className="alert alert-error" role="alert">
-                  {error}
-                </div>
-              )}
               <div className="order-form-columns">
                 <section className="order-form-group" aria-labelledby="order-customer-heading">
                   <div className="form-section-heading">
@@ -921,7 +922,8 @@ export function CreateOrderDialog({
                       </small>
                     )}
                   </div>
-                  <label className="field required-field field-grow">
+                  {/* Optional on every path -- never marked required. */}
+                  <label className="field field-grow">
                     <span>{t("operations.customerAddress")}</span>
                     <textarea
                       aria-describedby={describedBy("address")}
@@ -929,7 +931,6 @@ export function CreateOrderDialog({
                       id="order-address"
                       maxLength={500}
                       onChange={(event) => setAddress(event.target.value)}
-                      required
                       rows={3}
                       value={address}
                     />
@@ -977,12 +978,70 @@ export function CreateOrderDialog({
                         ))}
                     </select>
                   </label>
+                  {/* Sits with the money, because that is what it changes. */}
+                  <div className="field free-order-toggle">
+                    <label className="checkbox-row">
+                      <input
+                        checked={isFreeOrder}
+                        id="order-free"
+                        onChange={(event) => {
+                          const next = event.target.checked;
+                          setIsFreeOrder(next);
+                          if (next) {
+                            // Zero the money immediately so the operator never
+                            // types it, and drop the unresolved-pricing blocker:
+                            // this Order is priced by decision, not by lookup.
+                            setCodAmount("0.00");
+                            setAdditionalFees("0.00");
+                            setPricingMissing(false);
+                            setQuoteError(undefined);
+                            setQuoteLoading(false);
+                          } else {
+                            // Leaving Free clears the reason so it cannot be
+                            // submitted on an Order that is no longer free, and
+                            // hands pricing back to the normal flow rather than
+                            // restoring a stale fee.
+                            setFreeOrderReason("");
+                            setRequoteNonce((nonce) => nonce + 1);
+                          }
+                          clearServerError("freeOrderReason");
+                        }}
+                        type="checkbox"
+                      />
+                      <span>{t("operations.freeOrder")}</span>
+                    </label>
+                    {isFreeOrder ? (
+                      <>
+                        <small className="field-hint">{t("operations.freeOrderHint")}</small>
+                        <label className="field required-field">
+                          <span>{t("operations.freeOrderReason")}</span>
+                          <input
+                            aria-describedby={describedBy("freeOrderReason")}
+                            aria-invalid={errorFor("freeOrderReason") !== undefined}
+                            id="order-free-reason"
+                            maxLength={300}
+                            onChange={(event) => {
+                              setFreeOrderReason(event.target.value);
+                              clearServerError("freeOrderReason");
+                            }}
+                            value={freeOrderReason}
+                          />
+                          {errorFor("freeOrderReason") === undefined ? null : (
+                            <small className="field-error" id="order-freeOrderReason-error">
+                              {errorFor("freeOrderReason")}
+                            </small>
+                          )}
+                        </label>
+                      </>
+                    ) : null}
+                  </div>
                   <div className="form-grid">
                     <label className="field required-field">
                       <span>{t("operations.codAmount")}</span>
                       <input
                         aria-describedby={describedBy("codAmount")}
                         aria-invalid={errorFor("codAmount") !== undefined}
+                        disabled={isFreeOrder}
                         id="order-cod"
                         min="0"
                         onChange={(event) => {
@@ -1023,7 +1082,13 @@ export function CreateOrderDialog({
                       </small>
                     )}
                   </label>
-                  {pricingMissing ? (
+                  {isFreeOrder ? (
+                    // No pricing UI at all while Free: nothing to resolve, and
+                    // nothing for the operator to override.
+                    <div className="fee-override" role="group">
+                      <p className="field-hint">{t("operations.freeOrderFeeLocked")}</p>
+                    </div>
+                  ) : pricingMissing ? (
                     <div className="fee-override pricing-missing" role="group">
                       <p className="field-hint">{t("operations.pricingFailureMessage")}</p>
                       <div className="pricing-actions">
@@ -1103,9 +1168,7 @@ export function CreateOrderDialog({
                             </button>
                             <button
                               className="button button-primary"
-                              disabled={
-                                pricingSaving || pricingFee === "" || !pricingFeeInput.ok
-                              }
+                              disabled={pricingSaving || pricingFee === "" || !pricingFeeInput.ok}
                               onClick={() => void savePricing()}
                               type="button"
                             >
@@ -1302,6 +1365,32 @@ export function CreateOrderDialog({
                   </div>
                 </section>
               </div>
+              {/* Sits at the END of the scrolling body, directly above the action
+                  bar, so the failure appears next to the button that caused it
+                  rather than a full form-length away at the top. `focusField`
+                  still scrolls to the offending field when an item is clicked. */}
+              {showErrors && orderedErrorKeys.length > 0 ? (
+                <div className="validation-summary" ref={summaryRef} role="alert" tabIndex={-1}>
+                  <h3 id="order-validation-heading">{t("operations.errors.summaryHeading")}</h3>
+                  <ul>
+                    {orderedErrorKeys.map((key) => (
+                      <li key={key}>
+                        <button
+                          className="validation-summary-item"
+                          onClick={() => focusField(key)}
+                          type="button"
+                        >
+                          {errors[key]}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : error === undefined ? null : (
+                <div className="alert alert-error" role="alert">
+                  {error}
+                </div>
+              )}
             </div>
             <footer className="order-action-bar">
               <div className="order-totals" aria-label={t("operations.orderSummary")}>
@@ -1320,7 +1409,7 @@ export function CreateOrderDialog({
                 </button>
                 <button
                   className="button button-primary"
-                  disabled={saving || quoteLoading}
+                  disabled={saving || (!isFreeOrder && quoteLoading)}
                   type="submit"
                 >
                   {saving ? t("operations.creatingOrder") : t("operations.createOrder")}
@@ -1372,9 +1461,7 @@ export function CreateOrderDialog({
             const created = createdTrader;
             setCreateTraderOpen(false);
             setCreatedTrader(undefined);
-            void selectCreatedTrader(created).then(() =>
-              setRequoteNonce((nonce) => nonce + 1),
-            );
+            void selectCreatedTrader(created).then(() => setRequoteNonce((nonce) => nonce + 1));
           }}
           primaryLabel={t("operations.savePricingAndUseTrader")}
           title={t("operations.pricingSetup")}

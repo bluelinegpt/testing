@@ -1,6 +1,8 @@
 import { Module } from "@nestjs/common";
 
 import { AuthenticationModule } from "../authentication/authentication.module.js";
+import { BusinessDayService } from "./business-day.service.js";
+import { ReportDateModeService } from "./report-date-mode.js";
 import { AreaConfigurationController } from "./area-configuration.controller.js";
 import { AreaConfigurationService } from "./area-configuration.service.js";
 import { PasswordHasher } from "../authentication/password-hasher.js";
@@ -9,6 +11,8 @@ import { CompanyConfigurationService } from "./company-configuration.service.js"
 import { CustomerConfigurationController } from "./customer-configuration.controller.js";
 import { CustomerConfigurationService } from "./customer-configuration.service.js";
 import { WorkforceConfigurationController } from "./workforce-configuration.controller.js";
+import { OperationsHistoryWriter } from "../operations/operations-history.writer.js";
+import { EmployeeVariableEarningService } from "./employee-variable-earning.service.js";
 import { WorkforceConfigurationService } from "./workforce-configuration.service.js";
 import { TraderConfigurationController } from "./trader-configuration.controller.js";
 import { TraderConfigurationService } from "./trader-configuration.service.js";
@@ -24,11 +28,19 @@ import { TraderConfigurationService } from "./trader-configuration.service.js";
   ],
   providers: [
     AreaConfigurationService,
+    BusinessDayService,
+    ReportDateModeService,
     CompanyConfigurationService,
+    EmployeeVariableEarningService,
+    // Required by EmployeeVariableEarningService for rule-change auditing. The
+    // writer is dependency-free, so providing it here is enough -- without it
+    // Nest cannot construct the module and the whole API fails to boot.
+    OperationsHistoryWriter,
     WorkforceConfigurationService,
     TraderConfigurationService,
     CustomerConfigurationService,
     PasswordHasher,
   ],
+  exports: [BusinessDayService, ReportDateModeService],
 })
 export class CompanyConfigurationModule {}

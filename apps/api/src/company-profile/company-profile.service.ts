@@ -144,7 +144,11 @@ export class CompanyProfileService {
          returning id
       `.execute(transaction);
       if (result.rows[0] === undefined) {
-        throw new ApplicationException("company_not_found", "Company not found", HttpStatus.NOT_FOUND);
+        throw new ApplicationException(
+          "company_not_found",
+          "Company not found",
+          HttpStatus.NOT_FOUND,
+        );
       }
       await this.audit(transaction, {
         action: "company_profile.update",
@@ -269,10 +273,18 @@ export class CompanyProfileService {
     const { companyId } = this.tenants.current();
     const meta = await this.readLogoFileRow(this.database, companyId);
     if (meta === undefined) {
-      throw new ApplicationException("logo_not_found", "No Company logo is set", HttpStatus.NOT_FOUND);
+      throw new ApplicationException(
+        "logo_not_found",
+        "No Company logo is set",
+        HttpStatus.NOT_FOUND,
+      );
     }
     const bytes = await this.storage.readPrivate(companyId, meta.storageKey);
-    return { bytes: Buffer.from(bytes), fileName: meta.originalFilename, mediaType: meta.mediaType };
+    return {
+      bytes: Buffer.from(bytes),
+      fileName: meta.originalFilename,
+      mediaType: meta.mediaType,
+    };
   }
 
   private async readProfileRow(
@@ -291,7 +303,11 @@ export class CompanyProfileService {
     `.execute(database);
     const row = result.rows[0];
     if (row === undefined) {
-      throw new ApplicationException("company_not_found", "Company not found", HttpStatus.NOT_FOUND);
+      throw new ApplicationException(
+        "company_not_found",
+        "Company not found",
+        HttpStatus.NOT_FOUND,
+      );
     }
     return row;
   }
@@ -366,7 +382,9 @@ export class CompanyProfileService {
     // Strip any directory component (defeats path traversal) and keep only a
     // conservative character set. The result is metadata only — it is never
     // used to build the storage path.
-    const base = basename(original.replace(/\\/g, "/")).replace(/[^\w.\- ]+/g, "_").trim();
+    const base = basename(original.replace(/\\/g, "/"))
+      .replace(/[^\w.\- ]+/g, "_")
+      .trim();
     if (base.length === 0 || base === "." || base === "..") return fallback;
     return base.slice(0, 200);
   }

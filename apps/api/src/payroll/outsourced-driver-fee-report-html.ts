@@ -84,7 +84,10 @@ const labels: Record<string, { ar: string; en: string }> = {
   recoveryRequired: { ar: "مطلوب استرداده", en: "Recovery Required" },
   reconciliationCount: { ar: "استحقاقات المطابقة اليومية", en: "Daily Reconciliation Accruals" },
   remainingOutstanding: { ar: "المتبقي المستحق", en: "Remaining Outstanding" },
-  remainingDriverOutstanding: { ar: "إجمالي المستحق المتبقي للسائق", en: "Remaining Driver Outstanding" },
+  remainingDriverOutstanding: {
+    ar: "إجمالي المستحق المتبقي للسائق",
+    en: "Remaining Driver Outstanding",
+  },
   reversedAmount: { ar: "المبلغ المعكوس", en: "Reversed Amount" },
   reversedAt: { ar: "تاريخ العكس", en: "Reversed At" },
   reversedBy: { ar: "عكس بواسطة", en: "Reversed By" },
@@ -124,36 +127,144 @@ function doc(
   </style></head><body><header><div class="brand">${company.logoDataUri === null ? "" : `<img class="logo" src="${escape(company.logoDataUri)}">`}<div><strong>${escape(company.nameEn)}</strong>${company.nameAr === null ? "" : `<div>${escape(company.nameAr)}</div>`}</div></div><h1>${escape(title)}</h1></header>${body}<div class="internal">${escape(text[language].internal)} · ${escape(generatedAt)}</div></body></html>`;
 }
 
-function boxes(values: Record<string, unknown>, language: DriverFeeReportLanguage, kind: "meta" | "summary" = "summary") {
-  return `<section class="${kind}">${Object.entries(values).map(([key, value]) => `<div class="box"><span>${escape(label(key, language))}</span><strong>${escape(value)}</strong></div>`).join("")}</section>`;
+function boxes(
+  values: Record<string, unknown>,
+  language: DriverFeeReportLanguage,
+  kind: "meta" | "summary" = "summary",
+) {
+  return `<section class="${kind}">${Object.entries(values)
+    .map(
+      ([key, value]) =>
+        `<div class="box"><span>${escape(label(key, language))}</span><strong>${escape(value)}</strong></div>`,
+    )
+    .join("")}</section>`;
 }
 
-function table(rows: readonly Record<string, unknown>[], keys: readonly string[], language: DriverFeeReportLanguage) {
+function table(
+  rows: readonly Record<string, unknown>[],
+  keys: readonly string[],
+  language: DriverFeeReportLanguage,
+) {
   return `<table><thead><tr>${keys.map((key) => `<th>${escape(label(key, language))}</th>`).join("")}</tr></thead><tbody>${rows.map((row, index) => `<tr>${keys.map((key) => `<td${["orderNumber", "serialNumber", "paymentNumber", "driverCode"].includes(key) ? ' class="mono"' : ""}>${escape(key === "line" ? index + 1 : row[key])}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
 }
 
-export function buildDriverEarningsStatementHtml(data: DriverEarningsStatementData, language: DriverFeeReportLanguage) {
-  const keys = ["line","orderNumber","serialNumber","deliveryDate","accrualBusinessDate","feeRate","earnedAmount","paidBefore","paidDuringPeriod","separatePaymentAmount","collectionOffsetAmount","reversedAmount","closingOutstanding","recoveryAmount","accrualStatus"];
-  return doc(text[language].earnings, data.company, data.generatedAt, language,
-    boxes({driverName:data.driver.name,driverCode:data.driver.code,from:data.from,to:data.to},language,"meta")+
-    boxes(data.summary,language)+(data.warnings.length===0?"":`<div class="warning">${data.warnings.map(escape).join("<br>")}</div>`)+table(data.lines,keys,language));
+export function buildDriverEarningsStatementHtml(
+  data: DriverEarningsStatementData,
+  language: DriverFeeReportLanguage,
+) {
+  const keys = [
+    "line",
+    "orderNumber",
+    "serialNumber",
+    "deliveryDate",
+    "accrualBusinessDate",
+    "feeRate",
+    "earnedAmount",
+    "paidBefore",
+    "paidDuringPeriod",
+    "separatePaymentAmount",
+    "collectionOffsetAmount",
+    "reversedAmount",
+    "closingOutstanding",
+    "recoveryAmount",
+    "accrualStatus",
+  ];
+  return doc(
+    text[language].earnings,
+    data.company,
+    data.generatedAt,
+    language,
+    boxes(
+      { driverName: data.driver.name, driverCode: data.driver.code, from: data.from, to: data.to },
+      language,
+      "meta",
+    ) +
+      boxes(data.summary, language) +
+      (data.warnings.length === 0
+        ? ""
+        : `<div class="warning">${data.warnings.map(escape).join("<br>")}</div>`) +
+      table(data.lines, keys, language),
+  );
 }
 
-export function buildOutstandingDriverFeesHtml(data: OutstandingDriverFeesReportData, language: DriverFeeReportLanguage) {
-  return doc(text[language].outstanding,data.company,data.generatedAt,language,
-    boxes({asOf:data.asOf},language,"meta")+boxes(data.summary,language)+table(data.lines,["line","driverName","driverCode","earnedAmount","activePaid","outstanding","oldestOutstandingDate","unpaidOrderCount","partiallyPaidCount","recoveryAmount","lastPaymentDate","lastCollectionOffsetDate"],language));
+export function buildOutstandingDriverFeesHtml(
+  data: OutstandingDriverFeesReportData,
+  language: DriverFeeReportLanguage,
+) {
+  return doc(
+    text[language].outstanding,
+    data.company,
+    data.generatedAt,
+    language,
+    boxes({ asOf: data.asOf }, language, "meta") +
+      boxes(data.summary, language) +
+      table(
+        data.lines,
+        [
+          "line",
+          "driverName",
+          "driverCode",
+          "earnedAmount",
+          "activePaid",
+          "outstanding",
+          "oldestOutstandingDate",
+          "unpaidOrderCount",
+          "partiallyPaidCount",
+          "recoveryAmount",
+          "lastPaymentDate",
+          "lastCollectionOffsetDate",
+        ],
+        language,
+      ),
+  );
 }
 
-export function buildDailyDriverFeeAccrualHtml(data: DailyDriverFeeAccrualReportData, language: DriverFeeReportLanguage) {
-  return doc(text[language].accrualReport,data.company,data.generatedAt,language,
-    boxes({from:data.from,to:data.to},language,"meta")+boxes(data.summary,language)+table(data.lines,["line","accrualBusinessDate","deliveryDate","driverName","driverCode","orderNumber","serialNumber","feeRate","earnedAmount","source","status","createdBy","createdAt"],language));
+export function buildDailyDriverFeeAccrualHtml(
+  data: DailyDriverFeeAccrualReportData,
+  language: DriverFeeReportLanguage,
+) {
+  return doc(
+    text[language].accrualReport,
+    data.company,
+    data.generatedAt,
+    language,
+    boxes({ from: data.from, to: data.to }, language, "meta") +
+      boxes(data.summary, language) +
+      table(
+        data.lines,
+        [
+          "line",
+          "accrualBusinessDate",
+          "deliveryDate",
+          "driverName",
+          "driverCode",
+          "orderNumber",
+          "serialNumber",
+          "feeRate",
+          "earnedAmount",
+          "source",
+          "status",
+          "createdBy",
+          "createdAt",
+        ],
+        language,
+      ),
+  );
 }
 
-export function buildDriverFeePaymentReceiptHtml(data: DriverFeePaymentReceiptData, language: DriverFeeReportLanguage) {
+export function buildDriverFeePaymentReceiptHtml(
+  data: DriverFeePaymentReceiptData,
+  language: DriverFeeReportLanguage,
+) {
   const source = String(data.header.paymentSource ?? "");
-  const sourceLabel = source === "driver_collection"
-    ? (language === "ar" ? "خصم مقابل تحصيل السائق" : "Driver Collection Fee Offset")
-    : (language === "ar" ? "دفعة نقدية منفصلة" : "Separate Cash Payment");
+  const sourceLabel =
+    source === "driver_collection"
+      ? language === "ar"
+        ? "خصم مقابل تحصيل السائق"
+        : "Driver Collection Fee Offset"
+      : language === "ar"
+        ? "دفعة نقدية منفصلة"
+        : "Separate Cash Payment";
   const receiptHeader = {
     paymentNumber: data.header.paymentNumber,
     driverName: data.header.driverName,
@@ -173,8 +284,32 @@ export function buildDriverFeePaymentReceiptHtml(data: DriverFeePaymentReceiptDa
     reversedAt: data.header.reversedAt,
     notes: data.header.notes,
   };
-  return doc(text[language].receipt,data.company,data.generatedAt,language,
-    boxes(receiptHeader,language,"meta")+table(data.allocations,["line","orderNumber","serialNumber","deliveryDate","accrualBusinessDate","earnedAmount","paidBefore","paidThisPayment","remainingOutstanding","accrualStatus","allocationStatus"],language)+boxes(data.summary,language)+`<section class="signatures"><div class="signature">${text[language].paidBy}</div><div class="signature">${text[language].authorization}</div><div class="signature">${text[language].driverAcknowledgement}</div></section>`);
+  return doc(
+    text[language].receipt,
+    data.company,
+    data.generatedAt,
+    language,
+    boxes(receiptHeader, language, "meta") +
+      table(
+        data.allocations,
+        [
+          "line",
+          "orderNumber",
+          "serialNumber",
+          "deliveryDate",
+          "accrualBusinessDate",
+          "earnedAmount",
+          "paidBefore",
+          "paidThisPayment",
+          "remainingOutstanding",
+          "accrualStatus",
+          "allocationStatus",
+        ],
+        language,
+      ) +
+      boxes(data.summary, language) +
+      `<section class="signatures"><div class="signature">${text[language].paidBy}</div><div class="signature">${text[language].authorization}</div><div class="signature">${text[language].driverAcknowledgement}</div></section>`,
+  );
 }
 
 export function driverFeeReportFooter(language: DriverFeeReportLanguage) {

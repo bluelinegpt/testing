@@ -153,7 +153,22 @@ export class AuthenticationService {
     ) {
       throw this.invalidCredentials();
     }
-    if (account.accountStatus !== "active" || account.companyStatus === "disabled") {
+    // A Company account may sign in only while its Company is ACTIVE.
+    //
+    // This used to read `companyStatus === "disabled"`, which was correct while
+    // `active` and `disabled` were the only two states. With `draft` and
+    // `suspended` added, that test would have let a suspended Company keep
+    // signing in — the one thing suspension exists to stop — and would have let
+    // a half-onboarded draft tenant in as well.
+    //
+    // Session VALIDATION already required `c.status = 'active'`, so existing
+    // sessions died the moment a Company was suspended; only the sign-in path
+    // was permissive. `companyStatus` is null for a Platform Administrator,
+    // who belongs to no Company, so the check is scoped to Company accounts.
+    if (
+      account.accountStatus !== "active" ||
+      (account.companyId !== null && account.companyStatus !== "active")
+    ) {
       throw this.invalidCredentials();
     }
 

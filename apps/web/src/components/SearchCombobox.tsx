@@ -176,7 +176,10 @@ export function SearchCombobox<T extends SearchOption>({
                     `${path}${path.includes("?") ? "&" : "?"}search=${encodeURIComponent(query)}&limit=20&offset=${options.length}`,
                   )
                   .then((page) => {
-                    setOptions((current) => [...current, ...(Array.isArray(page.items) ? page.items : [])]);
+                    setOptions((current) => [
+                      ...current,
+                      ...(Array.isArray(page.items) ? page.items : []),
+                    ]);
                     setHasMore(Boolean(page.hasMore));
                   })
                   .catch(() => setHasMore(false))

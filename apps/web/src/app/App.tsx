@@ -4,9 +4,11 @@ import { useLocation, useNavigate } from "react-router-dom";
 
 import { ApiClient } from "../api/api-client.js";
 import type { LoginResponse } from "../api/contracts.js";
+import { AccountSetupView } from "../features/authentication/AccountSetupView.js";
 import { LoginView } from "../features/authentication/LoginView.js";
 import { PasswordChangeView } from "../features/authentication/PasswordChangeView.js";
 import { PortalWorkspace } from "../features/portal/PortalWorkspace.js";
+import { StorefrontApp } from "../storefront/StorefrontApp.js";
 import { TrackingView } from "../features/tracking/TrackingView.js";
 import {
   directionForLocale,
@@ -15,7 +17,18 @@ import {
   type SupportedLocale,
 } from "../localization/locale.js";
 import { CompanyWorkspace } from "./CompanyWorkspace.js";
-import { firstAuthorizedCompanyPath } from "./company-access.js";
+import { canAccessCompanyPath, firstAuthorizedCompanyPath } from "./company-access.js";
+
+/** Exactly what `GET auth/me` returns: the server-revalidated identity. */
+interface RestoredIdentity {
+  readonly companyId: string | null;
+  readonly displayName?: string;
+  readonly forcePasswordChange: boolean;
+  readonly identityId: string;
+  readonly kind: LoginResponse["identity"]["kind"];
+  readonly permissions: readonly string[];
+  readonly username?: string;
+}
 
 const languages = [
   { code: "en", label: "English" },
@@ -29,13 +42,78 @@ export function App() {
   const currentLanguage = normalizeLocale(i18n.resolvedLanguage);
   const api = useMemo(() => new ApiClient(), []);
   const [session, setSession] = useState<LoginResponse>();
+  // True until the silent restoration attempt below has answered, so neither
+  // the login form nor a protected page is shown on a guess.
+  const [restoring, setRestoring] = useState(true);
   const trackingToken = trackingTokenFromPath(location.pathname);
   const [requestedPath] = useState(() => safeRequestedPath(location.pathname));
+
+  // Public Trader Storefront PROTOTYPE. Intercepted before any session
+  // handling, exactly like the public tracking view: a public visitor never
+  // sees the login screen here, and a signed-in office user never gets the
+  // portal shell wrapped around a public store page. Storefront paths are
+  // also excluded from the post-login redirect (see safeRequestedPath), so
+  // this changes nothing about how the authenticated application behaves.
+  if (isStorefrontPath(location.pathname)) {
+    return <StorefrontApp />;
+  }
+
+  // Account activation and password recovery, from a link a Platform
+  // Administrator issued. Intercepted here for the same reason the public
+  // Storefront and tracking views are: the person following the link has no
+  // session yet and must not be shown the sign-in form instead of the page the
+  // link was for. The token is read from the query and never persisted.
+  const setupToken = accountSetupTokenFromLocation(location.pathname, location.search);
+  if (setupToken !== undefined) {
+    return <AccountSetupView token={setupToken} />;
+  }
 
   useEffect(() => {
     document.documentElement.lang = currentLanguage;
     document.documentElement.dir = directionForLocale(currentLanguage);
   }, [currentLanguage]);
+
+  /**
+   * Silent session restoration.
+   *
+   * The session token lives in an HttpOnly cookie, so page scripts cannot read
+   * it — but the browser sends it. Asking `auth/me` on load is therefore the
+   * only way to learn whether a session exists, and the server revalidates the
+   * Company and permissions while answering. Until it answers, `restoring` is
+   * true and the shell renders a neutral loading state: showing the login form
+   * first would flash a sign-in screen at an already-authenticated user, and
+   * rendering the workspace first would briefly expose a protected page.
+   *
+   * A failure is treated as "no session" and nothing more — an expired,
+   * revoked or deactivated account simply lands on Sign in.
+   */
+  useEffect(() => {
+    let active = true;
+    api
+      .get<RestoredIdentity>("auth/me")
+      .then((identity) => {
+        if (!active) return;
+        setSession({
+          accessToken: "",
+          expiresAt: "",
+          identity: {
+            companyId: identity.companyId,
+            displayName: identity.displayName ?? identity.username ?? "",
+            forcePasswordChange: identity.forcePasswordChange,
+            id: identity.identityId,
+            kind: identity.kind,
+            permissions: identity.permissions,
+          },
+        } as LoginResponse);
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (active) setRestoring(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [api]);
 
   const changeLanguage = async (locale: SupportedLocale) => {
     await i18n.changeLanguage(locale);
@@ -44,6 +122,9 @@ export function App() {
 
   const logout = async () => {
     try {
+      // Revokes the server-side session AND clears the cookie. Client state is
+      // dropped either way, so a failed call cannot leave a signed-out user
+      // looking signed in.
       await api.post<void>("auth/logout");
     } finally {
       api.setAccessToken(undefined);
@@ -52,14 +133,38 @@ export function App() {
     }
   };
 
+  /**
+   * Where a company user lands after signing in.
+   *
+   * The URL they originally asked for is honoured when their permissions allow
+   * it, so a shared or bookmarked detail link — `/trader-settlements/<id>`,
+   * `/accounting/journals/<id>` — survives the login round trip instead of
+   * dumping them on the default workspace. `requestedPath` is already captured
+   * at mount and sanitised by `safeRequestedPath`; nothing is written to
+   * browser storage, and permissions are still enforced on every request.
+   */
+  const landingPath = (permissions: readonly string[]) =>
+    requestedPath !== "/dashboard" && canAccessCompanyPath(requestedPath, permissions)
+      ? requestedPath
+      : firstAuthorizedCompanyPath(permissions);
+
   const authenticate = (authenticatedSession: LoginResponse) => {
     setSession(authenticatedSession);
     if (authenticatedSession.identity.kind === "company_user") {
-      navigate(firstAuthorizedCompanyPath(authenticatedSession.identity.permissions), {
-        replace: true,
-      });
+      navigate(landingPath(authenticatedSession.identity.permissions), { replace: true });
     }
   };
+
+  // Neither the login form nor a protected page until restoration has answered.
+  if (restoring) {
+    return (
+      <div className="app-shell public-shell">
+        <main className="public-main" role="status">
+          {t("common.loading")}
+        </main>
+      </div>
+    );
+  }
 
   if (session?.identity.kind === "company_user" && !session.identity.forcePasswordChange) {
     return <CompanyWorkspace api={api} onLogout={logout} session={session} />;
@@ -104,7 +209,7 @@ export function App() {
               identity: { ...session.identity, forcePasswordChange: false },
             });
             if (session.identity.kind === "company_user") {
-              navigate(firstAuthorizedCompanyPath(session.identity.permissions), { replace: true });
+              navigate(landingPath(session.identity.permissions), { replace: true });
             }
           }}
         />
@@ -119,8 +224,32 @@ export function App() {
   );
 }
 
+/**
+ * The account-setup token, when the browser is on `/account-setup?token=…`.
+ *
+ * Returns undefined for anything else, so every other path behaves exactly as
+ * it did before.
+ */
+function accountSetupTokenFromLocation(pathname: string, search: string): string | undefined {
+  if (pathname.replace(/\/+$/, "") !== "/account-setup") return undefined;
+  const token = new URLSearchParams(search).get("token")?.trim();
+  return token === undefined || token === "" ? undefined : token;
+}
+
+function isStorefrontPath(pathname: string): boolean {
+  return (
+    pathname === "/store" ||
+    pathname.startsWith("/store/") ||
+    pathname === "/storefront-preview" ||
+    pathname.startsWith("/storefront-preview/")
+  );
+}
+
 function safeRequestedPath(pathname: string): string {
+  // Public pages are never preserved as a login destination: a user signing
+  // in should land in the office, not on a tracking or storefront page.
   if (trackingTokenFromPath(pathname) !== undefined) return "/dashboard";
+  if (isStorefrontPath(pathname)) return "/dashboard";
   if (!pathname.startsWith("/") || pathname.startsWith("//")) return "/dashboard";
   return pathname === "/" ? "/dashboard" : pathname;
 }

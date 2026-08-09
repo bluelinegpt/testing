@@ -30,6 +30,7 @@ function createService(overrides?: {
     overrides !== undefined && "account" in overrides ? overrides.account : account;
   const repository = {
     createSession: vi.fn().mockResolvedValue("30000000-0000-4000-8000-000000000001"),
+    activeProfile: vi.fn().mockResolvedValue(undefined),
     findActiveSession: vi.fn(),
     findCompanyAccount: vi.fn().mockResolvedValue(resolvedAccount),
     findPermissions: vi.fn().mockResolvedValue(new Set(["orders.create"])),

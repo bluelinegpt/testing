@@ -614,7 +614,8 @@ export function TraderForm({
     e.preventDefault();
     setSaving(true);
     setError(undefined);
-    const f = new FormData(e.currentTarget);
+    const formElement = e.currentTarget;
+    const f = new FormData(formElement);
     // Accept 0506468442, 9715XXXXXXXX or +9715XXXXXXXX and store one form.
     const mobile = normalizeUaeMobile(String(f.get("mobileNumber")));
     const secondRaw = String(f.get("secondMobileNumber") ?? "").trim();
@@ -622,6 +623,14 @@ export function TraderForm({
     if (mobile === undefined || (secondRaw !== "" && secondMobile === undefined)) {
       setMobileError(t("traderConfig.mobileError"));
       setSaving(false);
+      /* Move the caret to the field that stopped the save. A short line of red
+         text under one field of a tall modal is easy to miss -- the reported
+         symptom was "nothing happens and there is no error" when the message
+         was in fact on screen the whole time. Focusing scrolls it into view and
+         announces it, since the input owns `aria-describedby`. */
+      const invalid = mobile === undefined ? "mobileNumber" : "secondMobileNumber";
+      const field = formElement.elements.namedItem(invalid);
+      if (field instanceof HTMLInputElement) field.focus();
       return;
     }
     setMobileError(undefined);
@@ -643,10 +652,47 @@ export function TraderForm({
         onSaved();
       } else {
         const created = await api.post<Record<string, unknown>>("configuration/traders", body);
+        /* A 204 or an empty body resolves to `undefined`, and the Order flow's
+           `onSaved` quietly returns when it gets that -- leaving the dialog open
+           with no message and nothing saved. Treat it as the failure it is. */
+        if (created?.id === undefined) {
+          setError(t("common.saveFailed"));
+          return;
+        }
         onSaved(created);
       }
-    } catch {
-      setError(t("common.saveFailed"));
+    } catch (caught) {
+      /* Show what the backend actually said. Every rejection used to collapse
+         into one generic sentence, so a duplicate mobile, an Area that is no
+         longer active and a missing permission were indistinguishable -- and
+         the operator had nothing to act on. The API envelope is already safe to
+         display: `api-exception.filter` replaces 5xx and raw database errors
+         with generic text and only lets through the operator-facing message of
+         a deliberate ApplicationException. */
+      const failure = caught as {
+        code?: string;
+        details?: readonly string[];
+        message?: string;
+        status?: number;
+      };
+      if (failure.code === "trader_mobile_invalid") {
+        // Belongs against the field, not in the banner at the bottom.
+        setMobileError(failure.message ?? t("traderConfig.mobileError"));
+      } else {
+        const detailed = failure.details?.length ? failure.details.join(" ") : undefined;
+        const message = detailed ?? failure.message ?? t("common.saveFailed");
+        /* `request_failed` is the client's own fallback code, used when the
+           response carried no error envelope at all -- the API never returns
+           it. That means the reply did not come from the API: a dev-proxy
+           error while it restarts, a gateway in front of it, or a body that is
+           not JSON. The bare message is a dead end for the operator and for
+           support, so the status is appended to make it traceable. */
+        setError(
+          failure.code === "request_failed"
+            ? `${message} (HTTP ${failure.status ?? "?"})`
+            : message,
+        );
+      }
     } finally {
       setSaving(false);
     }
@@ -856,11 +902,15 @@ export function PricingDialog({
           <p className="field-hint">
             {editing.emirateId === null
               ? t("traderConfig.allEmirates")
-              : (locale === "ar" ? editing.emirateNameAr : editing.emirateNameEn)}
+              : locale === "ar"
+                ? editing.emirateNameAr
+                : editing.emirateNameEn}
             {" · "}
             {editing.areaId === null
               ? t("traderConfig.allAreas")
-              : (locale === "ar" ? editing.areaNameAr : editing.areaNameEn)}
+              : locale === "ar"
+                ? editing.areaNameAr
+                : editing.areaNameEn}
           </p>
         ) : (
           <>

@@ -1,0 +1,73 @@
+/*
+ * Store design tokens.
+ *
+ * ---------------------------------------------------------------------------
+ * EVERY VALUE HERE IS COPIED, NOT CHOSEN
+ * ---------------------------------------------------------------------------
+ *
+ * These are the BluelineGPT blue/white identity values taken verbatim from
+ * `apps/web/src/styles.css`. Nothing was re-picked, re-toned or "improved" for
+ * the Store, because a separate deployment is not a reason for a separate brand
+ * — a customer who sees the Delivery Portal and the Store should be looking at
+ * one product.
+ *
+ * They are duplicated rather than imported on purpose. Importing the Delivery
+ * Portal's stylesheet would make the Store structurally dependent on the portal
+ * (the one thing this whole application exists to avoid) and would drag in
+ * hundreds of operational component rules the Store will never render. A short
+ * list of copied primitives is the cheaper coupling.
+ *
+ * Nothing outside this file may hard-code a colour. When the theme
+ * infrastructure arrives, this is the file it replaces.
+ */
+:root {
+  color-scheme: light;
+
+  /* Brand — identical to --color-primary / --color-navy in the portal. */
+  --store-primary: #4f63f6;
+  --store-primary-hover: #3f52df;
+  --store-primary-active: #3342bf;
+  --store-primary-subtle: #eef2ff;
+  --store-navy: #101936;
+
+  /* Canvas and surfaces. */
+  --store-page: #f4f7fb;
+  --store-surface: #ffffff;
+  --store-surface-subtle: #f7f9fd;
+
+  /* Text. */
+  --store-text: #172033;
+  --store-text-secondary: #5f6d84;
+  --store-text-muted: #7b8798;
+  --store-on-primary: #ffffff;
+  --store-on-navy: #ffffff;
+  --store-navy-muted: #9aa8c7;
+
+  /* Lines. */
+  --store-border: #dbe3ee;
+
+  /* Status, for availability and error states only. */
+  --store-success: #15803d;
+  --store-warning: #b45309;
+  --store-danger: #b91c1c;
+
+  /* Shape and rhythm — also taken from the portal. */
+  --store-radius-sm: 6px;
+  --store-radius-md: 8px;
+  --store-radius-lg: 14px;
+  --store-radius-xl: 20px;
+  --store-space-1: 4px;
+  --store-space-2: 8px;
+  --store-space-3: 12px;
+  --store-space-4: 16px;
+  --store-space-5: 20px;
+  --store-space-6: 24px;
+  --store-space-8: 32px;
+  --store-space-10: 40px;
+  --store-shadow-sm: 0 1px 3px rgb(15 31 61 / 8%);
+  --store-shadow-md: 0 14px 36px rgb(15 31 61 / 14%);
+
+  /* Layout. */
+  --store-max-width: 1200px;
+  --store-header-height: 64px;
+}

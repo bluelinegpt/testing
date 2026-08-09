@@ -16,12 +16,7 @@ import { assertPostingPeriodOpen } from "./accounting.guards.js";
 
 interface PostingPeriodRecord {
   readonly fiscalPeriodId: string;
-  readonly fiscalPeriodStatus:
-    | "future"
-    | "open"
-    | "soft_closed"
-    | "closed"
-    | "reopened";
+  readonly fiscalPeriodStatus: "future" | "open" | "soft_closed" | "closed" | "reopened";
   readonly fiscalYearId: string;
   readonly fiscalYearStatus: "draft" | "open" | "closed" | "reopened";
 }
@@ -56,10 +51,7 @@ export class AccountingFoundationService {
     return createHash("sha256").update(canonicalJson(event)).digest("hex");
   }
 
-  public assertEventRetryPayload(
-    existingEventHash: string,
-    event: AccountingEventContract,
-  ): void {
+  public assertEventRetryPayload(existingEventHash: string, event: AccountingEventContract): void {
     if (existingEventHash !== this.eventHash(event)) {
       throw new ApplicationException(
         "accounting_event_payload_mismatch",

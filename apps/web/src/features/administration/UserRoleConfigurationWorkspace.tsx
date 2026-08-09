@@ -1000,17 +1000,19 @@ function UserForm({
               <option value="ar">العربية</option>
             </select>
           </label>
-          {!editing ? <label className="field">
-            <span>{t("userAdmin.linkEmployee")}</span>
-            <select value={employeeId} onChange={(e) => setEmployeeId(e.target.value)}>
-              <option value="">{t("userAdmin.noEmployee")}</option>
-              {employees.map((employee) => (
-                <option key={employee.id} value={employee.id}>
-                  {employee.code} - {employee.name}
-                </option>
-              ))}
-            </select>
-          </label> : null}
+          {!editing ? (
+            <label className="field">
+              <span>{t("userAdmin.linkEmployee")}</span>
+              <select value={employeeId} onChange={(e) => setEmployeeId(e.target.value)}>
+                <option value="">{t("userAdmin.noEmployee")}</option>
+                {employees.map((employee) => (
+                  <option key={employee.id} value={employee.id}>
+                    {employee.code} - {employee.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
         </div>
         {!editing ? (
           <>
@@ -1292,7 +1294,13 @@ function RoleAssignment({
                 }
                 type="checkbox"
               />
-              <span>{role.name}</span>
+              <span className="role-assignment-option">
+                <strong>{role.name}</strong>
+                {role.description ? <small>{role.description}</small> : null}
+                <small>
+                  {role.permissions.length > 0 ? role.permissions.join(", ") : "No permissions"}
+                </small>
+              </span>
             </label>
           ))}
       </div>
@@ -1466,41 +1474,81 @@ function DuplicateRole({
 function Overview({ user, onNavigate }: { user: UserDetails; onNavigate: (path: string) => void }) {
   const { t } = useTranslation();
   return (
-    <><dl className="detail-grid">
-      <Detail label={t("userAdmin.username")} value={user.username} />
-      <Detail label={t("userAdmin.accountKind")} value={t(`userAdmin.accountKinds.${user.accountKind}`)} />
-      <Detail label={t("common.name")} value={user.displayName} />
-      <Detail label={t("userAdmin.email")} value={user.email} />
-      <Detail label={t("userAdmin.mobile")} value={user.mobileNumber} />
-      <Detail label={t("userAdmin.preferredLanguage")} value={user.preferredLanguage} />
-      <Detail
-        label={t("userAdmin.employee")}
-        value={
-          user.employeeName
-            ? `${user.employeeCode ?? ""} ${user.employeeName}`
-            : t("userAdmin.noEmployee")
-        }
-      />
-      <Detail label={t("userAdmin.createdAt")} value={dateTime(user.createdAt, "-")} />
-      <Detail label={t("userAdmin.updatedAt")} value={dateTime(user.updatedAt, "-")} />
-    </dl>
-    <section className="detail-section">
-      <h2>{t("access.linkedProfiles")}</h2>
-      {user.linkedProfiles.length===0?<p>{t("access.noLinkedUser")}</p>:<div className="table-scroll-x"><table>
-        <thead><tr><th>{t("access.columns.profile")}</th><th>{t("workforce.code")}</th>
-          <th>{t("common.name")}</th><th>{t("access.columns.status")}</th><th>{t("common.status")}</th>
-          <th>{t("access.linkCreated")}</th><th>{t("access.linkUpdated")}</th><th>{t("access.columns.actions")}</th></tr></thead>
-        <tbody>{user.linkedProfiles.map(profile=><tr key={profile.id}><td>{t(`access.profile.${profile.profileType}`)}</td>
-          <td><bdi>{profile.code??"—"}</bdi></td><td>{profile.name??"—"}</td>
-          <td>{t(`access.status.${profile.accessStatus}`)}</td><td>{profile.businessStatus??"—"}</td>
-          <td>{dateTime(profile.createdAt,"—")}</td><td>{dateTime(profile.updatedAt,"—")}</td>
-          <td><button type="button" onClick={()=>onNavigate(
-            profile.profileType==="trader"
-              ? `/configuration/traders/${encodeURIComponent(profile.code??profile.profileId)}`
-              : `/configuration/${profile.profileType}s/${encodeURIComponent(profile.code??profile.profileId)}`
-          )}>{t("access.openProfile")}</button></td></tr>)}</tbody>
-      </table></div>}
-    </section></>
+    <>
+      <dl className="detail-grid">
+        <Detail label={t("userAdmin.username")} value={user.username} />
+        <Detail
+          label={t("userAdmin.accountKind")}
+          value={t(`userAdmin.accountKinds.${user.accountKind}`)}
+        />
+        <Detail label={t("common.name")} value={user.displayName} />
+        <Detail label={t("userAdmin.email")} value={user.email} />
+        <Detail label={t("userAdmin.mobile")} value={user.mobileNumber} />
+        <Detail label={t("userAdmin.preferredLanguage")} value={user.preferredLanguage} />
+        <Detail
+          label={t("userAdmin.employee")}
+          value={
+            user.employeeName
+              ? `${user.employeeCode ?? ""} ${user.employeeName}`
+              : t("userAdmin.noEmployee")
+          }
+        />
+        <Detail label={t("userAdmin.createdAt")} value={dateTime(user.createdAt, "-")} />
+        <Detail label={t("userAdmin.updatedAt")} value={dateTime(user.updatedAt, "-")} />
+      </dl>
+      <section className="detail-section">
+        <h2>{t("access.linkedProfiles")}</h2>
+        {user.linkedProfiles.length === 0 ? (
+          <p>{t("access.noLinkedUser")}</p>
+        ) : (
+          <div className="table-scroll-x">
+            <table>
+              <thead>
+                <tr>
+                  <th>{t("access.columns.profile")}</th>
+                  <th>{t("workforce.code")}</th>
+                  <th>{t("common.name")}</th>
+                  <th>{t("access.columns.status")}</th>
+                  <th>{t("common.status")}</th>
+                  <th>{t("access.linkCreated")}</th>
+                  <th>{t("access.linkUpdated")}</th>
+                  <th>{t("access.columns.actions")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {user.linkedProfiles.map((profile) => (
+                  <tr key={profile.id}>
+                    <td>{t(`access.profile.${profile.profileType}`)}</td>
+                    <td>
+                      <bdi>{profile.code ?? "—"}</bdi>
+                    </td>
+                    <td>{profile.name ?? "—"}</td>
+                    <td>{t(`access.status.${profile.accessStatus}`)}</td>
+                    <td>{profile.businessStatus ?? "—"}</td>
+                    <td>{dateTime(profile.createdAt, "—")}</td>
+                    <td>{dateTime(profile.updatedAt, "—")}</td>
+                    <td>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          onNavigate(
+                            profile.profileType === "trader"
+                              ? `/configuration/traders/${encodeURIComponent(profile.code ?? profile.profileId)}`
+                              : `/configuration/${profile.profileType}s/${encodeURIComponent(profile.code ?? profile.profileId)}`,
+                          )
+                        }
+                      >
+                        {t("access.openProfile")}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+    </>
   );
 }
 function Access({ user, onAssign }: { user: UserDetails; onAssign: () => void }) {

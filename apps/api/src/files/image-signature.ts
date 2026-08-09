@@ -81,8 +81,7 @@ export function validateLogoImage(
   if (declaredMediaType !== undefined) {
     const normalized = declaredMediaType.trim().toLowerCase();
     const declaredAllowed =
-      normalized === detected.mediaType ||
-      (detected.type === "jpeg" && normalized === "image/jpg");
+      normalized === detected.mediaType || (detected.type === "jpeg" && normalized === "image/jpg");
     if (!declaredAllowed) {
       return { ok: false, reason: "declared_media_type_mismatch" };
     }

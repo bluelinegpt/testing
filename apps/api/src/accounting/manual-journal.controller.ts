@@ -18,7 +18,7 @@ import {
   RequireAnyPermission,
   RequireIdentityKinds,
 } from "../authentication/authentication.decorators.js";
-import {
+import type {
   AccountingNoteDto,
   CancelJournalDto,
   CreateJournalDto,
@@ -59,10 +59,7 @@ export class ManualJournalController {
 
   @Post()
   @RequireAnyPermission("accounting.manage", "users_roles.manage")
-  public create(
-    @Body() input: CreateJournalDto,
-    @Headers("x-idempotency-key") key?: string,
-  ) {
+  public create(@Body() input: CreateJournalDto, @Headers("x-idempotency-key") key?: string) {
     return this.journals.create(input, key);
   }
 

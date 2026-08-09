@@ -1,0 +1,1136 @@
+{
+  "accountMappings": [
+    {
+      "creditAccountKey": "REVENUE_ADDITIONAL_FEE",
+      "debitAccountKey": null,
+      "expenseAccountKey": null,
+      "feeAccountKey": null,
+      "isActive": true,
+      "mappingKey": "additional_fee_revenue",
+      "payableAccountKey": null,
+      "vatAccountKey": null
+    },
+    {
+      "creditAccountKey": null,
+      "debitAccountKey": null,
+      "expenseAccountKey": "EXPENSE_BANK_CHARGE",
+      "feeAccountKey": null,
+      "isActive": true,
+      "mappingKey": "bank_charge",
+      "payableAccountKey": null,
+      "vatAccountKey": null
+    },
+    {
+      "creditAccountKey": null,
+      "debitAccountKey": "ASSET_BANK",
+      "expenseAccountKey": null,
+      "feeAccountKey": null,
+      "isActive": true,
+      "mappingKey": "bank_transfer",
+      "payableAccountKey": null,
+      "vatAccountKey": null
+    },
+    {
+      "creditAccountKey": "LIABILITY_OTHER",
+      "debitAccountKey": null,
+      "expenseAccountKey": null,
+      "feeAccountKey": null,
+      "isActive": true,
+      "mappingKey": "cash_bank_deposit_loan",
+      "payableAccountKey": null,
+      "vatAccountKey": null
+    },
+    {
+      "creditAccountKey": "EQUITY_OWNER",
+      "debitAccountKey": null,
+      "expenseAccountKey": null,
+      "feeAccountKey": null,
+      "isActive": true,
+      "mappingKey": "cash_bank_deposit_owner_contribution",
+      "payableAccountKey": null,
+      "vatAccountKey": null
+    },
+    {
+      "creditAccountKey": "EXPENSE_GENERAL",
+      "debitAccountKey": null,
+      "expenseAccountKey": null,
+      "feeAccountKey": null,
+      "isActive": true,
+      "mappingKey": "cash_bank_deposit_refund",
+      "payableAccountKey": null,
+      "vatAccountKey": null
+    },
+    {
+      "creditAccountKey": null,
+      "debitAccountKey": "LIABILITY_OTHER",
+      "expenseAccountKey": null,
+      "feeAccountKey": null,
+      "isActive": true,
+      "mappingKey": "cash_bank_withdrawal_loan_repayment",
+      "payableAccountKey": null,
+      "vatAccountKey": null
+    },
+    {
+      "creditAccountKey": null,
+      "debitAccountKey": "EQUITY_OWNER",
+      "expenseAccountKey": null,
+      "feeAccountKey": null,
+      "isActive": true,
+      "mappingKey": "cash_bank_withdrawal_owner",
+      "payableAccountKey": null,
+      "vatAccountKey": null
+    },
+    {
+      "creditAccountKey": null,
+      "debitAccountKey": "LIABILITY_ACCOUNTS_PAYABLE",
+      "expenseAccountKey": null,
+      "feeAccountKey": null,
+      "isActive": true,
+      "mappingKey": "cash_bank_withdrawal_refund",
+      "payableAccountKey": null,
+      "vatAccountKey": null
+    },
+    {
+      "creditAccountKey": null,
+      "debitAccountKey": "ASSET_CASH",
+      "expenseAccountKey": null,
+      "feeAccountKey": null,
+      "isActive": true,
+      "mappingKey": "cash_transfer",
+      "payableAccountKey": null,
+      "vatAccountKey": null
+    },
+    {
+      "creditAccountKey": "REVENUE_DELIVERY",
+      "debitAccountKey": null,
+      "expenseAccountKey": null,
+      "feeAccountKey": null,
+      "isActive": true,
+      "mappingKey": "delivery_revenue",
+      "payableAccountKey": null,
+      "vatAccountKey": null
+    },
+    {
+      "creditAccountKey": null,
+      "debitAccountKey": "ASSET_CASH",
+      "expenseAccountKey": null,
+      "feeAccountKey": null,
+      "isActive": true,
+      "mappingKey": "driver_collection_cash",
+      "payableAccountKey": null,
+      "vatAccountKey": null
+    },
+    {
+      "creditAccountKey": null,
+      "debitAccountKey": null,
+      "expenseAccountKey": null,
+      "feeAccountKey": null,
+      "isActive": true,
+      "mappingKey": "driver_collection_fee_offset",
+      "payableAccountKey": "LIABILITY_DRIVER_PAYABLE",
+      "vatAccountKey": null
+    },
+    {
+      "creditAccountKey": null,
+      "debitAccountKey": null,
+      "expenseAccountKey": "EXPENSE_DRIVER",
+      "feeAccountKey": null,
+      "isActive": true,
+      "mappingKey": "driver_expense",
+      "payableAccountKey": null,
+      "vatAccountKey": null
+    },
+    {
+      "creditAccountKey": "ASSET_CASH",
+      "debitAccountKey": null,
+      "expenseAccountKey": null,
+      "feeAccountKey": null,
+      "isActive": true,
+      "mappingKey": "employee_payroll_cash_payment",
+      "payableAccountKey": null,
+      "vatAccountKey": null
+    },
+    {
+      "creditAccountKey": null,
+      "debitAccountKey": null,
+      "expenseAccountKey": "EXPENSE_PAYROLL",
+      "feeAccountKey": null,
+      "isActive": true,
+      "mappingKey": "employee_payroll_expense",
+      "payableAccountKey": null,
+      "vatAccountKey": null
+    },
+    {
+      "creditAccountKey": null,
+      "debitAccountKey": null,
+      "expenseAccountKey": null,
+      "feeAccountKey": null,
+      "isActive": true,
+      "mappingKey": "employee_payroll_payable",
+      "payableAccountKey": "LIABILITY_PAYROLL_PAYABLE",
+      "vatAccountKey": null
+    },
+    {
+      "creditAccountKey": null,
+      "debitAccountKey": null,
+      "expenseAccountKey": "EXPENSE_GENERAL",
+      "feeAccountKey": null,
+      "isActive": true,
+      "mappingKey": "general_expense",
+      "payableAccountKey": null,
+      "vatAccountKey": null
+    },
+    {
+      "creditAccountKey": "ASSET_BANK",
+      "debitAccountKey": null,
+      "expenseAccountKey": null,
+      "feeAccountKey": null,
+      "isActive": true,
+      "mappingKey": "general_expense_bank_payment",
+      "payableAccountKey": null,
+      "vatAccountKey": null
+    },
+    {
+      "creditAccountKey": "ASSET_CASH",
+      "debitAccountKey": null,
+      "expenseAccountKey": null,
+      "feeAccountKey": null,
+      "isActive": true,
+      "mappingKey": "general_expense_cash_payment",
+      "payableAccountKey": null,
+      "vatAccountKey": null
+    },
+    {
+      "creditAccountKey": null,
+      "debitAccountKey": null,
+      "expenseAccountKey": null,
+      "feeAccountKey": null,
+      "isActive": true,
+      "mappingKey": "general_expense_payable",
+      "payableAccountKey": "LIABILITY_ACCOUNTS_PAYABLE",
+      "vatAccountKey": null
+    },
+    {
+      "creditAccountKey": null,
+      "debitAccountKey": null,
+      "expenseAccountKey": null,
+      "feeAccountKey": null,
+      "isActive": true,
+      "mappingKey": "input_vat",
+      "payableAccountKey": null,
+      "vatAccountKey": "ASSET_OTHER_RECEIVABLE_1110"
+    },
+    {
+      "creditAccountKey": null,
+      "debitAccountKey": "ASSET_ACCOUNTS_RECEIVABLE",
+      "expenseAccountKey": null,
+      "feeAccountKey": null,
+      "isActive": true,
+      "mappingKey": "order_cod_receivable",
+      "payableAccountKey": null,
+      "vatAccountKey": null
+    },
+    {
+      "creditAccountKey": null,
+      "debitAccountKey": null,
+      "expenseAccountKey": null,
+      "feeAccountKey": null,
+      "isActive": true,
+      "mappingKey": "output_vat",
+      "payableAccountKey": null,
+      "vatAccountKey": "LIABILITY_VAT_PAYABLE"
+    },
+    {
+      "creditAccountKey": "ASSET_CASH",
+      "debitAccountKey": null,
+      "expenseAccountKey": null,
+      "feeAccountKey": null,
+      "isActive": true,
+      "mappingKey": "outsourced_driver_cash_payment",
+      "payableAccountKey": null,
+      "vatAccountKey": null
+    },
+    {
+      "creditAccountKey": null,
+      "debitAccountKey": null,
+      "expenseAccountKey": "EXPENSE_OUTSOURCED_DRIVER_FEE",
+      "feeAccountKey": null,
+      "isActive": true,
+      "mappingKey": "outsourced_driver_fee_expense",
+      "payableAccountKey": null,
+      "vatAccountKey": null
+    },
+    {
+      "creditAccountKey": null,
+      "debitAccountKey": null,
+      "expenseAccountKey": null,
+      "feeAccountKey": null,
+      "isActive": true,
+      "mappingKey": "outsourced_driver_payable",
+      "payableAccountKey": "LIABILITY_DRIVER_PAYABLE",
+      "vatAccountKey": null
+    },
+    {
+      "creditAccountKey": "REVENUE_SERVICE_FEE",
+      "debitAccountKey": null,
+      "expenseAccountKey": null,
+      "feeAccountKey": null,
+      "isActive": true,
+      "mappingKey": "service_fee_revenue",
+      "payableAccountKey": null,
+      "vatAccountKey": null
+    },
+    {
+      "creditAccountKey": null,
+      "debitAccountKey": null,
+      "expenseAccountKey": null,
+      "feeAccountKey": null,
+      "isActive": true,
+      "mappingKey": "trader_payable",
+      "payableAccountKey": "LIABILITY_TRADER_PAYABLE",
+      "vatAccountKey": null
+    },
+    {
+      "creditAccountKey": "ASSET_BANK",
+      "debitAccountKey": null,
+      "expenseAccountKey": null,
+      "feeAccountKey": null,
+      "isActive": true,
+      "mappingKey": "trader_settlement_bank",
+      "payableAccountKey": null,
+      "vatAccountKey": null
+    },
+    {
+      "creditAccountKey": "ASSET_CASH",
+      "debitAccountKey": null,
+      "expenseAccountKey": null,
+      "feeAccountKey": null,
+      "isActive": true,
+      "mappingKey": "trader_settlement_cash",
+      "payableAccountKey": null,
+      "vatAccountKey": null
+    }
+  ],
+  "accountingConfiguration": {
+    "companyDecisions": [
+      "manualAccountingActivationDate",
+      "fiscalYearStartDate",
+      "vatRegistrationAndRate"
+    ],
+    "defaultAccountKeys": {
+      "accountsPayable": "LIABILITY_ACCOUNTS_PAYABLE",
+      "accountsReceivable": "ASSET_ACCOUNTS_RECEIVABLE",
+      "bank": "ASSET_BANK",
+      "cash": "ASSET_CASH",
+      "currentYearEarnings": "EQUITY_CURRENT_YEAR_EARNINGS",
+      "deliveryRevenue": "REVENUE_DELIVERY",
+      "outsourcedDriverPayable": "LIABILITY_DRIVER_PAYABLE",
+      "payrollPayable": "LIABILITY_PAYROLL_PAYABLE",
+      "retainedEarnings": "EQUITY_RETAINED_EARNINGS",
+      "rounding": "EXPENSE_OTHER",
+      "serviceFeeRevenue": "REVENUE_SERVICE_FEE",
+      "suspense": null,
+      "traderPayable": "LIABILITY_TRADER_PAYABLE",
+      "vatInput": "ASSET_OTHER_RECEIVABLE_1110",
+      "vatOutput": "LIABILITY_VAT_PAYABLE"
+    },
+    "standardDefaults": {
+      "accountingEnabled": true,
+      "automaticPostingAreas": [
+        "cash_bank_management",
+        "driver_collections",
+        "employee_payroll",
+        "general_expenses",
+        "orders",
+        "outsourced_driver_fees",
+        "trader_receivables",
+        "trader_settlements"
+      ],
+      "automaticPostingEnabled": true,
+      "baseCurrency": "AED",
+      "defaultAccountingMethod": "accrual",
+      "fiscalYearStartMonth": 1,
+      "segregationPolicy": "single_user"
+    }
+  },
+  "accounts": [
+    {
+      "accountClass": "cash",
+      "accountType": "asset",
+      "code": "1000",
+      "controlAccountType": null,
+      "currency": "AED",
+      "description": null,
+      "isActive": true,
+      "isContraAccount": false,
+      "isControlAccount": false,
+      "isPostingAccount": true,
+      "isSystemAccount": false,
+      "key": "ASSET_CASH",
+      "nameAr": "الصندوق الرئيسي",
+      "nameEn": "Main Cash",
+      "normalBalance": "debit",
+      "parentAccountKey": null,
+      "systemPurpose": null
+    },
+    {
+      "accountClass": "bank",
+      "accountType": "asset",
+      "code": "1010",
+      "controlAccountType": null,
+      "currency": "AED",
+      "description": null,
+      "isActive": true,
+      "isContraAccount": false,
+      "isControlAccount": false,
+      "isPostingAccount": true,
+      "isSystemAccount": false,
+      "key": "ASSET_BANK",
+      "nameAr": "الحساب البنكي الرئيسي",
+      "nameEn": "Main Bank",
+      "normalBalance": "debit",
+      "parentAccountKey": null,
+      "systemPurpose": null
+    },
+    {
+      "accountClass": "accounts_receivable",
+      "accountType": "asset",
+      "code": "1100",
+      "controlAccountType": "accounts_receivable",
+      "currency": "AED",
+      "description": null,
+      "isActive": true,
+      "isContraAccount": false,
+      "isControlAccount": true,
+      "isPostingAccount": true,
+      "isSystemAccount": false,
+      "key": "ASSET_ACCOUNTS_RECEIVABLE",
+      "nameAr": "الحسابات المدينة",
+      "nameEn": "Accounts Receivable",
+      "normalBalance": "debit",
+      "parentAccountKey": null,
+      "systemPurpose": null
+    },
+    {
+      "accountClass": "other_receivable",
+      "accountType": "asset",
+      "code": "1110",
+      "controlAccountType": null,
+      "currency": "AED",
+      "description": null,
+      "isActive": true,
+      "isContraAccount": false,
+      "isControlAccount": false,
+      "isPostingAccount": true,
+      "isSystemAccount": false,
+      "key": "ASSET_OTHER_RECEIVABLE_1110",
+      "nameAr": "ضريبة القيمة المضافة المدخلة المستحقة",
+      "nameEn": "Input VAT Receivable",
+      "normalBalance": "debit",
+      "parentAccountKey": null,
+      "systemPurpose": null
+    },
+    {
+      "accountClass": "other_receivable",
+      "accountType": "asset",
+      "code": "1120",
+      "controlAccountType": null,
+      "currency": "AED",
+      "description": null,
+      "isActive": true,
+      "isContraAccount": false,
+      "isControlAccount": false,
+      "isPostingAccount": true,
+      "isSystemAccount": false,
+      "key": "ASSET_OTHER_RECEIVABLE_1120",
+      "nameAr": "ذمم مدينة أخرى",
+      "nameEn": "Other Receivable",
+      "normalBalance": "debit",
+      "parentAccountKey": null,
+      "systemPurpose": null
+    },
+    {
+      "accountClass": "other_asset",
+      "accountType": "asset",
+      "code": "1190",
+      "controlAccountType": null,
+      "currency": "AED",
+      "description": null,
+      "isActive": true,
+      "isContraAccount": false,
+      "isControlAccount": false,
+      "isPostingAccount": true,
+      "isSystemAccount": false,
+      "key": "ASSET_OTHER",
+      "nameAr": "حساب معلق",
+      "nameEn": "Suspense Account",
+      "normalBalance": "debit",
+      "parentAccountKey": null,
+      "systemPurpose": null
+    },
+    {
+      "accountClass": "trader_payable",
+      "accountType": "liability",
+      "code": "2000",
+      "controlAccountType": "trader_payable",
+      "currency": "AED",
+      "description": null,
+      "isActive": true,
+      "isContraAccount": false,
+      "isControlAccount": true,
+      "isPostingAccount": true,
+      "isSystemAccount": false,
+      "key": "LIABILITY_TRADER_PAYABLE",
+      "nameAr": "مستحقات التجار",
+      "nameEn": "Trader Payable",
+      "normalBalance": "credit",
+      "parentAccountKey": null,
+      "systemPurpose": null
+    },
+    {
+      "accountClass": "driver_payable",
+      "accountType": "liability",
+      "code": "2010",
+      "controlAccountType": "driver_payable",
+      "currency": "AED",
+      "description": null,
+      "isActive": true,
+      "isContraAccount": false,
+      "isControlAccount": true,
+      "isPostingAccount": true,
+      "isSystemAccount": false,
+      "key": "LIABILITY_DRIVER_PAYABLE",
+      "nameAr": "مستحقات السائقين الخارجيين",
+      "nameEn": "Outsourced Driver Payable",
+      "normalBalance": "credit",
+      "parentAccountKey": null,
+      "systemPurpose": null
+    },
+    {
+      "accountClass": "payroll_payable",
+      "accountType": "liability",
+      "code": "2020",
+      "controlAccountType": "payroll_payable",
+      "currency": "AED",
+      "description": null,
+      "isActive": true,
+      "isContraAccount": false,
+      "isControlAccount": true,
+      "isPostingAccount": true,
+      "isSystemAccount": false,
+      "key": "LIABILITY_PAYROLL_PAYABLE",
+      "nameAr": "الرواتب المستحقة",
+      "nameEn": "Payroll Payable",
+      "normalBalance": "credit",
+      "parentAccountKey": null,
+      "systemPurpose": null
+    },
+    {
+      "accountClass": "accounts_payable",
+      "accountType": "liability",
+      "code": "2030",
+      "controlAccountType": "accounts_payable",
+      "currency": "AED",
+      "description": null,
+      "isActive": true,
+      "isContraAccount": false,
+      "isControlAccount": true,
+      "isPostingAccount": true,
+      "isSystemAccount": false,
+      "key": "LIABILITY_ACCOUNTS_PAYABLE",
+      "nameAr": "الحسابات الدائنة",
+      "nameEn": "Accounts Payable",
+      "normalBalance": "credit",
+      "parentAccountKey": null,
+      "systemPurpose": null
+    },
+    {
+      "accountClass": "vat_payable",
+      "accountType": "liability",
+      "code": "2040",
+      "controlAccountType": null,
+      "currency": "AED",
+      "description": null,
+      "isActive": true,
+      "isContraAccount": false,
+      "isControlAccount": false,
+      "isPostingAccount": true,
+      "isSystemAccount": false,
+      "key": "LIABILITY_VAT_PAYABLE",
+      "nameAr": "ضريبة القيمة المضافة المستحقة",
+      "nameEn": "Output VAT Payable",
+      "normalBalance": "credit",
+      "parentAccountKey": null,
+      "systemPurpose": null
+    },
+    {
+      "accountClass": "other_liability",
+      "accountType": "liability",
+      "code": "2050",
+      "controlAccountType": null,
+      "currency": "AED",
+      "description": null,
+      "isActive": true,
+      "isContraAccount": false,
+      "isControlAccount": false,
+      "isPostingAccount": true,
+      "isSystemAccount": false,
+      "key": "LIABILITY_OTHER",
+      "nameAr": "القروض المستحقة",
+      "nameEn": "Loan Payable",
+      "normalBalance": "credit",
+      "parentAccountKey": null,
+      "systemPurpose": null
+    },
+    {
+      "accountClass": "retained_earnings",
+      "accountType": "equity",
+      "code": "3000",
+      "controlAccountType": null,
+      "currency": "AED",
+      "description": null,
+      "isActive": true,
+      "isContraAccount": false,
+      "isControlAccount": false,
+      "isPostingAccount": true,
+      "isSystemAccount": false,
+      "key": "EQUITY_RETAINED_EARNINGS",
+      "nameAr": "الأرباح المحتجزة",
+      "nameEn": "Retained Earnings",
+      "normalBalance": "credit",
+      "parentAccountKey": null,
+      "systemPurpose": null
+    },
+    {
+      "accountClass": "current_year_earnings",
+      "accountType": "equity",
+      "code": "3010",
+      "controlAccountType": null,
+      "currency": "AED",
+      "description": null,
+      "isActive": true,
+      "isContraAccount": false,
+      "isControlAccount": false,
+      "isPostingAccount": true,
+      "isSystemAccount": false,
+      "key": "EQUITY_CURRENT_YEAR_EARNINGS",
+      "nameAr": "أرباح السنة الحالية",
+      "nameEn": "Current Year Earnings",
+      "normalBalance": "credit",
+      "parentAccountKey": null,
+      "systemPurpose": null
+    },
+    {
+      "accountClass": "owner_equity",
+      "accountType": "equity",
+      "code": "3020",
+      "controlAccountType": null,
+      "currency": "AED",
+      "description": null,
+      "isActive": true,
+      "isContraAccount": false,
+      "isControlAccount": false,
+      "isPostingAccount": true,
+      "isSystemAccount": false,
+      "key": "EQUITY_OWNER",
+      "nameAr": "حقوق المالك",
+      "nameEn": "Owner Equity",
+      "normalBalance": "credit",
+      "parentAccountKey": null,
+      "systemPurpose": null
+    },
+    {
+      "accountClass": "delivery_revenue",
+      "accountType": "revenue",
+      "code": "4000",
+      "controlAccountType": null,
+      "currency": "AED",
+      "description": null,
+      "isActive": true,
+      "isContraAccount": false,
+      "isControlAccount": false,
+      "isPostingAccount": true,
+      "isSystemAccount": false,
+      "key": "REVENUE_DELIVERY",
+      "nameAr": "إيرادات التوصيل",
+      "nameEn": "Delivery Revenue",
+      "normalBalance": "credit",
+      "parentAccountKey": null,
+      "systemPurpose": null
+    },
+    {
+      "accountClass": "service_fee_revenue",
+      "accountType": "revenue",
+      "code": "4010",
+      "controlAccountType": null,
+      "currency": "AED",
+      "description": null,
+      "isActive": true,
+      "isContraAccount": false,
+      "isControlAccount": false,
+      "isPostingAccount": true,
+      "isSystemAccount": false,
+      "key": "REVENUE_SERVICE_FEE",
+      "nameAr": "إيرادات رسوم الخدمة",
+      "nameEn": "Service Fee Revenue",
+      "normalBalance": "credit",
+      "parentAccountKey": null,
+      "systemPurpose": null
+    },
+    {
+      "accountClass": "additional_fee_revenue",
+      "accountType": "revenue",
+      "code": "4020",
+      "controlAccountType": null,
+      "currency": "AED",
+      "description": null,
+      "isActive": true,
+      "isContraAccount": false,
+      "isControlAccount": false,
+      "isPostingAccount": true,
+      "isSystemAccount": false,
+      "key": "REVENUE_ADDITIONAL_FEE",
+      "nameAr": "إيرادات الرسوم الإضافية",
+      "nameEn": "Additional Fee Revenue",
+      "normalBalance": "credit",
+      "parentAccountKey": null,
+      "systemPurpose": null
+    },
+    {
+      "accountClass": "other_operating_revenue",
+      "accountType": "revenue",
+      "code": "4030",
+      "controlAccountType": null,
+      "currency": "AED",
+      "description": null,
+      "isActive": true,
+      "isContraAccount": false,
+      "isControlAccount": false,
+      "isPostingAccount": true,
+      "isSystemAccount": false,
+      "key": "REVENUE_OTHER_OPERATING",
+      "nameAr": "إيرادات تشغيلية أخرى",
+      "nameEn": "Other Operating Revenue",
+      "normalBalance": "credit",
+      "parentAccountKey": null,
+      "systemPurpose": null
+    },
+    {
+      "accountClass": "driver_expense",
+      "accountType": "expense",
+      "code": "5000",
+      "controlAccountType": null,
+      "currency": "AED",
+      "description": null,
+      "isActive": true,
+      "isContraAccount": false,
+      "isControlAccount": false,
+      "isPostingAccount": true,
+      "isSystemAccount": false,
+      "key": "EXPENSE_DRIVER",
+      "nameAr": "مصروفات السائقين",
+      "nameEn": "Driver Expense",
+      "normalBalance": "debit",
+      "parentAccountKey": null,
+      "systemPurpose": null
+    },
+    {
+      "accountClass": "outsourced_driver_fee_expense",
+      "accountType": "expense",
+      "code": "5010",
+      "controlAccountType": null,
+      "currency": "AED",
+      "description": null,
+      "isActive": true,
+      "isContraAccount": false,
+      "isControlAccount": false,
+      "isPostingAccount": true,
+      "isSystemAccount": false,
+      "key": "EXPENSE_OUTSOURCED_DRIVER_FEE",
+      "nameAr": "مصروف رسوم السائقين الخارجيين",
+      "nameEn": "Outsourced Driver Fee Expense",
+      "normalBalance": "debit",
+      "parentAccountKey": null,
+      "systemPurpose": null
+    },
+    {
+      "accountClass": "payroll_expense",
+      "accountType": "expense",
+      "code": "5020",
+      "controlAccountType": null,
+      "currency": "AED",
+      "description": null,
+      "isActive": true,
+      "isContraAccount": false,
+      "isControlAccount": false,
+      "isPostingAccount": true,
+      "isSystemAccount": false,
+      "key": "EXPENSE_PAYROLL",
+      "nameAr": "مصروف الرواتب",
+      "nameEn": "Payroll Expense",
+      "normalBalance": "debit",
+      "parentAccountKey": null,
+      "systemPurpose": null
+    },
+    {
+      "accountClass": "general_expense",
+      "accountType": "expense",
+      "code": "5030",
+      "controlAccountType": null,
+      "currency": "AED",
+      "description": null,
+      "isActive": true,
+      "isContraAccount": false,
+      "isControlAccount": false,
+      "isPostingAccount": true,
+      "isSystemAccount": false,
+      "key": "EXPENSE_GENERAL",
+      "nameAr": "المصروفات العامة",
+      "nameEn": "General Expense",
+      "normalBalance": "debit",
+      "parentAccountKey": null,
+      "systemPurpose": null
+    },
+    {
+      "accountClass": "administrative_expense",
+      "accountType": "expense",
+      "code": "5040",
+      "controlAccountType": null,
+      "currency": "AED",
+      "description": null,
+      "isActive": true,
+      "isContraAccount": false,
+      "isControlAccount": false,
+      "isPostingAccount": true,
+      "isSystemAccount": false,
+      "key": "EXPENSE_ADMINISTRATIVE",
+      "nameAr": "المصروفات الإدارية",
+      "nameEn": "Administrative Expense",
+      "normalBalance": "debit",
+      "parentAccountKey": null,
+      "systemPurpose": null
+    },
+    {
+      "accountClass": "bank_charge",
+      "accountType": "expense",
+      "code": "5050",
+      "controlAccountType": null,
+      "currency": "AED",
+      "description": null,
+      "isActive": true,
+      "isContraAccount": false,
+      "isControlAccount": false,
+      "isPostingAccount": true,
+      "isSystemAccount": false,
+      "key": "EXPENSE_BANK_CHARGE",
+      "nameAr": "الرسوم البنكية",
+      "nameEn": "Bank Charges",
+      "normalBalance": "debit",
+      "parentAccountKey": null,
+      "systemPurpose": null
+    },
+    {
+      "accountClass": "vat_expense",
+      "accountType": "expense",
+      "code": "5060",
+      "controlAccountType": null,
+      "currency": "AED",
+      "description": null,
+      "isActive": true,
+      "isContraAccount": false,
+      "isControlAccount": false,
+      "isPostingAccount": true,
+      "isSystemAccount": false,
+      "key": "EXPENSE_VAT",
+      "nameAr": "مصروف ضريبة القيمة المضافة",
+      "nameEn": "VAT Expense",
+      "normalBalance": "debit",
+      "parentAccountKey": null,
+      "systemPurpose": null
+    },
+    {
+      "accountClass": "other_expense",
+      "accountType": "expense",
+      "code": "5090",
+      "controlAccountType": null,
+      "currency": "AED",
+      "description": null,
+      "isActive": true,
+      "isContraAccount": false,
+      "isControlAccount": false,
+      "isPostingAccount": true,
+      "isSystemAccount": false,
+      "key": "EXPENSE_OTHER",
+      "nameAr": "فروقات التقريب ومصروفات أخرى",
+      "nameEn": "Rounding and Other Expense",
+      "normalBalance": "debit",
+      "parentAccountKey": null,
+      "systemPurpose": null
+    }
+  ],
+  "allowanceTypes": [
+    {
+      "code": "HM001",
+      "isActive": true,
+      "key": "ALLOWANCE_HM001",
+      "name": "Home",
+      "nameAr": null
+    },
+    {
+      "code": "TR001",
+      "isActive": true,
+      "key": "ALLOWANCE_TR001",
+      "name": "Transportation",
+      "nameAr": null
+    }
+  ],
+  "balancePolicy": {
+    "bankOverdraftLimit": "0.00",
+    "bankPolicy": "allow_within_overdraft",
+    "cashPolicy": "block",
+    "overridePermission": "accounting.manage"
+  },
+  "businessDay": {
+    "companyMayOverride": true,
+    "isDefault": true,
+    "startTime": "08:00",
+    "timezone": "Asia/Dubai"
+  },
+  "countryCode": "AE",
+  "currency": "AED",
+  "defaultBankAccounts": [
+    {
+      "accountType": "current",
+      "code": "BANK-0001",
+      "currency": "AED",
+      "glAccountKey": "ASSET_BANK",
+      "isActive": true,
+      "key": "BANK_BANK_0001",
+      "name": "Main Bank",
+      "requiresCompanyInput": [
+        "bankName",
+        "accountName",
+        "accountNumber",
+        "iban",
+        "swiftCode"
+      ]
+    }
+  ],
+  "defaultCashAccounts": [
+    {
+      "cashAccountType": "main_cash",
+      "code": "CASH-0001",
+      "currency": "AED",
+      "glAccountKey": "ASSET_CASH",
+      "isActive": true,
+      "key": "CASH_CASH_0001",
+      "name": "Main Cash",
+      "nameAr": "الصندوق الرئيسي",
+      "requiresCompanyInput": [
+        "locationOrCustodian"
+      ]
+    }
+  ],
+  "excludedFromTemplate": [
+    {
+      "item": "opening_balance_batches, opening_balance_lines",
+      "reason": "Financial history. A template must carry no balance; the new Company establishes its own opening balances after initialisation."
+    },
+    {
+      "item": "fiscal_years, accounting_periods (dated rows)",
+      "reason": "Dated to the source Company's calendar. A Company created later would inherit periods it cannot post into; only the fiscal policy is reusable."
+    },
+    {
+      "item": "company_reference_counters.next_value",
+      "reason": "A transactional watermark counting the source Company's documents. Only the prefixes are reusable; every new sequence starts at 1."
+    },
+    {
+      "item": "company_bank_accounts identity fields (bank name, account name, number, IBAN, SWIFT)",
+      "reason": "Commercially sensitive and specific to one Company. Seeding them into another Company would be a real disclosure, not a convenience."
+    },
+    {
+      "item": "company_cash_accounts.location_or_custodian",
+      "reason": "Names a physical office and custodian of the source Company."
+    },
+    {
+      "item": "chart_of_accounts / account_mappings effective_from dates",
+      "reason": "Adoption dates of the source Company. The importer sets these from the new Company's own start date."
+    },
+    {
+      "item": "accounting_configurations.manual_accounting_activation_date and change-reason/actor columns",
+      "reason": "Records when one Company switched Accounting on, and who did it."
+    },
+    {
+      "item": "accounting_configuration_history",
+      "reason": "An audit trail of the source Company's configuration changes."
+    },
+    {
+      "item": "payment methods",
+      "reason": "Not Company configuration. They are code-level enumerations enforced by CHECK constraints (for example cash/visa on driver collections), so there is nothing per-Company to carry."
+    },
+    {
+      "item": "areas, emirates",
+      "reason": "Operational geography rather than Accounting setup. Emirates are global reference data and Areas are imported by their own tool."
+    },
+    {
+      "item": "audit_events, accounts, roles, permissions, sessions",
+      "reason": "Identity, security and audit data — never part of an Accounting template."
+    },
+    {
+      "item": "all transactional tables",
+      "reason": "Orders, customers, traders, drivers, employees, journals, accounting events, settlements, collections, reconciliations, payroll, expenses, cash/bank movements, batch and recovery execution history."
+    }
+  ],
+  "expenseTypes": [
+    {
+      "code": "OTHER",
+      "displayName": "Other",
+      "isActive": true,
+      "key": "EXPENSE_TYPE_OTHER",
+      "nameAr": null,
+      "nameEn": "Other"
+    },
+    {
+      "code": "PARKING",
+      "displayName": "Parking",
+      "isActive": true,
+      "key": "EXPENSE_TYPE_PARKING",
+      "nameAr": null,
+      "nameEn": "Parking"
+    },
+    {
+      "code": "PETROL",
+      "displayName": "Petrol",
+      "isActive": true,
+      "key": "EXPENSE_TYPE_PETROL",
+      "nameAr": null,
+      "nameEn": "Petrol"
+    },
+    {
+      "code": "VEHICLE",
+      "displayName": "Vehicle-related",
+      "isActive": true,
+      "key": "EXPENSE_TYPE_VEHICLE",
+      "nameAr": null,
+      "nameEn": "Vehicle-related"
+    },
+    {
+      "code": "WATER",
+      "displayName": "Water",
+      "isActive": true,
+      "key": "EXPENSE_TYPE_WATER",
+      "nameAr": null,
+      "nameEn": "Water"
+    }
+  ],
+  "fiscalPolicy": {
+    "fiscalYearStartMonth": 1,
+    "generatedOnCompanyCreation": true,
+    "periodModel": "calendar_month",
+    "periodsPerYear": 12,
+    "timezone": "Asia/Dubai"
+  },
+  "generalExpenseCategories": [
+    {
+      "code": "EXP-OFFICE",
+      "defaultExpenseMappingKey": "general_expense",
+      "defaultVatTreatment": "out_of_scope",
+      "description": "Office supplies and stationery expenses",
+      "isActive": true,
+      "key": "EXPENSE_CATEGORY_EXP_OFFICE",
+      "nameAr": "مستلزمات مكتبية",
+      "nameEn": "Office Supplies"
+    }
+  ],
+  "name": "BluelineGPT Standard Delivery Accounting",
+  "openingBalances": [],
+  "referenceNumberPrefixes": [
+    {
+      "prefix": "OB",
+      "referenceType": "accounting_opening_balance"
+    },
+    {
+      "prefix": "AREA",
+      "referenceType": "area"
+    },
+    {
+      "prefix": "CBM",
+      "referenceType": "cash_bank_movement"
+    },
+    {
+      "prefix": "CUS",
+      "referenceType": "customer"
+    },
+    {
+      "prefix": "DRV",
+      "referenceType": "driver"
+    },
+    {
+      "prefix": "EMP",
+      "referenceType": "employee"
+    },
+    {
+      "prefix": "EXP",
+      "referenceType": "general_expense"
+    },
+    {
+      "prefix": "EXPPAY",
+      "referenceType": "general_expense_payment"
+    },
+    {
+      "prefix": "JRN",
+      "referenceType": "journal"
+    },
+    {
+      "prefix": "ORD",
+      "referenceType": "order"
+    },
+    {
+      "prefix": "DFPAY",
+      "referenceType": "outsourced_driver_fee_payment"
+    },
+    {
+      "prefix": "PAYPMT",
+      "referenceType": "payroll_payment"
+    },
+    {
+      "prefix": "REC",
+      "referenceType": "reconciliation"
+    },
+    {
+      "prefix": "SET",
+      "referenceType": "settlement"
+    },
+    {
+      "prefix": "TRD",
+      "referenceType": "trader"
+    },
+    {
+      "prefix": "COL",
+      "referenceType": "trader_collection"
+    },
+    {
+      "prefix": "RCV",
+      "referenceType": "trader_receivable"
+    }
+  ],
+  "requiredCompanyInputs": [
+    "bankAccountDetails.bankName",
+    "bankAccountDetails.accountName",
+    "bankAccountDetails.accountNumber",
+    "bankAccountDetails.iban",
+    "bankAccountDetails.swiftCode",
+    "cashAccount.locationOrCustodian",
+    "fiscalYear.startDate",
+    "accounting.manualActivationDate",
+    "vat.registrationAndRate",
+    "openingBalances"
+  ],
+  "schemaVersion": 1,
+  "source": {
+    "companyName": "Dana Delivery Services",
+    "type": "company_export"
+  },
+  "templateCode": "UAE_DELIVERY_STANDARD",
+  "templateVersion": 1
+}

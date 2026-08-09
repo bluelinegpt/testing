@@ -88,7 +88,9 @@ describe.skipIf(!runDatabaseTests)("Trader configuration database protections", 
           );
           await rejected(
             () =>
-              sql`delete from trader_service_prices where id=${pricingA}::uuid`.execute(transaction),
+              sql`delete from trader_service_prices where id=${pricingA}::uuid`.execute(
+                transaction,
+              ),
             "23001",
           );
 

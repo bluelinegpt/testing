@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router-dom";
 
@@ -12,6 +12,8 @@ import {
 } from "../features/administration/UserRoleConfigurationWorkspace.js";
 import { CompanyConfigurationWorkspace } from "../features/configuration/CompanyConfigurationWorkspace.js";
 import { CompanyProfileWorkspace } from "../features/configuration/CompanyProfileWorkspace.js";
+import { ProductCatalogueWorkspace } from "../features/storefront/ProductCatalogueWorkspace.js";
+import { StorefrontConfigurationWorkspace } from "../features/storefront/StorefrontConfigurationWorkspace.js";
 import {
   CustomerConfigurationWorkspace,
   CustomerDetailWorkspace,
@@ -42,9 +44,11 @@ import {
 import { TraderReceivablesWorkspace } from "../features/operations/TraderReceivablesWorkspace.js";
 import { TraderSettlementsWorkspace } from "../features/operations/TraderSettlementsWorkspace.js";
 import { SupportWorkspace } from "../features/support/SupportWorkspace.js";
+import { CommunicationCenter } from "../features/communication/CommunicationCenter.js";
 import { CompanyAppShell } from "./CompanyAppShell.js";
 import { CompanyBrandingProvider } from "./CompanyBrandingContext.js";
 import { canAccessCompanyPath, firstAuthorizedCompanyPath } from "./company-access.js";
+import { SessionAccessProvider } from "./SessionAccessContext.js";
 import { WorkflowErrorBoundary } from "./WorkflowErrorBoundary.js";
 
 const redirects: Readonly<Record<string, string>> = {
@@ -114,6 +118,19 @@ export function CompanyWorkspace({
     if (redirect !== undefined) navigate(redirect, { replace: true });
   }, [navigate, redirect]);
 
+  // Company, permissions and the navigator, published once so nested panels
+  // (Related Records) do not have to be threaded through every dialog. Keyed
+  // on the Company so switching it re-creates the value and invalidates every
+  // consumer's cache rather than leaving another Company's data on screen.
+  const sessionAccess = useMemo(
+    () => ({
+      companyId: session.identity.companyId,
+      navigate: (target: string) => void navigate(target),
+      permissions: session.identity.permissions,
+    }),
+    [navigate, session.identity.companyId, session.identity.permissions],
+  );
+
   if (redirect !== undefined) return null;
 
   let content;
@@ -135,6 +152,8 @@ export function CompanyWorkspace({
     content = (
       <DashboardWorkspace api={api} onDrillDown={(target) => navigate(dashboardTargets[target])} />
     );
+  } else if (path === "/communication") {
+    content = <CommunicationCenter />;
   } else if (path === "/orders") {
     content = (
       <OrdersModuleWorkspace
@@ -143,27 +162,53 @@ export function CompanyWorkspace({
         permissions={session.identity.permissions}
       />
     );
-  } else if (path === "/drivers") {
-    content = <DriverCollectionsWorkspace api={api} />;
-  } else if (path === "/trader-settlements") {
+  } else if (path === "/drivers" || path.startsWith("/drivers/collections/")) {
+    // The list stays mounted underneath a route-opened detail, so Back returns
+    // to it with its filters, sorting and page intact.
+    content = (
+      <DriverCollectionsWorkspace
+        api={api}
+        detailId={detailSegment(path, "/drivers/collections/")}
+      />
+    );
+  } else if (path === "/trader-settlements" || path.startsWith("/trader-settlements/")) {
     const statementTraderId =
       new URLSearchParams(location.search).get("statementTraderId") ?? undefined;
     content = (
       <TraderSettlementsWorkspace
         api={api}
-        initialStatementOpen={
-          new URLSearchParams(location.search).get("openStatement") === "true"
-        }
+        detailId={detailSegment(path, "/trader-settlements/")}
+        initialStatementOpen={new URLSearchParams(location.search).get("openStatement") === "true"}
         permissions={session.identity.permissions}
         presetTraderId={statementTraderId}
       />
     );
-  } else if (path === "/trader-receivables") {
+  } else if (path === "/trader-receivables" || path.startsWith("/trader-receivables/")) {
+    // `/trader-receivables/collections/:id` is checked first; anything else
+    // after the prefix is a Receivable, so the two can never be confused.
+    const collectionId = detailSegment(path, "/trader-receivables/collections/");
     content = (
-      <TraderReceivablesWorkspace api={api} permissions={session.identity.permissions} />
+      <TraderReceivablesWorkspace
+        api={api}
+        collectionDetailId={collectionId}
+        permissions={session.identity.permissions}
+        receivableDetailId={
+          collectionId === undefined ? detailSegment(path, "/trader-receivables/") : undefined
+        }
+      />
     );
-  } else if (path === "/payroll") {
-    content = <PayrollWorkspace api={api} permissions={session.identity.permissions} />;
+  } else if (path === "/payroll" || path.startsWith("/payroll/")) {
+    content = (
+      <PayrollWorkspace
+        api={api}
+        feeAccrualDetailId={detailSegment(path, "/payroll/driver-fees/accruals/")}
+        feePaymentDetailId={detailSegment(path, "/payroll/driver-fees/payments/")}
+        onDetailClose={() => void navigate("/payroll")}
+        paymentDetailId={detailSegment(path, "/payroll/payments/")}
+        periodDetailId={detailSegment(path, "/payroll/periods/")}
+        permissions={session.identity.permissions}
+      />
+    );
   } else if (path === "/accounting" || path.startsWith("/accounting/")) {
     content = (
       <AccountingWorkspace
@@ -194,6 +239,7 @@ export function CompanyWorkspace({
     content = (
       <OrderDetailsWorkspace
         api={api}
+        companyId={session.identity.companyId}
         onBack={() => void navigate("/orders")}
         onNavigate={(target) => void navigate(target)}
         orderNumber={orderNumber}
@@ -201,15 +247,62 @@ export function CompanyWorkspace({
       />
     );
   } else if (path === "/configuration/company-profile") {
-    content = <CompanyProfileWorkspace api={api} />;
+    content = <CompanyProfileWorkspace api={api} permissions={session.identity.permissions} />;
+  } else if (path.startsWith("/configuration/storefront-products/")) {
+    // The Storefront id is part of the path: a Company user manages one
+    // Trader's catalogue at a time, and the API re-checks that ownership.
+    const storefrontId = detailSegment(path, "/configuration/storefront-products/");
+    content =
+      storefrontId === undefined ? null : (
+        <ProductCatalogueWorkspace
+          api={api}
+          permissions={session.identity.permissions}
+          storefrontId={storefrontId}
+        />
+      );
+  } else if (path === "/configuration/storefront" || path.startsWith("/configuration/storefront/")) {
+    // The id segment is optional: a Trader account resolves its own Storefront
+    // through `mine`, while a Company user opens a specific one.
+    const storefrontId = detailSegment(path, "/configuration/storefront/");
+    content = (
+      <StorefrontConfigurationWorkspace
+        api={api}
+        permissions={session.identity.permissions}
+        {...(storefrontId === undefined ? {} : { storefrontId })}
+      />
+    );
   } else if (path === "/configuration/general") {
-    content = <CompanyConfigurationWorkspace api={api} permissions={session.identity.permissions} view="general" />;
+    content = (
+      <CompanyConfigurationWorkspace
+        api={api}
+        permissions={session.identity.permissions}
+        view="general"
+      />
+    );
   } else if (path === "/configuration/areas") {
-    content = <CompanyConfigurationWorkspace api={api} permissions={session.identity.permissions} view="areas" />;
+    content = (
+      <CompanyConfigurationWorkspace
+        api={api}
+        permissions={session.identity.permissions}
+        view="areas"
+      />
+    );
   } else if (path === "/configuration/bank-accounts") {
-    content = <CompanyConfigurationWorkspace api={api} permissions={session.identity.permissions} view="bank-accounts" />;
+    content = (
+      <CompanyConfigurationWorkspace
+        api={api}
+        permissions={session.identity.permissions}
+        view="bank-accounts"
+      />
+    );
   } else if (path === "/configuration/vat") {
-    content = <CompanyConfigurationWorkspace api={api} permissions={session.identity.permissions} view="vat" />;
+    content = (
+      <CompanyConfigurationWorkspace
+        api={api}
+        permissions={session.identity.permissions}
+        view="vat"
+      />
+    );
   } else if (path === "/configuration/employees") {
     content = (
       <WorkforceConfigurationWorkspace
@@ -321,19 +414,36 @@ export function CompanyWorkspace({
   }
 
   return (
-    <CompanyBrandingProvider api={api}>
-      <CompanyAppShell onLogout={onLogout} session={session}>
-        <WorkflowErrorBoundary
-          fallbackDescription={t("shell.workflowErrorDescription")}
-          fallbackTitle={t("shell.workflowErrorTitle")}
-          resetKey={path}
-          retryLabel={t("common.tryAgain")}
-        >
-          {content}
-        </WorkflowErrorBoundary>
-      </CompanyAppShell>
-    </CompanyBrandingProvider>
+    <SessionAccessProvider value={sessionAccess}>
+      <CompanyBrandingProvider api={api}>
+        <CompanyAppShell onLogout={onLogout} session={session}>
+          <WorkflowErrorBoundary
+            fallbackDescription={t("shell.workflowErrorDescription")}
+            fallbackTitle={t("shell.workflowErrorTitle")}
+            resetKey={path}
+            retryLabel={t("common.tryAgain")}
+          >
+            {content}
+          </WorkflowErrorBoundary>
+        </CompanyAppShell>
+      </CompanyBrandingProvider>
+    </SessionAccessProvider>
   );
+}
+
+/**
+ * The record identifier in a canonical detail route, or `undefined` when the
+ * path is not that route.
+ *
+ * Returns a value only for a single non-empty segment directly after the
+ * prefix, so `/trader-receivables/collections/<id>` can never be read as a
+ * Receivable identifier and a trailing slash resolves to the list.
+ */
+function detailSegment(pathname: string, prefix: string): string | undefined {
+  if (!pathname.startsWith(prefix)) return undefined;
+  const rest = pathname.slice(prefix.length);
+  if (rest === "" || rest.includes("/")) return undefined;
+  return decodeURIComponent(rest);
 }
 
 function normalizePath(pathname: string): string {

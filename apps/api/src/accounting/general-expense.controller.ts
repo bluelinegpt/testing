@@ -23,7 +23,7 @@ import {
   RequireIdentityKinds,
 } from "../authentication/authentication.decorators.js";
 import { ApplicationException } from "../presentation/errors/application.exception.js";
-import {
+import type {
   CreateGeneralExpenseCategoryDto,
   CreateGeneralExpenseDto,
   CreateGeneralExpensePaymentDto,
@@ -35,6 +35,13 @@ import {
   GeneralExpenseReasonDto,
   UpdateGeneralExpenseCategoryDto,
   UpdateGeneralExpenseDto,
+} from "./general-expense.dto.js";
+// Imported as values, not types: `emitDecoratorMetadata` can only record a
+// DTO class for the global ValidationPipe when the symbol survives to runtime,
+// so the new query contracts are actually validated.
+import {
+  GeneralExpensePaymentPreviewQueryDto,
+  PayableGeneralExpenseQueryDto,
 } from "./general-expense.dto.js";
 import { GeneralExpensePaymentService } from "./general-expense-payment.service.js";
 import { GeneralExpenseQueryService } from "./general-expense-query.service.js";
@@ -62,7 +69,9 @@ export class GeneralExpenseController {
 
   @Get("categories")
   @RequireAnyPermission("accounting.view", "accounting.manage", "users_roles.manage")
-  public categories(@Query("activeOnly", new ParseBoolPipe({ optional: true })) activeOnly?: boolean) {
+  public categories(
+    @Query("activeOnly", new ParseBoolPipe({ optional: true })) activeOnly?: boolean,
+  ) {
     return this.queries.categories(activeOnly);
   }
 
@@ -77,9 +86,7 @@ export class GeneralExpenseController {
 
   @Get("categories/:categoryId/dependencies")
   @RequireAnyPermission("accounting.view", "accounting.manage", "users_roles.manage")
-  public categoryDependencies(
-    @Param("categoryId", new ParseUUIDPipe()) categoryId: string,
-  ) {
+  public categoryDependencies(@Param("categoryId", new ParseUUIDPipe()) categoryId: string) {
     return this.queries.categoryDependencies(categoryId);
   }
 
@@ -146,6 +153,22 @@ export class GeneralExpenseController {
     return this.queries.payment(paymentId);
   }
 
+  // Searchable "Expense to Pay" options. Declared before ":expenseId" so the
+  // literal segment is not captured as an Expense identifier.
+  @Get("payable")
+  @RequireAnyPermission("accounting.view", "users_roles.manage")
+  public payable(@Query() query: PayableGeneralExpenseQueryDto) {
+    return this.queries.payableExpenses(query);
+  }
+
+  // Currency, Company today, and the active Cash/Bank Accounts the Record
+  // Payment form offers. Read-only.
+  @Get("payment-context")
+  @RequireAnyPermission("accounting.view", "users_roles.manage")
+  public paymentContext() {
+    return this.queries.paymentContext();
+  }
+
   @Get("attachments/:attachmentId/content")
   @RequireAnyPermission("accounting.view", "users_roles.manage")
   public async attachmentContent(
@@ -187,6 +210,25 @@ export class GeneralExpenseController {
   @RequireAnyPermission("accounting.manage", "accounting.post", "users_roles.manage")
   public previewBackfill(@Body() input: GeneralExpenseBackfillPreviewDto) {
     return this.queries.previewBackfill(input);
+  }
+
+  // Read-only: describes the Journal approval WOULD produce. Creates no
+  // Journal and no Accounting Event, and writes nothing.
+  @Get(":expenseId/accounting-preview")
+  @RequireAnyPermission("accounting.view", "users_roles.manage")
+  public accountingPreview(@Param("expenseId", new ParseUUIDPipe()) expenseId: string) {
+    return this.queries.accountingPreview(expenseId);
+  }
+
+  // Read-only: describes the Journal confirmation WOULD produce for a Payment
+  // and every blocker. Creates no Payment, Journal or Accounting Event.
+  @Get(":expenseId/payment-preview")
+  @RequireAnyPermission("accounting.view", "users_roles.manage")
+  public paymentPreview(
+    @Param("expenseId", new ParseUUIDPipe()) expenseId: string,
+    @Query() query: GeneralExpensePaymentPreviewQueryDto,
+  ) {
+    return this.queries.paymentPreview(expenseId, query);
   }
 
   @Get(":expenseId")
@@ -293,9 +335,7 @@ export class GeneralExpenseController {
 
   @Post(":expenseId/attachments/upload")
   @ApiConsumes("multipart/form-data")
-  @UseInterceptors(
-    FileInterceptor("file", { limits: { fileSize: 10 * 1024 * 1024, files: 1 } }),
-  )
+  @UseInterceptors(FileInterceptor("file", { limits: { fileSize: 10 * 1024 * 1024, files: 1 } }))
   @RequireAnyPermission("accounting.manage", "users_roles.manage")
   public uploadAttachment(
     @Param("expenseId", new ParseUUIDPipe()) expenseId: string,
@@ -321,12 +361,7 @@ export class GeneralExpenseController {
     @Body() input: GeneralExpenseReasonDto,
     @Headers("x-idempotency-key") key?: string,
   ) {
-    return this.expenses.deactivateAttachment(
-      expenseId,
-      attachmentId,
-      input,
-      key,
-    );
+    return this.expenses.deactivateAttachment(expenseId, attachmentId, input, key);
   }
 
   @Post(":expenseId/payments")

@@ -44,8 +44,17 @@ function component(
   metadata: Readonly<Record<string, unknown>>,
   description: string,
 ): AccountingFinancialComponent | undefined {
-  const normalized = new Decimal(amount ?? 0).toDecimalPlaces(2);
-  if (!normalized.isPositive()) return undefined;
+  // greaterThan(0), not isPositive(): Decimal.isPositive() is a SIGN check
+  // that returns true for zero, so a zero-value component (e.g. recoverable
+  // input VAT on an out-of-scope Expense) was emitted instead of dropped and
+  // then rejected by `accounting_event_components_amount_positive`.
+  // A null/blank/NaN amount normalises to 0 and is dropped by the same test;
+  // a negative amount is dropped too — a component only ever carries the
+  // magnitude, with direction expressed by `entryIntent`.
+  const normalized = new Decimal(
+    amount === null || amount === undefined || amount === "" ? 0 : amount,
+  ).toDecimalPlaces(2);
+  if (!normalized.isFinite() || !normalized.greaterThan(0)) return undefined;
   return {
     amount: normalized.toFixed(2),
     componentType,
@@ -188,34 +197,86 @@ export class OperationalSourceLoader {
     };
     const transfer = row.movementType.includes("_to_");
     const deposit = row.movementType.endsWith("_deposit");
-    const classificationKey = row.classificationMappingKey ??
+    const classificationKey =
+      row.classificationMappingKey ??
       (deposit ? "cash_bank_deposit_source" : "cash_bank_withdrawal_destination");
     const components: (AccountingFinancialComponent | undefined)[] = transfer
       ? [
-          component("cash_bank_account", row.amount, "debit", "cash_bank_account",
-            destinationMetadata, `${row.movementNumber} destination`),
-          component("cash_bank_account", row.amount, "credit", "cash_bank_account",
-            sourceMetadata, `${row.movementNumber} source`),
+          component(
+            "cash_bank_account",
+            row.amount,
+            "debit",
+            "cash_bank_account",
+            destinationMetadata,
+            `${row.movementNumber} destination`,
+          ),
+          component(
+            "cash_bank_account",
+            row.amount,
+            "credit",
+            "cash_bank_account",
+            sourceMetadata,
+            `${row.movementNumber} source`,
+          ),
         ]
       : deposit
         ? [
-            component("cash_bank_account", row.amount, "debit", "cash_bank_account",
-              destinationMetadata, `${row.movementNumber} receipt`),
-            component("cash_bank_external_source", row.amount, "credit", classificationKey,
-              base, `${row.movementNumber} source`),
+            component(
+              "cash_bank_account",
+              row.amount,
+              "debit",
+              "cash_bank_account",
+              destinationMetadata,
+              `${row.movementNumber} receipt`,
+            ),
+            component(
+              "cash_bank_external_source",
+              row.amount,
+              "credit",
+              classificationKey,
+              base,
+              `${row.movementNumber} source`,
+            ),
           ]
         : [
-            component("cash_bank_external_destination", row.amount, "debit", classificationKey,
-              base, `${row.movementNumber} destination`),
-            component("cash_bank_account", row.amount, "credit", "cash_bank_account",
-              sourceMetadata, `${row.movementNumber} payment`),
+            component(
+              "cash_bank_external_destination",
+              row.amount,
+              "debit",
+              classificationKey,
+              base,
+              `${row.movementNumber} destination`,
+            ),
+            component(
+              "cash_bank_account",
+              row.amount,
+              "credit",
+              "cash_bank_account",
+              sourceMetadata,
+              `${row.movementNumber} payment`,
+            ),
           ];
-    if (new Decimal(row.feeAmount).isPositive()) {
+    // greaterThan(0): only add a bank-charge component when a fee was really
+    // taken. `component()` would now drop a zero anyway, but the intent is
+    // clearer — and correct — stated here.
+    if (new Decimal(row.feeAmount).greaterThan(0)) {
       components.push(
-        component("cash_bank_fee", row.feeAmount, "debit", "bank_charge", base,
-          `${row.movementNumber} bank charge`),
-        component("cash_bank_account", row.feeAmount, "credit", "cash_bank_account",
-          sourceMetadata, `${row.movementNumber} fee source`),
+        component(
+          "cash_bank_fee",
+          row.feeAmount,
+          "debit",
+          "bank_charge",
+          base,
+          `${row.movementNumber} bank charge`,
+        ),
+        component(
+          "cash_bank_account",
+          row.feeAmount,
+          "credit",
+          "cash_bank_account",
+          sourceMetadata,
+          `${row.movementNumber} fee source`,
+        ),
       );
     }
     return {
@@ -272,16 +333,45 @@ export class OperationalSourceLoader {
       subledgerType: "trader",
       traderId: row.traderId,
     };
-    const revenue = row.financialModelVersion === null
-      ? row.companyRevenue
-      : money(new Decimal(row.serviceFeeNet ?? 0).plus(row.additionalFees ?? 0).toString());
+    const revenue =
+      row.financialModelVersion === null
+        ? row.companyRevenue
+        : money(new Decimal(row.serviceFeeNet ?? 0).plus(row.additionalFees ?? 0).toString());
     return {
       accountingDate: row.deliveredDate,
       components: present([
-        component("cod_receivable", row.customerAmountDue, "debit", "order_cod_receivable", dimensions, `Order ${row.orderNumber} receivable`),
-        component("trader_payable", row.traderNetPayable, "credit", "trader_payable", dimensions, `Order ${row.orderNumber} Trader payable`),
-        component("service_fee_revenue", revenue, "credit", "service_fee_revenue", dimensions, `Order ${row.orderNumber} Company revenue`),
-        component("output_vat", row.vatAmount, "credit", "output_vat", dimensions, `Order ${row.orderNumber} output VAT`),
+        component(
+          "cod_receivable",
+          row.customerAmountDue,
+          "debit",
+          "order_cod_receivable",
+          dimensions,
+          `Order ${row.orderNumber} receivable`,
+        ),
+        component(
+          "trader_payable",
+          row.traderNetPayable,
+          "credit",
+          "trader_payable",
+          dimensions,
+          `Order ${row.orderNumber} Trader payable`,
+        ),
+        component(
+          "service_fee_revenue",
+          revenue,
+          "credit",
+          "service_fee_revenue",
+          dimensions,
+          `Order ${row.orderNumber} Company revenue`,
+        ),
+        component(
+          "output_vat",
+          row.vatAmount,
+          "credit",
+          "output_vat",
+          dimensions,
+          `Order ${row.orderNumber} output VAT`,
+        ),
       ]),
       description: `Order ${row.orderNumber} financial recognition`,
       journalSource: "order",
@@ -310,7 +400,7 @@ export class OperationalSourceLoader {
          and company_id=${event.companyId}::uuid for share
     `.execute(database);
     const row = result.rows[0];
-    if (row === undefined || ["cancelled","reversed"].includes(row.status)) {
+    if (row === undefined || ["cancelled", "reversed"].includes(row.status)) {
       this.invalidSource("accounting_trader_receivable_not_recognizable");
     }
     const dimensions = {
@@ -324,8 +414,22 @@ export class OperationalSourceLoader {
     return {
       accountingDate: row.businessDate,
       components: present([
-        component("cod_receivable", row.amount, "debit", "order_cod_receivable", dimensions, `Trader receivable ${row.receivableNumber}`),
-        component("additional_fee_revenue", row.amount, "credit", "additional_fee_revenue", dimensions, row.reason),
+        component(
+          "cod_receivable",
+          row.amount,
+          "debit",
+          "order_cod_receivable",
+          dimensions,
+          `Trader receivable ${row.receivableNumber}`,
+        ),
+        component(
+          "additional_fee_revenue",
+          row.amount,
+          "credit",
+          "additional_fee_revenue",
+          dimensions,
+          row.reason,
+        ),
       ]),
       description: `Trader receivable ${row.receivableNumber}`,
       journalSource: "trader_receivable",
@@ -366,14 +470,27 @@ export class OperationalSourceLoader {
       subledgerType: "trader_collection",
       traderId: row.traderId,
     };
-    const cashMapping = row.paymentMethod === "cash"
-      ? "trader_settlement_cash"
-      : "trader_settlement_bank";
+    const cashMapping =
+      row.paymentMethod === "cash" ? "trader_settlement_cash" : "trader_settlement_bank";
     return {
       accountingDate: row.paymentDate,
       components: present([
-        component("trader_settlement", row.amount, "debit", cashMapping, dimensions, `Trader collection ${row.collectionNumber}`),
-        component("cod_receivable", row.amount, "credit", "order_cod_receivable", dimensions, `Receivable settlement ${row.collectionNumber}`),
+        component(
+          "trader_settlement",
+          row.amount,
+          "debit",
+          cashMapping,
+          dimensions,
+          `Trader collection ${row.collectionNumber}`,
+        ),
+        component(
+          "cod_receivable",
+          row.amount,
+          "credit",
+          "order_cod_receivable",
+          dimensions,
+          `Receivable settlement ${row.collectionNumber}`,
+        ),
       ]),
       description: `Trader collection ${row.collectionNumber}`,
       journalSource: "trader_receivable",
@@ -436,7 +553,14 @@ export class OperationalSourceLoader {
     return {
       accountingDate: row.businessDate,
       components: present([
-        component("trader_payable", row.netPayable, "debit", "trader_payable", base, `Trader settlement ${row.settlementNumber}`),
+        component(
+          "trader_payable",
+          row.netPayable,
+          "debit",
+          "trader_payable",
+          base,
+          `Trader settlement ${row.settlementNumber}`,
+        ),
         ...payments.rows.map((payment) =>
           component(
             "trader_settlement",
@@ -445,7 +569,8 @@ export class OperationalSourceLoader {
             payment.paymentMethod === "cash" ? "trader_settlement_cash" : "trader_settlement_bank",
             { ...base, companyBankAccountId: payment.bankAccountId, paymentRowId: payment.id },
             `${payment.paymentMethod} payment for ${row.settlementNumber}`,
-          )),
+          ),
+        ),
       ]),
       description: `Trader settlement ${row.settlementNumber}`,
       journalSource: "trader_settlement",
@@ -534,10 +659,32 @@ export class OperationalSourceLoader {
             payment.paymentMethod === "cash" ? "driver_collection_cash" : "trader_settlement_bank",
             { ...base, companyBankAccountId: payment.bankAccountId, paymentRowId: payment.id },
             `${payment.paymentMethod} received in ${row.number}`,
-          )),
-        component("driver_expense", row.totalExpenses, "debit", "driver_expense", base, `Driver expenses in ${row.number}`),
-        component("outsourced_driver_payable", row.feeDeduction, "debit", "driver_collection_fee_offset", base, `Driver fee offset in ${row.number}`),
-        component("cod_receivable", row.gross, "credit", "order_cod_receivable", base, `COD cleared by ${row.number}`),
+          ),
+        ),
+        component(
+          "driver_expense",
+          row.totalExpenses,
+          "debit",
+          "driver_expense",
+          base,
+          `Driver expenses in ${row.number}`,
+        ),
+        component(
+          "outsourced_driver_payable",
+          row.feeDeduction,
+          "debit",
+          "driver_collection_fee_offset",
+          base,
+          `Driver fee offset in ${row.number}`,
+        ),
+        component(
+          "cod_receivable",
+          row.gross,
+          "credit",
+          "order_cod_receivable",
+          base,
+          `COD cleared by ${row.number}`,
+        ),
       ]),
       description: `Driver collection ${row.number}`,
       journalSource: "driver_collection",
@@ -568,20 +715,43 @@ export class OperationalSourceLoader {
          and company_id=${event.companyId}::uuid for share
     `.execute(database);
     const row = result.rows[0];
-    if (row === undefined || !["approved","partially_paid","paid","closed"].includes(row.status)) {
+    if (
+      row === undefined ||
+      !["approved", "partially_paid", "paid", "closed"].includes(row.status)
+    ) {
       this.invalidSource("accounting_payroll_not_approved");
     }
     const payrollLines = await sql<{
+      deliveredOrderEarningSources: readonly Record<string, unknown>[];
+      deliveredOrderEarnings: string;
       employeeId: string;
       lineId: string;
       netSalary: string;
     }>`
-      select id as "lineId",employee_id as "employeeId",net_salary::text as "netSalary"
-        from payroll_entries
-       where company_id=${event.companyId}::uuid
-         and payroll_period_id=${event.sourceEntityId}::uuid
-         and status not in ('held','reversed') and net_salary>0
-       order by employee_number_snapshot,id
+      select l.id as "lineId",l.employee_id as "employeeId",
+             l.net_salary::text as "netSalary",
+             l.delivered_order_earnings::text as "deliveredOrderEarnings",
+             -- Straight off the allocated snapshots. No join to orders and no
+             -- join to the earning rules: the posted figure must be the one
+             -- recorded at delivery time, so a later rate change or a returned
+             -- Order cannot move a Journal that has already been posted.
+             coalesce((select jsonb_agg(jsonb_build_object(
+               'earningId', eoe.id,
+               'orderId', eoe.order_id,
+               'orderNumber', eoe.order_number,
+               'deliveredAt', eoe.delivered_at,
+               'appliedAmount', eoe.applied_amount::text,
+               'ruleId', eoe.rule_id,
+               'allocatedAt', eoe.allocated_at
+             ) order by eoe.delivered_at, eoe.id)
+               from employee_order_earnings eoe
+              where eoe.company_id=l.company_id and eoe.payroll_entry_id=l.id),'[]'::jsonb)
+               as "deliveredOrderEarningSources"
+        from payroll_entries l
+       where l.company_id=${event.companyId}::uuid
+         and l.payroll_period_id=${event.sourceEntityId}::uuid
+         and l.status not in ('held','reversed') and l.net_salary>0
+       order by l.employee_number_snapshot,l.id
     `.execute(database);
     const snapshottedTotal = payrollLines.rows.reduce(
       (sum, line) => sum.plus(line.netSalary),
@@ -600,22 +770,85 @@ export class OperationalSourceLoader {
     };
     return {
       accountingDate: row.periodEnd,
-      components: present(payrollLines.rows.flatMap((line) => {
-        const dimensions = {
-          ...base,
-          employeeId: line.employeeId,
-          payrollLineId: line.lineId,
-          subledgerId: line.employeeId,
-          subledgerType: "employee",
-        };
-        return [
-          component("payroll_expense", line.netSalary, "debit", "employee_payroll_expense", dimensions, `Payroll expense ${row.periodReference}`),
-          component("payroll_payable", line.netSalary, "credit", "employee_payroll_payable", dimensions, `Payroll payable ${row.periodReference}`),
-        ];
-      })),
+      components: present(
+        payrollLines.rows.flatMap((line) => {
+          const dimensions = {
+            ...base,
+            employeeId: line.employeeId,
+            payrollLineId: line.lineId,
+            subledgerId: line.employeeId,
+            subledgerType: "employee",
+          };
+          // The expense debit is SPLIT, not extended. Net Salary already
+          // contains Delivered Order Earnings -- Prompt 3C folded the component
+          // into gross and therefore into net -- so adding a further debit
+          // would double the expense and unbalance the Journal against an
+          // unchanged payable credit. Splitting makes the component separately
+          // identifiable on its own Journal line while the finalized payroll
+          // total, and every figure derived from it, stays exactly as approved.
+          const net = new Decimal(line.netSalary);
+          // Capped at Net Salary. Deductions and advances can exceed the rest
+          // of the line, and an uncapped split would emit a negative remainder
+          // -- silently dropped by component() -- leaving a debit larger than
+          // the credit and a Journal rejected as unbalanced. Both parts are
+          // non-negative and sum to exactly Net Salary.
+          const orderEarnings = Decimal.min(new Decimal(line.deliveredOrderEarnings), net);
+          const remainingSalary = net.minus(orderEarnings);
+          return [
+            component(
+              "payroll_expense",
+              remainingSalary.toFixed(2),
+              "debit",
+              "employee_payroll_expense",
+              dimensions,
+              `Payroll expense ${row.periodReference}`,
+            ),
+            // Zero-valued components are dropped by component(), so a period
+            // with no Order earnings posts exactly the two lines it always did.
+            component(
+              "payroll_expense",
+              orderEarnings.toFixed(2),
+              "debit",
+              "employee_payroll_expense",
+              {
+                ...dimensions,
+                deliveredOrderEarnings: {
+                  count: line.deliveredOrderEarningSources.length,
+                  sources: line.deliveredOrderEarningSources,
+                  total: money(line.deliveredOrderEarnings),
+                },
+              },
+              `Delivered Order Earnings ${row.periodReference}`,
+            ),
+            component(
+              "payroll_payable",
+              line.netSalary,
+              "credit",
+              "employee_payroll_payable",
+              dimensions,
+              `Payroll payable ${row.periodReference}`,
+            ),
+          ];
+        }),
+      ),
       description: `Employee Payroll ${row.periodReference}`,
       journalSource: "employee_payroll",
-      metadata: { ...base, payrollLines: payrollLines.rows, totalNetSalary: row.total },
+      metadata: {
+        ...base,
+        // The per-line source arrays are deliberately omitted here: they are
+        // already carried by the component that posts them, and repeating them
+        // at Journal level would store the same audit trail twice.
+        payrollLines: payrollLines.rows.map((line) => ({
+          deliveredOrderEarnings: line.deliveredOrderEarnings,
+          employeeId: line.employeeId,
+          lineId: line.lineId,
+          netSalary: line.netSalary,
+        })),
+        totalDeliveredOrderEarnings: payrollLines.rows
+          .reduce((sum, line) => sum.plus(line.deliveredOrderEarnings), new Decimal(0))
+          .toFixed(2),
+        totalNetSalary: row.total,
+      },
       sourceReference: row.periodReference,
     };
   }
@@ -682,8 +915,16 @@ export class OperationalSourceLoader {
               subledgerType: "employee",
             },
             `Payroll payment ${row.paymentNumber}`,
-          )),
-        component("payroll_cash_payment", row.amount, "credit", "employee_payroll_cash_payment", base, `Cash paid ${row.paymentNumber}`),
+          ),
+        ),
+        component(
+          "payroll_cash_payment",
+          row.amount,
+          "credit",
+          "employee_payroll_cash_payment",
+          base,
+          `Cash paid ${row.paymentNumber}`,
+        ),
       ]),
       description: `Employee Payroll payment ${row.paymentNumber}`,
       journalSource: "employee_payroll",
@@ -711,7 +952,7 @@ export class OperationalSourceLoader {
          and company_id=${event.companyId}::uuid for share
     `.execute(database);
     const row = result.rows[0];
-    if (row === undefined || ["reversed","recovery_required"].includes(row.status)) {
+    if (row === undefined || ["reversed", "recovery_required"].includes(row.status)) {
       this.invalidSource("accounting_outsourced_driver_fee_not_eligible");
     }
     const reference = row.sourceReference ?? event.sourceEntityId;
@@ -728,8 +969,22 @@ export class OperationalSourceLoader {
     return {
       accountingDate: row.businessDate,
       components: present([
-        component("outsourced_driver_fee_expense", row.earned, "debit", "outsourced_driver_fee_expense", base, `Outsourced Driver fee ${reference}`),
-        component("outsourced_driver_payable", row.earned, "credit", "outsourced_driver_payable", base, `Driver payable ${reference}`),
+        component(
+          "outsourced_driver_fee_expense",
+          row.earned,
+          "debit",
+          "outsourced_driver_fee_expense",
+          base,
+          `Outsourced Driver fee ${reference}`,
+        ),
+        component(
+          "outsourced_driver_payable",
+          row.earned,
+          "credit",
+          "outsourced_driver_payable",
+          base,
+          `Driver payable ${reference}`,
+        ),
       ]),
       description: `Outsourced Driver fee accrual ${reference}`,
       journalSource: "outsourced_driver_fee",
@@ -759,10 +1014,10 @@ export class OperationalSourceLoader {
     `.execute(database);
     const row = result.rows[0];
     if (
-      row === undefined
-      || row.status !== "confirmed"
-      || row.paymentMethod !== "cash"
-      || row.paymentSource !== "separate_payment"
+      row === undefined ||
+      row.status !== "confirmed" ||
+      row.paymentMethod !== "cash" ||
+      row.paymentSource !== "separate_payment"
     ) {
       this.invalidSource("accounting_outsourced_driver_fee_payment_not_confirmed");
     }
@@ -801,8 +1056,16 @@ export class OperationalSourceLoader {
               outsourcedDriverFeeAccrualId: allocation.accrualId,
             },
             `Driver fee payment ${row.paymentNumber}`,
-          )),
-        component("outsourced_driver_payment", row.amount, "credit", "outsourced_driver_cash_payment", base, `Cash payment ${row.paymentNumber}`),
+          ),
+        ),
+        component(
+          "outsourced_driver_payment",
+          row.amount,
+          "credit",
+          "outsourced_driver_cash_payment",
+          base,
+          `Cash payment ${row.paymentNumber}`,
+        ),
       ]),
       description: `Outsourced Driver fee payment ${row.paymentNumber}`,
       journalSource: "outsourced_driver_fee",
@@ -834,8 +1097,8 @@ export class OperationalSourceLoader {
     `.execute(database);
     const row = header.rows[0];
     if (
-      row === undefined
-      || !["approved", "partially_paid", "paid", "reversed"].includes(row.status)
+      row === undefined ||
+      !["approved", "partially_paid", "paid", "reversed"].includes(row.status)
     ) {
       this.invalidSource("accounting_general_expense_not_approved");
     }
@@ -956,15 +1219,23 @@ export class OperationalSourceLoader {
     if (row === undefined || !["confirmed", "reversed"].includes(row.status)) {
       this.invalidSource("accounting_general_expense_payment_not_confirmed");
     }
+    // The two Cash identities are read as two distinctly named fields, because
+    // one name for both is how they came to be confused: `cash_account_id` is
+    // the GL account the payment credits, `company_cash_account_id` is the
+    // drawer the money left. A Company that reuses a GL code on a replacement
+    // Cash Account makes them one-to-many, so neither can stand in for the
+    // other.
     const paymentRows = await sql<{
       amount: string;
       bankAccountId: string | null;
-      cashAccountId: string | null;
+      cashGlAccountId: string | null;
+      companyCashAccountId: string | null;
       id: string;
       paymentMethod: string;
     }>`
       select id,payment_method as "paymentMethod",amount::text,
-             cash_account_id as "cashAccountId",
+             cash_account_id as "cashGlAccountId",
+             company_cash_account_id as "companyCashAccountId",
              company_bank_account_id as "bankAccountId"
         from general_expense_payment_rows
        where company_id=${event.companyId}::uuid
@@ -1008,15 +1279,20 @@ export class OperationalSourceLoader {
               : "general_expense_bank_payment",
             {
               ...base,
-              accountOverrideId: paymentRow.paymentMethod === "cash"
-                ? paymentRow.cashAccountId
-                : null,
+              // Accounting identity: the GL account this row credits.
+              accountOverrideId:
+                paymentRow.paymentMethod === "cash" ? paymentRow.cashGlAccountId : null,
               companyBankAccountId: paymentRow.bankAccountId,
-              companyCashAccountId: paymentRow.cashAccountId,
+              // Operational identity: null on rows written before the column
+              // existed, and left null. Which drawer funded a historical
+              // payment is not recoverable, and a value derived from the GL
+              // account would be indistinguishable afterwards from a fact.
+              companyCashAccountId: paymentRow.companyCashAccountId,
               paymentRowId: paymentRow.id,
             },
             `${paymentRow.paymentMethod} payment ${row.paymentNumber}`,
-          )),
+          ),
+        ),
       ]),
       description: `General Expense payment ${row.paymentNumber}`,
       journalSource: "general_expense",

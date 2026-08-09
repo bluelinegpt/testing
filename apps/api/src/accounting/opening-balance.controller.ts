@@ -18,9 +18,11 @@ import {
   RequireAnyPermission,
   RequireIdentityKinds,
 } from "../authentication/authentication.decorators.js";
-import {
+import type {
   AccountingNoteDto,
+  AccountingReasonDto,
   CreateOpeningBalanceDto,
+  DeleteOpeningBalanceQueryDto,
   OpeningBalanceLineDto,
   OpeningBalanceListQueryDto,
   ReplaceOpeningBalanceLinesDto,
@@ -75,6 +77,17 @@ export class OpeningBalanceController {
     return this.balances.updateHeader(id, input, key);
   }
 
+  /* Batch-level deletion, distinct from the Line delete below. Draft only; the
+     service refuses anything that has produced an accounting effect. */
+  @Delete(":batchId")
+  @RequireAnyPermission("accounting.manage", "users_roles.manage")
+  public remove(
+    @Param("batchId", new ParseUUIDPipe()) id: string,
+    @Query() query: DeleteOpeningBalanceQueryDto,
+  ) {
+    return this.balances.remove(id, query.reason);
+  }
+
   @Post(":batchId/lines")
   @RequireAnyPermission("accounting.manage", "users_roles.manage")
   public addLine(
@@ -113,13 +126,23 @@ export class OpeningBalanceController {
     @Body() input: ReplaceOpeningBalanceLinesDto,
     @Headers("x-idempotency-key") key?: string,
   ) {
-    return this.balances.replaceLines(id, input.lines, key);
+    return this.balances.replaceLines(id, input, key);
   }
 
   @Post(":batchId/validate")
   @RequireAnyPermission("accounting.manage", "users_roles.manage")
   public validate(@Param("batchId", new ParseUUIDPipe()) id: string) {
     return this.balances.validate(id);
+  }
+
+  @Post(":batchId/return-to-draft")
+  @RequireAnyPermission("accounting.manage", "users_roles.manage")
+  public returnToDraft(
+    @Param("batchId", new ParseUUIDPipe()) id: string,
+    @Body() input: AccountingReasonDto,
+    @Headers("x-idempotency-key") key?: string,
+  ) {
+    return this.balances.returnToDraft(id, input.reason, key);
   }
 
   @Post(":batchId/approve")

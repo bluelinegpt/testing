@@ -56,7 +56,10 @@ interface SetupMapping {
 const datePattern = /^\d{4}-\d{2}-\d{2}$/;
 const currentDate = () => {
   const parts = new Intl.DateTimeFormat("en", {
-    day: "2-digit", month: "2-digit", timeZone: "Asia/Dubai", year: "numeric",
+    day: "2-digit",
+    month: "2-digit",
+    timeZone: "Asia/Dubai",
+    year: "numeric",
   }).formatToParts(new Date());
   const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
   return `${values.year}-${values.month}-${values.day}`;
@@ -155,11 +158,9 @@ export class AccountingSetupService {
       ...(definition.accountClasses.includes(account.accountClass)
         ? []
         : ["incompatible_account_class"]),
-      ...(account.normalBalance === expectedNormalBalance
-        ? []
-        : ["incompatible_normal_balance"]),
-      ...(definition.controlType === undefined
-        || (account.isControl && account.controlType === definition.controlType)
+      ...(account.normalBalance === expectedNormalBalance ? [] : ["incompatible_normal_balance"]),
+      ...(definition.controlType === undefined ||
+      (account.isControl && account.controlType === definition.controlType)
         ? []
         : ["incompatible_control_account"]),
     ];
@@ -190,13 +191,21 @@ export class AccountingSetupService {
       evidence,
       score: Math.min(
         100,
-        45 + (exact ? 35 : partial ? 22 : 0) + (account.isSystem ? 5 : 0)
-          + (account.isControl ? 5 : 0) + (account.parentId !== null ? 5 : 0),
+        45 +
+          (exact ? 35 : partial ? 22 : 0) +
+          (account.isSystem ? 5 : 0) +
+          (account.isControl ? 5 : 0) +
+          (account.parentId !== null ? 5 : 0),
       ),
     };
   }
 
-  private suggestionId(companyId: string, key: string, effectiveOn: string, accountId: string | null) {
+  private suggestionId(
+    companyId: string,
+    key: string,
+    effectiveOn: string,
+    accountId: string | null,
+  ) {
     return createHash("sha256")
       .update(`${companyId}:${key}:${effectiveOn}:${accountId ?? "none"}`)
       .digest("hex")
@@ -210,15 +219,22 @@ export class AccountingSetupService {
     const { accounts, mappings } = await this.source(this.database);
     const evaluatedAt = new Date().toISOString();
     const generated = accountingMandatoryMappings.map((definition) => {
-      const current = mappings.find((mapping) =>
-        mapping.mappingKey === definition.key && mapping.isActive
-        && mapping.effectiveFrom <= effectiveOn
-        && (mapping.effectiveTo === null || mapping.effectiveTo >= effectiveOn));
+      const current = mappings.find(
+        (mapping) =>
+          mapping.mappingKey === definition.key &&
+          mapping.isActive &&
+          mapping.effectiveFrom <= effectiveOn &&
+          (mapping.effectiveTo === null || mapping.effectiveTo >= effectiveOn),
+      );
       const currentAccountId = mappedAccountId(definition, current);
       const currentAccount = accounts.find((account) => account.id === currentAccountId);
-      const currentCompatibility = currentAccount === undefined
-        ? { compatible: false, errors: current === undefined ? ["mapping_missing"] : ["mapped_account_missing"] }
-        : this.compatibility(definition, currentAccount);
+      const currentCompatibility =
+        currentAccount === undefined
+          ? {
+              compatible: false,
+              errors: current === undefined ? ["mapping_missing"] : ["mapped_account_missing"],
+            }
+          : this.compatibility(definition, currentAccount);
       const candidates = accounts
         .map((account) => ({
           account,
@@ -226,24 +242,28 @@ export class AccountingSetupService {
           ...this.score(definition, account),
         }))
         .filter((candidate) => candidate.compatibility.compatible)
-        .sort((left, right) =>
-          right.score - left.score
-          || left.account.code.localeCompare(right.account.code)
-          || left.account.id.localeCompare(right.account.id));
+        .sort(
+          (left, right) =>
+            right.score - left.score ||
+            left.account.code.localeCompare(right.account.code) ||
+            left.account.id.localeCompare(right.account.id),
+        );
       const candidate = candidates[0];
-      const competing = candidate !== undefined
-        && candidates[1] !== undefined
-        && candidate.score - candidates[1].score < 10;
-      const confidence = candidate === undefined
-        ? "no_safe_suggestion"
-        : candidate.score >= 85 && !competing
-          ? "high"
-          : candidate.score >= 65
-            ? "medium"
-            : "low";
+      const competing =
+        candidate !== undefined &&
+        candidates[1] !== undefined &&
+        candidate.score - candidates[1].score < 10;
+      const confidence =
+        candidate === undefined
+          ? "no_safe_suggestion"
+          : candidate.score >= 85 && !competing
+            ? "high"
+            : candidate.score >= 65
+              ? "medium"
+              : "low";
       const suggestedId = currentCompatibility.compatible
         ? currentAccount!.id
-        : candidate?.account.id ?? null;
+        : (candidate?.account.id ?? null);
       return {
         suggestionId: this.suggestionId(companyId, definition.key, effectiveOn, suggestedId),
         companyId,
@@ -251,37 +271,53 @@ export class AccountingSetupService {
         mappingKey: definition.key,
         mappingLabel: definition.label,
         mandatoryStatus: definition.requirement,
-        currentMapping: current === undefined ? null : {
-          ...current,
-          account: currentAccount === undefined ? null : {
-            id: currentAccount.id, code: currentAccount.code,
-            nameEn: currentAccount.nameEn, nameAr: currentAccount.nameAr,
-          },
-        },
-        suggestedAccount: candidate === undefined ? null : {
-          id: candidate.account.id,
-          code: candidate.account.code,
-          nameEn: candidate.account.nameEn,
-          nameAr: candidate.account.nameAr,
-          accountType: candidate.account.accountType,
-          accountClass: candidate.account.accountClass,
-          isPostingAccount: candidate.account.isPosting,
-          isActive: candidate.account.isActive,
-        },
+        currentMapping:
+          current === undefined
+            ? null
+            : {
+                ...current,
+                account:
+                  currentAccount === undefined
+                    ? null
+                    : {
+                        id: currentAccount.id,
+                        code: currentAccount.code,
+                        nameEn: currentAccount.nameEn,
+                        nameAr: currentAccount.nameAr,
+                      },
+              },
+        suggestedAccount:
+          candidate === undefined
+            ? null
+            : {
+                id: candidate.account.id,
+                code: candidate.account.code,
+                nameEn: candidate.account.nameEn,
+                nameAr: candidate.account.nameAr,
+                accountType: candidate.account.accountType,
+                accountClass: candidate.account.accountClass,
+                isPostingAccount: candidate.account.isPosting,
+                isActive: candidate.account.isActive,
+              },
         confidence,
         confidenceScore: candidate?.score ?? 0,
-        confidenceReason: candidate === undefined
-          ? "No active compatible Posting Account exists"
-          : competing
-            ? "More than one similarly scored compatible Account exists"
-            : candidate.evidence.join(", "),
+        confidenceReason:
+          candidate === undefined
+            ? "No active compatible Posting Account exists"
+            : competing
+              ? "More than one similarly scored compatible Account exists"
+              : candidate.evidence.join(", "),
         evidence: candidate?.evidence ?? [],
         compatibilityStatus: candidate === undefined ? "incompatible" : "compatible",
         compatibilityErrors: candidate?.compatibility.errors ?? ["no_compatible_account"],
         alternativeCandidates: candidates.slice(1, 6).map((item) => ({
-          id: item.account.id, code: item.account.code, nameEn: item.account.nameEn,
-          nameAr: item.account.nameAr, accountType: item.account.accountType,
-          accountClass: item.account.accountClass, score: item.score,
+          id: item.account.id,
+          code: item.account.code,
+          nameEn: item.account.nameEn,
+          nameAr: item.account.nameAr,
+          accountType: item.account.accountType,
+          accountClass: item.account.accountClass,
+          score: item.score,
         })),
         effectiveFromProposal: effectiveOn,
         effectiveToProposal: null,
@@ -309,7 +345,8 @@ export class AccountingSetupService {
       const decision = decisions.rows.find((row) => row.subjectId === item.suggestionId);
       const status = decision?.action.split(".").at(-1);
       return status === "rejected" || status === "unresolved" || status === "not_applicable"
-        ? { ...item, status } : item;
+        ? { ...item, status }
+        : item;
     });
     await this.support.audit(this.database, {
       action: "accounting.setup.mapping_analysis.generated",
@@ -317,7 +354,9 @@ export class AccountingSetupService {
         effectiveOn,
         evaluatedCount: suggestions.length,
         configuredCount: suggestions.filter((item) => item.status === "already_configured").length,
-        noSafeSuggestionCount: suggestions.filter((item) => item.confidence === "no_safe_suggestion").length,
+        noSafeSuggestionCount: suggestions.filter(
+          (item) => item.confidence === "no_safe_suggestion",
+        ).length,
       },
       correlationId: randomUUID(),
       subjectId: companyId,
@@ -341,24 +380,32 @@ export class AccountingSetupService {
     const periodEnd = period.rows[0]?.periodEnd ?? null;
     const issues: Record<string, unknown>[] = [];
     for (const definition of accountingMandatoryMappings) {
-      const rows = mappings.filter((mapping) => mapping.mappingKey === definition.key && mapping.isActive);
-      const current = rows.filter((mapping) =>
-        mapping.effectiveFrom <= effectiveOn
-        && (mapping.effectiveTo === null || mapping.effectiveTo >= effectiveOn));
+      const rows = mappings.filter(
+        (mapping) => mapping.mappingKey === definition.key && mapping.isActive,
+      );
+      const current = rows.filter(
+        (mapping) =>
+          mapping.effectiveFrom <= effectiveOn &&
+          (mapping.effectiveTo === null || mapping.effectiveTo >= effectiveOn),
+      );
       if (current.length === 0) {
         const beginsLater = rows
           .filter((mapping) => mapping.effectiveFrom > effectiveOn)
           .sort((left, right) => left.effectiveFrom.localeCompare(right.effectiveFrom))[0];
         issues.push({
-          mappingKey: definition.key, operationalArea: definition.area,
-          issueType: rows.length === 0
-            ? "missing_mapping"
-            : beginsLater === undefined
-              ? "current_date_gap"
-              : "mapping_begins_after_activation",
-          effectiveFrom: effectiveOn, severity: "critical",
+          mappingKey: definition.key,
+          operationalArea: definition.area,
+          issueType:
+            rows.length === 0
+              ? "missing_mapping"
+              : beginsLater === undefined
+                ? "current_date_gap"
+                : "mapping_begins_after_activation",
+          effectiveFrom: effectiveOn,
+          severity: "critical",
           activationBlocker: definition.requirement === "mandatory",
-          automaticPostingBlocker: true, requiredAction: "create_effective_mapping",
+          automaticPostingBlocker: true,
+          requiredAction: "create_effective_mapping",
         });
       }
       for (const mapping of current) {
@@ -380,45 +427,64 @@ export class AccountingSetupService {
       }
       if (current.length > 1) {
         issues.push({
-          mappingKey: definition.key, operationalArea: definition.area,
-          issueType: "overlap", existingMappings: current, severity: "critical",
-          activationBlocker: true, automaticPostingBlocker: true,
+          mappingKey: definition.key,
+          operationalArea: definition.area,
+          issueType: "overlap",
+          existingMappings: current,
+          severity: "critical",
+          activationBlocker: true,
+          automaticPostingBlocker: true,
           requiredAction: "close_overlapping_mapping",
         });
       }
       for (const mapping of rows) {
         const account = accounts.find((item) => item.id === mappedAccountId(definition, mapping));
-        const compatibility = account === undefined
-          ? { compatible: false, errors: ["mapped_account_missing"] }
-          : this.compatibility(definition, account);
+        const compatibility =
+          account === undefined
+            ? { compatible: false, errors: ["mapped_account_missing"] }
+            : this.compatibility(definition, account);
         for (const error of compatibility.errors) {
           issues.push({
-            mappingKey: definition.key, operationalArea: definition.area,
-            issueType: error, existingMappings: [mapping], severity: "critical",
+            mappingKey: definition.key,
+            operationalArea: definition.area,
+            issueType: error,
+            existingMappings: [mapping],
+            severity: "critical",
             activationBlocker: definition.requirement === "mandatory",
-            automaticPostingBlocker: true, requiredAction: "replace_mapping",
+            automaticPostingBlocker: true,
+            requiredAction: "replace_mapping",
           });
         }
         if (mapping.effectiveTo !== null && mapping.effectiveTo < effectiveOn) {
           issues.push({
-            mappingKey: definition.key, operationalArea: definition.area,
-            issueType: "expired_mapping", effectiveTo: mapping.effectiveTo,
-            existingMappings: [mapping], severity: "warning",
-            activationBlocker: current.length === 0, automaticPostingBlocker: current.length === 0,
+            mappingKey: definition.key,
+            operationalArea: definition.area,
+            issueType: "expired_mapping",
+            effectiveTo: mapping.effectiveTo,
+            existingMappings: [mapping],
+            severity: "warning",
+            activationBlocker: current.length === 0,
+            automaticPostingBlocker: current.length === 0,
             requiredAction: "create_successor_mapping",
           });
         }
       }
-      const ordered = [...rows].sort((left, right) => left.effectiveFrom.localeCompare(right.effectiveFrom));
+      const ordered = [...rows].sort((left, right) =>
+        left.effectiveFrom.localeCompare(right.effectiveFrom),
+      );
       for (let index = 1; index < ordered.length; index += 1) {
         const previous = ordered[index - 1]!;
         const next = ordered[index]!;
         if (previous.effectiveTo !== null && previous.effectiveTo >= next.effectiveFrom) {
           issues.push({
-            mappingKey: definition.key, operationalArea: definition.area,
-            issueType: "overlap", effectiveFrom: next.effectiveFrom,
-            existingMappings: [previous, next], severity: "critical",
-            activationBlocker: true, automaticPostingBlocker: true,
+            mappingKey: definition.key,
+            operationalArea: definition.area,
+            issueType: "overlap",
+            effectiveFrom: next.effectiveFrom,
+            existingMappings: [previous, next],
+            severity: "critical",
+            activationBlocker: true,
+            automaticPostingBlocker: true,
             requiredAction: "close_overlapping_mapping",
           });
         } else if (previous.effectiveTo !== null) {
@@ -426,11 +492,15 @@ export class AccountingSetupService {
           nextDay.setUTCDate(nextDay.getUTCDate() + 1);
           if (nextDay.toISOString().slice(0, 10) < next.effectiveFrom) {
             issues.push({
-              mappingKey: definition.key, operationalArea: definition.area,
+              mappingKey: definition.key,
+              operationalArea: definition.area,
               issueType: "future_gap",
-              effectiveFrom: nextDay.toISOString().slice(0, 10), effectiveTo: next.effectiveFrom,
-              existingMappings: [previous, next], severity: "warning",
-              activationBlocker: false, automaticPostingBlocker: true,
+              effectiveFrom: nextDay.toISOString().slice(0, 10),
+              effectiveTo: next.effectiveFrom,
+              existingMappings: [previous, next],
+              severity: "warning",
+              activationBlocker: false,
+              automaticPostingBlocker: true,
               requiredAction: "close_effective_date_gap",
             });
           }
@@ -443,16 +513,24 @@ export class AccountingSetupService {
         total: issues.length,
         blockers: issues.filter((item) => item.activationBlocker === true).length,
         missing: issues.filter((item) => item.issueType === "missing_mapping").length,
-        invalid: issues.filter((item) => [
-          "mapped_account_missing", "inactive_account", "summary_account",
-          "incompatible_account_type", "incompatible_account_class",
-          "incompatible_control_account", "incompatible_normal_balance",
-        ].includes(String(item.issueType))).length,
+        invalid: issues.filter((item) =>
+          [
+            "mapped_account_missing",
+            "inactive_account",
+            "summary_account",
+            "incompatible_account_type",
+            "incompatible_account_class",
+            "incompatible_control_account",
+            "incompatible_normal_balance",
+          ].includes(String(item.issueType)),
+        ).length,
         inactive: issues.filter((item) => item.issueType === "inactive_account").length,
-        gaps: issues.filter((item) =>
-          String(item.issueType).includes("gap")
-          || item.issueType === "mapping_begins_after_activation"
-          || item.issueType === "mapping_ends_before_period_end").length,
+        gaps: issues.filter(
+          (item) =>
+            String(item.issueType).includes("gap") ||
+            item.issueType === "mapping_begins_after_activation" ||
+            item.issueType === "mapping_ends_before_period_end",
+        ).length,
         overlaps: issues.filter((item) => item.issueType === "overlap").length,
       },
       items: issues,
@@ -477,23 +555,29 @@ export class AccountingSetupService {
     const analysis = await this.mappingSuggestions(input.effectiveFrom);
     const suggestion = analysis.items.find((item) => item.suggestionId === suggestionId);
     if (suggestion === undefined) {
-      this.conflict("accounting_setup_suggestion_not_found", "The mapping suggestion is stale or unavailable");
+      this.conflict(
+        "accounting_setup_suggestion_not_found",
+        "The mapping suggestion is stale or unavailable",
+      );
     }
     if (input.decision === "not_applicable") {
-      const definition = accountingMandatoryMappings.find((item) => item.key === suggestion.mappingKey)!;
+      const definition = accountingMandatoryMappings.find(
+        (item) => item.key === suggestion.mappingKey,
+      )!;
       if (definition.requirement !== "conditional") {
         this.conflict("accounting_setup_mandatory_mapping_not_applicable_prohibited");
       }
       return this.recordDecision(suggestionId, input, {}, idempotencyKey);
     }
     if (input.decision === "accept" || input.decision === "change") {
-      const selectedId = input.decision === "change"
-        ? input.accountId
-        : suggestion.suggestedAccount?.id;
+      const selectedId =
+        input.decision === "change" ? input.accountId : suggestion.suggestedAccount?.id;
       if (selectedId === undefined) {
         this.conflict("accounting_setup_suggestion_conflict", "No compatible Account was selected");
       }
-      const definition = accountingMandatoryMappings.find((item) => item.key === suggestion.mappingKey)!;
+      const definition = accountingMandatoryMappings.find(
+        (item) => item.key === suggestion.mappingKey,
+      )!;
       const source = await this.source(this.database);
       const account = source.accounts.find((item) => item.id === selectedId);
       if (account === undefined) this.conflict("accounting_setup_company_mismatch");
@@ -508,12 +592,15 @@ export class AccountingSetupService {
           compatibility.errors.join(", "),
         );
       }
-      const mapping = await this.management.createMapping({
-        mappingKey: definition.key,
-        [definition.field]: selectedId,
-        effectiveFrom: input.effectiveFrom,
-        ...(input.effectiveTo === undefined ? {} : { effectiveTo: input.effectiveTo }),
-      }, idempotencyKey === undefined ? undefined : `${idempotencyKey}:mapping`);
+      const mapping = await this.management.createMapping(
+        {
+          mappingKey: definition.key,
+          [definition.field]: selectedId,
+          effectiveFrom: input.effectiveFrom,
+          ...(input.effectiveTo === undefined ? {} : { effectiveTo: input.effectiveTo }),
+        },
+        idempotencyKey === undefined ? undefined : `${idempotencyKey}:mapping`,
+      );
       return this.recordDecision(suggestionId, input, { mapping }, idempotencyKey);
     }
     return this.recordDecision(suggestionId, input, {}, idempotencyKey);
@@ -526,11 +613,14 @@ export class AccountingSetupService {
     idempotencyKey?: string,
   ) {
     return this.transactions.execute(async (transaction) => {
-      const reservation = await this.support.reserveIdempotency<Record<string, unknown>>(transaction, {
-        idempotencyKey,
-        operation: "accounting.setup.mapping-suggestion.decision",
-        payload: { suggestionId, ...input },
-      });
+      const reservation = await this.support.reserveIdempotency<Record<string, unknown>>(
+        transaction,
+        {
+          idempotencyKey,
+          operation: "accounting.setup.mapping-suggestion.decision",
+          payload: { suggestionId, ...input },
+        },
+      );
       if (reservation.replayResponse !== undefined) return reservation.replayResponse;
       const { companyId } = this.support.context();
       const statusByDecision = {
@@ -542,8 +632,10 @@ export class AccountingSetupService {
       } as const;
       const decisionStatus = statusByDecision[input.decision];
       const response = {
-        suggestionId, status: decisionStatus,
-        reason: input.reason, ...extra,
+        suggestionId,
+        status: decisionStatus,
+        reason: input.reason,
+        ...extra,
       };
       await this.support.audit(transaction, {
         action: `accounting.setup.mapping_suggestion.${decisionStatus}`,
@@ -608,7 +700,9 @@ export class AccountingSetupService {
       ...(counts.openingBatches === "0" ? [] : ["posted_opening_balance_exists"]),
       ...(counts.priorPostedJournals === "0" ? [] : ["prior_posted_ledger_exists"]),
       ...(counts.cashBankOpenings === "0" ? [] : ["cash_bank_opening_exists"]),
-      ...(counts.priorAccountingEvents === "0" ? [] : ["prior_operational_accounting_events_exist"]),
+      ...(counts.priorAccountingEvents === "0"
+        ? []
+        : ["prior_operational_accounting_events_exist"]),
       ...(counts.operationalBalances === "0" ? [] : ["legacy_operational_balances_exist"]),
     ];
     return { blockers, counts, safe: blockers.length === 0 };
@@ -629,11 +723,16 @@ export class AccountingSetupService {
     `.execute(this.database);
     const protection = await this.openingProtection(this.database, effectiveDate);
     return {
-      status: confirmation.rows[0] === undefined
-        ? protection.safe ? "no_opening_balance" : "blocking_balance_indicators"
-        : confirmation.rows[0].revokedAt === null
-          ? protection.safe ? "zero_opening_confirmed" : "zero_opening_confirmation_invalidated"
-          : "zero_opening_revoked",
+      status:
+        confirmation.rows[0] === undefined
+          ? protection.safe
+            ? "no_opening_balance"
+            : "blocking_balance_indicators"
+          : confirmation.rows[0].revokedAt === null
+            ? protection.safe
+              ? "zero_opening_confirmed"
+              : "zero_opening_confirmation_invalidated"
+            : "zero_opening_revoked",
       confirmation: confirmation.rows[0] ?? null,
       ...protection,
     };
@@ -697,8 +796,10 @@ export class AccountingSetupService {
         subjectType: "accounting_zero_opening",
       });
       await this.support.completeIdempotency(transaction, {
-        idempotencyKey: idempotencyKey!, operation: "accounting.setup.zero-opening.confirm",
-        resourceId: String(response.id), resourceType: "accounting_zero_opening",
+        idempotencyKey: idempotencyKey!,
+        operation: "accounting.setup.zero-opening.confirm",
+        resourceId: String(response.id),
+        resourceType: "accounting_zero_opening",
         responseBody: response,
       });
       return response;
@@ -709,7 +810,8 @@ export class AccountingSetupService {
     this.support.assertPermission("accounting.configuration.manage");
     return this.transactions.execute(async (transaction) => {
       const reservation = await this.support.reserveIdempotency(transaction, {
-        idempotencyKey, operation: "accounting.setup.zero-opening.revoke",
+        idempotencyKey,
+        operation: "accounting.setup.zero-opening.revoke",
         payload: { reason: reason.trim() },
       });
       if (reservation.replayResponse !== undefined) return reservation.replayResponse;
@@ -725,12 +827,16 @@ export class AccountingSetupService {
       const response = updated.rows[0]!;
       await this.support.audit(transaction, {
         action: "accounting.setup.zero_opening.revoked",
-        after: { ...response, reason }, correlationId: idempotencyKey ?? randomUUID(),
-        subjectId: String(response.id), subjectType: "accounting_zero_opening",
+        after: { ...response, reason },
+        correlationId: idempotencyKey ?? randomUUID(),
+        subjectId: String(response.id),
+        subjectType: "accounting_zero_opening",
       });
       await this.support.completeIdempotency(transaction, {
-        idempotencyKey: idempotencyKey!, operation: "accounting.setup.zero-opening.revoke",
-        resourceId: String(response.id), resourceType: "accounting_zero_opening",
+        idempotencyKey: idempotencyKey!,
+        operation: "accounting.setup.zero-opening.revoke",
+        resourceId: String(response.id),
+        resourceType: "accounting_zero_opening",
         responseBody: response,
       });
       return response;
@@ -740,7 +846,7 @@ export class AccountingSetupService {
   public async dashboardActions() {
     this.support.assertPermission("accounting.view");
     const { companyId } = this.support.context();
-    const [counts, mappingIssues, snapshot] = await Promise.all([
+    const [counts, mappingIssues] = await Promise.all([
       sql<Record<string, string>>`
         select
           (select count(*)::text from journal_entries where company_id=${companyId}::uuid and status='balanced') as "journalsAwaitingApproval",
@@ -761,7 +867,6 @@ export class AccountingSetupService {
           ) unresolved) as "oldestUnresolved"
       `.execute(this.database),
       this.mappingIssues(),
-      this.financialSnapshot(),
     ]);
     const row = counts.rows[0] ?? {};
     const items = [
@@ -769,19 +874,39 @@ export class AccountingSetupService {
       ["journalsAwaitingPosting", row.journalsAwaitingPosting, "warning", "/accounting/journals"],
       ["unbalancedDraftJournals", row.unbalancedDraftJournals, "critical", "/accounting/journals"],
       ["failedAccountingEvents", row.failedAccountingEvents, "critical", "/accounting/events"],
-      ["configurationBlockedEvents", row.configurationBlockedEvents, "critical", "/accounting/events"],
+      [
+        "configurationBlockedEvents",
+        row.configurationBlockedEvents,
+        "critical",
+        "/accounting/events",
+      ],
       ["periodBlockedEvents", row.periodBlockedEvents, "critical", "/accounting/events"],
-      ["missingMandatoryMappings", String(mappingIssues.counts.missing), "critical", "/accounting/setup"],
+      [
+        "missingMandatoryMappings",
+        String(mappingIssues.counts.missing),
+        "critical",
+        "/accounting/setup",
+      ],
       ["invalidMappings", String(mappingIssues.counts.invalid), "critical", "/accounting/setup"],
-      ["inactiveMappedAccounts", String(mappingIssues.counts.inactive), "critical", "/accounting/setup"],
+      [
+        "inactiveMappedAccounts",
+        String(mappingIssues.counts.inactive),
+        "critical",
+        "/accounting/setup",
+      ],
       ["mappingGaps", String(mappingIssues.counts.gaps), "warning", "/accounting/setup"],
       ["mappingOverlaps", String(mappingIssues.counts.overlaps), "critical", "/accounting/setup"],
       ["expensesAwaitingApproval", row.expensesAwaitingApproval, "warning", "/accounting/expenses"],
       ["outstandingExpenses", row.outstandingExpenses, "warning", "/accounting/expenses"],
-      ["draftCashBankMovements", row.draftCashBankMovements, "warning", "/accounting/cash-bank-movements"],
+      [
+        "draftCashBankMovements",
+        row.draftCashBankMovements,
+        "warning",
+        "/accounting/cash-bank-movements",
+      ],
       ["reconciliationMismatches", null, "warning", "/accounting/reconciliation"],
       ["reversalMismatches", null, "warning", "/accounting/reconciliation"],
-      ["trialBalanceDifference", snapshot.trialBalanceDifference, "critical", "/accounting/reports/trial-balance"],
+      ["trialBalanceDifference", null, "critical", "/accounting/reports/trial-balance"],
       ["balanceSheetDifference", null, "critical", "/accounting/reports/balance-sheet"],
     ].map(([key, count, severity, target]) => ({ key, count: count ?? null, severity, target }));
     return {
@@ -790,13 +915,14 @@ export class AccountingSetupService {
         "full_bank_reconciliation_unavailable",
         "standalone_reversal_mismatch_register_unavailable",
       ],
-      oldestUnresolvedItem: row.oldestUnresolved === undefined || row.oldestUnresolved === null
-        ? null
-        : {
-            severity: "warning",
-            target: "/accounting",
-            timestamp: row.oldestUnresolved,
-          },
+      oldestUnresolvedItem:
+        row.oldestUnresolved === undefined || row.oldestUnresolved === null
+          ? null
+          : {
+              severity: "warning",
+              target: "/accounting",
+              timestamp: row.oldestUnresolved,
+            },
       evaluatedAt: new Date().toISOString(),
     };
   }
@@ -912,10 +1038,7 @@ export class AccountingSetupService {
     return { limit: bounded, items: result.rows };
   }
 
-  private async activationState(
-    database: Kysely<DatabaseSchema>,
-    activationDate: string,
-  ) {
+  private async activationState(database: Kysely<DatabaseSchema>, activationDate: string) {
     const { companyId } = this.support.context();
     const [{ accounts, mappings }, configuration, period, links, opening] = await Promise.all([
       this.source(database),
@@ -945,13 +1068,18 @@ export class AccountingSetupService {
               and effective_date<=${activationDate}::date) as "zeroConfirmed"
       `.execute(database),
     ]);
-    const mandatory = accountingMandatoryMappings.filter((item) => item.requirement === "mandatory");
+    const mandatory = accountingMandatoryMappings.filter(
+      (item) => item.requirement === "mandatory",
+    );
     const invalidMappings: string[] = [];
     for (const definition of mandatory) {
-      const mapping = mappings.find((item) =>
-        item.mappingKey === definition.key && item.isActive
-        && item.effectiveFrom <= activationDate
-        && (item.effectiveTo === null || item.effectiveTo >= activationDate));
+      const mapping = mappings.find(
+        (item) =>
+          item.mappingKey === definition.key &&
+          item.isActive &&
+          item.effectiveFrom <= activationDate &&
+          (item.effectiveTo === null || item.effectiveTo >= activationDate),
+      );
       const account = accounts.find((item) => item.id === mappedAccountId(definition, mapping));
       if (account === undefined || !this.compatibility(definition, account).compatible) {
         invalidMappings.push(definition.key);
@@ -967,7 +1095,9 @@ export class AccountingSetupService {
       ...(invalidMappings.length === 0 ? [] : ["mandatory_mappings_incomplete"]),
       ...(period.rows[0]?.available ? [] : ["open_fiscal_period_missing"]),
       ...(link.total !== "0" && link.invalid === "0" ? [] : ["cash_bank_gl_links_incomplete"]),
-      ...(openingRow.posted || openingRow.zeroConfirmed ? [] : ["opening_balance_decision_missing"]),
+      ...(openingRow.posted || openingRow.zeroConfirmed
+        ? []
+        : ["opening_balance_decision_missing"]),
     ];
     const completed = 7 - blockers.length;
     return {
@@ -979,16 +1109,21 @@ export class AccountingSetupService {
       invalidMandatoryMappings: invalidMappings,
       fiscalPeriodStatus: period.rows[0]?.available ? "open" : "missing_or_closed",
       cashBankLinkingStatus: link.total !== "0" && link.invalid === "0" ? "complete" : "incomplete",
-      openingBalanceStatus: openingRow.posted ? "posted" : openingRow.zeroConfirmed ? "zero_confirmed" : "missing",
+      openingBalanceStatus: openingRow.posted
+        ? "posted"
+        : openingRow.zeroConfirmed
+          ? "zero_confirmed"
+          : "missing",
       criticalBlockers: blockers,
       warnings: ["historical_backfill_not_run", "automatic_posting_remains_disabled"],
       requiredAcknowledgements: ["historical_backfill_not_run", "controlled_testing_required"],
       proposedActivationDate: activationDate,
       historicalBackfillStatus: "not_run",
       automaticPostingStatus: "unchanged",
-      recommendedNextSteps: blockers.length === 0
-        ? ["activate_manual_accounting", "create_controlled_test_journal"]
-        : blockers,
+      recommendedNextSteps:
+        blockers.length === 0
+          ? ["activate_manual_accounting", "create_controlled_test_journal"]
+          : blockers,
       evaluatedAt: new Date().toISOString(),
     };
   }
@@ -1022,26 +1157,61 @@ export class AccountingSetupService {
       this.mappingIssues(evaluatedOn),
     ]);
     const steps = [
-      { key: "chart", complete: state.chartOfAccountsStatus === "complete", target: "/accounting/chart-of-accounts" },
-      { key: "accountsClassified", complete: state.chartOfAccountsStatus === "complete", target: "/accounting/chart-of-accounts" },
-      { key: "requiredMappings", complete: state.mappingStatus === "complete", target: "/accounting/setup" },
-      { key: "fiscalYear", complete: state.fiscalPeriodStatus === "open", target: "/accounting/fiscal-years" },
-      { key: "openFiscalPeriod", complete: state.fiscalPeriodStatus === "open", target: "/accounting/fiscal-periods" },
-      { key: "cashAndBankLinked", complete: state.cashBankLinkingStatus === "complete", target: "/accounting/cash-accounts" },
-      { key: "openingBalances", complete: state.openingBalanceStatus !== "missing", target: "/accounting/opening-balances" },
-      { key: "manualAccounting", complete: state.manualAccountingEnabled, target: "/accounting/setup" },
+      {
+        key: "chart",
+        complete: state.chartOfAccountsStatus === "complete",
+        target: "/accounting/chart-of-accounts",
+      },
+      {
+        key: "accountsClassified",
+        complete: state.chartOfAccountsStatus === "complete",
+        target: "/accounting/chart-of-accounts",
+      },
+      {
+        key: "requiredMappings",
+        complete: state.mappingStatus === "complete",
+        target: "/accounting/setup",
+      },
+      {
+        key: "fiscalYear",
+        complete: state.fiscalPeriodStatus === "open",
+        target: "/accounting/fiscal-years",
+      },
+      {
+        key: "openFiscalPeriod",
+        complete: state.fiscalPeriodStatus === "open",
+        target: "/accounting/fiscal-periods",
+      },
+      {
+        key: "cashAndBankLinked",
+        complete: state.cashBankLinkingStatus === "complete",
+        target: "/accounting/cash-accounts",
+      },
+      {
+        key: "openingBalances",
+        complete: state.openingBalanceStatus !== "missing",
+        target: "/accounting/opening-balances",
+      },
+      {
+        key: "manualAccounting",
+        complete: state.manualAccountingEnabled,
+        target: "/accounting/setup",
+      },
     ];
     return {
       ready: state.activationEligible,
       status: state.activationEligible
-        ? state.warnings.length === 0 ? "ready" : "ready_with_warnings"
+        ? state.warnings.length === 0
+          ? "ready"
+          : "ready_with_warnings"
         : "not_ready",
       completionPercentage: state.configurationPercentage,
       completedSteps: steps.filter((step) => step.complete).map((step) => step.key),
       incompleteSteps: steps.filter((step) => !step.complete),
       blockers: state.criticalBlockers.map((code) => ({
-        code, message: code.replaceAll("_", " "), target:
-          steps.find((step) => !step.complete)?.target ?? "/accounting/setup",
+        code,
+        message: code.replaceAll("_", " "),
+        target: steps.find((step) => !step.complete)?.target ?? "/accounting/setup",
       })),
       warnings: state.warnings,
       notApplicable: [],
@@ -1057,8 +1227,9 @@ export class AccountingSetupService {
     if (!input.confirmation) this.conflict("accounting_setup_activation_confirmation_required");
     const result = await this.transactions.execute(async (transaction) => {
       const { actorId, companyId } = this.support.context();
-      await sql`select 1 from accounting_configurations where company_id=${companyId}::uuid for update`
-        .execute(transaction);
+      await sql`select 1 from accounting_configurations where company_id=${companyId}::uuid for update`.execute(
+        transaction,
+      );
       await sql`select pg_advisory_xact_lock(hashtextextended(
         'accounting_account_configuration:'||${companyId}::text,0))`.execute(transaction);
       const readiness = await this.activationState(transaction, input.activationDate);
@@ -1119,10 +1290,18 @@ export class AccountingSetupService {
         historicalBackfillExecuted: false,
         journalsCreated: false,
         nextTestingSteps: [
-          "create_test_manual_journal", "approve_and_post_journal", "verify_trial_balance",
-          "verify_opening_balance_status", "test_general_expense", "test_expense_payment",
-          "test_cash_bank_movement", "review_accounting_events", "review_reconciliation",
-          "enable_one_automatic_posting_area", "verify_generated_journal", "test_reversal",
+          "create_test_manual_journal",
+          "approve_and_post_journal",
+          "verify_trial_balance",
+          "verify_opening_balance_status",
+          "test_general_expense",
+          "test_expense_payment",
+          "test_cash_bank_movement",
+          "review_accounting_events",
+          "review_reconciliation",
+          "enable_one_automatic_posting_area",
+          "verify_generated_journal",
+          "test_reversal",
         ],
       };
       await this.support.audit(transaction, {
@@ -1139,12 +1318,14 @@ export class AccountingSetupService {
           acknowledgedWarningCodes: [...acknowledged],
         },
         correlationId: idempotencyKey ?? randomUUID(),
-        subjectId: companyId, subjectType: "accounting_configuration",
+        subjectId: companyId,
+        subjectType: "accounting_configuration",
       });
       await this.support.completeIdempotency(transaction, {
         idempotencyKey: idempotencyKey!,
         operation: "accounting.setup.activate-manual-accounting",
-        resourceId: companyId, resourceType: "accounting_configuration",
+        resourceId: companyId,
+        resourceType: "accounting_configuration",
         responseBody: response,
       });
       return response;
@@ -1166,26 +1347,58 @@ export class AccountingSetupService {
       area: string;
       failedCount: string;
       lastSuccessfulPosting: string | null;
+      waitingCount: string;
     }>`
       select operational_area as area,
         count(*) filter(where processing_status='failed')::text as "failedCount",
+        count(*) filter(where processing_status
+          in('received','retry_pending','processing'))::text as "waitingCount",
         (max(processed_at) filter(where processing_status='posted'))::text as "lastSuccessfulPosting"
       from accounting_events
       where company_id=${companyId}::uuid and operational_area is not null
       group by operational_area
+    `.execute(this.database);
+    // Events still awaiting posting, so an operator can see exactly what is
+    // queued for an area before enabling it. Read-only: nothing is claimed,
+    // processed, or mutated here.
+    const waiting = await sql<{
+      area: string;
+      attemptCount: number;
+      eventType: string;
+      hasJournal: boolean;
+      processingStatus: string;
+      sourceReference: string | null;
+    }>`
+      select operational_area as area,event_type as "eventType",
+             source_reference as "sourceReference",processing_status as "processingStatus",
+             attempt_count as "attemptCount",(journal_id is not null) as "hasJournal"
+        from accounting_events
+       where company_id=${companyId}::uuid and operational_area is not null
+         and processing_status in('received','retry_pending','processing')
+       order by created_at,id
+       limit 100
     `.execute(this.database);
     return {
       ...readiness,
       areas: readiness.areas.map((area) => ({
         ...area,
         failedEventCount: history.rows.find((item) => item.area === area.area)?.failedCount ?? "0",
-        lastSuccessfulPosting: history.rows.find((item) => item.area === area.area)?.lastSuccessfulPosting ?? null,
+        lastSuccessfulPosting:
+          history.rows.find((item) => item.area === area.area)?.lastSuccessfulPosting ?? null,
         recommendedTestAction: `test_${area.area}_with_one_new_transaction`,
+        waitingEventCount: history.rows.find((item) => item.area === area.area)?.waitingCount ?? "0",
+        waitingEvents: waiting.rows
+          .filter((item) => item.area === area.area)
+          .map(({ area: _area, ...event }) => event),
       })),
     };
   }
 
-  public async changeArea(input: AccountingAreaChangeDto, enable: boolean, idempotencyKey?: string) {
+  public async changeArea(
+    input: AccountingAreaChangeDto,
+    enable: boolean,
+    idempotencyKey?: string,
+  ) {
     this.support.assertPermission("accounting.configuration.manage");
     if (!input.confirmation) this.conflict("accounting_setup_area_confirmation_required");
     if (enable) {
@@ -1195,11 +1408,6 @@ export class AccountingSetupService {
         this.conflict("accounting_setup_area_not_ready", "The selected posting area is not ready");
       }
     }
-    return this.automaticPosting.setArea(
-      input.area,
-      enable,
-      input.reason,
-      idempotencyKey,
-    );
+    return this.automaticPosting.setArea(input.area, enable, input.reason, idempotencyKey);
   }
 }

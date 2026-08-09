@@ -56,6 +56,55 @@ export class ApiExceptionFilter implements ExceptionFilter {
 
     if (status >= 500) {
       this.logger.error({ correlationId, err: exception, path: request.path }, "Request failed");
+    } else if (databaseIntegrityError) {
+      /**
+       * A database integrity error is logged with the constraint that fired.
+       *
+       * The CLIENT still gets only the generic message above — constraint and
+       * table names describe the schema and must not leave the server. But
+       * without them on the server side, "The operation conflicts with current
+       * data integrity rules." is equally opaque to whoever has to diagnose it:
+       * the correlation id in the user's screenshot leads to a log line that
+       * repeats the same non-answer.
+       *
+       * These fields are the standard `pg` error shape. Nothing user-supplied
+       * is logged — `detail` can quote the offending VALUES, so it is
+       * deliberately excluded rather than risk writing personal data into logs.
+       */
+      const pgError = exception as {
+        code?: string;
+        constraint?: string;
+        message?: string;
+        table?: string;
+      };
+      this.logger.warn(
+        {
+          code,
+          constraint: pgError.constraint,
+          correlationId,
+          path: request.path,
+          pgCode: pgError.code,
+          /**
+           * The message is logged because for a DEFERRED constraint trigger it
+           * is the only identifying field there is.
+           *
+           * Those fire at COMMIT rather than at the offending statement, so
+           * PostgreSQL reports no `constraint` and no `table` — both come back
+           * undefined. This repository leans on them heavily ("An Active Role
+           * must have at least one Permission", "An Active User must have at
+           * least one active Role"), so without the message a whole class of
+           * rejection logs as a row of undefineds.
+           *
+           * Safe to log: these messages are fixed strings raised by the trigger
+           * bodies and contain no user data. `detail`, which quotes the
+           * offending VALUES, is still deliberately excluded.
+           */
+          reason: pgError.message,
+          status,
+          table: pgError.table,
+        },
+        "Request rejected by a database constraint",
+      );
     } else {
       this.logger.warn({ code, correlationId, path: request.path, status }, "Request rejected");
     }

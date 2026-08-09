@@ -1,15 +1,29 @@
-import { useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+
+import { useSessionAccess } from "../../app/SessionAccessContext.js";
+import { useListState } from "../accounting/use-list-state.js";
+import { formatDate } from "../../localization/formatters.js";
+import { normalizeLocale } from "../../localization/locale.js";
+
+import {
+  businessDateFilterDefaults,
+  BusinessDateFilterControls,
+} from "./BusinessDateFilterControls.js";
 
 import { ApiError, type ApiClient } from "../../api/api-client.js";
 import type { PagedResponse, ReconciliationPageSize } from "../../api/contracts.js";
 import { CompanyBrandingContext } from "../../app/CompanyBrandingContext.js";
 import { Modal } from "../../components/Modal.js";
+import { useRouteDetail } from "../../app/use-route-detail.js";
+import { OperationalReference, partyDisplayLabel } from "./OperationalReference.js";
+import { AccountingRelatedPanel } from "../accounting/AccountingRelatedPanel.js";
 import { PageHeader } from "../../components/PageHeader.js";
 import { AreaSelector } from "../configuration/AreaSelector.js";
 
 import { DriverCashStatusLabel } from "./DriverCashStatus.js";
 import { type PdfAction, useReconciliationPdfActions } from "./reconciliation-pdf.js";
+import { useWorkflowDeepLink, type WorkflowDialog } from "./use-workflow-deep-link.js";
 import { materialFingerprint, useIdempotencyKey } from "./useIdempotencyKey.js";
 
 // ---- Server response shapes (mirrors the Checkpoint 2 backend contracts). ----
@@ -28,7 +42,10 @@ interface CollectionsSummary {
 }
 
 interface CollectionRow {
+  /** The reconciliation's own date-only field. NOT the Company Business Date. */
   readonly businessDate: string;
+  /** Company Business Date from the backend, derived from confirmedAt. */
+  readonly confirmationBusinessDate?: string | null;
   readonly collectionPaymentMethod: "cash" | "visa" | null;
   readonly confirmedAt: string | null;
   readonly confirmedBy: string;
@@ -38,6 +55,7 @@ interface CollectionRow {
   readonly grossCollections: string;
   readonly id: string;
   readonly isReversed: boolean;
+  readonly linkedDriverFeePaymentNumber: string | null;
   readonly netAmountReceived: string;
   readonly orderCount: number;
   readonly paymentTotal: string;
@@ -56,11 +74,13 @@ interface ReportDataOrder {
   readonly driverReconciliationStatus: string;
   readonly driverReconciliationStatusLabel: string;
   readonly emirateName: string | null;
+  readonly orderNumber: string;
   readonly paymentMethod: "cash" | "visa" | null;
   readonly referenceNumber: string | null;
   readonly serialNumber: string;
   readonly serviceFee: string;
   readonly totalDeductions: string;
+  readonly traderCode: string | null;
   readonly traderName: string;
   readonly traderPayable: string;
   readonly vatAmount: string;
@@ -83,7 +103,9 @@ interface ReportData {
     readonly confirmedBy: string;
     readonly createdAt: string;
     readonly createdBy: string;
+    readonly driverCode: string | null;
     readonly driverName: string;
+    readonly driverNameAr: string | null;
     readonly driverType: string;
     readonly isReversal: boolean;
     readonly linkedDriverFeePaymentId: string | null;
@@ -167,7 +189,11 @@ interface PreviewResult {
   readonly warnings: readonly string[];
 }
 
+/** Stable identity: an inline array would re-run the consuming effect. */
+const collectionDialogs: readonly WorkflowDialog[] = ["collect_money"];
+
 const emptyFilters = {
+  ...businessDateFilterDefaults,
   areaId: "",
   collectionPaymentMethod: "",
   customerName: "",
@@ -176,6 +202,7 @@ const emptyFilters = {
   dateFrom: "",
   dateTo: "",
   driverId: "",
+  driverFeeStatus: "",
   driverType: "",
   emirateId: "",
   orderSerialNumber: "",
@@ -186,6 +213,16 @@ const emptyFilters = {
 };
 
 type Filters = typeof emptyFilters;
+
+/**
+ * Filter names this screen puts in the URL. Module-level and frozen on purpose:
+ * `useListState` memoizes on this array, so a fresh literal built during render
+ * would produce new state every render and re-fire the request effect forever.
+ */
+const filterKeys = Object.keys(emptyFilters);
+
+/** Sort keys the Driver Collections endpoint actually accepts. */
+const sortKeys = new Set(["businessDate", "reconciliationNumber", "netAmountReceived"]);
 
 function money(value: string | number | undefined): string {
   const numeric = Number(value ?? 0);
@@ -217,36 +254,81 @@ function filterQuery(filters: Filters): URLSearchParams {
  * bookmarks keep working; Driver master-data administration remains a
  * separate, untouched screen at `/configuration/drivers`.
  */
-export function DriverCollectionsWorkspace({ api }: { api: ApiClient }) {
-  const { t } = useTranslation();
+export function DriverCollectionsWorkspace({
+  api,
+  detailId: routeDetailId,
+}: {
+  api: ApiClient;
+  /** Collection opened by `/drivers/collections/:id`. */
+  detailId?: string | undefined;
+}) {
+  const { i18n, t } = useTranslation();
+  const locale = normalizeLocale(i18n.language);
   const branding = useContext(CompanyBrandingContext);
   const [summary, setSummary] = useState<CollectionsSummary>();
-  const [filters, setFilters] = useState<Filters>(emptyFilters);
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState<ReconciliationPageSize>(25);
+  // The URL is the authoritative list state. No parallel local or session copy
+  // of these fields exists to drift out of step with it.
+  const session = useSessionAccess();
+  const list = useListState({
+    companyId: session?.companyId,
+    defaultSortBy: "businessDate",
+    filterKeys,
+  });
+  const { page } = list;
+  const pageSize = list.pageSize as ReconciliationPageSize;
+  const setPage = list.setPage;
+  // `useListState` omits empty filters entirely; the panel and `filterQuery`
+  // both expect every key present, so the defaults are merged back in.
+  const filters = useMemo<Filters>(
+    () => ({ ...emptyFilters, ...list.filters }),
+    [list.filters],
+  );
   const [collectionsPage, setCollectionsPage] = useState<PagedResponse<CollectionRow>>();
   const [listError, setListError] = useState<string>();
   const [createOpen, setCreateOpen] = useState(false);
-  const [detailId, setDetailId] = useState<string>();
+  /* A smart next action from the Orders list can ask this screen to open New
+     Collection with the Driver and originating Order already carried in. The
+     shared primitive reads it once and strips `openDialog`, so a refresh after
+     completing the collection cannot reopen the dialog. Nothing is written by
+     opening it. */
+  const collectDeepLink = useWorkflowDeepLink(collectionDialogs);
+  const [deepLinkDriverId, setDeepLinkDriverId] = useState<string>();
+  const [deepLinkOrderId, setDeepLinkOrderId] = useState<string>();
+  const [collectNotice, setCollectNotice] = useState<string>();
+
+  useEffect(() => {
+    const link = collectDeepLink.link;
+    if (link === null || link.dialog !== "collect_money") return;
+    if (link.driverId === null) return;
+    setDeepLinkDriverId(link.driverId);
+    if (link.orderId !== null) setDeepLinkOrderId(link.orderId);
+    setCreateOpen(true);
+  }, [collectDeepLink]);
+  const {
+    close: closeDetail,
+    detailId,
+    open: openDetail,
+  } = useRouteDetail("driver_collection", routeDetailId);
   const [reverseTarget, setReverseTarget] = useState<CollectionRow>();
   const [outstandingOpen, setOutstandingOpen] = useState(false);
   const [pdfBusy, setPdfBusy] = useState<{ id: string; mode: "download" | "preview" }>();
   const [pdfError, setPdfError] = useState<string>();
 
+  // Legacy `?reconciliationId=` links now redirect once to the canonical
+  // `/drivers/collections/:id` route, which drops the query string — so this
+  // cannot loop even though `openDetail` navigates.
   useEffect(() => {
     const linkedId = new URLSearchParams(window.location.search).get("reconciliationId");
-    if (linkedId !== null && /^[0-9a-f-]{36}$/i.test(linkedId)) setDetailId(linkedId);
-  }, []);
+    if (linkedId !== null && /^[0-9a-f-]{36}$/i.test(linkedId)) openDetail(linkedId);
+  }, [openDetail]);
 
+  // One write, not one per key: switching Date Mode changes several filters
+  // together, and separate writes would each start from stale state. The hook
+  // resets the page to 1 itself.
   const applyFilter = (change: Partial<Filters>) => {
-    setPage(1);
-    setFilters((current) => ({ ...current, ...change }));
+    list.setFilters(change as Record<string, string>);
   };
-  const clearFilters = () => {
-    setPage(1);
-    setPageSize(25);
-    setFilters(emptyFilters);
-  };
+  const clearFilters = () => list.clearFilters();
 
   const refresh = useCallback(() => {
     setListError(undefined);
@@ -257,11 +339,17 @@ export function DriverCollectionsWorkspace({ api }: { api: ApiClient }) {
     const params = filterQuery(filters);
     params.set("page", String(page));
     params.set("pageSize", String(pageSize));
+    // Allowlisted before it leaves the browser, so a hand-edited URL cannot
+    // send the API a sort key it does not support.
+    if (sortKeys.has(list.sortBy) && list.sortBy !== "businessDate") {
+      params.set("sortBy", list.sortBy);
+      params.set("sortDirection", list.sortDirection);
+    }
     void api
       .get<PagedResponse<CollectionRow>>(`operations/cash/reconciliations?${params.toString()}`)
       .then(setCollectionsPage)
       .catch(() => setListError(t("operations.detailLoadFailed")));
-  }, [api, filters, page, pageSize, t]);
+  }, [api, filters, list.sortBy, list.sortDirection, page, pageSize, t]);
 
   useEffect(() => refresh(), [refresh]);
 
@@ -334,6 +422,16 @@ export function DriverCollectionsWorkspace({ api }: { api: ApiClient }) {
       )}
 
       <FilterBar api={api} filters={filters} onChange={applyFilter} onClear={clearFilters} />
+      {/* Date Mode sits beside the list rather than inside the filter bar:
+          the summary it renders describes the response, so it belongs where
+          the response is. All three screens share this one component. */}
+      <BusinessDateFilterControls
+        applied={collectionsPage?.appliedDateMode}
+        businessDateFrom={filters.businessDateFrom}
+        businessDateTo={filters.businessDateTo}
+        dateMode={filters.dateMode}
+        onChange={(patch) => applyFilter(patch)}
+      />
 
       <section aria-labelledby="collections-list-heading">
         <h2 id="collections-list-heading">{t("operations.recentReconciliations")}</h2>
@@ -344,6 +442,9 @@ export function DriverCollectionsWorkspace({ api }: { api: ApiClient }) {
               <th scope="col">{t("operations.driver")}</th>
               <th scope="col">{t("operations.paymentMethod")}</th>
               <th scope="col">{t("operations.collectionDateColumn")}</th>
+              {/* Company Business Date. Distinct from the reconciliation's own
+                  date-only businessDate rendered in the column before it. */}
+              <th scope="col">{t("configuration.businessDay.businessDate")}</th>
               <th scope="col">{t("operations.orders")}</th>
               <th scope="col">{t("operations.selectedCollections")}</th>
               <th scope="col">{t("operations.expenses")}</th>
@@ -360,11 +461,7 @@ export function DriverCollectionsWorkspace({ api }: { api: ApiClient }) {
             {rows.map((row) => (
               <tr key={row.id}>
                 <td className="mono">
-                  <button
-                    className="link-button"
-                    onClick={() => setDetailId(row.id)}
-                    type="button"
-                  >
+                  <button className="link-button" onClick={() => openDetail(row.id)} type="button">
                     {row.reconciliationNumber}
                   </button>
                 </td>
@@ -372,9 +469,16 @@ export function DriverCollectionsWorkspace({ api }: { api: ApiClient }) {
                 <td>
                   {row.collectionPaymentMethod === null
                     ? t("operations.paymentMethodNotAssigned")
-                    : t(`operations.paymentMethod${row.collectionPaymentMethod === "cash" ? "Cash" : "Visa"}`)}
+                    : t(
+                        `operations.paymentMethod${row.collectionPaymentMethod === "cash" ? "Cash" : "Visa"}`,
+                      )}
                 </td>
                 <td>{row.businessDate}</td>
+                <td dir="ltr">
+                  {row.confirmationBusinessDate == null
+                    ? t("configuration.businessDay.historicalTimestampUnavailable")
+                    : formatDate(row.confirmationBusinessDate, locale)}
+                </td>
                 <td>{row.orderCount}</td>
                 <td>{money(row.grossCollections)}</td>
                 <td>{money(row.expenseTotal)}</td>
@@ -388,7 +492,7 @@ export function DriverCollectionsWorkspace({ api }: { api: ApiClient }) {
                   ) : null}
                 </td>
                 <td className="row-actions">
-                  <button onClick={() => setDetailId(row.id)} type="button">
+                  <button onClick={() => openDetail(row.id)} type="button">
                     {t("common.view")}
                   </button>
                   <button
@@ -437,10 +541,23 @@ export function DriverCollectionsWorkspace({ api }: { api: ApiClient }) {
         </nav>
       </section>
 
+      {collectNotice === undefined ? null : (
+        <div className="alert alert-info" role="status">
+          {collectNotice}
+        </div>
+      )}
       {createOpen ? (
         <CreateDriverCollectionDialog
           api={api}
-          onClose={() => setCreateOpen(false)}
+          {...(deepLinkDriverId === undefined ? {} : { initialDriverId: deepLinkDriverId })}
+          {...(deepLinkOrderId === undefined ? {} : { initialOrderId: deepLinkOrderId })}
+          onClose={() => {
+            setCreateOpen(false);
+            setCollectNotice(undefined);
+          }}
+          onOriginatingOrderIneligible={() =>
+            setCollectNotice(t("common.originatingOrderIneligible"))
+          }
           onCreated={() => {
             setCreateOpen(false);
             refresh();
@@ -451,9 +568,9 @@ export function DriverCollectionsWorkspace({ api }: { api: ApiClient }) {
       {detailId === undefined ? null : (
         <DriverCollectionDetailDialog
           api={api}
-          onClose={() => setDetailId(undefined)}
+          onClose={() => closeDetail()}
           onReversed={() => {
-            setDetailId(undefined);
+            closeDetail();
             refresh();
           }}
           reconciliationId={detailId}
@@ -567,7 +684,9 @@ function OutstandingByDriverDialog({ api, onClose }: { api: ApiClient; onClose: 
 
   const outstanding = (drivers ?? [])
     .filter((driver) => driver.pendingOrderCount > 0)
-    .sort((left, right) => Number(right.pendingCollectionTotal) - Number(left.pendingCollectionTotal));
+    .sort(
+      (left, right) => Number(right.pendingCollectionTotal) - Number(left.pendingCollectionTotal),
+    );
 
   return (
     <Modal
@@ -582,7 +701,9 @@ function OutstandingByDriverDialog({ api, onClose }: { api: ApiClient; onClose: 
         </div>
       )}
       {drivers === undefined ? (
-        error === undefined ? <div className="loading-row">{t("common.loading")}</div> : null
+        error === undefined ? (
+          <div className="loading-row">{t("common.loading")}</div>
+        ) : null
       ) : (
         <table>
           <thead>
@@ -687,6 +808,19 @@ function FilterBar({
             <option value="pending">{t("operations.reconciliationStatusPending")}</option>
             <option value="reconciled">{t("operations.reconciliationStatusReconciled")}</option>
             <option value="reversed">{t("operations.reconciliationStatusReversed")}</option>
+          </select>
+        </label>
+        {/* Outsourced Driver Fee payment state. Employee drivers accrue no
+            fee, so selecting Paid or Unpaid excludes their Collections. */}
+        <label className="field">
+          <span>{t("operations.driverFeeStatus")}</span>
+          <select
+            onChange={(event) => onChange({ driverFeeStatus: event.target.value })}
+            value={filters.driverFeeStatus}
+          >
+            <option value="all">{t("operations.all")}</option>
+            <option value="paid">{t("operations.driverFeeStatusPaid")}</option>
+            <option value="unpaid">{t("operations.driverFeeStatusUnpaid")}</option>
           </select>
         </label>
         <label className="field">
@@ -830,10 +964,19 @@ function CreateDriverCollectionDialog({
   api,
   onClose,
   onCreated,
+  initialDriverId,
+  initialOrderId,
+  onOriginatingOrderIneligible,
 }: {
   api: ApiClient;
+  /** Driver from a smart next action, preselected once the list resolves it. */
+  initialDriverId?: string | undefined;
+  /** Originating Order, checked once it appears among the eligible Orders. */
+  initialOrderId?: string | undefined;
   onClose: () => void;
   onCreated: () => void;
+  /** Called when the originating Order is not in the eligible list. */
+  onOriginatingOrderIneligible?: (() => void) | undefined;
 }) {
   const { t } = useTranslation();
 
@@ -848,6 +991,33 @@ function CreateDriverCollectionDialog({
   // Step 3 — Eligible Orders.
   const [ordersPage, setOrdersPage] = useState<PagedResponse<EligibleOrderRow>>();
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set());
+  /* Applied once. Without this the effect would re-check the Order every time
+     the eligible list refreshes, silently undoing a user who unchecked it. */
+  const originatingApplied = useRef(false);
+
+  /* The Driver is taken from the list this dialog already loads, not from the
+     URL: a Driver outside this Company is simply not in it, so the id can
+     never select something the user may not see. */
+  useEffect(() => {
+    if (initialDriverId === undefined || driver !== undefined) return;
+    const match = drivers.find((candidate) => candidate.id === initialDriverId);
+    if (match !== undefined) setDriver(match);
+  }, [driver, drivers, initialDriverId]);
+
+  /* The originating Order is checked only when the backend actually returned
+     it as eligible. An Order that has since been collected, reversed or
+     reassigned simply is not there, and is reported rather than forced. */
+  useEffect(() => {
+    if (initialOrderId === undefined || originatingApplied.current) return;
+    if (ordersPage === undefined) return;
+    originatingApplied.current = true;
+    const eligible = ordersPage.items.some((row) => row.id === initialOrderId);
+    if (!eligible) {
+      onOriginatingOrderIneligible?.();
+      return;
+    }
+    setSelectedIds((current) => new Set([...current, initialOrderId]));
+  }, [initialOrderId, onOriginatingOrderIneligible, ordersPage]);
   const [ordersError, setOrdersError] = useState<string>();
 
   // Step 4 — Driver Expenses.
@@ -1050,11 +1220,9 @@ function CreateDriverCollectionDialog({
         reconciliationId: string;
         reconciliationNumber: string;
         remainingDriverFeeOutstanding: string;
-      }>(
-        "operations/cash/reconciliations/selected",
-        confirmPayload,
-        { "X-Idempotency-Key": idempotency.keyFor(fingerprint) },
-      );
+      }>("operations/cash/reconciliations/selected", confirmPayload, {
+        "X-Idempotency-Key": idempotency.keyFor(fingerprint),
+      });
       setConfirmed({
         grossCollections: preview?.grossCollections ?? "0.00",
         id: result.reconciliationId,
@@ -1128,9 +1296,7 @@ function CreateDriverCollectionDialog({
             </div>
             <div className="detail-line">
               <dt>{t("operations.paymentMethod")}</dt>
-              <dd>
-                {t(`operations.paymentMethod${paymentMethod === "cash" ? "Cash" : "Visa"}`)}
-              </dd>
+              <dd>{t(`operations.paymentMethod${paymentMethod === "cash" ? "Cash" : "Visa"}`)}</dd>
             </div>
           </dl>
           {pdfError === undefined ? null : (
@@ -1166,7 +1332,15 @@ function CreateDriverCollectionDialog({
           </div>
         </div>
       ) : (
-        <form onSubmit={(event) => void (event.preventDefault(), confirm())}>
+        <form
+          className="order-form"
+          onSubmit={(event) => void (event.preventDefault(), confirm())}
+        >
+          {/* `.order-modal` is a fixed-height flex column with overflow hidden,
+              so the form must own the scroll region — otherwise the later steps
+              (Driver Expenses, Review and Confirm) are clipped with no way to
+              reach them. Same structure the Create Order modal already uses. */}
+          <div className="order-modal-scroll">
           {confirmError === undefined ? null : (
             <div className="alert alert-error" role="alert">
               {confirmError}
@@ -1203,7 +1377,9 @@ function CreateDriverCollectionDialog({
               </>
             ) : (
               <div className="detail-line">
-                <span>{driver.name} — {t(`statuses.${driver.driverType}`)}</span>
+                <span>
+                  {driver.name} — {t(`statuses.${driver.driverType}`)}
+                </span>
                 <button onClick={() => setDriver(undefined)} type="button">
                   {t("common.change")}
                 </button>
@@ -1220,9 +1396,7 @@ function CreateDriverCollectionDialog({
                 <label className="field required-field">
                   <span>{t("operations.paymentMethod")}</span>
                   <select
-                    onChange={(event) =>
-                      changePaymentMethod(event.target.value as "cash" | "visa")
-                    }
+                    onChange={(event) => changePaymentMethod(event.target.value as "cash" | "visa")}
                     value={paymentMethod}
                   >
                     <option value="cash">{t("operations.paymentMethodCash")}</option>
@@ -1237,6 +1411,8 @@ function CreateDriverCollectionDialog({
                 {ordersError === undefined ? null : (
                   <div className="alert alert-error">{ordersError}</div>
                 )}
+                {/* Ten columns overflow the modal width; scroll instead of clipping. */}
+                <div className="table-scroll-x">
                 <table>
                   <thead>
                     <tr>
@@ -1272,7 +1448,11 @@ function CreateDriverCollectionDialog({
                         <td>{order.customerName}</td>
                         <td>{order.areaName}</td>
                         <td>{money(order.amountCollected)}</td>
-                        <td>{t(`operations.paymentMethod${paymentMethod === "cash" ? "Cash" : "Visa"}`)}</td>
+                        <td>
+                          {t(
+                            `operations.paymentMethod${paymentMethod === "cash" ? "Cash" : "Visa"}`,
+                          )}
+                        </td>
                         <td>
                           <DriverCashStatusLabel value={order.cashStatus} />
                         </td>
@@ -1287,6 +1467,7 @@ function CreateDriverCollectionDialog({
                     ) : null}
                   </tbody>
                 </table>
+                </div>
               </section>
 
               {/* Step 4 — Driver Expenses */}
@@ -1395,8 +1576,25 @@ function CreateDriverCollectionDialog({
                       <dd>{money(preview?.safeMaximumDriverFeeOffset)}</dd>
                     </div>
                     <div className="detail-line">
-                      <dt><label htmlFor="driver-fee-offset">{t("operations.driverFeeOffset.selected")}</label></dt>
-                      <dd><input id="driver-fee-offset" inputMode="decimal" min="0" onChange={(event) => { setDriverFeeOffset(event.target.value); setManualDriverFeeAllocations(undefined); }} step="0.01" type="number" value={driverFeeOffset} /></dd>
+                      <dt>
+                        <label htmlFor="driver-fee-offset">
+                          {t("operations.driverFeeOffset.selected")}
+                        </label>
+                      </dt>
+                      <dd>
+                        <input
+                          id="driver-fee-offset"
+                          inputMode="decimal"
+                          min="0"
+                          onChange={(event) => {
+                            setDriverFeeOffset(event.target.value);
+                            setManualDriverFeeAllocations(undefined);
+                          }}
+                          step="0.01"
+                          type="number"
+                          value={driverFeeOffset}
+                        />
+                      </dd>
                     </div>
                     <div className="detail-line">
                       <dt>{t("operations.driverFeeOffset.remaining")}</dt>
@@ -1404,10 +1602,31 @@ function CreateDriverCollectionDialog({
                     </div>
                   </dl>
                   <div className="heading-actions">
-                    <button onClick={() => { setDriverFeeOffset(preview?.safeMaximumDriverFeeOffset ?? "0.00"); setManualDriverFeeAllocations(undefined); }} type="button">{t("operations.driverFeeOffset.applyAll")}</button>
-                    <button onClick={() => { setDriverFeeOffset("0.00"); setManualDriverFeeAllocations(undefined); }} type="button">{t("operations.driverFeeOffset.applyNone")}</button>
+                    <button
+                      onClick={() => {
+                        setDriverFeeOffset(preview?.safeMaximumDriverFeeOffset ?? "0.00");
+                        setManualDriverFeeAllocations(undefined);
+                      }}
+                      type="button"
+                    >
+                      {t("operations.driverFeeOffset.applyAll")}
+                    </button>
+                    <button
+                      onClick={() => {
+                        setDriverFeeOffset("0.00");
+                        setManualDriverFeeAllocations(undefined);
+                      }}
+                      type="button"
+                    >
+                      {t("operations.driverFeeOffset.applyNone")}
+                    </button>
                     {manualDriverFeeAllocations === undefined ? null : (
-                      <button onClick={() => setManualDriverFeeAllocations(undefined)} type="button">{t("payroll.driverFees.actions.oldestFirst")}</button>
+                      <button
+                        onClick={() => setManualDriverFeeAllocations(undefined)}
+                        type="button"
+                      >
+                        {t("payroll.driverFees.actions.oldestFirst")}
+                      </button>
                     )}
                   </div>
                   {manualDriverFeeAllocations === undefined ? null : (
@@ -1416,42 +1635,56 @@ function CreateDriverCollectionDialog({
                     </div>
                   )}
                   {(preview?.driverFeeAllocations.length ?? 0) === 0 ? null : (
-                    <div className="table-scroll-x"><table><thead><tr>
-                      <th>{t("operations.order")}</th>
-                      <th>{t("operations.driverFeeOffset.outstandingBefore")}</th>
-                      <th>{t("operations.driverFeeOffset.proposed")}</th>
-                      <th>{t("operations.driverFeeOffset.remainingAfter")}</th>
-                    </tr></thead><tbody>{preview?.driverFeeAllocations.map((line) => (
-                      <tr key={line.accrualId}><td>{line.orderNumber}</td><td>{money(line.outstandingBefore)}</td><td>
-                        <input
-                          inputMode="decimal"
-                          min="0"
-                          onChange={(event) => {
-                            const nextAmount = Number(money(event.target.value));
-                            const current =
-                              manualDriverFeeAllocations ??
-                              preview.driverFeeAllocations.map((item) => ({
-                                accrualId: item.accrualId,
-                                amount: Number(money(item.amount)),
-                              }));
-                            setManualDriverFeeAllocations(
-                              current.map((item) =>
-                                item.accrualId === line.accrualId
-                                  ? { ...item, amount: nextAmount }
-                                  : item,
-                              ),
-                            );
-                          }}
-                          step="0.01"
-                          type="number"
-                          value={
-                            manualDriverFeeAllocations?.find(
-                              (item) => item.accrualId === line.accrualId,
-                            )?.amount ?? line.amount
-                          }
-                        />
-                      </td><td>{money(line.remainingOutstanding)}</td></tr>
-                    ))}</tbody></table></div>
+                    <div className="table-scroll-x">
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>{t("operations.order")}</th>
+                            <th>{t("operations.driverFeeOffset.outstandingBefore")}</th>
+                            <th>{t("operations.driverFeeOffset.proposed")}</th>
+                            <th>{t("operations.driverFeeOffset.remainingAfter")}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {preview?.driverFeeAllocations.map((line) => (
+                            <tr key={line.accrualId}>
+                              <td>{line.orderNumber}</td>
+                              <td>{money(line.outstandingBefore)}</td>
+                              <td>
+                                <input
+                                  inputMode="decimal"
+                                  min="0"
+                                  onChange={(event) => {
+                                    const nextAmount = Number(money(event.target.value));
+                                    const current =
+                                      manualDriverFeeAllocations ??
+                                      preview.driverFeeAllocations.map((item) => ({
+                                        accrualId: item.accrualId,
+                                        amount: Number(money(item.amount)),
+                                      }));
+                                    setManualDriverFeeAllocations(
+                                      current.map((item) =>
+                                        item.accrualId === line.accrualId
+                                          ? { ...item, amount: nextAmount }
+                                          : item,
+                                      ),
+                                    );
+                                  }}
+                                  step="0.01"
+                                  type="number"
+                                  value={
+                                    manualDriverFeeAllocations?.find(
+                                      (item) => item.accrualId === line.accrualId,
+                                    )?.amount ?? line.amount
+                                  }
+                                />
+                              </td>
+                              <td>{money(line.remainingOutstanding)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   )}
                 </section>
               ) : null}
@@ -1466,7 +1699,9 @@ function CreateDriverCollectionDialog({
                   <div className="alert alert-error" role="alert">
                     <p>{t("operations.mixedEligibilityWarning")}</p>
                     <ul>
-                      {preview?.warnings.map((warning) => <li key={warning}>{warning}</li>)}
+                      {preview?.warnings.map((warning) => (
+                        <li key={warning}>{warning}</li>
+                      ))}
                     </ul>
                   </div>
                 )}
@@ -1522,7 +1757,9 @@ function CreateDriverCollectionDialog({
           )}
 
           {/* Step 6 — Confirmation */}
-          <div className="modal-actions">
+          </div>
+          {/* Outside the scroll region so Cancel/Confirm stay reachable. */}
+          <div className="modal-actions order-modal-actions">
             <button className="button button-secondary" onClick={onClose} type="button">
               {t("common.cancel")}
             </button>
@@ -1619,7 +1856,9 @@ export function DriverCollectionDetailDialog({
         </div>
       )}
       {data === undefined ? (
-        error === undefined ? <div className="loading-row">{t("common.loading")}</div> : null
+        error === undefined ? (
+          <div className="loading-row">{t("common.loading")}</div>
+        ) : null
       ) : (
         <>
           <dl className="reconciliation-summary">
@@ -1633,7 +1872,8 @@ export function DriverCollectionDetailDialog({
                 {data.header.statusLabel}
                 {data.header.reversedByReconciliationNumber === null ? null : (
                   <span className="badge badge-warning">
-                    {t("operations.reversedIndicator")}: {data.header.reversedByReconciliationNumber}
+                    {t("operations.reversedIndicator")}:{" "}
+                    {data.header.reversedByReconciliationNumber}
                   </span>
                 )}
                 {!data.header.isReversal ? null : (
@@ -1645,7 +1885,18 @@ export function DriverCollectionDetailDialog({
             </div>
             <div className="detail-line">
               <dt>{t("operations.driver")}</dt>
-              <dd>{data.header.driverName}</dd>
+              <dd>
+                <OperationalReference
+                  identifier={data.header.driverCode}
+                  reference={partyDisplayLabel(
+                    data.header.driverCode,
+                    data.header.driverName,
+                    data.header.driverNameAr,
+                    reportLanguage,
+                  )}
+                  type="driver"
+                />
+              </dd>
             </div>
             <div className="detail-line">
               <dt>{t("operations.driverType")}</dt>
@@ -1704,9 +1955,12 @@ export function DriverCollectionDetailDialog({
                 <div className="detail-line">
                   <dt>{t("operations.driverFeeOffset.linkedPayment")}</dt>
                   <dd>
-                    {data.header.linkedDriverFeePaymentNumber ?? t("operations.driverFeeOffset.none")}
+                    {data.header.linkedDriverFeePaymentNumber ??
+                      t("operations.driverFeeOffset.none")}
                     {data.header.linkedDriverFeePaymentStatus === null ? null : (
-                      <span className={`badge fee-status-${data.header.linkedDriverFeePaymentStatus}`}>
+                      <span
+                        className={`badge fee-status-${data.header.linkedDriverFeePaymentStatus}`}
+                      >
                         {t(`payroll.driverFees.status.${data.header.linkedDriverFeePaymentStatus}`)}
                       </span>
                     )}
@@ -1714,6 +1968,10 @@ export function DriverCollectionDetailDialog({
                 </div>
               </>
             )}
+            <div className="detail-line">
+              <dt>{t("operations.grossCollections")}</dt>
+              <dd>{money(data.summary.grossCollections)}</dd>
+            </div>
             <div className="detail-line detail-line-total">
               <dt>{t("operations.netExpected")}</dt>
               <dd>
@@ -1752,13 +2010,26 @@ export function DriverCollectionDetailDialog({
                   key={order.serialNumber}
                 >
                   <td>
-                    {/* Opens the Order's own detail in the approved separate
-                        view (a new tab), never inline. */}
-                    <a href={`/orders?serial=${encodeURIComponent(order.serialNumber)}`}>
-                      {order.serialNumber}
-                    </a>
+                    {/* The verified Order route, which takes the Order NUMBER.
+                        The Serial Number stays the value the User reads. */}
+                    <OperationalReference
+                      identifier={order.orderNumber}
+                      reference={order.serialNumber}
+                      type="order"
+                    />
                   </td>
-                  <td>{order.traderName}</td>
+                  <td>
+                    <OperationalReference
+                      identifier={order.traderCode}
+                      reference={partyDisplayLabel(
+                        order.traderCode,
+                        order.traderName,
+                        null,
+                        reportLanguage,
+                      )}
+                      type="trader"
+                    />
+                  </td>
                   <td>{order.customerName}</td>
                   <td>{money(order.customerAmountToCollect)}</td>
                   <td>{money(order.traderPayable)}</td>
@@ -1792,6 +2063,14 @@ export function DriverCollectionDetailDialog({
               </table>
             </>
           )}
+
+          {/* Additive Accounting link-through; renders nothing for a User
+              without Accounting access. */}
+          <AccountingRelatedPanel
+            api={api}
+            sourceId={reconciliationId}
+            sourceType="driver_reconciliation"
+          />
 
           <div className="modal-actions">
             <label className="field" htmlFor="report-language">

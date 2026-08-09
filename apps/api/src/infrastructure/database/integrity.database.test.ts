@@ -107,7 +107,7 @@ describe.skipIf(!runDatabaseTests)("database integrity protections", () => {
           const assignmentId = randomUUID();
           await sql`
             insert into orders (
-              id, company_id, order_number, order_date, trader_id, area_id,
+              service_fee_override_reason, id, company_id, order_number, order_date, trader_id, area_id,
               created_by_account_id, assigned_driver_id, customer_name,
               customer_mobile_number, customer_address, package_count, payment_condition,
               amount_collected, trader_gross_payable, trader_paid_service_fee,
@@ -116,7 +116,7 @@ describe.skipIf(!runDatabaseTests)("database integrity protections", () => {
               delivered_at, pricing_provenance_status, final_service_fee_snapshot,
               customer_provenance_status
             ) values (
-              ${orderId}::uuid, ${companyA}::uuid, ${orderNumber}, current_date,
+              'Zero configured Service Fee (fixture)', ${orderId}::uuid, ${companyA}::uuid, ${orderNumber}, current_date,
               ${traderA}::uuid, ${areaA}::uuid, ${actorA}::uuid, ${driverA}::uuid,
               'Integrity Customer', '0500000002', 'Integrity Address', 1,
               'customer_pays_cod_and_fee', ${amounts.collected}, ${amounts.gross},
@@ -347,8 +347,8 @@ describe.skipIf(!runDatabaseTests)("database integrity protections", () => {
 
         const bankAccountA = randomUUID();
         await sql`
-          insert into company_bank_accounts (id, company_id, bank_name, account_name) values
-            (${bankAccountA}::uuid, ${companyA}::uuid, 'Integrity Bank', 'Integrity Account')
+          insert into company_bank_accounts (id, company_id, bank_account_code, bank_name, account_name) values
+            (${bankAccountA}::uuid, ${companyA}::uuid, ${`INT-BANK-${suffix}`}, 'Integrity Bank', 'Integrity Account')
         `.execute(transaction);
         await sql`
           insert into driver_reconciliation_payments (
@@ -482,16 +482,16 @@ describe.skipIf(!runDatabaseTests)("database integrity protections", () => {
             adjustments, net_payable, created_by_account_id
           ) values (
             ${settlementId}::uuid, ${companyA}::uuid, 'INT-SET-P', ${traderA}::uuid,
-            current_date, 100, 10, 5, 2, 3, 86, ${actorA}::uuid
+            current_date, 86, 0, 0, 0, 0, 86, ${actorA}::uuid
           )
         `.execute(transaction);
         await sql`
           insert into trader_settlement_orders (
             company_id, settlement_id, order_id, gross_payable,
-            deductions_and_charges, adjustments, net_payable
+            deductions_and_charges, adjustments, net_payable, allocated_amount
           ) values (
             ${companyA}::uuid, ${settlementId}::uuid, ${settlementOrder.orderId}::uuid,
-            100, 17, 3, 86
+            100, 17, 3, 86, 86
           )
         `.execute(transaction);
         await expectIntegrityFailure(() =>

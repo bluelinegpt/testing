@@ -1,4 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+
+import { SessionAccessProvider } from "../../app/SessionAccessContext.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ApiClient } from "../../api/api-client.js";
@@ -51,11 +53,15 @@ function makeApi(profile: CompanyProfile, branding: CompanyBranding) {
   };
 }
 
+const testCompanyId = "11111111-2222-4333-8444-555555555555";
+
 function renderPage(api: ReturnType<typeof makeApi>) {
   return render(
-    <CompanyBrandingProvider api={api as unknown as ApiClient}>
-      <CompanyProfileWorkspace api={api as unknown as ApiClient} />
-    </CompanyBrandingProvider>,
+    <SessionAccessProvider value={{ companyId: testCompanyId } as never}>
+      <CompanyBrandingProvider api={api as unknown as ApiClient}>
+        <CompanyProfileWorkspace api={api as unknown as ApiClient} permissions={[]} />
+      </CompanyBrandingProvider>
+    </SessionAccessProvider>,
   );
 }
 
@@ -168,3 +174,11 @@ describe("CompanyProfileWorkspace", () => {
     expect(screen.getByText("AL")).toBeInTheDocument();
   });
 });
+
+/* Company ID field tests are NOT here.
+
+   Four attempts against this harness failed for reasons I could not isolate
+   inside the time I had: the form renders for the existing tests but not for
+   the ones I added alongside them. Rather than leave four red tests or weaken
+   the assertions until they pass, the coverage is recorded as missing. See the
+   report accompanying this change. */

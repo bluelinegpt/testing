@@ -57,7 +57,11 @@ export function DashboardWorkspace({
           <p className="eyebrow">{t("dashboard.area")}</p>
           <h1>{t("dashboard.title")}</h1>
         </div>
-        <button className="button button-secondary dashboard-refresh" onClick={() => void load()} type="button">
+        <button
+          className="button button-secondary dashboard-refresh"
+          onClick={() => void load()}
+          type="button"
+        >
           {t("common.refresh")}
         </button>
       </div>

@@ -26,8 +26,8 @@ export class AccountMappingResolver {
     for (const current of components) {
       const financialAccountOverride = current.metadata?.accountOverrideId;
       if (
-        current.mappingKey === "cash_bank_account"
-        && typeof financialAccountOverride === "string"
+        current.mappingKey === "cash_bank_account" &&
+        typeof financialAccountOverride === "string"
       ) {
         const override = await sql<{
           accountCode: string;
@@ -106,10 +106,7 @@ export class AccountMappingResolver {
       }
       let account = result.rows[0]!;
       const overrideId = current.metadata?.accountOverrideId;
-      if (
-        current.mappingKey === "general_expense_cash_payment"
-        && typeof overrideId === "string"
-      ) {
+      if (current.mappingKey === "general_expense_cash_payment" && typeof overrideId === "string") {
         const override = await sql<typeof account>`
           select id as "accountId",code as "accountCode",
                  name_en as "accountNameEn",name_ar as "accountNameAr",
@@ -148,8 +145,8 @@ export class AccountMappingResolver {
       };
       const expectedControl = requiredControlType[current.mappingKey];
       if (
-        expectedControl !== undefined
-        && (!account.control || account.controlType !== expectedControl)
+        expectedControl !== undefined &&
+        (!account.control || account.controlType !== expectedControl)
       ) {
         throw new ApplicationException(
           "accounting_event_mapping_control_account_invalid",

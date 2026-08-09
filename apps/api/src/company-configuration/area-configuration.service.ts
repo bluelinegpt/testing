@@ -245,9 +245,8 @@ export class AreaConfigurationService {
 
       const nameEn = input.nameEn === undefined ? before.nameEn : input.nameEn.trim();
       if (nameEn.length === 0) throw this.emptyName();
-      const nameAr =
-        input.nameAr === undefined ? before.nameAr : (input.nameAr.trim() || null);
-      const notes = input.notes === undefined ? before.notes : (input.notes.trim() || null);
+      const nameAr = input.nameAr === undefined ? before.nameAr : input.nameAr.trim() || null;
+      const notes = input.notes === undefined ? before.notes : input.notes.trim() || null;
       const emirateId = input.emirateId ?? before.emirateId;
 
       if (emirateId !== before.emirateId) {
@@ -346,7 +345,8 @@ export class AreaConfigurationService {
   }
 
   private async findArea(
-    database: Kysely<DatabaseSchema> | Parameters<Parameters<KyselyTransactionManager["execute"]>[0]>[0],
+    database:
+      Kysely<DatabaseSchema> | Parameters<Parameters<KyselyTransactionManager["execute"]>[0]>[0],
     areaId: string,
   ): Promise<ConfiguredArea | undefined> {
     const { companyId } = this.tenants.current();

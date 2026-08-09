@@ -7,6 +7,7 @@ import {
   Gauge,
   LogOut,
   Menu,
+  MessageSquare,
   PanelLeftClose,
   PanelLeftOpen,
   Settings,
@@ -29,7 +30,9 @@ import { canAccessCompanyPath, firstAuthorizedCompanyPath } from "./company-acce
 function brandInitials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
   if (parts.length === 0) return "•";
-  return ((parts[0]?.[0] ?? "") + (parts.length > 1 ? (parts.at(-1)?.[0] ?? "") : "")).toUpperCase();
+  return (
+    (parts[0]?.[0] ?? "") + (parts.length > 1 ? (parts.at(-1)?.[0] ?? "") : "")
+  ).toUpperCase();
 }
 
 type MenuGroupId =
@@ -61,6 +64,7 @@ const routeTitles: Readonly<Record<string, string>> = {
   "/reports": "nav.reports",
   "/accounting": "nav.accounting",
   "/configuration/company-profile": "nav.companyProfile",
+  "/configuration/storefront": "storefront.title",
   "/configuration/general": "nav.generalSettings",
   "/configuration/traders": "nav.tradersList",
   "/configuration/customers": "nav.customers",
@@ -72,6 +76,7 @@ const routeTitles: Readonly<Record<string, string>> = {
   "/configuration/users": "nav.users",
   "/configuration/roles": "nav.roles",
   "/support": "nav.supportCases",
+  "/communication": "nav.communicationCenter",
   "/no-access": "shell.noAccessTitle",
 };
 
@@ -147,12 +152,29 @@ export function CompanyAppShell({
               { label: t("accounting.sections.overview"), path: "/accounting" },
               { label: t("nav.cashManagement"), path: "/cash-management" },
               { label: t("nav.payroll"), path: "/payroll" },
-              { label: t("accounting.sections.chart-of-accounts"), path: "/accounting/chart-of-accounts" },
+              {
+                label: t("accounting.sections.chart-of-accounts"),
+                path: "/accounting/chart-of-accounts",
+              },
+              {
+                label: t("accounting.sections.cash-accounts"),
+                path: "/accounting/cash-accounts",
+              },
+              {
+                label: t("accounting.sections.bank-accounts"),
+                path: "/accounting/bank-accounts",
+              },
               { label: t("accounting.sections.journals"), path: "/accounting/journals" },
               { label: t("accounting.sections.events"), path: "/accounting/events" },
               { label: t("accounting.sections.expenses"), path: "/accounting/expenses" },
-              { label: t("accounting.sections.cash-bank-movements"), path: "/accounting/cash-bank-movements" },
-              { label: t("accounting.sections.reconciliation"), path: "/accounting/reconciliation" },
+              {
+                label: t("accounting.sections.cash-bank-movements"),
+                path: "/accounting/cash-bank-movements",
+              },
+              {
+                label: t("accounting.sections.reconciliation"),
+                path: "/accounting/reconciliation",
+              },
             ],
           },
           {
@@ -161,6 +183,7 @@ export function CompanyAppShell({
             label: t("nav.configuration"),
             items: [
               { label: t("nav.companyProfile"), path: "/configuration/company-profile" },
+              { label: t("storefront.title"), path: "/configuration/storefront" },
               { label: t("nav.generalSettings"), path: "/configuration/general" },
               { label: t("nav.tradersList"), path: "/configuration/traders" },
               { label: t("nav.customers"), path: "/configuration/customers" },
@@ -176,7 +199,10 @@ export function CompanyAppShell({
             icon: ShieldCheck,
             id: "administration",
             label: t("nav.administration"),
-            items: [{ label: t("nav.supportCases"), path: "/support" }],
+            items: [
+              { icon: MessageSquare, label: t("nav.communicationCenter"), path: "/communication" },
+              { label: t("nav.supportCases"), path: "/support" },
+            ],
           },
         ] satisfies readonly MenuGroup[]
       )

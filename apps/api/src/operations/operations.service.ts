@@ -6,12 +6,28 @@ import { type Kysely, sql } from "kysely";
 
 import { PasswordHasher } from "../authentication/password-hasher.js";
 import { DATABASE } from "../infrastructure/database/database.tokens.js";
+import { BusinessDayService } from "../company-configuration/business-day.service.js";
+import {
+  type AppliedReportDateMode,
+  ReportDateModeService,
+} from "../company-configuration/report-date-mode.js";
+import {
+  type OrderFeeSource,
+  orderAccountingColumns,
+  orderFeeSource,
+} from "./order-accounting-classification.js";
+import { deriveOrderWorkflowGuidance } from "./order-workflow-guidance.js";
 import type { DatabaseSchema } from "../infrastructure/database/database.types.js";
 import { KyselyTransactionManager } from "../infrastructure/database/transaction-manager.js";
 import { ApplicationException } from "../presentation/errors/application.exception.js";
+import {
+  normalizeReferenceTerm,
+  unifiedOrderSearchPredicate,
+} from "./order-search.js";
 import { mobileComparisonKey, normalizeUaeMobile } from "../shared/uae-mobile.js";
 import { IdentityContextAccessor } from "../security/identity-context.js";
 import { TenantContextAccessor } from "../tenancy/tenant-context.js";
+import { EmployeeDeliveryEarningService } from "../payroll/employee-delivery-earning.service.js";
 import { OutsourcedDriverFeeService } from "../payroll/outsourced-driver-fee.service.js";
 import type {
   BulkSettleTraderDto,
@@ -58,16 +74,48 @@ export interface OperationsStatusCount {
   readonly status: string;
 }
 
+/**
+ * Recorded as the Service Fee reason when a Trader/Area is CONFIGURED at
+ * zero and no fee was requested.
+ *
+ * This is deliberately a system-generated explanation, not a user's words:
+ * nobody made an exceptional decision here, the price simply is zero. It
+ * satisfies `orders_zero_service_fee_reason_check` while keeping a
+ * configured zero clearly distinguishable from a manual override in both
+ * the Order record and the audit trail.
+ */
+export const configuredZeroPriceReason = "Configured Trader/Area price is zero";
+
 export interface OperationsOrderFilters {
   readonly areaId?: string | undefined;
+  /** Every Order in an Emirate, without having to pick each Area inside it. */
+  readonly emirateId?: string | undefined;
   readonly cashStatus?: string | undefined;
   readonly dateFrom?: string | undefined;
   readonly dateTo?: string | undefined;
   readonly deliveryStatus?: string | undefined;
   readonly driverId?: string | undefined;
+  /** External Reference Number, partial match. Distinct from `search`. */
+  readonly referenceNumber?: string | undefined;
   readonly search?: string | undefined;
   readonly settlementStatus?: string | undefined;
   readonly quickView?: "active" | "all" | "cancelled" | "closed" | "hold" | undefined;
+  /**
+   * Delivery Activity: only Orders that actually reached a customer.
+   *
+   * Gated on `delivered_at is not null`, never on delivery_status. An Order
+   * later returned or cancelled still WAS delivered, and the view exists to
+   * report that the delivery happened; its current status stays visible in its
+   * own column.
+   */
+  readonly deliveredOnly?: boolean | undefined;
+  /** Calendar Date mode, against the Company-local date of `delivered_at`. */
+  readonly deliveryDateFrom?: string | undefined;
+  readonly deliveryDateTo?: string | undefined;
+  /** Delivery Activity only. `dateFrom`/`dateTo` keep meaning Order Date. */
+  readonly dateMode?: string | undefined;
+  readonly businessDateFrom?: string | undefined;
+  readonly businessDateTo?: string | undefined;
   readonly page?: number | undefined;
   readonly pageSize?: 25 | 50 | 100 | undefined;
   readonly sortBy?: "amountToCollect" | "createdAt" | "orderDate" | "orderNumber" | undefined;
@@ -76,6 +124,8 @@ export interface OperationsOrderFilters {
 }
 
 export interface OperationsOrderPage {
+  /** Present when Delivery Activity resolved a Date Mode; absent otherwise. */
+  readonly appliedDateMode?: AppliedReportDateMode;
   readonly filteredCount: number;
   readonly items: readonly OperationsOrder[];
   readonly page: number;
@@ -140,11 +190,35 @@ export interface OperationsBillingSummary {
 }
 
 export interface OperationsOrder {
+  /** Mirrors the capture trigger: |COD|+|Fee|+|Additional|+|VAT| is not zero. */
+  readonly accountingRequired: boolean;
+  /** The delivery instant. Null until the Order is delivered. */
+  readonly deliveredAt?: string | null;
+  /**
+   * Business Date of the delivery, backend-derived from `deliveredAt`.
+   *
+   * Present only on Delivery Activity responses. Deliberately NOT named
+   * `confirmationBusinessDate`: this one comes from a delivery, not a
+   * confirmation.
+   */
+  readonly deliveryBusinessDate?: string | null;
   readonly additionalFees: string | null;
   readonly additionalFeeVatAmount: string | null;
   readonly amountCollected: string;
   readonly areaName: string;
   readonly assignedDriverId: string | null;
+  /** Identifier only; used to prefilter the Trader Settlement screen.
+      Optional because two other constructors of this shape (Fast Entry and the
+      export path) do not select it and do not derive workflow guidance. */
+  readonly traderId?: string;
+  /** Settlements this Order could lawfully have its receipt confirmed on. */
+  readonly confirmableSettlementCount?: number;
+  /** Present only when exactly one confirmable settlement exists. */
+  readonly confirmableSettlementId?: string | null;
+  /** Ledger-derived Accounting state; see the lateral in the list query. */
+  readonly accountingState?: string;
+  readonly accountingEventId?: string | null;
+  readonly accountingJournalId?: string | null;
   readonly assignedDriverMobile: string | null;
   readonly assignedDriverName: string | null;
   readonly codAmount: string;
@@ -159,10 +233,17 @@ export interface OperationsOrder {
   readonly orderDate: string;
   readonly orderNumber: string;
   readonly orderProfit: string;
+  readonly outsourcedDriverFeeAmount: string | null;
+  readonly outsourcedDriverFeeOutstanding: string | null;
+  readonly outsourcedDriverFeePaid: string | null;
+  readonly outsourcedDriverFeePaymentNumbers: string | null;
+  readonly outsourcedDriverFeeStatus: string;
   readonly returnStatus: string;
   readonly referenceNumber: string | null;
   readonly serialNumber: string | null;
   readonly serviceFee: string;
+  /** Why the fee is zero or differs from the configured price. */
+  readonly serviceFeeOverrideReason: string | null;
   readonly serviceFeeVatAmount: string | null;
   readonly totalDeductions: string | null;
   readonly traderNetPayable: string;
@@ -293,11 +374,36 @@ export interface TraderPortalArea {
   readonly nameEn: string;
 }
 
+/**
+ * One row's outcome, in the importer's terms rather than the database's.
+ *
+ * Added alongside the existing flat `errors` list, never in place of it, so an
+ * older client that only reads `errors` keeps working unchanged.
+ */
+export interface OperationsOrderImportRow {
+  /** True once the Order exists; false for every validation failure. */
+  readonly accountingRequired: boolean | null;
+  readonly errorField: string | null;
+  /** Friendly, already-explained. Never SQL, a stack, or a constraint name. */
+  readonly errorMessage: string | null;
+  readonly feeSource: OrderFeeSource | null;
+  readonly orderNumber: string | null;
+  /** Preserved exactly as written, leading zeros and all. */
+  readonly referenceNumber: string | null;
+  readonly resolvedServiceFee: string | null;
+  /** Line number in the uploaded file, counting the header as row 1. */
+  readonly rowNumber: number;
+  readonly status: "imported" | "invalid";
+  readonly zeroFeeReason: string | null;
+}
+
 export interface OperationsOrderImportResult {
   readonly errors: readonly string[];
   readonly importNumber: string;
   readonly importedRows: number;
   readonly invalidRows: number;
+  /** Per-row detail. Additive; `errors` remains the summary view. */
+  readonly rows: readonly OperationsOrderImportRow[];
   readonly totalRows: number;
 }
 
@@ -460,10 +566,14 @@ export class OperationsService {
     @Inject(KyselyTransactionManager)
     private readonly transactions: KyselyTransactionManager,
     @Inject(TenantContextAccessor) private readonly tenants: TenantContextAccessor,
+    @Inject(ReportDateModeService) private readonly reportDateModes: ReportDateModeService,
+    @Inject(BusinessDayService) private readonly businessDays: BusinessDayService,
     @Inject(IdentityContextAccessor) private readonly identities: IdentityContextAccessor,
     @Inject(PasswordHasher) private readonly passwords: PasswordHasher,
     @Inject(OutsourcedDriverFeeService)
     private readonly outsourcedDriverFees: OutsourcedDriverFeeService,
+    @Inject(EmployeeDeliveryEarningService)
+    private readonly employeeDeliveryEarnings: EmployeeDeliveryEarningService,
   ) {}
 
   public async overview(filters: OperationsOverviewFilters = {}): Promise<OperationsOverview> {
@@ -527,15 +637,22 @@ export class OperationsService {
   public async orders(filters: OperationsOrderFilters = {}): Promise<OperationsOrderPage> {
     const { companyId } = this.tenants.current();
     const search = this.optionalFilter(filters.search);
+    const referenceNumber = this.optionalFilter(filters.referenceNumber);
+    // Normalised to match how reference_number_normalized is stored, so the
+    // deprecated filter reaches the same index the unified search uses.
+    const referenceTerm = referenceNumber === null ? null : normalizeReferenceTerm(referenceNumber);
     const deliveryStatus = this.optionalFilter(filters.deliveryStatus);
     const cashStatus = this.optionalFilter(filters.cashStatus);
     const settlementStatus = this.optionalFilter(filters.settlementStatus);
     const traderId = this.optionalUuidFilter(filters.traderId);
     const driverId = this.optionalUuidFilter(filters.driverId);
     const areaId = this.optionalUuidFilter(filters.areaId);
+    const emirateId = this.optionalUuidFilter(filters.emirateId);
     const dateFrom = this.optionalDate(filters.dateFrom);
     const dateTo = this.optionalDate(filters.dateTo);
     const quickView = filters.quickView ?? "active";
+    const delivery = await this.deliveryActivity(filters);
+    const { applied, deliveredOnly } = delivery;
     const page =
       Number.isInteger(filters.page) && (filters.page ?? 0) > 0 ? (filters.page ?? 1) : 1;
     const pageSize = ([25, 50, 100] as const).includes(filters.pageSize ?? 25)
@@ -550,6 +667,21 @@ export class OperationsService {
     } as const;
     const sortColumn = sortColumns[filters.sortBy ?? "orderDate"];
     const sortDirection = filters.sortDirection === "asc" ? "asc" : "desc";
+    /* Serial Number is the secondary key, so Orders sharing a date read in
+       Serial order instead of by `id` -- which is a random UUID and therefore
+       an arbitrary shuffle within each day. `order_date` is a DATE, so on a busy
+       day that shuffle was the entire visible ordering.
+       Compared NUMERICALLY: the digits are extracted and cast, because
+       lexically '10' sorts before '9'. Delivery Activity already does this to
+       its Order Number for the same reason.
+
+       ALWAYS ascending, deliberately, even when the date sorts descending: the
+       newest day belongs at the top, but within that day the Orders should read
+       in the sequence they were raised -- 1, 2, 3 -- which is how an operator
+       works through them. `id` stays as the final key: without a unique
+       tie-break, offset pagination can repeat one row and skip another. */
+    const serialSortKey =
+      "nullif(regexp_replace(o.serial_number,'[^0-9]','','g'),'')::bigint";
     const quickViewPredicate = sql`
       (${quickView} = 'all'
         or (${quickView} = 'active' and o.delivery_status not in ('hold', 'closed', 'cancelled'))
@@ -559,23 +691,29 @@ export class OperationsService {
     `;
     const filterPredicate = sql`
       ${quickViewPredicate}
-      and (${search}::text is null or (
-        o.order_number ilike '%' || ${search}::text || '%'
-        or coalesce(o.serial_number,'') ilike '%' || ${search}::text || '%'
-        or coalesce(o.reference_number,'') ilike '%' || ${search}::text || '%'
-        or o.customer_name ilike '%' || ${search}::text || '%'
-        or o.customer_mobile_number ilike '%' || ${search}::text || '%'
-        or t.name_en ilike '%' || ${search}::text || '%'
-        or coalesce(t.name_ar, '') ilike '%' || ${search}::text || '%'
-      ))
+      -- Deprecated dedicated Reference filter, kept for callers that still send
+      -- it; the web no longer renders a field for it. Now matched against the
+      -- normalised column so it uses the trigram index instead of scanning, and
+      -- leading zeros in values like '000123' still survive because the
+      -- normalisation lower-cases and trims but never casts to a number.
+      and (${referenceTerm}::text is null
+           or o.reference_number_normalized like '%' || ${referenceTerm}::text || '%')
+      and ${unifiedOrderSearchPredicate(search)}
       and (${deliveryStatus}::text is null or o.delivery_status = ${deliveryStatus})
       and (${cashStatus}::text is null or o.driver_reconciliation_status = ${cashStatus})
       and (${settlementStatus}::text is null or o.trader_settlement_status = ${settlementStatus})
       and (${traderId}::uuid is null or o.trader_id = ${traderId}::uuid)
       and (${driverId}::uuid is null or o.assigned_driver_id = ${driverId}::uuid)
       and (${areaId}::uuid is null or o.area_id = ${areaId}::uuid)
+      -- Through the Area the Order already joins, so no extra join is needed and
+      -- the existing access path is unchanged. Selecting an Emirate used to
+      -- narrow only the Area picker and filtered nothing.
+      and (${emirateId}::uuid is null or a.emirate_id = ${emirateId}::uuid)
       and (${dateFrom}::date is null or o.order_date >= ${dateFrom}::date)
       and (${dateTo}::date is null or o.order_date <= ${dateTo}::date)
+      -- Delivery Activity. One shared fragment, so the list, the count and the
+      -- export cannot drift apart. Matches everything when it is off.
+      and ${delivery.predicate}
     `;
     const result = await sql<OperationsOrder>`
       select o.id,
@@ -587,6 +725,9 @@ export class OperationsService {
              coalesce(o.customer_area_name_ar_snapshot,a.name_ar,
                       o.customer_area_name_snapshot,a.name_en) as "areaName",
              o.assigned_driver_id as "assignedDriverId",
+             /* Identifier only, so the workflow guidance can prefilter the
+                Trader Settlement screen. No financial column is added. */
+             o.trader_id as "traderId",
              d.name_en as "assignedDriverName",
              d.mobile_number as "assignedDriverMobile",
              o.customer_name as "customerName",
@@ -607,14 +748,136 @@ export class OperationsService {
              o.delivery_status as "deliveryStatus",
              o.driver_reconciliation_status as "driverReconciliationStatus",
              o.trader_settlement_status as "traderSettlementStatus",
-             o.return_status as "returnStatus"
+             case
+               when d.id is null or d.driver_type <> 'outsourced' then 'not_required'
+               when o.delivery_status <> 'delivered' then 'pending_delivery'
+               when fee.id is null then 'missing_accrual'
+               when fee.status = 'accrued' then 'unpaid'
+               else fee.status
+             end as "outsourcedDriverFeeStatus",
+             fee.earned_amount::text as "outsourcedDriverFeeAmount",
+             fee.paid_amount::text as "outsourcedDriverFeePaid",
+             fee.outstanding_amount::text as "outsourcedDriverFeeOutstanding",
+             fee_payments.payment_numbers as "outsourcedDriverFeePaymentNumbers",
+             o.return_status as "returnStatus",
+             o.delivered_at::text as "deliveredAt",
+             /* Authoritative Accounting state for this Order.
+
+                Derived from the Accounting Event and its Journal rather than
+                predicted from the Order's own money fields: an Order that is
+                "Accounting Required" tells you an Event SHOULD exist, never
+                that one did post. The lateral below is the ledger's answer. */
+             /* Receipt-confirmation target for this Order.
+
+                Settlement-level, because that is what the confirmation action
+                takes: confirmMoneyReceived(settlementId). There is deliberately
+                NO paymentId here -- one settlement carries many payment rows and
+                none of them is a confirmation target. */
+             coalesce(receipt.confirmable_count, 0) as "confirmableSettlementCount",
+             case
+               when receipt.confirmable_count = 1 then receipt.settlement_id
+             end as "confirmableSettlementId",
+             coalesce(acct.state, 'accounting_event_missing') as "accountingState",
+             acct.event_id as "accountingEventId",
+             acct.journal_id as "accountingJournalId"
       from orders o
       join traders t on t.id = o.trader_id and t.company_id = o.company_id
       join areas a on a.id = o.area_id and a.company_id = o.company_id
       left join drivers d on d.id = o.assigned_driver_id and d.company_id = o.company_id
+      left join outsourced_driver_fee_accruals fee
+        on fee.order_id = o.id and fee.company_id = o.company_id
+      /* ONE set-based lateral for the whole page, not a lookup per row: the
+         planner runs it as part of this single query, so adding it cannot
+         introduce an N+1 no matter how many Orders are returned.
+
+         The ordering below takes the CURRENT Event. An Order
+         can accumulate several (a reversal raises another), and the newest is
+         the one whose state the operator has to act on.
+
+         The classification order matters. A duplicate is reported as a
+         duplicate even though it also lands in the failed status, and a
+         mapping block is named as such rather than as a generic failure --
+         each one sends the operator to a different screen. */
+      /* ONE set-based lateral, evaluated as part of this single page query.
+
+         The eligibility test mirrors the service's own guard in
+         confirmMoneyReceived (trader-settlement.service.ts): a settlement can
+         receive a Money Received confirmation only when it is NOT itself a
+         reversal record, its status is 'confirmed' (money sent), and no
+         reversal of it exists. Those three conditions are restated here rather
+         than reinvented, so the count can never disagree with what the action
+         would accept.
+
+         The minimum id is read ONLY when the count is exactly one, so it never
+         picks a winner among several -- ambiguity is reported, not resolved. */
+      left join lateral (
+        select
+          count(*)::int as confirmable_count,
+          min(s.id::text) as settlement_id
+        from trader_settlement_orders tso
+        join trader_settlements s
+          on s.id = tso.settlement_id and s.company_id = tso.company_id
+        where tso.company_id = o.company_id
+          and tso.order_id = o.id
+          -- Only an Order actually awaiting receipt has a confirmable target.
+          and o.trader_settlement_status = 'money_sent_to_trader'
+          and s.status = 'confirmed'
+          and s.reversal_of_id is null
+          and not exists (
+            select 1
+            from trader_settlements r
+            where r.company_id = s.company_id and r.reversal_of_id = s.id
+          )
+      ) receipt on true
+      left join lateral (
+        select
+          e.id as event_id,
+          j.id as journal_id,
+          case
+            when e.error_code is not null and e.error_code like '%duplicate%'
+              then 'accounting_blocked_duplicate'
+            when e.processing_status = 'blocked_period' or e.failure_category = 'period'
+              then 'accounting_blocked_closed_period'
+            when e.processing_status = 'blocked_configuration'
+              or e.failure_category = 'configuration'
+              then 'accounting_blocked_missing_mapping'
+            when e.processing_status = 'failed' then 'accounting_event_failed'
+            when e.processing_status in ('received', 'validated', 'processing', 'retry_pending')
+              then 'accounting_event_waiting'
+            when e.processing_status = 'posted' and j.status = 'posted' then 'journal_posted'
+            when e.processing_status = 'posted' and j.id is not null then 'journal_pending'
+            when e.processing_status = 'posted' then 'accounting_event_posted'
+            else 'accounting_event_waiting'
+          end as state
+        from accounting_events e
+        left join journal_entries j on j.id = e.journal_id and j.company_id = e.company_id
+        where e.company_id = o.company_id
+          and e.source_entity_type = 'order'
+          and e.source_entity_id = o.id
+        order by e.created_at desc
+        limit 1
+      ) acct on true
+      left join lateral (
+        select string_agg(payments.payment_number, ', ' order by payments.payment_number) as payment_numbers
+        from (
+          select distinct p.payment_number
+          from outsourced_driver_fee_payment_allocations pa
+          join outsourced_driver_fee_payments p
+            on p.id = pa.payment_id and p.company_id = pa.company_id
+          where pa.company_id = o.company_id
+            and pa.accrual_id = fee.id
+            and pa.reversed_at is null
+            and p.status = 'confirmed'
+        ) payments
+      ) fee_payments on true
       where o.company_id = ${companyId}::uuid
         and ${filterPredicate}
-      order by ${sql.raw(sortColumn)} ${sql.raw(sortDirection)}, o.id ${sql.raw(sortDirection)}
+      order by ${
+        delivery.order ??
+        sql`${sql.raw(sortColumn)} ${sql.raw(sortDirection)},
+            ${sql.raw(serialSortKey)} asc nulls last,
+            o.id ${sql.raw(sortDirection)}`
+      }
       limit ${pageSize} offset ${offset}
     `.execute(this.database);
     const counts = await sql<{ filteredCount: number; totalCount: number }>`
@@ -623,26 +886,158 @@ export class OperationsService {
         count(*)::int as "filteredCount"
       from orders o
       join traders t on t.id = o.trader_id and t.company_id = o.company_id
+      -- The shared filter predicate reaches the Emirate through the Area, so
+      -- the count must join it too. Both queries use the same predicate; only
+      -- one of them joining is how the Emirate filter broke the whole list.
+      join areas a on a.id = o.area_id and a.company_id = o.company_id
       where o.company_id = ${companyId}::uuid and ${filterPredicate}
     `.execute(this.database);
+    // ONE Business Day configuration query for the whole page. Calling the
+    // resolver per Order would be an N+1; deriving the date in SQL would
+    // restate the business-day rule in a second language.
+    const deliveryBusinessDates = deliveredOnly
+      ? await this.businessDays.businessDatesFor(result.rows.map((row) => row.deliveredAt))
+      : undefined;
+    /* Workflow guidance is derived per row from columns this select ALREADY
+       returns -- no extra query, no join, no per-row lookup. See
+       `order-workflow-guidance.ts`; the four persisted statuses stay
+       authoritative and nothing here is written back. */
+    const items = result.rows.map((row) => ({
+      ...row,
+      ...(deliveryBusinessDates === undefined
+        ? {}
+        : {
+            // Only from delivered_at. Never created_at, never order_date.
+            deliveryBusinessDate:
+              row.deliveredAt == null ? null : (deliveryBusinessDates.get(row.deliveredAt) ?? null),
+          }),
+      workflowGuidance: deriveOrderWorkflowGuidance({
+        accountingRequired: row.accountingRequired === true,
+        accountingEventId: row.accountingEventId ?? null,
+        accountingJournalId: row.accountingJournalId ?? null,
+        accountingState: row.accountingState ?? null,
+        confirmableSettlementCount: row.confirmableSettlementCount ?? 0,
+        confirmableSettlementId: row.confirmableSettlementId ?? null,
+        assignedDriverId: row.assignedDriverId ?? null,
+        deliveryStatus: row.deliveryStatus,
+        driverReconciliationStatus: row.driverReconciliationStatus,
+        orderId: row.id,
+        orderNumber: row.orderNumber,
+        returnStatus: row.returnStatus ?? null,
+        traderId: row.traderId ?? "",
+        traderSettlementStatus: row.traderSettlementStatus,
+      }),
+    }));
     return {
+      ...(applied === undefined ? {} : { appliedDateMode: applied }),
       filteredCount: counts.rows[0]?.filteredCount ?? 0,
-      items: result.rows,
+      items,
       page,
       pageSize,
       totalCount: counts.rows[0]?.totalCount ?? 0,
     };
   }
 
+  /**
+   * The Delivery Activity predicate and ordering, built once and shared by the
+   * list, the count and the export.
+   *
+   * Three copies of this would eventually disagree, and the disagreement would
+   * be an export that does not match the screen it came from - the exact defect
+   * the temporary 501 refusal existed to prevent.
+   *
+   * Everything it returns is inert when Delivery Activity is off, so the
+   * Active/All/Hold/Cancelled/Closed views and every ordinary export keep their
+   * existing behaviour untouched.
+   */
+  private async deliveryActivity(filters: OperationsOrderFilters): Promise<{
+    readonly applied: AppliedReportDateMode | undefined;
+    readonly deliveredOnly: boolean;
+    readonly order: ReturnType<typeof sql> | null;
+    readonly predicate: ReturnType<typeof sql>;
+  }> {
+    const deliveredOnly = filters.deliveredOnly === true;
+    // Business Date is refused outside Delivery Activity rather than ignored:
+    // an Orders list has no authoritative operational instant, so answering
+    // would be answering a different question.
+    if (!deliveredOnly && filters.dateMode === "business_date") {
+      throw new ApplicationException(
+        "report_date_mode_not_supported",
+        "Business Date mode applies to Delivery Activity only",
+        HttpStatus.UNPROCESSABLE_ENTITY,
+      );
+    }
+    if (!deliveredOnly) {
+      return { applied: undefined, deliveredOnly, order: null, predicate: sql`true` };
+    }
+    // One resolution per request: one configuration query, boundaries computed
+    // once, and the same object feeds rows, count and export.
+    const applied = await this.reportDateModes.resolve("order-delivery-activity", {
+      businessDateFrom: filters.businessDateFrom,
+      businessDateTo: filters.businessDateTo,
+      dateMode: filters.dateMode,
+    });
+    const timezone = applied.timezone ?? (await this.companyTimezone());
+    const from = this.optionalDate(filters.deliveryDateFrom);
+    const to = this.optionalDate(filters.deliveryDateTo);
+    // Business Date compares the raw timestamp against UTC bounds, so no
+    // function wraps the indexed column there.
+    const businessDate =
+      applied.dateMode === "business_date"
+        ? this.reportDateModes.predicate("o.delivered_at", applied)
+        : sql`true`;
+    return {
+      applied,
+      deliveredOnly,
+      // Two Orders delivered in the same second must land in a fixed order, or
+      // offset pagination can repeat one row and skip another. Order Number is
+      // compared NUMERICALLY - lexically ORD-9 sorts after ORD-10 - with the id
+      // as the guaranteed-unique final key.
+      order:
+        filters.sortBy === undefined
+          ? sql`o.delivered_at desc nulls last,
+              nullif(regexp_replace(o.order_number,'[^0-9]','','g'),'')::bigint desc nulls last,
+              o.id desc`
+          : null,
+      // Calendar Date reads the COMPANY-LOCAL date of the delivery instant. A
+      // UTC date would put deliveries before 04:00 Dubai on the previous day.
+      predicate: sql`(
+        o.delivered_at is not null
+        and (${from}::date is null
+             or (o.delivered_at at time zone ${timezone})::date >= ${from}::date)
+        and (${to}::date is null
+             or (o.delivered_at at time zone ${timezone})::date <= ${to}::date)
+        and ${businessDate}
+      )`,
+    };
+  }
+
+  /** Company timezone for Calendar Date mode. One row, cached by Postgres. */
+  private async companyTimezone(): Promise<string> {
+    const { companyId } = this.tenants.current();
+    const result = await sql<{ timezone: string }>`
+      select timezone from company_settings where company_id = ${companyId}::uuid
+    `.execute(this.database);
+    return result.rows[0]?.timezone ?? "Asia/Dubai";
+  }
+
   public async exportOrders(filters: OperationsOrderFilters = {}): Promise<OperationsExportFile> {
     const { companyId } = this.tenants.current();
+    // Same shared fragment the list and count use, so the exported rows are
+    // exactly the rows the operator saw.
+    const delivery = await this.deliveryActivity(filters);
     const search = this.optionalFilter(filters.search);
+    const referenceNumber = this.optionalFilter(filters.referenceNumber);
+    // Normalised to match how reference_number_normalized is stored, so the
+    // deprecated filter reaches the same index the unified search uses.
+    const referenceTerm = referenceNumber === null ? null : normalizeReferenceTerm(referenceNumber);
     const deliveryStatus = this.optionalFilter(filters.deliveryStatus);
     const cashStatus = this.optionalFilter(filters.cashStatus);
     const settlementStatus = this.optionalFilter(filters.settlementStatus);
     const traderId = this.optionalUuidFilter(filters.traderId);
     const driverId = this.optionalUuidFilter(filters.driverId);
     const areaId = this.optionalUuidFilter(filters.areaId);
+    const emirateId = this.optionalUuidFilter(filters.emirateId);
     const dateFrom = this.optionalDate(filters.dateFrom);
     const dateTo = this.optionalDate(filters.dateTo);
     const result = await sql<
@@ -685,24 +1080,22 @@ export class OperationsService {
       join areas a on a.id = o.area_id and a.company_id = o.company_id
       left join drivers d on d.id = o.assigned_driver_id and d.company_id = o.company_id
       where o.company_id = ${companyId}::uuid
-        and (${search}::text is null or (
-          o.order_number ilike '%' || ${search}::text || '%'
-          or coalesce(o.serial_number,'') ilike '%' || ${search}::text || '%'
-          or coalesce(o.reference_number,'') ilike '%' || ${search}::text || '%'
-          or o.customer_name ilike '%' || ${search}::text || '%'
-          or o.customer_mobile_number ilike '%' || ${search}::text || '%'
-          or t.name_en ilike '%' || ${search}::text || '%'
-          or coalesce(d.name_en, '') ilike '%' || ${search}::text || '%'
-        ))
+        -- The same two fragments as the list, so an export reproduces exactly
+        -- what the operator saw on screen.
+        and (${referenceTerm}::text is null
+             or o.reference_number_normalized like '%' || ${referenceTerm}::text || '%')
+        and ${unifiedOrderSearchPredicate(search)}
         and (${deliveryStatus}::text is null or o.delivery_status = ${deliveryStatus})
         and (${cashStatus}::text is null or o.driver_reconciliation_status = ${cashStatus})
         and (${settlementStatus}::text is null or o.trader_settlement_status = ${settlementStatus})
         and (${traderId}::uuid is null or o.trader_id = ${traderId}::uuid)
         and (${driverId}::uuid is null or o.assigned_driver_id = ${driverId}::uuid)
         and (${areaId}::uuid is null or o.area_id = ${areaId}::uuid)
+        and (${emirateId}::uuid is null or a.emirate_id = ${emirateId}::uuid)
         and (${dateFrom}::date is null or o.order_date >= ${dateFrom}::date)
         and (${dateTo}::date is null or o.order_date <= ${dateTo}::date)
-      order by o.order_date desc, o.created_at desc, o.order_number
+        and ${delivery.predicate}
+      order by ${delivery.order ?? sql`o.order_date desc, o.created_at desc, o.order_number`}
       limit 5000
     `.execute(this.database);
     const content = this.toCsv([
@@ -1123,7 +1516,11 @@ export class OperationsService {
         HttpStatus.FORBIDDEN,
       );
     }
-    const trader = await this.traderForAccount(identity.companyId, identity.identityId, identity.profileId);
+    const trader = await this.traderForAccount(
+      identity.companyId,
+      identity.identityId,
+      identity.profileId,
+    );
     const result = await sql<TraderPortalProfile>`
       select id,code,name_en as name,mobile_number as "mobileNumber",email
         from traders
@@ -1173,8 +1570,24 @@ export class OperationsService {
       identity.identityId,
       identity.profileId,
     );
+    // Pricing is the Company's decision, not the Trader's. The portal contract
+    // inherits `serviceFee` and `serviceFeeOverrideReason` from the Operator
+    // DTO, so both are stripped here rather than trusted — the same reason
+    // `traderId` is resolved from the session instead of the request body.
+    //
+    // Stripped, not rejected, so an existing mobile build that still sends the
+    // fields keeps working: the Order is simply priced from the authoritative
+    // Trader/Area table, which is what it should always have been. A configured
+    // zero price therefore succeeds with no reason demanded of the Trader.
+    const {
+      serviceFee: _clientServiceFee,
+      serviceFeeOverrideReason: _clientReason,
+      ...pricedByCompany
+    } = input;
+    void _clientServiceFee;
+    void _clientReason;
     return this.createOrder(
-      { ...input, traderId: trader.id },
+      { ...pricedByCompany, traderId: trader.id },
       correlationId,
       idempotencyKey,
     );
@@ -1198,7 +1611,16 @@ export class OperationsService {
       identity.identityId,
       identity.profileId,
     );
-    const { traderId: _ignoredTraderId, ...safeInput } = input;
+    // Same rule as creation: the Trader owns the Order's business fields, never
+    // its price. Editing must not become the way around the creation guard.
+    const {
+      serviceFee: _ignoredServiceFee,
+      serviceFeeReason: _ignoredReason,
+      traderId: _ignoredTraderId,
+      ...safeInput
+    } = input;
+    void _ignoredServiceFee;
+    void _ignoredReason;
     void _ignoredTraderId;
     return this.updateOrder(orderId, safeInput, correlationId, trader.id);
   }
@@ -1212,7 +1634,11 @@ export class OperationsService {
         HttpStatus.FORBIDDEN,
       );
     }
-    const trader = await this.traderForAccount(identity.companyId, identity.identityId, identity.profileId);
+    const trader = await this.traderForAccount(
+      identity.companyId,
+      identity.identityId,
+      identity.profileId,
+    );
     const result = await sql<PortalOrder>`
       select o.id,
              o.order_number as "orderNumber",
@@ -1254,7 +1680,11 @@ export class OperationsService {
         HttpStatus.FORBIDDEN,
       );
     }
-    const driver = await this.driverForAccount(identity.companyId, identity.identityId, identity.profileId);
+    const driver = await this.driverForAccount(
+      identity.companyId,
+      identity.identityId,
+      identity.profileId,
+    );
     const result = await sql<PortalOrder>`
       select o.id,
              o.order_number as "orderNumber",
@@ -1303,7 +1733,11 @@ export class OperationsService {
         HttpStatus.FORBIDDEN,
       );
     }
-    const driver = await this.driverForAccount(identity.companyId, identity.identityId, identity.profileId);
+    const driver = await this.driverForAccount(
+      identity.companyId,
+      identity.identityId,
+      identity.profileId,
+    );
     const current = await sql<{ driverId: string | null }>`
       select assigned_driver_id as "driverId"
       from orders
@@ -1752,7 +2186,10 @@ export class OperationsService {
     ).trim();
     const customerSecondMobileNumber =
       (inlineCustomer?.secondMobileNumber ?? input.customerSecondMobileNumber)?.trim() || null;
-    const customerAddress = (inlineCustomer?.address ?? input.customerAddress).trim();
+    /* Address is optional. Stored as '' rather than NULL when absent: the column
+       is NOT NULL with no non-empty check, so an empty string satisfies the
+       schema and no migration is needed to relax it. */
+    const customerAddress = (inlineCustomer?.address ?? input.customerAddress ?? "").trim();
     const notes = input.notes?.trim() || null;
     const packageCount = input.packageCount ?? 1;
     const additionalFees = input.additionalFees ?? 0;
@@ -1899,22 +2336,58 @@ export class OperationsService {
       }
 
       const area = await this.activeArea(transaction, companyId, input.areaId);
-      const pricing = await this.resolveServiceFee(transaction, {
-        areaId: area.id,
-        companyId,
-        permissions: identity.permissions,
-        ...(input.serviceFee === undefined ? {} : { requestedFee: input.serviceFee }),
-        ...(input.serviceFeeOverrideReason === undefined
-          ? {}
-          : { requestedReason: input.serviceFeeOverrideReason }),
-        traderId: traderRow.id,
-      });
+      /*
+       * A Free Order is a decision, so it does not ask the pricing engine a
+       * question it has already answered. Skipping `resolveServiceFee` is the
+       * point: an Area with no configured price raises `pricing_not_configured`,
+       * which would block an Order the operator has explicitly declared free.
+       *
+       * The Trader's own pricing is not read, written or affected -- this is one
+       * Order, and the next one prices normally.
+       *
+       * `manual` provenance with a zero configured fee is the honest record: no
+       * `trader_service_price_id` was applied, and the zero came from a person.
+       * The operator's reason is copied into `service_fee_override_reason` so
+       * `orders_zero_service_fee_reason_check` is satisfied by the same stated
+       * words that justify the free delivery; `is_free_order` remains what
+       * distinguishes this from a configured-zero price.
+       */
+      const freeOrder = input.isFreeOrder === true;
+      const freeOrderReason = freeOrder ? (input.freeOrderReason ?? "").trim() : null;
+      if (freeOrder && freeOrderReason === "") {
+        throw new ApplicationException(
+          "free_order_reason_required",
+          "Enter a reason for the Free Order",
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      const pricing = freeOrder
+        ? {
+            configuredFee: this.money(new Decimal(0)),
+            finalFee: this.money(new Decimal(0)),
+            overrideApplied: false,
+            overrideReason: freeOrderReason,
+            provenance: "manual" as const,
+            servicePriceId: null,
+          }
+        : await this.resolveServiceFee(transaction, {
+            areaId: area.id,
+            companyId,
+            permissions: identity.permissions,
+            ...(input.serviceFee === undefined ? {} : { requestedFee: input.serviceFee }),
+            ...(input.serviceFeeOverrideReason === undefined
+              ? {}
+              : { requestedReason: input.serviceFeeOverrideReason }),
+            traderId: traderRow.id,
+          });
       const vatPolicy = await this.vatPolicy(transaction, companyId);
       const orderNumber = await this.nextOrderNumber(transaction, companyId);
       const driverCost = new Decimal(driverRow?.outsourcedFee ?? 0);
       const financials = this.calculateOrderFinancials({
-        additionalFees: new Decimal(additionalFees),
-        codAmount: new Decimal(input.codAmount),
+        // Both forced, never trusted from the client: a free Order with a COD is
+        // not a state this system recognises.
+        additionalFees: freeOrder ? new Decimal(0) : new Decimal(additionalFees),
+        codAmount: freeOrder ? new Decimal(0) : new Decimal(input.codAmount),
         driverCost,
         prospective: true,
         serviceFee: pricing.finalFee,
@@ -1939,7 +2412,8 @@ export class OperationsService {
           trader_net_payable,driver_cost,vat_amount,vat_enabled_snapshot,vat_rate_snapshot,
           vat_price_mode_snapshot,company_revenue,order_profit,delivery_status,trader_settlement_status,
           pricing_provenance_status, trader_service_price_id,
-          configured_service_fee_snapshot, final_service_fee_snapshot
+          configured_service_fee_snapshot, final_service_fee_snapshot,
+          service_fee_override_reason, is_free_order, free_order_reason
         ) values (
           ${companyId}::uuid, ${orderNumber}, ${serialNumber}, ${serialNumberNormalized},
           ${referenceNumber}, ${referenceNumberNormalized}, 'trader_deduction_v1',
@@ -1963,7 +2437,8 @@ export class OperationsService {
           ${vatPolicy.enabled ? vatPolicy.priceMode : null},
           ${financials.companyRevenue.toFixed(2)}, ${financials.orderProfit.toFixed(2)},
           ${deliveryStatus}, 'unsettled', ${pricing.provenance}, ${pricing.servicePriceId}::uuid,
-          ${pricing.configuredFee.toFixed(2)}, ${pricing.finalFee.toFixed(2)}
+          ${pricing.configuredFee.toFixed(2)}, ${pricing.finalFee.toFixed(2)},
+          ${pricing.overrideReason}, ${freeOrder}, ${freeOrderReason}
         )
         returning id
       `.execute(transaction);
@@ -2070,6 +2545,30 @@ export class OperationsService {
         `.execute(transaction);
       }
 
+      // A zero Service Fee that is NOT an override still deserves a line in the
+      // Order history. It is the case the zero-fee policy exists to make
+      // visible, and without this the history would simply show a zero fee with
+      // no explanation of where it came from.
+      //
+      // Recorded as its own event type, never as an override: nobody overrode
+      // anything here, and filing it under `order.service_fee_override` would
+      // misattribute an ordinary configured price to a person's decision.
+      if (!pricing.overrideApplied && pricing.finalFee.isZero()) {
+        await sql`
+          insert into order_events (
+            company_id, order_id, event_type, event_category, field_name,
+            previous_value, new_value, actor_account_id, actor_role, source,
+            reason, correlation_id
+          ) values (
+            ${companyId}::uuid, ${orderId}::uuid, 'order.zero_service_fee',
+            'financial_change', 'service_fee',
+            to_jsonb(${pricing.configuredFee.toFixed(2)}::text),
+            to_jsonb(${pricing.finalFee.toFixed(2)}::text), ${identity.identityId}::uuid,
+              ${actorRole}, 'web_portal', ${pricing.overrideReason}, ${correlationId}
+          )
+        `.execute(transaction);
+      }
+
       await sql`
         update idempotency_records
            set response_status = 201,
@@ -2082,6 +2581,15 @@ export class OperationsService {
       `.execute(transaction);
 
       return {
+        // The four components the capture trigger tests, computed here so a caller
+        // acting on the freshly created Order sees the same classification the
+        // list and detail queries will later report.
+        accountingRequired: !(
+          financials.codAmount.isZero() &&
+          financials.serviceFee.isZero() &&
+          financials.additionalFees.isZero() &&
+          financials.vatAmount.isZero()
+        ),
         additionalFees: financials.additionalFees.toFixed(2),
         additionalFeeVatAmount: financials.additionalFeeVatAmount.toFixed(2),
         amountCollected: "0.00",
@@ -2101,10 +2609,17 @@ export class OperationsService {
         orderDate: new Date().toISOString().slice(0, 10),
         orderNumber,
         orderProfit: financials.orderProfit.toFixed(2),
+        outsourcedDriverFeeAmount: null,
+        outsourcedDriverFeeOutstanding: null,
+        outsourcedDriverFeePaid: null,
+        outsourcedDriverFeePaymentNumbers: null,
+        outsourcedDriverFeeStatus:
+          driverRow?.outsourcedFee == null ? "not_required" : "pending_delivery",
         referenceNumber,
         returnStatus: "not_applicable",
         serialNumber,
         serviceFee: financials.serviceFee.toFixed(2),
+        serviceFeeOverrideReason: pricing.overrideReason,
         serviceFeeVatAmount: financials.serviceFeeVatAmount.toFixed(2),
         totalDeductions: financials.totalDeductions.toFixed(2),
         traderNetPayable: financials.traderNetPayable.toFixed(2),
@@ -2244,12 +2759,18 @@ export class OperationsService {
     const csv = String((input as { readonly csv?: unknown }).csv ?? "");
     const parsed = this.parseOrdersCsv(csv);
     const errors = parsed.errors.slice();
+    // Validation is all-or-nothing and runs BEFORE the transaction opens, which
+    // is what makes this import atomic in the way it already promised: if any
+    // row is bad, nothing is written and every bad row is reported at once. The
+    // importer fixes the whole file and resubmits, rather than discovering
+    // problems one failed upload at a time.
     if (errors.length > 0) {
       return {
         errors,
         importNumber: "",
         importedRows: 0,
         invalidRows: errors.length,
+        rows: parsed.invalid,
         totalRows: parsed.totalRows,
       };
     }
@@ -2297,12 +2818,23 @@ export class OperationsService {
       }
 
       let importedRows = 0;
-      for (const row of parsed.rows) {
+      const rowResults: OperationsOrderImportRow[] = [];
+      for (const { row, rowNumber } of parsed.rows) {
+        // Pricing, permissions and the zero-fee policy are all decided inside
+        // `insertOrder` -> `resolveServiceFee`, so an authorization or reason
+        // failure surfaces here as an ApplicationException. Left unhandled it
+        // would abort the import with a message that never says WHICH line
+        // caused it, so it is re-thrown with the row and reference attached.
+        //
+        // Re-thrown, not swallowed: this import is atomic and must stay atomic.
+        // Continuing past a failed row would leave a partial import behind.
         const created = await this.insertOrder(transaction, {
           ...row,
           correlationId,
           createdByAccountId: identity.identityId,
           importBatchId,
+        }).catch((cause: unknown) => {
+          throw this.importRowFailure(cause, rowNumber, row.referenceNumber ?? null);
         });
         await this.audit(transaction, {
           action: "order.import_create",
@@ -2312,6 +2844,18 @@ export class OperationsService {
           correlationId,
           subjectId: created.id,
           subjectType: "order",
+        });
+        rowResults.push({
+          accountingRequired: created.accountingRequired,
+          errorField: null,
+          errorMessage: null,
+          feeSource: orderFeeSource(created.serviceFee, created.serviceFeeOverrideReason),
+          orderNumber: created.orderNumber,
+          referenceNumber: created.referenceNumber,
+          resolvedServiceFee: created.serviceFee,
+          rowNumber,
+          status: "imported",
+          zeroFeeReason: created.serviceFeeOverrideReason,
         });
         importedRows += 1;
       }
@@ -2329,9 +2873,40 @@ export class OperationsService {
         importNumber,
         importedRows,
         invalidRows: 0,
+        rows: rowResults,
         totalRows: parsed.totalRows,
       };
     });
+  }
+
+  /**
+   * Turn a mid-import failure into something the importer can act on.
+   *
+   * Only the message from an ApplicationException is reused — those are written
+   * for people. Anything else (a driver error, a constraint violation, a bug)
+   * is replaced with a generic sentence, because its text may name a table, a
+   * constraint or a query and none of that belongs in front of a user.
+   *
+   * The original is kept as `cause` so the log still has the whole story.
+   */
+  private importRowFailure(
+    cause: unknown,
+    rowNumber: number,
+    referenceNumber: string | null,
+  ): ApplicationException {
+    const where =
+      referenceNumber === null ? `Row ${rowNumber}` : `Row ${rowNumber} (${referenceNumber})`;
+    const explanation =
+      cause instanceof ApplicationException
+        ? cause.message
+        : "This row could not be imported. Check the Trader, Area and amounts, then try again.";
+    const failure = new ApplicationException(
+      cause instanceof ApplicationException ? cause.errorCode : "orders_import_row_failed",
+      `${where}: ${explanation}`,
+      cause instanceof ApplicationException ? cause.getStatus() : HttpStatus.UNPROCESSABLE_ENTITY,
+    );
+    (failure as { cause?: unknown }).cause = cause;
+    return failure;
   }
 
   // Edits an order's business fields before delivery. Changing the Trader, or the Customer +
@@ -3021,6 +3596,17 @@ export class OperationsService {
           identity.identityId,
           correlationId,
         );
+        // Employee Drivers accrue per-delivery earnings here, in the SAME
+        // transaction as the status change: the accrual reads the delivered_at
+        // this statement just wrote, and an outside transaction would still see
+        // the pre-delivery null. It rolls back with the delivery for the same
+        // reason — an earning for a delivery that did not stick is not owed.
+        //
+        // Returns null for Orders with no employee Driver or no rule in force,
+        // and the existing earning on a replay. Neither is an error, so the
+        // result is deliberately not inspected: nothing downstream depends on
+        // it, and this must never be the reason a delivery fails to record.
+        await this.employeeDeliveryEarnings.accrueForDelivery(transaction, orderId);
       }
     });
     return this.orderById(companyId, orderId);
@@ -3553,11 +4139,39 @@ export class OperationsService {
              o.delivery_status as "deliveryStatus",
              o.driver_reconciliation_status as "driverReconciliationStatus",
              o.trader_settlement_status as "traderSettlementStatus",
-             o.return_status as "returnStatus"
+             case
+               when d.id is null or d.driver_type <> 'outsourced' then 'not_required'
+               when o.delivery_status <> 'delivered' then 'pending_delivery'
+               when fee.id is null then 'missing_accrual'
+               when fee.status = 'accrued' then 'unpaid'
+               else fee.status
+             end as "outsourcedDriverFeeStatus",
+             fee.earned_amount::text as "outsourcedDriverFeeAmount",
+             fee.paid_amount::text as "outsourcedDriverFeePaid",
+             fee.outstanding_amount::text as "outsourcedDriverFeeOutstanding",
+             fee_payments.payment_numbers as "outsourcedDriverFeePaymentNumbers",
+             o.return_status as "returnStatus",
+             o.delivered_at::text as "deliveredAt",
+             ${orderAccountingColumns}
       from orders o
       join traders t on t.id = o.trader_id and t.company_id = o.company_id
       join areas a on a.id = o.area_id and a.company_id = o.company_id
       left join drivers d on d.id = o.assigned_driver_id and d.company_id = o.company_id
+      left join outsourced_driver_fee_accruals fee
+        on fee.order_id = o.id and fee.company_id = o.company_id
+      left join lateral (
+        select string_agg(payments.payment_number, ', ' order by payments.payment_number) as payment_numbers
+        from (
+          select distinct p.payment_number
+          from outsourced_driver_fee_payment_allocations pa
+          join outsourced_driver_fee_payments p
+            on p.id = pa.payment_id and p.company_id = pa.company_id
+          where pa.company_id = o.company_id
+            and pa.accrual_id = fee.id
+            and pa.reversed_at is null
+            and p.status = 'confirmed'
+        ) payments
+      ) fee_payments on true
       where o.company_id = ${companyId}::uuid and o.id = ${orderId}::uuid
     `.execute(this.database);
     const order = result.rows[0];
@@ -3680,7 +4294,9 @@ export class OperationsService {
     if (trader === undefined) {
       throw new ApplicationException(
         profileId === undefined ? "profile_scope_required" : "profile_access_inactive",
-        profileId === undefined ? "An authenticated profile is required" : "The profile is not active",
+        profileId === undefined
+          ? "An authenticated profile is required"
+          : "The profile is not active",
         HttpStatus.FORBIDDEN,
       );
     }
@@ -3729,7 +4345,11 @@ export class OperationsService {
         )
       `.execute(transaction);
     }
-    const duplicate = await sql<{ orderDate: string; referenceExists: boolean; serialExists: boolean }>`
+    const duplicate = await sql<{
+      orderDate: string;
+      referenceExists: boolean;
+      serialExists: boolean;
+    }>`
       select
         current_date::text as "orderDate",
         exists(
@@ -3892,12 +4512,19 @@ export class OperationsService {
     `.execute(transaction);
     const customerRow = customer.rows[0];
     if (customerRow === undefined) throw new Error("Customer creation returned no identifier");
+    /* The address record is ALWAYS created, even with no street line.
+       `orders_customer_provenance_check` requires `customer_address_id` on a
+       'resolved' Order, so skipping the record is not an option -- the Order
+       would be rejected. The Area is known regardless, so the record is
+       meaningful; only the address text may be empty, which is why
+       `customer_addresses_address_nonempty` was dropped. No placeholder is
+       invented: an empty line reads as absent, "n/a" reads as data. */
     const address = await sql<{ id: string }>`
       insert into customer_addresses(
         company_id,customer_id,area_id,address,is_default,created_by_account_id
       ) values (
-        ${input.companyId}::uuid,${customerRow.id}::uuid,${area.id}::uuid,${draft.address.trim()},
-        true,${input.createdByAccountId}::uuid
+        ${input.companyId}::uuid,${customerRow.id}::uuid,${area.id}::uuid,
+        ${draft.address?.trim() ?? ""},true,${input.createdByAccountId}::uuid
       )
       returning id
     `.execute(transaction);
@@ -3951,7 +4578,9 @@ export class OperationsService {
     if (driver === undefined) {
       throw new ApplicationException(
         profileId === undefined ? "profile_scope_required" : "profile_access_inactive",
-        profileId === undefined ? "An authenticated profile is required" : "The profile is not active",
+        profileId === undefined
+          ? "An authenticated profile is required"
+          : "The profile is not active",
         HttpStatus.FORBIDDEN,
       );
     }
@@ -4029,7 +4658,9 @@ export class OperationsService {
     const { companyId } = this.tenants.current();
     const customerName = input.customerName.trim();
     const customerMobileNumber = input.customerMobileNumber.trim();
-    const customerAddress = input.customerAddress.trim();
+    // Optional, same as the primary create path: absent becomes '', which the
+    // NOT NULL column accepts because it carries no non-empty check.
+    const customerAddress = (input.customerAddress ?? "").trim();
     const serialNumber = input.serialNumber.trim();
     const referenceNumber = input.referenceNumber?.trim() || null;
     const serialNumberNormalized = this.normalizeOrderIdentifier(serialNumber);
@@ -4134,7 +4765,8 @@ export class OperationsService {
         trader_net_payable,driver_cost,vat_amount,vat_enabled_snapshot,vat_rate_snapshot,
         vat_price_mode_snapshot,company_revenue,order_profit,delivery_status,trader_settlement_status,
         pricing_provenance_status, trader_service_price_id,
-        configured_service_fee_snapshot, final_service_fee_snapshot
+        configured_service_fee_snapshot, final_service_fee_snapshot,
+        service_fee_override_reason
       ) values (
         ${companyId}::uuid, ${orderNumber}, ${serialNumber}, ${serialNumberNormalized},
         ${referenceNumber}, ${referenceNumberNormalized}, 'trader_deduction_v1',
@@ -4157,7 +4789,8 @@ export class OperationsService {
         ${vatPolicy.enabled ? vatPolicy.priceMode : null},${financials.companyRevenue.toFixed(2)},
         ${financials.orderProfit.toFixed(2)}, ${deliveryStatus}, 'unsettled',
         ${pricing.provenance}, ${pricing.servicePriceId}::uuid,
-        ${pricing.configuredFee.toFixed(2)}, ${pricing.finalFee.toFixed(2)}
+        ${pricing.configuredFee.toFixed(2)}, ${pricing.finalFee.toFixed(2)},
+        ${pricing.overrideReason}
       )
       returning id
     `.execute(database);
@@ -4200,6 +4833,15 @@ export class OperationsService {
     await this.recordOrderUsageEvent(database, companyId, orderId);
 
     return {
+      // The four components the capture trigger tests, computed here so a caller
+      // acting on the freshly created Order sees the same classification the
+      // list and detail queries will later report.
+      accountingRequired: !(
+        financials.codAmount.isZero() &&
+        financials.serviceFee.isZero() &&
+        financials.additionalFees.isZero() &&
+        financials.vatAmount.isZero()
+      ),
       amountCollected: "0.00",
       additionalFees: financials.additionalFees.toFixed(2),
       additionalFeeVatAmount: financials.additionalFeeVatAmount.toFixed(2),
@@ -4219,10 +4861,17 @@ export class OperationsService {
       orderDate: new Date().toISOString().slice(0, 10),
       orderNumber,
       orderProfit: financials.orderProfit.toFixed(2),
+      outsourcedDriverFeeAmount: null,
+      outsourcedDriverFeeOutstanding: null,
+      outsourcedDriverFeePaid: null,
+      outsourcedDriverFeePaymentNumbers: null,
+      outsourcedDriverFeeStatus:
+        driverRow?.outsourcedFee == null ? "not_required" : "pending_delivery",
       referenceNumber,
       returnStatus: "not_applicable",
       serialNumber,
       serviceFee: financials.serviceFee.toFixed(2),
+      serviceFeeOverrideReason: pricing.overrideReason,
       serviceFeeVatAmount: financials.serviceFeeVatAmount.toFixed(2),
       totalDeductions: financials.totalDeductions.toFixed(2),
       traderNetPayable: financials.traderNetPayable.toFixed(2),
@@ -4277,7 +4926,17 @@ export class OperationsService {
 
     const requested =
       input.requestedFee === undefined ? undefined : this.money(new Decimal(input.requestedFee));
-    const reason = input.requestedReason?.trim() || null;
+    // A caller must not be able to hand us the system marker and have it stored
+    // as though the pricing engine wrote it. Fee Source is derived from this
+    // string, so accepting it verbatim would let any client make a manual
+    // override present itself as an ordinary configured zero price.
+    //
+    // The marker is discarded rather than rejected: it is not a user's reason,
+    // so the correct treatment is "no reason was given". A manual zero then
+    // fails the normal reason check with the normal message, and a genuine
+    // configured zero has the marker re-applied below by the server.
+    const submitted = input.requestedReason?.trim() || null;
+    const reason = submitted === configuredZeroPriceReason ? null : submitted;
     const matched = result.rows[0];
 
     if (matched === undefined) {
@@ -4292,6 +4951,26 @@ export class OperationsService {
           HttpStatus.UNPROCESSABLE_ENTITY,
         );
       }
+      // This branch is only reached when the caller hand-entered a fee (there
+      // is no configured price at any level), so a zero here is always a
+      // deliberate manual decision. Trader mobile never reaches this path: it
+      // sends no fee, so an unpriced Area fails earlier above with
+      // pricing_not_configured.
+      //
+      // `overrideApplied` is false here — there is no configured price to
+      // override — so the permission gate further down never fires. A zero fee
+      // is exactly the decision that gate exists to control, so it is enforced
+      // explicitly. Deliberately limited to zero: entering a NON-zero fee for
+      // an unpriced Area remains open to any User who can create Orders, which
+      // is the existing approved behaviour and is not changed here.
+      if (requested.isZero() && !input.permissions.has("orders.override_service_fee")) {
+        throw new ApplicationException(
+          "service_fee_override_denied",
+          "You do not have permission to apply a zero service fee",
+          HttpStatus.FORBIDDEN,
+        );
+      }
+      this.assertZeroServiceFeeReason(requested, reason);
       return {
         configuredFee: requested,
         finalFee: requested,
@@ -4319,14 +4998,52 @@ export class OperationsService {
         HttpStatus.BAD_REQUEST,
       );
     }
+    // A zero Service Fee has two very different origins, and conflating them
+    // breaks Trader mobile:
+    //
+    //   MANUAL ZERO   - the caller asked for 0 against a priced Area. This is
+    //                   an exceptional business decision and needs a reason.
+    //   CONFIGURED 0  - the Trader/Area is simply priced at 0 and the caller
+    //                   asked for nothing. That is ordinary pricing, not an
+    //                   override, and Trader mobile has no field to supply a
+    //                   reason with. Demanding one would reject a perfectly
+    //                   valid Order.
+    //
+    // So the reason is required only when the ZERO WAS REQUESTED. A configured
+    // zero records a system-generated explanation instead, which keeps the
+    // constraint satisfied without inventing a user's words.
+    const requestedZero = requested !== undefined && requested.isZero();
+    if (requestedZero) this.assertZeroServiceFeeReason(finalFee, reason);
+    const resolvedReason =
+      finalFee.isZero() && !requestedZero && reason === null ? configuredZeroPriceReason : reason;
     return {
       configuredFee,
       finalFee,
       overrideApplied,
-      overrideReason: reason,
+      overrideReason: resolvedReason,
       provenance: "resolved",
       servicePriceId: matched.id,
     };
+  }
+
+  /**
+   * A Service Fee of exactly zero always requires a reason.
+   *
+   * `isZero()` on the Decimal, never `!fee` or `fee === 0`: the value is a
+   * Decimal, so a truthy test would be meaningless and a strict equality
+   * test would miss `0.00`.
+   *
+   * This mirrors the `orders_zero_service_fee_reason_check` constraint, so
+   * the rule is refused with a clear business error before the database has
+   * to refuse it with a constraint violation.
+   */
+  private assertZeroServiceFeeReason(fee: Decimal, reason: string | null): void {
+    if (!fee.isZero() || reason !== null) return;
+    throw new ApplicationException(
+      "service_fee_zero_reason_required",
+      "A reason is required when the Service Fee is zero",
+      HttpStatus.BAD_REQUEST,
+    );
   }
 
   private async loadOrder(
@@ -4476,15 +5193,30 @@ export class OperationsService {
 
   private parseOrdersCsv(csv: string): {
     readonly errors: readonly string[];
-    readonly rows: readonly CreateOrderDto[];
+    /** Rows that failed validation, already phrased for the importer. */
+    readonly invalid: readonly OperationsOrderImportRow[];
+    /** Rows that passed, each still carrying the file line it came from. */
+    readonly rows: readonly { readonly row: CreateOrderDto; readonly rowNumber: number }[];
     readonly totalRows: number;
   } {
     const lines = this.parseCsv(csv).filter((row) => row.some((cell) => cell.trim().length > 0));
     if (lines.length === 0) {
-      return { errors: [], rows: [], totalRows: 0 };
+      return { errors: [], invalid: [], rows: [], totalRows: 0 };
     }
     const header = lines[0]?.map((cell) => cell.trim()) ?? [];
     const index = new Map(header.map((name, position) => [name, position]));
+    // `serviceFee` is deliberately NOT required.
+    //
+    // Leaving the column out — or leaving a cell blank — means "price this from
+    // the authoritative Trader/Area table", which is the same path the Operator
+    // form and Trader mobile take. A configured zero price then imports
+    // normally, with the system explanation recorded, and nobody has to invent
+    // a justification for the Company's own price list.
+    //
+    // Supplying a value keeps the old behaviour exactly: it is a requested fee,
+    // and a requested zero is a manual override subject to the usual permission
+    // and reason rules. Existing import files that carry the column are
+    // therefore unaffected.
     const required = [
       "serialNumber",
       "traderId",
@@ -4492,25 +5224,32 @@ export class OperationsService {
       "customerMobileNumber",
       "customerAddress",
       "codAmount",
-      "serviceFee",
     ];
     const missing = required.filter((name) => !index.has(name));
     if (missing.length > 0) {
       return {
         errors: [`Missing required columns: ${missing.join(", ")}`],
+        invalid: [],
         rows: [],
         totalRows: Math.max(lines.length - 1, 0),
       };
     }
 
     const errors: string[] = [];
-    const rows: CreateOrderDto[] = [];
+    const invalid: OperationsOrderImportRow[] = [];
+    const rows: { row: CreateOrderDto; rowNumber: number }[] = [];
     const totalRows = Math.max(lines.length - 1, 0);
     for (const [offset, line] of lines.slice(1).entries()) {
       const rowNumber = offset + 2;
       const read = (column: string) => line[index.get(column) ?? -1]?.trim() ?? "";
-      const codAmount = Number(read("codAmount"));
-      const serviceFee = Number(read("serviceFee"));
+      const codAmountText = read("codAmount");
+      // Blank is NOT zero. `Number("")` is 0, which would silently turn a
+      // forgotten cell into a legitimate zero-COD Order, so the blank check
+      // below runs against the raw text and not the parsed number.
+      const codAmount = Number(codAmountText);
+      const serviceFeeText = read("serviceFee");
+      const serviceFee = serviceFeeText.length === 0 ? undefined : Number(serviceFeeText);
+      const zeroFeeReason = read("serviceFeeOverrideReason");
       const additionalFeesText = read("additionalFees");
       const additionalFees = additionalFeesText.length === 0 ? 0 : Number(additionalFeesText);
       const packageCountText = read("packageCount");
@@ -4519,10 +5258,31 @@ export class OperationsService {
       for (const column of required) {
         if (read(column).length === 0) rowErrors.push(`${column} is required`);
       }
-      if (!Number.isFinite(codAmount) || codAmount < 0)
-        rowErrors.push("codAmount must be 0 or more");
-      if (!Number.isFinite(serviceFee) || serviceFee < 0) {
-        rowErrors.push("serviceFee must be 0 or more");
+      if (!Number.isFinite(codAmount)) {
+        rowErrors.push("Invalid COD: enter a number, or 0 for a no-collection Order");
+      } else if (codAmount < 0) {
+        rowErrors.push("Negative COD: the amount to collect cannot be less than 0");
+      }
+      if (serviceFee !== undefined && (!Number.isFinite(serviceFee) || serviceFee < 0)) {
+        rowErrors.push(
+          serviceFee < 0
+            ? "Negative Service Fee: the fee cannot be less than 0"
+            : "Invalid Service Fee: enter a number, or leave blank to use configured pricing",
+        );
+      }
+      // An explicitly imported zero IS a requested zero, so it is a manual
+      // override and owes a reason — the same rule the Operator form applies.
+      // Caught here, per row, rather than as an exception that would abort the
+      // whole file with no indication of which line caused it.
+      //
+      // Authorization is NOT decided here: `resolveServiceFee` holds the single
+      // permission gate, and duplicating it in the parser would give two places
+      // to disagree about who may do this.
+      if (serviceFee === 0 && zeroFeeReason.trim() === "") {
+        rowErrors.push(
+          "Zero Service Fee Reason Required: give a reason, or leave Service Fee " +
+            "blank to use configured pricing",
+        );
       }
       if (!Number.isFinite(additionalFees) || additionalFees < 0) {
         rowErrors.push("additionalFees must be 0 or more");
@@ -4533,8 +5293,23 @@ export class OperationsService {
       if (!Number.isInteger(packageCount) || packageCount < 1) {
         rowErrors.push("packageCount must be a whole number greater than 0");
       }
+      // Read as raw text, never through Number(): a Reference Number is an
+      // identifier, not a quantity, and "0042" must survive as "0042".
+      const rowReference = this.optionalCsvValue(read("referenceNumber")) ?? null;
       if (rowErrors.length > 0) {
         errors.push(`Row ${rowNumber}: ${rowErrors.join("; ")}`);
+        invalid.push({
+          accountingRequired: null,
+          errorField: this.importErrorField(rowErrors[0] ?? ""),
+          errorMessage: rowErrors.join("; "),
+          feeSource: null,
+          orderNumber: null,
+          referenceNumber: rowReference,
+          resolvedServiceFee: null,
+          rowNumber,
+          status: "invalid",
+          zeroFeeReason: zeroFeeReason.trim() === "" ? null : zeroFeeReason.trim(),
+        });
         continue;
       }
       const parsedRow = {
@@ -4545,12 +5320,20 @@ export class OperationsService {
         customerName: read("customerName"),
         packageCount,
         serialNumber: read("serialNumber"),
-        serviceFee,
         traderId: read("traderId"),
       } as CreateOrderDto;
-      const referenceNumber = this.optionalCsvValue(read("referenceNumber"));
-      if (referenceNumber !== undefined) {
-        (parsedRow as { referenceNumber: string }).referenceNumber = referenceNumber;
+      // Omitted rather than sent as undefined: `insertOrder` spreads the fee in
+      // only when the key is present, and a present-but-undefined key would
+      // read as a requested fee of nothing.
+      if (serviceFee !== undefined) {
+        (parsedRow as { serviceFee: number }).serviceFee = serviceFee;
+      }
+      if (zeroFeeReason.trim() !== "") {
+        (parsedRow as { serviceFeeOverrideReason: string }).serviceFeeOverrideReason =
+          zeroFeeReason.trim();
+      }
+      if (rowReference !== null) {
+        (parsedRow as { referenceNumber: string }).referenceNumber = rowReference;
       }
       const areaId = this.optionalCsvValue(read("areaId"));
       const driverId = this.optionalCsvValue(read("driverId"));
@@ -4560,9 +5343,29 @@ export class OperationsService {
       if (driverId !== undefined) {
         (parsedRow as { driverId: string }).driverId = driverId;
       }
-      rows.push(parsedRow);
+      rows.push({ row: parsedRow, rowNumber });
     }
-    return { errors, rows, totalRows };
+    return { errors, invalid, rows, totalRows };
+  }
+
+  /**
+   * Which cell the importer should go and look at.
+   *
+   * Derived from the message we just wrote, so the two can never disagree about
+   * what went wrong. Only the first error is attributed — pointing at five
+   * fields at once helps nobody.
+   */
+  private importErrorField(message: string): string | null {
+    if (message.startsWith("Invalid COD") || message.startsWith("Negative COD")) return "codAmount";
+    if (message.startsWith("Invalid Service Fee") || message.startsWith("Negative Service Fee")) {
+      return "serviceFee";
+    }
+    if (message.startsWith("Zero Service Fee Reason")) return "serviceFeeOverrideReason";
+    if (message.startsWith("customerMobileNumber")) return "customerMobileNumber";
+    if (message.startsWith("packageCount")) return "packageCount";
+    if (message.startsWith("additionalFees")) return "additionalFees";
+    const requiredField = /^([A-Za-z]+) is required$/.exec(message);
+    return requiredField?.[1] ?? null;
   }
 
   private parseCsv(csv: string): string[][] {

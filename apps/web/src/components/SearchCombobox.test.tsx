@@ -187,5 +187,4 @@ describe("SearchCombobox", () => {
     expect(option).toBeInTheDocument();
     expect(screen.queryByText("No matches")).not.toBeInTheDocument();
   });
-
 });

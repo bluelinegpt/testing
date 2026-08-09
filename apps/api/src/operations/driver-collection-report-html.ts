@@ -336,12 +336,17 @@ export function buildDriverCollectionReportHtml(
     headerMeta(labels.status, statusLabel(labels, data.header.status)) +
     headerMeta(labels.driver, data.header.driverName) +
     headerMeta(labels.driverType, driverTypeLabel(labels, data.header.driverType)) +
-    headerMeta(labels.paymentMethod, paymentMethodLabel(labels, data.header.collectionPaymentMethod)) +
+    headerMeta(
+      labels.paymentMethod,
+      paymentMethodLabel(labels, data.header.collectionPaymentMethod),
+    ) +
     headerMeta(labels.businessDate, data.header.businessDate) +
     headerMeta(labels.createdDate, data.header.createdAt.slice(0, 16).replace("T", " ")) +
     headerMeta(
       labels.confirmedDate,
-      data.header.confirmedAt === null ? "" : data.header.confirmedAt.slice(0, 16).replace("T", " "),
+      data.header.confirmedAt === null
+        ? ""
+        : data.header.confirmedAt.slice(0, 16).replace("T", " "),
     ) +
     headerMeta(labels.createdBy, data.header.createdBy) +
     headerMeta(labels.confirmedBy, data.header.confirmedBy) +

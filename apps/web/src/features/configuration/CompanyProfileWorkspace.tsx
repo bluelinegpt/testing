@@ -1,10 +1,13 @@
 import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { useSessionAccess } from "../../app/SessionAccessContext.js";
+
 import { ApiError, type ApiClient } from "../../api/api-client.js";
 import type { CompanyProfile } from "../../api/contracts.js";
 import { useCompanyBranding } from "../../app/CompanyBrandingContext.js";
 import { PageHeader } from "../../components/PageHeader.js";
+import { BalanceControlsPanel } from "./BalanceControlsPanel.js";
 
 const MAX_LOGO_BYTES = 2 * 1024 * 1024;
 const ACCEPTED_TYPES = ["image/png", "image/jpeg", "image/jpg"];
@@ -24,9 +27,17 @@ function initialsOf(name: string): string {
   return letters.toUpperCase();
 }
 
-export function CompanyProfileWorkspace({ api }: { api: ApiClient }) {
+export function CompanyProfileWorkspace({
+  api,
+  permissions,
+}: {
+  api: ApiClient;
+  readonly permissions: readonly string[];
+}) {
   const { t } = useTranslation();
   const branding = useCompanyBranding();
+  // The authenticated Company. Never a request parameter.
+  const session = useSessionAccess();
   const [profile, setProfile] = useState<CompanyProfile>();
   const [form, setForm] = useState<FormState>();
   const [saving, setSaving] = useState(false);
@@ -34,6 +45,9 @@ export function CompanyProfileWorkspace({ api }: { api: ApiClient }) {
   const [selectedFile, setSelectedFile] = useState<File>();
   const [selectedPreview, setSelectedPreview] = useState<string>();
   const [fileError, setFileError] = useState<string>();
+  /* Brief confirmation that the clipboard write actually happened. Reset on a
+     timer rather than left on screen, so a later copy still reads as new. */
+  const [copied, setCopied] = useState(false);
   const [logoBusy, setLogoBusy] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -130,7 +144,8 @@ export function CompanyProfileWorkspace({ api }: { api: ApiClient }) {
     } catch (error) {
       setStatus({
         kind: "error",
-        message: error instanceof ApiError ? error.message : t("companyProfile.errors.uploadFailed"),
+        message:
+          error instanceof ApiError ? error.message : t("companyProfile.errors.uploadFailed"),
       });
     } finally {
       setLogoBusy(false);
@@ -162,6 +177,18 @@ export function CompanyProfileWorkspace({ api }: { api: ApiClient }) {
   }
 
   const hasLogo = profile?.logo != null;
+  const copyCompanyId = async (value: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      /* Clipboard access can be refused (permission, insecure origin). The
+         field is selectable, so the user can still copy manually -- failing
+         silently here is better than an error over a convenience action. */
+    }
+  };
+
   const previewName = branding.companyName || form.nameEn || form.nameAr;
 
   return (
@@ -181,6 +208,35 @@ export function CompanyProfileWorkspace({ api }: { api: ApiClient }) {
         <form className="company-profile-grid" onSubmit={(event) => void submit(event)}>
           <h2>{t("companyProfile.identityHeading")}</h2>
           <div className="cp-fields">
+            {/* Read-only, and deliberately NOT part of `form`.
+
+                The value comes from the authenticated session rather than from
+                the profile payload, so it is the Company the user is signed in
+                as by construction -- there is no request parameter that could
+                point it at anyone else. Keeping it out of `form` also means it
+                can never reach the update payload: `submit` sends `form`, and
+                this field is not in it. */}
+            {session?.companyId === undefined ? null : (
+              <label className="field">
+                <span>{t("companyProfile.companyId")}</span>
+                <div className="cp-company-id">
+                  {/* An identifier is LTR even on an Arabic page: a UUID read
+                      right-to-left is a different string. */}
+                  <input
+                    dir="ltr"
+                    readOnly
+                    value={session.companyId}
+                  />
+                  <button
+                    className="button button-secondary"
+                    onClick={() => void copyCompanyId(session.companyId)}
+                    type="button"
+                  >
+                    {copied ? t("companyProfile.copied") : t("common.copy")}
+                  </button>
+                </div>
+              </label>
+            )}
             <label className="field">
               <span>{t("companyProfile.nameEn")}</span>
               <input
@@ -243,71 +299,73 @@ export function CompanyProfileWorkspace({ api }: { api: ApiClient }) {
         <div className="cp-logo-section">
           <h2>{t("companyProfile.logoHeading")}</h2>
           <div className="company-logo-manager">
-          <div className="company-logo-previews">
-            <figure className="company-logo-figure">
-              <figcaption>{t("companyProfile.currentLogo")}</figcaption>
-              {hasLogo && branding.logoUrl !== undefined ? (
-                <img alt={previewName} className="company-logo-image" src={branding.logoUrl} />
-              ) : (
-                <span aria-hidden="true" className="company-logo-placeholder">
-                  {initialsOf(previewName)}
-                </span>
-              )}
-            </figure>
-            {selectedPreview !== undefined ? (
+            <div className="company-logo-previews">
               <figure className="company-logo-figure">
-                <figcaption>{t("companyProfile.selectedPreview")}</figcaption>
-                <img
-                  alt={t("companyProfile.selectedPreview")}
-                  className="company-logo-image"
-                  src={selectedPreview}
-                />
+                <figcaption>{t("companyProfile.currentLogo")}</figcaption>
+                {hasLogo && branding.logoUrl !== undefined ? (
+                  <img alt={previewName} className="company-logo-image" src={branding.logoUrl} />
+                ) : (
+                  <span aria-hidden="true" className="company-logo-placeholder">
+                    {initialsOf(previewName)}
+                  </span>
+                )}
               </figure>
-            ) : null}
-          </div>
+              {selectedPreview !== undefined ? (
+                <figure className="company-logo-figure">
+                  <figcaption>{t("companyProfile.selectedPreview")}</figcaption>
+                  <img
+                    alt={t("companyProfile.selectedPreview")}
+                    className="company-logo-image"
+                    src={selectedPreview}
+                  />
+                </figure>
+              ) : null}
+            </div>
 
-          <div className="company-logo-controls">
-            <p className="muted">{t("companyProfile.logoHint")}</p>
-            <input
-              accept="image/png,image/jpeg"
-              aria-label={t("companyProfile.chooseFile")}
-              onChange={(event) => chooseFile(event.target.files?.[0])}
-              ref={fileInputRef}
-              type="file"
-            />
-            {fileError !== undefined ? (
-              <p className="field-error" role="alert">
-                {fileError}
-              </p>
-            ) : null}
-            <div className="company-logo-actions">
-              <button
-                className="button button-primary"
-                disabled={selectedFile === undefined || logoBusy}
-                onClick={() => void uploadLogo()}
-                type="button"
-              >
-                {logoBusy
-                  ? t("common.working")
-                  : hasLogo
-                    ? t("companyProfile.replaceLogo")
-                    : t("companyProfile.uploadLogo")}
-              </button>
-              {hasLogo ? (
+            <div className="company-logo-controls">
+              <p className="muted">{t("companyProfile.logoHint")}</p>
+              <input
+                accept="image/png,image/jpeg"
+                aria-label={t("companyProfile.chooseFile")}
+                onChange={(event) => chooseFile(event.target.files?.[0])}
+                ref={fileInputRef}
+                type="file"
+              />
+              {fileError !== undefined ? (
+                <p className="field-error" role="alert">
+                  {fileError}
+                </p>
+              ) : null}
+              <div className="company-logo-actions">
                 <button
-                  className="button button-secondary"
-                  disabled={logoBusy}
-                  onClick={() => void removeLogo()}
+                  className="button button-primary"
+                  disabled={selectedFile === undefined || logoBusy}
+                  onClick={() => void uploadLogo()}
                   type="button"
                 >
-                  {t("companyProfile.removeLogo")}
+                  {logoBusy
+                    ? t("common.working")
+                    : hasLogo
+                      ? t("companyProfile.replaceLogo")
+                      : t("companyProfile.uploadLogo")}
                 </button>
-              ) : null}
+                {hasLogo ? (
+                  <button
+                    className="button button-secondary"
+                    disabled={logoBusy}
+                    onClick={() => void removeLogo()}
+                    type="button"
+                  >
+                    {t("companyProfile.removeLogo")}
+                  </button>
+                ) : null}
+              </div>
             </div>
           </div>
         </div>
-        </div>
       </section>
+
+      <BalanceControlsPanel api={api} canManage={permissions.includes("accounting.manage")} />
     </div>
   );
 }

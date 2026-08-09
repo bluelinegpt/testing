@@ -148,9 +148,9 @@ describe.skipIf(!runHttpTests)("reconciliation HTTP boundary", () => {
           expect(Array.isArray(coerced.body.items)).toBe(true);
           expect(typeof coerced.body.total).toBe("number");
 
-          const defaulted = await authed(admin.token)(
-            "/operations/cash/reconciliations",
-          ).expect(200);
+          const defaulted = await authed(admin.token)("/operations/cash/reconciliations").expect(
+            200,
+          );
           expect(defaulted.body.page).toBe(1);
           expect(defaulted.body.pageSize).toBe(25);
 
@@ -160,7 +160,9 @@ describe.skipIf(!runHttpTests)("reconciliation HTTP boundary", () => {
           await authed(admin.token)("/operations/cash/reconciliations?pageSize=7").expect(400);
           await authed(admin.token)("/operations/cash/reconciliations?pageSize=abc").expect(400);
           // Invalid sort field and direction.
-          await authed(admin.token)("/operations/cash/reconciliations?sortBy=driver_id").expect(400);
+          await authed(admin.token)("/operations/cash/reconciliations?sortBy=driver_id").expect(
+            400,
+          );
           await authed(admin.token)(
             "/operations/cash/reconciliations?sortDirection=sideways",
           ).expect(400);
@@ -226,7 +228,15 @@ describe.skipIf(!runHttpTests)("reconciliation HTTP boundary", () => {
           expect(notFound.body.error?.code).toBe("reconciliation_not_found");
           expect(typeof notFound.body.error?.correlationId).toBe("string");
           const serialised = JSON.stringify(notFound.body).toLowerCase();
-          for (const leak of ["select ", "insert ", "pg_", "kysely", "at object.", ".ts:", "stack"]) {
+          for (const leak of [
+            "select ",
+            "insert ",
+            "pg_",
+            "kysely",
+            "at object.",
+            ".ts:",
+            "stack",
+          ]) {
             expect(serialised).not.toContain(leak);
           }
 
@@ -304,7 +314,7 @@ describe.skipIf(!runHttpTests)("reconciliation HTTP boundary", () => {
             `.execute(transaction);
             await sql`
               insert into orders (
-                id, company_id, order_number, order_date, trader_id, area_id,
+                service_fee_override_reason, id, company_id, order_number, order_date, trader_id, area_id,
                 created_by_account_id, assigned_driver_id, customer_name,
                 customer_mobile_number, customer_address, package_count, payment_condition,
                 amount_collected, customer_amount_due, driver_cost,
@@ -314,7 +324,7 @@ describe.skipIf(!runHttpTests)("reconciliation HTTP boundary", () => {
                 delivered_at, pricing_provenance_status, final_service_fee_snapshot,
                 customer_provenance_status
               ) values (
-                ${orderId}::uuid, ${admin.companyId}::uuid, ${`HTTP-${suffix}`}, current_date,
+                'Zero configured Service Fee (fixture)', ${orderId}::uuid, ${admin.companyId}::uuid, ${`HTTP-${suffix}`}, current_date,
                 ${traderId}::uuid, ${areaId}::uuid, ${admin.accountId}::uuid, ${options.driverId}::uuid,
                 'HTTP Customer', '971500000007', 'HTTP Address', 2, 'customer_pays_cod_and_fee',
                 0, 55, 7.5, 55, 0, 0, 0, 0, 55,
@@ -329,7 +339,10 @@ describe.skipIf(!runHttpTests)("reconciliation HTTP boundary", () => {
             `.execute(transaction);
             // Assignment can only be inserted while the Order is newly-assigned or
             // held, so status transitions like Cancelled are applied afterward.
-            if (options.deliveryStatus !== undefined && options.deliveryStatus !== "assigned_to_driver") {
+            if (
+              options.deliveryStatus !== undefined &&
+              options.deliveryStatus !== "assigned_to_driver"
+            ) {
               await sql`
                 update orders set delivery_status = ${options.deliveryStatus} where id = ${orderId}::uuid
               `.execute(transaction);
@@ -341,7 +354,9 @@ describe.skipIf(!runHttpTests)("reconciliation HTTP boundary", () => {
           const manifestDriverTwo = await createDriver("two");
           const manifestOrderOne = await createManifestOrder({ driverId: manifestDriverOne });
           const manifestOrderTwo = await createManifestOrder({ driverId: manifestDriverOne });
-          const manifestOrderOtherDriver = await createManifestOrder({ driverId: manifestDriverTwo });
+          const manifestOrderOtherDriver = await createManifestOrder({
+            driverId: manifestDriverTwo,
+          });
           const manifestOrderCancelled = await createManifestOrder({
             deliveryStatus: "cancelled",
             driverId: manifestDriverOne,

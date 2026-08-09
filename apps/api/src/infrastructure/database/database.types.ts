@@ -166,8 +166,12 @@ export interface DatabaseSchema {
   company_reference_counters: UntypedTable;
   company_settings: UntypedTable;
   company_users: CompanyUserTable;
+  communication_notification_outbox: UntypedTable;
+  conversation_participants: UntypedTable;
+  conversations: UntypedTable;
   customer_addresses: UntypedTable;
   customers: UntypedTable;
+  customer_messaging_sessions: UntypedTable;
   driver_commission_calculations: UntypedTable;
   driver_commission_orders: UntypedTable;
   driver_commission_rules: UntypedTable;
@@ -224,7 +228,9 @@ export interface DatabaseSchema {
   payroll_payments: UntypedTable;
   payroll_periods: UntypedTable;
   permissions: UntypedTable;
+  messages: UntypedTable;
   password_reset_tokens: PasswordResetTokenTable;
+  realtime_event_log: UntypedTable;
   user_business_links: UserBusinessLinkTable;
   role_permissions: UntypedTable;
   roles: RoleTable;

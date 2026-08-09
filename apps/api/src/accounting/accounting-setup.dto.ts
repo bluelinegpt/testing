@@ -39,7 +39,10 @@ export class AccountingZeroOpeningDto {
 
 export class AccountingActivationPreviewDto {
   @Matches(datePattern) public readonly activationDate!: string;
-  @IsOptional() @IsArray() @ArrayMaxSize(50) @IsString({ each: true })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(50)
+  @IsString({ each: true })
   public readonly acknowledgedWarningCodes?: string[];
 }
 

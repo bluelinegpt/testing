@@ -2,6 +2,7 @@ import { Inject, Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 
 import type { AppConfiguration } from "../configuration/environment.js";
+import { isReservedCompanySubdomain } from "./reserved-subdomains.js";
 
 /**
  * Resolves which Company a login attempt belongs to, from the request host.
@@ -17,7 +18,22 @@ import type { AppConfiguration } from "../configuration/environment.js";
  * invalid-credentials response used for a wrong password, so an unresolved host
  * is indistinguishable from a bad login and reveals nothing about which
  * Companies exist.
+ *
+ * ---------------------------------------------------------------------------
+ * A RESERVED HOST IS NOT AN UNRESOLVED HOST
+ * ---------------------------------------------------------------------------
+ *
+ * `platform.bluelinegpt.com` serves the Platform Administration Portal, not a
+ * tenant. Treating it as merely "unresolved" would be a real defect in
+ * development, because an unresolved host falls back to the configured
+ * development Company — which would make Company sign-in succeed on the
+ * Platform host. So the three outcomes are distinguished explicitly, and a
+ * reserved host returns `undefined` WITHOUT consulting the fallback.
  */
+type HostOutcome =
+  | { kind: "company"; subdomain: string }
+  | { kind: "reserved" }
+  | { kind: "unknown" };
 @Injectable()
 export class CompanyHostResolver {
   private readonly hostSuffix: string | undefined;
@@ -32,23 +48,47 @@ export class CompanyHostResolver {
 
   /** Returns the Company subdomain for a request host, or undefined. */
   public resolve(host: string | undefined): string | undefined {
-    return this.fromHost(host) ?? this.developmentSubdomain;
+    const outcome = this.classify(host);
+    if (outcome.kind === "company") return outcome.subdomain;
+    // A reserved host is deliberately NOT eligible for the development
+    // fallback: falling back there would let a Company sign in on the Platform
+    // host in development, which is exactly the ambiguity the reservation
+    // exists to remove.
+    if (outcome.kind === "reserved") return undefined;
+    return this.developmentSubdomain;
   }
 
-  private fromHost(host: string | undefined): string | undefined {
-    if (host === undefined) return undefined;
-    // Strip the port and any IPv6 brackets before matching.
-    const hostname = host.trim().toLowerCase().replace(/^\[|\]$/g, "").split(":")[0];
-    if (hostname === undefined || hostname.length === 0) return undefined;
-    if (this.hostSuffix === undefined) return undefined;
-    if (!hostname.endsWith(`.${this.hostSuffix}`)) return undefined;
+  /** Whether the request host is a reserved, non-tenant host. */
+  public isReservedHost(host: string | undefined): boolean {
+    return this.classify(host).kind === "reserved";
+  }
 
-    const label = hostname.slice(0, -(this.hostSuffix.length + 1));
-    // Only a single leading label identifies a tenant. `a.b.example.com` is
-    // ambiguous and must not silently resolve to `a`.
-    if (label.length === 0 || label.includes(".")) return undefined;
-    // `www.example.com` is the marketing host, not a tenant.
-    if (label === "www") return undefined;
-    return label;
+  private classify(host: string | undefined): HostOutcome {
+    if (host === undefined) return { kind: "unknown" };
+    // Strip the port and any IPv6 brackets before matching.
+    const hostname = host
+      .trim()
+      .toLowerCase()
+      .replace(/^\[|\]$/g, "")
+      .split(":")[0];
+    if (hostname === undefined || hostname.length === 0) return { kind: "unknown" };
+
+    if (this.hostSuffix !== undefined && hostname.endsWith(`.${this.hostSuffix}`)) {
+      const label = hostname.slice(0, -(this.hostSuffix.length + 1));
+      // Only a single leading label identifies a tenant. `a.b.example.com` is
+      // ambiguous and must not silently resolve to `a`.
+      if (label.length === 0 || label.includes(".")) return { kind: "unknown" };
+      return isReservedCompanySubdomain(label)
+        ? { kind: "reserved" }
+        : { kind: "company", subdomain: label };
+    }
+
+    // No configured suffix, or a host that does not sit under it. A tenant can
+    // never be identified here — but a reserved label still has to be honoured,
+    // because local development runs on hosts like `platform.localhost` where
+    // no suffix is configured at all.
+    const leading = hostname.includes(".") ? hostname.split(".")[0] : undefined;
+    if (leading !== undefined && isReservedCompanySubdomain(leading)) return { kind: "reserved" };
+    return { kind: "unknown" };
   }
 }

@@ -18,7 +18,9 @@ export class PayrollOperationalRepository {
       advances: string;
       allowanceTotal: string;
       basicSalary: string;
+      collectionEarnings: string;
       commission: string;
+      deliveredOrderEarnings: string;
       earningAdjustments: string;
       deductionAdjustments: string;
       held: boolean;
@@ -27,6 +29,8 @@ export class PayrollOperationalRepository {
       select l.basic_salary_snapshot::text as "basicSalary",
              l.allowance_total::text as "allowanceTotal",
              l.employee_driver_commission::text as commission,
+             l.delivered_order_earnings::text as "deliveredOrderEarnings",
+             l.collection_earnings::text as "collectionEarnings",
              l.advances::text as advances, l.amount_paid::text as paid,
              l.salary_hold_snapshot as held,
              coalesce(sum(a.amount) filter (
@@ -51,11 +55,26 @@ export class PayrollOperationalRepository {
     }
     const earning = row.held ? new Decimal(0) : new Decimal(row.earningAdjustments);
     const deduction = row.held ? new Decimal(0) : new Decimal(row.deductionAdjustments);
+    // A held line pays nothing, including Order earnings. Those snapshots are
+    // never allocated to a held line in the first place, so they stay unpaid and
+    // remain eligible for a later period rather than being forfeited.
+    /* THIS IS THE AUTHORITATIVE GROSS. It runs after the calculation INSERT and
+       after every adjustment, and it OVERWRITES `gross_earnings` -- so any
+       component missing from this sum is silently dropped from the payslip even
+       when the calculation computed it correctly and stored it in its own
+       column. That is exactly how collection earnings were lost: the INSERT
+       wrote 3009, this recomputation then wrote 3006 back over it.
+
+       Every variable component must therefore appear here, in `payroll_entries_amounts_check`,
+       and in the calculation service's own `gross`. Adding a component to one
+       without the others reintroduces the same defect. */
     const gross = row.held
       ? new Decimal(0)
       : new Decimal(row.basicSalary)
           .plus(row.allowanceTotal)
           .plus(row.commission)
+          .plus(row.deliveredOrderEarnings)
+          .plus(row.collectionEarnings)
           .plus(earning);
     const net = gross.minus(deduction).minus(row.held ? 0 : row.advances);
     if (net.isNegative()) {
@@ -95,6 +114,8 @@ export class PayrollOperationalRepository {
              total_basic_salary=totals.basic_salary,
              total_allowances=totals.allowances,
              total_employee_driver_commission=totals.driver_commission,
+             total_delivered_order_earnings=totals.delivered_order_earnings,
+             total_collection_earnings=totals.collection_earnings,
              total_earning_adjustments=totals.earning_adjustments,
              total_deductions=totals.deductions,
              total_net_salary=totals.net_salary,
@@ -107,6 +128,10 @@ export class PayrollOperationalRepository {
                  coalesce(sum(allowance_total) filter (where status <> 'reversed'),0) as allowances,
                  coalesce(sum(employee_driver_commission) filter (where status <> 'reversed'),0)
                    as driver_commission,
+                 coalesce(sum(delivered_order_earnings) filter (where status <> 'reversed'),0)
+                   as delivered_order_earnings,
+                 coalesce(sum(collection_earnings) filter (where status <> 'reversed'),0)
+                   as collection_earnings,
                  coalesce(sum(earning_adjustments_total) filter (where status <> 'reversed'),0)
                    as earning_adjustments,
                  coalesce(sum(deduction_adjustments_total + advances)
@@ -145,11 +170,7 @@ export class PayrollOperationalRepository {
     `.execute(database);
     const summary = lines.rows[0]!;
     const status =
-      summary.paidCount === 0
-        ? "approved"
-        : summary.hasOutstanding
-          ? "partially_paid"
-          : "paid";
+      summary.paidCount === 0 ? "approved" : summary.hasOutstanding ? "partially_paid" : "paid";
     await sql`
       update payroll_entries
          set status=case

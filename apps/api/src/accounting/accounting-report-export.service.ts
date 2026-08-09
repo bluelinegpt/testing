@@ -2,14 +2,8 @@ import { Inject, Injectable } from "@nestjs/common";
 
 import { CompanyProfileService } from "../company-profile/company-profile.service.js";
 import { DriverCollectionPdfService } from "../operations/driver-collection-pdf.service.js";
-import type {
-  AccountingReportKind,
-  AccountingReportQueryDto,
-} from "./accounting-report.dto.js";
-import {
-  accountingReportHtml,
-  type AccountingReportDocument,
-} from "./accounting-report-html.js";
+import type { AccountingReportKind, AccountingReportQueryDto } from "./accounting-report.dto.js";
+import { accountingReportHtml, type AccountingReportDocument } from "./accounting-report-html.js";
 import {
   AccountingReportService,
   type AccountingReportEnvelope,
@@ -32,41 +26,81 @@ const arTitles: Readonly<Record<string, string>> = {
   vat: "أساس تقرير ضريبة القيمة المضافة",
 };
 const arColumns: Readonly<Record<string, string>> = {
-  accountClass: "فئة الحساب", accountNameAr: "الاسم بالعربية", accountNameEn: "اسم الحساب",
-  accountType: "نوع الحساب", accountingDate: "التاريخ المحاسبي", amount: "المبلغ",
-  categoryCode: "رمز الفئة", categoryNameAr: "الفئة بالعربية", categoryNameEn: "الفئة",
-  closingBalance: "الرصيد الختامي", closingCredit: "دائن ختامي", closingDebit: "مدين ختامي",
-  code: "رمز الحساب", credit: "دائن", date: "التاريخ", debit: "مدين",
-  description: "الوصف", direction: "الاتجاه", expenseDate: "تاريخ المصروف",
-  expenseNumber: "رقم المصروف", journalNumber: "رقم القيد", netVat: "صافي الضريبة",
-  openingBalance: "الرصيد الافتتاحي", openingCredit: "دائن افتتاحي", openingDebit: "مدين افتتاحي",
-  operationalApproved: "المعتمد تشغيلياً", operationalOutstanding: "المتبقي تشغيلياً",
-  operationalPaid: "المدفوع تشغيلياً", payee: "المستفيد", paymentStatus: "حالة الدفع",
-  periodCredit: "دائن الفترة", periodDebit: "مدين الفترة", postedNet: "الصافي المُرحّل",
-  recoverableVat: "الضريبة القابلة للاسترداد", reference: "المرجع",
-  runningBalance: "الرصيد الجاري", section: "القسم", source: "المصدر", status: "الحالة",
+  accountClass: "فئة الحساب",
+  accountNameAr: "الاسم بالعربية",
+  accountNameEn: "اسم الحساب",
+  accountType: "نوع الحساب",
+  accountingDate: "التاريخ المحاسبي",
+  amount: "المبلغ",
+  categoryCode: "رمز الفئة",
+  categoryNameAr: "الفئة بالعربية",
+  categoryNameEn: "الفئة",
+  closingBalance: "الرصيد الختامي",
+  closingCredit: "دائن ختامي",
+  closingDebit: "مدين ختامي",
+  code: "رمز الحساب",
+  credit: "دائن",
+  date: "التاريخ",
+  debit: "مدين",
+  description: "الوصف",
+  direction: "الاتجاه",
+  expenseDate: "تاريخ المصروف",
+  expenseNumber: "رقم المصروف",
+  journalNumber: "رقم القيد",
+  netVat: "صافي الضريبة",
+  openingBalance: "الرصيد الافتتاحي",
+  openingCredit: "دائن افتتاحي",
+  openingDebit: "مدين افتتاحي",
+  operationalApproved: "المعتمد تشغيلياً",
+  operationalOutstanding: "المتبقي تشغيلياً",
+  operationalPaid: "المدفوع تشغيلياً",
+  payee: "المستفيد",
+  paymentStatus: "حالة الدفع",
+  periodCredit: "دائن الفترة",
+  periodDebit: "مدين الفترة",
+  postedNet: "الصافي المُرحّل",
+  recoverableVat: "الضريبة القابلة للاسترداد",
+  reference: "المرجع",
+  runningBalance: "الرصيد الجاري",
+  section: "القسم",
+  source: "المصدر",
+  status: "الحالة",
 };
 const arWarnings: Readonly<Record<string, string>> = {
-  accounting_report_bank_reconciliation_unavailable: "لا تتوفر مطابقة كاملة مع كشف البنك؛ لا يعرض التقرير حالة المقاصة البنكية.",
-  accounting_report_open_period_provisional: "يتضمن التقرير فترة مفتوحة أو معاد فتحها، ولذلك تُعد نتائجه مؤقتة.",
-  accounting_report_query_limit_exceeded: "بلغ التقرير حد الصفوف. ضيّق المعايير لتضمين جميع الصفوف.",
-  accounting_report_reconciliation_difference_possible: "تظهر القيم التشغيلية بجانب القيود المُرحّلة وتبقى أي فروقات ظاهرة للمطابقة.",
-  accounting_report_reconciliation_difference: "يوجد فرق في ضوابط مطابقة التقرير. لم تتم إضافة أي سطر موازن اصطناعي.",
-  accounting_report_vat_not_tax_return: "هذا أساس لتقرير الضريبة فقط، وليس إقراراً أو تقديماً للهيئة الاتحادية للضرائب ولا استشارة ضريبية.",
+  accounting_report_bank_reconciliation_unavailable:
+    "لا تتوفر مطابقة كاملة مع كشف البنك؛ لا يعرض التقرير حالة المقاصة البنكية.",
+  accounting_report_open_period_provisional:
+    "يتضمن التقرير فترة مفتوحة أو معاد فتحها، ولذلك تُعد نتائجه مؤقتة.",
+  accounting_report_query_limit_exceeded:
+    "بلغ التقرير حد الصفوف. ضيّق المعايير لتضمين جميع الصفوف.",
+  accounting_report_reconciliation_difference_possible:
+    "تظهر القيم التشغيلية بجانب القيود المُرحّلة وتبقى أي فروقات ظاهرة للمطابقة.",
+  accounting_report_reconciliation_difference:
+    "يوجد فرق في ضوابط مطابقة التقرير. لم تتم إضافة أي سطر موازن اصطناعي.",
+  accounting_report_vat_not_tax_return:
+    "هذا أساس لتقرير الضريبة فقط، وليس إقراراً أو تقديماً للهيئة الاتحادية للضرائب ولا استشارة ضريبية.",
 };
 
 function localizedTable(report: AccountingReportEnvelope, language: "en" | "ar") {
   if (language === "en") {
-    return { columns: report.columns, rows: report.items, title: report.title, warnings: report.warnings };
+    return {
+      columns: report.columns,
+      rows: report.items,
+      title: report.title,
+      warnings: report.warnings,
+    };
   }
   const columns = report.columns.map((column) => arColumns[column] ?? column);
-  const rows = report.items.map((row) => Object.fromEntries(report.columns.map((column, index) =>
-    [columns[index]!, row[column]])));
+  const rows = report.items.map((row) =>
+    Object.fromEntries(report.columns.map((column, index) => [columns[index]!, row[column]])),
+  );
   return {
     columns,
     rows,
     title: arTitles[report.kind] ?? report.title,
-    warnings: report.warningCodes.map((code) => arWarnings[code]).filter((value): value is string => value !== undefined),
+    warnings: report.warningCodes
+      .map((code) => arWarnings[code])
+      .filter((value): value is string => value !== undefined),
   };
 }
 
@@ -78,7 +112,11 @@ export class AccountingReportExportService {
     @Inject(DriverCollectionPdfService) private readonly pdf: DriverCollectionPdfService,
   ) {}
 
-  public async tabular(kind: AccountingReportKind, query: AccountingReportQueryDto, format: "csv" | "xlsx") {
+  public async tabular(
+    kind: AccountingReportKind,
+    query: AccountingReportQueryDto,
+    format: "csv" | "xlsx",
+  ) {
     const report = await this.reports.report(kind, query, "export");
     const table = localizedTable(report, query.language ?? "en");
     await this.reports.auditGeneration(kind, format, report.filters);
@@ -89,8 +127,12 @@ export class AccountingReportExportService {
           ["Currency", report.currency],
           ["Snapshot", report.snapshotAt],
           ["Data Source", report.dataSource],
-          ...Object.entries(report.filters).filter((entry): entry is [string, string] => entry[1] !== undefined),
-          ...table.warnings.map((warning) => [query.language === "ar" ? "تنبيه" : "Warning", warning] as const),
+          ...Object.entries(report.filters).filter(
+            (entry): entry is [string, string] => entry[1] !== undefined,
+          ),
+          ...table.warnings.map(
+            (warning) => [query.language === "ar" ? "تنبيه" : "Warning", warning] as const,
+          ),
         ]),
         contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         extension: "xlsx",
@@ -106,7 +148,9 @@ export class AccountingReportExportService {
     ];
     const rows = [
       ...metadata.map((row) => row.map(csvCell).join(",")),
-      ...table.warnings.map((warning) => [csvCell(query.language === "ar" ? "تنبيه" : "Warning"), csvCell(warning)].join(",")),
+      ...table.warnings.map((warning) =>
+        [csvCell(query.language === "ar" ? "تنبيه" : "Warning"), csvCell(warning)].join(","),
+      ),
       "",
       table.columns.map(csvCell).join(","),
       ...table.rows.map((row) => table.columns.map((column) => csvCell(row[column])).join(",")),
@@ -134,17 +178,24 @@ export class AccountingReportExportService {
   ) {
     const data = await this.reports.document(type, id);
     const now = new Date().toISOString();
-    const body = await this.render({
-      ...data,
-      filters: { documentId: id },
-      generatedAt: now,
-      snapshotAt: now,
-    }, language);
+    const body = await this.render(
+      {
+        ...data,
+        filters: { documentId: id },
+        generatedAt: now,
+        rows: data.items,
+        snapshotAt: now,
+      },
+      language,
+    );
     await this.reports.auditGeneration(type, "pdf", { documentId: id });
     return { body, reference: String(data.items[0]?.["Document Number"] ?? type) };
   }
 
-  private reportDocument(report: AccountingReportEnvelope, language: "en" | "ar"): AccountingReportDocument {
+  private reportDocument(
+    report: AccountingReportEnvelope,
+    language: "en" | "ar",
+  ): AccountingReportDocument {
     const table = localizedTable(report, language);
     return {
       columns: table.columns,
@@ -162,9 +213,15 @@ export class AccountingReportExportService {
     let logoDataUrl: string | undefined;
     if (branding.hasLogo) {
       const logo = await this.profiles.logoContent().catch(() => undefined);
-      if (logo !== undefined) logoDataUrl = `data:${logo.mediaType};base64,${logo.bytes.toString("base64")}`;
+      if (logo !== undefined)
+        logoDataUrl = `data:${logo.mediaType};base64,${logo.bytes.toString("base64")}`;
     }
-    const built = accountingReportHtml({ branding, document, language, ...(logoDataUrl === undefined ? {} : { logoDataUrl }) });
+    const built = accountingReportHtml({
+      branding,
+      document,
+      language,
+      ...(logoDataUrl === undefined ? {} : { logoDataUrl }),
+    });
     return this.pdf.renderPdf(built.html, built.footer);
   }
 }

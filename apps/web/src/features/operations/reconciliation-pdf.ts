@@ -23,7 +23,8 @@ export function useReconciliationPdfActions(api: ApiClient) {
   ): Promise<unknown> => {
     setBusy(mode);
     try {
-      const blob = body === undefined ? await api.getBinary(path) : await api.postBinary(path, body);
+      const blob =
+        body === undefined ? await api.getBinary(path) : await api.postBinary(path, body);
       const url = URL.createObjectURL(blob);
       if (mode === "download") {
         const link = document.createElement("a");

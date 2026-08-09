@@ -217,14 +217,20 @@ export function buildDriverShipmentManifestHtml(
         "<tr>" +
         `<td class="num">${index + 1}</td>` +
         `<td class="mono">${escapeHtml(order.serialNumber)}</td>` +
+        `<td class="mono">${order.referenceNumber === null ? "" : escapeHtml(order.referenceNumber)}</td>` +
         `<td>${escapeHtml(order.traderName)}</td>` +
         `<td>${escapeHtml(order.customerName)}</td>` +
         `<td class="mono">${escapeHtml(order.customerMobileNumber)}</td>` +
+        `<td class="mono">${order.customerSecondMobileNumber === null ? "" : escapeHtml(order.customerSecondMobileNumber)}</td>` +
         `<td>${order.emirateName === null ? "" : escapeHtml(order.emirateName)}</td>` +
         `<td>${escapeHtml(order.areaName)}</td>` +
         `<td>${escapeHtml(order.customerAddress)}</td>` +
+        `<td class="num">${escapeHtml(String(order.packageCount))}</td>` +
         `<td class="num">${money(order.codAmount)}</td>` +
-        `<td>${order.deliveryInstructions === null ? "" : escapeHtml(order.deliveryInstructions)}</td>` +
+        /* Notes, not Delivery Status. A manifest is signed at handover, when
+           every Order on it is going out, so the status column read the same on
+           every line. A free-text note is what the Driver actually needs in
+           front of them. */
         `<td>${order.notes === null ? "" : escapeHtml(order.notes)}</td>` +
         "</tr>",
     )
@@ -234,14 +240,16 @@ export function buildDriverShipmentManifestHtml(
     [
       labels.lineNumber,
       labels.orderSerial,
+      labels.externalReference,
       labels.trader,
       labels.customer,
       labels.mobile,
+      labels.secondMobile,
       labels.emirate,
       labels.area,
       labels.address,
+      labels.packages,
       labels.cod,
-      labels.deliveryInstructions,
       labels.notes,
     ]
       .map((label) => `<th>${escapeHtml(label)}</th>`)
@@ -288,11 +296,17 @@ export function buildDriverShipmentManifestHtml(
 
   const summaryLine = (label: string, value: string) =>
     `<div class="summary-line"><span>${escapeHtml(label)}</span><span>${escapeHtml(value)}</span></div>`;
+  /* Two figures only, side by side. The per-status breakdown (Packages, New,
+     Out for Delivery, Delivered, Returned, Cancelled) was removed: a manifest is
+     handed over at dispatch, when every Order on it is going out, so those
+     counts were either all zero or restated the Delivery Status column. */
   const summary =
     `<section class="summary-section">` +
     `<h2 class="section-title">${escapeHtml(labels.numberOfOrders)}</h2>` +
+    `<div class="summary-row">` +
     summaryLine(labels.totalOrders, String(data.summary.totalOrders)) +
     summaryLine(labels.totalCod, money(data.summary.totalCod)) +
+    `</div>` +
     `</section>`;
 
   const signatures =
@@ -323,19 +337,31 @@ export function buildDriverShipmentManifestHtml(
     table.grid thead th { background: #f0f0f0; }
     table.grid td.num, table.grid th.num { text-align: end; white-space: nowrap; }
     .mono { font-variant-numeric: tabular-nums; }
-    table.grid th:nth-child(1), table.grid td:nth-child(1) { width: 14px; }
-    table.grid th:nth-child(2), table.grid td:nth-child(2) { width: 24px; }
-    table.grid th:nth-child(3), table.grid td:nth-child(3) { width: 44px; }
-    table.grid th:nth-child(4), table.grid td:nth-child(4) { width: 48px; }
-    table.grid th:nth-child(5), table.grid td:nth-child(5) { width: 46px; }
-    table.grid th:nth-child(6), table.grid td:nth-child(6) { width: 36px; }
-    table.grid th:nth-child(7), table.grid td:nth-child(7) { width: 42px; }
-    table.grid th:nth-child(8), table.grid td:nth-child(8) { width: 56px; }
-    table.grid th:nth-child(9), table.grid td:nth-child(9) { width: 40px; }
-    table.grid th:nth-child(10), table.grid td:nth-child(10),
-    table.grid th:nth-child(11), table.grid td:nth-child(11) { width: 46px; }
-    .summary-section { margin-top: 12px; max-width: 360px; }
-    .summary-line { display: flex; justify-content: space-between; border-bottom: 1px solid #ddd; padding: 3px 0; font-size: 10px; }
+    /* Every one of the 13 columns is sized, in per cent of the printed width.
+       Only columns 1-11 used to be, which left the last two splitting the whole
+       remainder between them -- that is why COD Amount was so wide while
+       Customer Mobile wrapped a 10-digit number onto two lines. COD Amount is
+       sized for its longest real value, "AED 9999.00"; amounts do not exceed
+       four digits. Notes is free text, so it takes the widest share after the
+       Customer Address. The percentages must total 100. */
+    table.grid th:nth-child(1), table.grid td:nth-child(1) { width: 2%; }
+    table.grid th:nth-child(2), table.grid td:nth-child(2) { width: 4%; }
+    table.grid th:nth-child(3), table.grid td:nth-child(3) { width: 7%; }
+    table.grid th:nth-child(4), table.grid td:nth-child(4) { width: 9%; }
+    table.grid th:nth-child(5), table.grid td:nth-child(5) { width: 9%; }
+    table.grid th:nth-child(6), table.grid td:nth-child(6) { width: 8%; }
+    table.grid th:nth-child(7), table.grid td:nth-child(7) { width: 8%; }
+    table.grid th:nth-child(8), table.grid td:nth-child(8) { width: 7%; }
+    table.grid th:nth-child(9), table.grid td:nth-child(9) { width: 7%; }
+    table.grid th:nth-child(10), table.grid td:nth-child(10) { width: 15%; }
+    table.grid th:nth-child(11), table.grid td:nth-child(11) { width: 5%; }
+    table.grid th:nth-child(12), table.grid td:nth-child(12) { width: 7%; }
+    table.grid th:nth-child(13), table.grid td:nth-child(13) { width: 12%; }
+    .summary-section { margin-top: 12px; max-width: 460px; }
+    /* Side by side rather than stacked. Each keeps its own underline so the
+       label still reads as attached to its own figure. */
+    .summary-row { display: flex; gap: 24px; }
+    .summary-line { flex: 1; display: flex; justify-content: space-between; gap: 12px; border-bottom: 1px solid #ddd; padding: 3px 0; font-size: 10px; }
     .signatures { display: flex; justify-content: space-between; gap: 18px; margin-top: 32px; }
     .sign-box { flex: 1; text-align: center; font-size: 9px; }
     .sign-line { border-top: 1px solid #333; margin-bottom: 5px; height: 30px; }

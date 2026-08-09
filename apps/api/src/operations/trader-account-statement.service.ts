@@ -307,7 +307,9 @@ export class TraderAccountStatementService {
       settlements.push({ ...settlement, allocations });
     }
     const reversedSettlementNumbers = new Set(
-      settlements.filter((settlement) => settlement.isReversed).map((settlement) => settlement.settlementNumber),
+      settlements
+        .filter((settlement) => settlement.isReversed)
+        .map((settlement) => settlement.settlementNumber),
     );
     let running = new Decimal(opening);
     let payable = new Decimal(0);
@@ -350,28 +352,29 @@ export class TraderAccountStatementService {
         type: row.type,
       };
     });
-    const transactions = allTransactions.filter(
-      (row) => {
-        if (query.reversedOnly === true && row.type !== "reversal") return false;
-        if (query.paidOnly === true && !["payment", "reversal"].includes(row.type)) return false;
-        if (query.outstandingOnly === true && (row.type !== "order" || !row.isOutstanding)) return false;
-        if (
-          query.settlementStatus === "reversed" &&
-          row.type !== "reversal" &&
-          !(row.type === "payment" && reversedSettlementNumbers.has(row.reference))
-        ) return false;
-        if (
-          query.settlementStatus === "confirmed" &&
-          (row.type === "reversal" ||
-            (row.type === "payment" && reversedSettlementNumbers.has(row.reference)))
-        ) return false;
-        return (
-          query.transactionType === undefined ||
-          query.transactionType === "all" ||
-          row.type === query.transactionType
-        );
-      },
-    );
+    const transactions = allTransactions.filter((row) => {
+      if (query.reversedOnly === true && row.type !== "reversal") return false;
+      if (query.paidOnly === true && !["payment", "reversal"].includes(row.type)) return false;
+      if (query.outstandingOnly === true && (row.type !== "order" || !row.isOutstanding))
+        return false;
+      if (
+        query.settlementStatus === "reversed" &&
+        row.type !== "reversal" &&
+        !(row.type === "payment" && reversedSettlementNumbers.has(row.reference))
+      )
+        return false;
+      if (
+        query.settlementStatus === "confirmed" &&
+        (row.type === "reversal" ||
+          (row.type === "payment" && reversedSettlementNumbers.has(row.reference)))
+      )
+        return false;
+      return (
+        query.transactionType === undefined ||
+        query.transactionType === "all" ||
+        row.type === query.transactionType
+      );
+    });
     const branding = await this.companyProfile.branding();
     const logoDataUri = branding.hasLogo
       ? await this.companyProfile
@@ -383,12 +386,11 @@ export class TraderAccountStatementService {
       .toISOString()
       .slice(0, 10);
     const outstandingAtEnd = await this.balanceBefore(companyId, traderId, dayAfterTo);
-    const warnings =
-      this.money(outstandingAtEnd).equals(this.money(running))
-        ? []
-        : [
-            `Data-integrity warning: event closing balance ${this.money(running).toFixed(2)} does not match the as-of outstanding balance ${this.money(outstandingAtEnd).toFixed(2)}.`,
-          ];
+    const warnings = this.money(outstandingAtEnd).equals(this.money(running))
+      ? []
+      : [
+          `Data-integrity warning: event closing balance ${this.money(running).toFixed(2)} does not match the as-of outstanding balance ${this.money(outstandingAtEnd).toFixed(2)}.`,
+        ];
     return {
       company: { logoDataUri, nameAr: branding.nameAr, nameEn: branding.nameEn },
       generatedAt: new Intl.DateTimeFormat("en-GB", {
@@ -511,7 +513,11 @@ export class TraderAccountStatementService {
     const permissions = this.identities.current().permissions;
     const required = Array.isArray(permission) ? permission : [permission];
     if (!permissions.has("users_roles.manage") && !required.some((key) => permissions.has(key))) {
-      throw new ApplicationException("permission_denied", "Permission denied", HttpStatus.FORBIDDEN);
+      throw new ApplicationException(
+        "permission_denied",
+        "Permission denied",
+        HttpStatus.FORBIDDEN,
+      );
     }
   }
 }

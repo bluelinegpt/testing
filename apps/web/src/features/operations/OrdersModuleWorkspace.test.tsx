@@ -1,4 +1,21 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import type { ReactElement } from "react";
+import { MemoryRouter } from "react-router-dom";
+
+/**
+ * The workspaces under test now read their list state from the URL via
+ * `useListState` -> `useSearchParams`, which requires a Router in context.
+ *
+ * A real `MemoryRouter` is used rather than mocking the hooks: mocking would
+ * hide the very behaviour the URL-state migration introduced, and these suites
+ * would stop proving that the screens mount at all. The default entry is "/",
+ * which carries no search parameters, so every existing assumption about
+ * starting filters, page and sort is unchanged.
+ */
+function renderWithRouter(ui: ReactElement, initialEntries: readonly string[] = ["/"]) {
+  return render(<MemoryRouter initialEntries={[...initialEntries]}>{ui}</MemoryRouter>);
+}
+
 import { vi } from "vitest";
 
 import type { ApiClient } from "../../api/api-client.js";
@@ -78,7 +95,7 @@ describe("OrdersModuleWorkspace", () => {
       }),
     };
     const onNavigate = vi.fn();
-    render(
+    renderWithRouter(
       <OrdersModuleWorkspace
         api={api as unknown as ApiClient}
         onNavigate={onNavigate}
@@ -122,7 +139,7 @@ describe("OrdersModuleWorkspace", () => {
       patch: vi.fn().mockResolvedValue({}),
       post: vi.fn().mockResolvedValue({}),
     };
-    render(
+    renderWithRouter(
       <OrdersModuleWorkspace
         api={api as unknown as ApiClient}
         onNavigate={vi.fn()}
@@ -134,9 +151,7 @@ describe("OrdersModuleWorkspace", () => {
     // Delivery Status and Financial Status (Driver Collection / Trader Settlement)
     // are separate columns — never merged into one general "Status" (§3).
     expect(screen.getByRole("columnheader", { name: "Delivery status" })).toBeVisible();
-    expect(
-      screen.getByRole("columnheader", { name: "Collection / Settlement" }),
-    ).toBeVisible();
+    expect(screen.getByRole("columnheader", { name: "Collection / Settlement" })).toBeVisible();
     expect(screen.queryByRole("columnheader", { name: "Stage" })).not.toBeInTheDocument();
     expect(screen.queryByRole("columnheader", { name: "Status" })).not.toBeInTheDocument();
     expect(screen.getAllByText("New").length).toBeGreaterThanOrEqual(1);
@@ -144,12 +159,239 @@ describe("OrdersModuleWorkspace", () => {
     fireEvent.click(screen.getByRole("button", { name: "Order actions" }));
     fireEvent.click(screen.getByRole("button", { name: "Mark item in branch" }));
 
+    // The transition now CONFIRMS before it writes. It used to PATCH straight
+    // from the menu, which left a smart next action nothing to open and no safe
+    // way to suggest a status.
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog).toBeInTheDocument();
+    expect(api.patch).not.toHaveBeenCalled();
+    // The menu's choice arrives as the suggested value.
+    expect((within(dialog).getByRole("combobox") as HTMLSelectElement).value).toBe("in_branch");
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Confirm" }));
+
     await waitFor(() =>
       expect(api.patch).toHaveBeenCalledWith(
         `operations/orders/${order.id}/status`,
         expect.objectContaining({ status: "in_branch" }),
       ),
     );
+  });
+
+  it("opens Change Status directly from a smart next-action deep link", async () => {
+    // The screenshot case, end to end: the popover's primary action lands here
+    // and the dialog opens on the right Order with `delivered` suggested.
+    const delivered = { ...order, deliveryStatus: "out_for_delivery" };
+    const api = {
+      get: vi.fn((path: string) => {
+        if (path.startsWith("operations/orders?")) {
+          return Promise.resolve({
+            filteredCount: 1,
+            items: [delivered],
+            page: 1,
+            pageSize: 25,
+            totalCount: 1,
+          });
+        }
+        if (path.startsWith("configuration/areas")) {
+          return Promise.resolve({ items: [], page: 1, pageSize: 100, total: 0 });
+        }
+        return Promise.resolve([]);
+      }),
+      patch: vi.fn().mockResolvedValue({}),
+      post: vi.fn().mockResolvedValue({}),
+    };
+    globalThis.history.replaceState(
+      {},
+      "",
+      `/orders?orderId=${order.id}&suggestedStatus=delivered&openDialog=change_status&returnTo=%2Forders`,
+    );
+    renderWithRouter(
+      <OrdersModuleWorkspace
+        api={api as unknown as ApiClient}
+        onNavigate={vi.fn()}
+        permissions={["users_roles.manage"]}
+      />,
+    );
+
+    const dialog = await screen.findByRole("dialog");
+    expect((within(dialog).getByRole("combobox") as HTMLSelectElement).value).toBe("delivered");
+    // Nothing is written by arriving.
+    expect(api.patch).not.toHaveBeenCalled();
+    // And the instruction is gone, so a refresh cannot reopen it.
+    expect(globalThis.location.search).not.toContain("openDialog");
+    expect(globalThis.location.search).toContain("returnTo");
+  });
+
+  it("does not reopen Change Status with the next transition after confirming one", async () => {
+    /* The reported defect. Arriving from "Change Status to Out for Delivery"
+       opened the dialog correctly; confirming it wrote the status, reloaded the
+       list, and then opened the dialog a SECOND time offering "Mark delivered"
+       -- as if a further change had been requested. Nobody asked for it, and on
+       a screen full of money that reads like the first change failed.
+
+       The cause was the deep-link request being rebuilt on every render while
+       the guard meant to retire it (`consumedDeepLink`) was never set, so the
+       effect refired on the reload it had itself caused. */
+    const assigned = {
+      ...order,
+      assignedDriverId: "20000000-0000-4000-8000-000000000001",
+      assignedDriverName: "Driver 2",
+      deliveryStatus: "assigned_to_driver",
+    };
+    // The list reflects the write, exactly as the real reload does -- which is
+    // what made the replayed dialog offer the following status rather than the
+    // same one.
+    let status = "assigned_to_driver";
+    const api = {
+      get: vi.fn((path: string) => {
+        if (path.startsWith("operations/orders?")) {
+          return Promise.resolve({
+            filteredCount: 1,
+            items: [{ ...assigned, deliveryStatus: status }],
+            page: 1,
+            pageSize: 25,
+            totalCount: 1,
+          });
+        }
+        if (path.startsWith("configuration/areas")) {
+          return Promise.resolve({ items: [], page: 1, pageSize: 100, total: 0 });
+        }
+        return Promise.resolve([]);
+      }),
+      patch: vi.fn().mockImplementation(() => {
+        status = "out_for_delivery";
+        return Promise.resolve({});
+      }),
+      post: vi.fn().mockResolvedValue({}),
+    };
+    globalThis.history.replaceState(
+      {},
+      "",
+      `/orders?orderId=${order.id}&suggestedStatus=out_for_delivery&openDialog=change_status`,
+    );
+    renderWithRouter(
+      <OrdersModuleWorkspace
+        api={api as unknown as ApiClient}
+        onNavigate={vi.fn()}
+        permissions={["users_roles.manage"]}
+      />,
+    );
+
+    const dialog = await screen.findByRole("dialog");
+    expect((within(dialog).getByRole("combobox") as HTMLSelectElement).value).toBe(
+      "out_for_delivery",
+    );
+    fireEvent.click(within(dialog).getByRole("button", { name: "Confirm" }));
+
+    await waitFor(() =>
+      expect(api.patch).toHaveBeenCalledWith(
+        `operations/orders/${order.id}/status`,
+        expect.objectContaining({ status: "out_for_delivery" }),
+      ),
+    );
+
+    /* The reload has happened and the row now reads out_for_delivery. Matched
+       against the row's status badge specifically: the phrase also appears as a
+       Delivery Status filter option, which is present from first paint and would
+       make this pass without any reload at all. */
+    await waitFor(() =>
+      expect(
+        within(screen.getByRole("table")).getAllByText("Out for delivery").length,
+      ).toBeGreaterThan(0),
+    );
+    /* ...and no second dialog came with it. Given time to appear first: the
+       replay happens in an effect after the reload commits, so asserting the
+       instant the row text changes can beat the bug to the DOM. */
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    // Only the one transition was ever written.
+    expect(api.patch).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens the existing ReasonDialog for a return deep link", async () => {
+    // Return and Cancel REQUIRE a reason, so they route to ReasonDialog rather
+    // than to the plain status confirmation.
+    const outForDelivery = { ...order, deliveryStatus: "out_for_delivery" };
+    const api = {
+      get: vi.fn((path: string) => {
+        if (path.startsWith("operations/orders?")) {
+          return Promise.resolve({
+            filteredCount: 1,
+            items: [outForDelivery],
+            page: 1,
+            pageSize: 25,
+            totalCount: 1,
+          });
+        }
+        if (path.startsWith("configuration/areas")) {
+          return Promise.resolve({ items: [], page: 1, pageSize: 100, total: 0 });
+        }
+        return Promise.resolve([]);
+      }),
+      patch: vi.fn().mockResolvedValue({}),
+      post: vi.fn().mockResolvedValue({}),
+    };
+    globalThis.history.replaceState(
+      {},
+      "",
+      `/orders?orderId=${order.id}&suggestedStatus=returned_to_branch&openDialog=change_status&returnTo=%2Forders`,
+    );
+    renderWithRouter(
+      <OrdersModuleWorkspace
+        api={api as unknown as ApiClient}
+        onNavigate={vi.fn()}
+        permissions={["users_roles.manage"]}
+      />,
+    );
+
+    const dialog = await screen.findByRole("dialog");
+    // A reason prompt, not the status dropdown.
+    expect(within(dialog).queryByRole("combobox")).toBeNull();
+    // Nothing is written by arriving.
+    expect(api.patch).not.toHaveBeenCalled();
+    expect(globalThis.location.search).not.toContain("openDialog");
+  });
+
+  it("does not force an action the Order is no longer eligible for", async () => {
+    // A delivered Order cannot be returned to branch; the row menu would not
+    // offer it, so the deep link must not either.
+    const delivered = { ...order, deliveryStatus: "delivered" };
+    const api = {
+      get: vi.fn((path: string) => {
+        if (path.startsWith("operations/orders?")) {
+          return Promise.resolve({
+            filteredCount: 1,
+            items: [delivered],
+            page: 1,
+            pageSize: 25,
+            totalCount: 1,
+          });
+        }
+        if (path.startsWith("configuration/areas")) {
+          return Promise.resolve({ items: [], page: 1, pageSize: 100, total: 0 });
+        }
+        return Promise.resolve([]);
+      }),
+      patch: vi.fn().mockResolvedValue({}),
+      post: vi.fn().mockResolvedValue({}),
+    };
+    globalThis.history.replaceState(
+      {},
+      "",
+      `/orders?orderId=${order.id}&suggestedStatus=returned_to_branch&openDialog=change_status`,
+    );
+    renderWithRouter(
+      <OrdersModuleWorkspace
+        api={api as unknown as ApiClient}
+        onNavigate={vi.fn()}
+        permissions={["users_roles.manage"]}
+      />,
+    );
+
+    expect(await screen.findByText(/no longer eligible for this action/i)).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(api.patch).not.toHaveBeenCalled();
   });
 
   it("groups the visible page and selects only within one group", async () => {
@@ -185,7 +427,7 @@ describe("OrdersModuleWorkspace", () => {
         selectedCount: 1,
       }),
     };
-    render(
+    renderWithRouter(
       <OrdersModuleWorkspace
         api={api as unknown as ApiClient}
         onNavigate={vi.fn()}
@@ -211,9 +453,7 @@ describe("OrdersModuleWorkspace", () => {
       ),
     );
 
-    fireEvent.click(
-      screen.getByRole("button", { name: /Hold.*1 visible Orders.*1 selected/ }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: /Hold.*1 visible Orders.*1 selected/ }));
     expect(screen.queryByText("SER-000002")).not.toBeInTheDocument();
     expect(holdGroupSelection).toBeChecked();
 
@@ -243,7 +483,7 @@ describe("OrdersModuleWorkspace", () => {
       }),
       post: vi.fn().mockResolvedValue({}),
     };
-    render(
+    renderWithRouter(
       <OrdersModuleWorkspace
         api={api as unknown as ApiClient}
         onNavigate={vi.fn()}
@@ -298,7 +538,7 @@ describe("OrdersModuleWorkspace", () => {
       }),
       post: vi.fn().mockResolvedValue({}),
     };
-    render(
+    renderWithRouter(
       <OrdersModuleWorkspace
         api={api as unknown as ApiClient}
         onNavigate={vi.fn()}
@@ -406,7 +646,7 @@ describe("CollectMoneyDialog financial formulas", () => {
         return Promise.resolve({});
       }),
     };
-    render(
+    renderWithRouter(
       <OrdersModuleWorkspace
         api={api as unknown as ApiClient}
         onNavigate={vi.fn()}
@@ -455,9 +695,9 @@ describe("CollectMoneyDialog financial formulas", () => {
     expect(dialog.getByText("Amount due to Trader").nextElementSibling?.textContent).toBe(
       aed("175.00"),
     );
-    expect(
-      dialog.getAllByText("Driver-level expenses")[0]?.nextElementSibling?.textContent,
-    ).toBe(aed("0.00"));
+    expect(dialog.getAllByText("Driver-level expenses")[0]?.nextElementSibling?.textContent).toBe(
+      aed("0.00"),
+    );
     expect(dialog.getByText("Net Expected from Driver").nextElementSibling?.textContent).toBe(
       aed("200.00"),
     );

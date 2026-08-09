@@ -219,7 +219,7 @@ export async function seedReconciliationDemo(
       tenant: { companyId, identityId: accountId },
     },
     async () => {
-      const correlationId = `dev-demo-seed:${randomUUID()}`;
+      const correlationId = randomUUID();
 
       // Each step is independently resumable, so a partial run can be completed
       // safely rather than leaving the fixture half-built.
@@ -258,10 +258,17 @@ export async function seedReconciliationDemo(
           correlationId,
         );
         traderId = String((trader as { id: unknown }).id);
+        const areaScope = await sql<{ emirateId: string }>`
+          select emirate_id as "emirateId" from areas
+           where id = ${areaId}::uuid and company_id = ${companyId}::uuid
+        `.execute(database);
+        const emirateId = areaScope.rows[0]?.emirateId;
+        if (emirateId === undefined) throw new Error("Demo Area Emirate was not found");
         await traders.createPricing(
           traderId,
           {
             areaId,
+            emirateId,
             effectiveFrom: new Date().toISOString().slice(0, 10),
             pricingType: "by_area",
             reason: `${demoMarker} fixture pricing`,
@@ -332,6 +339,7 @@ export async function seedReconciliationDemo(
             customerMobileNumber: "971500000103",
             customerName: `${demoMarker} Customer`,
             notes: `${demoMarker} fixture order ${index + 1}`,
+            serialNumber: `DEMO-${companyId.slice(0, 8)}-${index + 1}`,
             traderId,
           } as never,
           correlationId,
@@ -382,6 +390,8 @@ export async function seedReconciliationDemo(
             identityId: driverAccountId,
             kind: "driver",
             permissions: new Set<string>(),
+            profileId: driverId,
+            profileType: "driver",
             sessionId: randomUUID(),
           },
           tenant: { companyId, identityId: driverAccountId },

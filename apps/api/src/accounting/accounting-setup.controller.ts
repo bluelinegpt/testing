@@ -5,7 +5,7 @@ import {
   RequireAnyPermission,
   RequireIdentityKinds,
 } from "../authentication/authentication.decorators.js";
-import {
+import type {
   AccountingActivationDto,
   AccountingActivationPreviewDto,
   AccountingAreaChangeDto,
@@ -14,7 +14,7 @@ import {
   AccountingZeroOpeningDto,
 } from "./accounting-setup.dto.js";
 import { AccountingSetupService } from "./accounting-setup.service.js";
-import { AccountingReasonDto } from "./accounting.dto.js";
+import type { AccountingReasonDto } from "./accounting.dto.js";
 
 @ApiTags("accounting-setup")
 @ApiBearerAuth()

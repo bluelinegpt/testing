@@ -9,7 +9,15 @@ import type { DatabaseSchema } from "../infrastructure/database/database.types.j
 import { KyselyTransactionManager } from "../infrastructure/database/transaction-manager.js";
 import { ApplicationException } from "../presentation/errors/application.exception.js";
 import { IdentityContextAccessor } from "../security/identity-context.js";
+import { BalanceEnforcementCoordinator } from "../accounting/balance-enforcement.coordinator.js";
+import type { BalanceEnforcementResult } from "../accounting/balance-enforcement.coordinator.js";
+import { PaymentFundingAccountService } from "../accounting/payment-funding-account.service.js";
 import { TenantContextAccessor } from "../tenancy/tenant-context.js";
+import { BusinessDayService } from "../company-configuration/business-day.service.js";
+import {
+  type AppliedReportDateMode,
+  ReportDateModeService,
+} from "../company-configuration/report-date-mode.js";
 
 import { CompanyProfileService } from "../company-profile/company-profile.service.js";
 import { DriverCollectionPdfService } from "./driver-collection-pdf.service.js";
@@ -55,7 +63,19 @@ interface EligibleTraderOrder {
   readonly traderPaidServiceFeeFull: string;
 }
 
+/** The authoritative operational timestamp for this screen. */
+const BUSINESS_DATE_COLUMN = "s.confirmed_at";
+
 export interface Page<T> {
+  /**
+   * The Date Mode actually applied, resolved by the backend.
+   *
+   * Optional so existing callers are unaffected; present whenever the screen
+   * asked for a mode. Carries the window, the timezone, the authoritative
+   * timestamp and the two warning flags, so the caption above a total always
+   * describes the predicate that produced it.
+   */
+  readonly appliedDateMode?: AppliedReportDateMode;
   readonly items: readonly T[];
   readonly page: number;
   readonly pageSize: number;
@@ -108,6 +128,8 @@ export interface CreateTraderSettlementResult {
 }
 
 export interface TraderSettlementListRow {
+  /** Company Business Date derived from confirmedAt. Null when unavailable. */
+  readonly confirmationBusinessDate?: string | null;
   readonly confirmedBy: string;
   readonly createdBy: string;
   readonly isReversed: boolean;
@@ -155,6 +177,7 @@ export interface TraderSettlementDetailOrder {
   readonly customerName: string;
   readonly deliveryDate: string | null;
   readonly emirateName: string | null;
+  readonly orderNumber: string;
   readonly orderSettlementStatus: string;
   readonly originalTraderPayable: string;
   readonly previouslyPaid: string;
@@ -261,10 +284,16 @@ export class TraderSettlementService {
     @Inject(KyselyTransactionManager)
     private readonly transactions: KyselyTransactionManager,
     @Inject(TenantContextAccessor) private readonly tenants: TenantContextAccessor,
+    @Inject(PaymentFundingAccountService)
+    private readonly fundingAccounts: PaymentFundingAccountService,
+    @Inject(ReportDateModeService) private readonly reportDateModes: ReportDateModeService,
+    @Inject(BusinessDayService) private readonly businessDays: BusinessDayService,
     @Inject(IdentityContextAccessor) private readonly identities: IdentityContextAccessor,
     @Inject(OperationsHistoryWriter) private readonly history: OperationsHistoryWriter,
     @Inject(CompanyProfileService) private readonly companyProfile: CompanyProfileService,
     @Inject(DriverCollectionPdfService) private readonly pdf: DriverCollectionPdfService,
+    @Inject(BalanceEnforcementCoordinator)
+    private readonly balanceEnforcement: BalanceEnforcementCoordinator,
   ) {}
 
   /**
@@ -527,9 +556,7 @@ export class TraderSettlementService {
       );
       const manualAllocationOverride =
         expectedOldestFirst.size !== submitted.size ||
-        [...expectedOldestFirst].some(
-          ([orderId, amount]) => submitted.get(orderId) !== amount,
-        );
+        [...expectedOldestFirst].some(([orderId, amount]) => submitted.get(orderId) !== amount);
       const skippedOlderOrders = manualAllocationOverride
         ? eligibleBeforePayment
             .filter((order) => expectedOldestFirst.has(order.id) && !submitted.has(order.id))
@@ -630,19 +657,81 @@ export class TraderSettlementService {
           )
         `.execute(transaction);
       }
-      await sql`
+      // A bank transfer names its Bank account and nothing else. Rejecting a
+      // stray cash account rather than ignoring it: silently dropping a field
+      // the caller supplied leaves them believing something untrue, and the
+      // table CHECK would reject the row anyway.
+      if (payment.method !== "cash" && input.cashAccountId !== undefined) {
+        throw new ApplicationException(
+          "payment_funding_account_not_allowed",
+          "A bank transfer settlement is funded from a Bank account, not a Cash account",
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      // Resolved here rather than earlier so an account deactivated mid-flow
+      // fails at the moment of the write. A throw rolls back the settlement,
+      // its order rows and everything else this transaction has done.
+      const cashAccount =
+        payment.method === "cash"
+          ? await this.fundingAccounts.resolve(input.cashAccountId, "cash")
+          : null;
+      // Balance control, on whichever account this settlement actually draws
+      // on. Both methods move Company money out -- a bank transfer is not
+      // exempt just because it is not cash -- so both are checked, each against
+      // its own kind's policy: Cash has no overdraft, Bank may have one.
+      //
+      // Placed after the funding-account validation above and before the
+      // payment insert below. The coordinator locks the account, then reads its
+      // balance behind that lock, then judges, all in this transaction. A throw
+      // here rolls back the settlement header, its order rows and everything
+      // else written so far.
+      const enforcement = await this.balanceEnforcement.evaluate(transaction, {
+        actorId: identity.identityId,
+        actorPermissions: [...identity.permissions],
+        deductions: [
+          cashAccount === null
+            ? { accountId: payment.bankAccountId!, amount: netPayable.toFixed(2), kind: "bank" }
+            : { accountId: cashAccount.accountId, amount: netPayable.toFixed(2), kind: "cash" },
+        ],
+        sourceReference: settlementNumber,
+        sourceType: "trader_settlement",
+        ...(input.balanceOverrideReason === undefined
+          ? {}
+          : { overrideReason: input.balanceOverrideReason }),
+      });
+      if (!enforcement.allowed) this.balanceBlocked(enforcement);
+      const paymentRow = await sql<{ id: string }>`
         insert into trader_settlement_payments (
           company_id, settlement_id, payment_method, amount, company_bank_account_id,
+          company_cash_account_id,
           bank_reference, created_by_account_id, payment_at,
           trader_bank_account_id, trader_bank_account_snapshot
         ) values (
           ${companyId}::uuid, ${settlementId}::uuid, ${payment.method}, ${netPayable.toNumber()},
-          ${payment.bankAccountId}::uuid, ${payment.bankReference},
+          ${payment.bankAccountId}::uuid,
+          -- Null for a bank transfer; the CHECK added by
+          -- 20260805220000 enforces that pairing independently.
+          ${cashAccount?.accountId ?? null}::uuid,
+          ${payment.bankReference},
           ${identity.identityId}::uuid, coalesce(${input.paymentDate ?? null}::date::timestamptz, now()),
           ${beneficiary?.id ?? null}::uuid,
           ${beneficiary === null ? null : JSON.stringify(beneficiary.snapshot)}::jsonb
         )
+        returning id
       `.execute(transaction);
+      // The audit is written only now: the payment row exists and its id is
+      // known. Written before the insert it would survive a rolled-back
+      // settlement as an accusation about money that never moved.
+      if (enforcement.requiresOverrideAudit) {
+        await this.balanceEnforcement.recordOverrides(transaction, {
+          actorId: identity.identityId,
+          overrideReason: input.balanceOverrideReason ?? "",
+          result: enforcement,
+          sourceEntityId: paymentRow.rows[0]!.id,
+          sourceReference: settlementNumber,
+          sourceType: "trader_settlement",
+        });
+      }
       await sql`
         update trader_settlements
            set status = 'confirmed', confirmed_by_account_id = ${identity.identityId}::uuid,
@@ -677,7 +766,9 @@ export class TraderSettlementService {
           category: "financial_change",
           companyId,
           correlationId,
-          eventType: fullyPaid ? "trader_settlement.money_sent" : "trader_settlement.partial_payment",
+          eventType: fullyPaid
+            ? "trader_settlement.money_sent"
+            : "trader_settlement.partial_payment",
           fieldName: "trader_settlement_status",
           newValue: {
             allocatedAmount: this.money(amount).toFixed(2),
@@ -746,6 +837,11 @@ export class TraderSettlementService {
 
       return {
         amount: netPayable.toFixed(2),
+        // Advisory, never blocking: the balance this settlement was judged
+        // against excludes confirmed payments that never recorded which account
+        // funded them.
+        balanceCoverage: enforcement.coverage,
+        balanceCoverageIncomplete: enforcement.balanceCoverageIncomplete,
         orderCount: orders.length,
         paymentMethod: payment.method,
         settlementId,
@@ -754,6 +850,31 @@ export class TraderSettlementService {
         traderName,
       };
     });
+  }
+
+  /**
+   * Reject a settlement the balance policy will not permit.
+   *
+   * Throwing is what guarantees the "no payment, no Event, no Journal, no
+   * audit, no Trader balance change" outcome: this runs inside the settlement
+   * transaction and before the payment insert, so the rollback undoes the
+   * settlement header, its order rows, the reserved settlement number and every
+   * statement taken so far. No Order allocation is touched, because those
+   * updates all come after this point.
+   *
+   * The details are the figures a person needs in order to act -- their own
+   * balance, what they tried to pay, where it would land, and the rule that
+   * stopped it. No account ids, no policy row id, no internals.
+   */
+  private balanceBlocked(enforcement: BalanceEnforcementResult): never {
+    throw new ApplicationException(
+      enforcement.failureCode ?? "balance_would_go_negative",
+      enforcement.failureReason ?? "This settlement is not permitted by the balance policy",
+      HttpStatus.CONFLICT,
+      // Shared formatter. A settlement funds from Cash OR Bank, and the labelled
+      // output says which -- the local copy this replaced could not.
+      this.balanceEnforcement.blockedDetails(enforcement),
+    );
   }
 
   /**
@@ -786,7 +907,14 @@ export class TraderSettlementService {
       );
     }
     const requestHash = createHash("sha256")
-      .update(JSON.stringify({ notes: input.notes?.trim() ?? "", receivedDate: input.receivedDate ?? "", reference: input.reference?.trim() ?? "", settlementId }))
+      .update(
+        JSON.stringify({
+          notes: input.notes?.trim() ?? "",
+          receivedDate: input.receivedDate ?? "",
+          reference: input.reference?.trim() ?? "",
+          settlementId,
+        }),
+      )
       .digest("hex");
 
     return this.transactions.execute(async (transaction) => {
@@ -1183,7 +1311,11 @@ export class TraderSettlementService {
     const direction = query.sortDirection === "asc" ? "asc" : "desc";
     const sortColumn =
       query.sortBy === "settlementNumber" ? "s.settlement_number" : "s.business_date";
-    const filters = this.settlementFilters(companyId, query);
+    // Resolved once per request: one configuration query, boundaries computed
+    // once, and the same object feeds the row query, the count that rides the
+    // same statement, and the caption returned to the caller.
+    const applied = await this.reportDateModes.resolve("trader-settlement-activity", query);
+    const filters = this.settlementFilters(companyId, query, applied);
     const result = await sql<TraderSettlementListRow & { total: number }>`
       select s.id as "settlementId", s.settlement_number as "settlementNumber",
              t.name_en as "traderName", s.business_date::text as "paymentDate",
@@ -1236,7 +1368,24 @@ export class TraderSettlementService {
       ...row,
       status: row.isReversed ? ("reversed" as const) : ("confirmed" as const),
     }));
-    return this.page(items, page, pageSize);
+    // ONE configuration query for the whole page, then pure in-memory
+    // resolution. Calling businessDateOf per row would be an N+1; deriving
+    // the date in SQL would restate the rule in a second language.
+    // The confirmation instant is selected as `moneySentAt` -- the list query
+    // aliases `s.confirmed_at` under that name. Reading a non-existent
+    // `confirmedAt` produced `undefined` on every row, so every Business Date
+    // resolved to null and the column was silently always empty.
+    const businessDates = await this.businessDays.businessDatesFor(
+      items.map((row) => row.moneySentAt),
+    );
+    const enriched = items.map((row) => ({
+      ...row,
+      // Null when no authoritative timestamp exists. Never guessed, and
+      // `== null` so an absent value is treated the same as an explicit one.
+      confirmationBusinessDate:
+        row.moneySentAt == null ? null : (businessDates.get(row.moneySentAt) ?? null),
+    }));
+    return { ...this.page(enriched, page, pageSize), appliedDateMode: applied };
   }
 
   public async summary(query: TraderSettlementSummaryQueryDto): Promise<TraderSettlementSummary> {
@@ -1276,7 +1425,11 @@ export class TraderSettlementService {
        where ${orderFilters}
     `.execute(this.database);
     const filters = this.settlementFilters(companyId, query);
-    const settlementTotals = await sql<{ moneyReceivedAmount: string; moneySentAmount: string; reversedPayments: number }>`
+    const settlementTotals = await sql<{
+      moneyReceivedAmount: string;
+      moneySentAmount: string;
+      reversedPayments: number;
+    }>`
       select
         coalesce(sum(s.net_payable) filter (where s.reversal_of_id is null), 0)::text as "moneySentAmount",
         coalesce(sum(s.net_payable) filter (
@@ -1670,12 +1823,16 @@ export class TraderSettlementService {
         referenceNumber: string | null;
         serialNumber: string;
         serviceFee: string;
+        orderNumber: string;
         totalDeductions: string;
         traderNetPayable: string;
         traderPaidAmount: string;
         vatAmount: string;
       }>`
-        select coalesce(o.serial_number, o.order_number) as "serialNumber",
+        -- Order NUMBER as well as the Serial Number: the Serial is what the
+        -- User reads, the Number is what the Order detail route consumes.
+        select o.order_number as "orderNumber",
+               coalesce(o.serial_number, o.order_number) as "serialNumber",
                o.reference_number as "referenceNumber", o.delivered_at::text as "deliveryDate",
                o.customer_name as "customerName", e.name_en as "emirateName",
                coalesce(o.customer_area_name_snapshot, a.name_en, '') as "areaName",
@@ -1706,11 +1863,10 @@ export class TraderSettlementService {
       emirateName: row.emirateName,
       orderSettlementStatus: row.orderSettlementStatus,
       originalTraderPayable: new Decimal(row.traderNetPayable).toFixed(2),
-      previouslyPaid: new Decimal(row.traderPaidAmount)
-        .minus(row.allocatedAmount)
-        .toFixed(2),
+      previouslyPaid: new Decimal(row.traderPaidAmount).minus(row.allocatedAmount).toFixed(2),
       referenceNumber: row.referenceNumber,
       remainingOutstanding: new Decimal(row.outstandingBalance).toFixed(2),
+      orderNumber: row.orderNumber,
       serialNumber: row.serialNumber,
       serviceFee: new Decimal(row.serviceFee).toFixed(2),
       totalDeductions: new Decimal(row.totalDeductions).toFixed(2),
@@ -1763,13 +1919,33 @@ export class TraderSettlementService {
    * shows. Excludes synthetic reversal-marker rows — a reversal is exposed as
    * a flag on the ORIGINAL settlement, never as a row of its own.
    */
+
+  /**
+   * The Business Date predicate, or a no-op.
+   *
+   * Built by `ReportDateModeService` so this screen cannot develop its own idea
+   * of where a business day begins. Returns a match-everything predicate in
+   * Calendar Date mode, which is why the calendar filters alongside it need no
+   * conditional of their own.
+   */
+  private businessDatePredicate(
+    applied: AppliedReportDateMode | undefined,
+  ): ReturnType<typeof sql> {
+    if (applied === undefined || applied.dateMode !== "business_date") return sql`true`;
+    return this.reportDateModes.predicate(BUSINESS_DATE_COLUMN, applied);
+  }
+
   private settlementFilters(
     companyId: string,
     query: TraderSettlementFilterDto,
+    applied?: AppliedReportDateMode,
   ): ReturnType<typeof sql> {
     return sql`
       s.company_id = ${companyId}::uuid
         and s.reversal_of_id is null
+        -- Business Date mode. Matches everything in every other mode, so the
+        -- existing calendar filters below are completely unaffected.
+        and ${this.businessDatePredicate(applied)}
         and (${query.traderId ?? null}::uuid is null or s.trader_id = ${query.traderId ?? null}::uuid)
         and (${query.settlementNumber ?? null}::text is null
              or s.settlement_number ilike '%' || ${query.settlementNumber ?? null} || '%')
@@ -1904,10 +2080,7 @@ export class TraderSettlementService {
     return result.rows;
   }
 
-  private assertOrdersSettleable(
-    orders: readonly EligibleTraderOrder[],
-    traderId: string,
-  ): void {
+  private assertOrdersSettleable(orders: readonly EligibleTraderOrder[], traderId: string): void {
     if (orders.length === 0) {
       throw new ApplicationException(
         "settlement_allocation_empty",
@@ -1942,7 +2115,11 @@ export class TraderSettlementService {
   private async resolveFinancialPayment(
     database: Kysely<DatabaseSchema>,
     companyId: string,
-    input: { bankAccountId?: string; bankReference?: string; paymentMethod?: "bank_transfer" | "cash" },
+    input: {
+      bankAccountId?: string;
+      bankReference?: string;
+      paymentMethod?: "bank_transfer" | "cash";
+    },
   ): Promise<{
     readonly bankAccountId: string | null;
     readonly bankReference: string | null;
@@ -2080,8 +2257,14 @@ export class TraderSettlementService {
         )
         .sort(),
       amount: new Decimal(input.amount).toFixed(2),
+      // Both funding accounts belong in the fingerprint, not just the Bank one.
+      // cashAccountId was absent: two settlements sent under one key drawing on
+      // two different Cash drawers hashed identically, so the second replayed
+      // the first instead of being rejected as a reused key.
+      balanceOverrideReason: input.balanceOverrideReason?.trim() ?? "",
       bankAccountId: input.bankAccountId ?? "",
       bankReference: input.bankReference?.trim() ?? "",
+      cashAccountId: input.cashAccountId ?? "",
       notes: input.notes?.trim() ?? "",
       paymentDate: input.paymentDate ?? "",
       paymentMethod: input.paymentMethod ?? "cash",

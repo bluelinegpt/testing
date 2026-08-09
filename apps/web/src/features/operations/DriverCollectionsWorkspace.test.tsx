@@ -1,4 +1,21 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import type { ReactElement } from "react";
+import { MemoryRouter } from "react-router-dom";
+
+/**
+ * The workspaces under test now read their list state from the URL via
+ * `useListState` -> `useSearchParams`, which requires a Router in context.
+ *
+ * A real `MemoryRouter` is used rather than mocking the hooks: mocking would
+ * hide the very behaviour the URL-state migration introduced, and these suites
+ * would stop proving that the screens mount at all. The default entry is "/",
+ * which carries no search parameters, so every existing assumption about
+ * starting filters, page and sort is unchanged.
+ */
+function renderWithRouter(ui: ReactElement, initialEntries: readonly string[] = ["/"]) {
+  return render(<MemoryRouter initialEntries={[...initialEntries]}>{ui}</MemoryRouter>);
+}
+
 
 import type { ApiClient } from "../../api/api-client.js";
 import { i18nInstance } from "../../localization/i18n.js";
@@ -92,10 +109,18 @@ function setup(overrides: { readonly getExtra?: (path: string) => unknown } = {}
         return Promise.resolve({
           difference: "0.00",
           driverId: driver.id,
+          driverFeeAllocations: [],
+          driverPayableDeduction: "0.00",
+          eligibleDriverFeeAccrualCount: 0,
           expenseTotal: "0.00",
           grossCollections: "60.00",
           netAmountExpected: "60.00",
+          oldestFirstDriverFeeProposal: [],
           orderCount: 1,
+          remainingDriverFeeOutstanding: "0.00",
+          requestedDriverFeeOffset: "0.00",
+          safeMaximumDriverFeeOffset: "0.00",
+          totalOutstandingDriverFees: "0.00",
           warnings: [],
         });
       }
@@ -109,7 +134,7 @@ function setup(overrides: { readonly getExtra?: (path: string) => unknown } = {}
       return Promise.resolve({});
     }),
   };
-  render(<DriverCollectionsWorkspace api={api as unknown as ApiClient} />);
+  renderWithRouter(<DriverCollectionsWorkspace api={api as unknown as ApiClient} />);
   return { api, getCalls };
 }
 
@@ -205,13 +230,9 @@ describe("DriverCollectionsWorkspace", () => {
   it("opens an Outstanding by Driver drill-down from the Outstanding from Drivers card", async () => {
     setup();
     await screen.findByText("REC-000123");
-    fireEvent.click(
-      screen.getByRole("button", { name: /Outstanding from Drivers/ }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: /Outstanding from Drivers/ }));
     const dialog = within(await screen.findByRole("dialog"));
-    expect(
-      await dialog.findByText("Test Driver — Outsourced"),
-    ).toBeInTheDocument();
+    expect(await dialog.findByText("Test Driver — Outsourced")).toBeInTheDocument();
     expect(dialog.getByText("Test Driver — Outsourced").closest("tr")?.textContent).toContain(
       "60.00",
     );
@@ -230,9 +251,7 @@ describe("DriverCollectionsWorkspace", () => {
           : undefined,
     });
     await screen.findByText("REC-000123");
-    fireEvent.click(
-      screen.getByRole("button", { name: /Outstanding from Drivers/ }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: /Outstanding from Drivers/ }));
     const dialog = within(await screen.findByRole("dialog"));
     await dialog.findByText("No Drivers currently have an outstanding balance.");
     expect(dialog.queryByText("Test Driver — Outsourced")).not.toBeInTheDocument();
@@ -379,10 +398,9 @@ describe("DriverCollectionsWorkspace", () => {
       expect(confirmButton).toBeEnabled();
       fireEvent.click(confirmButton);
       await waitFor(() =>
-        expect(api.post).toHaveBeenCalledWith(
-          "operations/cash/reconciliations/rec-1/reverse",
-          { reason: "Wrong Driver selected" },
-        ),
+        expect(api.post).toHaveBeenCalledWith("operations/cash/reconciliations/rec-1/reverse", {
+          reason: "Wrong Driver selected",
+        }),
       );
     });
 
@@ -397,5 +415,86 @@ describe("DriverCollectionsWorkspace", () => {
       fireEvent.click(screen.getByRole("button", { name: "Confirm Reversal" }));
       await waitFor(() => expect(api.get.mock.calls.length).toBeGreaterThan(callsBefore));
     });
+  });
+});
+
+/**
+ * Driver Collection deep link.
+ *
+ * A smart next action from the Orders list can ask this screen to open New
+ * Collection with the Driver and the originating Order already carried in.
+ * Nothing here may create a collection: the cases that matter are that the
+ * dialog opens preselected, that a stale Order is reported rather than forced,
+ * and that arriving writes nothing.
+ */
+describe("collect_money deep link", () => {
+  const visit = (search: string) => {
+    globalThis.history.replaceState({}, "", `/drivers${search}`);
+  };
+
+  afterEach(() => {
+    globalThis.history.replaceState({}, "", "/drivers");
+  });
+
+  it("opens New Collection with the Driver and originating Order preselected", async () => {
+    visit("?driverId=drv-1&orderId=order-1&orderNumber=ORD-1&openDialog=collect_money&returnTo=%2Forders");
+    const { api } = setup();
+
+    const dialog = await screen.findByRole("dialog");
+    // The Driver resolved from the Company-scoped list this dialog loads.
+    await waitFor(() => {
+      expect(within(dialog).getByText(/Test Driver/i)).toBeInTheDocument();
+    });
+    // The originating Order is checked, with its authoritative amount shown.
+    await waitFor(() => {
+      const checked = within(dialog)
+        .getAllByRole("checkbox")
+        .filter((box) => (box as HTMLInputElement).checked);
+      expect(checked.length).toBeGreaterThan(0);
+    });
+    expect(within(dialog).getByText(/ORD-1/)).toBeInTheDocument();
+    // Opening writes nothing.
+    expect(
+      (api.post as unknown as { mock: { calls: unknown[][] } }).mock.calls.filter((call) =>
+        String(call[0]).includes("reconciliations") && !String(call[0]).includes("preview"),
+      ),
+    ).toHaveLength(0);
+    // The instruction is consumed, so a refresh cannot reopen it.
+    expect(globalThis.location.search).not.toContain("openDialog");
+    expect(globalThis.location.search).toContain("driverId=drv-1");
+  });
+
+  it("reports an originating Order that is no longer eligible rather than forcing it", async () => {
+    visit("?driverId=drv-1&orderId=order-gone&openDialog=collect_money");
+    setup();
+    expect(
+      await screen.findByText(/no longer eligible for Driver collection/i),
+    ).toBeInTheDocument();
+  });
+
+  it("does not open the dialog without a Driver", async () => {
+    // Nothing to preselect: a New Collection with no Driver reads as lost
+    // context rather than as absent context.
+    visit("?orderId=order-1&openDialog=collect_money");
+    setup();
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+  });
+
+  it("ignores a dialog request this screen does not own", async () => {
+    visit("?traderId=trader-1&openDialog=new_settlement");
+    setup();
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+    expect(globalThis.location.search).not.toContain("openDialog");
+  });
+
+  it("discards an off-origin returnTo", async () => {
+    visit("?driverId=drv-1&openDialog=collect_money&returnTo=https%3A%2F%2Fevil.test");
+    setup();
+    await screen.findByRole("dialog");
+    expect(document.body.innerHTML).not.toContain("evil.test");
   });
 });

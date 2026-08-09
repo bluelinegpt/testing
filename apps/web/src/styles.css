@@ -98,6 +98,66 @@
   min-width: 0;
 }
 
+/* TWO sidebars compete for this row: the Company shell navigation sits outside
+   this grid, and the Accounting section navigation is its first column. Below
+   roughly 1100px the pair leaves the content column near 26rem, which is where
+   the Dashboard's summary cards and the Movement Activity explanation start to
+   feel cramped.
+   The section navigation therefore stacks ABOVE the content rather than beside
+   it. Nothing is added, removed or reordered — the same elements appear in the
+   same sequence, wrapped instead of columned — so the navigation structure is
+   unchanged and the existing 720px rules below still apply on small screens. */
+@media (max-width: 1100px) {
+  .accounting-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .accounting-internal-navigation {
+    max-height: none;
+    position: static;
+  }
+}
+
+/* Focus mode: a single record, editor or report fills the full width with the
+   internal Accounting navigation hidden, so wide financial tables stay
+   readable. Back restores the normal two-column layout. */
+.accounting-workspace-focused {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.accounting-inline-notice {
+  align-items: center;
+  background: var(--warning-subtle, #fff7ed);
+  border: 1px solid var(--warning-border, #fed7aa);
+  border-radius: 0.6rem;
+  color: var(--text-primary, #1f2937);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  justify-content: space-between;
+  margin-bottom: 0.9rem;
+  padding: 0.75rem 1rem;
+}
+
+.accounting-menu-toggle {
+  align-items: center;
+  background: var(--surface-color, #fff);
+  border: 1px solid var(--border-color, #d9e0ec);
+  border-radius: 0.55rem;
+  color: var(--text-secondary, #526176);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 0.8rem;
+  gap: 0.4rem;
+  margin-bottom: 0.75rem;
+  padding: 0.4rem 0.7rem;
+}
+
+.accounting-menu-toggle:hover {
+  background: var(--primary-subtle, #eef2ff);
+  color: var(--primary-color, #334fc2);
+}
+
 .accounting-internal-navigation {
   align-self: start;
   background: var(--surface-color, #fff);
@@ -137,15 +197,32 @@
   text-decoration: none;
 }
 
-.accounting-internal-navigation a:hover,
 .accounting-internal-navigation a.active {
   background: var(--primary-subtle, #eef2ff);
-  color: var(--primary-color, #334fc2);
   font-weight: 600;
+}
+
+/* Hover changes the background only. Recolouring the text as well made every
+   item flicker to a different ink as the pointer crossed the list. */
+.accounting-internal-navigation a.active {
+  color: var(--primary-color, #334fc2);
 }
 
 .accounting-content {
   min-width: 0;
+}
+
+/* Explanatory notices carry long sentences with unbreakable tokens such as
+   "Cash/Bank Movements". A grid or flex child defaults to min-width:auto, so
+   one of those tokens can push the box wider than its column and the sentence
+   is cut off rather than wrapped — which is exactly how the Movement Activity
+   explanation was being clipped. Allowing a break inside such a token, and
+   letting the box shrink, keeps the whole sentence readable at any width. */
+.accounting-page .alert,
+.accounting-page .accounting-summary-card,
+.accounting-page .accounting-dashboard-panel {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .accounting-setup-summary {
@@ -237,7 +314,7 @@
 .accounting-action-list {
   display: grid;
   gap: 0.55rem;
-  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(15rem, 100%), 1fr));
 }
 
 .accounting-action-list > button {
@@ -275,7 +352,7 @@
 .accounting-status-strip {
   display: grid;
   gap: 0.75rem;
-  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(10rem, 100%), 1fr));
 }
 
 .accounting-status-strip article,
@@ -314,7 +391,11 @@
 .accounting-summary-grid {
   display: grid;
   gap: 1rem;
-  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  /* 15rem tracks needed 752px for a third column, but the Accounting content
+     area is only ~655px wide at a 1280px viewport, so six metrics fell into a
+     2-wide, 3-tall stack. 12rem fits three across there and still collapses to
+     one column on mobile. */
+  grid-template-columns: repeat(auto-fit, minmax(min(12rem, 100%), 1fr));
 }
 
 .accounting-dashboard-panel,
@@ -422,6 +503,67 @@
   background: var(--primary-subtle, #f3f5ff);
 }
 
+/* The reference in the first column is the row's affordance: it reads as the
+   link even though the whole row is clickable. */
+.accounting-clickable-row td:first-child .accounting-code {
+  color: var(--primary-color, #334fc2);
+  font-weight: 600;
+}
+
+.accounting-clickable-row:hover td:first-child .accounting-code {
+  text-decoration: underline;
+}
+
+/* Status must never truncate, and a long Payee should wrap at most to a
+   second line rather than stretching the table past the viewport. */
+.accounting-table td .status-badge {
+  white-space: nowrap;
+}
+
+.accounting-table td {
+  overflow-wrap: anywhere;
+}
+
+.accounting-preview-panel {
+  background: var(--surface-color, #fff);
+  border: 1px solid var(--border-color, #d9e0ec);
+  border-radius: 0.75rem;
+  margin: 1rem 0;
+  padding: 1rem 1.25rem;
+}
+
+.accounting-preview-panel h3 {
+  margin: 0 0 0.25rem;
+}
+
+.accounting-preview-note {
+  color: var(--text-secondary, #6b7280);
+  font-size: 0.85rem;
+  margin: 0 0 0.75rem;
+}
+
+.accounting-preview-totals {
+  margin-top: 0.75rem;
+}
+
+.accounting-technical-details {
+  border-top: 1px solid var(--border-color, #e5e7eb);
+  margin-top: 1rem;
+  padding-top: 0.5rem;
+}
+
+.accounting-technical-details summary {
+  color: var(--text-secondary, #6b7280);
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.accounting-pending-amount {
+  color: var(--text-secondary, #6b7280);
+  font-style: italic;
+  white-space: nowrap;
+}
+
 .accounting-code {
   direction: ltr;
   unicode-bidi: isolate;
@@ -451,6 +593,24 @@
   padding: 1rem;
 }
 
+.accounting-form-sections {
+  display: grid;
+  gap: 1rem;
+}
+
+.accounting-form-section {
+  border: 1px solid var(--border-color, #cfd7e6);
+  border-radius: 0.9rem;
+  margin: 0;
+  padding: 1rem;
+}
+
+.accounting-form-section legend {
+  color: var(--text-color, #172033);
+  font-weight: 700;
+  padding: 0 0.45rem;
+}
+
 .accounting-form-grid {
   display: grid;
   gap: 1rem;
@@ -463,6 +623,30 @@
   min-width: 0;
 }
 
+.accounting-field-label-row {
+  align-items: center;
+  color: var(--text-color, #172033);
+  display: flex;
+  gap: 0.2rem;
+  font-weight: 600;
+}
+
+.accounting-field-required {
+  color: var(--danger-color, #9f2d2d);
+}
+
+.accounting-field-helper,
+.accounting-account-status {
+  color: var(--text-secondary, #667085);
+  font-size: 0.85rem;
+  line-height: 1.35;
+}
+
+.accounting-account-selector {
+  display: grid;
+  gap: 0.35rem;
+}
+
 .accounting-form-grid input,
 .accounting-form-grid select,
 .accounting-form-grid textarea {
@@ -471,6 +655,27 @@
   min-height: 2.75rem;
   padding: 0.6rem 0.75rem;
   width: 100%;
+}
+
+/* A select with a trailing action beside it (e.g. "+ Add Category"). The
+   select keeps filling the row; the button sizes to its label and never
+   wraps under it, so "Category [dropdown] [+ Add Category]" stays one line
+   down to fairly narrow widths. */
+.accounting-field-with-action {
+  align-items: center;
+  display: flex;
+  gap: 0.5rem;
+}
+.accounting-field-with-action select {
+  flex: 1;
+  min-width: 0;
+}
+.accounting-field-trailing-action {
+  flex-shrink: 0;
+  font-size: 0.85rem;
+  min-height: 2.75rem;
+  padding-inline: 0.75rem;
+  white-space: nowrap;
 }
 
 .accounting-form-grid textarea {
@@ -487,10 +692,19 @@
   margin-top: 1rem;
 }
 
+.accounting-form-actions-sticky {
+  background: var(--surface-color, #fff);
+  border-top: 1px solid var(--border-color, #cfd7e6);
+  bottom: 0;
+  padding-top: 1rem;
+  position: sticky;
+  z-index: 2;
+}
+
 .accounting-detail-grid {
   display: grid;
   gap: 0;
-  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(14rem, 100%), 1fr));
   margin: 0;
   overflow-x: hidden;
   overflow-y: auto;
@@ -636,7 +850,12 @@
   border: 1px solid var(--border-color);
   border-radius: var(--radius-xl);
   box-shadow: var(--shadow-sm);
-  overflow: hidden;
+  /* `clip` rather than `hidden`: both clip the rounded corners identically,
+     but `hidden` makes this element a SCROLL CONTAINER, which becomes the
+     scrollport for any sticky descendant. That is what stopped the sticky
+     horizontal scrollbar from pinning to the visible area -- it was sticking
+     inside a box that never scrolls. `clip` clips without creating one. */
+  overflow: clip;
 }
 .orders-quick-views {
   display: flex;
@@ -702,9 +921,20 @@
   max-width: none;
 }
 .filter-area .search-combobox,
-.filter-area .search-combobox > input {
+.filter-area .search-combobox > input,
+.filter-combobox-field .search-combobox,
+.filter-combobox-field .search-combobox > input {
   width: 100%;
   box-sizing: border-box;
+}
+/* Matches the height and framing of the <select> controls beside it, so the
+   Trader and Driver filters do not read as a different kind of control. */
+.filter-combobox-field .search-combobox > input {
+  min-height: 38px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--surface-color);
+  padding-inline: 8px;
 }
 .filter-area input {
   min-height: 38px;
@@ -777,6 +1007,15 @@
 .orders-table-scroll {
   overflow-x: auto;
   background: var(--surface-color);
+  /* The native bar is HIDDEN, not disabled: the element still scrolls, and the
+     sticky proxy below drives it. Showing both produced two gray tracks a few
+     pixels apart, which is worse than the problem the proxy solved. */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.orders-table-scroll::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }
 .orders-table {
   min-width: 1280px;
@@ -2008,6 +2247,27 @@ td:last-child {
 .modal-wide {
   width: min(1120px, calc(100vw - 48px));
 }
+
+/* Trader Account Statement and other wide financial dialogs.
+
+   This class was already requested in the markup but had NO rule, so the
+   dialog silently fell back to the 720px base width - which cut off the
+   Transaction Type filter and forced the summary cards into three cramped
+   columns. It now uses nearly the whole viewport, matching the
+   .fast-entry-modal precedent. */
+.modal-extra-wide {
+  width: min(1600px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+}
+
+/* Narrow screens: use the full viewport rather than leaving a margin that
+   squeezes the content further. */
+@media (max-width: 900px) {
+  .modal-extra-wide {
+    width: calc(100vw - 16px);
+    max-height: calc(100vh - 16px);
+  }
+}
 .fast-entry-modal {
   justify-self: center;
   align-self: center;
@@ -2085,6 +2345,20 @@ td:last-child {
 .permission-list small {
   margin-top: 1px;
   color: #6a7c82;
+}
+.role-assignment-option {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+.role-assignment-option strong {
+  font-size: 14px;
+  color: var(--color-text, #172033);
+}
+.role-assignment-option small {
+  color: var(--color-text-muted, #6a7c82);
+  overflow-wrap: anywhere;
 }
 .selection-list {
   max-height: 300px;
@@ -2657,14 +2931,15 @@ tr.row-highlighted {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  color: var(--text-color);
 }
 .financial-status-label {
-  color: var(--text-muted);
+  color: inherit;
   font-size: 12px;
   font-weight: 600;
 }
 .financial-status-cell [data-trader-settlement-status] {
-  color: var(--text-muted);
+  color: inherit;
   font-size: 12px;
 }
 
@@ -2781,6 +3056,34 @@ tr.row-highlighted {
   overflow-x: auto;
 }
 
+/* Totals under the eligible-Orders list. Sits outside the horizontal scroller
+   so it stays readable when the table itself is scrolled sideways. */
+.eligible-orders-totals {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px 20px;
+  padding: 8px 4px 0;
+  font-size: 0.92rem;
+  color: var(--text-muted);
+}
+.eligible-orders-totals strong {
+  margin-inline-start: 6px;
+  color: var(--text-color);
+  font-variant-numeric: tabular-nums;
+}
+.eligible-orders-selected {
+  color: var(--text-color);
+  font-weight: 600;
+}
+
+/* The blocking consequence of an unconfirmed override, kept on its own line so
+   it is not lost at the tail of the warning paragraph. */
+.override-required {
+  display: block;
+  margin-top: 4px;
+}
+
 .dashboard-summary-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2890,7 +3193,10 @@ tr.row-highlighted {
   color: var(--text-secondary);
   background: var(--surface-subtle);
   border: 1px solid transparent;
-  transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease;
+  transition:
+    background-color 150ms ease,
+    border-color 150ms ease,
+    color 150ms ease;
 }
 
 .close-button:hover {
@@ -3068,6 +3374,22 @@ tr.row-highlighted {
   position: static;
   background: var(--surface-color);
   z-index: 1;
+}
+
+.driver-fee-detail-modal {
+  max-width: min(1180px, calc(100vw - 48px));
+}
+
+.driver-fee-detail-modal .detail-grid {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.driver-fee-detail-modal .table-scroll-x {
+  margin-block: 12px;
+}
+
+.driver-fee-detail-modal table {
+  min-width: 920px;
 }
 
 .search-combobox {
@@ -3725,6 +4047,17 @@ tr.row-highlighted {
 
 .page-heading-copy {
   min-width: 0;
+  /* `min-width: 0` alone let this block shrink below its own text: inside a
+     655px header it settled at 187px, wrapping "Opening Balances" onto two
+     lines while ~280px of the header sat empty. Growing into the free space
+     keeps the title on one line wherever it fits. */
+  flex: 1 1 auto;
+}
+
+.heading-actions {
+  /* Actions size to their buttons and stay side by side; the copy block above
+     absorbs the slack instead. They still wrap on their own at narrow widths. */
+  flex-shrink: 0;
 }
 
 .page-description {
@@ -4051,6 +4384,27 @@ tr.row-highlighted {
   display: grid;
   gap: 14px;
   margin-top: 8px;
+}
+/*
+ * The input and its show/hide button, styled explicitly.
+ *
+ * This class was used in the markup with no matching rule at all, so its
+ * layout was left entirely to each browser's own default handling of a
+ * `width: 100%` input inside a plain, unstyled inline `<span>` — a case
+ * browser engines are known to size differently, which is exactly the kind of
+ * thing that renders one way in one browser and another way in a different
+ * one. Declaring it explicitly, as a flex row, removes that ambiguity: the
+ * input takes the remaining space and the button keeps its own size in every
+ * browser, the same way `.input-with-action` already does elsewhere.
+ */
+.password-input-wrap {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+.password-input-wrap input {
+  flex: 1;
+  min-width: 0;
 }
 .password-visibility {
   display: inline-flex;
@@ -5089,7 +5443,11 @@ tr.row-highlighted {
   font-size: 34px;
   font-weight: 700;
   color: #fff;
-  background: linear-gradient(135deg, var(--shell-accent, #2563eb), var(--shell-accent-violet, #7c3aed));
+  background: linear-gradient(
+    135deg,
+    var(--shell-accent, #2563eb),
+    var(--shell-accent-violet, #7c3aed)
+  );
 }
 .company-logo-controls {
   display: grid;
@@ -5307,32 +5665,32 @@ tr.row-highlighted {
 .driver-fees-workspace .detail-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: .75rem;
+  gap: 0.75rem;
 }
 
 .driver-fees-workspace .detail-grid > div {
   border: 1px solid var(--border-color);
-  border-radius: .5rem;
-  padding: .65rem;
+  border-radius: 0.5rem;
+  padding: 0.65rem;
 }
 
 .driver-fees-workspace .detail-grid dt {
   color: var(--text-muted);
-  font-size: .78rem;
+  font-size: 0.78rem;
 }
 
 .driver-fees-workspace .detail-grid dd {
-  margin: .25rem 0 0;
+  margin: 0.25rem 0 0;
   overflow-wrap: anywhere;
 }
 
 .data-preview {
   background: #f7f8fb;
   border: 1px solid var(--border-color);
-  border-radius: .5rem;
+  border-radius: 0.5rem;
   max-height: 18rem;
   overflow: auto;
-  padding: .75rem;
+  padding: 0.75rem;
   white-space: pre-wrap;
 }
 
@@ -5507,7 +5865,7 @@ tr.row-highlighted {
 
 .accounting-report-card span {
   color: var(--text-muted, #667085);
-  font-size: .9rem;
+  font-size: 0.9rem;
 }
 
 .accounting-report-filters,
@@ -5810,7 +6168,10 @@ tr.row-highlighted {
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
   color: var(--text-primary);
-  transition: border-color 150ms ease, box-shadow 150ms ease, background-color 150ms ease;
+  transition:
+    border-color 150ms ease,
+    box-shadow 150ms ease,
+    background-color 150ms ease;
 }
 
 .company-content input:focus,
@@ -5823,6 +6184,26 @@ tr.row-highlighted {
   border-color: color-mix(in srgb, var(--primary-color) 62%, var(--border-color));
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary-color) 16%, transparent);
   outline: none;
+}
+
+/* Keyboard focus must stay VISIBLE wherever the rule above applies.
+   That rule replaces the global `:focus-visible` outline with a 16%-opacity
+   ring and `outline: none`, which measured fully transparent on the Sign in
+   form — a keyboard user got no focus indicator at all. The same rule also
+   covers `.company-content` and `.modal`, so the authenticated pages and every
+   dialog had the identical defect; a focused textarea inside the New Batch
+   dialog computed `outline-style: none` with only the faint ring behind it.
+   Restoring a real outline for keyboard focus only (`:focus-visible`, so a
+   mouse click still gets the quiet treatment). */
+.public-shell .login-form input:focus-visible,
+.company-content input:focus-visible,
+.company-content select:focus-visible,
+.company-content textarea:focus-visible,
+.modal input:focus-visible,
+.modal select:focus-visible,
+.modal textarea:focus-visible {
+  outline: 3px solid var(--primary-color);
+  outline-offset: 2px;
 }
 
 .company-content input::placeholder,
@@ -5914,8 +6295,16 @@ tr.row-highlighted {
 
 .login-main {
   background:
-    radial-gradient(circle at 18% 16%, color-mix(in srgb, var(--primary-color) 18%, transparent), transparent 30%),
-    radial-gradient(circle at 88% 12%, color-mix(in srgb, var(--primary-strong) 14%, transparent), transparent 24%),
+    radial-gradient(
+      circle at 18% 16%,
+      color-mix(in srgb, var(--primary-color) 18%, transparent),
+      transparent 30%
+    ),
+    radial-gradient(
+      circle at 88% 12%,
+      color-mix(in srgb, var(--primary-strong) 14%, transparent),
+      transparent 24%
+    ),
     var(--app-bg);
 }
 
@@ -5999,6 +6388,16 @@ tr.row-highlighted {
 :root[data-theme="dark"] .modal .form-section-heading h3,
 :root[data-theme="dark"] .modal .modal-subtitle,
 :root[data-theme="dark"] .modal .quote-loading,
+/* The public shell (Sign in, password change, tracking) was missing from the
+   dark-mode readability set above: its `.field` labels inherited the light
+   theme's #344a52 on the dark #151f34 surface, which measures 1.76:1 —
+   unreadable, and far below the 4.5:1 minimum. Scoped to the public shell in
+   dark mode only, so no authenticated page changes. */
+:root[data-theme="dark"] .public-shell label,
+:root[data-theme="dark"] .public-shell legend,
+:root[data-theme="dark"] .public-shell .field,
+:root[data-theme="dark"] .public-shell .field-hint,
+:root[data-theme="dark"] .public-shell .form-hint,
 :root[data-theme="dark"] .order-totals small,
 :root[data-theme="dark"] .fast-entry-add-count,
 :root[data-theme="dark"] .fast-entry-row-created,
@@ -6095,4 +6494,2889 @@ tr.row-highlighted {
 
 :root[data-theme="dark"] .metric-card span {
   color: #475569;
+}
+
+.communication-heading,
+.communication-search,
+.communication-empty,
+.communication-thread,
+.status-badge {
+  display: flex;
+  gap: 1rem;
+}
+.communication-heading {
+  align-items: center;
+  justify-content: space-between;
+}
+.communication-layout {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: minmax(15rem, 1fr) minmax(20rem, 2fr) minmax(15rem, 1fr);
+  margin-top: 1rem;
+}
+.communication-panel {
+  border: 1px solid var(--border-color, #dbe3ef);
+  border-radius: 0.75rem;
+  min-height: 28rem;
+  padding: 1rem;
+}
+.communication-search {
+  align-items: center;
+  flex-wrap: wrap;
+}
+.communication-search input {
+  width: 100%;
+}
+.communication-empty,
+.communication-thread {
+  align-items: center;
+  flex-direction: column;
+  justify-content: center;
+  text-align: center;
+}
+.status-badge {
+  align-items: center;
+}
+.status-badge svg {
+  height: 1rem;
+  width: 1rem;
+}
+@media (max-width: 900px) {
+  .communication-layout {
+    grid-template-columns: 1fr;
+  }
+  .communication-panel {
+    min-height: 12rem;
+  }
+}
+
+/* Expense Payment workflow: business-first Record Payment form, searchable
+   Expense selector, allocation summary, quick filters and pagination. */
+.accounting-payment-workflow {
+  display: grid;
+  gap: 1rem;
+}
+
+.accounting-payment-selection-header {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  justify-content: space-between;
+}
+
+.accounting-payment-search {
+  display: grid;
+  gap: 0.35rem;
+  margin-bottom: 0.75rem;
+}
+
+.accounting-payment-search input {
+  border: 1px solid var(--border-color, #cfd7e6);
+  border-radius: 0.55rem;
+  min-height: 2.6rem;
+  padding: 0.55rem 0.7rem;
+  width: 100%;
+}
+
+.accounting-option-list {
+  display: grid;
+  gap: 0.4rem;
+  list-style: none;
+  margin: 0;
+  max-height: 22rem;
+  overflow-y: auto;
+  padding: 0;
+}
+
+.accounting-option-list button {
+  background: var(--surface-color, #fff);
+  border: 1px solid var(--border-color, #d9e0ec);
+  border-radius: 0.6rem;
+  color: var(--text-primary, #1f2937);
+  cursor: pointer;
+  display: grid;
+  gap: 0.2rem;
+  padding: 0.6rem 0.8rem;
+  text-align: start;
+  width: 100%;
+}
+
+.accounting-option-list button:hover,
+.accounting-option-list button:focus-visible {
+  border-color: var(--accent-color, #2563eb);
+}
+
+.accounting-option-list small {
+  color: var(--text-secondary, #6b7280);
+}
+
+.accounting-allocation-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(11rem, 100%), 1fr));
+}
+
+.accounting-quick-filters,
+.accounting-pagination {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.accounting-pagination {
+  justify-content: flex-end;
+  margin-top: 0.75rem;
+}
+
+.accounting-pagination label {
+  align-items: center;
+  display: flex;
+  gap: 0.4rem;
+}
+
+.accounting-related-records h3 {
+  margin-bottom: 0.5rem;
+}
+
+/* Codes, amounts, dates and references stay LTR-readable inside an RTL page. */
+[dir="rtl"] .accounting-option-list button {
+  text-align: right;
+}
+
+@media (max-width: 720px) {
+  .accounting-payment-workflow .accounting-form-grid {
+    grid-template-columns: 1fr;
+  }
+  .accounting-pagination {
+    justify-content: flex-start;
+  }
+}
+
+/* The Expense Payment primary columns fit the viewport on desktop, so the
+   list does not scroll sideways for its main information. */
+.accounting-payments-table .accounting-table {
+  min-width: 0;
+}
+
+@media (max-width: 900px) {
+  .accounting-payments-table .accounting-table {
+    min-width: 44rem;
+  }
+}
+
+/* New Collection modal: the form owns the vertical scroll region while the
+   Cancel/Confirm footer stays pinned. Without this the modal's fixed height
+   plus `overflow: hidden` clipped the later steps with no way to reach them. */
+.order-modal-actions {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 14px 22px;
+  border-top: 1px solid var(--border-color, #d9e0ec);
+  background: var(--surface-color, #fff);
+}
+
+/* Always-visible scrollbars on the modal's scroll regions, so it is obvious
+   there is more content below and to the right rather than looking cut off. */
+.order-modal-scroll,
+.order-modal-scroll .table-scroll-x {
+  scrollbar-color: #94a3b8 var(--surface-subtle, #eef2f6);
+  scrollbar-gutter: stable;
+  scrollbar-width: auto;
+}
+.order-modal-scroll::-webkit-scrollbar,
+.order-modal-scroll .table-scroll-x::-webkit-scrollbar {
+  height: 12px;
+  width: 12px;
+}
+.order-modal-scroll::-webkit-scrollbar-track,
+.order-modal-scroll .table-scroll-x::-webkit-scrollbar-track {
+  background: var(--surface-subtle, #eef2f6);
+  border-radius: 8px;
+}
+.order-modal-scroll::-webkit-scrollbar-thumb,
+.order-modal-scroll .table-scroll-x::-webkit-scrollbar-thumb {
+  background: #94a3b8;
+  border: 3px solid var(--surface-subtle, #eef2f6);
+  border-radius: 8px;
+}
+.order-modal-scroll::-webkit-scrollbar-thumb:hover,
+.order-modal-scroll .table-scroll-x::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
+}
+
+/* The eligible-orders table keeps its natural column widths and scrolls
+   sideways instead of squeezing "Cash Status" off the edge. */
+.order-modal-scroll .table-scroll-x > table {
+  min-width: 60rem;
+}
+
+/* ── Accounting readability standard ─────────────────────────────────────────
+   Accounting screens were rendering business values in pale gray that is hard
+   to read. Contrast is raised by overriding the shared text TOKENS within the
+   Accounting surfaces rather than hardcoding colours on individual rules, so
+   every existing `var(--text-secondary)` / `var(--text-muted)` reference gains
+   contrast at once and dark mode continues to work.                          */
+.accounting-workspace,
+.accounting-page {
+  /* Light mode: near-black primary, dark-gray secondary, readable muted. */
+  --text-secondary: #3f4a5c;
+  --text-muted: #55617a;
+}
+
+/* Values a user reads to make a financial decision are primary text. */
+.accounting-page .accounting-table tbody td,
+.accounting-page .accounting-detail-grid dd,
+.accounting-page .accounting-summary-card strong,
+.accounting-page .accounting-preview-totals dd,
+.accounting-page .data-table tbody td {
+  color: var(--text-primary);
+}
+
+/* Labels stay clearly legible rather than fading into the surface. */
+.accounting-page .accounting-detail-grid dt,
+.accounting-page .accounting-field-label-row,
+.accounting-page .accounting-filter-bar label,
+.accounting-page .accounting-summary-card span,
+.accounting-page .accounting-table thead th,
+.accounting-page legend {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+/* Helper and hint text: dark gray, never pale. */
+.accounting-page .accounting-field-helper,
+.accounting-page .accounting-preview-note,
+.accounting-page .field-hint {
+  color: var(--text-muted);
+}
+
+/* Left navigation must be readable, and the active item unmistakable. */
+.accounting-internal-navigation a {
+  color: var(--text-secondary);
+}
+/* Keyboard focus still recolours — that is a state worth signalling. Hover is
+   deliberately absent here. */
+.accounting-internal-navigation a:focus-visible {
+  color: var(--text-primary);
+}
+.accounting-internal-navigation a.active {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+/* Disabled controls stay distinguishable but still readable — not ghosted. */
+.accounting-page button:disabled,
+.accounting-page input:disabled,
+.accounting-page select:disabled {
+  color: var(--text-muted);
+  opacity: 0.85;
+}
+
+/* Dark mode: high-contrast light text, avoiding low-contrast blue-gray. */
+:root[data-theme="dark"] .accounting-workspace,
+:root[data-theme="dark"] .accounting-page {
+  --text-secondary: #d7deef;
+  --text-muted: #b3bed4;
+}
+
+/* Journal totals. The markup was a bare span + strong with no styling, so the
+   label and amount ran together as "Total DebitAED 1,000.00". These are cards
+   with the label above the value. */
+.manual-journal-totals {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fit, minmax(min(11rem, 100%), 1fr));
+  margin: 1rem 0;
+}
+.manual-journal-total-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--border-color, #d9e0ec);
+  border-radius: 0.7rem;
+  background: var(--surface-color, #fff);
+}
+.manual-journal-total-card span {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.manual-journal-total-card strong {
+  color: var(--text-primary);
+  font-size: 1.1rem;
+  /* Amounts stay LTR-readable inside an RTL page. */
+  direction: ltr;
+  unicode-bidi: isolate;
+  text-align: start;
+}
+.manual-journal-balanced {
+  color: var(--success-strong, #15803d);
+}
+.manual-journal-unbalanced {
+  color: var(--danger-strong, #b91c1c);
+}
+
+/* Subledger business label in a Journal line: reference and party read as one
+   unit, with the reference kept LTR. */
+.accounting-subledger-label {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35rem;
+}
+
+/* Related Records: a business reference that navigates, styled as a link
+   rather than a button so it reads as a reference, not an action. */
+.accounting-related-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent-color, #2563eb);
+  cursor: pointer;
+  font: inherit;
+  text-align: start;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.accounting-related-link:hover,
+.accounting-related-link:focus-visible {
+  color: var(--accent-strong, #1d4ed8);
+}
+
+/* Accounting list controls: pagination footer, sortable headers, filter
+   summary. Logical properties throughout, so RTL flips without a second rule
+   set, while codes and amounts keep their own LTR handling. */
+.accounting-pagination {
+  align-items: center;
+  border-top: 1px solid var(--border-color, #d9e0ec);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  justify-content: space-between;
+  margin-block-start: 0.75rem;
+  padding-block-start: 0.75rem;
+}
+.accounting-pagination-range {
+  color: var(--text-secondary, #667085);
+}
+.accounting-pagination-size {
+  align-items: center;
+  display: flex;
+  gap: 0.5rem;
+}
+.accounting-pagination-buttons {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+/* A real <button> in the header cell, so sorting is keyboard-operable with no
+   extra key handling. */
+.accounting-sort-header {
+  align-items: center;
+  background: none;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  gap: 0.35rem;
+  padding: 0;
+  text-align: start;
+}
+.accounting-sort-header.active {
+  font-weight: 600;
+}
+.accounting-sort-indicator {
+  color: var(--text-secondary, #667085);
+  font-size: 0.8rem;
+}
+.accounting-sort-header.active .accounting-sort-indicator {
+  color: var(--accent-color, #2563eb);
+}
+
+.accounting-filter-summary {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+/* Narrow screens: the footer stacks and the filter bar becomes one column, so
+   nothing is pushed outside the viewport. */
+@media (max-width: 640px) {
+  .accounting-pagination {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .accounting-filter-bar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
+/* Accounting Event lifecycle: the status banner is the loudest element on the
+   screen, because "what state is this in and what do I do" is the whole
+   question the page exists to answer. */
+.accounting-lifecycle-banner {
+  border: 1px solid var(--border-color, #d9e0ec);
+  border-inline-start-width: 4px;
+  border-radius: 0.85rem;
+  background: var(--surface-color, #fff);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-block-end: 1rem;
+  padding: 1rem 1.25rem;
+}
+.accounting-lifecycle-banner > button {
+  align-self: start;
+}
+.accounting-lifecycle-heading {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+.accounting-lifecycle-heading strong {
+  font-size: 1.15rem;
+}
+.accounting-lifecycle-blocker {
+  color: var(--text-secondary, #667085);
+}
+.accounting-lifecycle-note {
+  font-style: italic;
+}
+
+/* Compact lifecycle chip for the Event list. */
+.accounting-lifecycle-chip {
+  border-radius: 999px;
+  display: inline-block;
+  font-size: 0.8rem;
+  padding: 0.15rem 0.6rem;
+  white-space: nowrap;
+}
+
+/* Processing Timeline. Reads top to bottom in Company-local time; the rail
+   flips side automatically in RTL because it uses logical properties. */
+.accounting-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.accounting-timeline li {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: auto 1fr;
+}
+.accounting-timeline-dot {
+  background: var(--accent-color, #2563eb);
+  border-radius: 999px;
+  height: 0.6rem;
+  margin-block-start: 0.4rem;
+  width: 0.6rem;
+}
+.accounting-timeline small {
+  color: var(--text-secondary, #667085);
+  display: block;
+}
+.accounting-timeline p {
+  margin: 0.2rem 0 0;
+}
+
+.accounting-blocker-list {
+  margin: 0 0 1rem;
+  padding-inline-start: 1.2rem;
+}
+
+/* Narrow screens: the timeline and banner stay single-column and readable. */
+@media (max-width: 640px) {
+  .accounting-lifecycle-heading {
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+}
+
+/* Journal header: Description and Notes read as prose, so they span the whole
+   row instead of being squeezed into one grid column. The class was already on
+   the markup but had no rule, in either the editable or the read-only header. */
+.manual-journal-header-grid .manual-journal-wide,
+.accounting-detail-grid .manual-journal-wide {
+  grid-column: 1 / -1;
+}
+
+/* Related Records: the record exists and its reference is shown, but it cannot
+   be opened — no permission, or no detail screen for that record type. Kept
+   visually distinct from a link so it never invites a click. */
+.accounting-related-disabled {
+  color: var(--text-primary, #101828);
+  cursor: default;
+  display: inline-flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.accounting-related-disabled small {
+  color: var(--text-secondary, #667085);
+  font-size: 0.75rem;
+}
+
+/* =========================================================================
+   ACCOUNTING UI LAYOUT STANDARD
+   -------------------------------------------------------------------------
+   One typography, spacing and surface standard for the Accounting module and
+   the Accounting-linked operational detail screens.
+
+   Three rules hold throughout:
+
+   1. Colours come from theme tokens, never hardcoded, so light and dark both
+      work from one rule set.
+   2. Spacing and alignment use LOGICAL properties (inline-start/end, margin-
+      block) so Arabic RTL mirrors without a second stylesheet — while codes,
+      dates and amounts are pinned LTR where they must stay readable.
+   3. Nothing here changes behaviour. These are container, type and spacing
+      rules only.
+   ========================================================================= */
+
+.accounting-page,
+.accounting-workspace {
+  /* One spacing scale for the whole module, so no screen invents its own. */
+  --acc-space-1: 0.35rem;
+  --acc-space-2: 0.6rem;
+  --acc-space-3: 1rem;
+  --acc-space-4: 1.5rem;
+  --acc-space-5: 2rem;
+  --acc-radius: 0.85rem;
+  /* Deliberately restrained: financial density reads better with borders than
+     with shadow stacking. */
+  --acc-shadow: 0 1px 2px rgb(16 25 54 / 6%);
+}
+
+/* ---------- Typography hierarchy ------------------------------------- */
+
+.accounting-page h1 {
+  font-size: 1.5rem;
+  font-weight: 650;
+  line-height: 1.25;
+  margin-block-end: var(--acc-space-2);
+}
+
+/* One section-heading style for Summary, Journal Lines, Related Records,
+   Source Transaction, Processing Timeline, Failure Details, Employee Lines,
+   Allocated Orders, Settled Receivables, Collections and Payments alike. */
+.accounting-page h2,
+.accounting-page h3,
+.accounting-preview-panel > h3,
+.accounting-page .manual-journal-section-heading h3 {
+  color: var(--text-primary, #172033);
+  font-size: 1.02rem;
+  font-weight: 620;
+  letter-spacing: 0.01em;
+  line-height: 1.35;
+  margin-block: 0 var(--acc-space-2);
+}
+
+/* Field labels: smaller than values, but never pale. Low-contrast labels were
+   the single most common readability complaint in this module. */
+.accounting-page dt,
+.accounting-detail-grid dt,
+.accounting-page .detail-line dt {
+  color: var(--text-secondary, #5f6d84);
+  font-size: 0.82rem;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+/* Values carry the weight, and are allowed to wrap rather than overflow. */
+.accounting-page dd,
+.accounting-detail-grid dd,
+.accounting-page .detail-line dd {
+  color: var(--text-primary, #172033);
+  font-size: 0.95rem;
+  font-weight: 550;
+  line-height: 1.45;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* ---------- Money and business references ----------------------------- */
+
+/* Tabular figures so columns of money line up on the decimal regardless of
+   digit widths; `bidi-override` is deliberately NOT used — `direction: ltr`
+   with isolation keeps the value LTR inside an RTL page without reversing
+   any characters. */
+.accounting-page td.is-money,
+.accounting-page .accounting-money,
+.accounting-summary-card strong,
+.manual-journal-total-card strong {
+  direction: ltr;
+  font-variant-numeric: tabular-nums;
+  unicode-bidi: isolate;
+}
+
+.accounting-page td.is-money,
+.accounting-page th.is-money {
+  text-align: end;
+}
+
+/* Business references (JRN-000021, ORD-000017) stay LTR and unbroken. */
+.accounting-page .accounting-code,
+.accounting-page .mono,
+.accounting-related-link,
+.accounting-related-disabled {
+  direction: ltr;
+  unicode-bidi: isolate;
+  white-space: nowrap;
+}
+
+/* ---------- Page shell ------------------------------------------------ */
+
+.accounting-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--acc-space-4);
+  padding-inline: clamp(0.75rem, 2vw, 1.5rem);
+  padding-block-end: var(--acc-space-5);
+}
+
+/* Header and its actions share a baseline and wrap together rather than the
+   actions escaping the viewport on a narrow window. */
+.accounting-page .page-heading {
+  align-items: baseline;
+  column-gap: var(--acc-space-3);
+  flex-wrap: wrap;
+  row-gap: var(--acc-space-2);
+}
+
+.accounting-page .heading-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--acc-space-2);
+  margin-inline-start: auto;
+}
+
+/* ---------- Summary cards --------------------------------------------- */
+
+.accounting-page .metric-grid,
+.manual-journal-totals {
+  display: grid;
+  gap: var(--acc-space-3);
+  /* auto-fit + minmax gives 4 → 2 → 1 columns across desktop, tablet and
+     narrow widths from one rule, with equal card heights per row. */
+  grid-template-columns: repeat(auto-fit, minmax(min(11rem, 100%), 1fr));
+}
+
+.accounting-summary-card,
+.accounting-page .metric-card,
+.manual-journal-total-card {
+  background: var(--surface-color, #fff);
+  border: 1px solid var(--border-color, #dbe3ee);
+  border-radius: var(--acc-radius);
+  box-shadow: var(--acc-shadow);
+  display: flex;
+  flex-direction: column;
+  gap: var(--acc-space-1);
+  min-width: 0;
+  padding: var(--acc-space-3);
+}
+
+.accounting-summary-card > span,
+.accounting-page .metric-card > span,
+.manual-journal-total-card > span {
+  color: var(--text-secondary, #5f6d84);
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+
+.accounting-summary-card > strong,
+.accounting-page .metric-card > strong,
+.manual-journal-total-card > strong {
+  font-size: 1.15rem;
+  font-weight: 640;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+/* ---------- Detail grids ---------------------------------------------- */
+
+.accounting-detail-grid {
+  display: grid;
+  gap: var(--acc-space-3) var(--acc-space-4);
+  /* 3–4 columns on desktop, 2 on tablet, 1 when narrow — one rule. */
+  grid-template-columns: repeat(auto-fit, minmax(min(14rem, 100%), 1fr));
+  margin: 0;
+}
+
+.accounting-detail-grid > div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+/* ---------- Panels ---------------------------------------------------- */
+
+.accounting-preview-panel {
+  background: var(--surface-color, #fff);
+  border: 1px solid var(--border-color, #dbe3ee);
+  border-radius: var(--acc-radius);
+  padding: var(--acc-space-4);
+}
+
+/* ---------- Tables ---------------------------------------------------- */
+
+.accounting-page table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.accounting-page thead th {
+  background: var(--surface-subtle, #f7f9fd);
+  border-block-end: 1px solid var(--border-color, #dbe3ee);
+  color: var(--text-secondary, #5f6d84);
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: var(--acc-space-2) var(--acc-space-3);
+  text-align: start;
+  white-space: nowrap;
+}
+
+.accounting-page tbody td {
+  border-block-end: 1px solid var(--border-color, #dbe3ee);
+  color: var(--text-primary, #172033);
+  font-size: 0.9rem;
+  padding: var(--acc-space-2) var(--acc-space-3);
+  vertical-align: middle;
+}
+
+.accounting-page tbody tr:hover {
+  background: var(--surface-subtle, #f7f9fd);
+}
+
+/* Complex financial tables scroll horizontally, and the scrollbar stays
+   reachable rather than sitting below a very tall page. */
+.accounting-page .table-scroll-x,
+.accounting-page .table-shell {
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-gutter: stable;
+}
+
+/* ---------- Forms ----------------------------------------------------- */
+
+.accounting-form-grid,
+.manual-journal-header-grid {
+  display: grid;
+  gap: var(--acc-space-3) var(--acc-space-4);
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+}
+
+.accounting-page label {
+  color: var(--text-primary, #172033);
+  display: flex;
+  flex-direction: column;
+  font-size: 0.85rem;
+  font-weight: 550;
+  gap: 0.3rem;
+  min-width: 0;
+}
+
+.accounting-page input,
+.accounting-page select,
+.accounting-page textarea {
+  font: inherit;
+  min-height: 2.35rem;
+  width: 100%;
+}
+
+/* Errors sit directly under their field, in the danger token. */
+.accounting-page .form-field-error {
+  color: var(--danger-color, #b91c1c);
+  font-size: 0.78rem;
+  font-weight: 500;
+}
+
+/* The action bar reads as separate from the form body. */
+.accounting-page .manual-journal-actions,
+.accounting-page .accounting-lifecycle-actions {
+  border-block-start: 1px solid var(--border-color, #dbe3ee);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--acc-space-2);
+  padding-block-start: var(--acc-space-3);
+}
+
+/* ---------- Filters and pagination ------------------------------------ */
+
+.accounting-filter-bar {
+  align-items: end;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--acc-space-3);
+}
+
+.accounting-filter-bar > label {
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+
+/* ---------- Related Records ------------------------------------------- */
+
+/* Compact: the reference leads, the relationship label is secondary. */
+.accounting-related-records .accounting-detail-grid {
+  gap: var(--acc-space-2) var(--acc-space-4);
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+}
+
+.accounting-related-records dt {
+  font-size: 0.78rem;
+}
+
+/* ---------- Technical Details ----------------------------------------- */
+
+/* Visually secondary by design: this is the one section a normal User should
+   never need to open. */
+.accounting-technical-details {
+  background: var(--surface-subtle, #f7f9fd);
+  border: 1px dashed var(--border-color, #dbe3ee);
+  border-radius: var(--acc-radius);
+  padding: var(--acc-space-2) var(--acc-space-3);
+}
+
+.accounting-technical-details > summary {
+  color: var(--text-secondary, #5f6d84);
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 550;
+}
+
+.accounting-technical-details dd {
+  font-size: 0.82rem;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+/* ---------- Accessibility -------------------------------------------- */
+
+/* One visible focus ring for every interactive element in the module. */
+.accounting-page :focus-visible,
+.accounting-workspace :focus-visible {
+  outline: 2px solid var(--primary-color, #4f63f6);
+  outline-offset: 2px;
+}
+
+/* Disabled controls stay distinguishable by more than colour alone. */
+.accounting-page button:disabled,
+.accounting-page .button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+/* ---------- Responsive ------------------------------------------------ */
+
+@media (max-width: 900px) {
+  .accounting-page {
+    gap: var(--acc-space-3);
+  }
+  .accounting-detail-grid {
+    grid-template-columns: repeat(auto-fit, minmax(min(11rem, 100%), 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .accounting-page h1 {
+    font-size: 1.28rem;
+  }
+  /* One column everywhere: detail grids, forms and cards all stack. */
+  .accounting-detail-grid,
+  .accounting-form-grid,
+  .manual-journal-header-grid,
+  .accounting-page .metric-grid,
+  .manual-journal-totals {
+    grid-template-columns: 1fr;
+  }
+  .accounting-page .heading-actions {
+    margin-inline-start: 0;
+    width: 100%;
+  }
+  .accounting-preview-panel {
+    padding: var(--acc-space-3);
+  }
+  /* Actions stay inside the viewport and reachable. */
+  .accounting-page .manual-journal-actions,
+  .accounting-page .accounting-lifecycle-actions,
+  .accounting-page .modal-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
+/* ---------- Theme-aware lifecycle chips ------------------------------- */
+
+/* These previously hardcoded light-mode pastels, which read as light chips
+   stranded on a dark page. Now expressed through the theme's own subtle/
+   strong pairs so both themes work from one rule. */
+.accounting-lifecycle-chip.success {
+  background: var(--success-subtle, #ecfdf3);
+  color: var(--success-color, #15803d);
+}
+.accounting-lifecycle-chip.danger {
+  background: var(--danger-subtle, #fef2f2);
+  color: var(--danger-color, #b91c1c);
+}
+.accounting-lifecycle-chip.warning {
+  background: var(--warning-subtle, #fffbeb);
+  color: var(--warning-color, #b45309);
+}
+.accounting-lifecycle-chip.info {
+  background: var(--primary-subtle, #eef2ff);
+  color: var(--primary-strong, #3342bf);
+}
+
+.accounting-lifecycle-success {
+  border-inline-start-color: var(--success-color, #15803d);
+}
+.accounting-lifecycle-danger {
+  border-inline-start-color: var(--danger-color, #b91c1c);
+}
+.accounting-lifecycle-warning {
+  border-inline-start-color: var(--warning-color, #b45309);
+}
+.accounting-lifecycle-info {
+  border-inline-start-color: var(--primary-color, #4f63f6);
+}
+
+/* ---------- Dark theme ------------------------------------------------ */
+
+:root[data-theme="dark"] .accounting-page thead th {
+  background: var(--surface-subtle, #1b2438);
+  color: var(--text-secondary, #b6c2d9);
+}
+
+:root[data-theme="dark"] .accounting-page tbody tr:hover {
+  background: var(--surface-subtle, #1b2438);
+}
+
+:root[data-theme="dark"] .accounting-technical-details {
+  background: var(--surface-subtle, #1b2438);
+}
+
+/* Chips carry their own background, so they need a readable foreground of
+   their own in dark mode rather than the light-mode strong colour. */
+:root[data-theme="dark"] .accounting-lifecycle-chip.success,
+:root[data-theme="dark"] .accounting-lifecycle-chip.danger,
+:root[data-theme="dark"] .accounting-lifecycle-chip.warning,
+:root[data-theme="dark"] .accounting-lifecycle-chip.info {
+  background: color-mix(in srgb, currentcolor 18%, transparent);
+}
+
+/* Status badges needed the SAME treatment and never received it. Their
+   backgrounds (#dcfce7, #eaf2ff, #fee2e2 …) are light-mode fills, while dark
+   mode gives the badge the light foreground #d7def0. Measured on the
+   Accounting Health tiles that pairing is 1.20:1 — the counts were effectively
+   invisible. Deriving the fill from `currentcolor`, exactly as the lifecycle
+   chips above do, puts light text on a dark translucent fill instead. */
+:root[data-theme="dark"] .company-content .status-badge,
+:root[data-theme="dark"] .company-content .badge,
+:root[data-theme="dark"] .modal .status-badge,
+:root[data-theme="dark"] .modal .badge {
+  background: color-mix(in srgb, currentcolor 18%, transparent);
+  border-color: color-mix(in srgb, currentcolor 34%, transparent);
+}
+
+/* =========================================================================
+   GLOBAL LIGHT-MODE TEXT VISIBILITY STANDARD
+   -------------------------------------------------------------------------
+   Light mode renders all body text in pure black with a heavier weight, across
+   every module — Orders, Traders, Drivers, Customers, Driver Collections,
+   Trader Settlements/Receivables/Collections, Payroll, Driver Fees,
+   Accounting, Reports, Configuration and Dashboard alike.
+
+   Scoping: `:root:not([data-theme="dark"])` rather than `[data-theme="light"]`,
+   because the theme layer may leave the attribute unset. Dark mode is
+   therefore untouched by every rule below.
+
+   Two areas are deliberately EXCLUDED, because black text on them would be
+   invisible or would destroy meaning:
+
+     1. Dark surfaces that stay dark in light mode — the application sidebar
+        and the public/login shell. Their text is light BY DESIGN.
+     2. Elements that carry their own semantic colour — status chips, alerts,
+        and buttons with a filled background (white text on primary/danger).
+
+   Hierarchy therefore rests on WEIGHT (600 body / 700 emphasis), not colour,
+   which is the deliberate consequence of a single-colour standard.
+   ========================================================================= */
+
+:root:not([data-theme="dark"]) {
+  /* Every text token collapses to pure black. Non-text tokens (surfaces,
+     borders, accents) are untouched, so layout and theming still work. */
+  --text-primary: #000000;
+  --text-secondary: #000000;
+  --text-muted: #000000;
+  --text-heading: #000000;
+  --text-label: #000000;
+  --text-table: #000000;
+  --color-muted: #000000;
+}
+
+/* ---------- Base: black at weight 600 -------------------------------- */
+
+/* Scoped to real content roots rather than a bare `*`, so the dark sidebar
+   and login shell keep their own light-on-dark treatment. */
+:root:not([data-theme="dark"]) .company-content,
+:root:not([data-theme="dark"]) .company-content *,
+:root:not([data-theme="dark"]) .modal,
+:root:not([data-theme="dark"]) .modal *,
+:root:not([data-theme="dark"]) .topbar,
+:root:not([data-theme="dark"]) .topbar * {
+  color: #000000;
+  font-weight: 600;
+}
+
+/* ---------- Emphasis: weight 700 -------------------------------------- */
+
+/* Titles, totals, references, amounts, table headers and active navigation. */
+:root:not([data-theme="dark"]) .company-content h1,
+:root:not([data-theme="dark"]) .company-content h2,
+:root:not([data-theme="dark"]) .company-content h3,
+:root:not([data-theme="dark"]) .company-content h4,
+:root:not([data-theme="dark"]) .company-content th,
+:root:not([data-theme="dark"]) .company-content strong,
+:root:not([data-theme="dark"]) .company-content b,
+:root:not([data-theme="dark"]) .company-content .mono,
+:root:not([data-theme="dark"]) .company-content .metric-card strong,
+:root:not([data-theme="dark"]) .company-content .accounting-code,
+:root:not([data-theme="dark"]) .company-content .accounting-related-link,
+:root:not([data-theme="dark"]) .company-content td.is-money,
+:root:not([data-theme="dark"]) .company-content .detail-line-total dd,
+:root:not([data-theme="dark"]) .modal h1,
+:root:not([data-theme="dark"]) .modal h2,
+:root:not([data-theme="dark"]) .modal h3,
+:root:not([data-theme="dark"]) .modal th,
+:root:not([data-theme="dark"]) .modal strong,
+:root:not([data-theme="dark"]) .modal .mono {
+  color: #000000;
+  font-weight: 700;
+}
+
+/* Active navigation item. */
+/* The selected section sits on an indigo gradient pill. Two light-mode rules
+   were painting it black: this one used to set `#000000` directly, and the
+   blanket `.company-content *` rule above outweighs the pill's own colour
+   (three classes to two). Both needed answering here, at a specificity the
+   blanket rule cannot beat. */
+:root:not([data-theme="dark"]) .accounting-internal-navigation a.active,
+:root:not([data-theme="dark"]) .accounting-internal-navigation a.is-active,
+:root:not([data-theme="dark"]) .accounting-internal-navigation a[aria-current="page"] {
+  color: #fff0a0;
+  font-weight: 700;
+}
+
+/* Table body values stay at 600; form labels at 600. Both already inherit the
+   base rule — restated here so the intent survives future edits. */
+:root:not([data-theme="dark"]) .company-content td,
+:root:not([data-theme="dark"]) .company-content label,
+:root:not([data-theme="dark"]) .modal td,
+:root:not([data-theme="dark"]) .modal label {
+  color: #000000;
+  font-weight: 600;
+}
+
+/* ---------- Inputs, buttons, placeholders ----------------------------- */
+
+:root:not([data-theme="dark"]) .company-content input,
+:root:not([data-theme="dark"]) .company-content select,
+:root:not([data-theme="dark"]) .company-content textarea,
+:root:not([data-theme="dark"]) .modal input,
+:root:not([data-theme="dark"]) .modal select,
+:root:not([data-theme="dark"]) .modal textarea {
+  color: #000000;
+  font-weight: 600;
+}
+
+/* Placeholders stay black but lighten slightly through opacity, so they remain
+   clearly visible while still reading as a prompt rather than a value. */
+:root:not([data-theme="dark"]) .company-content input::placeholder,
+:root:not([data-theme="dark"]) .company-content textarea::placeholder,
+:root:not([data-theme="dark"]) .modal input::placeholder,
+:root:not([data-theme="dark"]) .modal textarea::placeholder {
+  color: #000000;
+  font-weight: 600;
+  opacity: 0.62;
+}
+
+:root:not([data-theme="dark"]) .company-content button,
+:root:not([data-theme="dark"]) .company-content .button,
+:root:not([data-theme="dark"]) .modal button,
+:root:not([data-theme="dark"]) .modal .button {
+  font-weight: 600;
+}
+
+/* Disabled text keeps a black base and signals state through opacity only. */
+:root:not([data-theme="dark"]) .company-content :disabled,
+:root:not([data-theme="dark"]) .modal :disabled {
+  color: #000000;
+  opacity: 0.55;
+}
+
+/* ---------- Exclusions ------------------------------------------------ */
+
+/* Filled buttons carry their own foreground: forcing black would put black
+   text on a saturated primary/danger background. */
+:root:not([data-theme="dark"]) .company-content .button-primary,
+:root:not([data-theme="dark"]) .company-content .button-danger,
+:root:not([data-theme="dark"]) .modal .button-primary,
+:root:not([data-theme="dark"]) .modal .button-danger,
+:root:not([data-theme="dark"]) .company-content .button-primary *,
+:root:not([data-theme="dark"]) .modal .button-primary * {
+  color: #ffffff;
+  font-weight: 700;
+}
+
+/* Status chips, badges and alerts encode meaning in colour and set their own
+   foreground against their own background. Status remains readable, and is
+   never communicated by colour alone because the label text is present. */
+:root:not([data-theme="dark"]) .company-content .status-badge,
+:root:not([data-theme="dark"]) .company-content .badge,
+:root:not([data-theme="dark"]) .company-content .accounting-lifecycle-chip,
+:root:not([data-theme="dark"]) .company-content .alert,
+:root:not([data-theme="dark"]) .company-content .alert *,
+:root:not([data-theme="dark"]) .modal .status-badge,
+:root:not([data-theme="dark"]) .modal .badge,
+:root:not([data-theme="dark"]) .modal .alert,
+:root:not([data-theme="dark"]) .modal .alert * {
+  color: inherit;
+  font-weight: 700;
+}
+
+/* Validation messages keep the danger colour so an error still reads as an
+   error, at 700 so it is unmissable. */
+:root:not([data-theme="dark"]) .company-content .form-error,
+:root:not([data-theme="dark"]) .company-content .form-field-error,
+:root:not([data-theme="dark"]) .modal .form-error,
+:root:not([data-theme="dark"]) .modal .form-field-error {
+  color: var(--danger-color, #b91c1c);
+  font-weight: 700;
+}
+
+/* The sidebar is dark navy in BOTH themes, so its text must stay light.
+
+   `color: inherit` was WRONG here: inherit resolves to the ancestor's
+   computed colour, which the black standard above had just set to black —
+   so the whole menu rendered black on navy. An explicit colour is the only
+   correct fix. This applies in both themes because the surface is dark in
+   both, so it is deliberately NOT scoped to light mode. */
+.app-sidebar,
+.app-sidebar *,
+.app-sidebar .nav-direct-link,
+.app-sidebar .nav-group-button,
+.app-sidebar .nav-submenu-link,
+.app-sidebar .sidebar-brand,
+.app-sidebar .sidebar-brand-copy,
+.app-sidebar .sidebar-footer,
+.app-sidebar .sidebar-footer *,
+.app-sidebar .sidebar-collapse-button,
+.app-sidebar .powered-by,
+.app-sidebar button,
+.app-sidebar a,
+.app-sidebar span,
+.app-sidebar strong,
+.app-sidebar small {
+  color: #ffffff;
+}
+
+/* Icons follow the text colour rather than carrying their own. */
+.app-sidebar svg {
+  color: #ffffff;
+  stroke: currentcolor;
+}
+
+/* Business Date controls — Driver Collections, Trader Settlements, Trader
+   Collections. Deliberately narrow in scope: these rules style the shared
+   control only and change nothing else in those modules. */
+.business-date-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 12px 0;
+}
+.business-date-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+}
+.business-date-fields > .field {
+  flex: 1 1 200px;
+  min-width: 160px;
+}
+.business-date-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px 16px;
+  margin: 0;
+}
+.business-date-summary-grid dt {
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+.business-date-summary-grid dd {
+  margin: 0;
+}
+/* Segment tables scroll inside themselves so a long range can never widen the
+   page. */
+.business-date-segments {
+  overflow-x: auto;
+  max-width: 100%;
+  margin-top: 8px;
+}
+@media (max-width: 640px) {
+  .business-date-fields {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .business-date-fields > .field {
+    flex: 1 1 auto;
+  }
+}
+
+/* Delivery Activity date cells. Values like "05 Aug 2026, 2:00 AM" must not
+   break character-by-character; the Orders table already scrolls horizontally. */
+.nowrap-cell {
+  white-space: nowrap;
+}
+
+/* Delivered Order Earnings source list on the Payroll line detail.
+   Collapsed by default because a busy Employee can have hundreds of deliveries
+   in one month. The summary is styled to sit level with the <h3> headings of
+   the sibling sections so the section reads as one of them, not as a control. */
+.payroll-earning-sources > summary {
+  margin: 18px 0 8px;
+  font-size: 1.05rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.payroll-earning-sources > summary:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+
+/* Daily Cash and Financial Activity report.
+   Only the containers this page introduces; cards, tables, alerts and the
+   empty state all reuse the existing accounting styles. */
+.daily-cash-activity .accounting-summary-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.daily-cash-activity .accounting-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.daily-cash-activity .accounting-filters label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 170px;
+}
+.daily-cash-activity .accounting-filter-actions {
+  display: flex;
+  gap: 8px;
+}
+.daily-cash-activity .accounting-hint {
+  color: #6e7e84;
+  font-size: 0.85rem;
+}
+/* Money stays left-to-right even when the page direction is RTL: a digit group
+   read right-to-left is a different number. */
+.daily-cash-activity .accounting-amount {
+  direction: ltr;
+  unicode-bidi: isolate;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Unified Payment Position. Reuses the accounting filter bar and card grid
+   declared for the daily cash report; only the additions are here. */
+.payment-position .accounting-summary-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.payment-position .accounting-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.payment-position .accounting-filters label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 170px;
+}
+.payment-position .accounting-filters .accounting-filter-check {
+  flex-direction: row;
+  align-items: center;
+  min-width: 0;
+}
+.payment-position .accounting-filter-actions {
+  display: flex;
+  gap: 8px;
+}
+/* Amounts stay left-to-right on an RTL page: a digit group read
+   right-to-left is a different number. */
+.payment-position .accounting-amount {
+  direction: ltr;
+  unicode-bidi: isolate;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.payment-position .link-button {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+}
+.payment-position .row-overdue td {
+  background: rgba(200, 60, 40, 0.06);
+}
+
+/* Cash and Bank Balance Controls, Company Profile. */
+.balance-controls .field-wide {
+  grid-column: 1 / -1;
+}
+.balance-controls .balance-controls-schedule {
+  margin: 0 0 16px;
+  padding-inline-start: 20px;
+}
+.balance-controls .balance-controls-schedule li {
+  margin-bottom: 4px;
+}
+
+/* The warning-coloured "Not Enforced" state on the Balance Controls panel is
+   gone: all five outgoing workflows now consult the policy, so the status line
+   reads "Enforced" in the panel's normal emphasis colour. */
+
+/* =========================================================================
+   ACCOUNTING DASHBOARD — FILTER LAYOUT
+   -------------------------------------------------------------------------
+   `.accounting-filters` is styled per screen (Daily Cash Activity, Payment
+   Position). The Dashboard never had a rule, so its labels fell back to block
+   layout and every control stretched the full content width — five stacked
+   full-width rows that were hard to scan.
+
+   CONTAINER queries, not viewport queries. This form sits in the Accounting
+   content column, which the Company sidebar and the Accounting section
+   navigation both narrow: at a 1280px viewport the column measures ~609px,
+   so a viewport-keyed "desktop" rule would lay out three columns in a space
+   that cannot hold them and overflow. Sizing against the container means the
+   form uses the wide arrangement exactly when the room exists — including
+   when the section navigation is hidden — and steps down when it does not.
+
+   Named areas rather than auto-flow, because the rows are not uniform: the
+   dates stay compact, Account and Party take the slack, and the buttons sit
+   on their own row at natural width. Areas follow the writing mode, so RTL
+   mirrors with no `[dir]` override. Labels still wrap their controls, so
+   label association, tab order and keyboard behaviour are unchanged.
+   ========================================================================= */
+.accounting-dashboard {
+  container-type: inline-size;
+  container-name: accounting-dashboard;
+}
+
+/* Base (narrowest): one column, every control full width. */
+.accounting-dashboard .accounting-filters {
+  display: grid;
+  align-items: end;
+  gap: 0.75rem 1rem;
+  margin-bottom: 1.25rem;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas:
+    "from"
+    "to"
+    "account"
+    "party-type"
+    "party"
+    "actions";
+}
+
+.accounting-dashboard .accounting-filters > label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+/* Source order is From, To, Account, Party Type, Party; the areas preserve
+   both the visual layout and the DOM/tab order. */
+.accounting-dashboard .accounting-filters > label:nth-of-type(1) {
+  grid-area: from;
+}
+.accounting-dashboard .accounting-filters > label:nth-of-type(2) {
+  grid-area: to;
+}
+.accounting-dashboard .accounting-filters > label:nth-of-type(3) {
+  grid-area: account;
+}
+.accounting-dashboard .accounting-filters > label:nth-of-type(4) {
+  grid-area: party-type;
+}
+.accounting-dashboard .accounting-filters > label:nth-of-type(5) {
+  grid-area: party;
+}
+
+.accounting-dashboard .accounting-filters input,
+.accounting-dashboard .accounting-filters select {
+  width: 100%;
+  min-width: 0;
+}
+
+.accounting-dashboard .accounting-filter-actions {
+  grid-area: actions;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: flex-start;
+}
+
+/* Buttons at natural width, wrapping to their own line only when they must. */
+.accounting-dashboard .accounting-filter-actions .button {
+  flex: 0 0 auto;
+}
+
+/* Tablet-width container: two columns with the dates side by side; the long
+   Account and Party selects span, which is where the width is actually used. */
+@container accounting-dashboard (min-width: 520px) {
+  .accounting-dashboard .accounting-filters {
+    grid-template-columns: minmax(150px, 1fr) minmax(150px, 1fr);
+    grid-template-areas:
+      "from to"
+      "account account"
+      "party-type party-type"
+      "party party"
+      "actions actions";
+  }
+}
+
+/* Full arrangement, once the container can genuinely hold it:
+   Row 1  From | To | Account      Row 2  Party Type | Party      Row 3  actions */
+@container accounting-dashboard (min-width: 700px) {
+  .accounting-dashboard .accounting-filters {
+    grid-template-columns:
+      minmax(180px, 220px)
+      minmax(180px, 220px)
+      minmax(280px, 1fr);
+    grid-template-areas:
+      "from to account"
+      "party-type party party"
+      "actions actions actions";
+  }
+
+  .accounting-dashboard .accounting-filters > label:nth-of-type(4) {
+    min-width: 220px;
+    max-width: 260px;
+  }
+}
+
+/* =========================================================================
+   ACCOUNTING DASHBOARD — VISUAL TREATMENT
+   -------------------------------------------------------------------------
+   Presentation only. No amount, label source, request or route is touched
+   here; every rule is scoped under `.accounting-dashboard` (plus the
+   Accounting section menu) so no other page inherits it.
+
+   The palette is expressed as local custom properties rather than literals so
+   light and dark share one definition, and dark mode overrides three values
+   instead of duplicating every rule.
+   ========================================================================= */
+/* Promoted from `.accounting-dashboard` to the whole workspace: the same
+   tokens now drive the section menu and all 24 Accounting pages, which is what
+   stopped the Dashboard from looking like a different product to the pages
+   beside it. The full token set lives in the ACCOUNTING DESIGN SYSTEM block at
+   the end of this file; these are the originals it builds on. */
+.accounting-workspace {
+  --acc-blue: #2f5bd7;
+  --acc-indigo: #4f46e5;
+  --acc-purple: #7c3aed;
+  --acc-surface: var(--surface-color, #fff);
+  --acc-border: var(--border-color, #dbe3ef);
+  --acc-ink: var(--text-primary, #101828);
+  --acc-muted: var(--text-secondary, #667085);
+  --acc-warning-bg: #fff8ed;
+  --acc-warning-border: #f4c98a;
+  --acc-warning-ink: #7c4a10;
+}
+
+:root[data-theme="dark"] .accounting-workspace {
+  --acc-surface: #16203a;
+  --acc-border: #2c3a5c;
+  --acc-warning-bg: #33270f;
+  --acc-warning-border: #7a5a20;
+  /* Light ink on a light warning fill was the dark-mode defect found earlier
+     in this module; the dark fill above carries light ink deliberately. */
+  --acc-warning-ink: #ffd9a0;
+}
+
+.accounting-dashboard-asof {
+  margin: -0.5rem 0 1rem;
+  color: var(--acc-muted);
+  font-size: 0.85rem;
+}
+
+/* ------------------------------------------------------------ KPI cards */
+.accounting-dashboard .accounting-kpi-grid {
+  display: grid;
+  gap: 1rem;
+  /* One column by default. `auto-fit` was tried first and produced THREE
+     columns in a 977px container, which is not the intended rhythm — the
+     count is therefore fixed rather than derived, and stepped up by the
+     container query below. */
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* Two columns once the content column can genuinely hold a pair. Container,
+   not viewport: this page carries both the Company sidebar and the Accounting
+   section menu, so the viewport says little about the space actually here. */
+@container accounting-dashboard (min-width: 600px) {
+  .accounting-dashboard .accounting-kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.accounting-dashboard .accounting-kpi-card {
+  position: relative;
+  display: grid;
+  align-content: start;
+  gap: 0.35rem;
+  /* Equal height regardless of caption length. */
+  min-height: 7.5rem;
+  padding: 1rem 1rem 1rem 1.15rem;
+  border: 1px solid var(--acc-border);
+  border-radius: 0.9rem;
+  background: var(--acc-surface);
+  box-shadow: 0 1px 2px rgb(16 24 40 / 6%);
+  overflow-wrap: anywhere;
+}
+
+/* The accent bar is the icon-substitute: it carries the palette without
+   depending on an icon set this page does not already use. Marked
+   presentational so assistive technology ignores it, and status is never
+   conveyed by colour alone — every card has a text label. */
+.accounting-dashboard .accounting-kpi-card::before {
+  content: "";
+  position: absolute;
+  inset-block: 0.9rem;
+  inset-inline-start: 0;
+  width: 3px;
+  border-radius: 3px;
+  background: linear-gradient(180deg, var(--acc-blue), var(--acc-purple));
+}
+
+.accounting-dashboard .accounting-kpi-card > span {
+  color: var(--acc-muted);
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
+}
+
+.accounting-dashboard .accounting-kpi-card > strong {
+  color: var(--acc-ink);
+  font-size: 1.6rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+
+.accounting-dashboard .accounting-kpi-card > small {
+  color: var(--acc-muted);
+  font-size: 0.78rem;
+}
+
+/* ------------------------------------------------------- warning banner */
+.accounting-dashboard-warning {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+  margin-bottom: 1rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--acc-warning-border);
+  border-inline-start: 4px solid var(--acc-warning-border);
+  border-radius: 0.75rem;
+  background: var(--acc-warning-bg);
+  color: var(--acc-warning-ink);
+}
+
+.accounting-dashboard-warning p {
+  margin: 0.25rem 0 0;
+  font-size: 0.88rem;
+}
+
+.accounting-dashboard-warning-count {
+  font-weight: 700;
+}
+
+.accounting-dashboard-warning-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 50%;
+  /* The fill must derive from the banner ink rather than from
+     `--acc-warning-border`. That border token is a light amber in light mode
+     and a dark bronze in dark mode, so a fixed dark glyph colour measured
+     2.24:1 against it in dark mode. Deriving the disc from `currentcolor`
+     keeps the glyph on the same side of the banner ink in both themes. */
+  background: color-mix(in srgb, currentcolor 22%, transparent);
+  border: 1px solid color-mix(in srgb, currentcolor 40%, transparent);
+  color: var(--acc-warning-ink);
+  font-weight: 800;
+}
+
+/* ---------------------------------------------------------- data card */
+.accounting-dashboard-card {
+  margin: 1rem 0 1.5rem;
+  border: 1px solid var(--acc-border);
+  border-radius: 0.9rem;
+  background: var(--acc-surface);
+  overflow: hidden;
+}
+
+.accounting-dashboard-card > header {
+  padding: 0.9rem 1rem;
+  border-bottom: 1px solid var(--acc-border);
+}
+
+.accounting-dashboard-card > header h4 {
+  margin: 0;
+  color: var(--acc-ink);
+  font-size: 0.98rem;
+}
+
+.accounting-dashboard-card > header p {
+  margin: 0.2rem 0 0;
+  color: var(--acc-muted);
+  font-size: 0.83rem;
+}
+
+/* Counts read as a column of figures, not prose. */
+.accounting-dashboard .accounting-numeric-column {
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* -------------------------------------------- Accounting section menu */
+/* Only the ACTIVE item is re-coloured, so the menu structure, order, routes
+   and behaviour are untouched and no other navigation is affected. */
+.accounting-internal-navigation a[aria-current="page"],
+.accounting-internal-navigation a.is-active {
+  background: linear-gradient(90deg, var(--acc-blue, #2f5bd7), var(--acc-indigo, #4f46e5));
+  border-radius: 0.5rem;
+  /* Measured 5.06:1 against the darker (blue) end of the gradient and 5.46:1
+     against the indigo end, so it clears AA for normal text across the whole
+     pill. A deeper amber looked better but came in at 4.1:1. */
+  color: #fff0a0;
+  font-weight: 700;
+}
+
+.accounting-internal-navigation a:focus-visible {
+  outline: 3px solid var(--acc-indigo, #4f46e5);
+  outline-offset: 2px;
+}
+
+/* ------------------------------------- dark-mode status badge legibility */
+/* Journal-entry status badges inside the Dashboard's entry table keep the
+   light-mode ink `.status-neutral { color: #1d4ed8 }`, because the dark theme
+   override at the top of this file re-derives only the badge BACKGROUND from
+   `currentcolor`, never the foreground. On the dark card that pairing measures
+   2.5:1. The equivalent badge inside `.accounting-summary-card` escapes the
+   problem only incidentally, via `.accounting-page .accounting-summary-card
+   span => var(--text-secondary)`.
+   Scoped to this page so no other module's badges change. */
+:root[data-theme="dark"] .accounting-dashboard table .status-badge.status-neutral {
+  color: #a8c6ff;
+}
+
+/* =========================================================================
+   ACCOUNTING DESIGN SYSTEM
+   -------------------------------------------------------------------------
+   One scoped presentation system for the whole Accounting workspace.
+
+   WHY THIS EXISTS
+   The Dashboard had been styled on its own while the other 24 Accounting
+   pages kept the default form-and-table look, so the workspace read as an
+   unfinished admin form with one decorated page in it. Adding a third
+   page-specific block would have deepened that. Everything below is keyed off
+   class names the Accounting pages ALREADY share: `.accounting-page`,
+   `.accounting-summary-card`, `.accounting-table`, `.accounting-filters`,
+   `.data-surface`. A single system therefore reaches every page without
+   touching their markup.
+
+   SCOPE
+   Every selector is nested under `.accounting-workspace`, the Accounting
+   section menu, or the shared app sidebar where the prompt explicitly asks for
+   it. No other BluelineGPT module inherits these rules and no global theme
+   token is redefined.
+
+   NOTHING HERE CHANGES BEHAVIOUR. No amount, label source, request, route,
+   permission or status is affected by any line in this block.
+   ========================================================================= */
+
+.accounting-workspace {
+  /* ---- surfaces ---------------------------------------------------- */
+  --acc-page-bg: #f5f8fd;
+  --acc-surface: #ffffff;
+  --acc-surface-sunken: #f8fafd;
+  --acc-nav-surface: #eef3fc;
+
+  /* ---- blue / indigo family ---------------------------------------- */
+  --acc-blue: #2f5bd7;
+  --acc-blue-soft: #e8effe;
+  --acc-blue-ink: #1c3f9e;
+  --acc-indigo: #4f46e5;
+  --acc-indigo-soft: #eceafe;
+  --acc-purple: #7c3aed;
+
+  /* ---- semantic ----------------------------------------------------- */
+  --acc-success: #067647;
+  --acc-success-soft: #e7f6ee;
+  --acc-warning: #b54708;
+  --acc-warning-soft: #fef4e6;
+  --acc-danger: #b42318;
+  --acc-danger-soft: #fdeceb;
+  --acc-info: #175cd3;
+  --acc-info-soft: #e8f1fe;
+  --acc-slate: #475467;
+  --acc-slate-soft: #f1f4f9;
+
+  /* ---- text and lines ----------------------------------------------- */
+  --acc-ink: #101828;
+  --acc-muted: #5b6779;
+  --acc-border: #dfe6f1;
+  --acc-border-strong: #c8d4e6;
+
+  /* ---- shape and depth ---------------------------------------------- */
+  --acc-shadow: 0 1px 2px rgb(16 24 40 / 5%), 0 1px 3px rgb(16 24 40 / 7%);
+  --acc-shadow-raised: 0 4px 12px rgb(16 24 40 / 8%), 0 1px 3px rgb(16 24 40 / 6%);
+  --acc-radius-card: 12px;
+  --acc-radius-input: 8px;
+  --acc-radius-pill: 999px;
+  --acc-focus: 0 0 0 3px rgb(79 70 229 / 35%);
+
+  /* ---- rhythm -------------------------------------------------------- */
+  --acc-gap: 0.75rem;
+  --acc-gap-section: 1.25rem;
+}
+
+/* Dark mode is designed rather than inherited: light cards are NOT reused with
+   a filter over them. Surfaces carry their own values and every soft semantic
+   fill is re-derived, so text never lands on a light fill. */
+:root[data-theme="dark"] .accounting-workspace {
+  --acc-page-bg: #0b1020;
+  --acc-surface: #131b2f;
+  --acc-surface-sunken: #0f1626;
+  --acc-nav-surface: #131c31;
+
+  --acc-blue: #7d9bff;
+  --acc-blue-soft: #1b2947;
+  --acc-blue-ink: #b9caff;
+  --acc-indigo: #9aa6ff;
+  --acc-indigo-soft: #232145;
+
+  --acc-success: #6ee7a8;
+  --acc-success-soft: #10291f;
+  --acc-warning: #fbbf6b;
+  --acc-warning-soft: #2e2211;
+  --acc-danger: #fda29b;
+  --acc-danger-soft: #2f1615;
+  --acc-info: #93b4ff;
+  --acc-info-soft: #16233d;
+  --acc-slate: #aab6cb;
+  --acc-slate-soft: #1a2337;
+
+  --acc-ink: #f2f5ff;
+  --acc-muted: #a9b4c9;
+  --acc-border: #2a3550;
+  --acc-border-strong: #3a4767;
+
+  --acc-shadow: 0 1px 2px rgb(0 0 0 / 40%);
+  --acc-shadow-raised: 0 6px 18px rgb(0 0 0 / 45%);
+}
+
+/* =============================================== 1. PAGE SHELL + SPACING */
+
+.accounting-workspace .accounting-content {
+  background: var(--acc-page-bg);
+}
+
+.accounting-workspace .accounting-page {
+  max-width: 1360px;
+  padding: 1.25rem 1.5rem 2.5rem;
+  color: var(--acc-ink);
+  container-type: inline-size;
+  container-name: accounting-page;
+}
+
+/* Section rhythm. The pages ran tall largely because every heading and block
+   carried default margins on top of the container padding. */
+.accounting-workspace .accounting-page > h2,
+.accounting-workspace .accounting-page > h3 {
+  margin: var(--acc-gap-section) 0 var(--acc-gap);
+  font-size: 1.02rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--acc-ink);
+}
+
+.accounting-workspace .accounting-page > h3::before {
+  content: "";
+  display: inline-block;
+  width: 3px;
+  height: 0.95em;
+  margin-inline-end: 0.55rem;
+  border-radius: 2px;
+  background: linear-gradient(180deg, var(--acc-blue), var(--acc-indigo));
+  vertical-align: -0.12em;
+}
+
+.accounting-workspace .accounting-page > h2:first-child,
+.accounting-workspace .accounting-page > h3:first-child {
+  margin-top: 0;
+}
+
+/* ===================================================== 2. PAGE HEADERS */
+
+.accounting-workspace .page-heading-copy {
+  margin-bottom: var(--acc-gap-section);
+}
+
+.accounting-workspace .page-heading-copy h1 {
+  margin: 0;
+  font-size: 1.45rem;
+  font-weight: 680;
+  letter-spacing: -0.02em;
+  color: var(--acc-ink);
+}
+
+.accounting-workspace .page-heading-copy > p {
+  max-width: 78ch;
+  margin: 0.35rem 0 0;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: var(--acc-muted);
+}
+
+/* The eyebrow already exists on most pages. This is what makes it read as a
+   breadcrumb rather than as stray small text. */
+.accounting-workspace [class*="eyebrow"] {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.3rem;
+  font-size: 0.72rem;
+  font-weight: 650;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--acc-blue);
+}
+
+/* ====================================================== 3. FILTER CARD */
+
+.accounting-workspace .accounting-filters,
+.accounting-workspace .accounting-filter-bar {
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--acc-border);
+  border-radius: var(--acc-radius-card);
+  background: var(--acc-surface);
+  box-shadow: var(--acc-shadow);
+}
+
+.accounting-workspace .accounting-filters label,
+.accounting-workspace .accounting-filter-bar label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--acc-muted);
+}
+
+/* =============================================== 4. CONTROLS + BUTTONS */
+
+.accounting-workspace input:not([type="checkbox"]):not([type="radio"]),
+.accounting-workspace select,
+.accounting-workspace textarea {
+  border: 1px solid var(--acc-border-strong);
+  border-radius: var(--acc-radius-input);
+  background: var(--acc-surface);
+  color: var(--acc-ink);
+  font-size: 0.875rem;
+}
+
+.accounting-workspace input:not([type="checkbox"]):not([type="radio"]):focus-visible,
+.accounting-workspace select:focus-visible,
+.accounting-workspace textarea:focus-visible {
+  border-color: var(--acc-indigo);
+  box-shadow: var(--acc-focus);
+}
+
+.accounting-workspace .button {
+  border-radius: var(--acc-radius-input);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.accounting-workspace .button-primary,
+.accounting-workspace button[type="submit"].button:not(.button-secondary) {
+  border: 1px solid transparent;
+  background: linear-gradient(180deg, var(--acc-blue), var(--acc-indigo));
+  color: #fff;
+  box-shadow: var(--acc-shadow);
+}
+
+.accounting-workspace .button-secondary {
+  border: 1px solid var(--acc-border-strong);
+  background: var(--acc-surface);
+  color: var(--acc-ink);
+}
+
+.accounting-workspace .button:focus-visible {
+  outline: 3px solid var(--acc-indigo);
+  outline-offset: 2px;
+}
+
+/* ========================================= 5. CARDS (KPI / SUMMARY / DATA) */
+
+.accounting-workspace .accounting-summary-cards {
+  display: grid;
+  gap: var(--acc-gap);
+  /* `min()` rather than a bare fixed minimum: a 240px track overflows a
+     narrower container, which is what put a horizontal scrollbar on the
+     two-sidebar layout. */
+  grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
+}
+
+.accounting-workspace .accounting-summary-card,
+.accounting-workspace .data-surface,
+.accounting-workspace .accounting-dashboard-card {
+  padding: 0.95rem 1rem;
+  border: 1px solid var(--acc-border);
+  border-radius: var(--acc-radius-card);
+  background: var(--acc-surface);
+  box-shadow: var(--acc-shadow);
+}
+
+.accounting-workspace .accounting-summary-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  min-height: 0;
+}
+
+.accounting-workspace .accounting-summary-card > span:first-child {
+  font-size: 0.76rem;
+  font-weight: 620;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--acc-muted);
+}
+
+.accounting-workspace .accounting-summary-card > strong {
+  font-size: 1.3rem;
+  font-weight: 680;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  color: var(--acc-ink);
+}
+
+/* A card link is an affordance, not body copy. */
+.accounting-workspace .accounting-summary-card a {
+  align-self: flex-start;
+  margin-top: 0.15rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-decoration: none;
+  color: var(--acc-blue);
+}
+
+.accounting-workspace .accounting-summary-card a:hover {
+  text-decoration: underline;
+}
+
+/* ======================================================== 6. DATA TABLES */
+
+.accounting-workspace .table-scroll-x {
+  border: 1px solid var(--acc-border);
+  border-radius: var(--acc-radius-card);
+  background: var(--acc-surface);
+  box-shadow: var(--acc-shadow);
+  overflow-x: auto;
+}
+
+.accounting-workspace .accounting-table,
+.accounting-workspace .data-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 0.85rem;
+}
+
+.accounting-workspace .accounting-table thead th,
+.accounting-workspace .data-table thead th {
+  padding: 0.6rem 0.85rem;
+  border-bottom: 1px solid var(--acc-border);
+  background: var(--acc-surface-sunken);
+  font-size: 0.72rem;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  text-align: start;
+  color: var(--acc-muted);
+  white-space: nowrap;
+}
+
+.accounting-workspace .accounting-table tbody td,
+.accounting-workspace .data-table tbody td {
+  padding: 0.55rem 0.85rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--acc-border) 60%, transparent);
+  vertical-align: middle;
+}
+
+.accounting-workspace .accounting-table tbody tr:last-child td,
+.accounting-workspace .data-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.accounting-workspace .accounting-table tbody tr:hover td,
+.accounting-workspace .data-table tbody tr:hover td {
+  background: var(--acc-surface-sunken);
+}
+
+/* Amounts, codes and references read as data, not as prose. */
+.accounting-workspace .accounting-amount,
+.accounting-workspace .accounting-numeric-column,
+.accounting-workspace .accounting-code {
+  font-variant-numeric: tabular-nums;
+}
+
+.accounting-workspace .accounting-code {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--acc-blue-ink);
+}
+
+/* ===================================== 7. LINKS INSIDE ACCOUNTING CONTENT */
+
+/* Default underlined browser links were the primary visual design on several
+   pages; Historical Recovery alone rendered 76 of them. */
+.accounting-workspace .accounting-page a:not(.button):not([class*="nav"]) {
+  font-weight: 600;
+  text-decoration: none;
+  color: var(--acc-blue);
+}
+
+.accounting-workspace .accounting-page a:not(.button):not([class*="nav"]):hover {
+  text-decoration: underline;
+}
+
+.accounting-workspace .accounting-page a:focus-visible {
+  outline: 3px solid var(--acc-indigo);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* ================================================= 8. BADGES AND STATES */
+
+.accounting-workspace .status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.15rem 0.55rem;
+  border: 1px solid transparent;
+  border-radius: var(--acc-radius-pill);
+  font-size: 0.72rem;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.accounting-workspace .accounting-empty {
+  padding: 1.75rem 1rem;
+  border: 1px dashed var(--acc-border-strong);
+  border-radius: var(--acc-radius-card);
+  background: var(--acc-surface-sunken);
+  font-size: 0.875rem;
+  text-align: center;
+  color: var(--acc-muted);
+}
+
+.accounting-workspace .alert {
+  border-radius: var(--acc-radius-card);
+  font-size: 0.85rem;
+}
+
+/* An informational note is a note. It had been set as a full-width paragraph
+   block heavy enough to outrank the figures it annotates. */
+.accounting-workspace .alert-info {
+  display: flex;
+  gap: 0.6rem;
+  padding: 0.7rem 0.9rem;
+  border: 1px solid color-mix(in srgb, var(--acc-info) 30%, transparent);
+  background: var(--acc-info-soft);
+  color: var(--acc-info);
+  line-height: 1.45;
+}
+
+/* ======================================================== 9. KEY/VALUE */
+
+.accounting-workspace .accounting-detail-grid {
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--acc-border);
+  border-radius: var(--acc-radius-card);
+  background: var(--acc-surface);
+  box-shadow: var(--acc-shadow);
+  font-size: 0.85rem;
+}
+
+.accounting-workspace .accounting-detail-grid dt {
+  font-size: 0.74rem;
+  font-weight: 620;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--acc-muted);
+}
+
+/* =================================== 10. ACCOUNTING SECTION MENU (SUB-NAV) */
+
+/* The section menu was a second full-weight sidebar competing with the primary
+   one: together they took 528px of a 1440px viewport and left the content 817.
+   It is now a lighter, narrower companion surface that reads as part of the
+   same navigation system rather than as a rival to it. */
+/* The workspace grid track has to shrink WITH the menu: styling the aside
+   narrower inside a 16rem track just left a dead gap, so the content column
+   never got the width back. */
+/* Guarded at 1101px so it cannot override the existing rule that STACKS the
+   section menu below 1100 -- an unconditional track here pinned a 214px column
+   at 1024 and left the content just 447px wide. */
+@media (min-width: 1101px) {
+  .accounting-workspace {
+    grid-template-columns: 13.375rem minmax(0, 1fr);
+    gap: 1rem;
+  }
+}
+
+.accounting-internal-navigation {
+  width: 100%;
+  padding: 0.75rem 0.6rem;
+  border-inline-end: 1px solid var(--acc-border, #dfe6f1);
+  background: var(--acc-nav-surface, #eef3fc);
+}
+
+.accounting-internal-navigation a {
+  display: block;
+  padding: 0.38rem 0.6rem;
+  border-radius: var(--acc-radius-input, 8px);
+  font-size: 0.82rem;
+  font-weight: 550;
+  text-decoration: none;
+  color: var(--acc-slate, #475467);
+}
+
+/* Hover intentionally leaves the background alone. This rule used to set a pale
+   tint, and because `background` is a shorthand it also cleared the selected
+   item's `linear-gradient`, dropping the pill to near-white and making its
+   amber text unreadable the moment the pointer touched it. */
+
+.accounting-internal-navigation summary {
+  padding: 0.5rem 0.6rem 0.25rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--acc-muted, #5b6779);
+  cursor: pointer;
+}
+
+.accounting-internal-navigation details {
+  margin-top: 0.2rem;
+}
+
+.accounting-menu-toggle {
+  border-radius: var(--acc-radius-input, 8px);
+  font-size: 0.8rem;
+  color: var(--acc-slate, #475467);
+}
+
+/* ==================================== 11. MAIN SIDEBAR: LIGHTER BLUE FAMILY */
+
+/* The primary sidebar read as flat near-black. The User asked for a lighter
+   blue treatment in the same family as the rest of the redesign. Layering a
+   navy-to-indigo gradient over the existing token keeps every item, its order,
+   route, permission and behaviour untouched: this changes paint only. */
+.app-sidebar {
+  background:
+    radial-gradient(120% 80% at 0% 0%, rgb(99 121 255 / 22%) 0%, transparent 55%),
+    linear-gradient(170deg, #1e2f5e 0%, #182a52 45%, #121d3c 100%);
+}
+
+:root[data-theme="dark"] .app-sidebar {
+  background:
+    radial-gradient(120% 80% at 0% 0%, rgb(99 121 255 / 16%) 0%, transparent 55%),
+    linear-gradient(170deg, #101a33 0%, #0c1428 50%, #070d1d 100%);
+}
+
+/* ============================================ 12. RESPONSIVE (CONTAINER) */
+
+@container accounting-page (max-width: 700px) {
+  .accounting-workspace .accounting-summary-cards {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Below the two-sidebar breakpoint the section menu stacks above the content
+   instead of squeezing it. */
+@media (max-width: 1100px) {
+  .accounting-internal-navigation {
+    width: 100%;
+    border-inline-end: 0;
+    border-bottom: 1px solid var(--acc-border, #dfe6f1);
+  }
+}
+
+@media (max-width: 768px) {
+  .accounting-workspace .accounting-page {
+    padding: 1rem 0.9rem 2rem;
+  }
+}
+
+/* =========================================================================
+   ACCOUNTING DESIGN SYSTEM — CARD PATTERNS
+   -------------------------------------------------------------------------
+   The KPI, position, income and status cards share one anatomy:
+
+     icon chip -> label -> value -> caption/badge -> action
+
+   A single `acc-tone-*` class carries the card's meaning, so a card changes
+   colour by changing ONE class rather than by growing its own rule set. That
+   is what keeps six card groups on one page looking like one product.
+
+   Presentation only: no amount, request, route or status is touched here.
+   ========================================================================= */
+
+.accounting-workspace .accounting-kpi-card,
+.accounting-workspace .accounting-status-card {
+  --acc-tone: var(--acc-blue);
+  --acc-tone-soft: var(--acc-blue-soft);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.9rem 1rem 0.95rem;
+  overflow: hidden;
+}
+
+/* The accent bar names the card's state at a glance without adding height. */
+.accounting-workspace .accounting-kpi-card::before,
+.accounting-workspace .accounting-status-card::before {
+  content: "";
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline: 0;
+  height: 3px;
+  background: linear-gradient(
+    90deg,
+    var(--acc-tone),
+    color-mix(in srgb, var(--acc-tone) 45%, transparent)
+  );
+}
+
+.accounting-workspace .accounting-kpi-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  margin-bottom: 0.15rem;
+  border-radius: 9px;
+  background: var(--acc-tone-soft);
+  color: var(--acc-tone);
+}
+
+/* ------------------------------------------------------------- tones */
+
+.accounting-workspace .acc-tone-blue {
+  --acc-tone: var(--acc-blue);
+  --acc-tone-soft: var(--acc-blue-soft);
+}
+
+.accounting-workspace .acc-tone-indigo {
+  --acc-tone: var(--acc-indigo);
+  --acc-tone-soft: var(--acc-indigo-soft);
+}
+
+.accounting-workspace .acc-tone-purple {
+  --acc-tone: var(--acc-purple);
+  --acc-tone-soft: color-mix(in srgb, var(--acc-purple) 12%, transparent);
+}
+
+.accounting-workspace .acc-tone-slate {
+  --acc-tone: var(--acc-slate);
+  --acc-tone-soft: var(--acc-slate-soft);
+}
+
+.accounting-workspace .acc-tone-success {
+  --acc-tone: var(--acc-success);
+  --acc-tone-soft: var(--acc-success-soft);
+}
+
+.accounting-workspace .acc-tone-warning {
+  --acc-tone: var(--acc-warning);
+  --acc-tone-soft: var(--acc-warning-soft);
+}
+
+.accounting-workspace .acc-tone-danger {
+  --acc-tone: var(--acc-danger);
+  --acc-tone-soft: var(--acc-danger-soft);
+}
+
+.accounting-workspace .acc-tone-info {
+  --acc-tone: var(--acc-info);
+  --acc-tone-soft: var(--acc-info-soft);
+}
+
+/* -------------------------------------------------- negative amounts */
+
+/* A negative figure is recognised without being read. The sign stays in the
+   text, so this is reinforcement rather than the only signal. */
+.accounting-workspace .accounting-amount-negative {
+  color: var(--acc-danger);
+}
+
+/* ------------------------------------------------------ status cards */
+
+.accounting-workspace .accounting-status-card > strong {
+  font-size: 1.55rem;
+  line-height: 1.1;
+}
+
+.accounting-workspace .accounting-status-card > .status-badge {
+  align-self: flex-start;
+  border-color: color-mix(in srgb, var(--acc-tone) 35%, transparent);
+  background: var(--acc-tone-soft);
+  color: var(--acc-tone);
+}
+
+/* ------------------------------------------------------------- grids */
+
+/* Explicit column counts rather than `auto-fit`: auto-fit gave three columns
+   where the design calls for two, and four one-line cards stacked full width
+   where it calls for a compact grid. */
+.accounting-workspace .accounting-kpi-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.accounting-workspace .accounting-position-grid,
+.accounting-workspace .accounting-health-grid,
+.accounting-workspace .accounting-income-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* 430 rather than 520: at a 1024 viewport the primary sidebar and the section
+   menu leave the content container near 490px, so a 520 gate dropped every
+   grid to a single column on a laptop. */
+@container accounting-page (min-width: 430px) {
+  .accounting-workspace .accounting-kpi-grid,
+  .accounting-workspace .accounting-position-grid,
+  .accounting-workspace .accounting-health-grid,
+  .accounting-workspace .accounting-income-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* 780 rather than 900: with the primary sidebar and the section menu both
+   present, the content container tops out near 815px at a 1440 viewport, so a
+   900px gate meant the compact grids never engaged on a normal desktop. */
+@container accounting-page (min-width: 780px) {
+  /* Cash/Bank stays two-across by design: four money figures in one row read
+     as a ticker rather than as four distinct balances. */
+  .accounting-workspace .accounting-income-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .accounting-workspace .accounting-position-grid,
+  .accounting-workspace .accounting-health-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+/* ------------------------------------------------------- data card */
+
+.accounting-workspace .accounting-dashboard-card {
+  padding: 0;
+  overflow: hidden;
+}
+
+.accounting-workspace .accounting-dashboard-card > header {
+  padding: 0.8rem 1rem;
+  border-bottom: 1px solid var(--acc-border);
+  background: var(--acc-surface-sunken);
+}
+
+.accounting-workspace .accounting-dashboard-card > header h4 {
+  margin: 0;
+  font-size: 0.92rem;
+  font-weight: 650;
+  color: var(--acc-ink);
+}
+
+.accounting-workspace .accounting-dashboard-card > header p {
+  margin: 0.2rem 0 0;
+  font-size: 0.8rem;
+  color: var(--acc-muted);
+}
+
+/* The card already draws the frame; the table inside must not draw a second. */
+.accounting-workspace .accounting-dashboard-card .table-scroll-x {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+/* -------------------------------------------------- coverage warning */
+
+/* Raised to sit directly under the filters rather than halfway down the page. */
+.accounting-workspace .accounting-dashboard-warning {
+  box-shadow: var(--acc-shadow);
+}
+
+/* ---------------------------------------------------------- RTL ---- */
+
+/* The accent bar and icon chip use logical properties, so RTL mirrors without
+   a separate rule. Only the numeric run needs pinning, and the markup already
+   wraps every amount, code and date in `<bdi dir="ltr">`. */
+
+/* ------------------------------------------------- reduced motion --- */
+
+@media (prefers-reduced-motion: no-preference) {
+  .accounting-workspace .accounting-kpi-card,
+  .accounting-workspace .accounting-status-card {
+    transition:
+      box-shadow 140ms ease,
+      transform 140ms ease;
+  }
+
+  .accounting-workspace .accounting-kpi-card:hover,
+  .accounting-workspace .accounting-status-card:hover {
+    box-shadow: var(--acc-shadow-raised);
+  }
+}
+
+/* =========================================================================
+   STICKY HORIZONTAL SCROLLBAR
+   -------------------------------------------------------------------------
+   Keeps the Orders table's horizontal axis reachable without scrolling to the
+   bottom of the list first. The bar is a PROXY over the real scroll container
+   (see `StickyHorizontalScrollbar.tsx`); the table keeps the one authoritative
+   scroll position, so the two can never disagree.
+
+   `position: sticky; bottom: 0` rather than `fixed`: sticky stays inside the
+   table's own block, so the bar cannot float over pagination, the selection
+   banner or another page's content, and it disappears with the table.
+   ========================================================================= */
+.sticky-hscroll {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  overflow-x: auto;
+  overflow-y: hidden;
+  /* Tall enough for a grabbable thumb on platforms that draw an overlay
+     scrollbar, without stealing a row of content. */
+  height: 14px;
+  background: var(--surface-color);
+  border-top: 1px solid var(--border-color);
+}
+
+/* The spacer only has to be as wide as the content; it is never seen. */
+.sticky-hscroll-spacer {
+  height: 1px;
+}
+
+.sticky-hscroll:focus-visible {
+  outline: 3px solid var(--primary-color);
+  outline-offset: -3px;
+}
+
+/* Some platforms hide overlay scrollbars until a scroll gesture starts, which
+   would defeat the point of an ALWAYS-visible control. These make the proxy
+   track and thumb explicit. */
+.sticky-hscroll::-webkit-scrollbar {
+  height: 10px;
+}
+
+.sticky-hscroll::-webkit-scrollbar-track {
+  margin-inline: 4px;
+  background: color-mix(in srgb, var(--border-color) 30%, transparent);
+  border-radius: 999px;
+}
+
+/* Blue/indigo thumb rather than the platform gray, so the one remaining bar
+   reads as part of the product instead of as browser furniture. */
+.sticky-hscroll::-webkit-scrollbar-thumb {
+  background: linear-gradient(90deg, #2f5bd7, #4f46e5);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  border-radius: 999px;
+}
+
+.sticky-hscroll::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(90deg, #2848b4, #4038c4);
+  background-clip: padding-box;
+}
+
+.sticky-hscroll {
+  scrollbar-width: thin;
+  scrollbar-color: #4f46e5 color-mix(in srgb, var(--border-color) 30%, transparent);
+}
+
+/* =========================================================================
+   ORDER WORKFLOW INDICATOR
+   -------------------------------------------------------------------------
+   One chip per Orders row, with the explanation behind it. Presentation only:
+   the chip reflects server-derived guidance and nothing here can change an
+   Order.
+
+   Colour REINFORCES the state; the chip always carries the words too, so the
+   meaning survives for a colour-blind reader and in a monochrome print.
+   ========================================================================= */
+.order-workflow {
+  position: relative;
+  display: inline-block;
+}
+
+.order-workflow-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 2px 8px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: var(--wf-soft);
+  color: var(--wf-ink);
+  border-color: color-mix(in srgb, var(--wf-ink) 28%, transparent);
+  font-size: 0.72rem;
+  font-weight: 650;
+  line-height: 1.5;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.order-workflow-chip:focus-visible {
+  outline: 3px solid #4f46e5;
+  outline-offset: 2px;
+}
+
+.order-workflow-blue {
+  --wf-ink: #1c3f9e;
+  --wf-soft: #e8effe;
+}
+.order-workflow-amber {
+  --wf-ink: #92400e;
+  --wf-soft: #fef4e6;
+}
+.order-workflow-green {
+  --wf-ink: #066043;
+  --wf-soft: #e7f6ee;
+}
+.order-workflow-red {
+  --wf-ink: #a4271d;
+  --wf-soft: #fdeceb;
+}
+.order-workflow-gray {
+  --wf-ink: #475467;
+  --wf-soft: #f1f4f9;
+}
+
+:root[data-theme="dark"] .order-workflow-blue {
+  --wf-ink: #b9caff;
+  --wf-soft: #1b2947;
+}
+:root[data-theme="dark"] .order-workflow-amber {
+  --wf-ink: #fbbf6b;
+  --wf-soft: #2e2211;
+}
+:root[data-theme="dark"] .order-workflow-green {
+  --wf-ink: #6ee7a8;
+  --wf-soft: #10291f;
+}
+:root[data-theme="dark"] .order-workflow-red {
+  --wf-ink: #fda29b;
+  --wf-soft: #2f1615;
+}
+:root[data-theme="dark"] .order-workflow-gray {
+  --wf-ink: #aab6cb;
+  --wf-soft: #1a2337;
+}
+
+/* The panel is anchored to the chip and constrained, so a long explanation
+   cannot widen the Orders table or push a column off-screen. */
+/* Portalled to <body> and positioned in VIEWPORT coordinates by the component.
+   `fixed` rather than `absolute`, so the panel is unaffected by every scroll
+   container and transform between it and the row it describes.
+
+   z-index 900: above the sticky scrollbar (2), the sticky table header (1), the
+   app sidebar (30) and pagination, but deliberately BELOW the modal backdrop
+   (1000) so a confirmation dialog still covers it. No new tier was invented. */
+.order-workflow-panel {
+  position: fixed;
+  z-index: 900;
+  width: 380px;
+  max-width: min(420px, calc(100vw - 24px));
+  min-width: min(300px, calc(100vw - 24px));
+  padding: 0.75rem 0.85rem;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  background: var(--surface-color);
+  box-shadow: 0 10px 28px rgb(16 24 40 / 16%);
+  text-align: start;
+  white-space: normal;
+  /* Only when the content genuinely exceeds the space the component measured. */
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.order-workflow-statuses {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 10px;
+  margin: 0 0 0.55rem;
+  font-size: 0.76rem;
+}
+
+.order-workflow-statuses dt {
+  color: var(--text-secondary);
+}
+
+.order-workflow-statuses dd {
+  margin: 0;
+  /* `min-width: 0` plus `anywhere` is what stops a long single-token status
+     from widening the grid column and pushing the value out of the card. */
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.order-workflow-statuses dt {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.order-workflow-waiting {
+  margin: 0 0 0.3rem;
+  font-size: 0.8rem;
+  color: var(--text-primary);
+}
+
+.order-workflow-why {
+  margin: 0 0 0.6rem;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+/* The action button.
+
+   It kept inheriting the surrounding text and link treatment -- the global
+   light-mode rule that forces body text to pure black beat a plain `color`
+   here, so white-on-indigo rendered as BLACK-on-indigo. The states are
+   therefore declared explicitly and the text decoration is pinned, which is
+   what keeps the label white while hovered, focused and active. */
+.order-workflow-action,
+.order-workflow-action:link,
+.order-workflow-action:visited,
+.order-workflow-action:hover,
+.order-workflow-action:focus,
+.order-workflow-action:active {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.4rem 0.8rem;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: linear-gradient(180deg, #2f5bd7, #4f46e5);
+  color: #ffffff;
+  font-size: 0.78rem;
+  font-weight: 650;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+/* Icons inherit the label colour rather than the page's. */
+.order-workflow-action svg {
+  color: currentcolor;
+}
+
+.order-workflow-action:hover {
+  background: linear-gradient(180deg, #2848b4, #4038c4);
+}
+
+.order-workflow-action:active {
+  background: linear-gradient(180deg, #23409f, #372fb0);
+}
+
+.order-workflow-action:focus-visible {
+  outline: 3px solid #93b4ff;
+  outline-offset: 2px;
+}
+
+.order-workflow-action:disabled {
+  background: var(--border-color);
+  color: var(--text-secondary);
+  cursor: not-allowed;
+}
+
+/* Dark mode keeps the same white label: the fill is already dark enough, and
+   letting the dark theme's light body colour win would wash it out. */
+:root[data-theme="dark"] .order-workflow-action,
+:root[data-theme="dark"] .order-workflow-action:hover,
+:root[data-theme="dark"] .order-workflow-action:focus,
+:root[data-theme="dark"] .order-workflow-action:active {
+  color: #ffffff;
+}
+
+.order-workflow-denied {
+  margin: 0;
+  font-size: 0.76rem;
+  color: var(--text-secondary);
+}
+
+/* The next step is the panel's strongest line; "waiting for" only appears when
+   there is genuinely nothing to do. */
+.order-workflow-nextstep {
+  margin: 0 0 0.35rem;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.order-workflow-nextstep-label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.order-workflow-nextstep strong {
+  font-size: 0.95rem;
+  font-weight: 680;
+  line-height: 1.3;
+  color: var(--text-primary);
+}
+
+.order-workflow-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+/* Secondary: quiet on purpose, so the primary action stays the obvious one. */
+.order-workflow-secondary,
+.order-workflow-secondary:hover,
+.order-workflow-secondary:focus,
+.order-workflow-secondary:active {
+  padding: 0.4rem 0.7rem;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.order-workflow-secondary:hover {
+  background: color-mix(in srgb, var(--border-color) 30%, transparent);
+}
+
+.order-workflow-secondary:focus-visible {
+  outline: 3px solid #4f46e5;
+  outline-offset: 2px;
+}
+
+/* Company ID: a read-only identifier beside its Copy control. The input is
+   selectable so a user can still copy manually when clipboard access is
+   refused (insecure origin or denied permission). */
+.cp-company-id {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.cp-company-id input {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85rem;
+}
+
+.cp-company-id input:read-only {
+  background: color-mix(in srgb, var(--border-color) 22%, transparent);
+  cursor: text;
+}
+
+.cp-company-id .button {
+  flex: 0 0 auto;
+}
+
+/* ---------------------------------------- Accounting focus-mode track list */
+/* Collapsing the section menu removes the navigation from the DOM, but the
+   two-column track list survived: the page then landed in the ~214px first
+   column and the 1fr track sat empty, which is the narrow content strip with a
+   large blank area beside it. `.accounting-workspace-focused` near the top of
+   this sheet already says this, but a later rule was re-widening it, so it is
+   restated here at a specificity and position nothing else beats. Applies to
+   every Accounting screen, not just Opening Balances. */
+.accounting-workspace.accounting-workspace-focused {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* Account activation / password recovery, reached from a one-time link. */
+.account-setup {
+  max-width: 420px;
+  margin: 8vh auto;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.account-setup form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.account-setup label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }

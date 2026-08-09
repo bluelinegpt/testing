@@ -84,7 +84,22 @@ describe.skipIf(!runHttpTests)("trader settlement HTTP boundary", () => {
           // itself. Every "permission variant" must share ONE Company's data, or requests
           // made with that token are correctly (but unintentionally) Company-isolated away
           // from the fixtures below.
-          const makeUser = async (companyId: string, label: string, permission: string | null) => {
+          const makeUser = async (
+            companyId: string,
+            label: string,
+            permission: string | null,
+            /**
+             * Extra permissions this Role also grants.
+             *
+             * Creating a settlement now reads the funding account's
+             * authoritative balance for balance enforcement, and that read
+             * asserts `accounting.view`. A settlement User therefore genuinely
+             * needs it; the single-permission Role predates balance controls.
+             * Kept as an explicit opt-in so the unprivileged User stays
+             * unprivileged and the permission assertions below are unchanged.
+             */
+            extraPermissions: readonly string[] = [],
+          ) => {
             const accountId = randomUUID();
             const roleId = randomUUID();
             const suffix = randomUUID().slice(0, 8);
@@ -105,10 +120,16 @@ describe.skipIf(!runHttpTests)("trader settlement HTTP boundary", () => {
               insert into roles (id, company_id, code, name, is_system)
               values (${roleId}::uuid, ${companyId}::uuid, ${`role_${suffix}`}, ${`Role ${suffix}`}, true)
             `.execute(transaction);
-            await sql`
-              insert into role_permissions (role_id, permission_code)
-              values (${roleId}::uuid, ${permission ?? "orders.assign_driver"})
-            `.execute(transaction);
+            const permissionCodes = [
+              permission ?? "orders.assign_driver",
+              ...extraPermissions,
+            ];
+            for (const permissionCode of permissionCodes) {
+              await sql`
+                insert into role_permissions (role_id, permission_code)
+                values (${roleId}::uuid, ${permissionCode})
+              `.execute(transaction);
+            }
             await sql`
               insert into account_roles (account_id, role_id, company_id)
               values (${accountId}::uuid, ${roleId}::uuid, ${companyId}::uuid)
@@ -128,7 +149,9 @@ describe.skipIf(!runHttpTests)("trader settlement HTTP boundary", () => {
           // Company A: one Company, four Users with different, deliberately narrow Roles,
           // all sharing the same Company's data.
           const admin = await makeCompany("admin", "users_roles.manage");
-          const settlementUser = await makeUser(admin.companyId, "settle", "settlements.create");
+          const settlementUser = await makeUser(admin.companyId, "settle", "settlements.create", [
+            "accounting.view",
+          ]);
           const reportUser = await makeUser(admin.companyId, "report", "reports.export");
           // Neither settlements.create, settlements.reverse, reports.export nor
           // users_roles.manage — must be refused everywhere.
@@ -168,14 +191,47 @@ describe.skipIf(!runHttpTests)("trader settlement HTTP boundary", () => {
           const traderA = await createTrader(admin.companyId, admin.accountId, "a");
           const traderB = await createTrader(adminB.companyId, adminB.accountId, "b");
 
+          const cashGlAccountId = randomUUID();
+          const companyCashAccountId = randomUUID();
+          await sql`
+            insert into chart_of_accounts (
+              id, company_id, code, name_en, account_type, account_class,
+              normal_balance, is_posting_account, is_active
+            ) values (
+              ${cashGlAccountId}::uuid, ${admin.companyId}::uuid,
+              ${`1010-${admin.companyId.slice(0, 8)}`}, 'Cash on hand', 'asset', 'cash',
+              'debit', true, true
+            )
+          `.execute(transaction);
+          await sql`
+            insert into company_cash_accounts (
+              id, company_id, cash_account_code, cash_account_name, cash_account_type,
+              linked_gl_account_id, effective_from, created_by_account_id
+            ) values (
+              ${companyCashAccountId}::uuid, ${admin.companyId}::uuid,
+              ${`HTTP-CASH-${admin.companyId.slice(0, 8)}`}, 'HTTP Cash', 'main_cash',
+              ${cashGlAccountId}::uuid, '2020-01-01'::date, ${admin.accountId}::uuid
+            )
+          `.execute(transaction);
+          await sql`
+            insert into company_balance_policies (
+              company_id, cash_policy, bank_policy, bank_overdraft_limit, effective_from,
+              change_reason, created_by_account_id
+            ) values (
+              ${admin.companyId}::uuid, 'allow', 'allow', 0, '2020-01-01'::date,
+              'HTTP boundary fixture: this suite asserts routing, not balance policy',
+              ${admin.accountId}::uuid
+            )
+          `.execute(transaction);
+
           const companyBankAccountId = randomUUID();
           const companyBankAccountInactiveId = randomUUID();
           await sql`
-            insert into company_bank_accounts (id, company_id, bank_name, account_name, iban, is_active)
+            insert into company_bank_accounts (id, company_id, bank_account_code, bank_name, account_name, iban, is_active)
             values
-              (${companyBankAccountId}::uuid, ${admin.companyId}::uuid, 'HTTP Bank', 'HTTP Account',
+              (${companyBankAccountId}::uuid, ${admin.companyId}::uuid, ${`HTTP-BANK-${admin.companyId.slice(0, 8)}-1`}, 'HTTP Bank', 'HTTP Account',
                ${`AE${admin.companyId.slice(0, 8)}COMPANY01`}, true),
-              (${companyBankAccountInactiveId}::uuid, ${admin.companyId}::uuid, 'HTTP Bank', 'Inactive Account',
+              (${companyBankAccountInactiveId}::uuid, ${admin.companyId}::uuid, ${`HTTP-BANK-${admin.companyId.slice(0, 8)}-2`}, 'HTTP Bank', 'Inactive Account',
                ${`AE${admin.companyId.slice(0, 8)}COMPANY02`}, false)
           `.execute(transaction);
           const traderBankAccountId = randomUUID();
@@ -215,14 +271,14 @@ describe.skipIf(!runHttpTests)("trader settlement HTTP boundary", () => {
             `.execute(transaction);
             await sql`
               insert into orders (
-                id, company_id, order_number, order_date, trader_id, area_id, created_by_account_id,
+                service_fee_override_reason, id, company_id, order_number, order_date, trader_id, area_id, created_by_account_id,
                 customer_name, customer_mobile_number, customer_address, package_count, payment_condition,
                 final_service_fee_snapshot, customer_provenance_status, pricing_provenance_status,
                 trader_gross_payable, trader_net_payable,
                 delivery_status, driver_reconciliation_status, trader_settlement_status, return_status,
                 delivered_at
               ) values (
-                ${orderId}::uuid, ${companyId}::uuid, ${number}, current_date, ${traderId}::uuid,
+                'Zero configured Service Fee (fixture)', ${orderId}::uuid, ${companyId}::uuid, ${number}, current_date, ${traderId}::uuid,
                 ${areaId}::uuid, ${creatorAccountId}::uuid, 'HTTP Customer', '971509999999',
                 'HTTP address', 1, 'customer_pays_cod_and_fee', 0, 'legacy_unattributed',
                 'legacy_unattributed', ${netPayable}, ${netPayable},
@@ -236,7 +292,12 @@ describe.skipIf(!runHttpTests)("trader settlement HTTP boundary", () => {
           const orderPartial = await createOrder(admin.companyId, admin.accountId, traderA, 80);
           const orderIdemA = await createOrder(admin.companyId, admin.accountId, traderA, 40);
           const orderOverpay = await createOrder(admin.companyId, admin.accountId, traderA, 25);
-          const orderBankInactive = await createOrder(admin.companyId, admin.accountId, traderA, 60);
+          const orderBankInactive = await createOrder(
+            admin.companyId,
+            admin.accountId,
+            traderA,
+            60,
+          );
           const orderBankCrossTrader = await createOrder(
             admin.companyId,
             admin.accountId,
@@ -252,12 +313,7 @@ describe.skipIf(!runHttpTests)("trader settlement HTTP boundary", () => {
             traderA,
             55,
           );
-          const orderCompanyB = await createOrder(
-            adminB.companyId,
-            adminB.accountId,
-            traderB,
-            50,
-          );
+          const orderCompanyB = await createOrder(adminB.companyId, adminB.accountId, traderB, 50);
 
           // =====================================================================
           // 1. GET eligible-orders
@@ -268,9 +324,9 @@ describe.skipIf(!runHttpTests)("trader settlement HTTP boundary", () => {
           const eligibleOk = await authed(settlementUser.token)(
             `/operations/settlements/payments/eligible-orders?traderId=${traderA}&page=1&pageSize=25`,
           ).expect(200);
-          expect(
-            eligibleOk.body.items.some((row: { id: string }) => row.id === orderFull.id),
-          ).toBe(true);
+          expect(eligibleOk.body.items.some((row: { id: string }) => row.id === orderFull.id)).toBe(
+            true,
+          );
           // Missing Trader validation.
           await authed(settlementUser.token)(
             "/operations/settlements/payments/eligible-orders?page=1&pageSize=25",
@@ -289,10 +345,14 @@ describe.skipIf(!runHttpTests)("trader settlement HTTP boundary", () => {
           // =====================================================================
           // 2. POST propose-allocation
           // =====================================================================
-          const proposal = await post(settlementUser.token, "/operations/settlements/payments/propose-allocation", {
-            amount: 120,
-            traderId: traderA,
-          }).expect(201);
+          const proposal = await post(
+            settlementUser.token,
+            "/operations/settlements/payments/propose-allocation",
+            {
+              amount: 120,
+              traderId: traderA,
+            },
+          ).expect(201);
           expect(proposal.body.allocations.length).toBeGreaterThan(0);
           expect(Number(proposal.body.totalAllocated)).toBeGreaterThan(0);
           // Invalid amount.
@@ -324,6 +384,7 @@ describe.skipIf(!runHttpTests)("trader settlement HTTP boundary", () => {
             {
               allocations: [{ amount: 100, orderId: orderFull.id }],
               amount: 100,
+              cashAccountId: companyCashAccountId,
               paymentMethod: "cash",
               traderId: traderA,
             },
@@ -340,6 +401,7 @@ describe.skipIf(!runHttpTests)("trader settlement HTTP boundary", () => {
             {
               allocations: [{ amount: 30, orderId: orderPartial.id }],
               amount: 30,
+              cashAccountId: companyCashAccountId,
               paymentMethod: "cash",
               traderId: traderA,
             },
@@ -353,6 +415,7 @@ describe.skipIf(!runHttpTests)("trader settlement HTTP boundary", () => {
           const idemBody = {
             allocations: [{ amount: 40, orderId: orderIdemA.id }],
             amount: 40,
+            cashAccountId: companyCashAccountId,
             paymentMethod: "cash",
             traderId: traderA,
           };
@@ -373,11 +436,11 @@ describe.skipIf(!runHttpTests)("trader settlement HTTP boundary", () => {
           expect(idemReplay.body.settlementId).toBe(idemFirst.body.settlementId);
 
           // Missing idempotency key where required.
-          const missingKey = await post(
-            settlementUser.token,
-            "/operations/settlements/payments",
-            { allocations: [{ amount: 5, orderId: orderOverpay.id }], amount: 5, traderId: traderA },
-          );
+          const missingKey = await post(settlementUser.token, "/operations/settlements/payments", {
+            allocations: [{ amount: 5, orderId: orderOverpay.id }],
+            amount: 5,
+            traderId: traderA,
+          });
           expect(missingKey.status).toBe(400);
           expect(missingKey.body.error?.code).toBe("idempotency_key_invalid");
 
@@ -405,7 +468,9 @@ describe.skipIf(!runHttpTests)("trader settlement HTTP boundary", () => {
             },
           ).set("X-Idempotency-Key", `overpay-${randomUUID()}`);
           expect(overpayResponse.status).toBe(409);
-          expect(overpayResponse.body.error?.code).toBe("settlement_allocation_exceeds_outstanding");
+          expect(overpayResponse.body.error?.code).toBe(
+            "settlement_allocation_exceeds_outstanding",
+          );
 
           // Inactive bank account.
           const inactiveBankResponse = await post(
@@ -443,11 +508,11 @@ describe.skipIf(!runHttpTests)("trader settlement HTTP boundary", () => {
           expect(crossTraderBankResponse.body.error?.code).toBe("trader_beneficiary_required");
 
           // Permission denied.
-          const deniedCreate = await post(
-            unprivileged.token,
-            "/operations/settlements/payments",
-            { allocations: [{ amount: 5, orderId: orderOverpay.id }], amount: 5, traderId: traderA },
-          ).set("X-Idempotency-Key", `denied-${randomUUID()}`);
+          const deniedCreate = await post(unprivileged.token, "/operations/settlements/payments", {
+            allocations: [{ amount: 5, orderId: orderOverpay.id }],
+            amount: 5,
+            traderId: traderA,
+          }).set("X-Idempotency-Key", `denied-${randomUUID()}`);
           expect(deniedCreate.status).toBe(403);
 
           // Cross-Company Order rejected: Company A's token paying against
@@ -529,19 +594,21 @@ describe.skipIf(!runHttpTests)("trader settlement HTTP boundary", () => {
           // Masked bank values: the bank-transfer settlement created above names
           // a real beneficiary, so its report-data must mask it.
           const bankReport = await authed(settlementUser.token)(
-            `/operations/settlements/payments/${(
-              await post(settlementUser.token, "/operations/settlements/payments", {
-                allocations: [{ amount: 60, orderId: orderBankCrossTrader.id }],
-                amount: 60,
-                bankAccountId: companyBankAccountId,
-                bankReference: "REF-MASKTEST",
-                paymentMethod: "bank_transfer",
-                traderBankAccountId,
-                traderId: traderA,
-              })
-                .set("X-Idempotency-Key", `masktest-${randomUUID()}`)
-                .expect(201)
-            ).body.settlementId}/report-data`,
+            `/operations/settlements/payments/${
+              (
+                await post(settlementUser.token, "/operations/settlements/payments", {
+                  allocations: [{ amount: 60, orderId: orderBankCrossTrader.id }],
+                  amount: 60,
+                  bankAccountId: companyBankAccountId,
+                  bankReference: "REF-MASKTEST",
+                  paymentMethod: "bank_transfer",
+                  traderBankAccountId,
+                  traderId: traderA,
+                })
+                  .set("X-Idempotency-Key", `masktest-${randomUUID()}`)
+                  .expect(201)
+              ).body.settlementId
+            }/report-data`,
           ).expect(200);
           expect(bankReport.body.header.beneficiaryBank.accountNumberMasked).not.toContain(
             "5551234567",
@@ -629,6 +696,9 @@ describe.skipIf(!runHttpTests)("trader settlement HTTP boundary", () => {
             {
               allocations: [{ amount: 45, orderId: orderReceipt.id }],
               amount: 45,
+              // No paymentMethod: the API defaults to cash, which still needs
+              // its funding Cash account named.
+              cashAccountId: companyCashAccountId,
               traderId: traderA,
             },
           )
@@ -694,6 +764,7 @@ describe.skipIf(!runHttpTests)("trader settlement HTTP boundary", () => {
             {
               allocations: [{ amount: 35, orderId: orderReverse.id }],
               amount: 35,
+              cashAccountId: companyCashAccountId,
               traderId: traderA,
             },
           )
@@ -728,6 +799,7 @@ describe.skipIf(!runHttpTests)("trader settlement HTTP boundary", () => {
             {
               allocations: [{ amount: 10, orderId: orderMismatch.id }],
               amount: 10,
+              cashAccountId: companyCashAccountId,
               traderId: traderA,
             },
           )
@@ -745,6 +817,7 @@ describe.skipIf(!runHttpTests)("trader settlement HTTP boundary", () => {
             {
               allocations: [{ amount: 55, orderId: orderReverseBlocked.id }],
               amount: 55,
+              cashAccountId: companyCashAccountId,
               traderId: traderA,
             },
           )

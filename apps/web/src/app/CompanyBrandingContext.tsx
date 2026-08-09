@@ -51,7 +51,9 @@ export function CompanyBrandingProvider({
   const [branding, setBranding] = useState<CompanyBranding>();
   const [textLanguage, setTextLanguageState] = useState<SupportedLocale>("en");
   const [themePreference, setThemePreferenceState] = useState<ThemePreference>("system");
-  const [resolvedTheme, setResolvedTheme] = useState<ResolvedTheme>(() => resolveThemePreference("system"));
+  const [resolvedTheme, setResolvedTheme] = useState<ResolvedTheme>(() =>
+    resolveThemePreference("system"),
+  );
   const [logoUrl, setLogoUrl] = useState<string | undefined>(undefined);
   const logoUrlRef = useRef<string | undefined>(undefined);
 
@@ -86,6 +88,7 @@ export function CompanyBrandingProvider({
 
   useEffect(() => {
     if (themePreference !== "system") return undefined;
+    if (typeof window.matchMedia !== "function") return undefined;
     const media = window.matchMedia("(prefers-color-scheme: dark)");
     const handleSystemThemeChange = () => {
       const next = resolveThemePreference("system");
@@ -173,9 +176,7 @@ export function CompanyBrandingProvider({
     [textLanguage],
   );
 
-  const companyName = branding
-    ? localize({ ar: branding.nameAr, en: branding.nameEn })
-    : "";
+  const companyName = branding ? localize({ ar: branding.nameAr, en: branding.nameEn }) : "";
   const companySubtitle = branding
     ? localize({ ar: branding.subtitleAr, en: branding.subtitleEn }) || undefined
     : undefined;
@@ -209,7 +210,9 @@ export function CompanyBrandingProvider({
     ],
   );
 
-  return <CompanyBrandingContext.Provider value={value}>{children}</CompanyBrandingContext.Provider>;
+  return (
+    <CompanyBrandingContext.Provider value={value}>{children}</CompanyBrandingContext.Provider>
+  );
 }
 
 /** Full branding context. Throws if used outside the provider (shell/profile page). */

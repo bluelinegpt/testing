@@ -14,6 +14,7 @@ import {
   MaxLength,
   MinLength,
   Min,
+  ValidateIf,
   ValidateNested,
 } from "class-validator";
 import { Transform, Type } from "class-transformer";
@@ -301,6 +302,34 @@ export class CreateDriverReconciliationDto extends OrderSelectionDto {
   @ValidateNested({ each: true })
   @Type(() => DriverFeeOffsetAllocationDto)
   public readonly driverFeeAllocations?: readonly DriverFeeOffsetAllocationDto[];
+
+  /*
+   * Employee Driver collection earnings -- operational fact capture only.
+   *
+   * Neither field carries or implies money. They record what the operator
+   * observed: whether this collection counts towards the Driver's collection
+   * earnings, and how many Orders it covered when the reconciliation itself
+   * cannot say. What that is worth is decided by Payroll from the effective
+   * rule, which is why no rate appears anywhere in this request or its response.
+   *
+   * Absent means "does not count", so every existing caller -- web, mobile and
+   * any integration -- keeps its current behaviour untouched.
+   */
+  @IsOptional()
+  @IsBoolean()
+  public readonly countsForCollectionEarning?: boolean;
+
+  /*
+   * Fallback only. When the reconciliation carries Order links they are
+   * authoritative and this is ignored, because a typed number that disagrees
+   * with the linked Orders would be a silent correction of the reconciliation.
+   * The upper bound matches the 100-Order cap the selection DTO already applies.
+   */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  public readonly manualCollectedOrderCount?: number;
 }
 
 // Reversal of a confirmed Driver collection (§8): controlled, reason-required,
@@ -343,14 +372,45 @@ export class InlineOrderCustomerDto {
   @IsUUID()
   public readonly areaId!: string;
 
+  /*
+   * Optional, matching `customerAddress` on the Order itself. A new Customer
+   * captured without one simply gets no saved address record rather than a
+   * placeholder; see `resolveCreateOrderCustomer`.
+   */
+  @IsOptional()
   @IsString()
-  @MinLength(1)
+  @OptionalTrimmedText()
   @MaxLength(500)
-  @TrimText()
-  public readonly address!: string;
+  public readonly address?: string;
 }
 
 export class CreateOrderDto {
+  /*
+   * A deliberate free delivery. Never inferred from zero amounts -- a
+   * zero-valued Order can equally be a pricing gap, and the two must stay
+   * distinguishable in reporting and in audit.
+   *
+   * When true the server forces COD and Service Fee to zero and skips Trader
+   * pricing resolution entirely, so an unpriced Area cannot block an Order the
+   * operator has already decided is free. Trader pricing itself is untouched.
+   */
+  @IsOptional()
+  @IsBoolean()
+  public readonly isFreeOrder?: boolean;
+
+  /*
+   * Required whenever `isFreeOrder` is true, and rejected when it is not, so a
+   * stale reason cannot linger on an Order that is no longer free. Enforced
+   * again by `orders_free_order_shape_check`, because a validation rule the
+   * database does not share is a rule a second caller can miss.
+   */
+  @ValidateIf((dto: CreateOrderDto) => dto.isFreeOrder === true)
+  @IsString()
+  @MinLength(1)
+  @MaxLength(300)
+  @TrimText()
+  public readonly freeOrderReason?: string;
+
   @IsString()
   @MinLength(1)
   @MaxLength(160)
@@ -407,10 +467,17 @@ export class CreateOrderDto {
   @Matches(noControlChars, mobileCharsMessage)
   public readonly customerSecondMobileNumber?: string;
 
+  /*
+   * Optional. Plenty of deliveries are arranged by phone against a landmark or
+   * a pin rather than a written address, and forcing a value there produced
+   * placeholder text that was worse than an empty field. The column is NOT NULL
+   * with no non-empty check, so an absent address is stored as '' and no
+   * migration is needed.
+   */
+  @IsOptional()
   @IsString()
-  @MinLength(1)
   @MaxLength(500)
-  public readonly customerAddress!: string;
+  public readonly customerAddress?: string;
 
   @IsOptional()
   @IsString()
@@ -467,9 +534,7 @@ export class CreateOrderDto {
 // The authenticated Trader is always resolved from the active portal profile.
 // Accepting a Trader identifier from the browser would allow an unsafe
 // cross-profile selection, so it is deliberately absent from this contract.
-export class CreateTraderPortalOrderDto extends OmitType(CreateOrderDto, [
-  "traderId",
-] as const) {}
+export class CreateTraderPortalOrderDto extends OmitType(CreateOrderDto, ["traderId"] as const) {}
 
 // Partial edit of an existing order's business fields before delivery. Every field is
 // optional; only the provided fields change. Changing the Trader, or the Customer + address
@@ -511,9 +576,10 @@ export class UpdateOrderDto {
   @MaxLength(12)
   public readonly customerSecondMobileNumber?: string;
 
+  // Blank is allowed, as on create: an Order may legitimately have no written
+  // address, and clearing a wrong one must not be forbidden.
   @IsOptional()
   @IsString()
-  @MinLength(1)
   @MaxLength(500)
   public readonly customerAddress?: string;
 
@@ -699,6 +765,9 @@ const driverTypeFilters = ["employee", "outsourced"] as const;
 // is the bank-tender method on a settlement payment line.
 const collectionPaymentMethodFilters = ["cash", "visa", "not_assigned"] as const;
 const reconciliationStatusFilters = ["pending", "reconciled", "reversed", "all"] as const;
+// Outsourced Driver Fee payment state for a Collection. Employee drivers accrue
+// no fee, so their Collections match neither 'paid' nor 'unpaid'.
+const driverFeeStatusFilters = ["paid", "unpaid", "all"] as const;
 const orderStatusFilters = [
   "new",
   "assigned_to_driver",
@@ -776,7 +845,45 @@ export class EligibleOrdersQueryDto extends PaginationQueryDto {
 // Shared filter fields (§3) reused by both the reconciliation list and the
 // summary-cards endpoint so the cards always describe the same slice the list
 // shows. Every field is optional; the service applies each only when present.
+/**
+ * Business Date filtering, shared by every operational activity screen.
+ *
+ * Mixed into each filter DTO rather than inherited, because these DTOs already
+ * extend other shapes and a second base class is not available.
+ *
+ * Deliberately absent: any UTC boundary. The window is resolved server-side by
+ * `ReportDateModeService` — a range computed in the browser would be built from
+ * the viewer's own clock and zone, and the backend could not tell a wrong one
+ * from a right one.
+ */
+export class BusinessDateFilterDto {
+  /** Omitted means the screen's existing calendar behaviour, unchanged. */
+  @IsOptional()
+  @IsIn(["calendar_date", "business_date"])
+  public readonly dateMode?: "business_date" | "calendar_date";
+
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  public readonly businessDateFrom?: string;
+
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  public readonly businessDateTo?: string;
+}
+
 export class DriverCollectionsFilterDto {
+  @IsOptional()
+  @IsIn(["calendar_date", "business_date"])
+  public readonly dateMode?: "business_date" | "calendar_date";
+
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  public readonly businessDateFrom?: string;
+
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  public readonly businessDateTo?: string;
+
   @IsOptional()
   @IsString()
   @MaxLength(120)
@@ -844,6 +951,10 @@ export class DriverCollectionsFilterDto {
   @IsOptional()
   @IsIn(reconciliationStatusFilters)
   public readonly reconciliationStatus?: (typeof reconciliationStatusFilters)[number];
+
+  @IsOptional()
+  @IsIn(driverFeeStatusFilters)
+  public readonly driverFeeStatus?: (typeof driverFeeStatusFilters)[number];
 
   @IsOptional()
   @IsIn(orderStatusFilters)
@@ -984,6 +1095,18 @@ export class TraderSettlementAllocationLineDto {
 }
 
 export class CreateTraderSettlementDto {
+  /**
+   * Company CASH account funding a cash settlement.
+   *
+   * A separate field from `bankAccountId` rather than one polymorphic id,
+   * matching how the table stores them: two columns, so the foreign key
+   * itself prevents a Bank account being recorded as the source of a cash
+   * payment. Optional here and conditional in the service -- required for
+   * cash, rejected for bank transfer.
+   */
+  @IsOptional()
+  @IsUUID()
+  public readonly cashAccountId?: string;
   @IsUUID()
   public readonly traderId!: string;
 
@@ -1023,6 +1146,21 @@ export class CreateTraderSettlementDto {
   @IsString()
   @MaxLength(1000)
   public readonly notes?: string;
+
+  /**
+   * Why this settlement may take its funding account below the permitted floor.
+   *
+   * Applies to both methods -- a cash settlement draws on a Cash account and a
+   * bank transfer on a Bank account, and either can be taken negative.
+   *
+   * Optional here and conditional in the backend, which is the only place the
+   * condition can be evaluated: whether an override is needed depends on the
+   * balance at confirmation and the Company policy in force.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  public readonly balanceOverrideReason?: string;
 }
 
 export class TraderAccountStatementQueryDto {
@@ -1093,6 +1231,18 @@ export class ReverseTraderSettlementDto {
 }
 
 export class TraderSettlementFilterDto {
+  @IsOptional()
+  @IsIn(["calendar_date", "business_date"])
+  public readonly dateMode?: "business_date" | "calendar_date";
+
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  public readonly businessDateFrom?: string;
+
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  public readonly businessDateTo?: string;
+
   @IsOptional()
   @IsUUID()
   public readonly traderId?: string;
@@ -1203,7 +1353,11 @@ const traderReceivableStatuses = [
 ] as const;
 
 const traderCollectionHeaderStatuses = ["confirmed", "reversed", "all"] as const;
-const traderReceivableEligibleSorts = ["businessDate", "receivableNumber", "outstandingAmount"] as const;
+const traderReceivableEligibleSorts = [
+  "businessDate",
+  "receivableNumber",
+  "outstandingAmount",
+] as const;
 const traderCollectionListSorts = ["paymentDate", "collectionNumber"] as const;
 
 export class CreateTraderReceivableDto {
@@ -1372,6 +1526,18 @@ export class ReverseTraderCollectionDto {
 }
 
 export class TraderCollectionFilterDto {
+  @IsOptional()
+  @IsIn(["calendar_date", "business_date"])
+  public readonly dateMode?: "business_date" | "calendar_date";
+
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  public readonly businessDateFrom?: string;
+
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  public readonly businessDateTo?: string;
+
   @IsOptional()
   @IsUUID()
   public readonly traderId?: string;

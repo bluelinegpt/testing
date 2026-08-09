@@ -8,7 +8,6 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
-  Query,
 } from "@nestjs/common";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 
@@ -16,7 +15,7 @@ import {
   RequireAnyPermission,
   RequireIdentityKinds,
 } from "../authentication/authentication.decorators.js";
-import {
+import type {
   AccountingConfigurationDto,
   AccountingReasonDto,
   AccountMutationDto,
@@ -31,7 +30,7 @@ import { AccountingManagementService } from "./accounting-management.service.js"
 import { AccountingQueryService } from "./accounting-query.service.js";
 import { FiscalCalendarService } from "./fiscal-calendar.service.js";
 import { AccountingSetupService } from "./accounting-setup.service.js";
-import { AccountingActivationDto } from "./accounting-setup.dto.js";
+import type { AccountingActivationDto } from "./accounting-setup.dto.js";
 
 @ApiTags("accounting")
 @ApiBearerAuth()
@@ -166,9 +165,7 @@ export class AccountingManagementController {
 
   @Get("fiscal-years/:fiscalYearId/dependencies")
   @RequireAnyPermission("accounting.view", "users_roles.manage")
-  public fiscalYearDependencies(
-    @Param("fiscalYearId", new ParseUUIDPipe()) fiscalYearId: string,
-  ) {
+  public fiscalYearDependencies(@Param("fiscalYearId", new ParseUUIDPipe()) fiscalYearId: string) {
     return this.calendar.yearDependencies(fiscalYearId);
   }
 

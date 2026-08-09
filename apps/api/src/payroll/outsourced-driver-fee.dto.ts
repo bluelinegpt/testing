@@ -160,6 +160,18 @@ export class ConfirmOutsourcedDriverFeePaymentDto extends OutsourcedDriverFeePay
   @IsDateString()
   public readonly paymentDate!: string;
 
+  /**
+   * The Company CASH account funding this payment.
+   *
+   * Optional on the decorator, REQUIRED in the service. The rule is
+   * conditional -- a collection offset must supply none -- and a decorator
+   * cannot express a condition that depends on which endpoint was called,
+   * so the service is the only honest place to enforce it.
+   */
+  @IsOptional()
+  @IsUUID()
+  public readonly accountId?: string;
+
   @IsOptional()
   @IsString()
   @MaxLength(100)
@@ -174,6 +186,22 @@ export class ConfirmOutsourcedDriverFeePaymentDto extends OutsourcedDriverFeePay
   @IsString()
   @MaxLength(1000)
   public readonly notes?: string;
+
+  /**
+   * Why this payment may take the Cash account below its permitted floor.
+   *
+   * Cash payments only. A collection offset moves no Company funds and is never
+   * balance-checked, so it has no use for this and its internal input does not
+   * carry it.
+   *
+   * Optional here and conditional in the backend, which is the only place the
+   * condition can be evaluated: whether an override is needed depends on the
+   * balance at confirmation and the Company policy in force.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  public readonly balanceOverrideReason?: string;
 }
 
 export class OutsourcedDriverFeePaymentListQueryDto {

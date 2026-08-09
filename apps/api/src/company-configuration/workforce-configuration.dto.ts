@@ -395,3 +395,48 @@ export class ConfirmOutsourcedPaymentDto {
   @Matches(/^[A-Za-z0-9._:-]{16,128}$/)
   public readonly idempotencyKey!: string;
 }
+
+/*
+ * Employee Driver variable earnings.
+ *
+ * Deliberately separate from `SaveEmployeeDto`: a rate is effective-dated
+ * history, not a property of the Employee record. Folding it into the Employee
+ * PATCH would mean every profile edit implicitly restated the rate, which is
+ * exactly the overwrite the rule tables exist to prevent.
+ */
+const earningDatePattern = /^\d{4}-\d{2}-\d{2}$/;
+
+export class SaveDeliveryEarningRuleDto {
+  /** Flat amount per delivered Order. Zero is not a rate, it is a mistake. */
+  @IsNumber({ allowInfinity: false, allowNaN: false, maxDecimalPlaces: 2 })
+  @Min(0.01)
+  public readonly amountPerOrder!: number;
+
+  @Matches(earningDatePattern)
+  public readonly effectiveFrom!: string;
+
+  /** Omitted means "still in force". */
+  @IsOptional()
+  @Matches(earningDatePattern)
+  public readonly effectiveTo?: string;
+}
+
+export class SaveCollectionEarningRuleDto {
+  @IsIn(["none", "per_collected_order", "flat_per_confirmed_collection"])
+  public readonly collectionPaymentType!:
+    | "none"
+    | "per_collected_order"
+    | "flat_per_confirmed_collection";
+
+  /** Must be 0 for `none`, and above 0 for either paid type. */
+  @IsNumber({ allowInfinity: false, allowNaN: false, maxDecimalPlaces: 2 })
+  @Min(0)
+  public readonly amount!: number;
+
+  @Matches(earningDatePattern)
+  public readonly effectiveFrom!: string;
+
+  @IsOptional()
+  @Matches(earningDatePattern)
+  public readonly effectiveTo?: string;
+}

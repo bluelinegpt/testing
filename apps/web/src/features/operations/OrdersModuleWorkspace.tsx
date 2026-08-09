@@ -21,6 +21,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -44,34 +45,72 @@ import type {
   SearchPage,
 } from "../../api/contracts.js";
 import { Modal } from "../../components/Modal.js";
+import { StickyHorizontalScrollbar } from "../../components/StickyHorizontalScrollbar.js";
+import {
+  useWorkflowDeepLink,
+  type WorkflowDeepLink,
+  type WorkflowDialog,
+} from "./use-workflow-deep-link.js";
 import { PageHeader } from "../../components/PageHeader.js";
+import { FilterCombobox } from "../../components/FilterCombobox.js";
 import { SearchCombobox } from "../../components/SearchCombobox.js";
 import { isUaeMobile, normalizeUaeMobile } from "../../domain/uae-mobile.js";
 import { formatCurrency, formatDate, formatDateTime } from "../../localization/formatters.js";
 import { normalizeLocale } from "../../localization/locale.js";
 import { CompanyBrandingContext } from "../../app/CompanyBrandingContext.js";
+import { AccountingRelatedPanel } from "../accounting/AccountingRelatedPanel.js";
 import { localizeName } from "../../localization/localize-name.js";
 import { formatMoneyValue, parseMoneyInput, parseNumericInput } from "../../utils/numeric-input.js";
+import { useSessionAccess } from "../../app/SessionAccessContext.js";
+import { useListState } from "../accounting/use-list-state.js";
+import { BusinessDateFilterControls } from "./BusinessDateFilterControls.js";
+import {
+  orderAccountingStatus,
+  orderFeeSource,
+  showsAccountingRelatedRecords,
+} from "./order-accounting-policy.js";
 import { CreateOrderDialog } from "./CreateOrderDialog.js";
 import { DriverCashStatusLabel, useDriverCashStatusLabel } from "./DriverCashStatus.js";
+import { OrderWorkflowIndicator } from "./OrderWorkflowIndicator.js";
 import { DriverCollectionDetailDialog } from "./DriverCollectionsWorkspace.js";
 import { openOrderWaybill, OrderBarcode } from "./OperationsWorkspace.js";
 import { type PdfAction, useReconciliationPdfActions } from "./reconciliation-pdf.js";
 import { SettlementDetailDialog } from "./TraderSettlementsWorkspace.js";
 import { materialFingerprint, useIdempotencyKey } from "./useIdempotencyKey.js";
 
-type QuickView = "active" | "all" | "hold" | "cancelled" | "closed";
+/**
+ * `delivery` is a FRONTEND-ONLY view. It is never sent as `quickView`: the
+ * backend expresses Delivery Activity through `deliveredOnly`, and sending an
+ * unrecognised quick view would silently fall through to the Active predicate.
+ */
+type QuickView = "active" | "all" | "hold" | "cancelled" | "closed" | "delivery";
+
+/** Quick views the backend actually understands. */
+const backendQuickViews = new Set(["active", "all", "hold", "cancelled", "closed"]);
 type OrderGrouping = "" | "status" | "driver";
 type BulkAction = "assign" | "collect" | "manifest" | "status";
 
 interface OrderFilters {
   areaId: string;
   cashStatus: string;
+  /* Selecting an Emirate used to narrow only the Area picker and filter
+     nothing, so "show me every Order in Sharjah" was impossible without
+     choosing each Area in turn. It is a real server-side filter now. */
+  emirateId: string;
   dateFrom: string;
   dateTo: string;
   deliveryStatus: string;
   driverId: string;
   quickView: QuickView;
+  // Delivery Activity. Empty in every other view, so `filterQuery` omits them
+  // and no other quick view can be affected by a stale value.
+  deliveredOnly: string;
+  deliveryDateFrom: string;
+  deliveryDateTo: string;
+  dateMode: string;
+  businessDateFrom: string;
+  businessDateTo: string;
+  referenceNumber: string;
   search: string;
   settlementStatus: string;
   traderId: string;
@@ -93,15 +132,32 @@ interface SelectionSummary {
 const initialFilters: OrderFilters = {
   areaId: "",
   cashStatus: "",
+  emirateId: "",
   dateFrom: "",
   dateTo: "",
   deliveryStatus: "",
   driverId: "",
   quickView: "active",
+  deliveredOnly: "",
+  deliveryDateFrom: "",
+  deliveryDateTo: "",
+  dateMode: "",
+  businessDateFrom: "",
+  businessDateTo: "",
+  referenceNumber: "",
   search: "",
   settlementStatus: "",
   traderId: "",
 };
+
+/**
+ * Filter names this screen puts in the URL.
+ *
+ * Module-level and built once: `useListState` memoizes on this array, so a
+ * literal created during render would produce new state every render and
+ * re-fire the request effect forever.
+ */
+const orderFilterKeys = Object.keys(initialFilters);
 
 export function OrdersModuleWorkspace({
   api,
@@ -118,13 +174,57 @@ export function OrdersModuleWorkspace({
   // falling back to the UI language when no branding provider is present.
   const branding = useContext(CompanyBrandingContext);
   const textLanguage = branding?.textLanguage ?? locale;
-  const [filters, setFilters] = useState<OrderFilters>(initialFilters);
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState<25 | 50 | 100>(25);
+  /* The Orders table scroll container. The sticky horizontal scrollbar mirrors
+     this element rather than owning a scroll position of its own. */
+  const ordersScrollRef = useRef<HTMLDivElement>(null);
+  /* A smart next action from the workflow popover can ask this screen to open
+     a row's Change Status or Assign Driver dialog. Parsed by the shared
+     primitive, which strips `openDialog` so a refresh cannot reopen it. The
+     request is matched against the LOADED page, so an Order from another
+     Company simply never matches: the list is Company-scoped by the API. */
+  const orderDeepLink = useWorkflowDeepLink(orderDialogs);
+  /* The request already acted on, held by IDENTITY rather than as a boolean.
+     The hook builds one object per distinct request, so comparing identity
+     retires exactly that request and lets a genuinely new one through. A sticky
+     boolean would have swallowed every later next-step click on this screen. */
+  const [consumedDeepLink, setConsumedDeepLink] = useState<WorkflowDeepLink | null>(null);
+  const [orderActionNotice, setOrderActionNotice] = useState<string>();
+  // The URL is the authoritative Orders list state. No parallel local or
+  // session copy of these fields remains to drift out of step with it.
+  //
+  // `quickView` is persisted under its own name — including `delivery`, which
+  // stays frontend-only. The request builder decides separately whether the
+  // value is one the backend understands, so a URL parameter and an API
+  // parameter that happen to share a name never have to mean the same thing.
+  const session = useSessionAccess();
+  const list = useListState({
+    companyId: session?.companyId,
+    defaultSortBy: "orderDate",
+    filterKeys: orderFilterKeys,
+  });
+  const { page } = list;
+  const pageSize = list.pageSize;
+  const setPage = list.setPage;
+  const setPageSize = list.setPageSize;
+  // `useListState` omits empty filters and stores everything as text; the panel
+  // and the request builder expect every key present.
+  const filters = useMemo<OrderFilters>(
+    () => ({ ...initialFilters, ...list.filters }) as OrderFilters,
+    [list.filters],
+  );
+  const setFilters = (update: (current: OrderFilters) => OrderFilters) =>
+    list.setFilters(update(filters) as unknown as Record<string, string>);
   const [data, setData] = useState<OperationsOrderPage>();
   const [holdCount, setHoldCount] = useState(0);
   const [emirates, setEmirates] = useState<readonly Emirate[]>([]);
   const [filterEmirateId, setFilterEmirateId] = useState("");
+  /* The search box types into local state and reaches the filter -- and so the
+     request -- only on Enter. Searching per keystroke sent one request per
+     character against a 100-per-minute limit and returned
+     `ThrottlerException: Too Many Requests`; a debounce reduced that but still
+     fired searches nobody asked for, on half-typed terms. Enter makes the
+     search an explicit act. */
+  const [searchText, setSearchText] = useState("");
   const [filterArea, setFilterArea] = useState<CompanyArea>();
   const [drivers, setDrivers] = useState<readonly OperationsDriver[]>([]);
   const [traders, setTraders] = useState<readonly OperationsTrader[]>([]);
@@ -144,8 +244,13 @@ export function OrdersModuleWorkspace({
     const parameters = new URLSearchParams({
       page: String(page),
       pageSize: String(pageSize),
-      quickView: filters.quickView,
     });
+    // Delivery Activity is carried by `deliveredOnly`, never by `quickView`.
+    // Sending an unknown quick view would fall through to the Active predicate
+    // and quietly return the wrong Orders.
+    if (backendQuickViews.has(filters.quickView)) {
+      parameters.set("quickView", filters.quickView);
+    }
     for (const [key, value] of Object.entries(filters)) {
       if (key !== "quickView" && value !== "") parameters.set(key, value);
     }
@@ -156,19 +261,15 @@ export function OrdersModuleWorkspace({
     setLoading(true);
     setError(undefined);
     try {
-      const [orders, holdOrders, loadedDrivers, loadedTraders] = await Promise.all([
-        api.get<OperationsOrderPage>(`operations/orders?${query}`),
-        api.get<OperationsOrderPage>("operations/orders?page=1&pageSize=25&quickView=hold"),
-        api.get<readonly OperationsDriver[]>("operations/drivers"),
-        api.get<readonly OperationsTrader[]>("operations/traders"),
-      ]);
+      /* Only the Orders page depends on the filters. The Hold count, the Driver
+         list and the Trader list are the same whatever is typed, so refetching
+         them per keystroke quadrupled the request rate for no new data. They
+         load once, below. */
+      const orders = await api.get<OperationsOrderPage>(`operations/orders?${query}`);
       setData({
         ...orders,
         items: Array.isArray(orders.items) ? orders.items : [],
       });
-      setHoldCount(holdOrders.filteredCount);
-      setDrivers((Array.isArray(loadedDrivers) ? loadedDrivers : []).filter((driver) => driver.status === "active"));
-      setTraders((Array.isArray(loadedTraders) ? loadedTraders : []).filter((trader) => trader.status === "active"));
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : t("common.loadFailed"));
     } finally {
@@ -177,6 +278,31 @@ export function OrdersModuleWorkspace({
   }, [api, query, t]);
 
   useEffect(() => void load(), [load]);
+
+  // Reference data that no filter changes: fetched once per mount rather than
+  // with every list reload.
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      const [holdOrders, loadedDrivers, loadedTraders] = await Promise.all([
+        api.get<OperationsOrderPage>("operations/orders?page=1&pageSize=25&quickView=hold"),
+        api.get<readonly OperationsDriver[]>("operations/drivers"),
+        api.get<readonly OperationsTrader[]>("operations/traders"),
+      ]).catch(() => [undefined, undefined, undefined] as const);
+      if (!active) return;
+      if (holdOrders !== undefined) setHoldCount(holdOrders.filteredCount);
+      if (loadedDrivers !== undefined) {
+        setDrivers(loadedDrivers.filter((driver) => driver.status === "active"));
+      }
+      // Active only, exactly as before the split.
+      if (loadedTraders !== undefined) {
+        setTraders(loadedTraders.filter((trader) => trader.status === "active"));
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [api]);
 
   // Emirates scope the Area filter; load them once.
   useEffect(() => {
@@ -189,8 +315,14 @@ export function OrdersModuleWorkspace({
       active = false;
     };
   }, [api]);
+  // Selection is cleared when the filters change, because a selected Order
+  // may no longer be in the result set.
+  //
+  // The page reset that used to live here is GONE on purpose: `useListState`
+  // already resets to page 1 on every filter write. Doing it again from an
+  // effect would push a second history entry for one user action, and Back
+  // would appear not to work.
   useEffect(() => {
-    setPage(1);
     setSelectedIds(new Set());
     setExcludedIds(new Set());
     setAllMatching(false);
@@ -226,6 +358,62 @@ export function OrdersModuleWorkspace({
 
   const updateFilters = (change: Partial<OrderFilters>) =>
     setFilters((current) => ({ ...current, ...change }));
+
+  // Filter -> box: Clear filters, or arriving on a URL that already carries a
+  // term. Guarded on inequality so it cannot fight the user's typing.
+  useEffect(() => {
+    setSearchText((current) => (current === filters.search ? current : filters.search));
+  }, [filters.search]);
+
+  /* Clearing the box applies at once. Waiting for Enter to reveal the full list
+     again would leave the operator looking at filtered results with an empty
+     search box, which reads as a bug. Only a non-empty term waits for Enter. */
+  useEffect(() => {
+    if (searchText === "" && filters.search !== "") updateFilters({ search: "" });
+    // `updateFilters` is recreated every render and is not a real dependency.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchText, filters.search]);
+
+  /**
+   * Switch quick view, carrying Delivery Activity's own fields with it.
+   *
+   * One functional update, not several `updateFilters` calls: separate calls
+   * would each start from the same stale snapshot and the later ones would
+   * discard the earlier changes.
+   *
+   * Entering opens in a clean Calendar Date state; leaving clears every
+   * Delivery Activity field so none of them can leak into Active, All, Hold,
+   * Cancelled or Closed. Unrelated filters and page size are preserved.
+   */
+  /**
+   * Date Mode and Delivery Activity date changes.
+   *
+   * One functional update plus a page reset — separate calls would each start
+   * from the same stale snapshot and the later ones would discard the earlier
+   * changes. The control already clears the fields of the mode being left, so
+   * no stale value can travel into a request it does not belong in.
+   */
+  // Delivery Activity adds two columns. Derived once so every colspan below
+  // moves with the header instead of being hardcoded in several places.
+  const deliveryView = filters.quickView === "delivery";
+  const deliveryColumns = deliveryView ? 2 : 0;
+
+  const applyDeliveryFilter = (patch: Record<string, string>) => {
+    list.setFilters(patch);
+  };
+
+  const selectQuickView = (view: QuickView) => {
+    list.setFilters({
+      quickView: view,
+      businessDateFrom: "",
+      businessDateTo: "",
+      deliveryDateFrom: "",
+      deliveryDateTo: "",
+      ...(view === "delivery"
+        ? { dateMode: "calendar_date", deliveredOnly: "true" }
+        : { dateMode: "", deliveredOnly: "" }),
+    });
+  };
   const orderItems = Array.isArray(data?.items) ? data.items : [];
   const traderFilterOptions = Array.isArray(traders) ? traders : [];
   const driverFilterOptions = Array.isArray(drivers) ? drivers : [];
@@ -233,15 +421,11 @@ export function OrdersModuleWorkspace({
   const pageIds = orderItems.map((order) => order.id);
   const isAdministrator = permissions.includes("users_roles.manage");
   const canAssignDriver = isAdministrator || permissions.includes("orders.assign_driver");
-  const canUpdateStatus =
-    isAdministrator || permissions.includes("orders.update_delivery_status");
+  const canUpdateStatus = isAdministrator || permissions.includes("orders.update_delivery_status");
   const canReconcile = isAdministrator || permissions.includes("reconciliations.create");
   const canSettle = isAdministrator || permissions.includes("settlements.create");
   const canManifest =
-    isAdministrator ||
-    permissions.includes("reports.export") ||
-    canAssignDriver ||
-    canUpdateStatus;
+    isAdministrator || permissions.includes("reports.export") || canAssignDriver || canUpdateStatus;
   const canSelectOrders = canAssignDriver || canUpdateStatus || canReconcile || canSettle;
   const pageSelected =
     pageIds.length > 0 &&
@@ -337,14 +521,49 @@ export function OrdersModuleWorkspace({
         <td>
           <DeliveryStatusBadge order={order} />
         </td>
+        {!deliveryView ? null : (
+          <>
+            {/* Backend values only. No fallback to Order Date, Created At,
+                Updated At or status history, and no Business Date arithmetic
+                in the browser. */}
+            <td dir="ltr" className="nowrap-cell">
+              {order.deliveredAt == null
+                ? t("operations.historicalDeliveryTimestampUnavailable")
+                : formatDateTime(order.deliveredAt, locale)}
+            </td>
+            <td dir="ltr" className="nowrap-cell">
+              {order.deliveryBusinessDate == null
+                ? t("operations.historicalDeliveryTimestampUnavailable")
+                : formatDate(order.deliveryBusinessDate, locale)}
+            </td>
+          </>
+        )}
         <td>
-          <FinancialStatusCell order={order} />
+          <OrderAccountingBadge order={order} />
+        </td>
+        <td>
+          <FinancialStatusCell
+            onNavigate={onNavigate}
+            order={order}
+            permissions={permissions}
+          />
         </td>
         <td>
           <OrderRowActions
             api={api}
             drivers={drivers}
             onChanged={load}
+            onWorkflowRequestIneligible={() =>
+              setOrderActionNotice(t("operations.workflowActionIneligible"))
+            }
+            onWorkflowRequestConsumed={() => setConsumedDeepLink(orderDeepLink.link)}
+            {...(orderDeepLink.link !== null &&
+            orderDeepLink.link !== consumedDeepLink &&
+            orderDeepLink.link.orderId === order.id
+              ? // Passed through as the link OBJECT, not a fresh literal: a stable
+                // identity is what lets the row tell a re-render from a new request.
+                { workflowRequest: orderDeepLink.link }
+              : {})}
             onNavigate={onNavigate}
             order={order}
             permissions={permissions}
@@ -374,11 +593,7 @@ export function OrdersModuleWorkspace({
             >
               <Plus aria-hidden="true" size={18} /> {t("operations.createOrder")}
             </button>
-            <button
-              className="button"
-              onClick={() => setFastEntryOpen(true)}
-              type="button"
-            >
+            <button className="button" onClick={() => setFastEntryOpen(true)} type="button">
               {t("operations.fastEntry")}
             </button>
           </>
@@ -393,12 +608,12 @@ export function OrdersModuleWorkspace({
       )}
       <section className="orders-workspace">
         <div className="orders-quick-views" role="tablist" aria-label={t("operations.orderViews")}>
-          {(["active", "hold", "all", "closed", "cancelled"] as const).map((view) => (
+          {(["active", "hold", "all", "closed", "cancelled", "delivery"] as const).map((view) => (
             <button
               aria-selected={filters.quickView === view}
               className={filters.quickView === view ? "active" : undefined}
               key={view}
-              onClick={() => updateFilters({ quickView: view })}
+              onClick={() => selectQuickView(view)}
               role="tab"
               type="button"
             >
@@ -407,44 +622,87 @@ export function OrdersModuleWorkspace({
             </button>
           ))}
         </div>
+        {/* Delivery Activity only. The same shared control the three other
+            activity screens use — a second Date Mode component would be a
+            second opinion about where a business day begins. */}
+        {filters.quickView !== "delivery" ? null : (
+          <BusinessDateFilterControls
+            applied={data?.appliedDateMode}
+            authoritativeTimestampLabel={t("operations.deliveryDateTime")}
+            businessDateFrom={filters.businessDateFrom}
+            businessDateTo={filters.businessDateTo}
+            calendarDateFrom={filters.deliveryDateFrom}
+            calendarDateTo={filters.deliveryDateTo}
+            calendarFromLabel={t("operations.deliveryDateFrom")}
+            calendarKeyFrom="deliveryDateFrom"
+            calendarKeyTo="deliveryDateTo"
+            calendarToLabel={t("operations.deliveryDateTo")}
+            dateMode={filters.dateMode}
+            historicalWarningLabel={t("operations.historicalDeliveryExcluded")}
+            onChange={applyDeliveryFilter}
+          />
+        )}
         <div className="orders-filter-bar">
+          {/* One field for every identifier an operator has to hand. The
+              separate Reference Number input that used to sit beside this was
+              removed with the unified search: the backend now matches Order
+              Number, Reference, Customer Name and Mobile from this single term,
+              so a second box asked the operator to classify their own input and
+              left the filter row visibly uneven. */}
           <label className="orders-search">
             <Search aria-hidden="true" size={17} />
             <span className="sr-only">{t("operations.searchOrders")}</span>
             <input
-              onChange={(event) => updateFilters({ search: event.target.value })}
-              placeholder={t("operations.searchOrders")}
-              value={filters.search}
+              onChange={(event) => setSearchText(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key !== "Enter") return;
+                // The box is not inside a form, but preventDefault keeps this
+                // safe if it is ever moved into one.
+                event.preventDefault();
+                updateFilters({ search: searchText });
+              }}
+              placeholder={t("operations.searchOrdersPlaceholder")}
+              value={searchText}
             />
           </label>
-          <FilterSelect
-            label={t("operations.trader")}
-            onChange={(value) => updateFilters({ traderId: value })}
-            value={filters.traderId}
-          >
-            {traderFilterOptions.map((trader) => (
-              <option key={trader.id} value={trader.id}>
-                {trader.code} - {trader.name}
-              </option>
-            ))}
-          </FilterSelect>
-          <FilterSelect
-            label={t("operations.driver")}
-            onChange={(value) => updateFilters({ driverId: value })}
-            value={filters.driverId}
-          >
-            {driverFilterOptions.map((driver) => (
-              <option key={driver.id} value={driver.id}>
-                {driver.code} - {driver.name}
-              </option>
-            ))}
-          </FilterSelect>
+          {/* Name only, and searchable. The code stays matchable so anyone who
+              knows "TRD-000002" can still type it, but it is not printed on
+              every row where it only crowds out the name. */}
+          <label className="filter-select filter-combobox-field">
+            <span className="sr-only">{t("operations.trader")}</span>
+            <FilterCombobox
+              emptyText={t("operations.noTradersFound")}
+              label={t("operations.trader")}
+              onChange={(value) => updateFilters({ traderId: value })}
+              options={traderFilterOptions.map((trader) => ({
+                id: trader.id,
+                label: trader.name,
+                searchText: trader.code,
+              }))}
+              value={filters.traderId}
+            />
+          </label>
+          <label className="filter-select filter-combobox-field">
+            <span className="sr-only">{t("operations.driver")}</span>
+            <FilterCombobox
+              emptyText={t("operations.noDriversFound")}
+              label={t("operations.driver")}
+              onChange={(value) => updateFilters({ driverId: value })}
+              options={driverFilterOptions.map((driver) => ({
+                id: driver.id,
+                label: driver.name,
+                searchText: driver.code,
+              }))}
+              value={filters.driverId}
+            />
+          </label>
           <FilterSelect
             label={t("areas.emirate")}
             onChange={(value) => {
               setFilterEmirateId(value);
               setFilterArea(undefined);
-              updateFilters({ areaId: "" });
+              // Area is cleared because it belongs to the previous Emirate.
+              updateFilters({ areaId: "", emirateId: value });
             }}
             value={filterEmirateId}
           >
@@ -542,7 +800,15 @@ export function OrdersModuleWorkspace({
           <button
             className="button button-link"
             onClick={() => {
-              setFilters(initialFilters);
+              // Clear Filters keeps the selected view and the page size; it
+              // clears the filters that apply to it and resets the page.
+              list.setFilters({
+                ...Object.fromEntries(orderFilterKeys.map((key) => [key, ""])),
+                quickView: filters.quickView,
+                ...(filters.quickView === "delivery"
+                  ? { dateMode: "calendar_date", deliveredOnly: "true" }
+                  : {}),
+              });
               setFilterEmirateId("");
               setFilterArea(undefined);
             }}
@@ -599,7 +865,12 @@ export function OrdersModuleWorkspace({
           </div>
         ) : null}
 
-        <div className="orders-table-scroll">
+        {orderActionNotice === undefined ? null : (
+          <div className="alert alert-info" role="status">
+            {orderActionNotice}
+          </div>
+        )}
+        <div className="orders-table-scroll" ref={ordersScrollRef}>
           <table className="orders-table">
             <thead>
               <tr>
@@ -625,6 +896,13 @@ export function OrdersModuleWorkspace({
                 <th>{t("operations.amountDueToTrader")}</th>
                 <th>{t("operations.amountToCollect")}</th>
                 <th>{t("operations.deliveryStatus")}</th>
+                {!deliveryView ? null : (
+                  <>
+                    <th>{t("operations.deliveryDateTime")}</th>
+                    <th>{t("operations.deliveryBusinessDate")}</th>
+                  </>
+                )}
+                <th>{t("operations.accountingColumn")}</th>
                 <th>{t("operations.financialStatusColumn")}</th>
                 <th>
                   <span className="sr-only">{t("common.actions")}</span>
@@ -653,7 +931,7 @@ export function OrdersModuleWorkspace({
                               />
                             ) : null}
                           </td>
-                          <td colSpan={12}>
+                          <td colSpan={13 + deliveryColumns}>
                             <button
                               aria-expanded={expanded}
                               className="order-group-toggle"
@@ -685,7 +963,7 @@ export function OrdersModuleWorkspace({
                   })}
               {!loading && orderItems.length === 0 ? (
                 <tr>
-                  <td className="empty-state" colSpan={13}>
+                  <td className="empty-state" colSpan={14 + deliveryColumns}>
                     {t("operations.noOrders")}
                   </td>
                 </tr>
@@ -693,6 +971,12 @@ export function OrdersModuleWorkspace({
             </tbody>
           </table>
         </div>
+        {/* Placed after the table and before the selection and pagination
+            controls, so a sticky bar can never sit on top of them. */}
+        <StickyHorizontalScrollbar
+          label={t("operations.ordersHorizontalScroll")}
+          targetRef={ordersScrollRef}
+        />
         {grouping === "" &&
         pageSelected &&
         !allMatching &&
@@ -720,7 +1004,6 @@ export function OrdersModuleWorkspace({
             <select
               onChange={(event) => {
                 setPageSize(Number(event.target.value) as 25 | 50 | 100);
-                setPage(1);
               }}
               value={pageSize}
             >
@@ -733,7 +1016,7 @@ export function OrdersModuleWorkspace({
             aria-label={t("operations.previousPage")}
             className="icon-button"
             disabled={page <= 1}
-            onClick={() => setPage((current) => current - 1)}
+            onClick={() => setPage(page - 1)}
             type="button"
           >
             <ChevronLeft aria-hidden="true" size={18} />
@@ -743,7 +1026,7 @@ export function OrdersModuleWorkspace({
             aria-label={t("operations.nextPage")}
             className="icon-button"
             disabled={page * pageSize >= (data?.filteredCount ?? 0)}
-            onClick={() => setPage((current) => current + 1)}
+            onClick={() => setPage(page + 1)}
             type="button"
           >
             <ChevronRight aria-hidden="true" size={18} />
@@ -766,7 +1049,6 @@ export function OrdersModuleWorkspace({
           onClose={() => setFastEntryOpen(false)}
           onSaved={load}
           textLanguage={textLanguage}
-          traders={traders}
         />
       ) : null}
       {bulkAction === "assign" ? (
@@ -842,7 +1124,7 @@ interface FastEntryRow {
   traderId: string;
   traderOption: OperationsTraderOption | undefined;
   mobile: string;
-  message?: string;
+  message?: string | undefined;
 }
 
 const fastEntryColumns = [
@@ -901,7 +1183,8 @@ function incrementSerial(base: string, offset: number): string {
   if (value === "" || offset === 0) return value;
   const match = /^(.*?)(\d+)$/.exec(value);
   if (match === null) return value;
-  const [, prefix, digits] = match;
+  const prefix = match[1] ?? "";
+  const digits = match[2] ?? "";
   return `${prefix}${String(Number(digits) + offset).padStart(digits.length, "0")}`;
 }
 
@@ -912,7 +1195,14 @@ function parseFastEntryMoney(value: string, required = false): number | undefine
 
 function isFastEntryMobileValid(value: string): boolean {
   const trimmed = value.trim();
-  return trimmed.length > 0 && trimmed.length <= 32 && /^[^\u0000-\u001f\u007f]+$/.test(trimmed);
+  return (
+    trimmed.length > 0 &&
+    trimmed.length <= 32 &&
+    Array.from(trimmed).every((character) => {
+      const codePoint = character.codePointAt(0);
+      return codePoint !== undefined && codePoint > 31 && codePoint !== 127;
+    })
+  );
 }
 
 function mobileComparisonKey(input: string | null | undefined): string {
@@ -942,7 +1232,8 @@ function resolveApiMessage(requestError: unknown, fallback: string): string {
     message.includes("Cannot read properties of undefined") ? fallback : message;
   if (requestError instanceof ApiError) {
     const details = Array.isArray(requestError.details) ? requestError.details.filter(Boolean) : [];
-    const message = details.length > 0 ? `${requestError.message}: ${details.join(" ")}` : requestError.message;
+    const message =
+      details.length > 0 ? `${requestError.message}: ${details.join(" ")}` : requestError.message;
     if (requestError.code === "idempotency_key_reused") {
       return tSafeOrderMessage(
         "This row was already submitted with different details. Change the row or remove it and add it again.",
@@ -1005,7 +1296,10 @@ function FastOrderEntryDialog({
         setRows((current) =>
           current.map((row, index) => ({
             ...row,
-            serialNumber: row.serialNumber.trim() === "" ? incrementSerial(result.serialNumber, index) : row.serialNumber,
+            serialNumber:
+              row.serialNumber.trim() === ""
+                ? incrementSerial(result.serialNumber, index)
+                : row.serialNumber,
           })),
         );
       })
@@ -1041,7 +1335,8 @@ function FastOrderEntryDialog({
   const addRows = (count: number) => {
     const safeCount = Number.isFinite(count) && count > 0 ? Math.min(Math.floor(count), 100) : 5;
     setRows((current) => {
-      const lastSerial = [...current].reverse().find((row) => row.serialNumber.trim() !== "")?.serialNumber ?? "";
+      const lastSerial =
+        [...current].reverse().find((row) => row.serialNumber.trim() !== "")?.serialNumber ?? "";
       return [
         ...current,
         ...Array.from({ length: safeCount }, (_, index) =>
@@ -1084,7 +1379,8 @@ function FastOrderEntryDialog({
         const serial = row.serialNumber.trim();
         if (serial !== "") serialCounts.set(serial, (serialCounts.get(serial) ?? 0) + 1);
         const reference = row.referenceNumber.trim();
-        if (reference !== "") referenceCounts.set(reference, (referenceCounts.get(reference) ?? 0) + 1);
+        if (reference !== "")
+          referenceCounts.set(reference, (referenceCounts.get(reference) ?? 0) + 1);
       }
 
       return Promise.all(
@@ -1104,17 +1400,19 @@ function FastOrderEntryDialog({
           });
 
           if (serial === "") errors.push(t("operations.errors.serialRequired"));
-          if ((serialCounts.get(serial) ?? 0) > 1) errors.push(t("operations.fastEntryDuplicateSerial"));
+          if ((serialCounts.get(serial) ?? 0) > 1)
+            errors.push(t("operations.fastEntryDuplicateSerial"));
           if (reference !== "" && (referenceCounts.get(reference) ?? 0) > 1)
             errors.push(t("operations.fastEntryDuplicateReference"));
           if (row.traderId === "") errors.push(t("operations.errors.traderRequired"));
-          if (row.customerName.trim() === "") errors.push(t("operations.errors.customerNameRequired"));
+          if (row.customerName.trim() === "")
+            errors.push(t("operations.errors.customerNameRequired"));
           if (row.mobile.trim() === "") errors.push(t("operations.errors.mobileRequired"));
           if (row.mobile.trim() !== "" && !isFastEntryMobileValid(row.mobile))
             errors.push(t("operations.fastEntryMobileInvalid"));
           if (row.emirateId === "") errors.push(t("areas.selectEmirate"));
           if (row.areaId === "") errors.push(t("operations.errors.areaRequired"));
-          if (row.customerAddress.trim() === "") errors.push(t("operations.errors.addressRequired"));
+          // Address is optional here too, matching the Create Order dialog.
           if (cod === undefined) errors.push(t("operations.errors.codInvalid"));
           if (additionalFees === undefined) errors.push(t("operations.errors.additionalInvalid"));
           if (serviceFee === undefined && row.serviceFee.trim() !== "")
@@ -1138,7 +1436,8 @@ function FastOrderEntryDialog({
               if (customerOption !== undefined) {
                 const sameArea = customerOption.areaId === row.areaId;
                 const sameAddress =
-                  normalizedAddress(customerOption.address) === normalizedAddress(row.customerAddress);
+                  normalizedAddress(customerOption.address) ===
+                  normalizedAddress(row.customerAddress);
                 if (!sameArea || !sameAddress) {
                   errors.push(t("operations.fastEntryExistingCustomerAddressMismatch"));
                   customerOption = undefined;
@@ -1157,14 +1456,21 @@ function FastOrderEntryDialog({
                 referenceNumberAvailable: boolean;
                 serialNumberAvailable: boolean;
               }>(`operations/orders/identifier-availability?${query.toString()}`);
-              if (!availability.serialNumberAvailable) errors.push(t("operations.serialNumberExists"));
-              if (!availability.referenceNumberAvailable) errors.push(t("operations.referenceNumberExists"));
+              if (!availability.serialNumberAvailable)
+                errors.push(t("operations.serialNumberExists"));
+              if (!availability.referenceNumberAvailable)
+                errors.push(t("operations.referenceNumberExists"));
             } catch {
               errors.push(t("operations.fastEntryValidationFailed"));
             }
           }
 
-          if (errors.length === 0 && row.traderId !== "" && row.areaId !== "" && cod !== undefined) {
+          if (
+            errors.length === 0 &&
+            row.traderId !== "" &&
+            row.areaId !== "" &&
+            cod !== undefined
+          ) {
             try {
               const quote = await api.post<OperationsOrderQuote>("operations/orders/quote", {
                 additionalFees: additionalFees ?? 0,
@@ -1219,10 +1525,12 @@ function FastOrderEntryDialog({
       let stoppedOnCreateError = false;
       for (let index = 0; index < nextRows.length; index += 1) {
         const row = nextRows[index];
+        if (row === undefined) continue;
         if (row.status !== "ready") continue;
         const cod = parseFastEntryMoney(row.codAmount, true) ?? 0;
         const additionalFees = parseFastEntryMoney(row.additionalFees) ?? 0;
-        const serviceFee = row.serviceFee.trim() === "" ? undefined : parseFastEntryMoney(row.serviceFee);
+        const serviceFee =
+          row.serviceFee.trim() === "" ? undefined : parseFastEntryMoney(row.serviceFee);
         const packages = parseNumericInput(row.packageCount, {
           allowZero: false,
           required: true,
@@ -1359,7 +1667,11 @@ function FastOrderEntryDialog({
             rows={4}
             value={pasteText}
           />
-          <button disabled={pasteText.trim() === "" || busy} onClick={importPastedRows} type="button">
+          <button
+            disabled={pasteText.trim() === "" || busy}
+            onClick={importPastedRows}
+            type="button"
+          >
             {t("operations.fastEntryUsePastedRows")}
           </button>
         </details>
@@ -1386,168 +1698,180 @@ function FastOrderEntryDialog({
             </thead>
             <tbody>
               {rows.map((row, index) => (
-                  <tr className={`fast-entry-row-${row.status}`} key={row.id}>
-                    <td>{index + 1}</td>
-                    <td>
+                <tr className={`fast-entry-row-${row.status}`} key={row.id}>
+                  <td>{index + 1}</td>
+                  <td>
+                    <input
+                      value={row.serialNumber}
+                      onChange={(event) => updateRow(row.id, { serialNumber: event.target.value })}
+                    />
+                  </td>
+                  <td>
+                    <input
+                      value={row.referenceNumber}
+                      onChange={(event) =>
+                        updateRow(row.id, { referenceNumber: event.target.value })
+                      }
+                    />
+                  </td>
+                  <td>
+                    <SearchCombobox<OperationsTraderOption>
+                      api={api}
+                      emptyText={t("operations.noTradersFound")}
+                      getLabel={fastEntryTraderLabel}
+                      getSelectedLabel={fastEntryTraderLabel}
+                      label={t("operations.trader")}
+                      onChange={(trader) =>
+                        updateRow(row.id, {
+                          traderId: trader?.id ?? "",
+                          traderOption: trader,
+                        })
+                      }
+                      path="operations/traders/search"
+                      placeholder={t("operations.searchTrader")}
+                      value={row.traderOption}
+                    />
+                  </td>
+                  <td>
+                    <input
+                      value={row.customerName}
+                      onChange={(event) => updateRow(row.id, { customerName: event.target.value })}
+                    />
+                  </td>
+                  <td>
+                    <input
+                      value={row.mobile}
+                      onChange={(event) => updateRow(row.id, { mobile: event.target.value })}
+                    />
+                  </td>
+                  <td>
+                    <select
+                      value={row.emirateId}
+                      onChange={(event) => {
+                        const emirateId = event.target.value;
+                        updateRow(row.id, { areaId: "", areaOption: undefined, emirateId });
+                      }}
+                    >
+                      <option value="">{t("areas.selectEmirate")}</option>
+                      {emirateOptions.map((emirate) => (
+                        <option key={emirate.id} value={emirate.id}>
+                          {localizeName(textLanguage, { ar: emirate.nameAr, en: emirate.nameEn })}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+                  <td>
+                    <SearchCombobox<CompanyArea>
+                      api={api}
+                      emptyText={t("areas.noneFound")}
+                      getLabel={(area) =>
+                        localizeName(textLanguage, { ar: area.nameAr, en: area.nameEn })
+                      }
+                      label={t("operations.areaField")}
+                      key={`${row.id}-${row.emirateId}`}
+                      onChange={(area) =>
+                        updateRow(row.id, {
+                          areaId: area?.id ?? "",
+                          areaOption: area,
+                          emirateId: area?.emirateId ?? row.emirateId,
+                        })
+                      }
+                      path={
+                        row.emirateId === ""
+                          ? "configuration/areas/search"
+                          : `configuration/areas/search?emirateId=${encodeURIComponent(row.emirateId)}`
+                      }
+                      placeholder={t("operations.selectArea")}
+                      value={row.areaOption}
+                    />
+                  </td>
+                  <td>
+                    <input
+                      value={row.customerAddress}
+                      onChange={(event) =>
+                        updateRow(row.id, { customerAddress: event.target.value })
+                      }
+                    />
+                  </td>
+                  <td>
+                    <input
+                      min="0"
+                      step="0.01"
+                      type="number"
+                      value={row.codAmount}
+                      onChange={(event) => updateRow(row.id, { codAmount: event.target.value })}
+                    />
+                  </td>
+                  <td>
+                    <input
+                      min="0"
+                      placeholder={t("operations.fastEntryAutoFee")}
+                      step="0.01"
+                      type="number"
+                      value={row.serviceFee || row.resolvedServiceFee}
+                      onChange={(event) => updateRow(row.id, { serviceFee: event.target.value })}
+                      title={
+                        row.serviceFee.trim() === ""
+                          ? t("operations.fastEntryAutoFeeHint")
+                          : undefined
+                      }
+                    />
+                    {row.serviceFee.trim() === "" ? null : (
                       <input
-                        value={row.serialNumber}
-                        onChange={(event) => updateRow(row.id, { serialNumber: event.target.value })}
-                      />
-                    </td>
-                    <td>
-                      <input
-                        value={row.referenceNumber}
-                        onChange={(event) => updateRow(row.id, { referenceNumber: event.target.value })}
-                      />
-                    </td>
-                    <td>
-                      <SearchCombobox<OperationsTraderOption>
-                        api={api}
-                        emptyText={t("operations.noTradersFound")}
-                        getLabel={fastEntryTraderLabel}
-                        getSelectedLabel={fastEntryTraderLabel}
-                        label={t("operations.trader")}
-                        onChange={(trader) =>
-                          updateRow(row.id, {
-                            traderId: trader?.id ?? "",
-                            traderOption: trader,
-                          })
+                        className="fast-entry-override-reason"
+                        placeholder={t("operations.overrideReason")}
+                        value={row.overrideReason}
+                        onChange={(event) =>
+                          updateRow(row.id, { overrideReason: event.target.value })
                         }
-                        path="operations/traders/search"
-                        placeholder={t("operations.searchTrader")}
-                        value={row.traderOption}
                       />
-                    </td>
-                    <td>
-                      <input
-                        value={row.customerName}
-                        onChange={(event) => updateRow(row.id, { customerName: event.target.value })}
-                      />
-                    </td>
-                    <td>
-                      <input
-                        value={row.mobile}
-                        onChange={(event) => updateRow(row.id, { mobile: event.target.value })}
-                      />
-                    </td>
-                    <td>
-                      <select
-                        value={row.emirateId}
-                        onChange={(event) => {
-                          const emirateId = event.target.value;
-                          updateRow(row.id, { areaId: "", areaOption: undefined, emirateId });
-                        }}
-                      >
-                        <option value="">{t("areas.selectEmirate")}</option>
-                        {emirateOptions.map((emirate) => (
-                          <option key={emirate.id} value={emirate.id}>
-                            {localizeName(textLanguage, { ar: emirate.nameAr, en: emirate.nameEn })}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-                    <td>
-                      <SearchCombobox<CompanyArea>
-                        api={api}
-                        emptyText={t("areas.noneFound")}
-                        getLabel={(area) =>
-                          localizeName(textLanguage, { ar: area.nameAr, en: area.nameEn })
-                        }
-                        label={t("operations.areaField")}
-                        key={`${row.id}-${row.emirateId}`}
-                        onChange={(area) =>
-                          updateRow(row.id, {
-                            areaId: area?.id ?? "",
-                            areaOption: area,
-                            emirateId: area?.emirateId ?? row.emirateId,
-                          })
-                        }
-                        path={
-                          row.emirateId === ""
-                            ? "configuration/areas/search"
-                            : `configuration/areas/search?emirateId=${encodeURIComponent(row.emirateId)}`
-                        }
-                        placeholder={t("operations.selectArea")}
-                        value={row.areaOption}
-                      />
-                    </td>
-                    <td>
-                      <input
-                        value={row.customerAddress}
-                        onChange={(event) => updateRow(row.id, { customerAddress: event.target.value })}
-                      />
-                    </td>
-                    <td>
-                      <input
-                        min="0"
-                        step="0.01"
-                        type="number"
-                        value={row.codAmount}
-                        onChange={(event) => updateRow(row.id, { codAmount: event.target.value })}
-                      />
-                    </td>
-                    <td>
-                      <input
-                        min="0"
-                        placeholder={t("operations.fastEntryAutoFee")}
-                        step="0.01"
-                        type="number"
-                        value={row.serviceFee || row.resolvedServiceFee}
-                        onChange={(event) => updateRow(row.id, { serviceFee: event.target.value })}
-                        title={row.serviceFee.trim() === "" ? t("operations.fastEntryAutoFeeHint") : undefined}
-                      />
-                      {row.serviceFee.trim() === "" ? null : (
-                        <input
-                          className="fast-entry-override-reason"
-                          placeholder={t("operations.overrideReason")}
-                          value={row.overrideReason}
-                          onChange={(event) => updateRow(row.id, { overrideReason: event.target.value })}
-                        />
-                      )}
-                    </td>
-                    <td>
-                      <input
-                        min="0"
-                        step="0.01"
-                        type="number"
-                        value={row.additionalFees}
-                        onChange={(event) => updateRow(row.id, { additionalFees: event.target.value })}
-                      />
-                    </td>
-                    <td>
-                      <input
-                        min="1"
-                        step="1"
-                        type="number"
-                        value={row.packageCount}
-                        onChange={(event) => updateRow(row.id, { packageCount: event.target.value })}
-                      />
-                    </td>
-                    <td>
-                      <input
-                        value={row.notes}
-                        onChange={(event) => updateRow(row.id, { notes: event.target.value })}
-                      />
-                    </td>
-                    <td>
-                      {row.message === undefined ? null : (
-                        <span className="fast-entry-row-message">{row.message}</span>
-                      )}
-                      <button
-                        disabled={busy}
-                        onClick={() =>
-                          setRows((current) =>
-                            current.length <= 1
-                              ? [createFastEntryRow()]
-                              : current.filter((candidate) => candidate.id !== row.id),
-                          )
-                        }
-                        type="button"
-                      >
-                        {t("common.remove")}
-                      </button>
-                    </td>
-                  </tr>
+                    )}
+                  </td>
+                  <td>
+                    <input
+                      min="0"
+                      step="0.01"
+                      type="number"
+                      value={row.additionalFees}
+                      onChange={(event) =>
+                        updateRow(row.id, { additionalFees: event.target.value })
+                      }
+                    />
+                  </td>
+                  <td>
+                    <input
+                      min="1"
+                      step="1"
+                      type="number"
+                      value={row.packageCount}
+                      onChange={(event) => updateRow(row.id, { packageCount: event.target.value })}
+                    />
+                  </td>
+                  <td>
+                    <input
+                      value={row.notes}
+                      onChange={(event) => updateRow(row.id, { notes: event.target.value })}
+                    />
+                  </td>
+                  <td>
+                    {row.message === undefined ? null : (
+                      <span className="fast-entry-row-message">{row.message}</span>
+                    )}
+                    <button
+                      disabled={busy}
+                      onClick={() =>
+                        setRows((current) =>
+                          current.length <= 1
+                            ? [createFastEntryRow()]
+                            : current.filter((candidate) => candidate.id !== row.id),
+                        )
+                      }
+                      type="button"
+                    >
+                      {t("common.remove")}
+                    </button>
+                  </td>
+                </tr>
               ))}
             </tbody>
             <tfoot>
@@ -1574,12 +1898,14 @@ function FastOrderEntryDialog({
 
 export function OrderDetailsWorkspace({
   api,
+  companyId,
   onBack,
   onNavigate,
   orderNumber,
   permissions = [],
 }: {
   api: ApiClient;
+  companyId: string;
   onBack: () => void;
   onNavigate?: (path: string) => void;
   orderNumber: string;
@@ -1654,27 +1980,29 @@ export function OrderDetailsWorkspace({
       )
       .then((link) => {
         if (!active || link === undefined) return undefined;
-        return api.get<{
-          header: {
-            businessDate: string;
-            collectionPaymentMethod: "cash" | "visa" | null;
-            driverName: string;
-            statusLabel: string;
-          };
-          orders: readonly { customerAmountToCollect: string; serialNumber: string }[];
-        }>(`operations/cash/reconciliations/${link.reconciliationId}/report-data`).then((data) => {
-          if (!active) return;
-          const own = data.orders.find((row) => row.serialNumber === detail.serialNumber);
-          setCollectionSummary({
-            businessDate: data.header.businessDate,
-            collectionPaymentMethod: data.header.collectionPaymentMethod,
-            customerAmountToCollect: own?.customerAmountToCollect ?? "0.00",
-            driverName: data.header.driverName,
-            reconciliationId: link.reconciliationId,
-            reconciliationNumber: link.reconciliationNumber,
-            statusLabel: data.header.statusLabel,
+        return api
+          .get<{
+            header: {
+              businessDate: string;
+              collectionPaymentMethod: "cash" | "visa" | null;
+              driverName: string;
+              statusLabel: string;
+            };
+            orders: readonly { customerAmountToCollect: string; serialNumber: string }[];
+          }>(`operations/cash/reconciliations/${link.reconciliationId}/report-data`)
+          .then((data) => {
+            if (!active) return;
+            const own = data.orders.find((row) => row.serialNumber === detail.serialNumber);
+            setCollectionSummary({
+              businessDate: data.header.businessDate,
+              collectionPaymentMethod: data.header.collectionPaymentMethod,
+              customerAmountToCollect: own?.customerAmountToCollect ?? "0.00",
+              driverName: data.header.driverName,
+              reconciliationId: link.reconciliationId,
+              reconciliationNumber: link.reconciliationNumber,
+              statusLabel: data.header.statusLabel,
+            });
           });
-        });
       })
       .catch((requestError: unknown) => {
         if (active) setCollectionError(message(requestError, t("operations.detailLoadFailed")));
@@ -1882,7 +2210,12 @@ export function OrderDetailsWorkspace({
             [t("operations.orderDate"), formatDate(detail.orderDate, locale)],
             [t("operations.areaField"), detail.areaName],
             [t("operations.packages"), String(detail.metadata.packageCount)],
-            [t("operations.paymentCondition"), t(`statuses.${detail.metadata.paymentCondition}`)],
+            [
+              t("operations.paymentCondition"),
+              t(`operations.paymentConditions.${detail.metadata.paymentCondition}`, {
+                defaultValue: detail.metadata.paymentCondition,
+              }),
+            ],
           ]}
         />
         <DetailSection
@@ -1908,6 +2241,21 @@ export function OrderDetailsWorkspace({
           rows={[
             [t("operations.codAmount"), money(detail.codAmount, locale)] as const,
             [t("operations.serviceFee"), money(detail.serviceFee, locale)] as const,
+            [
+              t("operations.feeSource"),
+              t(`operations.feeSources.${orderFeeSource(detail.serviceFeeOverrideReason)}`),
+            ] as const,
+            // Only shown when a reason was actually recorded. A blank row would
+            // imply the reason is missing, when for most Orders none is owed.
+            ...(detail.serviceFeeOverrideReason == null ||
+            detail.serviceFeeOverrideReason.trim() === ""
+              ? []
+              : [
+                  [
+                    t("operations.serviceFeeOverrideReason"),
+                    detail.serviceFeeOverrideReason,
+                  ] as const,
+                ]),
             ...(detail.additionalFees == null
               ? []
               : [[t("operations.additionalFees"), money(detail.additionalFees, locale)] as const]),
@@ -1938,8 +2286,59 @@ export function OrderDetailsWorkspace({
         <DetailSection
           title={t("operations.financialStatusColumn")}
           rows={[
+            ...(orderAccountingStatus(detail) === null
+              ? []
+              : [
+                  [
+                    t("operations.accountingColumn"),
+                    detail.accountingRequired === true
+                      ? t("operations.accountingRequired")
+                      : t("operations.noAccountingRequired"),
+                  ] as const,
+                  [
+                    t("operations.accountingStatus"),
+                    t(`operations.accountingStatuses.${orderAccountingStatus(detail)}`),
+                  ] as const,
+                ]),
             [t("operations.driverCashStatus"), cashStatusLabel(detail.driverReconciliationStatus)],
             [t("operations.settlementStatus"), t(`statuses.${detail.traderSettlementStatus}`)],
+            [
+              t("operations.outsourcedDriverFeeStatus"),
+              t(`operations.outsourcedDriverFeeStatuses.${detail.outsourcedDriverFeeStatus}`, {
+                defaultValue: detail.outsourcedDriverFeeStatus,
+              }),
+            ],
+            ...(detail.outsourcedDriverFeeStatus === "not_required"
+              ? []
+              : [
+                  [
+                    t("operations.outsourcedDriverFeeAmount"),
+                    detail.outsourcedDriverFeeAmount == null
+                      ? "-"
+                      : money(detail.outsourcedDriverFeeAmount, locale),
+                  ] as const,
+                  [
+                    t("operations.outsourcedDriverFeePaid"),
+                    detail.outsourcedDriverFeePaid == null
+                      ? "-"
+                      : money(detail.outsourcedDriverFeePaid, locale),
+                  ] as const,
+                  [
+                    t("operations.outsourcedDriverFeeOutstanding"),
+                    detail.outsourcedDriverFeeOutstanding == null
+                      ? "-"
+                      : money(detail.outsourcedDriverFeeOutstanding, locale),
+                  ] as const,
+                  ...(detail.outsourcedDriverFeePaymentNumbers == null ||
+                  detail.outsourcedDriverFeePaymentNumbers.trim() === ""
+                    ? []
+                    : [
+                        [
+                          t("operations.outsourcedDriverFeePayments"),
+                          detail.outsourcedDriverFeePaymentNumbers,
+                        ] as const,
+                      ]),
+                ]),
           ]}
         />
         {collectionSummary === undefined ? null : (
@@ -2186,6 +2585,31 @@ export function OrderDetailsWorkspace({
             ))}
           </div>
         </section>
+        <div className="order-detail-section order-detail-wide">
+          {/* Accounting is a separate module; this panel is additive and
+              renders nothing for a User without Accounting access.
+
+              A no-impact Order never raises an Accounting Event, so there is no
+              Journal to link to. The panel is replaced by a plain statement
+              rather than left to render an empty result that would read as a
+              missing record — and no link is offered that could not resolve. */}
+          {showsAccountingRelatedRecords(detail) ? null : (
+            <section>
+              <h2>{t("operations.accountingColumn")}</h2>
+              <p>{t("operations.noAccountingRequiredExplanation")}</p>
+            </section>
+          )}
+          {!showsAccountingRelatedRecords(detail) ? null : (
+          <AccountingRelatedPanel
+            api={api}
+            companyId={companyId}
+            onNavigate={(path) => onNavigate?.(path)}
+            permissions={permissions}
+            sourceId={detail.id}
+            sourceType="order"
+          />
+          )}
+        </div>
       </main>
       {editOpen ? (
         <EditOrderDialog
@@ -2662,9 +3086,7 @@ function CollectMoneyDialog({
     >
       {confirmed !== undefined ? (
         <div className="reconciliation-success" role="status">
-          <p>
-            {t("operations.collectionConfirmed", { number: confirmed.reconciliationNumber })}
-          </p>
+          <p>{t("operations.collectionConfirmed", { number: confirmed.reconciliationNumber })}</p>
           <dl className="reconciliation-summary">
             <div className="detail-line">
               <dt>{t("operations.reconciliationNumber")}</dt>
@@ -2714,7 +3136,11 @@ function CollectMoneyDialog({
             >
               {pdf.busy === "download" ? t("common.loading") : t("operations.downloadPdf")}
             </button>
-            <button className="button button-primary" onClick={() => void onComplete()} type="button">
+            <button
+              className="button button-primary"
+              onClick={() => void onComplete()}
+              type="button"
+            >
               {t("common.close")}
             </button>
           </div>
@@ -3008,7 +3434,11 @@ function DriverShipmentManifestDialog({
             >
               {pdf.busy === "preview" ? t("common.loading") : t("operations.previewReport")}
             </button>
-            <button disabled={pdf.busy !== undefined} onClick={() => void run("print")} type="button">
+            <button
+              disabled={pdf.busy !== undefined}
+              onClick={() => void run("print")}
+              type="button"
+            >
               {pdf.busy === "print" ? t("common.loading") : t("common.print")}
             </button>
             <button
@@ -3100,7 +3530,13 @@ function orderStatusLabel(t: TFunction, key: OrderStatusKey): string {
 // event (Money Collected, Money Sent to Trader, ...). Delivery, Driver
 // Collection and Trader Settlement are three independent dimensions in
 // storage and must stay visibly independent here too.
-function DeliveryStatusBadge({ large = false, order }: { large?: boolean; order: OperationsOrder }) {
+function DeliveryStatusBadge({
+  large = false,
+  order,
+}: {
+  large?: boolean;
+  order: OperationsOrder;
+}) {
   const { t } = useTranslation();
   const tone = order.deliveryStatus === "cancelled" ? "disabled" : "neutral";
   return (
@@ -3110,23 +3546,191 @@ function DeliveryStatusBadge({ large = false, order }: { large?: boolean; order:
   );
 }
 
-function FinancialStatusCell({ order }: { order: OperationsOrder }) {
+/**
+ * Whether this Order will ever reach the ledger.
+ *
+ * Renders nothing when the API did not classify the Order — an older build, or
+ * a payload that predates the field. Showing "No Accounting Required" on a
+ * missing value would be a confident answer to a question nobody answered.
+ */
+function OrderAccountingBadge({ order }: { order: OperationsOrder }) {
+  const { t } = useTranslation();
+  const status = orderAccountingStatus(order);
+  if (status === null) return null;
+  return (
+    <span
+      className={`status status-${status === "not_applicable" ? "disabled" : "neutral"}`}
+      data-order-accounting-status={status}
+    >
+      {t(`operations.accountingStatuses.${status}`)}
+    </span>
+  );
+}
+
+
+/**
+ * Confirm a delivery-status change.
+ *
+ * ===========================================================================
+ * WHY THIS EXISTS
+ * ===========================================================================
+ *
+ * The direct transitions -- Mark Delivered, Mark Out for Delivery, Mark In
+ * Branch, Close -- previously wrote straight from the row menu with no
+ * confirmation step. There was therefore no dialog for a smart next action to
+ * open, and no field for it to suggest a status in: the only two outcomes
+ * available to a deep link were "open a menu" or "PATCH the Order", and the
+ * second is an automatic status change.
+ *
+ * This is the missing confirmation step. It writes nothing itself -- `onConfirm`
+ * is the caller's existing `patchStatus`, unchanged -- and it offers only the
+ * transitions `availableActions()` already judged lawful for this Order. The
+ * backend re-checks every one of them.
+ *
+ * The reason-carrying transitions (Hold, Cancel, Return) keep their existing
+ * `ReasonDialog`; this does not replace or duplicate it.
+ */
+function ChangeStatusDialog({
+  busy,
+  onClose,
+  onConfirm,
+  options,
+  orderNumber,
+  suggestedStatus,
+}: {
+  busy: boolean;
+  onClose: () => void;
+  onConfirm: (status: string) => void;
+  /** Lawful targets only, already filtered by status and permission. */
+  options: readonly { readonly label: string; readonly status: string }[];
+  orderNumber: string;
+  suggestedStatus?: string | undefined;
+}) {
+  const { t } = useTranslation();
+  const selectRef = useRef<HTMLSelectElement>(null);
+  const titleId = useId();
+  // The suggestion is a DEFAULT, not a decision: it is applied only when it is
+  // one of the lawful options, so an unlawful or stale suggestion in a URL
+  // silently falls back to the first legitimate transition.
+  const suggested =
+    suggestedStatus !== undefined && options.some((option) => option.status === suggestedStatus)
+      ? suggestedStatus
+      : (options[0]?.status ?? "");
+  const [status, setStatus] = useState(suggested);
+
+  // Focused rather than programmatically expanded: opening a native <select>
+  // from script is not something browsers support consistently, and a focused
+  // control with the right value already chosen is the honest equivalent.
+  useEffect(() => {
+    selectRef.current?.focus();
+  }, []);
+
+  return (
+    <Modal
+      closeLabel={t("common.close")}
+      onRequestClose={onClose}
+      title={t("operations.changeStatusTitle")}
+      titleId={titleId}
+    >
+      <p className="form-hint">
+        {t("operations.changeStatusPrompt")} <bdi dir="ltr">{orderNumber}</bdi>
+      </p>
+      <label>
+        {t("operations.deliveryStatus")}
+        <select
+          disabled={busy}
+          onChange={(event) => setStatus(event.target.value)}
+          ref={selectRef}
+          value={status}
+        >
+          {options.map((option) => (
+            <option key={option.status} value={option.status}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <div className="modal-actions">
+        <button className="button button-secondary" onClick={onClose} type="button">
+          {t("common.cancel")}
+        </button>
+        <button
+          className="button button-primary"
+          disabled={busy || status === ""}
+          onClick={() => onConfirm(status)}
+          type="button"
+        >
+          {t("common.confirm")}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+function FinancialStatusCell({
+  order,
+  onNavigate,
+  permissions,
+}: {
+  onNavigate: (path: string) => void;
+  order: OperationsOrder;
+  permissions: readonly string[];
+}) {
   const { t } = useTranslation();
   return (
     <div className="financial-status-cell">
+      {/* Server-derived workflow guidance. It sits in the existing financial
+          status area rather than in a new column, so no row grows wider and
+          the checkbox, row menu and selection behaviour are untouched. */}
+      {order.workflowGuidance === undefined ? null : (
+        <OrderWorkflowIndicator
+          guidance={order.workflowGuidance}
+          onNavigate={onNavigate}
+          orderNumber={order.orderNumber}
+          permissions={permissions}
+          statuses={{
+            /* The ledger's own state where the server supplied it. The old
+               expression only predicted whether an Event SHOULD exist, so a
+               posted Order still read as "Posting expected". */
+            accounting: order.accountingRequired
+              ? (order.accountingState ??
+                (order.deliveryStatus === "delivered" ? "expected" : "pending"))
+              : "not_applicable",
+            delivery: order.deliveryStatus,
+            driverCash: order.driverReconciliationStatus,
+            return: order.returnStatus ?? null,
+            settlement: order.traderSettlementStatus,
+          }}
+        />
+      )}
       <span>
         <span className="financial-status-label">{t("operations.driverCashShortLabel")}: </span>
         <DriverCashStatusLabel value={order.driverReconciliationStatus} />
       </span>
       {order.traderSettlementStatus === "not_eligible" ? null : (
         <span data-trader-settlement-status={order.traderSettlementStatus}>
-          <span className="financial-status-label">{t("operations.traderSettlementShortLabel")}: </span>
+          <span className="financial-status-label">
+            {t("operations.traderSettlementShortLabel")}:{" "}
+          </span>
           {t(`statuses.${order.traderSettlementStatus}`)}
+        </span>
+      )}
+      {order.outsourcedDriverFeeStatus === "not_required" ? null : (
+        <span data-outsourced-driver-fee-status={order.outsourcedDriverFeeStatus}>
+          <span className="financial-status-label">
+            {t("operations.outsourcedDriverFeeShortLabel")}:{" "}
+          </span>
+          {t(`operations.outsourcedDriverFeeStatuses.${order.outsourcedDriverFeeStatus}`, {
+            defaultValue: order.outsourcedDriverFeeStatus,
+          })}
         </span>
       )}
     </div>
   );
 }
+
+/** Stable identity: an inline array would re-run the consuming effect. */
+const orderDialogs: readonly WorkflowDialog[] = ["change_status", "assign_driver"];
 
 type RowAction =
   | "markInBranch"
@@ -3141,6 +3745,15 @@ type RowAction =
   | "moneyOut"
   | "close"
   | "cancel";
+
+/** Target status -> the reason-carrying action that reaches it. Derived from
+    `actionTargetStatus` below so the two can never drift apart. */
+const reasonActionForStatus: Readonly<Record<string, RowAction>> = {
+  cancelled: "cancel",
+  hold: "hold",
+  returned_to_branch: "returnToBranch",
+  returned_to_trader: "returnToTrader",
+};
 
 const actionTargetStatus: Partial<Record<RowAction, string>> = {
   cancel: "cancelled",
@@ -3158,9 +3771,7 @@ function closeEligible(order: OperationsOrder): boolean {
   return (
     ["delivered", "returned_to_trader"].includes(status) &&
     ["reconciled", "not_applicable"].includes(order.driverReconciliationStatus) &&
-    ["money_received_by_trader", "not_eligible"].includes(
-      order.traderSettlementStatus,
-    ) &&
+    ["money_received_by_trader", "not_eligible"].includes(order.traderSettlementStatus) &&
     (status !== "returned_to_trader" || order.returnStatus === "returned_to_trader")
   );
 }
@@ -3221,6 +3832,9 @@ function OrderRowActions({
   onNavigate,
   order,
   permissions,
+  workflowRequest,
+  onWorkflowRequestIneligible,
+  onWorkflowRequestConsumed,
 }: {
   api: ApiClient;
   drivers: readonly OperationsDriver[];
@@ -3228,6 +3842,12 @@ function OrderRowActions({
   onNavigate: (path: string) => void;
   order: OperationsOrder;
   permissions: readonly string[];
+  /** Reported when the requested action is no longer lawful for this Order. */
+  onWorkflowRequestIneligible?: (() => void) | undefined;
+  /** Reported once the request has been acted on, so it is never replayed. */
+  onWorkflowRequestConsumed?: (() => void) | undefined;
+  /** A smart next action asking THIS row to open one of its dialogs. */
+  workflowRequest?: { readonly dialog: string; readonly suggestedStatus: string | null } | undefined;
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
@@ -3237,16 +3857,19 @@ function OrderRowActions({
   const [assignOpen, setAssignOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [collectOpen, setCollectOpen] = useState(false);
+  const [statusOpen, setStatusOpen] = useState(false);
+  const [suggestedStatus, setSuggestedStatus] = useState<string>();
   const [viewCollectionId, setViewCollectionId] = useState<string>();
   const [viewCollectionBusy, setViewCollectionBusy] = useState(false);
+  /** The request object already acted on, so a re-render cannot replay it. */
+  const workflowRequestHandled = useRef<object | null>(null);
   const canAssign =
     permissions.includes("orders.assign_driver") || permissions.includes("users_roles.manage");
   const canUpdateStatus =
     permissions.includes("orders.update_delivery_status") ||
     permissions.includes("users_roles.manage");
   const canReconcile =
-    permissions.includes("reconciliations.create") ||
-    permissions.includes("users_roles.manage");
+    permissions.includes("reconciliations.create") || permissions.includes("users_roles.manage");
   const canSettle =
     permissions.includes("settlements.create") || permissions.includes("users_roles.manage");
   const actions = availableActions(order).filter((action) =>
@@ -3297,6 +3920,73 @@ function OrderRowActions({
     }
   };
 
+  /* Only transitions `availableActions()` already allows for this Order and
+     this user, and only the ones that carry no reason prompt -- Hold, Cancel
+     and the Returns keep their existing ReasonDialog. */
+  const statusOptions = actions
+    .filter((action) => actionTargetStatus[action] !== undefined)
+    .filter((action) => !["hold", "cancel", "returnToBranch", "returnToTrader"].includes(action))
+    .map((action) => ({
+      label: t(`operations.actions.${action}`),
+      status: actionTargetStatus[action] as string,
+    }));
+
+  /* A smart next action asking this row to open a dialog. Permission and
+     lawfulness are re-checked here: `statusOptions` is empty when the user
+     cannot update status or the transition is not available, and the dialog is
+     then never opened. */
+  useEffect(() => {
+    if (workflowRequest === undefined) return;
+    /* Acted on exactly once per request, whatever the outcome.
+       This effect re-runs whenever the list re-renders -- including the reload
+       that follows a successful status change. Without this guard the dialog
+       reopened itself straight after Confirm, offering the NEXT transition
+       (Out for Delivery -> Mark Delivered) as though a second change had been
+       asked for. Compared by identity, so a genuinely new request still fires. */
+    if (workflowRequestHandled.current === workflowRequest) return;
+    workflowRequestHandled.current = workflowRequest;
+    onWorkflowRequestConsumed?.();
+    if (workflowRequest.dialog === "assign_driver") {
+      if (canAssign) setAssignOpen(true);
+      return;
+    }
+    if (workflowRequest.dialog !== "change_status") return;
+    if (!canUpdateStatus) return;
+
+    /* Two different dialogs answer to `change_status`.
+
+       Hold, Cancel and the two Returns REQUIRE a reason, and the existing
+       `ReasonDialog` already owns that. The direct transitions do not, and use
+       `ChangeStatusDialog`. Routing on the suggested status keeps one deep-link
+       parameter for both rather than inventing a second `openDialog` value that
+       would mean almost the same thing. */
+    const suggested = workflowRequest.suggestedStatus;
+    if (suggested !== null) {
+      const reasonAction = reasonActionForStatus[suggested];
+      if (reasonAction !== undefined) {
+        /* Eligibility comes from `actions` -- the SAME list the row menu is
+           built from, already filtered by lifecycle and permission. An Order
+           that is no longer eligible simply is not in it, so the dialog is not
+           forced open. */
+        if (!actions.includes(reasonAction)) {
+          onWorkflowRequestIneligible?.();
+          return;
+        }
+        setReasonFor(reasonAction);
+        return;
+      }
+    }
+    if (statusOptions.length === 0) {
+      onWorkflowRequestIneligible?.();
+      return;
+    }
+    if (suggested !== null) setSuggestedStatus(suggested);
+    setStatusOpen(true);
+    // Requested once per row per arrival; `workflowRequest` is cleared by the
+    // workspace after the first consumption.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workflowRequest]);
+
   const perform = (action: RowAction) => {
     setError(undefined);
     if (action === "assignDriver") {
@@ -3329,7 +4019,14 @@ function OrderRowActions({
       return;
     }
     const target = actionTargetStatus[action];
-    if (target !== undefined) void patchStatus(target);
+    if (target !== undefined) {
+      /* Confirm rather than write. These transitions used to PATCH straight
+         from the menu, which left a smart next action nothing to open and no
+         safe way to suggest a status. */
+      setOpen(false);
+      setSuggestedStatus(target);
+      setStatusOpen(true);
+    }
   };
 
   return (
@@ -3406,6 +4103,20 @@ function OrderRowActions({
           {error === undefined ? null : <div className="alert alert-error">{error}</div>}
         </Modal>
       ) : null}
+      {!statusOpen ? null : (
+        <ChangeStatusDialog
+          busy={busy}
+          onClose={() => setStatusOpen(false)}
+          onConfirm={(status) => {
+            setStatusOpen(false);
+            // The existing write path, unchanged.
+            void patchStatus(status);
+          }}
+          options={statusOptions}
+          orderNumber={order.orderNumber}
+          {...(suggestedStatus === undefined ? {} : { suggestedStatus })}
+        />
+      )}
       {reasonFor === undefined ? null : (
         <ReasonDialog
           busy={busy}
@@ -3608,7 +4319,7 @@ function EditOrderDialog({
     isUaeMobile(form.customerMobileNumber) &&
     (form.customerSecondMobileNumber.trim() === "" ||
       isUaeMobile(form.customerSecondMobileNumber)) &&
-    form.customerAddress.trim() !== "" &&
+    // Address deliberately absent: optional on create, so optional on edit too.
     form.codAmount !== "" &&
     Number(form.codAmount) >= 0 &&
     form.serviceFee !== "" &&
@@ -4064,6 +4775,9 @@ function auditFieldLabel(fieldName: string | null, t: Translate): string {
 
 function auditEventTitle(event: AuditEvent, t: Translate): string {
   if (event.eventType === "order.created") return t("operations.audit.orderCreated");
+  // Distinct from an override: same field, entirely different decision.
+  if (event.eventType === "order.zero_service_fee")
+    return t("operations.audit.zeroServiceFee");
   const field = auditFieldLabel(event.fieldName, t);
   return field !== "" ? field : prettifyToken(event.eventType);
 }

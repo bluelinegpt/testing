@@ -130,6 +130,9 @@ function setup() {
           },
         ]);
       }
+      if (path === "operations/orders/next-serial-number") {
+        return Promise.resolve({ serialNumber: "000123" });
+      }
       if (path.startsWith("operations/orders/identifier-availability")) {
         return Promise.resolve({
           referenceNumberAvailable: true,
@@ -360,6 +363,142 @@ describe("CreateOrderDialog", () => {
     await waitFor(() => expect(areaInput).toHaveValue("Dubai"));
   });
 
+  /* Free Order. The blocker this feature removes is real: an unpriced
+     Trader/Area otherwise refuses the quote and the operator has no way to say
+     "this one is deliberately free". */
+  const unpricedApi = () => ({
+    get: vi.fn((path: string) => {
+      if (path.startsWith("operations/orders/identifier-availability")) {
+        return Promise.resolve({ referenceNumberAvailable: true, serialNumberAvailable: true });
+      }
+      if (path === "configuration/emirates") {
+        return Promise.resolve([
+          { code: "DXB", id: area.emirateId, nameAr: area.emirateNameAr, nameEn: area.emirateNameEn },
+        ]);
+      }
+      if (path === "operations/orders/next-serial-number") {
+        return Promise.resolve({ serialNumber: "000123" });
+      }
+      if (path.startsWith("configuration/customers/CUS-000001")) {
+        return Promise.resolve({ addresses: [{ ...customer, isActive: true, isDefault: true }] });
+      }
+      // Same dispatch as `setup()`: Trader search lives under operations/.
+      const items = path.startsWith("operations/traders")
+        ? [trader]
+        : path.startsWith("configuration/customers")
+          ? [customer]
+          : [area];
+      return Promise.resolve({ hasMore: false, items, total: 1 });
+    }),
+    post: vi.fn((path: string) => {
+      // No configured price: the quote always refuses.
+      if (path === "operations/orders/quote") {
+        return Promise.reject(new ApiError("no price", "pricing_not_configured", 422));
+      }
+      return Promise.resolve({ orderNumber: "ORD-000300" });
+    }),
+  });
+
+  const renderWith = (api: ReturnType<typeof unpricedApi>) =>
+    render(
+      <CreateOrderDialog
+        api={api as unknown as ApiClient}
+        drivers={[]}
+        onClose={vi.fn()}
+        onSaved={vi.fn().mockResolvedValue(undefined)}
+        permissions={["users_roles.manage"]}
+        searchDebounceMs={0}
+      />,
+    );
+
+  it("offers a Free Order checkbox, unchecked by default", async () => {
+    renderWith(unpricedApi());
+    await selectTraderAndCustomer();
+    const checkbox = screen.getByLabelText("Free Order");
+    expect(checkbox).toBeInTheDocument();
+    expect(checkbox).not.toBeChecked();
+    // The reason only exists once the decision is made.
+    expect(screen.queryByLabelText("Free Order Reason")).not.toBeInTheDocument();
+  });
+
+  it("zeroes and locks the money when Free Order is checked", async () => {
+    renderWith(unpricedApi());
+    await selectTraderAndCustomer();
+    fireEvent.change(screen.getByLabelText("COD amount"), { target: { value: "300" } });
+    fireEvent.click(screen.getByLabelText("Free Order"));
+
+    const cod = screen.getByLabelText("COD amount");
+    // Set for the operator rather than typed by them, and no longer editable.
+    expect(cod).toHaveValue(0);
+    expect(cod).toBeDisabled();
+    expect(screen.getByText(/this Order is free/i)).toBeInTheDocument();
+    expect(await screen.findByLabelText("Free Order Reason")).toBeInTheDocument();
+  });
+
+  it("does not let unresolved Trader pricing block a Free Order", async () => {
+    const api = unpricedApi();
+    renderWith(api);
+    await selectTraderAndCustomer();
+    // The pricing dead end is present for a normal Order...
+    expect(await screen.findByText(/could not be resolved/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText("Free Order"));
+    const reason = await screen.findByLabelText("Free Order Reason");
+    fireEvent.change(reason, {
+      target: { value: "Free delivery test" },
+    });
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Create order" })).toBeEnabled(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Create order" }));
+
+    // ...and does not stop this one, because it was never a pricing question.
+    await waitFor(() =>
+      expect(api.post).toHaveBeenCalledWith(
+        "operations/orders",
+        expect.objectContaining({
+          codAmount: 0,
+          freeOrderReason: "Free delivery test",
+          isFreeOrder: true,
+        }),
+        expect.objectContaining({ "X-Idempotency-Key": expect.any(String) }),
+      ),
+    );
+  });
+
+  it("blocks a Free Order with a blank reason before it reaches the server", async () => {
+    const api = unpricedApi();
+    renderWith(api);
+    await selectTraderAndCustomer();
+    fireEvent.click(screen.getByLabelText("Free Order"));
+    const reason = await screen.findByLabelText("Free Order Reason");
+    fireEvent.change(reason, { target: { value: "   " } });
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Create order" })).toBeEnabled(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Create order" }));
+
+    const reasonErrors = await screen.findAllByText("Enter a reason for the Free Order.");
+    expect(reasonErrors).toHaveLength(2);
+    expect(api.post).not.toHaveBeenCalledWith("operations/orders", expect.anything());
+  });
+
+  it("hands pricing back and drops the reason when Free Order is unchecked", async () => {
+    renderWith(unpricedApi());
+    await selectTraderAndCustomer();
+    fireEvent.click(screen.getByLabelText("Free Order"));
+    fireEvent.change(screen.getByLabelText("Free Order Reason"), {
+      target: { value: "Free delivery test" },
+    });
+    fireEvent.click(screen.getByLabelText("Free Order"));
+
+    // COD editable again, reason gone, and the normal pricing dead end returns
+    // rather than a stale zero fee being kept.
+    expect(screen.getByLabelText("COD amount")).toBeEnabled();
+    expect(screen.queryByLabelText("Free Order Reason")).not.toBeInTheDocument();
+    expect(await screen.findByText(/could not be resolved/i)).toBeInTheDocument();
+  });
+
   it("lets the operator enter a manual fee when the Trader has no configured price", async () => {
     // The quote endpoint refuses until a manual service fee is supplied, then
     // prices the order manually — the resolver's no-configured-price path.
@@ -522,9 +661,9 @@ describe("CreateOrderDialog validation (Phase 3)", () => {
         "Unable to create the Order. Please complete or correct the following fields:",
       ),
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Enter a Serial Number." })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Select a valid Trader." })).toBeInTheDocument();
-    // The first invalid field (Serial Number) receives focus.
+    // A submit may occur while the generated Serial Number request is still
+    // settling. The ordered validation focus remains deterministic.
     expect(document.activeElement).toBe(document.getElementById("order-serial"));
   });
 
@@ -609,7 +748,12 @@ describe("CreateOrderDialog validation (Phase 3)", () => {
         }
         if (path === "configuration/emirates") {
           return Promise.resolve([
-            { code: "DXB", id: area.emirateId, nameAr: area.emirateNameAr, nameEn: area.emirateNameEn },
+            {
+              code: "DXB",
+              id: area.emirateId,
+              nameAr: area.emirateNameAr,
+              nameEn: area.emirateNameEn,
+            },
           ]);
         }
         if (path.startsWith("configuration/customers/CUS-000001")) {

@@ -168,9 +168,17 @@ export class OperationsController {
     @Query("traderId") traderId?: string,
     @Query("driverId") driverId?: string,
     @Query("areaId") areaId?: string,
+    @Query("emirateId") emirateId?: string,
+    @Query("referenceNumber") referenceNumber?: string,
     @Query("dateFrom") dateFrom?: string,
     @Query("dateTo") dateTo?: string,
     @Query("quickView") quickView?: "active" | "all" | "cancelled" | "closed" | "hold",
+    @Query("deliveredOnly") deliveredOnly?: string,
+    @Query("deliveryDateFrom") deliveryDateFrom?: string,
+    @Query("deliveryDateTo") deliveryDateTo?: string,
+    @Query("dateMode") dateMode?: string,
+    @Query("businessDateFrom") businessDateFrom?: string,
+    @Query("businessDateTo") businessDateTo?: string,
     @Query("page") page?: string,
     @Query("pageSize") pageSize?: string,
     @Query("sortBy") sortBy?: "amountToCollect" | "createdAt" | "orderDate" | "orderNumber",
@@ -183,8 +191,17 @@ export class OperationsController {
       deliveryStatus,
       driverId,
       areaId,
+      emirateId,
+      referenceNumber,
       search,
       quickView,
+      // Delivery Activity. `dateFrom`/`dateTo` above still mean Order Date.
+      deliveredOnly: deliveredOnly === "true",
+      deliveryDateFrom,
+      deliveryDateTo,
+      dateMode,
+      businessDateFrom,
+      businessDateTo,
       page: Number(page),
       pageSize: Number(pageSize) as 25 | 50 | 100,
       sortBy,
@@ -265,6 +282,8 @@ export class OperationsController {
     @Query("traderId") traderId?: string,
     @Query("driverId") driverId?: string,
     @Query("areaId") areaId?: string,
+    @Query("emirateId") emirateId?: string,
+    @Query("referenceNumber") referenceNumber?: string,
     @Query("dateFrom") dateFrom?: string,
     @Query("dateTo") dateTo?: string,
   ): Promise<OperationsExportFile> {
@@ -275,6 +294,8 @@ export class OperationsController {
       deliveryStatus,
       driverId,
       areaId,
+      emirateId,
+      referenceNumber,
       search,
       settlementStatus,
       traderId,
@@ -480,7 +501,9 @@ export class OperationsController {
     return this.reconciliations.details(reconciliationId);
   }
 
-  @ApiOperation({ summary: "Read-only print data for the Driver collection document (grouped by Trader)" })
+  @ApiOperation({
+    summary: "Read-only print data for the Driver collection document (grouped by Trader)",
+  })
   @Get("cash/reconciliations/:reconciliationId/print-data")
   public driverReconciliationPrintData(
     @Param("reconciliationId", new ParseUUIDPipe()) reconciliationId: string,
@@ -531,7 +554,9 @@ export class OperationsController {
     summary: "Server-authoritative data for the Driver Shipment Manifest, from selected Orders",
   })
   @Post("cash/driver-shipment-manifest/data")
-  public driverShipmentManifestData(@Body() input: GenerateShipmentManifestDto): Promise<ManifestData> {
+  public driverShipmentManifestData(
+    @Body() input: GenerateShipmentManifestDto,
+  ): Promise<ManifestData> {
     return this.manifest.manifestData(input);
   }
 
@@ -872,7 +897,11 @@ export class OperationsController {
     readonly reversalSettlementNumber: string;
     readonly settlementId: string;
   }> {
-    return this.traderSettlementService.reverse(settlementId, input.reason, this.correlationId(request));
+    return this.traderSettlementService.reverse(
+      settlementId,
+      input.reason,
+      this.correlationId(request),
+    );
   }
 
   private correlationId(request: Request): string {
@@ -943,11 +972,7 @@ export class PortalController {
     @Body() input: UpdateOrderDto,
     @Req() request: Request,
   ): Promise<unknown> {
-    return this.operations.updateTraderPortalOrder(
-      orderId,
-      input,
-      this.correlationId(request),
-    );
+    return this.operations.updateTraderPortalOrder(orderId, input, this.correlationId(request));
   }
 
   @RequireIdentityKinds("driver")

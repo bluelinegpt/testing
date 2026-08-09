@@ -1,4 +1,21 @@
 const manage = "users_roles.manage";
+const accountingAccess = [
+  manage,
+  "accounting.view",
+  "accounting.manage",
+  "accounting.approve",
+  "accounting.post",
+  "accounting.reverse",
+  "accounting.configuration.manage",
+  "accounting.periods.manage",
+  "accounting.chart_of_accounts.manage",
+] as const;
+const accountingCashBankAccess = [
+  manage,
+  "accounting.view",
+  "accounting.manage",
+  "accounting.configuration.manage",
+] as const;
 
 const routePermissions: Readonly<Record<string, readonly string[]>> = {
   "/dashboard": [manage, "reports.financial.view"],
@@ -20,17 +37,9 @@ const routePermissions: Readonly<Record<string, readonly string[]>> = {
     "payroll.pay",
     "payroll.reverse",
   ],
-  "/accounting": [
-    manage,
-    "accounting.view",
-    "accounting.manage",
-    "accounting.approve",
-    "accounting.post",
-    "accounting.reverse",
-    "accounting.configuration.manage",
-    "accounting.periods.manage",
-    "accounting.chart_of_accounts.manage",
-  ],
+  "/accounting": accountingAccess,
+  "/accounting/cash-accounts": accountingCashBankAccess,
+  "/accounting/bank-accounts": accountingCashBankAccess,
   "/drivers": [manage, "orders.assign_driver", "orders.update_delivery_status"],
   "/driver-cash-reconciliation": [manage, "reconciliations.create", "reconciliations.reverse"],
   "/operations/driver-reconciliations/new": [manage, "reconciliations.create"],
@@ -43,6 +52,21 @@ const routePermissions: Readonly<Record<string, readonly string[]>> = {
   ],
   "/reports": [manage, "reports.financial.view", "reports.export"],
   "/configuration/company-profile": ["company_profile.manage"],
+  // Registered here or the route is unreachable: an unlisted path is denied
+  // outright, which is how the Storefront screens ended up showing "Access
+  // denied" despite being wired into the workspace and the navigation.
+  "/configuration/storefront": [
+    manage,
+    "storefront.view",
+    "storefront.manage",
+    "storefront.publish",
+  ],
+  "/configuration/storefront-products": [
+    manage,
+    "storefront_products.view",
+    "storefront_products.manage",
+    "storefront_products.publish",
+  ],
   "/configuration/general": [manage],
   "/configuration/traders": [manage],
   "/configuration/customers": [manage],
@@ -54,6 +78,7 @@ const routePermissions: Readonly<Record<string, readonly string[]>> = {
   "/configuration/users": [manage],
   "/configuration/roles": [manage],
   "/support": [manage],
+  "/communication": [manage],
 };
 
 const landingPriority = ["/dashboard", "/orders", "/orders/create"] as const;

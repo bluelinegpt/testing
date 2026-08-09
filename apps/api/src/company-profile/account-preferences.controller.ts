@@ -3,7 +3,10 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
 import type { Request } from "express";
 
 import { RequireIdentityKinds } from "../authentication/authentication.decorators.js";
-import { type AccountPreferences, AccountPreferencesService } from "./account-preferences.service.js";
+import {
+  type AccountPreferences,
+  AccountPreferencesService,
+} from "./account-preferences.service.js";
 // Runtime class value is required for Nest validation metadata.
 // eslint-disable-next-line @typescript-eslint/consistent-type-imports
 import { UpdateTextLanguageDto, UpdateThemeDto } from "./company-profile.dto.js";

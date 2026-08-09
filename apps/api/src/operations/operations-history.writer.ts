@@ -83,10 +83,7 @@ export class OperationsHistoryWriter {
     `.execute(database);
   }
 
-  public async orderEvent(
-    database: Kysely<DatabaseSchema>,
-    input: OrderEventInput,
-  ): Promise<void> {
+  public async orderEvent(database: Kysely<DatabaseSchema>, input: OrderEventInput): Promise<void> {
     await sql`
       insert into order_events (
         company_id, order_id, event_type, event_category, field_name,

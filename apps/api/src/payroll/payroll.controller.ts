@@ -36,7 +36,7 @@ import { PayrollPaymentService } from "./payroll-payment.service.js";
 import { PayrollPeriodService } from "./payroll-period.service.js";
 import { PayrollQueryService } from "./payroll-query.service.js";
 import { PayrollReportService } from "./payroll-report.service.js";
-import {
+import type {
   ConfirmOutsourcedDriverFeePaymentDto,
   DailyDriverFeeAccrualReportQueryDto,
   OutstandingDriverFeesReportQueryDto,
@@ -80,11 +80,7 @@ export class PayrollController {
     return this.outsourcedDriverFeeReports.statement(driverId, query);
   }
 
-  @RequireAnyPermission(
-    "outsourced_driver_fees.view",
-    "reports.export",
-    "users_roles.manage",
-  )
+  @RequireAnyPermission("outsourced_driver_fees.view", "reports.export", "users_roles.manage")
   @Get("outsourced-driver-fees/drivers/:driverId/statement/pdf")
   public async outsourcedDriverStatementPdf(
     @Param("driverId", new ParseUUIDPipe()) driverId: string,
@@ -109,11 +105,7 @@ export class PayrollController {
     return this.outsourcedDriverFeeReports.outstanding(query);
   }
 
-  @RequireAnyPermission(
-    "outsourced_driver_fees.view",
-    "reports.export",
-    "users_roles.manage",
-  )
+  @RequireAnyPermission("outsourced_driver_fees.view", "reports.export", "users_roles.manage")
   @Get("outsourced-driver-fees/reports/outstanding/pdf")
   public async outstandingDriverFeesPdf(
     @Query() query: OutstandingDriverFeesReportQueryDto,
@@ -136,11 +128,7 @@ export class PayrollController {
     return this.outsourcedDriverFeeReports.dailyAccruals(query);
   }
 
-  @RequireAnyPermission(
-    "outsourced_driver_fees.view",
-    "reports.export",
-    "users_roles.manage",
-  )
+  @RequireAnyPermission("outsourced_driver_fees.view", "reports.export", "users_roles.manage")
   @Get("outsourced-driver-fees/reports/accruals/pdf")
   public async dailyDriverFeeAccrualsPdf(
     @Query() query: DailyDriverFeeAccrualReportQueryDto,
@@ -159,17 +147,11 @@ export class PayrollController {
 
   @RequireAnyPermission("outsourced_driver_fees.view", "users_roles.manage")
   @Get("outsourced-driver-fees/payments/:paymentId/receipt")
-  public outsourcedDriverFeeReceipt(
-    @Param("paymentId", new ParseUUIDPipe()) paymentId: string,
-  ) {
+  public outsourcedDriverFeeReceipt(@Param("paymentId", new ParseUUIDPipe()) paymentId: string) {
     return this.outsourcedDriverFeeReports.receipt(paymentId);
   }
 
-  @RequireAnyPermission(
-    "outsourced_driver_fees.view",
-    "reports.export",
-    "users_roles.manage",
-  )
+  @RequireAnyPermission("outsourced_driver_fees.view", "reports.export", "users_roles.manage")
   @Get("outsourced-driver-fees/payments/:paymentId/receipt/pdf")
   public async outsourcedDriverFeeReceiptPdf(
     @Param("paymentId", new ParseUUIDPipe()) paymentId: string,
@@ -214,11 +196,7 @@ export class PayrollController {
     @Headers("x-idempotency-key") idempotencyKey: string | undefined,
     @Req() request: Request,
   ) {
-    return this.outsourcedDriverFees.reconcile(
-      input,
-      idempotencyKey,
-      this.correlationId(request),
-    );
+    return this.outsourcedDriverFees.reconcile(input, idempotencyKey, this.correlationId(request));
   }
 
   @RequireAnyPermission("outsourced_driver_fees.manage", "users_roles.manage")
@@ -228,11 +206,7 @@ export class PayrollController {
     @Headers("x-idempotency-key") idempotencyKey: string | undefined,
     @Req() request: Request,
   ) {
-    return this.outsourcedDriverFees.backfill(
-      input,
-      idempotencyKey,
-      this.correlationId(request),
-    );
+    return this.outsourcedDriverFees.backfill(input, idempotencyKey, this.correlationId(request));
   }
 
   @RequireAnyPermission("outsourced_driver_fees.reverse", "users_roles.manage")
@@ -253,9 +227,7 @@ export class PayrollController {
 
   @RequireAnyPermission("outsourced_driver_fees.pay", "users_roles.manage")
   @Post("outsourced-driver-fees/payments/proposal")
-  public outsourcedDriverFeePaymentProposal(
-    @Body() input: OutsourcedDriverFeePaymentProposalDto,
-  ) {
+  public outsourcedDriverFeePaymentProposal(@Body() input: OutsourcedDriverFeePaymentProposalDto) {
     return this.outsourcedDriverFees.paymentProposal(input);
   }
 
@@ -546,9 +518,7 @@ export class PayrollController {
 
   @RequireAnyPermission("payroll.view", "users_roles.manage")
   @Get("payments/:paymentId/report-data")
-  public paymentReportData(
-    @Param("paymentId", new ParseUUIDPipe()) paymentId: string,
-  ) {
+  public paymentReportData(@Param("paymentId", new ParseUUIDPipe()) paymentId: string) {
     return this.reports.paymentData(paymentId);
   }
 

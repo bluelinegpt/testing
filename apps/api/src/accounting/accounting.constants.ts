@@ -270,12 +270,7 @@ export const cashBankMovementTypes = [
 ] as const;
 export type CashBankMovementType = (typeof cashBankMovementTypes)[number];
 
-export const cashBankMovementStatuses = [
-  "draft",
-  "confirmed",
-  "cancelled",
-  "reversed",
-] as const;
+export const cashBankMovementStatuses = ["draft", "confirmed", "cancelled", "reversed"] as const;
 
 export const cashBankClassificationMappingKeys = [
   "cash_bank_deposit_owner_contribution",
@@ -295,12 +290,33 @@ export const cashAccountTypes = [
   "other",
 ] as const;
 
-export const bankAccountTypes = [
-  "current",
-  "savings",
-  "merchant",
-  "settlement",
-  "other",
-] as const;
+export const bankAccountTypes = ["current", "savings", "merchant", "settlement", "other"] as const;
 
 export const accountingAutomaticPostingEnabledByDefault = false as const;
+
+/**
+ * Segregation of Duties across the whole Accounting module — approving,
+ * posting, paying, confirming a Cash/Bank Movement and reversing.
+ *
+ * - `strict`      — dual control is always required, whether or not a second
+ *                   authorized user currently exists.
+ * - `conditional` — dual control is required only while a second authorized
+ *                   user is actually available, so a record can never wait on
+ *                   a person who does not exist.
+ * - `single_user` — one authorized accountant may perform every step.
+ *
+ * The effective value is a COMPANY decision stored in
+ * `accounting_configurations.segregation_policy`; this list is the contract,
+ * and `accountingDefaultSegregationPolicy` is only the fallback used when a
+ * Company has no Accounting configuration row yet.
+ *
+ * Accountability is unaffected by any policy: `created_by`, `approved_by`,
+ * `posted_by`, `confirmed_by` and `reversed_by` are always recorded, and every
+ * action is always written to `audit_events`. The policy only decides whether
+ * those columns must hold DIFFERENT accounts.
+ */
+export const accountingSegregationPolicies = ["strict", "conditional", "single_user"] as const;
+export type AccountingSegregationPolicy = (typeof accountingSegregationPolicies)[number];
+
+/** Fallback for a Company with no Accounting configuration row yet. */
+export const accountingDefaultSegregationPolicy: AccountingSegregationPolicy = "single_user";

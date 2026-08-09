@@ -7,6 +7,7 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Query,
   Req,
 } from "@nestjs/common";
 import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
@@ -18,6 +19,11 @@ import {
   RequirePermissions,
 } from "../authentication/authentication.decorators.js";
 import {
+  type BusinessDayConfiguration,
+  type BusinessDayWindow,
+  BusinessDayService,
+} from "./business-day.service.js";
+import {
   type CompanyBankAccount,
   type CompanySettings,
   CompanyConfigurationService,
@@ -26,6 +32,7 @@ import {
 // eslint-disable-next-line @typescript-eslint/consistent-type-imports
 import {
   CreateBankAccountDto,
+  SaveBusinessDayConfigurationDto,
   UpdateAreaStatusDto,
   UpdateCompanySettingsDto,
 } from "./company-configuration.dto.js";
@@ -39,7 +46,48 @@ export class CompanyConfigurationController {
   public constructor(
     @Inject(CompanyConfigurationService)
     private readonly configuration: CompanyConfigurationService,
+    @Inject(BusinessDayService)
+    private readonly businessDays: BusinessDayService,
   ) {}
+
+  // ---------------------------------------------------------------------------
+  // Business day
+  //
+  // The Company is taken from the authenticated tenant context in the service,
+  // never from a route or query parameter, so no caller can read or reshape
+  // another Company's calendar.
+  // ---------------------------------------------------------------------------
+
+  @ApiOperation({ summary: "List this Company's effective-dated business-day rules" })
+  @Get("business-day")
+  public businessDayConfigurations(): Promise<readonly BusinessDayConfiguration[]> {
+    return this.businessDays.configurations();
+  }
+
+  @ApiOperation({ summary: "Adopt a business-day rule from a future date" })
+  @Post("business-day")
+  public saveBusinessDay(
+    @Body() input: SaveBusinessDayConfigurationDto,
+    @Req() request: Request,
+  ): Promise<BusinessDayConfiguration> {
+    return this.businessDays.saveConfiguration(input, this.correlationId(request));
+  }
+
+  /**
+   * Resolve a Business Date range to the exact window a report will query.
+   *
+   * The browser asks for this rather than computing it: a UTC boundary derived
+   * in the client would be built from the viewer's own clock and zone, and the
+   * backend would have no way to tell a wrong one from a right one.
+   */
+  @ApiOperation({ summary: "Resolve the UTC window for a Business Date range" })
+  @Get("business-day/window")
+  public businessDayWindow(
+    @Query("businessDateFrom") businessDateFrom: string,
+    @Query("businessDateTo") businessDateTo?: string,
+  ): Promise<BusinessDayWindow> {
+    return this.businessDays.window(businessDateFrom, businessDateTo);
+  }
 
   @ApiOperation({ summary: "Show Company settings" })
   @Get("settings")

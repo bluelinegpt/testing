@@ -1,4 +1,9 @@
 import { randomUUID } from "node:crypto";
+import { permissiveBalanceEnforcement } from "../test/balance-enforcement-stub.js";
+import {
+  createBusinessDayServiceStub,
+  createCalendarDateReportModeServiceStub,
+} from "../test/business-day-stubs.js";
 import { resolve } from "node:path";
 
 import { config as loadEnvironment } from "dotenv";
@@ -20,6 +25,7 @@ import type { IdentityContext, IdentityContextAccessor } from "../security/ident
 import type { TenantContext, TenantContextAccessor } from "../tenancy/tenant-context.js";
 
 import type { DriverCollectionPdfService } from "./driver-collection-pdf.service.js";
+import { PaymentFundingAccountService } from "../accounting/payment-funding-account.service.js";
 import { OperationsHistoryWriter } from "./operations-history.writer.js";
 import type { CreateTraderSettlementDto } from "./operations.dto.js";
 import { TraderSettlementService } from "./trader-settlement.service.js";
@@ -116,10 +122,21 @@ describe.skipIf(!runDatabaseTests)("trader settlement", () => {
           transaction as unknown as Kysely<DatabaseSchema>,
           manager as unknown as KyselyTransactionManager,
           tenants as unknown as TenantContextAccessor,
+          {
+            resolve: async (accountId: string) => ({
+              accountId, kind: "cash", name: "Harness Cash Account",
+            }),
+          } as unknown as PaymentFundingAccountService,
+          createCalendarDateReportModeServiceStub(),
+          createBusinessDayServiceStub(),
           identities as unknown as IdentityContextAccessor,
           new OperationsHistoryWriter(),
           companyProfile,
           {} as unknown as DriverCollectionPdfService,
+          // Always-allow: these cases assert settlement behaviour, not balance
+          // policy. Enforcing here would make them fail on seeded Cash balances
+          // for a reason they were never written to test.
+          permissiveBalanceEnforcement(),
         );
 
         const createCompany = async (label: string): Promise<CompanyFixture> => {
@@ -162,8 +179,8 @@ describe.skipIf(!runDatabaseTests)("trader settlement", () => {
                       ${`TRD-${suffix}`}, 'Settlement Trader', '971509999999', ${accountId}::uuid)
           `.execute(transaction);
           await sql`
-            insert into company_bank_accounts (id, company_id, bank_name, account_name, iban) values
-              (${companyBankAccountId}::uuid, ${companyId}::uuid, 'Settlement Bank', 'Main Account',
+            insert into company_bank_accounts (id, company_id, bank_account_code, bank_name, account_name, iban) values
+              (${companyBankAccountId}::uuid, ${companyId}::uuid, ${`SET-BANK-${suffix}`}, 'Settlement Bank', 'Main Account',
                ${`AE${suffix}COMPANY0001`})
           `.execute(transaction);
           await sql`
@@ -230,7 +247,7 @@ describe.skipIf(!runDatabaseTests)("trader settlement", () => {
           const paid = options.traderPaidAmount ?? 0;
           await sql`
             insert into orders (
-              id, company_id, order_number, order_date, trader_id, area_id,
+              service_fee_override_reason, id, company_id, order_number, order_date, trader_id, area_id,
               created_by_account_id, customer_name, customer_mobile_number, customer_address,
               package_count, payment_condition, final_service_fee_snapshot,
               customer_provenance_status, pricing_provenance_status,
@@ -238,7 +255,7 @@ describe.skipIf(!runDatabaseTests)("trader settlement", () => {
               delivery_status, driver_reconciliation_status, trader_settlement_status, return_status,
               delivered_at
             ) values (
-              ${orderId}::uuid, ${company.companyId}::uuid, ${number}, current_date,
+              'Zero configured Service Fee (fixture)', ${orderId}::uuid, ${company.companyId}::uuid, ${number}, current_date,
               ${traderId}::uuid, ${areaId}::uuid, ${company.accountId}::uuid,
               'Settlement Customer', '971509999998', 'Settlement address', 1,
               'customer_pays_cod_and_fee', 0, 'legacy_unattributed', 'legacy_unattributed',
@@ -318,10 +335,16 @@ describe.skipIf(!runDatabaseTests)("trader settlement", () => {
           traderId: companyA.traderId,
         });
         const otherTrader = randomUUID();
+        const otherTraderAccount = randomUUID();
         await sql`
           insert into accounts (id, company_id, account_kind, username, password_hash)
-          values (${randomUUID()}::uuid, ${companyA.companyId}::uuid, 'trader',
+          values (${otherTraderAccount}::uuid, ${companyA.companyId}::uuid, 'trader',
                   ${`other.trader.${otherTrader.slice(0, 8)}`}, 'test-only')
+        `.execute(transaction);
+        await sql`
+          insert into traders (id, company_id, account_id, code, name_en, mobile_number)
+          values (${otherTrader}::uuid, ${companyA.companyId}::uuid, ${otherTraderAccount}::uuid,
+                  ${`OTRD-${otherTrader.slice(0, 8)}`}, 'Other Settlement Trader', '971509999999')
         `.execute(transaction);
         // Attempting to pay this Order under a DIFFERENT (non-existent) Trader ID
         // must be rejected as a Trader mismatch, not silently accepted.
@@ -813,7 +836,8 @@ describe.skipIf(!runDatabaseTests)("trader settlement", () => {
         );
         // A reversal record itself cannot be reversed.
         await expectRejection(
-          () => service.reverse(reversal.reversalSettlementId, "reverse the reversal", randomUUID()),
+          () =>
+            service.reverse(reversal.reversalSettlementId, "reverse the reversal", randomUUID()),
           "settlement_reversal_invalid",
         );
         // The original settlement, its lines and its payment are preserved untouched.
@@ -837,7 +861,8 @@ describe.skipIf(!runDatabaseTests)("trader settlement", () => {
           `key-blocked-receipt-${randomUUID()}`,
         );
         await expectRejection(
-          () => service.reverse(blockedSettlement.settlementId, "attempt after receipt", randomUUID()),
+          () =>
+            service.reverse(blockedSettlement.settlementId, "attempt after receipt", randomUUID()),
           "settlement_reversal_blocked_by_receipt",
         );
 
@@ -855,7 +880,11 @@ describe.skipIf(!runDatabaseTests)("trader settlement", () => {
           `key-multi-second-${randomUUID()}`,
         );
         expect((await statusOf(multiPayOrder.id)).paid).toBe("60.00");
-        await service.reverse(multiPaySecond.settlementId, "reverse second payment only", randomUUID());
+        await service.reverse(
+          multiPaySecond.settlementId,
+          "reverse second payment only",
+          randomUUID(),
+        );
         expect((await statusOf(multiPayOrder.id)).status).toBe("partially_settled");
         expect((await statusOf(multiPayOrder.id)).paid).toBe("30.00");
         expect((await statusOf(multiPayOrder.id)).outstanding).toBe("60.00");
@@ -870,9 +899,11 @@ describe.skipIf(!runDatabaseTests)("trader settlement", () => {
         expect(report.header.beneficiaryBank?.accountNumberMasked).toBe("******3210");
         expect(report.header.beneficiaryBank?.ibanMasked).not.toContain("TRADER00002");
         // No internal database IDs anywhere in the report payload.
-        expect(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.test(
-          JSON.stringify(report),
-        )).toBe(false);
+        expect(
+          /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.test(
+            JSON.stringify(report),
+          ),
+        ).toBe(false);
         // Regeneration returns stable values.
         const reportAgain = await service.reportData(bankResult.settlementId);
         expect(reportAgain).toEqual(report);
@@ -898,7 +929,10 @@ describe.skipIf(!runDatabaseTests)("trader settlement", () => {
 
         // --- Company isolation ----------------------------------------------------
         useCompany(companyB);
-        await expectRejection(() => service.detail(bankResult.settlementId), "settlement_not_found");
+        await expectRejection(
+          () => service.detail(bankResult.settlementId),
+          "settlement_not_found",
+        );
         await expectRejection(
           () => service.reportData(bankResult.settlementId),
           "settlement_not_found",

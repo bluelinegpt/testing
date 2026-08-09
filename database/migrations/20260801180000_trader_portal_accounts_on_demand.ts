@@ -73,9 +73,7 @@ export async function down(database: Kysely<MigrationDatabase>): Promise<void> {
     select count(*)::text as count from traders where account_id is null
   `.execute(database);
   if (Number(missing.rows[0]?.count ?? "0") > 0) {
-    throw new Error(
-      "Cannot restore mandatory Trader accounts after on-demand account cleanup",
-    );
+    throw new Error("Cannot restore mandatory Trader accounts after on-demand account cleanup");
   }
   await sql`
     alter table traders alter column account_id set not null;

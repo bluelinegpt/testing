@@ -2,7 +2,23 @@ import { Module } from "@nestjs/common";
 
 import { AuthenticationModule } from "../authentication/authentication.module.js";
 import { PasswordHasher } from "../authentication/password-hasher.js";
+import { CompanyConfigurationModule } from "../company-configuration/company-configuration.module.js";
 import { CompanyProfileModule } from "../company-profile/company-profile.module.js";
+// Balance control for Payroll Payment confirmation. These are PROVIDED here
+// rather than reached by importing AccountingModule, matching the pattern
+// already used for PaymentFundingAccountService in this file and for
+// OperationsHistoryWriter in AccountingModule: the two modules deliberately
+// re-provide each other's leaf services instead of importing each other, so
+// neither ends up depending on the other at module level.
+import { AccountingOperationSupport } from "../accounting/accounting-operation.support.js";
+import { BalanceControlService } from "../accounting/balance-control.service.js";
+import { BalanceEnforcementCoordinator } from "../accounting/balance-enforcement.coordinator.js";
+import { CashBankQueryService } from "../accounting/cash-bank-query.service.js";
+import { FundingAccountBalanceService } from "../accounting/funding-account-balance.service.js";
+import { FundingAccountLockService } from "../accounting/funding-account-lock.service.js";
+import { GeneralExpenseQueryService } from "../accounting/general-expense-query.service.js";
+import { PaymentFundingAccountService } from "../accounting/payment-funding-account.service.js";
+import { EmployeeDeliveryEarningService } from "../payroll/employee-delivery-earning.service.js";
 import { PayrollAdjustmentService } from "../payroll/payroll-adjustment.service.js";
 import { PayrollCalculationService } from "../payroll/payroll-calculation.service.js";
 import { PayrollController } from "../payroll/payroll.controller.js";
@@ -12,6 +28,7 @@ import { PayrollPaymentService } from "../payroll/payroll-payment.service.js";
 import { PayrollPeriodService } from "../payroll/payroll-period.service.js";
 import { PayrollQueryService } from "../payroll/payroll-query.service.js";
 import { PayrollReportService } from "../payroll/payroll-report.service.js";
+import { EmployeeCollectionEarningService } from "../payroll/employee-collection-earning.service.js";
 import { OutsourcedDriverFeeService } from "../payroll/outsourced-driver-fee.service.js";
 import { OutsourcedDriverFeeReportService } from "../payroll/outsourced-driver-fee-report.service.js";
 import {
@@ -31,7 +48,9 @@ import { TraderAccountStatementService } from "./trader-account-statement.servic
 import { TraderSettlementService } from "./trader-settlement.service.js";
 
 @Module({
-  imports: [AuthenticationModule, CompanyProfileModule],
+  // CompanyConfigurationModule exports BusinessDayService and
+  // ReportDateModeService, which the activity lists inject to resolve Date Mode.
+  imports: [AuthenticationModule, CompanyProfileModule, CompanyConfigurationModule],
   controllers: [
     OperationsController,
     PortalController,
@@ -40,18 +59,32 @@ import { TraderSettlementService } from "./trader-settlement.service.js";
     TraderReceivableController,
   ],
   providers: [
+    // The balance-control chain, in dependency order. Every one of these is
+    // satisfiable here: AccountingOperationSupport needs OperationsHistoryWriter
+    // which this module already provides, and everything else resolves from the
+    // global tenancy, identity and database providers.
+    AccountingOperationSupport,
+    GeneralExpenseQueryService,
+    CashBankQueryService,
+    FundingAccountBalanceService,
+    FundingAccountLockService,
+    BalanceControlService,
+    BalanceEnforcementCoordinator,
     DriverCashReconciliationService,
     DriverCollectionPdfService,
     DriverShipmentManifestService,
     OperationsHistoryWriter,
     OperationsService,
     OrdersWorkflowService,
+    EmployeeDeliveryEarningService,
+    EmployeeCollectionEarningService,
     OutsourcedDriverFeeService,
     OutsourcedDriverFeeReportService,
     PayrollAdjustmentService,
     PayrollCalculationService,
     PayrollOperationSupport,
     PayrollOperationalRepository,
+    PaymentFundingAccountService,
     PayrollPaymentService,
     PayrollPeriodService,
     PayrollQueryService,

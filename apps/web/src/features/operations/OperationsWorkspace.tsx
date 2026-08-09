@@ -598,10 +598,7 @@ function ReportsPanel({
         <button className="button button-primary" onClick={() => void exportOrders()} type="button">
           {t("operations.exportOrdersCsv")}
         </button>
-        <a
-          className="button button-secondary"
-          href="/trader-settlements?openStatement=true"
-        >
+        <a className="button button-secondary" href="/trader-settlements?openStatement=true">
           {t("traderSettlements.accountStatement")}
         </a>
       </section>
@@ -1595,128 +1592,128 @@ function ReconciliationDetail({
     <>
       {/* Rendered into a body-level portal; visible only when printing. */}
       <ReconciliationPrintReport companyName={companyName} detail={detail} />
-    <div className="detail-grid reconciliation-detail">
-      <section>
-        <h3>{t("operations.overview")}</h3>
-        <div className="detail-line">
-          <span>{t("operations.reconciliation")}</span>
-          <strong>{overview.reconciliationNumber}</strong>
-        </div>
-        <div className="detail-line">
-          <span>{t("operations.businessDate")}</span>
-          <span>{overview.businessDate}</span>
-        </div>
-        <div className="detail-line">
-          <span>{t("operations.status")}</span>
-          <span>{overview.statusLabel}</span>
-        </div>
-        <div className="detail-line">
-          <span>{t("operations.confirmedBy")}</span>
-          <span>
-            {overview.confirmedBy} {overview.confirmedAt ?? ""}
-          </span>
-        </div>
-      </section>
-      <section>
-        <h3>{t("operations.driver")}</h3>
-        <div className="detail-line">
-          <span>{overview.driverName}</span>
-          <span>{t(`drivers.type.${overview.driverType}`, overview.driverType)}</span>
-        </div>
-      </section>
-      <section>
-        <h3>{t("operations.financialSummary")}</h3>
-        <div className="detail-line">
-          <span>{t("operations.selectedCollections")}</span>
-          <span>{formatMoney(overview.grossCollections)}</span>
-        </div>
-        <div className="detail-line">
-          <span>{t("operations.driverPayableDeduction")}</span>
-          <span>{formatMoney("0.00")}</span>
-        </div>
-        <div className="detail-line">
-          <span>{t("operations.expenses")}</span>
-          <span>{formatMoney(overview.expenseTotal)}</span>
-        </div>
-        <div className="detail-line detail-line-total">
-          <span>{t("operations.netExpected")}</span>
-          <strong>{formatMoney(overview.netAmountReceived)}</strong>
-        </div>
-        <div className="detail-line">
-          <span>{t("operations.paymentTotal")}</span>
-          <span>{formatMoney(overview.paymentTotal)}</span>
-        </div>
-      </section>
-      <section>
-        <h3>{t("operations.orders")}</h3>
-        {detail.orders.map((order) => (
-          <div className="detail-line" key={order.id}>
-            <span>
-              <strong>{order.orderNumber}</strong> {order.customerName}
-              <span className="cell-secondary">{order.cashStatusLabel}</span>
-            </span>
-            <span>{formatMoney(order.amountCollected)}</span>
+      <div className="detail-grid reconciliation-detail">
+        <section>
+          <h3>{t("operations.overview")}</h3>
+          <div className="detail-line">
+            <span>{t("operations.reconciliation")}</span>
+            <strong>{overview.reconciliationNumber}</strong>
           </div>
-        ))}
-      </section>
-      <section>
-        <h3>{t("operations.payments")}</h3>
-        {detail.payments.map((payment) => (
-          <div className="detail-line" key={payment.id}>
+          <div className="detail-line">
+            <span>{t("operations.businessDate")}</span>
+            <span>{overview.businessDate}</span>
+          </div>
+          <div className="detail-line">
+            <span>{t("operations.status")}</span>
+            <span>{overview.statusLabel}</span>
+          </div>
+          <div className="detail-line">
+            <span>{t("operations.confirmedBy")}</span>
             <span>
-              {payment.paymentMethodLabel}
-              <span className="cell-secondary">
-                {[payment.bankName, payment.bankAccountName, payment.bankReference]
-                  .filter((value) => value !== null && value !== "")
-                  .join(" | ")}
-                {payment.recordedBy === "" ? "" : ` | ${payment.recordedBy}`}
+              {overview.confirmedBy} {overview.confirmedAt ?? ""}
+            </span>
+          </div>
+        </section>
+        <section>
+          <h3>{t("operations.driver")}</h3>
+          <div className="detail-line">
+            <span>{overview.driverName}</span>
+            <span>{t(`drivers.type.${overview.driverType}`, overview.driverType)}</span>
+          </div>
+        </section>
+        <section>
+          <h3>{t("operations.financialSummary")}</h3>
+          <div className="detail-line">
+            <span>{t("operations.selectedCollections")}</span>
+            <span>{formatMoney(overview.grossCollections)}</span>
+          </div>
+          <div className="detail-line">
+            <span>{t("operations.driverPayableDeduction")}</span>
+            <span>{formatMoney("0.00")}</span>
+          </div>
+          <div className="detail-line">
+            <span>{t("operations.expenses")}</span>
+            <span>{formatMoney(overview.expenseTotal)}</span>
+          </div>
+          <div className="detail-line detail-line-total">
+            <span>{t("operations.netExpected")}</span>
+            <strong>{formatMoney(overview.netAmountReceived)}</strong>
+          </div>
+          <div className="detail-line">
+            <span>{t("operations.paymentTotal")}</span>
+            <span>{formatMoney(overview.paymentTotal)}</span>
+          </div>
+        </section>
+        <section>
+          <h3>{t("operations.orders")}</h3>
+          {detail.orders.map((order) => (
+            <div className="detail-line" key={order.id}>
+              <span>
+                <strong>{order.orderNumber}</strong> {order.customerName}
+                <span className="cell-secondary">{order.cashStatusLabel}</span>
               </span>
-            </span>
-            <span>{formatMoney(payment.amount)}</span>
-          </div>
-        ))}
-        {detail.payments.length === 0 ? (
-          <p className="empty-state">{t("operations.noPayments")}</p>
-        ) : null}
-      </section>
-      <section>
-        <h3>{t("operations.expenses")}</h3>
-        {detail.expenses.map((expense) => (
-          <div className="detail-line" key={expense.id}>
-            <span>
-              {expense.expenseType}
-              <span className="cell-secondary">
-                {[expense.description, expense.reference, expense.recordedBy]
-                  .filter((value) => value !== null && value !== "")
-                  .join(" | ")}
+              <span>{formatMoney(order.amountCollected)}</span>
+            </div>
+          ))}
+        </section>
+        <section>
+          <h3>{t("operations.payments")}</h3>
+          {detail.payments.map((payment) => (
+            <div className="detail-line" key={payment.id}>
+              <span>
+                {payment.paymentMethodLabel}
+                <span className="cell-secondary">
+                  {[payment.bankName, payment.bankAccountName, payment.bankReference]
+                    .filter((value) => value !== null && value !== "")
+                    .join(" | ")}
+                  {payment.recordedBy === "" ? "" : ` | ${payment.recordedBy}`}
+                </span>
               </span>
-            </span>
-            <span>{formatMoney(expense.amount)}</span>
-          </div>
-        ))}
-        {detail.expenses.length === 0 ? (
-          <p className="empty-state">{t("operations.noExpenses")}</p>
-        ) : null}
-      </section>
-      <section>
-        <h3>{t("operations.historyAudit")}</h3>
-        {detail.audit.map((entry, index) => (
-          <div className="detail-line" key={`${entry.action}-${index}`}>
-            <span>{entry.action}</span>
-            <span>
-              {entry.actor} {entry.occurredAt}
-            </span>
-          </div>
-        ))}
-        {detail.audit.length === 0 ? (
-          <p className="empty-state">{t("operations.noAuditHistory")}</p>
-        ) : null}
-      </section>
-      <div className="row-actions no-print">
-        <button onClick={() => globalThis.print()} type="button">
-          {t("common.print")}
-        </button>
-      </div>
+              <span>{formatMoney(payment.amount)}</span>
+            </div>
+          ))}
+          {detail.payments.length === 0 ? (
+            <p className="empty-state">{t("operations.noPayments")}</p>
+          ) : null}
+        </section>
+        <section>
+          <h3>{t("operations.expenses")}</h3>
+          {detail.expenses.map((expense) => (
+            <div className="detail-line" key={expense.id}>
+              <span>
+                {expense.expenseType}
+                <span className="cell-secondary">
+                  {[expense.description, expense.reference, expense.recordedBy]
+                    .filter((value) => value !== null && value !== "")
+                    .join(" | ")}
+                </span>
+              </span>
+              <span>{formatMoney(expense.amount)}</span>
+            </div>
+          ))}
+          {detail.expenses.length === 0 ? (
+            <p className="empty-state">{t("operations.noExpenses")}</p>
+          ) : null}
+        </section>
+        <section>
+          <h3>{t("operations.historyAudit")}</h3>
+          {detail.audit.map((entry, index) => (
+            <div className="detail-line" key={`${entry.action}-${index}`}>
+              <span>{entry.action}</span>
+              <span>
+                {entry.actor} {entry.occurredAt}
+              </span>
+            </div>
+          ))}
+          {detail.audit.length === 0 ? (
+            <p className="empty-state">{t("operations.noAuditHistory")}</p>
+          ) : null}
+        </section>
+        <div className="row-actions no-print">
+          <button onClick={() => globalThis.print()} type="button">
+            {t("common.print")}
+          </button>
+        </div>
       </div>
     </>
   );
@@ -1955,8 +1952,13 @@ function ImportOrdersDialog({
   onImported: () => Promise<void>;
 }) {
   const { t } = useTranslation();
+  // `serviceFee` stays in the template but may now be left blank, which prices
+  // the row from the authoritative Trader/Area table. `serviceFeeOverrideReason`
+  // is only needed when a row deliberately imports a zero fee.
   const [csv, setCsv] = useState(
-    "traderId,areaId,driverId,customerName,customerMobileNumber,customerAddress,codAmount,serviceFee,packageCount\n",
+    "serialNumber,referenceNumber,traderId,areaId,driverId,customerName," +
+      "customerMobileNumber,customerAddress,codAmount,serviceFee," +
+      "serviceFeeOverrideReason,additionalFees,packageCount\n",
   );
   const [saving, setSaving] = useState(false);
   const [result, setResult] = useState<OperationsOrderImportResult>();
@@ -2020,6 +2022,30 @@ function ImportOrdersDialog({
               {result.errors.map((item) => (
                 <span className="cell-secondary" key={item}>
                   {item}
+                </span>
+              ))}
+              {/* Per-row detail when the API supplies it. The flat `errors`
+                  list above is kept as the summary, so an older API build
+                  still renders exactly as before. */}
+              {(result.rows ?? []).map((row) => (
+                <span className="cell-secondary" key={`row-${row.rowNumber}`}>
+                  {t("operations.import.row", { number: row.rowNumber })}
+                  {row.referenceNumber === null ? "" : ` (${row.referenceNumber})`}
+                  {": "}
+                  {row.status === "invalid"
+                    ? row.errorMessage
+                    : [
+                        row.orderNumber,
+                        row.resolvedServiceFee === null
+                          ? null
+                          : `${t("operations.serviceFee")} ${row.resolvedServiceFee}`,
+                        row.feeSource === null ? null : t(`operations.feeSources.${row.feeSource}`),
+                        row.accountingRequired === false
+                          ? t("operations.noAccountingRequired")
+                          : null,
+                      ]
+                        .filter((part) => part !== null)
+                        .join(" · ")}
                 </span>
               ))}
             </div>

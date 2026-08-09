@@ -24,34 +24,51 @@ export const accountingReportKinds = [
 export type AccountingReportKind = (typeof accountingReportKinds)[number];
 
 export class AccountingReportQueryDto {
-  @IsOptional() @IsDateString()
+  @IsOptional()
+  @IsDateString()
   public readonly dateFrom?: string;
 
-  @IsOptional() @IsDateString()
+  @IsOptional()
+  @IsDateString()
   public readonly dateTo?: string;
 
-  @IsOptional() @IsDateString()
+  @IsOptional()
+  @IsDateString()
   public readonly asOfDate?: string;
 
-  @IsOptional() @IsUUID()
+  @IsOptional()
+  @IsUUID()
   public readonly accountId?: string;
 
-  @IsOptional() @IsUUID()
+  @IsOptional()
+  @IsUUID()
   public readonly categoryId?: string;
 
-  @IsOptional() @IsIn(["en", "ar"])
+  @IsOptional()
+  @IsIn(["en", "ar"])
   public readonly language?: "en" | "ar";
 
-  @IsOptional() @Transform(({ value }) => value === true || value === "true") @IsBoolean()
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === "true")
+  @IsBoolean()
   public readonly includeZero?: boolean;
 
-  @IsOptional() @Transform(({ value }) => value === true || value === "true") @IsBoolean()
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === "true")
+  @IsBoolean()
   public readonly comparative?: boolean;
 
-  @IsOptional() @Type(() => Number) @IsInt() @Min(1)
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
   public readonly page?: number;
 
-  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(200)
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(200)
   public readonly pageSize?: number;
 }
 
@@ -61,9 +78,11 @@ export class AccountingReportExportQueryDto extends AccountingReportQueryDto {
 }
 
 export class AccountingDocumentQueryDto {
-  @IsOptional() @IsIn(["en", "ar"])
+  @IsOptional()
+  @IsIn(["en", "ar"])
   public readonly language?: "en" | "ar";
 
-  @IsOptional() @IsString()
+  @IsOptional()
+  @IsString()
   public readonly disposition?: string;
 }

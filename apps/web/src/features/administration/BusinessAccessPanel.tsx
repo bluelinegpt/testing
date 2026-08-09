@@ -34,9 +34,9 @@ export function BusinessAccessPanel({
   readonly entityId: string;
   readonly kind: Kind;
   readonly onNavigate: (path: string) => void;
-  readonly profileCode?: string;
+  readonly profileCode?: string | undefined;
   readonly profileMobileNumber?: string;
-  readonly profileName?: string;
+  readonly profileName?: string | undefined;
 }) {
   const { t } = useTranslation();
   const [rows, setRows] = useState<readonly AccessRow[]>([]);
@@ -103,11 +103,7 @@ export function BusinessAccessPanel({
       const response = await api.post<{
         temporaryPassword: string;
         username: string;
-      }>(
-        `${base}/create`,
-        {},
-        { "X-Idempotency-Key": idempotencyKey("trader-portal-create") },
-      );
+      }>(`${base}/create`, {}, { "X-Idempotency-Key": idempotencyKey("trader-portal-create") });
       setTemporaryCredentials({
         password: response.temporaryPassword,
         username: response.username,
@@ -202,7 +198,9 @@ export function BusinessAccessPanel({
           <p>{t("access.sourceOwned")}</p>
           <p>
             {t("access.requiredAccountKind")}:{" "}
-            <strong>{t(`userAdmin.accountKinds.${kind === "employee" ? "company_user" : kind}`)}</strong>
+            <strong>
+              {t(`userAdmin.accountKinds.${kind === "employee" ? "company_user" : kind}`)}
+            </strong>
           </p>
         </div>
       </header>
@@ -254,39 +252,39 @@ export function BusinessAccessPanel({
           </button>
         </div>
       ) : rows.some((row) => row.accessStatus !== "revoked") ? null : (
-      <div className="business-access-linker">
-        <button
-          className="button button-secondary"
-          onClick={() => {
-            setError(undefined);
-            setCreating(true);
-          }}
-          type="button"
-        >
-          {t("access.createEmployeeUser")}
-        </button>
-        {false ? (
-          <>
-        <select value={accountId} onChange={(event) => setAccountId(event.target.value)}>
-          <option value="">{t("access.linkEligibleExisting")}</option>
-          {users.map((user) => (
-            <option key={user.accountId} value={user.accountId}>
-              {user.username} · {user.displayName} ·{" "}
-              {t(`userAdmin.accountKinds.${user.accountKind}`)}
-            </option>
-          ))}
-        </select>
-        <button
-          className="button button-primary"
-          disabled={!accountId}
-          onClick={() => void link()}
-          type="button"
-        >
-          {t("access.link")}
-        </button>
-          </>
-        ) : null}
-      </div>
+        <div className="business-access-linker">
+          <button
+            className="button button-secondary"
+            onClick={() => {
+              setError(undefined);
+              setCreating(true);
+            }}
+            type="button"
+          >
+            {t("access.createEmployeeUser")}
+          </button>
+          {users.length > 0 ? (
+            <>
+              <select value={accountId} onChange={(event) => setAccountId(event.target.value)}>
+                <option value="">{t("access.linkEligibleExisting")}</option>
+                {users.map((user) => (
+                  <option key={user.accountId} value={user.accountId}>
+                    {user.username} · {user.displayName} ·{" "}
+                    {t(`userAdmin.accountKinds.${user.accountKind}`)}
+                  </option>
+                ))}
+              </select>
+              <button
+                className="button button-primary"
+                disabled={!accountId}
+                onClick={() => void link()}
+                type="button"
+              >
+                {t("access.link")}
+              </button>
+            </>
+          ) : null}
+        </div>
       )}
       {rows.length === 0 ? (
         <p>{t("access.noLinkedUser")}</p>
@@ -295,24 +293,39 @@ export function BusinessAccessPanel({
           <table>
             <thead>
               <tr>
-                {["user", "username", "accountKind", "contact", "status", "roles", "activity", "actions"].map(
-                  (key) => <th key={key}>{t(`access.columns.${key}`)}</th>,
-                )}
+                {[
+                  "user",
+                  "username",
+                  "accountKind",
+                  "contact",
+                  "status",
+                  "roles",
+                  "activity",
+                  "actions",
+                ].map((key) => (
+                  <th key={key}>{t(`access.columns.${key}`)}</th>
+                ))}
               </tr>
             </thead>
             <tbody>
               {rows.map((row) => (
                 <tr key={row.id}>
                   <td>{String(row.displayName ?? row.accountId)}</td>
-                  <td><bdi>{String(row.username ?? "—")}</bdi></td>
+                  <td>
+                    <bdi>{String(row.username ?? "—")}</bdi>
+                  </td>
                   <td>{t(`userAdmin.accountKinds.${String(row.accountKind)}`)}</td>
                   <td>
                     {String(row.email ?? "—")}
-                    <small><bdi>{String(row.mobileNumber ?? "—")}</bdi></small>
+                    <small>
+                      <bdi>{String(row.mobileNumber ?? "—")}</bdi>
+                    </small>
                   </td>
                   <td>
                     {t(`access.status.${row.accessStatus}`)}
-                    <small>{t("access.userStatus")}: {String(row.userStatus ?? "—")}</small>
+                    <small>
+                      {t("access.userStatus")}: {String(row.userStatus ?? "—")}
+                    </small>
                     <small>
                       {t("access.mustChangePassword")}:{" "}
                       {row.mustChangePassword ? t("common.yes") : t("common.no")}
@@ -321,7 +334,9 @@ export function BusinessAccessPanel({
                   <td>{Array.isArray(row.roles) ? row.roles.join(", ") : "—"}</td>
                   <td>
                     {t("access.lastLogin")}: {String(row.lastLoginAt ?? "—")}
-                    <small>{t("access.linkCreated")}: {String(row.linkCreatedAt ?? "—")}</small>
+                    <small>
+                      {t("access.linkCreated")}: {String(row.linkCreatedAt ?? "—")}
+                    </small>
                   </td>
                   <td>
                     <div className="table-actions">
@@ -352,22 +367,22 @@ export function BusinessAccessPanel({
                           {t("userAdmin.disable")}
                         </button>
                       )}
-                      {false ? (
-                        <>
-                      {row.accessStatus === "suspended" ? (
-                        <button onClick={() => void action(row, "restore")} type="button">
-                          {t("access.restore")}
-                        </button>
-                      ) : row.accessStatus !== "revoked" ? (
-                        <button onClick={() => void action(row, "suspend")} type="button">
-                          {t("access.suspend")}
-                        </button>
-                      ) : null}
                       {row.accessStatus !== "revoked" ? (
-                        <button onClick={() => void action(row, "revoke")} type="button">
-                          {t("access.revoke")}
-                        </button>
-                      ) : null}
+                        <>
+                          {row.accessStatus === "suspended" ? (
+                            <button onClick={() => void action(row, "restore")} type="button">
+                              {t("access.restore")}
+                            </button>
+                          ) : row.accessStatus !== "revoked" ? (
+                            <button onClick={() => void action(row, "suspend")} type="button">
+                              {t("access.suspend")}
+                            </button>
+                          ) : null}
+                          {row.accessStatus !== "revoked" ? (
+                            <button onClick={() => void action(row, "revoke")} type="button">
+                              {t("access.revoke")}
+                            </button>
+                          ) : null}
                         </>
                       ) : null}
                       <button onClick={() => void action(row, "revoke-sessions")} type="button">
@@ -407,8 +422,7 @@ export function BusinessAccessPanel({
         >
           <p>{t("access.temporaryPasswordWarning")}</p>
           <p>
-            <strong>{t("userAdmin.username")}:</strong>{" "}
-            <bdi>{temporaryCredentials.username}</bdi>
+            <strong>{t("userAdmin.username")}:</strong> <bdi>{temporaryCredentials.username}</bdi>
           </p>
           <div className="temporary-password-value">
             <bdi>{temporaryCredentials.password}</bdi>
@@ -442,8 +456,8 @@ function CreateLinkedUser({
   readonly api: ApiClient;
   readonly base: string;
   readonly kind: Kind;
-  readonly profileCode?: string;
-  readonly profileName?: string;
+  readonly profileCode?: string | undefined;
+  readonly profileName?: string | undefined;
   readonly roles: readonly RoleOption[];
   readonly onClose: () => void;
   readonly onCreated: (credentials: TemporaryCredentials) => Promise<void>;
@@ -451,9 +465,7 @@ function CreateLinkedUser({
 }) {
   const { t } = useTranslation();
   const [username, setUsername] = useState(
-    profileCode
-      ? `${kind === "employee" ? "employee" : kind}.${profileCode.toLowerCase()}`
-      : "",
+    profileCode ? `${kind === "employee" ? "employee" : kind}.${profileCode.toLowerCase()}` : "",
   );
   const [displayName, setDisplayName] = useState(profileName ?? "");
   // Email is optional and is not copied automatically from the Employee
@@ -506,11 +518,20 @@ function CreateLinkedUser({
         </label>
         <label className="field">
           <span>{t("userAdmin.username")}</span>
-          <input required minLength={3} value={username} onChange={(event) => setUsername(event.target.value)} />
+          <input
+            required
+            minLength={3}
+            value={username}
+            onChange={(event) => setUsername(event.target.value)}
+          />
         </label>
         <label className="field">
           <span>{t("common.name")}</span>
-          <input required value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
+          <input
+            required
+            value={displayName}
+            onChange={(event) => setDisplayName(event.target.value)}
+          />
         </label>
         <label className="field">
           <span>{t("access.emailOptional")}</span>

@@ -7,6 +7,7 @@ const sample: ManifestData = {
   header: {
     company: {
       hasLogo: true,
+      logoDataUri: null,
       nameAr: "شركة الاختبار",
       nameEn: "Test Company",
       subtitleAr: null,
@@ -69,9 +70,7 @@ describe("buildDriverShipmentManifestHtml", () => {
     expect(html).toContain("Deira");
     expect(html).toContain("Villa 12, Street 4");
     expect(html).toContain("AED 150.00");
-    expect(html).toContain("Call before arrival");
     expect(html).toContain("Fragile");
-    expect(html).toContain("Assigned to Driver");
     expect(html).toContain("Test Company");
     expect(html).toContain("Delivery operations");
     expect(html).toContain("Test Driver");
@@ -127,15 +126,108 @@ describe("buildDriverShipmentManifestHtml", () => {
     expect(html).toContain("&lt;script&gt;");
   });
 
-  it("renders every summary total and delivery-status count", () => {
+  /*
+   * The manifest summary carries TWO figures and no status breakdown.
+   *
+   * A manifest is a handover document: it is printed at dispatch, when every
+   * Order on it is going out, so the per-status counts were either all zero or a
+   * restatement of the Delivery Status column beside them. Total Orders and
+   * Total COD are the two figures the Driver and the person handing over
+   * actually check against the parcels in hand.
+   */
+  it("renders Total Orders and Total COD as the only summary figures", () => {
     const html = buildDriverShipmentManifestHtml(sample, "en", "now");
     expect(html).toContain("Total Orders");
     expect(html).toContain("Total COD");
-    expect(html).toContain("Total Packages");
-    expect(html).toContain("Cancelled");
-    expect(html).toContain("Delivered");
-    expect(html).toContain("Returned");
-    expect(html).toContain("Out for Delivery");
+    expect(html).toContain("AED 150.00");
+    /* Matched as the rendered summary label rather than as loose text: the word
+       "Returned" still belongs on the page, in the "Returned/Received By"
+       signature line, and a bare substring check would forbid that too. */
+    for (const removed of [
+      "Total Packages",
+      "Cancelled",
+      "Returned",
+      "Delivered",
+      "Out for Delivery",
+      "New",
+    ]) {
+      expect(html, `${removed} should no longer be a summary figure`).not.toContain(
+        `<span>${removed}</span>`,
+      );
+    }
+  });
+
+  it("puts the two summary figures on one line", () => {
+    const html = buildDriverShipmentManifestHtml(sample, "en", "now");
+    // Side by side rather than stacked, which is what the flex row provides.
+    expect(html).toContain(`<div class="summary-row">`);
+    expect(html).toContain(".summary-row { display: flex;");
+  });
+
+  /*
+   * Column widths, which are load-bearing on a printed page.
+   *
+   * Only columns 1-11 were sized, so COD Amount and Delivery Status silently
+   * split the entire remaining width between them -- COD Amount ended up roughly
+   * three times wider than the widest amount it can hold, while Customer Mobile
+   * wrapped a 10-digit number onto two lines. Nothing failed; it just printed
+   * badly. These pin the invariant so adding a column and forgetting its width
+   * fails here rather than on the Driver's copy.
+   */
+  it("sizes every table column and totals exactly 100%", () => {
+    const html = buildDriverShipmentManifestHtml(sample, "en", "now");
+    const headerCount = (html.match(/<th>/g) ?? []).length;
+    const widths = [...html.matchAll(/td:nth-child\((\d+)\) \{ width: (\d+)%/g)].map((match) => ({
+      column: Number(match[1]),
+      width: Number(match[2]),
+    }));
+
+    expect(widths).toHaveLength(headerCount);
+    // Every column from 1..n is covered -- no gaps, which is how the last two
+    // came to be sharing the leftover.
+    expect(widths.map((entry) => entry.column).sort((a, b) => a - b)).toEqual(
+      Array.from({ length: headerCount }, (_, index) => index + 1),
+    );
+    expect(widths.reduce((sum, entry) => sum + entry.width, 0)).toBe(100);
+  });
+
+  it("gives Customer Mobile at least as much width as COD Amount", () => {
+    // A 10-digit mobile is longer than "AED 9999.00", so the relative order of
+    // these two is the point -- it was inverted, and badly.
+    const html = buildDriverShipmentManifestHtml(sample, "en", "now");
+    const widthOf = (column: number) =>
+      Number(
+        new RegExp(`td:nth-child\\(${column}\\) \\{ width: (\\d+)%`).exec(html)?.[1] ?? "0",
+      );
+    const headers = [...html.matchAll(/<th>([^<]*)<\/th>/g)].map((match) => match[1]);
+    const mobileColumn = headers.indexOf("Customer Mobile") + 1;
+    const codColumn = headers.indexOf("COD Amount") + 1;
+
+    expect(mobileColumn).toBeGreaterThan(0);
+    expect(codColumn).toBeGreaterThan(0);
+    expect(widthOf(mobileColumn)).toBeGreaterThanOrEqual(widthOf(codColumn));
+  });
+
+  it("prints Notes as the last column, in place of Delivery Status", () => {
+    /* The manifest is a handover document: every Order on it is going out, so a
+       Delivery Status column read the same on every line and earned nothing.
+       The Driver's own note is what belongs in that space. */
+    const html = buildDriverShipmentManifestHtml(sample, "en", "now");
+    const headers = [...html.matchAll(/<th>([^<]*)<\/th>/g)].map((match) => match[1]);
+    expect(headers.at(-1)).toBe("Notes");
+    expect(headers).not.toContain("Delivery Status");
+    // The value, not just the heading.
+    expect(html).toContain("Fragile");
+    expect(html).not.toContain("Assigned to Driver");
+  });
+
+  it("still leaves out the Delivery Instructions column", () => {
+    // Removed earlier and deliberately not brought back with Notes. The data is
+    // still supplied by the service; asserted on the VALUE so reinstating the
+    // column fails here rather than quietly widening the table again.
+    const html = buildDriverShipmentManifestHtml(sample, "en", "now");
+    expect(html).not.toContain("<th>Delivery Instructions</th>");
+    expect(html).not.toContain("Call before arrival");
   });
 
   it("omits optional fields cleanly when null rather than printing 'null'", () => {

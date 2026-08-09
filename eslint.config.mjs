@@ -6,9 +6,14 @@ export default tseslint.config(
   {
     ignores: [
       "**/dist/**",
+      // The Store's server bundle. Compiled output, linted from source already.
+      "**/dist-server/**",
       "**/coverage/**",
       "**/node_modules/**",
       "**/.vite/**",
+      "**/.dart_tool/**",
+      "**/.tools/**",
+      "**/build/**",
       "Documentation/**",
     ],
   },

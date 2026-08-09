@@ -19,6 +19,12 @@ import {
   REQUIRED_ANY_PERMISSIONS,
   PASSWORD_CHANGE_ALLOWED,
 } from "./authentication.decorators.js";
+import {
+  isSafeMethod,
+  readSessionCookie,
+  sessionCsrfHeader,
+  sessionCsrfValue,
+} from "./session-cookie.js";
 
 @Injectable()
 export class AuthenticationGuard implements CanActivate {
@@ -39,7 +45,7 @@ export class AuthenticationGuard implements CanActivate {
     }
 
     const request = context.switchToHttp().getRequest<Request>();
-    const accessToken = this.readBearerToken(request.headers.authorization);
+    const accessToken = this.readAccessToken(request);
     const identity = await this.authentication.authenticate(accessToken);
     const requiredKinds =
       this.reflector.getAllAndOverride<readonly IdentityKind[]>(REQUIRED_IDENTITY_KINDS, [
@@ -105,15 +111,39 @@ export class AuthenticationGuard implements CanActivate {
     return true;
   }
 
-  private readBearerToken(header: string | undefined): string {
-    const match = /^Bearer ([A-Za-z0-9_-]{43})$/.exec(header ?? "");
-    if (match?.[1] === undefined) {
+  /**
+   * The session token, from the `Authorization` header or the session cookie.
+   *
+   * The header is preferred so existing API clients are unchanged. The cookie
+   * is what survives a reload, a pasted URL and a new tab — the whole point of
+   * the second transport — and it carries the SAME token, validated by the
+   * same server-side session record.
+   *
+   * A cookie-authenticated request that changes state must also carry the
+   * custom header. A cross-site form cannot set one, so this closes the CSRF
+   * surface the cookie opens. Bearer-authenticated requests skip the check:
+   * nothing attaches a bearer token automatically, so there is nothing to
+   * forge.
+   */
+  private readAccessToken(request: Request): string {
+    const header = /^Bearer ([A-Za-z0-9_-]{43})$/.exec(request.headers.authorization ?? "");
+    if (header?.[1] !== undefined) return header[1];
+
+    const cookieToken = readSessionCookie(request);
+    if (cookieToken === undefined) {
       throw new ApplicationException(
         "authentication_required",
-        "A valid Bearer authentication token is required",
+        "A valid authentication session is required",
         HttpStatus.UNAUTHORIZED,
       );
     }
-    return match[1];
+    if (!isSafeMethod(request.method) && request.headers[sessionCsrfHeader] !== sessionCsrfValue) {
+      throw new ApplicationException(
+        "csrf_header_required",
+        "A cookie-authenticated request must carry the session header",
+        HttpStatus.FORBIDDEN,
+      );
+    }
+    return cookieToken;
   }
 }

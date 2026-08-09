@@ -7,11 +7,17 @@ import { KyselyTransactionManager } from "../infrastructure/database/transaction
 import { OperationsHistoryWriter } from "../operations/operations-history.writer.js";
 import { ApplicationException } from "../presentation/errors/application.exception.js";
 import { AccountingOperationSupport } from "./accounting-operation.support.js";
+import { BalanceEnforcementCoordinator } from "./balance-enforcement.coordinator.js";
+import type {
+  BalanceEnforcementResult,
+  FundingAccountDeduction,
+} from "./balance-enforcement.coordinator.js";
 import { GeneralExpenseAccountingEventWriter } from "./general-expense-accounting-event.writer.js";
 import type {
   CreateGeneralExpensePaymentDto,
   GeneralExpenseReasonDto,
 } from "./general-expense.dto.js";
+import { PaymentFundingAccountService } from "./payment-funding-account.service.js";
 
 interface PayableExpense {
   readonly accountingDate: string;
@@ -46,6 +52,10 @@ export class GeneralExpensePaymentService {
     @Inject(AccountingOperationSupport) private readonly support: AccountingOperationSupport,
     @Inject(GeneralExpenseAccountingEventWriter)
     private readonly eventWriter: GeneralExpenseAccountingEventWriter,
+    @Inject(PaymentFundingAccountService)
+    private readonly fundingAccounts: PaymentFundingAccountService,
+    @Inject(BalanceEnforcementCoordinator)
+    private readonly balanceEnforcement: BalanceEnforcementCoordinator,
   ) {}
 
   public async createAndConfirm(
@@ -69,15 +79,39 @@ export class GeneralExpensePaymentService {
       if (Number(expense.version) !== input.expenseVersion) {
         this.conflict("accounting_general_expense_stale_version");
       }
+      // Segregation of duties on payment release mirrors Journal posting
+      // (`enforcePostingSegregation`): the user who APPROVED the expenditure
+      // must not also release the money, while another authorized user is
+      // available to do it instead.
+      //
+      // The previous condition also excluded the CREATOR, with `or`. Because
+      // create/approve segregation already forces those to be two different
+      // people, that barred both of them and made an Expense unpayable in any
+      // Company with two Accounting users — a deadlock, not a control. Data
+      // entry is not an authorisation step, and dual control is still
+      // guaranteed: whoever approved the Expense cannot be the one who pays it.
       if (
-        (context.actorId === expense.createdBy || context.actorId === expense.approvedBy)
-        && (await this.support.hasAlternateAuthorizedActor(transaction, "accounting.manage"))
+        context.actorId === expense.approvedBy &&
+        (await this.support.hasAlternateAuthorizedActor(transaction, "accounting.manage"))
       ) {
         this.conflict("accounting_general_expense_payment_segregation_blocked");
       }
       let amount = new Decimal(0);
       let cashAmount = new Decimal(0);
       let visaAmount = new Decimal(0);
+      // Positionally aligned with `input.rows`: the GL account each cash row
+      // resolved to, derived during validation so the insert below writes the
+      // account that was actually checked rather than re-deriving it.
+      const cashGlAccountIds: (string | null)[] = [];
+      // Deductions, grouped by the account they leave. Two rows drawing on one
+      // drawer are ONE deduction of their combined total: judged separately,
+      // two 6,000 rows would both pass against a 10,000 balance because nothing
+      // ever asked about the 12,000 they add up to.
+      //
+      // Keyed on the funding account -- the Cash or Bank account -- never the
+      // GL account. A GL code can be shared by two Cash accounts, so grouping
+      // on it would pool the balances of drawers that are not the same drawer.
+      const deductions = new Map<string, { accountId: string; amount: Decimal; kind: "bank" | "cash" }>();
       for (const row of input.rows) {
         let rowAmount: Decimal;
         try {
@@ -85,14 +119,28 @@ export class GeneralExpensePaymentService {
         } catch {
           this.conflict("accounting_general_expense_payment_amount_invalid");
         }
-        if (!rowAmount!.isFinite() || !rowAmount!.isPositive()) {
+        // greaterThan(0): a payment row must carry a real amount, and
+        // Decimal.isPositive() is a sign check that accepts zero.
+        if (!rowAmount!.isFinite() || !rowAmount!.greaterThan(0)) {
           this.conflict("accounting_general_expense_payment_amount_invalid");
         }
         const rounded = rowAmount!.toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
         if (!rounded.equals(rowAmount!)) {
           this.conflict("accounting_general_expense_payment_amount_invalid");
         }
-        await this.assertDestination(transaction, row);
+        cashGlAccountIds.push(await this.assertDestination(transaction, row));
+        // Accumulated only AFTER assertDestination has passed, so a deduction
+        // can never name an account this payment was not allowed to use.
+        const kind = row.paymentMethod === "cash" ? "cash" : "bank";
+        const accountId =
+          row.paymentMethod === "cash" ? row.companyCashAccountId! : row.companyBankAccountId!;
+        const key = `${kind}:${accountId}`;
+        const existing = deductions.get(key);
+        deductions.set(key, {
+          accountId,
+          amount: (existing?.amount ?? new Decimal(0)).plus(rounded),
+          kind,
+        });
         amount = amount.plus(rounded);
         if (row.paymentMethod === "cash") cashAmount = cashAmount.plus(rounded);
         else visaAmount = visaAmount.plus(rounded);
@@ -100,6 +148,30 @@ export class GeneralExpensePaymentService {
       if (amount.greaterThan(expense.outstandingAmount)) {
         this.conflict("accounting_general_expense_payment_exceeds_outstanding");
       }
+      // Balance control, for every account this payment draws on, in ONE call.
+      // The coordinator locks them all in its own deterministic order before
+      // reading any balance, so two concurrent split payments over the same
+      // pair of accounts queue rather than deadlock -- and so no balance is
+      // read that another transaction could still move.
+      //
+      // All-or-nothing: the coordinator allows only when EVERY account passes,
+      // and this throws on anything less. Half a split payment is not a payment
+      // the caller asked for, and the Expense would be left part-settled
+      // against money that never left.
+      const enforcement = await this.balanceEnforcement.evaluate(transaction, {
+        actorId: context.actorId,
+        actorPermissions: this.support.permissions(),
+        deductions: [...deductions.values()].map<FundingAccountDeduction>((entry) => ({
+          accountId: entry.accountId,
+          amount: entry.amount.toFixed(2),
+          kind: entry.kind,
+        })),
+        sourceType: "general_expense_payment",
+        ...(input.balanceOverrideReason === undefined
+          ? {}
+          : { overrideReason: input.balanceOverrideReason }),
+      });
+      if (!enforcement.allowed) this.balanceBlocked(enforcement);
       const paymentNumber = await this.history.nextReferenceNumber(
         transaction,
         context.companyId,
@@ -122,20 +194,39 @@ export class GeneralExpensePaymentService {
       `.execute(transaction);
       const paymentId = payment.rows[0]!.id;
       let rowNumber = 0;
-      for (const row of input.rows) {
+      for (const [index, row] of input.rows.entries()) {
         rowNumber += 1;
+        // Both identities are recorded: the drawer the money left
+        // (`company_cash_account_id`) and the GL account it credits
+        // (`cash_account_id`). Deriving either from the other later is a guess
+        // once a Company reuses a GL code on a replacement Cash Account.
         await sql`
           insert into general_expense_payment_rows (
             company_id,general_expense_payment_id,row_number,payment_method,
-            amount,cash_account_id,company_bank_account_id,reference_number,
-            created_by_account_id
+            amount,company_cash_account_id,cash_account_id,company_bank_account_id,
+            reference_number,created_by_account_id
           ) values (
             ${context.companyId}::uuid,${paymentId}::uuid,${rowNumber},
             ${row.paymentMethod},${new Decimal(row.amount).toFixed(2)}::numeric,
-            ${row.cashAccountId ?? null}::uuid,${row.companyBankAccountId ?? null}::uuid,
+            ${row.companyCashAccountId ?? null}::uuid,${cashGlAccountIds[index] ?? null}::uuid,
+            ${row.companyBankAccountId ?? null}::uuid,
             ${row.referenceNumber?.trim() || null},${context.actorId}::uuid
           )
         `.execute(transaction);
+      }
+      // Only now, with the payment AND all of its rows inserted. One audit per
+      // overridden funding account, keyed to this payment; the coordinator
+      // skips any that already exist and the unique index behind it makes that
+      // a guarantee rather than a check.
+      if (enforcement.requiresOverrideAudit) {
+        await this.balanceEnforcement.recordOverrides(transaction, {
+          actorId: context.actorId,
+          overrideReason: input.balanceOverrideReason ?? "",
+          result: enforcement,
+          sourceEntityId: paymentId,
+          sourceReference: paymentNumber,
+          sourceType: "general_expense_payment",
+        });
       }
       const paid = new Decimal(expense.paidAmount).plus(amount);
       const outstanding = new Decimal(expense.outstandingAmount).minus(amount);
@@ -172,6 +263,11 @@ export class GeneralExpensePaymentService {
       const response = {
         accountingEventId: eventId,
         amount: amount.toFixed(2),
+        // Advisory, never blocking: the balances this payment was judged
+        // against exclude confirmed payments that never recorded which account
+        // funded them.
+        balanceCoverage: enforcement.coverage,
+        balanceCoverageIncomplete: enforcement.balanceCoverageIncomplete,
         cashAmount: cashAmount.toFixed(2),
         expenseId,
         outstandingAmount: outstanding.toFixed(2),
@@ -198,11 +294,7 @@ export class GeneralExpensePaymentService {
     });
   }
 
-  public async reverse(
-    paymentId: string,
-    input: GeneralExpenseReasonDto,
-    idempotencyKey?: string,
-  ) {
+  public async reverse(paymentId: string, input: GeneralExpenseReasonDto, idempotencyKey?: string) {
     this.support.assertPermission("accounting.reverse");
     const context = this.support.context();
     return this.transactions.execute(async (transaction) => {
@@ -300,19 +392,39 @@ export class GeneralExpensePaymentService {
     });
   }
 
+  /**
+   * Validate a row's destination and, for Cash, DERIVE its GL account.
+   *
+   * The client names a Cash Account -- the drawer. It does not name the GL
+   * account, and is not believed if it tries: the GL id is read from the Cash
+   * Account's own `linked_gl_account_id`. Accepting both from the caller would
+   * let a valid Cash Account be paired with an unrelated GL account, and the
+   * two columns written from that pair would disagree forever with no way to
+   * tell which one was the lie.
+   *
+   * Returns the derived GL account id for a cash row, `null` for Bank/Visa.
+   */
   private async assertDestination(
     database: Kysely<DatabaseSchema>,
     row: CreateGeneralExpensePaymentDto["rows"][number],
-  ): Promise<void> {
+  ): Promise<string | null> {
     const { companyId } = this.support.context();
     if (row.paymentMethod === "cash") {
-      if (row.cashAccountId === undefined || row.companyBankAccountId !== undefined) {
+      if (row.companyCashAccountId === undefined || row.companyBankAccountId !== undefined) {
         this.conflict("accounting_general_expense_cash_account_required");
       }
+      // Company scope, active status and Cash kind, checked once for every
+      // workflow that funds a payment.
+      const funding = await this.fundingAccounts.resolve(row.companyCashAccountId!, "cash");
+      if (funding.linkedGlAccountId === null) {
+        this.conflict("accounting_general_expense_cash_account_invalid");
+      }
+      // The GL account behind the drawer must still be postable today: the same
+      // `is_posting_account` gate as before, on an id the client never chose.
       const account = await sql<{ valid: boolean }>`
         select exists (
           select 1 from chart_of_accounts
-           where id=${row.cashAccountId!}::uuid and company_id=${companyId}::uuid
+           where id=${funding.linkedGlAccountId!}::uuid and company_id=${companyId}::uuid
              and is_active and is_posting_account
              and account_type='asset' and account_class='cash'
         ) as valid
@@ -320,9 +432,9 @@ export class GeneralExpensePaymentService {
       if (!(account.rows[0]?.valid ?? false)) {
         this.conflict("accounting_general_expense_cash_account_invalid");
       }
-      return;
+      return funding.linkedGlAccountId;
     }
-    if (row.companyBankAccountId === undefined || row.cashAccountId !== undefined) {
+    if (row.companyBankAccountId === undefined || row.companyCashAccountId !== undefined) {
       this.conflict("accounting_general_expense_bank_account_required");
     }
     const bank = await sql<{ valid: boolean }>`
@@ -335,6 +447,7 @@ export class GeneralExpensePaymentService {
     if (!(bank.rows[0]?.valid ?? false)) {
       this.conflict("accounting_general_expense_bank_account_invalid");
     }
+    return null;
   }
 
   private async lockedExpense(
@@ -386,6 +499,28 @@ export class GeneralExpensePaymentService {
       );
     }
     return row;
+  }
+
+  /**
+   * Reject a payment the balance policy will not permit, in full.
+   *
+   * Throwing is what makes this all-or-nothing: it runs inside the confirmation
+   * transaction and before the payment header exists, so the rollback undoes
+   * the reserved reference number, the Expense row lock and every statement
+   * taken so far. No payment, no rows, no Expense status change, no Accounting
+   * Event, no Journal, no override audit.
+   *
+   * Detail formatting comes from the coordinator, which owns the figures, so a
+   * split payment blocked on one of two accounts reports both -- kind-labelled,
+   * so nobody goes looking at the wrong drawer.
+   */
+  private balanceBlocked(enforcement: BalanceEnforcementResult): never {
+    throw new ApplicationException(
+      enforcement.failureCode ?? "balance_would_go_negative",
+      enforcement.failureReason ?? "This payment is not permitted by the balance policy",
+      HttpStatus.CONFLICT,
+      this.balanceEnforcement.blockedDetails(enforcement),
+    );
   }
 
   private conflict(code: string): never {

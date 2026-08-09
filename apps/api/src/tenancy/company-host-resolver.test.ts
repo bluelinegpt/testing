@@ -11,9 +11,7 @@ function createResolver(tenancy: {
 }) {
   const config = {
     get: (key: string) =>
-      key === "tenancy.hostSuffix"
-        ? tenancy.hostSuffix
-        : tenancy.developmentCompanySubdomain,
+      key === "tenancy.hostSuffix" ? tenancy.hostSuffix : tenancy.developmentCompanySubdomain,
   } as unknown as ConfigService<AppConfiguration, true>;
   return new CompanyHostResolver(config);
 }

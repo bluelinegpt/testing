@@ -1,4 +1,8 @@
 import "reflect-metadata";
+import {
+  createBusinessDayServiceStub,
+  createCalendarDateReportModeServiceStub,
+} from "../test/business-day-stubs.js";
 
 import { Decimal } from "decimal.js";
 import { describe, expect, it } from "vitest";
@@ -38,6 +42,13 @@ type FinancialCalculator = {
 
 const service = new OperationsService(
   undefined as never,
+  undefined as never,
+  undefined as never,
+  // Real stubs rather than `undefined as never`: these two are called on
+  // every list path. This suite only exercises the pure financial model, but
+  // an inert value here would throw the moment that changed.
+  createCalendarDateReportModeServiceStub(),
+  createBusinessDayServiceStub(),
   undefined as never,
   undefined as never,
   undefined as never,

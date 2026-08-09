@@ -59,7 +59,10 @@ function renderShell(api: ReturnType<typeof makeApi>, permissions: readonly stri
   return render(
     <MemoryRouter initialEntries={["/dashboard"]}>
       <CompanyBrandingProvider api={api as unknown as ApiClient}>
-        <CompanyAppShell onLogout={vi.fn().mockResolvedValue(undefined)} session={session(permissions)}>
+        <CompanyAppShell
+          onLogout={vi.fn().mockResolvedValue(undefined)}
+          session={session(permissions)}
+        >
           <div>content</div>
         </CompanyAppShell>
       </CompanyBrandingProvider>

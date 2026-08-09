@@ -1,4 +1,4 @@
-import { KeyRound } from "lucide-react";
+import { Eye, EyeOff, KeyRound } from "lucide-react";
 import { type FormEvent, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -9,6 +9,7 @@ export function PasswordChangeView({ api, onChanged }: { api: ApiClient; onChang
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [visible, setVisible] = useState({ current: false, next: false, confirm: false });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string>();
   const submit = async (event: FormEvent) => {
@@ -42,32 +43,53 @@ export function PasswordChangeView({ api, onChanged }: { api: ApiClient; onChang
         <form onSubmit={(event) => void submit(event)}>
           <label className="field" htmlFor="current-password">
             <span>{t("userAdmin.currentPassword")}</span>
-            <input
+            <span className="password-input-wrap">
+              <input
                 autoComplete="current-password"
                 id="current-password"
                 minLength={8}
                 onChange={(e) => setCurrentPassword(e.target.value)}
                 required
-                type="password"
+                type={visible.current ? "text" : "password"}
                 value={currentPassword}
               />
+              <button
+                aria-label={t(visible.current ? "auth.hidePassword" : "auth.showPassword")}
+                className="icon-button"
+                onClick={() => setVisible((value) => ({ ...value, current: !value.current }))}
+                type="button"
+              >
+                {visible.current ? <EyeOff aria-hidden="true" /> : <Eye aria-hidden="true" />}
+              </button>
+            </span>
           </label>
           <label className="field" htmlFor="new-password">
             <span>{t("userAdmin.newPassword")}</span>
-            <input
+            <span className="password-input-wrap">
+              <input
                 aria-describedby="password-policy"
                 autoComplete="new-password"
                 id="new-password"
                 minLength={8}
                 onChange={(e) => setNewPassword(e.target.value)}
                 required
-                type="password"
+                type={visible.next ? "text" : "password"}
                 value={newPassword}
               />
+              <button
+                aria-label={t(visible.next ? "auth.hidePassword" : "auth.showPassword")}
+                className="icon-button"
+                onClick={() => setVisible((value) => ({ ...value, next: !value.next }))}
+                type="button"
+              >
+                {visible.next ? <EyeOff aria-hidden="true" /> : <Eye aria-hidden="true" />}
+              </button>
+            </span>
           </label>
           <label className="field" htmlFor="confirm-password">
             <span>{t("userAdmin.confirmNewPassword")}</span>
-            <input
+            <span className="password-input-wrap">
+              <input
                 aria-describedby={
                   confirmPassword !== "" && newPassword !== confirmPassword
                     ? "password-mismatch"
@@ -79,9 +101,18 @@ export function PasswordChangeView({ api, onChanged }: { api: ApiClient; onChang
                 minLength={8}
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 required
-                type="password"
+                type={visible.confirm ? "text" : "password"}
                 value={confirmPassword}
               />
+              <button
+                aria-label={t(visible.confirm ? "auth.hidePassword" : "auth.showPassword")}
+                className="icon-button"
+                onClick={() => setVisible((value) => ({ ...value, confirm: !value.confirm }))}
+                type="button"
+              >
+                {visible.confirm ? <EyeOff aria-hidden="true" /> : <Eye aria-hidden="true" />}
+              </button>
+            </span>
             {confirmPassword !== "" && newPassword !== confirmPassword ? (
               <small className="field-error" id="password-mismatch">
                 {t("userAdmin.passwordMismatch")}

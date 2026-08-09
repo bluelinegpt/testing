@@ -18,7 +18,10 @@ import type {
 import { mapAccountingDatabaseError } from "./accounting-error.mapper.js";
 import { AccountingFoundationService } from "./accounting-foundation.service.js";
 import { assertJournalLineAmounts } from "./accounting.guards.js";
-import { AccountingOperationSupport } from "./accounting-operation.support.js";
+import {
+  AccountingOperationSupport,
+  numericReferenceOrder,
+} from "./accounting-operation.support.js";
 
 interface JournalRecord {
   readonly accountingPeriodId: string;
@@ -86,8 +89,8 @@ export class ManualJournalService {
     const period = result.rows[0]!;
     if (
       requireOpen &&
-      (!["open","reopened"].includes(period.fiscalYearStatus)
-        || !["open","reopened"].includes(period.fiscalPeriodStatus))
+      (!["open", "reopened"].includes(period.fiscalYearStatus) ||
+        !["open", "reopened"].includes(period.fiscalPeriodStatus))
     ) {
       throw new ApplicationException(
         period.fiscalPeriodStatus === "soft_closed"
@@ -148,7 +151,66 @@ export class ManualJournalService {
         HttpStatus.BAD_REQUEST,
       );
     }
-    for (const line of lines) assertJournalLineAmounts(line.debit, line.credit);
+    for (const [index, line] of lines.entries()) {
+      try {
+        assertJournalLineAmounts(line.debit, line.credit);
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Enter a Debit or Credit amount.";
+        throw new ApplicationException(
+          "accounting_journal_line_invalid_amount",
+          `Row ${line.lineNumber || index + 1}: ${message}`,
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+    }
+  }
+
+  private normalizeInputLineAmount(value: number | string | null | undefined): number {
+    let amount: Decimal;
+    try {
+      amount = new Decimal(value ?? 0);
+    } catch {
+      throw new ApplicationException(
+        "accounting_journal_line_invalid_amount",
+        "Journal line amount must be a valid number.",
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    if (!amount.isFinite() || amount.isNegative() || amount.decimalPlaces() > 2) {
+      throw new ApplicationException(
+        "accounting_journal_line_invalid_amount",
+        "Journal line amount must be zero or a positive amount with up to two decimals.",
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    return Number(amount.toFixed(2));
+  }
+
+  private normalizeInputLines(lines: readonly JournalLineDto[]): JournalLineDto[] {
+    return lines.map((line, index) => {
+      const normalizedDebit = this.normalizeInputLineAmount(line.debit);
+      const normalizedCredit = this.normalizeInputLineAmount(line.credit);
+      const amountSide =
+        line.amountSide ??
+        (normalizedDebit > 0 && normalizedCredit === 0
+          ? "debit"
+          : normalizedCredit > 0 && normalizedDebit === 0
+            ? "credit"
+            : undefined);
+
+      return {
+        ...line,
+        // Omitted, not set to undefined: absent already means "no side was
+        // determined", and the draft type treats a present-but-undefined
+        // property as a different thing. The credit/debit values below read
+        // the same local, so balancing is unchanged.
+        ...(amountSide === undefined ? {} : { amountSide }),
+        credit: amountSide === "debit" ? 0 : normalizedCredit,
+        debit: amountSide === "credit" ? 0 : normalizedDebit,
+        lineNumber: index + 1,
+      };
+    });
   }
 
   private async validateAccounts(
@@ -198,10 +260,7 @@ export class ManualJournalService {
     const totalDebit = lines.reduce((sum, line) => sum.plus(line.debit), new Decimal(0));
     const totalCredit = lines.reduce((sum, line) => sum.plus(line.credit), new Decimal(0));
     return {
-      balanced:
-        lines.length >= 2 &&
-        totalDebit.isPositive() &&
-        totalDebit.equals(totalCredit),
+      balanced: lines.length >= 2 && totalDebit.greaterThan(0) && totalDebit.equals(totalCredit),
       difference: totalDebit.minus(totalCredit).toFixed(2),
       totalCredit: totalCredit.toFixed(2),
       totalDebit: totalDebit.toFixed(2),
@@ -310,7 +369,7 @@ export class ManualJournalService {
           payload: input,
         });
         if (reservation.replayResponse !== undefined) return reservation.replayResponse;
-        const lines = input.lines ?? [];
+        const lines = this.normalizeInputLines(input.lines ?? []);
         this.validateInputLines(lines);
         await this.validateAccounts(transaction, lines);
         const period = await this.lockPeriod(transaction, input.journalDate, false);
@@ -406,7 +465,11 @@ export class ManualJournalService {
         const date = input.journalDate ?? journal.businessDate;
         const period = await this.lockPeriod(transaction, date, false);
         const { actorId, companyId } = this.support.context();
-        const payload = JSON.stringify(input);
+        // Lines travel separately from the jsonb header-patch payload below;
+        // they are replaced wholesale (same semantics as replaceLines) inside
+        // this same transaction when provided.
+        const { lines: inputLines, ...headerInput } = input;
+        const payload = JSON.stringify(headerInput);
         const result = await sql<Record<string, unknown>>`
           update journal_entries j
              set business_date=${date}::date, accounting_period_id=${period.fiscalPeriodId}::uuid,
@@ -424,7 +487,28 @@ export class ManualJournalService {
                      description, status, total_debit::text as "totalDebit",
                      total_credit::text as "totalCredit", version::text as version
         `.execute(transaction);
-        const response = result.rows[0]!;
+        let response = result.rows[0]!;
+        if (inputLines !== undefined) {
+          const lines = this.normalizeInputLines(inputLines);
+          this.validateInputLines(lines);
+          await this.validateAccounts(transaction, lines);
+          await sql`delete from journal_lines where journal_entry_id=${journalId}::uuid
+                      and company_id=${companyId}::uuid`.execute(transaction);
+          await this.insertLines(transaction, journalId, lines);
+          const calculated = this.totals(lines);
+          if (calculated.balanced) {
+            await sql`update journal_entries set status='balanced',
+                         updated_by_account_id=${actorId}::uuid, updated_at=now(), version=version+1
+                       where id=${journalId}::uuid and company_id=${companyId}::uuid`.execute(
+              transaction,
+            );
+          }
+          response = {
+            ...response,
+            status: calculated.balanced ? "balanced" : "draft",
+            ...calculated,
+          };
+        }
         await this.support.audit(transaction, {
           action: "accounting.journal.updated",
           after: response,
@@ -463,17 +547,20 @@ export class ManualJournalService {
         const journal = await this.lockJournal(transaction, journalId);
         this.assertManualJournal(journal);
         await this.makeEditable(transaction, journal);
-        this.validateInputLines(input.lines);
-        await this.validateAccounts(transaction, input.lines);
+        const lines = this.normalizeInputLines(input.lines);
+        this.validateInputLines(lines);
+        await this.validateAccounts(transaction, lines);
         const { actorId, companyId } = this.support.context();
         await sql`delete from journal_lines where journal_entry_id=${journalId}::uuid
                     and company_id=${companyId}::uuid`.execute(transaction);
-        await this.insertLines(transaction, journalId, input.lines);
-        const calculated = this.totals(input.lines);
+        await this.insertLines(transaction, journalId, lines);
+        const calculated = this.totals(lines);
         if (calculated.balanced) {
           await sql`update journal_entries set status='balanced',
                        updated_by_account_id=${actorId}::uuid, updated_at=now(), version=version+1
-                     where id=${journalId}::uuid and company_id=${companyId}::uuid`.execute(transaction);
+                     where id=${journalId}::uuid and company_id=${companyId}::uuid`.execute(
+            transaction,
+          );
         }
         const response = {
           id: journalId,
@@ -506,13 +593,9 @@ export class ManualJournalService {
     line: JournalLineDto,
     idempotencyKey: string | undefined,
   ) {
-    return this.mutateLines(
-      journalId,
-      "add",
-      idempotencyKey,
-      (lines) => [...lines, line],
-      { line },
-    );
+    return this.mutateLines(journalId, "add", idempotencyKey, (lines) => [...lines, line], {
+      line,
+    });
   }
 
   public async updateLine(
@@ -534,17 +617,13 @@ export class ManualJournalService {
             HttpStatus.NOT_FOUND,
           );
         }
-        return lines.map((existing, currentIndex) => currentIndex === index ? line : existing);
+        return lines.map((existing, currentIndex) => (currentIndex === index ? line : existing));
       },
       { line, lineId },
     );
   }
 
-  public async removeLine(
-    journalId: string,
-    lineId: string,
-    idempotencyKey: string | undefined,
-  ) {
+  public async removeLine(journalId: string, lineId: string, idempotencyKey: string | undefined) {
     return this.mutateLines(
       journalId,
       "remove",
@@ -584,9 +663,11 @@ export class ManualJournalService {
         const journal = await this.lockJournal(transaction, journalId);
         await this.makeEditable(transaction, journal);
         const raw = await this.readLines(transaction, journalId);
-        const lines = mutation(
-          this.toLineDtos(raw),
-          raw.map((item) => item.id!),
+        const lines = this.normalizeInputLines(
+          mutation(
+            this.toLineDtos(raw),
+            raw.map((item) => item.id!),
+          ),
         );
         this.validateInputLines(lines);
         await this.validateAccounts(transaction, lines);
@@ -654,7 +735,7 @@ export class ManualJournalService {
             HttpStatus.CONFLICT,
           );
         }
-        if (!["draft","balanced"].includes(journal.status)) {
+        if (!["draft", "balanced"].includes(journal.status)) {
           throw new ApplicationException(
             "accounting_journal_not_editable",
             "Only Draft or Balanced Journals can be validated",
@@ -675,14 +756,32 @@ export class ManualJournalService {
           if (journal.status === "balanced") {
             await sql`update journal_entries set status='draft',
                          updated_by_account_id=${actorId}::uuid, updated_at=now(), version=version+1
-                       where id=${journalId}::uuid and company_id=${companyId}::uuid`.execute(transaction);
+                       where id=${journalId}::uuid and company_id=${companyId}::uuid`.execute(
+              transaction,
+            );
           }
           return { id: journalId, lineErrors: [], status: "draft", valid: false, ...calculated };
         }
-        await sql`update journal_entries set status='balanced',
-                     updated_by_account_id=${actorId}::uuid, updated_at=now(), version=version+1
-                   where id=${journalId}::uuid and company_id=${companyId}::uuid`.execute(transaction);
-        const response = { id: journalId, lineErrors: [], status: "balanced", valid: true, ...calculated };
+        // Only write the status when it actually changes: the history-guard
+        // trigger forbids ANY update to an already-'balanced' Journal except a
+        // transition to draft/approved/cancelled, so a balanced->balanced
+        // self-update would raise accounting_journal_not_editable. Since
+        // saving lines now auto-balances the Journal, an already-balanced
+        // state on Validate is the normal case, not an anomaly.
+        if (journal.status !== "balanced") {
+          await sql`update journal_entries set status='balanced',
+                       updated_by_account_id=${actorId}::uuid, updated_at=now(), version=version+1
+                     where id=${journalId}::uuid and company_id=${companyId}::uuid`.execute(
+            transaction,
+          );
+        }
+        const response = {
+          id: journalId,
+          lineErrors: [],
+          status: "balanced",
+          valid: true,
+          ...calculated,
+        };
         await this.support.audit(transaction, {
           action: "accounting.journal.validated",
           after: response,
@@ -704,8 +803,11 @@ export class ManualJournalService {
     idempotencyKey: string | undefined,
   ) {
     const permission =
-      target === "approved" ? "accounting.approve"
-      : target === "posted" ? "accounting.post" : "accounting.manage";
+      target === "approved"
+        ? "accounting.approve"
+        : target === "posted"
+          ? "accounting.post"
+          : "accounting.manage";
     this.support.assertPermission(permission);
     try {
       return await this.transactions.execute(async (transaction) => {
@@ -733,8 +835,8 @@ export class ManualJournalService {
         const journal = await this.lockJournal(transaction, journalId);
         this.assertManualJournal(journal);
         if (
-          (target === "approved" || target === "posted")
-          && journal.businessDate !== preview.rows[0].businessDate
+          (target === "approved" || target === "posted") &&
+          journal.businessDate !== preview.rows[0].businessDate
         ) {
           throw new ApplicationException(
             "accounting_concurrent_modification",
@@ -769,7 +871,7 @@ export class ManualJournalService {
               HttpStatus.BAD_REQUEST,
             );
           }
-          if (!["draft","balanced","approved"].includes(journal.status)) {
+          if (!["draft", "balanced", "approved"].includes(journal.status)) {
             throw new ApplicationException(
               "accounting_journal_not_cancellable",
               "Only an unposted Journal can be cancelled",
@@ -921,20 +1023,28 @@ export class ManualJournalService {
           `.execute(transaction);
         }
         await sql`update journal_entries set status='balanced', version=version+1
-                   where id=${reversalId}::uuid and company_id=${companyId}::uuid`.execute(transaction);
+                   where id=${reversalId}::uuid and company_id=${companyId}::uuid`.execute(
+          transaction,
+        );
         await sql`update journal_entries
                      set status='approved', approved_by_account_id=${actorId}::uuid,
                          approved_at=now(), approval_note=${input.reason}, version=version+1
-                   where id=${reversalId}::uuid and company_id=${companyId}::uuid`.execute(transaction);
+                   where id=${reversalId}::uuid and company_id=${companyId}::uuid`.execute(
+          transaction,
+        );
         await sql`update journal_entries
                      set status='posted', posted_by_account_id=${actorId}::uuid,
                          posted_at=now(), posting_note=${input.reason}, version=version+1
-                   where id=${reversalId}::uuid and company_id=${companyId}::uuid`.execute(transaction);
+                   where id=${reversalId}::uuid and company_id=${companyId}::uuid`.execute(
+          transaction,
+        );
         await sql`update journal_entries
                      set status='reversed', reversed_by_journal_id=${reversalId}::uuid,
                          reversed_by_account_id=${actorId}::uuid, reversed_at=now(),
                          reversal_reason=${input.reason}, version=version+1
-                   where id=${journalId}::uuid and company_id=${companyId}::uuid`.execute(transaction);
+                   where id=${journalId}::uuid and company_id=${companyId}::uuid`.execute(
+          transaction,
+        );
         const response = {
           originalJournalId: journalId,
           originalJournalNumber: original.journalNumber,
@@ -1011,6 +1121,21 @@ export class ManualJournalService {
     this.support.assertPermission("accounting.view");
     const { companyId } = this.support.context();
     const pagination = this.support.pagination(query);
+    // Allowlisted sort keys: the client sends a business key, never a column
+    // name, so nothing from the request can reach the ORDER BY fragment.
+    const sort = this.support.sorting(
+      query,
+      {
+        businessDate: "j.business_date",
+        createdAt: "j.created_at",
+        description: "j.description",
+        journalNumber: numericReferenceOrder("j.journal_number"),
+        status: "j.status",
+        totalCredit: "j.total_credit",
+        totalDebit: "j.total_debit",
+      },
+      "businessDate",
+    );
     const result = await this.transactions.execute(async (transaction) =>
       sql<Record<string, unknown>>`
         select j.id, j.company_id as "companyId", j.journal_number as "journalNumber",
@@ -1082,16 +1207,36 @@ export class ManualJournalService {
              select 1 from journal_lines l where l.journal_entry_id=j.id
                and l.company_id=j.company_id and l.payroll_period_id=${query.payrollPeriodId ?? null}::uuid
            ))
-         order by j.business_date desc, j.created_at desc
+         -- Deterministic newest-first ordering. business_date + created_at
+         -- alone left same-day Journals in an unstable order across pages, and
+         -- ignored the Journal sequence entirely. The number is sorted by its
+         -- NUMERIC suffix, so JRN-000010 correctly follows JRN-000009 instead
+         -- of sorting lexically. j.id is the final tiebreaker so the total
+         -- order is strict and paging can never repeat or drop a row.
+         -- The class [^0-9] is used rather than a backslash escape, which a JS
+         -- template literal would swallow before the SQL is built.
+         -- Requested sort first, then the Phase 1 deterministic tail: business
+         -- date, the journal number's NUMERIC sequence, created_at, and finally
+         -- the id so offset pagination can never repeat or omit a row.
+         order by ${sql.raw(sort.column)} ${sql.raw(sort.direction)} nulls last,
+                  j.business_date desc,
+                  ${sql.raw(numericReferenceOrder("j.journal_number"))} desc nulls last,
+                  j.created_at desc,
+                  j.id desc
          limit ${pagination.limit} offset ${pagination.offset}
       `.execute(transaction),
     );
     const total = Number(result.rows[0]?.totalRows ?? 0);
     return {
-      items: result.rows.map(({ totalRows: _totalRows, ...row }) => row),
+      items: result.rows.map(({ totalRows, ...row }) => {
+        void totalRows;
+        return row;
+      }),
       page: pagination.page,
       pageSize: pagination.pageSize,
       total,
+      sortBy: sort.sortBy,
+      sortDirection: sort.sortDirection,
       totalPages: Math.ceil(total / pagination.pageSize),
     };
   }
@@ -1122,7 +1267,17 @@ export class ManualJournalService {
                canceller.username as "cancelledByName",
                reverser.username as "reversedByName",
                original.journal_number as "originalJournalNumber",
-               reversing.journal_number as "reversalJournalNumber"
+               reversing.journal_number as "reversalJournalNumber",
+               -- Related Records needs the identifiers the detail routes take,
+               -- not only the business references shown on screen. Additive:
+               -- nothing existing changes shape.
+               j.reversal_of_id as "originalJournalId",
+               j.reversed_by_journal_id as "reversalJournalId",
+               ev.id as "accountingEventId",
+               ev.event_type as "accountingEventType",
+               ev.source_entity_type as "eventSourceEntityType",
+               ev.source_entity_id as "eventSourceEntityId",
+               ev.source_reference as "eventSourceReference"
           from journal_entries j
           join fiscal_years y on y.id=j.fiscal_year_id and y.company_id=j.company_id
           join accounting_periods p on p.id=j.accounting_period_id and p.company_id=j.company_id
@@ -1135,6 +1290,8 @@ export class ManualJournalService {
             on original.id=j.reversal_of_id and original.company_id=j.company_id
           left join journal_entries reversing
             on reversing.id=j.reversed_by_journal_id and reversing.company_id=j.company_id
+          left join accounting_events ev
+            on ev.id=j.accounting_event_id and ev.company_id=j.company_id
          where j.id=${journalId}::uuid and j.company_id=${companyId}::uuid
       `.execute(transaction);
       if (header.rows[0] === undefined) {
@@ -1153,8 +1310,11 @@ export class ManualJournalService {
                l.credit::text as credit, l.description,
                l.subledger_type as "subledgerType", l.subledger_id as "subledgerId",
                l.trader_id as "traderId", t.name_en as "traderName",
+               t.code as "traderCode", t.name_ar as "traderNameAr",
                l.driver_id as "driverId", d.name_en as "driverName",
+               d.code as "driverCode", d.name_ar as "driverNameAr",
                l.employee_id as "employeeId", e.name_en as "employeeName",
+               e.employee_number as "employeeNumber", e.name_ar as "employeeNameAr",
                l.order_id as "orderId", o.order_number as "orderNumber",
                l.trader_settlement_id as "traderSettlementId",
                l.driver_collection_id as "driverCollectionId",
@@ -1162,14 +1322,67 @@ export class ManualJournalService {
                l.payroll_payment_id as "payrollPaymentId",
                l.outsourced_driver_fee_accrual_id as "outsourcedDriverFeeAccrualId",
                l.outsourced_driver_fee_payment_id as "outsourcedDriverFeePaymentId",
+               l.general_expense_id as "generalExpenseId",
+               l.general_expense_payment_id as "generalExpensePaymentId",
                l.source_entity_type as "sourceEntityType",
-               l.source_entity_id as "sourceEntityId"
+               l.source_entity_id as "sourceEntityId",
+               -- Business reference + party for every subledger the line can
+               -- carry, resolved by LEFT JOIN in this one query. Each join is
+               -- on a primary key AND company_id, so Company isolation holds
+               -- and no row can trigger a follow-up lookup (no N+1).
+               ts.settlement_number as "settlementNumber",
+               tst.code as "settlementTraderCode",
+               tst.name_en as "settlementTraderName",
+               tst.name_ar as "settlementTraderNameAr",
+               dr.reconciliation_number as "collectionNumber",
+               drd.code as "collectionDriverCode",
+               drd.name_en as "collectionDriverName",
+               drd.name_ar as "collectionDriverNameAr",
+               pp.period_reference as "payrollPeriodReference",
+               ppay.payment_number as "payrollPaymentNumber",
+               odfa.source_reference as "driverFeeAccrualReference",
+               odfad.code as "driverFeeAccrualDriverCode",
+               odfad.name_en as "driverFeeAccrualDriverName",
+               odfp.payment_number as "driverFeePaymentNumber",
+               odfpd.code as "driverFeePaymentDriverCode",
+               odfpd.name_en as "driverFeePaymentDriverName",
+               ge.expense_number as "generalExpenseNumber",
+               ge.payee_name_snapshot as "generalExpensePayee",
+               gep.payment_number as "generalExpensePaymentNumber",
+               tc.collection_number as "traderCollectionNumber",
+               tcr.code as "traderCollectionTraderCode",
+               tcr.name_en as "traderCollectionTraderName",
+               tcr.name_ar as "traderCollectionTraderNameAr"
           from journal_lines l
           join chart_of_accounts a on a.id=l.account_id and a.company_id=l.company_id
           left join traders t on t.id=l.trader_id and t.company_id=l.company_id
           left join drivers d on d.id=l.driver_id and d.company_id=l.company_id
           left join employees e on e.id=l.employee_id and e.company_id=l.company_id
           left join orders o on o.id=l.order_id and o.company_id=l.company_id
+          left join trader_settlements ts
+            on ts.id=l.trader_settlement_id and ts.company_id=l.company_id
+          left join traders tst on tst.id=ts.trader_id and tst.company_id=ts.company_id
+          left join driver_reconciliations dr
+            on dr.id=l.driver_collection_id and dr.company_id=l.company_id
+          left join drivers drd on drd.id=dr.driver_id and drd.company_id=dr.company_id
+          left join payroll_periods pp
+            on pp.id=l.payroll_period_id and pp.company_id=l.company_id
+          left join payroll_payments ppay
+            on ppay.id=l.payroll_payment_id and ppay.company_id=l.company_id
+          left join outsourced_driver_fee_accruals odfa
+            on odfa.id=l.outsourced_driver_fee_accrual_id and odfa.company_id=l.company_id
+          left join drivers odfad on odfad.id=odfa.driver_id and odfad.company_id=odfa.company_id
+          left join outsourced_driver_fee_payments odfp
+            on odfp.id=l.outsourced_driver_fee_payment_id and odfp.company_id=l.company_id
+          left join drivers odfpd on odfpd.id=odfp.driver_id and odfpd.company_id=odfp.company_id
+          left join general_expenses ge
+            on ge.id=l.general_expense_id and ge.company_id=l.company_id
+          left join general_expense_payments gep
+            on gep.id=l.general_expense_payment_id and gep.company_id=l.company_id
+          left join trader_collections tc
+            on tc.id=l.subledger_id and l.subledger_type='trader_collection'
+           and tc.company_id=l.company_id
+          left join traders tcr on tcr.id=tc.trader_id and tcr.company_id=tc.company_id
          where l.journal_entry_id=${journalId}::uuid and l.company_id=${companyId}::uuid
          order by l.line_number
       `.execute(transaction);

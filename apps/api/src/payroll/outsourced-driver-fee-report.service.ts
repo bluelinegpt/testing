@@ -122,9 +122,7 @@ export class OutsourcedDriverFeeReportService {
         and (${query.status ?? null}::text is null or f.status=${query.status ?? null})
       order by f.accrual_business_date,f.delivery_date,f.id
     `.execute(this.database);
-    const periodLines = lines.rows.filter(
-      (line) => String(line.accrualBusinessDate) >= range.from,
-    );
+    const periodLines = lines.rows.filter((line) => String(line.accrualBusinessDate) >= range.from);
     const earned = periodLines.reduce(
       (total, row) => total.plus(String(row.earnedAmount)),
       new Decimal(0),
@@ -252,14 +250,24 @@ export class OutsourcedDriverFeeReportService {
         min(accrual_business_date) filter(where outstanding>0),
         driver_name
     `.execute(this.database);
-    const outstanding = lines.rows.reduce((sum, row) => sum.plus(String(row.outstanding)), new Decimal(0));
-    const recovery = lines.rows.reduce((sum, row) => sum.plus(String(row.recoveryAmount)), new Decimal(0));
-    const earned = lines.rows.reduce((sum, row) => sum.plus(String(row.earnedAmount)), new Decimal(0));
+    const outstanding = lines.rows.reduce(
+      (sum, row) => sum.plus(String(row.outstanding)),
+      new Decimal(0),
+    );
+    const recovery = lines.rows.reduce(
+      (sum, row) => sum.plus(String(row.recoveryAmount)),
+      new Decimal(0),
+    );
+    const earned = lines.rows.reduce(
+      (sum, row) => sum.plus(String(row.earnedAmount)),
+      new Decimal(0),
+    );
     const paid = lines.rows.reduce((sum, row) => sum.plus(String(row.activePaid)), new Decimal(0));
-    const oldestOutstandingDate = lines.rows
-      .map((row) => row.oldestOutstandingDate)
-      .filter((value): value is string => typeof value === "string")
-      .sort()[0] ?? null;
+    const oldestOutstandingDate =
+      lines.rows
+        .map((row) => row.oldestOutstandingDate)
+        .filter((value): value is string => typeof value === "string")
+        .sort()[0] ?? null;
     return {
       asOf: query.asOf,
       company: await this.company(),
@@ -302,7 +310,10 @@ export class OutsourcedDriverFeeReportService {
         and (${query.status ?? null}::text is null or f.status=${query.status ?? null})
       order by f.accrual_business_date,f.delivery_date,f.id
     `.execute(this.database);
-    const total = lines.rows.reduce((sum, row) => sum.plus(String(row.earnedAmount)), new Decimal(0));
+    const total = lines.rows.reduce(
+      (sum, row) => sum.plus(String(row.earnedAmount)),
+      new Decimal(0),
+    );
     return {
       company: await this.company(),
       from: query.from,
@@ -313,7 +324,8 @@ export class OutsourcedDriverFeeReportService {
         backfillCount: lines.rows.filter((row) => row.source === "authorized_backfill").length,
         deliveryCount: lines.rows.filter((row) => row.source === "delivery").length,
         driverCount: new Set(lines.rows.map((row) => row.driverCode)).size,
-        reconciliationCount: lines.rows.filter((row) => row.source === "daily_reconciliation").length,
+        reconciliationCount: lines.rows.filter((row) => row.source === "daily_reconciliation")
+          .length,
         totalEarned: total.toFixed(2),
       },
       to: query.to,
@@ -344,7 +356,11 @@ export class OutsourcedDriverFeeReportService {
     `.execute(this.database);
     const header = payment.rows[0];
     if (header === undefined) {
-      throw new ApplicationException("outsourced_driver_fee_payment_not_found", "The Driver fee payment was not found", HttpStatus.NOT_FOUND);
+      throw new ApplicationException(
+        "outsourced_driver_fee_payment_not_found",
+        "The Driver fee payment was not found",
+        HttpStatus.NOT_FOUND,
+      );
     }
     const allocations = await sql<Record<string, unknown>>`
       select x.id,o.order_number as "orderNumber",o.serial_number::text as "serialNumber",
@@ -385,29 +401,91 @@ export class OutsourcedDriverFeeReportService {
     };
   }
 
-  public statementPdf(driverId: string, query: OutsourcedDriverFeeStatementQueryDto, language: DriverFeeReportLanguage, correlationId: string) {
-    return this.render("outsourced_driver_fee.statement.pdf_generated",driverId,"driver",language,this.statement(driverId,query),buildDriverEarningsStatementHtml,(data) => `Driver-Earnings-${this.safe(data.driver.code)}-${data.from}-${data.to}.pdf`,correlationId);
+  public statementPdf(
+    driverId: string,
+    query: OutsourcedDriverFeeStatementQueryDto,
+    language: DriverFeeReportLanguage,
+    correlationId: string,
+  ) {
+    return this.render(
+      "outsourced_driver_fee.statement.pdf_generated",
+      driverId,
+      "driver",
+      language,
+      this.statement(driverId, query),
+      buildDriverEarningsStatementHtml,
+      (data) => `Driver-Earnings-${this.safe(data.driver.code)}-${data.from}-${data.to}.pdf`,
+      correlationId,
+    );
   }
-  public outstandingPdf(query: OutstandingDriverFeesReportQueryDto, language: DriverFeeReportLanguage, correlationId: string) {
-    return this.render("outsourced_driver_fee.outstanding.pdf_generated",this.support.context().companyId,"company",language,this.outstanding(query),buildOutstandingDriverFeesHtml,(data) => `Outstanding-Driver-Fees-${data.asOf}.pdf`,correlationId);
+  public outstandingPdf(
+    query: OutstandingDriverFeesReportQueryDto,
+    language: DriverFeeReportLanguage,
+    correlationId: string,
+  ) {
+    return this.render(
+      "outsourced_driver_fee.outstanding.pdf_generated",
+      this.support.context().companyId,
+      "company",
+      language,
+      this.outstanding(query),
+      buildOutstandingDriverFeesHtml,
+      (data) => `Outstanding-Driver-Fees-${data.asOf}.pdf`,
+      correlationId,
+    );
   }
-  public dailyAccrualsPdf(query: DailyDriverFeeAccrualReportQueryDto, language: DriverFeeReportLanguage, correlationId: string) {
-    return this.render("outsourced_driver_fee.accrual_report.pdf_generated",this.support.context().companyId,"company",language,this.dailyAccruals(query),buildDailyDriverFeeAccrualHtml,(data) => `Daily-Driver-Fee-Accrual-${data.from}-${data.to}.pdf`,correlationId);
+  public dailyAccrualsPdf(
+    query: DailyDriverFeeAccrualReportQueryDto,
+    language: DriverFeeReportLanguage,
+    correlationId: string,
+  ) {
+    return this.render(
+      "outsourced_driver_fee.accrual_report.pdf_generated",
+      this.support.context().companyId,
+      "company",
+      language,
+      this.dailyAccruals(query),
+      buildDailyDriverFeeAccrualHtml,
+      (data) => `Daily-Driver-Fee-Accrual-${data.from}-${data.to}.pdf`,
+      correlationId,
+    );
   }
   public receiptPdf(paymentId: string, language: DriverFeeReportLanguage, correlationId: string) {
-    return this.render("outsourced_driver_fee.receipt.pdf_generated",paymentId,"outsourced_driver_fee_payment",language,this.receipt(paymentId),buildDriverFeePaymentReceiptHtml,(data) => `Driver-Fee-Payment-${this.safe(String(data.header.paymentNumber))}.pdf`,correlationId);
+    return this.render(
+      "outsourced_driver_fee.receipt.pdf_generated",
+      paymentId,
+      "outsourced_driver_fee_payment",
+      language,
+      this.receipt(paymentId),
+      buildDriverFeePaymentReceiptHtml,
+      (data) => `Driver-Fee-Payment-${this.safe(String(data.header.paymentNumber))}.pdf`,
+      correlationId,
+    );
   }
 
   private async render<T>(
-    action: string, subjectId: string, subjectType: string, language: DriverFeeReportLanguage,
-    dataPromise: Promise<T>, html: (data: T, language: DriverFeeReportLanguage) => string,
-    filename: (data: T) => string, correlationId: string,
+    action: string,
+    subjectId: string,
+    subjectType: string,
+    language: DriverFeeReportLanguage,
+    dataPromise: Promise<T>,
+    html: (data: T, language: DriverFeeReportLanguage) => string,
+    filename: (data: T) => string,
+    correlationId: string,
   ) {
     this.support.assertPermission("reports.export");
     const { actorId, companyId } = this.support.context();
     const data = await dataPromise;
     const bytes = await this.pdf.renderPdf(html(data, language), driverFeeReportFooter(language));
-    await this.history.audit(this.database,{action,actorId,after:{language},companyId,correlationId,subjectId,subjectType});
+    await this.history.audit(this.database, {
+      action,
+      actorId,
+      after: { language },
+      companyId,
+      correlationId,
+      subjectId,
+      subjectType,
+    });
     return { bytes, filename: filename(data) };
   }
 
@@ -415,21 +493,44 @@ export class OutsourcedDriverFeeReportService {
     if (query.month !== undefined) {
       const start = `${query.month}-01`;
       const [year, month] = query.month.split("-").map(Number);
-      return { from: start, to: `${query.month}-${String(new Date(Date.UTC(year!,month!,0)).getUTCDate()).padStart(2,"0")}` };
+      return {
+        from: start,
+        to: `${query.month}-${String(new Date(Date.UTC(year!, month!, 0)).getUTCDate()).padStart(2, "0")}`,
+      };
     }
     if (query.from === undefined || query.to === undefined) {
-      throw new ApplicationException("outsourced_driver_fee_report_range_required","Select a month or a From and To date",HttpStatus.BAD_REQUEST);
+      throw new ApplicationException(
+        "outsourced_driver_fee_report_range_required",
+        "Select a month or a From and To date",
+        HttpStatus.BAD_REQUEST,
+      );
     }
     this.assertRange(query.from, query.to);
     return { from: query.from, to: query.to };
   }
   private assertRange(from: string, to: string) {
-    const days = (Date.parse(`${to}T00:00:00Z`)-Date.parse(`${from}T00:00:00Z`))/86_400_000;
-    if (!Number.isFinite(days) || days < 0 || days > 366) throw new ApplicationException("outsourced_driver_fee_report_range_invalid","The report date range must be between zero and 366 days",HttpStatus.BAD_REQUEST);
+    const days = (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000;
+    if (!Number.isFinite(days) || days < 0 || days > 366)
+      throw new ApplicationException(
+        "outsourced_driver_fee_report_range_invalid",
+        "The report date range must be between zero and 366 days",
+        HttpStatus.BAD_REQUEST,
+      );
   }
   private async driver(companyId: string, driverId: string) {
-    const result = await sql<{ code: string; id: string; name: string }>`select id,code,name_en as name from drivers where id=${driverId}::uuid and company_id=${companyId}::uuid and driver_type='outsourced'`.execute(this.database);
-    if (result.rows[0] === undefined) throw new ApplicationException("outsourced_driver_fee_driver_not_found","The Outsourced Driver was not found",HttpStatus.NOT_FOUND);
+    const result = await sql<{
+      code: string;
+      id: string;
+      name: string;
+    }>`select id,code,name_en as name from drivers where id=${driverId}::uuid and company_id=${companyId}::uuid and driver_type='outsourced'`.execute(
+      this.database,
+    );
+    if (result.rows[0] === undefined)
+      throw new ApplicationException(
+        "outsourced_driver_fee_driver_not_found",
+        "The Outsourced Driver was not found",
+        HttpStatus.NOT_FOUND,
+      );
     return result.rows[0];
   }
   private outstandingAsOf(companyId: string, driverId: string, date: string) {
@@ -443,14 +544,36 @@ export class OutsourcedDriverFeeReportService {
       ) paid on true where f.company_id=${companyId}::uuid and f.driver_id=${driverId}::uuid
         and f.accrual_business_date<=${date}::date
         and not(f.status in ('reversed','recovery_required') and (f.reversed_at at time zone 'Asia/Dubai')::date<=${date}::date)
-    `.execute(this.database).then((result) => new Decimal(result.rows[0]?.amount ?? 0));
+    `
+      .execute(this.database)
+      .then((result) => new Decimal(result.rows[0]?.amount ?? 0));
   }
-  private dayBefore(date: string) { const value=new Date(`${date}T00:00:00Z`); value.setUTCDate(value.getUTCDate()-1); return value.toISOString().slice(0,10); }
+  private dayBefore(date: string) {
+    const value = new Date(`${date}T00:00:00Z`);
+    value.setUTCDate(value.getUTCDate() - 1);
+    return value.toISOString().slice(0, 10);
+  }
   private async company() {
-    const branding=await this.companyProfile.branding();
-    const logoDataUri=branding.hasLogo?await this.companyProfile.logoContent().then((logo)=>`data:${logo.mediaType};base64,${logo.bytes.toString("base64")}`).catch(()=>null):null;
-    return {logoDataUri,nameAr:branding.nameAr,nameEn:branding.nameEn,subtitleAr:branding.subtitleAr,subtitleEn:branding.subtitleEn,telephone:branding.telephone};
+    const branding = await this.companyProfile.branding();
+    const logoDataUri = branding.hasLogo
+      ? await this.companyProfile
+          .logoContent()
+          .then((logo) => `data:${logo.mediaType};base64,${logo.bytes.toString("base64")}`)
+          .catch(() => null)
+      : null;
+    return {
+      logoDataUri,
+      nameAr: branding.nameAr,
+      nameEn: branding.nameEn,
+      subtitleAr: branding.subtitleAr,
+      subtitleEn: branding.subtitleEn,
+      telephone: branding.telephone,
+    };
   }
-  private generatedAt() { return `${new Intl.DateTimeFormat("en-GB",{dateStyle:"medium",timeStyle:"short",timeZone:"Asia/Dubai"}).format(new Date())} (UAE)`; }
-  private safe(value: string) { return value.replaceAll(/[^A-Za-z0-9-]/g,"")||"Driver"; }
+  private generatedAt() {
+    return `${new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Dubai" }).format(new Date())} (UAE)`;
+  }
+  private safe(value: string) {
+    return value.replaceAll(/[^A-Za-z0-9-]/g, "") || "Driver";
+  }
 }

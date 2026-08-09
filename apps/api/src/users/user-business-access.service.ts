@@ -71,7 +71,7 @@ interface LegacyCandidateRow {
   readonly sourceCompanyId: string;
 }
 
-interface ClassifiedLegacyCandidate extends LegacyCandidateRow {
+export interface ClassifiedLegacyCandidate extends LegacyCandidateRow {
   readonly candidateId: string;
   readonly classification: string;
   readonly classifications: readonly string[];
@@ -153,10 +153,14 @@ export class UserBusinessAccessService {
                 and l.access_status in ('invited','active','suspended')
                 and l.entity_id<>${entityId}::uuid
            )
-           ${term ? sql`and (
+           ${
+             term
+               ? sql`and (
              a.username ilike ${`%${term}%`} or a.email ilike ${`%${term}%`}
              or a.mobile_number ilike ${`%${term}%`} or cu.display_name ilike ${`%${term}%`}
-           )` : sql``}
+           )`
+               : sql``
+           }
          order by lower(coalesce(cu.display_name,a.username)),a.id limit 100
       `.execute(transaction);
       return rows.rows;
@@ -261,13 +265,7 @@ export class UserBusinessAccessService {
           `.execute(transaction);
         }
 
-        const link = await this.insertLink(
-          transaction,
-          "trader",
-          entityId,
-          accountId,
-          actorId,
-        );
+        const link = await this.insertLink(transaction, "trader", entityId, accountId, actorId);
         await sql`
           update account_sessions set revoked_at=coalesce(revoked_at,now())
            where account_id=${accountId}::uuid and company_id=${companyId}::uuid
@@ -331,27 +329,41 @@ export class UserBusinessAccessService {
     const payload = { accountId, entityId, profileType: type };
     try {
       return await this.transactions.execute(async (transaction) => {
-        const reservation = await this.reserveIdempotency<{ linkId: string; status: string; created: boolean }>(
-        transaction,
-        `user_business_access.${type}.link`,
-        idempotencyKey,
-        payload,
-      );
+        const reservation = await this.reserveIdempotency<{
+          linkId: string;
+          status: string;
+          created: boolean;
+        }>(transaction, `user_business_access.${type}.link`, idempotencyKey, payload);
         if (reservation !== undefined) {
-          await this.audit(transaction,companyId,actorId,"user_profile.idempotent_replay",
-            reservation.linkId,correlationId,{ operation: `${type}.link` });
+          await this.audit(
+            transaction,
+            companyId,
+            actorId,
+            "user_profile.idempotent_replay",
+            reservation.linkId,
+            correlationId,
+            { operation: `${type}.link` },
+          );
           return reservation;
         }
         await this.assertBusinessRecord(transaction, type, entityId, true);
         await this.assertAccountEligible(transaction, type, accountId);
         const result = await this.insertLink(transaction, type, entityId, accountId, actorId);
         if (result.created) {
-          await this.audit(transaction, companyId, actorId, "user_profile.linked", result.linkId, correlationId, {
-            accountId,
-            accountKind: accountKindByProfile[type],
-            entityId,
-            profileType: type,
-          });
+          await this.audit(
+            transaction,
+            companyId,
+            actorId,
+            "user_profile.linked",
+            result.linkId,
+            correlationId,
+            {
+              accountId,
+              accountKind: accountKindByProfile[type],
+              entityId,
+              profileType: type,
+            },
+          );
         }
         await this.completeIdempotency(
           transaction,
@@ -364,7 +376,7 @@ export class UserBusinessAccessService {
         return result;
       });
     } catch (error) {
-      await this.auditRejected("user_profile.link_blocked",correlationId,payload,error);
+      await this.auditRejected("user_profile.link_blocked", correlationId, payload, error);
       throw error;
     }
   }
@@ -386,9 +398,15 @@ export class UserBusinessAccessService {
         "An Employee User must have at least one Company role",
         HttpStatus.BAD_REQUEST,
       );
-      await this.auditRejected("user_profile.create_and_link_blocked",correlationId,{
-        entityId,profileType:type,
-      },error);
+      await this.auditRejected(
+        "user_profile.create_and_link_blocked",
+        correlationId,
+        {
+          entityId,
+          profileType: type,
+        },
+        error,
+      );
       throw error;
     }
     if (type !== "employee" && roleIds.length > 0) {
@@ -397,9 +415,15 @@ export class UserBusinessAccessService {
         "Driver and Trader portal accounts do not use Company User roles",
         HttpStatus.BAD_REQUEST,
       );
-      await this.auditRejected("user_profile.create_and_link_blocked",correlationId,{
-        entityId,profileType:type,
-      },error);
+      await this.auditRejected(
+        "user_profile.create_and_link_blocked",
+        correlationId,
+        {
+          entityId,
+          profileType: type,
+        },
+        error,
+      );
       throw error;
     }
     const payload = {
@@ -417,43 +441,53 @@ export class UserBusinessAccessService {
     try {
       return await this.transactions.execute(async (transaction) => {
         const replay = await this.reserveIdempotency<Record<string, unknown>>(
-        transaction,
-        `user_business_access.${type}.create_and_link`,
-        idempotencyKey,
-        payload,
-      );
+          transaction,
+          `user_business_access.${type}.create_and_link`,
+          idempotencyKey,
+          payload,
+        );
         if (replay !== undefined) {
-          await this.audit(transaction,companyId,actorId,"user_profile.idempotent_replay",
-            String(replay.accountId ?? actorId),correlationId,{ operation: `${type}.create_and_link` });
+          await this.audit(
+            transaction,
+            companyId,
+            actorId,
+            "user_profile.idempotent_replay",
+            String(replay.accountId ?? actorId),
+            correlationId,
+            { operation: `${type}.create_and_link` },
+          );
           return replay;
-      }
-      await this.lockCompany(transaction, companyId);
-      await this.assertBusinessRecord(transaction, type, entityId, true);
-      // Email is optional for business-record account creation. Older browser
-      // sessions may still submit an automatically populated Employee email.
-      // If that optional address already identifies another account, create
-      // this account without an email instead of blocking the whole workflow.
-      // Employee access is created from the Employee record and signs in with
-      // its generated username. Do not copy optional contact identifiers into
-      // the login account: the same email or mobile may already identify an
-      // administrator, Trader, or another historical account.
-      const accountEmail = type === "employee"
-        ? null
-        : await this.availableOptionalEmail(transaction, payload.email);
-      const accountMobileNumber = type === "employee"
-        ? null
-        : await this.availableOptionalMobileNumber(transaction, payload.mobileNumber);
-      await this.assertIdentifiersAvailable(transaction, {
-        ...payload,
-        email: null,
-        mobileNumber: null,
-      });
-      if (type === "employee") await this.assertRoles(transaction, roleIds);
+        }
+        await this.lockCompany(transaction, companyId);
+        await this.assertBusinessRecord(transaction, type, entityId, true);
+        // Email is optional for business-record account creation. Older browser
+        // sessions may still submit an automatically populated Employee email.
+        // If that optional address already identifies another account, create
+        // this account without an email instead of blocking the whole workflow.
+        // Employee access is created from the Employee record and signs in with
+        // its generated username. Do not copy optional contact identifiers into
+        // the login account: the same email or mobile may already identify an
+        // administrator, Trader, or another historical account.
+        const accountEmail =
+          type === "employee"
+            ? null
+            : await this.availableOptionalEmail(transaction, payload.email);
+        const accountMobileNumber =
+          type === "employee"
+            ? null
+            : await this.availableOptionalMobileNumber(transaction, payload.mobileNumber);
+        await this.assertIdentifiersAvailable(transaction, {
+          ...payload,
+          email: null,
+          mobileNumber: null,
+        });
+        if (type === "employee") await this.assertRoles(transaction, roleIds);
 
-      let accountId: string;
-      try {
-        const account = type === "employee"
-          ? await sql<{ id: string }>`
+        let accountId: string;
+        try {
+          const account =
+            type === "employee"
+              ? await sql<{ id: string }>`
               insert into accounts(
                 company_id,account_kind,username,password_hash,status,
                 preferred_language,force_password_change,temporary_password_expires_at
@@ -462,7 +496,7 @@ export class UserBusinessAccessService {
                 'active',${input.preferredLanguage},true,now()+interval '24 hours'
               ) returning id
             `.execute(transaction)
-          : await sql<{ id: string }>`
+              : await sql<{ id: string }>`
               insert into accounts(
                 company_id,account_kind,username,email,mobile_number,password_hash,status,
                 preferred_language,force_password_change,temporary_password_expires_at
@@ -472,13 +506,13 @@ export class UserBusinessAccessService {
                 true,now()+interval '24 hours'
               ) returning id
             `.execute(transaction);
-        accountId = account.rows[0]!.id;
-      } catch (error) {
-        throw this.translateDatabaseConflict(error, type);
-      }
+          accountId = account.rows[0]!.id;
+        } catch (error) {
+          throw this.translateDatabaseConflict(error, type);
+        }
 
-      if (type === "employee") {
-        const companyUser = await sql<{ id: string }>`
+        if (type === "employee") {
+          const companyUser = await sql<{ id: string }>`
           insert into company_users(
             company_id,account_id,name_en,display_name,is_active
           ) values(
@@ -486,56 +520,70 @@ export class UserBusinessAccessService {
             true
           ) returning id
         `.execute(transaction);
-        await sql`
+          await sql`
           update employees
              set company_user_id=${companyUser.rows[0]!.id}::uuid,
                  updated_at=now(),version=version+1
            where id=${entityId}::uuid and company_id=${companyId}::uuid
         `.execute(transaction);
-        for (const roleId of roleIds) {
-          await sql`
+          for (const roleId of roleIds) {
+            await sql`
             insert into account_roles(account_id,role_id,company_id,assigned_by_account_id)
             values(${accountId}::uuid,${roleId}::uuid,${companyId}::uuid,${actorId}::uuid)
           `.execute(transaction);
+          }
         }
-      }
 
-      const link = await this.insertLink(transaction, type, entityId, accountId, actorId);
-      const response = {
-        accountId,
-        accountKind: expectedKind,
-        linkId: link.linkId,
-        status: link.status,
-        temporaryPassword,
-        temporaryPasswordExpiresAt: new Date(Date.now() + 86_400_000).toISOString(),
-      };
-      await this.audit(transaction, companyId, actorId, "user_profile.account_created_and_linked", link.linkId, correlationId, {
-        accountId,
-        accountKind: expectedKind,
-        entityId,
-        forcePasswordChange: true,
-        optionalEmailOmitted: payload.email !== null && accountEmail === null,
-        optionalMobileOmitted:
-          payload.mobileNumber !== null && accountMobileNumber === null,
-        preferredLanguage: input.preferredLanguage,
-        profileType: type,
-        roleIds,
-        username: payload.username,
-      });
-      await this.completeIdempotency(
-        transaction,
-        `user_business_access.${type}.create_and_link`,
-        idempotencyKey!,
-        accountId,
-        "account",
-        response,
-      );
+        const link = await this.insertLink(transaction, type, entityId, accountId, actorId);
+        const response = {
+          accountId,
+          accountKind: expectedKind,
+          linkId: link.linkId,
+          status: link.status,
+          temporaryPassword,
+          temporaryPasswordExpiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+        };
+        await this.audit(
+          transaction,
+          companyId,
+          actorId,
+          "user_profile.account_created_and_linked",
+          link.linkId,
+          correlationId,
+          {
+            accountId,
+            accountKind: expectedKind,
+            entityId,
+            forcePasswordChange: true,
+            optionalEmailOmitted: payload.email !== null && accountEmail === null,
+            optionalMobileOmitted: payload.mobileNumber !== null && accountMobileNumber === null,
+            preferredLanguage: input.preferredLanguage,
+            profileType: type,
+            roleIds,
+            username: payload.username,
+          },
+        );
+        await this.completeIdempotency(
+          transaction,
+          `user_business_access.${type}.create_and_link`,
+          idempotencyKey!,
+          accountId,
+          "account",
+          response,
+        );
         return response;
       });
     } catch (error) {
-      await this.auditRejected("user_profile.create_and_link_blocked",correlationId,{
-        entityId,profileType:type,username:payload.username,
-      },error);
+      await this.auditRejected(
+        "user_profile.create_and_link_blocked",
+        correlationId,
+        {
+          entityId,
+          profileType: type,
+          username: payload.username,
+        },
+        error,
+      );
       throw error;
     }
   }
@@ -561,17 +609,19 @@ export class UserBusinessAccessService {
          where id=${linkId}::uuid and company_id=${companyId}::uuid for update
       `.execute(transaction);
       const link = current.rows[0];
-      if (link === undefined) throw new ApplicationException(
-        "user_profile_link_not_found",
-        "The profile link was not found",
-        HttpStatus.NOT_FOUND,
-      );
+      if (link === undefined)
+        throw new ApplicationException(
+          "user_profile_link_not_found",
+          "The profile link was not found",
+          HttpStatus.NOT_FOUND,
+        );
       if (link.status === status) return { linkId, status };
-      if (link.status === "revoked") throw new ApplicationException(
-        "user_profile_access_revoked",
-        "Revoked access cannot be restored",
-        HttpStatus.CONFLICT,
-      );
+      if (link.status === "revoked")
+        throw new ApplicationException(
+          "user_profile_access_revoked",
+          "Revoked access cannot be restored",
+          HttpStatus.CONFLICT,
+        );
       if (status === "active") {
         await this.assertBusinessRecord(transaction, link.profileType, link.entityId, true);
         await this.assertAccountEligible(transaction, link.profileType, link.accountId);
@@ -587,11 +637,20 @@ export class UserBusinessAccessService {
           updated_by_account_id=${actorId}::uuid,updated_at=now(),version=version+1
         where id=${linkId}::uuid and company_id=${companyId}::uuid
       `.execute(transaction);
-      if (status !== "active") await sql`
+      if (status !== "active")
+        await sql`
         update account_sessions set revoked_at=coalesce(revoked_at,now())
          where company_id=${companyId}::uuid and profile_link_id=${linkId}::uuid and revoked_at is null
       `.execute(transaction);
-      await this.audit(transaction,companyId,actorId,`user_profile.${status}`,linkId,correlationId,{ reason });
+      await this.audit(
+        transaction,
+        companyId,
+        actorId,
+        `user_profile.${status}`,
+        linkId,
+        correlationId,
+        { reason },
+      );
       return { linkId, status };
     });
   }
@@ -604,19 +663,28 @@ export class UserBusinessAccessService {
         select id from user_business_links
          where id=${linkId}::uuid and company_id=${companyId}::uuid for update
       `.execute(transaction);
-      if (!link.rows[0]) throw new ApplicationException(
-        "user_profile_link_not_found",
-        "The profile link was not found",
-        HttpStatus.NOT_FOUND,
-      );
+      if (!link.rows[0])
+        throw new ApplicationException(
+          "user_profile_link_not_found",
+          "The profile link was not found",
+          HttpStatus.NOT_FOUND,
+        );
       const changed = await sql<{ id: string }>`
         update account_sessions set revoked_at=coalesce(revoked_at,now())
          where company_id=${companyId}::uuid and profile_link_id=${linkId}::uuid
            and revoked_at is null returning id
       `.execute(transaction);
-      await this.audit(transaction,companyId,actorId,"user_profile.sessions_revoked",linkId,correlationId,{
-        count:changed.rows.length,
-      });
+      await this.audit(
+        transaction,
+        companyId,
+        actorId,
+        "user_profile.sessions_revoked",
+        linkId,
+        correlationId,
+        {
+          count: changed.rows.length,
+        },
+      );
       return { revokedSessions: changed.rows.length };
     });
   }
@@ -641,19 +709,20 @@ export class UserBusinessAccessService {
           },
         );
       }
-      if (correlationId) await this.audit(
-        transaction,
-        companyId,
-        actorId,
-        "user_profile.legacy_previewed",
-        actorId,
-        correlationId,
-        {
-          candidateCount: preview.candidates.length,
-          classificationCounts: preview.classificationCounts,
-          previewIdentity: preview.previewIdentity,
-        },
-      );
+      if (correlationId)
+        await this.audit(
+          transaction,
+          companyId,
+          actorId,
+          "user_profile.legacy_previewed",
+          actorId,
+          correlationId,
+          {
+            candidateCount: preview.candidates.length,
+            classificationCounts: preview.classificationCounts,
+            previewIdentity: preview.previewIdentity,
+          },
+        );
       return preview;
     });
   }
@@ -672,9 +741,14 @@ export class UserBusinessAccessService {
         `A legacy synchronization batch cannot exceed ${legacySyncMaximum} candidates`,
         HttpStatus.BAD_REQUEST,
       );
-      await this.auditRejected("user_profile.legacy_synchronization_blocked",correlationId,{
-        candidateCount:selected.length,
-      },error);
+      await this.auditRejected(
+        "user_profile.legacy_synchronization_blocked",
+        correlationId,
+        {
+          candidateCount: selected.length,
+        },
+        error,
+      );
       throw error;
     }
     const payload = {
@@ -686,135 +760,171 @@ export class UserBusinessAccessService {
     const operationReference = createHash("sha256")
       .update(`${companyId}:legacy-sync:${idempotencyKey?.trim() ?? ""}`)
       .digest("hex");
-    await this.transactions.execute((transaction) => this.audit(
-      transaction,companyId,actorId,"user_profile.legacy_synchronization_started",
-      actorId,correlationId,{ candidateCount:selected.length,previewIdentity:input.previewIdentity },
-    ));
+    await this.transactions.execute((transaction) =>
+      this.audit(
+        transaction,
+        companyId,
+        actorId,
+        "user_profile.legacy_synchronization_started",
+        actorId,
+        correlationId,
+        { candidateCount: selected.length, previewIdentity: input.previewIdentity },
+      ),
+    );
     try {
       return await this.transactions.execute(async (transaction) => {
         const replay = await this.reserveIdempotency<Record<string, unknown>>(
-        transaction,
-        "user_business_access.legacy_sync",
-        idempotencyKey,
-        payload,
-      );
+          transaction,
+          "user_business_access.legacy_sync",
+          idempotencyKey,
+          payload,
+        );
         if (replay !== undefined) {
-          await this.audit(transaction,companyId,actorId,"user_profile.idempotent_replay",
-            actorId,correlationId,{ operation:"legacy_sync",previewIdentity:input.previewIdentity });
+          await this.audit(
+            transaction,
+            companyId,
+            actorId,
+            "user_profile.idempotent_replay",
+            actorId,
+            correlationId,
+            { operation: "legacy_sync", previewIdentity: input.previewIdentity },
+          );
           return replay;
         }
 
-      const preview = await this.buildLegacyPreview(transaction);
-      if (preview.previewIdentity !== input.previewIdentity) {
-        throw new ApplicationException(
-          "legacy_sync_preview_stale",
-          "The legacy-link preview is stale. Refresh the preview before synchronizing.",
-          HttpStatus.CONFLICT,
-        );
-      }
-      const candidates = selected.map((candidateId) => {
-        const candidate = preview.candidates.find((item) => item.candidateId === candidateId);
-        if (candidate === undefined) throw new ApplicationException(
-          "legacy_sync_candidate_not_found",
-          "A selected legacy-link candidate is no longer available",
-          HttpStatus.CONFLICT,
-        );
-        if (!candidate.eligible && !candidate.classifications.includes("already_synchronized")) {
+        const preview = await this.buildLegacyPreview(transaction);
+        if (preview.previewIdentity !== input.previewIdentity) {
           throw new ApplicationException(
-            "legacy_sync_candidate_ineligible",
-            "Only eligible legacy-link candidates may be synchronized",
+            "legacy_sync_preview_stale",
+            "The legacy-link preview is stale. Refresh the preview before synchronizing.",
             HttpStatus.CONFLICT,
-            candidate.classifications,
           );
         }
-        return candidate;
-      });
-
-      const lockOrder = candidates
-        .filter((candidate) => candidate.eligible)
-        .sort((left, right) =>
-          `${left.profileType}:${left.profileId}:${left.accountId}`.localeCompare(
-            `${right.profileType}:${right.profileId}:${right.accountId}`,
-          ),
-        );
-      let created = 0;
-      let existing = 0;
-      const results: Record<string, unknown>[] = [];
-      for (const candidate of lockOrder) {
-        await this.assertBusinessRecord(transaction, candidate.profileType, candidate.profileId, true);
-        await this.assertAccountEligible(transaction, candidate.profileType, candidate.accountId!);
-        const result = await this.insertLink(
-          transaction,
-          candidate.profileType,
-          candidate.profileId,
-          candidate.accountId!,
-          actorId,
-        );
-        if (result.created) created += 1;
-        else existing += 1;
-        results.push({ candidateId: candidate.candidateId, ...result });
-      }
-      for (const candidate of candidates.filter((item) =>
-        item.classifications.includes("already_synchronized"),
-      )) {
-        results.push({
-          candidateId: candidate.candidateId,
-          created: false,
-          status: "already_synchronized",
+        const candidates = selected.map((candidateId) => {
+          const candidate = preview.candidates.find((item) => item.candidateId === candidateId);
+          if (candidate === undefined)
+            throw new ApplicationException(
+              "legacy_sync_candidate_not_found",
+              "A selected legacy-link candidate is no longer available",
+              HttpStatus.CONFLICT,
+            );
+          if (!candidate.eligible && !candidate.classifications.includes("already_synchronized")) {
+            throw new ApplicationException(
+              "legacy_sync_candidate_ineligible",
+              "Only eligible legacy-link candidates may be synchronized",
+              HttpStatus.CONFLICT,
+              candidate.classifications,
+            );
+          }
+          return candidate;
         });
-      }
-      existing += candidates.filter((candidate) =>
-        candidate.classifications.includes("already_synchronized"),
-      ).length;
-      const response = {
-        actorId,
-        companyId,
-        completedAt: new Date().toISOString(),
-        conflictCount: 0,
-        created,
-        existing,
-        failedCount: 0,
-        operationReference,
-        previewIdentity: input.previewIdentity,
-        results,
-        selectedCount: candidates.length,
-        skippedCount: 0,
-        startedAt,
-        synchronizationMode: "selected_atomic_batch",
-        total: candidates.length,
-      };
-      await this.audit(
-        transaction,
-        companyId,
-        actorId,
-        "user_profile.legacy_synchronized",
-        actorId,
-        correlationId,
-        {
-          candidateIds: selected,
+
+        const lockOrder = candidates
+          .filter((candidate) => candidate.eligible)
+          .sort((left, right) =>
+            `${left.profileType}:${left.profileId}:${left.accountId}`.localeCompare(
+              `${right.profileType}:${right.profileId}:${right.accountId}`,
+            ),
+          );
+        let created = 0;
+        let existing = 0;
+        const results: Record<string, unknown>[] = [];
+        for (const candidate of lockOrder) {
+          await this.assertBusinessRecord(
+            transaction,
+            candidate.profileType,
+            candidate.profileId,
+            true,
+          );
+          await this.assertAccountEligible(
+            transaction,
+            candidate.profileType,
+            candidate.accountId!,
+          );
+          const result = await this.insertLink(
+            transaction,
+            candidate.profileType,
+            candidate.profileId,
+            candidate.accountId!,
+            actorId,
+          );
+          if (result.created) created += 1;
+          else existing += 1;
+          results.push({ candidateId: candidate.candidateId, ...result });
+        }
+        for (const candidate of candidates.filter((item) =>
+          item.classifications.includes("already_synchronized"),
+        )) {
+          results.push({
+            candidateId: candidate.candidateId,
+            created: false,
+            status: "already_synchronized",
+          });
+        }
+        existing += candidates.filter((candidate) =>
+          candidate.classifications.includes("already_synchronized"),
+        ).length;
+        const response = {
+          actorId,
+          companyId,
+          completedAt: new Date().toISOString(),
+          conflictCount: 0,
           created,
           existing,
+          failedCount: 0,
+          operationReference,
           previewIdentity: input.previewIdentity,
+          results,
+          selectedCount: candidates.length,
+          skippedCount: 0,
+          startedAt,
+          synchronizationMode: "selected_atomic_batch",
           total: candidates.length,
-        },
-      );
-      await this.completeIdempotency(
-        transaction,
-        "user_business_access.legacy_sync",
-        idempotencyKey!,
-        actorId,
-        "legacy_business_link_sync",
-        response,
-      );
+        };
+        await this.audit(
+          transaction,
+          companyId,
+          actorId,
+          "user_profile.legacy_synchronized",
+          actorId,
+          correlationId,
+          {
+            candidateIds: selected,
+            created,
+            existing,
+            previewIdentity: input.previewIdentity,
+            total: candidates.length,
+          },
+        );
+        await this.completeIdempotency(
+          transaction,
+          "user_business_access.legacy_sync",
+          idempotencyKey!,
+          actorId,
+          "legacy_business_link_sync",
+          response,
+        );
         return response;
       });
     } catch (error) {
-      await this.auditRejected("user_profile.legacy_synchronization_blocked",correlationId,{
-        candidateCount:selected.length,previewIdentity:input.previewIdentity,
-      },error);
-      await this.auditRejected("user_profile.legacy_synchronization_rolled_back",correlationId,{
-        candidateCount:selected.length,previewIdentity:input.previewIdentity,
-      },error);
+      await this.auditRejected(
+        "user_profile.legacy_synchronization_blocked",
+        correlationId,
+        {
+          candidateCount: selected.length,
+          previewIdentity: input.previewIdentity,
+        },
+        error,
+      );
+      await this.auditRejected(
+        "user_profile.legacy_synchronization_rolled_back",
+        correlationId,
+        {
+          candidateCount: selected.length,
+          previewIdentity: input.previewIdentity,
+        },
+        error,
+      );
       throw error;
     }
   }
@@ -864,44 +974,56 @@ export class UserBusinessAccessService {
     const candidates = source.rows.map((row): ClassifiedLegacyCandidate => {
       const classifications: string[] = [];
       const expectedKind = accountKindByProfile[row.profileType];
-      const exact = links.rows.some((link) =>
-        link.accountId === row.accountId
-        && link.entityId === row.profileId
-        && link.profileType === row.profileType,
+      const exact = links.rows.some(
+        (link) =>
+          link.accountId === row.accountId &&
+          link.entityId === row.profileId &&
+          link.profileType === row.profileType,
       );
-      const profileConflict = row.profileType !== "trader" && links.rows.some((link) =>
-        link.entityId === row.profileId
-        && link.profileType === row.profileType
-        && link.accountId !== row.accountId,
+      const profileConflict =
+        row.profileType !== "trader" &&
+        links.rows.some(
+          (link) =>
+            link.entityId === row.profileId &&
+            link.profileType === row.profileType &&
+            link.accountId !== row.accountId,
+        );
+      const accountConflict = links.rows.some(
+        (link) =>
+          link.accountId === row.accountId &&
+          link.profileType === row.profileType &&
+          link.entityId !== row.profileId,
       );
-      const accountConflict = links.rows.some((link) =>
-        link.accountId === row.accountId
-        && link.profileType === row.profileType
-        && link.entityId !== row.profileId,
-      );
-      const duplicateLegacyAccount = row.accountId !== null && source.rows.some((other) =>
-        other !== row
-        && other.accountId === row.accountId
-        && other.profileType === row.profileType
-        && other.profileId !== row.profileId,
-      );
+      const duplicateLegacyAccount =
+        row.accountId !== null &&
+        source.rows.some(
+          (other) =>
+            other !== row &&
+            other.accountId === row.accountId &&
+            other.profileType === row.profileType &&
+            other.profileId !== row.profileId,
+        );
       if (!row.legacyReference) classifications.push("invalid_legacy_reference");
       else if (!row.accountId) classifications.push("missing_user");
       if (!row.profileId) classifications.push("missing_business_record");
       if (row.accountCompanyId && row.accountCompanyId !== row.sourceCompanyId) {
         classifications.push("cross_company_conflict");
       }
-      if (row.accountKind && row.accountKind !== expectedKind) classifications.push("account_kind_conflict");
+      if (row.accountKind && row.accountKind !== expectedKind)
+        classifications.push("account_kind_conflict");
       if (!row.businessActive) classifications.push("inactive_business_record");
-      if (row.accountStatus && row.accountStatus !== "active") classifications.push("disabled_user");
+      if (row.accountStatus && row.accountStatus !== "active")
+        classifications.push("disabled_user");
       if (exact) classifications.push("already_synchronized");
       if (profileConflict) classifications.push(`${row.profileType}_link_conflict`);
       if (accountConflict) {
-        classifications.push(row.profileType === "employee" ? "duplicate" : `${row.profileType}_link_conflict`);
+        classifications.push(
+          row.profileType === "employee" ? "duplicate" : `${row.profileType}_link_conflict`,
+        );
       }
       if (duplicateLegacyAccount) classifications.push("duplicate");
-      const blocking = classifications.filter((classification) =>
-        classification !== "already_synchronized",
+      const blocking = classifications.filter(
+        (classification) => classification !== "already_synchronized",
       );
       if (blocking.length === 0 && !exact) classifications.push("eligible");
       if (blocking.length > 1 || classifications.includes("invalid_legacy_reference")) {
@@ -918,13 +1040,16 @@ export class UserBusinessAccessService {
         companyId: row.sourceCompanyId,
         eligible: classifications.includes("eligible"),
         existingLink: exact,
-        legacySource: row.profileType === "employee"
-          ? "employees.company_user_id"
-          : `${row.profileType}s.account_id`,
+        legacySource:
+          row.profileType === "employee"
+            ? "employees.company_user_id"
+            : `${row.profileType}s.account_id`,
         reason: classifications.join(","),
         requiredAction: classifications.includes("eligible")
           ? "synchronize"
-          : classifications.includes("already_synchronized") ? "none" : "manual_review",
+          : classifications.includes("already_synchronized")
+            ? "none"
+            : "manual_review",
         safeToSynchronize: classifications.includes("eligible"),
         userId: row.accountId,
       };
@@ -944,10 +1069,13 @@ export class UserBusinessAccessService {
     }));
     const classificationCounts = candidates
       .flatMap((candidate) => candidate.classifications)
-      .reduce<Record<string, number>>((counts, classification) => {
-        counts[classification] = (counts[classification] ?? 0) + 1;
-        return counts;
-      }, Object.fromEntries(legacyClassifications.map((classification) => [classification, 0])));
+      .reduce<Record<string, number>>(
+        (counts, classification) => {
+          counts[classification] = (counts[classification] ?? 0) + 1;
+          return counts;
+        },
+        Object.fromEntries(legacyClassifications.map((classification) => [classification, 0])),
+      );
     return {
       candidates,
       classificationCounts,
@@ -965,31 +1093,40 @@ export class UserBusinessAccessService {
     requireActive: boolean,
   ): Promise<void> {
     const { companyId } = this.tenants.current();
-    const result = type === "employee"
-      ? await sql<{ active: boolean }>`
+    const result =
+      type === "employee"
+        ? await sql<{ active: boolean }>`
           select is_active as active from employees
            where id=${entityId}::uuid and company_id=${companyId}::uuid for update
         `.execute(database)
-      : type === "driver"
-        ? await sql<{ active: boolean }>`
+        : type === "driver"
+          ? await sql<{ active: boolean }>`
             select account_status='active' as active from drivers
              where id=${entityId}::uuid and company_id=${companyId}::uuid for update
           `.execute(database)
-        : await sql<{ active: boolean }>`
+          : await sql<{ active: boolean }>`
             select account_status='active' as active from traders
              where id=${entityId}::uuid and company_id=${companyId}::uuid for update
           `.execute(database);
     if (!result.rows[0]) {
-      const code = type === "employee" ? "employee_system_access_not_found"
-        : type === "driver" ? "driver_system_access_not_found"
-          : "trader_portal_user_not_found";
-      throw new ApplicationException(code, "The business profile was not found", HttpStatus.NOT_FOUND);
+      const code =
+        type === "employee"
+          ? "employee_system_access_not_found"
+          : type === "driver"
+            ? "driver_system_access_not_found"
+            : "trader_portal_user_not_found";
+      throw new ApplicationException(
+        code,
+        "The business profile was not found",
+        HttpStatus.NOT_FOUND,
+      );
     }
-    if (requireActive && !result.rows[0].active) throw new ApplicationException(
-      "inactive_business_record",
-      "The business record must be active before User access can be changed",
-      HttpStatus.CONFLICT,
-    );
+    if (requireActive && !result.rows[0].active)
+      throw new ApplicationException(
+        "inactive_business_record",
+        "The business record must be active before User access can be changed",
+        HttpStatus.CONFLICT,
+      );
   }
 
   private async assertAccountEligible(
@@ -1002,22 +1139,28 @@ export class UserBusinessAccessService {
       select account_kind as "accountKind",status from accounts
        where id=${accountId}::uuid and company_id=${companyId}::uuid for update
     `.execute(database);
-    if (!account.rows[0]) throw new ApplicationException(
-      "user_profile_company_mismatch",
-      "The User and business profile must belong to the same Company",
-      HttpStatus.CONFLICT,
-    );
-    if (account.rows[0].accountKind !== accountKindByProfile[type]) throw new ApplicationException(
-      type === "employee" ? "employee_account_kind_required"
-        : type === "driver" ? "driver_account_kind_required" : "trader_account_kind_required",
-      `A ${type} profile requires a ${accountKindByProfile[type]} account`,
-      HttpStatus.CONFLICT,
-    );
-    if (account.rows[0].status !== "active") throw new ApplicationException(
-      `user_not_eligible_for_${type}_link`,
-      "The User account must be active before it can be linked",
-      HttpStatus.CONFLICT,
-    );
+    if (!account.rows[0])
+      throw new ApplicationException(
+        "user_profile_company_mismatch",
+        "The User and business profile must belong to the same Company",
+        HttpStatus.CONFLICT,
+      );
+    if (account.rows[0].accountKind !== accountKindByProfile[type])
+      throw new ApplicationException(
+        type === "employee"
+          ? "employee_account_kind_required"
+          : type === "driver"
+            ? "driver_account_kind_required"
+            : "trader_account_kind_required",
+        `A ${type} profile requires a ${accountKindByProfile[type]} account`,
+        HttpStatus.CONFLICT,
+      );
+    if (account.rows[0].status !== "active")
+      throw new ApplicationException(
+        `user_not_eligible_for_${type}_link`,
+        "The User account must be active before it can be linked",
+        HttpStatus.CONFLICT,
+      );
   }
 
   private async insertLink(
@@ -1044,11 +1187,12 @@ export class UserBusinessAccessService {
          and (entity_id=${entityId}::uuid or account_id=${accountId}::uuid)
        order by id for update
     `.execute(database);
-    if (type !== "trader" && occupied.rows.some((row) => row.entityId === entityId)) throw new ApplicationException(
-      "user_profile_link_exists",
-      `This ${type} already has an active User link`,
-      HttpStatus.CONFLICT,
-    );
+    if (type !== "trader" && occupied.rows.some((row) => row.entityId === entityId))
+      throw new ApplicationException(
+        "user_profile_link_exists",
+        `This ${type} already has an active User link`,
+        HttpStatus.CONFLICT,
+      );
     if (type !== "employee" && occupied.rows.some((row) => row.accountId === accountId)) {
       throw new ApplicationException(
         "user_profile_link_conflict",
@@ -1080,30 +1224,41 @@ export class UserBusinessAccessService {
         select 1 from accounts where company_id=${companyId}::uuid
           and lower(username)=lower(${input.username})
       ) as username,
-      ${input.email === null ? sql`false` : sql`exists(
+      ${
+        input.email === null
+          ? sql`false`
+          : sql`exists(
         select 1 from accounts where company_id=${companyId}::uuid
           and lower(email)=lower(${input.email})
-      )`} as email,
-      ${input.mobileNumber === null ? sql`false` : sql`exists(
+      )`
+      } as email,
+      ${
+        input.mobileNumber === null
+          ? sql`false`
+          : sql`exists(
         select 1 from accounts where company_id=${companyId}::uuid
           and mobile_number=${input.mobileNumber}
-      )`} as mobile
+      )`
+      } as mobile
     `.execute(database);
-    if (conflict.rows[0]?.username) throw new ApplicationException(
-      "user_username_exists",
-      "This username is already in use",
-      HttpStatus.CONFLICT,
-    );
-    if (conflict.rows[0]?.email) throw new ApplicationException(
-      "user_email_exists",
-      "This email address is already in use",
-      HttpStatus.CONFLICT,
-    );
-    if (conflict.rows[0]?.mobile) throw new ApplicationException(
-      "user_mobile_exists",
-      "This mobile number is already in use",
-      HttpStatus.CONFLICT,
-    );
+    if (conflict.rows[0]?.username)
+      throw new ApplicationException(
+        "user_username_exists",
+        "This username is already in use",
+        HttpStatus.CONFLICT,
+      );
+    if (conflict.rows[0]?.email)
+      throw new ApplicationException(
+        "user_email_exists",
+        "This email address is already in use",
+        HttpStatus.CONFLICT,
+      );
+    if (conflict.rows[0]?.mobile)
+      throw new ApplicationException(
+        "user_mobile_exists",
+        "This mobile number is already in use",
+        HttpStatus.CONFLICT,
+      );
   }
 
   private async availableOptionalEmail(
@@ -1156,11 +1311,12 @@ export class UserBusinessAccessService {
       select id from roles where company_id=${companyId}::uuid and is_active
         and id=any(${roleIds}::uuid[]) for update
     `.execute(database);
-    if (roles.rows.length !== roleIds.length) throw new ApplicationException(
-      "company_user_role_invalid",
-      "One or more selected roles are not active in this Company",
-      HttpStatus.CONFLICT,
-    );
+    if (roles.rows.length !== roleIds.length)
+      throw new ApplicationException(
+        "company_user_role_invalid",
+        "One or more selected roles are not active in this Company",
+        HttpStatus.CONFLICT,
+      );
   }
 
   private async lockCompany(database: DatabaseExecutor, companyId: string): Promise<void> {
@@ -1175,11 +1331,12 @@ export class UserBusinessAccessService {
   ): Promise<T | undefined> {
     const { companyId } = this.tenants.current();
     const key = idempotencyKey?.trim() ?? "";
-    if (!idempotencyKeyPattern.test(key)) throw new ApplicationException(
-      "user_access_idempotency_key_required",
-      "A valid idempotency key is required",
-      HttpStatus.BAD_REQUEST,
-    );
+    if (!idempotencyKeyPattern.test(key))
+      throw new ApplicationException(
+        "user_access_idempotency_key_required",
+        "A valid idempotency key is required",
+        HttpStatus.BAD_REQUEST,
+      );
     const requestHash = createHash("sha256").update(canonicalJson(payload)).digest("hex");
     const inserted = await sql<{ id: string }>`
       insert into idempotency_records(
@@ -1189,23 +1346,29 @@ export class UserBusinessAccessService {
       ) on conflict(company_id,operation,idempotency_key) do nothing returning id
     `.execute(database);
     if (inserted.rows[0]) return undefined;
-    const existing = await sql<{ requestHash: string; resourceId: string | null; response: T | null }>`
+    const existing = await sql<{
+      requestHash: string;
+      resourceId: string | null;
+      response: T | null;
+    }>`
       select request_hash as "requestHash",resource_id as "resourceId",response_body as response
         from idempotency_records
        where company_id=${companyId}::uuid and operation=${operation}
          and idempotency_key=${key} for update
     `.execute(database);
     const record = existing.rows[0];
-    if (!record || record.requestHash !== requestHash) throw new ApplicationException(
-      "user_access_idempotency_payload_mismatch",
-      "This idempotency key was already used with different User Access details",
-      HttpStatus.CONFLICT,
-    );
-    if (!record.resourceId || record.response === null) throw new ApplicationException(
-      "user_access_operation_in_progress",
-      "This User Access operation is already being processed",
-      HttpStatus.CONFLICT,
-    );
+    if (!record || record.requestHash !== requestHash)
+      throw new ApplicationException(
+        "user_access_idempotency_payload_mismatch",
+        "This idempotency key was already used with different User Access details",
+        HttpStatus.CONFLICT,
+      );
+    if (!record.resourceId || record.response === null)
+      throw new ApplicationException(
+        "user_access_operation_in_progress",
+        "This User Access operation is already being processed",
+        HttpStatus.CONFLICT,
+      );
     return record.response;
   }
 
@@ -1234,36 +1397,42 @@ export class UserBusinessAccessService {
       throw error;
     }
     const constraint = databaseError.constraint ?? "";
-    if (constraint.includes("account_kind")) return new ApplicationException(
-      "user_account_kind_conflict",
-      `A ${type} profile requires a ${accountKindByProfile[type]} account`,
-      HttpStatus.CONFLICT,
-    );
-    if (constraint.includes("username")) return new ApplicationException(
-      "user_username_exists",
-      "This username is already in use",
-      HttpStatus.CONFLICT,
-    );
-    if (constraint.includes("email")) return new ApplicationException(
-      "user_email_exists",
-      "This email address is already in use",
-      HttpStatus.CONFLICT,
-    );
-    if (constraint.includes("mobile")) return new ApplicationException(
-      "user_mobile_exists",
-      "This mobile number is already in use",
-      HttpStatus.CONFLICT,
-    );
-    if (constraint.includes("account_active")) return new ApplicationException(
-      "user_profile_link_conflict",
-      `This ${type} User is already linked`,
-      HttpStatus.CONFLICT,
-    );
-    if (constraint.includes("active_unique")) return new ApplicationException(
-      "user_profile_link_exists",
-      `This ${type} already has an active User link`,
-      HttpStatus.CONFLICT,
-    );
+    if (constraint.includes("account_kind"))
+      return new ApplicationException(
+        "user_account_kind_conflict",
+        `A ${type} profile requires a ${accountKindByProfile[type]} account`,
+        HttpStatus.CONFLICT,
+      );
+    if (constraint.includes("username"))
+      return new ApplicationException(
+        "user_username_exists",
+        "This username is already in use",
+        HttpStatus.CONFLICT,
+      );
+    if (constraint.includes("email"))
+      return new ApplicationException(
+        "user_email_exists",
+        "This email address is already in use",
+        HttpStatus.CONFLICT,
+      );
+    if (constraint.includes("mobile"))
+      return new ApplicationException(
+        "user_mobile_exists",
+        "This mobile number is already in use",
+        HttpStatus.CONFLICT,
+      );
+    if (constraint.includes("account_active"))
+      return new ApplicationException(
+        "user_profile_link_conflict",
+        `This ${type} User is already linked`,
+        HttpStatus.CONFLICT,
+      );
+    if (constraint.includes("active_unique"))
+      return new ApplicationException(
+        "user_profile_link_exists",
+        `This ${type} already has an active User link`,
+        HttpStatus.CONFLICT,
+      );
     return new ApplicationException(
       "user_profile_link_conflict",
       "The User Access operation conflicts with current Company data",
@@ -1299,19 +1468,17 @@ export class UserBusinessAccessService {
   ): Promise<void> {
     const { companyId } = this.tenants.current();
     const actorId = this.identities.current().identityId;
-    const failure = error instanceof ApplicationException
-      ? { errorCode: error.errorCode, statusCode: error.getStatus() }
-      : { errorCode: "unexpected_error", statusCode: 500 };
+    const failure =
+      error instanceof ApplicationException
+        ? { errorCode: error.errorCode, statusCode: error.getStatus() }
+        : { errorCode: "unexpected_error", statusCode: 500 };
     try {
-      await this.transactions.execute((transaction) => this.audit(
-        transaction,
-        companyId,
-        actorId,
-        action,
-        actorId,
-        correlationId,
-        { ...metadata, ...failure },
-      ));
+      await this.transactions.execute((transaction) =>
+        this.audit(transaction, companyId, actorId, action, actorId, correlationId, {
+          ...metadata,
+          ...failure,
+        }),
+      );
     } catch {
       // A rejected business operation must retain its original safe error even if
       // the secondary security audit channel is temporarily unavailable.

@@ -22,6 +22,13 @@ import { type TenantContext, TenantContextAccessor } from "../tenancy/tenant-con
 import { DriverCashReconciliationService } from "./driver-cash-reconciliation.service.js";
 import { DriverCollectionPdfService } from "./driver-collection-pdf.service.js";
 import { OperationsHistoryWriter } from "./operations-history.writer.js";
+import { BusinessDayService } from "../company-configuration/business-day.service.js";
+import { ReportDateModeService } from "../company-configuration/report-date-mode.js";
+import {
+  createBusinessDayServiceStub,
+  createCalendarDateReportModeServiceStub,
+} from "../test/business-day-stubs.js";
+import { OutsourcedDriverFeeService } from "../payroll/outsourced-driver-fee.service.js";
 import { OrdersWorkflowService } from "./orders-workflow.service.js";
 
 const runDatabaseTests = process.env.RUN_HISTORY_DATABASE === "true";
@@ -94,6 +101,7 @@ describe.skipIf(!runDatabaseTests)("OperationsHistoryWriter consumers", () => {
           tenants as unknown as TenantContextAccessor,
           identities as unknown as IdentityContextAccessor,
           history,
+          undefined as never,
         );
 
         const makeCompany = async (label: string) => {
@@ -185,7 +193,8 @@ describe.skipIf(!runDatabaseTests)("OperationsHistoryWriter consumers", () => {
               trader_gross_payable, trader_paid_service_fee, trader_deductions,
               trader_charges, trader_adjustments, trader_net_payable,
               delivery_status, driver_reconciliation_status, trader_settlement_status,
-              pricing_provenance_status, final_service_fee_snapshot, customer_provenance_status
+              pricing_provenance_status, final_service_fee_snapshot, customer_provenance_status,
+              service_fee_override_reason
             ) values (
               ${orderId}::uuid, ${company.companyId}::uuid, ${`HIS-${suffix}`}, current_date,
               ${company.traderId}::uuid, ${company.areaId}::uuid, ${company.accountId}::uuid,
@@ -195,7 +204,8 @@ describe.skipIf(!runDatabaseTests)("OperationsHistoryWriter consumers", () => {
               ${options.deliveryStatus ?? "new"},
               ${options.reconciliationStatus ?? "not_applicable"},
               ${options.settlementStatus ?? "not_eligible"},
-              'legacy_unattributed', 0, 'legacy_unattributed'
+              'legacy_unattributed', 0, 'legacy_unattributed',
+              'Configured Trader/Area price is zero'
             )
           `.execute(transaction);
           return orderId;
@@ -554,6 +564,31 @@ describe.skipIf(!runDatabaseTests)("OperationsHistoryWriter consumers", () => {
         OrdersWorkflowService,
         CompanyProfileService,
         { provide: DriverCollectionPdfService, useValue: {} },
+        // Both consumers below gained an OutsourcedDriverFeeService dependency
+        // after this suite was written, so the container could no longer build
+        // them. Provided as a stub, not mocked over: the services under test
+        // remain the real classes, which is what this test asserts about.
+        // Calendar/business-day collaborators, using the repository's own
+        // canonical stubs rather than ad hoc objects.
+        { provide: ReportDateModeService, useValue: createCalendarDateReportModeServiceStub() },
+        { provide: BusinessDayService, useValue: createBusinessDayServiceStub() },
+        {
+          provide: OutsourcedDriverFeeService,
+          useValue: {
+            collectionOffsetProposal: () =>
+              Promise.resolve({
+                allocations: [],
+                eligibleAccrualCount: 0,
+                oldestFirstProposal: [],
+                remainingDriverOutstanding: "0.00",
+                requestedOffset: "0.00",
+                safeMaximumOffset: "0.00",
+                totalOutstanding: "0.00",
+              }),
+            confirmCollectionOffset: () => Promise.resolve(null),
+            reverseCollectionOffset: () => Promise.resolve(null),
+          },
+        },
         DriverCashReconciliationService,
       ],
     }).compile();

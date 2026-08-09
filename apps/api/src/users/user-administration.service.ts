@@ -193,7 +193,7 @@ export class UserAdministrationService {
       ),
       this.sessions(accountId),
       this.auditHistory(accountId, 1, 50),
-      sql<Record<string,unknown>>`
+      sql<Record<string, unknown>>`
         select l.id,l.entity_type as "profileType",l.entity_id as "profileId",
           l.access_status as "accessStatus",l.created_at as "createdAt",l.updated_at as "updatedAt",
           coalesce(e.employee_number,d.code,t.code) as code,
@@ -378,7 +378,8 @@ export class UserAdministrationService {
         ...(input.email === undefined ? {} : { email: input.email }),
         ...(input.mobileNumber == null ? {} : { mobileNumber: input.mobileNumber }),
       });
-      if (user.companyUserId !== null) await sql`
+      if (user.companyUserId !== null)
+        await sql`
         update company_users
            set display_name=coalesce(${input.displayName ?? null},display_name),
                updated_at=now(),version=version+1
@@ -420,11 +421,12 @@ export class UserAdministrationService {
     await this.transactions.execute(async (transaction) => {
       await this.lockCompany(transaction, companyId);
       const account = await this.lockCompanyUser(transaction, companyId, accountId);
-      if (account.accountKind !== "company_user") throw new ApplicationException(
-        "account_kind_roles_not_supported",
-        "Roles can only be assigned to Company User accounts",
-        HttpStatus.CONFLICT,
-      );
+      if (account.accountKind !== "company_user")
+        throw new ApplicationException(
+          "account_kind_roles_not_supported",
+          "Roles can only be assigned to Company User accounts",
+          HttpStatus.CONFLICT,
+        );
       await this.assertRoles(transaction, companyId, requested, account.status === "active");
       const current = await sql<{
         roleId: string;
@@ -766,9 +768,7 @@ export class UserAdministrationService {
         from accounts a
         left join company_users cu on cu.account_id=a.id and cu.company_id=a.company_id
        where a.id=${accountId}::uuid and a.company_id=${companyId}::uuid
-         and a.account_kind<>'platform_user' for update of a`.execute(
-      tx,
-    );
+         and a.account_kind<>'platform_user' for update of a`.execute(tx);
     const row = result.rows[0];
     if (!row) throw this.notFound();
     return row;

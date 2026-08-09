@@ -85,7 +85,9 @@ function createApi(areas: readonly CompanyArea[] = [jumeirah, sharjahArea]) {
       const items = areas
         .filter((item) => item.emirateId === decodeURIComponent(emirateId))
         .filter((item) => !activeOnly || item.isActive)
-        .filter((item) => search === "" || item.nameEn.toLowerCase().includes(search.toLowerCase()));
+        .filter(
+          (item) => search === "" || item.nameEn.toLowerCase().includes(search.toLowerCase()),
+        );
       return Promise.resolve({ hasMore: false, items, total: items.length });
     }
     return Promise.resolve({ hasMore: false, items: [], total: 0 });
@@ -195,7 +197,11 @@ describe("AreaSelector", () => {
   });
 
   it("surfaces an error when the Emirate master cannot be loaded", async () => {
-    const api = { get: vi.fn().mockRejectedValue(new Error("offline")), patch: vi.fn(), post: vi.fn() };
+    const api = {
+      get: vi.fn().mockRejectedValue(new Error("offline")),
+      patch: vi.fn(),
+      post: vi.fn(),
+    };
     render(<Harness api={api as unknown as ApiClient} />);
 
     expect(await screen.findByText("Emirates could not be loaded.")).toBeInTheDocument();

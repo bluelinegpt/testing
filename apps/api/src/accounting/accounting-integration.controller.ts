@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -15,7 +16,7 @@ import {
   RequireAnyPermission,
   RequireIdentityKinds,
 } from "../authentication/authentication.decorators.js";
-import {
+import type {
   AccountingBackfillPreviewDto,
   AccountingEventBulkReprocessDto,
   AccountingEventListQueryDto,
@@ -25,7 +26,28 @@ import {
   AutomaticPostingDisableDto,
 } from "./accounting-integration.dto.js";
 import { AccountingEventQueryService } from "./accounting-event-query.service.js";
+import { AccountingReprocessPrecheckService } from "./accounting-reprocess-precheck.service.js";
 import { AutomaticPostingService } from "./automatic-posting.service.js";
+
+/**
+ * Source entity types the Accounting capture triggers write to
+ * `accounting_events.source_entity_type`. Anything outside this set is not a
+ * record Accounting can be related to.
+ */
+const relatedSourceTypes: readonly string[] = [
+  "cash_bank_movement",
+  "driver_reconciliation",
+  "general_expense",
+  "general_expense_payment",
+  "order",
+  "outsourced_driver_fee_accrual",
+  "outsourced_driver_fee_payment",
+  "payroll_payment",
+  "payroll_period",
+  "trader_collection",
+  "trader_receivable",
+  "trader_settlement",
+];
 
 @ApiTags("accounting-operational-integration")
 @ApiBearerAuth()
@@ -37,6 +59,8 @@ export class AccountingIntegrationController {
     private readonly automaticPosting: AutomaticPostingService,
     @Inject(AccountingEventQueryService)
     private readonly events: AccountingEventQueryService,
+    @Inject(AccountingReprocessPrecheckService)
+    private readonly precheck: AccountingReprocessPrecheckService,
   ) {}
 
   @Get("automatic-posting/status")
@@ -97,13 +121,32 @@ export class AccountingIntegrationController {
   }
 
   @Get("events/:eventId/reprocessing-readiness")
-  @RequireAnyPermission("accounting.view", "accounting.post", "accounting.manage", "users_roles.manage")
-  public reprocessingReadiness(
-    @Param("eventId", new ParseUUIDPipe()) eventId: string,
-  ) {
+  @RequireAnyPermission(
+    "accounting.view",
+    "accounting.post",
+    "accounting.manage",
+    "users_roles.manage",
+  )
+  public reprocessingReadiness(@Param("eventId", new ParseUUIDPipe()) eventId: string) {
     return this.events.reprocessingReadiness(eventId);
   }
 
+  /**
+   * Read-only dry run of the posting pipeline for one Event. POST to match the
+   * sibling reprocess-preview route, but it writes nothing, changes no status
+   * and creates no Journal — safe to call any number of times.
+   */
+  @Post("events/:eventId/reprocess-precheck")
+  @RequireAnyPermission("accounting.post", "accounting.manage", "users_roles.manage")
+  public reprocessPrecheck(@Param("eventId", new ParseUUIDPipe()) eventId: string) {
+    return this.precheck.precheck(eventId);
+  }
+
+  /**
+   * Controlled single-Event reprocess: the existing requeue flow, with the
+   * full precheck re-run inside it as final revalidation. The route and
+   * contract are unchanged and additive (`expectedStatus` is optional).
+   */
   @Post("events/:eventId/reprocess")
   @RequireAnyPermission("accounting.post", "accounting.manage", "users_roles.manage")
   public reprocessEvent(
@@ -111,13 +154,31 @@ export class AccountingIntegrationController {
     @Body() input: AccountingEventReprocessDto,
     @Headers("x-idempotency-key") idempotencyKey?: string,
   ) {
-    return this.events.reprocess(eventId, input, idempotencyKey);
+    return this.precheck.execute(eventId, input, idempotencyKey);
   }
 
   @Get("events/:eventId")
   @RequireAnyPermission("accounting.view", "users_roles.manage")
   public eventDetail(@Param("eventId", new ParseUUIDPipe()) eventId: string) {
     return this.events.detail(eventId);
+  }
+
+  /**
+   * Related Accounting records for one operational record. Read-only; the
+   * source type is validated against the closed set the capture triggers can
+   * write, so an unknown value is rejected rather than silently returning an
+   * empty list that would read as "nothing was posted".
+   */
+  @Get("related/:sourceEntityType/:sourceEntityId")
+  @RequireAnyPermission("accounting.view", "users_roles.manage")
+  public relatedRecords(
+    @Param("sourceEntityType") sourceEntityType: string,
+    @Param("sourceEntityId", new ParseUUIDPipe()) sourceEntityId: string,
+  ) {
+    if (!relatedSourceTypes.includes(sourceEntityType)) {
+      throw new BadRequestException("accounting_related_source_type_invalid");
+    }
+    return this.events.relatedRecords(sourceEntityType, sourceEntityId);
   }
 
   @Get("reconciliation/summary")

@@ -71,14 +71,17 @@ export async function importUaeAreas(
   const file = resolve(process.cwd(), "../../database/seeds/uae-areas.json");
   const seed = JSON.parse(await fileSystem.readFile(file, "utf8")) as readonly SeedArea[];
 
-  const existingRows = await sql<{ emirateId: string; id: string; nameAr: string | null; nameEn: string }>`
+  const existingRows = await sql<{
+    emirateId: string;
+    id: string;
+    nameAr: string | null;
+    nameEn: string;
+  }>`
     select id, emirate_id as "emirateId", name_en as "nameEn", name_ar as "nameAr"
       from areas where company_id = ${companyId}::uuid
   `.execute(database);
   const key = (emirateId: string, nameEn: string) => `${emirateId}::${nameEn.trim().toLowerCase()}`;
-  const existing = new Map(
-    existingRows.rows.map((row) => [key(row.emirateId, row.nameEn), row]),
-  );
+  const existing = new Map(existingRows.rows.map((row) => [key(row.emirateId, row.nameEn), row]));
 
   let created = 0;
   let skippedExisting = 0;

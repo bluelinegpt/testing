@@ -38,7 +38,11 @@ export class AccountPreferencesService {
     `.execute(this.database);
     const row = result.rows[0];
     if (row === undefined) {
-      throw new ApplicationException("account_not_found", "Account not found", HttpStatus.NOT_FOUND);
+      throw new ApplicationException(
+        "account_not_found",
+        "Account not found",
+        HttpStatus.NOT_FOUND,
+      );
     }
     return { textLanguage: row.textLanguage, theme: row.theme };
   }
@@ -78,7 +82,10 @@ export class AccountPreferencesService {
     return this.myPreferences();
   }
 
-  public async updateTheme(theme: AccountTheme, correlationId: string): Promise<AccountPreferences> {
+  public async updateTheme(
+    theme: AccountTheme,
+    correlationId: string,
+  ): Promise<AccountPreferences> {
     const identity = this.identities.current();
     await this.transactions.execute(async (transaction) => {
       const result = await sql<{ id: string }>`

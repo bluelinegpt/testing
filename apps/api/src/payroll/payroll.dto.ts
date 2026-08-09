@@ -106,6 +106,16 @@ export class ConfirmPayrollPaymentDto {
   @IsUUID()
   public readonly periodId!: string;
 
+  /**
+   * The Company CASH account funding this payment.
+   *
+   * Required, and required to be a Cash account: payroll is cash-only, so
+   * there is no bank alternative to offer and no payment method to choose.
+   * Validated server-side against the Company before the payment is written.
+   */
+  @IsUUID()
+  public readonly accountId!: string;
+
   @IsDateString()
   public readonly paymentDate!: string;
 
@@ -130,6 +140,20 @@ export class ConfirmPayrollPaymentDto {
   @IsString()
   @MaxLength(1000)
   public readonly notes?: string;
+
+  /**
+   * Why this payment may take the Cash account below its permitted floor.
+   *
+   * Optional here and mandatory in the backend, which is the only place the
+   * answer can be known: whether an override is needed depends on the balance
+   * at confirmation time and the Company policy in force, neither of which the
+   * client can evaluate. A payment that passes normally never needs this; one
+   * that does not is rejected without it, by BalanceControlService's own rule.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  public readonly balanceOverrideReason?: string;
 
   @IsArray()
   @ArrayMinSize(1)

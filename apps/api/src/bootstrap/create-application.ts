@@ -7,6 +7,7 @@ import helmet from "helmet";
 import { Logger } from "nestjs-pino";
 
 import { AppModule } from "../app.module.js";
+import { CommunicationRealtimeGateway } from "../communication/communication-realtime.gateway.js";
 import type { AppConfiguration } from "../configuration/environment.js";
 import { ApiExceptionFilter } from "../presentation/errors/api-exception.filter.js";
 
@@ -20,6 +21,7 @@ export async function createApplication(): Promise<BluelineApplication> {
   });
   const config = app.get<ConfigService<AppConfiguration, true>>(ConfigService);
   const logger = app.get(Logger);
+  const realtime = app.get(CommunicationRealtimeGateway);
 
   app.useLogger(logger);
   app.enableShutdownHooks();
@@ -32,8 +34,14 @@ export async function createApplication(): Promise<BluelineApplication> {
       limit: `${config.get("app.requestBodyLimitMb", { infer: true })}mb`,
     }),
   );
+  // `credentials` is required for the HttpOnly session cookie to travel on
+  // browser requests. It does NOT widen who may call: `origin` remains the
+  // configured allow-list, and a credentialed request from any other origin is
+  // still refused by the browser. The custom session header is added to the
+  // allowed set because cookie-authenticated mutations must carry it.
   app.enableCors({
-    credentials: false,
+    allowedHeaders: ["Authorization", "Content-Type", "X-Blueline-Session", "X-Idempotency-Key"],
+    credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     origin: config.get("app.corsOrigins", { infer: true }),
   });
@@ -62,6 +70,7 @@ export async function createApplication(): Promise<BluelineApplication> {
   return {
     async listen(): Promise<void> {
       const port = config.get("app.port", { infer: true });
+      realtime.attach(app.getHttpServer());
       await app.listen(port, "0.0.0.0");
       logger.log(`BluelineGPT API listening on port ${port}`);
     },
