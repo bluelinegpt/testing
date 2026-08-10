@@ -116,6 +116,74 @@ describe("OrdersModuleWorkspace", () => {
     expect(onNavigate).toHaveBeenCalledWith("/orders/ORD-000001");
   });
 
+  it("enables Close order and hides Trader settlements for a delivered Free Order", async () => {
+    const freeOrder = {
+      ...order,
+      accountingRequired: false,
+      accountingState: "accounting_event_missing",
+      assignedDriverId: "20000000-0000-4000-8000-000000000001",
+      assignedDriverMobile: "971501234568",
+      assignedDriverName: "Ahmed",
+      codAmount: "0.00",
+      customerAmountDue: "0.00",
+      deliveryStatus: "delivered",
+      driverReconciliationStatus: "not_applicable",
+      id: "10000000-0000-4000-8000-000000000007",
+      orderNumber: "ORD-000007",
+      serialNumber: "7",
+      serviceFee: "0.00",
+      totalDeductions: "0.00",
+      traderNetPayable: "0.00",
+      traderSettlementStatus: "unsettled",
+      workflowGuidance: {
+        completionBlockerCode: null,
+        isFinanciallyComplete: true,
+        nextActionCode: "close_order",
+        nextActionParams: {
+          openDialog: "change_status",
+          orderId: "10000000-0000-4000-8000-000000000007",
+          orderNumber: "ORD-000007",
+          returnTo: "/orders",
+          suggestedStatus: "closed",
+        },
+        nextActionRoute: "/orders",
+        waitingFor: "no_accounting_required",
+        workflowState: "no_accounting_required",
+      },
+    };
+    const api = {
+      get: vi.fn((path: string) => {
+        if (path.startsWith("operations/orders?")) {
+          return Promise.resolve({
+            filteredCount: 1,
+            items: [freeOrder],
+            page: 1,
+            pageSize: 25,
+            totalCount: 1,
+          });
+        }
+        if (path.startsWith("configuration/areas")) {
+          return Promise.resolve({ items: [], page: 1, pageSize: 100, total: 0 });
+        }
+        return Promise.resolve([]);
+      }),
+      post: vi.fn().mockResolvedValue({}),
+    };
+    renderWithRouter(
+      <OrdersModuleWorkspace
+        api={api as unknown as ApiClient}
+        onNavigate={vi.fn()}
+        permissions={["users_roles.manage"]}
+      />,
+    );
+
+    await screen.findByText("7");
+    fireEvent.click(screen.getByRole("button", { name: "Order actions" }));
+
+    expect(screen.queryByRole("button", { name: "Trader settlements" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Close order" })).toBeEnabled();
+  });
+
   it("prints the Driver Shipment Manifest with a clean selected-order payload", async () => {
     const api = {
       get: vi.fn((path: string) => {

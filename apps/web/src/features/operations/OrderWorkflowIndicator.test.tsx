@@ -55,6 +55,20 @@ beforeEach(async () => {
 });
 
 describe("OrderWorkflowIndicator", () => {
+  it("resolves the Close Order action label in English and Arabic", async () => {
+    await i18nInstance.changeLanguage("en");
+    expect(i18nInstance.t("orderWorkflow.action.close_order")).toBe("Close Order");
+    expect(i18nInstance.t("orderWorkflow.action.close_order")).not.toBe(
+      "orderWorkflow.action.close_order",
+    );
+
+    await i18nInstance.changeLanguage("ar");
+    expect(i18nInstance.t("orderWorkflow.action.close_order")).toBe("إغلاق الطلب");
+    expect(i18nInstance.t("orderWorkflow.action.close_order")).not.toBe(
+      "orderWorkflow.action.close_order",
+    );
+  });
+
   it("shows the state on the chip without opening anything", () => {
     setup();
     expect(screen.getByRole("button", { name: /Collect from Driver/i })).toHaveAttribute(

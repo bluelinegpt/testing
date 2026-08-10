@@ -3343,6 +3343,7 @@ const actionTargetStatus: Partial<Record<RowAction, string>> = {
 };
 
 function closeEligible(order: OperationsOrder): boolean {
+  if (order.workflowGuidance?.nextActionCode === "close_order") return true;
   const status = order.deliveryStatus;
   return (
     ["delivered", "returned_to_trader"].includes(status) &&
@@ -3350,6 +3351,11 @@ function closeEligible(order: OperationsOrder): boolean {
     ["money_received_by_trader", "not_eligible"].includes(order.traderSettlementStatus) &&
     (status !== "returned_to_trader" || order.returnStatus === "returned_to_trader")
   );
+}
+
+function traderSettlementActionApplicable(order: OperationsOrder): boolean {
+  if (order.workflowGuidance?.nextActionCode === "close_order") return false;
+  return Number(order.traderNetPayable) > 0 || order.traderSettlementStatus !== "not_eligible";
 }
 
 function availableActions(order: OperationsOrder): readonly RowAction[] {
@@ -3380,13 +3386,20 @@ function availableActions(order: OperationsOrder): readonly RowAction[] {
       case "delivered":
         return [
           ...(cashDone ? [] : (["collectMoney"] as const)),
-          ...(settleDone ? [] : (["moneyOut"] as const)),
+          ...(settleDone || !traderSettlementActionApplicable(order)
+            ? []
+            : (["moneyOut"] as const)),
           "close",
         ];
       case "returned_to_branch":
         return ["returnToTrader"];
       case "returned_to_trader":
-        return [...(settleDone ? [] : (["moneyOut"] as const)), "close"];
+        return [
+          ...(settleDone || !traderSettlementActionApplicable(order)
+            ? []
+            : (["moneyOut"] as const)),
+          "close",
+        ];
       default:
         return [];
     }
