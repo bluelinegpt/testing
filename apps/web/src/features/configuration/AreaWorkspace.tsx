@@ -44,8 +44,10 @@ export function AreaWorkspace({ api }: { api: ApiClient }) {
       const query = new URLSearchParams({
         page: String(page),
         pageSize: String(pageSize),
-        status,
       });
+      // `all` is the API default. Omitting it keeps the request compatible
+      // with older testing deployments while preserving explicit filters.
+      if (status !== "all") query.set("status", status);
       if (search.trim().length > 0) query.set("search", search.trim());
       if (emirateId.length > 0) query.set("emirateId", emirateId);
       setResult(await api.get<AreaPage>(`configuration/areas?${query.toString()}`));
