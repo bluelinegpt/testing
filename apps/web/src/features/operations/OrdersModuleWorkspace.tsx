@@ -116,13 +116,13 @@ interface OrderFilters {
   traderId: string;
 }
 
-interface SelectionPayload extends OrderFilters {
+interface SelectionPayload extends Partial<OrderFilters> {
   excludedOrderIds?: readonly string[];
   orderIds?: readonly string[];
   selectionMode: "filter" | "ids";
 }
 
-const manifestFilterKeys = [
+const bulkSelectionFilterKeys = [
   "areaId",
   "cashStatus",
   "dateFrom",
@@ -141,7 +141,7 @@ type ManifestSelectionPayload = Partial<OrderFilters> & {
   selectionMode: "filter" | "ids";
 };
 
-function manifestSelectionPayload(
+function cleanSelectionPayload(
   filters: OrderFilters,
   allMatching: boolean,
   excludedIds: Set<string>,
@@ -157,10 +157,19 @@ function manifestSelectionPayload(
     excludedOrderIds: [...excludedIds],
     selectionMode: "filter",
   };
-  for (const key of manifestFilterKeys) {
+  for (const key of bulkSelectionFilterKeys) {
     if (filters[key] !== "") Object.assign(payload, { [key]: filters[key] });
   }
   return payload;
+}
+
+function selectionPayload(
+  filters: OrderFilters,
+  allMatching: boolean,
+  excludedIds: Set<string>,
+  selectedIds: Set<string>,
+): SelectionPayload {
+  return cleanSelectionPayload(filters, allMatching, excludedIds, selectedIds);
 }
 
 interface SelectionSummary {
@@ -370,16 +379,11 @@ export function OrdersModuleWorkspace({
   }, [filters]);
 
   const selection = useMemo<SelectionPayload>(
-    () => ({
-      ...filters,
-      ...(allMatching
-        ? { excludedOrderIds: [...excludedIds], selectionMode: "filter" as const }
-        : { orderIds: [...selectedIds], selectionMode: "ids" as const }),
-    }),
+    () => selectionPayload(filters, allMatching, excludedIds, selectedIds),
     [allMatching, excludedIds, filters, selectedIds],
   );
   const manifestSelection = useMemo<ManifestSelectionPayload>(
-    () => manifestSelectionPayload(filters, allMatching, excludedIds, selectedIds),
+    () => cleanSelectionPayload(filters, allMatching, excludedIds, selectedIds),
     [allMatching, excludedIds, filters, selectedIds],
   );
   const selectedCount = allMatching

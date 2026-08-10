@@ -174,6 +174,82 @@ describe("OrdersModuleWorkspace", () => {
     );
   });
 
+  it("previews bulk driver assignment with a clean selected-order payload", async () => {
+    const api = {
+      get: vi.fn((path: string) => {
+        if (path.startsWith("operations/orders?")) {
+          return Promise.resolve({
+            filteredCount: 1,
+            items: [heldOrder],
+            page: 1,
+            pageSize: 25,
+            totalCount: 1,
+          });
+        }
+        if (path.startsWith("operations/drivers")) {
+          return Promise.resolve([
+            {
+              activeOrders: 0,
+              code: "DRV-000006",
+              deliveredOrders: 0,
+              id: "20000000-0000-4000-8000-000000000006",
+              mobileNumber: "971501234569",
+              name: "Kareem",
+              pendingCashOrders: 0,
+              status: "active",
+              type: "employee",
+            },
+          ]);
+        }
+        if (path.startsWith("configuration/areas")) {
+          return Promise.resolve({ items: [], page: 1, pageSize: 100, total: 0 });
+        }
+        return Promise.resolve([]);
+      }),
+      post: vi.fn((path: string) => {
+        if (path === "operations/orders/selection-summary") {
+          return Promise.resolve({
+            eligibleCount: 1,
+            ineligible: [],
+            selectedAmountToCollect: "110.00",
+            selectedCount: 1,
+          });
+        }
+        if (path === "operations/orders/bulk-assign/preview") {
+          return Promise.resolve({
+            eligibleCount: 1,
+            ineligible: [],
+            selectedAmountToCollect: "110.00",
+            selectedCount: 1,
+          });
+        }
+        return Promise.resolve({});
+      }),
+    };
+    renderWithRouter(
+      <OrdersModuleWorkspace
+        api={api as unknown as ApiClient}
+        onNavigate={vi.fn()}
+        permissions={["users_roles.manage"]}
+      />,
+    );
+
+    fireEvent.click(await screen.findByLabelText("Select Order SER-000002"));
+    fireEvent.click(screen.getByRole("button", { name: "Assign driver" }));
+    const dialog = within(await screen.findByRole("dialog", { name: "Assign driver" }));
+    fireEvent.change(dialog.getByLabelText("Driver"), {
+      target: { value: "20000000-0000-4000-8000-000000000006" },
+    });
+
+    await waitFor(() =>
+      expect(api.post).toHaveBeenCalledWith("operations/orders/bulk-assign/preview", {
+        driverIdToAssign: "20000000-0000-4000-8000-000000000006",
+        orderIds: [heldOrder.id],
+        selectionMode: "ids",
+      }),
+    );
+  });
+
   it("drives a new order to Item in branch from the per-row action menu", async () => {
     const api = {
       get: vi.fn((path: string) => {
