@@ -78,11 +78,13 @@ export class AreaListQueryDto {
   public status?: "all" | "active" | "disabled";
 
   @IsOptional()
+  @Transform(({ value }: { value: unknown }) => (value === undefined ? value : Number(value)))
   @IsInt()
   @Min(1)
   public page?: number;
 
   @IsOptional()
+  @Transform(({ value }: { value: unknown }) => (value === undefined ? value : Number(value)))
   @IsInt()
   @IsIn([...areaPageSizes])
   public pageSize?: number;
@@ -110,12 +112,14 @@ export class AreaSearchQueryDto {
   public activeOnly?: boolean;
 
   @IsOptional()
+  @Transform(({ value }: { value: unknown }) => (value === undefined ? value : Number(value)))
   @IsInt()
   @Min(1)
   @Max(50)
   public limit?: number;
 
   @IsOptional()
+  @Transform(({ value }: { value: unknown }) => (value === undefined ? value : Number(value)))
   @IsInt()
   @Min(0)
   public offset?: number;
