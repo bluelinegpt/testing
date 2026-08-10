@@ -122,6 +122,47 @@ interface SelectionPayload extends OrderFilters {
   selectionMode: "filter" | "ids";
 }
 
+const manifestFilterKeys = [
+  "areaId",
+  "cashStatus",
+  "dateFrom",
+  "dateTo",
+  "deliveryStatus",
+  "driverId",
+  "quickView",
+  "search",
+  "settlementStatus",
+  "traderId",
+] as const satisfies readonly (keyof OrderFilters)[];
+
+type ManifestSelectionPayload = Partial<OrderFilters> & {
+  excludedOrderIds?: readonly string[];
+  orderIds?: readonly string[];
+  selectionMode: "filter" | "ids";
+};
+
+function manifestSelectionPayload(
+  filters: OrderFilters,
+  allMatching: boolean,
+  excludedIds: Set<string>,
+  selectedIds: Set<string>,
+): ManifestSelectionPayload {
+  if (!allMatching) {
+    return {
+      orderIds: [...selectedIds],
+      selectionMode: "ids",
+    };
+  }
+  const payload: ManifestSelectionPayload = {
+    excludedOrderIds: [...excludedIds],
+    selectionMode: "filter",
+  };
+  for (const key of manifestFilterKeys) {
+    if (filters[key] !== "") payload[key] = filters[key];
+  }
+  return payload;
+}
+
 interface SelectionSummary {
   eligibleCount: number;
   ineligible: readonly { orderNumber: string; reason: string }[];
@@ -335,6 +376,10 @@ export function OrdersModuleWorkspace({
         ? { excludedOrderIds: [...excludedIds], selectionMode: "filter" as const }
         : { orderIds: [...selectedIds], selectionMode: "ids" as const }),
     }),
+    [allMatching, excludedIds, filters, selectedIds],
+  );
+  const manifestSelection = useMemo<ManifestSelectionPayload>(
+    () => manifestSelectionPayload(filters, allMatching, excludedIds, selectedIds),
     [allMatching, excludedIds, filters, selectedIds],
   );
   const selectedCount = allMatching
@@ -1093,7 +1138,7 @@ export function OrdersModuleWorkspace({
         <DriverShipmentManifestDialog
           api={api}
           onClose={() => setBulkAction(undefined)}
-          selection={selection}
+          selection={manifestSelection}
         />
       ) : null}
     </>
@@ -3325,7 +3370,7 @@ function DriverShipmentManifestDialog({
 }: {
   api: ApiClient;
   onClose: () => void;
-  selection: SelectionPayload;
+  selection: ManifestSelectionPayload;
 }) {
   const { i18n, t } = useTranslation();
   const locale = normalizeLocale(i18n.resolvedLanguage);

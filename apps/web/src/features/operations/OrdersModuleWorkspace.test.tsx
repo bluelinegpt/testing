@@ -119,6 +119,61 @@ describe("OrdersModuleWorkspace", () => {
     expect(onNavigate).toHaveBeenCalledWith("/orders/ORD-000001");
   });
 
+  it("prints the Driver Shipment Manifest with a clean selected-order payload", async () => {
+    const api = {
+      get: vi.fn((path: string) => {
+        if (path.startsWith("operations/orders?")) {
+          return Promise.resolve({
+            filteredCount: 1,
+            items: [heldOrder],
+            page: 1,
+            pageSize: 25,
+            totalCount: 1,
+          });
+        }
+        if (path.startsWith("configuration/areas")) {
+          return Promise.resolve({ items: [], page: 1, pageSize: 100, total: 0 });
+        }
+        return Promise.resolve([]);
+      }),
+      post: vi.fn((path: string) => {
+        if (path === "operations/orders/selection-summary") {
+          return Promise.resolve({
+            eligibleCount: 1,
+            ineligible: [],
+            selectedAmountToCollect: "110.00",
+            selectedCount: 1,
+          });
+        }
+        if (path === "operations/cash/driver-shipment-manifest/data") {
+          return Promise.resolve({
+            header: { driverMobile: "971501234568", driverName: "Ahmed", orderCount: 1 },
+            summary: { totalCod: "100.00", totalOrders: 1, totalPackages: 1 },
+          });
+        }
+        return Promise.resolve({});
+      }),
+    };
+    renderWithRouter(
+      <OrdersModuleWorkspace
+        api={api as unknown as ApiClient}
+        onNavigate={vi.fn()}
+        permissions={["users_roles.manage"]}
+      />,
+    );
+
+    fireEvent.click(await screen.findByLabelText("Select Order SER-000002"));
+    fireEvent.click(screen.getByRole("button", { name: "Print Driver Shipment Manifest" }));
+
+    await screen.findByRole("dialog", { name: "Print Driver Shipment Manifest" });
+    await waitFor(() =>
+      expect(api.post).toHaveBeenCalledWith("operations/cash/driver-shipment-manifest/data", {
+        orderIds: [heldOrder.id],
+        selectionMode: "ids",
+      }),
+    );
+  });
+
   it("drives a new order to Item in branch from the per-row action menu", async () => {
     const api = {
       get: vi.fn((path: string) => {
