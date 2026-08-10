@@ -1447,6 +1447,7 @@ export const englishTranslations = {
     },
     action: {
       assign_driver: "Assign Driver",
+      close_order: "Close Order",
       open_order: "Open Order",
       collect_from_driver: "Collect Money from Driver",
       pay_trader: "Pay Trader",

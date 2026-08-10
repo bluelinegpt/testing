@@ -69,6 +69,7 @@ const actionPermissions: Readonly<Record<string, readonly string[]>> = {
   // enforces its own permissions, and hiding a read-only link would leave the
   // user with an explanation and no way to look at the record.
   assign_driver: ["orders.assign_driver"],
+  close_order: ["orders.update_delivery_status"],
   collect_from_driver: ["reconciliations.create"],
   confirm_trader_received: ["settlements.create"],
   none: [],

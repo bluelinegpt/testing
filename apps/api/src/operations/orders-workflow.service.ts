@@ -24,11 +24,13 @@ interface SelectedOrder {
   readonly driverCost: string;
   readonly driverReconciliationStatus: string;
   readonly id: string;
+  readonly isFreeOrder: boolean;
   readonly orderNumber: string;
   readonly returnStatus: string;
   readonly settlementStatus: string;
   readonly amountCollected: string;
   readonly customerAmountDue: string;
+  readonly traderNetPayable: string;
 }
 
 export interface BulkActionPreview {
@@ -330,10 +332,19 @@ export class OrdersWorkflowService {
     const status = input.targetStatus;
     const order = input.order;
     const amountDue = Number(order.customerAmountDue);
+    const traderPayable = Number(order.traderNetPayable);
+    const deliveredFreeNoValue =
+      status === "delivered" &&
+      order.isFreeOrder === true &&
+      amountDue === 0 &&
+      traderPayable === 0;
     const reconciliationStatus =
       status === "hold"
         ? order.driverReconciliationStatus
-        : status === "delivered" && order.assignedDriverId !== null && amountDue > 0
+        : status === "delivered" &&
+            order.assignedDriverId !== null &&
+            amountDue > 0 &&
+            !deliveredFreeNoValue
           ? "pending"
           : status === "closed"
             ? order.driverReconciliationStatus
@@ -353,6 +364,8 @@ export class OrdersWorkflowService {
             status === "returned_to_branch" ||
             status === "returned_to_trader"
           ? "not_eligible"
+          : deliveredFreeNoValue
+            ? "not_eligible"
           : status === "closed" || status === "in_branch"
             ? order.settlementStatus
             : "unsettled";
@@ -420,8 +433,10 @@ export class OrdersWorkflowService {
                delivery_status as "deliveryStatus", return_status as "returnStatus",
                driver_reconciliation_status as "driverReconciliationStatus",
                trader_settlement_status as "settlementStatus",
+               is_free_order as "isFreeOrder",
                amount_collected::text as "amountCollected",
                customer_amount_due::text as "customerAmountDue",
+               trader_net_payable::text as "traderNetPayable",
                driver_cost::text as "driverCost"
         from orders
         where company_id = ${companyId}::uuid
@@ -438,8 +453,10 @@ export class OrdersWorkflowService {
              o.delivery_status as "deliveryStatus", o.return_status as "returnStatus",
              o.driver_reconciliation_status as "driverReconciliationStatus",
              o.trader_settlement_status as "settlementStatus",
+             o.is_free_order as "isFreeOrder",
              o.amount_collected::text as "amountCollected",
              o.customer_amount_due::text as "customerAmountDue",
+             o.trader_net_payable::text as "traderNetPayable",
              o.driver_cost::text as "driverCost"
       from orders o
       join traders t on t.id = o.trader_id and t.company_id = o.company_id

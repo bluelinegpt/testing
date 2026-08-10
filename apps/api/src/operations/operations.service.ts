@@ -230,6 +230,7 @@ export interface OperationsOrder {
   readonly deliveryStatus: string;
   readonly driverReconciliationStatus: string;
   readonly id: string;
+  readonly isFreeOrder?: boolean;
   readonly orderDate: string;
   readonly orderNumber: string;
   readonly orderProfit: string;
@@ -742,6 +743,7 @@ export class OperationsService {
              o.trader_net_payable::text as "traderNetPayable",
              o.customer_amount_due::text as "customerAmountDue",
              o.amount_collected::text as "amountCollected",
+             o.is_free_order as "isFreeOrder",
              o.vat_amount::text as "vatAmount",
              o.company_revenue::text as "companyRevenue",
              o.order_profit::text as "orderProfit",
@@ -919,12 +921,15 @@ export class OperationsService {
         confirmableSettlementCount: row.confirmableSettlementCount ?? 0,
         confirmableSettlementId: row.confirmableSettlementId ?? null,
         assignedDriverId: row.assignedDriverId ?? null,
+        customerAmountDue: row.customerAmountDue,
         deliveryStatus: row.deliveryStatus,
         driverReconciliationStatus: row.driverReconciliationStatus,
+        isFreeOrder: row.isFreeOrder === true,
         orderId: row.id,
         orderNumber: row.orderNumber,
         returnStatus: row.returnStatus ?? null,
         traderId: row.traderId ?? "",
+        traderNetPayable: row.traderNetPayable,
         traderSettlementStatus: row.traderSettlementStatus,
       }),
     }));
@@ -2436,7 +2441,8 @@ export class OperationsService {
           ${financials.vatAmount.toFixed(2)},${vatPolicy.enabled},${vatPolicy.rate.toFixed(4)},
           ${vatPolicy.enabled ? vatPolicy.priceMode : null},
           ${financials.companyRevenue.toFixed(2)}, ${financials.orderProfit.toFixed(2)},
-          ${deliveryStatus}, 'unsettled', ${pricing.provenance}, ${pricing.servicePriceId}::uuid,
+          ${deliveryStatus}, ${freeOrder ? "not_eligible" : "unsettled"},
+          ${pricing.provenance}, ${pricing.servicePriceId}::uuid,
           ${pricing.configuredFee.toFixed(2)}, ${pricing.finalFee.toFixed(2)},
           ${pricing.overrideReason}, ${freeOrder}, ${freeOrderReason}
         )
@@ -3407,16 +3413,20 @@ export class OperationsService {
         customerAmountDue: string;
         deliveryStatus: string;
         driverReconciliationStatus: string;
+        isFreeOrder: boolean;
         returnStatus: string;
         settlementStatus: string;
+        traderNetPayable: string;
       }>`
         select amount_collected::text as "amountCollected",
                assigned_driver_id as "assignedDriverId",
                customer_amount_due::text as "customerAmountDue",
                delivery_status as "deliveryStatus",
                driver_reconciliation_status as "driverReconciliationStatus",
+               is_free_order as "isFreeOrder",
                return_status as "returnStatus",
-               trader_settlement_status as "settlementStatus"
+               trader_settlement_status as "settlementStatus",
+               trader_net_payable::text as "traderNetPayable"
         from orders
         where id = ${orderId}::uuid
           and company_id = ${companyId}::uuid
@@ -3504,12 +3514,21 @@ export class OperationsService {
       }
 
       const amountDue = Number(order.customerAmountDue);
+      const traderPayable = Number(order.traderNetPayable);
+      const deliveredFreeNoValue =
+        status === "delivered" &&
+        order.isFreeOrder === true &&
+        amountDue === 0 &&
+        traderPayable === 0;
       const amountCollected =
         status === "hold" ? Number(order.amountCollected) : status === "delivered" ? amountDue : 0;
       const reconciliationStatus =
         status === "hold"
           ? order.driverReconciliationStatus
-          : status === "delivered" && order.assignedDriverId !== null && amountDue > 0
+          : status === "delivered" &&
+              order.assignedDriverId !== null &&
+              amountDue > 0 &&
+              !deliveredFreeNoValue
             ? "pending"
             : status === "closed"
               ? order.driverReconciliationStatus
@@ -3529,6 +3548,8 @@ export class OperationsService {
               status === "returned_to_branch" ||
               status === "returned_to_trader"
             ? "not_eligible"
+            : deliveredFreeNoValue
+              ? "not_eligible"
             : status === "closed" || status === "in_branch"
               ? order.settlementStatus
               : "unsettled";

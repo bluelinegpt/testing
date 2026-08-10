@@ -515,6 +515,57 @@ describe("smart next action", () => {
     });
   });
 
+  it("closes a delivered Free Order instead of offering Trader or Driver money workflows", () => {
+    const g = derive({
+      accountingRequired: false,
+      accountingState: "accounting_event_missing",
+      deliveryStatus: "delivered",
+      driverReconciliationStatus: "not_applicable",
+      isFreeOrder: true,
+      traderSettlementStatus: "not_eligible",
+    });
+    expect(g.workflowState).toBe("no_accounting_required");
+    expect(g.isFinanciallyComplete).toBe(true);
+    expect(g.nextActionCode).toBe("close_order");
+    expect(g.nextActionRoute).toBe("/orders");
+    expect(g.nextActionParams).toMatchObject({
+      openDialog: "change_status",
+      suggestedStatus: "closed",
+    });
+    expect(g.nextActionCode).not.toBe("pay_trader");
+    expect(g.nextActionCode).not.toBe("collect_from_driver");
+  });
+
+  it("has no next action after the same Free Order is already closed", () => {
+    const g = derive({
+      accountingRequired: false,
+      accountingState: "accounting_event_missing",
+      deliveryStatus: "closed",
+      driverReconciliationStatus: "not_applicable",
+      isFreeOrder: true,
+      traderSettlementStatus: "not_eligible",
+    });
+    expect(g.workflowState).toBe("complete");
+    expect(g.nextActionCode).toBe("none");
+    expect(g.nextActionRoute).toBeNull();
+  });
+
+  it("normalizes an existing Serial 7/9-like Free Order that was already stored as unsettled", () => {
+    const g = derive({
+      accountingRequired: false,
+      accountingState: "accounting_event_missing",
+      customerAmountDue: "0.00",
+      deliveryStatus: "delivered",
+      driverReconciliationStatus: "not_applicable",
+      isFreeOrder: true,
+      traderNetPayable: "0.00",
+      traderSettlementStatus: "unsettled",
+    });
+    expect(g.nextActionCode).toBe("close_order");
+    expect(g.nextActionCode).not.toBe("pay_trader");
+    expect(g.workflowState).toBe("no_accounting_required");
+  });
+
   it("asks for receipt confirmation once payment has gone out", () => {
     const g = derive({
       confirmableSettlementCount: 1,

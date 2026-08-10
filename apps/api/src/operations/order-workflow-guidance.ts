@@ -80,6 +80,7 @@ export type OrderNextActionCode =
   | "review_return"
   | "view_collection"
   | "open_journal"
+  | "close_order"
   | "start_delivery"
   | "mark_delivered"
   | "process_return"
@@ -126,12 +127,15 @@ export interface OrderWorkflowInput {
   /** Ledger state from the list query's lateral. */
   readonly accountingState?: string | null;
   readonly assignedDriverId: string | null;
+  readonly customerAmountDue?: string | null;
   readonly deliveryStatus: string;
   readonly driverReconciliationStatus: string;
+  readonly isFreeOrder?: boolean;
   readonly orderId: string;
   readonly orderNumber: string;
   readonly returnStatus: string | null;
   readonly traderId: string;
+  readonly traderNetPayable?: string | null;
   readonly traderSettlementStatus: string;
 }
 
@@ -158,13 +162,26 @@ export function deriveOrderWorkflowGuidance(
     accountingJournalId = null,
     accountingState = null,
     assignedDriverId,
+    customerAmountDue = null,
     deliveryStatus,
-    driverReconciliationStatus,
+    driverReconciliationStatus: storedDriverReconciliationStatus,
+    isFreeOrder = false,
     orderId,
     orderNumber,
     traderId,
-    traderSettlementStatus,
+    traderNetPayable = null,
+    traderSettlementStatus: storedTraderSettlementStatus,
   } = input;
+  const explicitFreeNoValue =
+    isFreeOrder === true &&
+    Number(customerAmountDue ?? Number.NaN) === 0 &&
+    Number(traderNetPayable ?? Number.NaN) === 0;
+  const driverReconciliationStatus = explicitFreeNoValue
+    ? "not_applicable"
+    : storedDriverReconciliationStatus;
+  const traderSettlementStatus = explicitFreeNoValue
+    ? "not_eligible"
+    : storedTraderSettlementStatus;
 
   const orderRoute = `/orders/${encodeURIComponent(orderNumber)}`;
   /* Status and Assign actions target the Orders LIST, because the row dialogs
@@ -428,15 +445,9 @@ export function deriveOrderWorkflowGuidance(
     accountingState !== "accounting_not_required";
 
   if (!accountingRequired && !ledgerHasEvent) {
-    return {
-      completionBlockerCode: null,
-      isFinanciallyComplete: true,
-      nextActionCode: "none",
-      nextActionParams: {},
-      nextActionRoute: null,
-      waitingFor: "no_accounting_required",
-      workflowState: "no_accounting_required",
-    };
+    return deliveryStatus === "delivered" && isFreeOrder
+      ? closeOrder("no_accounting_required")
+      : complete(deliveryStatus === "closed" ? "complete" : "no_accounting_required");
   }
 
   if (settlementComplete.has(traderSettlementStatus)) {
@@ -490,7 +501,9 @@ export function deriveOrderWorkflowGuidance(
       case "journal_posted":
         // Event posted AND Journal posted: the ledger is finished, so with
         // collection and settlement already complete the Order is complete.
-        return complete("complete");
+        return deliveryStatus === "delivered" && isFreeOrder
+          ? closeOrder("complete")
+          : complete("complete");
       case "journal_pending":
         return {
           completionBlockerCode: null,
@@ -518,7 +531,9 @@ export function deriveOrderWorkflowGuidance(
     }
   }
 
-  return complete("complete");
+  return deliveryStatus === "delivered" && isFreeOrder
+    ? closeOrder("complete")
+    : complete("complete");
 
   function blocked(
     code: OrderCompletionBlockerCode,
@@ -547,6 +562,22 @@ export function deriveOrderWorkflowGuidance(
       workflowState: state,
     };
   }
+
+  function closeOrder(state: OrderWorkflowState): OrderWorkflowGuidance {
+    return {
+      completionBlockerCode: null,
+      isFinanciallyComplete: true,
+      nextActionCode: "close_order",
+      nextActionParams: {
+        ...orderParams,
+        openDialog: "change_status",
+        suggestedStatus: "closed",
+      },
+      nextActionRoute: orderListRoute,
+      waitingFor: state,
+      workflowState: state,
+    };
+  }
 }
 
 /**
@@ -566,6 +597,7 @@ export const orderNextActionPermissions: Readonly<
   assign_driver: ["orders.assign_driver"],
   collect_from_driver: ["reconciliations.create"],
   confirm_trader_received: ["settlements.create"],
+  close_order: ["orders.update_delivery_status"],
   none: [],
   open_accounting: [],
   open_order: [],
