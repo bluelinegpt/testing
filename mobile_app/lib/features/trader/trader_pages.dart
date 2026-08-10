@@ -15,15 +15,18 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 final class RoleOrdersPage extends ConsumerWidget {
-  const RoleOrdersPage({super.key});
+  const RoleOrdersPage({super.key, this.initialDeliveryStatus});
+  final String? initialDeliveryStatus;
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final user = ref.watch(authenticationProvider).value?.user;
     if (user?.hasRole(UserRole.trader) == true) return const TraderOrdersPage();
-    if (user?.hasRole(UserRole.driver) == true) return const DriverOrdersPage();
+    if (user?.hasRole(UserRole.driver) == true) {
+      return DriverOrdersPage(initialDeliveryStatus: initialDeliveryStatus);
+    }
     if (user?.hasRole(UserRole.operatorRole) == true) {
       return hasOperatorOrderAccess(user!.permissions)
-          ? const OperatorOrdersPage()
+          ? OperatorOrdersPage(initialDeliveryStatus: initialDeliveryStatus)
           : MessagePage(
               message: AppLocalizations.of(context).operatorAccessRequired,
             );

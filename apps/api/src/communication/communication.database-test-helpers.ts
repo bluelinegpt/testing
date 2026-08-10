@@ -1,4 +1,5 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { resolve } from "node:path";
 import { sql, type Kysely, type Transaction } from "kysely";
 
 import type { ConfigService } from "@nestjs/config";
@@ -7,7 +8,11 @@ import { AuthenticationRepository } from "../authentication/authentication.repos
 import { AuthenticationService } from "../authentication/authentication.service.js";
 import { PasswordHasher } from "../authentication/password-hasher.js";
 import type { AppConfiguration } from "../configuration/environment.js";
+import { FileOwnershipService } from "../files/file-ownership.service.js";
+import { PushOutboxWriter } from "../push/push-outbox-writer.service.js";
+import { LocalFileStorageAdapter } from "../files/local-file-storage.adapter.js";
 import type { DatabaseSchema } from "../infrastructure/database/database.types.js";
+import { KyselyTransactionManager } from "../infrastructure/database/transaction-manager.js";
 import type { IdentityContext } from "../security/identity-context.js";
 import { IdentityContextAccessor } from "../security/identity-context.js";
 import { SessionTokenService } from "../authentication/session-token.service.js";
@@ -138,8 +143,12 @@ export async function cleanupCommunicationRunId(
         transaction,
       );
       await sql`delete from messages where company_id = ${companyId}::uuid`.execute(transaction);
-      await sql`delete from conversations where company_id = ${companyId}::uuid`.execute(transaction);
-      await sql`delete from tracking_tokens where company_id = ${companyId}::uuid`.execute(transaction);
+      await sql`delete from conversations where company_id = ${companyId}::uuid`.execute(
+        transaction,
+      );
+      await sql`delete from tracking_tokens where company_id = ${companyId}::uuid`.execute(
+        transaction,
+      );
       await sql`delete from orders where company_id = ${companyId}::uuid`.execute(transaction);
       await sql`delete from user_business_links where company_id = ${companyId}::uuid`.execute(
         transaction,
@@ -147,12 +156,16 @@ export async function cleanupCommunicationRunId(
       await sql`delete from areas where company_id = ${companyId}::uuid`.execute(transaction);
       await sql`delete from drivers where company_id = ${companyId}::uuid`.execute(transaction);
       await sql`delete from traders where company_id = ${companyId}::uuid`.execute(transaction);
-      await sql`delete from account_roles where company_id = ${companyId}::uuid`.execute(transaction);
+      await sql`delete from account_roles where company_id = ${companyId}::uuid`.execute(
+        transaction,
+      );
       await sql`delete from role_permissions where role_id in (select id from roles where company_id = ${companyId}::uuid)`.execute(
         transaction,
       );
       await sql`delete from roles where company_id = ${companyId}::uuid`.execute(transaction);
-      await sql`delete from company_users where company_id = ${companyId}::uuid`.execute(transaction);
+      await sql`delete from company_users where company_id = ${companyId}::uuid`.execute(
+        transaction,
+      );
       await sql`delete from accounts where company_id = ${companyId}::uuid`.execute(transaction);
       await sql`delete from companies where id = ${companyId}::uuid`.execute(transaction);
     }
@@ -160,12 +173,18 @@ export async function cleanupCommunicationRunId(
 }
 
 function sanitizeLabel(label: string): string {
-  return label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+  return label
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
 }
 
 /** Companies' subdomain check constraint forbids underscores; hyphens only. */
 function sanitizeSubdomain(label: string): string {
-  return label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  return label
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
 }
 
 export interface FixtureCompany {
@@ -468,14 +487,52 @@ export class StaticIdentityAccessor extends IdentityContextAccessor {
   }
 }
 
-/** Builds a CommunicationService bound to the test transaction. */
+/** A dedicated root, separate from the real DEV `.file-storage` directory, so
+ *  voice-message bytes written by a test never intermix with real local data
+ *  — matches this suite's existing "never touch real data" discipline, just
+ *  applied to the filesystem instead of the database. */
+const TEST_FILE_STORAGE_ROOT = resolve(process.cwd(), ".file-storage-test");
+
+function testStorageConfig(): ConfigService<AppConfiguration, true> {
+  return {
+    get: (key: string) =>
+      key === "files.provider"
+        ? "local"
+        : key === "files.localRoot"
+          ? TEST_FILE_STORAGE_ROOT
+          : undefined,
+  } as unknown as ConfigService<AppConfiguration, true>;
+}
+
+/** Builds a CommunicationService bound to the test transaction. Voice-message
+ *  storage uses a real `LocalFileStorageAdapter` (not a mock) — media
+ *  upload/download authorization is a real requirement here, not a UI
+ *  affordance, so the tests that exercise it read real bytes back.
+ *
+ *  `transactions.execute` runs the work directly against the already-active
+ *  test transaction rather than opening a real nested one — Kysely does not
+ *  support calling `.transaction()` again on a `Transaction` instance, and
+ *  the outer `withRolledBackCommunicationFixtures` transaction already gives
+ *  every write in one `it()` the atomicity (and guaranteed rollback) a real
+ *  nested transaction would. Same stub shape as
+ *  `company-profile.database.test.ts` uses for the identical reason. */
 export function createTestCommunicationService(
   transaction: Transaction<DatabaseSchema>,
   accessor: StaticIdentityAccessor,
 ): CommunicationService {
+  const database = transaction as unknown as Kysely<DatabaseSchema>;
+  const transactions = {
+    execute: <T>(work: (t: Transaction<DatabaseSchema>) => Promise<T>): Promise<T> =>
+      work(transaction),
+  } as unknown as KyselyTransactionManager;
   return new CommunicationService(
-    transaction as unknown as Kysely<DatabaseSchema>,
+    database,
     accessor,
+    transactions,
+    new LocalFileStorageAdapter(testStorageConfig()),
+    new FileOwnershipService(database),
+    new PushOutboxWriter(),
+    testStorageConfig(),
   );
 }
 
@@ -487,5 +544,10 @@ export function createTestAuthenticationService(
   const config = {
     get: (key: string) => (key === "auth.lockoutMinutes" ? 15 : 720),
   } as unknown as ConfigService<AppConfiguration, true>;
-  return new AuthenticationService(repository, new PasswordHasher(), new SessionTokenService(), config);
+  return new AuthenticationService(
+    repository,
+    new PasswordHasher(),
+    new SessionTokenService(),
+    config,
+  );
 }

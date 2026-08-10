@@ -64,6 +64,8 @@ uploads/
 private-files/
 # Locally-stored private file bytes (Company logos, etc.)
 .file-storage/
+# Same, but written by the guarded communication DB test suite's voice-message tests
+.file-storage-test/
 
 # Local database backups and baselines (never commit)
 .backups/

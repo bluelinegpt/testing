@@ -12,6 +12,7 @@ import { PlatformAuthController } from "./platform-auth.controller.js";
 import { PlatformCompanyUserController } from "./platform-company-user.controller.js";
 import {
   PlatformCompanyController,
+  PlatformCompanyDeletionController,
   PlatformTargetCompanyController,
 } from "./platform-company.controller.js";
 
@@ -39,6 +40,7 @@ const platformControllers = [
   PlatformAuditController,
   PlatformAuthController,
   PlatformCompanyController,
+  PlatformCompanyDeletionController,
   PlatformTargetCompanyController,
   PlatformCompanyUserController,
 ];
@@ -136,7 +138,7 @@ describe("Platform route inventory", () => {
       "activate",
       "suspend",
       "reactivate",
-      "disable",
+      "close",
       "activation",
       "passwordReset",
       "unlock",
@@ -153,6 +155,12 @@ describe("Platform route inventory", () => {
       if (shouldManage !== hasManage) bad.push(`${route.controller}.${route.method}`);
     }
     expect(bad).toEqual([]);
+  });
+
+  it("gates Company deletion preview behind the dedicated delete permission", () => {
+    const preview = routes.find((route) => route.method === "deletionPreview");
+    expect(preview?.permissions).toContain("platform.companies.delete");
+    expect(preview?.permissions).not.toContain("platform.companies.manage");
   });
 
   it("gates audit behind its own permission", () => {

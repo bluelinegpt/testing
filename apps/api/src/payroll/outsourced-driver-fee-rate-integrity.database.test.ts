@@ -341,7 +341,13 @@ function buildWorkforceService(
   const manager = new SavepointTransactionManager(
     transaction,
   ) as unknown as KyselyTransactionManager;
-  return new WorkforceConfigurationServiceCtor(database, manager, tenants, identities);
+  return new WorkforceConfigurationServiceCtor(
+    database,
+    manager,
+    tenants,
+    identities,
+    {} as never, // DriverRoleProvisioningService — unused by the fee-rate integrity paths under test
+  );
 }
 
 /** Exposes the private effective-dated fee sync for direct, date-controlled testing. */

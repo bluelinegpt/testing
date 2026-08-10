@@ -1044,3 +1044,18 @@ the generic 401 exists to prevent.
 
 Phase 1 closure evidence is in
 `PLATFORM_ADMINISTRATION_PHASE_1_CERTIFICATION.md`.
+# Permanent Company deletion
+
+Company lifecycle operations have distinct meanings:
+
+- **Suspend** is reversible, preserves all data, and does not start deletion eligibility.
+- **Close** is the final operational shutdown, preserves data initially, and records the server-controlled `closed_at` timestamp.
+- **Delete** permanently removes the Company and Company-owned data only after every deletion safety gate succeeds.
+
+Development, Demo, Sandbox, and Trial Companies are time-eligible immediately after Close. Production Companies must remain continuously Closed for 48 hours, using database time; there is no Platform or Super Admin bypass.
+
+The Platform deletion flow is Close → Preview → Create Verified Backup → type `DELETE <COMPANY CODE>` → Permanently Delete. Preview uses the versioned `company-deletion-v2` manifest and becomes stale after 15 minutes or when lifecycle, environment, manifest, operation, or Company row counts change. The backup is a verified full PostgreSQL database dump, not a Company-only export.
+
+Database deletion runs in one transaction under a Company advisory/row lock. Only reviewed Company tables, two explicit indirect relationships, two documented FK-cycle breaks, and an exact delete-trigger allowlist are handled. Company-owned rows are verified absent before the Company row is removed last. Critical global reference counts are fingerprinted before and after. Any failure rolls the transaction back.
+
+External file objects are inventoried durably before commit and deleted afterward. Failed external cleanup does not undo the committed database deletion; the operation remains `completed_cleanup_pending` and the Platform retry action processes failed items idempotently. Deletion operations, previews, backup metadata, cleanup results, and Company snapshots survive the Company row.

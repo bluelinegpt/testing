@@ -54,13 +54,32 @@ void main() {
     );
   });
 
-  test('notification deep links reject malformed payloads', () {
+  test('notification deep links parse the targetType/targetId contract and '
+      'reject malformed payloads by falling back to the Notification Center '
+      '(never null, never a crash)', () {
     expect(
-      NotificationRouter.parse({'type': 'order', 'id': 'order-1'}),
+      NotificationRouter.parse({'targetType': 'order', 'targetId': 'order-1'}),
       isA<OrderNotificationDestination>(),
     );
-    expect(NotificationRouter.parse({'type': 'order', 'id': ''}), isNull);
-    expect(NotificationRouter.parse({'type': 'unknown'}), isNull);
+    expect(
+      NotificationRouter.parse({
+        'targetType': 'conversation',
+        'targetId': 'conversation-1',
+      }),
+      isA<MessageNotificationDestination>(),
+    );
+    expect(
+      NotificationRouter.parse({'targetType': 'order', 'targetId': ''}),
+      isA<NotificationCenterDestination>(),
+    );
+    expect(
+      NotificationRouter.parse({'targetType': 'unknown'}),
+      isA<NotificationCenterDestination>(),
+    );
+    expect(
+      NotificationRouter.parse(const {}),
+      isA<NotificationCenterDestination>(),
+    );
   });
 
   test('real-time reconnect backoff is deterministic and capped', () {

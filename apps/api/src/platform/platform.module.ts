@@ -2,6 +2,7 @@ import { Module } from "@nestjs/common";
 
 import { AccountingTemplateImporter } from "../accounting-template/accounting-template.importer.js";
 import { AuthenticationModule } from "../authentication/authentication.module.js";
+import { FilesModule } from "../files/files.module.js";
 import { UserAdministrationModule } from "../users/user-administration.module.js";
 import { PlatformAuditController } from "./platform-audit.controller.js";
 import { PlatformAuditQueryService } from "./platform-audit.query.js";
@@ -10,9 +11,21 @@ import { PlatformCompanyUserController } from "./platform-company-user.controlle
 import { PlatformCompanyUserService } from "./platform-company-user.service.js";
 import { PlatformUserDeletionService } from "./platform-user-deletion.service.js";
 import { PlatformCompanyService } from "./platform-company.service.js";
+import { PlatformCompanyDeletionService } from "./platform-company-deletion.service.js";
+import {
+  COMPANY_DELETION_FAILURE_INJECTOR,
+  noCompanyDeletionFailure,
+  PlatformCompanyDeletionExecutionService,
+} from "./platform-company-deletion-execution.service.js";
+import {
+  COMPANY_DELETION_BACKUP_RUNNER,
+  PlatformCompanyDeletionBackupService,
+  runBackupProcess,
+} from "./platform-company-deletion-backup.service.js";
 import { PlatformAuthController } from "./platform-auth.controller.js";
 import {
   PlatformCompanyController,
+  PlatformCompanyDeletionController,
   PlatformTargetCompanyController,
 } from "./platform-company.controller.js";
 import { PlatformTargetCompanyGuard } from "./platform-target-company.guard.js";
@@ -38,16 +51,22 @@ import { PlatformService } from "./platform.service.js";
     PlatformAuditController,
     PlatformAuthController,
     PlatformCompanyController,
+    PlatformCompanyDeletionController,
     PlatformTargetCompanyController,
     PlatformCompanyUserController,
   ],
   exports: [PlatformService, PlatformAuditService, PlatformCompanyService],
-  imports: [AuthenticationModule, UserAdministrationModule],
+  imports: [AuthenticationModule, FilesModule, UserAdministrationModule],
   providers: [
     PlatformService,
     PlatformAuditService,
     PlatformAuditQueryService,
     PlatformCompanyService,
+    PlatformCompanyDeletionService,
+    PlatformCompanyDeletionExecutionService,
+    { provide: COMPANY_DELETION_FAILURE_INJECTOR, useValue: noCompanyDeletionFailure },
+    PlatformCompanyDeletionBackupService,
+    { provide: COMPANY_DELETION_BACKUP_RUNNER, useValue: runBackupProcess },
     PlatformCompanyUserService,
     PlatformUserDeletionService,
     AccountingTemplateImporter,

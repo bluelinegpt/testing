@@ -159,7 +159,6 @@ describe.skipIf(!runTests)("Platform Company onboarding", () => {
 
           const payload = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
             name: `Test Delivery ${suffix}`,
-            code: `TST-${suffix.toUpperCase()}`,
             subdomain: `tst${suffix}`,
             environment: "sandbox",
             countryCode: "AE",
@@ -183,7 +182,7 @@ describe.skipIf(!runTests)("Platform Company onboarding", () => {
           // ---------------------------------------------------------------
           await create(
             readCookie,
-            payload({ code: `RO-${suffix.toUpperCase()}`, subdomain: `ro${suffix}` }),
+            payload({ subdomain: `ro${suffix}` }),
           ).expect(403);
           await request(server)
             .get("/api/v1/platform/companies")
@@ -201,6 +200,7 @@ describe.skipIf(!runTests)("Platform Company onboarding", () => {
           await create(manageCookie, payload({ name: "   " })).expect(400);
           // Nothing outside the declared contract is accepted.
           await create(manageCookie, payload({ companyId: randomUUID() })).expect(400);
+          await create(manageCookie, payload({ code: "BROWSER-CHOSEN" })).expect(400);
           await create(manageCookie, payload({ status: "active" })).expect(400);
 
           // An unapproved template is refused, and no Company survives it.
@@ -209,12 +209,11 @@ describe.skipIf(!runTests)("Platform Company onboarding", () => {
             payload({
               accountingTemplateCode: "SOMETHING_ELSE",
               subdomain: `bad${suffix}`,
-              code: `BAD-${suffix.toUpperCase()}`,
             }),
           ).expect(400);
           const afterBadTemplate = (
             await sql<{ n: string }>`
-              select count(*)::bigint n from companies where code = ${`BAD-${suffix.toUpperCase()}`}
+              select count(*)::bigint n from companies where subdomain = ${`bad${suffix}`}
             `.execute(transaction)
           ).rows[0];
           expect(Number(afterBadTemplate?.n)).toBe(0);
@@ -232,6 +231,7 @@ describe.skipIf(!runTests)("Platform Company onboarding", () => {
             `.execute(transaction)
           ).rows[0];
           expect(company?.status).toBe("draft");
+          expect(company?.code).toMatch(/^CMP-\d{6,}$/);
           expect(company?.environment).toBe("sandbox");
           expect(company?.accounting_setup_status).toBe("ready");
           expect(company?.accounting_template_code).toBe("UAE_DELIVERY_STANDARD");
@@ -242,8 +242,7 @@ describe.skipIf(!runTests)("Platform Company onboarding", () => {
           expect(company?.contact_name).toBe("Ops Lead");
 
           // Duplicates are refused.
-          await create(manageCookie, payload({ subdomain: `other${suffix}` })).expect(409);
-          await create(manageCookie, payload({ code: `OTH-${suffix.toUpperCase()}` })).expect(409);
+          await create(manageCookie, payload()).expect(409);
 
           // ---------------------------------------------------------------
           // Accounting setup matches the template exactly
@@ -484,7 +483,6 @@ describe.skipIf(!runTests)("Platform Company onboarding", () => {
           const second = await create(
             manageCookie,
             payload({
-              code: `TS2-${suffix.toUpperCase()}`,
               subdomain: `ts2${suffix}`,
               name: `Second Delivery ${suffix}`,
               environment: "demo",
@@ -653,7 +651,10 @@ describe.skipIf(!runTests)("Platform Company onboarding", () => {
           expect(await counts("chart_of_accounts")).toBe(template.accounts.length);
 
           // Terminal state, and no route back out of it.
-          await act(companyId, "disable", manageCookie, { reason: "closed" }).expect(204);
+          await act(companyId, "close", manageCookie, {
+            reason: "closed",
+            confirmation: `CLOSE ${String(company?.code)}`,
+          }).expect(204);
           await act(companyId, "activate", manageCookie, { reason: "reopen" }).expect(409);
           await act(companyId, "reactivate", manageCookie, { reason: "reopen" }).expect(409);
           expect(await counts("chart_of_accounts")).toBe(template.accounts.length);
@@ -744,7 +745,7 @@ describe.skipIf(!runTests)("Platform Company onboarding", () => {
           expect(actions).toContain("platform.company.activated");
           expect(actions).toContain("platform.company.suspended");
           expect(actions).toContain("platform.company.reactivated");
-          expect(actions).toContain("platform.company.disabled");
+          expect(actions).toContain("platform.company.closed");
           for (const row of auditRows) {
             expect(row.source).toBe("platform_portal");
             expect(row.actor).toBe(managerId);

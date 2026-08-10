@@ -183,7 +183,6 @@ describe.skipIf(!runTests)("Platform Phase 1 certification", () => {
           // =================================================================
           const createPayload = (tag: string) => ({
             name: `Cert ${tag} ${suffix}`,
-            code: `${tag}-${suffix.toUpperCase()}`,
             subdomain: `${tag.toLowerCase()}${suffix}`,
             environment: "sandbox",
             countryCode: "AE",
@@ -218,10 +217,7 @@ describe.skipIf(!runTests)("Platform Phase 1 certification", () => {
           const before = (
             await sql<{ n: string }>`select count(*) as n from companies`.execute(transaction)
           ).rows[0]?.n;
-          await post("/api/v1/platform/companies", manageCookie, {
-            ...createPayload("AAA"),
-            code: `DUP-${suffix.toUpperCase()}`,
-          }).expect(409);
+          await post("/api/v1/platform/companies", manageCookie, createPayload("AAA")).expect(409);
           const after = (
             await sql<{ n: string }>`select count(*) as n from companies`.execute(transaction)
           ).rows[0]?.n;
@@ -534,9 +530,13 @@ describe.skipIf(!runTests)("Platform Phase 1 certification", () => {
             .send({ identifier: `cert.admin.${suffix}`, password: newPassword })
             .expect(200);
 
-          // Disabled is terminal: nothing brings a closed Company back.
-          await post(`/api/v1/platform/companies/${companyId}/disable`, manageCookie, {
+          // Closed is terminal: nothing brings a closed Company back.
+          const closingCode = (
+            await sql<{ code: string }>`select code from companies where id = ${companyId}::uuid`.execute(transaction)
+          ).rows[0]?.code;
+          await post(`/api/v1/platform/companies/${companyId}/close`, manageCookie, {
             reason: "Certification closure",
+            confirmation: `CLOSE ${closingCode ?? ""}`,
           }).expect(204);
           for (const action of ["activate", "reactivate", "suspend"]) {
             await post(`/api/v1/platform/companies/${companyId}/${action}`, manageCookie, {
@@ -574,7 +574,7 @@ describe.skipIf(!runTests)("Platform Phase 1 certification", () => {
             "platform.company.created",
             "platform.company.activated",
             "platform.company.suspended",
-            "platform.company.disabled",
+            "platform.company.closed",
           ]) {
             expect(actions).toContain(expected);
           }

@@ -21,7 +21,10 @@ import {
 
 const enabled = process.env.RUN_COMMUNICATION_DATABASE === "true";
 
-function officeIdentity(companyId: string, accountId: string): IdentityContext & { companyId: string } {
+function officeIdentity(
+  companyId: string,
+  accountId: string,
+): IdentityContext & { companyId: string } {
   return {
     companyId,
     forcePasswordChange: false,
@@ -192,8 +195,18 @@ describe.skipIf(!enabled)("guarded communication message integrity and read-stat
         "communication.operator.send",
       ]);
       const trader = await createFixtureTrader(transaction, company.companyId, "e3c", []);
-      const customerOne = await createFixtureCustomer(transaction, company.companyId, office.accountId, "e3c1");
-      const customerTwo = await createFixtureCustomer(transaction, company.companyId, office.accountId, "e3c2");
+      const customerOne = await createFixtureCustomer(
+        transaction,
+        company.companyId,
+        office.accountId,
+        "e3c1",
+      );
+      const customerTwo = await createFixtureCustomer(
+        transaction,
+        company.companyId,
+        office.accountId,
+        "e3c2",
+      );
       const orderOne = await createFixtureOrder(transaction, company.companyId, office.accountId, {
         customerId: customerOne.customerId,
         traderId: trader.traderId,
@@ -204,10 +217,22 @@ describe.skipIf(!enabled)("guarded communication message integrity and read-stat
       });
       const accessor = new StaticIdentityAccessor();
       const service = createTestCommunicationService(transaction, accessor);
-      const trackingOne = await createFixtureTrackingToken(transaction, company.companyId, orderOne.orderId);
-      const trackingTwo = await createFixtureTrackingToken(transaction, company.companyId, orderTwo.orderId);
-      const sessionOne = await service.createCustomerMessagingSession({ trackingToken: trackingOne.rawToken });
-      const sessionTwo = await service.createCustomerMessagingSession({ trackingToken: trackingTwo.rawToken });
+      const trackingOne = await createFixtureTrackingToken(
+        transaction,
+        company.companyId,
+        orderOne.orderId,
+      );
+      const trackingTwo = await createFixtureTrackingToken(
+        transaction,
+        company.companyId,
+        orderTwo.orderId,
+      );
+      const sessionOne = await service.createCustomerMessagingSession({
+        trackingToken: trackingOne.rawToken,
+      });
+      const sessionTwo = await service.createCustomerMessagingSession({
+        trackingToken: trackingTwo.rawToken,
+      });
       const sharedKey = `e3c-shared-key-${runId}`;
 
       const messageOne = await service.customerSendText(sessionOne.customerMessagingToken, {
@@ -223,7 +248,10 @@ describe.skipIf(!enabled)("guarded communication message integrity and read-stat
           text: "Collision-prone customer payload",
         }),
       ).rejects.toMatchObject({ errorCode: "customer_messaging_session_invalid" });
-      const conversationTwoHistory = await service.customerMessages(sessionTwo.customerMessagingToken, {});
+      const conversationTwoHistory = await service.customerMessages(
+        sessionTwo.customerMessagingToken,
+        {},
+      );
       expect(conversationTwoHistory.items).toEqual([]);
       expect(messageOne.id).toBeDefined();
       return undefined;
@@ -233,14 +261,18 @@ describe.skipIf(!enabled)("guarded communication message integrity and read-stat
   it("F1: marking read is per-principal — one participant's read cursor never advances another's", async () => {
     await withRolledBackCommunicationFixtures(database, async (transaction, runId) => {
       const company = await createFixtureCompany(transaction, runId, "f1");
-      const officeOne = await createFixtureOfficeUser(transaction, company.companyId, "f1-office-one", [
-        "communication.operator.read",
-        "communication.operator.send",
-      ]);
-      const officeTwo = await createFixtureOfficeUser(transaction, company.companyId, "f1-office-two", [
-        "communication.operator.read",
-        "communication.operator.send",
-      ]);
+      const officeOne = await createFixtureOfficeUser(
+        transaction,
+        company.companyId,
+        "f1-office-one",
+        ["communication.operator.read", "communication.operator.send"],
+      );
+      const officeTwo = await createFixtureOfficeUser(
+        transaction,
+        company.companyId,
+        "f1-office-two",
+        ["communication.operator.read", "communication.operator.send"],
+      );
       const trader = await createFixtureTrader(transaction, company.companyId, "f1", [
         "communication.trader.read",
         "communication.trader.send",
@@ -285,7 +317,9 @@ describe.skipIf(!enabled)("guarded communication message integrity and read-stat
 
       accessor.identity = officeIdentity(company.companyId, officeOne.accountId);
       const officeOneConversations = await service.listConversations({});
-      const targetForOfficeOne = officeOneConversations.items.find((item) => item.id === conversation.id);
+      const targetForOfficeOne = officeOneConversations.items.find(
+        (item) => item.id === conversation.id,
+      );
       expect(targetForOfficeOne?.unreadCount).toBe(0);
       return undefined;
     });

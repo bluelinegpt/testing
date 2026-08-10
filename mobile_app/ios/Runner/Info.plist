@@ -18,6 +18,8 @@
 	<string>BluelineGPT</string>
 	<key>FirebaseAppDelegateProxyEnabled</key>
 	<true/>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>BluelineGPT needs microphone access to record voice messages.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>fetch</string>

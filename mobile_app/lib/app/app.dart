@@ -1,7 +1,9 @@
 import 'package:bluelinegpt_mobile/app/localization/app_localizations.dart';
 import 'package:bluelinegpt_mobile/app/providers.dart';
+import 'package:bluelinegpt_mobile/app/push_notification_controller.dart';
 import 'package:bluelinegpt_mobile/app/routing/app_router.dart';
 import 'package:bluelinegpt_mobile/app/theme/app_theme.dart';
+import 'package:bluelinegpt_mobile/core/services/driver_sync_controller.dart';
 import 'package:bluelinegpt_mobile/features/common/pages.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -28,6 +30,16 @@ final class _RoutedApp extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final locale = ref.watch(localeProvider).value ?? const Locale('en');
+    // Starts the FCM token-refresh/foreground-message/notification-tap
+    // wiring exactly once for the app's lifetime — safe to watch on every
+    // rebuild (e.g. a locale change) since `pushNotificationControllerProvider`
+    // itself is only re-evaluated if one of its own dependencies changes,
+    // not on unrelated rebuilds of this widget.
+    ref.watch(pushNotificationControllerProvider);
+    // Starts the Driver offline sync queue's connectivity/auth listeners
+    // (Prompt 16) exactly once for the app's lifetime — same lazy,
+    // watch-is-safe-on-every-rebuild shape as the push controller above.
+    ref.watch(driverSyncControllerProvider);
     return MaterialApp.router(
       debugShowCheckedModeBanner: false,
       title: 'BluelineGPT',

@@ -43,6 +43,7 @@ import {
 export const PLATFORM_ACCESS = "platform.access";
 export const PLATFORM_COMPANIES_READ = "platform.companies.read";
 export const PLATFORM_COMPANIES_MANAGE = "platform.companies.manage";
+export const PLATFORM_COMPANIES_DELETE = "platform.companies.delete";
 export const PLATFORM_USERS_READ = "platform.users.read";
 export const PLATFORM_USERS_MANAGE = "platform.users.manage";
 export const PLATFORM_AUDIT_READ = "platform.audit.read";
@@ -59,6 +60,7 @@ export const PLATFORM_PERMISSIONS: readonly { code: string; description: string 
   { code: PLATFORM_ACCESS, description: "Sign in to the Platform Administration Portal" },
   { code: PLATFORM_COMPANIES_READ, description: "View Companies on the Platform" },
   { code: PLATFORM_COMPANIES_MANAGE, description: "Create and manage Companies on the Platform" },
+  { code: PLATFORM_COMPANIES_DELETE, description: "Preview and permanently delete eligible Companies" },
   { code: PLATFORM_USERS_READ, description: "View the users of a Company from the Platform" },
   { code: PLATFORM_USERS_MANAGE, description: "Manage the users of a Company from the Platform" },
   { code: PLATFORM_AUDIT_READ, description: "View Platform and Company audit history" },

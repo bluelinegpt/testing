@@ -24,6 +24,11 @@ const routePermissions: Readonly<Record<string, readonly string[]>> = {
     "orders.edit_before_processing",
     "orders.assign_driver",
     "orders.update_delivery_status",
+    // A Driver User's own permission (Driver Order Status Permission fix) --
+    // unlocks the List/Detail surface a Driver needs for their own assigned
+    // Orders only; the backend narrows visibility and status transitions
+    // independently, this only decides whether the nav item/route appears.
+    "orders.driver_self_service",
   ],
   "/orders/create": [manage, "orders.create"],
   "/orders/import": [manage, "orders.create"],
@@ -40,7 +45,18 @@ const routePermissions: Readonly<Record<string, readonly string[]>> = {
   "/accounting": accountingAccess,
   "/accounting/cash-accounts": accountingCashBankAccess,
   "/accounting/bank-accounts": accountingCashBankAccess,
-  "/drivers": [manage, "orders.assign_driver", "orders.update_delivery_status"],
+  // Driver Collections (`DriverCollectionsWorkspace`), NOT Driver master-data
+  // management (that's `/configuration/drivers`, gated to `manage` only,
+  // below). It calls only `operations/cash/*`, which the backend gates on
+  // `reconciliations.create`/`reconciliations.reverse`/`manage` -- NEVER on
+  // `orders.assign_driver`/`orders.update_delivery_status`. Those two used to
+  // be listed here too: they are legitimate Order-list/self-service
+  // permissions (see `/orders` below), and a User holding only one of them --
+  // e.g. a Driver User whose Role was named "Orders" -- got a route/nav entry
+  // into office Driver Collections that the underlying API always rejected,
+  // surfacing as a generic "The details could not be loaded." Removing them
+  // here does not affect `/orders` at all; each route keeps its own list.
+  "/drivers": [manage, "reconciliations.create", "reconciliations.reverse"],
   "/driver-cash-reconciliation": [manage, "reconciliations.create", "reconciliations.reverse"],
   "/operations/driver-reconciliations/new": [manage, "reconciliations.create"],
   "/cash-management": [
@@ -51,6 +67,7 @@ const routePermissions: Readonly<Record<string, readonly string[]>> = {
     "settlements.reverse",
   ],
   "/reports": [manage, "reports.financial.view", "reports.export"],
+  "/reports/daily-operations-summary": [manage, "reports.financial.view", "reports.export"],
   "/configuration/company-profile": ["company_profile.manage"],
   // Registered here or the route is unreachable: an unlisted path is denied
   // outright, which is how the Storefront screens ended up showing "Access
@@ -78,18 +95,36 @@ const routePermissions: Readonly<Record<string, readonly string[]>> = {
   "/configuration/users": [manage],
   "/configuration/roles": [manage],
   "/support": [manage],
-  "/communication": [manage],
+  "/communication": [manage, "communication.operator.read"],
 };
 
 const landingPriority = ["/dashboard", "/orders", "/orders/create"] as const;
 
+// Every route whose ENTIRE gate is Order-list/self-service permissions --
+// today just the Order screens themselves. An identity whose whole
+// authorized surface is one of these (a Driver User, or any future
+// Orders-only Role) gets no "General Settings is universal" carve-out below:
+// their office-facing surface really is Orders alone.
+const orderOnlyPaths = new Set(["/orders", "/orders/create", "/orders/import"]);
+const hasAnyNonOrderPermission = (permissions: readonly string[]): boolean =>
+  Object.entries(routePermissions).some(
+    ([path, required]) =>
+      !orderOnlyPaths.has(path) && required.some((permission) => permissions.includes(permission)),
+  );
+
 export function canAccessCompanyPath(pathname: string, permissions: readonly string[]): boolean {
   const normalized = normalizePath(pathname);
-  // General Settings is reachable by every authenticated user so they can set
-  // their own Search-and-Display preference; the page itself hides the
-  // admin-only Company settings from users without the configuration
-  // permission (also enforced on the backend).
-  if (normalized === "/no-access" || normalized === "/configuration/general") return true;
+  if (normalized === "/no-access") return true;
+  // General Settings is reachable by every OFFICE identity (anyone whose
+  // permissions unlock at least one non-Orders route) so they can set their
+  // own Search-and-Display preference; the page itself hides the admin-only
+  // Company settings from users without the configuration permission (also
+  // enforced on the backend). An Orders-only identity -- the Driver User
+  // case this carve-out used to leak to -- gets none of that: their whole
+  // authorized surface is Orders, so General Settings falls through to its
+  // own normal `routePermissions["/configuration/general"]` entry (`manage`
+  // only) below, same as every other route.
+  if (normalized === "/configuration/general" && hasAnyNonOrderPermission(permissions)) return true;
   const route =
     routePermissions[normalized] === undefined
       ? Object.keys(routePermissions)

@@ -30,6 +30,7 @@ import {
   DashboardWorkspace,
   type DashboardDrillDown,
 } from "../features/dashboard/DashboardWorkspace.js";
+import { DailyOperationsSummaryReport } from "../features/operations/DailyOperationsSummaryReport.js";
 import { DriverCollectionsWorkspace } from "../features/operations/DriverCollectionsWorkspace.js";
 import { PayrollWorkspace } from "../features/payroll/PayrollWorkspace.js";
 import { AccountingWorkspace } from "../features/accounting/AccountingWorkspace.js";
@@ -153,7 +154,15 @@ export function CompanyWorkspace({
       <DashboardWorkspace api={api} onDrillDown={(target) => navigate(dashboardTargets[target])} />
     );
   } else if (path === "/communication") {
-    content = <CommunicationCenter />;
+    content = (
+      <CommunicationCenter
+        accessToken={session.accessToken}
+        api={api}
+        currentAccountId={session.identity.id}
+        onNavigate={(target) => void navigate(target)}
+        permissions={session.identity.permissions}
+      />
+    );
   } else if (path === "/orders") {
     content = (
       <OrdersModuleWorkspace
@@ -219,6 +228,8 @@ export function CompanyWorkspace({
         permissions={session.identity.permissions}
       />
     );
+  } else if (path === "/reports/daily-operations-summary") {
+    content = <DailyOperationsSummaryReport api={api} onNavigate={(target) => void navigate(target)} />;
   } else if (operationRoutes[path] !== undefined) {
     const route = operationRoutes[path];
     content = (
@@ -260,7 +271,10 @@ export function CompanyWorkspace({
           storefrontId={storefrontId}
         />
       );
-  } else if (path === "/configuration/storefront" || path.startsWith("/configuration/storefront/")) {
+  } else if (
+    path === "/configuration/storefront" ||
+    path.startsWith("/configuration/storefront/")
+  ) {
     // The id segment is optional: a Trader account resolves its own Storefront
     // through `mine`, while a Company user opens a specific one.
     const storefrontId = detailSegment(path, "/configuration/storefront/");

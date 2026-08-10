@@ -12,6 +12,7 @@ import {
   ShieldCheck,
   UnlockKeyhole,
   UserRoundCog,
+  X,
 } from "lucide-react";
 import { type FormEvent, useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -316,6 +317,7 @@ export function UserDetailsWorkspace({
   const [modal, setModal] = useState<
     "edit" | "roles" | "disable" | "lock" | "reset" | "force" | "revoke"
   >();
+  const [removingRole, setRemovingRole] = useState<{ id: string; name: string }>();
   const [temp, setTemp] = useState<{
     temporaryPassword: string;
     temporaryPasswordExpiresAt: string;
@@ -428,7 +430,11 @@ export function UserDetailsWorkspace({
       {tab === "overview" ? (
         <Overview onNavigate={onNavigate} user={user} />
       ) : tab === "access" ? (
-        <Access user={user} onAssign={() => setModal("roles")} />
+        <Access
+          user={user}
+          onAssign={() => setModal("roles")}
+          onRemoveRole={(role) => setRemovingRole(role)}
+        />
       ) : tab === "activity" ? (
         <Activity user={user} onForce={() => setModal("force")} onReset={() => setModal("reset")} />
       ) : tab === "sessions" ? (
@@ -461,6 +467,18 @@ export function UserDetailsWorkspace({
           onClose={() => setModal(undefined)}
           onSaved={async () => {
             setModal(undefined);
+            await load();
+          }}
+        />
+      ) : null}
+      {removingRole ? (
+        <RemoveRoleDialog
+          api={api}
+          role={removingRole}
+          user={user}
+          onClose={() => setRemovingRole(undefined)}
+          onRemoved={async () => {
+            setRemovingRole(undefined);
             await load();
           }}
         />
@@ -1253,6 +1271,69 @@ function PermissionReadOnly({
     </div>
   );
 }
+/**
+ * Removing an assigned Role.
+ *
+ * Reuses the SAME endpoint `RoleAssignment` already uses to add roles --
+ * `PUT users/:accountId/roles` -- with the target Role's id simply left out
+ * of the set. That single endpoint already replaces the account's full Role
+ * set inside a transaction and already enforces everything this needs:
+ * Company scope, `users_roles.manage`, last-active-Company-Administrator
+ * ("The last active Company administrator cannot lose access"), self-lockout,
+ * and an audit trail (`company_user.role_removed`). There is no second
+ * role-management system here, only a focused, one-Role-at-a-time UI on top
+ * of the one that already exists.
+ */
+function RemoveRoleDialog({
+  api,
+  role,
+  user,
+  onClose,
+  onRemoved,
+}: {
+  api: ApiClient;
+  role: { id: string; name: string };
+  user: UserDetails;
+  onClose: () => void;
+  onRemoved: () => Promise<void>;
+}) {
+  const { t } = useTranslation();
+  const [error, setError] = useState<string>();
+  const [removing, setRemoving] = useState(false);
+  const remove = () => {
+    setRemoving(true);
+    setError(undefined);
+    const roleIds = user.roles.filter((r) => r.id !== role.id).map((r) => r.id);
+    void api
+      .put<void>(`users/${user.accountId}/roles`, { roleIds })
+      .then(onRemoved)
+      .catch((caught) => {
+        setError(caught instanceof ApiError ? caught.message : t("userAdmin.actionFailed"));
+        setRemoving(false);
+      });
+  };
+  return (
+    <Modal
+      className="modal-small"
+      closeLabel={t("common.close")}
+      onRequestClose={onClose}
+      title={t("userAdmin.removeRoleTitle")}
+      titleId="remove-role-title"
+    >
+      {error ? <div className="alert alert-error">{error}</div> : null}
+      <p>{t("userAdmin.removeRoleConfirm", { role: role.name, user: user.displayName })}</p>
+      <p className="field-hint">{t("userAdmin.removeRoleWarning")}</p>
+      <div className="modal-actions">
+        <button className="button button-secondary" onClick={onClose} type="button">
+          {t("common.cancel")}
+        </button>
+        <button className="button button-danger" disabled={removing} onClick={remove} type="button">
+          {t("userAdmin.removeRoleAction")}
+        </button>
+      </div>
+    </Modal>
+  );
+}
 function RoleAssignment({
   api,
   roles,
@@ -1493,6 +1574,7 @@ function Overview({ user, onNavigate }: { user: UserDetails; onNavigate: (path: 
               : t("userAdmin.noEmployee")
           }
         />
+        <Detail label={t("userAdmin.driver")} value={user.driverCode ?? t("userAdmin.noDriver")} />
         <Detail label={t("userAdmin.createdAt")} value={dateTime(user.createdAt, "-")} />
         <Detail label={t("userAdmin.updatedAt")} value={dateTime(user.updatedAt, "-")} />
       </dl>
@@ -1551,7 +1633,15 @@ function Overview({ user, onNavigate }: { user: UserDetails; onNavigate: (path: 
     </>
   );
 }
-function Access({ user, onAssign }: { user: UserDetails; onAssign: () => void }) {
+function Access({
+  user,
+  onAssign,
+  onRemoveRole,
+}: {
+  user: UserDetails;
+  onAssign: () => void;
+  onRemoveRole: (role: { id: string; name: string }) => void;
+}) {
   const { t } = useTranslation();
   return (
     <div className="detail-section">
@@ -1565,8 +1655,26 @@ function Access({ user, onAssign }: { user: UserDetails; onAssign: () => void })
       </div>
       <div className="tag-list">
         {user.roles.map((role) => (
-          <span className="tag" key={role.id}>
+          <span className="tag tag-removable" key={role.id}>
             {role.name}
+            {user.accountKind === "company_user" ? (
+              <button
+                className="tag-remove-button"
+                // A User must always keep at least one active Role while
+                // active (`assertRoles` in `user-administration.service.ts`
+                // -- the same rule `RoleAssignment`'s own Save button already
+                // respects). The backend still enforces this and the other
+                // safeguards (last active Company Administrator, self-
+                // lockout) regardless; this only avoids an avoidable
+                // rejection for the one case knowable client-side.
+                disabled={user.status === "active" && user.roles.length <= 1}
+                onClick={() => onRemoveRole({ id: role.id, name: role.name })}
+                title={t("userAdmin.removeRole")}
+                type="button"
+              >
+                <X size={13} />
+              </button>
+            ) : null}
           </span>
         ))}
       </div>

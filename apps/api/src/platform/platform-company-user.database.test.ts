@@ -147,7 +147,6 @@ describe.skipIf(!runTests)("Platform Company user administration", () => {
               .set("X-Blueline-Session", "cookie")
               .send({
                 name: `Test ${tag} ${suffix}`,
-                code: `${tag}-${suffix.toUpperCase()}`,
                 subdomain: `${tag.toLowerCase()}${suffix}`,
                 environment: "sandbox",
                 countryCode: "AE",

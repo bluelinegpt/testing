@@ -1,4 +1,5 @@
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 
@@ -152,6 +153,20 @@ final class ApiClient {
     options: Options(headers: headers),
     cancelToken: cancelToken,
   );
+
+  /// Fetches a binary response body (e.g. authenticated media downloads) —
+  /// `get<T>` alone cannot request `ResponseType.bytes`, and this must always
+  /// go through the shared client so the auth-header interceptor still runs.
+  Future<Uint8List> getBytes(String path, {CancelToken? cancelToken}) async {
+    final response = await _dio.get<List<int>>(
+      path,
+      options: Options(responseType: ResponseType.bytes),
+      cancelToken: cancelToken,
+    );
+    final data = response.data;
+    if (data == null) throw const ApiFailure(ApiFailureKind.invalidResponse);
+    return Uint8List.fromList(data);
+  }
 
   static String _correlationId() {
     final random = Random.secure();

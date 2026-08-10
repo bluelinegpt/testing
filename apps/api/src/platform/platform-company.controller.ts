@@ -1,7 +1,9 @@
 import {
   Body,
+  BadRequestException,
   Controller,
   Get,
+  Headers,
   HttpCode,
   Inject,
   Param,
@@ -21,6 +23,7 @@ import { correlationIdOf } from "./platform-audit.service.js";
 import {
   PLATFORM_AUDIT_READ,
   PLATFORM_COMPANIES_MANAGE,
+  PLATFORM_COMPANIES_DELETE,
   PLATFORM_COMPANIES_READ,
   RequirePlatformPermissions,
 } from "./platform-authorization.js";
@@ -28,12 +31,18 @@ import {
 // eslint-disable-next-line @typescript-eslint/consistent-type-imports
 import {
   CompanyListQueryDto,
+  CloseCompanyDto,
+  CreateCompanyDeletionBackupDto,
+  PermanentDeleteCompanyDto,
   CreateCompanyDto,
   LifecycleActionDto,
   SuspendCompanyDto,
   UpdateCompanyProfileDto,
 } from "./platform-company.dto.js";
 import { PlatformCompanyService } from "./platform-company.service.js";
+import { PlatformCompanyDeletionService } from "./platform-company-deletion.service.js";
+import { PlatformCompanyDeletionBackupService } from "./platform-company-deletion-backup.service.js";
+import { PlatformCompanyDeletionExecutionService } from "./platform-company-deletion-execution.service.js";
 import { PlatformTargetCompanyGuard } from "./platform-target-company.guard.js";
 
 /**
@@ -91,12 +100,11 @@ export class PlatformCompanyController {
     const created = await this.companies.create(
       {
         name: input.name,
-        code: input.code,
         subdomain: input.subdomain,
         environment: input.environment,
-        countryCode: input.countryCode,
-        timezone: input.timezone,
-        defaultLanguage: input.defaultLanguage,
+        countryCode: input.countryCode ?? "AE",
+        timezone: input.timezone ?? "Asia/Dubai",
+        defaultLanguage: input.defaultLanguage ?? "en",
         contactName: input.contactName,
         telephone: input.telephone,
         email: input.email,
@@ -128,6 +136,9 @@ export class PlatformCompanyController {
 export class PlatformTargetCompanyController {
   public constructor(
     @Inject(PlatformCompanyService) private readonly companies: PlatformCompanyService,
+    @Inject(PlatformCompanyDeletionService) private readonly deletion: PlatformCompanyDeletionService,
+    @Inject(PlatformCompanyDeletionBackupService) private readonly deletionBackups: PlatformCompanyDeletionBackupService,
+    @Inject(PlatformCompanyDeletionExecutionService) private readonly deletionExecution: PlatformCompanyDeletionExecutionService,
     @Inject(RequestSecurityContextStore) private readonly contextStore: RequestSecurityContextStore,
     @Inject(TenantContextAccessor) private readonly tenants: TenantContextAccessor,
     @Inject(IdentityContextAccessor) private readonly identities: IdentityContextAccessor,
@@ -269,15 +280,84 @@ export class PlatformTargetCompanyController {
    * survive the Company being closed.
    */
   @ApiBearerAuth()
-  @ApiOperation({ summary: "Disable (close) a Company" })
+  @ApiOperation({ summary: "Permanently close Company operations without deleting data" })
   @RequirePlatformPermissions(PLATFORM_COMPANIES_MANAGE)
   @HttpCode(204)
-  @Post("disable")
-  public disable(
+  @Post("close")
+  public close(
     @Param("companyId") companyId: string,
-    @Body() input: SuspendCompanyDto,
+    @Body() input: CloseCompanyDto,
     @Req() request: Request,
   ): Promise<void> {
-    return this.companies.transition(companyId, "disabled", input.reason, this.actor(request));
+    return this.companies.close(companyId, input.reason, input.confirmation, this.actor(request));
+  }
+
+  @ApiBearerAuth()
+  @ApiOperation({ summary: "Return server-authoritative Company deletion eligibility" })
+  @RequirePlatformPermissions(PLATFORM_COMPANIES_READ)
+  @Get("deletion-eligibility")
+  public deletionEligibility(@Param("companyId") companyId: string): Promise<object> {
+    return this.deletion.eligibility(companyId);
+  }
+
+  @ApiBearerAuth()
+  @ApiOperation({ summary: "Create a read-only Company deletion preview" })
+  @RequirePlatformPermissions(PLATFORM_COMPANIES_DELETE)
+  @HttpCode(200)
+  @Post("deletion-preview")
+  public deletionPreview(
+    @Param("companyId") companyId: string,
+    @Headers("idempotency-key") idempotencyKey: string | undefined,
+    @Req() request: Request,
+  ): Promise<object> {
+    if (idempotencyKey === undefined || idempotencyKey.trim().length < 8) {
+      throw new BadRequestException("A valid Idempotency-Key header is required");
+    }
+    return this.deletion.preview(companyId, this.actor(request), idempotencyKey.trim());
+  }
+
+  @ApiBearerAuth()
+  @ApiOperation({ summary: "Create and verify the required full-database deletion backup" })
+  @RequirePlatformPermissions(PLATFORM_COMPANIES_DELETE)
+  @HttpCode(200)
+  @Post("deletion-backup")
+  public deletionBackup(
+    @Param("companyId") companyId: string,
+    @Body() input: CreateCompanyDeletionBackupDto,
+  ): Promise<object> {
+    return this.deletionBackups.createVerifiedBackup(
+      companyId,
+      input.operationId,
+      this.identities.current().identityId,
+    );
+  }
+
+  @ApiBearerAuth()
+  @ApiOperation({ summary: "Permanently delete an eligible closed Company" })
+  @RequirePlatformPermissions(PLATFORM_COMPANIES_DELETE)
+  @HttpCode(200)
+  @Post("permanent-delete")
+  public permanentDelete(
+    @Param("companyId") companyId: string,
+    @Body() input: PermanentDeleteCompanyDto,
+  ): Promise<object> {
+    return this.deletionExecution.execute(companyId, input);
+  }
+}
+
+@ApiTags("platform company deletions")
+@Controller("platform/company-deletions")
+export class PlatformCompanyDeletionController {
+  public constructor(
+    @Inject(PlatformCompanyDeletionExecutionService) private readonly deletionExecution: PlatformCompanyDeletionExecutionService,
+  ) {}
+
+  @ApiBearerAuth()
+  @ApiOperation({ summary: "Retry pending external cleanup after Company deletion" })
+  @RequirePlatformPermissions(PLATFORM_COMPANIES_DELETE)
+  @HttpCode(200)
+  @Post(":operationId/retry-cleanup")
+  public retryCleanup(@Param("operationId") operationId: string): Promise<object> {
+    return this.deletionExecution.retryCleanup(operationId);
   }
 }

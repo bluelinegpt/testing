@@ -34,6 +34,12 @@ class AppLocalizationsAr extends AppLocalizations {
   String get password => 'كلمة المرور';
 
   @override
+  String get showPassword => 'إظهار كلمة المرور';
+
+  @override
+  String get hidePassword => 'إخفاء كلمة المرور';
+
+  @override
   String get invalidCredentials =>
       'معرّف تسجيل الدخول أو كلمة المرور غير صحيحة.';
 
@@ -67,6 +73,9 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String get orders => 'الطلبات';
+
+  @override
+  String get orderDetails => 'تفاصيل الطلب';
 
   @override
   String get createOrder => 'إنشاء طلب';
@@ -355,7 +364,7 @@ class AppLocalizationsAr extends AppLocalizations {
   String get createAnother => 'إنشاء طلب آخر';
 
   @override
-  String get allActive => 'جميع الطلبات النشطة';
+  String get allActive => 'جميع النشطة';
 
   @override
   String get ordersLimited =>
@@ -477,17 +486,51 @@ class AppLocalizationsAr extends AppLocalizations {
   String get assignDriver => 'إسناد سائق';
 
   @override
+  String get reassignDriver => 'إعادة إسناد السائق';
+
+  @override
   String get selectDriver => 'اختر سائقاً نشطاً';
 
   @override
   String get assignmentConfirm => 'هل تريد إسناد هذا السائق إلى الطلب؟';
 
   @override
+  String get reassignmentConfirm =>
+      'هل تريد إعادة إسناد هذا الطلب إلى سائق مختلف؟';
+
+  @override
   String get assignmentCompleted => 'تم إسناد السائق.';
+
+  @override
+  String get reassignmentCompleted => 'تمت إعادة إسناد السائق.';
 
   @override
   String get operatorActionsUnavailable =>
       'تتطلب القرارات التشغيلية الإضافية عقوداً خلفية مخصصة.';
+
+  @override
+  String get orderActions => 'الإجراءات';
+
+  @override
+  String get changeStatusAction => 'تغيير الحالة';
+
+  @override
+  String get confirmStatusChange => 'هل تريد تغيير حالة هذا الطلب؟';
+
+  @override
+  String get statusUpdateCompleted => 'تم تحديث الحالة.';
+
+  @override
+  String get reasonLabel => 'السبب';
+
+  @override
+  String get reasonRequiredError => 'السبب مطلوب لهذا التغيير.';
+
+  @override
+  String get returnPending => 'بانتظار الإرجاع';
+
+  @override
+  String get totalActiveOrders => 'إجمالي الطلبات النشطة';
 
   @override
   String get orderHistory => 'سجل الطلب';
@@ -496,7 +539,34 @@ class AppLocalizationsAr extends AppLocalizations {
   String get assignedDriverLabel => 'السائق المسند';
 
   @override
+  String get myActiveOrders => 'طلباتي النشطة';
+
+  @override
+  String get assignedToMe => 'مسندة لي';
+
+  @override
+  String get orderDate => 'تاريخ الطلب';
+
+  @override
+  String get serialNumber => 'الرقم التسلسلي';
+
+  @override
+  String get location => 'الموقع';
+
+  @override
+  String get reference => 'المرجع';
+
+  @override
+  String get emptyValuePlaceholder => '—';
+
+  @override
+  String get returnToBranchAction => 'إرجاع إلى الفرع';
+
+  @override
   String get traderLabel => 'التاجر';
+
+  @override
+  String get mobileLabel => 'الجوال';
 
   @override
   String get loadMore => 'تحميل المزيد';
@@ -544,4 +614,139 @@ class AppLocalizationsAr extends AppLocalizations {
   @override
   String get communicationSafetyNotice =>
       'لا تتم محاكاة الرسائل ولا اعتبارها مسلمة دون تأكيد الخادم.';
+
+  @override
+  String get noConversations => 'لا توجد محادثات بعد';
+
+  @override
+  String get noMessages => 'لا توجد رسائل بعد';
+
+  @override
+  String get messageInputHint => 'اكتب رسالة';
+
+  @override
+  String get sendMessage => 'إرسال';
+
+  @override
+  String get recordVoiceMessage => 'تسجيل رسالة صوتية';
+
+  @override
+  String get recordingInProgress => 'جارٍ التسجيل…';
+
+  @override
+  String get stopRecordingAction => 'إيقاف';
+
+  @override
+  String get discardRecordingAction => 'حذف';
+
+  @override
+  String get sendVoiceMessageAction => 'إرسال الرسالة الصوتية';
+
+  @override
+  String get voiceMessageLabel => 'رسالة صوتية';
+
+  @override
+  String get microphonePermissionRequired =>
+      'يلزم الوصول إلى الميكروفون لتسجيل رسالة صوتية.';
+
+  @override
+  String get microphonePermissionDenied =>
+      'تم رفض الوصول إلى الميكروفون. فعّله من إعدادات جهازك لتسجيل الرسائل الصوتية.';
+
+  @override
+  String get recordingFailed => 'فشل التسجيل. يرجى المحاولة مرة أخرى.';
+
+  @override
+  String get voiceSendFailed => 'تعذر إرسال الرسالة الصوتية.';
+
+  @override
+  String get unsupportedAudioFormat => 'تنسيق الصوت هذا غير مدعوم.';
+
+  @override
+  String get audioFileTooLarge => 'حجم التسجيل كبير جداً ولا يمكن إرساله.';
+
+  @override
+  String get maxRecordingDurationReachedNotice =>
+      'تم بلوغ الحد الأقصى لمدة التسجيل (5 دقائق).';
+
+  @override
+  String get audioUnavailable => 'هذه الرسالة الصوتية غير متاحة.';
+
+  @override
+  String get playAction => 'تشغيل';
+
+  @override
+  String get pauseAction => 'إيقاف مؤقت';
+
+  @override
+  String get conversationsUnavailable => 'تعذر تحميل المحادثات.';
+
+  @override
+  String get messageSendFailed => 'تعذر إرسال الرسالة.';
+
+  @override
+  String get enableNotifications => 'تفعيل الإشعارات';
+
+  @override
+  String get notificationPermissionRequired =>
+      'فعّل الإشعارات لتصلك تنبيهات فورية بالرسائل الجديدة وتحديثات الطلبات.';
+
+  @override
+  String get notificationPermissionDenied =>
+      'الإشعارات متوقفة. يمكنك دائماً مراجعة هذه الشاشة للاطلاع على التحديثات.';
+
+  @override
+  String get openNotificationSettings => 'فتح الإعدادات';
+
+  @override
+  String get newMessageNotification => 'رسالة جديدة';
+
+  @override
+  String get voiceMessageNotification => 'رسالة صوتية جديدة';
+
+  @override
+  String get orderUpdatedNotification => 'تم تحديث الطلب';
+
+  @override
+  String get orderAssignedNotification => 'تم إسناد الطلب';
+
+  @override
+  String get orderReassignedNotification => 'تمت إعادة إسناد الطلب';
+
+  @override
+  String get driverOfflineBanner => 'غير متصل';
+
+  @override
+  String get driverLastSyncedLabel => 'آخر مزامنة';
+
+  @override
+  String get driverSyncPending => 'بانتظار المزامنة';
+
+  @override
+  String get driverSyncInProgress => 'جارٍ المزامنة…';
+
+  @override
+  String get driverSyncCompleted => 'تمت المزامنة';
+
+  @override
+  String get driverSyncFailed => 'فشلت المزامنة';
+
+  @override
+  String get driverSyncNeedsReview => 'يتطلب المراجعة';
+
+  @override
+  String get driverConflictMessage =>
+      'تغيّر هذا الطلب أثناء عدم اتصالك. يرجى تحديث الطلب قبل المتابعة.';
+
+  @override
+  String get driverRefreshAction => 'تحديث';
+
+  @override
+  String get holdStatus => 'معلّق';
+
+  @override
+  String get hold => 'تعليق';
+
+  @override
+  String get orderPlacedOnHold => 'تم تعليق الطلب.';
 }

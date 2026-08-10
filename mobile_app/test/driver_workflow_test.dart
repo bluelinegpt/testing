@@ -8,14 +8,23 @@ void main() {
         DriverAction.startDelivery,
       });
     });
-    test('Out for Delivery exposes only delivery outcomes', () {
+    test('Out for Delivery exposes exactly Delivered, Hold, and Return to '
+        'Branch', () {
+      // No separate "report failure" concept — the backend's only reachable
+      // targets from `out_for_delivery` are `delivered`, `hold`, and
+      // `returned_to_branch` (`operations.service.ts` `driverTransitions`
+      // inside `changeOrderStatus`). Hold is not a new backend status — it
+      // is newly reachable by a Driver from this one source status only.
       expect(actionsForDriverStatus('out_for_delivery'), {
         DriverAction.markDelivered,
-        DriverAction.reportFailure,
+        DriverAction.hold,
+        DriverAction.returnToBranch,
       });
     });
-    test('terminal and unknown states expose no mutation', () {
+    test('terminal and unknown states expose no mutation, including Hold '
+        'itself — there is no `hold -> anything` entry for a Driver', () {
       for (final status in [
+        'hold',
         'delivered',
         'returned_to_branch',
         'returned_to_trader',
@@ -24,41 +33,6 @@ void main() {
       ]) {
         expect(actionsForDriverStatus(status), isEmpty);
       }
-    });
-  });
-
-  group('Delivery confirmation validation', () {
-    test('accepts exact cash collection', () {
-      const draft = DeliveryConfirmationDraft(
-        expectedCod: '100.00',
-        actualCod: '100',
-        paymentMethod: DriverPaymentMethod.cash,
-      );
-      expect(draft.validate(), isEmpty);
-    });
-    test('requires Bank reference for Bank collection', () {
-      const draft = DeliveryConfirmationDraft(
-        expectedCod: '100',
-        actualCod: '100',
-        paymentMethod: DriverPaymentMethod.bank,
-      );
-      expect(draft.validate(), contains('bankReference'));
-    });
-    test('rejects unsupported COD difference', () {
-      const draft = DeliveryConfirmationDraft(
-        expectedCod: '100',
-        actualCod: '90',
-        paymentMethod: DriverPaymentMethod.cash,
-      );
-      expect(draft.validate()['actualCod'], 'difference_unsupported');
-    });
-    test('rejects malformed pasted COD without throwing', () {
-      const draft = DeliveryConfirmationDraft(
-        expectedCod: '100',
-        actualCod: '1O0<script>',
-        paymentMethod: DriverPaymentMethod.cash,
-      );
-      expect(draft.validate(), contains('actualCod'));
     });
   });
 

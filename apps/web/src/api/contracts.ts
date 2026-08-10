@@ -140,6 +140,11 @@ export interface UserDetails extends CompanyUser {
   readonly employeeId: string | null;
   readonly employeeJobTitle: string | null;
   readonly employeeStatus: string | null;
+  /** The Driver identity this account operates as, if any -- either a
+   *  driver-kind account's own linked Driver, or the backing Driver record
+   *  of this account's linked Employee. Read-only. */
+  readonly driverId: string | null;
+  readonly driverCode: string | null;
   readonly roles: readonly {
     readonly id: string;
     readonly code: string;
@@ -444,6 +449,9 @@ export interface OperationsOrder {
   readonly additionalFeeVatAmount?: string | null;
   readonly amountCollected: string;
   readonly areaName: string;
+  /** Present only on the single-order detail fetch, not the list. */
+  readonly emirateNameEn?: string;
+  readonly emirateNameAr?: string;
   readonly assignedDriverId: string | null;
   readonly assignedDriverMobile: string | null;
   readonly assignedDriverName: string | null;

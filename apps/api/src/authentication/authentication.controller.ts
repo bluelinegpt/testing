@@ -5,12 +5,14 @@ import type { Request, Response } from "express";
 
 import type { AppConfiguration } from "../configuration/environment.js";
 
+import { DeviceRegistrationService } from "../push/device-registration.service.js";
 import { IdentityContextAccessor } from "../security/identity-context.js";
 import { CompanyHostResolver } from "../tenancy/company-host-resolver.js";
 import { AllowPasswordChangeRequired, Public } from "./authentication.decorators.js";
 // Runtime class values are required for Nest validation metadata.
 // eslint-disable-next-line @typescript-eslint/consistent-type-imports
 import { ChangePasswordDto, CompanyLoginDto } from "./authentication.dto.js";
+import { AuthenticationRepository } from "./authentication.repository.js";
 import { AuthenticationService, type LoginResult } from "./authentication.service.js";
 import { clearSessionCookie, setSessionCookie } from "./session-cookie.js";
 
@@ -21,6 +23,9 @@ export class AuthenticationController {
     @Inject(AuthenticationService) private readonly authentication: AuthenticationService,
     @Inject(IdentityContextAccessor) private readonly identities: IdentityContextAccessor,
     @Inject(CompanyHostResolver) private readonly companyHosts: CompanyHostResolver,
+    @Inject(DeviceRegistrationService)
+    private readonly deviceRegistrations: DeviceRegistrationService,
+    @Inject(AuthenticationRepository) private readonly repository: AuthenticationRepository,
     @Inject(ConfigService) private readonly config: ConfigService<AppConfiguration, true>,
   ) {}
 
@@ -71,9 +76,26 @@ export class AuthenticationController {
   @ApiOperation({ summary: "Return the authenticated account and effective permissions" })
   @Get("me")
   @AllowPasswordChangeRequired()
-  public me(): object {
+  public async me(): Promise<object> {
     const identity = this.identities.current();
-    return { ...identity, permissions: [...identity.permissions].sort() };
+    // Authoritative "Driver User" signal (Driver Physical Correction, Section
+    // A): a `company_user` account can be operationally a Driver — its linked
+    // Employee backs a `drivers.employee_id` record — without ever holding a
+    // `driver`-kind account. `undefined` here (omitted from the response,
+    // never `null`) for every other identity, including a `driver`-kind
+    // session itself, which needs no such hint. The client must treat this as
+    // the single source of truth for "should this account see a Driver-style
+    // experience" and never infer it from a display name or any local check.
+    const linkedDriverId = await this.repository.linkedDriverId(
+      identity.companyId,
+      identity.profileType,
+      identity.profileId,
+    );
+    return {
+      ...identity,
+      permissions: [...identity.permissions].sort(),
+      ...(linkedDriverId === undefined ? {} : { linkedDriverId }),
+    };
   }
 
   @ApiBearerAuth()
@@ -84,7 +106,14 @@ export class AuthenticationController {
   public async logout(@Res({ passthrough: true }) response: Response): Promise<void> {
     // Server-side revocation first: if clearing the cookie failed for any
     // reason, the session is already dead rather than merely hidden.
-    await this.authentication.logout(this.identities.current());
+    const identity = this.identities.current();
+    await this.authentication.logout(identity);
+    // Best-effort: a Push module issue must never block logout completing
+    // (Section E, point 3). `identities.current()` still resolves here — it
+    // reads the request-scoped identity already established for this
+    // request, independent of the session row `authentication.logout` just
+    // revoked in the database.
+    await this.deviceRegistrations.deregister(undefined, "logout").catch(() => undefined);
     clearSessionCookie(response, this.secureCookies);
   }
 

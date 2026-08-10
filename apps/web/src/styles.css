@@ -4097,6 +4097,47 @@ tr.row-highlighted {
   gap: 10px;
   align-items: center;
 }
+/* Unlike `.admin-filter-bar`, this bar's control count varies (quick-select
+   buttons plus two date fields plus Run Report) and a fixed grid track count
+   clips whatever doesn't fit. Two explicit wrapping rows -- quick-select
+   buttons, then the date range and Run Report -- avoid mixing very
+   different item heights on one flex line, which is what pushed the date
+   fields out of view in the first place. */
+.report-filter-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.report-filter-bar__quick,
+.report-filter-bar__range {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.report-filter-bar__range {
+  align-items: flex-end;
+}
+.report-filter-bar .field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 0;
+}
+.report-filter-bar .field input {
+  min-height: 42px;
+}
+.report-filter-bar .field select {
+  min-height: 42px;
+  padding: 0 10px;
+}
+/* Which Date Mode a report ran in must be unmissable on screen, not just in
+   the raw dates -- the same subtitle text this report also puts atop its
+   PDF/Excel exports. */
+.page-header-subtitle {
+  margin: 4px 0 0;
+  color: var(--text-secondary, #62747b);
+  font-size: 14px;
+}
 .admin-filter-bar select,
 .admin-search {
   min-height: 42px;
@@ -4137,6 +4178,29 @@ tr.row-highlighted {
   color: #353b81;
   padding: 3px 7px;
   font-size: 12px;
+}
+.tag-removable {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.tag-remove-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  cursor: pointer;
+  opacity: 0.7;
+}
+.tag-remove-button:hover:not(:disabled) {
+  opacity: 1;
+}
+.tag-remove-button:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
 }
 .pagination-bar {
   display: flex;
@@ -6499,7 +6563,6 @@ tr.row-highlighted {
 .communication-heading,
 .communication-search,
 .communication-empty,
-.communication-thread,
 .status-badge {
   display: flex;
   gap: 1rem;
@@ -6511,28 +6574,378 @@ tr.row-highlighted {
 .communication-layout {
   display: grid;
   gap: 1rem;
-  grid-template-columns: minmax(15rem, 1fr) minmax(20rem, 2fr) minmax(15rem, 1fr);
+  grid-template-columns: minmax(15rem, 1fr) minmax(22rem, 2fr) minmax(15rem, 1fr);
   margin-top: 1rem;
 }
 .communication-panel {
+  background: var(--surface-color, #fff);
   border: 1px solid var(--border-color, #dbe3ef);
   border-radius: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
   min-height: 28rem;
+  max-height: 42rem;
+  overflow: hidden;
   padding: 1rem;
 }
 .communication-search {
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 }
 .communication-search input {
+  flex: 1;
+  min-width: 0;
+}
+.communication-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.communication-filters select {
+  min-height: 34px;
+}
+.communication-unread-toggle {
+  align-items: center;
+  color: var(--text-secondary, #5f6d84);
+  display: inline-flex;
+  font-size: 0.85rem;
+  gap: 0.35rem;
+}
+.communication-loading,
+.communication-empty-note {
+  align-items: center;
+  color: var(--text-muted, #7b8798);
+  display: flex;
+  font-size: 0.9rem;
+  gap: 0.5rem;
+  justify-content: center;
+  padding: 1rem 0;
+}
+.communication-error {
+  color: var(--danger-color, #b91c1c);
+  font-size: 0.85rem;
+}
+.communication-notice {
+  background: var(--warning-subtle, #fffbeb);
+  border-radius: 0.5rem;
+  color: var(--warning-color, #b45309);
+  font-size: 0.85rem;
+  padding: 0.5rem 0.75rem;
+}
+.spin {
+  animation: communication-spin 0.8s linear infinite;
+}
+@keyframes communication-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.communication-conversation-list {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 0.4rem;
+  list-style: none;
+  margin: 0;
+  overflow-y: auto;
+  padding: 0;
+}
+.communication-conversation {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 0.5rem;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.5rem 0.6rem;
+  text-align: start;
   width: 100%;
 }
-.communication-empty,
-.communication-thread {
+.communication-conversation:hover {
+  background: var(--surface-subtle, #f7f9fd);
+}
+.communication-conversation.active {
+  background: var(--primary-subtle, #eef2ff);
+  border-color: var(--primary-color, #4f63f6);
+}
+.communication-conversation-top {
   align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+.communication-unread-badge {
+  background: var(--primary-color, #4f63f6);
+  border-radius: 999px;
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 700;
+  min-width: 1.1rem;
+  padding: 0.05rem 0.4rem;
+  text-align: center;
+}
+.communication-conversation-meta {
+  color: var(--text-secondary, #5f6d84);
+  font-size: 0.78rem;
+}
+.communication-conversation-preview {
+  color: var(--text-muted, #7b8798);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.communication-conversation-badges {
+  display: flex;
+  gap: 0.35rem;
+  margin-top: 0.15rem;
+}
+.communication-status-waiting_for_office,
+.communication-priority-urgent {
+  background: var(--danger-subtle, #fef2f2);
+  color: var(--danger-color, #b91c1c);
+}
+.communication-status-resolved {
+  background: var(--success-subtle, #ecfdf3);
+  color: var(--success-color, #15803d);
+}
+.communication-priority-high {
+  background: var(--warning-subtle, #fffbeb);
+  color: var(--warning-color, #b45309);
+}
+.communication-thread-panel {
+  min-width: 0;
+}
+.communication-empty {
+  align-items: center;
+  color: var(--text-muted, #7b8798);
+  flex: 1;
   flex-direction: column;
   justify-content: center;
   text-align: center;
+}
+.communication-thread-header {
+  align-items: flex-start;
+  display: flex;
+  justify-content: space-between;
+}
+.communication-thread-status {
+  flex-shrink: 0;
+}
+.communication-realtime-indicator {
+  align-items: center;
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 0.75rem;
+  gap: 0.3rem;
+  padding: 0.15rem 0.55rem;
+}
+.communication-realtime-indicator svg {
+  height: 0.85rem;
+  width: 0.85rem;
+}
+.communication-realtime-live {
+  background: var(--success-subtle, #ecfdf3);
+  color: var(--success-color, #15803d);
+}
+.communication-realtime-pending {
+  background: var(--surface-subtle, #f7f9fd);
+  color: var(--text-muted, #7b8798);
+}
+.communication-actions {
+  align-items: center;
+  border-block: 1px solid var(--border-color, #dbe3ef);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding-block: 0.5rem;
+}
+.communication-assignee {
+  color: var(--text-muted, #7b8798);
+}
+.communication-messages {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 0.5rem;
+  overflow-y: auto;
+}
+.communication-message {
+  border-radius: 0.5rem;
+  max-width: 80%;
+  padding: 0.5rem 0.7rem;
+}
+.communication-message small {
+  color: var(--text-muted, #7b8798);
+  display: block;
+  font-size: 0.72rem;
+  margin-bottom: 0.15rem;
+}
+.communication-message p {
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.communication-message.sent {
+  align-self: flex-end;
+  background: var(--primary-subtle, #eef2ff);
+}
+.communication-message.received {
+  align-self: flex-start;
+  background: var(--surface-subtle, #f7f9fd);
+}
+.communication-system-message {
+  color: var(--text-muted, #7b8798);
+  font-size: 0.78rem;
+  margin: 0.2rem auto;
+  text-align: center;
+}
+.communication-composer-row {
+  align-items: flex-end;
+  display: flex;
+  gap: 0.5rem;
+}
+.communication-composer-row textarea {
+  flex: 1;
+  min-height: 2.5rem;
+  resize: vertical;
+}
+.communication-context-panel {
+  overflow-y: auto;
+}
+.communication-context-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0;
+}
+.communication-context-fields div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+.communication-context-fields dt {
+  color: var(--text-muted, #7b8798);
+  font-size: 0.75rem;
+}
+.communication-context-fields dd {
+  margin: 0;
+}
+.communication-voice-preview-label {
+  align-items: center;
+  display: inline-flex;
+  gap: 0.3rem;
+}
+.communication-voice-preview-label svg {
+  height: 0.85rem;
+  width: 0.85rem;
+}
+.communication-voice-composer {
+  margin-top: 0.5rem;
+}
+.communication-voice-mic-button {
+  color: var(--text-secondary, #5f6d84);
+}
+.communication-voice-recording-row,
+.communication-voice-preview-row {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+.communication-voice-recording-indicator {
+  align-items: center;
+  color: var(--danger-color, #b91c1c);
+  display: inline-flex;
+  font-size: 0.85rem;
+  font-weight: 600;
+  gap: 0.4rem;
+}
+.communication-voice-recording-dot {
+  animation: communication-voice-pulse 1.2s ease-in-out infinite;
+  background: var(--danger-color, #b91c1c);
+  border-radius: 999px;
+  display: inline-block;
+  height: 0.55rem;
+  width: 0.55rem;
+}
+@keyframes communication-voice-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+.communication-voice-preview-actions {
+  align-items: center;
+  display: flex;
+  gap: 0.4rem;
+  margin-inline-start: auto;
+}
+.communication-voice-player {
+  align-items: center;
+  background: var(--surface-subtle, #f7f9fd);
+  border: 1px solid var(--border-color, #dbe3ef);
+  border-radius: 0.5rem;
+  display: flex;
+  gap: 0.6rem;
+  padding: 0.35rem 0.6rem;
+}
+.communication-voice-play-button {
+  align-items: center;
+  background: var(--primary-color, #4f63f6);
+  border: none;
+  border-radius: 999px;
+  color: #fff;
+  cursor: pointer;
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 1.9rem;
+  justify-content: center;
+  width: 1.9rem;
+}
+.communication-voice-play-button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.communication-voice-play-button svg {
+  height: 0.95rem;
+  width: 0.95rem;
+}
+.communication-voice-progress {
+  align-items: center;
+  display: flex;
+  flex: 1;
+  gap: 0.5rem;
+  min-width: 0;
+}
+.communication-voice-progress-bar {
+  background: var(--border-color, #dbe3ef);
+  border-radius: 999px;
+  display: block;
+  flex: 1;
+  height: 0.3rem;
+  overflow: hidden;
+}
+.communication-voice-progress-fill {
+  background: var(--primary-color, #4f63f6);
+  display: block;
+  height: 100%;
+}
+.communication-voice-duration {
+  color: var(--text-muted, #7b8798);
+  flex: 0 0 auto;
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+.communication-voice-player-error {
+  align-items: center;
+  color: var(--danger-color, #b91c1c);
+  display: inline-flex;
+  font-size: 0.8rem;
+  gap: 0.4rem;
 }
 .status-badge {
   align-items: center;
@@ -6547,6 +6960,11 @@ tr.row-highlighted {
   }
   .communication-panel {
     min-height: 12rem;
+    max-height: none;
+  }
+  .communication-conversation-list,
+  .communication-messages {
+    max-height: 20rem;
   }
 }
 

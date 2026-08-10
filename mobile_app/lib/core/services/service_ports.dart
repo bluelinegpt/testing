@@ -1,7 +1,12 @@
+import 'dart:io';
+
 import 'package:bluelinegpt_mobile/core/auth/auth_models.dart';
+import 'package:bluelinegpt_mobile/core/network/api_client.dart';
+import 'package:bluelinegpt_mobile/firebase_options.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 abstract interface class AppLogger {
   void info(String event);
@@ -48,6 +53,78 @@ final class UnsupportedDeviceRegistrationService
   Future<void> deregister() async {}
 }
 
+/// Backs `DeviceRegistrationService` with the real Prompt 15 backend
+/// contract: `POST push/device-registrations` (register/refresh a token) and
+/// `POST push/device-registrations/deregister` (revoke on logout).
+///
+/// `SensitiveKey.deviceRegistrationId` is deliberately left unused here — the
+/// backend endpoint is an idempotent upsert keyed by `(account, token)`, so
+/// there is nothing a locally-cached registration id would let this client
+/// skip or short-circuit. `register()` is cheap and safe to call every login
+/// and restore (mirroring the existing `_connectOptionalServices` call
+/// site), and `deregister()` always revokes every active registration for
+/// the account rather than a single tracked id (see below).
+final class ApiDeviceRegistrationService implements DeviceRegistrationService {
+  ApiDeviceRegistrationService(this.api);
+  final ApiClient api;
+
+  @override
+  Future<void> register(String token, AuthenticatedUser user) async {
+    final platform = _platform();
+    // Web/desktop/etc. — mobile push registration only applies to the
+    // Android/iOS builds this phase targets.
+    if (platform == null) return;
+    String? appVersion;
+    try {
+      appVersion = (await PackageInfo.fromPlatform()).version;
+    } on Object {
+      // `appVersion` is an optional backend field — a failure to read it
+      // (e.g. in a stripped test/CI environment) must never block
+      // registration itself.
+    }
+    await api.post<void>(
+      'push/device-registrations',
+      data: {
+        'platform': platform,
+        'token': token,
+        if (appVersion != null && appVersion.isNotEmpty)
+          'appVersion': appVersion,
+      },
+    );
+  }
+
+  @override
+  Future<void> deregister() async {
+    // Omitting `token` revokes every active registration for the account —
+    // correct on logout, since (per the doc comment above) no single
+    // registration id is tracked locally to target instead.
+    await api.post<void>('push/device-registrations/deregister');
+  }
+
+  static String? _platform() {
+    if (kIsWeb) return null;
+    if (Platform.isAndroid) return 'android';
+    if (Platform.isIOS) return 'ios';
+    return null;
+  }
+}
+
+/// Registered via `FirebaseMessaging.onBackgroundMessage` during Firebase
+/// init (Android/iOS only). Must be a top-level (or static) function — the
+/// platform SDK dispatches it on a separate background isolate with no
+/// access to the running app's Riverpod container or widget tree, so it
+/// cannot safely read/write app state.
+///
+/// The backend always sends a `notification` block alongside `data` (see
+/// `firebase-push.provider.ts`'s `messaging.send({notification, data})`), so
+/// the OS-level notification tray entry while the app is backgrounded or
+/// terminated is already handled automatically by the platform FCM SDK —
+/// this handler exists only to satisfy the plugin's registration
+/// requirement and as a seam for any future background data-only
+/// processing, not to construct a UI notification itself.
+@pragma('vm:entry-point')
+Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {}
+
 final class SafeFirebaseNotificationService implements NotificationService {
   SafeFirebaseNotificationService(this.logger);
   final AppLogger logger;
@@ -56,7 +133,14 @@ final class SafeFirebaseNotificationService implements NotificationService {
   @override
   Future<void> initialize() async {
     try {
-      await Firebase.initializeApp();
+      await Firebase.initializeApp(
+        options: DefaultFirebaseOptions.currentPlatform,
+      );
+      if (!kIsWeb) {
+        FirebaseMessaging.onBackgroundMessage(
+          firebaseMessagingBackgroundHandler,
+        );
+      }
       _available = true;
     } on Object catch (error) {
       _available = false;
@@ -92,18 +176,32 @@ final class NotificationCenterDestination extends NotificationDestination {
   const NotificationCenterDestination();
 }
 
+/// Parses the shared "where does this notification go" shape used by both
+/// an FCM tap (`RemoteMessage.data`) and a Notification Inbox row tap
+/// (`{targetType, targetId}` built from a `MobileNotification`) — the single
+/// source of truth for push deep-link routing (see Prompt 15 §V).
+///
+/// `targetType`/`targetId` are never trusted as authorization — they only
+/// select which route to navigate to. The destination page's own backend
+/// call is what enforces access, exactly as it already does for every other
+/// in-app navigation (e.g. `DriverOrderDetailsPage`'s `_load()` returning
+/// null for an Order the Driver can no longer see).
 abstract final class NotificationRouter {
-  static NotificationDestination? parse(Map<String, Object?> data) {
-    final type = data['type'];
-    final id = data['id'];
-    if (type == 'order' && id is String && id.isNotEmpty) {
-      return OrderNotificationDestination(id);
+  static NotificationDestination parse(Map<String, Object?> data) {
+    final targetType = data['targetType'];
+    final targetId = data['targetId'];
+    if (targetType == 'conversation' &&
+        targetId is String &&
+        targetId.isNotEmpty) {
+      return MessageNotificationDestination(targetId);
     }
-    if (type == 'message' && id is String && id.isNotEmpty) {
-      return MessageNotificationDestination(id);
+    if (targetType == 'order' && targetId is String && targetId.isNotEmpty) {
+      return OrderNotificationDestination(targetId);
     }
-    if (type == 'notifications') return const NotificationCenterDestination();
-    return null;
+    // No resolvable target (rare — the backend documents `targetId` as
+    // nullable) or a malformed payload both fail safe to the Notification
+    // Center rather than crashing or silently doing nothing.
+    return const NotificationCenterDestination();
   }
 }
 

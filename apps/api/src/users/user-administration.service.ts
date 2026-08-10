@@ -165,9 +165,21 @@ export class UserAdministrationService {
              coalesce(a.mobile_number,linked_trader.mobile_number) as "mobileNumber",
              cu.name_en as "legacyNameEn", cu.name_ar as "legacyNameAr",
              e.id as "employeeId", e.employee_number as "employeeCode", e.name_en as "employeeName",
-             e.job_title as "employeeJobTitle", case when e.is_active then 'active' else 'disabled' end as "employeeStatus"
+             e.job_title as "employeeJobTitle", case when e.is_active then 'active' else 'disabled' end as "employeeStatus",
+             -- The Driver identity this account actually operates as, if any --
+             -- either this IS a driver-kind account (linked via
+             -- user_business_links, linked_driver below), or its linked
+             -- Employee (via company_users) has a backing Driver record
+             -- (drivers.employee_id, set when the Driver was created/edited
+             -- as an employee-type Driver -- see workforce-configuration.
+             -- service.ts's saveDriver). Read-only surfacing for
+             -- Administration display; it does NOT change how any
+             -- Driver-scoped API resolves the caller's own identity.
+             coalesce(linked_driver.id, employee_driver.id) as "driverId",
+             coalesce(linked_driver.code, employee_driver.code) as "driverCode"
         from accounts a left join company_users cu on cu.account_id = a.id and cu.company_id = a.company_id
         left join employees e on e.company_user_id = cu.id and e.company_id = cu.company_id
+        left join drivers employee_driver on employee_driver.employee_id = e.id and employee_driver.company_id = e.company_id
         left join user_business_links profile_link on profile_link.account_id=a.id
           and profile_link.company_id=a.company_id
           and profile_link.access_status in ('invited','active','suspended')

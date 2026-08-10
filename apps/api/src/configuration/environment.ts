@@ -7,6 +7,10 @@ type FileStorageProvider = (typeof fileStorageProviders)[number];
 const logLevels = ["fatal", "error", "warn", "info", "debug", "trace", "silent"] as const;
 
 export interface AppConfiguration {
+  companyDeletion: {
+    backupRoot: string;
+    timeoutMs: number;
+  };
   app: {
     corsOrigins: string[];
     environment: ApplicationEnvironment;
@@ -34,6 +38,18 @@ export interface AppConfiguration {
      * only through an authenticated, Company-scoped endpoint.
      */
     localRoot: string;
+  };
+  push: {
+    /**
+     * The Firebase Admin SDK service-account credential, as a JSON string
+     * (never a file path — this deploys the same way the rest of the app's
+     * secrets do, via an environment variable, and is never committed).
+     * Absent in DEV until a real Firebase project exists: `FirebasePushProvider`
+     * treats that as "not configured" and reports every send as a transient
+     * failure rather than throwing at bootstrap, so the API starts and runs
+     * normally without it.
+     */
+    firebaseServiceAccountJson: string | undefined;
   };
   tenancy: {
     /**
@@ -215,6 +231,19 @@ export function configuration(): AppConfiguration {
   }
 
   return {
+    companyDeletion: {
+      backupRoot: parseFileStorageLocalRoot(
+        process.env.COMPANY_DELETION_BACKUP_ROOT ?? resolve(process.cwd(), ".backups/company-deletion"),
+        environment,
+      ),
+      timeoutMs: parseInteger(
+        process.env.COMPANY_DELETION_BACKUP_TIMEOUT_MS,
+        "COMPANY_DELETION_BACKUP_TIMEOUT_MS",
+        300_000,
+        10_000,
+        1_800_000,
+      ),
+    },
     app: {
       corsOrigins: parseCorsOrigins(process.env.CORS_ORIGINS, environment),
       environment,
@@ -273,6 +302,12 @@ export function configuration(): AppConfiguration {
     files: {
       localRoot: parseFileStorageLocalRoot(process.env.FILE_STORAGE_LOCAL_ROOT, environment),
       provider: parseFileStorageProvider(process.env.FILE_STORAGE_PROVIDER),
+    },
+    push: {
+      firebaseServiceAccountJson:
+        process.env.FIREBASE_SERVICE_ACCOUNT_JSON?.trim() === ""
+          ? undefined
+          : process.env.FIREBASE_SERVICE_ACCOUNT_JSON,
     },
   };
 }

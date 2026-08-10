@@ -152,7 +152,6 @@ describe.skipIf(!runTests)("Platform user deletion", () => {
             (
               await post("/api/v1/platform/companies", manageCookie, {
                 name: `Del ${tag} ${suffix}`,
-                code: `${tag}-${suffix.toUpperCase()}`,
                 subdomain: `${tag.toLowerCase()}${suffix}`,
                 environment: "sandbox",
                 countryCode: "AE",

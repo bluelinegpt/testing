@@ -60,7 +60,11 @@ describe.skipIf(!enabled)("guarded communication cleanup verification", () => {
    * into the realtime event log and the notification outbox). Only ever
    * used inside a rolled-back transaction — see the file-level note above.
    */
-  async function buildFullScenario(transaction: Transaction<DatabaseSchema>, runId: string, label: string) {
+  async function buildFullScenario(
+    transaction: Transaction<DatabaseSchema>,
+    runId: string,
+    label: string,
+  ) {
     const company = await createFixtureCompany(transaction, runId, label);
     const office = await createFixtureOfficeUser(transaction, company.companyId, label, [
       "communication.operator.read",
@@ -70,15 +74,26 @@ describe.skipIf(!enabled)("guarded communication cleanup verification", () => {
       "communication.trader.read",
       "communication.trader.send",
     ]);
-    const customer = await createFixtureCustomer(transaction, company.companyId, office.accountId, label);
+    const customer = await createFixtureCustomer(
+      transaction,
+      company.companyId,
+      office.accountId,
+      label,
+    );
     const order = await createFixtureOrder(transaction, company.companyId, office.accountId, {
       customerId: customer.customerId,
       traderId: trader.traderId,
     });
-    const tracking = await createFixtureTrackingToken(transaction, company.companyId, order.orderId);
+    const tracking = await createFixtureTrackingToken(
+      transaction,
+      company.companyId,
+      order.orderId,
+    );
     const accessor = new StaticIdentityAccessor();
     const service = createTestCommunicationService(transaction, accessor);
-    const session = await service.createCustomerMessagingSession({ trackingToken: tracking.rawToken });
+    const session = await service.createCustomerMessagingSession({
+      trackingToken: tracking.rawToken,
+    });
     await service.customerResolveConversation(session.customerMessagingToken);
     await service.customerSendText(session.customerMessagingToken, {
       clientMessageId: `${label}-cleanup-message`,
@@ -117,7 +132,11 @@ describe.skipIf(!enabled)("guarded communication cleanup verification", () => {
       // A bare Company row is the one fixture shape that can be committed
       // and later fully removed — no account, Role, or Customer is ever
       // attached, so none of the permanent no-delete triggers apply.
-      const target = await createFixtureCompany(database as unknown as Transaction<DatabaseSchema>, targetRunId, "i2t");
+      const target = await createFixtureCompany(
+        database as unknown as Transaction<DatabaseSchema>,
+        targetRunId,
+        "i2t",
+      );
       const control = await createFixtureCompany(
         database as unknown as Transaction<DatabaseSchema>,
         controlRunId,
@@ -168,9 +187,9 @@ describe.skipIf(!enabled)("guarded communication cleanup verification", () => {
       // This must never be reachable from a real committed scenario — it
       // is only exercised here, against uncommitted rows still inside the
       // open transaction, purely to prove the guard clause itself works.
-      await expect(cleanupCommunicationRunId(transaction as unknown as Kysely<DatabaseSchema>, runId)).rejects.toThrow(
-        /cannot remove Role rows/,
-      );
+      await expect(
+        cleanupCommunicationRunId(transaction as unknown as Kysely<DatabaseSchema>, runId),
+      ).rejects.toThrow(/cannot remove Role rows/);
       return undefined;
     });
   });

@@ -47,15 +47,26 @@ describe.skipIf(!enabled)("guarded Customer communication REST security", () => 
       "communication.operator.send",
     ]);
     const trader = await createFixtureTrader(transaction, company.companyId, "b", []);
-    const customer = await createFixtureCustomer(transaction, company.companyId, office.accountId, "b");
+    const customer = await createFixtureCustomer(
+      transaction,
+      company.companyId,
+      office.accountId,
+      "b",
+    );
     const order = await createFixtureOrder(transaction, company.companyId, office.accountId, {
       customerId: customer.customerId,
       traderId: trader.traderId,
     });
-    const tracking = await createFixtureTrackingToken(transaction, company.companyId, order.orderId);
+    const tracking = await createFixtureTrackingToken(
+      transaction,
+      company.companyId,
+      order.orderId,
+    );
     const accessor = new StaticIdentityAccessor();
     const service = createTestCommunicationService(transaction, accessor);
-    const session = await service.createCustomerMessagingSession({ trackingToken: tracking.rawToken });
+    const session = await service.createCustomerMessagingSession({
+      trackingToken: tracking.rawToken,
+    });
     return { accessor, company, customer, office, order, service, session, trader };
   }
 
@@ -73,10 +84,7 @@ describe.skipIf(!enabled)("guarded Customer communication REST security", () => 
 
   it("send/history/read/unread-count form a consistent, correctly scoped lifecycle", async () => {
     await withRolledBackCommunicationFixtures(database, async (transaction, runId) => {
-      const { service, session, office, company, order } = await buildScenario(
-        runId,
-        transaction,
-      );
+      const { service, session, office, company, order } = await buildScenario(runId, transaction);
 
       // The Customer's own message never counts toward their own unread total.
       const customerMessage = await service.customerSendText(session.customerMessagingToken, {
@@ -118,7 +126,9 @@ describe.skipIf(!enabled)("guarded Customer communication REST security", () => 
         sessionId: "office-session",
       };
       const officeService = createTestCommunicationService(transaction, accessor);
-      const conversation = await service.customerResolveConversation(session.customerMessagingToken);
+      const conversation = await service.customerResolveConversation(
+        session.customerMessagingToken,
+      );
       const officeReplyOne = await officeService.sendTextMessage(conversation.id, {
         clientMessageId: "b-lifecycle-office-1",
         idempotencyKey: `b-lifecycle-office-key-1-${runId}`,
@@ -219,7 +229,9 @@ describe.skipIf(!enabled)("guarded Customer communication REST security", () => 
   it("realtime recovery advances the cursor and safely reports fullRefreshRequired once it expires", async () => {
     await withRolledBackCommunicationFixtures(database, async (transaction, runId) => {
       const { service, session, office, company } = await buildScenario(runId, transaction);
-      const conversation = await service.customerResolveConversation(session.customerMessagingToken);
+      const conversation = await service.customerResolveConversation(
+        session.customerMessagingToken,
+      );
 
       const accessor = new StaticIdentityAccessor();
       accessor.identity = {

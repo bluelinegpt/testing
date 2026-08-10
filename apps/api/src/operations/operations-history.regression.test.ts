@@ -29,6 +29,7 @@ import {
   createCalendarDateReportModeServiceStub,
 } from "../test/business-day-stubs.js";
 import { OutsourcedDriverFeeService } from "../payroll/outsourced-driver-fee.service.js";
+import { PushOutboxWriter } from "../push/push-outbox-writer.service.js";
 import { OrdersWorkflowService } from "./orders-workflow.service.js";
 
 const runDatabaseTests = process.env.RUN_HISTORY_DATABASE === "true";
@@ -102,6 +103,7 @@ describe.skipIf(!runDatabaseTests)("OperationsHistoryWriter consumers", () => {
           identities as unknown as IdentityContextAccessor,
           history,
           undefined as never,
+          new PushOutboxWriter(),
         );
 
         const makeCompany = async (label: string) => {

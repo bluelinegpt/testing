@@ -2,14 +2,37 @@ import 'dart:async';
 
 import 'package:bluelinegpt_mobile/app/localization/app_localizations.dart';
 import 'package:bluelinegpt_mobile/app/theme/app_theme.dart';
+import 'package:bluelinegpt_mobile/core/network/api_client.dart';
 import 'package:bluelinegpt_mobile/shared/models/mobile_ui_models.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart' as intl;
+
+/// The single shared DEV-only diagnostic text for a failed data load —
+/// previously duplicated near-identically as a private `_devError` in both
+/// `dashboard_page.dart` and `operator_pages.dart`, and entirely absent from
+/// `driver_pages.dart` (whose two `AppErrorState` call sites fell back to
+/// the same generic "Data is currently unavailable" text with zero way to
+/// tell which category — network/timeout/HTTP status/invalid response —
+/// actually failed). [screen] identifies which screen/endpoint failed, since
+/// `AppErrorState` itself has no way to know that. Never includes a response
+/// body, token, or other payload content — only the failure's kind/code/HTTP
+/// status, matching the existing DEV-diagnostics convention used at login
+/// (`_LoginDiagnostics` in `pages.dart`).
+String devApiFailureText(String screen, Object error) {
+  if (error is ApiFailure) {
+    final status = error.statusCode == null
+        ? ''
+        : 'HTTP ${error.statusCode} — ';
+    return 'DEV $screen: $status${error.code ?? error.kind.name.toUpperCase()}';
+  }
+  return 'DEV $screen: UNKNOWN_ERROR';
+}
 
 enum OrderStatusPresentation {
   newOrder,
   assigned,
   outForDelivery,
+  onHold,
   delivered,
   returnedToBranch,
   returnedToTrader,
@@ -22,6 +45,7 @@ abstract final class OrderStatusMapper {
     'new' => OrderStatusPresentation.newOrder,
     'assigned' || 'assigned_to_driver' => OrderStatusPresentation.assigned,
     'out_for_delivery' => OrderStatusPresentation.outForDelivery,
+    'hold' => OrderStatusPresentation.onHold,
     'delivered' => OrderStatusPresentation.delivered,
     'returned_to_branch' => OrderStatusPresentation.returnedToBranch,
     'returned_to_trader' => OrderStatusPresentation.returnedToTrader,
@@ -34,6 +58,7 @@ abstract final class OrderStatusMapper {
         OrderStatusPresentation.newOrder => l10n.newStatus,
         OrderStatusPresentation.assigned => l10n.assignedToDriver,
         OrderStatusPresentation.outForDelivery => l10n.outForDelivery,
+        OrderStatusPresentation.onHold => l10n.holdStatus,
         OrderStatusPresentation.delivered => l10n.delivered,
         OrderStatusPresentation.returnedToBranch => l10n.returnedToBranch,
         OrderStatusPresentation.returnedToTrader => l10n.returnedToTrader,
@@ -52,7 +77,8 @@ final class StatusChip extends StatelessWidget {
       OrderStatusPresentation.delivered => AppColors.success,
       OrderStatusPresentation.cancelled => AppColors.error,
       OrderStatusPresentation.returnedToBranch ||
-      OrderStatusPresentation.returnedToTrader => AppColors.warning,
+      OrderStatusPresentation.returnedToTrader ||
+      OrderStatusPresentation.onHold => AppColors.warning,
       OrderStatusPresentation.unknown => Colors.grey,
       _ => AppColors.info,
     };
@@ -95,6 +121,7 @@ final class SummaryCard extends StatelessWidget {
             decimalDigits: 2,
           ).format(value)
         : intl.NumberFormat.decimalPattern(locale).format(value);
+    final scheme = Theme.of(context).colorScheme;
     return Semantics(
       button: onTap != null,
       label: '$title, $formatted',
@@ -106,18 +133,37 @@ final class SummaryCard extends StatelessWidget {
             padding: const EdgeInsets.all(AppSpacing.md),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.max,
               children: [
-                Icon(icon, color: Theme.of(context).colorScheme.primary),
-                const SizedBox(height: AppSpacing.sm),
-                Text(title, maxLines: 2, overflow: TextOverflow.ellipsis),
+                Container(
+                  padding: const EdgeInsets.all(AppSpacing.xs),
+                  decoration: BoxDecoration(
+                    color: scheme.primary.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(icon, size: 20, color: scheme.primary),
+                ),
                 const Spacer(),
                 if (loading)
                   const LinearProgressIndicator()
                 else
                   Text(
                     formatted,
-                    style: Theme.of(context).textTheme.titleLarge,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
+                const SizedBox(height: AppSpacing.xs / 2),
+                Text(
+                  title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
               ],
             ),
           ),
@@ -164,6 +210,27 @@ final class OrderCard extends StatelessWidget {
     final showTraderMoney =
         audience == OrderAudience.trader ||
         audience == OrderAudience.operatorRole;
+    final theme = Theme.of(context);
+    final mutedStyle = theme.textTheme.bodySmall?.copyWith(
+      color: theme.colorScheme.onSurfaceVariant,
+    );
+    // Serial/Reference — whichever is available — is the card's primary,
+    // emphasized identifier; the raw internal `orderNumber` becomes a
+    // smaller secondary line rather than disappearing outright. When
+    // neither is available, `orderNumber` is shown at full emphasis instead
+    // (never left with no primary identifier at all).
+    final reference = order.externalReference?.trim();
+    final serial = order.serialNumber?.trim();
+    final primaryLabel = (reference != null && reference.isNotEmpty)
+        ? reference
+        : (serial != null && serial.isNotEmpty)
+        ? serial
+        : order.orderNumber;
+    final showSecondaryOrderNumber = primaryLabel != order.orderNumber;
+    final areaLine = [
+      order.emirate,
+      order.area,
+    ].whereType<String>().where((value) => value.trim().isNotEmpty).join(', ');
     return Card(
       child: InkWell(
         onTap: onTap,
@@ -173,37 +240,86 @@ final class OrderCard extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // Serial/Reference (primary) + internal order number
+              // (secondary) always sit on the left; the status chip always
+              // sits trailing, in a single fixed position.
               Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Expanded(
                     child: Directionality(
                       textDirection: TextDirection.ltr,
-                      child: Text(
-                        order.orderNumber,
-                        style: Theme.of(context).textTheme.titleMedium,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            primaryLabel,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          if (showSecondaryOrderNumber)
+                            Text(order.orderNumber, style: mutedStyle),
+                        ],
                       ),
                     ),
                   ),
+                  const SizedBox(width: AppSpacing.sm),
                   StatusChip(status: order.status),
                 ],
               ),
-              if (showCustomer && order.customerName != null)
-                Text('${l10n.customerName}: ${order.customerName}'),
-              if (order.emirate != null || order.area != null)
-                Text(
-                  [order.emirate, order.area].whereType<String>().join(' • '),
+              if (showCustomer &&
+                  (order.customerName != null || areaLine.isNotEmpty)) ...[
+                const SizedBox(height: AppSpacing.xs),
+                // A single compact customer + area summary line instead of
+                // two separately-stacked, unlabeled Text rows.
+                Wrap(
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: AppSpacing.xs,
+                  children: [
+                    if (order.customerName != null) Text(order.customerName!),
+                    if (order.customerName != null && areaLine.isNotEmpty)
+                      Text('•', style: mutedStyle),
+                    if (areaLine.isNotEmpty) Text(areaLine, style: mutedStyle),
+                  ],
                 ),
-              if (showCustomer && order.mobileNumber != null)
+              ],
+              if (showCustomer && order.mobileNumber != null) ...[
+                const SizedBox(height: AppSpacing.xs / 2),
                 Directionality(
                   textDirection: TextDirection.ltr,
-                  child: Text(order.mobileNumber!),
+                  child: Text(order.mobileNumber!, style: mutedStyle),
                 ),
-              if (showCustomer && order.addressSummary != null)
-                Text(order.addressSummary!),
-              if (showTraderMoney && order.cod != null)
-                Text('${l10n.cod}: AED ${order.cod}'),
-              if (showTraderMoney && order.deliveryFee != null)
-                Text('${l10n.deliveryFee}: AED ${order.deliveryFee}'),
+              ],
+              if (showCustomer && order.addressSummary != null) ...[
+                const SizedBox(height: AppSpacing.xs / 2),
+                Text(
+                  order.addressSummary!,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: mutedStyle,
+                ),
+              ],
+              // COD/fee figures stay a compact, muted line — visible, but
+              // never a giant figure competing with the Serial/status above.
+              if ((showTraderMoney && order.cod != null) ||
+                  (showTraderMoney && order.deliveryFee != null)) ...[
+                const SizedBox(height: AppSpacing.xs),
+                Wrap(
+                  spacing: AppSpacing.sm,
+                  children: [
+                    if (showTraderMoney && order.cod != null)
+                      Text('${l10n.cod}: AED ${order.cod}', style: mutedStyle),
+                    if (showTraderMoney && order.deliveryFee != null)
+                      Text(
+                        '${l10n.deliveryFee}: AED ${order.deliveryFee}',
+                        style: mutedStyle,
+                      ),
+                  ],
+                ),
+              ],
             ],
           ),
         ),

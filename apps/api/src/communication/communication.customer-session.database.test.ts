@@ -58,18 +58,31 @@ describe.skipIf(!enabled)("guarded Customer communication database security", ()
       const company = await createFixtureCompany(transaction, runId, "a1");
       const office = await createFixtureOfficeUser(transaction, company.companyId, "a1", []);
       const trader = await createFixtureTrader(transaction, company.companyId, "a1", []);
-      const customer = await createFixtureCustomer(transaction, company.companyId, office.accountId, "a1");
+      const customer = await createFixtureCustomer(
+        transaction,
+        company.companyId,
+        office.accountId,
+        "a1",
+      );
       const order = await createFixtureOrder(transaction, company.companyId, office.accountId, {
         customerId: customer.customerId,
         traderId: trader.traderId,
       });
-      const tracking = await createFixtureTrackingToken(transaction, company.companyId, order.orderId);
+      const tracking = await createFixtureTrackingToken(
+        transaction,
+        company.companyId,
+        order.orderId,
+      );
       const accessor = new StaticIdentityAccessor();
       const service = createTestCommunicationService(transaction, accessor);
 
-      const session = await service.createCustomerMessagingSession({ trackingToken: tracking.rawToken });
+      const session = await service.createCustomerMessagingSession({
+        trackingToken: tracking.rawToken,
+      });
       expect(session.orderId).toBe(order.orderId);
-      const principal = await service.validateCustomerMessagingSession(session.customerMessagingToken);
+      const principal = await service.validateCustomerMessagingSession(
+        session.customerMessagingToken,
+      );
       expect(principal.companyId).toBe(company.companyId);
       expect(principal.orderId).toBe(order.orderId);
       expect(principal.customerId).toBe(customer.customerId);
@@ -92,7 +105,12 @@ describe.skipIf(!enabled)("guarded Customer communication database security", ()
       const company = await createFixtureCompany(transaction, runId, "a3");
       const office = await createFixtureOfficeUser(transaction, company.companyId, "a3", []);
       const trader = await createFixtureTrader(transaction, company.companyId, "a3", []);
-      const customer = await createFixtureCustomer(transaction, company.companyId, office.accountId, "a3");
+      const customer = await createFixtureCustomer(
+        transaction,
+        company.companyId,
+        office.accountId,
+        "a3",
+      );
       const order = await createFixtureOrder(transaction, company.companyId, office.accountId, {
         customerId: customer.customerId,
         traderId: trader.traderId,
@@ -112,8 +130,14 @@ describe.skipIf(!enabled)("guarded Customer communication database security", ()
       ).rejects.toMatchObject({ errorCode: "customer_messaging_token_invalid" });
 
       // A session minted while valid, then expired later, is rejected on use.
-      const tracking = await createFixtureTrackingToken(transaction, company.companyId, order.orderId);
-      const session = await service.createCustomerMessagingSession({ trackingToken: tracking.rawToken });
+      const tracking = await createFixtureTrackingToken(
+        transaction,
+        company.companyId,
+        order.orderId,
+      );
+      const session = await service.createCustomerMessagingSession({
+        trackingToken: tracking.rawToken,
+      });
       // The expiry check constraint requires expires_at > created_at, so
       // backdating one without the other would fail the UPDATE itself.
       await sql`
@@ -135,7 +159,12 @@ describe.skipIf(!enabled)("guarded Customer communication database security", ()
       const company = await createFixtureCompany(transaction, runId, "a4");
       const office = await createFixtureOfficeUser(transaction, company.companyId, "a4", []);
       const trader = await createFixtureTrader(transaction, company.companyId, "a4", []);
-      const customer = await createFixtureCustomer(transaction, company.companyId, office.accountId, "a4");
+      const customer = await createFixtureCustomer(
+        transaction,
+        company.companyId,
+        office.accountId,
+        "a4",
+      );
       const order = await createFixtureOrder(transaction, company.companyId, office.accountId, {
         customerId: customer.customerId,
         traderId: trader.traderId,
@@ -153,8 +182,14 @@ describe.skipIf(!enabled)("guarded Customer communication database security", ()
         service.createCustomerMessagingSession({ trackingToken: revokedTracking.rawToken }),
       ).rejects.toMatchObject({ errorCode: "customer_messaging_token_invalid" });
 
-      const tracking = await createFixtureTrackingToken(transaction, company.companyId, order.orderId);
-      const session = await service.createCustomerMessagingSession({ trackingToken: tracking.rawToken });
+      const tracking = await createFixtureTrackingToken(
+        transaction,
+        company.companyId,
+        order.orderId,
+      );
+      const session = await service.createCustomerMessagingSession({
+        trackingToken: tracking.rawToken,
+      });
       await sql`update customer_messaging_sessions set revoked_at = now() where id = (
         select id from customer_messaging_sessions where company_id = ${company.companyId}::uuid
           and order_id = ${order.orderId}::uuid order by created_at desc limit 1
@@ -182,15 +217,26 @@ describe.skipIf(!enabled)("guarded Customer communication database security", ()
       const company = await createFixtureCompany(transaction, runId, "a5");
       const office = await createFixtureOfficeUser(transaction, company.companyId, "a5", []);
       const trader = await createFixtureTrader(transaction, company.companyId, "a5", []);
-      const customer = await createFixtureCustomer(transaction, company.companyId, office.accountId, "a5");
+      const customer = await createFixtureCustomer(
+        transaction,
+        company.companyId,
+        office.accountId,
+        "a5",
+      );
       const order = await createFixtureOrder(transaction, company.companyId, office.accountId, {
         customerId: customer.customerId,
         traderId: trader.traderId,
       });
       const accessor = new StaticIdentityAccessor();
       const service = createTestCommunicationService(transaction, accessor);
-      const tracking = await createFixtureTrackingToken(transaction, company.companyId, order.orderId);
-      const session = await service.createCustomerMessagingSession({ trackingToken: tracking.rawToken });
+      const tracking = await createFixtureTrackingToken(
+        transaction,
+        company.companyId,
+        order.orderId,
+      );
+      const session = await service.createCustomerMessagingSession({
+        trackingToken: tracking.rawToken,
+      });
 
       // Still active: session validates.
       await expect(
@@ -215,7 +261,12 @@ describe.skipIf(!enabled)("guarded Customer communication database security", ()
         "communication.operator.send",
       ]);
       const trader = await createFixtureTrader(transaction, company.companyId, "a6", []);
-      const customer = await createFixtureCustomer(transaction, company.companyId, office.accountId, "a6");
+      const customer = await createFixtureCustomer(
+        transaction,
+        company.companyId,
+        office.accountId,
+        "a6",
+      );
       const orderOne = await createFixtureOrder(transaction, company.companyId, office.accountId, {
         customerId: customer.customerId,
         traderId: trader.traderId,
@@ -226,16 +277,28 @@ describe.skipIf(!enabled)("guarded Customer communication database security", ()
       });
       const accessor = new StaticIdentityAccessor();
       const service = createTestCommunicationService(transaction, accessor);
-      const trackingOne = await createFixtureTrackingToken(transaction, company.companyId, orderOne.orderId);
-      const trackingTwo = await createFixtureTrackingToken(transaction, company.companyId, orderTwo.orderId);
+      const trackingOne = await createFixtureTrackingToken(
+        transaction,
+        company.companyId,
+        orderOne.orderId,
+      );
+      const trackingTwo = await createFixtureTrackingToken(
+        transaction,
+        company.companyId,
+        orderTwo.orderId,
+      );
       const sessionOne = await service.createCustomerMessagingSession({
         trackingToken: trackingOne.rawToken,
       });
       const sessionTwo = await service.createCustomerMessagingSession({
         trackingToken: trackingTwo.rawToken,
       });
-      const conversationOne = await service.customerResolveConversation(sessionOne.customerMessagingToken);
-      const conversationTwo = await service.customerResolveConversation(sessionTwo.customerMessagingToken);
+      const conversationOne = await service.customerResolveConversation(
+        sessionOne.customerMessagingToken,
+      );
+      const conversationTwo = await service.customerResolveConversation(
+        sessionTwo.customerMessagingToken,
+      );
       expect(conversationOne.orderId).toBe(orderOne.orderId);
       expect(conversationTwo.orderId).toBe(orderTwo.orderId);
       expect(conversationOne.id).not.toBe(conversationTwo.id);
@@ -252,7 +315,9 @@ describe.skipIf(!enabled)("guarded Customer communication database security", ()
            .update(sessionOne.customerMessagingToken, "utf8")
            .digest("hex")}
       `.execute(transaction);
-      await expect(service.customerMessages(sessionOne.customerMessagingToken, {})).rejects.toMatchObject({
+      await expect(
+        service.customerMessages(sessionOne.customerMessagingToken, {}),
+      ).rejects.toMatchObject({
         errorCode: "customer_messaging_session_invalid",
       });
       return undefined;
@@ -293,9 +358,17 @@ describe.skipIf(!enabled)("guarded Customer communication database security", ()
       });
       const accessor = new StaticIdentityAccessor();
       const service = createTestCommunicationService(transaction, accessor);
-      const trackingA = await createFixtureTrackingToken(transaction, companyA.companyId, orderA.orderId);
-      const sessionA = await service.createCustomerMessagingSession({ trackingToken: trackingA.rawToken });
-      const principalA = await service.validateCustomerMessagingSession(sessionA.customerMessagingToken);
+      const trackingA = await createFixtureTrackingToken(
+        transaction,
+        companyA.companyId,
+        orderA.orderId,
+      );
+      const sessionA = await service.createCustomerMessagingSession({
+        trackingToken: trackingA.rawToken,
+      });
+      const principalA = await service.validateCustomerMessagingSession(
+        sessionA.customerMessagingToken,
+      );
       expect(principalA.companyId).toBe(companyA.companyId);
       expect(principalA.companyId).not.toBe(companyB.companyId);
 
@@ -303,10 +376,20 @@ describe.skipIf(!enabled)("guarded Customer communication database security", ()
       // makes cross-Company redirection impossible at the database level, not
       // just by convention: resolving Company A's conversation, then trying
       // to point at Company B's conversation for the same session, fails.
-      const conversationA = await service.customerResolveConversation(sessionA.customerMessagingToken);
-      const trackingB = await createFixtureTrackingToken(transaction, companyB.companyId, orderB.orderId);
-      const sessionB = await service.createCustomerMessagingSession({ trackingToken: trackingB.rawToken });
-      const conversationB = await service.customerResolveConversation(sessionB.customerMessagingToken);
+      const conversationA = await service.customerResolveConversation(
+        sessionA.customerMessagingToken,
+      );
+      const trackingB = await createFixtureTrackingToken(
+        transaction,
+        companyB.companyId,
+        orderB.orderId,
+      );
+      const sessionB = await service.createCustomerMessagingSession({
+        trackingToken: trackingB.rawToken,
+      });
+      const conversationB = await service.customerResolveConversation(
+        sessionB.customerMessagingToken,
+      );
       expect(conversationA.id).not.toBe(conversationB.id);
 
       await expect(
@@ -329,8 +412,18 @@ describe.skipIf(!enabled)("guarded Customer communication database security", ()
         "communication.operator.send",
       ]);
       const trader = await createFixtureTrader(transaction, company.companyId, "a8", []);
-      const customerA = await createFixtureCustomer(transaction, company.companyId, office.accountId, "a8a");
-      const customerB = await createFixtureCustomer(transaction, company.companyId, office.accountId, "a8b");
+      const customerA = await createFixtureCustomer(
+        transaction,
+        company.companyId,
+        office.accountId,
+        "a8a",
+      );
+      const customerB = await createFixtureCustomer(
+        transaction,
+        company.companyId,
+        office.accountId,
+        "a8b",
+      );
       const orderA = await createFixtureOrder(transaction, company.companyId, office.accountId, {
         customerId: customerA.customerId,
         traderId: trader.traderId,
@@ -341,10 +434,22 @@ describe.skipIf(!enabled)("guarded Customer communication database security", ()
       });
       const accessor = new StaticIdentityAccessor();
       const service = createTestCommunicationService(transaction, accessor);
-      const trackingA = await createFixtureTrackingToken(transaction, company.companyId, orderA.orderId);
-      const trackingB = await createFixtureTrackingToken(transaction, company.companyId, orderB.orderId);
-      const sessionA = await service.createCustomerMessagingSession({ trackingToken: trackingA.rawToken });
-      const sessionB = await service.createCustomerMessagingSession({ trackingToken: trackingB.rawToken });
+      const trackingA = await createFixtureTrackingToken(
+        transaction,
+        company.companyId,
+        orderA.orderId,
+      );
+      const trackingB = await createFixtureTrackingToken(
+        transaction,
+        company.companyId,
+        orderB.orderId,
+      );
+      const sessionA = await service.createCustomerMessagingSession({
+        trackingToken: trackingA.rawToken,
+      });
+      const sessionB = await service.createCustomerMessagingSession({
+        trackingToken: trackingB.rawToken,
+      });
 
       const sentByA = await service.customerSendText(sessionA.customerMessagingToken, {
         clientMessageId: "a8-message-from-a-",

@@ -21,7 +21,10 @@ import {
 
 const enabled = process.env.RUN_COMMUNICATION_DATABASE === "true";
 
-function officeIdentity(companyId: string, accountId: string): IdentityContext & { companyId: string } {
+function officeIdentity(
+  companyId: string,
+  accountId: string,
+): IdentityContext & { companyId: string } {
   return {
     companyId,
     forcePasswordChange: false,
@@ -78,14 +81,18 @@ describe.skipIf(!enabled)("guarded communication outbox and replay security", ()
   it("G1/G2: the outbox notifies every other participant with an account, never the sender", async () => {
     await withRolledBackCommunicationFixtures(database, async (transaction, runId) => {
       const company = await createFixtureCompany(transaction, runId, "g1");
-      const officeOne = await createFixtureOfficeUser(transaction, company.companyId, "g1-office-one", [
-        "communication.operator.read",
-        "communication.operator.send",
-      ]);
-      const officeTwo = await createFixtureOfficeUser(transaction, company.companyId, "g1-office-two", [
-        "communication.operator.read",
-        "communication.operator.send",
-      ]);
+      const officeOne = await createFixtureOfficeUser(
+        transaction,
+        company.companyId,
+        "g1-office-one",
+        ["communication.operator.read", "communication.operator.send"],
+      );
+      const officeTwo = await createFixtureOfficeUser(
+        transaction,
+        company.companyId,
+        "g1-office-two",
+        ["communication.operator.read", "communication.operator.send"],
+      );
       const trader = await createFixtureTrader(transaction, company.companyId, "g1", [
         "communication.trader.read",
         "communication.trader.send",
@@ -130,15 +137,26 @@ describe.skipIf(!enabled)("guarded communication outbox and replay security", ()
         "communication.operator.send",
       ]);
       const trader = await createFixtureTrader(transaction, company.companyId, "g3", []);
-      const customer = await createFixtureCustomer(transaction, company.companyId, office.accountId, "g3");
+      const customer = await createFixtureCustomer(
+        transaction,
+        company.companyId,
+        office.accountId,
+        "g3",
+      );
       const order = await createFixtureOrder(transaction, company.companyId, office.accountId, {
         customerId: customer.customerId,
         traderId: trader.traderId,
       });
       const accessor = new StaticIdentityAccessor();
       const service = createTestCommunicationService(transaction, accessor);
-      const tracking = await createFixtureTrackingToken(transaction, company.companyId, order.orderId);
-      const session = await service.createCustomerMessagingSession({ trackingToken: tracking.rawToken });
+      const tracking = await createFixtureTrackingToken(
+        transaction,
+        company.companyId,
+        order.orderId,
+      );
+      const session = await service.createCustomerMessagingSession({
+        trackingToken: tracking.rawToken,
+      });
       const message = await service.customerSendText(session.customerMessagingToken, {
         clientMessageId: "g3-customer-message",
         idempotencyKey: `g3-customer-key-${runId}`,
@@ -154,10 +172,12 @@ describe.skipIf(!enabled)("guarded communication outbox and replay security", ()
   it("G4: a duplicate idempotent send creates no additional outbox rows", async () => {
     await withRolledBackCommunicationFixtures(database, async (transaction, runId) => {
       const company = await createFixtureCompany(transaction, runId, "g4");
-      const officeOne = await createFixtureOfficeUser(transaction, company.companyId, "g4-office-one", [
-        "communication.operator.read",
-        "communication.operator.send",
-      ]);
+      const officeOne = await createFixtureOfficeUser(
+        transaction,
+        company.companyId,
+        "g4-office-one",
+        ["communication.operator.read", "communication.operator.send"],
+      );
       const trader = await createFixtureTrader(transaction, company.companyId, "g4", [
         "communication.trader.read",
         "communication.trader.send",
@@ -343,9 +363,15 @@ describe.skipIf(!enabled)("guarded communication outbox and replay security", ()
 
       accessor.identity = officeIdentity(companyA.companyId, officeA.accountId);
       const eventsForA = await service.recoverEvents({ after: "0" });
-      const payloadsA = eventsForA.events as readonly { readonly payload: { readonly conversationId: string } }[];
-      expect(payloadsA.every((event) => event.payload.conversationId === conversationA.id)).toBe(true);
-      expect(payloadsA.some((event) => event.payload.conversationId === conversationB.id)).toBe(false);
+      const payloadsA = eventsForA.events as readonly {
+        readonly payload: { readonly conversationId: string };
+      }[];
+      expect(payloadsA.every((event) => event.payload.conversationId === conversationA.id)).toBe(
+        true,
+      );
+      expect(payloadsA.some((event) => event.payload.conversationId === conversationB.id)).toBe(
+        false,
+      );
       return undefined;
     });
   });

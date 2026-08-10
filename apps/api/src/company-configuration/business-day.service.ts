@@ -189,12 +189,48 @@ export class BusinessDayService {
     businessDateFrom: string,
     businessDateTo?: string,
   ): Promise<readonly BusinessDayWindowSegment[]> {
-    const from = this.assertDate(businessDateFrom, "businessDateFrom");
-    const to = this.assertDate(businessDateTo ?? businessDateFrom, "businessDateTo");
+    return this.resolveSegments(businessDateFrom, businessDateTo, undefined);
+  }
+
+  /**
+   * Calendar Date boundaries: plain Company-local midnight-to-midnight, in the
+   * SAME effective-dated timezone Business Date mode uses -- but never shifted
+   * by the Business Day start. "Asia/Dubai calendar date" means Asia/Dubai
+   * midnight-to-midnight, nothing else.
+   *
+   * This is the one other lens callers may use on a date range; it shares
+   * every piece of the engine below (effective-dated rule resolution, the
+   * DST-safe local-instant computation) with Business Date mode, so the two
+   * can never independently drift on what "Company local time" means. Only
+   * the boundary instant itself differs -- 00:00 instead of the configured
+   * cutoff.
+   */
+  public async calendarSegments(
+    dateFrom: string,
+    dateTo?: string,
+  ): Promise<readonly BusinessDayWindowSegment[]> {
+    return this.resolveSegments(dateFrom, dateTo, "00:00");
+  }
+
+  /**
+   * The shared engine behind `segments()` and `calendarSegments()`.
+   *
+   * `boundaryStartOverride` is the only thing that differs between the two
+   * modes: undefined uses each rule's own configured Business Day start;
+   * "00:00" forces plain midnight. Rule resolution, effective-dating and the
+   * DST-safe local-instant arithmetic are identical either way.
+   */
+  private async resolveSegments(
+    dateFrom: string,
+    dateTo: string | undefined,
+    boundaryStartOverride: string | undefined,
+  ): Promise<readonly BusinessDayWindowSegment[]> {
+    const from = this.assertDate(dateFrom, "dateFrom");
+    const to = this.assertDate(dateTo ?? dateFrom, "dateTo");
     if (to < from) {
       throw new ApplicationException(
         "business_date_range_invalid",
-        "Business Date From cannot be after Business Date To",
+        "Date From cannot be after Date To",
         HttpStatus.BAD_REQUEST,
       );
     }
@@ -203,8 +239,11 @@ export class BusinessDayService {
     // first row already contained.
     const rules = await this.activeConfigurations();
 
-    // Group consecutive Business Dates that share a rule. Most ranges produce
-    // exactly one group; a rule change produces two.
+    // Group consecutive dates that share a rule. Most ranges produce exactly
+    // one group; a rule change produces two. (In Calendar Date mode this can
+    // split a range where only the Business Day start changed and the
+    // timezone did not -- harmless: the segments below still union to the
+    // exact right window, just as one extra OR term.)
     const groups: { configuration: BusinessDayConfiguration; first: string; last: string }[] = [];
     for (let date = from; date <= to; date = this.addDays(date, 1)) {
       const configuration = this.ruleFor(rules, date);
@@ -216,19 +255,24 @@ export class BusinessDayService {
       groups.push({ configuration, first: date, last: date });
     }
 
+    const boundaryConfig = (configuration: BusinessDayConfiguration) =>
+      boundaryStartOverride === undefined
+        ? configuration
+        : { ...configuration, businessDayStart: boundaryStartOverride };
+
     return groups.map((group, index) => {
       const next = groups[index + 1];
-      const startUtc = this.localInstant(group.first, group.configuration);
+      const startUtc = this.localInstant(group.first, boundaryConfig(group.configuration));
       // Chained: hand over exactly where the next rule opens, so the boundary
       // can be neither double-counted nor lost.
       const endUtc =
         next === undefined
-          ? this.localInstant(this.addDays(group.last, 1), group.configuration)
-          : this.localInstant(next.first, next.configuration);
+          ? this.localInstant(this.addDays(group.last, 1), boundaryConfig(group.configuration))
+          : this.localInstant(next.first, boundaryConfig(next.configuration));
       return {
         businessDateFrom: group.first,
         businessDateTo: group.last,
-        businessDayStart: group.configuration.businessDayStart,
+        businessDayStart: boundaryConfig(group.configuration).businessDayStart,
         configurationId: group.configuration.id,
         displayEnd: new Date(Date.parse(endUtc) - 1).toISOString(),
         endUtc,
@@ -250,13 +294,22 @@ export class BusinessDayService {
     businessDateFrom: string,
     businessDateTo?: string,
   ): Promise<BusinessDayWindow> {
-    const segments = await this.segments(businessDateFrom, businessDateTo);
+    return this.foldSegments(await this.segments(businessDateFrom, businessDateTo));
+  }
+
+  /** The Calendar Date analog of `window()` -- same envelope shape, boundaries
+   *  from `calendarSegments()` instead. */
+  public async calendarWindow(dateFrom: string, dateTo?: string): Promise<BusinessDayWindow> {
+    return this.foldSegments(await this.calendarSegments(dateFrom, dateTo));
+  }
+
+  private foldSegments(segments: readonly BusinessDayWindowSegment[]): BusinessDayWindow {
     const first = segments[0];
     const last = segments[segments.length - 1];
     if (first === undefined || last === undefined) {
       throw new ApplicationException(
         "business_date_range_invalid",
-        "The Business Date range resolved to no window",
+        "The Date range resolved to no window",
         HttpStatus.UNPROCESSABLE_ENTITY,
       );
     }
@@ -319,6 +372,39 @@ export class BusinessDayService {
         continue;
       }
       resolved.set(timestamp, this.businessDateWith(instant, rule));
+    }
+    return resolved;
+  }
+
+  /** The Calendar Date analog of `businessDatesFor()` -- the instant's own
+   *  local calendar date in the effective-dated Company timezone, with no
+   *  Business Day cutoff shift. */
+  public async calendarDatesFor(
+    timestamps: readonly (string | null | undefined)[],
+  ): Promise<ReadonlyMap<string, string>> {
+    const distinct = [...new Set(timestamps.filter((value): value is string => !!value))];
+    const resolved = new Map<string, string>();
+    if (distinct.length === 0) return resolved;
+    const rules = await this.activeConfigurations();
+    for (const timestamp of distinct) {
+      const parsed = Date.parse(timestamp);
+      if (Number.isNaN(parsed)) continue;
+      const instant = new Date(parsed);
+      const utcDate = instant.toISOString().slice(0, 10);
+      let localDate: string;
+      try {
+        const provisional = this.ruleFor(rules, utcDate);
+        localDate = this.localDate(instant, provisional.timezone);
+        // The timezone itself is effective-dated; re-resolve only if crossing
+        // to a different local date could mean a different rule applies.
+        if (localDate !== utcDate) {
+          const confirmed = this.ruleFor(rules, localDate);
+          localDate = this.localDate(instant, confirmed.timezone);
+        }
+      } catch {
+        continue;
+      }
+      resolved.set(timestamp, localDate);
     }
     return resolved;
   }
@@ -414,6 +500,27 @@ export class BusinessDayService {
     const startMinutes = this.startMinutes(configuration.businessDayStart);
     // Before the day has begun, the instant still belongs to yesterday.
     return localMinutes < startMinutes ? this.addDays(local, -1) : local;
+  }
+
+  /** The Calendar Date analog of `businessDateOf()` -- the instant's own
+   *  local calendar date, with no Business Day cutoff shift. Used to resolve
+   *  "Today" in Calendar Date mode. */
+  public async calendarDateOf(timestamp: string): Promise<string> {
+    const parsed = Date.parse(timestamp);
+    if (Number.isNaN(parsed)) {
+      throw new ApplicationException(
+        "business_day_instant_invalid",
+        "A valid timestamp is required",
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    const instant = new Date(parsed);
+    const utcDate = instant.toISOString().slice(0, 10);
+    const provisional = await this.configurationFor(utcDate);
+    const localDate = this.localDate(instant, provisional.timezone);
+    if (localDate === utcDate) return localDate;
+    const configuration = await this.configurationFor(localDate);
+    return this.localDate(instant, configuration.timezone);
   }
 
   public nextBusinessDate(businessDate: string): string {

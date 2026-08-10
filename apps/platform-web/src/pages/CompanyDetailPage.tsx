@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { FormEvent, ReactElement } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 
 import {
   PlatformApiError,
@@ -8,6 +8,9 @@ import {
   type AccountingSetupSummary,
   type AuditEntry,
   type CompanyDetail,
+  type CompanyDeletionEligibility,
+  type CompanyDeletionPreview,
+  type CompanyDeletionBackup,
   type ReadinessSummary,
 } from "../api/platform-client.js";
 import { usePlatformSession } from "../app/PlatformSession.js";
@@ -23,8 +26,10 @@ import { CompanyAdministrators } from "./CompanyAdministrators.js";
  */
 export function CompanyDetailPage(): ReactElement {
   const { companyId = "" } = useParams();
+  const navigate = useNavigate();
   const session = usePlatformSession();
   const canManage = session.can("platform.companies.manage");
+  const canDelete = session.can("platform.companies.delete");
 
   const [company, setCompany] = useState<CompanyDetail | undefined>(undefined);
   const [setup, setSetup] = useState<AccountingSetupSummary | undefined>(undefined);
@@ -35,6 +40,12 @@ export function CompanyDetailPage(): ReactElement {
   const [failed, setFailed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
+  const [deletionEligibility, setDeletionEligibility] = useState<CompanyDeletionEligibility | undefined>(undefined);
+  const [deletionPreview, setDeletionPreview] = useState<CompanyDeletionPreview | undefined>(undefined);
+  const [deletionBackup, setDeletionBackup] = useState<CompanyDeletionBackup | undefined>(undefined);
+  const [deletionKey, setDeletionKey] = useState<string | undefined>(undefined);
+  const [deleteConfirmation, setDeleteConfirmation] = useState("");
+  const [deletionStatus, setDeletionStatus] = useState<string | undefined>(undefined);
 
   const load = useCallback(async () => {
     setFailed(false);
@@ -47,6 +58,11 @@ export function CompanyDetailPage(): ReactElement {
       setCompany(detail);
       setSetup(accounting);
       setReadiness(ready);
+      setDeletionEligibility(
+        detail.status === "closed"
+          ? await platformApi.companyDeletionEligibility(companyId)
+          : undefined,
+      );
       // Audit is a separate, separately-permissioned read. A Platform account
       // without the audit permission still gets a working page; it just does
       // not get the trail.
@@ -97,6 +113,84 @@ export function CompanyDetailPage(): ReactElement {
           ? failure.message
           : `The Company could not be ${action}d.`,
       );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function closeCompany(): Promise<void> {
+    if (company === undefined) return;
+    const reason = globalThis.prompt("Reason for closing this Company:");
+    if (reason === null || reason.trim().length < 3) return;
+    const confirmation = globalThis.prompt(
+      `No Company data will be deleted by closing the Company. Type CLOSE ${company.code} to confirm.`,
+    );
+    if (confirmation === null) return;
+    setBusy(true);
+    setError(undefined);
+    try {
+      await platformApi.closeCompany(companyId, reason.trim(), confirmation);
+      await load();
+    } catch (failure) {
+      setError(failure instanceof PlatformApiError ? failure.message : "The Company could not be closed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function runDeletionPreview(): Promise<void> {
+    const key = globalThis.crypto.randomUUID();
+    setBusy(true);
+    setError(undefined);
+    setDeletionBackup(undefined);
+    setDeletionStatus("Preparing deletion preview");
+    try {
+      setDeletionPreview(await platformApi.companyDeletionPreview(companyId, key));
+      setDeletionKey(key);
+      setDeletionStatus("Preview ready");
+    } catch (failure) {
+      setError(failure instanceof PlatformApiError ? failure.message : "Unable to run deletion preview.");
+      setDeletionStatus(undefined);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function createDeletionBackup(): Promise<void> {
+    if (deletionPreview === undefined) return;
+    setBusy(true);
+    setError(undefined);
+    setDeletionStatus("Creating and verifying full-database backup");
+    try {
+      setDeletionBackup(await platformApi.companyDeletionBackup(companyId, deletionPreview.operationId));
+      setDeletionStatus("Backup verified — ready for final confirmation");
+    } catch (failure) {
+      setError(failure instanceof PlatformApiError ? failure.message : "Unable to create verified backup.");
+      setDeletionStatus("Backup failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function permanentlyDelete(): Promise<void> {
+    if (deletionPreview === undefined || deletionKey === undefined) return;
+    setBusy(true);
+    setError(undefined);
+    setDeletionStatus("Revalidating and deleting Company data");
+    try {
+      await platformApi.permanentlyDeleteCompany(companyId, {
+        operationId: deletionPreview.operationId,
+        previewId: deletionPreview.previewId,
+        confirmation: deleteConfirmation,
+        idempotencyKey: deletionKey,
+      });
+      navigate("/companies", {
+        replace: true,
+        state: { notice: `${company?.code ?? "Company"} was permanently deleted.` },
+      });
+    } catch (failure) {
+      setError(failure instanceof PlatformApiError ? failure.message : "Permanent deletion failed and was rolled back.");
+      setDeletionStatus("Failed / rolled back");
     } finally {
       setBusy(false);
     }
@@ -248,10 +342,18 @@ export function CompanyDetailPage(): ReactElement {
         safety property that future maintenance operations depend on.
       </p>
 
+      <h3>Technical information</h3>
+      <dl className="platform-review">
+        <div>
+          <dt>Company ID</dt>
+          <dd>{company.id}</dd>
+        </div>
+      </dl>
+
       <h3>Configuration</h3>
       <dl className="platform-review">
         {[
-          ["Country", company.countryCode],
+          ["Country", company.countryCode === "AE" ? "United Arab Emirates (AE)" : company.countryCode],
           ["Timezone", company.timezone ?? "\u2014"],
           ["Currency", company.baseCurrency ?? "\u2014"],
           ["Default language", company.defaultLanguage ?? "\u2014"],
@@ -423,19 +525,75 @@ export function CompanyDetailPage(): ReactElement {
                 Reactivate
               </button>
             ) : null}
-            {company.status !== "disabled" ? (
+            {company.status !== "disabled" && company.status !== "closed" ? (
               <button
                 className="platform-button platform-button--quiet"
                 disabled={busy}
-                onClick={() => void act("disable", true)}
+                onClick={() => void closeCompany()}
                 type="button"
               >
                 Close Company
               </button>
             ) : null}
           </div>
-          {/* No delete control exists anywhere: a Company's orders, journals
-              and audit trail must outlive the Company being closed. */}
+          {company.status === "closed" ? (
+            <section aria-labelledby="deletion-foundation-heading">
+              <h4 id="deletion-foundation-heading">Permanent Company deletion</h4>
+              <p>Environment: {company.environment}</p>
+              <p>Closed at: {company.closedAt ?? "—"}</p>
+              <p>
+                {deletionEligibility?.eligible
+                  ? "Eligible for deletion immediately, subject to preview and backup readiness."
+                  : deletionEligibility?.eligibleAt === null || deletionEligibility === undefined
+                    ? "Deletion eligibility is unavailable."
+                    : `Deletion available after ${deletionEligibility.eligibleAt}. Remaining: ${deletionEligibility.remainingSeconds} seconds.`}
+              </p>
+              {canDelete ? (
+                <button
+                  className="platform-button platform-button--quiet"
+                  disabled={busy}
+                  onClick={() => void runDeletionPreview()}
+                  type="button"
+                >
+                  Run Deletion Preview
+                </button>
+              ) : null}
+              {deletionPreview === undefined ? null : (
+                <div className="platform-review">
+                  <p role="status">READY FOR DELETE: {deletionPreview.readyForDelete ? "YES" : "NO"}</p>
+                  <p><strong>Manifest:</strong> {deletionPreview.manifestVersion ?? "pending"} ({deletionPreview.manifestHash?.slice(0, 12) ?? "pending"}…)</p>
+                  <p><strong>Total Company rows:</strong> {deletionPreview.totalCompanyRows ?? 0}</p>
+                  <p><strong>External objects:</strong> {deletionPreview.externalFiles?.fileObjects ?? 0}</p>
+                  <p><strong>Global/shared data:</strong> preserved</p>
+                  {Object.entries(deletionPreview.moduleCounts ?? {}).map(([module, count]) => (
+                    <p key={module}>{module}: {count}</p>
+                  ))}
+                  {(deletionPreview.blockers ?? []).map((blocker) => <p className="platform-warning" key={blocker}>{blocker}</p>)}
+                  <button
+                    className="platform-button platform-button--quiet"
+                    disabled={busy || (deletionPreview.blockers ?? []).length > 0 || !deletionEligibility?.eligible}
+                    onClick={() => void createDeletionBackup()}
+                    type="button"
+                  >Create Verified Backup</button>
+                </div>
+              )}
+              {deletionBackup === undefined ? null : (
+                <div className="platform-review">
+                  <p><strong>Backup:</strong> Verified full-database backup</p>
+                  <p><strong>Size:</strong> {deletionBackup.sizeBytes.toLocaleString()} bytes</p>
+                  <p><strong>Verified:</strong> {deletionBackup.verifiedAt}</p>
+                  <label className="platform-field" htmlFor="permanent-delete-confirmation">
+                    <span>Type DELETE {company.code}</span>
+                    <input id="permanent-delete-confirmation" onChange={(event) => setDeleteConfirmation(event.target.value)} value={deleteConfirmation} />
+                  </label>
+                  <button className="platform-button" disabled={busy || deleteConfirmation !== `DELETE ${company.code}`} onClick={() => void permanentlyDelete()} type="button">
+                    Permanently Delete Company
+                  </button>
+                </div>
+              )}
+              {deletionStatus === undefined ? null : <p role="status">{deletionStatus}</p>}
+            </section>
+          ) : null}
           <p className="platform-muted">
             Suspension stops sign-in and ends existing sessions. No data is removed, and
             reactivation restores access without recreating anything.

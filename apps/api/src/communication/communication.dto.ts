@@ -1,10 +1,14 @@
+import { Type } from "class-transformer";
 import {
   IsIn,
   IsISO8601,
+  IsNumber,
   IsOptional,
   IsString,
   IsUUID,
+  Max,
   MaxLength,
+  Min,
   MinLength,
 } from "class-validator";
 
@@ -51,6 +55,10 @@ export class ConversationListQueryDto {
   @IsOptional()
   @IsIn(["true", "false"])
   public unreadOnly?: string;
+
+  @IsOptional()
+  @IsIn(["normal", "high", "urgent"])
+  public priority?: string;
 }
 
 export class MessageHistoryQueryDto {
@@ -86,6 +94,36 @@ export class SendTextMessageDto {
   @IsOptional()
   @IsISO8601()
   public originalClientTime?: string;
+}
+
+/**
+ * Multipart form fields alongside the audio file itself (see
+ * `SendVoiceMessageDto` on the multipart route) — every field arrives on
+ * `request.body` as a string, so `durationSeconds` is coerced via `@Type`
+ * before `class-validator` runs.
+ */
+export class SendVoiceMessageDto {
+  @IsString()
+  @MinLength(8)
+  @MaxLength(120)
+  public clientMessageId!: string;
+
+  @IsString()
+  @MinLength(8)
+  @MaxLength(160)
+  public idempotencyKey!: string;
+
+  @IsOptional()
+  @IsISO8601()
+  public originalClientTime?: string;
+
+  /** Client-reported recording length. Re-validated server-side against the
+   *  same 5-minute ceiling the database enforces — never trusted alone. */
+  @Type(() => Number)
+  @IsNumber()
+  @Min(1)
+  @Max(300)
+  public durationSeconds!: number;
 }
 
 export class MarkConversationReadDto {

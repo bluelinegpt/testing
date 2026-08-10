@@ -5,6 +5,7 @@ import {
   IsInt,
   IsOptional,
   IsString,
+  IsUUID,
   Length,
   Matches,
   Max,
@@ -30,7 +31,7 @@ import {
  */
 
 const environments = ["development", "demo", "sandbox", "trial", "production"] as const;
-const statuses = ["draft", "active", "suspended", "disabled"] as const;
+const statuses = ["draft", "active", "suspended", "disabled", "closed"] as const;
 
 const trim = ({ value }: { value: unknown }): unknown =>
   typeof value === "string" ? value.trim() : value;
@@ -85,16 +86,7 @@ export class CreateCompanyDto {
    * the second one anyway — normalising here turns a constraint violation into
    * a predictable value.
    */
-  @Transform(({ value }: { value: unknown }) =>
-    typeof value === "string" ? value.trim().toUpperCase() : value,
-  )
-  @IsString()
-  @Length(2, 40)
-  @Matches(/^[A-Z0-9][A-Z0-9-]*$/, {
-    message: "code must use uppercase letters, digits and hyphens",
-  })
-  public code!: string;
-
+  @IsOptional()
   @Transform(({ value }: { value: unknown }) =>
     typeof value === "string" ? value.trim().toLowerCase() : value,
   )
@@ -103,25 +95,28 @@ export class CreateCompanyDto {
   @Matches(/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/, {
     message: "subdomain must be a valid DNS label",
   })
-  public subdomain!: string;
+  public subdomain?: string;
 
   @IsIn(environments)
   public environment!: (typeof environments)[number];
 
+  @IsOptional()
   @Transform(({ value }: { value: unknown }) =>
     typeof value === "string" ? value.trim().toUpperCase() : value,
   )
   @IsString()
   @Matches(/^[A-Z]{2}$/, { message: "countryCode must be a two-letter ISO code" })
-  public countryCode!: string;
+  public countryCode?: string;
 
+  @IsOptional()
   @Transform(trim)
   @IsString()
   @Length(1, 64)
-  public timezone!: string;
+  public timezone?: string;
 
+  @IsOptional()
   @IsIn(["en", "ar"])
-  public defaultLanguage!: "en" | "ar";
+  public defaultLanguage?: "en" | "ar";
 
   @IsOptional()
   @Transform(trim)
@@ -243,4 +238,34 @@ export class SuspendCompanyDto {
   @IsString()
   @Length(3, 500)
   public reason!: string;
+}
+
+export class CloseCompanyDto extends SuspendCompanyDto {
+  @Transform(trim)
+  @IsString()
+  @Length(7, 80)
+  public confirmation!: string;
+}
+
+export class CreateCompanyDeletionBackupDto {
+  @IsUUID()
+  public operationId!: string;
+}
+
+export class PermanentDeleteCompanyDto {
+  @IsUUID()
+  public operationId!: string;
+
+  @IsUUID()
+  public previewId!: string;
+
+  @Transform(trim)
+  @IsString()
+  @Length(8, 80)
+  public confirmation!: string;
+
+  @Transform(trim)
+  @IsString()
+  @Length(8, 200)
+  public idempotencyKey!: string;
 }

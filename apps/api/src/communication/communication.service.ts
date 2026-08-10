@@ -1,24 +1,42 @@
 import { HttpStatus, Inject, Injectable } from "@nestjs/common";
-import { createHash, randomBytes } from "node:crypto";
+import { ConfigService } from "@nestjs/config";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { sql, type Kysely } from "kysely";
 
+import type { AppConfiguration } from "../configuration/environment.js";
+import { FileOwnershipService } from "../files/file-ownership.service.js";
+import { PushOutboxWriter } from "../push/push-outbox-writer.service.js";
+import { FileStoragePort } from "../files/file-storage.port.js";
 import { DATABASE } from "../infrastructure/database/database.tokens.js";
 import type { DatabaseSchema } from "../infrastructure/database/database.types.js";
+import { KyselyTransactionManager } from "../infrastructure/database/transaction-manager.js";
 import { ApplicationException } from "../presentation/errors/application.exception.js";
 import { IdentityContextAccessor, type IdentityContext } from "../security/identity-context.js";
 import type {
+  AssignConversationDto,
   ConversationListQueryDto,
   EventRecoveryQueryDto,
   MarkConversationReadDto,
   MessageHistoryQueryDto,
   ResolveConversationDto,
   SendTextMessageDto,
+  SendVoiceMessageDto,
+  SetConversationPriorityDto,
   CreateCustomerMessagingSessionDto,
 } from "./communication.dto.js";
+import { validateVoiceMedia, voiceFileExtension } from "./voice-media.rules.js";
 
 const COMMUNICATION_OPERATOR_READ = "communication.operator.read";
 const COMMUNICATION_OPERATOR_SEND = "communication.operator.send";
 const MAX_PAGE_SIZE = 50;
+
+/** The shape `multer`'s `FileInterceptor` puts on `request.file` — declared
+ *  locally rather than depending on `@types/multer`, which isn't installed. */
+export interface UploadedVoiceFile {
+  readonly buffer: Buffer;
+  readonly mimetype?: string;
+  readonly size?: number;
+}
 
 type ParticipantRole = "office" | "trader" | "driver" | "customer";
 type ParticipantContextType = "trader" | "driver" | "customer";
@@ -27,6 +45,13 @@ export interface ConversationSummary {
   readonly id: string;
   readonly type: string;
   readonly participantContextType: ParticipantContextType;
+  /**
+   * The Trader/Driver/Customer's own display name — resolved through the
+   * linked Order's `trader_id`/`assigned_driver_id`/`customer_id` (the
+   * conversation itself never stores a duplicate copy of the name). `null`
+   * only for a legacy-unattributed Order or a not-yet-assigned Driver.
+   */
+  readonly participantName: string | null;
   readonly orderId: string | null;
   readonly orderNumber: string | null;
   readonly subject: string | null;
@@ -35,6 +60,11 @@ export interface ConversationSummary {
   readonly lastMessageAt: string | null;
   readonly lastMessagePreview: string | null;
   readonly unreadCount: number;
+  /** Office ownership — who this conversation is assigned to, if anyone.
+   *  `null` on the Customer-facing view: assignment is an internal Office
+   *  concern the Customer session has no business seeing. */
+  readonly assignedOperatorAccountId: string | null;
+  readonly assignedOperatorName: string | null;
 }
 
 export interface MessageView {
@@ -47,6 +77,18 @@ export interface MessageView {
   readonly systemEventType: string | null;
   readonly sequence: number;
   readonly createdAt: string;
+  /** Populated only for `messageType === "voice"`; `null` otherwise. The
+   *  audio bytes themselves are never inlined here — fetch them from the
+   *  dedicated authenticated media endpoint using this message's `id`. */
+  readonly mediaMimeType: string | null;
+  readonly mediaDurationSeconds: number | null;
+  readonly mediaSizeBytes: number | null;
+}
+
+export interface MessageMedia {
+  readonly content: Uint8Array;
+  readonly mimeType: string;
+  readonly sizeBytes: number;
 }
 
 export interface CustomerMessagingSessionView {
@@ -69,10 +111,19 @@ export interface CustomerMessagingPrincipal {
 
 @Injectable()
 export class CommunicationService {
+  private readonly fileStorageProviderName: string;
+
   public constructor(
     @Inject(DATABASE) private readonly database: Kysely<DatabaseSchema>,
     @Inject(IdentityContextAccessor) private readonly identityAccessor: IdentityContextAccessor,
-  ) {}
+    @Inject(KyselyTransactionManager) private readonly transactions: KyselyTransactionManager,
+    @Inject(FileStoragePort) private readonly fileStorage: FileStoragePort,
+    @Inject(FileOwnershipService) private readonly fileOwnership: FileOwnershipService,
+    @Inject(PushOutboxWriter) private readonly pushOutbox: PushOutboxWriter,
+    @Inject(ConfigService) config: ConfigService<AppConfiguration, true>,
+  ) {
+    this.fileStorageProviderName = config.get("files.provider", { infer: true });
+  }
 
   public async resolveConversation(dto: ResolveConversationDto): Promise<ConversationSummary> {
     const identity = this.requireCompanyIdentity();
@@ -165,12 +216,19 @@ export class CommunicationService {
     const searchFilter =
       query.search === undefined || query.search.trim() === ""
         ? sql``
-        : sql`and (o.order_number ilike ${`%${query.search.trim()}%`} or c.subject ilike ${`%${query.search.trim()}%`})`;
+        : sql`and (o.order_number ilike ${`%${query.search.trim()}%`}
+               or c.subject ilike ${`%${query.search.trim()}%`}
+               or pt.name_en ilike ${`%${query.search.trim()}%`}
+               or pd.name_en ilike ${`%${query.search.trim()}%`}
+               or pc.name ilike ${`%${query.search.trim()}%`})`;
+    const priorityFilter =
+      query.priority === undefined ? sql`` : sql`and c.priority = ${query.priority}`;
 
     const rows = await sql<ConversationSummary & { sort_at: Date }>`
       select c.id,
              c.conversation_type as "type",
              c.participant_context_type as "participantContextType",
+             coalesce(pt.name_en, pd.name_en, pc.name) as "participantName",
              c.order_id as "orderId",
              o.order_number as "orderNumber",
              c.subject,
@@ -179,13 +237,26 @@ export class CommunicationService {
              c.last_message_at as "lastMessageAt",
              case when m.message_type = 'text' then left(m.text_body, 120)
                   when m.message_type = 'system' then m.system_event_type
-                  when m.message_type = 'voice_placeholder' then 'voice_message'
+                  when m.message_type in ('voice', 'voice_placeholder') then 'voice_message'
                   else null end as "lastMessagePreview",
              ${this.unreadCountSql(identity.identityId)} as "unreadCount",
+             c.assigned_operator_user_id as "assignedOperatorAccountId",
+             au.username as "assignedOperatorName",
              coalesce(c.last_message_at, c.created_at) as sort_at
         from conversations c
         left join orders o on o.id = c.order_id and o.company_id = c.company_id
         left join messages m on m.id = c.last_message_id and m.company_id = c.company_id
+        left join traders pt
+          on pt.id = o.trader_id and pt.company_id = c.company_id
+         and c.participant_context_type = 'trader'
+        left join drivers pd
+          on pd.id = o.assigned_driver_id and pd.company_id = c.company_id
+         and c.participant_context_type = 'driver'
+        left join customers pc
+          on pc.id = o.customer_id and pc.company_id = c.company_id
+         and c.participant_context_type = 'customer'
+        left join accounts au
+          on au.id = c.assigned_operator_user_id and au.company_id = c.company_id
        where c.company_id = ${identity.companyId}
          ${participantFilter}
          ${roleFilter}
@@ -193,6 +264,7 @@ export class CommunicationService {
          ${unreadFilter}
          ${cursorFilter}
          ${searchFilter}
+         ${priorityFilter}
        order by coalesce(c.last_message_at, c.created_at) desc, c.id desc
        limit ${limit + 1}
     `.execute(this.database);
@@ -222,7 +294,10 @@ export class CommunicationService {
              client_message_id as "clientMessageId",
              system_event_type as "systemEventType",
              conversation_sequence::int as sequence,
-             created_at as "createdAt"
+             created_at as "createdAt",
+             media_mime_type as "mediaMimeType",
+             media_duration_seconds as "mediaDurationSeconds",
+             media_size_bytes::text as "mediaSizeBytes"
         from messages
        where company_id = ${identity.companyId}
          and conversation_id = ${conversationId}
@@ -269,7 +344,9 @@ export class CommunicationService {
     const existing = await sql<MessageView & { stored_text: string | null }>`
       select id, conversation_id as "conversationId", sender_role as "senderRole", message_type as "messageType",
              text_body as "text", text_body as stored_text, client_message_id as "clientMessageId",
-             system_event_type as "systemEventType", conversation_sequence::int as sequence, created_at as "createdAt"
+             system_event_type as "systemEventType", conversation_sequence::int as sequence, created_at as "createdAt",
+             media_mime_type as "mediaMimeType", media_duration_seconds as "mediaDurationSeconds",
+             media_size_bytes::text as "mediaSizeBytes"
         from messages
        where company_id = ${identity.companyId} and idempotency_key = ${dto.idempotencyKey}
        limit 1
@@ -317,7 +394,9 @@ export class CommunicationService {
       )
       select id, conversation_id as "conversationId", sender_role as "senderRole", message_type as "messageType",
              text_body as "text", client_message_id as "clientMessageId",
-             system_event_type as "systemEventType", conversation_sequence::int as sequence, created_at as "createdAt"
+             system_event_type as "systemEventType", conversation_sequence::int as sequence, created_at as "createdAt",
+             media_mime_type as "mediaMimeType", media_duration_seconds as "mediaDurationSeconds",
+             media_size_bytes::text as "mediaSizeBytes"
         from inserted_message
     `.execute(this.database);
     const message = this.mapMessage(inserted.rows[0]);
@@ -347,7 +426,195 @@ export class CommunicationService {
       conversationId,
     );
     await this.writeNotificationOutbox(conversationId, message.id, identity.identityId);
+    await this.pushOutbox.writeCommunicationMessage(this.database, {
+      conversationId,
+      messageId: message.id,
+      senderAccountId: identity.identityId,
+      messageType: "text",
+    });
     return message;
+  }
+
+  /**
+   * Voice messages follow exactly the same authorization, idempotency and
+   * realtime-fan-out path as `sendTextMessage` — only the payload shape
+   * differs: bytes are written through {@link FileStoragePort} and referenced
+   * from `messages` via `file_objects`, never inlined into the message row or
+   * any realtime/JSON payload.
+   */
+  public async sendVoiceMessage(
+    conversationId: string,
+    dto: SendVoiceMessageDto,
+    file: UploadedVoiceFile,
+  ): Promise<MessageView> {
+    const identity = this.requireCompanyIdentity();
+    const conversation = await this.authorizeConversation(identity, conversationId);
+    this.requireSendPermission(identity, conversation.participant_context_type);
+    if (conversation.status === "resolved") {
+      throw new ApplicationException(
+        "conversation_resolved",
+        "Resolved conversations must be reopened first",
+        HttpStatus.CONFLICT,
+      );
+    }
+
+    const existing = await sql<MessageView>`
+      select id, conversation_id as "conversationId", sender_role as "senderRole", message_type as "messageType",
+             text_body as "text", client_message_id as "clientMessageId",
+             system_event_type as "systemEventType", conversation_sequence::int as sequence, created_at as "createdAt",
+             media_mime_type as "mediaMimeType", media_duration_seconds as "mediaDurationSeconds",
+             media_size_bytes::text as "mediaSizeBytes"
+        from messages
+       where company_id = ${identity.companyId} and idempotency_key = ${dto.idempotencyKey}
+       limit 1
+    `.execute(this.database);
+    if (existing.rows[0] !== undefined) {
+      // Same cross-conversation and payload-mismatch guards as the text path
+      // — a reused idempotency key must never be honoured against a
+      // different conversation or a different recording.
+      if (existing.rows[0].conversationId !== conversationId) {
+        throw new ApplicationException(
+          "idempotency_key_scope_denied",
+          "Idempotency key was already used in a different conversation",
+          HttpStatus.CONFLICT,
+        );
+      }
+      if (existing.rows[0].clientMessageId !== dto.clientMessageId) {
+        throw new ApplicationException(
+          "idempotency_conflict",
+          "Idempotency key was reused with a different payload",
+          HttpStatus.CONFLICT,
+        );
+      }
+      return existing.rows[0];
+    }
+
+    const validation = validateVoiceMedia({
+      durationSeconds: dto.durationSeconds,
+      mimeType: file.mimetype,
+      sizeBytes: file.buffer?.length ?? file.size ?? 0,
+    });
+    if (!validation.ok) throw this.voiceRejection(validation.reason);
+
+    const bytes = file.buffer ?? Buffer.alloc(0);
+    const fileName = `voice-${randomUUID()}.${voiceFileExtension(validation.mimeType)}`;
+    const stored = await this.fileStorage.storePrivate(
+      identity.companyId,
+      { contentType: validation.mimeType, fileName, sizeBytes: bytes.length },
+      this.toAsyncIterable(bytes),
+    );
+
+    let message: MessageView;
+    try {
+      message = await this.transactions.execute(async (transaction) => {
+        const fileObjectId = await this.fileOwnership.createCompanyFile(
+          transaction,
+          identity.companyId,
+          {
+            mediaType: validation.mimeType,
+            originalFilename: fileName,
+            scanStatus: "pending",
+            sizeBytes: bytes.length,
+            storageKey: stored.storageKey,
+            storageProvider: this.fileStorageProviderName,
+            uploadedByAccountId: identity.identityId,
+          },
+        );
+        const inserted = await sql<MessageView>`
+          with next_sequence as (
+            select coalesce(max(conversation_sequence), 0) + 1 as value
+              from messages
+             where company_id = ${identity.companyId} and conversation_id = ${conversationId}
+          ), inserted_message as (
+            insert into messages (
+              company_id, conversation_id, sender_account_id, sender_role, message_type,
+              client_message_id, idempotency_key, original_client_time, conversation_sequence,
+              media_file_object_id, media_mime_type, media_duration_seconds, media_size_bytes
+            )
+            select ${identity.companyId}, ${conversationId}, ${identity.identityId}, ${this.senderRole(identity)}, 'voice',
+                   ${dto.clientMessageId}, ${dto.idempotencyKey}, ${dto.originalClientTime ?? null}, value,
+                   ${fileObjectId}::uuid, ${validation.mimeType}, ${Math.round(dto.durationSeconds)}, ${bytes.length}
+              from next_sequence
+            returning *
+          )
+          select id, conversation_id as "conversationId", sender_role as "senderRole", message_type as "messageType",
+                 text_body as "text", client_message_id as "clientMessageId",
+                 system_event_type as "systemEventType", conversation_sequence::int as sequence, created_at as "createdAt",
+                 media_mime_type as "mediaMimeType", media_duration_seconds as "mediaDurationSeconds",
+                 media_size_bytes::text as "mediaSizeBytes"
+            from inserted_message
+        `.execute(transaction);
+        return this.mapMessage(inserted.rows[0]);
+      });
+    } catch (error) {
+      // The file_objects/messages rows never committed — never leave the
+      // just-written bytes behind as an orphan.
+      await this.deleteVoiceBytes(identity.companyId, stored.storageKey);
+      throw error;
+    }
+
+    await sql`
+      update conversations
+         set last_message_id = ${message.id}, last_message_at = ${message.createdAt}, updated_at = now(),
+             status = case when ${this.senderRole(identity)} = 'office' then 'waiting_for_user' else 'waiting_for_office' end,
+             version = version + 1
+       where id = ${conversationId} and company_id = ${identity.companyId}
+    `.execute(this.database);
+    await this.writeEventsForParticipants(
+      conversationId,
+      "message.created",
+      message.id,
+      identity.identityId,
+    );
+    await this.writeEventsForCustomerSessions(conversationId, "message.created", message.id);
+    await this.writeEventsForParticipants(
+      conversationId,
+      "conversation.updated",
+      conversationId,
+      identity.identityId,
+    );
+    await this.writeEventsForCustomerSessions(
+      conversationId,
+      "conversation.updated",
+      conversationId,
+    );
+    await this.writeNotificationOutbox(conversationId, message.id, identity.identityId);
+    await this.pushOutbox.writeCommunicationMessage(this.database, {
+      conversationId,
+      messageId: message.id,
+      senderAccountId: identity.identityId,
+      messageType: "voice",
+    });
+    return message;
+  }
+
+  /**
+   * Streams a Voice message's audio bytes. Authorization is deliberately
+   * re-derived here rather than trusted from the message list response: this
+   * checks the SAME conversation participant-or-operator rule as every other
+   * message read, on every call, so a forged/guessed message id from another
+   * conversation is refused even if the caller never listed it.
+   */
+  public async getMessageMedia(messageId: string): Promise<MessageMedia> {
+    const identity = this.requireCompanyIdentity();
+    const row = await sql<{
+      conversationId: string;
+      storageKey: string;
+      mimeType: string;
+      sizeBytes: string;
+    }>`
+      select m.conversation_id as "conversationId", f.storage_key as "storageKey",
+             m.media_mime_type as "mimeType", m.media_size_bytes::text as "sizeBytes"
+        from messages m
+        join file_objects f on f.id = m.media_file_object_id and f.company_id = m.company_id
+       where m.company_id = ${identity.companyId} and m.id = ${messageId} and m.message_type = 'voice'
+       limit 1
+    `.execute(this.database);
+    const media = row.rows[0];
+    if (media === undefined) throw this.denied("voice_media_not_found");
+    await this.authorizeConversation(identity, media.conversationId);
+    const content = await this.fileStorage.readPrivate(identity.companyId, media.storageKey);
+    return { content, mimeType: media.mimeType, sizeBytes: Number(media.sizeBytes) };
   }
 
   public async markRead(
@@ -430,6 +697,99 @@ export class CommunicationService {
       unreadMessages: Number(row.rows[0]?.unread_messages ?? "0"),
       unreadConversations: Number(row.rows[0]?.unread_conversations ?? "0"),
     };
+  }
+
+  /** Resolving/reopening/re-prioritizing/reassigning are Office-only actions
+   *  — a Trader or Driver identity is never a participant of that decision,
+   *  so `authorizeConversation` (participant-or-operator) is exactly the
+   *  right existence+scope check, layered under the dedicated permission. */
+  public async markConversationResolved(conversationId: string): Promise<ConversationSummary> {
+    const identity = this.requireCompanyIdentity();
+    this.requirePermission(identity, "communication.operator.resolve");
+    await this.authorizeConversation(identity, conversationId);
+    await sql`
+      update conversations
+         set status = 'resolved', resolved_at = now(), resolved_by_account_id = ${identity.identityId},
+             updated_at = now(), version = version + 1
+       where id = ${conversationId} and company_id = ${identity.companyId}
+    `.execute(this.database);
+    await this.broadcastConversationUpdated(conversationId, identity);
+    return this.getConversationSummary(conversationId, identity);
+  }
+
+  public async reopenConversation(conversationId: string): Promise<ConversationSummary> {
+    const identity = this.requireCompanyIdentity();
+    this.requirePermission(identity, "communication.operator.reopen");
+    await this.authorizeConversation(identity, conversationId);
+    // resolved_at/resolved_by_account_id are left untouched — the fact that
+    // it was once resolved (and by whom) is history, not something a later
+    // reopen should erase.
+    await sql`
+      update conversations
+         set status = 'reopened', updated_at = now(), version = version + 1
+       where id = ${conversationId} and company_id = ${identity.companyId}
+    `.execute(this.database);
+    await this.broadcastConversationUpdated(conversationId, identity);
+    return this.getConversationSummary(conversationId, identity);
+  }
+
+  public async setConversationPriority(
+    conversationId: string,
+    dto: SetConversationPriorityDto,
+  ): Promise<ConversationSummary> {
+    const identity = this.requireCompanyIdentity();
+    this.requirePermission(identity, "communication.operator.priority");
+    await this.authorizeConversation(identity, conversationId);
+    await sql`
+      update conversations
+         set priority = ${dto.priority}, updated_at = now(), version = version + 1
+       where id = ${conversationId} and company_id = ${identity.companyId}
+    `.execute(this.database);
+    await this.broadcastConversationUpdated(conversationId, identity);
+    return this.getConversationSummary(conversationId, identity);
+  }
+
+  public async assignConversation(
+    conversationId: string,
+    dto: AssignConversationDto,
+  ): Promise<ConversationSummary> {
+    const identity = this.requireCompanyIdentity();
+    this.requirePermission(identity, "communication.operator.assign");
+    await this.authorizeConversation(identity, conversationId);
+    if (dto.operatorAccountId !== undefined) {
+      const assignee = await sql<{ id: string }>`
+        select id from accounts
+         where id = ${dto.operatorAccountId} and company_id = ${identity.companyId}
+           and account_kind = 'company_user' and status = 'active'
+        limit 1
+      `.execute(this.database);
+      if (assignee.rows[0] === undefined) throw this.denied("assignee_not_found");
+    }
+    await sql`
+      update conversations
+         set assigned_operator_user_id = ${dto.operatorAccountId ?? null},
+             updated_at = now(), version = version + 1
+       where id = ${conversationId} and company_id = ${identity.companyId}
+    `.execute(this.database);
+    await this.broadcastConversationUpdated(conversationId, identity);
+    return this.getConversationSummary(conversationId, identity);
+  }
+
+  private async broadcastConversationUpdated(
+    conversationId: string,
+    identity: IdentityContext & { companyId: string },
+  ): Promise<void> {
+    await this.writeEventsForParticipants(
+      conversationId,
+      "conversation.updated",
+      conversationId,
+      identity.identityId,
+    );
+    await this.writeEventsForCustomerSessions(
+      conversationId,
+      "conversation.updated",
+      conversationId,
+    );
   }
 
   public async recoverEvents(
@@ -648,7 +1008,7 @@ export class CommunicationService {
     if (text.length === 0 || text.length > 4000)
       throw this.customerSessionDenied("message_invalid");
     const existing =
-      await sql<MessageView>`select id, conversation_id as "conversationId", sender_role as "senderRole", message_type as "messageType", text_body as text, client_message_id as "clientMessageId", system_event_type as "systemEventType", conversation_sequence::int as sequence, created_at as "createdAt" from messages where company_id=${principal.companyId} and idempotency_key=${dto.idempotencyKey} limit 1`.execute(
+      await sql<MessageView>`select id, conversation_id as "conversationId", sender_role as "senderRole", message_type as "messageType", text_body as text, client_message_id as "clientMessageId", system_event_type as "systemEventType", conversation_sequence::int as sequence, created_at as "createdAt", media_mime_type as "mediaMimeType", media_duration_seconds as "mediaDurationSeconds", media_size_bytes::text as "mediaSizeBytes" from messages where company_id=${principal.companyId} and idempotency_key=${dto.idempotencyKey} limit 1`.execute(
         this.database,
       );
     if (existing.rows[0] !== undefined) {
@@ -661,7 +1021,7 @@ export class CommunicationService {
       with next_sequence as (select coalesce(max(conversation_sequence),0)+1 value from messages where company_id=${principal.companyId} and conversation_id=${principal.conversationId}),
       created as (insert into messages (company_id, conversation_id, sender_role, message_type, text_body, client_message_id, idempotency_key, original_client_time, conversation_sequence)
         select ${principal.companyId}, ${principal.conversationId}, 'customer', 'text', ${text}, ${dto.clientMessageId}, ${dto.idempotencyKey}, ${dto.originalClientTime ?? null}, value from next_sequence returning *)
-      select id, conversation_id as "conversationId", sender_role as "senderRole", message_type as "messageType", text_body as text, client_message_id as "clientMessageId", system_event_type as "systemEventType", conversation_sequence::int as sequence, created_at as "createdAt" from created
+      select id, conversation_id as "conversationId", sender_role as "senderRole", message_type as "messageType", text_body as text, client_message_id as "clientMessageId", system_event_type as "systemEventType", conversation_sequence::int as sequence, created_at as "createdAt", media_mime_type as "mediaMimeType", media_duration_seconds as "mediaDurationSeconds", media_size_bytes::text as "mediaSizeBytes" from created
     `.execute(this.database);
     const message = this.mapMessage(inserted.rows[0]);
     await sql`update conversations set last_message_id=${message.id}, last_message_at=${message.createdAt}, status='waiting_for_office', updated_at=now(), version=version+1 where id=${principal.conversationId} and company_id=${principal.companyId}`.execute(
@@ -679,7 +1039,135 @@ export class CommunicationService {
       message.id,
     );
     await this.writeNotificationOutbox(principal.conversationId, message.id, null);
+    await this.pushOutbox.writeCommunicationMessage(this.database, {
+      conversationId: principal.conversationId,
+      messageId: message.id,
+      senderAccountId: null,
+      messageType: "text",
+    });
     return message;
+  }
+
+  /** Customer-session counterpart of `sendVoiceMessage`. Order/Company scope
+   *  is locked to the trusted session (never a client-supplied value), and
+   *  `customerPrincipalForConversation` re-validates the session (expiry,
+   *  revocation) on every call — a revoked/expired session cannot send. */
+  public async customerSendVoiceMessage(
+    token: string,
+    dto: SendVoiceMessageDto,
+    file: UploadedVoiceFile,
+  ): Promise<MessageView> {
+    const principal = await this.customerPrincipalForConversation(token);
+    const existing =
+      await sql<MessageView>`select id, conversation_id as "conversationId", sender_role as "senderRole", message_type as "messageType", text_body as text, client_message_id as "clientMessageId", system_event_type as "systemEventType", conversation_sequence::int as sequence, created_at as "createdAt", media_mime_type as "mediaMimeType", media_duration_seconds as "mediaDurationSeconds", media_size_bytes::text as "mediaSizeBytes" from messages where company_id=${principal.companyId} and idempotency_key=${dto.idempotencyKey} limit 1`.execute(
+        this.database,
+      );
+    if (existing.rows[0] !== undefined) {
+      if (existing.rows[0].conversationId !== principal.conversationId) {
+        throw this.customerSessionDenied("idempotency_key_scope_denied");
+      }
+      return this.mapMessage(existing.rows[0]);
+    }
+
+    const validation = validateVoiceMedia({
+      durationSeconds: dto.durationSeconds,
+      mimeType: file.mimetype,
+      sizeBytes: file.buffer?.length ?? file.size ?? 0,
+    });
+    if (!validation.ok) throw this.voiceRejection(validation.reason);
+
+    const bytes = file.buffer ?? Buffer.alloc(0);
+    const fileName = `voice-${randomUUID()}.${voiceFileExtension(validation.mimeType)}`;
+    const stored = await this.fileStorage.storePrivate(
+      principal.companyId,
+      { contentType: validation.mimeType, fileName, sizeBytes: bytes.length },
+      this.toAsyncIterable(bytes),
+    );
+
+    let message: MessageView;
+    try {
+      message = await this.transactions.execute(async (transaction) => {
+        const fileObjectId = await this.fileOwnership.createCompanyFile(
+          transaction,
+          principal.companyId,
+          {
+            mediaType: validation.mimeType,
+            originalFilename: fileName,
+            scanStatus: "pending",
+            sizeBytes: bytes.length,
+            storageKey: stored.storageKey,
+            storageProvider: this.fileStorageProviderName,
+            uploadedByAccountId: null,
+          },
+        );
+        const inserted = await sql<MessageView>`
+          with next_sequence as (select coalesce(max(conversation_sequence),0)+1 value from messages where company_id=${principal.companyId} and conversation_id=${principal.conversationId}),
+          created as (
+            insert into messages (
+              company_id, conversation_id, sender_role, message_type, client_message_id,
+              idempotency_key, original_client_time, conversation_sequence,
+              media_file_object_id, media_mime_type, media_duration_seconds, media_size_bytes
+            )
+            select ${principal.companyId}, ${principal.conversationId}, 'customer', 'voice',
+                   ${dto.clientMessageId}, ${dto.idempotencyKey}, ${dto.originalClientTime ?? null}, value,
+                   ${fileObjectId}::uuid, ${validation.mimeType}, ${Math.round(dto.durationSeconds)}, ${bytes.length}
+              from next_sequence returning *
+          )
+          select id, conversation_id as "conversationId", sender_role as "senderRole", message_type as "messageType",
+                 text_body as text, client_message_id as "clientMessageId", system_event_type as "systemEventType",
+                 conversation_sequence::int as sequence, created_at as "createdAt", media_mime_type as "mediaMimeType",
+                 media_duration_seconds as "mediaDurationSeconds", media_size_bytes::text as "mediaSizeBytes"
+            from created
+        `.execute(transaction);
+        return this.mapMessage(inserted.rows[0]);
+      });
+    } catch (error) {
+      await this.deleteVoiceBytes(principal.companyId, stored.storageKey);
+      throw error;
+    }
+
+    await sql`update conversations set last_message_id=${message.id}, last_message_at=${message.createdAt}, status='waiting_for_office', updated_at=now(), version=version+1 where id=${principal.conversationId} and company_id=${principal.companyId}`.execute(
+      this.database,
+    );
+    await this.writeEventsForParticipants(
+      principal.conversationId,
+      "message.created",
+      message.id,
+      null,
+    );
+    await this.writeEventsForCustomerSessions(
+      principal.conversationId,
+      "message.created",
+      message.id,
+    );
+    await this.writeNotificationOutbox(principal.conversationId, message.id, null);
+    await this.pushOutbox.writeCommunicationMessage(this.database, {
+      conversationId: principal.conversationId,
+      messageId: message.id,
+      senderAccountId: null,
+      messageType: "voice",
+    });
+    return message;
+  }
+
+  /** Customer-session counterpart of `getMessageMedia` — Order/Company scope
+   *  is the trusted session's, and the message must belong to the session's
+   *  own (locked) conversation, never merely the session's Company. */
+  public async customerMessageMedia(token: string, messageId: string): Promise<MessageMedia> {
+    const principal = await this.customerPrincipalForConversation(token);
+    const row = await sql<{ storageKey: string; mimeType: string; sizeBytes: string }>`
+      select f.storage_key as "storageKey", m.media_mime_type as "mimeType",
+             m.media_size_bytes::text as "sizeBytes"
+        from messages m
+        join file_objects f on f.id = m.media_file_object_id and f.company_id = m.company_id
+       where m.company_id = ${principal.companyId} and m.conversation_id = ${principal.conversationId}
+         and m.id = ${messageId} and m.message_type = 'voice'
+       limit 1
+    `.execute(this.database);
+    const media = row.rows[0];
+    if (media === undefined) throw this.customerSessionDenied("voice_media_not_found");
+    const content = await this.fileStorage.readPrivate(principal.companyId, media.storageKey);
+    return { content, mimeType: media.mimeType, sizeBytes: Number(media.sizeBytes) };
   }
 
   public async customerMarkRead(
@@ -941,7 +1429,10 @@ export class CommunicationService {
   ): Promise<ConversationSummary> {
     const row = await sql<ConversationSummary>`
       select c.id, c.conversation_type as "type", c.participant_context_type as "participantContextType", c.order_id as "orderId", o.order_number as "orderNumber", c.subject, c.status, c.priority, c.last_message_at as "lastMessageAt",
-        case when m.message_type='text' then left(m.text_body,120) else null end as "lastMessagePreview", 0::int as "unreadCount"
+        case when m.message_type='text' then left(m.text_body,120)
+             when m.message_type in ('voice', 'voice_placeholder') then 'voice_message'
+             else null end as "lastMessagePreview", 0::int as "unreadCount",
+        null::uuid as "assignedOperatorAccountId", null::text as "assignedOperatorName"
       from conversations c join orders o on o.id=c.order_id and o.company_id=c.company_id
       left join messages m on m.id=c.last_message_id and m.company_id=c.company_id
       where c.id=${conversationId} and c.company_id=${principal.companyId} and c.order_id=${principal.orderId} and c.participant_context_type='customer'
@@ -959,7 +1450,7 @@ export class CommunicationService {
     const after = this.parseNumberCursor(query.after);
     const before = this.parseNumberCursor(query.before);
     const rows =
-      await sql<MessageView>`select id, conversation_id as "conversationId", sender_role as "senderRole", message_type as "messageType", text_body as text, client_message_id as "clientMessageId", system_event_type as "systemEventType", conversation_sequence::int as sequence, created_at as "createdAt" from messages where company_id=${principal.companyId} and conversation_id=${principal.conversationId} ${after === null ? sql`` : sql`and conversation_sequence > ${after}`} ${before === null ? sql`` : sql`and conversation_sequence < ${before}`} order by conversation_sequence desc limit ${limit + 1}`.execute(
+      await sql<MessageView>`select id, conversation_id as "conversationId", sender_role as "senderRole", message_type as "messageType", text_body as text, client_message_id as "clientMessageId", system_event_type as "systemEventType", conversation_sequence::int as sequence, created_at as "createdAt", media_mime_type as "mediaMimeType", media_duration_seconds as "mediaDurationSeconds", media_size_bytes::text as "mediaSizeBytes" from messages where company_id=${principal.companyId} and conversation_id=${principal.conversationId} ${after === null ? sql`` : sql`and conversation_sequence > ${after}`} ${before === null ? sql`` : sql`and conversation_sequence < ${before}`} order by conversation_sequence desc limit ${limit + 1}`.execute(
         this.database,
       );
     const page = rows.rows.slice(0, limit);
@@ -986,6 +1477,7 @@ export class CommunicationService {
       select c.id,
              c.conversation_type as "type",
              c.participant_context_type as "participantContextType",
+             coalesce(pt.name_en, pd.name_en, pc.name) as "participantName",
              c.order_id as "orderId",
              o.order_number as "orderNumber",
              c.subject,
@@ -994,12 +1486,25 @@ export class CommunicationService {
              c.last_message_at as "lastMessageAt",
              case when m.message_type = 'text' then left(m.text_body, 120)
                   when m.message_type = 'system' then m.system_event_type
-                  when m.message_type = 'voice_placeholder' then 'voice_message'
+                  when m.message_type in ('voice', 'voice_placeholder') then 'voice_message'
                   else null end as "lastMessagePreview",
-             ${this.unreadCountSql(identity.identityId)} as "unreadCount"
+             ${this.unreadCountSql(identity.identityId)} as "unreadCount",
+             c.assigned_operator_user_id as "assignedOperatorAccountId",
+             au.username as "assignedOperatorName"
         from conversations c
         left join orders o on o.id = c.order_id and o.company_id = c.company_id
         left join messages m on m.id = c.last_message_id and m.company_id = c.company_id
+        left join traders pt
+          on pt.id = o.trader_id and pt.company_id = c.company_id
+         and c.participant_context_type = 'trader'
+        left join drivers pd
+          on pd.id = o.assigned_driver_id and pd.company_id = c.company_id
+         and c.participant_context_type = 'driver'
+        left join customers pc
+          on pc.id = o.customer_id and pc.company_id = c.company_id
+         and c.participant_context_type = 'customer'
+        left join accounts au
+          on au.id = c.assigned_operator_user_id and au.company_id = c.company_id
        where c.company_id = ${identity.companyId} and c.id = ${conversationId}
     `.execute(this.database);
     if (row.rows[0] === undefined) throw this.denied("conversation_not_found");
@@ -1115,6 +1620,37 @@ export class CommunicationService {
     );
   }
 
+  private voiceRejection(
+    reason: "empty" | "too_large" | "unsupported_type" | "duration_invalid",
+  ): ApplicationException {
+    const message: Record<typeof reason, string> = {
+      duration_invalid: "The voice message duration is invalid or exceeds the 5 minute limit",
+      empty: "The voice message recording was empty",
+      too_large: "The voice message exceeds the maximum upload size",
+      unsupported_type: "The voice message format is not supported",
+    };
+    return new ApplicationException(
+      `voice_message_${reason}`,
+      message[reason],
+      HttpStatus.UNPROCESSABLE_ENTITY,
+    );
+  }
+
+  /** Best-effort cleanup of bytes already written to storage when the
+   *  message/file_objects rows that should reference them never committed —
+   *  mirrors `CompanyProfileService`'s identical orphan-avoidance pattern. */
+  private async deleteVoiceBytes(companyId: string, storageKey: string): Promise<void> {
+    try {
+      await this.fileStorage.deletePrivate(companyId, storageKey);
+    } catch {
+      /* the bytes are already unreferenced; a leftover file is inert */
+    }
+  }
+
+  private async *toAsyncIterable(buffer: Buffer): AsyncIterable<Uint8Array> {
+    yield buffer;
+  }
+
   private mapConversation(row: ConversationSummary): ConversationSummary {
     return {
       ...row,
@@ -1129,6 +1665,15 @@ export class CommunicationService {
       ...row,
       sequence: Number(row.sequence),
       createdAt: new Date(row.createdAt).toISOString(),
+      mediaDurationSeconds:
+        row.mediaDurationSeconds === null || row.mediaDurationSeconds === undefined
+          ? null
+          : Number(row.mediaDurationSeconds),
+      mediaMimeType: row.mediaMimeType ?? null,
+      mediaSizeBytes:
+        row.mediaSizeBytes === null || row.mediaSizeBytes === undefined
+          ? null
+          : Number(row.mediaSizeBytes),
     };
   }
 }

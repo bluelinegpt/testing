@@ -71,9 +71,9 @@ export async function up(database: Kysely<MigrationDatabase>): Promise<void> {
         'order',
         ${row.orderId}::uuid,
         jsonb_build_object(
-          'orderNumber', ${row.orderNumber},
-          'driverReconciliationStatus', ${row.driverReconciliationStatus},
-          'traderSettlementStatus', ${row.traderSettlementStatus}
+          'orderNumber', ${row.orderNumber}::text,
+          'driverReconciliationStatus', ${row.driverReconciliationStatus}::text,
+          'traderSettlementStatus', ${row.traderSettlementStatus}::text
         ),
         jsonb_build_object(
           'driverReconciliationStatus', 'not_applicable',
@@ -81,7 +81,7 @@ export async function up(database: Kysely<MigrationDatabase>): Promise<void> {
           'amountCollected', '0.00'
         ),
         'Repair delivered zero-value Free Order financial workflow statuses',
-        ${`migration:20260814000000:${row.orderId}`}
+        ${`migration:20260814000000:${row.orderId}`}::text
       )
     `.execute(database);
   }

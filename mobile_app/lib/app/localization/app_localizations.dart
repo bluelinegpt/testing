@@ -146,6 +146,18 @@ abstract class AppLocalizations {
   /// **'Password'**
   String get password;
 
+  /// No description provided for @showPassword.
+  ///
+  /// In en, this message translates to:
+  /// **'Show password'**
+  String get showPassword;
+
+  /// No description provided for @hidePassword.
+  ///
+  /// In en, this message translates to:
+  /// **'Hide password'**
+  String get hidePassword;
+
   /// No description provided for @invalidCredentials.
   ///
   /// In en, this message translates to:
@@ -205,6 +217,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Orders'**
   String get orders;
+
+  /// No description provided for @orderDetails.
+  ///
+  /// In en, this message translates to:
+  /// **'Order Details'**
+  String get orderDetails;
 
   /// No description provided for @createOrder.
   ///
@@ -779,7 +797,7 @@ abstract class AppLocalizations {
   /// No description provided for @allActive.
   ///
   /// In en, this message translates to:
-  /// **'All active'**
+  /// **'All Active'**
   String get allActive;
 
   /// No description provided for @ordersLimited.
@@ -1004,6 +1022,12 @@ abstract class AppLocalizations {
   /// **'Assign Driver'**
   String get assignDriver;
 
+  /// No description provided for @reassignDriver.
+  ///
+  /// In en, this message translates to:
+  /// **'Reassign Driver'**
+  String get reassignDriver;
+
   /// No description provided for @selectDriver.
   ///
   /// In en, this message translates to:
@@ -1016,17 +1040,77 @@ abstract class AppLocalizations {
   /// **'Assign this Driver to the Order?'**
   String get assignmentConfirm;
 
+  /// No description provided for @reassignmentConfirm.
+  ///
+  /// In en, this message translates to:
+  /// **'Reassign this Order to a different Driver?'**
+  String get reassignmentConfirm;
+
   /// No description provided for @assignmentCompleted.
   ///
   /// In en, this message translates to:
   /// **'Driver assigned.'**
   String get assignmentCompleted;
 
+  /// No description provided for @reassignmentCompleted.
+  ///
+  /// In en, this message translates to:
+  /// **'Driver reassigned.'**
+  String get reassignmentCompleted;
+
   /// No description provided for @operatorActionsUnavailable.
   ///
   /// In en, this message translates to:
   /// **'Additional operational decisions require dedicated backend contracts.'**
   String get operatorActionsUnavailable;
+
+  /// No description provided for @orderActions.
+  ///
+  /// In en, this message translates to:
+  /// **'Actions'**
+  String get orderActions;
+
+  /// No description provided for @changeStatusAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Change Status'**
+  String get changeStatusAction;
+
+  /// No description provided for @confirmStatusChange.
+  ///
+  /// In en, this message translates to:
+  /// **'Change this Order\'s status?'**
+  String get confirmStatusChange;
+
+  /// No description provided for @statusUpdateCompleted.
+  ///
+  /// In en, this message translates to:
+  /// **'Status updated.'**
+  String get statusUpdateCompleted;
+
+  /// No description provided for @reasonLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Reason'**
+  String get reasonLabel;
+
+  /// No description provided for @reasonRequiredError.
+  ///
+  /// In en, this message translates to:
+  /// **'A reason is required for this change.'**
+  String get reasonRequiredError;
+
+  /// No description provided for @returnPending.
+  ///
+  /// In en, this message translates to:
+  /// **'Return Pending'**
+  String get returnPending;
+
+  /// No description provided for @totalActiveOrders.
+  ///
+  /// In en, this message translates to:
+  /// **'Total Active Orders'**
+  String get totalActiveOrders;
 
   /// No description provided for @orderHistory.
   ///
@@ -1040,11 +1124,65 @@ abstract class AppLocalizations {
   /// **'Assigned Driver'**
   String get assignedDriverLabel;
 
+  /// No description provided for @myActiveOrders.
+  ///
+  /// In en, this message translates to:
+  /// **'My Active Orders'**
+  String get myActiveOrders;
+
+  /// No description provided for @assignedToMe.
+  ///
+  /// In en, this message translates to:
+  /// **'Assigned to Me'**
+  String get assignedToMe;
+
+  /// No description provided for @orderDate.
+  ///
+  /// In en, this message translates to:
+  /// **'Order Date'**
+  String get orderDate;
+
+  /// No description provided for @serialNumber.
+  ///
+  /// In en, this message translates to:
+  /// **'Serial No.'**
+  String get serialNumber;
+
+  /// No description provided for @location.
+  ///
+  /// In en, this message translates to:
+  /// **'Location'**
+  String get location;
+
+  /// No description provided for @reference.
+  ///
+  /// In en, this message translates to:
+  /// **'Reference'**
+  String get reference;
+
+  /// No description provided for @emptyValuePlaceholder.
+  ///
+  /// In en, this message translates to:
+  /// **'—'**
+  String get emptyValuePlaceholder;
+
+  /// No description provided for @returnToBranchAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Return to Branch'**
+  String get returnToBranchAction;
+
   /// No description provided for @traderLabel.
   ///
   /// In en, this message translates to:
   /// **'Trader'**
   String get traderLabel;
+
+  /// No description provided for @mobileLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Mobile'**
+  String get mobileLabel;
 
   /// No description provided for @loadMore.
   ///
@@ -1129,6 +1267,264 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Messages are never simulated or stored as delivered without server confirmation.'**
   String get communicationSafetyNotice;
+
+  /// No description provided for @noConversations.
+  ///
+  /// In en, this message translates to:
+  /// **'No conversations yet'**
+  String get noConversations;
+
+  /// No description provided for @noMessages.
+  ///
+  /// In en, this message translates to:
+  /// **'No messages yet'**
+  String get noMessages;
+
+  /// No description provided for @messageInputHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Type a message'**
+  String get messageInputHint;
+
+  /// No description provided for @sendMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'Send'**
+  String get sendMessage;
+
+  /// No description provided for @recordVoiceMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'Record voice message'**
+  String get recordVoiceMessage;
+
+  /// No description provided for @recordingInProgress.
+  ///
+  /// In en, this message translates to:
+  /// **'Recording…'**
+  String get recordingInProgress;
+
+  /// No description provided for @stopRecordingAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Stop'**
+  String get stopRecordingAction;
+
+  /// No description provided for @discardRecordingAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Discard'**
+  String get discardRecordingAction;
+
+  /// No description provided for @sendVoiceMessageAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Send voice message'**
+  String get sendVoiceMessageAction;
+
+  /// No description provided for @voiceMessageLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Voice message'**
+  String get voiceMessageLabel;
+
+  /// No description provided for @microphonePermissionRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'Microphone access is required to record a voice message.'**
+  String get microphonePermissionRequired;
+
+  /// No description provided for @microphonePermissionDenied.
+  ///
+  /// In en, this message translates to:
+  /// **'Microphone access was denied. Enable it in your device settings to record voice messages.'**
+  String get microphonePermissionDenied;
+
+  /// No description provided for @recordingFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Recording failed. Please try again.'**
+  String get recordingFailed;
+
+  /// No description provided for @voiceSendFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'The voice message could not be sent.'**
+  String get voiceSendFailed;
+
+  /// No description provided for @unsupportedAudioFormat.
+  ///
+  /// In en, this message translates to:
+  /// **'This audio format is not supported.'**
+  String get unsupportedAudioFormat;
+
+  /// No description provided for @audioFileTooLarge.
+  ///
+  /// In en, this message translates to:
+  /// **'The recording is too large to send.'**
+  String get audioFileTooLarge;
+
+  /// No description provided for @maxRecordingDurationReachedNotice.
+  ///
+  /// In en, this message translates to:
+  /// **'Maximum recording duration reached (5 minutes).'**
+  String get maxRecordingDurationReachedNotice;
+
+  /// No description provided for @audioUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'This voice message is unavailable.'**
+  String get audioUnavailable;
+
+  /// No description provided for @playAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Play'**
+  String get playAction;
+
+  /// No description provided for @pauseAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Pause'**
+  String get pauseAction;
+
+  /// No description provided for @conversationsUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Conversations could not be loaded.'**
+  String get conversationsUnavailable;
+
+  /// No description provided for @messageSendFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'The message could not be sent.'**
+  String get messageSendFailed;
+
+  /// No description provided for @enableNotifications.
+  ///
+  /// In en, this message translates to:
+  /// **'Enable notifications'**
+  String get enableNotifications;
+
+  /// No description provided for @notificationPermissionRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'Turn on notifications to be alerted about new messages and Order updates as they happen.'**
+  String get notificationPermissionRequired;
+
+  /// No description provided for @notificationPermissionDenied.
+  ///
+  /// In en, this message translates to:
+  /// **'Notifications are off. You can still check this screen for updates.'**
+  String get notificationPermissionDenied;
+
+  /// No description provided for @openNotificationSettings.
+  ///
+  /// In en, this message translates to:
+  /// **'Open Settings'**
+  String get openNotificationSettings;
+
+  /// No description provided for @newMessageNotification.
+  ///
+  /// In en, this message translates to:
+  /// **'New message'**
+  String get newMessageNotification;
+
+  /// No description provided for @voiceMessageNotification.
+  ///
+  /// In en, this message translates to:
+  /// **'New voice message'**
+  String get voiceMessageNotification;
+
+  /// No description provided for @orderUpdatedNotification.
+  ///
+  /// In en, this message translates to:
+  /// **'Order updated'**
+  String get orderUpdatedNotification;
+
+  /// No description provided for @orderAssignedNotification.
+  ///
+  /// In en, this message translates to:
+  /// **'Order assigned'**
+  String get orderAssignedNotification;
+
+  /// No description provided for @orderReassignedNotification.
+  ///
+  /// In en, this message translates to:
+  /// **'Order reassigned'**
+  String get orderReassignedNotification;
+
+  /// No description provided for @driverOfflineBanner.
+  ///
+  /// In en, this message translates to:
+  /// **'Offline'**
+  String get driverOfflineBanner;
+
+  /// No description provided for @driverLastSyncedLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Last synced'**
+  String get driverLastSyncedLabel;
+
+  /// No description provided for @driverSyncPending.
+  ///
+  /// In en, this message translates to:
+  /// **'Pending Sync'**
+  String get driverSyncPending;
+
+  /// No description provided for @driverSyncInProgress.
+  ///
+  /// In en, this message translates to:
+  /// **'Syncing…'**
+  String get driverSyncInProgress;
+
+  /// No description provided for @driverSyncCompleted.
+  ///
+  /// In en, this message translates to:
+  /// **'Synced'**
+  String get driverSyncCompleted;
+
+  /// No description provided for @driverSyncFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Sync Failed'**
+  String get driverSyncFailed;
+
+  /// No description provided for @driverSyncNeedsReview.
+  ///
+  /// In en, this message translates to:
+  /// **'Needs Review'**
+  String get driverSyncNeedsReview;
+
+  /// No description provided for @driverConflictMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'This Order changed while you were offline. Refresh the Order before continuing.'**
+  String get driverConflictMessage;
+
+  /// No description provided for @driverRefreshAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Refresh'**
+  String get driverRefreshAction;
+
+  /// No description provided for @holdStatus.
+  ///
+  /// In en, this message translates to:
+  /// **'On Hold'**
+  String get holdStatus;
+
+  /// No description provided for @hold.
+  ///
+  /// In en, this message translates to:
+  /// **'Hold'**
+  String get hold;
+
+  /// No description provided for @orderPlacedOnHold.
+  ///
+  /// In en, this message translates to:
+  /// **'Order placed on Hold.'**
+  String get orderPlacedOnHold;
 }
 
 class _AppLocalizationsDelegate

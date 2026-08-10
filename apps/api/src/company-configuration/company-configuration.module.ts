@@ -16,6 +16,7 @@ import { EmployeeVariableEarningService } from "./employee-variable-earning.serv
 import { WorkforceConfigurationService } from "./workforce-configuration.service.js";
 import { TraderConfigurationController } from "./trader-configuration.controller.js";
 import { TraderConfigurationService } from "./trader-configuration.service.js";
+import { DriverRoleProvisioningService } from "../users/driver-role-provisioning.service.js";
 
 @Module({
   imports: [AuthenticationModule],
@@ -40,6 +41,13 @@ import { TraderConfigurationService } from "./trader-configuration.service.js";
     TraderConfigurationService,
     CustomerConfigurationService,
     PasswordHasher,
+    // Re-provided rather than importing UserAdministrationModule: this is a
+    // leaf service (DATABASE only), and WorkforceConfigurationService needs
+    // it to revoke the Driver role when a Driver is deactivated directly
+    // (not via its Employee) -- matching the established pattern elsewhere
+    // in this codebase of re-providing a shared leaf service instead of a
+    // cross-module import (see OperationsModule's own comment on this).
+    DriverRoleProvisioningService,
   ],
   exports: [BusinessDayService, ReportDateModeService],
 })

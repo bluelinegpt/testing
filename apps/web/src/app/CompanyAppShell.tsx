@@ -36,7 +36,13 @@ function brandInitials(name: string): string {
 }
 
 type MenuGroupId =
-  "orders" | "traders" | "drivers" | "accounting" | "configuration" | "administration";
+  | "orders"
+  | "traders"
+  | "drivers"
+  | "accounting"
+  | "configuration"
+  | "administration"
+  | "reports";
 
 interface MenuItem {
   readonly icon?: LucideIcon;
@@ -204,6 +210,18 @@ export function CompanyAppShell({
               { label: t("nav.supportCases"), path: "/support" },
             ],
           },
+          {
+            icon: FileBarChart,
+            id: "reports",
+            label: t("nav.reports"),
+            items: [
+              { label: t("nav.ordersExport"), path: "/reports" },
+              {
+                label: t("nav.dailyOperationsSummary"),
+                path: "/reports/daily-operations-summary",
+              },
+            ],
+          },
         ] satisfies readonly MenuGroup[]
       )
         .map((group) => ({
@@ -337,12 +355,6 @@ export function CompanyAppShell({
               pathname={location.pathname}
             />
           ))}
-          {canAccessCompanyPath("/reports", session.identity.permissions) ? (
-            <NavLink className="nav-direct-link" to="/reports">
-              <FileBarChart aria-hidden="true" size={19} />
-              <span>{t("nav.reports")}</span>
-            </NavLink>
-          ) : null}
           {groups.slice(4).map((group) => (
             <NavigationGroup
               expanded={expandedGroup === group.id}
@@ -468,6 +480,7 @@ function groupForPath(pathname: string): MenuGroupId | undefined {
   if (pathname.startsWith("/accounting")) return "accounting";
   if (pathname.startsWith("/configuration")) return "configuration";
   if (["/support"].includes(normalizePath(pathname))) return "administration";
+  if (pathname.startsWith("/reports")) return "reports";
   return undefined;
 }
 

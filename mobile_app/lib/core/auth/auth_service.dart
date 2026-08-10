@@ -60,6 +60,7 @@ final class SessionAuthenticationService implements AuthenticationService {
     required this.realtime,
     required this.privateCache,
     required this.errorMapper,
+    required this.driverOfflineStore,
   });
   final SensitiveStorage storage;
   final AuthenticationApi api;
@@ -68,6 +69,13 @@ final class SessionAuthenticationService implements AuthenticationService {
   final RealtimeClient realtime;
   final ProtectedCache privateCache;
   final ApiErrorMapper errorMapper;
+
+  /// Clears the Driver offline cache/queue (Prompt 16 §T) — a durable local
+  /// SQLite store, deliberately a separate seam from [privateCache] (an
+  /// in-memory, non-durable cache with a different scoping model). Reuses
+  /// the pre-existing, previously-unused `OfflineStore` contract from
+  /// `service_ports.dart` rather than inventing a new one.
+  final OfflineStore driverOfflineStore;
 
   @override
   Future<AuthenticationState> login(LoginInput input) async {
@@ -184,6 +192,16 @@ final class SessionAuthenticationService implements AuthenticationService {
     } on Object {
       /* optional */
     }
+    try {
+      if (user != null) {
+        await driverOfflineStore.clearScope(
+          userId: user.id,
+          companyId: user.companyId,
+        );
+      }
+    } on Object {
+      /* optional — the Driver offline cache/queue must never block logout */
+    }
     if (user != null) await privateCache.clear(user.companyId, user.id);
     await storage.clearSession();
   }
@@ -229,6 +247,13 @@ final class SessionAuthenticationService implements AuthenticationService {
     if (role == null) access = AccountAccessState.unsupportedRole;
     final profileId = verified['profileId'] as String?;
     final profileType = verified['profileType'] as String?;
+    // Orthogonal to `role`/`kind` by design — `role` stays whatever `_roleFor`
+    // derives from `kind` (so mobile keeps calling the correct backend
+    // endpoints for this identity), while `linkedDriverId` layers the "show a
+    // Driver-style UI" signal on top. Absent (not merely `null`/`false`) in
+    // the JSON for every identity except a resolved Driver User — see
+    // `AuthenticatedUser.isDriverPresentation`.
+    final linkedDriverId = verified['linkedDriverId'] as String?;
     if ((role == UserRole.trader || role == UserRole.driver) &&
         (profileId == null || profileType != role!.code)) {
       access = AccountAccessState.missingProfile;
@@ -254,6 +279,7 @@ final class SessionAuthenticationService implements AuthenticationService {
         forcePasswordChange:
             verified['forcePasswordChange'] == true ||
             identity['forcePasswordChange'] == true,
+        linkedDriverId: linkedDriverId,
       ),
     );
   }

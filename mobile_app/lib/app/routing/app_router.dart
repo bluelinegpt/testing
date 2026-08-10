@@ -59,17 +59,34 @@ final routerProvider = Provider<GoRouter>((ref) {
             path: '/dashboard',
             builder: (_, _) => const RoleDashboardPage(),
           ),
-          GoRoute(path: '/orders', builder: (_, _) => const RoleOrdersPage()),
+          GoRoute(
+            path: '/orders',
+            builder: (_, state) => RoleOrdersPage(
+              initialDeliveryStatus:
+                  state.uri.queryParameters['deliveryStatus'],
+            ),
+          ),
           GoRoute(
             path: '/orders/:id',
             builder: (_, state) {
               final orderId = state.pathParameters['id'] ?? '';
-              if (auth?.user?.hasRole(UserRole.driver) == true) {
+              final user = auth?.user;
+              // A genuine `driver`-kind identity always uses the
+              // driver-portal endpoints. A Driver User (`company_user` with
+              // a resolved `linkedDriverId`) gets the identical Driver
+              // presentation but must keep calling the Operator endpoints —
+              // `/portal/driver/*` would 403 for a `company_user`
+              // (`isDriverPresentation` covers both; `hasRole(driver)`
+              // alone would wrongly route a Driver User here).
+              if (user?.hasRole(UserRole.driver) == true) {
                 return DriverOrderDetailsPage(orderId: orderId);
               }
-              if (auth?.user?.hasRole(UserRole.operatorRole) == true &&
-                  hasOperatorOrderAccess(auth!.user!.permissions)) {
-                return OperatorOrderDetailsPage(orderId: orderId);
+              if (user?.hasRole(UserRole.operatorRole) == true &&
+                  hasOperatorOrderAccess(user!.permissions)) {
+                return OperatorOrderDetailsPage(
+                  orderId: orderId,
+                  driverPresentation: user.isDriverPresentation,
+                );
               }
               return TraderOrderDetailsPage(orderId: orderId);
             },

@@ -7,6 +7,7 @@ import {
   type CompanySession,
   type CompanyUser,
   type SetupLink,
+  type UserDeletionEligibility,
 } from "../api/platform-client.js";
 import { usePlatformSession } from "../app/PlatformSession.js";
 
@@ -44,7 +45,12 @@ export function CompanyAdministrators({
   const [error, setError] = useState<string | undefined>(undefined);
   const [link, setLink] = useState<(SetupLink & { forUser: string }) | undefined>(undefined);
   const [sessionsFor, setSessionsFor] = useState<string | undefined>(undefined);
-  const [sessions, setSessions] = useState<readonly CompanySession[]>([]);
+  const [sessionsForUsername, setSessionsForUsername] = useState<string | undefined>(undefined);
+  const [sessions, setSessions] = useState<readonly CompanySession[] | undefined>(undefined);
+  const [sessionsError, setSessionsError] = useState(false);
+  const [deletion, setDeletion] = useState<UserDeletionEligibility | undefined>(undefined);
+  const [deletionLoading, setDeletionLoading] = useState(false);
+  const [deletionConfirmation, setDeletionConfirmation] = useState("");
 
   const load = useCallback(async () => {
     if (!canRead) return;
@@ -140,9 +146,47 @@ export function CompanyAdministrators({
     await run(() => platformApi.userAction(companyId, user.accountId, action, reason));
   }
 
-  async function showSessions(user: CompanyUser): Promise<void> {
+  async function loadSessions(accountId: string): Promise<void> {
+    setSessions(undefined);
+    setSessionsError(false);
+    try {
+      setSessions(await platformApi.userSessions(companyId, accountId));
+    } catch {
+      setSessions([]);
+      setSessionsError(true);
+    }
+  }
+
+  function showSessions(user: CompanyUser): void {
     setSessionsFor(user.accountId);
-    setSessions(await platformApi.userSessions(companyId, user.accountId));
+    setSessionsForUsername(user.username);
+    void loadSessions(user.accountId);
+  }
+
+  function formatSessionDate(value: string | null, includeDate = true): string {
+    if (value === null || value.trim() === "") return "—";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "—";
+    const iso = date.toISOString();
+    return includeDate ? iso.slice(0, 19).replace("T", " ") : iso.slice(11, 19);
+  }
+
+  async function inspectDeletion(user: CompanyUser): Promise<void> {
+    setDeletion(undefined);
+    setDeletionConfirmation("");
+    setDeletionLoading(true);
+    setError(undefined);
+    try {
+      setDeletion(await platformApi.userDeletionEligibility(companyId, user.accountId));
+    } catch (failure) {
+      setError(
+        failure instanceof PlatformApiError
+          ? failure.message
+          : "Unable to check whether this user can be deleted.",
+      );
+    } finally {
+      setDeletionLoading(false);
+    }
   }
 
   return (
@@ -358,10 +402,18 @@ export function CompanyAdministrators({
                     <button
                       className="platform-button platform-button--quiet"
                       disabled={busy}
-                      onClick={() => void showSessions(user)}
+                      onClick={() => showSessions(user)}
                       type="button"
                     >
                       Sessions
+                    </button>
+                    <button
+                      className="platform-button platform-button--quiet"
+                      disabled={busy || deletionLoading}
+                      onClick={() => void inspectDeletion(user)}
+                      type="button"
+                    >
+                      Delete user
                     </button>
                   </td>
                 ) : null}
@@ -372,10 +424,24 @@ export function CompanyAdministrators({
       )}
 
       {sessionsFor === undefined ? null : (
-        <>
-          <h4>Sessions</h4>
-          {sessions.length === 0 ? (
-            <p className="platform-muted">No sessions recorded.</p>
+        <section aria-labelledby="company-user-sessions-heading">
+          <h4 id="company-user-sessions-heading">Sessions</h4>
+          <p className="platform-muted">User: {sessionsForUsername ?? "Selected user"}</p>
+          {sessions === undefined ? (
+            <p role="status">Loading sessions...</p>
+          ) : sessionsError ? (
+            <div role="alert">
+              <p>Unable to load sessions.</p>
+              <button
+                className="platform-button platform-button--quiet"
+                onClick={() => void loadSessions(sessionsFor)}
+                type="button"
+              >
+                Retry
+              </button>
+            </div>
+          ) : sessions.length === 0 ? (
+            <p className="platform-muted">No sessions found for this user.</p>
           ) : (
             <table className="platform-table">
               <thead>
@@ -392,15 +458,13 @@ export function CompanyAdministrators({
                 {sessions.map((entry) => (
                   <tr key={entry.id}>
                     <td>
-                      {new Date(entry.createdAt).toISOString().slice(0, 19).replace("T", " ")}
+                      {formatSessionDate(entry.createdAt)}
                     </td>
                     <td>
-                      {entry.lastSeenAt === null
-                        ? "—"
-                        : new Date(entry.lastSeenAt).toISOString().slice(11, 19)}
+                      {formatSessionDate(entry.lastSeenAt, false)}
                     </td>
                     <td>
-                      {new Date(entry.expiresAt).toISOString().slice(0, 16).replace("T", " ")}
+                      {formatSessionDate(entry.expiresAt)}
                     </td>
                     <td className="platform-truncate">{entry.userAgent ?? "—"}</td>
                     <td>{entry.revokedAt === null ? "active" : "revoked"}</td>
@@ -413,7 +477,7 @@ export function CompanyAdministrators({
                             onClick={() =>
                               void run(async () => {
                                 await platformApi.revokeSession(companyId, sessionsFor, entry.id);
-                                setSessions(await platformApi.userSessions(companyId, sessionsFor));
+                                await loadSessions(sessionsFor);
                               })
                             }
                             type="button"
@@ -437,7 +501,7 @@ export function CompanyAdministrators({
                   if (!globalThis.confirm("Revoke all active sessions for this user?")) return;
                   void run(async () => {
                     await platformApi.revokeAllSessions(companyId, sessionsFor);
-                    setSessions(await platformApi.userSessions(companyId, sessionsFor));
+                    await loadSessions(sessionsFor);
                   });
                 }}
                 type="button"
@@ -447,13 +511,76 @@ export function CompanyAdministrators({
             ) : null}
             <button
               className="platform-button platform-button--quiet"
-              onClick={() => setSessionsFor(undefined)}
+              onClick={() => {
+                setSessionsFor(undefined);
+                setSessionsForUsername(undefined);
+                setSessions(undefined);
+                setSessionsError(false);
+              }}
               type="button"
             >
               Close
             </button>
           </div>
-        </>
+        </section>
+      )}
+
+      {deletionLoading ? <p role="status">Checking deletion eligibility...</p> : null}
+      {deletion === undefined ? null : (
+        <section aria-labelledby="user-deletion-heading">
+          <h4 id="user-deletion-heading">Delete user</h4>
+          <p>
+            {deletion.eligible
+              ? `${deletion.username} has no historical dependencies and may be permanently deleted.`
+              : deletion.reason}
+          </p>
+          {deletion.blockingCategories.length === 0 ? null : (
+            <ul>
+              {deletion.blockingCategories.map((blocker) => (
+                <li key={blocker.category}>{blocker.category}: {blocker.rows}</li>
+              ))}
+            </ul>
+          )}
+          {deletion.eligible ? (
+            <>
+              <label className="platform-field" htmlFor="delete-user-confirmation">
+                <span>Type {deletion.confirmationChallenge} to confirm</span>
+                <input
+                  id="delete-user-confirmation"
+                  onChange={(event) => setDeletionConfirmation(event.target.value)}
+                  value={deletionConfirmation}
+                />
+              </label>
+              <button
+                className="platform-button"
+                disabled={busy || deletionConfirmation !== deletion.confirmationChallenge}
+                onClick={() => {
+                  void run(async () => {
+                    await platformApi.deleteUser(
+                      companyId,
+                      deletion.accountId,
+                      deletionConfirmation,
+                    );
+                    setDeletion(undefined);
+                    setDeletionConfirmation("");
+                  });
+                }}
+                type="button"
+              >
+                Permanently delete user
+              </button>
+            </>
+          ) : (
+            <p className="platform-muted">Recommended action: Deactivate</p>
+          )}
+          <button
+            className="platform-button platform-button--quiet"
+            onClick={() => setDeletion(undefined)}
+            type="button"
+          >
+            Cancel
+          </button>
+        </section>
       )}
     </>
   );

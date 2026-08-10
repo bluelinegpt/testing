@@ -77,6 +77,26 @@ void main() {
       '/login?from=%2Forders',
     );
   });
+
+  test('a Prompt 15 notification-tap deep link while logged out or expired is '
+      'redirected to Login, never the target page — the same shared '
+      '`redirectFor` mechanism handles a Message/Order tap exactly like any '
+      'other protected route', () {
+    expect(
+      redirectFor(
+        const AuthenticationState.unauthenticated(),
+        '/messages/conversation-1',
+      ),
+      '/login?from=%2Fmessages%2Fconversation-1',
+    );
+    expect(
+      redirectFor(
+        const AuthenticationState(AuthenticationStatus.expired),
+        '/orders/order-1',
+      ),
+      '/login?from=%2Forders%2Forder-1',
+    );
+  });
 }
 
 AuthenticatedUser _user(Set<UserRole> roles, Set<String> permissions) =>

@@ -69,6 +69,7 @@ describe("Platform permission catalogue", () => {
     expect(PLATFORM_PERMISSIONS.map((permission) => permission.code).sort()).toEqual([
       "platform.access",
       "platform.audit.read",
+      "platform.companies.delete",
       "platform.companies.manage",
       "platform.companies.read",
       "platform.users.manage",
@@ -88,21 +89,24 @@ describe("Platform permission catalogue", () => {
   });
 
   it("seeds exactly the declared codes in the migration", () => {
-    const migration = readFileSync(
+    const foundationMigration = readFileSync(
       resolve(
         process.cwd(),
         "../../database/migrations/20260808100000_platform_administration_foundation.ts",
       ),
       "utf8",
     );
-    for (const permission of PLATFORM_PERMISSIONS) {
-      expect(migration).toContain(`'${permission.code}'`);
-    }
-    expect(migration).toContain(`'${PLATFORM_SUPER_ADMIN_ROLE_CODE}'`);
+    const deletionMigration = readFileSync(
+      resolve(process.cwd(), "../../database/migrations/20260812000000_company_deletion_foundation.ts"),
+      "utf8",
+    );
+    const migrations = foundationMigration + deletionMigration;
+    for (const permission of PLATFORM_PERMISSIONS) expect(migrations).toContain(`'${permission.code}'`);
+    expect(migrations).toContain(`'${PLATFORM_SUPER_ADMIN_ROLE_CODE}'`);
     // Idempotent on an environment that has already been migrated.
-    expect(migration).toContain("on conflict (code) do nothing");
-    expect(migration).toContain("on conflict (role_id, permission_code) do nothing");
-    expect(migration).toContain("on conflict (account_id, role_id) do nothing");
+    expect(foundationMigration).toContain("on conflict (code) do nothing");
+    expect(foundationMigration).toContain("on conflict (role_id, permission_code) do nothing");
+    expect(foundationMigration).toContain("on conflict (account_id, role_id) do nothing");
   });
 });
 

@@ -18,6 +18,7 @@ final class OrderCardModel {
     required this.orderNumber,
     required this.status,
     this.externalReference,
+    this.serialNumber,
     this.customerName,
     this.mobileNumber,
     this.emirate,
@@ -31,6 +32,13 @@ final class OrderCardModel {
   final String orderNumber;
   final String status;
   final String? externalReference;
+
+  /// Display-only — never changes which Orders are fetched or how the list
+  /// is scoped/filtered. When present (alongside/instead of
+  /// [externalReference]), `OrderCard` shows it as the card's primary,
+  /// emphasized identifier and demotes the raw internal [orderNumber] to a
+  /// smaller secondary line.
+  final String? serialNumber;
   final String? customerName;
   final String? mobileNumber;
   final String? emirate;
@@ -51,12 +59,37 @@ final class MobileNotification {
     required this.createdAt,
     required this.isRead,
     this.destination,
+    this.notificationType = '',
+    this.titleKey,
+    this.bodyKey,
+    this.bodyParams = const {},
+    this.targetType,
+    this.targetId,
   });
   final String id;
   final String title;
   final DateTime createdAt;
   final bool isRead;
   final String? destination;
+
+  /// One of `communication.message.created` / `order.assigned` /
+  /// `order.reassigned` / `order.status_changed` (Prompt 15 backend
+  /// contract) — `''` for any older/unknown fixture that predates it.
+  final String notificationType;
+
+  /// Raw localization keys from the backend (e.g.
+  /// `push.order.statusChangedTitle`) — resolved to display text at render
+  /// time via `titleForNotification`/`bodyForNotification`
+  /// (`core/services/push_notifications.dart`), never shown verbatim.
+  final String? titleKey;
+  final String? bodyKey;
+  final Map<String, Object?> bodyParams;
+
+  /// `'conversation'` or `'order'` — together with [targetId], fed straight
+  /// into `NotificationRouter.parse` for tap-to-navigate, exactly like an
+  /// FCM payload's `targetType`/`targetId`.
+  final String? targetType;
+  final String? targetId;
 }
 
 abstract interface class DashboardRepository {
@@ -98,32 +131,28 @@ final class NotificationInboxController {
     await repository.markRead(id);
     items = [
       for (final item in items)
-        if (item.id == id)
-          MobileNotification(
-            id: item.id,
-            title: item.title,
-            createdAt: item.createdAt,
-            isRead: true,
-            destination: item.destination,
-          )
-        else
-          item,
+        if (item.id == id) _markedRead(item) else item,
     ];
   }
 
   Future<void> markAllRead() async {
     await repository.markAllRead();
-    items = [
-      for (final item in items)
-        MobileNotification(
-          id: item.id,
-          title: item.title,
-          createdAt: item.createdAt,
-          isRead: true,
-          destination: item.destination,
-        ),
-    ];
+    items = [for (final item in items) _markedRead(item)];
   }
+
+  MobileNotification _markedRead(MobileNotification item) => MobileNotification(
+    id: item.id,
+    title: item.title,
+    createdAt: item.createdAt,
+    isRead: true,
+    destination: item.destination,
+    notificationType: item.notificationType,
+    titleKey: item.titleKey,
+    bodyKey: item.bodyKey,
+    bodyParams: item.bodyParams,
+    targetType: item.targetType,
+    targetId: item.targetId,
+  );
 }
 
 final class UnsupportedDashboardRepository implements DashboardRepository {

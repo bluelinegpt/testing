@@ -151,3 +151,100 @@ describe("CompanyAppShell branding", () => {
     expect(document.documentElement.dir).toBe("ltr");
   });
 });
+
+/**
+ * A Driver-only User's navigation.
+ *
+ * Uses the CORRECT Driver permission shape (Driver Order Status Permission
+ * fix): the dedicated `driver_operations` Role's one permission,
+ * `orders.driver_self_service` -- never the office `Orders` Role a Driver
+ * User was previously (incorrectly) assigned, which carried
+ * `orders.assign_driver`/`orders.create`/`orders.edit_before_processing`/
+ * `financial_transactions.reverse`/`journals.create_manual` along with it.
+ * None of `users_roles.manage`, `reconciliations.*`, `accounting.*`,
+ * `settlements.*`, `reports.*` either. Before an earlier fix, `/drivers`
+ * (Driver Collections) was reachable because its route gate incorrectly
+ * included `orders.assign_driver`/`orders.update_delivery_status` --
+ * Order-list permissions that have nothing to do with the Driver
+ * Collections API (`operations/cash/*`, gated on
+ * `reconciliations.*`/`manage`). Everything else the Driver must not see
+ * was already correctly gated.
+ */
+const DRIVER_ONLY = ["orders.driver_self_service"];
+
+describe("Driver-only navigation", () => {
+  beforeEach(async () => {
+    await i18nInstance.changeLanguage("en");
+    document.documentElement.dir = "ltr";
+  });
+
+  it("sees Orders", async () => {
+    renderShell(makeApi(branding()), DRIVER_ONLY);
+    await screen.findAllByText("Acme Logistics");
+    expect(screen.getByRole("button", { name: "Orders" })).toBeInTheDocument();
+  });
+
+  it("does not see Create order or Import orders under Orders", async () => {
+    renderShell(makeApi(branding()), DRIVER_ONLY);
+    await screen.findAllByText("Acme Logistics");
+    fireEvent.click(screen.getByRole("button", { name: "Orders" }));
+    expect(screen.queryByRole("link", { name: "Create order" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Import orders" })).not.toBeInTheDocument();
+  });
+
+  it("does not see the Drivers group (Driver Collections)", async () => {
+    renderShell(makeApi(branding()), DRIVER_ONLY);
+    await screen.findAllByText("Acme Logistics");
+    expect(screen.queryByRole("button", { name: "Drivers" })).not.toBeInTheDocument();
+  });
+
+  it("does not see Accounting", async () => {
+    renderShell(makeApi(branding()), DRIVER_ONLY);
+    await screen.findAllByText("Acme Logistics");
+    expect(screen.queryByRole("button", { name: "Accounting" })).not.toBeInTheDocument();
+  });
+
+  it("does not see Traders", async () => {
+    renderShell(makeApi(branding()), DRIVER_ONLY);
+    await screen.findAllByText("Acme Logistics");
+    expect(screen.queryByRole("button", { name: "Traders" })).not.toBeInTheDocument();
+  });
+
+  it("does not see Administration", async () => {
+    renderShell(makeApi(branding()), DRIVER_ONLY);
+    await screen.findAllByText("Acme Logistics");
+    expect(screen.queryByRole("button", { name: "Administration" })).not.toBeInTheDocument();
+  });
+
+  it("does not see Dashboard or Reports (both require office-level permissions)", async () => {
+    renderShell(makeApi(branding()), DRIVER_ONLY);
+    await screen.findAllByText("Acme Logistics");
+    expect(screen.queryByRole("link", { name: "Dashboard" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Reports" })).not.toBeInTheDocument();
+  });
+
+  /* `/configuration/general` ("General Settings") used to be reachable by
+     EVERY authenticated company_user unconditionally, specifically so any
+     Role could set its own personal display-language preference without
+     needing `users_roles.manage`. That universal carve-out was the second
+     leak: an Orders-only identity (this Driver) inherited it too. It now
+     only applies to an identity that already has some non-Orders permission
+     (any other office Role keeps exactly the access it had); an Orders-only
+     identity falls through to `/configuration/general`'s own normal
+     `[manage]` gate, same as every other Configuration route. */
+  it("does not see Configuration at all", async () => {
+    renderShell(makeApi(branding()), DRIVER_ONLY);
+    await screen.findAllByText("Acme Logistics");
+    expect(screen.queryByRole("button", { name: "Configuration" })).not.toBeInTheDocument();
+  });
+
+  it("still exposes General Settings to an office Role that holds no other Configuration permission", async () => {
+    // Proves the fix is scoped to Orders-only identities, not "everyone
+    // without users_roles.manage" -- an AccountingAdmin-only Role (no
+    // `manage`) keeps exactly the personal-preference access it always had.
+    renderShell(makeApi(branding()), ["accounting.manage"]);
+    await screen.findAllByText("Acme Logistics");
+    fireEvent.click(screen.getByRole("button", { name: "Configuration" }));
+    expect(screen.getByRole("link", { name: "General settings" })).toBeInTheDocument();
+  });
+});

@@ -7,7 +7,12 @@ enum SensitiveKey {
   companyId('company_id'),
   sessionMetadata('session_metadata'),
   locale('locale'),
-  deviceRegistrationId('device_registration_id');
+  deviceRegistrationId('device_registration_id'),
+  // Device-level push-notification permission UX state (Prompt 15) — not
+  // session data, so (like `locale`) it survives `clearSession()` and is
+  // never cleared on logout.
+  notificationPermissionAsked('notification_permission_asked'),
+  notificationPermissionDenialCount('notification_permission_denial_count');
 
   const SensitiveKey(this.value);
   final String value;
@@ -39,7 +44,10 @@ final class SecureSensitiveStorage implements SensitiveStorage {
   @override
   Future<void> clearSession() async {
     for (final key in SensitiveKey.values.where(
-      (key) => key != SensitiveKey.locale,
+      (key) =>
+          key != SensitiveKey.locale &&
+          key != SensitiveKey.notificationPermissionAsked &&
+          key != SensitiveKey.notificationPermissionDenialCount,
     )) {
       await delete(key);
     }
@@ -51,7 +59,12 @@ final class MemorySensitiveStorage implements SensitiveStorage {
 
   @override
   Future<void> clearSession() async {
-    values.removeWhere((key, _) => key != SensitiveKey.locale);
+    values.removeWhere(
+      (key, _) =>
+          key != SensitiveKey.locale &&
+          key != SensitiveKey.notificationPermissionAsked &&
+          key != SensitiveKey.notificationPermissionDenialCount,
+    );
   }
 
   @override

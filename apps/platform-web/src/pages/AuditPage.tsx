@@ -118,12 +118,12 @@ export function AuditPage(): ReactElement {
     try {
       setResult(
         await platformApi.platformAudit({
-          action: filters.action === "" ? undefined : filters.action,
+          ...(filters.action === "" ? {} : { action: filters.action }),
           // A date is a whole day to the reader, so the upper bound is
           // exclusive of the following midnight rather than of the date
           // itself — otherwise "to 5 March" would silently exclude 5 March.
-          from: filters.from === "" ? undefined : `${filters.from}T00:00:00Z`,
-          to: filters.to === "" ? undefined : `${filters.to}T23:59:59Z`,
+          ...(filters.from === "" ? {} : { from: `${filters.from}T00:00:00Z` }),
+          ...(filters.to === "" ? {} : { to: `${filters.to}T23:59:59Z` }),
           page: requested,
           pageSize: PAGE_SIZE,
         }),

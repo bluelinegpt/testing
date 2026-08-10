@@ -43,10 +43,10 @@ const defaultTimeoutMs = 15_000;
 
 async function request<TResponse>(
   path: string,
-  init: { body?: unknown; method: string },
+  init: { body?: unknown; headers?: Readonly<Record<string, string>>; method: string; timeoutMs?: number },
 ): Promise<TResponse | undefined> {
   const controller = new AbortController();
-  const timeout = globalThis.setTimeout(() => controller.abort(), defaultTimeoutMs);
+  const timeout = globalThis.setTimeout(() => controller.abort(), init.timeoutMs ?? defaultTimeoutMs);
   try {
     const response = await fetch(`${platformConfiguration.apiBaseUrl}/${path.replace(/^\//, "")}`, {
       ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
@@ -56,6 +56,7 @@ async function request<TResponse>(
         Accept: "application/json",
         "X-Blueline-Session": "cookie",
         ...(init.body === undefined ? {} : { "Content-Type": "application/json" }),
+        ...init.headers,
       },
       method: init.method,
       signal: controller.signal,
@@ -87,7 +88,7 @@ export interface PlatformIdentity {
   readonly roles: readonly string[];
 }
 
-export type CompanyStatus = "draft" | "active" | "suspended" | "disabled";
+export type CompanyStatus = "draft" | "active" | "suspended" | "disabled" | "closed";
 export type CompanyEnvironment = "development" | "demo" | "sandbox" | "trial" | "production";
 
 export interface PlatformCompanySummary {
@@ -149,6 +150,46 @@ export interface CompanyDetail {
   readonly accountingSetupAppliedBy: string | null;
   readonly createdAt: string;
   readonly statusChangeReason: string | null;
+  readonly closedAt: string | null;
+}
+
+export interface CompanyDeletionEligibility {
+  readonly eligible: boolean;
+  readonly status: string;
+  readonly environment: string;
+  readonly closedAt: string | null;
+  readonly eligibleAt: string | null;
+  readonly requiresWaitingPeriod: boolean;
+  readonly waitingPeriodHours: number;
+  readonly remainingSeconds: number;
+  readonly blockers: readonly string[];
+  readonly previewRequired: true;
+  readonly backupRequired: true;
+}
+
+export interface CompanyDeletionPreview {
+  readonly previewId: string;
+  readonly operationId: string;
+  readonly manifestVersion: string;
+  readonly manifestHash: string;
+  readonly rowCounts: Readonly<Record<string, number>>;
+  readonly moduleCounts: Readonly<Record<string, number>>;
+  readonly totalCompanyRows: number;
+  readonly blockers: readonly string[];
+  readonly guardedTriggers: readonly { readonly tableName: string; readonly triggerName: string }[];
+  readonly globalPreserved: readonly string[];
+  readonly externalFiles: { readonly fileObjects: number; readonly strategy: string };
+  readonly readyForDelete: boolean;
+}
+
+export interface CompanyDeletionBackup {
+  readonly id: string;
+  readonly backupType: "full_database";
+  readonly status: "verified";
+  readonly backupReference: string;
+  readonly checksumSha256: string;
+  readonly sizeBytes: number;
+  readonly verifiedAt: string;
 }
 
 export interface AccountingSetupSummary {
@@ -251,6 +292,22 @@ export interface CompanySession {
   readonly createdIp: string | null;
 }
 
+export interface UserDeletionEligibility {
+  readonly eligible: boolean;
+  readonly accountId: string;
+  readonly username: string;
+  readonly displayName: string | null;
+  readonly companyId: string;
+  readonly companyName: string;
+  readonly activeSessions: number;
+  readonly isLastAdministrator: boolean;
+  readonly blockingRows: number;
+  readonly blockingCategories: readonly { readonly category: string; readonly rows: number }[];
+  readonly recommendedAction: "delete" | "deactivate";
+  readonly reason: string | null;
+  readonly confirmationChallenge: string;
+}
+
 /**
  * A one-time credential link.
  *
@@ -273,12 +330,11 @@ export interface CreateAdministratorPayload {
 
 export interface CreateCompanyPayload {
   readonly name: string;
-  readonly code: string;
-  readonly subdomain: string;
+  readonly subdomain?: string;
   readonly environment: string;
-  readonly countryCode: string;
-  readonly timezone: string;
-  readonly defaultLanguage: string;
+  readonly countryCode?: string;
+  readonly timezone?: string;
+  readonly defaultLanguage?: string;
   readonly contactName?: string;
   readonly telephone?: string;
   readonly email?: string;
@@ -372,6 +428,55 @@ export const platformApi = {
     });
   },
 
+  async closeCompany(companyId: string, reason: string, confirmation: string): Promise<void> {
+    await request(`platform/companies/${companyId}/close`, {
+      body: { reason, confirmation },
+      method: "POST",
+    });
+  },
+
+  async companyDeletionEligibility(companyId: string): Promise<CompanyDeletionEligibility> {
+    const result = await request<CompanyDeletionEligibility>(
+      `platform/companies/${companyId}/deletion-eligibility`,
+      { method: "GET" },
+    );
+    if (result === undefined) throw new PlatformApiError("Empty eligibility response", "empty", 500);
+    return result;
+  },
+
+  async companyDeletionPreview(companyId: string, idempotencyKey: string): Promise<CompanyDeletionPreview> {
+    const result = await request<CompanyDeletionPreview>(
+      `platform/companies/${companyId}/deletion-preview`,
+      {
+        headers: { "Idempotency-Key": idempotencyKey },
+        method: "POST",
+      },
+    );
+    if (result === undefined) throw new PlatformApiError("Empty preview response", "empty", 500);
+    return result;
+  },
+
+  async companyDeletionBackup(companyId: string, operationId: string): Promise<CompanyDeletionBackup> {
+    const result = await request<CompanyDeletionBackup>(
+      `platform/companies/${companyId}/deletion-backup`,
+      { body: { operationId }, method: "POST", timeoutMs: 310_000 },
+    );
+    if (result === undefined) throw new PlatformApiError("Empty backup response", "empty", 500);
+    return result;
+  },
+
+  async permanentlyDeleteCompany(
+    companyId: string,
+    input: { operationId: string; previewId: string; confirmation: string; idempotencyKey: string },
+  ): Promise<Record<string, unknown>> {
+    const result = await request<Record<string, unknown>>(
+      `platform/companies/${companyId}/permanent-delete`,
+      { body: input, method: "POST", timeoutMs: 120_000 },
+    );
+    if (result === undefined) throw new PlatformApiError("Empty deletion response", "empty", 500);
+    return result;
+  },
+
   async updateCompany(companyId: string, changes: Record<string, string>): Promise<void> {
     await request(`platform/companies/${companyId}`, { body: changes, method: "PATCH" });
   },
@@ -442,6 +547,25 @@ export const platformApi = {
       { method: "POST" },
     );
     return result ?? { revoked: 0 };
+  },
+
+  async userDeletionEligibility(
+    companyId: string,
+    accountId: string,
+  ): Promise<UserDeletionEligibility> {
+    const result = await request<UserDeletionEligibility>(
+      `platform/companies/${companyId}/users/${accountId}/deletion-eligibility`,
+      { method: "GET" },
+    );
+    if (result === undefined) throw new PlatformApiError("Empty eligibility response", "empty", 500);
+    return result;
+  },
+
+  async deleteUser(companyId: string, accountId: string, confirmation: string): Promise<void> {
+    await request(`platform/companies/${companyId}/users/${accountId}/delete`, {
+      body: { confirmation },
+      method: "POST",
+    });
   },
 
   async audit(companyId: string): Promise<readonly AuditEntry[]> {

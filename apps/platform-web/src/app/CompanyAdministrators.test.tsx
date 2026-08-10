@@ -391,6 +391,63 @@ describe("Company Administrators section", () => {
     await waitFor(() => expect(revoked).toBe(true));
   });
 
+  it("shows loading and then the empty sessions state without rendering blank", async () => {
+    const routes = baseRoutes(fullAccess, [user({ state: "active" })]);
+    routes[`GET platform/companies/${companyId}/users/${accountId}/sessions`] = {
+      body: { items: [] },
+      status: 200,
+    };
+    vi.stubGlobal("fetch", stubFetch(routes));
+    renderDetail();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Sessions" }));
+    expect(screen.getByRole("heading", { name: "Sessions" })).toBeInTheDocument();
+    expect(screen.getByText("Loading sessions...")).toBeInTheDocument();
+    expect(await screen.findByText("No sessions found for this user.")).toBeInTheDocument();
+  });
+
+  it.each([403, 404, 500])("shows a retryable sessions error for HTTP %s", async (status) => {
+    const routes = baseRoutes(fullAccess, [user({ state: "active" })]);
+    routes[`GET platform/companies/${companyId}/users/${accountId}/sessions`] = {
+      body: { error: { code: "sessions_unavailable", message: "Not available" } },
+      status,
+    };
+    vi.stubGlobal("fetch", stubFetch(routes));
+    renderDetail();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Sessions" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Unable to load sessions.");
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Sessions" })).toBeInTheDocument();
+  });
+
+  it("renders revoked sessions and nullable or malformed metadata safely", async () => {
+    const routes = baseRoutes(fullAccess, [user({ state: "active" })]);
+    routes[`GET platform/companies/${companyId}/users/${accountId}/sessions`] = {
+      body: {
+        items: [
+          {
+            id: "99999999-8888-4777-8666-555544443333",
+            createdAt: "not-a-date",
+            lastSeenAt: null,
+            expiresAt: "",
+            revokedAt: "2026-08-10T10:00:00.000Z",
+            userAgent: null,
+            createdIp: null,
+          },
+        ],
+      },
+      status: 200,
+    };
+    vi.stubGlobal("fetch", stubFetch(routes));
+    renderDetail();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Sessions" }));
+    expect(await screen.findByText("revoked")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Revoke" })).toBeNull();
+    expect(screen.getAllByText("—").length).toBeGreaterThan(0);
+  });
+
   it("confirms before revoking every session", async () => {
     const routes = baseRoutes(fullAccess, [user({ state: "active" })]);
     routes[`GET platform/companies/${companyId}/users/${accountId}/sessions`] = {
@@ -413,6 +470,73 @@ describe("Company Administrators section", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Revoke all sessions" }));
     await waitFor(() => expect(globalThis.confirm).toHaveBeenCalled());
     expect(revokedAll).toBe(false);
+  });
+
+  it("permanently deletes an eligible unused user only after typed confirmation", async () => {
+    const routes = baseRoutes(fullAccess, [user({ state: "disabled" })]);
+    routes[`GET platform/companies/${companyId}/users/${accountId}/deletion-eligibility`] = {
+      body: {
+        eligible: true,
+        accountId,
+        username: "admin.acme",
+        displayName: "Admin",
+        companyId,
+        companyName: "Test Delivery",
+        activeSessions: 0,
+        isLastAdministrator: false,
+        blockingRows: 0,
+        blockingCategories: [],
+        recommendedAction: "delete",
+        reason: null,
+        confirmationChallenge: "DELETE admin.acme",
+      },
+      status: 200,
+    };
+    let confirmation: unknown;
+    routes[`POST platform/companies/${companyId}/users/${accountId}/delete`] = (body) => {
+      confirmation = (body as { confirmation?: string }).confirmation;
+      return { body: { deleted: true }, status: 200 };
+    };
+    vi.stubGlobal("fetch", stubFetch(routes));
+    renderDetail();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Delete user" }));
+    const remove = await screen.findByRole("button", { name: "Permanently delete user" });
+    expect(remove).toBeDisabled();
+    fireEvent.change(screen.getByLabelText(/DELETE admin\.acme/), {
+      target: { value: "DELETE admin.acme" },
+    });
+    fireEvent.click(remove);
+    await waitFor(() => expect(confirmation).toBe("DELETE admin.acme"));
+  });
+
+  it("blocks permanent user deletion when the server reports history", async () => {
+    const routes = baseRoutes(fullAccess, [user({ state: "disabled" })]);
+    routes[`GET platform/companies/${companyId}/users/${accountId}/deletion-eligibility`] = {
+      body: {
+        eligible: false,
+        accountId,
+        username: "admin.acme",
+        displayName: "Admin",
+        companyId,
+        companyName: "Test Delivery",
+        activeSessions: 0,
+        isLastAdministrator: false,
+        blockingRows: 2,
+        blockingCategories: [{ category: "Orders", rows: 2 }],
+        recommendedAction: "deactivate",
+        reason: "This user has historical activity. Deactivate instead.",
+        confirmationChallenge: "DELETE admin.acme",
+      },
+      status: 200,
+    };
+    vi.stubGlobal("fetch", stubFetch(routes));
+    renderDetail();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Delete user" }));
+    expect(await screen.findByText(/historical activity/)).toBeInTheDocument();
+    expect(screen.getByText("Orders: 2")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Permanently delete user" })).toBeNull();
   });
 });
 

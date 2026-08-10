@@ -60,13 +60,84 @@ void main() {
     expect(state.failureCode, ApiFailureKind.invalidResponse.name);
   });
 
-  test('session restoration verifies server state', () async {
+  test(
+    'no stored session restores as unauthenticated (Login is shown)',
+    () async {
+      final fixture = _Fixture();
+      final state = await fixture.service.restore();
+      expect(state.isAuthenticated, isFalse);
+      expect(state.status, AuthenticationStatus.unauthenticated);
+      // No local session material means no backend round trip is even
+      // attempted — nothing exists yet to verify.
+      expect(fixture.api.meCalls, 0);
+    },
+  );
+
+  test('session restoration verifies server state and re-registers the device '
+      'push token (Prompt 15 — a cold-start restore must not silently skip '
+      'registration)', () async {
     final fixture = _Fixture();
     await fixture.seedSession();
     final state = await fixture.service.restore();
     expect(state.isAuthenticated, isTrue);
     expect(fixture.api.meCalls, 1);
+    expect(fixture.device.registered, 1);
   });
+
+  test(
+    'a revoked or disabled account is denied on restore and local data is cleared '
+    '(mobile Login enhancement — restore never trusts local data alone)',
+    () async {
+      final fixture = _Fixture();
+      await fixture.seedSession();
+      // The backend is the single source of truth for account state: a
+      // revoked session or a disabled user/Company surfaces as the identity
+      // check failing, not as a locally-cached flag.
+      fixture.api.meError = const ApiFailure(
+        ApiFailureKind.unauthorized,
+        code: 'account_disabled',
+      );
+      final state = await fixture.service.restore();
+      expect(state.isAuthenticated, isFalse);
+      expect(state.status, AuthenticationStatus.unauthenticated);
+      expect(await fixture.storage.read(SensitiveKey.accessToken), isNull);
+      expect(await fixture.storage.read(SensitiveKey.sessionMetadata), isNull);
+    },
+  );
+
+  test(
+    'a disabled Company denies restore and clears local session material',
+    () async {
+      final fixture = _Fixture();
+      await fixture.seedSession();
+      fixture.api.meResponse['companyId'] = null;
+      final state = await fixture.service.restore();
+      expect(state.isAuthenticated, isFalse);
+      expect(state.status, AuthenticationStatus.unauthorized);
+      expect(await fixture.storage.read(SensitiveKey.accessToken), isNull);
+    },
+  );
+
+  test(
+    'restored session uses the role and Company the backend verifies now, '
+    'never a stale locally-cached value (mobile Login enhancement)',
+    () async {
+      final fixture = _Fixture();
+      // Local metadata claims a stale role and a different Company than the
+      // backend currently reports — simulating data left over from before a
+      // role/Company change, or tampering with the on-device cache.
+      await fixture.seedSession(role: 'trader', companyId: 'stale-company');
+      fixture.api.meResponse
+        ..['kind'] = 'driver'
+        ..['companyId'] = 'fresh-company'
+        ..['profileId'] = 'profile-1'
+        ..['profileType'] = 'driver';
+      final state = await fixture.service.restore();
+      expect(state.isAuthenticated, isTrue);
+      expect(state.user?.roles, {UserRole.driver});
+      expect(state.user?.companyId, 'fresh-company');
+    },
+  );
 
   test('expired session is cleared without backend trust', () async {
     final fixture = _Fixture();
@@ -130,6 +201,71 @@ void main() {
     },
   );
 
+  test('a failing server logout call (network unavailable) still clears local '
+      'session material — local logout must always succeed', () async {
+    final fixture = _Fixture()
+      ..api.logoutError = const ApiFailure(ApiFailureKind.network);
+    await fixture.service.login(
+      const LoginInput(identifier: 'u', password: 'password'),
+    );
+    await fixture.service.logout();
+    expect(await fixture.storage.read(SensitiveKey.accessToken), isNull);
+    expect(await fixture.storage.read(SensitiveKey.sessionMetadata), isNull);
+  });
+
+  test(
+    'a failing push-deregistration call still logs out and clears local '
+    'session material (best-effort, like every other optional logout step)',
+    () async {
+      final fixture = _Fixture()..device.failDeregister = true;
+      await fixture.service.login(
+        const LoginInput(identifier: 'u', password: 'password'),
+      );
+      await fixture.service.logout();
+      expect(await fixture.storage.read(SensitiveKey.accessToken), isNull);
+    },
+  );
+
+  test('logout clears the Driver offline store for the logging-out identity '
+      '(Prompt 16 §T)', () async {
+    final fixture = _Fixture();
+    await fixture.service.login(
+      const LoginInput(identifier: 'u', password: 'password'),
+    );
+    await fixture.service.logout();
+    expect(fixture.offlineStore.clearedScopes, [
+      (userId: 'user-1', companyId: 'company-1'),
+    ]);
+  });
+
+  test('a failing Driver offline store never blocks logout (best-effort, like '
+      'every other optional logout step)', () async {
+    final fixture = _Fixture()..offlineStore.fail = true;
+    await fixture.service.login(
+      const LoginInput(identifier: 'u', password: 'password'),
+    );
+    await fixture.service.logout();
+    expect(await fixture.storage.read(SensitiveKey.accessToken), isNull);
+  });
+
+  test('restarting the app after logout does not auto-login — restore sees no '
+      'session and Login is shown again (mobile Login enhancement)', () async {
+    final fixture = _Fixture();
+    await fixture.service.login(
+      const LoginInput(identifier: 'u', password: 'password'),
+    );
+    await fixture.service.logout();
+    final meCallsBeforeRestore = fixture.api.meCalls;
+    // The same durable storage a real app restart would read from — since
+    // logout already cleared it, restore() must not resurrect a session,
+    // and (with nothing local left to verify) must not even call the
+    // backend again.
+    final state = await fixture.service.restore();
+    expect(state.isAuthenticated, isFalse);
+    expect(state.status, AuthenticationStatus.unauthenticated);
+    expect(fixture.api.meCalls, meCallsBeforeRestore);
+  });
+
   test(
     'optional device and realtime failures do not leak or block session',
     () async {
@@ -155,6 +291,7 @@ final class _Fixture {
       realtime: realtime,
       privateCache: cache,
       errorMapper: const ApiErrorMapper(),
+      driverOfflineStore: offlineStore,
     );
   }
   final storage = MemorySensitiveStorage();
@@ -163,9 +300,14 @@ final class _Fixture {
   final device = _FakeDevice();
   final realtime = _FakeRealtime();
   final cache = ScopedMemoryProtectedCache();
+  final offlineStore = _FakeOfflineStore();
   late final SessionAuthenticationService service;
 
-  Future<void> seedSession({DateTime? expiry}) async {
+  Future<void> seedSession({
+    DateTime? expiry,
+    String role = 'driver',
+    String companyId = 'company-1',
+  }) async {
     await storage.write(SensitiveKey.accessToken, 'access-token');
     await storage.write(
       SensitiveKey.sessionMetadata,
@@ -175,8 +317,8 @@ final class _Fixture {
                 .toIso8601String(),
         'displayName': 'Driver One',
         'id': 'user-1',
-        'companyId': 'company-1',
-        'role': 'driver',
+        'companyId': companyId,
+        'role': role,
       }),
     );
   }
@@ -187,6 +329,8 @@ final class _FakeAuthApi implements AuthenticationApi {
   int meCalls = 0;
   int logoutCalls = 0;
   Object? loginError;
+  Object? meError;
+  Object? logoutError;
   Map<String, dynamic> loginResponse = {
     'accessToken': 'access-token',
     'expiresAt': DateTime.now()
@@ -218,12 +362,14 @@ final class _FakeAuthApi implements AuthenticationApi {
   @override
   Future<Map<String, dynamic>> currentIdentity() async {
     meCalls++;
+    if (meError case final error?) throw error;
     return meResponse;
   }
 
   @override
   Future<void> logout() async {
     logoutCalls++;
+    if (logoutError case final error?) throw error;
   }
 }
 
@@ -240,6 +386,7 @@ final class _FakeDevice implements DeviceRegistrationService {
   int registered = 0;
   int deregistered = 0;
   bool fail = false;
+  bool failDeregister = false;
   @override
   Future<void> register(String token, AuthenticatedUser user) async {
     registered++;
@@ -249,6 +396,7 @@ final class _FakeDevice implements DeviceRegistrationService {
   @override
   Future<void> deregister() async {
     deregistered++;
+    if (failDeregister) throw StateError('offline');
   }
 }
 
@@ -274,4 +422,17 @@ final class _FakeRealtime implements RealtimeClient {
 
   @override
   Future<void> subscribeToConversation(String conversationId) async {}
+}
+
+final class _FakeOfflineStore implements OfflineStore {
+  bool fail = false;
+  final List<({String userId, String companyId})> clearedScopes = [];
+  @override
+  Future<void> clearScope({
+    required String userId,
+    required String companyId,
+  }) async {
+    if (fail) throw StateError('offline store unavailable');
+    clearedScopes.add((userId: userId, companyId: companyId));
+  }
 }

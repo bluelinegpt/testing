@@ -762,6 +762,136 @@ describe("OrdersModuleWorkspace", () => {
  * as context, and the destination screen re-validates against the live
  * backend (§4 in the consolidation report).
  */
+/**
+ * A Driver User holding only `orders.driver_self_service` (Driver Order
+ * Status Permission fix) -- sees exactly the narrow Driver transition set on
+ * their own row, never Assign Driver, Cancel, or any office/financial
+ * action, matching `OperationsService.changeOrderStatus`'s own
+ * `driverTransitions` map exactly.
+ */
+describe("Driver self-service row actions", () => {
+  beforeEach(async () => i18nInstance.changeLanguage("en"));
+
+  it("shows the allowed status action for Assigned to Driver, and hides Assign Driver / Cancel", async () => {
+    const assignedOrder = {
+      ...order,
+      assignedDriverId: "20000000-0000-4000-8000-000000000001",
+      assignedDriverMobile: "971501234568",
+      assignedDriverName: "D123",
+      deliveryStatus: "assigned_to_driver",
+    };
+    const api = {
+      get: vi.fn((path: string) => {
+        if (path.startsWith("operations/orders?")) {
+          return Promise.resolve({
+            filteredCount: 1,
+            items: [assignedOrder],
+            page: 1,
+            pageSize: 25,
+            totalCount: 1,
+          });
+        }
+        if (path.startsWith("configuration/areas")) {
+          return Promise.resolve({ items: [], page: 1, pageSize: 100, total: 0 });
+        }
+        return Promise.resolve([]);
+      }),
+      post: vi.fn().mockResolvedValue({}),
+    };
+    renderWithRouter(
+      <OrdersModuleWorkspace
+        api={api as unknown as ApiClient}
+        onNavigate={vi.fn()}
+        permissions={["orders.driver_self_service"]}
+      />,
+    );
+
+    await screen.findByText("SER-000001");
+    fireEvent.click(screen.getByRole("button", { name: "Order actions" }));
+    expect(screen.getByRole("button", { name: "Send out for delivery" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Assign driver" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Cancel order" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Move to Hold" })).not.toBeInTheDocument();
+  });
+
+  it("shows Hold, Deliver and Return to branch for Out for Delivery, and hides every office/financial action", async () => {
+    const outForDeliveryOrder = {
+      ...order,
+      assignedDriverId: "20000000-0000-4000-8000-000000000001",
+      assignedDriverMobile: "971501234568",
+      assignedDriverName: "D123",
+      deliveryStatus: "out_for_delivery",
+    };
+    const api = {
+      get: vi.fn((path: string) => {
+        if (path.startsWith("operations/orders?")) {
+          return Promise.resolve({
+            filteredCount: 1,
+            items: [outForDeliveryOrder],
+            page: 1,
+            pageSize: 25,
+            totalCount: 1,
+          });
+        }
+        if (path.startsWith("configuration/areas")) {
+          return Promise.resolve({ items: [], page: 1, pageSize: 100, total: 0 });
+        }
+        return Promise.resolve([]);
+      }),
+      post: vi.fn().mockResolvedValue({}),
+    };
+    renderWithRouter(
+      <OrdersModuleWorkspace
+        api={api as unknown as ApiClient}
+        onNavigate={vi.fn()}
+        permissions={["orders.driver_self_service"]}
+      />,
+    );
+
+    await screen.findByText("SER-000001");
+    fireEvent.click(screen.getByRole("button", { name: "Order actions" }));
+    expect(screen.getByRole("button", { name: "Mark delivered" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Move to Hold" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Return to branch" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Assign driver" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Cancel order" })).not.toBeInTheDocument();
+  });
+
+  it("does not offer any status action for an unassigned New Order (no office permission)", async () => {
+    const api = {
+      get: vi.fn((path: string) => {
+        if (path.startsWith("operations/orders?")) {
+          return Promise.resolve({
+            filteredCount: 1,
+            items: [order],
+            page: 1,
+            pageSize: 25,
+            totalCount: 1,
+          });
+        }
+        if (path.startsWith("configuration/areas")) {
+          return Promise.resolve({ items: [], page: 1, pageSize: 100, total: 0 });
+        }
+        return Promise.resolve([]);
+      }),
+      post: vi.fn().mockResolvedValue({}),
+    };
+    renderWithRouter(
+      <OrdersModuleWorkspace
+        api={api as unknown as ApiClient}
+        onNavigate={vi.fn()}
+        permissions={["orders.driver_self_service"]}
+      />,
+    );
+
+    await screen.findByText("SER-000001");
+    fireEvent.click(screen.getByRole("button", { name: "Order actions" }));
+    expect(screen.queryByRole("button", { name: "Mark item in branch" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Assign driver" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Cancel order" })).not.toBeInTheDocument();
+  });
+});
+
 describe("Collect from Driver — consolidated into one workflow", () => {
   beforeEach(async () => i18nInstance.changeLanguage("en"));
 

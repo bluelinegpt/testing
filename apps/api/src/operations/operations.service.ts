@@ -20,11 +20,9 @@ import { deriveOrderWorkflowGuidance } from "./order-workflow-guidance.js";
 import type { DatabaseSchema } from "../infrastructure/database/database.types.js";
 import { KyselyTransactionManager } from "../infrastructure/database/transaction-manager.js";
 import { ApplicationException } from "../presentation/errors/application.exception.js";
-import {
-  normalizeReferenceTerm,
-  unifiedOrderSearchPredicate,
-} from "./order-search.js";
+import { normalizeReferenceTerm, unifiedOrderSearchPredicate } from "./order-search.js";
 import { mobileComparisonKey, normalizeUaeMobile } from "../shared/uae-mobile.js";
+import { PushOutboxWriter } from "../push/push-outbox-writer.service.js";
 import { IdentityContextAccessor } from "../security/identity-context.js";
 import { TenantContextAccessor } from "../tenancy/tenant-context.js";
 import { EmployeeDeliveryEarningService } from "../payroll/employee-delivery-earning.service.js";
@@ -72,6 +70,31 @@ export interface OperationsOverviewFilters {
 export interface OperationsStatusCount {
   readonly count: number;
   readonly status: string;
+}
+
+/**
+ * Operational counts only — deliberately no COD/revenue/profit totals, so an
+ * Operator holding only dispatch permissions (`orders.assign_driver`,
+ * `orders.update_delivery_status`) can call this without ever being granted
+ * `reports.financial.view`. `byStatus` always includes every known delivery
+ * status key (zero-filled), so a mobile client never has to special-case a
+ * status that simply has no Orders right now.
+ */
+export interface OperationsOperatorDashboardSummary {
+  readonly activeTotal: number;
+  readonly byStatus: Readonly<Record<string, number>>;
+  readonly deliveredToday: number;
+  readonly returnPending: number;
+}
+
+/** Driver-scoped dashboard counts — never Company-wide, never another
+ *  Driver's. See {@link OperationsService.driverDashboardSummary}. */
+export interface OperationsDriverDashboardSummary {
+  readonly activeTotal: number;
+  readonly assignedToMe: number;
+  readonly deliveredToday: number;
+  readonly outForDelivery: number;
+  readonly returnPending: number;
 }
 
 /**
@@ -206,6 +229,10 @@ export interface OperationsOrder {
   readonly additionalFeeVatAmount: string | null;
   readonly amountCollected: string;
   readonly areaName: string;
+  /** Present only on the single-order detail fetch (`orderById`) — the list
+      and export queries do not join `emirates`, so this is undefined there. */
+  readonly emirateNameEn?: string;
+  readonly emirateNameAr?: string;
   readonly assignedDriverId: string | null;
   /** Identifier only; used to prefilter the Trader Settlement screen.
       Optional because two other constructors of this shape (Fast Entry and the
@@ -356,6 +383,8 @@ export interface PortalOrder {
   readonly serviceFee: string;
   readonly traderName: string;
   readonly traderSettlementStatus: string;
+  readonly emirateNameEn: string | null;
+  readonly emirateNameAr: string | null;
 }
 
 export interface TraderPortalProfile {
@@ -575,6 +604,7 @@ export class OperationsService {
     private readonly outsourcedDriverFees: OutsourcedDriverFeeService,
     @Inject(EmployeeDeliveryEarningService)
     private readonly employeeDeliveryEarnings: EmployeeDeliveryEarningService,
+    @Inject(PushOutboxWriter) private readonly pushOutbox: PushOutboxWriter,
   ) {}
 
   public async overview(filters: OperationsOverviewFilters = {}): Promise<OperationsOverview> {
@@ -635,6 +665,166 @@ export class OperationsService {
     };
   }
 
+  /**
+   * Every value here comes from a server-side `count(*) ... group by`, never
+   * a client-downloaded page of Orders — a mobile dashboard must not fake
+   * counts by paging through full history. `activeTotal` uses the exact
+   * `quickView = 'active'` boundary the Orders list already applies
+   * (`delivery_status not in ('hold', 'closed', 'cancelled')`), so a Driver
+   * out for delivery or an Order Returned to Trader still counts as Active
+   * here exactly as it does when quick-viewing "Active" in the list.
+   */
+  public async operatorDashboardSummary(): Promise<OperationsOperatorDashboardSummary> {
+    const { companyId } = this.tenants.current();
+    const knownStatuses = [
+      "new",
+      "in_branch",
+      "assigned_to_driver",
+      "out_for_delivery",
+      "hold",
+      "delivered",
+      "returned_to_branch",
+      "returned_to_trader",
+      "cancelled",
+      "closed",
+    ] as const;
+    // A "Driver User" (a `company_user` account whose linked Employee backs a
+    // `drivers.employee_id` record — see `currentEmployeeDriverId`) must see
+    // ONLY their own Driver's counts here, exactly like `orders()` and
+    // `orderDetail()` already narrow for them. Without this, a Driver User's
+    // mobile dashboard leaked full Company-wide totals even though the very
+    // same identity's Orders list was already correctly scoped to just their
+    // own assignments — the two views disagreed about what this account is.
+    // An ordinary Operator (no linked Driver) is completely unaffected:
+    // `ownDriverId` is `undefined` and every predicate below is a no-op.
+    const ownDriverId = await this.currentEmployeeDriverId();
+    const driverScope = sql`(${ownDriverId ?? null}::uuid is null or assigned_driver_id = ${ownDriverId ?? null}::uuid)`;
+    const [statusCounts, activeTotal, deliveredToday, returnPending] = await Promise.all([
+      sql<OperationsStatusCount>`
+        select delivery_status as status, count(*)::int as count
+          from orders
+         where company_id = ${companyId}::uuid
+           and ${driverScope}
+         group by delivery_status
+      `.execute(this.database),
+      sql<{ count: number }>`
+        select count(*)::int as count from orders
+         where company_id = ${companyId}::uuid
+           and delivery_status not in ('hold', 'closed', 'cancelled')
+           and ${driverScope}
+      `.execute(this.database),
+      sql<{ count: number }>`
+        select count(*)::int as count from orders
+         where company_id = ${companyId}::uuid
+           and delivery_status = 'delivered' and delivered_at::date = current_date
+           and ${driverScope}
+      `.execute(this.database),
+      sql<{ count: number }>`
+        select count(*)::int as count from orders
+         where company_id = ${companyId}::uuid and delivery_status = 'returned_to_branch'
+           and ${driverScope}
+      `.execute(this.database),
+    ]);
+    const byStatus: Record<string, number> = Object.fromEntries(
+      knownStatuses.map((status) => [status, 0]),
+    );
+    for (const row of statusCounts.rows) byStatus[row.status] = row.count;
+    return {
+      activeTotal: activeTotal.rows[0]?.count ?? 0,
+      byStatus,
+      deliveredToday: deliveredToday.rows[0]?.count ?? 0,
+      returnPending: returnPending.rows[0]?.count ?? 0,
+    };
+  }
+
+  /**
+   * Dashboard summary for the authenticated Driver ONLY — every count is
+   * scoped to `assigned_driver_id = driver.id`, where `driver` is resolved
+   * from the authenticated identity via `driverForAccount` exactly like
+   * `driverPortalOrders`/`changeDriverPortalOrderStatus` already do. There is
+   * no `driverId` input anywhere in this method's signature — a client can
+   * only ever see its own counts, never another Driver's or the Company's.
+   *
+   * Unlike the Operator summary, "New" (unassigned) Orders are intentionally
+   * excluded: an Order not yet assigned to this Driver is not their concern.
+   */
+  public async driverDashboardSummary(): Promise<OperationsDriverDashboardSummary> {
+    const identity = this.identities.current();
+    if (identity.companyId === null) {
+      throw new ApplicationException(
+        "tenant_required",
+        "A Company account is required",
+        HttpStatus.FORBIDDEN,
+      );
+    }
+    const driver = await this.driverForAccount(
+      identity.companyId,
+      identity.identityId,
+      identity.profileId,
+    );
+    const [statusCounts, deliveredToday] = await Promise.all([
+      sql<{ status: string; count: number }>`
+        select delivery_status as status, count(*)::int as count
+          from orders
+         where company_id = ${identity.companyId}::uuid
+           and assigned_driver_id = ${driver.id}::uuid
+           and delivery_status in ('assigned_to_driver', 'out_for_delivery', 'returned_to_branch')
+         group by delivery_status
+      `.execute(this.database),
+      sql<{ count: number }>`
+        select count(*)::int as count from orders
+         where company_id = ${identity.companyId}::uuid
+           and assigned_driver_id = ${driver.id}::uuid
+           and delivery_status = 'delivered' and delivered_at::date = current_date
+      `.execute(this.database),
+    ]);
+    const byStatus: Record<string, number> = {
+      assigned_to_driver: 0,
+      out_for_delivery: 0,
+      returned_to_branch: 0,
+    };
+    for (const row of statusCounts.rows) byStatus[row.status] = row.count;
+    const assignedToMe = byStatus.assigned_to_driver ?? 0;
+    const outForDelivery = byStatus.out_for_delivery ?? 0;
+    const returnPending = byStatus.returned_to_branch ?? 0;
+    return {
+      activeTotal: assignedToMe + outForDelivery,
+      assignedToMe,
+      deliveredToday: deliveredToday.rows[0]?.count ?? 0,
+      outForDelivery,
+      returnPending,
+    };
+  }
+
+  /**
+   * The Driver this authenticated identity operates as, if any -- resolved
+   * ONLY from the explicit `employees.company_user_id` / `drivers.employee_id`
+   * chain (never from name, mobile, or email matching). `IdentityContext`
+   * already carries `profileType`/`profileId` for a `company_user` session
+   * (set at login from `user_business_links`, defaulting to the "employee"
+   * profile type -- see `authentication.repository.ts`'s `activeProfile`), so
+   * this is a single deterministic lookup, not an inference.
+   *
+   * Returns `undefined` for every other identity (an ordinary office User
+   * with no Driver behind their linked Employee, an Employee that IS a
+   * Driver but wasn't yet resolved this way, a Platform Administrator, ...),
+   * in which case Orders visibility is completely unchanged -- this never
+   * narrows what an Operator/Admin can already see.
+   */
+  private async currentEmployeeDriverId(): Promise<string | undefined> {
+    const identity = this.identities.current();
+    if (identity.kind !== "company_user" || identity.profileType !== "employee") {
+      return undefined;
+    }
+    const { companyId } = this.tenants.current();
+    const result = await sql<{ id: string }>`
+      select id from drivers
+       where employee_id = ${identity.profileId ?? null}::uuid and company_id = ${companyId}::uuid
+       limit 1
+    `.execute(this.database);
+    return result.rows[0]?.id;
+  }
+
   public async orders(filters: OperationsOrderFilters = {}): Promise<OperationsOrderPage> {
     const { companyId } = this.tenants.current();
     const search = this.optionalFilter(filters.search);
@@ -646,7 +836,13 @@ export class OperationsService {
     const cashStatus = this.optionalFilter(filters.cashStatus);
     const settlementStatus = this.optionalFilter(filters.settlementStatus);
     const traderId = this.optionalUuidFilter(filters.traderId);
-    const driverId = this.optionalUuidFilter(filters.driverId);
+    // A Driver User must see only Orders assigned to them, regardless of
+    // which Orders permission their Role happens to grant, and regardless of
+    // any `driverId` the client sends -- never let the caller pick someone
+    // else's Driver identity to view. Everyone else's behaviour, including
+    // the client-supplied `driverId` filter, is completely unchanged.
+    const ownDriverId = await this.currentEmployeeDriverId();
+    const driverId = ownDriverId ?? this.optionalUuidFilter(filters.driverId);
     const areaId = this.optionalUuidFilter(filters.areaId);
     const emirateId = this.optionalUuidFilter(filters.emirateId);
     const dateFrom = this.optionalDate(filters.dateFrom);
@@ -681,8 +877,7 @@ export class OperationsService {
        in the sequence they were raised -- 1, 2, 3 -- which is how an operator
        works through them. `id` stays as the final key: without a unique
        tie-break, offset pagination can repeat one row and skip another. */
-    const serialSortKey =
-      "nullif(regexp_replace(o.serial_number,'[^0-9]','','g'),'')::bigint";
+    const serialSortKey = "nullif(regexp_replace(o.serial_number,'[^0-9]','','g'),'')::bigint";
     const quickViewPredicate = sql`
       (${quickView} = 'all'
         or (${quickView} = 'active' and o.delivery_status not in ('hold', 'closed', 'cancelled'))
@@ -1193,10 +1388,20 @@ export class OperationsService {
 
   public async orderDetail(orderId: string): Promise<OperationsOrderDetail> {
     const { companyId } = this.tenants.current();
-    const [order, history, attachments, internationalShipment, metadata, events] =
-      await Promise.all([
-        this.orderById(companyId, orderId),
-        sql<OperationsOrderDetail["history"][number]>`
+    // `orders()` (the list) already scopes to the caller's own Driver id when
+    // one is resolved -- but this single-Order lookup is reachable by the
+    // SAME `orders.*` permissions and takes an arbitrary id, so without this
+    // check a Driver could read any other Order in the Company by guessing/
+    // iterating ids, bypassing the list scoping entirely. Same fate as a
+    // truly nonexistent Order (`order_not_found`), not a distinct 403 --
+    // this never confirms to the caller that a Order they cannot see exists.
+    const ownDriverId = await this.currentEmployeeDriverId();
+    const order = await this.orderById(companyId, orderId);
+    if (ownDriverId !== undefined && order.assignedDriverId !== ownDriverId) {
+      throw new ApplicationException("order_not_found", "Order not found", HttpStatus.NOT_FOUND);
+    }
+    const [history, attachments, internationalShipment, metadata, events] = await Promise.all([
+      sql<OperationsOrderDetail["history"][number]>`
         select h.status_dimension as "statusDimension",
                h.from_status as "fromStatus",
                h.to_status as "toStatus",
@@ -1208,9 +1413,9 @@ export class OperationsService {
         where h.company_id = ${companyId}::uuid and h.order_id = ${orderId}::uuid
         order by h.occurred_at, h.id
       `.execute(this.database),
-        this.orderAttachments(companyId, orderId),
-        this.internationalShipment(companyId, orderId),
-        sql<OperationsOrderDetail["metadata"]>`
+      this.orderAttachments(companyId, orderId),
+      this.internationalShipment(companyId, orderId),
+      sql<OperationsOrderDetail["metadata"]>`
         select o.created_at::text as "createdAt", creator.username as "createdBy",
                o.customer_second_mobile_number as "customerSecondMobileNumber",
                o.package_count as "packageCount", o.notes, o.payment_condition as "paymentCondition",
@@ -1224,7 +1429,7 @@ export class OperationsService {
           and creator.company_id = o.company_id
         where o.company_id = ${companyId}::uuid and o.id = ${orderId}::uuid
       `.execute(this.database),
-        sql<OperationsOrderDetail["events"][number]>`
+      sql<OperationsOrderDetail["events"][number]>`
         select e.id, e.event_type as "eventType", e.event_category as category,
                e.field_name as "fieldName", e.previous_value as "previousValue",
                e.new_value as "newValue", coalesce(a.username, 'System') as actor,
@@ -1235,7 +1440,7 @@ export class OperationsService {
         where e.company_id = ${companyId}::uuid and e.order_id = ${orderId}::uuid
         order by e.occurred_at desc, e.id desc
       `.execute(this.database),
-      ]);
+    ]);
     const detailMetadata = metadata.rows[0];
     if (detailMetadata === undefined) {
       throw new ApplicationException("order_not_found", "Order not found", HttpStatus.NOT_FOUND);
@@ -1664,10 +1869,13 @@ export class OperationsService {
              o.customer_amount_due::text as "customerAmountDue",
              o.amount_collected::text as "amountCollected",
              o.delivery_status as "deliveryStatus",
-             o.trader_settlement_status as "traderSettlementStatus"
+             o.trader_settlement_status as "traderSettlementStatus",
+             e.name_en as "emirateNameEn",
+             e.name_ar as "emirateNameAr"
       from orders o
       join traders t on t.id = o.trader_id and t.company_id = o.company_id
       join areas a on a.id = o.area_id and a.company_id = o.company_id
+      left join emirates e on e.id = a.emirate_id
       where o.company_id = ${identity.companyId}::uuid
         and o.trader_id = ${trader.id}::uuid
       order by o.order_date desc, o.created_at desc, o.order_number
@@ -1710,10 +1918,13 @@ export class OperationsService {
              o.customer_amount_due::text as "customerAmountDue",
              o.amount_collected::text as "amountCollected",
              o.delivery_status as "deliveryStatus",
-             o.trader_settlement_status as "traderSettlementStatus"
+             o.trader_settlement_status as "traderSettlementStatus",
+             e.name_en as "emirateNameEn",
+             e.name_ar as "emirateNameAr"
       from orders o
       join traders t on t.id = o.trader_id and t.company_id = o.company_id
       join areas a on a.id = o.area_id and a.company_id = o.company_id
+      left join emirates e on e.id = a.emirate_id
       where o.company_id = ${identity.companyId}::uuid
         and o.assigned_driver_id = ${driver.id}::uuid
         and o.delivery_status in (
@@ -1725,10 +1936,117 @@ export class OperationsService {
     return result.rows;
   }
 
+  /**
+   * A single Order, scoped to one Driver's own assignment, with NO status
+   * filter — unlike `driverPortalOrders()` (the Orders list), which
+   * deliberately only surfaces the statuses a Driver actively works: Hold is
+   * excluded there by design (it drops off the Driver's list once put on
+   * Hold, matching "Driver: limited operational next actions" — resuming it
+   * is Operations-only). `changeDriverPortalOrderStatus` still needs to
+   * return the Order it just changed regardless of which status that left it
+   * in, which is exactly what caused a real bug this method fixes: reusing
+   * `driverPortalOrders()` for that re-fetch meant a successful Hold (a valid
+   * status this Driver Physical Correction newly allows) could never be
+   * found again by `.find()`, throwing "Updated driver portal order could
+   * not be loaded" as a 500 on every Hold attempt.
+   */
+  private async driverPortalOrderById(
+    companyId: string,
+    driverId: string,
+    orderId: string,
+  ): Promise<PortalOrder | undefined> {
+    const result = await sql<PortalOrder>`
+      select o.id,
+             o.order_number as "orderNumber",
+             o.order_date::text as "orderDate",
+             o.serial_number as "serialNumber",
+             o.reference_number as "referenceNumber",
+             o.area_id as "areaId",
+             o.package_count as "packageCount",
+             o.notes,
+             t.name_en as "traderName",
+             coalesce(o.customer_area_name_ar_snapshot,a.name_ar,
+                      o.customer_area_name_snapshot,a.name_en) as "areaName",
+             o.customer_name as "customerName",
+             o.customer_address as "customerAddress",
+             o.customer_mobile_number as "customerMobileNumber",
+             o.cod_amount::text as "codAmount",
+             o.service_fee::text as "serviceFee",
+             o.customer_amount_due::text as "customerAmountDue",
+             o.amount_collected::text as "amountCollected",
+             o.delivery_status as "deliveryStatus",
+             o.trader_settlement_status as "traderSettlementStatus",
+             e.name_en as "emirateNameEn",
+             e.name_ar as "emirateNameAr"
+      from orders o
+      join traders t on t.id = o.trader_id and t.company_id = o.company_id
+      join areas a on a.id = o.area_id and a.company_id = o.company_id
+      left join emirates e on e.id = a.emirate_id
+      where o.company_id = ${companyId}::uuid
+        and o.id = ${orderId}::uuid
+        and o.assigned_driver_id = ${driverId}::uuid
+      limit 1
+    `.execute(this.database);
+    return result.rows[0];
+  }
+
+  /**
+   * Read-only status timeline for one Order this Driver is (or was, for a
+   * just-completed delivery) assigned to. Ownership is re-checked here
+   * independently of whatever the caller was ever shown via
+   * `driverPortalOrders()` — the same defense-in-depth pattern
+   * `changeDriverPortalOrderStatus` already uses. Loaded on demand only
+   * (the mobile client fetches this when the Driver expands History, not on
+   * every Order Detail open), so no cost is paid for a Driver who never asks.
+   */
+  public async driverPortalOrderHistory(
+    orderId: string,
+  ): Promise<readonly { fromStatus: string | null; toStatus: string; occurredAt: string }[]> {
+    const identity = this.identities.current();
+    if (identity.companyId === null) {
+      throw new ApplicationException(
+        "tenant_required",
+        "A Company account is required",
+        HttpStatus.FORBIDDEN,
+      );
+    }
+    const driver = await this.driverForAccount(
+      identity.companyId,
+      identity.identityId,
+      identity.profileId,
+    );
+    const owned = await sql<{ id: string }>`
+      select id from orders
+       where id = ${orderId}::uuid and company_id = ${identity.companyId}::uuid
+         and assigned_driver_id = ${driver.id}::uuid
+       limit 1
+    `.execute(this.database);
+    if (owned.rows[0] === undefined) {
+      throw new ApplicationException(
+        "driver_order_access_denied",
+        "The order was not found",
+        HttpStatus.NOT_FOUND,
+      );
+    }
+    const history = await sql<{
+      fromStatus: string | null;
+      toStatus: string;
+      occurredAt: string;
+    }>`
+      select h.from_status as "fromStatus", h.to_status as "toStatus",
+             h.occurred_at::text as "occurredAt"
+        from order_status_history h
+       where h.company_id = ${identity.companyId}::uuid and h.order_id = ${orderId}::uuid
+       order by h.occurred_at, h.id
+    `.execute(this.database);
+    return history.rows;
+  }
+
   public async changeDriverPortalOrderStatus(
     orderId: string,
     input: ChangeOrderStatusDto,
     correlationId: string,
+    idempotencyKey?: string,
   ): Promise<PortalOrder> {
     const identity = this.identities.current();
     if (identity.companyId === null) {
@@ -1764,8 +2082,8 @@ export class OperationsService {
         HttpStatus.NOT_FOUND,
       );
     }
-    await this.changeOrderStatus(orderId, input, correlationId);
-    const updated = (await this.driverPortalOrders()).find((order) => order.id === orderId);
+    await this.changeOrderStatus(orderId, input, correlationId, idempotencyKey);
+    const updated = await this.driverPortalOrderById(identity.companyId, driver.id, orderId);
     if (updated === undefined) {
       throw new Error("Updated driver portal order could not be loaded");
     }
@@ -3402,11 +3720,116 @@ export class OperationsService {
     orderId: string,
     input: ChangeOrderStatusDto,
     correlationId: string,
+    idempotencyKey?: string,
   ): Promise<OperationsOrder> {
     const { companyId } = this.tenants.current();
     const identity = this.identities.current();
     const status = input.status;
+    // Driver Order Detail status-action fix: the guard on this route no
+    // longer requires any permission (see `operations.controller.ts`), so
+    // authorization is decided here. A plain Operator still needs one of
+    // these two — completely unchanged from before.
+    const hasOperatorStatusPermission =
+      identity.permissions.has("orders.update_delivery_status") ||
+      identity.permissions.has("users_roles.manage");
+    // A "Driver User" — a `company_user` whose linked Employee backs a
+    // `drivers.employee_id` record (`currentEmployeeDriverId`) — reaches this
+    // SAME endpoint (a `company_user` can never call the driver-only
+    // `/portal/driver/*` routes) but may hold none of the Operator
+    // permissions above; that must not block them from managing their OWN
+    // Driver's Orders, exactly like a genuine `driver`-kind identity needs no
+    // permission at all. Resolved only when actually needed (an ordinary
+    // Operator with the right permission never pays for this extra lookup).
+    const ownDriverIdForStatusChange =
+      identity.kind === "company_user" && !hasOperatorStatusPermission
+        ? await this.currentEmployeeDriverId()
+        : undefined;
+    const actingAsDriverUser = ownDriverIdForStatusChange !== undefined;
+    if (
+      identity.kind === "company_user" &&
+      !hasOperatorStatusPermission &&
+      !actingAsDriverUser
+    ) {
+      // No broad Operator permission, and not a Driver User either (no
+      // linked Driver at all) — the same rejection the guard used to give,
+      // just relocated here.
+      throw new ApplicationException(
+        "permission_denied",
+        "The authenticated account does not have permission for this operation",
+        HttpStatus.FORBIDDEN,
+      );
+    }
+    // Prompt 16 (Driver offline sync): a Driver's queued offline mutation
+    // carries a stable idempotency key so a retried sync submission (app
+    // kill, timeout, duplicate reconnect attempt) can never create a second
+    // status-history/event row for the same logical action. Optional and
+    // driver-only by construction — Operator's own call site never passes a
+    // key, so this reservation dance never runs for it and its behavior is
+    // byte-for-byte unchanged. Mirrors `createOrder`'s exact
+    // `idempotency_records` pattern (reservation -> on conflict, compare
+    // request hash -> replay or reject).
+    const key = identity.kind === "driver" ? idempotencyKey?.trim() : undefined;
+    if (key !== undefined && key !== "" && !/^[A-Za-z0-9._:-]{16,128}$/.test(key)) {
+      throw new ApplicationException(
+        "idempotency_key_invalid",
+        "A valid idempotency key is required",
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    const requestHash =
+      key === undefined || key === ""
+        ? undefined
+        : createHash("sha256")
+            .update(
+              JSON.stringify({
+                expectedStatus: input.expectedStatus ?? null,
+                orderId,
+                reason: input.reason?.trim() || null,
+                status,
+              }),
+            )
+            .digest("hex");
     await this.transactions.execute(async (transaction) => {
+      if (key !== undefined && key !== "" && requestHash !== undefined) {
+        const reservation = await sql<{ id: string }>`
+          insert into idempotency_records (
+            company_id, operation, idempotency_key, request_hash, expires_at
+          ) values (
+            ${companyId}::uuid, 'driver.order_status_change', ${key}, ${requestHash},
+            now() + interval '24 hours'
+          )
+          on conflict (company_id, operation, idempotency_key) do nothing
+          returning id
+        `.execute(transaction);
+        if (reservation.rows[0] === undefined) {
+          const existing = await sql<{ requestHash: string; resourceId: string | null }>`
+            select request_hash as "requestHash", resource_id as "resourceId"
+              from idempotency_records
+             where company_id = ${companyId}::uuid
+               and operation = 'driver.order_status_change'
+               and idempotency_key = ${key}
+             for update
+          `.execute(transaction);
+          const record = existing.rows[0];
+          if (record === undefined || record.requestHash !== requestHash) {
+            throw new ApplicationException(
+              "idempotency_key_reused",
+              "This submission key was already used for a different status change",
+              HttpStatus.CONFLICT,
+            );
+          }
+          if (record.resourceId !== null) {
+            // The exact same mutation already completed — a safe replay, not
+            // a second logical action. No new history/event row is written.
+            return;
+          }
+          throw new ApplicationException(
+            "order_status_change_in_progress",
+            "This status change is still being processed",
+            HttpStatus.CONFLICT,
+          );
+        }
+      }
       const current = await sql<{
         amountCollected: string;
         assignedDriverId: string | null;
@@ -3434,16 +3857,64 @@ export class OperationsService {
             ${identity.kind} <> 'driver'
             or assigned_driver_id = ${identity.profileId ?? null}::uuid
           )
+          and (
+            ${!actingAsDriverUser}
+            or assigned_driver_id = ${ownDriverIdForStatusChange ?? null}::uuid
+          )
         for update
       `.execute(transaction);
       const order = current.rows[0];
       if (order === undefined) {
         throw new ApplicationException("order_not_found", "Order not found", HttpStatus.NOT_FOUND);
       }
+      // Prompt 16 Section O/P: the Order changed while the caller was
+      // offline in a way its queued action did not anticipate — reject
+      // rather than silently overwrite newer server state. Excludes the
+      // "already applied" case just below, which is a safe no-op, not a
+      // conflict.
+      if (
+        input.expectedStatus !== undefined &&
+        input.expectedStatus !== order.deliveryStatus &&
+        order.deliveryStatus !== status
+      ) {
+        throw new ApplicationException(
+          "order_status_conflict",
+          "This Order changed since it was last synced",
+          HttpStatus.CONFLICT,
+        );
+      }
+      // Section P Case 1/4: the target state was already reached (this
+      // exact request already succeeded under a different sync attempt, or
+      // another session/actor reached the same state independently). Resolve
+      // as already-applied rather than re-running the transition — no
+      // duplicate history/event row.
+      if (order.deliveryStatus === status) {
+        if (key !== undefined && key !== "") {
+          await sql`
+            update idempotency_records
+               set response_status = 200, resource_type = 'order', resource_id = ${orderId}::uuid
+             where company_id = ${companyId}::uuid and operation = 'driver.order_status_change'
+               and idempotency_key = ${key}
+          `.execute(transaction);
+        }
+        return;
+      }
       const reason = input.reason?.trim() || null;
+      // Driver Physical Correction (Section F): "Hold" is not a new status —
+      // it already exists for Operations (`operationsTransitions` below) with
+      // its own reason requirement and audit/history recording, both handled
+      // identically regardless of identity kind by the shared code after this
+      // lookup. The Driver's own approved action set is deliberately narrower
+      // than Operations' full lifecycle: `assigned_to_driver` only ever moves
+      // forward to `out_for_delivery` ("Start Delivery"); once Out for
+      // Delivery, a Driver may additionally Hold it (their own no-move-yet
+      // case, e.g. customer unreachable), Deliver it, or Return it to Branch.
+      // Deliberately NOT included for a Driver: assigning/reassigning,
+      // `cancelled`, `returned_to_trader`, or resuming an Order OUT of Hold —
+      // those remain Operations-only, unchanged from before this correction.
       const driverTransitions: Readonly<Record<string, readonly string[]>> = {
         assigned_to_driver: ["out_for_delivery"],
-        out_for_delivery: ["delivered", "returned_to_branch"],
+        out_for_delivery: ["hold", "delivered", "returned_to_branch"],
       };
       // Operations/admin can drive every step of the lifecycle, including the
       // driver-facing moves (out for delivery, delivered, return to branch),
@@ -3458,7 +3929,13 @@ export class OperationsService {
         returned_to_branch: ["returned_to_trader"],
         returned_to_trader: ["closed"],
       };
-      const transitions = identity.kind === "driver" ? driverTransitions : operationsTransitions;
+      // A Driver User gets exactly the narrow set a genuine Driver gets here
+      // too — never the broader Operator lifecycle, regardless of holding
+      // `orders.assign_driver` or any other Orders permission on their Role.
+      const transitions =
+        identity.kind === "driver" || actingAsDriverUser
+          ? driverTransitions
+          : operationsTransitions;
       if (!(transitions[order.deliveryStatus] ?? []).includes(status)) {
         throw new ApplicationException(
           "order_status_transition_invalid",
@@ -3610,6 +4087,20 @@ export class OperationsService {
         subjectId: orderId,
         subjectType: "order",
       });
+      // Trader push: the statuses that actually change what a Trader would
+      // want to know, not every internal step (Section O: "keep this
+      // operational, not noisy").
+      if (
+        ["out_for_delivery", "delivered", "returned_to_branch", "returned_to_trader", "cancelled"]
+          .includes(status)
+      ) {
+        await this.pushOutbox.writeOrderStatusChanged(transaction, {
+          companyId,
+          orderId,
+          newStatus: status,
+          correlationId,
+        });
+      }
       if (status === "delivered") {
         await this.outsourcedDriverFees.createForDeliveredOrder(
           transaction,
@@ -3628,6 +4119,14 @@ export class OperationsService {
         // result is deliberately not inspected: nothing downstream depends on
         // it, and this must never be the reason a delivery fails to record.
         await this.employeeDeliveryEarnings.accrueForDelivery(transaction, orderId);
+      }
+      if (key !== undefined && key !== "") {
+        await sql`
+          update idempotency_records
+             set response_status = 200, resource_type = 'order', resource_id = ${orderId}::uuid
+           where company_id = ${companyId}::uuid and operation = 'driver.order_status_change'
+             and idempotency_key = ${key}
+        `.execute(transaction);
       }
     });
     return this.orderById(companyId, orderId);
@@ -4139,6 +4638,8 @@ export class OperationsService {
              t.name_en as "traderName",
              coalesce(o.customer_area_name_ar_snapshot,a.name_ar,
                       o.customer_area_name_snapshot,a.name_en) as "areaName",
+             e.name_en as "emirateNameEn",
+             e.name_ar as "emirateNameAr",
              o.assigned_driver_id as "assignedDriverId",
              d.name_en as "assignedDriverName",
              d.mobile_number as "assignedDriverMobile",
@@ -4177,6 +4678,7 @@ export class OperationsService {
       from orders o
       join traders t on t.id = o.trader_id and t.company_id = o.company_id
       join areas a on a.id = o.area_id and a.company_id = o.company_id
+      left join emirates e on e.id = a.emirate_id
       left join drivers d on d.id = o.assigned_driver_id and d.company_id = o.company_id
       left join outsourced_driver_fee_accruals fee
         on fee.order_id = o.id and fee.company_id = o.company_id

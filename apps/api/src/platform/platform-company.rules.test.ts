@@ -86,7 +86,7 @@ describe("Platform Company route protection", () => {
         "activate",
         "suspend",
         "reactivate",
-        "disable",
+        "close",
       ].includes(route.method);
       const hasManage = permissions.includes("platform.companies.manage");
       if (mutating !== hasManage) wrong.push(`${route.controller}.${route.method} (${method})`);
@@ -98,12 +98,13 @@ describe("Platform Company route protection", () => {
    * A Company's history must survive the Company being closed, so closure is a
    * lifecycle transition and never a delete.
    */
-  it("exposes no deletion route", () => {
+  it("exposes no permanent deletion execution route", () => {
     const source = readFileSync(
       resolve(process.cwd(), "src/platform/platform-company.controller.ts"),
       "utf8",
     );
     expect(source).not.toContain("@Delete");
+    expect(source).not.toContain('Post("delete")');
   });
 
   it("exposes no generic status mutation", () => {
@@ -176,6 +177,19 @@ describe("Company request contracts", () => {
     expect(source).toContain("public accountingTemplateCode");
     expect(source).toContain("public accountingTemplateVersion");
   });
+
+  it("does not accept a browser-chosen Company code", () => {
+    const source = readFileSync(
+      resolve(process.cwd(), "src/platform/platform-company.dto.ts"),
+      "utf8",
+    );
+    const createContract = source.slice(
+      source.indexOf("class CreateCompanyDto"),
+      source.indexOf("class UpdateCompanyProfileDto"),
+    );
+    expect(createContract).not.toContain("public code");
+    expect(createContract).toContain("public subdomain?: string");
+  });
 });
 
 describe("Company lifecycle rules", () => {
@@ -209,5 +223,16 @@ describe("Company lifecycle rules", () => {
   it("runs creation through the shared transaction manager", () => {
     expect(source).toContain("this.transactions.execute");
     expect(source).not.toContain("this.database.transaction()");
+  });
+
+  it("generates Company codes from a database sequence", () => {
+    expect(source).toContain("nextval('platform_company_code_seq')");
+    expect(source).toContain("`CMP-${codeNumber.padStart(6, \"0\")}`");
+  });
+
+  it("normalizes safe subdomain suggestions and rejects empty Arabic-only output", () => {
+    expect(source).toContain("export function suggestCompanySubdomain");
+    expect(source).toContain('"subdomain_required"');
+    expect(source).toContain("pg_advisory_xact_lock");
   });
 });

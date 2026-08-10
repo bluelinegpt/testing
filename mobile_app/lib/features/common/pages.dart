@@ -59,6 +59,7 @@ final class _LoginPageState extends ConsumerState<LoginPage> {
   final _formKey = GlobalKey<FormState>();
   final _identifier = TextEditingController();
   final _password = TextEditingController();
+  bool _obscurePassword = true;
 
   @override
   void dispose() {
@@ -110,6 +111,7 @@ final class _LoginPageState extends ConsumerState<LoginPage> {
                       ),
                       const SizedBox(height: AppSpacing.lg),
                       TextFormField(
+                        key: const Key('loginIdentifierField'),
                         controller: _identifier,
                         autofillHints: const [
                           AutofillHints.username,
@@ -124,11 +126,28 @@ final class _LoginPageState extends ConsumerState<LoginPage> {
                       ),
                       const SizedBox(height: AppSpacing.md),
                       TextFormField(
+                        key: const Key('loginPasswordField'),
                         controller: _password,
                         autofillHints: const [AutofillHints.password],
-                        obscureText: true,
+                        obscureText: _obscurePassword,
                         textInputAction: TextInputAction.done,
-                        decoration: InputDecoration(labelText: l10n.password),
+                        decoration: InputDecoration(
+                          labelText: l10n.password,
+                          suffixIcon: IconButton(
+                            key: const Key('loginPasswordVisibilityToggle'),
+                            tooltip: _obscurePassword
+                                ? l10n.showPassword
+                                : l10n.hidePassword,
+                            icon: Icon(
+                              _obscurePassword
+                                  ? Icons.visibility
+                                  : Icons.visibility_off,
+                            ),
+                            onPressed: () => setState(
+                              () => _obscurePassword = !_obscurePassword,
+                            ),
+                          ),
+                        ),
                         validator: (value) => value == null || value.isEmpty
                             ? l10n.requiredField
                             : null,
@@ -364,10 +383,26 @@ final class _ChangePasswordPageState extends ConsumerState<ChangePasswordPage> {
   }
 }
 
-final class AccountPage extends ConsumerWidget {
+final class AccountPage extends ConsumerStatefulWidget {
   const AccountPage({super.key});
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<AccountPage> createState() => _AccountPageState();
+}
+
+final class _AccountPageState extends ConsumerState<AccountPage> {
+  // Disables the Logout button and shows a spinner from the moment logout is
+  // confirmed until the awaited service call resolves (success or failure —
+  // `SessionAuthenticationService.logout()` never actually throws, every
+  // external step is individually try/catch-wrapped, but this button is
+  // defensive regardless). Without this, a slow/flaky network leaves the
+  // button looking frozen for up to ~30s (the Dio receive timeout) with no
+  // feedback — indistinguishable from "logout is broken" to the user tapping
+  // it, who may then background/kill the app mid-call and leave stale
+  // credentials on disk.
+  bool _loggingOut = false;
+
+  @override
+  Widget build(BuildContext context) {
     final user = ref.watch(authenticationProvider).value?.user;
     final l10n = AppLocalizations.of(context);
     if (user == null) return MessagePage(message: l10n.sessionExpired);
@@ -377,7 +412,7 @@ final class AccountPage extends ConsumerWidget {
         ListTile(
           leading: const Icon(Icons.person_outline),
           title: Text(user.displayName),
-          subtitle: Text(_roleLabel(user, l10n)),
+          subtitle: Text(roleLabel(user, l10n)),
         ),
         ListTile(
           leading: const Icon(Icons.language),
@@ -438,28 +473,44 @@ final class AccountPage extends ConsumerWidget {
         ),
         const SizedBox(height: AppSpacing.md),
         FilledButton.tonalIcon(
-          onPressed: () async {
-            final confirmed = await showDialog<bool>(
-              context: context,
-              builder: (dialogContext) => AlertDialog(
-                title: Text(l10n.logoutConfirm),
-                actions: [
-                  TextButton(
-                    onPressed: () => Navigator.pop(dialogContext, false),
-                    child: Text(l10n.cancel),
-                  ),
-                  FilledButton(
-                    onPressed: () => Navigator.pop(dialogContext, true),
-                    child: Text(l10n.logout),
-                  ),
-                ],
-              ),
-            );
-            if (confirmed == true) {
-              await ref.read(authenticationProvider.notifier).logout();
-            }
-          },
-          icon: const Icon(Icons.logout),
+          key: const Key('logoutButton'),
+          onPressed: _loggingOut
+              ? null
+              : () async {
+                  final confirmed = await showDialog<bool>(
+                    context: context,
+                    builder: (dialogContext) => AlertDialog(
+                      title: Text(l10n.logoutConfirm),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(dialogContext, false),
+                          child: Text(l10n.cancel),
+                        ),
+                        FilledButton(
+                          onPressed: () => Navigator.pop(dialogContext, true),
+                          child: Text(l10n.logout),
+                        ),
+                      ],
+                    ),
+                  );
+                  if (confirmed != true || !mounted) return;
+                  setState(() => _loggingOut = true);
+                  try {
+                    await ref.read(authenticationProvider.notifier).logout();
+                  } finally {
+                    // The router redirects away from `/profile` once `state`
+                    // flips to unauthenticated, but this widget can still be
+                    // briefly alive during that transition — guard `setState`
+                    // regardless of which branch above ran.
+                    if (mounted) setState(() => _loggingOut = false);
+                  }
+                },
+          icon: _loggingOut
+              ? const SizedBox.square(
+                  dimension: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.logout),
           label: Text(l10n.logout),
         ),
       ],
@@ -516,14 +567,6 @@ final class SettingsPage extends ConsumerWidget {
       ],
     );
   }
-}
-
-String _roleLabel(AuthenticatedUser user, AppLocalizations l10n) {
-  if (user.hasRole(UserRole.trader)) return l10n.trader;
-  if (user.hasRole(UserRole.driver)) return l10n.driver;
-  if (user.hasRole(UserRole.operatorRole)) return l10n.operator;
-  if (user.hasRole(UserRole.customer)) return l10n.customer;
-  return l10n.unsupportedRole;
 }
 
 final class PlaceholderPage extends StatelessWidget {
@@ -584,7 +627,11 @@ List<AppNavigationItem> navigationFor(
       AppNavigationItem('/profile', l10n.account, Icons.person_outline),
     ];
   }
-  if (user.hasRole(UserRole.driver)) {
+  // Covers both a genuine `driver`-kind account and a Driver User
+  // (`company_user` + resolved `linkedDriverId`) — presentation (nav label,
+  // icon) matches a genuine Driver either way; only the underlying API calls
+  // differ, decided elsewhere (repository/router selection), never here.
+  if (user.isDriverPresentation) {
     return [
       AppNavigationItem('/dashboard', l10n.dashboard, Icons.dashboard_outlined),
       AppNavigationItem(
@@ -649,8 +696,28 @@ final class RoleAwareShell extends ConsumerWidget {
     final currentIndex = items.indexWhere(
       (item) => location.startsWith(item.path),
     );
+    // An explicit, always-visible Back action for any pushed detail page
+    // (Order Detail, and anything else reached the same way) — relying on
+    // AppBar's automatic leading-widget inference inside a ShellRoute is
+    // exactly the kind of "poor/unclear back behavior" this makes explicit
+    // and predictable instead. Android's system Back gesture/button is
+    // handled separately by go_router's own Navigator integration and keeps
+    // working unchanged.
+    //
+    // Deliberately derived from `location` shape, not `canPop()`: this
+    // shell's `context` sits above the nested Navigator that go_router's
+    // `ShellRoute` manages for its sub-routes (e.g. Orders -> Order Detail),
+    // so neither `Navigator.of(context).canPop()` nor `context.canPop()`
+    // reliably reflect a push into that nested stack from here (the shell is
+    // rebuilt with the new `location` before the nested Navigator's own
+    // pushed page is committed) — Back is shown whenever the current
+    // location isn't itself one of the bottom-nav destinations below.
+    final isTabRoot = items.any((item) => item.path == location);
+    final canPop = !isTabRoot;
     return Scaffold(
       appBar: AppBar(
+        leading: canPop ? BackButton(onPressed: () => context.pop()) : null,
+        automaticallyImplyLeading: false,
         title: Text(_pageTitle(location, AppLocalizations.of(context))),
         actions: [
           IconButton(
@@ -706,6 +773,10 @@ final class RoleAwareShell extends ConsumerWidget {
 }
 
 String _pageTitle(String location, AppLocalizations l10n) {
+  // `/orders/<id>` is a distinct page from the `/orders` list — a shared
+  // title left the Order Detail screen with no way to tell, at a glance,
+  // that Back would return to a list rather than close the app.
+  if (location.startsWith('/orders/')) return l10n.orderDetails;
   if (location.startsWith('/orders')) return l10n.orders;
   if (location.startsWith('/messages')) return l10n.messages;
   if (location.startsWith('/notifications')) return l10n.notifications;

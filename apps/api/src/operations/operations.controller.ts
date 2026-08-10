@@ -31,6 +31,8 @@ import {
   type OperationsOrderFilters,
   type OperationsOrder,
   type OperationsOrderPage,
+  type OperationsDriverDashboardSummary,
+  type OperationsOperatorDashboardSummary,
   type OperationsOverview,
   type OperationsOrderQuote,
   type OperationsOrderImportResult,
@@ -151,6 +153,7 @@ export class OperationsController {
   @ApiOperation({ summary: "List recent orders for the authenticated Company" })
   @RequireAnyPermission(
     "orders.edit_before_processing",
+    "orders.driver_self_service",
     "orders.assign_driver",
     "orders.update_delivery_status",
     "reconciliations.create",
@@ -210,6 +213,30 @@ export class OperationsController {
       traderId,
     };
     return this.operations.orders(filters);
+  }
+
+  // Deliberately narrower than `overview`: no financial totals (COD, revenue,
+  // profit) are computed or returned here, so the same operational
+  // permissions that unlock the Orders list are enough — an Operator scoped
+  // to dispatch-only permissions must never need `reports.financial.view`
+  // just to see how many Orders are New today (Prompt 12B).
+  @ApiOperation({
+    summary: "Operational Order counts for the authenticated Company (no financials)",
+  })
+  @RequireAnyPermission(
+    "orders.edit_before_processing",
+    "orders.driver_self_service",
+    "orders.assign_driver",
+    "orders.update_delivery_status",
+    "reconciliations.create",
+    "reconciliations.reverse",
+    "settlements.create",
+    "settlements.reverse",
+    "users_roles.manage",
+  )
+  @Get("orders/dashboard-summary")
+  public orderDashboardSummary(): Promise<OperationsOperatorDashboardSummary> {
+    return this.operations.operatorDashboardSummary();
   }
 
   @RequireAnyPermission("orders.assign_driver", "users_roles.manage")
@@ -342,6 +369,23 @@ export class OperationsController {
     return this.operations.billingSummary();
   }
 
+  // Viewing detail requires the same operational access as the list — any
+  // account that can see an Order in the list must be able to open it.
+  // (Previously fell back to the class-level `users_roles.manage` default
+  // only, silently blocking an Operator scoped to `orders.assign_driver`/
+  // `orders.update_delivery_status` from opening an Order they can already
+  // list — Prompt 12B.)
+  @RequireAnyPermission(
+    "orders.edit_before_processing",
+    "orders.driver_self_service",
+    "orders.assign_driver",
+    "orders.update_delivery_status",
+    "reconciliations.create",
+    "reconciliations.reverse",
+    "settlements.create",
+    "settlements.reverse",
+    "users_roles.manage",
+  )
   @ApiOperation({ summary: "Show one order with status timeline" })
   @Get("orders/:orderId")
   public orderDetail(
@@ -350,6 +394,17 @@ export class OperationsController {
     return this.operations.orderDetail(orderId);
   }
 
+  @RequireAnyPermission(
+    "orders.edit_before_processing",
+    "orders.driver_self_service",
+    "orders.assign_driver",
+    "orders.update_delivery_status",
+    "reconciliations.create",
+    "reconciliations.reverse",
+    "settlements.create",
+    "settlements.reverse",
+    "users_roles.manage",
+  )
   @ApiOperation({ summary: "Show one Order by its Company-scoped Order Number" })
   @Get("order-details/:orderNumber")
   public orderDetailByNumber(
@@ -671,6 +726,21 @@ export class OperationsController {
     return this.operations.updateOrder(orderId, input, this.correlationId(request));
   }
 
+  // No permission requirement at the guard layer (deliberately empty, NOT
+  // omitted — omitting it would fall back to the class-level
+  // `users_roles.manage` default, which is MORE restrictive and would break
+  // every ordinary Operator holding just `orders.update_delivery_status`).
+  // Authorization is fully decided inside `OperationsService.changeOrderStatus`
+  // instead, mirroring the driver-portal route's own established pattern
+  // (`@RequireIdentityKinds("driver")` alone, ownership checked in the
+  // service) — this lets a "Driver User" (a `company_user` whose linked
+  // Employee backs a Driver record) reach this SAME endpoint and change
+  // status on their OWN assigned Order without needing the broader Operator
+  // permission, exactly like a genuine `driver`-kind identity needs none.
+  // A plain Operator's existing behavior is completely unchanged: the
+  // service still requires `orders.update_delivery_status`/`users_roles.manage`
+  // for anyone who isn't acting on their own Driver-linked Order.
+  @RequireAnyPermission()
   @ApiOperation({ summary: "Change an order delivery status" })
   @Patch("orders/:orderId/status")
   public changeOrderStatus(
@@ -976,10 +1046,24 @@ export class PortalController {
   }
 
   @RequireIdentityKinds("driver")
+  @ApiOperation({ summary: "Dashboard summary scoped to the authenticated Driver only" })
+  @Get("driver/dashboard-summary")
+  public driverDashboardSummary(): Promise<OperationsDriverDashboardSummary> {
+    return this.operations.driverDashboardSummary();
+  }
+
+  @RequireIdentityKinds("driver")
   @ApiOperation({ summary: "List orders assigned to the authenticated Driver" })
   @Get("driver/orders")
   public driverOrders(): Promise<readonly PortalOrder[]> {
     return this.operations.driverPortalOrders();
+  }
+
+  @RequireIdentityKinds("driver")
+  @ApiOperation({ summary: "Read-only status history for one assigned Order, loaded on demand" })
+  @Get("driver/orders/:orderId/history")
+  public driverOrderHistory(@Param("orderId", new ParseUUIDPipe()) orderId: string) {
+    return this.operations.driverPortalOrderHistory(orderId);
   }
 
   @RequireIdentityKinds("driver")
@@ -989,11 +1073,13 @@ export class PortalController {
     @Param("orderId", new ParseUUIDPipe()) orderId: string,
     @Body() input: ChangeOrderStatusDto,
     @Req() request: Request,
+    @Headers("x-idempotency-key") idempotencyKey: string | undefined,
   ): Promise<PortalOrder> {
     return this.operations.changeDriverPortalOrderStatus(
       orderId,
       input,
       this.correlationId(request),
+      idempotencyKey,
     );
   }
 

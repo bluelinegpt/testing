@@ -24,11 +24,8 @@ const environments = ["sandbox", "development", "demo", "trial", "production"] a
 
 interface FormState {
   name: string;
-  code: string;
   subdomain: string;
   environment: string;
-  countryCode: string;
-  timezone: string;
   defaultLanguage: string;
   contactName: string;
   telephone: string;
@@ -39,14 +36,11 @@ interface FormState {
 
 const initialState: FormState = {
   name: "",
-  code: "",
   subdomain: "",
   // Not production. The safest default for a Company someone is creating by
   // hand is the one that is easiest to recover from; production is an explicit
   // choice.
   environment: "sandbox",
-  countryCode: "AE",
-  timezone: "Asia/Dubai",
   defaultLanguage: "en",
   contactName: "",
   telephone: "",
@@ -69,6 +63,7 @@ export function CreateCompanyPage(): ReactElement {
   const [reviewing, setReviewing] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
+  const [subdomainEdited, setSubdomainEdited] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -101,11 +96,8 @@ export function CreateCompanyPage(): ReactElement {
     try {
       const created = await platformApi.createCompany({
         name: form.name,
-        code: form.code,
-        subdomain: form.subdomain,
+        ...(form.subdomain === "" ? {} : { subdomain: form.subdomain }),
         environment: form.environment,
-        countryCode: form.countryCode,
-        timezone: form.timezone,
         defaultLanguage: form.defaultLanguage,
         ...(form.contactName === "" ? {} : { contactName: form.contactName }),
         ...(form.telephone === "" ? {} : { telephone: form.telephone }),
@@ -142,18 +134,16 @@ export function CreateCompanyPage(): ReactElement {
         <dl className="platform-review">
           {[
             ["Name", form.name],
-            ["Code", form.code],
+            ["Company Code", "Generated automatically"],
             ["Subdomain", form.subdomain],
             ["Environment", form.environment],
-            ["Country", form.countryCode],
-            ["Timezone", form.timezone],
+            ["Country", "United Arab Emirates"],
+            ["Timezone", "Asia/Dubai"],
             ["Currency", "AED"],
             ["Default language", form.defaultLanguage],
             [
               "Business day",
-              form.businessDayStart === ""
-                ? "From the Accounting template"
-                : `${form.businessDayStart} (Company override)`,
+              form.businessDayStart === "" ? "08:00" : form.businessDayStart,
             ],
             ["Accounting template", form.template === "" ? "None" : form.template],
           ].map(([label, value]) => (
@@ -201,20 +191,24 @@ export function CreateCompanyPage(): ReactElement {
 
       <form className="platform-form" onSubmit={review}>
         <h3>Company</h3>
-        <Field id="name" label="Name" onChange={set("name")} required value={form.name} />
         <Field
-          hint="Uppercase letters, digits and hyphens. Used for reference and cannot be changed later."
-          id="code"
-          label="Code"
-          onChange={set("code")}
+          id="name"
+          label="Company Name"
+          onChange={(value) => {
+            set("name")(value);
+            if (!subdomainEdited) set("subdomain")(suggestSubdomain(value));
+          }}
           required
-          value={form.code}
+          value={form.name}
         />
         <Field
-          hint="The Company portal host label. Reserved names such as 'platform' are refused."
+          hint="Suggested from the Company name. Edit only when a different portal address is needed."
           id="subdomain"
           label="Subdomain"
-          onChange={set("subdomain")}
+          onChange={(value) => {
+            setSubdomainEdited(true);
+            set("subdomain")(value.toLowerCase());
+          }}
           required
           value={form.subdomain}
         />
@@ -239,21 +233,12 @@ export function CreateCompanyPage(): ReactElement {
           </small>
         </div>
 
-        <h3>Localization</h3>
-        <Field
-          id="countryCode"
-          label="Country"
-          onChange={set("countryCode")}
-          required
-          value={form.countryCode}
-        />
-        <Field
-          id="timezone"
-          label="Timezone"
-          onChange={set("timezone")}
-          required
-          value={form.timezone}
-        />
+        <h3>Settings</h3>
+        <dl className="platform-review">
+          <div><dt>Country</dt><dd>United Arab Emirates</dd></div>
+          <div><dt>Currency</dt><dd>AED</dd></div>
+          <div><dt>Timezone</dt><dd>Dubai (Asia/Dubai)</dd></div>
+        </dl>
         <label className="platform-field" htmlFor="defaultLanguage">
           <span>Default language</span>
           <select
@@ -265,13 +250,9 @@ export function CreateCompanyPage(): ReactElement {
             <option value="ar">ar</option>
           </select>
         </label>
-        <p className="platform-muted">Currency is AED for every Company on this platform.</p>
-
-        <h3>Operations</h3>
         <Field
-          hint="Leave blank to use the Accounting template's default."
           id="businessDayStart"
-          label="Business-day start"
+          label="Business Day Start"
           onChange={set("businessDayStart")}
           type="time"
           value={form.businessDayStart}
@@ -332,6 +313,18 @@ export function CreateCompanyPage(): ReactElement {
       </form>
     </section>
   );
+}
+
+function suggestSubdomain(name: string): string {
+  return name
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 63)
+    .replace(/-$/g, "");
 }
 
 /**

@@ -43,7 +43,7 @@ import { PlatformAuditService, redactSensitive } from "./platform-audit.service.
  */
 
 export type CompanyEnvironment = "development" | "demo" | "sandbox" | "trial" | "production";
-export type CompanyStatus = "draft" | "active" | "suspended" | "disabled";
+export type CompanyStatus = "draft" | "active" | "suspended" | "disabled" | "closed";
 
 /**
  * Legal lifecycle transitions.
@@ -53,12 +53,13 @@ export type CompanyStatus = "draft" | "active" | "suspended" | "disabled";
  * impossible to reach rather than merely unlikely.
  */
 const legalTransitions: Readonly<Record<CompanyStatus, readonly CompanyStatus[]>> = {
-  draft: ["active", "disabled"],
-  active: ["suspended", "disabled"],
-  suspended: ["active", "disabled"],
+  draft: ["active", "closed"],
+  active: ["suspended", "closed"],
+  suspended: ["active", "closed"],
   // Terminal. Reopening a closed Company is a decision nobody has made yet, and
   // guessing it here would be inventing product.
   disabled: [],
+  closed: [],
 };
 
 export interface CompanyListQuery {
@@ -96,8 +97,7 @@ export interface CompanyListRow {
 
 export interface CreateCompanyInput {
   readonly name: string;
-  readonly code: string;
-  readonly subdomain: string;
+  readonly subdomain?: string | undefined;
   readonly environment: CompanyEnvironment;
   readonly countryCode: string;
   readonly timezone: string;
@@ -120,6 +120,19 @@ const sortColumns: Readonly<Record<string, string>> = {
 
 /** IANA zones the product supports today. Validated server-side, never trusted. */
 const supportedTimezones = new Set(["Asia/Dubai"]);
+
+/** ASCII-only by design: Arabic-only names require an explicit safe override. */
+export function suggestCompanySubdomain(name: string): string {
+  return name
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 63)
+    .replace(/-$/g, "");
+}
 
 @Injectable()
 export class PlatformCompanyService {
@@ -206,7 +219,7 @@ export class PlatformCompanyService {
                c.trade_license_number as "tradeLicenseNumber",
                c.tax_registration_number as "taxRegistrationNumber",
                c.created_at as "createdAt", c.activated_at as "activatedAt",
-               c.suspended_at as "suspendedAt", c.disabled_at as "disabledAt",
+               c.suspended_at as "suspendedAt", c.disabled_at as "disabledAt", c.closed_at as "closedAt",
                c.status_changed_at as "statusChangedAt", c.status_change_reason as "statusChangeReason",
                c.accounting_setup_status as "accountingSetupStatus",
                c.accounting_template_code as "accountingTemplateCode",
@@ -463,7 +476,6 @@ export class PlatformCompanyService {
       userAgent?: string | undefined;
     },
   ): Promise<{ companyId: string; accountingSetup: Record<string, unknown> | null }> {
-    this.assertSubdomain(input.subdomain);
     if (!supportedTimezones.has(input.timezone)) {
       throw new ApplicationException(
         "timezone_not_supported",
@@ -472,12 +484,18 @@ export class PlatformCompanyService {
       );
     }
 
-    const code = input.code.trim().toUpperCase();
-    const subdomain = input.subdomain.trim().toLowerCase();
     const applyTemplate = input.accountingTemplateCode !== undefined;
 
     try {
       return await this.transactions.execute(async (transaction) => {
+        const codeNumber = (
+          await sql<{ value: string }>`select nextval('platform_company_code_seq')::text as value`.execute(
+            transaction,
+          )
+        ).rows[0]?.value;
+        if (codeNumber === undefined) throw new Error("Company code generation failed");
+        const code = `CMP-${codeNumber.padStart(6, "0")}`;
+        const subdomain = await this.resolveSubdomain(transaction, input.name, input.subdomain);
         const companyId = (
           await sql<{ id: string }>`
             insert into companies (
@@ -560,6 +578,7 @@ export class PlatformCompanyService {
           companyId,
           actorAccountId: actor.accountId,
           after: {
+            companyId,
             code,
             subdomain,
             name: input.name.trim(),
@@ -618,8 +637,8 @@ export class PlatformCompanyService {
       subjectType: "company",
       subjectId: null,
       after: {
-        code: input.code,
-        subdomain: input.subdomain,
+        code: "generated_server_side",
+        subdomain: input.subdomain ?? "generated_server_side",
         environment: input.environment,
         result: "failure",
         reason: error instanceof Error ? error.message.slice(0, 500) : "unknown",
@@ -747,12 +766,13 @@ export class PlatformCompanyService {
                activated_at = case when ${target} = 'active' then coalesce(activated_at, now()) else activated_at end,
                suspended_at = case when ${target} = 'suspended' then now() else suspended_at end,
                disabled_at = case when ${target} = 'disabled' then now() else disabled_at end,
+               closed_at = case when ${target} = 'closed' then now() else null end,
                updated_at = now(), version = version + 1
          where id = ${companyId}::uuid
       `.execute(transaction);
 
       await this.auditInTransaction(transaction, {
-        action: `platform.company.${target === "active" ? (current.status === "suspended" ? "reactivated" : "activated") : target === "suspended" ? "suspended" : "disabled"}`,
+        action: `platform.company.${target === "active" ? (current.status === "suspended" ? "reactivated" : "activated") : target === "suspended" ? "suspended" : target === "closed" ? "closed" : "disabled"}`,
         companyId,
         actorAccountId: actor.accountId,
         before: { status: current.status },
@@ -763,9 +783,71 @@ export class PlatformCompanyService {
     });
   }
 
+  public async close(
+    companyId: string,
+    reason: string,
+    confirmation: string,
+    actor: { accountId: string; correlationId: string },
+  ): Promise<void> {
+    const company = (
+      await sql<{ code: string }>`select code from companies where id = ${companyId}::uuid`.execute(
+        this.database,
+      )
+    ).rows[0];
+    if (company === undefined) throw this.notFound();
+    if (confirmation !== `CLOSE ${company.code}`) {
+      throw new ApplicationException(
+        "company_close_confirmation_mismatch",
+        `Type CLOSE ${company.code} to confirm`,
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    await this.transition(companyId, "closed", reason, actor);
+  }
+
   // -------------------------------------------------------------------------
   // Helpers
   // -------------------------------------------------------------------------
+
+  private async resolveSubdomain(
+    database: Kysely<DatabaseSchema>,
+    name: string,
+    override?: string,
+  ): Promise<string> {
+    if (override !== undefined) {
+      this.assertSubdomain(override);
+      return override.trim().toLowerCase();
+    }
+    const base = suggestCompanySubdomain(name);
+    if (base === "") {
+      throw new ApplicationException(
+        "subdomain_required",
+        "Enter a URL-safe subdomain for this Company name",
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    this.assertSubdomain(base);
+    await sql`select pg_advisory_xact_lock(hashtext(${`platform-company-subdomain:${base}`}))`.execute(
+      database,
+    );
+    const existing = (
+      await sql<{ subdomain: string }>`
+        select subdomain from companies
+         where lower(subdomain) = ${base} or lower(subdomain) like ${`${base}-%`}
+      `.execute(database)
+    ).rows.map((row) => row.subdomain.toLowerCase());
+    if (!existing.includes(base)) return base;
+    for (let suffix = 2; suffix < 1_000_000; suffix += 1) {
+      const suffixText = String(suffix);
+      const candidate = `${base.slice(0, 62 - suffixText.length)}-${suffixText}`;
+      if (!existing.includes(candidate)) return candidate;
+    }
+    throw new ApplicationException(
+      "subdomain_unavailable",
+      "No subdomain is available for this Company name",
+      HttpStatus.CONFLICT,
+    );
+  }
 
   private assertSubdomain(subdomain: string): void {
     const value = subdomain.trim().toLowerCase();

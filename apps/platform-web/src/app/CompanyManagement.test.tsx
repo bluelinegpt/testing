@@ -258,10 +258,25 @@ describe("Create Company", () => {
   afterEach(() => vi.restoreAllMocks());
 
   const fill = (): void => {
-    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Acme Delivery" } });
-    fireEvent.change(screen.getByLabelText("Code"), { target: { value: "ACM-0001" } });
-    fireEvent.change(screen.getByLabelText("Subdomain"), { target: { value: "acme" } });
+    fireEvent.change(screen.getByLabelText("Company Name"), { target: { value: "Acme Delivery" } });
   };
+
+  it("omits technical identifiers and suggests an editable subdomain", async () => {
+    vi.stubGlobal("fetch", stubFetch(baseRoutes()));
+    renderAt("/companies/new");
+    await screen.findByRole("button", { name: "Review" });
+
+    expect(screen.queryByLabelText("Code")).toBeNull();
+    expect(screen.queryByLabelText("Company ID")).toBeNull();
+    fireEvent.change(screen.getByLabelText("Company Name"), {
+      target: { value: "Fast Delivery UAE" },
+    });
+    expect(screen.getByLabelText("Subdomain")).toHaveValue("fast-delivery-uae");
+    fireEvent.change(screen.getByLabelText("Subdomain"), { target: { value: "fast-ops" } });
+    expect(screen.getByLabelText("Subdomain")).toHaveValue("fast-ops");
+    expect(screen.getByText("United Arab Emirates")).toBeInTheDocument();
+    expect(screen.getByText("Dubai (Asia/Dubai)")).toBeInTheDocument();
+  });
 
   it("requires the mandatory fields before review", async () => {
     vi.stubGlobal("fetch", stubFetch(baseRoutes()));
@@ -271,7 +286,7 @@ describe("Create Company", () => {
     // Native validity blocks the submit; the review step never appears.
     fireEvent.click(screen.getByRole("button", { name: "Review" }));
     expect(screen.queryByRole("button", { name: "Create Company" })).toBeNull();
-    expect((screen.getByLabelText("Name") as HTMLInputElement).checkValidity()).toBe(false);
+    expect((screen.getByLabelText("Company Name") as HTMLInputElement).checkValidity()).toBe(false);
   });
 
   it("shows a review step before creating anything", async () => {
@@ -284,7 +299,8 @@ describe("Create Company", () => {
     fireEvent.click(screen.getByRole("button", { name: "Review" }));
 
     expect(await screen.findByRole("heading", { name: "Review" })).toBeInTheDocument();
-    expect(screen.getByText("ACM-0001")).toBeInTheDocument();
+    expect(screen.getByText("Generated automatically")).toBeInTheDocument();
+    expect(screen.getByText("acme-delivery")).toBeInTheDocument();
     // v2 is the default the form pre-selects, not v1: v1 left every new
     // Company without a working set of delivery Areas.
     expect(screen.getByText("UAE_DELIVERY_STANDARD@2")).toBeInTheDocument();
@@ -326,15 +342,12 @@ describe("Create Company", () => {
     expect(Object.keys(sent).sort()).toEqual([
       "accountingTemplateCode",
       "accountingTemplateVersion",
-      "code",
-      "countryCode",
       "defaultLanguage",
       "environment",
       "name",
       "subdomain",
-      "timezone",
     ]);
-    for (const forbidden of ["companyId", "status", "createdBy", "id", "openingBalances"]) {
+    for (const forbidden of ["companyId", "code", "status", "createdBy", "id", "openingBalances"]) {
       expect(sent).not.toHaveProperty(forbidden);
     }
   });
@@ -354,8 +367,7 @@ describe("Create Company", () => {
     renderAt("/companies/new");
     await screen.findByRole("button", { name: "Review" });
 
-    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Bad" } });
-    fireEvent.change(screen.getByLabelText("Code"), { target: { value: "BAD-1" } });
+    fireEvent.change(screen.getByLabelText("Company Name"), { target: { value: "Bad" } });
     fireEvent.change(screen.getByLabelText("Subdomain"), { target: { value: "platform" } });
     fireEvent.click(screen.getByRole("button", { name: "Review" }));
     fireEvent.click(await screen.findByRole("button", { name: "Create Company" }));
@@ -383,6 +395,14 @@ describe("Company detail", () => {
     expect(
       screen.getByText(/Opening balances 0 · Journals 0 · Accounting events 0/),
     ).toBeInTheDocument();
+  });
+
+  it("shows the generated Company code and read-only Company ID", async () => {
+    vi.stubGlobal("fetch", stubFetch(baseRoutes()));
+    renderAt(`/companies/${companyId}`);
+    expect(await screen.findByText(companyId)).toBeInTheDocument();
+    expect(screen.getAllByText("TST-0001").length).toBeGreaterThan(0);
+    expect(screen.queryByLabelText("Company ID")).toBeNull();
   });
 
   it("shows readiness with Company Administrator pending and opening balance optional", async () => {
@@ -495,6 +515,57 @@ describe("Company detail", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Reactivate" }));
     await waitFor(() => expect(reactivated).toBe(true));
+  });
+
+  it("closes with the exact typed Company-code confirmation", async () => {
+    const routes = baseRoutes();
+    let sent: Record<string, unknown> = {};
+    routes[`POST platform/companies/${companyId}/close`] = (body) => {
+      sent = body as Record<string, unknown>;
+      return { status: 204 };
+    };
+    vi.stubGlobal("fetch", stubFetch(routes));
+    vi.stubGlobal("prompt", vi.fn().mockReturnValueOnce("final closure").mockReturnValueOnce("CLOSE TST-0001"));
+    renderAt(`/companies/${companyId}`);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Close Company" }));
+    await waitFor(() => expect(sent).toEqual({ reason: "final closure", confirmation: "CLOSE TST-0001" }));
+  });
+
+  it("shows server eligibility and a non-destructive preview for a closed Company", async () => {
+    const permissions = [...fullAccess, "platform.companies.delete"];
+    const routes = baseRoutes(permissions);
+    routes[`GET platform/companies/${companyId}`] = {
+      body: detail({ status: "closed", closedAt: "2026-08-09T00:00:00.000Z" }),
+      status: 200,
+    };
+    routes[`GET platform/companies/${companyId}/deletion-eligibility`] = {
+      body: {
+        eligible: true,
+        status: "closed",
+        environment: "sandbox",
+        closedAt: "2026-08-09T00:00:00.000Z",
+        eligibleAt: "2026-08-09T00:00:00.000Z",
+        requiresWaitingPeriod: false,
+        waitingPeriodHours: 0,
+        remainingSeconds: 0,
+        blockers: [],
+        previewRequired: true,
+        backupRequired: true,
+      },
+      status: 200,
+    };
+    routes[`POST platform/companies/${companyId}/deletion-preview`] = {
+      body: { readyForDelete: false, blockers: ["A verified deletion backup has not been attached"] },
+      status: 200,
+    };
+    vi.stubGlobal("fetch", stubFetch(routes));
+    renderAt(`/companies/${companyId}`);
+
+    expect(await screen.findByText(/Eligible for deletion immediately/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Run Deletion Preview" }));
+    expect(await screen.findByText("READY FOR DELETE: NO")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /permanently delete company/i })).toBeNull();
   });
 
   it("hides every lifecycle control from a read-only Platform account", async () => {
@@ -681,7 +752,7 @@ describe("Company configuration and audit sections", () => {
 
     expect(await screen.findByRole("heading", { name: "Configuration" })).toBeInTheDocument();
     expect(screen.getByText("AED")).toBeInTheDocument();
-    expect(screen.getByText("AE")).toBeInTheDocument();
+    expect(screen.getByText("United Arab Emirates (AE)")).toBeInTheDocument();
   });
 
   it("shows the Platform audit summary", async () => {
@@ -725,11 +796,9 @@ describe("Create Company optional fields", () => {
     renderAt("/companies/new");
     await screen.findByRole("button", { name: "Review" });
 
-    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Acme" } });
-    fireEvent.change(screen.getByLabelText("Code"), { target: { value: "ACM-1" } });
-    fireEvent.change(screen.getByLabelText("Subdomain"), { target: { value: "acme" } });
+    fireEvent.change(screen.getByLabelText("Company Name"), { target: { value: "Acme" } });
     fireEvent.click(screen.getByRole("button", { name: "Review" }));
-    expect(await screen.findByText("From the Accounting template")).toBeInTheDocument();
+    expect(await screen.findByText("08:00")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Create Company" }));
 
     await screen.findByRole("heading", { name: "Test Delivery" });
@@ -747,13 +816,11 @@ describe("Create Company optional fields", () => {
     renderAt("/companies/new");
     await screen.findByRole("button", { name: "Review" });
 
-    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Acme" } });
-    fireEvent.change(screen.getByLabelText("Code"), { target: { value: "ACM-1" } });
-    fireEvent.change(screen.getByLabelText("Subdomain"), { target: { value: "acme" } });
-    fireEvent.change(screen.getByLabelText("Business-day start"), { target: { value: "07:30" } });
+    fireEvent.change(screen.getByLabelText("Company Name"), { target: { value: "Acme" } });
+    fireEvent.change(screen.getByLabelText("Business Day Start"), { target: { value: "07:30" } });
     fireEvent.change(screen.getByLabelText("Contact name"), { target: { value: "Ops Lead" } });
     fireEvent.click(screen.getByRole("button", { name: "Review" }));
-    expect(await screen.findByText("07:30 (Company override)")).toBeInTheDocument();
+    expect(await screen.findByText("07:30")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Create Company" }));
 
     await screen.findByRole("heading", { name: "Test Delivery" });

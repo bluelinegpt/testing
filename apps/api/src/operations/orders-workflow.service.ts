@@ -10,6 +10,7 @@ import { KyselyTransactionManager } from "../infrastructure/database/transaction
 import { ApplicationException } from "../presentation/errors/application.exception.js";
 import { IdentityContextAccessor } from "../security/identity-context.js";
 import { TenantContextAccessor } from "../tenancy/tenant-context.js";
+import { PushOutboxWriter } from "../push/push-outbox-writer.service.js";
 import { OutsourcedDriverFeeService } from "../payroll/outsourced-driver-fee.service.js";
 import { OperationsHistoryWriter } from "./operations-history.writer.js";
 import type {
@@ -56,14 +57,15 @@ export class OrdersWorkflowService {
     @Inject(OperationsHistoryWriter) private readonly history: OperationsHistoryWriter,
     @Inject(OutsourcedDriverFeeService)
     private readonly outsourcedDriverFees: OutsourcedDriverFeeService,
+    @Inject(PushOutboxWriter) private readonly pushOutbox: PushOutboxWriter,
   ) {}
 
   public async assignmentPreview(input: BulkAssignDriverDto): Promise<BulkActionPreview> {
     this.assertAnyPermission("orders.assign_driver");
     const { companyId } = this.tenants.current();
-    await this.activeDriver(this.database, companyId, input.driverIdToAssign);
+    const driver = await this.activeDriver(this.database, companyId, input.driverIdToAssign);
     const orders = await this.resolveSelection(this.database, companyId, input, false);
-    return this.assignmentAssessment(orders);
+    return this.assignmentAssessment(orders, driver.id);
   }
 
   public async selectionSummary(input: OrderSelectionDto): Promise<BulkActionPreview> {
@@ -90,17 +92,20 @@ export class OrdersWorkflowService {
     return this.transactions.execute(async (transaction) => {
       const driver = await this.activeDriver(transaction, companyId, input.driverIdToAssign);
       const orders = await this.resolveSelection(transaction, companyId, input, true);
-      const assessment = this.assignmentAssessment(orders);
+      const assessment = this.assignmentAssessment(orders, driver.id);
       const actorRole = await this.history.actorRole(transaction, companyId, identity.identityId);
       let processedCount = 0;
       for (const order of orders) {
-        if (
-          !["new", "in_branch", "hold"].includes(order.deliveryStatus) ||
-          order.assignedDriverId !== null
-        )
-          continue;
+        const isReassignment = order.assignedDriverId !== null;
+        if (this.assignmentIneligibilityReason(order, driver.id) !== null) continue;
+        // A fresh assignment moves New/In-Branch into Assigned (Hold stays
+        // Hold); a reassignment only changes the Driver — the Order's own
+        // delivery status is untouched, matching how the single-order status
+        // machine treats driver changes as orthogonal to status changes.
         const nextStatus =
-          order.deliveryStatus === "hold" ? order.deliveryStatus : "assigned_to_driver";
+          isReassignment || order.deliveryStatus === "hold"
+            ? order.deliveryStatus
+            : "assigned_to_driver";
         await sql`
           update orders
              set assigned_driver_id = ${driver.id}::uuid,
@@ -108,6 +113,17 @@ export class OrdersWorkflowService {
                  updated_at = now(), version = version + 1
            where id = ${order.id}::uuid and company_id = ${companyId}::uuid
         `.execute(transaction);
+        if (isReassignment) {
+          // Only one active (unassigned_at is null) assignment row may exist
+          // per Order (`order_assignments_active_unique`) — close the
+          // previous one out before the new active row is inserted below.
+          await sql`
+            update order_assignments
+               set unassigned_at = now(), reason = 'Reassigned to a different Driver'
+             where company_id = ${companyId}::uuid and order_id = ${order.id}::uuid
+               and unassigned_at is null
+          `.execute(transaction);
+        }
         await sql`
           insert into order_assignments (
             company_id, order_id, driver_id, assigned_by_account_id
@@ -132,13 +148,20 @@ export class OrdersWorkflowService {
           category: "driver_assignment",
           companyId,
           correlationId,
-          eventType: "order.driver_assigned",
+          eventType: isReassignment ? "order.driver_reassigned" : "order.driver_assigned",
           fieldName: "assigned_driver_id",
           newValue: { driverId: driver.id, driverName: driver.name },
           orderId: order.id,
-          previousValue: null,
+          previousValue: isReassignment ? { driverId: order.assignedDriverId } : null,
           relatedDriverId: driver.id,
           source: "web_portal",
+        });
+        await this.pushOutbox.writeOrderAssigned(transaction, {
+          companyId,
+          orderId: order.id,
+          driverAccountId: driver.accountId,
+          isReassignment,
+          correlationId,
         });
         processedCount += 1;
       }
@@ -241,20 +264,42 @@ export class OrdersWorkflowService {
     });
   }
 
-  private assignmentAssessment(orders: readonly SelectedOrder[]): BulkActionPreview {
+  /**
+   * A fresh assignment (no Driver yet) is eligible while New/In-Branch/Hold.
+   * A reassignment (already has a Driver) is eligible only while
+   * Assigned-to-Driver or Hold — matching `enforce_initial_order_assignment`,
+   * which only permits a new active `order_assignments` row while the Order
+   * is in one of those two states. Once Out for Delivery or later, the
+   * Driver is locked in and can only change through a status transition.
+   */
+  private assignmentIneligibilityReason(
+    order: SelectedOrder,
+    targetDriverId: string,
+  ): string | null {
+    if (order.assignedDriverId === targetDriverId) {
+      return "Driver is already assigned to this Order";
+    }
+    if (order.assignedDriverId === null) {
+      return ["new", "in_branch", "hold"].includes(order.deliveryStatus)
+        ? null
+        : "Only New, In-Branch, or Hold Orders are eligible for assignment";
+    }
+    return ["assigned_to_driver", "hold"].includes(order.deliveryStatus)
+      ? null
+      : "Only Assigned-to-Driver or Hold Orders are eligible for reassignment";
+  }
+
+  private assignmentAssessment(
+    orders: readonly SelectedOrder[],
+    targetDriverId: string,
+  ): BulkActionPreview {
     const ineligible = orders
-      .filter(
-        (order) =>
-          !["new", "in_branch", "hold"].includes(order.deliveryStatus) ||
-          order.assignedDriverId !== null,
-      )
       .map((order) => ({
-        orderNumber: order.orderNumber,
-        reason:
-          order.assignedDriverId !== null
-            ? "Order is already assigned; reassignment is deferred"
-            : "Only New, In-Branch, or Hold Orders are eligible for assignment",
-      }));
+        order,
+        reason: this.assignmentIneligibilityReason(order, targetDriverId),
+      }))
+      .filter((entry): entry is { order: SelectedOrder; reason: string } => entry.reason !== null)
+      .map(({ order, reason }) => ({ orderNumber: order.orderNumber, reason }));
     return {
       eligibleCount: orders.length - ineligible.length,
       ineligible,
@@ -495,9 +540,9 @@ export class OrdersWorkflowService {
     database: Kysely<DatabaseSchema>,
     companyId: string,
     driverId: string,
-  ): Promise<{ readonly id: string; readonly name: string }> {
-    const result = await sql<{ id: string; name: string }>`
-      select id, name_en as name from drivers
+  ): Promise<{ readonly id: string; readonly name: string; readonly accountId: string | null }> {
+    const result = await sql<{ id: string; name: string; accountId: string | null }>`
+      select id, name_en as name, account_id as "accountId" from drivers
       where id = ${driverId}::uuid and company_id = ${companyId}::uuid
         and account_status = 'active'
     `.execute(database);

@@ -4,6 +4,7 @@ import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 
 import { ApiError, type ApiClient } from "../../api/api-client.js";
+import type { CompanySettings } from "../../api/contracts.js";
 import { PageHeader } from "../../components/PageHeader.js";
 import { parseMoneyInput, safeMoneyValue } from "../../utils/numeric-input.js";
 import { AddExpenseCategoryDialog } from "./AddExpenseCategoryDialog.js";
@@ -550,9 +551,23 @@ const definitions: Readonly<Partial<Record<AccountingSection, ResourceDefinition
   },
   expenses: {
     actions: [
-      { action: "submit", permission: "manage", reason: true },
+      // No `reason: true` on Submit or Approve, unlike the transitions below:
+      // neither has a dedicated reason column to fill -- only Reject's and
+      // Cancel's reasons are persisted (`rejection_reason`/
+      // `cancellation_reason` in `general-expense.service.ts`; Approve's own
+      // `reason(input.reason)` call only ever lands in the accounting event's
+      // `metadata.reason`, not a durable column). Forcing the operator to
+      // type one added friction with no business payoff. Matches the
+      // existing convention already used for Journal's own `approve`/`post`/
+      // `validate` actions below, which never required one either. The
+      // backend still receives a non-empty `reason` on every "expenses"
+      // action regardless -- `submitAction`'s payload falls back to
+      // `accounting.confirmation.confirmedByUser` when the operator leaves it
+      // blank, so `GeneralExpenseReasonDto`'s own requirement is still
+      // satisfied without any backend change.
+      { action: "submit", permission: "manage" },
       { action: "withdraw", permission: "manage", reason: true },
-      { action: "approve", permission: "approve", reason: true },
+      { action: "approve", permission: "approve" },
       { action: "reject", permission: "approve", reason: true },
       { action: "return-to-draft", permission: "manage", reason: true },
       { action: "cancel", permission: "manage", reason: true },
@@ -582,36 +597,31 @@ const definitions: Readonly<Partial<Record<AccountingSection, ResourceDefinition
       },
       { key: "status", label: "Status", status: true },
     ],
+    // The operator-facing form is deliberately simple: one Category, one
+    // Amount. `submitCreate` (below) builds the single accounting line the
+    // backend requires from Category + Description + Amount -- the raw line
+    // fields (category, description, quantity, unit amount, VAT treatment,
+    // VAT rate, recoverable %, mapping key) used to be typed here directly;
+    // they still exist on the backend/domain model (`GeneralExpenseLineDto`)
+    // and are still shown, read-only, on an Expense's own detail page. See
+    // the report for the full audit of why they were removed from Create.
     createFields: [
       { name: "expenseDate", type: "date" },
       { name: "accountingDate", type: "date" },
-      { name: "categoryId" },
+      // Required here now that it also drives the accounting line
+      // `submitCreate` builds automatically -- the backend line always needs
+      // a Category (`GeneralExpenseLineDto.categoryId`).
+      { name: "categoryId", required: true },
       { name: "payeeType" },
       { name: "payeeName" },
       { name: "payeeContact" },
       { name: "referenceNumber" },
-      { name: "description", type: "textarea" },
+      // Required here (unlike the header `description` column, which is
+      // optional) because it becomes the accounting line's own description,
+      // and the backend rejects an empty one (`GeneralExpenseLineDto`).
+      { name: "description", required: true, type: "textarea" },
+      { name: "amount", required: true, type: "money" },
       { name: "notes", type: "textarea" },
-      { name: "lineCategoryId", required: true },
-      { name: "lineDescription", required: true },
-      { name: "quantity", required: true, type: "money" },
-      { name: "unitAmount", required: true, type: "money" },
-      {
-        name: "vatTreatment",
-        required: true,
-        type: "select",
-        options: [
-          "standard_rated",
-          "zero_rated",
-          "exempt",
-          "out_of_scope",
-          "non_recoverable",
-          "partially_recoverable",
-        ].map((value) => ({ label: value, value })),
-      },
-      { name: "vatRate", required: true, type: "money" },
-      { name: "recoverablePercentage", type: "money" },
-      { name: "expenseAccountMappingKey" },
     ],
     createPath: "general-expenses",
     detailPath: (id) => `general-expenses/${id}`,
@@ -3325,10 +3335,13 @@ export function AccountingResourcePage({
         ? client.accounts({ activeOnly: true }, signal)
         : Promise.resolve([]),
   );
-  // A General Expense cannot be created without a Category (`lineCategoryId`
-  // is required), so the create form checks whether any ACTIVE Category
-  // exists and offers a direct link to the Setup screen when none does.
-  // Read-only: never creates or modifies Category data.
+  // A General Expense cannot be created without a Category (the accounting
+  // line the form builds automatically always needs one), so the create form
+  // checks whether any ACTIVE Category exists and offers a direct link to the
+  // Setup screen when none does. Read-only: never creates or modifies
+  // Category data. Each row also carries `defaultVatTreatment` /
+  // `defaultExpenseMappingKey`, which `submitCreate` reads to build the line
+  // without asking the operator for either.
   const expenseCategoryOptions = useAccountingResource<
     AccountingPage | readonly AccountingRecord[]
   >(
@@ -3343,6 +3356,18 @@ export function AccountingResourcePage({
         : Promise.resolve([]),
   );
   const hasActiveExpenseCategory = normalizePage(expenseCategoryOptions.data).length > 0;
+  // VAT is Company-level configuration (`configuration/settings`, the same
+  // screen Accounting Configuration itself uses) -- fetched here only so the
+  // line the form builds can use the Company's actual standard rate for a
+  // `standard_rated` Category. Never rendered as a field: the operator is
+  // never asked to type a VAT treatment or rate.
+  const companySettings = useAccountingResource<CompanySettings | undefined>(
+    accountingQueryKey(companyId, "expenses:company-settings", { creating, section }),
+    (signal) =>
+      section === "expenses" && creating
+        ? api.get<CompanySettings>("configuration/settings", signal)
+        : Promise.resolve(undefined),
+  );
   // Read-only Accounting Preview for the open Expense: shows the Journal
   // approval WOULD create and whether anything blocks it. Creates nothing.
   const accountingPreview = useAccountingResource<AccountingRecord>(
@@ -3380,7 +3405,7 @@ export function AccountingResourcePage({
           ? ("ready" as const)
           : ("error" as const);
       return fields.map((field) => {
-        if (field.name === "categoryId" || field.name === "lineCategoryId") {
+        if (field.name === "categoryId") {
           return {
             ...field,
             emptyText: expenseCategoryOptions.loading
@@ -3389,13 +3414,6 @@ export function AccountingResourcePage({
             options: categoryOptions,
             optionsError: expenseCategoryOptions.error,
             optionsStatus: categoryStatus,
-            // ONE trailing action, on the TOP-level `categoryId` field only --
-            // that is the field the requested UI placement points at (beside
-            // the header Category dropdown, not the line item). `lineCategoryId`
-            // is a separate, independently-required field on the same line
-            // item and is left exactly as it was; attaching the button there
-            // too would duplicate it for no requested reason.
-            //
             // Hidden rather than disabled for someone who can create General
             // Expenses but not manage Categories (§8): the Category dropdown
             // itself stays fully usable either way, only the extra control is
@@ -3403,7 +3421,7 @@ export function AccountingResourcePage({
             // permission model the two are the same gate (`accounting.manage`
             // covers both), so this is a hidden case today but not an
             // assumption this code bakes in.
-            ...(field.name === "categoryId" && permissionSet.manage
+            ...(permissionSet.manage
               ? {
                   trailingAction: {
                     label: t("accounting.expenseCategoryDialog.addCategory"),
@@ -3505,29 +3523,45 @@ export function AccountingResourcePage({
   };
   const submitCreate = async (payload: Record<string, unknown>) => {
     if (section === "expenses") {
-      const {
-        expenseAccountMappingKey,
-        lineCategoryId,
-        lineDescription,
-        quantity,
-        recoverablePercentage,
-        unitAmount,
-        vatRate,
-        vatTreatment,
-        ...header
-      } = payload;
+      // The operator only fills in Category, Description and Amount -- the
+      // single accounting line the backend requires is built here, not typed
+      // by hand. `expenseAccountMappingKey` is left unset on purpose: the
+      // server itself falls back to the Category's own `defaultExpenseMappingKey`
+      // when a line omits it (`replaceLines`), which is exactly the mapping
+      // this Category was created (or vetted) against.
+      const { amount, ...header } = payload;
+      const categoryId = String(header.categoryId ?? "");
+      const description = String(header.description ?? "").trim();
+      const category = normalizePage(expenseCategoryOptions.data).find(
+        (row) => String(row.id) === categoryId,
+      );
+      // Never asked of the operator: the line's VAT treatment is the
+      // Category's own `defaultVatTreatment` (required on every Category).
+      // Only a `standard_rated` Category needs an actual rate, taken from the
+      // Company's configured VAT settings; every other treatment prices at
+      // 0% -- the backend zeroes the rate for zero_rated/exempt/out_of_scope
+      // regardless of what is sent (`calculateLine`), so 0% is always safe
+      // there.
+      const vatTreatment = String(category?.defaultVatTreatment ?? "out_of_scope");
+      const vatRate =
+        vatTreatment === "standard_rated" && companySettings.data?.vatEnabled === true
+          ? String(companySettings.data.vatRate ?? "0")
+          : "0";
       await client.post(definition.createPath!, {
         ...header,
         lines: [
           {
-            categoryId: lineCategoryId,
-            description: lineDescription,
-            expenseAccountMappingKey: expenseAccountMappingKey || undefined,
-            quantity,
-            recoverablePercentage: recoverablePercentage || undefined,
-            unitAmount,
-            vatRate,
+            categoryId,
+            description,
+            quantity: "1",
+            unitAmount: amount,
             vatTreatment,
+            vatRate,
+            // `partially_recoverable` has no stored default on the Category
+            // itself; 100% keeps the line's own math internally consistent
+            // (fully recoverable) until a future task decides this treatment
+            // needs its own operator-facing control.
+            ...(vatTreatment === "partially_recoverable" ? { recoverablePercentage: "100" } : {}),
           },
         ],
       });
@@ -4155,13 +4189,9 @@ export function AccountingResourcePage({
             expenseCategoryOptions.refresh();
             // A NEW array each time, per RecordForm's own contract, so the
             // merge fires even if the operator adds two Categories in a row
-            // with the very same id shape.
-            //
-            // Only the TOP `categoryId` is auto-selected -- that is the field
-            // this button sits beside and the only one the requested UX names.
-            // `lineCategoryId` is a separate, independently-required field the
-            // operator still chooses on its own; see the architecture-audit
-            // note in the PR/report for why the form carries both.
+            // with the very same id shape. `categoryId` is now the only
+            // Category field on the form -- `submitCreate` derives the
+            // accounting line's own category from it directly.
             setCategoryPatch([{ name: "categoryId", value: category.id }]);
           }}
         />

@@ -96,6 +96,9 @@ export const PURGE_TABLES = new Set([
   "conversation_participants",
   "conversations",
   "customer_messaging_sessions",
+  // Push notifications (Prompt 15)
+  "notification_outbox_events",
+  "device_registrations",
   "idempotency_records",
   "messages",
   "realtime_event_log",

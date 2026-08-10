@@ -1,3 +1,4 @@
+import 'package:bluelinegpt_mobile/app/localization/app_localizations.dart';
 import 'package:flutter/foundation.dart';
 
 @immutable
@@ -39,6 +40,7 @@ final class AuthenticatedUser {
     this.profileId,
     this.profileType,
     this.forcePasswordChange = false,
+    this.linkedDriverId,
   });
   final String id;
   final String companyId;
@@ -50,9 +52,27 @@ final class AuthenticatedUser {
   final String? profileType;
   final bool forcePasswordChange;
 
+  /// Present only for a `company_user` ("Driver User") whose linked Employee
+  /// backs a `drivers.employee_id` record — the backend's single
+  /// authoritative signal for this (`/auth/me`'s `linkedDriverId`, sourced
+  /// from `OperationsService.currentEmployeeDriverId()`/
+  /// `AuthenticationRepository.linkedDriverId()`). `null` for every other
+  /// identity, including a plain Operator and a genuine `driver`-kind
+  /// account (which doesn't need the hint — `roles` already says `driver`).
+  /// Never inferred from display name, username, or any hardcoded account.
+  final String? linkedDriverId;
+
   bool can(String permission) => permissions.contains(permission);
   bool hasRole(UserRole role) => roles.contains(role);
   bool get isAuthorized => accessState == AccountAccessState.active;
+
+  /// The single place that decides "show this account a Driver-style UI" —
+  /// true for a genuine `driver`-kind account, and equally true for a Driver
+  /// User (a `company_user` whose `linkedDriverId` resolved). Every other
+  /// place (dashboard, profile, router, order detail) must read this getter
+  /// rather than re-deriving the same decision independently.
+  bool get isDriverPresentation =>
+      hasRole(UserRole.driver) || linkedDriverId != null;
 }
 
 @immutable
@@ -101,4 +121,18 @@ final class LoginInput {
   final String identifier;
   final String password;
   bool get isValid => identifier.trim().isNotEmpty && password.isNotEmpty;
+}
+
+/// The single shared role-label mapping — previously duplicated
+/// byte-for-byte between `dashboard_page.dart` and `pages.dart`'s
+/// `AccountPage`. `isDriverPresentation` covers BOTH a genuine `driver`-kind
+/// account and a Driver User (`company_user` + resolved `linkedDriverId`),
+/// so Profile/Dashboard authoritatively read "Driver" for a Driver User with
+/// zero hardcoding on display name, username, or any specific account.
+String roleLabel(AuthenticatedUser user, AppLocalizations l10n) {
+  if (user.hasRole(UserRole.trader)) return l10n.trader;
+  if (user.isDriverPresentation) return l10n.driver;
+  if (user.hasRole(UserRole.operatorRole)) return l10n.operator;
+  if (user.hasRole(UserRole.customer)) return l10n.customer;
+  return l10n.unsupportedRole;
 }

@@ -108,10 +108,12 @@ describe("App", () => {
     await waitFor(() => expect(router.state.location.pathname).toBe("/orders/create"));
     expect(await screen.findByRole("heading", { name: "Create order" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Users" })).not.toBeInTheDocument();
-    // General Settings is reachable by everyone for their personal display
-    // preference, so the Configuration group shows — but only its General
-    // settings item, never the admin-only items (Users, etc.).
-    expect(screen.getByRole("button", { name: "Configuration" })).toBeInTheDocument();
+    // General Settings used to be reachable by every authenticated User
+    // unconditionally, so an Orders-only identity (like this one) inherited a
+    // "Configuration" group it had no real business in. It is now reachable
+    // only alongside some OTHER, non-Orders permission — an Orders-only User
+    // sees no Configuration group at all.
+    expect(screen.queryByRole("button", { name: "Configuration" })).not.toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/users"))).toBe(false);
 
     await router.navigate("/configuration/users");

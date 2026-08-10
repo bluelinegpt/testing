@@ -53,7 +53,11 @@ describe.skipIf(!enabled)("guarded communication cross-role and cross-Company se
     await database.destroy();
   });
 
-  async function buildCompany(transaction: Transaction<DatabaseSchema>, runId: string, label: string) {
+  async function buildCompany(
+    transaction: Transaction<DatabaseSchema>,
+    runId: string,
+    label: string,
+  ) {
     const company = await createFixtureCompany(transaction, runId, label);
     const office = await createFixtureOfficeUser(transaction, company.companyId, label, [
       "communication.operator.read",
@@ -254,7 +258,12 @@ describe.skipIf(!enabled)("guarded communication cross-role and cross-Company se
 
       // A Trader with no communication permissions at all is refused too,
       // for the same reason plus the missing permission.
-      const noPermissionTrader = await createFixtureTrader(transaction, company.companyId, "d4-none", []);
+      const noPermissionTrader = await createFixtureTrader(
+        transaction,
+        company.companyId,
+        "d4-none",
+        [],
+      );
       accessor.identity = identityFor(
         company.companyId,
         noPermissionTrader.accountId,
@@ -262,9 +271,9 @@ describe.skipIf(!enabled)("guarded communication cross-role and cross-Company se
         [],
         noPermissionTrader.traderId,
       );
-      await expect(
-        service.getMessages(conversation.id, {}),
-      ).rejects.toMatchObject({ errorCode: "conversation_access_denied" });
+      await expect(service.getMessages(conversation.id, {})).rejects.toMatchObject({
+        errorCode: "conversation_access_denied",
+      });
       await expect(
         service.sendTextMessage(conversation.id, {
           clientMessageId: "d4-no-permission",
@@ -283,9 +292,12 @@ describe.skipIf(!enabled)("guarded communication cross-role and cross-Company se
         "communication.operator.read",
         "communication.operator.send",
       ]);
-      const readOnlyOffice = await createFixtureOfficeUser(transaction, company.companyId, "d5-read", [
-        "communication.operator.read",
-      ]);
+      const readOnlyOffice = await createFixtureOfficeUser(
+        transaction,
+        company.companyId,
+        "d5-read",
+        ["communication.operator.read"],
+      );
       const trader = await createFixtureTrader(transaction, company.companyId, "d5", [
         "communication.trader.read",
         "communication.trader.send",

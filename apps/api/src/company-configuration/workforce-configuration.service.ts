@@ -10,6 +10,7 @@ import { KyselyTransactionManager } from "../infrastructure/database/transaction
 import { ApplicationException } from "../presentation/errors/application.exception.js";
 import { IdentityContextAccessor } from "../security/identity-context.js";
 import { TenantContextAccessor } from "../tenancy/tenant-context.js";
+import { DriverRoleProvisioningService } from "../users/driver-role-provisioning.service.js";
 import type {
   ConfirmOutsourcedPaymentDto,
   CreateCommissionRuleDto,
@@ -66,6 +67,8 @@ export class WorkforceConfigurationService {
     @Inject(KyselyTransactionManager) private readonly transactions: KyselyTransactionManager,
     @Inject(TenantContextAccessor) private readonly tenants: TenantContextAccessor,
     @Inject(IdentityContextAccessor) private readonly identities: IdentityContextAccessor,
+    @Inject(DriverRoleProvisioningService)
+    private readonly driverRoles: DriverRoleProvisioningService,
   ) {}
 
   public async employees(input: {
@@ -1122,16 +1125,48 @@ export class WorkforceConfigurationService {
         }
       } else {
         const result = await sql<{
+          employeeId: string | null;
           id: string;
-        }>`update drivers set account_status=${isActive ? "active" : "disabled"},deactivated_at=case when ${isActive} then null else now() end,updated_at=now(),version=version+1 where id=${id}::uuid and company_id=${companyId}::uuid returning id`.execute(
+        }>`update drivers set account_status=${isActive ? "active" : "disabled"},deactivated_at=case when ${isActive} then null else now() end,updated_at=now(),version=version+1 where id=${id}::uuid and company_id=${companyId}::uuid returning id, employee_id as "employeeId"`.execute(
           transaction,
         );
-        if (result.rows[0] === undefined)
+        const driver = result.rows[0];
+        if (driver === undefined)
           throw new ApplicationException(
             "driver_not_found",
             "Driver not found",
             HttpStatus.NOT_FOUND,
           );
+        // The Driver record was deactivated directly (not via its Employee,
+        // whose own deactivation above already disables the whole account).
+        // The linked Employee's account otherwise stays fully active, so the
+        // auto-provisioned Driver role must be revoked explicitly here or a
+        // no-longer-a-Driver User would keep Order self-service access
+        // indefinitely.
+        if (!isActive && driver.employeeId !== null) {
+          const account = await sql<{ accountId: string }>`
+            select cu.account_id as "accountId"
+              from employees e
+              join company_users cu on cu.id = e.company_user_id and cu.company_id = e.company_id
+             where e.id = ${driver.employeeId}::uuid and e.company_id = ${companyId}::uuid
+          `.execute(transaction);
+          const accountId = account.rows[0]?.accountId;
+          if (accountId !== undefined) {
+            const revoked = await this.driverRoles.revoke(transaction, companyId, accountId);
+            if (revoked) {
+              await this.audit(transaction, {
+                action: "driver.role_revoked_on_deactivation",
+                actorId,
+                after: { accountId },
+                companyId,
+                correlationId,
+                reason: reason.trim(),
+                subjectId: id,
+                subjectType: "driver",
+              });
+            }
+          }
+        }
       }
       await this.audit(transaction, {
         action: `${kind}.${isActive ? "activate" : "disable"}`,

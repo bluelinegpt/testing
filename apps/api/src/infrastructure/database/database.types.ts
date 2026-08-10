@@ -172,6 +172,7 @@ export interface DatabaseSchema {
   customer_addresses: UntypedTable;
   customers: UntypedTable;
   customer_messaging_sessions: UntypedTable;
+  device_registrations: UntypedTable;
   driver_commission_calculations: UntypedTable;
   driver_commission_orders: UntypedTable;
   driver_commission_rules: UntypedTable;
@@ -229,6 +230,7 @@ export interface DatabaseSchema {
   payroll_periods: UntypedTable;
   permissions: UntypedTable;
   messages: UntypedTable;
+  notification_outbox_events: UntypedTable;
   password_reset_tokens: PasswordResetTokenTable;
   realtime_event_log: UntypedTable;
   user_business_links: UserBusinessLinkTable;

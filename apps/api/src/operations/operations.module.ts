@@ -4,6 +4,7 @@ import { AuthenticationModule } from "../authentication/authentication.module.js
 import { PasswordHasher } from "../authentication/password-hasher.js";
 import { CompanyConfigurationModule } from "../company-configuration/company-configuration.module.js";
 import { CompanyProfileModule } from "../company-profile/company-profile.module.js";
+import { PushModule } from "../push/push.module.js";
 // Balance control for Payroll Payment confirmation. These are PROVIDED here
 // rather than reached by importing AccountingModule, matching the pattern
 // already used for PaymentFundingAccountService in this file and for
@@ -19,6 +20,7 @@ import { FundingAccountLockService } from "../accounting/funding-account-lock.se
 import { GeneralExpenseQueryService } from "../accounting/general-expense-query.service.js";
 import { PaymentFundingAccountService } from "../accounting/payment-funding-account.service.js";
 import { EmployeeDeliveryEarningService } from "../payroll/employee-delivery-earning.service.js";
+import { Clock, SystemClock } from "../shared/time/clock.js";
 import { PayrollAdjustmentService } from "../payroll/payroll-adjustment.service.js";
 import { PayrollCalculationService } from "../payroll/payroll-calculation.service.js";
 import { PayrollController } from "../payroll/payroll.controller.js";
@@ -36,6 +38,8 @@ import {
   PortalController,
   PublicTrackingController,
 } from "./operations.controller.js";
+import { DailyOperationsSummaryController } from "./daily-operations-summary.controller.js";
+import { DailyOperationsSummaryService } from "./daily-operations-summary.service.js";
 import { DriverCashReconciliationService } from "./driver-cash-reconciliation.service.js";
 import { DriverCollectionPdfService } from "./driver-collection-pdf.service.js";
 import { DriverShipmentManifestService } from "./driver-shipment-manifest.service.js";
@@ -50,13 +54,14 @@ import { TraderSettlementService } from "./trader-settlement.service.js";
 @Module({
   // CompanyConfigurationModule exports BusinessDayService and
   // ReportDateModeService, which the activity lists inject to resolve Date Mode.
-  imports: [AuthenticationModule, CompanyProfileModule, CompanyConfigurationModule],
+  imports: [AuthenticationModule, CompanyProfileModule, CompanyConfigurationModule, PushModule],
   controllers: [
     OperationsController,
     PortalController,
     PublicTrackingController,
     PayrollController,
     TraderReceivableController,
+    DailyOperationsSummaryController,
   ],
   providers: [
     // The balance-control chain, in dependency order. Every one of these is
@@ -70,6 +75,12 @@ import { TraderSettlementService } from "./trader-settlement.service.js";
     FundingAccountLockService,
     BalanceControlService,
     BalanceEnforcementCoordinator,
+    // The Daily Operations Summary's "Today"/"Yesterday" quick filters resolve
+    // the Company Business Date from "now" (see `currentBusinessDate()`), so
+    // "now" is injected rather than read via a bare `new Date()` -- a DB test
+    // can then swap in a fixed instant to exercise the 08:00 cutoff exactly.
+    { provide: Clock, useClass: SystemClock },
+    DailyOperationsSummaryService,
     DriverCashReconciliationService,
     DriverCollectionPdfService,
     DriverShipmentManifestService,

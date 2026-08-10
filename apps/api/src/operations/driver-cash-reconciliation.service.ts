@@ -166,6 +166,8 @@ export interface EligibleOrderRow {
   readonly deliveredAt: string | null;
   readonly id: string;
   readonly orderNumber: string;
+  readonly referenceNumber: string | null;
+  readonly serialNumber: string;
   readonly traderName: string;
 }
 
@@ -478,7 +480,8 @@ export class DriverCashReconciliationService {
              or o.delivered_at::date <= ${query.deliveredTo ?? null}::date)
     `;
     const result = await sql<Omit<EligibleOrderRow, "cashStatusLabel"> & { total: number }>`
-      select o.id, o.order_number as "orderNumber", o.delivered_at::text as "deliveredAt",
+      select o.id, o.order_number as "orderNumber", o.serial_number as "serialNumber",
+             o.reference_number as "referenceNumber", o.delivered_at::text as "deliveredAt",
              o.customer_name as "customerName", t.name_en as "traderName",
              a.name_en as "areaName", o.amount_collected::text as "amountCollected",
              o.driver_reconciliation_status as "cashStatus",

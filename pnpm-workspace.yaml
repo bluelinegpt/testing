@@ -2,5 +2,7 @@ packages:
   - "apps/*"
 
 allowBuilds:
+  '@firebase/util': true
   "@scarf/scarf": false
   esbuild: true
+  protobufjs: true

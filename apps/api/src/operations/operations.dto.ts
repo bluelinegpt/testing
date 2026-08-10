@@ -49,6 +49,17 @@ const deliveryStatuses = [
   "closed",
 ] as const;
 
+/**
+ * Every value `orders.delivery_status` can actually hold — `deliveryStatuses`
+ * above is deliberately narrower (only the states this endpoint can be asked
+ * to move an Order TO; "new"/"assigned_to_driver" are reached by creation and
+ * assignment, never by a direct target here). `expectedStatus` (Prompt 16
+ * offline sync) describes the CURRENT state a caller last observed, which can
+ * legitimately be any of those wider values — most commonly
+ * "assigned_to_driver" for a Driver who cached an Order before going offline.
+ */
+const allDeliveryStatuses = ["new", "assigned_to_driver", ...deliveryStatuses] as const;
+
 const paymentMethods = ["cash", "bank_transfer"] as const;
 const orderAttachmentTypes = ["delivery_photo", "expense", "waybill", "other"] as const;
 const orderIdentifierPattern = /^[\p{L}\p{N} _/-]+$/u;
@@ -92,6 +103,20 @@ export class ChangeOrderStatusDto {
   @IsString()
   @MaxLength(300)
   public readonly reason?: string;
+
+  /**
+   * Prompt 16 (Driver offline sync): the delivery status the caller last knew
+   * to be current, captured before going offline. Optional and additive —
+   * Operator web calls never send it and behave exactly as before. When
+   * present, the server compares it against the row's ACTUAL current status
+   * (never trusts the client's cached value as truth) to distinguish a queued
+   * offline transition that is still valid from one whose Order changed while
+   * the Driver was offline (reassigned, cancelled, already advanced by
+   * another session) — see `OperationsService.changeOrderStatus`.
+   */
+  @IsOptional()
+  @IsIn(allDeliveryStatuses)
+  public readonly expectedStatus?: (typeof allDeliveryStatuses)[number];
 }
 
 export class OrderSelectionDto {

@@ -4,6 +4,16 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+// Firebase's Google Services Gradle plugin is applied CONDITIONALLY — only
+// when a real `google-services.json` has been dropped into this directory.
+// This is what lets the dev APK build successfully today with no Firebase
+// project configured, and start working automatically (no further code
+// changes) the moment a real file is added — see Prompt 15 (Push
+// Notifications) §R.
+if (file("google-services.json").exists()) {
+    apply(plugin = "com.google.gms.google-services")
+}
+
 android {
 
     

@@ -2132,6 +2132,18 @@ export function OrderDetailsWorkspace({
     permissions.includes("settlements.create") || permissions.includes("users_roles.manage");
   const canReverseSettlement =
     permissions.includes("settlements.reverse") || permissions.includes("users_roles.manage");
+  const isOfficeStatusUser =
+    permissions.includes("orders.update_delivery_status") ||
+    permissions.includes("users_roles.manage");
+  // See `OrderRowActions`' identical flag: a Driver User holds
+  // `orders.driver_self_service` instead, and may only Hold from Out for
+  // Delivery -- never from New or Assigned to Driver, matching the backend's
+  // own narrower Driver transition set.
+  const isDriverSelfServiceUser =
+    !isOfficeStatusUser && permissions.includes("orders.driver_self_service");
+  const canHold =
+    isOfficeStatusUser ||
+    (isDriverSelfServiceUser && detail.deliveryStatus === "out_for_delivery");
   return (
     <>
       <div className="order-detail-header">
@@ -2161,8 +2173,7 @@ export function OrderDetailsWorkspace({
         </div>
         <div className="order-detail-actions">
           {["new", "assigned_to_driver", "out_for_delivery"].includes(detail.deliveryStatus) &&
-          (permissions.includes("orders.update_delivery_status") ||
-            permissions.includes("users_roles.manage")) ? (
+          canHold ? (
             <button
               className="button button-secondary"
               onClick={() => setHoldOpen(true)}
@@ -2171,7 +2182,7 @@ export function OrderDetailsWorkspace({
               {t("operations.actions.hold")}
             </button>
           ) : null}
-          {canEditOrder(detail.deliveryStatus) ? (
+          {!isDriverSelfServiceUser && canEditOrder(detail.deliveryStatus) ? (
             <button
               className="button button-secondary"
               onClick={() => setEditOpen(true)}
@@ -3342,6 +3353,20 @@ const actionTargetStatus: Partial<Record<RowAction, string>> = {
   returnToTrader: "returned_to_trader",
 };
 
+/**
+ * The narrower set a Driver User (holding only `orders.driver_self_service`,
+ * never the office `orders.update_delivery_status`) may act on for their own
+ * assigned Order -- mirrors `driverTransitions` in
+ * `OperationsService.changeOrderStatus` exactly, so the UI never offers a
+ * move the backend would reject. Assigning/reassigning a Driver, Cancel, and
+ * every other office/financial action stay unavailable regardless of
+ * delivery status.
+ */
+const driverSelfServiceActions: Readonly<Record<string, readonly RowAction[]>> = {
+  assigned_to_driver: ["markOutForDelivery"],
+  out_for_delivery: ["hold", "markDelivered", "returnToBranch"],
+};
+
 function closeEligible(order: OperationsOrder): boolean {
   if (order.workflowGuidance?.nextActionCode === "close_order") return true;
   const status = order.deliveryStatus;
@@ -3472,22 +3497,32 @@ function OrderRowActions({
   const workflowRequestHandled = useRef<object | null>(null);
   const canAssign =
     permissions.includes("orders.assign_driver") || permissions.includes("users_roles.manage");
-  const canUpdateStatus =
+  const isOfficeStatusUser =
     permissions.includes("orders.update_delivery_status") ||
     permissions.includes("users_roles.manage");
+  // A Driver User holds `orders.driver_self_service` instead of the office
+  // permission above -- never both, by construction of the Driver role. The
+  // Order list is already scoped to the Driver's own assigned Orders, so
+  // `canUpdateStatus` may be true here, but WHICH actions are offered is
+  // still narrowed below to `driverSelfServiceActions`, matching the
+  // backend's own narrower Driver transition set exactly.
+  const isDriverSelfServiceUser =
+    !isOfficeStatusUser && permissions.includes("orders.driver_self_service");
+  const canUpdateStatus = isOfficeStatusUser || isDriverSelfServiceUser;
   const canReconcile =
     permissions.includes("reconciliations.create") || permissions.includes("users_roles.manage");
   const canSettle =
     permissions.includes("settlements.create") || permissions.includes("users_roles.manage");
-  const actions = availableActions(order).filter((action) =>
-    action === "assignDriver"
-      ? canAssign
-      : action === "collectMoney"
-        ? canReconcile
-        : action === "moneyOut"
-          ? canSettle
-          : canUpdateStatus,
-  );
+  const actions = availableActions(order).filter((action) => {
+    if (action === "assignDriver") return canAssign;
+    if (action === "collectMoney") return canReconcile;
+    if (action === "moneyOut") return canSettle;
+    if (!canUpdateStatus) return false;
+    if (isDriverSelfServiceUser) {
+      return (driverSelfServiceActions[order.deliveryStatus] ?? []).includes(action);
+    }
+    return true;
+  });
   const detailsPath = `/orders/${encodeURIComponent(order.orderNumber)}`;
 
   const patchStatus = async (status: string, reason?: string) => {
@@ -3668,7 +3703,7 @@ function OrderRowActions({
             >
               {t("operations.viewDetails")}
             </button>
-            {canEditOrder(order.deliveryStatus) ? (
+            {!isDriverSelfServiceUser && canEditOrder(order.deliveryStatus) ? (
               <button
                 className="button button-secondary"
                 onClick={() => {

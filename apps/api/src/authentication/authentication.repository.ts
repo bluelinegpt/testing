@@ -227,6 +227,33 @@ export class AuthenticationRepository {
     return result.rows.length === 1 ? result.rows[0] : undefined;
   }
 
+  /**
+   * The Driver a "Driver User" identity operates as, if any — a
+   * `company_user` account whose active `employee` profile link backs a
+   * `drivers.employee_id` record (see `OperationsService.currentEmployeeDriverId`,
+   * which `orders()`/`orderDetail()`/`operatorDashboardSummary()` already use
+   * to narrow an Operator-kind account's own view to just their Driver's
+   * Orders). Exposed here too so `/auth/me` can tell the client, authoritatively,
+   * that this Operator-kind account is really a Driver in practice — the
+   * client must never infer this from a display name or hardcode an account.
+   * Returns `undefined` for every other identity, including an ordinary
+   * office User whose linked Employee is not also a Driver.
+   */
+  public async linkedDriverId(
+    companyId: string | null,
+    profileType: "driver" | "employee" | "trader" | undefined,
+    profileId: string | undefined,
+  ): Promise<string | undefined> {
+    if (companyId === null || profileType !== "employee" || profileId === undefined) {
+      return undefined;
+    }
+    const result = await sql<{ id: string }>`
+      select id from drivers where employee_id = ${profileId}::uuid and company_id = ${companyId}::uuid
+      limit 1
+    `.execute(this.database);
+    return result.rows[0]?.id;
+  }
+
   public async passwordHash(accountId: string): Promise<string | undefined> {
     const result = await sql<{ passwordHash: string }>`
       select password_hash as "passwordHash" from accounts where id = ${accountId}::uuid

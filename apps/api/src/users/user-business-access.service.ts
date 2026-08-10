@@ -10,6 +10,7 @@ import { KyselyTransactionManager } from "../infrastructure/database/transaction
 import { ApplicationException } from "../presentation/errors/application.exception.js";
 import { IdentityContextAccessor } from "../security/identity-context.js";
 import { TenantContextAccessor } from "../tenancy/tenant-context.js";
+import { DriverRoleProvisioningService } from "./driver-role-provisioning.service.js";
 import type {
   CreateBusinessUserDto,
   LegacyBusinessLinkSyncDto,
@@ -93,6 +94,8 @@ export class UserBusinessAccessService {
     @Inject(IdentityContextAccessor) private readonly identities: IdentityContextAccessor,
     @Inject(PasswordHasher) private readonly passwordHasher: PasswordHasher,
     @Inject(TemporaryPasswordService) private readonly temporaryPasswords: TemporaryPasswordService,
+    @Inject(DriverRoleProvisioningService)
+    private readonly driverRoles: DriverRoleProvisioningService,
   ) {}
 
   public list(type: ProfileType, entityId: string) {
@@ -365,6 +368,28 @@ export class UserBusinessAccessService {
             },
           );
         }
+        // Automatic Driver operational access: a no-op unless `entityId` is
+        // an Employee backed by a Driver record. Additive and idempotent, so
+        // this is safe to run on every link, not only newly created ones.
+        if (type === "employee") {
+          const granted = await this.driverRoles.provisionForEmployeeLink(
+            transaction,
+            companyId,
+            entityId,
+            accountId,
+          );
+          if (granted) {
+            await this.audit(
+              transaction,
+              companyId,
+              actorId,
+              "user_profile.driver_role_auto_provisioned",
+              accountId,
+              correlationId,
+              { accountId, entityId },
+            );
+          }
+        }
         await this.completeIdempotency(
           transaction,
           `user_business_access.${type}.link`,
@@ -392,7 +417,17 @@ export class UserBusinessAccessService {
     const actorId = this.identities.current().identityId;
     const expectedKind = accountKindByProfile[type];
     const roleIds = [...new Set(input.roleIds ?? [])].sort();
-    if (type === "employee" && roleIds.length === 0) {
+    // A Driver-backed Employee needs no explicit Role pick: the Driver role
+    // is provisioned automatically below. Every other Employee still
+    // requires an administrator to choose at least one Company role, exactly
+    // as before.
+    const isDriverEmployee =
+      type === "employee" && (await this.driverRoles.isDriverBackedEmployee(
+        undefined,
+        companyId,
+        entityId,
+      ));
+    if (type === "employee" && roleIds.length === 0 && !isDriverEmployee) {
       const error = new ApplicationException(
         "employee_user_role_required",
         "An Employee User must have at least one Company role",
@@ -563,6 +598,27 @@ export class UserBusinessAccessService {
             username: payload.username,
           },
         );
+        // Automatic Driver operational access, same as `link()`. The account
+        // was just created, so no session exists yet to revoke.
+        if (type === "employee") {
+          const granted = await this.driverRoles.provisionForEmployeeLink(
+            transaction,
+            companyId,
+            entityId,
+            accountId,
+          );
+          if (granted) {
+            await this.audit(
+              transaction,
+              companyId,
+              actorId,
+              "user_profile.driver_role_auto_provisioned",
+              accountId,
+              correlationId,
+              { accountId, entityId },
+            );
+          }
+        }
         await this.completeIdempotency(
           transaction,
           `user_business_access.${type}.create_and_link`,

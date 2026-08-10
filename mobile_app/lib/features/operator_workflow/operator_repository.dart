@@ -2,6 +2,7 @@ import 'package:bluelinegpt_mobile/core/network/api_client.dart';
 import 'package:bluelinegpt_mobile/features/operator_workflow/operator_models.dart';
 
 abstract interface class OperatorRepository {
+  Future<OperatorDashboardSummary> dashboardSummary();
   Future<OperatorOrderPage> orders({
     int page = 1,
     String? search,
@@ -10,11 +11,25 @@ abstract interface class OperatorRepository {
   Future<OperatorOrder> detail(String id);
   Future<List<OperatorDriver>> drivers();
   Future<void> assign(String orderId, String driverId);
+  Future<void> changeStatus(String orderId, String status, {String? reason});
 }
 
 final class ApiOperatorRepository implements OperatorRepository {
   ApiOperatorRepository(this.api);
   final ApiClient api;
+
+  @override
+  Future<OperatorDashboardSummary> dashboardSummary() async {
+    final data = (await api.get<Object?>(
+      'operations/orders/dashboard-summary',
+    )).data;
+    if (data is! Map) throw const ApiFailure(ApiFailureKind.invalidResponse);
+    try {
+      return OperatorDashboardSummary.fromJson(Map<String, dynamic>.from(data));
+    } on OperatorDashboardParseError catch (error) {
+      throw ApiFailure(ApiFailureKind.invalidResponse, code: error.code);
+    }
+  }
 
   @override
   Future<OperatorOrderPage> orders({
@@ -90,12 +105,28 @@ final class ApiOperatorRepository implements OperatorRepository {
     await api.post<Object?>('operations/orders/bulk-assign', data: payload);
   }
 
+  @override
+  Future<void> changeStatus(
+    String orderId,
+    String status, {
+    String? reason,
+  }) async {
+    final payload = <String, dynamic>{'status': status};
+    final trimmedReason = reason?.trim();
+    if (trimmedReason?.isNotEmpty == true) payload['reason'] = trimmedReason;
+    await api.patch<Object?>(
+      'operations/orders/$orderId/status',
+      data: payload,
+    );
+  }
+
   static OperatorOrder _order(
     Map<String, dynamic> value, {
     bool includeHistory = false,
   }) => OperatorOrder(
     id: _required(value, 'id'),
     orderNumber: _required(value, 'orderNumber'),
+    serialNumber: _required(value, 'serialNumber'),
     orderDate: _required(value, 'orderDate'),
     traderName: _required(value, 'traderName'),
     customerName: _required(value, 'customerName'),
@@ -113,6 +144,11 @@ final class ApiOperatorRepository implements OperatorRepository {
     notes: value['metadata'] is Map
         ? (value['metadata'] as Map)['notes'] as String?
         : null,
+    // Present only on the single-Order detail fetch — the list query has no
+    // `emirates` join server-side (`operations.service.ts`'s `orders()` vs
+    // `orderById()`), so these are simply absent (never fabricated) there.
+    emirateNameEn: value['emirateNameEn'] as String?,
+    emirateNameAr: value['emirateNameAr'] as String?,
     history: includeHistory && value['history'] is List
         ? [
             for (final event in value['history'] as List)
