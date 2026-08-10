@@ -21,10 +21,12 @@ export class DriverCollectionPdfService implements OnModuleDestroy {
   private browserPromise: Promise<Browser> | undefined;
 
   private async browser(): Promise<Browser> {
-    this.browserPromise ??= chromium.launch({ headless: true }).catch((error: unknown) => {
-      this.browserPromise = undefined;
-      throw error;
-    });
+    this.browserPromise ??= chromium
+      .launch({ args: ["--no-sandbox", "--disable-setuid-sandbox"], headless: true })
+      .catch((error: unknown) => {
+        this.browserPromise = undefined;
+        throw error;
+      });
     return this.browserPromise;
   }
 
@@ -32,11 +34,12 @@ export class DriverCollectionPdfService implements OnModuleDestroy {
     let browser: Browser;
     try {
       browser = await this.browser();
-    } catch {
+    } catch (error) {
       throw new ApplicationException(
         "report_pdf_engine_unavailable",
         "The PDF engine could not start. The reconciliation data is unaffected.",
         HttpStatus.SERVICE_UNAVAILABLE,
+        error instanceof Error ? [error.message] : undefined,
       );
     }
     const page = await browser.newPage();
