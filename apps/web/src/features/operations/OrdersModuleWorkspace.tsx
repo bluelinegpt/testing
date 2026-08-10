@@ -158,7 +158,7 @@ function manifestSelectionPayload(
     selectionMode: "filter",
   };
   for (const key of manifestFilterKeys) {
-    if (filters[key] !== "") payload[key] = filters[key];
+    if (filters[key] !== "") Object.assign(payload, { [key]: filters[key] });
   }
   return payload;
 }
