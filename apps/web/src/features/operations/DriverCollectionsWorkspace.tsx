@@ -141,6 +141,8 @@ interface EligibleOrderRow {
   readonly deliveredAt: string | null;
   readonly id: string;
   readonly orderNumber: string;
+  readonly referenceNumber: string | null;
+  readonly serialNumber: string;
   readonly traderName: string;
 }
 
@@ -279,10 +281,7 @@ export function DriverCollectionsWorkspace({
   const setPage = list.setPage;
   // `useListState` omits empty filters entirely; the panel and `filterQuery`
   // both expect every key present, so the defaults are merged back in.
-  const filters = useMemo<Filters>(
-    () => ({ ...emptyFilters, ...list.filters }),
-    [list.filters],
-  );
+  const filters = useMemo<Filters>(() => ({ ...emptyFilters, ...list.filters }), [list.filters]);
   const [collectionsPage, setCollectionsPage] = useState<PagedResponse<CollectionRow>>();
   const [listError, setListError] = useState<string>();
   const [createOpen, setCreateOpen] = useState(false);
@@ -293,15 +292,20 @@ export function DriverCollectionsWorkspace({
      opening it. */
   const collectDeepLink = useWorkflowDeepLink(collectionDialogs);
   const [deepLinkDriverId, setDeepLinkDriverId] = useState<string>();
-  const [deepLinkOrderId, setDeepLinkOrderId] = useState<string>();
+  const [deepLinkOrderIds, setDeepLinkOrderIds] = useState<readonly string[]>();
   const [collectNotice, setCollectNotice] = useState<string>();
 
   useEffect(() => {
     const link = collectDeepLink.link;
     if (link === null || link.dialog !== "collect_money") return;
+    // Nothing to preselect: a New Collection with no Driver reads as lost
+    // context rather than as absent context.
     if (link.driverId === null) return;
     setDeepLinkDriverId(link.driverId);
-    if (link.orderId !== null) setDeepLinkOrderId(link.orderId);
+    // A row action carries `orderId` alone; a bulk action carries `orderIds`
+    // (possibly several). Either, both or neither may be present.
+    const orderIds = [...(link.orderId === null ? [] : [link.orderId]), ...link.orderIds];
+    if (orderIds.length > 0) setDeepLinkOrderIds(orderIds);
     setCreateOpen(true);
   }, [collectDeepLink]);
   const {
@@ -550,13 +554,13 @@ export function DriverCollectionsWorkspace({
         <CreateDriverCollectionDialog
           api={api}
           {...(deepLinkDriverId === undefined ? {} : { initialDriverId: deepLinkDriverId })}
-          {...(deepLinkOrderId === undefined ? {} : { initialOrderId: deepLinkOrderId })}
+          {...(deepLinkOrderIds === undefined ? {} : { initialOrderIds: deepLinkOrderIds })}
           onClose={() => {
             setCreateOpen(false);
             setCollectNotice(undefined);
           }}
-          onOriginatingOrderIneligible={() =>
-            setCollectNotice(t("common.originatingOrderIneligible"))
+          onOrdersSkipped={(count) =>
+            setCollectNotice(t("operations.collectSkippedOrders", { count }))
           }
           onCreated={() => {
             setCreateOpen(false);
@@ -965,18 +969,22 @@ function CreateDriverCollectionDialog({
   onClose,
   onCreated,
   initialDriverId,
-  initialOrderId,
-  onOriginatingOrderIneligible,
+  initialOrderIds,
+  onOrdersSkipped,
 }: {
   api: ApiClient;
-  /** Driver from a smart next action, preselected once the list resolves it. */
+  /** Driver from a smart next action or Orders bulk action, preselected once
+   *  the list resolves it. */
   initialDriverId?: string | undefined;
-  /** Originating Order, checked once it appears among the eligible Orders. */
-  initialOrderId?: string | undefined;
+  /** Originating Order(s) -- from a single row action or a bulk selection on
+   *  the Orders list -- checked once they appear among the eligible Orders. */
+  initialOrderIds?: readonly string[] | undefined;
   onClose: () => void;
   onCreated: () => void;
-  /** Called when the originating Order is not in the eligible list. */
-  onOriginatingOrderIneligible?: (() => void) | undefined;
+  /** Called with the count of originating Orders that are NOT in the eligible
+   *  list (already collected by someone else, reassigned, etc. since the
+   *  operator selected them) -- never blocks the remaining eligible ones. */
+  onOrdersSkipped?: ((count: number) => void) | undefined;
 }) {
   const { t } = useTranslation();
 
@@ -1004,20 +1012,26 @@ function CreateDriverCollectionDialog({
     if (match !== undefined) setDriver(match);
   }, [driver, drivers, initialDriverId]);
 
-  /* The originating Order is checked only when the backend actually returned
-     it as eligible. An Order that has since been collected, reversed or
-     reassigned simply is not there, and is reported rather than forced. */
+  /* Each originating Order is checked only when the backend actually
+     returned it as eligible -- never trusting the caller's selection as
+     authoritative (§4). One already collected, reversed or reassigned since
+     the operator selected it simply is not in `ordersPage`; it is reported
+     via `onOrdersSkipped`, and every OTHER originating Order that IS eligible
+     is still preselected -- a stale Order never blocks the rest. */
   useEffect(() => {
-    if (initialOrderId === undefined || originatingApplied.current) return;
+    if (initialOrderIds === undefined || initialOrderIds.length === 0) return;
+    if (originatingApplied.current) return;
     if (ordersPage === undefined) return;
     originatingApplied.current = true;
-    const eligible = ordersPage.items.some((row) => row.id === initialOrderId);
-    if (!eligible) {
-      onOriginatingOrderIneligible?.();
-      return;
+    const eligibleIds = initialOrderIds.filter((id) =>
+      ordersPage.items.some((row) => row.id === id),
+    );
+    const skippedCount = initialOrderIds.length - eligibleIds.length;
+    if (skippedCount > 0) onOrdersSkipped?.(skippedCount);
+    if (eligibleIds.length > 0) {
+      setSelectedIds((current) => new Set([...current, ...eligibleIds]));
     }
-    setSelectedIds((current) => new Set([...current, initialOrderId]));
-  }, [initialOrderId, onOriginatingOrderIneligible, ordersPage]);
+  }, [initialOrderIds, onOrdersSkipped, ordersPage]);
   const [ordersError, setOrdersError] = useState<string>();
 
   // Step 4 — Driver Expenses.
@@ -1332,431 +1346,438 @@ function CreateDriverCollectionDialog({
           </div>
         </div>
       ) : (
-        <form
-          className="order-form"
-          onSubmit={(event) => void (event.preventDefault(), confirm())}
-        >
+        <form className="order-form" onSubmit={(event) => void (event.preventDefault(), confirm())}>
           {/* `.order-modal` is a fixed-height flex column with overflow hidden,
               so the form must own the scroll region — otherwise the later steps
               (Driver Expenses, Review and Confirm) are clipped with no way to
               reach them. Same structure the Create Order modal already uses. */}
           <div className="order-modal-scroll">
-          {confirmError === undefined ? null : (
-            <div className="alert alert-error" role="alert">
-              {confirmError}
-            </div>
-          )}
-
-          {/* Step 1 — Driver */}
-          <section className="workspace-step">
-            <h3>{t("operations.collectionStepDriver")}</h3>
-            {driver === undefined ? (
-              <>
-                <label className="field">
-                  <span>{t("operations.searchDrivers")}</span>
-                  <input
-                    onChange={(event) => setDriverSearch(event.target.value)}
-                    placeholder={t("operations.searchDrivers")}
-                    type="search"
-                    value={driverSearch}
-                  />
-                </label>
-                <ul className="option-list">
-                  {drivers.map((option) => (
-                    <li key={option.id}>
-                      <button onClick={() => chooseDriver(option)} type="button">
-                        {/* Driver Name and Type only — no internal Driver code (§6). */}
-                        {option.name} — {t(`statuses.${option.driverType}`)}
-                      </button>
-                    </li>
-                  ))}
-                  {drivers.length === 0 ? (
-                    <li className="empty-state">{t("operations.noDrivers")}</li>
-                  ) : null}
-                </ul>
-              </>
-            ) : (
-              <div className="detail-line">
-                <span>
-                  {driver.name} — {t(`statuses.${driver.driverType}`)}
-                </span>
-                <button onClick={() => setDriver(undefined)} type="button">
-                  {t("common.change")}
-                </button>
+            {confirmError === undefined ? null : (
+              <div className="alert alert-error" role="alert">
+                {confirmError}
               </div>
             )}
-          </section>
 
-          {driver === undefined ? null : (
-            <>
-              {/* Step 2 — Payment Method: Cash or Visa, immediately after Driver
-                  and before Expenses (§2). */}
-              <section className="workspace-step">
-                <h3>{t("operations.paymentMethod")}</h3>
-                <label className="field required-field">
-                  <span>{t("operations.paymentMethod")}</span>
-                  <select
-                    onChange={(event) => changePaymentMethod(event.target.value as "cash" | "visa")}
-                    value={paymentMethod}
-                  >
-                    <option value="cash">{t("operations.paymentMethodCash")}</option>
-                    <option value="visa">{t("operations.paymentMethodVisa")}</option>
-                  </select>
-                </label>
-              </section>
-
-              {/* Step 3 — Eligible Orders */}
-              <section className="workspace-step">
-                <h3>{t("operations.collectionStepOrders")}</h3>
-                {ordersError === undefined ? null : (
-                  <div className="alert alert-error">{ordersError}</div>
-                )}
-                {/* Ten columns overflow the modal width; scroll instead of clipping. */}
-                <div className="table-scroll-x">
-                <table>
-                  <thead>
-                    <tr>
-                      <th scope="col">
-                        <span className="sr-only">{t("common.select")}</span>
-                      </th>
-                      <th scope="col">{t("operations.serialNumber")}</th>
-                      <th scope="col">{t("operations.externalReferenceNumber")}</th>
-                      <th scope="col">{t("operations.deliveryDate")}</th>
-                      <th scope="col">{t("operations.trader")}</th>
-                      <th scope="col">{t("operations.customer")}</th>
-                      <th scope="col">{t("operations.areaField")}</th>
-                      <th scope="col">{t("operations.customerAmountToCollect")}</th>
-                      <th scope="col">{t("operations.paymentMethod")}</th>
-                      <th scope="col">{t("operations.cashStatus")}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(ordersPage?.items ?? []).map((order) => (
-                      <tr key={order.id}>
-                        <td>
-                          <input
-                            aria-label={t("operations.selectOrder", { order: order.orderNumber })}
-                            checked={selectedIds.has(order.id)}
-                            onChange={() => toggleOrder(order.id)}
-                            type="checkbox"
-                          />
-                        </td>
-                        <td>{order.orderNumber}</td>
-                        <td>—</td>
-                        <td>{order.deliveredAt ?? ""}</td>
-                        <td>{order.traderName}</td>
-                        <td>{order.customerName}</td>
-                        <td>{order.areaName}</td>
-                        <td>{money(order.amountCollected)}</td>
-                        <td>
-                          {t(
-                            `operations.paymentMethod${paymentMethod === "cash" ? "Cash" : "Visa"}`,
-                          )}
-                        </td>
-                        <td>
-                          <DriverCashStatusLabel value={order.cashStatus} />
-                        </td>
-                      </tr>
+            {/* Step 1 — Driver */}
+            <section className="workspace-step">
+              <h3>{t("operations.collectionStepDriver")}</h3>
+              {driver === undefined ? (
+                <>
+                  <label className="field">
+                    <span>{t("operations.searchDrivers")}</span>
+                    <input
+                      onChange={(event) => setDriverSearch(event.target.value)}
+                      placeholder={t("operations.searchDrivers")}
+                      type="search"
+                      value={driverSearch}
+                    />
+                  </label>
+                  <ul className="option-list">
+                    {drivers.map((option) => (
+                      <li key={option.id}>
+                        <button onClick={() => chooseDriver(option)} type="button">
+                          {/* Driver Name and Type only — no internal Driver code (§6). */}
+                          {option.name} — {t(`statuses.${option.driverType}`)}
+                        </button>
+                      </li>
                     ))}
-                    {(ordersPage?.items.length ?? 0) === 0 ? (
-                      <tr>
-                        <td className="empty-state" colSpan={10}>
-                          {t("operations.noEligibleOrders")}
-                        </td>
-                      </tr>
+                    {drivers.length === 0 ? (
+                      <li className="empty-state">{t("operations.noDrivers")}</li>
                     ) : null}
-                  </tbody>
-                </table>
+                  </ul>
+                </>
+              ) : (
+                <div className="detail-line">
+                  <span>
+                    {driver.name} — {t(`statuses.${driver.driverType}`)}
+                  </span>
+                  <button onClick={() => setDriver(undefined)} type="button">
+                    {t("common.change")}
+                  </button>
                 </div>
-              </section>
+              )}
+            </section>
 
-              {/* Step 4 — Driver Expenses */}
-              <section className="workspace-step">
-                <h3>{t("operations.collectionStepExpenses")}</h3>
-                {expenses.map((row, index) => {
-                  const type = expenseTypes.find((option) => option.id === row.expenseTypeId);
-                  return (
-                    <div className="reconciliation-row" key={index}>
-                      <label>
-                        {t("operations.expenseType")}
-                        <select
-                          onChange={(event) =>
-                            setExpenses(
-                              expenses.map((current, position) =>
-                                position === index
-                                  ? { ...current, expenseTypeId: event.target.value }
-                                  : current,
-                              ),
-                            )
+            {driver === undefined ? null : (
+              <>
+                {/* Step 2 — Payment Method: Cash or Visa, immediately after Driver
+                  and before Expenses (§2). */}
+                <section className="workspace-step">
+                  <h3>{t("operations.paymentMethod")}</h3>
+                  <label className="field required-field">
+                    <span>{t("operations.paymentMethod")}</span>
+                    <select
+                      onChange={(event) =>
+                        changePaymentMethod(event.target.value as "cash" | "visa")
+                      }
+                      value={paymentMethod}
+                    >
+                      <option value="cash">{t("operations.paymentMethodCash")}</option>
+                      <option value="visa">{t("operations.paymentMethodVisa")}</option>
+                    </select>
+                  </label>
+                </section>
+
+                {/* Step 3 — Eligible Orders */}
+                <section className="workspace-step">
+                  <h3>{t("operations.collectionStepOrders")}</h3>
+                  {ordersError === undefined ? null : (
+                    <div className="alert alert-error">{ordersError}</div>
+                  )}
+                  {/* Ten columns overflow the modal width; scroll instead of clipping. */}
+                  <div className="table-scroll-x">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th scope="col">
+                            <span className="sr-only">{t("common.select")}</span>
+                          </th>
+                          <th scope="col">{t("operations.serialNumber")}</th>
+                          <th scope="col">{t("operations.orderNumber")}</th>
+                          <th scope="col">{t("operations.externalReferenceNumber")}</th>
+                          <th scope="col">{t("operations.deliveryDate")}</th>
+                          <th scope="col">{t("operations.trader")}</th>
+                          <th scope="col">{t("operations.customer")}</th>
+                          <th scope="col">{t("operations.areaField")}</th>
+                          <th scope="col">{t("operations.customerAmountToCollect")}</th>
+                          <th scope="col">{t("operations.paymentMethod")}</th>
+                          <th scope="col">{t("operations.cashStatus")}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(ordersPage?.items ?? []).map((order) => (
+                          <tr key={order.id}>
+                            <td>
+                              <input
+                                aria-label={t("operations.selectOrder", {
+                                  order: order.orderNumber,
+                                })}
+                                checked={selectedIds.has(order.id)}
+                                onChange={() => toggleOrder(order.id)}
+                                type="checkbox"
+                              />
+                            </td>
+                            {/* The Serial Number is what the operator reads elsewhere
+                            (the Orders list, the Driver Collection report); the
+                            Order Number stays available alongside it, never
+                            relabelled as the Serial Number. */}
+                            <td>{order.serialNumber}</td>
+                            <td>{order.orderNumber}</td>
+                            <td>{order.referenceNumber ?? "—"}</td>
+                            <td>{order.deliveredAt ?? ""}</td>
+                            <td>{order.traderName}</td>
+                            <td>{order.customerName}</td>
+                            <td>{order.areaName}</td>
+                            <td>{money(order.amountCollected)}</td>
+                            <td>
+                              {t(
+                                `operations.paymentMethod${paymentMethod === "cash" ? "Cash" : "Visa"}`,
+                              )}
+                            </td>
+                            <td>
+                              <DriverCashStatusLabel value={order.cashStatus} />
+                            </td>
+                          </tr>
+                        ))}
+                        {(ordersPage?.items.length ?? 0) === 0 ? (
+                          <tr>
+                            <td className="empty-state" colSpan={10}>
+                              {t("operations.noEligibleOrders")}
+                            </td>
+                          </tr>
+                        ) : null}
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+
+                {/* Step 4 — Driver Expenses */}
+                <section className="workspace-step">
+                  <h3>{t("operations.collectionStepExpenses")}</h3>
+                  {expenses.map((row, index) => {
+                    const type = expenseTypes.find((option) => option.id === row.expenseTypeId);
+                    return (
+                      <div className="reconciliation-row" key={index}>
+                        <label>
+                          {t("operations.expenseType")}
+                          <select
+                            onChange={(event) =>
+                              setExpenses(
+                                expenses.map((current, position) =>
+                                  position === index
+                                    ? { ...current, expenseTypeId: event.target.value }
+                                    : current,
+                                ),
+                              )
+                            }
+                            value={row.expenseTypeId}
+                          >
+                            <option value="">{t("common.select")}</option>
+                            {expenseTypes.map((option) => (
+                              <option key={option.id} value={option.id}>
+                                {option.name}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label>
+                          {t("operations.amount")}
+                          <input
+                            min="0.01"
+                            onChange={(event) =>
+                              setExpenses(
+                                expenses.map((current, position) =>
+                                  position === index
+                                    ? { ...current, amount: event.target.value }
+                                    : current,
+                                ),
+                              )
+                            }
+                            step="0.01"
+                            type="number"
+                            value={row.amount}
+                          />
+                        </label>
+                        <label>
+                          {t("operations.reason")}
+                          <input
+                            onChange={(event) =>
+                              setExpenses(
+                                expenses.map((current, position) =>
+                                  position === index
+                                    ? { ...current, reason: event.target.value }
+                                    : current,
+                                ),
+                              )
+                            }
+                            placeholder={t("operations.expenseReasonPlaceholder")}
+                            type="text"
+                            value={row.reason}
+                          />
+                        </label>
+                        {type?.requiresDescription === true ? (
+                          <small className="field-hint">{t("operations.otherExpenseHint")}</small>
+                        ) : null}
+                        <button
+                          onClick={() =>
+                            setExpenses(expenses.filter((_, position) => position !== index))
                           }
-                          value={row.expenseTypeId}
+                          type="button"
                         >
-                          <option value="">{t("common.select")}</option>
-                          {expenseTypes.map((option) => (
-                            <option key={option.id} value={option.id}>
-                              {option.name}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <label>
-                        {t("operations.amount")}
-                        <input
-                          min="0.01"
-                          onChange={(event) =>
-                            setExpenses(
-                              expenses.map((current, position) =>
-                                position === index
-                                  ? { ...current, amount: event.target.value }
-                                  : current,
-                              ),
-                            )
-                          }
-                          step="0.01"
-                          type="number"
-                          value={row.amount}
-                        />
-                      </label>
-                      <label>
-                        {t("operations.reason")}
-                        <input
-                          onChange={(event) =>
-                            setExpenses(
-                              expenses.map((current, position) =>
-                                position === index
-                                  ? { ...current, reason: event.target.value }
-                                  : current,
-                              ),
-                            )
-                          }
-                          placeholder={t("operations.expenseReasonPlaceholder")}
-                          type="text"
-                          value={row.reason}
-                        />
-                      </label>
-                      {type?.requiresDescription === true ? (
-                        <small className="field-hint">{t("operations.otherExpenseHint")}</small>
-                      ) : null}
+                          {t("common.remove")}
+                        </button>
+                      </div>
+                    );
+                  })}
+                  <button
+                    onClick={() =>
+                      setExpenses([...expenses, { amount: "", expenseTypeId: "", reason: "" }])
+                    }
+                    type="button"
+                  >
+                    {t("operations.addExpense")}
+                  </button>
+                </section>
+
+                {driver.driverType === "outsourced" ? (
+                  <section className="workspace-step driver-fee-offset">
+                    <h3>{t("operations.driverFeeOffset.title")}</h3>
+                    <p className="field-hint">{t("operations.driverFeeOffset.help")}</p>
+                    <dl className="reconciliation-summary">
+                      <div className="detail-line">
+                        <dt>{t("operations.driverFeeOffset.totalOutstanding")}</dt>
+                        <dd>{money(preview?.totalOutstandingDriverFees)}</dd>
+                      </div>
+                      <div className="detail-line">
+                        <dt>{t("operations.driverFeeOffset.eligibleAccruals")}</dt>
+                        <dd>{preview?.eligibleDriverFeeAccrualCount ?? 0}</dd>
+                      </div>
+                      <div className="detail-line">
+                        <dt>{t("operations.driverFeeOffset.safeMaximum")}</dt>
+                        <dd>{money(preview?.safeMaximumDriverFeeOffset)}</dd>
+                      </div>
+                      <div className="detail-line">
+                        <dt>
+                          <label htmlFor="driver-fee-offset">
+                            {t("operations.driverFeeOffset.selected")}
+                          </label>
+                        </dt>
+                        <dd>
+                          <input
+                            id="driver-fee-offset"
+                            inputMode="decimal"
+                            min="0"
+                            onChange={(event) => {
+                              setDriverFeeOffset(event.target.value);
+                              setManualDriverFeeAllocations(undefined);
+                            }}
+                            step="0.01"
+                            type="number"
+                            value={driverFeeOffset}
+                          />
+                        </dd>
+                      </div>
+                      <div className="detail-line">
+                        <dt>{t("operations.driverFeeOffset.remaining")}</dt>
+                        <dd>{money(preview?.remainingDriverFeeOutstanding)}</dd>
+                      </div>
+                    </dl>
+                    <div className="heading-actions">
                       <button
-                        onClick={() =>
-                          setExpenses(expenses.filter((_, position) => position !== index))
-                        }
+                        onClick={() => {
+                          setDriverFeeOffset(preview?.safeMaximumDriverFeeOffset ?? "0.00");
+                          setManualDriverFeeAllocations(undefined);
+                        }}
                         type="button"
                       >
-                        {t("common.remove")}
+                        {t("operations.driverFeeOffset.applyAll")}
                       </button>
+                      <button
+                        onClick={() => {
+                          setDriverFeeOffset("0.00");
+                          setManualDriverFeeAllocations(undefined);
+                        }}
+                        type="button"
+                      >
+                        {t("operations.driverFeeOffset.applyNone")}
+                      </button>
+                      {manualDriverFeeAllocations === undefined ? null : (
+                        <button
+                          onClick={() => setManualDriverFeeAllocations(undefined)}
+                          type="button"
+                        >
+                          {t("payroll.driverFees.actions.oldestFirst")}
+                        </button>
+                      )}
                     </div>
-                  );
-                })}
-                <button
-                  onClick={() =>
-                    setExpenses([...expenses, { amount: "", expenseTypeId: "", reason: "" }])
-                  }
-                  type="button"
-                >
-                  {t("operations.addExpense")}
-                </button>
-              </section>
+                    {manualDriverFeeAllocations === undefined ? null : (
+                      <div className="alert alert-warning">
+                        {t("payroll.driverFees.pay.overrideWarning")}
+                      </div>
+                    )}
+                    {(preview?.driverFeeAllocations.length ?? 0) === 0 ? null : (
+                      <div className="table-scroll-x">
+                        <table>
+                          <thead>
+                            <tr>
+                              <th>{t("operations.order")}</th>
+                              <th>{t("operations.driverFeeOffset.outstandingBefore")}</th>
+                              <th>{t("operations.driverFeeOffset.proposed")}</th>
+                              <th>{t("operations.driverFeeOffset.remainingAfter")}</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {preview?.driverFeeAllocations.map((line) => (
+                              <tr key={line.accrualId}>
+                                <td>{line.orderNumber}</td>
+                                <td>{money(line.outstandingBefore)}</td>
+                                <td>
+                                  <input
+                                    inputMode="decimal"
+                                    min="0"
+                                    onChange={(event) => {
+                                      const nextAmount = Number(money(event.target.value));
+                                      const current =
+                                        manualDriverFeeAllocations ??
+                                        preview.driverFeeAllocations.map((item) => ({
+                                          accrualId: item.accrualId,
+                                          amount: Number(money(item.amount)),
+                                        }));
+                                      setManualDriverFeeAllocations(
+                                        current.map((item) =>
+                                          item.accrualId === line.accrualId
+                                            ? { ...item, amount: nextAmount }
+                                            : item,
+                                        ),
+                                      );
+                                    }}
+                                    step="0.01"
+                                    type="number"
+                                    value={
+                                      manualDriverFeeAllocations?.find(
+                                        (item) => item.accrualId === line.accrualId,
+                                      )?.amount ?? line.amount
+                                    }
+                                  />
+                                </td>
+                                <td>{money(line.remainingOutstanding)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </section>
+                ) : null}
 
-              {driver.driverType === "outsourced" ? (
-                <section className="workspace-step driver-fee-offset">
-                  <h3>{t("operations.driverFeeOffset.title")}</h3>
-                  <p className="field-hint">{t("operations.driverFeeOffset.help")}</p>
+                {/* Step 5 — Totals */}
+                <section className="workspace-step">
+                  <h3>{t("operations.collectionStepReview")}</h3>
+                  {previewError === undefined ? null : (
+                    <div className="alert alert-error">{previewError}</div>
+                  )}
+                  {(preview?.warnings.length ?? 0) === 0 ? null : (
+                    <div className="alert alert-error" role="alert">
+                      <p>{t("operations.mixedEligibilityWarning")}</p>
+                      <ul>
+                        {preview?.warnings.map((warning) => (
+                          <li key={warning}>{warning}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
                   <dl className="reconciliation-summary">
                     <div className="detail-line">
-                      <dt>{t("operations.driverFeeOffset.totalOutstanding")}</dt>
-                      <dd>{money(preview?.totalOutstandingDriverFees)}</dd>
+                      <dt>{t("operations.selectedCollections")}</dt>
+                      <dd>{money(preview?.grossCollections)}</dd>
                     </div>
                     <div className="detail-line">
-                      <dt>{t("operations.driverFeeOffset.eligibleAccruals")}</dt>
-                      <dd>{preview?.eligibleDriverFeeAccrualCount ?? 0}</dd>
+                      <dt>{t("operations.expenses")}</dt>
+                      <dd>{money(preview?.expenseTotal)}</dd>
                     </div>
                     <div className="detail-line">
-                      <dt>{t("operations.driverFeeOffset.safeMaximum")}</dt>
-                      <dd>{money(preview?.safeMaximumDriverFeeOffset)}</dd>
+                      <dt>{t("operations.driverFeeOffset.title")}</dt>
+                      <dd>{money(preview?.driverPayableDeduction)}</dd>
+                    </div>
+                    <div className="detail-line detail-line-total">
+                      <dt>{t("operations.netExpected")}</dt>
+                      <dd>
+                        <strong>{money(preview?.netAmountExpected)}</strong>
+                      </dd>
                     </div>
                     <div className="detail-line">
                       <dt>
-                        <label htmlFor="driver-fee-offset">
-                          {t("operations.driverFeeOffset.selected")}
-                        </label>
+                        <label htmlFor="actual-received">{t("operations.actualReceived")}</label>
                       </dt>
                       <dd>
                         <input
-                          id="driver-fee-offset"
+                          id="actual-received"
                           inputMode="decimal"
-                          min="0"
-                          onChange={(event) => {
-                            setDriverFeeOffset(event.target.value);
-                            setManualDriverFeeAllocations(undefined);
-                          }}
+                          onChange={(event) => setActualReceived(event.target.value)}
+                          required
                           step="0.01"
                           type="number"
-                          value={driverFeeOffset}
+                          value={actualReceived}
                         />
                       </dd>
                     </div>
                     <div className="detail-line">
-                      <dt>{t("operations.driverFeeOffset.remaining")}</dt>
-                      <dd>{money(preview?.remainingDriverFeeOutstanding)}</dd>
+                      <dt>{t("operations.difference")}</dt>
+                      <dd className={Number(difference) === 0 ? undefined : "summary-invalid"}>
+                        <strong>{difference}</strong>
+                      </dd>
                     </div>
                   </dl>
-                  <div className="heading-actions">
-                    <button
-                      onClick={() => {
-                        setDriverFeeOffset(preview?.safeMaximumDriverFeeOffset ?? "0.00");
-                        setManualDriverFeeAllocations(undefined);
-                      }}
-                      type="button"
-                    >
-                      {t("operations.driverFeeOffset.applyAll")}
-                    </button>
-                    <button
-                      onClick={() => {
-                        setDriverFeeOffset("0.00");
-                        setManualDriverFeeAllocations(undefined);
-                      }}
-                      type="button"
-                    >
-                      {t("operations.driverFeeOffset.applyNone")}
-                    </button>
-                    {manualDriverFeeAllocations === undefined ? null : (
-                      <button
-                        onClick={() => setManualDriverFeeAllocations(undefined)}
-                        type="button"
-                      >
-                        {t("payroll.driverFees.actions.oldestFirst")}
-                      </button>
-                    )}
-                  </div>
-                  {manualDriverFeeAllocations === undefined ? null : (
-                    <div className="alert alert-warning">
-                      {t("payroll.driverFees.pay.overrideWarning")}
-                    </div>
-                  )}
-                  {(preview?.driverFeeAllocations.length ?? 0) === 0 ? null : (
-                    <div className="table-scroll-x">
-                      <table>
-                        <thead>
-                          <tr>
-                            <th>{t("operations.order")}</th>
-                            <th>{t("operations.driverFeeOffset.outstandingBefore")}</th>
-                            <th>{t("operations.driverFeeOffset.proposed")}</th>
-                            <th>{t("operations.driverFeeOffset.remainingAfter")}</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {preview?.driverFeeAllocations.map((line) => (
-                            <tr key={line.accrualId}>
-                              <td>{line.orderNumber}</td>
-                              <td>{money(line.outstandingBefore)}</td>
-                              <td>
-                                <input
-                                  inputMode="decimal"
-                                  min="0"
-                                  onChange={(event) => {
-                                    const nextAmount = Number(money(event.target.value));
-                                    const current =
-                                      manualDriverFeeAllocations ??
-                                      preview.driverFeeAllocations.map((item) => ({
-                                        accrualId: item.accrualId,
-                                        amount: Number(money(item.amount)),
-                                      }));
-                                    setManualDriverFeeAllocations(
-                                      current.map((item) =>
-                                        item.accrualId === line.accrualId
-                                          ? { ...item, amount: nextAmount }
-                                          : item,
-                                      ),
-                                    );
-                                  }}
-                                  step="0.01"
-                                  type="number"
-                                  value={
-                                    manualDriverFeeAllocations?.find(
-                                      (item) => item.accrualId === line.accrualId,
-                                    )?.amount ?? line.amount
-                                  }
-                                />
-                              </td>
-                              <td>{money(line.remainingOutstanding)}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
+                  {Number(difference) === 0 ? null : (
+                    <p className="field-error" role="alert">
+                      {t("operations.blockedDifference")}
+                    </p>
                   )}
                 </section>
-              ) : null}
+              </>
+            )}
 
-              {/* Step 5 — Totals */}
-              <section className="workspace-step">
-                <h3>{t("operations.collectionStepReview")}</h3>
-                {previewError === undefined ? null : (
-                  <div className="alert alert-error">{previewError}</div>
-                )}
-                {(preview?.warnings.length ?? 0) === 0 ? null : (
-                  <div className="alert alert-error" role="alert">
-                    <p>{t("operations.mixedEligibilityWarning")}</p>
-                    <ul>
-                      {preview?.warnings.map((warning) => (
-                        <li key={warning}>{warning}</li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-                <dl className="reconciliation-summary">
-                  <div className="detail-line">
-                    <dt>{t("operations.selectedCollections")}</dt>
-                    <dd>{money(preview?.grossCollections)}</dd>
-                  </div>
-                  <div className="detail-line">
-                    <dt>{t("operations.expenses")}</dt>
-                    <dd>{money(preview?.expenseTotal)}</dd>
-                  </div>
-                  <div className="detail-line">
-                    <dt>{t("operations.driverFeeOffset.title")}</dt>
-                    <dd>{money(preview?.driverPayableDeduction)}</dd>
-                  </div>
-                  <div className="detail-line detail-line-total">
-                    <dt>{t("operations.netExpected")}</dt>
-                    <dd>
-                      <strong>{money(preview?.netAmountExpected)}</strong>
-                    </dd>
-                  </div>
-                  <div className="detail-line">
-                    <dt>
-                      <label htmlFor="actual-received">{t("operations.actualReceived")}</label>
-                    </dt>
-                    <dd>
-                      <input
-                        id="actual-received"
-                        inputMode="decimal"
-                        onChange={(event) => setActualReceived(event.target.value)}
-                        required
-                        step="0.01"
-                        type="number"
-                        value={actualReceived}
-                      />
-                    </dd>
-                  </div>
-                  <div className="detail-line">
-                    <dt>{t("operations.difference")}</dt>
-                    <dd className={Number(difference) === 0 ? undefined : "summary-invalid"}>
-                      <strong>{difference}</strong>
-                    </dd>
-                  </div>
-                </dl>
-                {Number(difference) === 0 ? null : (
-                  <p className="field-error" role="alert">
-                    {t("operations.blockedDifference")}
-                  </p>
-                )}
-              </section>
-            </>
-          )}
-
-          {/* Step 6 — Confirmation */}
+            {/* Step 6 — Confirmation */}
           </div>
           {/* Outside the scroll region so Cancel/Confirm stay reachable. */}
           <div className="modal-actions order-modal-actions">

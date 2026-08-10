@@ -60,7 +60,7 @@ import { normalizeLocale } from "../../localization/locale.js";
 import { CompanyBrandingContext } from "../../app/CompanyBrandingContext.js";
 import { AccountingRelatedPanel } from "../accounting/AccountingRelatedPanel.js";
 import { localizeName } from "../../localization/localize-name.js";
-import { formatMoneyValue, parseMoneyInput, parseNumericInput } from "../../utils/numeric-input.js";
+import { parseMoneyInput, parseNumericInput } from "../../utils/numeric-input.js";
 import { useSessionAccess } from "../../app/SessionAccessContext.js";
 import { useListState } from "../accounting/use-list-state.js";
 import { BusinessDateFilterControls } from "./BusinessDateFilterControls.js";
@@ -76,7 +76,6 @@ import { DriverCollectionDetailDialog } from "./DriverCollectionsWorkspace.js";
 import { openOrderWaybill, OrderBarcode } from "./OperationsWorkspace.js";
 import { type PdfAction, useReconciliationPdfActions } from "./reconciliation-pdf.js";
 import { SettlementDetailDialog } from "./TraderSettlementsWorkspace.js";
-import { materialFingerprint, useIdempotencyKey } from "./useIdempotencyKey.js";
 
 /**
  * `delivery` is a FRONTEND-ONLY view. It is never sent as `quickView`: the
@@ -88,7 +87,7 @@ type QuickView = "active" | "all" | "hold" | "cancelled" | "closed" | "delivery"
 /** Quick views the backend actually understands. */
 const backendQuickViews = new Set(["active", "all", "hold", "cancelled", "closed"]);
 type OrderGrouping = "" | "status" | "driver";
-type BulkAction = "assign" | "collect" | "manifest" | "status";
+type BulkAction = "assign" | "manifest" | "status";
 
 interface OrderFilters {
   areaId: string;
@@ -376,6 +375,14 @@ export function OrdersModuleWorkspace({
     () => selectionPayload(filters, allMatching, excludedIds, selectedIds),
     [allMatching, excludedIds, filters, selectedIds],
   );
+  // Explicit rows only -- "select all matching" can span far more Orders than
+  // is sane to carry in a URL, so that mode hands over just the Driver filter
+  // (when set) and lets the destination screen's own eligible-Orders list do
+  // the rest.
+  const bulkSelectedOrders = useMemo(
+    () => (allMatching ? [] : (data?.items ?? []).filter((order) => selectedIds.has(order.id))),
+    [allMatching, data, selectedIds],
+  );
   const manifestSelection = useMemo<ManifestSelectionPayload>(
     () => cleanSelectionPayload(filters, allMatching, excludedIds, selectedIds),
     [allMatching, excludedIds, filters, selectedIds],
@@ -585,11 +592,7 @@ export function OrdersModuleWorkspace({
           <OrderAccountingBadge order={order} />
         </td>
         <td>
-          <FinancialStatusCell
-            onNavigate={onNavigate}
-            order={order}
-            permissions={permissions}
-          />
+          <FinancialStatusCell onNavigate={onNavigate} order={order} permissions={permissions} />
         </td>
         <td>
           <OrderRowActions
@@ -856,7 +859,17 @@ export function OrdersModuleWorkspace({
                 </button>
               ) : null}
               {canReconcile ? (
-                <button onClick={() => setBulkAction("collect")} type="button">
+                <button
+                  onClick={() =>
+                    onNavigate(
+                      collectFromDriverPath({
+                        driverId: bulkSelectedOrders[0]?.assignedDriverId ?? filters.driverId,
+                        orderIds: bulkSelectedOrders.map((order) => order.id),
+                      }),
+                    )
+                  }
+                  type="button"
+                >
                   <HandCoins aria-hidden="true" size={17} />
                   {t("operations.actions.collectMoney")}
                 </button>
@@ -1095,19 +1108,6 @@ export function OrdersModuleWorkspace({
             clearSelection();
             await load();
           }}
-        />
-      ) : null}
-      {bulkAction === "collect" ? (
-        <CollectMoneyDialog
-          api={api}
-          drivers={drivers}
-          onClose={() => setBulkAction(undefined)}
-          onComplete={async () => {
-            setBulkAction(undefined);
-            clearSelection();
-            await load();
-          }}
-          selection={selection}
         />
       ) : null}
       {bulkAction === "manifest" ? (
@@ -1943,7 +1943,6 @@ export function OrderDetailsWorkspace({
   const [holdOpen, setHoldOpen] = useState(false);
   const [statusBusy, setStatusBusy] = useState(false);
   const [error, setError] = useState<string>();
-  const [collectOpen, setCollectOpen] = useState(false);
   const [viewCollectionId, setViewCollectionId] = useState<string>();
   const [collectionError, setCollectionError] = useState<string>();
   const [collectionSummary, setCollectionSummary] = useState<{
@@ -2207,7 +2206,14 @@ export function OrderDetailsWorkspace({
             permissions.includes("users_roles.manage")) ? (
             <button
               className="button button-secondary"
-              onClick={() => setCollectOpen(true)}
+              onClick={() =>
+                onNavigate?.(
+                  collectFromDriverPath({
+                    driverId: detail.assignedDriverId,
+                    orderIds: [detail.id],
+                  }),
+                )
+              }
               type="button"
             >
               {t("operations.actions.collectMoney")}
@@ -2621,14 +2627,14 @@ export function OrderDetailsWorkspace({
             </section>
           )}
           {!showsAccountingRelatedRecords(detail) ? null : (
-          <AccountingRelatedPanel
-            api={api}
-            companyId={companyId}
-            onNavigate={(path) => onNavigate?.(path)}
-            permissions={permissions}
-            sourceId={detail.id}
-            sourceType="order"
-          />
+            <AccountingRelatedPanel
+              api={api}
+              companyId={companyId}
+              onNavigate={(path) => onNavigate?.(path)}
+              permissions={permissions}
+              sourceId={detail.id}
+              sourceType="order"
+            />
           )}
         </div>
       </main>
@@ -2678,34 +2684,6 @@ export function OrderDetailsWorkspace({
           {settlementError}
         </div>
       )}
-      {collectOpen ? (
-        <CollectMoneyDialog
-          api={api}
-          drivers={
-            detail.assignedDriverId === null
-              ? []
-              : [
-                  {
-                    activeOrders: 0,
-                    code: "",
-                    deliveredOrders: 0,
-                    id: detail.assignedDriverId,
-                    mobileNumber: detail.assignedDriverMobile ?? "",
-                    name: detail.assignedDriverName ?? "",
-                    pendingCashOrders: 0,
-                    status: "active",
-                    type: "",
-                  },
-                ]
-          }
-          onClose={() => setCollectOpen(false)}
-          onComplete={async () => {
-            setCollectOpen(false);
-            await load();
-          }}
-          selection={singleSelection(detail.id)}
-        />
-      ) : null}
       {viewCollectionId === undefined ? null : (
         <DriverCollectionDetailDialog
           api={api}
@@ -2913,428 +2891,6 @@ function BulkStatusDialog({
           {saving ? t("common.working") : t("common.confirm")}
         </button>
       </div>
-    </Modal>
-  );
-}
-
-interface CollectPreview {
-  readonly companyFees: string;
-  readonly difference: string;
-  readonly driverId: string;
-  readonly expenseTotal: string;
-  readonly grossCollections: string;
-  readonly netAmountExpected: string;
-  readonly orderCount: number;
-  readonly paymentTotal: string;
-  readonly traderCount: number;
-  readonly traderPayable: string;
-  readonly warnings: readonly string[];
-}
-interface CollectExpenseType {
-  readonly id: string;
-  readonly name: string;
-}
-
-// Collect the cash for the selected delivered orders from their driver, in one reconciliation.
-// The backend requires every selected order to belong to the same driver.
-function CollectMoneyDialog({
-  api,
-  drivers,
-  onClose,
-  onComplete,
-  selection,
-}: {
-  api: ApiClient;
-  drivers: readonly OperationsDriver[];
-  onClose: () => void;
-  onComplete: () => Promise<void>;
-  selection: SelectionPayload;
-}) {
-  const { i18n, t } = useTranslation();
-  const locale = normalizeLocale(i18n.resolvedLanguage);
-  const branding = useContext(CompanyBrandingContext);
-  const reportLanguage = branding?.textLanguage === "ar" ? "ar" : "en";
-  const [paymentMethod, setPaymentMethod] = useState<"cash" | "visa">("cash");
-  const [expenses, setExpenses] = useState<
-    readonly { amount: string; expenseTypeId: string; reason: string }[]
-  >([]);
-  // Never pre-filled from Net Expected: the operator enters what the Driver actually
-  // handed over, so the Difference correctly reads negative until they do.
-  const [cash, setCash] = useState("");
-  const [expenseTypes, setExpenseTypes] = useState<readonly CollectExpenseType[]>([]);
-  const [preview, setPreview] = useState<CollectPreview>();
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string>();
-  const [confirmed, setConfirmed] = useState<{
-    driverName: string;
-    grossCollections: string;
-    orderCount: number;
-    paymentMethod: "cash" | "visa";
-    reconciliationId: string;
-    reconciliationNumber: string;
-  }>();
-  const pdf = useReconciliationPdfActions(api);
-  const [pdfError, setPdfError] = useState<string>();
-  const idempotency = useIdempotencyKey();
-
-  // Reason is optional; rows still being filled in (no type or amount yet) are ignored.
-  const filledExpenses = expenses.filter((row) => row.expenseTypeId !== "" && row.amount !== "");
-  const cleanExpenses = useMemo(
-    () =>
-      filledExpenses.map((row) => ({
-        amount: Number(twoDecimals(row.amount)),
-        expenseTypeId: row.expenseTypeId,
-        reason: row.reason.trim(),
-      })),
-    // filledExpenses is rebuilt every render; key the memo on its serialized
-    // value so it only recomputes when an expense's content actually changes.
-    [JSON.stringify(filledExpenses)],
-  );
-
-  useEffect(() => {
-    void api
-      .get<readonly CollectExpenseType[]>("operations/cash/expense-types")
-      .then(setExpenseTypes)
-      .catch(() => undefined);
-  }, [api]);
-
-  // Preview depends on the selection and expenses only (payments don't change the net expected),
-  // so typing the cash amount doesn't re-hit the server.
-  useEffect(() => {
-    let active = true;
-    const timer = window.setTimeout(() => {
-      void api
-        .post<CollectPreview>("operations/cash/reconciliations/preview", {
-          ...selection,
-          expenses: cleanExpenses,
-          payments: [],
-        })
-        .then((result) => {
-          if (!active) return;
-          setPreview(result);
-          setError(undefined);
-        })
-        .catch((requestError) => {
-          if (!active) return;
-          setPreview(undefined);
-          setError(message(requestError, t("operations.reconciliationInvalid")));
-        });
-    }, 250);
-    return () => {
-      active = false;
-      window.clearTimeout(timer);
-    };
-  }, [api, cleanExpenses, selection, t]);
-
-  const driverName = drivers.find((driver) => driver.id === preview?.driverId)?.name;
-  const netExpected = preview === undefined ? 0 : Number(preview.netAmountExpected);
-  const difference = twoDecimals(Number(twoDecimals(cash || 0)) - netExpected);
-  const confirmPayload = {
-    ...selection,
-    // Authoritative Cash/Visa method for the whole collection (§6), stored on the collection
-    // and each Order. The tender amount is recorded as the money received.
-    collectionPaymentMethod: paymentMethod,
-    expenses: cleanExpenses,
-    payments:
-      cash.trim() === "" ? [] : [{ amount: Number(twoDecimals(cash)), paymentMethod: "cash" }],
-  };
-  const fingerprint = `${paymentMethod}|${materialFingerprint({
-    excludedOrderIds: "excludedOrderIds" in selection ? selection.excludedOrderIds : [],
-    expenses: cleanExpenses.map((row) => ({ ...row, amount: String(row.amount) })),
-    orderIds: "orderIds" in selection ? selection.orderIds : [],
-    payments: confirmPayload.payments.map((row) => ({ ...row, amount: String(row.amount) })),
-    selectionMode: selection.selectionMode,
-  })}`;
-
-  const submit = async () => {
-    if (preview === undefined) return;
-    setSaving(true);
-    setError(undefined);
-    try {
-      const result = await api.post<{
-        reconciliationId: string;
-        reconciliationNumber: string;
-      }>("operations/cash/reconciliations/selected", confirmPayload, {
-        "X-Idempotency-Key": idempotency.keyFor(fingerprint),
-      });
-      idempotency.reset();
-      // Keep the dialog open on success so the operator can preview/print/download
-      // the confirmed collection; the list is refreshed when they close via Done.
-      // Uses the reconciliation ID the backend just returned — never the number
-      // alone — for every subsequent report/PDF request.
-      setConfirmed({
-        driverName: driverName ?? "",
-        grossCollections: preview.grossCollections,
-        orderCount: preview.orderCount,
-        paymentMethod,
-        reconciliationId: result.reconciliationId,
-        reconciliationNumber: result.reconciliationNumber,
-      });
-    } catch (requestError) {
-      setError(message(requestError, t("operations.reconciliationFailed")));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const openConfirmedPdf = async (mode: PdfAction) => {
-    if (confirmed === undefined) return;
-    setPdfError(undefined);
-    const requestError = await pdf.run(
-      `operations/cash/reconciliations/${confirmed.reconciliationId}/pdf?language=${reportLanguage}`,
-      `Driver-Collection-${confirmed.reconciliationNumber}.pdf`,
-      mode,
-    );
-    if (requestError !== undefined) {
-      setPdfError(message(requestError, t("operations.pdfGenerationFailed")));
-    }
-  };
-
-  const canSubmit =
-    preview !== undefined &&
-    preview.orderCount > 0 &&
-    preview.warnings.length === 0 &&
-    cash.trim() !== "" &&
-    Number(difference) === 0 &&
-    !saving;
-
-  return (
-    <Modal
-      closeLabel={t("common.close")}
-      onRequestClose={onClose}
-      title={t("operations.actions.collectMoney")}
-      titleId="collect-money-title"
-    >
-      {confirmed !== undefined ? (
-        <div className="reconciliation-success" role="status">
-          <p>{t("operations.collectionConfirmed", { number: confirmed.reconciliationNumber })}</p>
-          <dl className="reconciliation-summary">
-            <div className="detail-line">
-              <dt>{t("operations.reconciliationNumber")}</dt>
-              <dd>{confirmed.reconciliationNumber}</dd>
-            </div>
-            <div className="detail-line">
-              <dt>{t("operations.driver")}</dt>
-              <dd>{confirmed.driverName}</dd>
-            </div>
-            <div className="detail-line">
-              <dt>{t("operations.orders")}</dt>
-              <dd>{confirmed.orderCount}</dd>
-            </div>
-            <div className="detail-line">
-              <dt>{t("operations.grossCustomerCollections")}</dt>
-              <dd>{formatCurrency(confirmed.grossCollections, "AED", locale)}</dd>
-            </div>
-            <div className="detail-line">
-              <dt>{t("operations.paymentMethod")}</dt>
-              <dd>
-                {t(
-                  `operations.paymentMethod${confirmed.paymentMethod === "cash" ? "Cash" : "Visa"}`,
-                )}
-              </dd>
-            </div>
-          </dl>
-          {pdfError === undefined ? null : <div className="alert alert-error">{pdfError}</div>}
-          <div className="modal-actions">
-            <button
-              disabled={pdf.busy !== undefined}
-              onClick={() => void openConfirmedPdf("preview")}
-              type="button"
-            >
-              {pdf.busy === "preview" ? t("common.loading") : t("operations.previewReport")}
-            </button>
-            <button
-              disabled={pdf.busy !== undefined}
-              onClick={() => void openConfirmedPdf("print")}
-              type="button"
-            >
-              {pdf.busy === "print" ? t("common.loading") : t("common.print")}
-            </button>
-            <button
-              disabled={pdf.busy !== undefined}
-              onClick={() => void openConfirmedPdf("download")}
-              type="button"
-            >
-              {pdf.busy === "download" ? t("common.loading") : t("operations.downloadPdf")}
-            </button>
-            <button
-              className="button button-primary"
-              onClick={() => void onComplete()}
-              type="button"
-            >
-              {t("common.close")}
-            </button>
-          </div>
-        </div>
-      ) : preview === undefined ? (
-        error === undefined ? (
-          <div className="loading-row">{t("common.loading")}</div>
-        ) : (
-          <div className="alert alert-error">{error}</div>
-        )
-      ) : (
-        <>
-          {preview.warnings.length === 0 ? null : (
-            <div className="alert alert-error" role="alert">
-              <p>{t("operations.mixedEligibilityWarning")}</p>
-              <ul>
-                {preview.warnings.map((warning) => (
-                  <li key={warning}>{warning}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-          <label className="field">
-            <span>{t("operations.paymentMethod")}</span>
-            <select
-              onChange={(event) => setPaymentMethod(event.target.value as "cash" | "visa")}
-              value={paymentMethod}
-            >
-              <option value="cash">{t("operations.paymentMethodCash")}</option>
-              <option value="visa">{t("operations.paymentMethodVisa")}</option>
-            </select>
-          </label>
-          <dl className="reconciliation-summary">
-            <div>
-              <dt>{t("operations.driver")}</dt>
-              <dd>{driverName ?? "—"}</dd>
-            </div>
-            <div>
-              <dt>{t("operations.selectedOrders")}</dt>
-              <dd>{preview.orderCount}</dd>
-            </div>
-            <div>
-              <dt>{t("operations.tradersRepresented")}</dt>
-              <dd>{preview.traderCount}</dd>
-            </div>
-            <div>
-              <dt>{t("operations.grossCustomerCollections")}</dt>
-              <dd>{formatCurrency(preview.grossCollections, "AED", locale)}</dd>
-            </div>
-            <div>
-              <dt>{t("operations.companyFees")}</dt>
-              <dd>{formatCurrency(preview.companyFees, "AED", locale)}</dd>
-            </div>
-            <div>
-              <dt>{t("operations.amountDueToTrader")}</dt>
-              <dd>{formatCurrency(preview.traderPayable, "AED", locale)}</dd>
-            </div>
-            <div>
-              <dt>{t("operations.expenses")}</dt>
-              <dd>{formatCurrency(preview.expenseTotal, "AED", locale)}</dd>
-            </div>
-            <div>
-              <dt>{t("operations.netAmountExpected")}</dt>
-              <dd>{formatCurrency(preview.netAmountExpected, "AED", locale)}</dd>
-            </div>
-            <div>
-              <dt>{t("operations.difference")}</dt>
-              <dd>{formatCurrency(difference, "AED", locale)}</dd>
-            </div>
-          </dl>
-          <div className="collect-expenses">
-            <div className="collect-expenses-head">
-              <span>{t("operations.expenses")}</span>
-              <button
-                className="button button-link"
-                onClick={() =>
-                  setExpenses((current) => [
-                    ...current,
-                    { amount: "", expenseTypeId: "", reason: "" },
-                  ])
-                }
-                type="button"
-              >
-                {t("operations.addExpense")}
-              </button>
-            </div>
-            {expenses.map((row, index) => (
-              <div className="collect-expense-row collect-expense-row-reason" key={index}>
-                <select
-                  onChange={(event) =>
-                    setExpenses((current) =>
-                      current.map((item, itemIndex) =>
-                        itemIndex === index ? { ...item, expenseTypeId: event.target.value } : item,
-                      ),
-                    )
-                  }
-                  value={row.expenseTypeId}
-                >
-                  <option value="">{t("operations.expenseType")}</option>
-                  {expenseTypes.map((type) => (
-                    <option key={type.id} value={type.id}>
-                      {type.name}
-                    </option>
-                  ))}
-                </select>
-                <input
-                  className="no-spinner"
-                  inputMode="decimal"
-                  min="0.01"
-                  onChange={(event) =>
-                    setExpenses((current) =>
-                      current.map((item, itemIndex) =>
-                        itemIndex === index ? { ...item, amount: event.target.value } : item,
-                      ),
-                    )
-                  }
-                  placeholder="0.00"
-                  step="0.01"
-                  type="number"
-                  value={row.amount}
-                />
-                <input
-                  onChange={(event) =>
-                    setExpenses((current) =>
-                      current.map((item, itemIndex) =>
-                        itemIndex === index ? { ...item, reason: event.target.value } : item,
-                      ),
-                    )
-                  }
-                  placeholder={t("operations.expenseReasonPlaceholder")}
-                  value={row.reason}
-                />
-                <button
-                  aria-label={t("common.remove")}
-                  className="icon-button"
-                  onClick={() =>
-                    setExpenses((current) => current.filter((_, itemIndex) => itemIndex !== index))
-                  }
-                  type="button"
-                >
-                  ×
-                </button>
-              </div>
-            ))}
-          </div>
-          <label className="field required-field">
-            <span>{t("operations.actualReceived")}</span>
-            <input
-              className="no-spinner"
-              inputMode="decimal"
-              min="0"
-              onChange={(event) => setCash(event.target.value)}
-              step="0.01"
-              type="number"
-              value={cash}
-            />
-          </label>
-          {error === undefined ? null : <div className="alert alert-error">{error}</div>}
-          <div className="modal-actions">
-            <button className="button button-secondary" onClick={onClose} type="button">
-              {t("common.cancel")}
-            </button>
-            <button
-              className="button button-primary"
-              disabled={!canSubmit}
-              onClick={() => void submit()}
-              type="button"
-            >
-              {saving ? t("common.working") : t("operations.actions.collectMoney")}
-            </button>
-          </div>
-        </>
-      )}
     </Modal>
   );
 }
@@ -3587,7 +3143,6 @@ function OrderAccountingBadge({ order }: { order: OperationsOrder }) {
     </span>
   );
 }
-
 
 /**
  * Confirm a delivery-status change.
@@ -3846,6 +3401,24 @@ function singleSelection(orderId: string): SelectionPayload {
   return { ...initialFilters, orderIds: [orderId], selectionMode: "ids" };
 }
 
+/**
+ * The ONE authoritative Driver Collection workflow (New Collection, on the
+ * Driver Collections screen) with whichever Driver/Order context is already
+ * known here carried in. That screen re-validates every Order's eligibility
+ * itself against the live backend -- this never decides eligibility, it only
+ * saves the operator from re-selecting what they already picked. An Order
+ * that turns out to be no longer eligible is reported there, not here.
+ */
+function collectFromDriverPath(context: {
+  readonly driverId?: string | null | undefined;
+  readonly orderIds: readonly string[];
+}): string {
+  const query = new URLSearchParams({ openDialog: "collect_money", returnTo: "/orders" });
+  if (context.driverId) query.set("driverId", context.driverId);
+  if (context.orderIds.length > 0) query.set("orderIds", context.orderIds.join(","));
+  return `/drivers?${query.toString()}`;
+}
+
 function OrderRowActions({
   api,
   drivers,
@@ -3868,7 +3441,8 @@ function OrderRowActions({
   /** Reported once the request has been acted on, so it is never replayed. */
   onWorkflowRequestConsumed?: (() => void) | undefined;
   /** A smart next action asking THIS row to open one of its dialogs. */
-  workflowRequest?: { readonly dialog: string; readonly suggestedStatus: string | null } | undefined;
+  workflowRequest?:
+    { readonly dialog: string; readonly suggestedStatus: string | null } | undefined;
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
@@ -3877,7 +3451,6 @@ function OrderRowActions({
   const [reasonFor, setReasonFor] = useState<RowAction>();
   const [assignOpen, setAssignOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
-  const [collectOpen, setCollectOpen] = useState(false);
   const [statusOpen, setStatusOpen] = useState(false);
   const [suggestedStatus, setSuggestedStatus] = useState<string>();
   const [viewCollectionId, setViewCollectionId] = useState<string>();
@@ -4017,7 +3590,7 @@ function OrderRowActions({
     }
     if (action === "collectMoney") {
       setOpen(false);
-      setCollectOpen(true);
+      onNavigate(collectFromDriverPath({ driverId: order.assignedDriverId, orderIds: [order.id] }));
       return;
     }
     if (action === "viewCollection") {
@@ -4178,18 +3751,6 @@ function OrderRowActions({
           }}
           orderId={order.id}
           orderNumber={order.orderNumber}
-        />
-      ) : null}
-      {collectOpen ? (
-        <CollectMoneyDialog
-          api={api}
-          drivers={drivers}
-          onClose={() => setCollectOpen(false)}
-          onComplete={async () => {
-            setCollectOpen(false);
-            await onChanged();
-          }}
-          selection={singleSelection(order.id)}
         />
       ) : null}
       {viewCollectionId === undefined ? null : (
@@ -4744,9 +4305,6 @@ function GroupSelectionCheckbox({
 function money(value: string, locale: "ar" | "en"): string {
   return formatCurrency(value, "AED", locale);
 }
-function twoDecimals(value: string | number): string {
-  return formatMoneyValue(value);
-}
 function message(error: unknown, fallback: string): string {
   if (error instanceof ApiError) {
     return error.details === undefined || error.details.length === 0
@@ -4797,8 +4355,7 @@ function auditFieldLabel(fieldName: string | null, t: Translate): string {
 function auditEventTitle(event: AuditEvent, t: Translate): string {
   if (event.eventType === "order.created") return t("operations.audit.orderCreated");
   // Distinct from an override: same field, entirely different decision.
-  if (event.eventType === "order.zero_service_fee")
-    return t("operations.audit.zeroServiceFee");
+  if (event.eventType === "order.zero_service_fee") return t("operations.audit.zeroServiceFee");
   const field = auditFieldLabel(event.fieldName, t);
   return field !== "" ? field : prettifyToken(event.eventType);
 }

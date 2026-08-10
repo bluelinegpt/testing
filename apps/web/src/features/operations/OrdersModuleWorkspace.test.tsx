@@ -20,10 +20,7 @@ import { vi } from "vitest";
 
 import type { ApiClient } from "../../api/api-client.js";
 import { i18nInstance } from "../../localization/i18n.js";
-import { formatCurrency } from "../../localization/formatters.js";
 import { OrdersModuleWorkspace } from "./OrdersModuleWorkspace.js";
-
-const aed = (value: string) => formatCurrency(value, "AED", "en");
 
 const order = {
   amountCollected: "0.00",
@@ -688,58 +685,38 @@ describe("OrdersModuleWorkspace", () => {
   });
 });
 
-describe("CollectMoneyDialog financial formulas", () => {
+/**
+ * Consolidated "Collect from Driver" -- there is exactly ONE Driver
+ * Collection workflow (the Driver Collections screen's own New Collection),
+ * and every entry point on the Orders list now navigates into it instead of
+ * opening a second, duplicate summary dialog. Orders never decides
+ * eligibility itself: it only carries the Driver/Order ids it already knows
+ * as context, and the destination screen re-validates against the live
+ * backend (§4 in the consolidation report).
+ */
+describe("Collect from Driver — consolidated into one workflow", () => {
   beforeEach(async () => i18nInstance.changeLanguage("en"));
 
-  const driver = {
-    activeOrders: 1,
-    code: "DRV-000001",
-    deliveredOrders: 1,
-    id: "20000000-0000-4000-8000-000000000001",
-    mobileNumber: "971501234568",
-    name: "Shoala",
-    pendingCashOrders: 1,
-    status: "active",
-    type: "employee",
-  };
-
-  // Customer Amount to Collect = 200, Company Fees = 25, Amount Due to Trader = 175
-  // — the exact figures from the reported defect.
-  const deliveredOrder = {
+  const collectableOrder = {
     ...order,
-    assignedDriverId: driver.id,
-    assignedDriverMobile: driver.mobileNumber,
-    assignedDriverName: driver.name,
-    codAmount: "200.00",
-    customerAmountDue: "200.00",
+    assignedDriverId: "20000000-0000-4000-8000-000000000006",
+    assignedDriverMobile: "971501234569",
+    assignedDriverName: "Kareem",
     deliveryStatus: "delivered",
     driverReconciliationStatus: "pending",
     id: "10000000-0000-4000-8000-000000000010",
     orderNumber: "ORD-000010",
     serialNumber: "SER-000010",
-    totalDeductions: "25.00",
-    traderNetPayable: "175.00",
   };
-
-  const secondDeliveredOrder = {
-    ...deliveredOrder,
-    codAmount: "150.00",
-    customerAmountDue: "150.00",
+  const secondCollectableOrder = {
+    ...collectableOrder,
     id: "10000000-0000-4000-8000-000000000011",
     orderNumber: "ORD-000011",
     serialNumber: "SER-000011",
-    totalDeductions: "25.00",
-    traderNetPayable: "125.00",
   };
 
-  interface CollectPreviewBody {
-    readonly expenses?: readonly unknown[];
-  }
-
-  function setup(
-    orders: readonly (typeof deliveredOrder)[],
-    previewByBody: (body: CollectPreviewBody) => unknown,
-  ) {
+  function setup(orders: readonly (typeof collectableOrder)[]) {
+    const onNavigate = vi.fn();
     const api = {
       get: vi.fn((path: string) => {
         if (path.startsWith("operations/orders?")) {
@@ -751,255 +728,61 @@ describe("CollectMoneyDialog financial formulas", () => {
             totalCount: orders.length,
           });
         }
-        if (path.startsWith("operations/drivers")) {
-          return Promise.resolve([driver]);
-        }
-        if (path.startsWith("operations/cash/expense-types")) {
-          return Promise.resolve([{ id: "expense-fuel", name: "Fuel" }]);
-        }
         if (path.startsWith("configuration/areas")) {
           return Promise.resolve({ items: [], page: 1, pageSize: 100, total: 0 });
         }
         return Promise.resolve([]);
       }),
-      post: vi.fn((path: string, body?: unknown) => {
-        if (path === "operations/orders/selection-summary") {
-          return Promise.resolve({
-            eligibleCount: orders.length,
-            ineligible: [],
-            selectedAmountToCollect: "0.00",
-            selectedCount: orders.length,
-          });
-        }
-        if (path === "operations/cash/reconciliations/preview") {
-          return Promise.resolve(previewByBody(body as CollectPreviewBody));
-        }
-        return Promise.resolve({});
-      }),
+      post: vi.fn().mockResolvedValue({}),
     };
     renderWithRouter(
       <OrdersModuleWorkspace
         api={api as unknown as ApiClient}
-        onNavigate={vi.fn()}
+        onNavigate={onNavigate}
         permissions={["users_roles.manage"]}
       />,
     );
-    return { api };
+    return { api, onNavigate };
   }
 
-  async function openDialogWithAllOrders(orders: readonly (typeof deliveredOrder)[]) {
-    for (const item of orders) {
-      fireEvent.click(
-        await screen.findByRole("checkbox", { name: `Select Order ${item.serialNumber}` }),
-      );
-    }
-    fireEvent.click(await screen.findByRole("button", { name: "Collect money from driver" }));
-    const dialog = within(await screen.findByRole("dialog"));
-    // The dialog first renders a loading state while the preview request is in
-    // flight (debounced); wait for the resolved content before returning.
-    await dialog.findByLabelText("Actual Amount Received");
-    return dialog;
-  }
+  it("bulk 'Collect money from driver' navigates straight to New Collection with the Driver and selected Orders, opening no dialog here", async () => {
+    const { onNavigate } = setup([collectableOrder, secondCollectableOrder]);
 
-  it("binds Gross Collections, Company Fees, Amount Due to Trader and Net Expected from the server preview — one Order", async () => {
-    setup([deliveredOrder], () =>
-      Promise.resolve({
-        companyFees: "25.00",
-        difference: "-200.00",
-        driverId: driver.id,
-        expenseTotal: "0.00",
-        grossCollections: "200.00",
-        netAmountExpected: "200.00",
-        orderCount: 1,
-        paymentTotal: "0.00",
-        traderCount: 1,
-        traderPayable: "175.00",
-        warnings: [],
-      }),
-    );
-    const dialog = await openDialogWithAllOrders([deliveredOrder]);
+    fireEvent.click(await screen.findByLabelText("Select Order SER-000010"));
+    fireEvent.click(screen.getByLabelText("Select Order SER-000011"));
+    fireEvent.click(screen.getByRole("button", { name: "Collect money from driver" }));
 
-    expect(
-      (await dialog.findByText("Gross Customer Collections")).nextElementSibling?.textContent,
-    ).toBe(aed("200.00"));
-    expect(dialog.getByText("Company fees").nextElementSibling?.textContent).toBe(aed("25.00"));
-    expect(dialog.getByText("Amount due to Trader").nextElementSibling?.textContent).toBe(
-      aed("175.00"),
-    );
-    expect(dialog.getAllByText("Driver-level expenses")[0]?.nextElementSibling?.textContent).toBe(
-      aed("0.00"),
-    );
-    expect(dialog.getByText("Net Expected from Driver").nextElementSibling?.textContent).toBe(
-      aed("200.00"),
-    );
-  });
-
-  it("sums Gross Collections, Company Fees and Amount Due to Trader across multiple Orders", async () => {
-    setup([deliveredOrder, secondDeliveredOrder], () =>
-      Promise.resolve({
-        companyFees: "50.00",
-        difference: "-350.00",
-        driverId: driver.id,
-        expenseTotal: "0.00",
-        grossCollections: "350.00",
-        netAmountExpected: "350.00",
-        orderCount: 2,
-        paymentTotal: "0.00",
-        traderCount: 1,
-        traderPayable: "300.00",
-        warnings: [],
-      }),
-    );
-    const dialog = await openDialogWithAllOrders([deliveredOrder, secondDeliveredOrder]);
-
-    expect(
-      (await dialog.findByText("Gross Customer Collections")).nextElementSibling?.textContent,
-    ).toBe(aed("350.00"));
-    expect(dialog.getByText("Company fees").nextElementSibling?.textContent).toBe(aed("50.00"));
-    expect(dialog.getByText("Amount due to Trader").nextElementSibling?.textContent).toBe(
-      aed("300.00"),
-    );
-    expect(dialog.getByText("Net Expected from Driver").nextElementSibling?.textContent).toBe(
-      aed("350.00"),
-    );
-  });
-
-  it("shows a negative Difference before Actual Amount Received is entered, and blocks confirmation", async () => {
-    setup([deliveredOrder], () =>
-      Promise.resolve({
-        companyFees: "25.00",
-        difference: "-200.00",
-        driverId: driver.id,
-        expenseTotal: "0.00",
-        grossCollections: "200.00",
-        netAmountExpected: "200.00",
-        orderCount: 1,
-        paymentTotal: "0.00",
-        traderCount: 1,
-        traderPayable: "175.00",
-        warnings: [],
-      }),
-    );
-    const dialog = await openDialogWithAllOrders([deliveredOrder]);
-
-    // Actual Amount Received is never pre-filled from Net Expected (§ formula fix).
-    const actualReceived = dialog.getByLabelText("Actual Amount Received") as HTMLInputElement;
-    expect(actualReceived.value).toBe("");
-    expect(dialog.getByText("Difference").nextElementSibling?.textContent).toBe(aed("-200.00"));
-    expect(dialog.getByRole("button", { name: "Collect money from driver" })).toBeDisabled();
-  });
-
-  it("shows a zero Difference and enables confirmation once the exact amount is entered", async () => {
-    setup([deliveredOrder], () =>
-      Promise.resolve({
-        companyFees: "25.00",
-        difference: "-200.00",
-        driverId: driver.id,
-        expenseTotal: "0.00",
-        grossCollections: "200.00",
-        netAmountExpected: "200.00",
-        orderCount: 1,
-        paymentTotal: "0.00",
-        traderCount: 1,
-        traderPayable: "175.00",
-        warnings: [],
-      }),
-    );
-    const dialog = await openDialogWithAllOrders([deliveredOrder]);
-
-    fireEvent.change(dialog.getByLabelText("Actual Amount Received"), {
-      target: { value: "200" },
-    });
-    await waitFor(() =>
-      expect(dialog.getByText("Difference").nextElementSibling?.textContent).toBe(aed("0.00")),
-    );
-    expect(dialog.getByRole("button", { name: "Collect money from driver" })).toBeEnabled();
-  });
-
-  it("blocks confirmation when Actual Amount Received leaves a non-zero Difference", async () => {
-    setup([deliveredOrder], () =>
-      Promise.resolve({
-        companyFees: "25.00",
-        difference: "-200.00",
-        driverId: driver.id,
-        expenseTotal: "0.00",
-        grossCollections: "200.00",
-        netAmountExpected: "200.00",
-        orderCount: 1,
-        paymentTotal: "0.00",
-        traderCount: 1,
-        traderPayable: "175.00",
-        warnings: [],
-      }),
-    );
-    const dialog = await openDialogWithAllOrders([deliveredOrder]);
-
-    fireEvent.change(dialog.getByLabelText("Actual Amount Received"), {
-      target: { value: "50" },
-    });
-    await waitFor(() =>
-      expect(dialog.getByText("Difference").nextElementSibling?.textContent).toBe(aed("-150.00")),
-    );
-    expect(dialog.getByRole("button", { name: "Collect money from driver" })).toBeDisabled();
-  });
-
-  it("reduces Net Expected by Driver Expenses only — Company Fees and Trader payable are unaffected", async () => {
-    const { api } = setup([deliveredOrder], (body: { expenses?: readonly unknown[] }) =>
-      Promise.resolve(
-        (body.expenses?.length ?? 0) > 0
-          ? {
-              // A 20.00 Driver Expense reduces Net Expected from 200 to 180; Company Fees
-              // and Amount Due to Trader are computed straight from the Orders and never
-              // move because of expenses (§ formula fix).
-              companyFees: "25.00",
-              difference: "-180.00",
-              driverId: driver.id,
-              expenseTotal: "20.00",
-              grossCollections: "200.00",
-              netAmountExpected: "180.00",
-              orderCount: 1,
-              paymentTotal: "0.00",
-              traderCount: 1,
-              traderPayable: "175.00",
-              warnings: [],
-            }
-          : {
-              companyFees: "25.00",
-              difference: "-200.00",
-              driverId: driver.id,
-              expenseTotal: "0.00",
-              grossCollections: "200.00",
-              netAmountExpected: "200.00",
-              orderCount: 1,
-              paymentTotal: "0.00",
-              traderCount: 1,
-              traderPayable: "175.00",
-              warnings: [],
-            },
+    expect(onNavigate).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /^\/drivers\?openDialog=collect_money&returnTo=%2Forders&driverId=20000000-0000-4000-8000-000000000006&orderIds=10000000-0000-4000-8000-000000000010%2C10000000-0000-4000-8000-000000000011$/,
       ),
     );
-    const dialog = await openDialogWithAllOrders([deliveredOrder]);
-    void api;
+    // Nothing opened here -- the old duplicate summary dialog is gone.
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
 
-    fireEvent.click(dialog.getByRole("button", { name: "Add expense" }));
-    const comboboxes = dialog.getAllByRole("combobox");
-    const typeSelect = comboboxes[comboboxes.length - 1];
-    if (typeSelect === undefined) throw new Error("Expected an expense type <select>");
-    fireEvent.change(typeSelect, { target: { value: "expense-fuel" } });
-    const amountInput = dialog.getByPlaceholderText("0.00");
-    fireEvent.change(amountInput, { target: { value: "20" } });
-    const reasonInput = dialog.getByPlaceholderText(/reason/i);
-    fireEvent.change(reasonInput, { target: { value: "Fuel" } });
+  it("the per-row 'Collect from Driver' action navigates with just that one Order, opening no dialog here", async () => {
+    const { onNavigate } = setup([collectableOrder]);
 
-    await waitFor(() =>
-      expect(dialog.getByText("Net Expected from Driver").nextElementSibling?.textContent).toBe(
-        aed("180.00"),
-      ),
+    await screen.findByText("SER-000010");
+    fireEvent.click(screen.getByRole("button", { name: "Order actions" }));
+    fireEvent.click(screen.getByRole("button", { name: "Collect money from driver" }));
+
+    expect(onNavigate).toHaveBeenCalledWith(
+      "/drivers?openDialog=collect_money&returnTo=%2Forders&driverId=20000000-0000-4000-8000-000000000006&orderIds=10000000-0000-4000-8000-000000000010",
     );
-    // Company Fees and Amount Due to Trader never move because of Driver Expenses.
-    expect(dialog.getByText("Company fees").nextElementSibling?.textContent).toBe(aed("25.00"));
-    expect(dialog.getByText("Amount due to Trader").nextElementSibling?.textContent).toBe(
-      aed("175.00"),
-    );
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("never renders the old duplicate Collect Money summary dialog from any entry point", async () => {
+    setup([collectableOrder]);
+    await screen.findByText("SER-000010");
+    fireEvent.click(screen.getByLabelText("Select Order SER-000010"));
+
+    // Neither entry point's fields (Traders Represented, Net Expected, ...)
+    // exist anywhere in this screen any more.
+    expect(screen.queryByText("Traders Represented")).not.toBeInTheDocument();
+    expect(screen.queryByText("Net Expected")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Actual Amount Received")).not.toBeInTheDocument();
   });
 });

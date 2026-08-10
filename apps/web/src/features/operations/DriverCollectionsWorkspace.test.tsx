@@ -16,7 +16,6 @@ function renderWithRouter(ui: ReactElement, initialEntries: readonly string[] = 
   return render(<MemoryRouter initialEntries={[...initialEntries]}>{ui}</MemoryRouter>);
 }
 
-
 import type { ApiClient } from "../../api/api-client.js";
 import { i18nInstance } from "../../localization/i18n.js";
 import { DriverCollectionsWorkspace } from "./DriverCollectionsWorkspace.js";
@@ -437,7 +436,9 @@ describe("collect_money deep link", () => {
   });
 
   it("opens New Collection with the Driver and originating Order preselected", async () => {
-    visit("?driverId=drv-1&orderId=order-1&orderNumber=ORD-1&openDialog=collect_money&returnTo=%2Forders");
+    visit(
+      "?driverId=drv-1&orderId=order-1&orderNumber=ORD-1&openDialog=collect_money&returnTo=%2Forders",
+    );
     const { api } = setup();
 
     const dialog = await screen.findByRole("dialog");
@@ -455,8 +456,9 @@ describe("collect_money deep link", () => {
     expect(within(dialog).getByText(/ORD-1/)).toBeInTheDocument();
     // Opening writes nothing.
     expect(
-      (api.post as unknown as { mock: { calls: unknown[][] } }).mock.calls.filter((call) =>
-        String(call[0]).includes("reconciliations") && !String(call[0]).includes("preview"),
+      (api.post as unknown as { mock: { calls: unknown[][] } }).mock.calls.filter(
+        (call) =>
+          String(call[0]).includes("reconciliations") && !String(call[0]).includes("preview"),
       ),
     ).toHaveLength(0);
     // The instruction is consumed, so a refresh cannot reopen it.
@@ -468,7 +470,7 @@ describe("collect_money deep link", () => {
     visit("?driverId=drv-1&orderId=order-gone&openDialog=collect_money");
     setup();
     expect(
-      await screen.findByText(/no longer eligible for Driver collection/i),
+      await screen.findByText(/could not be included.*no longer eligible for this Driver/i),
     ).toBeInTheDocument();
   });
 

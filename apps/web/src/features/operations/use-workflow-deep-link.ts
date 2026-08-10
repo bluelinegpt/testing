@@ -57,6 +57,10 @@ export interface WorkflowDeepLink {
   readonly driverId: string | null;
   readonly journalId: string | null;
   readonly orderId: string | null;
+  /** Several Orders at once (a bulk action), comma-separated in the URL as
+   *  `orderIds`. Empty when the request carries at most the single `orderId`
+   *  above. */
+  readonly orderIds: readonly string[];
   readonly orderNumber: string | null;
   readonly settlementId: string | null;
   readonly suggestedStatus: string | null;
@@ -101,9 +105,10 @@ function readParameter(parameters: URLSearchParams, key: string): string | null 
  *                  dialog the screen does not own is ignored rather than
  *                  guessed at.
  */
-export function useWorkflowDeepLink(
-  accepted: readonly WorkflowDialog[],
-): { readonly link: WorkflowDeepLink | null; readonly returnTo: string | null } {
+export function useWorkflowDeepLink(accepted: readonly WorkflowDialog[]): {
+  readonly link: WorkflowDeepLink | null;
+  readonly returnTo: string | null;
+} {
   /* Keyed to the REQUEST, not to the mount.
 
      A single `consumed` boolean was correct only for a cold load. Clicking a
@@ -149,6 +154,7 @@ export function useWorkflowDeepLink(
       globalThis.location.pathname,
       requested,
       readParameter(parameters, "orderId"),
+      readParameter(parameters, "orderIds"),
       readParameter(parameters, "orderNumber"),
       readParameter(parameters, "driverId"),
       readParameter(parameters, "traderId"),
@@ -175,11 +181,19 @@ export function useWorkflowDeepLink(
 
     if (!isSupported || !isAccepted) return;
 
+    const orderIdsParameter = readParameter(parameters, "orderIds");
     setLink({
       dialog: requested as WorkflowDialog,
       driverId: readParameter(parameters, "driverId"),
       journalId: readParameter(parameters, "journalId"),
       orderId: readParameter(parameters, "orderId"),
+      orderIds:
+        orderIdsParameter === null
+          ? []
+          : orderIdsParameter
+              .split(",")
+              .map((id) => id.trim())
+              .filter((id) => id !== ""),
       orderNumber: readParameter(parameters, "orderNumber"),
       settlementId: readParameter(parameters, "settlementId"),
       suggestedStatus: readParameter(parameters, "suggestedStatus"),
