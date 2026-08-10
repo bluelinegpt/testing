@@ -316,6 +316,16 @@ describe.skipIf(!runDatabaseTests)("trader settlement", () => {
           "100.00",
         );
 
+        const zeroPayableUnsettledOrder = await createOrder(companyA, { netPayable: 0 });
+        const eligibleAfterZeroPayable = await service.eligibleOrders({
+          page: 1,
+          pageSize: 25,
+          traderId: companyA.traderId,
+        });
+        expect(
+          eligibleAfterZeroPayable.items.some((row) => row.id === zeroPayableUnsettledOrder.id),
+        ).toBe(false);
+
         const cancelledOrder = await createOrder(companyA, {
           deliveryStatus: "cancelled",
           netPayable: 50,

@@ -298,11 +298,11 @@ export class TraderSettlementService {
 
   /**
    * Eligible Orders for one Trader (§4/§5). No Order is hidden by omission: an
-   * Order that can never be settled (cancelled, driver cash not yet
-   * reconciled, no Trader payable) is excluded in SQL rather than left for the
-   * caller to filter, but an already fully-paid Order remains visible unless
-   * `outstandingOnly` narrows the list — the operator can still browse a
-   * Trader's settled history through this same endpoint.
+   * Order that can never be settled (cancelled, driver cash not yet reconciled,
+   * no remaining Trader payable) is excluded in SQL rather than left for the
+   * caller to filter. Historical browsing belongs to the settlement history
+   * endpoints; this endpoint drives payment creation and therefore only returns
+   * rows with an outstanding balance.
    */
   public async eligibleOrders(
     query: TraderSettlementEligibleOrdersQueryDto,
@@ -347,7 +347,7 @@ export class TraderSettlementService {
              or o.delivered_at::date <= ${query.deliveredTo ?? null}::date)
         and (${query.settlementStatus ?? null}::text is null
              or o.trader_settlement_status = ${query.settlementStatus ?? null}::text)
-        and (${query.outstandingOnly === true} = false or o.trader_outstanding_balance > 0)
+        and o.trader_outstanding_balance > 0
     `;
     const result = await sql<Omit<TraderEligibleOrderRow, never> & { total: number }>`
       select o.id, coalesce(o.serial_number, o.order_number) as "serialNumber",
