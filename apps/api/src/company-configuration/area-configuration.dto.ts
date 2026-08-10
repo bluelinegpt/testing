@@ -1,3 +1,4 @@
+import { Transform } from "class-transformer";
 import {
   IsBoolean,
   IsIn,
@@ -102,6 +103,9 @@ export class AreaSearchQueryDto {
    * historical record pass false so a disabled Area still resolves.
    */
   @IsOptional()
+  @Transform(({ value }: { value: unknown }) =>
+    value === "true" ? true : value === "false" ? false : value,
+  )
   @IsBoolean()
   public activeOnly?: boolean;
 
