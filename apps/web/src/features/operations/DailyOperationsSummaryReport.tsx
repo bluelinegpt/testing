@@ -131,6 +131,17 @@ function parseDateString(date: string): { readonly day: number; readonly month: 
   return { day, month, year };
 }
 
+export function normalizeReportDateInput(value: string): string {
+  const trimmed = value.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+  const slash = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(trimmed);
+  if (slash === null) return trimmed;
+  const month = slash[1]!;
+  const day = slash[2]!;
+  const year = slash[3]!;
+  return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+}
+
 function addDaysToDateString(date: string, offset: number): string {
   const { day, month, year } = parseDateString(date);
   const utc = new Date(Date.UTC(year, month - 1, day));
@@ -214,7 +225,12 @@ export function DailyOperationsSummaryReport({
     };
   }, [api, dateMode]);
 
-  const query = () => `dateFrom=${dateFrom}&dateTo=${dateTo}&dateMode=${dateMode}`;
+  const query = () =>
+    new URLSearchParams({
+      dateFrom: normalizeReportDateInput(dateFrom),
+      dateTo: normalizeReportDateInput(dateTo),
+      dateMode,
+    }).toString();
 
   const changeDateMode = (next: DateMode) => {
     setDateMode(next);

@@ -6,6 +6,7 @@ import {
   DailyOperationsSummaryReport,
   expenseSourcePath,
   formatOrderIdentifier,
+  normalizeReportDateInput,
   orderDetailPath,
 } from "./DailyOperationsSummaryReport.js";
 
@@ -114,6 +115,11 @@ function setup(todayByMode: Record<string, string> = { business_day: "2026-08-10
 describe("DailyOperationsSummaryReport", () => {
   beforeEach(async () => {
     await i18nInstance.changeLanguage("en");
+  });
+
+  it("normalizes localized slash dates before sending report queries", () => {
+    expect(normalizeReportDateInput("08/11/2026")).toBe("2026-08-11");
+    expect(normalizeReportDateInput("2026-08-11")).toBe("2026-08-11");
   });
 
   it("defaults to Business Day mode", async () => {
