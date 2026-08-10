@@ -60,7 +60,11 @@ describe("ApiClient", () => {
     );
 
     const response = new ApiClient(25).get("health/live");
-    const expectation = expect(response).rejects.toMatchObject({ name: "AbortError" });
+    const expectation = expect(response).rejects.toMatchObject({
+      code: "request_timeout",
+      message: "The request timed out. Please try again.",
+      status: 408,
+    });
     await vi.advanceTimersByTimeAsync(25);
 
     await expectation;

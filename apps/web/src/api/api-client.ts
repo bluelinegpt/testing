@@ -128,6 +128,11 @@ export class ApiClient {
         );
       }
       return await response.blob();
+    } catch (error) {
+      if (this.isAbortError(error)) {
+        throw new ApiError("The request timed out. Please try again.", "request_timeout", 408);
+      }
+      throw error;
     } finally {
       globalThis.clearTimeout(timeout);
       input.signal?.removeEventListener("abort", abortRequest);
@@ -196,6 +201,11 @@ export class ApiClient {
         throw new Error("The API returned an unsupported content type");
       }
       return (await response.json()) as TResponse;
+    } catch (error) {
+      if (this.isAbortError(error)) {
+        throw new ApiError("The request timed out. Please try again.", "request_timeout", 408);
+      }
+      throw error;
     } finally {
       globalThis.clearTimeout(timeout);
       input.signal?.removeEventListener("abort", abortRequest);
@@ -205,5 +215,13 @@ export class ApiClient {
   private isJson(contentType: string | null): boolean {
     const mediaType = contentType?.split(";", 1)[0]?.trim().toLowerCase();
     return mediaType === "application/json" || mediaType?.endsWith("+json") === true;
+  }
+
+  private isAbortError(error: unknown): boolean {
+    return (
+      (error instanceof DOMException && error.name === "AbortError") ||
+      (error instanceof Error && error.name === "AbortError") ||
+      (error instanceof Error && error.message.toLowerCase().includes("signal is aborted"))
+    );
   }
 }
