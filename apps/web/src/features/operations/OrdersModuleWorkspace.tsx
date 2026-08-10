@@ -92,7 +92,6 @@ type BulkAction = "assign" | "collect" | "manifest" | "status";
 
 interface OrderFilters {
   areaId: string;
-  cashStatus: string;
   /* Selecting an Emirate used to narrow only the Area picker and filter
      nothing, so "show me every Order in Sharjah" was impossible without
      choosing each Area in turn. It is a real server-side filter now. */
@@ -112,7 +111,6 @@ interface OrderFilters {
   businessDateTo: string;
   referenceNumber: string;
   search: string;
-  settlementStatus: string;
   traderId: string;
 }
 
@@ -124,14 +122,12 @@ interface SelectionPayload extends Partial<OrderFilters> {
 
 const bulkSelectionFilterKeys = [
   "areaId",
-  "cashStatus",
   "dateFrom",
   "dateTo",
   "deliveryStatus",
   "driverId",
   "quickView",
   "search",
-  "settlementStatus",
   "traderId",
 ] as const satisfies readonly (keyof OrderFilters)[];
 
@@ -181,7 +177,6 @@ interface SelectionSummary {
 
 const initialFilters: OrderFilters = {
   areaId: "",
-  cashStatus: "",
   emirateId: "",
   dateFrom: "",
   dateTo: "",
@@ -196,7 +191,6 @@ const initialFilters: OrderFilters = {
   businessDateTo: "",
   referenceNumber: "",
   search: "",
-  settlementStatus: "",
   traderId: "",
 };
 
@@ -792,28 +786,6 @@ export function OrdersModuleWorkspace({
             value={filters.deliveryStatus}
           >
             {deliveryStatuses.map((status) => (
-              <option key={status} value={status}>
-                {t(`statuses.${status}`)}
-              </option>
-            ))}
-          </FilterSelect>
-          <FilterSelect
-            label={t("operations.driverCashStatus")}
-            onChange={(value) => updateFilters({ cashStatus: value })}
-            value={filters.cashStatus}
-          >
-            {cashStatuses.map((status) => (
-              <option key={status} value={status}>
-                {t(`statuses.${status}`)}
-              </option>
-            ))}
-          </FilterSelect>
-          <FilterSelect
-            label={t("operations.settlementStatus")}
-            onChange={(value) => updateFilters({ settlementStatus: value })}
-            value={filters.settlementStatus}
-          >
-            {settlementStatuses.map((status) => (
               <option key={status} value={status}>
                 {t(`statuses.${status}`)}
               </option>
@@ -4917,12 +4889,4 @@ const bulkTargetStatuses = [
   "returned_to_trader",
   "cancelled",
   "closed",
-] as const;
-const cashStatuses = ["not_applicable", "pending", "reconciled", "reversed"] as const;
-const settlementStatuses = [
-  "not_eligible",
-  "unsettled",
-  "money_sent_to_trader",
-  "money_received_by_trader",
-  "reversed",
 ] as const;
