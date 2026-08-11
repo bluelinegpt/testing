@@ -166,7 +166,15 @@ export class TraderAccountStatementService {
                o.notes
           from orders o
          where o.company_id = ${companyId}::uuid and o.trader_id = ${traderId}::uuid
-           and o.delivery_status = 'delivered'
+           -- 'closed' is the terminal state a delivered Order reaches once its
+           -- Driver cash is reconciled and its Trader Settlement is complete
+           -- (see changeOrderStatus's delivered -> closed transition). It
+           -- must stay visible here or a fully-settled Order silently drops
+           -- out of this statement's payable/opening-balance math while the
+           -- Settlement payment that paid it is still counted independently
+           -- -- producing a phantom negative Closing Balance for a Trader who
+           -- in fact owes nothing.
+           and o.delivery_status in ('delivered', 'closed')
            and (o.delivered_at at time zone 'Asia/Dubai')::date between ${from}::date and ${to}::date
         union all
         select s.id, 'payment'::text, s.business_date::text, s.created_at::text, 2,
@@ -218,7 +226,9 @@ export class TraderAccountStatementService {
                coalesce(sum(o.trader_outstanding_balance), 0)::text as "outstandingAmount"
           from orders o
          where o.company_id = ${companyId}::uuid and o.trader_id = ${traderId}::uuid
-           and o.delivery_status = 'delivered'
+           -- Same reason as the source query above: 'closed' is a delivered
+           -- Order's own terminal state, not a different lifecycle.
+           and o.delivery_status in ('delivered', 'closed')
            and (o.delivered_at at time zone 'Asia/Dubai')::date between ${from}::date and ${to}::date
       `.execute(this.database)
     ).rows[0];
@@ -464,7 +474,9 @@ export class TraderAccountStatementService {
         select (
           coalesce((select sum(o.trader_net_payable) from orders o
             where o.company_id = ${companyId}::uuid and o.trader_id = ${traderId}::uuid
-              and o.delivery_status = 'delivered'
+              -- Same reason as statement()'s own source query: a Closed
+              -- Order still owes/owed its Trader payable history.
+              and o.delivery_status in ('delivered', 'closed')
               and (o.delivered_at at time zone 'Asia/Dubai')::date < ${from}::date), 0)
           - coalesce((select sum(p.amount) from trader_settlements s
               join trader_settlement_payments p on p.settlement_id = s.id and p.company_id = s.company_id
