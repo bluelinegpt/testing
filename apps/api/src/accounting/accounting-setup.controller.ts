@@ -5,7 +5,11 @@ import {
   RequireAnyPermission,
   RequireIdentityKinds,
 } from "../authentication/authentication.decorators.js";
-import type {
+// Imported as values, not types: `emitDecoratorMetadata` can only record a
+// DTO class for the global ValidationPipe when the symbol survives to runtime,
+// so these query/body contracts are actually validated.
+// eslint-disable-next-line @typescript-eslint/consistent-type-imports
+import {
   AccountingActivationDto,
   AccountingActivationPreviewDto,
   AccountingAreaChangeDto,
@@ -14,7 +18,11 @@ import type {
   AccountingZeroOpeningDto,
 } from "./accounting-setup.dto.js";
 import { AccountingSetupService } from "./accounting-setup.service.js";
-import type { AccountingReasonDto } from "./accounting.dto.js";
+// Imported as a value, not a type: `emitDecoratorMetadata` can only record a
+// DTO class for the global ValidationPipe when the symbol survives to runtime,
+// so this body contract is actually validated.
+// eslint-disable-next-line @typescript-eslint/consistent-type-imports
+import { AccountingReasonDto } from "./accounting.dto.js";
 
 @ApiTags("accounting-setup")
 @ApiBearerAuth()

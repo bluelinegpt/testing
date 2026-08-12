@@ -36,7 +36,9 @@ import { PayrollPaymentService } from "./payroll-payment.service.js";
 import { PayrollPeriodService } from "./payroll-period.service.js";
 import { PayrollQueryService } from "./payroll-query.service.js";
 import { PayrollReportService } from "./payroll-report.service.js";
-import type {
+// Runtime classes are required by Nest validation metadata.
+// eslint-disable-next-line @typescript-eslint/consistent-type-imports
+import {
   ConfirmOutsourcedDriverFeePaymentDto,
   DailyDriverFeeAccrualReportQueryDto,
   OutstandingDriverFeesReportQueryDto,

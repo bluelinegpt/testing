@@ -6,7 +6,11 @@ import {
   RequireAnyPermission,
   RequireIdentityKinds,
 } from "../authentication/authentication.decorators.js";
-import type { PaymentPositionQueryDto } from "./payment-position.dto.js";
+// Imported as a value, not a type: `emitDecoratorMetadata` can only record a
+// DTO class for the global ValidationPipe when the symbol survives to runtime,
+// so this query contract is actually validated.
+// eslint-disable-next-line @typescript-eslint/consistent-type-imports
+import { PaymentPositionQueryDto } from "./payment-position.dto.js";
 import { paymentPositionCsv } from "./payment-position-csv.js";
 import { safeAccountingFilename } from "./accounting-report-html.js";
 import { PaymentPositionService } from "./payment-position.service.js";

@@ -6,7 +6,11 @@ import {
   RequireAnyPermission,
   RequireIdentityKinds,
 } from "../authentication/authentication.decorators.js";
-import type {
+// Imported as values, not types: `emitDecoratorMetadata` can only record a
+// DTO class for the global ValidationPipe when the symbol survives to runtime,
+// so these query contracts are actually validated.
+// eslint-disable-next-line @typescript-eslint/consistent-type-imports
+import {
   DailyCashActivityExportQueryDto,
   DailyCashActivityQueryDto,
   DailyCashActivityRowsQueryDto,

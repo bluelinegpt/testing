@@ -23,7 +23,11 @@ import {
   RequireIdentityKinds,
 } from "../authentication/authentication.decorators.js";
 import { ApplicationException } from "../presentation/errors/application.exception.js";
-import type {
+// Imported as values, not types: `emitDecoratorMetadata` can only record a
+// DTO class for the global ValidationPipe when the symbol survives to runtime,
+// so these query/body contracts are actually validated.
+// eslint-disable-next-line @typescript-eslint/consistent-type-imports
+import {
   CreateGeneralExpenseCategoryDto,
   CreateGeneralExpenseDto,
   CreateGeneralExpensePaymentDto,
@@ -32,16 +36,11 @@ import type {
   GeneralExpenseBackfillPreviewDto,
   GeneralExpenseListQueryDto,
   GeneralExpensePaymentListQueryDto,
+  GeneralExpensePaymentPreviewQueryDto,
   GeneralExpenseReasonDto,
+  PayableGeneralExpenseQueryDto,
   UpdateGeneralExpenseCategoryDto,
   UpdateGeneralExpenseDto,
-} from "./general-expense.dto.js";
-// Imported as values, not types: `emitDecoratorMetadata` can only record a
-// DTO class for the global ValidationPipe when the symbol survives to runtime,
-// so the new query contracts are actually validated.
-import {
-  GeneralExpensePaymentPreviewQueryDto,
-  PayableGeneralExpenseQueryDto,
 } from "./general-expense.dto.js";
 import { GeneralExpensePaymentService } from "./general-expense-payment.service.js";
 import { GeneralExpenseQueryService } from "./general-expense-query.service.js";

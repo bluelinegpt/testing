@@ -19,11 +19,11 @@ import {
 } from "../authentication/authentication.decorators.js";
 import { CashBankManagementService } from "./cash-bank-management.service.js";
 import { CashBankQueryService } from "./cash-bank-query.service.js";
-// Imported as a value, not a type: `emitDecoratorMetadata` can only record a
+// Imported as values, not types: `emitDecoratorMetadata` can only record a
 // DTO class for the global ValidationPipe when the symbol survives to runtime,
-// so the new query contract is actually validated.
-import { CashBankMovementPreviewQueryDto } from "./cash-bank.dto.js";
-import type {
+// so these query/body contracts are actually validated.
+// eslint-disable-next-line @typescript-eslint/consistent-type-imports
+import {
   BankAccountMutationDto,
   CashAccountMutationDto,
   CashBankAttachmentDto,
@@ -31,6 +31,7 @@ import type {
   CashBankConfirmDto,
   CashBankListQueryDto,
   CashBankMovementMutationDto,
+  CashBankMovementPreviewQueryDto,
   CashBankReasonDto,
   CashBankReverseDto,
 } from "./cash-bank.dto.js";
