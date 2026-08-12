@@ -28,6 +28,9 @@
     "validate": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build",
     "ci:validate": "pnpm security:secrets && pnpm migrations:validate && pnpm validate && pnpm security:dependencies"
   },
+  "dependencies": {
+    "kysely": "^0.29.3"
+  },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "eslint": "^10.7.0",
