@@ -11,6 +11,7 @@ import { PlatformCompanyUserController } from "./platform-company-user.controlle
 import { PlatformCompanyUserService } from "./platform-company-user.service.js";
 import { PlatformUserDeletionService } from "./platform-user-deletion.service.js";
 import { PlatformCompanyService } from "./platform-company.service.js";
+import { PlatformCompanyResetService } from "./platform-company-reset.service.js";
 import { PlatformCompanyDeletionService } from "./platform-company-deletion.service.js";
 import {
   COMPANY_DELETION_FAILURE_INJECTOR,
@@ -42,11 +43,11 @@ import { PlatformService } from "./platform.service.js";
  * reach by reading one module, and the Company modules keep their existing
  * `@RequireIdentityKinds("company_user")` posture unchanged.
  *
- * The Company test-data reset tools also live in `apps/api/src/platform/` but
- * are deliberately NOT registered here. They are a CLI capability today, they
- * remain one, and exposing them through a Nest module before the Company
- * Maintenance phase has designed the preview, backup and confirmation flow
- * would create a reachable destructive surface for no benefit.
+ * The Company test-data reset engine gained its Portal surface with
+ * `PlatformCompanyResetService` — the preview, backup and typed-confirmation
+ * flow this comment previously deferred to the Company Maintenance phase.
+ * The CLI remains available; both fronts drive the same reviewed engine, and
+ * the service refuses any Company whose environment is 'production'.
  */
 @Module({
   controllers: [
@@ -65,6 +66,7 @@ import { PlatformService } from "./platform.service.js";
     PlatformAuditService,
     PlatformAuditQueryService,
     PlatformCompanyService,
+    PlatformCompanyResetService,
     PlatformDashboardService,
     PlatformCompanyDeletionService,
     PlatformCompanyDeletionExecutionService,

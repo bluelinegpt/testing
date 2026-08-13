@@ -11,6 +11,8 @@ import {
   type CompanyDeletionEligibility,
   type CompanyDeletionPreview,
   type CompanyDeletionBackup,
+  type CompanyResetPreview,
+  type CompanyResetResult,
   type ReadinessSummary,
 } from "../api/platform-client.js";
 import { usePlatformSession } from "../app/PlatformSession.js";
@@ -30,6 +32,7 @@ export function CompanyDetailPage(): ReactElement {
   const session = usePlatformSession();
   const canManage = session.can("platform.companies.manage");
   const canDelete = session.can("platform.companies.delete");
+  const canReset = session.can("platform.companies.reset");
 
   const [company, setCompany] = useState<CompanyDetail | undefined>(undefined);
   const [setup, setSetup] = useState<AccountingSetupSummary | undefined>(undefined);
@@ -53,6 +56,12 @@ export function CompanyDetailPage(): ReactElement {
   const [closeReason, setCloseReason] = useState("");
   const [closeConfirmation, setCloseConfirmation] = useState("");
   const [closeError, setCloseError] = useState<string | undefined>(undefined);
+  const [resetPreview, setResetPreview] = useState<CompanyResetPreview | undefined>(undefined);
+  const [resetConfirmation, setResetConfirmation] = useState("");
+  const [resetResult, setResetResult] = useState<CompanyResetResult | undefined>(undefined);
+  const [resetError, setResetError] = useState<string | undefined>(undefined);
+  const [productionConfirmation, setProductionConfirmation] = useState("");
+  const [productionError, setProductionError] = useState<string | undefined>(undefined);
 
   const load = useCallback(async () => {
     setFailed(false);
@@ -255,6 +264,63 @@ export function CompanyDetailPage(): ReactElement {
     }
   }
 
+  async function runResetPreview(): Promise<void> {
+    setBusy(true);
+    setResetError(undefined);
+    setResetResult(undefined);
+    setResetConfirmation("");
+    try {
+      setResetPreview(await platformApi.companyResetPreview(companyId));
+    } catch (failure) {
+      setResetError(
+        failure instanceof PlatformApiError ? failure.message : "Unable to run the reset preview.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function executeReset(): Promise<void> {
+    if (resetPreview === undefined) return;
+    setBusy(true);
+    setResetError(undefined);
+    try {
+      const result = await platformApi.resetCompanyData(companyId, resetConfirmation);
+      setResetResult(result);
+      setResetPreview(undefined);
+      setResetConfirmation("");
+      await load();
+    } catch (failure) {
+      setResetError(
+        failure instanceof PlatformApiError
+          ? failure.message
+          : "The reset failed and was rolled back.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function confirmMoveToProduction(): Promise<void> {
+    setBusy(true);
+    setProductionError(undefined);
+    try {
+      await platformApi.moveCompanyToProduction(companyId);
+      setProductionConfirmation("");
+      setResetPreview(undefined);
+      setResetResult(undefined);
+      await load();
+    } catch (failure) {
+      setProductionError(
+        failure instanceof PlatformApiError
+          ? failure.message
+          : "The Company could not be moved to production.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (failed) {
     return (
       <section className="platform-panel">
@@ -397,8 +463,9 @@ export function CompanyDetailPage(): ReactElement {
         </dl>
       )}
       <p className="platform-muted">
-        Code, subdomain and environment are fixed after creation. Environment in particular is a
-        safety property that future maintenance operations depend on.
+        Code and subdomain are fixed after creation. Environment moves only one way — to
+        production, via the Lifecycle section below — because it gates whether the Company&apos;s
+        data can ever be reset.
       </p>
 
       <h3>Technical information</h3>
@@ -666,6 +733,120 @@ export function CompanyDetailPage(): ReactElement {
               </div>
             </form>
           </dialog>
+          {company.environment !== "production" ? (
+            <section aria-labelledby="company-maintenance-heading">
+              <h4 id="company-maintenance-heading">Training data &amp; environment</h4>
+              <p className="platform-muted">
+                This Company is in <strong>{company.environment}</strong>. Its transactional data
+                — orders, settlements, reconciliations, accounting entries, payments, expenses,
+                customers, traders, drivers and employees — can be reset for training. The
+                Company profile, its users, chart of accounts and configuration are always
+                preserved. Once the Company moves to production, resetting becomes permanently
+                unavailable.
+              </p>
+              {canReset ? (
+                <>
+                  <button
+                    className="platform-button platform-button--quiet"
+                    disabled={busy}
+                    onClick={() => void runResetPreview()}
+                    type="button"
+                  >
+                    Preview Data Reset
+                  </button>
+                  {resetPreview === undefined ? null : (
+                    <div className="platform-review">
+                      <p role="status">
+                        READY FOR RESET: {resetPreview.eligible ? "YES" : "NO"}
+                      </p>
+                      <p>
+                        <strong>Rows to remove:</strong> {resetPreview.totalRows.toLocaleString()}
+                        {" across "}
+                        {resetPreview.tables.length} table(s). A full-database backup is taken
+                        automatically before anything is removed.
+                      </p>
+                      {resetPreview.tables.map((entry) => (
+                        <p key={entry.table}>
+                          {entry.table}: {entry.rows.toLocaleString()}
+                        </p>
+                      ))}
+                      {resetPreview.blockers.map((blocker) => (
+                        <p className="platform-warning" key={blocker}>
+                          {blocker}
+                        </p>
+                      ))}
+                      {resetPreview.eligible ? (
+                        <>
+                          <label className="platform-field" htmlFor="reset-confirmation">
+                            <span>Type RESET {company.code} to confirm</span>
+                            <input
+                              autoComplete="off"
+                              id="reset-confirmation"
+                              onChange={(event) => setResetConfirmation(event.target.value)}
+                              value={resetConfirmation}
+                            />
+                          </label>
+                          <button
+                            className="platform-button"
+                            disabled={busy || resetConfirmation !== `RESET ${company.code}`}
+                            onClick={() => void executeReset()}
+                            type="button"
+                          >
+                            Reset Company Data
+                          </button>
+                        </>
+                      ) : null}
+                    </div>
+                  )}
+                  {resetResult === undefined ? null : (
+                    <div className="platform-review" role="status">
+                      <p>
+                        <strong>Reset complete.</strong> {resetResult.totalRemoved.toLocaleString()}
+                        {" row(s) removed across "}
+                        {resetResult.removed.length} table(s). {resetResult.preservedVerified}
+                        {" preserved table(s) verified unchanged."}
+                      </p>
+                      <p>
+                        <strong>Backup:</strong> {resetResult.backupFile}
+                      </p>
+                    </div>
+                  )}
+                  {resetError === undefined ? null : (
+                    <p className="platform-login__error" role="alert">
+                      {resetError}
+                    </p>
+                  )}
+                </>
+              ) : null}
+              <h4>Move to production</h4>
+              <p className="platform-warning">
+                Moving to production is one-way. After this, the Company&apos;s data can never be
+                reset or deleted by any tool, and there is no way back to {company.environment}.
+              </p>
+              <label className="platform-field" htmlFor="production-confirmation">
+                <span>Type PRODUCTION {company.code} to confirm</span>
+                <input
+                  autoComplete="off"
+                  id="production-confirmation"
+                  onChange={(event) => setProductionConfirmation(event.target.value)}
+                  value={productionConfirmation}
+                />
+              </label>
+              <button
+                className="platform-button"
+                disabled={busy || productionConfirmation !== `PRODUCTION ${company.code}`}
+                onClick={() => void confirmMoveToProduction()}
+                type="button"
+              >
+                Move to Production
+              </button>
+              {productionError === undefined ? null : (
+                <p className="platform-login__error" role="alert">
+                  {productionError}
+                </p>
+              )}
+            </section>
+          ) : null}
           {company.status === "closed" ? (
             <section aria-labelledby="deletion-foundation-heading">
               <h4 id="deletion-foundation-heading">Permanent Company deletion</h4>

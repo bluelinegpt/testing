@@ -25,6 +25,7 @@ import {
   PLATFORM_COMPANIES_MANAGE,
   PLATFORM_COMPANIES_DELETE,
   PLATFORM_COMPANIES_READ,
+  PLATFORM_COMPANIES_RESET,
   RequirePlatformPermissions,
 } from "./platform-authorization.js";
 // Runtime class values are required for Nest validation metadata.
@@ -36,9 +37,11 @@ import {
   PermanentDeleteCompanyDto,
   CreateCompanyDto,
   LifecycleActionDto,
+  ResetCompanyDataDto,
   SuspendCompanyDto,
   UpdateCompanyProfileDto,
 } from "./platform-company.dto.js";
+import { PlatformCompanyResetService } from "./platform-company-reset.service.js";
 import { PlatformCompanyService } from "./platform-company.service.js";
 import { PlatformCompanyDeletionService } from "./platform-company-deletion.service.js";
 import { PlatformCompanyDeletionBackupService } from "./platform-company-deletion-backup.service.js";
@@ -136,6 +139,7 @@ export class PlatformCompanyController {
 export class PlatformTargetCompanyController {
   public constructor(
     @Inject(PlatformCompanyService) private readonly companies: PlatformCompanyService,
+    @Inject(PlatformCompanyResetService) private readonly reset: PlatformCompanyResetService,
     @Inject(PlatformCompanyDeletionService) private readonly deletion: PlatformCompanyDeletionService,
     @Inject(PlatformCompanyDeletionBackupService) private readonly deletionBackups: PlatformCompanyDeletionBackupService,
     @Inject(PlatformCompanyDeletionExecutionService) private readonly deletionExecution: PlatformCompanyDeletionExecutionService,
@@ -290,6 +294,49 @@ export class PlatformTargetCompanyController {
     @Req() request: Request,
   ): Promise<void> {
     return this.companies.close(companyId, input.reason, input.confirmation, this.actor(request));
+  }
+
+  /**
+   * The Company test-data reset, gated by its own permission. The preview is
+   * read-only and safe to call repeatedly; execution re-verifies everything —
+   * including the Company's environment, under lock — inside the service.
+   */
+  @ApiBearerAuth()
+  @ApiOperation({ summary: "Preview what a Company test-data reset would remove" })
+  @RequirePlatformPermissions(PLATFORM_COMPANIES_RESET)
+  @Get("reset-preview")
+  public resetPreview(@Param("companyId") companyId: string): Promise<object> {
+    return this.reset.preview(companyId);
+  }
+
+  @ApiBearerAuth()
+  @ApiOperation({ summary: "Reset a development or demo Company's transactional data" })
+  @RequirePlatformPermissions(PLATFORM_COMPANIES_RESET)
+  @HttpCode(200)
+  @Post("reset-execute")
+  public resetExecute(
+    @Param("companyId") companyId: string,
+    @Body() input: ResetCompanyDataDto,
+    @Req() request: Request,
+  ): Promise<object> {
+    return this.reset.execute(companyId, input.confirmation, this.actor(request));
+  }
+
+  /**
+   * One-way: there is no route that moves a Company out of production,
+   * because `environment` is the gate the data reset above depends on.
+   */
+  @ApiBearerAuth()
+  @ApiOperation({ summary: "Move a Company's environment to production (one-way)" })
+  @RequirePlatformPermissions(PLATFORM_COMPANIES_MANAGE)
+  @HttpCode(204)
+  @Post("move-to-production")
+  public moveToProduction(
+    @Param("companyId") companyId: string,
+    @Body() input: LifecycleActionDto,
+    @Req() request: Request,
+  ): Promise<void> {
+    return this.companies.moveToProduction(companyId, input.reason, this.actor(request));
   }
 
   @ApiBearerAuth()

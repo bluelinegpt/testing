@@ -115,6 +115,23 @@ export const PURGE_TABLES = new Set([
   "hr_document_attachments",
   "hr_documents",
   "outsourced_driver_fee_versions",
+  // Driver-collection earnings and variable-earning payments (reviewed
+  // 2026-08-13 with the Portal reset screen). All are Company-scoped
+  // transactional records or per-Employee/Driver rules referencing masters
+  // removed in this same set — the same shape as the employee_* and
+  // outsourced_driver_* rows above, added by later payroll migrations.
+  "employee_collection_earning_rules",
+  "employee_driver_collection_fact_orders",
+  "employee_driver_collection_facts",
+  "employee_driver_earning_period_delivery_sources",
+  "employee_driver_earning_period_payment_allocations",
+  "employee_driver_earning_period_payroll_allocations",
+  "employee_driver_earning_periods",
+  "employee_salary_advance_payroll_allocations",
+  "employee_salary_advances",
+  "employee_variable_earning_payment_allocations",
+  "employee_variable_earning_payments",
+  "outsourced_driver_collection_earning_rules",
   // Business masters — approved for this full-cycle development reset (Prompt 2A)
   "customer_addresses",
   "customers",
@@ -202,6 +219,33 @@ export const PRESERVE_TABLES = new Set([
   "trader_storefronts",
   "user_business_links",
   "vehicles",
+  /*
+   * Commerce customers and Storefront orders (reviewed 2026-08-13). Owned by
+   * the Trader Commerce world, not the Delivery Company being reset: a
+   * commerce Customer registers against Storefronts, and a store Order hangs
+   * off `storefront_id`/`trader_commerce_id`. Neither carries a `company_id`.
+   * `store_orders`' references INTO the removal set (`delivery_order_id`,
+   * the delivery-relationship columns) are live RESTRICT constraints listed
+   * in LEGACY_COMPATIBILITY_EDGES below with delegated enforcement: a
+   * Company whose delivery orders are still referenced by store Orders fails
+   * the reset at the database and rolls back, which is the correct outcome —
+   * commerce history must not lose its delivery side silently.
+   */
+  "commerce_customer_addresses",
+  "commerce_customers",
+  "store_order_items",
+  "store_order_number_counters",
+  "store_orders",
+  /* Crash reports for the Platform Error Handler. Diagnostic history, same
+     rationale as audit_events: a training reset must not erase the record of
+     what crashed. */
+  "client_error_reports",
+  /* Platform bookkeeping for permanent Company deletions. Keyed by snapshot
+     columns, owned by the Platform, and never part of a Company's own data. */
+  "platform_company_deletion_backups",
+  "platform_company_deletion_cleanup_items",
+  "platform_company_deletion_operations",
+  "platform_company_deletion_previews",
 ]);
 
 /**
@@ -258,9 +302,10 @@ export const CYCLE_BREAKS: { table: string; columns: string[]; reason: string }[
  * The inbound-reference check refuses to remove a table that anything outside the removal
  * set still points at. That check is structural -- it reads `pg_constraint`, not rows -- so
  * it cannot tell a live relationship from a dormant column kept only so older code keeps
- * compiling. Each entry below records an edge that has been reviewed and found to be the
- * latter, and is skipped by `collectInboundReferences` alone. Nothing else consults this
- * list: ordering, classification and the removal statements are all unaffected.
+ * compiling. Each entry below records an edge that has been reviewed — either found dormant,
+ * or found live with enforcement deliberately delegated to the database (the entry's reason
+ * says which) — and is skipped by `collectInboundReferences` alone. Nothing else consults
+ * this list: ordering, classification and the removal statements are all unaffected.
  *
  * This never disables the database's own protection. Every edge here is declared RESTRICT,
  * so if the columns ever do hold a value for the Company being reset, Postgres refuses the
@@ -283,6 +328,40 @@ export const LEGACY_COMPATIBILITY_EDGES: {
       "nullable compatibility references and states that no Company ownership may be " +
       "inferred from them. The pair is MATCH SIMPLE with a CHECK that both are NULL or " +
       "neither, so the constraint is skipped whenever they are unset -- which is every row",
+  },
+  /*
+   * Storefront-order edges into the removal set (reviewed 2026-08-13). These are LIVE
+   * relationships, not dormant columns: a store Order that has been dispatched holds the
+   * delivery Order and delivery relationship it flowed through. Enforcement is delegated
+   * to the database on purpose — all three are RESTRICT, so a Company whose delivery
+   * orders are still referenced by store Orders fails the reset transaction and rolls
+   * back. What is skipped here is only the up-front structural refusal, which would
+   * otherwise block EVERY Company's reset because the constraint exists, even when no
+   * store Order references the Company being reset.
+   */
+  {
+    child: "store_orders",
+    parent: "orders",
+    columns: ["delivery_order_id"],
+    reason:
+      "live commerce-to-delivery edge; RESTRICT in the database, which aborts the reset " +
+      "of any Company whose delivery orders a store Order still references",
+  },
+  {
+    child: "store_orders",
+    parent: "trader_delivery_company_relationships",
+    columns: ["delivery_company_relationship_id"],
+    reason:
+      "live commerce-to-delivery edge; RESTRICT in the database, same delegation as the " +
+      "delivery_order_id edge above",
+  },
+  {
+    child: "store_orders",
+    parent: "trader_delivery_company_relationships",
+    columns: ["delivery_company_relationship_id", "trader_commerce_id", "delivery_company_id"],
+    reason:
+      "composite variant of the relationship edge; RESTRICT in the database, same " +
+      "delegation as the delivery_order_id edge above",
   },
 ];
 
@@ -707,14 +786,21 @@ export function computeBlockers(
   reports: TableReport[],
   snapshot: SchemaSnapshot,
   environment: string,
-  companyCode: string,
+  company: { code: string; environment: string },
 ): { blockers: string[]; order: string[]; cycle: string[]; blocked: string[] } {
   const blockers: string[] = [];
   if (environment === "production") {
     blockers.push("NODE_ENV is production — test-data reset is a development-only capability.");
   }
-  if (!/^DEV-/i.test(companyCode)) {
-    blockers.push(`Company '${companyCode}' is not a DEV-* development Company.`);
+  // The Company's OWN environment is the decisive per-Company gate — it
+  // replaced the old DEV-* code-prefix heuristic on 2026-08-13, when
+  // move-to-production became a one-way Platform action. A code prefix is a
+  // naming convention; `environment` is a stored property that only ever
+  // moves to 'production' and never back, so it is the one worth trusting.
+  if (company.environment === "production") {
+    blockers.push(
+      `Company '${company.code}' is in production. Production data can never be reset.`,
+    );
   }
 
   const purgeTables = reports

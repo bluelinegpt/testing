@@ -55,6 +55,11 @@ export const PLATFORM_ERRORS_MANAGE = "platform.errors.manage";
 // later, separate decision per the three-tier remediation policy agreed
 // 2026-08-04, not something to seed ahead of actually building it.
 export const PLATFORM_INTEGRITY_READ = "platform.integrity.read";
+// Guards the Company test-data reset (wipe transactional data, keep the
+// Company shell). The reset itself additionally refuses any Company whose
+// own environment is 'production' — the permission grants the button, the
+// environment decides whether the button can ever fire.
+export const PLATFORM_COMPANIES_RESET = "platform.companies.reset";
 
 /**
  * The Phase 1 permission set, in the order the seed migration writes them.
@@ -80,6 +85,10 @@ export const PLATFORM_PERMISSIONS: readonly { code: string; description: string 
   {
     code: PLATFORM_INTEGRITY_READ,
     description: "View cross-module data integrity findings on the Platform",
+  },
+  {
+    code: PLATFORM_COMPANIES_RESET,
+    description: "Reset a development or demo Company's transactional data",
   },
 ];
 

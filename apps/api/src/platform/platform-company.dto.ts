@@ -247,6 +247,13 @@ export class CloseCompanyDto extends SuspendCompanyDto {
   public confirmation!: string;
 }
 
+export class ResetCompanyDataDto {
+  @Transform(trim)
+  @IsString()
+  @Length(7, 80)
+  public confirmation!: string;
+}
+
 export class CreateCompanyDeletionBackupDto {
   @IsUUID()
   public operationId!: string;

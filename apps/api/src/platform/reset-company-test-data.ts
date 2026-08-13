@@ -109,7 +109,11 @@ export async function runDryRun(client: pg.PoolClient, companyId: string): Promi
         subdomain: string;
         name_en: string;
         status: string;
-      }>("select id, code, subdomain, name_en, status from companies where id = $1", [companyId])
+        environment: string;
+      }>(
+        "select id, code, subdomain, name_en, status, environment from companies where id = $1",
+        [companyId],
+      )
     ).rows[0];
 
     write("BlueLineGPT — Company test-data reset inspection");
@@ -127,12 +131,13 @@ export async function runDryRun(client: pg.PoolClient, companyId: string): Promi
 
     write("Company");
     write("-".repeat(110));
-    write(`  id         ${company.id}`);
-    write(`  code       ${company.code}`);
-    write(`  subdomain  ${company.subdomain}`);
-    write(`  name       ${company.name_en}`);
-    write(`  status     ${company.status}`);
-    write(`  NODE_ENV   ${environment}`);
+    write(`  id           ${company.id}`);
+    write(`  code         ${company.code}`);
+    write(`  subdomain    ${company.subdomain}`);
+    write(`  name         ${company.name_en}`);
+    write(`  status       ${company.status}`);
+    write(`  environment  ${company.environment}`);
+    write(`  NODE_ENV     ${environment}`);
     write("");
 
     const snapshot = await introspectSchema(client);
@@ -141,7 +146,7 @@ export async function runDryRun(client: pg.PoolClient, companyId: string): Promi
       reports,
       snapshot,
       environment,
-      company.code,
+      company,
     );
 
     const counts = { PURGE: 0, PRESERVE: 0, CONDITIONAL: 0, UNSAFE: 0 };

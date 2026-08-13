@@ -256,6 +256,34 @@ export interface CompanyDeletionBackup {
   readonly verifiedAt: string;
 }
 
+export interface CompanyResetTableCount {
+  readonly table: string;
+  readonly rows: number;
+}
+
+export interface CompanyResetPreview {
+  readonly company: {
+    readonly id: string;
+    readonly code: string;
+    readonly name: string;
+    readonly status: string;
+    readonly environment: string;
+  };
+  readonly eligible: boolean;
+  readonly blockers: readonly string[];
+  readonly confirmation: string;
+  readonly tables: readonly CompanyResetTableCount[];
+  readonly totalRows: number;
+}
+
+export interface CompanyResetResult {
+  readonly company: { readonly id: string; readonly code: string; readonly name: string };
+  readonly removed: readonly CompanyResetTableCount[];
+  readonly totalRemoved: number;
+  readonly preservedVerified: number;
+  readonly backupFile: string;
+}
+
 export interface AccountingSetupSummary {
   readonly status: string;
   readonly templateCode: string | null;
@@ -754,6 +782,31 @@ export const platformApi = {
 
   async updateCompany(companyId: string, changes: Record<string, string>): Promise<void> {
     await request(`platform/companies/${companyId}`, { body: changes, method: "PATCH" });
+  },
+
+  async companyResetPreview(companyId: string): Promise<CompanyResetPreview> {
+    const result = await request<CompanyResetPreview>(
+      `platform/companies/${companyId}/reset-preview`,
+      { method: "GET" },
+    );
+    if (result === undefined) throw new PlatformApiError("Empty reset preview response", "empty", 500);
+    return result;
+  },
+
+  async resetCompanyData(companyId: string, confirmation: string): Promise<CompanyResetResult> {
+    const result = await request<CompanyResetResult>(
+      `platform/companies/${companyId}/reset-execute`,
+      { body: { confirmation }, method: "POST", timeoutMs: 310_000 },
+    );
+    if (result === undefined) throw new PlatformApiError("Empty reset response", "empty", 500);
+    return result;
+  },
+
+  async moveCompanyToProduction(companyId: string, reason?: string): Promise<void> {
+    await request(`platform/companies/${companyId}/move-to-production`, {
+      body: reason === undefined ? {} : { reason },
+      method: "POST",
+    });
   },
 
   async companyUsers(companyId: string): Promise<readonly CompanyUser[]> {

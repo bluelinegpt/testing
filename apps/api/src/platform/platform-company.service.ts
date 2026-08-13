@@ -805,6 +805,54 @@ export class PlatformCompanyService {
     await this.transition(companyId, "closed", reason, actor);
   }
 
+  /**
+   * One-way move of the Company's environment to 'production'.
+   *
+   * One-way is the whole point: `environment` is what the Company data reset
+   * gates on, so a route that could move a Company OUT of production would
+   * quietly turn "production data can never be reset" into "production data
+   * can be reset in two requests". No such route exists, and this method
+   * refuses a Company that is already in production rather than succeeding
+   * silently, so the audit trail records exactly one transition per Company.
+   */
+  public moveToProduction(
+    companyId: string,
+    reason: string | undefined,
+    actor: { accountId: string; correlationId: string },
+  ): Promise<void> {
+    return this.transactions.execute(async (transaction) => {
+      const current = (
+        await sql<{ environment: string }>`
+          select environment from companies where id = ${companyId}::uuid for update
+        `.execute(transaction)
+      ).rows[0];
+      if (current === undefined) throw this.notFound();
+      if (current.environment === "production") {
+        throw new ApplicationException(
+          "company_already_production",
+          "The Company is already in production",
+          HttpStatus.CONFLICT,
+        );
+      }
+
+      await sql`
+        update companies
+           set environment = 'production', updated_at = now(), version = version + 1
+         where id = ${companyId}::uuid
+      `.execute(transaction);
+
+      await this.auditInTransaction(transaction, {
+        action: "platform.company.moved_to_production",
+        companyId,
+        actorAccountId: actor.accountId,
+        before: { environment: current.environment },
+        after: { environment: "production", reason: reason ?? null },
+        correlationId: actor.correlationId,
+        reason,
+      });
+    });
+  }
+
   // -------------------------------------------------------------------------
   // Helpers
   // -------------------------------------------------------------------------

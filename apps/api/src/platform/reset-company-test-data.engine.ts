@@ -105,6 +105,16 @@ const APPROVED_TRIGGERS: TriggerApproval[] = [
   },
   {
     reason:
+      "Parent-total synchronisation for variable-earning payments (reviewed 2026-08-13, " +
+      "same category as the totals guards above): it verifies allocations still sum to the " +
+      "payment's amount whenever an allocation row changes. Safe to suspend only because " +
+      "the payments themselves are removed in this same transaction, which the engine " +
+      "verifies before commit.",
+    requiresCleared: ["employee_variable_earning_payments"],
+    triggers: ["employee_variable_payment_total_guard"],
+  },
+  {
+    reason:
       "Business-master removal guards. They exist to stop masters being removed while " +
       "operational history references them. All referencing history is removed earlier in " +
       "the same transaction, and the dependency order enforces that.",
@@ -183,16 +193,29 @@ export async function runReset(
   log: ResetLogger,
 ): Promise<ResetSummary> {
   const company = (
-    await client.query<{ code: string }>("select code from companies where id = $1", [companyId])
+    await client.query<{ code: string; environment: string }>(
+      "select code, environment from companies where id = $1",
+      [companyId],
+    )
   ).rows[0];
   if (company === undefined) {
     throw new Error(`No Company found for id '${companyId}'`);
+  }
+  // The Company's own environment is checked HERE, in the engine, so no
+  // caller — CLI or Portal — can reach the removal statements for a
+  // production Company. This is deliberately in addition to the callers'
+  // own checks, not instead of them.
+  if (company.environment === "production") {
+    throw new Error(
+      "Refusing to reset — this Company's environment is 'production'. " +
+        "Production data can never be reset; there is no bypass.",
+    );
   }
 
   const environment = (process.env.NODE_ENV ?? "development").trim().toLowerCase();
   const snapshot = await introspectSchema(client);
   const reports = await buildReports(client, companyId, snapshot);
-  const { blockers, order, cycle } = computeBlockers(reports, snapshot, environment, company.code);
+  const { blockers, order, cycle } = computeBlockers(reports, snapshot, environment, company);
   if (blockers.length > 0) {
     throw new Error(
       `Refusing to reset — the manifest is not ready:\n  - ${blockers.join("\n  - ")}`,
