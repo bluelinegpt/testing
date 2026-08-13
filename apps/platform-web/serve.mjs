@@ -1,9 +1,51 @@
 import { createReadStream, existsSync, statSync } from "node:fs";
-import { createServer } from "node:http";
+import { createServer, request as httpRequest } from "node:http";
+import { request as httpsRequest } from "node:https";
 import { extname, isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
 
 const port = Number.parseInt(process.env.WEB_PORT ?? "8080", 10);
 const publicDirectory = resolve(process.env.WEB_ROOT ?? "dist");
+/**
+ * Same-origin API proxy. The session cookie is HttpOnly `SameSite=Lax` by
+ * design (see `session-cookie.ts` and its tests), and onrender.com is on the
+ * Public Suffix List — two *.onrender.com services are cross-SITE, so a
+ * browser will withhold the cookie from any absolute cross-origin API URL.
+ * Serving `/api/*` from THIS origin, exactly as the Vite dev server already
+ * does locally, is what keeps sign-in working without weakening the cookie.
+ * Set API_PROXY_TARGET to the API service origin (e.g.
+ * https://bluelinegpt-api-test.onrender.com) and build the SPA with the
+ * relative VITE_API_BASE_URL=/api/v1.
+ */
+const apiProxyTarget = process.env.API_PROXY_TARGET;
+const proxyTargetUrl = apiProxyTarget === undefined ? undefined : new URL(apiProxyTarget);
+
+function proxyApi(request, response) {
+  const makeRequest = proxyTargetUrl.protocol === "https:" ? httpsRequest : httpRequest;
+  const upstream = makeRequest(
+    {
+      headers: {
+        ...request.headers,
+        host: proxyTargetUrl.host,
+        // The API trusts this for scheme detection behind proxies; the
+        // browser-facing hop here is whatever Render terminated.
+        "x-forwarded-proto": "https",
+      },
+      hostname: proxyTargetUrl.hostname,
+      method: request.method,
+      path: request.url,
+      port: proxyTargetUrl.port === "" ? undefined : Number(proxyTargetUrl.port),
+    },
+    (upstreamResponse) => {
+      response.writeHead(upstreamResponse.statusCode ?? 502, upstreamResponse.headers);
+      upstreamResponse.pipe(response);
+    },
+  );
+  upstream.on("error", () => {
+    if (!response.headersSent) response.writeHead(502, { "Content-Type": "application/json" });
+    response.end('{"error":{"code":"bad_gateway","message":"API upstream unreachable"}}');
+  });
+  request.pipe(upstream);
+}
 const connectSources = process.env.WEB_CONNECT_SRC ?? "'self' https:";
 if (/[;\r\n]/.test(connectSources)) {
   throw new Error("WEB_CONNECT_SRC contains invalid CSP characters");
@@ -44,6 +86,10 @@ function resolveAsset(requestUrl) {
 }
 
 const server = createServer((request, response) => {
+  if (proxyTargetUrl !== undefined && (request.url ?? "").startsWith("/api/")) {
+    proxyApi(request, response);
+    return;
+  }
   addSecurityHeaders(response);
   if (request.url === "/healthz") {
     response.writeHead(200, { "Cache-Control": "no-store", "Content-Type": "application/json" });
