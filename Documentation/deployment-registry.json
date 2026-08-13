@@ -7,9 +7,9 @@
       "path": "apps/api",
       "renderService": "bluelinegpt-api-test",
       "status": "needs_deploy",
-      "localCommit": "711f8cd",
-      "localCommitDate": "2026-08-13",
-      "lastChangeDescription": "feat(platform): Company data reset screen with one-way move-to-production",
+      "localCommit": "4c480d8",
+      "localCommitDate": "2026-08-14",
+      "lastChangeDescription": "chore: update deployment registry for reset audit fix",
       "lastChangeBy": "claude",
       "confirmedLiveCommit": null,
       "confirmedLiveAt": null
