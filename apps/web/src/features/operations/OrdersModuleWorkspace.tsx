@@ -347,12 +347,11 @@ export function OrdersModuleWorkspace({
   useEffect(() => {
     let active = true;
     void (async () => {
-      const [holdOrders, loadedDrivers, loadedTraders, loadedAreas] = await Promise.all([
+      const [holdOrders, loadedDrivers, loadedTraders] = await Promise.all([
         api.get<OperationsOrderPage>("operations/orders?page=1&pageSize=25&quickView=hold"),
         api.get<readonly OperationsDriver[]>("operations/drivers"),
         api.get<readonly OperationsTrader[]>("operations/traders"),
-        api.get<readonly CompanyArea[]>("configuration/areas").catch(() => []),
-      ]).catch(() => [undefined, undefined, undefined, undefined] as const);
+      ]).catch(() => [undefined, undefined, undefined] as const);
       if (!active) return;
       if (holdOrders !== undefined) {
         setHoldCount(holdOrders.tabTotalCount ?? holdOrders.filteredCount);
@@ -364,14 +363,35 @@ export function OrdersModuleWorkspace({
       if (loadedTraders !== undefined) {
         setTraders(loadedTraders.filter((trader) => trader.status === "active"));
       }
-      if (loadedAreas !== undefined) {
-        setAreas(Array.isArray(loadedAreas) ? loadedAreas : []);
+
+      // Load areas for each emirate to build area-emirate mapping
+      if (active && emirates.length > 0) {
+        try {
+          const allAreas: CompanyArea[] = [];
+          for (const emirate of emirates) {
+            try {
+              const emirateAreas = await api.get<readonly CompanyArea[]>(
+                `configuration/areas/search?emirateId=${encodeURIComponent(emirate.id)}&activeOnly=true`,
+              );
+              if (Array.isArray(emirateAreas)) {
+                allAreas.push(...emirateAreas);
+              }
+            } catch {
+              // Skip this emirate if fetch fails
+            }
+          }
+          if (active && allAreas.length > 0) {
+            setAreas(allAreas);
+          }
+        } catch {
+          // Areas loading failed, continue without them
+        }
       }
     })();
     return () => {
       active = false;
     };
-  }, [api]);
+  }, [api, emirates]);
 
   // Emirates scope the Area filter; load them once.
   useEffect(() => {
@@ -999,7 +1019,7 @@ export function OrdersModuleWorkspace({
                   checked={Array.isArray(grouping) && grouping.includes("area")}
                   onChange={() => toggleGroupingDimension("area")}
                 />
-                {t("operations.groupByArea", { defaultValue: "Area" })}
+                Area
               </label>
               <label className="grouping-checkbox">
                 <input
@@ -1007,7 +1027,7 @@ export function OrdersModuleWorkspace({
                   checked={Array.isArray(grouping) && grouping.includes("trader")}
                   onChange={() => toggleGroupingDimension("trader")}
                 />
-                {t("operations.groupByTrader", { defaultValue: "Trader" })}
+                Trader
               </label>
               <label className="grouping-checkbox">
                 <input
@@ -1015,7 +1035,7 @@ export function OrdersModuleWorkspace({
                   checked={Array.isArray(grouping) && grouping.includes("driver")}
                   onChange={() => toggleGroupingDimension("driver")}
                 />
-                {t("operations.groupByDriver")}
+                Driver
               </label>
               <label className="grouping-checkbox">
                 <input
@@ -1023,7 +1043,7 @@ export function OrdersModuleWorkspace({
                   checked={Array.isArray(grouping) && grouping.includes("status")}
                   onChange={() => toggleGroupingDimension("status")}
                 />
-                {t("operations.groupByStatus")}
+                Status
               </label>
               {grouping !== "" && (
                 <>
