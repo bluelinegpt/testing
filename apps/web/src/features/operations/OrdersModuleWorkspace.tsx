@@ -540,13 +540,23 @@ export function OrdersModuleWorkspace({
   };
   const orderSelected = (id: string) => (allMatching ? !excludedIds.has(id) : selectedIds.has(id));
   // Build area-to-emirate-code mapping from loaded areas data
+  // Map both English and Arabic area names to emirate codes
   const areaEmirateMap = useMemo(() => {
     const map = new Map<string, string>();
 
     // Use the loaded areas data to build area-to-emirate mapping
+    // Include both English (nameEn) and Arabic (nameAr) names
     for (const area of areas) {
-      if (area.nameEn && area.emirateCode) {
-        map.set(area.nameEn, area.emirateCode.toUpperCase());
+      if (area.emirateCode) {
+        const emirateCode = area.emirateCode.toUpperCase();
+        // Map English name
+        if (area.nameEn) {
+          map.set(area.nameEn, emirateCode);
+        }
+        // Map Arabic name
+        if (area.nameAr) {
+          map.set(area.nameAr, emirateCode);
+        }
       }
     }
 
