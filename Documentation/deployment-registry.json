@@ -20,9 +20,9 @@
       "path": "apps/web",
       "renderService": "bluelinegpt-web-test",
       "status": "needs_deploy",
-      "localCommit": "71f378d",
+      "localCommit": "b0789de",
       "localCommitDate": "2026-08-13",
-      "lastChangeDescription": "Fix build error and display full emirate names in order area grouping",
+      "lastChangeDescription": "Display emirate - area names in grouping (Dubai - Abu Hail format)",
       "lastChangeBy": "claude",
       "confirmedLiveCommit": null,
       "confirmedLiveAt": null

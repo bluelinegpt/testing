@@ -559,41 +559,40 @@ export function OrdersModuleWorkspace({
     setExcludedIds(new Set());
   };
   const orderSelected = (id: string) => (allMatching ? !excludedIds.has(id) : selectedIds.has(id));
-  // Build area-to-emirate mapping from multiple sources
+  // Build area-to-emirate mapping from areas configuration
+  // Since emirateNameEn is not in the orders list, we must use the areas data
   const areaEmirateMap = useMemo(() => {
     const map = new Map<string, { code: string; name: string }>();
 
-    // FIRST PRIORITY: Extract from orders that have emirateNameEn
-    // This is the most reliable because it comes directly from the API response
-    for (const order of orderItems) {
-      if (order.areaName && order.emirateNameEn && !map.has(order.areaName)) {
-        map.set(order.areaName, { code: order.emirateNameEn.substring(0, 3).toUpperCase(), name: order.emirateNameEn });
-      }
-    }
-
-    // SECOND PRIORITY: Use loaded areas data if available
+    // Build emirate code to name lookup
     const emirateCodeToName = new Map<string, string>();
     for (const emirate of emirates) {
       emirateCodeToName.set(emirate.code.toUpperCase(), emirate.nameEn);
     }
 
+    // Map all areas to their emirates
+    // Each order has an areaName, and we need to find the emirate for that area
     for (const area of areas) {
-      if (area.emirateCode && !map.has(area.nameEn || "") && !map.has(area.nameAr || "")) {
-        const emirateCode = area.emirateCode.toUpperCase();
-        const emirateName = emirateCodeToName.get(emirateCode) || emirateCode;
-        const mapping = { code: emirateCode, name: emirateName };
+      if (!area.emirateCode) continue;
 
-        if (area.nameEn) {
-          map.set(area.nameEn, mapping);
-        }
-        if (area.nameAr) {
-          map.set(area.nameAr, mapping);
-        }
+      const emirateCode = area.emirateCode.toUpperCase();
+      const emirateName = emirateCodeToName.get(emirateCode);
+
+      if (!emirateName) continue; // Skip if we can't find the emirate name
+
+      const mapping = { code: emirateCode, name: emirateName };
+
+      // Map both English and Arabic area names to the emirate
+      if (area.nameEn) {
+        map.set(area.nameEn, mapping);
+      }
+      if (area.nameAr) {
+        map.set(area.nameAr, mapping);
       }
     }
 
     return map;
-  }, [orderItems, areas, emirates]);
+  }, [areas, emirates]);
 
   const groups = useMemo(
     () => groupVisibleOrders(orderItems, grouping, t, areaEmirateMap),
