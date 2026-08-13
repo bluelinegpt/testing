@@ -86,7 +86,7 @@ type QuickView = "active" | "all" | "hold" | "cancelled" | "closed" | "delivery"
 
 /** Quick views the backend actually understands. */
 const backendQuickViews = new Set(["active", "all", "hold", "cancelled", "closed"]);
-type OrderGrouping = "" | "status" | "driver";
+type OrderGrouping = "" | ("area" | "trader" | "driver" | "status")[];
 type BulkAction = "assign" | "manifest" | "status";
 
 interface OrderFilters {
@@ -273,6 +273,25 @@ export function OrdersModuleWorkspace({
   const [traders, setTraders] = useState<readonly OperationsTrader[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [grouping, setGrouping] = useState<OrderGrouping>("");
+  const matchingCount = data?.matchingCount ?? data?.filteredCount ?? 0;
+  const tabTotalCount = data?.tabTotalCount ?? data?.totalCount ?? 0;
+  const hasNarrowingFilters = [
+    filters.areaId,
+    filters.emirateId,
+    filters.dateFrom,
+    filters.dateTo,
+    filters.deliveryStatus,
+    filters.driverId,
+    filters.deliveryDateFrom,
+    filters.deliveryDateTo,
+    filters.businessDateFrom,
+    filters.businessDateTo,
+    filters.cashStatus,
+    filters.referenceNumber,
+    filters.settlementStatus,
+    filters.search,
+    filters.traderId,
+  ].some((value) => value !== "");
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [allMatching, setAllMatching] = useState(false);
   const [excludedIds, setExcludedIds] = useState<Set<string>>(new Set());
@@ -333,7 +352,9 @@ export function OrdersModuleWorkspace({
         api.get<readonly OperationsTrader[]>("operations/traders"),
       ]).catch(() => [undefined, undefined, undefined] as const);
       if (!active) return;
-      if (holdOrders !== undefined) setHoldCount(holdOrders.filteredCount);
+      if (holdOrders !== undefined) {
+        setHoldCount(holdOrders.tabTotalCount ?? holdOrders.filteredCount);
+      }
       if (loadedDrivers !== undefined) {
         setDrivers(loadedDrivers.filter((driver) => driver.status === "active"));
       }
@@ -388,7 +409,7 @@ export function OrdersModuleWorkspace({
     [allMatching, excludedIds, filters, selectedIds],
   );
   const selectedCount = allMatching
-    ? Math.max(0, (data?.filteredCount ?? 0) - excludedIds.size)
+    ? Math.max(0, matchingCount - excludedIds.size)
     : selectedIds.size;
 
   useEffect(() => {
@@ -423,6 +444,19 @@ export function OrdersModuleWorkspace({
     // `updateFilters` is recreated every render and is not a real dependency.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchText, filters.search]);
+
+  // Close grouping popover when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const anchor = document.getElementById("grouping-popover-anchor");
+      const popover = document.getElementById("grouping-popover");
+      if (anchor && popover && !anchor.contains(event.target as Node)) {
+        popover.style.display = "none";
+      }
+    };
+    document.addEventListener("click", handleClickOutside);
+    return () => document.removeEventListener("click", handleClickOutside);
+  }, []);
 
   /**
    * Switch quick view, carrying Delivery Activity's own fields with it.
@@ -513,6 +547,92 @@ export function OrdersModuleWorkspace({
     setGrouping(next);
     setCollapsedGroups(new Set());
   };
+
+  const toggleGroupingDimension = (dimension: "area" | "trader" | "driver" | "status") => {
+    const current = Array.isArray(grouping) ? grouping : [];
+    const updated = current.includes(dimension)
+      ? current.filter((d) => d !== dimension)
+      : [...current, dimension];
+    changeGrouping(updated.length === 0 ? "" : (updated as OrderGrouping));
+  };
+
+  const clearAllGrouping = () => {
+    changeGrouping("");
+  };
+
+  const renderGroupsRecursive = (groups: readonly VisibleOrderGroup[]): React.ReactNode => {
+    return groups.flatMap((group) => {
+      const hasChildren = group.children.length > 0;
+      const leafOrders = hasChildren ? [] : group.orders;
+      const allOrderIds = hasChildren
+        ? getAllOrderIdsFromGroup(group)
+        : group.orders.map((o) => o.id);
+      const selectedInGroup = allOrderIds.filter(orderSelected).length;
+      const expanded = !collapsedGroups.has(group.key);
+      const paddingLeft = group.level * 20;
+
+      return [
+        <Fragment key={group.key}>
+          <tr className={`order-group-row order-group-level-${group.level}`} style={{ paddingLeft }}>
+            <td style={{ paddingLeft: `${paddingLeft}px` }}>
+              {canSelectOrders ? (
+                <GroupSelectionCheckbox
+                  checked={selectedInGroup === allOrderIds.length && allOrderIds.length > 0}
+                  indeterminate={selectedInGroup > 0 && selectedInGroup < allOrderIds.length}
+                  label={t("operations.selectVisibleGroup", {
+                    group: group.label,
+                  })}
+                  onChange={() => toggleGroup(allOrderIds)}
+                />
+              ) : null}
+            </td>
+            <td colSpan={13 + deliveryColumns}>
+              {hasChildren ? (
+                <button
+                  aria-expanded={expanded}
+                  className="order-group-toggle"
+                  onClick={() => toggleCollapsedGroup(group.key)}
+                  type="button"
+                >
+                  {expanded ? (
+                    <ChevronDown aria-hidden="true" size={18} />
+                  ) : (
+                    <ChevronRight aria-hidden="true" size={18} />
+                  )}
+                  <strong>{group.label}</strong>
+                  <span>
+                    {t("operations.visibleOrderCount", { count: allOrderIds.length })}
+                  </span>
+                  {selectedInGroup > 0 ? (
+                    <span>
+                      {t("operations.groupSelectedCount", {
+                        count: selectedInGroup,
+                      })}
+                    </span>
+                  ) : null}
+                </button>
+              ) : (
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <strong>{group.label}</strong>
+                  <span>
+                    {t("operations.visibleOrderCount", { count: leafOrders.length })}
+                  </span>
+                </div>
+              )}
+            </td>
+          </tr>
+        </Fragment>,
+        expanded && hasChildren ? renderGroupsRecursive(group.children) : null,
+        expanded && !hasChildren ? leafOrders.map(renderOrderRow) : null,
+      ];
+    });
+  };
+
+  const getAllOrderIdsFromGroup = (group: VisibleOrderGroup): readonly string[] => {
+    if (group.orders.length > 0) return group.orders.map((o) => o.id);
+    return group.children.flatMap(getAllOrderIdsFromGroup);
+  };
+
   const toggleGroup = (groupIds: readonly string[]) => {
     const allSelected = groupIds.every((id) => orderSelected(id));
     setAllMatching(false);
@@ -794,17 +914,97 @@ export function OrdersModuleWorkspace({
               </option>
             ))}
           </FilterSelect>
-          <label className="filter-select">
-            <span>{t("operations.grouping")}</span>
-            <select
-              onChange={(event) => changeGrouping(event.target.value as OrderGrouping)}
-              value={grouping}
+          <div className="filter-grouping-multi-select" id="grouping-popover-anchor">
+            <button
+              className="grouping-button"
+              onClick={() => {
+                const popover = document.getElementById("grouping-popover");
+                if (popover?.style.display === "none" || !popover?.style.display) {
+                  popover!.style.display = "block";
+                } else {
+                  popover!.style.display = "none";
+                }
+              }}
+              type="button"
             >
-              <option value="">{t("operations.clearGrouping")}</option>
-              <option value="status">{t("operations.groupByStatus")}</option>
-              <option value="driver">{t("operations.groupByDriver")}</option>
-            </select>
-          </label>
+              <span className="grouping-label">
+                {t("operations.grouping")}
+                {Array.isArray(grouping) && grouping.length > 0 && (
+                  <>
+                    :{" "}
+                    <span className="grouping-values">
+                      {grouping
+                        .map((d) =>
+                          d === "area"
+                            ? t("operations.groupByArea", { defaultValue: "Area" })
+                            : d === "trader"
+                              ? t("operations.groupByTrader", { defaultValue: "Trader" })
+                              : d === "driver"
+                                ? t("operations.groupByDriver")
+                                : t("operations.groupByStatus"),
+                        )
+                        .join(", ")}
+                    </span>
+                  </>
+                )}
+              </span>
+              <ChevronDown aria-hidden="true" size={16} style={{ marginLeft: "6px" }} />
+            </button>
+            <div
+              className="grouping-popover"
+              id="grouping-popover"
+              style={{ display: "none" }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <label className="grouping-checkbox">
+                <input
+                  type="checkbox"
+                  checked={Array.isArray(grouping) && grouping.includes("area")}
+                  onChange={() => toggleGroupingDimension("area")}
+                />
+                {t("operations.groupByArea", { defaultValue: "Area" })}
+              </label>
+              <label className="grouping-checkbox">
+                <input
+                  type="checkbox"
+                  checked={Array.isArray(grouping) && grouping.includes("trader")}
+                  onChange={() => toggleGroupingDimension("trader")}
+                />
+                {t("operations.groupByTrader", { defaultValue: "Trader" })}
+              </label>
+              <label className="grouping-checkbox">
+                <input
+                  type="checkbox"
+                  checked={Array.isArray(grouping) && grouping.includes("driver")}
+                  onChange={() => toggleGroupingDimension("driver")}
+                />
+                {t("operations.groupByDriver")}
+              </label>
+              <label className="grouping-checkbox">
+                <input
+                  type="checkbox"
+                  checked={Array.isArray(grouping) && grouping.includes("status")}
+                  onChange={() => toggleGroupingDimension("status")}
+                />
+                {t("operations.groupByStatus")}
+              </label>
+              {grouping !== "" && (
+                <>
+                  <div className="grouping-divider" />
+                  <button
+                    className="grouping-clear-button"
+                    onClick={() => {
+                      clearAllGrouping();
+                      document.getElementById("grouping-popover")!.style.display = "none";
+                    }}
+                    type="button"
+                  >
+                    {t("operations.clearGrouping")}
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
           <label className="filter-date">
             <span>{t("operations.dateFrom")}</span>
             <input
@@ -909,7 +1109,7 @@ export function OrdersModuleWorkspace({
             <thead>
               <tr>
                 <th>
-                  {grouping === "" && canSelectOrders ? (
+                  {(grouping === "" || grouping.length === 0) && canSelectOrders ? (
                     <input
                       aria-label={t("operations.selectCurrentPage")}
                       checked={pageSelected}
@@ -946,55 +1146,7 @@ export function OrdersModuleWorkspace({
             <tbody>
               {grouping === ""
                 ? orderItems.map(renderOrderRow)
-                : groups.map((group) => {
-                    const ids = group.orders.map((order) => order.id);
-                    const selectedInGroup = ids.filter(orderSelected).length;
-                    const expanded = !collapsedGroups.has(group.key);
-                    return (
-                      <Fragment key={group.key}>
-                        <tr className="order-group-row">
-                          <td>
-                            {canSelectOrders ? (
-                              <GroupSelectionCheckbox
-                                checked={selectedInGroup === ids.length && ids.length > 0}
-                                indeterminate={selectedInGroup > 0 && selectedInGroup < ids.length}
-                                label={t("operations.selectVisibleGroup", {
-                                  group: group.label,
-                                })}
-                                onChange={() => toggleGroup(ids)}
-                              />
-                            ) : null}
-                          </td>
-                          <td colSpan={13 + deliveryColumns}>
-                            <button
-                              aria-expanded={expanded}
-                              className="order-group-toggle"
-                              onClick={() => toggleCollapsedGroup(group.key)}
-                              type="button"
-                            >
-                              {expanded ? (
-                                <ChevronDown aria-hidden="true" size={18} />
-                              ) : (
-                                <ChevronRight aria-hidden="true" size={18} />
-                              )}
-                              <strong>{group.label}</strong>
-                              <span>
-                                {t("operations.visibleOrderCount", { count: ids.length })}
-                              </span>
-                              {selectedInGroup > 0 ? (
-                                <span>
-                                  {t("operations.groupSelectedCount", {
-                                    count: selectedInGroup,
-                                  })}
-                                </span>
-                              ) : null}
-                            </button>
-                          </td>
-                        </tr>
-                        {expanded ? group.orders.map(renderOrderRow) : null}
-                      </Fragment>
-                    );
-                  })}
+                : renderGroupsRecursive(groups)}
               {!loading && orderItems.length === 0 ? (
                 <tr>
                   <td className="empty-state" colSpan={14 + deliveryColumns}>
@@ -1011,10 +1163,10 @@ export function OrdersModuleWorkspace({
           label={t("operations.ordersHorizontalScroll")}
           targetRef={ordersScrollRef}
         />
-        {grouping === "" &&
+        {(grouping === "" || grouping.length === 0) &&
         pageSelected &&
         !allMatching &&
-        (data?.filteredCount ?? 0) > pageIds.length ? (
+        matchingCount > pageIds.length ? (
           <button
             className="select-all-matching"
             onClick={() => {
@@ -1023,15 +1175,21 @@ export function OrdersModuleWorkspace({
             }}
             type="button"
           >
-            {t("operations.selectAllMatching", { count: data?.filteredCount ?? 0 })}
+            {t("operations.selectAllMatching", { count: matchingCount })}
           </button>
         ) : null}
         <footer className="orders-pagination">
           <span>
-            {t("operations.resultCount", {
-              filtered: data?.filteredCount ?? 0,
-              total: data?.totalCount ?? 0,
-            })}
+            {hasNarrowingFilters
+              ? t("operations.resultCountFilteredScoped", {
+                  matching: matchingCount,
+                  scope: t(`operations.countScope.${filters.quickView}`),
+                  total: tabTotalCount,
+                })
+              : t("operations.resultCountScoped", {
+                  count: tabTotalCount,
+                  scope: t(`operations.countScope.${filters.quickView}`),
+                })}
           </span>
           <label>
             <span>{t("operations.pageSize")}</span>
@@ -1059,7 +1217,7 @@ export function OrdersModuleWorkspace({
           <button
             aria-label={t("operations.nextPage")}
             className="icon-button"
-            disabled={page * pageSize >= (data?.filteredCount ?? 0)}
+            disabled={page * pageSize >= matchingCount}
             onClick={() => setPage(page + 1)}
             type="button"
           >
@@ -3414,7 +3572,7 @@ function availableActions(order: OperationsOrder): readonly RowAction[] {
           ...(settleDone || !traderSettlementActionApplicable(order)
             ? []
             : (["moneyOut"] as const)),
-          "close",
+          ...(closeEligible(order) ? (["close"] as const) : []),
         ];
       case "returned_to_branch":
         return ["returnToTrader"];
@@ -3423,7 +3581,7 @@ function availableActions(order: OperationsOrder): readonly RowAction[] {
           ...(settleDone || !traderSettlementActionApplicable(order)
             ? []
             : (["moneyOut"] as const)),
-          "close",
+          ...(closeEligible(order) ? (["close"] as const) : []),
         ];
       default:
         return [];
@@ -3450,8 +3608,12 @@ function singleSelection(orderId: string): SelectionPayload {
 function collectFromDriverPath(context: {
   readonly driverId?: string | null | undefined;
   readonly orderIds: readonly string[];
+  readonly returnTo?: string | undefined;
 }): string {
-  const query = new URLSearchParams({ openDialog: "collect_money", returnTo: "/orders" });
+  const query = new URLSearchParams({
+    openDialog: "collect_money",
+    returnTo: context.returnTo ?? "/orders",
+  });
   if (context.driverId) query.set("driverId", context.driverId);
   if (context.orderIds.length > 0) query.set("orderIds", context.orderIds.join(","));
   return `/drivers?${query.toString()}`;
@@ -3524,6 +3686,18 @@ function OrderRowActions({
     return true;
   });
   const detailsPath = `/orders/${encodeURIComponent(order.orderNumber)}`;
+  const workflowReturnPath = "/orders";
+
+  const traderSettlementPath = () => {
+    const guidance = order.workflowGuidance;
+    const query = new URLSearchParams(
+      guidance?.nextActionRoute === "/trader-settlements"
+        ? guidance.nextActionParams
+        : { openDialog: "new_settlement", orderId: order.id, orderNumber: order.orderNumber },
+    );
+    query.set("returnTo", workflowReturnPath);
+    return `/trader-settlements?${query.toString()}`;
+  };
 
   const patchStatus = async (status: string, reason?: string) => {
     setBusy(true);
@@ -3638,7 +3812,13 @@ function OrderRowActions({
     }
     if (action === "collectMoney") {
       setOpen(false);
-      onNavigate(collectFromDriverPath({ driverId: order.assignedDriverId, orderIds: [order.id] }));
+      onNavigate(
+        collectFromDriverPath({
+          driverId: order.assignedDriverId,
+          orderIds: [order.id],
+          returnTo: workflowReturnPath,
+        }),
+      );
       return;
     }
     if (action === "viewCollection") {
@@ -3647,7 +3827,8 @@ function OrderRowActions({
       return;
     }
     if (action === "moneyOut") {
-      onNavigate("/trader-settlements");
+      setOpen(false);
+      onNavigate(traderSettlementPath());
       return;
     }
     if (
@@ -3717,9 +3898,8 @@ function OrderRowActions({
             ) : null}
             {actions.map((action) => {
               const blocked =
-                (action === "close" && !closeEligible(order)) ||
-                ((action === "markDelivered" || action === "markOutForDelivery") &&
-                  order.assignedDriverId === null);
+                (action === "markDelivered" || action === "markOutForDelivery") &&
+                order.assignedDriverId === null;
               return (
                 <button
                   className="button button-secondary"
@@ -3732,7 +3912,7 @@ function OrderRowActions({
                         ? action === "markOutForDelivery"
                           ? t("operations.driverRequiredForDispatch")
                           : t("operations.driverRequiredForDelivery")
-                        : t("operations.closeBlockedHint")
+                        : undefined
                       : undefined
                   }
                   type="button"
@@ -4283,7 +4463,9 @@ function updateSet(source: Set<string>, values: readonly string[], remove: boole
 interface VisibleOrderGroup {
   readonly key: string;
   readonly label: string;
+  readonly level: number;
   readonly orders: readonly OperationsOrder[];
+  readonly children: readonly VisibleOrderGroup[];
 }
 
 function groupVisibleOrders(
@@ -4291,44 +4473,92 @@ function groupVisibleOrders(
   grouping: OrderGrouping,
   t: TFunction,
 ): readonly VisibleOrderGroup[] {
-  if (grouping === "") return [];
-  const grouped = new Map<string, OperationsOrder[]>();
-  for (const order of orders) {
-    const visibleStatus = deriveOrderStatus(order).key;
-    const key =
-      grouping === "status"
-        ? `status:${visibleStatus}`
-        : order.assignedDriverId === null
-          ? "driver:unassigned"
-          : `driver:${order.assignedDriverId}`;
-    const existing = grouped.get(key) ?? [];
-    existing.push(order);
-    grouped.set(key, existing);
-  }
+  if (grouping === "" || grouping.length === 0) return [];
+
   const statusOrder = new Map<string, number>(
     visibleOrderStatuses.map((status, index) => [status, index]),
   );
-  return [...grouped.entries()]
-    .map(([key, groupedOrders]) => ({
-      key,
-      label:
-        grouping === "status"
-          ? orderStatusLabel(t, deriveOrderStatus(groupedOrders[0] ?? orders[0]!).key)
-          : (groupedOrders[0]?.assignedDriverName ?? t("operations.unassigned")),
-      orders: groupedOrders,
-    }))
-    .sort((left, right) => {
-      if (grouping === "status") {
-        const leftStatus =
-          left.orders[0] === undefined ? "" : deriveOrderStatus(left.orders[0]).key;
-        const rightStatus =
-          right.orders[0] === undefined ? "" : deriveOrderStatus(right.orders[0]).key;
+
+  const getGroupLabel = (dimension: string, order: OperationsOrder): string => {
+    switch (dimension) {
+      case "area": {
+        const emirateCode = order.emirateNameEn
+          ? order.emirateNameEn.substring(0, 3).toUpperCase()
+          : "???";
+        const areaName = order.areaName ?? t("operations.unknown");
+        return `${emirateCode} - ${areaName}`;
+      }
+      case "trader":
+        return order.traderName ?? t("operations.unknown");
+      case "driver":
+        return order.assignedDriverName ?? t("operations.unassigned");
+      case "status":
+        return orderStatusLabel(t, deriveOrderStatus(order).key);
+      default:
+        return t("operations.unknown");
+    }
+  };
+
+  const getGroupKey = (dimension: string, order: OperationsOrder): string => {
+    switch (dimension) {
+      case "area":
+        return `area:${order.areaName ?? "unknown"}`;
+      case "trader":
+        return `trader:${order.traderId ?? "unknown"}`;
+      case "driver":
+        return `driver:${order.assignedDriverId ?? "unassigned"}`;
+      case "status":
+        return `status:${deriveOrderStatus(order).key}`;
+      default:
+        return "unknown";
+    }
+  };
+
+  const buildHierarchy = (
+    items: readonly OperationsOrder[],
+    dimensions: string[],
+    level: number,
+  ): VisibleOrderGroup[] => {
+    if (level >= dimensions.length) return [];
+
+    const grouped = new Map<string, OperationsOrder[]>();
+    for (const order of items) {
+      const key = getGroupKey(dimensions[level], order);
+      const existing = grouped.get(key) ?? [];
+      existing.push(order);
+      grouped.set(key, existing);
+    }
+
+    const result = [...grouped.entries()].map(([key, groupedOrders]) => {
+      const isLeaf = level === dimensions.length - 1;
+      return {
+        key,
+        label: getGroupLabel(dimensions[level], groupedOrders[0]!),
+        level,
+        orders: isLeaf ? groupedOrders : [],
+        children: isLeaf ? [] : buildHierarchy(groupedOrders, dimensions, level + 1),
+      };
+    });
+
+    // Sort based on dimension
+    const dimension = dimensions[level];
+    return result.sort((left, right) => {
+      if (dimension === "status") {
+        const leftStatus = deriveOrderStatus(left.children[0]?.orders[0] ?? left.orders[0]!).key;
+        const rightStatus = deriveOrderStatus(
+          right.children[0]?.orders[0] ?? right.orders[0]!,
+        ).key;
         return (statusOrder.get(leftStatus) ?? 999) - (statusOrder.get(rightStatus) ?? 999);
       }
-      if (left.key === "driver:unassigned") return 1;
-      if (right.key === "driver:unassigned") return -1;
+      if (dimension === "driver") {
+        if (left.key === "driver:unassigned") return 1;
+        if (right.key === "driver:unassigned") return -1;
+      }
       return left.label.localeCompare(right.label);
     });
+  };
+
+  return buildHierarchy(orders, grouping as string[], 0);
 }
 
 function GroupSelectionCheckbox({

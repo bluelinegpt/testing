@@ -977,6 +977,102 @@
   color: var(--text-secondary);
   font-size: 12px;
 }
+.filter-grouping-multi-select {
+  position: relative;
+  display: inline-block;
+}
+
+.grouping-button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 38px;
+  padding: 6px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--surface-color);
+  color: var(--text-primary);
+  font-size: 14px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.grouping-button:hover {
+  background: var(--primary-subtle);
+  border-color: var(--color-primary);
+}
+
+.grouping-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.grouping-values {
+  font-weight: 500;
+  color: var(--color-primary);
+}
+
+.grouping-popover {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 4px;
+  background: var(--surface-color);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  padding: 8px;
+  min-width: 160px;
+  z-index: 1000;
+}
+
+.grouping-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  cursor: pointer;
+  border-radius: 6px;
+  font-size: 14px;
+  color: var(--text-primary);
+  transition: background-color 0.2s;
+}
+
+.grouping-checkbox:hover {
+  background: var(--primary-subtle);
+}
+
+.grouping-checkbox input {
+  cursor: pointer;
+  width: 16px;
+  height: 16px;
+  accent-color: var(--color-primary);
+}
+
+.grouping-divider {
+  height: 1px;
+  background: var(--border-color);
+  margin: 6px 0;
+}
+
+.grouping-clear-button {
+  display: block;
+  width: 100%;
+  padding: 8px;
+  border: none;
+  background: none;
+  color: var(--color-danger);
+  font-size: 13px;
+  cursor: pointer;
+  border-radius: 6px;
+  text-align: left;
+  transition: background-color 0.2s;
+}
+
+.grouping-clear-button:hover {
+  background: var(--danger-subtle);
+}
 .bulk-toolbar {
   min-height: 54px;
   display: flex;
@@ -1067,6 +1163,20 @@
 .orders-table .order-group-row > td {
   border-block-start: 1px solid rgb(79 99 246 / 24%);
   border-block-end: 1px solid rgb(79 99 246 / 24%);
+}
+.orders-table .order-group-level-0 {
+  background: rgb(79 99 246 / 14%);
+  font-weight: 600;
+}
+.orders-table .order-group-level-1 {
+  background: rgb(79 99 246 / 8%);
+  font-weight: 500;
+}
+.orders-table .order-group-level-2 {
+  background: rgb(79 99 246 / 4%);
+}
+.orders-table .order-group-level-3 {
+  background: transparent;
 }
 .fast-entry-workspace {
   display: grid;
@@ -2307,6 +2417,219 @@ td:last-child {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 14px;
+}
+
+.driver-earnings-preview {
+  margin-top: 18px;
+  padding: 22px;
+  border-inline-start: 4px solid var(--color-primary, #5065f6);
+  background: linear-gradient(135deg, #ffffff 0%, #f5f7ff 100%);
+}
+.driver-earnings-preview > div:not(.alert) {
+  padding: 10px 0;
+  border-bottom: 1px solid #e6eaf5;
+}
+.driver-earnings-help {
+  max-width: 760px;
+  color: #52616b;
+}
+
+.driver-monthly-heading {
+  align-items: flex-start;
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+}
+
+.driver-monthly-heading h2,
+.driver-monthly-heading p {
+  margin-top: 0;
+}
+
+.driver-monthly-tabs {
+  flex-shrink: 0;
+}
+
+.driver-monthly-filters {
+  margin-top: 1rem;
+}
+
+.driver-monthly-totals {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.driver-monthly-totals .card {
+  display: grid;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.driver-monthly-totals span,
+.driver-monthly-metric small,
+.driver-monthly-name small {
+  color: var(--text-muted);
+  display: block;
+}
+
+.driver-monthly-totals strong {
+  font-size: 1.25rem;
+}
+
+.driver-monthly-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.driver-monthly-row {
+  padding: 0;
+  overflow: hidden;
+}
+
+.driver-monthly-row-button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: minmax(13rem, 1.4fr) repeat(4, minmax(7rem, 1fr)) auto;
+  padding: 1rem;
+  text-align: start;
+  width: 100%;
+}
+
+.driver-monthly-row-button:hover {
+  background: var(--surface-subtle);
+}
+
+.driver-monthly-name,
+.driver-monthly-metric {
+  min-width: 0;
+}
+
+.driver-monthly-detail {
+  background: var(--surface-subtle);
+  border-top: 1px solid var(--border-color);
+  display: grid;
+  gap: 1.25rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding: 1rem;
+}
+
+.driver-monthly-detail h3 {
+  margin-top: 0;
+}
+
+.driver-monthly-detail-line {
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+  padding: 0.45rem 0;
+}
+
+.driver-monthly-note {
+  border-inline-start: 3px solid var(--warning-color);
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 0.75rem;
+}
+
+.driver-monthly-report table {
+  min-width: 70rem;
+}
+
+.driver-monthly-report-heading {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.driver-monthly-report-heading h3 {
+  margin: 0;
+}
+
+@media print {
+  .driver-monthly-shell,
+  .driver-monthly-report-heading .button,
+  .payroll-tabs {
+    display: none !important;
+  }
+  .driver-monthly-report table {
+    min-width: 0;
+  }
+}
+
+@media (max-width: 900px) {
+  .driver-monthly-heading {
+    display: block;
+  }
+  .driver-monthly-totals,
+  .driver-monthly-detail {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .driver-monthly-row-button {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .driver-monthly-totals,
+  .driver-monthly-detail,
+  .driver-monthly-row-button {
+    grid-template-columns: 1fr;
+  }
+}
+.driver-payment-card {
+  padding: 22px;
+  border-top: 4px solid #5065f6;
+}
+.driver-advance-card {
+  border-top-color: #d48a1f;
+  background: #fffaf2;
+}
+.driver-advance-limit {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 16px 0;
+}
+.driver-advance-limit > span {
+  padding: 12px;
+  border: 1px solid #ead9ba;
+  border-radius: 8px;
+  background: #fff;
+}
+.driver-advance-limit strong {
+  display: block;
+  margin-top: 4px;
+}
+.driver-payment-step {
+  display: inline-block;
+  margin-bottom: 6px;
+  color: #52616b;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.driver-payment-total {
+  padding: 22px;
+  background: #f4f7fb;
+}
+.driver-payment-total > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 8px 0;
+}
+.driver-payment-grand-total {
+  margin-top: 6px;
+  border-top: 2px solid #cdd6e2;
+  font-size: 18px;
 }
 .permission-list {
   margin: 2px 0 18px;
@@ -3978,6 +4301,13 @@ tr.row-highlighted {
   font-size: 11px;
 }
 
+.top-header-title-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
 .top-header-title strong {
   overflow: hidden;
   color: var(--shell-text);
@@ -5286,6 +5616,48 @@ tr.row-highlighted {
   font-size: 13px;
   font-weight: 400;
   color: #5b6b73;
+}
+
+/* Advisory slug-availability feedback (Trader Store creation). Same sizing
+   as `.field-hint`; only the colour carries the verdict. */
+.field-hint-ok,
+.field-hint-error {
+  font-size: 13px;
+  font-weight: 500;
+}
+.field-hint-ok {
+  color: var(--success-color, var(--color-success));
+}
+.field-hint-error {
+  color: var(--danger-color, var(--color-danger));
+}
+
+/* The Store URL domain prefix shown beside the slug input (§22): one visual
+   field, not a label floating over a bare textbox. */
+.storefront-slug-preview {
+  display: flex;
+  align-items: stretch;
+  border: 1px solid #b9c9ce;
+  border-radius: 5px;
+  overflow: hidden;
+}
+.storefront-slug-preview__domain {
+  display: flex;
+  align-items: center;
+  padding-inline: 10px;
+  background: var(--surface-subtle-color, #f4f7fb);
+  color: var(--text-secondary, #667085);
+  font-size: 13px;
+  white-space: nowrap;
+  border-inline-end: 1px solid #b9c9ce;
+}
+.storefront-slug-preview input {
+  border: none;
+  border-radius: 0;
+  min-height: 42px;
+}
+.storefront-slug-preview input:focus {
+  outline: none;
 }
 
 /* A checkbox field reads label-beside-control, not label-above-control —
@@ -9797,4 +10169,92 @@ tr.row-highlighted {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+/* Corner build label -- lets a screen be visually identified as local vs a
+   Render deploy, and which commit it's running. z-index 50: above ordinary
+   page content but well below the sticky table header (900+) and modal
+   backdrop (1000) tiers documented near .order-workflow-panel, so it never
+   competes with anything that actually needs to be on top. */
+.version-badge {
+  position: fixed;
+  inset-block-end: 8px;
+  inset-inline-end: 10px;
+  z-index: 50;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--surface-color);
+  border: 1px solid var(--border-color);
+  color: var(--text-muted, #6b7280);
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  opacity: 0.7;
+  pointer-events: none;
+  user-select: text;
+}
+
+/* Sits in the shared header's title row, next to the page name, instead of
+   floating in a corner -- undoes every `position: fixed` property from the
+   base rule above rather than layering a second selector on top of it. */
+.version-badge-inline {
+  position: static;
+  inset-block-end: auto;
+  inset-inline-end: auto;
+  padding: 1px 6px;
+  vertical-align: middle;
+}
+
+.deployment-status-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 16px 0;
+}
+.deployment-status-filters select,
+.deployment-status-filters input {
+  min-width: 180px;
+}
+.deployment-status-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.deployment-status-table th {
+  text-align: start;
+  color: var(--text-secondary, #667085);
+  font-weight: 600;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-color);
+}
+.deployment-status-table td {
+  padding: 10px;
+  border-bottom: 1px solid var(--border-color);
+  vertical-align: top;
+}
+.deployment-status-app-name {
+  font-weight: 600;
+}
+.deployment-status-app-path,
+.deployment-status-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--text-secondary, #667085);
+  font-size: 12px;
+}
+.deployment-status-badge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+.deployment-status-needs-deploy {
+  color: var(--warning-color, #b45309);
+}
+.deployment-status-pushed {
+  color: var(--primary-color);
+}
+.deployment-status-live {
+  color: var(--success-color, #15803d);
 }
