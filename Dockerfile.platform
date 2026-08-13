@@ -1,0 +1,26 @@
+# syntax=docker/dockerfile:1
+# Platform Administration portal — same shape as Dockerfile.web: Vite build
+# with the API base URL baked in at build time, served by the shared static
+# server (SPA fallback to index.html, /healthz, strict security headers).
+FROM node:24-bookworm-slim AS build
+RUN corepack enable && corepack prepare pnpm@11.7.0 --activate
+WORKDIR /workspace
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
+COPY apps/platform-web/package.json apps/platform-web/package.json
+RUN pnpm install --frozen-lockfile --filter . --filter @blueline/platform-web...
+
+COPY apps/platform-web apps/platform-web
+ARG VITE_API_BASE_URL
+RUN test -n "$VITE_API_BASE_URL" && pnpm --filter @blueline/platform-web build
+
+FROM node:24-bookworm-slim AS runtime
+ENV NODE_ENV=production WEB_PORT=8080 WEB_ROOT=/opt/app/dist
+WORKDIR /opt/app
+COPY --chown=node:node --from=build /workspace/apps/platform-web/dist ./dist
+COPY --chown=node:node apps/platform-web/serve.mjs ./serve.mjs
+USER node
+EXPOSE 8080
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+  CMD ["node", "-e", "fetch('http://127.0.0.1:'+(process.env.WEB_PORT||8080)+'/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+CMD ["node", "serve.mjs"]
