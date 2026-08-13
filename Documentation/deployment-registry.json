@@ -33,9 +33,9 @@
       "path": "apps/platform-web",
       "renderService": null,
       "status": "needs_deploy",
-      "localCommit": "fddb096",
+      "localCommit": "d424b70",
       "localCommitDate": "2026-08-14",
-      "lastChangeDescription": "feat(platform-web): add Dockerfile and static server for Render deployment",
+      "lastChangeDescription": "feat(platform-web): same-origin API proxy in the static server so SameSite=Lax sessions survive Render",
       "lastChangeBy": "human",
       "confirmedLiveCommit": null,
       "confirmedLiveAt": null
