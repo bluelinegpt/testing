@@ -271,6 +271,7 @@ export function OrdersModuleWorkspace({
   const [filterArea, setFilterArea] = useState<CompanyArea>();
   const [drivers, setDrivers] = useState<readonly OperationsDriver[]>([]);
   const [traders, setTraders] = useState<readonly OperationsTrader[]>([]);
+  const [areas, setAreas] = useState<readonly CompanyArea[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [grouping, setGrouping] = useState<OrderGrouping>("");
   const matchingCount = data?.matchingCount ?? data?.filteredCount ?? 0;
@@ -346,11 +347,12 @@ export function OrdersModuleWorkspace({
   useEffect(() => {
     let active = true;
     void (async () => {
-      const [holdOrders, loadedDrivers, loadedTraders] = await Promise.all([
+      const [holdOrders, loadedDrivers, loadedTraders, loadedAreas] = await Promise.all([
         api.get<OperationsOrderPage>("operations/orders?page=1&pageSize=25&quickView=hold"),
         api.get<readonly OperationsDriver[]>("operations/drivers"),
         api.get<readonly OperationsTrader[]>("operations/traders"),
-      ]).catch(() => [undefined, undefined, undefined] as const);
+        api.get<readonly CompanyArea[]>("configuration/areas").catch(() => []),
+      ]).catch(() => [undefined, undefined, undefined, undefined] as const);
       if (!active) return;
       if (holdOrders !== undefined) {
         setHoldCount(holdOrders.tabTotalCount ?? holdOrders.filteredCount);
@@ -361,6 +363,9 @@ export function OrdersModuleWorkspace({
       // Active only, exactly as before the split.
       if (loadedTraders !== undefined) {
         setTraders(loadedTraders.filter((trader) => trader.status === "active"));
+      }
+      if (loadedAreas !== undefined) {
+        setAreas(Array.isArray(loadedAreas) ? loadedAreas : []);
       }
     })();
     return () => {
@@ -534,27 +539,27 @@ export function OrdersModuleWorkspace({
     setExcludedIds(new Set());
   };
   const orderSelected = (id: string) => (allMatching ? !excludedIds.has(id) : selectedIds.has(id));
-  // Build area-to-emirate-code mapping from actual orders
+  // Build area-to-emirate-code mapping from loaded areas data
   const areaEmirateMap = useMemo(() => {
     const map = new Map<string, string>();
 
-    // First, build a emirate name -> code map
-    const emirateNameToCode = new Map<string, string>();
-    for (const emirate of emirates) {
-      emirateNameToCode.set(emirate.nameEn.toLowerCase(), emirate.code.toUpperCase());
+    // Use the loaded areas data to build area-to-emirate mapping
+    for (const area of areas) {
+      if (area.nameEn && area.emirateCode) {
+        map.set(area.nameEn, area.emirateCode.toUpperCase());
+      }
     }
 
-    // Then, extract area-to-emirate mappings from orders
+    // As fallback, also extract from orders that have emirateNameEn
     for (const order of orderItems) {
-      if (order.areaName && order.emirateNameEn) {
-        const emirateCode = emirateNameToCode.get(order.emirateNameEn.toLowerCase())
-          || order.emirateNameEn.substring(0, 3).toUpperCase();
+      if (order.areaName && order.emirateNameEn && !map.has(order.areaName)) {
+        const emirateCode = order.emirateNameEn.substring(0, 3).toUpperCase();
         map.set(order.areaName, emirateCode);
       }
     }
 
     return map;
-  }, [orderItems, emirates]);
+  }, [areas, orderItems]);
 
   const groups = useMemo(
     () => groupVisibleOrders(orderItems, grouping, t, areaEmirateMap),
