@@ -366,26 +366,32 @@ export function OrdersModuleWorkspace({
 
       // Load areas for each emirate to build area-emirate mapping
       if (active && emirates.length > 0) {
+        console.log("Loading areas for emirates:", emirates.length);
         try {
           const allAreas: CompanyArea[] = [];
           for (const emirate of emirates) {
             try {
-              const emirateAreas = await api.get<readonly CompanyArea[]>(
+              const response = await api.get<{ items: readonly CompanyArea[]; total: number; hasMore: boolean }>(
                 `configuration/areas/search?emirateId=${encodeURIComponent(emirate.id)}&activeOnly=true`,
               );
-              if (Array.isArray(emirateAreas)) {
-                allAreas.push(...emirateAreas);
+              console.log(`Areas for ${emirate.nameEn}:`, response);
+              // API returns paginated response with items array
+              if (response?.items && Array.isArray(response.items)) {
+                allAreas.push(...response.items);
               }
-            } catch {
-              // Skip this emirate if fetch fails
+            } catch (error) {
+              console.error(`Failed to load areas for ${emirate.nameEn}:`, error);
             }
           }
+          console.log("Total areas loaded:", allAreas.length);
           if (active && allAreas.length > 0) {
             setAreas(allAreas);
           }
-        } catch {
-          // Areas loading failed, continue without them
+        } catch (error) {
+          console.error("Areas loading failed:", error);
         }
+      } else {
+        console.log("Skipping areas load - emirates not ready", { emiratesLength: emirates.length, active });
       }
     })();
     return () => {
@@ -398,8 +404,13 @@ export function OrdersModuleWorkspace({
     let active = true;
     void api
       .get<readonly Emirate[]>("configuration/emirates")
-      .then((loaded) => active && setEmirates(Array.isArray(loaded) ? loaded : []))
-      .catch(() => undefined);
+      .then((loaded) => {
+        console.log("Emirates loaded:", loaded);
+        active && setEmirates(Array.isArray(loaded) ? loaded : []);
+      })
+      .catch((error) => {
+        console.error("Failed to load emirates:", error);
+      });
     return () => {
       active = false;
     };
@@ -590,6 +601,13 @@ export function OrdersModuleWorkspace({
         map.set(area.nameAr, mapping);
       }
     }
+
+    console.log("areaEmirateMap built:", {
+      mapSize: map.size,
+      areasCount: areas.length,
+      emiratesCount: emirates.length,
+      mapEntries: Array.from(map.entries()).slice(0, 5)
+    });
 
     return map;
   }, [areas, emirates]);
