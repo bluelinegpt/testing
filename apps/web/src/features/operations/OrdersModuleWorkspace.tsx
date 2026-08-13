@@ -4553,7 +4553,7 @@ function groupVisibleOrders(
   orders: readonly OperationsOrder[],
   grouping: OrderGrouping,
   t: TFunction,
-  areaEmirateMap?: Map<string, string>,
+  areaEmirateMap?: Map<string, { code: string; name: string }>,
 ): readonly VisibleOrderGroup[] {
   if (grouping === "" || grouping.length === 0) return [];
 
