@@ -6,26 +6,26 @@
       "displayName": "API",
       "path": "apps/api",
       "renderService": "bluelinegpt-api-test",
-      "status": "pushed_awaiting_confirmation",
+      "status": "confirmed_live",
       "localCommit": "cf6a09b",
       "localCommitDate": "2026-08-14",
       "lastChangeDescription": "fix(platform): exclude Platform bookkeeping tables from deletion direct set and complete the 139-table inventory review",
       "lastChangeBy": "human",
-      "confirmedLiveCommit": null,
-      "confirmedLiveAt": null
+      "confirmedLiveCommit": "cf6a09b",
+      "confirmedLiveAt": "2026-08-13"
     },
     {
       "id": "web",
       "displayName": "Main app",
       "path": "apps/web",
       "renderService": "bluelinegpt-web-test",
-      "status": "needs_deploy",
+      "status": "confirmed_live",
       "localCommit": "17c934c",
       "localCommitDate": "2026-08-14",
       "lastChangeDescription": "fix(web): resolve duplicate localization keys and type errors blocking the Render build",
       "lastChangeBy": "human",
-      "confirmedLiveCommit": null,
-      "confirmedLiveAt": null
+      "confirmedLiveCommit": "17c934c",
+      "confirmedLiveAt": "2026-08-13"
     },
     {
       "id": "platform-web",
