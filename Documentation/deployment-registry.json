@@ -33,9 +33,9 @@
       "path": "apps/platform-web",
       "renderService": null,
       "status": "needs_deploy",
-      "localCommit": "bd637db",
+      "localCommit": "fddb096",
       "localCommitDate": "2026-08-14",
-      "lastChangeDescription": "feat(platform-web): point server-error messages at the Error Handler with the correlation reference",
+      "lastChangeDescription": "feat(platform-web): add Dockerfile and static server for Render deployment",
       "lastChangeBy": "human",
       "confirmedLiveCommit": null,
       "confirmedLiveAt": null
