@@ -66,7 +66,17 @@ describe("permanent Company deletion manifest", () => {
     // `employee_driver_earning_period_delivery_sources` — new tables from
     // the still-evolving parallel Driver Earnings work, both direct
     // `company_id`, no special handling needed.
-    expect(COMPANY_DELETION_DIRECT_TABLES.size).toBe(136);
+    // 136 -> 139: the 2026-08-14 review (done with the Portal reset screen)
+    // classified `employee_driver_earning_period_payment_allocations` and
+    // `employee_driver_earning_period_payroll_allocations` (the period's two
+    // remaining allocation children, direct `company_id`) and
+    // `client_error_reports` (crash reports; carries `company_id`, so its
+    // rows for the deleted Company go with it — while the reset manifest
+    // PRESERVES it, because a training reset must keep diagnostic history).
+    // Verified 2026-08-14 that the manifest now equals the live
+    // `information_schema` inventory exactly: 139 = 139, no differences in
+    // either direction.
+    expect(COMPANY_DELETION_DIRECT_TABLES.size).toBe(139);
     expect(COMPANY_DELETION_MANIFEST_HASH).toMatch(/^[a-f0-9]{64}$/);
   });
 

@@ -159,8 +159,17 @@ const NEW_DIRECT_TABLES = [
 
 export const COMPANY_DELETION_DIRECT_TABLES = new Set([
   ...PURGE_TABLES,
+  // Both exclusion lists matter: SHARED_PRESERVE holds the global/commerce
+  // tables, and PLATFORM_PRESERVE holds the Platform's own deletion
+  // bookkeeping (keyed by `company_id_snapshot`, no `company_id` column).
+  // The reset manifest classifies all of them as PRESERVE since 2026-08-13,
+  // so without this second filter they would flow in here and the per-table
+  // `where company_id` count in the preview would fail on a column that
+  // does not exist.
   ...[...PRESERVE_TABLES].filter(
-    (table) => !SHARED_PRESERVE.includes(table as (typeof SHARED_PRESERVE)[number]),
+    (table) =>
+      !SHARED_PRESERVE.includes(table as (typeof SHARED_PRESERVE)[number]) &&
+      !PLATFORM_PRESERVE.includes(table as (typeof PLATFORM_PRESERVE)[number]),
   ),
   ...NEW_DIRECT_TABLES,
 ]);
