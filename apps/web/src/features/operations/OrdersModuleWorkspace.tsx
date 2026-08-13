@@ -563,14 +563,22 @@ export function OrdersModuleWorkspace({
   const areaEmirateMap = useMemo(() => {
     const map = new Map<string, { code: string; name: string }>();
 
-    // First priority: Use loaded areas data
+    // FIRST PRIORITY: Extract from orders that have emirateNameEn
+    // This is the most reliable because it comes directly from the API response
+    for (const order of orderItems) {
+      if (order.areaName && order.emirateNameEn && !map.has(order.areaName)) {
+        map.set(order.areaName, { code: order.emirateNameEn.substring(0, 3).toUpperCase(), name: order.emirateNameEn });
+      }
+    }
+
+    // SECOND PRIORITY: Use loaded areas data if available
     const emirateCodeToName = new Map<string, string>();
     for (const emirate of emirates) {
       emirateCodeToName.set(emirate.code.toUpperCase(), emirate.nameEn);
     }
 
     for (const area of areas) {
-      if (area.emirateCode) {
+      if (area.emirateCode && !map.has(area.nameEn || "") && !map.has(area.nameAr || "")) {
         const emirateCode = area.emirateCode.toUpperCase();
         const emirateName = emirateCodeToName.get(emirateCode) || emirateCode;
         const mapping = { code: emirateCode, name: emirateName };
@@ -584,36 +592,8 @@ export function OrdersModuleWorkspace({
       }
     }
 
-    // Second priority: Extract from orders that have emirateNameEn
-    for (const order of orderItems) {
-      if (order.areaName && order.emirateNameEn && !map.has(order.areaName)) {
-        const emirateName = order.emirateNameEn;
-        const emirateCode = emirateName.substring(0, 3).toUpperCase();
-        map.set(order.areaName, { code: emirateCode, name: emirateName });
-      }
-    }
-
-    // Third priority: Try to infer from emirate names based on area patterns
-    // Map Arabic area names to emirates by checking all orders
-    if (map.size < orderItems.length) {
-      const areaToEmirateByName = new Map<string, string>();
-      for (const order of orderItems) {
-        if (order.areaName && order.emirateNameEn) {
-          areaToEmirateByName.set(order.areaName, order.emirateNameEn);
-        }
-      }
-
-      // Apply the inferred mappings
-      for (const [areaName, emirateName] of areaToEmirateByName) {
-        if (!map.has(areaName)) {
-          const emirateCode = emirateName.substring(0, 3).toUpperCase();
-          map.set(areaName, { code: emirateCode, name: emirateName });
-        }
-      }
-    }
-
     return map;
-  }, [areas, orderItems, emirates]);
+  }, [orderItems, areas, emirates]);
 
   const groups = useMemo(
     () => groupVisibleOrders(orderItems, grouping, t, areaEmirateMap),

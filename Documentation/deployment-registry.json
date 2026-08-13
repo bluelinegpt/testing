@@ -20,9 +20,9 @@
       "path": "apps/web",
       "renderService": "bluelinegpt-web-test",
       "status": "needs_deploy",
-      "localCommit": "2388956",
+      "localCommit": "71f378d",
       "localCommitDate": "2026-08-13",
-      "lastChangeDescription": "Display full emirate names in order area grouping for clarity",
+      "lastChangeDescription": "Fix build error and display full emirate names in order area grouping",
       "lastChangeBy": "claude",
       "confirmedLiveCommit": null,
       "confirmedLiveAt": null
