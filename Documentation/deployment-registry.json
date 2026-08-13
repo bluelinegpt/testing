@@ -7,10 +7,10 @@
       "path": "apps/api",
       "renderService": "bluelinegpt-api-test",
       "status": "needs_deploy",
-      "localCommit": "4c480d8",
+      "localCommit": "cf6a09b",
       "localCommitDate": "2026-08-14",
-      "lastChangeDescription": "chore: update deployment registry for reset audit fix",
-      "lastChangeBy": "claude",
+      "lastChangeDescription": "fix(platform): exclude Platform bookkeeping tables from deletion direct set and complete the 139-table inventory review",
+      "lastChangeBy": "human",
       "confirmedLiveCommit": null,
       "confirmedLiveAt": null
     },
