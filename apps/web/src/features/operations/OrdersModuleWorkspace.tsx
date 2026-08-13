@@ -4527,8 +4527,8 @@ function groupVisibleOrders(
         if (order.emirateNameEn) {
           emirateCode = order.emirateNameEn.substring(0, 3).toUpperCase();
         } else if (areaEmirateMap) {
-          // Try to find emirate by matching known area names or emirate names
-          emirateCode = areaEmirateMap.get(areaName.toLowerCase());
+          // Try to find emirate by matching area name exactly (works for Arabic and English)
+          emirateCode = areaEmirateMap.get(areaName);
         }
 
         // If we found emirate code, use the full format; otherwise just show area
