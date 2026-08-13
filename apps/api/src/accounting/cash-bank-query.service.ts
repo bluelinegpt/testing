@@ -653,6 +653,22 @@ export class CashBankQueryService {
           from outsourced_driver_fee_payments fp
          where fp.company_id=${companyId}::uuid and fp.status='confirmed'
            and fp.payment_method='cash' and fp.company_cash_account_id is not null
+        union all select ep.company_cash_account_id,'cash',-ep.amount_paid
+          from employee_variable_earning_payments ep
+         where ep.company_id=${companyId}::uuid and ep.status='confirmed'
+           and ep.company_cash_account_id is not null
+        union all select ep.company_bank_account_id,'bank',-ep.amount_paid
+          from employee_variable_earning_payments ep
+         where ep.company_id=${companyId}::uuid and ep.status='confirmed'
+           and ep.company_bank_account_id is not null
+        union all select sa.company_cash_account_id,'cash',-sa.amount_paid
+          from employee_salary_advances sa
+         where sa.company_id=${companyId}::uuid and sa.status<>'reversed'
+           and sa.company_cash_account_id is not null
+        union all select sa.company_bank_account_id,'bank',-sa.amount_paid
+          from employee_salary_advances sa
+         where sa.company_id=${companyId}::uuid and sa.status<>'reversed'
+           and sa.company_bank_account_id is not null
         -- General Expense payment ROWS, not the header. One payment may split
         -- across a Cash and a Bank account; each row carries its own amount and
         -- its own account, and the destination CHECK makes a row exactly one of

@@ -1322,6 +1322,15 @@ a:hover {
   inset-block-start: var(--store-space-2);
 }
 
+/* Prompt 3D §25: subtle, non-blocking -- a thin strip, never a modal. */
+.store-offline-banner {
+  padding: var(--store-space-2) var(--store-space-4);
+  background: var(--store-navy);
+  color: var(--store-on-navy);
+  font-size: 13px;
+  text-align: center;
+}
+
 /* ------------------------------------------------------------ breadcrumbs */
 
 /*
@@ -1345,4 +1354,333 @@ a:hover {
   content: "›";
   margin-inline-end: var(--store-space-2);
   color: var(--store-text-muted);
+}
+
+/* ---------------------------------------------------------- customer auth */
+
+/*
+ * Shared Commerce Foundation Prompt 3A: the first real forms in this app —
+ * register/login/forgot-password/reset-password/account. Logical properties
+ * throughout for correct Arabic mirroring (margin-inline-*, text-align via
+ * inherited `dir`, never left/right).
+ */
+.store-auth-page {
+  display: flex;
+  justify-content: center;
+  padding-block: var(--store-space-10);
+}
+
+.store-auth-card {
+  background: var(--store-surface);
+  border: 1px solid var(--store-border);
+  border-radius: var(--store-radius-lg);
+  box-shadow: var(--store-shadow-sm);
+  max-width: 420px;
+  padding: var(--store-space-8);
+  width: 100%;
+}
+
+.store-auth-card h1 {
+  font-size: 22px;
+  margin-block-end: var(--store-space-2);
+}
+
+.store-auth-card__lead {
+  color: var(--store-text-secondary);
+  margin-block-end: var(--store-space-6);
+}
+
+.store-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--store-space-4);
+}
+
+.store-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--store-space-1);
+}
+
+.store-field label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--store-text);
+}
+
+.store-field input,
+.store-field select {
+  background: var(--store-page);
+  border: 1px solid var(--store-border);
+  border-radius: var(--store-radius-md);
+  color: var(--store-text);
+  font-size: 15px;
+  min-height: 44px;
+  padding-inline: var(--store-space-3);
+}
+
+.store-field input:focus,
+.store-field select:focus {
+  border-color: var(--store-primary);
+  outline: 2px solid var(--store-primary-subtle);
+  outline-offset: 1px;
+}
+
+.store-field--checkbox {
+  align-items: start;
+  flex-direction: row;
+  gap: var(--store-space-2);
+}
+
+.store-field--checkbox label {
+  font-weight: 400;
+}
+
+.store-field-error {
+  color: var(--store-danger);
+  font-size: 13px;
+}
+
+.store-form-error {
+  background: color-mix(in srgb, var(--store-danger) 10%, transparent);
+  border: 1px solid var(--store-danger);
+  border-radius: var(--store-radius-md);
+  color: var(--store-danger);
+  font-size: 14px;
+  padding: var(--store-space-3);
+}
+
+.store-form-success {
+  background: color-mix(in srgb, var(--store-success) 12%, transparent);
+  border: 1px solid var(--store-success);
+  border-radius: var(--store-radius-md);
+  color: var(--store-text);
+  font-size: 14px;
+  padding: var(--store-space-3);
+}
+
+.store-auth-card__footer {
+  color: var(--store-text-secondary);
+  font-size: 14px;
+  margin-block-start: var(--store-space-6);
+  text-align: center;
+}
+
+.store-auth-card__footer a {
+  color: var(--store-primary);
+}
+
+.store-account-grid {
+  display: grid;
+  gap: var(--store-space-6);
+}
+
+.store-account-section {
+  background: var(--store-surface);
+  border: 1px solid var(--store-border);
+  border-radius: var(--store-radius-lg);
+  padding: var(--store-space-6);
+}
+
+.store-account-section h2 {
+  font-size: 18px;
+  margin-block-end: var(--store-space-4);
+}
+
+.store-address-card {
+  border: 1px solid var(--store-border);
+  border-radius: var(--store-radius-md);
+  margin-block-end: var(--store-space-3);
+  padding: var(--store-space-4);
+}
+
+.store-address-card__actions {
+  display: flex;
+  gap: var(--store-space-3);
+  margin-block-start: var(--store-space-2);
+}
+
+@media (min-width: 900px) {
+  .store-account-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .store-account-grid > :first-child {
+    grid-column: 1 / -1;
+  }
+}
+
+/* ------------------------------------------------------ My Orders / tracking
+ *
+ * Prompt 3C (§17/§21): cards at every width, never the Delivery Portal's
+ * dense operational table. Mobile-first per the rest of this file — the
+ * single-column card list IS the mobile layout, so there is nothing to
+ * collapse into at small widths, only room to add a second column back once
+ * there is space for it.
+ */
+
+.store-orders-list {
+  display: grid;
+  gap: var(--store-space-4);
+  margin: var(--store-space-6) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.store-order-card {
+  border: 1px solid var(--store-border);
+  border-radius: var(--store-radius-lg);
+  background: var(--store-surface);
+  overflow: hidden;
+}
+
+.store-order-card__link {
+  display: grid;
+  grid-template-columns: 88px 1fr;
+  gap: var(--store-space-4);
+  padding: var(--store-space-4);
+  color: inherit;
+}
+
+.store-order-card__link:hover {
+  text-decoration: none;
+  background: var(--store-surface-subtle);
+}
+
+.store-order-card__media {
+  inline-size: 88px;
+  block-size: 88px;
+  border-radius: var(--store-radius-md);
+  overflow: hidden;
+  background: var(--store-surface-subtle);
+}
+
+.store-order-card__media img {
+  inline-size: 100%;
+  block-size: 100%;
+  object-fit: contain;
+}
+
+.store-order-card__body {
+  display: grid;
+  gap: var(--store-space-1);
+  min-inline-size: 0;
+}
+
+.store-order-card__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--store-space-3);
+  flex-wrap: wrap;
+}
+
+.store-order-card__number {
+  font-weight: 600;
+}
+
+.store-order-card__store {
+  color: var(--store-text-secondary);
+  font-size: 14px;
+  margin: 0;
+}
+
+.store-order-card__meta {
+  color: var(--store-text-muted);
+  font-size: 13px;
+  margin: 0;
+}
+
+.store-order-card__total {
+  font-weight: 600;
+  margin: var(--store-space-1) 0 0;
+}
+
+.store-orders-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--store-space-4);
+  margin-block-start: var(--store-space-6);
+}
+
+/* ------------------------------------------------------------ Order detail */
+
+.store-order-detail {
+  display: grid;
+  gap: var(--store-space-5);
+}
+
+.store-order-detail__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--store-space-3);
+  flex-wrap: wrap;
+}
+
+.store-order-items {
+  display: grid;
+  gap: var(--store-space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.store-order-item {
+  display: grid;
+  grid-template-columns: 64px 1fr auto;
+  gap: var(--store-space-3);
+  align-items: center;
+  padding-block: var(--store-space-3);
+  border-block-end: 1px solid var(--store-border);
+}
+
+.store-order-item:last-child {
+  border-block-end: none;
+}
+
+.store-order-item__media {
+  inline-size: 64px;
+  block-size: 64px;
+  border-radius: var(--store-radius-md);
+  overflow: hidden;
+  background: var(--store-surface-subtle);
+}
+
+.store-order-item__media img {
+  inline-size: 100%;
+  block-size: 100%;
+  object-fit: contain;
+}
+
+.store-order-item__name {
+  font-weight: 500;
+  margin: 0;
+}
+
+.store-order-item__total {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------------------------- track */
+
+.store-track {
+  max-inline-size: 480px;
+}
+
+.store-track__result {
+  margin-block-start: var(--store-space-6);
+}
+
+@media (min-width: 900px) {
+  .store-orders-list {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.store-error-page {
+  padding: var(--store-space-6);
+  text-align: center;
 }

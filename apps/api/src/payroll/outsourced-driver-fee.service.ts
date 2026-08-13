@@ -87,6 +87,51 @@ export class OutsourcedDriverFeeService {
     private readonly balanceEnforcement: BalanceEnforcementCoordinator,
   ) {}
 
+  public async createForConfirmedCollection(
+    database: Database,
+    input: {
+      readonly businessDate: string;
+      readonly countsForCollectionEarning: boolean;
+      readonly driverId: string;
+      readonly orderCount: number;
+      readonly reconciliationId: string;
+    },
+    actorId: string,
+    correlationId: string,
+  ) {
+    const { companyId } = this.support.context();
+    if (!input.countsForCollectionEarning || input.orderCount <= 0) return null;
+    const driver = await sql<{ driverType: string }>`select driver_type as "driverType" from drivers
+      where id=${input.driverId}::uuid and company_id=${companyId}::uuid`.execute(database);
+    if (driver.rows[0]?.driverType !== "outsourced") return null;
+    const rule = await sql<{ amount: string; id: string; paymentType: string }>`
+      select id,amount::text,collection_payment_type as "paymentType"
+        from outsourced_driver_collection_earning_rules
+       where company_id=${companyId}::uuid and driver_id=${input.driverId}::uuid and is_active
+         and effective_from<=${input.businessDate}::date
+         and (effective_to is null or ${input.businessDate}::date<effective_to)
+       order by effective_from desc limit 1
+    `.execute(database);
+    const applied=rule.rows[0];
+    if(applied===undefined||applied.paymentType==="none")return null;
+    const units=applied.paymentType==="per_collected_order"?input.orderCount:1;
+    const earned=new Decimal(applied.amount).times(units);
+    const created=await sql<{id:string}>`insert into outsourced_driver_fee_accruals(
+      company_id,driver_id,order_id,delivery_date,accrual_business_date,fee_rate_version_id,
+      fee_rate_snapshot,earned_amount,paid_amount,outstanding_amount,status,accrual_source,
+      source_reference,created_by_account_id,earning_type,reconciliation_id,collection_rule_id,unit_count)
+      values(${companyId}::uuid,${input.driverId}::uuid,null,null,${input.businessDate}::date,null,
+      ${applied.amount},${earned.toFixed(2)},0,${earned.toFixed(2)},'accrued','daily_reconciliation',
+      ${`collection:${input.reconciliationId}`},${actorId}::uuid,'collection',
+      ${input.reconciliationId}::uuid,${applied.id}::uuid,${units})
+      on conflict(company_id,reconciliation_id) where reconciliation_id is not null do nothing returning id`.execute(database);
+    const accrualId=created.rows[0]?.id;
+    if(accrualId!==undefined)await this.history.audit(database,{action:"outsourced_driver_fee.collection_accrued",
+      actorId,after:{...input,accrualId,amount:earned.toFixed(2),ruleId:applied.id,units},companyId,
+      correlationId,subjectId:accrualId,subjectType:"outsourced_driver_fee_accrual"});
+    return accrualId===undefined?null:{accrualId,amount:earned.toFixed(2)};
+  }
+
   /**
    * Called inside the authoritative Order delivery transaction. Missing or
    * ambiguous configuration is returned as a structured outcome so delivery is
@@ -295,7 +340,7 @@ export class OutsourcedDriverFeeService {
     const page = this.support.pagination(query);
     const result = await sql<Record<string, unknown>>`
       select a.id, a.driver_id as "driverId", d.code as "driverCode", d.name_en as "driverName",
-        a.order_id as "orderId", o.order_number as "orderNumber", o.serial_number as "serialNumber",
+        a.order_id as "orderId", coalesce(o.order_number,a.source_reference) as "orderNumber", o.serial_number as "serialNumber",
         a.delivery_date as "deliveryDate", a.accrual_business_date::text as "accrualBusinessDate",
         d.driver_type as "driverType", a.fee_rate_version_id as "feeRateVersionId",
         a.fee_rate_snapshot::text as "feeRate", a.earned_amount::text as "earnedAmount",
@@ -305,7 +350,7 @@ export class OutsourcedDriverFeeService {
         a.created_at as "createdAt", count(*) over()::int as "totalCount"
       from outsourced_driver_fee_accruals a
       join drivers d on d.id=a.driver_id and d.company_id=a.company_id
-      join orders o on o.id=a.order_id and o.company_id=a.company_id
+      left join orders o on o.id=a.order_id and o.company_id=a.company_id
       left join accounts creator on creator.id=a.created_by_account_id and creator.company_id=a.company_id
       left join company_users cu on cu.account_id=creator.id and cu.company_id=creator.company_id
       where a.company_id=${companyId}::uuid
@@ -341,12 +386,12 @@ export class OutsourcedDriverFeeService {
     const { companyId } = this.support.context();
     const result = await sql<Record<string, unknown>>`
       select a.*, d.code as "driverCode", d.name_en as "driverName", d.driver_type as "driverType",
-        o.order_number as "orderNumber", o.serial_number as "serialNumber",
+        coalesce(o.order_number,a.source_reference) as "orderNumber", o.serial_number as "serialNumber",
         v.effective_from as "rateEffectiveFrom", v.effective_to as "rateEffectiveTo",
         coalesce(cu.display_name,creator.username) as "createdBy"
       from outsourced_driver_fee_accruals a
       join drivers d on d.id=a.driver_id and d.company_id=a.company_id
-      join orders o on o.id=a.order_id and o.company_id=a.company_id
+      left join orders o on o.id=a.order_id and o.company_id=a.company_id
       join outsourced_driver_fee_versions v on v.id=a.fee_rate_version_id and v.company_id=a.company_id
       left join accounts creator on creator.id=a.created_by_account_id and creator.company_id=a.company_id
       left join company_users cu on cu.account_id=creator.id and cu.company_id=creator.company_id
@@ -674,7 +719,7 @@ export class OutsourcedDriverFeeService {
     const allocations = await sql<Record<string, unknown>>`
       select x.id, x.accrual_id as "accrualId", x.allocated_amount::text as amount,
         x.allocation_order as "allocationOrder", x.created_at as "createdAt", x.reversed_at as "reversedAt",
-        o.id as "orderId", o.order_number as "orderNumber", o.serial_number as "serialNumber",
+        o.id as "orderId", coalesce(o.order_number,f.source_reference) as "orderNumber", o.serial_number as "serialNumber",
         f.delivery_date as "deliveryDate", f.accrual_business_date::text as "accrualBusinessDate",
         f.earned_amount::text as "earnedAmount", f.status as "accrualStatus",
         coalesce((
@@ -694,7 +739,7 @@ export class OutsourcedDriverFeeService {
         case when x.reversed_at is null then 'active' else 'reversed' end as "allocationStatus"
       from outsourced_driver_fee_payment_allocations x
       join outsourced_driver_fee_accruals f on f.id=x.accrual_id and f.company_id=x.company_id
-      join orders o on o.id=f.order_id and o.company_id=f.company_id
+      left join orders o on o.id=f.order_id and o.company_id=f.company_id
       where x.payment_id=${paymentId}::uuid and x.company_id=${companyId}::uuid
       order by x.allocation_order,x.id
     `.execute(this.database);
@@ -1074,8 +1119,8 @@ export class OutsourcedDriverFeeService {
     lock: boolean,
   ) {
     const result = await sql<{ accrualId: string; orderNumber: string; outstanding: string }>`
-      select f.id as "accrualId",o.order_number as "orderNumber",f.outstanding_amount::text as outstanding
-      from outsourced_driver_fee_accruals f join orders o on o.id=f.order_id and o.company_id=f.company_id
+      select f.id as "accrualId",coalesce(o.order_number,f.source_reference) as "orderNumber",f.outstanding_amount::text as outstanding
+      from outsourced_driver_fee_accruals f left join orders o on o.id=f.order_id and o.company_id=f.company_id
       where f.company_id=${companyId}::uuid and f.driver_id=${driverId}::uuid
         and f.status in ('accrued','partially_paid') and f.outstanding_amount>0
       order by f.accrual_business_date,f.delivery_date,f.created_at,f.id
@@ -1212,12 +1257,12 @@ export class OutsourcedDriverFeeService {
     const remaining = await this.driverOutstanding(database, input.companyId, input.driverId);
     const confirmedAllocations = await sql<AllocationProposal>`
       select x.accrual_id as "accrualId",x.allocated_amount::text as amount,
-        o.order_number as "orderNumber",
+        coalesce(o.order_number,f.source_reference) as "orderNumber",
         (f.outstanding_amount+x.allocated_amount)::text as "outstandingBefore",
         f.outstanding_amount::text as "remainingOutstanding"
       from outsourced_driver_fee_payment_allocations x
       join outsourced_driver_fee_accruals f on f.id=x.accrual_id and f.company_id=x.company_id
-      join orders o on o.id=f.order_id and o.company_id=f.company_id
+      left join orders o on o.id=f.order_id and o.company_id=f.company_id
       where x.company_id=${input.companyId}::uuid and x.payment_id=${paymentId}::uuid
       order by x.allocation_order
     `.execute(database);

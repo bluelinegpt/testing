@@ -242,6 +242,9 @@ describe("expenseSourcePath", () => {
     expect(expenseSourcePath("general_expense", "expense-1")).toBe(
       "/accounting/general-expenses/expense-1",
     );
+    expect(expenseSourcePath("driver_collection_expense", "reconciliation-1")).toBe(
+      "/drivers/collections/reconciliation-1",
+    );
   });
 
   it("opens the Fee Payment for an Outsourced Driver Fee reference", () => {

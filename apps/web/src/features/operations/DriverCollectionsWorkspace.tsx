@@ -291,6 +291,11 @@ export function DriverCollectionsWorkspace({
      completing the collection cannot reopen the dialog. Nothing is written by
      opening it. */
   const collectDeepLink = useWorkflowDeepLink(collectionDialogs);
+  const returnToOrigin = () => {
+    if (collectDeepLink.returnTo === null) return false;
+    session?.navigate(collectDeepLink.returnTo);
+    return session !== undefined;
+  };
   const [deepLinkDriverId, setDeepLinkDriverId] = useState<string>();
   const [deepLinkOrderIds, setDeepLinkOrderIds] = useState<readonly string[]>();
   const [collectNotice, setCollectNotice] = useState<string>();
@@ -558,12 +563,14 @@ export function DriverCollectionsWorkspace({
           onClose={() => {
             setCreateOpen(false);
             setCollectNotice(undefined);
+            returnToOrigin();
           }}
           onOrdersSkipped={(count) =>
             setCollectNotice(t("operations.collectSkippedOrders", { count }))
           }
           onCreated={() => {
             setCreateOpen(false);
+            if (returnToOrigin()) return;
             refresh();
           }}
         />

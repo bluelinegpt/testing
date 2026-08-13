@@ -112,7 +112,11 @@ export interface OperatingExpenseRow {
   readonly reference: string;
   /** The exact source record `reference` identifies, for drill-down. */
   readonly sourceId: string;
-  readonly type: "general_expense" | "outsourced_driver_fee" | "payroll";
+  readonly type:
+    | "driver_collection_expense"
+    | "general_expense"
+    | "outsourced_driver_fee"
+    | "payroll";
 }
 
 export interface DriverOrderRow {
@@ -272,6 +276,30 @@ export class DailyOperationsSummaryService {
            where gp.company_id = ${companyId}::uuid and gp.status = 'confirmed'
              and gp.confirmed_at >= ${window.startUtc}::timestamptz
              and gp.confirmed_at < ${window.endUtc}::timestamptz
+
+          union all
+          -- Expenses retained from a Driver's collection are genuine
+          -- operating expenses even though they are not General Expense
+          -- payments. They are paid economically when the confirmed
+          -- reconciliation nets them from the COD handed over. Keep the
+          -- reconciliation as their single source of truth so the report does
+          -- not create or count a duplicate General Expense.
+          select 'driver_collection_expense', r.id,
+                 coalesce(et.display_name, 'Driver Collection Expense') ||
+                   coalesce(' — ' || nullif(e.description, ''), ''),
+                 coalesce(d.name_en, d.code), r.reconciliation_number,
+                 e.amount::text, r.confirmed_at::text
+            from driver_reconciliation_expenses e
+            join driver_reconciliations r
+              on r.id=e.reconciliation_id and r.company_id=e.company_id
+            join drivers d on d.id=r.driver_id and d.company_id=r.company_id
+            left join expense_types et on et.id=e.expense_type_id and et.company_id=e.company_id
+           where e.company_id=${companyId}::uuid and r.status='confirmed'
+             and r.confirmed_at is not null
+             and r.confirmed_at>=${window.startUtc}::timestamptz
+             and r.confirmed_at<${window.endUtc}::timestamptz
+             and (${driverId}::uuid is null or r.driver_id=${driverId}::uuid)
+             and (${driverType}::text is null or d.driver_type=${driverType}::text)
 
           union all
           -- Outsourced Driver fee payments, cash and bank alike -- unlike the

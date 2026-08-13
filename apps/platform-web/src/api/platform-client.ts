@@ -1,5 +1,9 @@
 import { platformConfiguration } from "../config/environment.js";
 
+// Baked in by vite.config.ts's `define` -- see VersionBadge for the same
+// contract.
+declare const __APP_VERSION__: string;
+
 /**
  * The Platform Portal's only way to reach the API.
  *
@@ -120,8 +124,67 @@ export interface CompanyListFilters {
   readonly status?: string;
   readonly environment?: string;
   readonly page?: number;
+  readonly pageSize?: number;
   readonly sort?: string;
   readonly direction?: "asc" | "desc";
+}
+
+export interface ErrorReport {
+  readonly id: string;
+  readonly companyId: string | null;
+  readonly companyName: string | null;
+  readonly sourceApp: string;
+  readonly severity: "high" | "medium" | "low";
+  readonly status: "open" | "resolved";
+  readonly message: string;
+  readonly stack: string | null;
+  readonly correlationId: string | null;
+  readonly path: string | null;
+  readonly accountId: string | null;
+  readonly accountKind: string | null;
+  readonly appCommit: string | null;
+  readonly explanation: string | null;
+  readonly resolutionNotes: string | null;
+  readonly resolvedByAccountId: string | null;
+  readonly resolvedByUsername: string | null;
+  readonly resolvedAt: string | null;
+  readonly occurredAt: string;
+}
+
+export interface ErrorReportPage {
+  readonly items: readonly ErrorReport[];
+  readonly total: number;
+  readonly page: number;
+  readonly pageSize: number;
+}
+
+export interface ErrorReportListFilters {
+  readonly companyId?: string;
+  readonly sourceApp?: string;
+  readonly severity?: string;
+  readonly status?: string;
+  readonly search?: string;
+  readonly page?: number;
+  readonly pageSize?: number;
+}
+
+export interface UpdateErrorReportInput {
+  readonly severity?: "high" | "medium" | "low";
+  readonly status?: "open" | "resolved";
+  readonly explanation?: string;
+  readonly resolutionNotes?: string;
+}
+
+export interface IntegrityFinding {
+  readonly checkId: string;
+  readonly checkLabel: string;
+  readonly companyId: string;
+  readonly companyName: string;
+  readonly severity: "high" | "medium" | "low";
+  readonly subjectType: string;
+  readonly subjectId: string;
+  readonly subjectReference: string;
+  readonly detail: string;
 }
 
 export interface CompanyDetail {
@@ -176,6 +239,7 @@ export interface CompanyDeletionPreview {
   readonly moduleCounts: Readonly<Record<string, number>>;
   readonly totalCompanyRows: number;
   readonly blockers: readonly string[];
+  readonly unknownReferences: readonly string[];
   readonly guardedTriggers: readonly { readonly tableName: string; readonly triggerName: string }[];
   readonly globalPreserved: readonly string[];
   readonly externalFiles: { readonly fileObjects: number; readonly strategy: string };
@@ -343,6 +407,144 @@ export interface CreateCompanyPayload {
   readonly accountingTemplateVersion?: number;
 }
 
+// ---------------------------------------------------------------------------
+// Platform Dashboard
+// ---------------------------------------------------------------------------
+
+export interface DashboardFilters {
+  readonly from?: string | undefined;
+  readonly to?: string | undefined;
+  readonly companyId?: string | undefined;
+  readonly groupBy?: "daily" | "weekly" | "monthly" | undefined;
+}
+
+export interface DashboardChange {
+  readonly percent: number | null;
+  readonly label: string;
+}
+
+export interface DashboardSummary {
+  readonly companies: {
+    readonly total: number;
+    readonly active: number;
+    readonly activePercent: number;
+    readonly suspended: number;
+    readonly suspendedPercent: number;
+    readonly closed: number;
+    readonly closedPercent: number;
+    readonly draft: number;
+    readonly disabled: number;
+    readonly newThisMonth: number;
+  };
+  readonly orders: {
+    readonly total: number;
+    readonly totalChange: DashboardChange;
+    readonly delivered: number;
+    readonly deliveryRate: number | null;
+    readonly cod: number;
+    readonly codChange: DashboardChange;
+    readonly serviceFees: number;
+    readonly serviceFeesChange: DashboardChange;
+  };
+  readonly traders: { readonly total: number; readonly active: number; readonly new: number };
+  readonly customers: { readonly total: number; readonly new: number };
+  readonly drivers: { readonly total: number; readonly new: number };
+  readonly employees: { readonly total: number; readonly new: number };
+  readonly filters: { readonly companyId: string | null; readonly from: string; readonly to: string };
+  readonly metadata: {
+    readonly codBasis: string;
+    readonly serviceFeeBasis: string;
+    readonly customerCountingNote: string;
+    readonly deliveryRateDefinition: string;
+    readonly previousPeriod: { readonly from: string; readonly to: string };
+    readonly timezone: string;
+  };
+}
+
+export interface OrdersTrendPoint {
+  readonly bucket: string;
+  readonly created: number;
+  readonly delivered: number;
+  readonly cancelled: number;
+  readonly returned: number;
+}
+
+export interface OrdersTrend {
+  readonly series: readonly OrdersTrendPoint[];
+  readonly filters: { readonly groupBy: "daily" | "weekly" | "monthly" };
+}
+
+export interface DistributionItem {
+  readonly value?: string;
+  readonly status?: string;
+  readonly emirate?: string;
+  readonly count: number;
+  readonly percent: number;
+}
+
+export interface Distribution {
+  readonly items: readonly DistributionItem[];
+  readonly total: number;
+}
+
+export interface CompanyRankingItem {
+  readonly id: string;
+  readonly code: string;
+  readonly name: string;
+  readonly status: string;
+  readonly environment: string;
+  readonly orders: number;
+  readonly delivered: number;
+  readonly cod: number;
+  readonly serviceFees: number;
+  readonly traders: number;
+  readonly customers: number;
+}
+
+export interface CompanyOverviewRow {
+  readonly id: string;
+  readonly code: string;
+  readonly name: string;
+  readonly status: string;
+  readonly environment: string;
+  readonly orders: number;
+  readonly delivered: number;
+  readonly cod: number;
+  readonly traders: number;
+  readonly customers: number;
+  readonly drivers: number;
+  readonly lastOrderAt: string | null;
+}
+
+export interface CompanyOverviewPage {
+  readonly items: readonly CompanyOverviewRow[];
+  readonly total: number;
+  readonly page: number;
+  readonly pageSize: number;
+}
+
+export interface AttentionCategory {
+  readonly key: string;
+  readonly label: string;
+  readonly severity: "critical" | "warning" | "info";
+  readonly count: number;
+  readonly companies: readonly { readonly id: string; readonly code: string; readonly name: string }[];
+}
+
+export interface NeedsAttention {
+  readonly categories: readonly AttentionCategory[];
+  readonly generatedAt: string;
+}
+
+function toQuery(filters: object): string {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(filters as Record<string, string | number | undefined>)) {
+    if (value === undefined || value === "") continue;
+    query.set(key, String(value));
+  }
+  return query.toString();
+}
+
 export const platformApi = {
   async login(identifier: string, password: string): Promise<PlatformIdentity> {
     const result = await request<{ identity: PlatformIdentity }>("platform/auth/login", {
@@ -372,11 +574,84 @@ export const platformApi = {
     }
     if (filters.sort !== undefined) query.set("sort", filters.sort);
     if (filters.direction !== undefined) query.set("direction", filters.direction);
+    if (filters.pageSize !== undefined) query.set("pageSize", String(filters.pageSize));
     query.set("page", String(filters.page ?? 1));
     const result = await request<CompanyPage>(`platform/companies?${query.toString()}`, {
       method: "GET",
     });
     return result ?? { items: [], total: 0, page: 1, pageSize: 25 };
+  },
+
+  /**
+   * Where this app's own error boundary (`PlatformErrorBoundary`) reports a
+   * crash. Deliberately swallows its own failure -- reporting a crash must
+   * never itself throw and mask the crash the boundary is already handling.
+   */
+  async reportError(input: {
+    readonly message: string;
+    readonly stack?: string;
+    readonly path?: string;
+  }): Promise<void> {
+    try {
+      await request("errors", {
+        body: {
+          appCommit: __APP_VERSION__,
+          message: input.message,
+          path: input.path ?? window.location.pathname,
+          sourceApp: "platform-web",
+          stack: input.stack,
+        },
+        method: "POST",
+      });
+    } catch {
+      // See doc comment above.
+    }
+  },
+
+  async errors(filters: ErrorReportListFilters = {}): Promise<ErrorReportPage> {
+    const query = new URLSearchParams();
+    if (filters.companyId !== undefined && filters.companyId !== "") {
+      query.set("companyId", filters.companyId);
+    }
+    if (filters.sourceApp !== undefined && filters.sourceApp !== "") {
+      query.set("sourceApp", filters.sourceApp);
+    }
+    if (filters.severity !== undefined && filters.severity !== "") {
+      query.set("severity", filters.severity);
+    }
+    if (filters.status !== undefined && filters.status !== "") query.set("status", filters.status);
+    if (filters.search !== undefined && filters.search !== "") query.set("search", filters.search);
+    if (filters.pageSize !== undefined) query.set("pageSize", String(filters.pageSize));
+    query.set("page", String(filters.page ?? 1));
+    const result = await request<ErrorReportPage>(`platform/errors?${query.toString()}`, {
+      method: "GET",
+    });
+    return result ?? { items: [], page: 1, pageSize: 25, total: 0 };
+  },
+
+  async errorDetail(id: string): Promise<ErrorReport> {
+    const result = await request<ErrorReport>(`platform/errors/${id}`, { method: "GET" });
+    if (result === undefined) throw new PlatformApiError("Empty error report", "empty", 500);
+    return result;
+  },
+
+  async updateError(id: string, input: UpdateErrorReportInput): Promise<ErrorReport> {
+    const result = await request<ErrorReport>(`platform/errors/${id}`, {
+      body: input,
+      method: "PATCH",
+    });
+    if (result === undefined) throw new PlatformApiError("Empty error report", "empty", 500);
+    return result;
+  },
+
+  async integrityFindings(companyId?: string): Promise<readonly IntegrityFinding[]> {
+    const query = new URLSearchParams();
+    if (companyId !== undefined && companyId !== "") query.set("companyId", companyId);
+    const result = await request<readonly IntegrityFinding[]>(
+      `platform/integrity?${query.toString()}`,
+      { method: "GET" },
+    );
+    return result ?? [];
   },
 
   async approvedTemplates(): Promise<readonly ApprovedTemplateOption[]> {
@@ -598,5 +873,82 @@ export const platformApi = {
   async platformAuditActions(): Promise<readonly string[]> {
     const result = await request<{ items: string[] }>("platform/audit/actions", { method: "GET" });
     return result?.items ?? [];
+  },
+
+  async dashboardSummary(filters: DashboardFilters): Promise<DashboardSummary> {
+    const result = await request<DashboardSummary>(`platform/dashboard/summary?${toQuery(filters)}`, {
+      method: "GET",
+    });
+    if (result === undefined) throw new PlatformApiError("Empty Dashboard summary response", "empty", 500);
+    return result;
+  },
+
+  async dashboardOrdersTrend(filters: DashboardFilters): Promise<OrdersTrend> {
+    const result = await request<OrdersTrend>(`platform/dashboard/orders-trend?${toQuery(filters)}`, {
+      method: "GET",
+    });
+    return result ?? { filters: { groupBy: "daily" }, series: [] };
+  },
+
+  async dashboardOrderStatus(filters: DashboardFilters): Promise<Distribution> {
+    const result = await request<Distribution>(`platform/dashboard/order-status?${toQuery(filters)}`, {
+      method: "GET",
+    });
+    return result ?? { items: [], total: 0 };
+  },
+
+  async dashboardCompanyRanking(
+    filters: DashboardFilters & { metric?: string | undefined; limit?: number | undefined },
+  ): Promise<{ items: readonly CompanyRankingItem[] }> {
+    const result = await request<{ items: CompanyRankingItem[] }>(
+      `platform/dashboard/company-ranking?${toQuery(filters)}`,
+      { method: "GET" },
+    );
+    return result ?? { items: [] };
+  },
+
+  async dashboardCompaniesByStatus(filters: DashboardFilters): Promise<Distribution> {
+    const result = await request<Distribution>(
+      `platform/dashboard/companies-by-status?${toQuery(filters)}`,
+      { method: "GET" },
+    );
+    return result ?? { items: [], total: 0 };
+  },
+
+  async dashboardCompaniesByEnvironment(filters: DashboardFilters): Promise<Distribution> {
+    const result = await request<Distribution>(
+      `platform/dashboard/companies-by-environment?${toQuery(filters)}`,
+      { method: "GET" },
+    );
+    return result ?? { items: [], total: 0 };
+  },
+
+  async dashboardOrdersByEmirate(filters: DashboardFilters): Promise<Distribution> {
+    const result = await request<Distribution>(
+      `platform/dashboard/orders-by-emirate?${toQuery(filters)}`,
+      { method: "GET" },
+    );
+    return result ?? { items: [], total: 0 };
+  },
+
+  async dashboardCompanyOverview(
+    filters: DashboardFilters & {
+      search?: string | undefined;
+      page?: number | undefined;
+      pageSize?: number | undefined;
+      sort?: string | undefined;
+      direction?: "asc" | "desc" | undefined;
+    },
+  ): Promise<CompanyOverviewPage> {
+    const result = await request<CompanyOverviewPage>(
+      `platform/dashboard/company-overview?${toQuery(filters)}`,
+      { method: "GET" },
+    );
+    return result ?? { items: [], page: 1, pageSize: 25, total: 0 };
+  },
+
+  async dashboardNeedsAttention(): Promise<NeedsAttention> {
+    const result = await request<NeedsAttention>("platform/dashboard/needs-attention", { method: "GET" });
+    return result ?? { categories: [], generatedAt: new Date(0).toISOString() };
   },
 };

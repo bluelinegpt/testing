@@ -123,6 +123,8 @@ export type BalanceOverrideSourceType =
   | "general_expense_payment"
   | "outsourced_driver_fee_payment"
   | "payroll_payment"
+  | "employee_variable_earnings_payment"
+  | "employee_salary_advance"
   | "refund"
   | "trader_settlement";
 

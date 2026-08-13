@@ -53,7 +53,17 @@ export function formatCurrency(
   currencyCode: string,
   locale: SupportedLocale,
 ): string {
-  const match = decimalPattern.exec(decimalValue);
+  // A focused `<input type="number">` happily holds strings this component
+  // never intended to accept -- most commonly a leading zero picked up when
+  // the cursor sits right after the pre-filled "0" of "0.00" and the operator
+  // types their real amount into it ("0.00" -> "50.00" one keystroke at a
+  // time -> "05.00" in between). That is normal mid-edit state, not bad data,
+  // so it is normalized here rather than rejected. Screens that echo a field
+  // back through this formatter while the operator is still typing (order
+  // totals, settlement previews, etc.) must not crash over an interim value
+  // nobody has finished entering yet.
+  const normalizedValue = decimalValue.replace(/^(-?)0+(?=\d)/, "$1");
+  const match = decimalPattern.exec(normalizedValue);
   if (match?.groups === undefined) {
     throw new RangeError("Currency value must be a decimal string with at most two decimal places");
   }

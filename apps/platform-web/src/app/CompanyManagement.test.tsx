@@ -517,19 +517,133 @@ describe("Company detail", () => {
     await waitFor(() => expect(reactivated).toBe(true));
   });
 
-  it("closes with the exact typed Company-code confirmation", async () => {
-    const routes = baseRoutes();
-    let sent: Record<string, unknown> = {};
-    routes[`POST platform/companies/${companyId}/close`] = (body) => {
-      sent = body as Record<string, unknown>;
-      return { status: 204 };
-    };
-    vi.stubGlobal("fetch", stubFetch(routes));
-    vi.stubGlobal("prompt", vi.fn().mockReturnValueOnce("final closure").mockReturnValueOnce("CLOSE TST-0001"));
+  it("opens a dialog showing Company Name, Code, Environment and Status, with the button disabled", async () => {
+    vi.stubGlobal("fetch", stubFetch(baseRoutes()));
     renderAt(`/companies/${companyId}`);
 
     fireEvent.click(await screen.findByRole("button", { name: "Close Company" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText("Test Delivery")).toBeInTheDocument();
+    expect(within(dialog).getByText("TST-0001")).toBeInTheDocument();
+    expect(within(dialog).getByText("sandbox")).toBeInTheDocument();
+    expect(within(dialog).getByText("draft")).toBeInTheDocument();
+    expect(within(dialog).getByText("No Company data will be deleted by closing the Company.")).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Close Company" })).toBeDisabled();
+  });
+
+  it("keeps the confirm button disabled until the confirmation text matches exactly", async () => {
+    vi.stubGlobal("fetch", stubFetch(baseRoutes()));
+    renderAt(`/companies/${companyId}`);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Close Company" }));
+    const dialog = await screen.findByRole("dialog");
+    const confirmButton = within(dialog).getByRole("button", { name: "Close Company" });
+    fireEvent.change(within(dialog).getByLabelText(/Reason for closing/), {
+      target: { value: "final closure" },
+    });
+    fireEvent.change(within(dialog).getByLabelText(/Type CLOSE TST-0001/), {
+      target: { value: "close tst-0001" },
+    });
+    expect(confirmButton).toBeDisabled();
+    fireEvent.change(within(dialog).getByLabelText(/Type CLOSE TST-0001/), {
+      target: { value: "CLOSE TST-0001" },
+    });
+    expect(confirmButton).not.toBeDisabled();
+  });
+
+  it("sends the reason and exact confirmation, and refreshes to Closed with no silent failure path", async () => {
+    const routes = baseRoutes();
+    let sent: Record<string, unknown> = {};
+    let closed = false;
+    routes[`POST platform/companies/${companyId}/close`] = (body) => {
+      sent = body as Record<string, unknown>;
+      closed = true;
+      return { status: 204 };
+    };
+    routes[`GET platform/companies/${companyId}`] = () =>
+      closed
+        ? { body: detail({ status: "closed", closedAt: "2026-08-12T00:00:00.000Z" }), status: 200 }
+        : { body: detail({ status: "draft" }), status: 200 };
+    routes[`GET platform/companies/${companyId}/deletion-eligibility`] = {
+      body: {
+        eligible: true,
+        status: "closed",
+        environment: "sandbox",
+        closedAt: "2026-08-12T00:00:00.000Z",
+        eligibleAt: "2026-08-12T00:00:00.000Z",
+        requiresWaitingPeriod: false,
+        waitingPeriodHours: 0,
+        remainingSeconds: 0,
+        blockers: [],
+        previewRequired: true,
+        backupRequired: true,
+      },
+      status: 200,
+    };
+    vi.stubGlobal("fetch", stubFetch(routes));
+    renderAt(`/companies/${companyId}`);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Close Company" }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.change(within(dialog).getByLabelText(/Reason for closing/), {
+      target: { value: "final closure" },
+    });
+    fireEvent.change(within(dialog).getByLabelText(/Type CLOSE TST-0001/), {
+      target: { value: "CLOSE TST-0001" },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close Company" }));
+
     await waitFor(() => expect(sent).toEqual({ reason: "final closure", confirmation: "CLOSE TST-0001" }));
+    expect(await screen.findByText("closed", { selector: ".platform-badge" })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("shows the server's rejection visibly when the confirmation is wrong, and leaves the Company unchanged", async () => {
+    const routes = baseRoutes();
+    routes[`POST platform/companies/${companyId}/close`] = () => ({
+      body: { error: { code: "company_close_confirmation_mismatch", message: "Type CLOSE TST-0001 exactly" } },
+      status: 409,
+    });
+    vi.stubGlobal("fetch", stubFetch(routes));
+    renderAt(`/companies/${companyId}`);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Close Company" }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.change(within(dialog).getByLabelText(/Reason for closing/), {
+      target: { value: "final closure" },
+    });
+    fireEvent.change(within(dialog).getByLabelText(/Type CLOSE TST-0001/), {
+      target: { value: "CLOSE TST-0001" },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close Company" }));
+
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("Type CLOSE TST-0001 exactly");
+    expect(dialog).toBeVisible();
+    expect(within(dialog).getByText("draft")).toBeInTheDocument();
+  });
+
+  it("Cancel closes the dialog without sending any request or changing state", async () => {
+    const routes = baseRoutes();
+    let called = false;
+    routes[`POST platform/companies/${companyId}/close`] = () => {
+      called = true;
+      return { status: 204 };
+    };
+    vi.stubGlobal("fetch", stubFetch(routes));
+    renderAt(`/companies/${companyId}`);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Close Company" }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.change(within(dialog).getByLabelText(/Reason for closing/), {
+      target: { value: "final closure" },
+    });
+    fireEvent.change(within(dialog).getByLabelText(/Type CLOSE TST-0001/), {
+      target: { value: "CLOSE TST-0001" },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+
+    expect(called).toBe(false);
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
   it("shows server eligibility and a non-destructive preview for a closed Company", async () => {
@@ -566,6 +680,121 @@ describe("Company detail", () => {
     fireEvent.click(screen.getByRole("button", { name: "Run Deletion Preview" }));
     expect(await screen.findByText("READY FOR DELETE: NO")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /permanently delete company/i })).toBeNull();
+  });
+
+  function closedEligibleRoutes(): Record<string, Route> {
+    const permissions = [...fullAccess, "platform.companies.delete"];
+    const routes = baseRoutes(permissions);
+    routes[`GET platform/companies/${companyId}`] = {
+      body: detail({ status: "closed", closedAt: "2026-08-09T00:00:00.000Z" }),
+      status: 200,
+    };
+    routes[`GET platform/companies/${companyId}/deletion-eligibility`] = {
+      body: {
+        eligible: true,
+        status: "closed",
+        environment: "sandbox",
+        closedAt: "2026-08-09T00:00:00.000Z",
+        eligibleAt: "2026-08-09T00:00:00.000Z",
+        requiresWaitingPeriod: false,
+        waitingPeriodHours: 0,
+        remainingSeconds: 0,
+        blockers: [],
+        previewRequired: true,
+        backupRequired: true,
+      },
+      status: 200,
+    };
+    return routes;
+  }
+
+  it("shows the exact unknown-dependency blocker, not just a generic label", async () => {
+    const routes = closedEligibleRoutes();
+    routes[`POST platform/companies/${companyId}/deletion-preview`] = {
+      body: {
+        readyForDelete: false,
+        blockers: ["UNSAFE / UNKNOWN DEPENDENCY"],
+        unknownReferences: ["Unclassified Company table: store_orders"],
+      },
+      status: 200,
+    };
+    vi.stubGlobal("fetch", stubFetch(routes));
+    renderAt(`/companies/${companyId}`);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Run Deletion Preview" }));
+    expect(await screen.findByText("UNSAFE / UNKNOWN DEPENDENCY")).toBeInTheDocument();
+    expect(screen.getByText("Unclassified Company table: store_orders")).toBeInTheDocument();
+  });
+
+  it("shows a stale-operation preview failure inline, with a Retry button, not the page banner", async () => {
+    const routes = closedEligibleRoutes();
+    let attempts = 0;
+    routes[`POST platform/companies/${companyId}/deletion-preview`] = () => {
+      attempts += 1;
+      return attempts === 1
+        ? {
+            body: {
+              error: {
+                code: "company_deletion_preview_in_progress",
+                message: "Another deletion preview for this Company started at the same moment. Retry the preview.",
+              },
+            },
+            status: 409,
+          }
+        : { body: { readyForDelete: false, blockers: [], unknownReferences: [] }, status: 200 };
+    };
+    vi.stubGlobal("fetch", stubFetch(routes));
+    renderAt(`/companies/${companyId}`);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Run Deletion Preview" }));
+    expect(await screen.findByText("Existing deletion operation must be refreshed")).toBeInTheDocument();
+    expect(
+      screen.getByText("Another deletion preview for this Company started at the same moment. Retry the preview."),
+    ).toBeInTheDocument();
+    // Not the page-level banner.
+    expect(screen.queryByText("Another deletion preview for this Company started at the same moment. Retry the preview.", { selector: ".platform-login__error" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry Deletion Preview" }));
+    await waitFor(() => expect(attempts).toBe(2));
+    expect(await screen.findByText("READY FOR DELETE: NO")).toBeInTheDocument();
+    expect(screen.queryByText("Existing deletion operation must be refreshed")).toBeNull();
+  });
+
+  it("shows a permission-denied preview failure explicitly", async () => {
+    const routes = closedEligibleRoutes();
+    routes[`POST platform/companies/${companyId}/deletion-preview`] = {
+      body: { error: { code: "permission_denied", message: "The authenticated account does not have permission for this operation" } },
+      status: 403,
+    };
+    vi.stubGlobal("fetch", stubFetch(routes));
+    renderAt(`/companies/${companyId}`);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Run Deletion Preview" }));
+    expect(await screen.findByText("Permission denied")).toBeInTheDocument();
+  });
+
+  it("shows a database integrity conflict safely, without a raw stack trace, and enables Backup once preview is clean", async () => {
+    const routes = closedEligibleRoutes();
+    let attempts = 0;
+    routes[`POST platform/companies/${companyId}/deletion-preview`] = () => {
+      attempts += 1;
+      return attempts === 1
+        ? {
+            body: { error: { code: "database_integrity_conflict", message: "The operation conflicts with current data integrity rules." } },
+            status: 409,
+          }
+        : { body: { readyForDelete: false, blockers: [], unknownReferences: [] }, status: 200 };
+    };
+    vi.stubGlobal("fetch", stubFetch(routes));
+    renderAt(`/companies/${companyId}`);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Run Deletion Preview" }));
+    expect(await screen.findByText("Database integrity conflict")).toBeInTheDocument();
+    expect(screen.queryByText(/at Object\.|node_modules|\.ts:\d+/)).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry Deletion Preview" }));
+    await screen.findByText("READY FOR DELETE: NO");
+    expect(screen.getByRole("button", { name: "Create Verified Backup" })).not.toBeDisabled();
   });
 
   it("hides every lifecycle control from a read-only Platform account", async () => {

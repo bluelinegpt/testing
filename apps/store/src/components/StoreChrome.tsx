@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 
+import { useCustomerSession } from "../auth/customer-session-context.js";
 import { storeConfiguration } from "../config/environment.js";
 import {
   isLocalePrefix,
@@ -10,6 +11,7 @@ import {
   useLocalePrefix,
 } from "../routing/locale-routing.js";
 import { supportedLanguages } from "../localization/i18n.js";
+import { OfflineBanner } from "../pwa/OfflineBanner.js";
 
 /**
  * Marketplace shell: header, search, footer.
@@ -25,15 +27,16 @@ import { supportedLanguages } from "../localization/i18n.js";
  * and the controls beside it fall below a comfortable tap size.
  *
  * ---------------------------------------------------------------------------
- * PLACEHOLDERS THAT ADMIT WHAT THEY ARE
+ * ACCOUNT vs CART: ONE IS REAL NOW, ONE IS STILL A PLACEHOLDER
  * ---------------------------------------------------------------------------
  *
- * Account and Cart are in the approved composition but Customer identity does
- * not exist yet. They render as real, styled, DISABLED controls carrying
- * "Coming soon" — not as links that navigate somewhere apologetic, and not as
- * buttons that silently do nothing. A control that looks live and isn't is a
- * worse experience than one that is honest about its state, and `disabled`
- * also keeps them out of the tab order.
+ * Customer identity now exists (Shared Commerce Foundation Prompt 3A), so
+ * Account is a real link whose destination and label follow
+ * `useCustomerSession()` — "Sign In" anonymous, "My Account" authenticated
+ * (§52) — never inferred from a Trader/Company/Platform cookie, which lives
+ * under a completely separate origin and is never visible to this app.
+ * Cart remains the same honest, styled, DISABLED "Coming soon" control it
+ * always was — Store Orders/Cart are out of this prompt's scope.
  */
 export function StoreChrome({ children }: { readonly children: ReactNode }) {
   const { i18n, t } = useTranslation();
@@ -41,6 +44,7 @@ export function StoreChrome({ children }: { readonly children: ReactNode }) {
   const location = useLocation();
   const localePath = useLocalePath();
   const localePrefix = useLocalePrefix();
+  const { session } = useCustomerSession();
 
   /**
    * Switching language rewrites the URL when the URL carries a locale.
@@ -64,6 +68,8 @@ export function StoreChrome({ children }: { readonly children: ReactNode }) {
       <a className="store-skip" href="#store-main">
         {t("common.skipToContent")}
       </a>
+
+      <OfflineBanner />
 
       <header className="store-header">
         <div className="store-container store-header__inner">
@@ -109,17 +115,16 @@ export function StoreChrome({ children }: { readonly children: ReactNode }) {
           </form>
 
           <div className="store-header__actions">
-            {/* Structural placeholders from the approved composition. Disabled
-                rather than dressed up as working controls. */}
-            <button
+            <Link
               className="store-iconbutton"
-              disabled
-              title={`${t("common.account")} — ${t("common.comingSoon")}`}
-              type="button"
+              title={session.status === "authenticated" ? t("auth.account.title") : t("auth.login")}
+              to={localePath(session.status === "authenticated" ? "/account" : "/login")}
             >
               <AccountIcon />
-              <span className="store-iconbutton__label">{t("common.account")}</span>
-            </button>
+              <span className="store-iconbutton__label">
+                {session.status === "authenticated" ? t("auth.account.title") : t("auth.login")}
+              </span>
+            </Link>
             <button
               className="store-iconbutton"
               disabled

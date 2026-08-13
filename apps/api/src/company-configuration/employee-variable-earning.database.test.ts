@@ -159,7 +159,7 @@ describe.skipIf(!runDatabaseTests)("employee driver variable earning rules", () 
     });
   });
 
-  it("creates each collection payment type", async () => {
+  it("creates supported collection types and keeps a legacy flat rule readable", async () => {
     await inRolledBackTransaction(async (transaction) => {
       const fixture = await seed(transaction, "VEC");
       const rules = service(transaction, fixture);
@@ -168,14 +168,17 @@ describe.skipIf(!runDatabaseTests)("employee driver variable earning rules", () 
         { amount: 1, collectionPaymentType: "per_collected_order", effectiveFrom: "2026-01-01" },
         randomUUID(),
       );
-      await rules.setCollectionRule(
-        fixture.employeeId,
-        {
-          amount: 5,
-          collectionPaymentType: "flat_per_confirmed_collection",
-          effectiveFrom: "2026-06-01",
-        },
-        randomUUID(),
+      // Simulate history created before flat rules were retired. The database
+      // value remains readable, but no current write API accepts it.
+      await sql`update employee_collection_earning_rules set effective_to='2026-06-01'
+        where company_id=${fixture.companyId}::uuid and employee_id=${fixture.employeeId}::uuid`.execute(
+        transaction,
+      );
+      await sql`insert into employee_collection_earning_rules(company_id,employee_id,
+        collection_payment_type,amount,effective_from,created_by_account_id)
+        values(${fixture.companyId}::uuid,${fixture.employeeId}::uuid,
+        'flat_per_confirmed_collection',5,'2026-06-01',${fixture.actorId}::uuid)`.execute(
+        transaction,
       );
       await rules.setCollectionRule(
         fixture.employeeId,
@@ -193,6 +196,24 @@ describe.skipIf(!runDatabaseTests)("employee driver variable earning rules", () 
       expect(listed.collection[2]!.effectiveTo).toBe("2026-06-01");
       expect(listed.collection[1]!.effectiveTo).toBe("2026-10-01");
       expect(listed.collection[0]!.effectiveTo).toBeNull();
+    });
+  });
+
+  it("rejects new legacy flat collection rules at the service boundary", async () => {
+    await inRolledBackTransaction(async (transaction) => {
+      const fixture = await seed(transaction, "VEF");
+      const rules = service(transaction, fixture);
+      await expect(
+        rules.setCollectionRule(
+          fixture.employeeId,
+          {
+            amount: 5,
+            collectionPaymentType: "flat_per_confirmed_collection",
+            effectiveFrom: "2026-06-01",
+          } as never,
+          randomUUID(),
+        ),
+      ).rejects.toMatchObject({ errorCode: "employee_collection_payment_type_unsupported" });
     });
   });
 

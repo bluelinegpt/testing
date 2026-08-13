@@ -99,6 +99,10 @@ export class OperationalSourceLoader {
         return this.payrollApproval(database, event);
       case "employee_payroll_paid":
         return this.payrollPayment(database, event);
+      case "employee_variable_earnings_interim_paid":
+        return this.employeeEarlyPayment(database, event, "variable");
+      case "employee_salary_advance_paid":
+        return this.employeeEarlyPayment(database, event, "salary_advance");
       case "outsourced_driver_fee_accrued":
         return this.driverFeeAccrual(database, event);
       case "outsourced_driver_fee_paid":
@@ -725,12 +729,16 @@ export class OperationalSourceLoader {
       deliveredOrderEarningSources: readonly Record<string, unknown>[];
       deliveredOrderEarnings: string;
       employeeId: string;
+      salaryAdvanceRecovery: string;
+      variableAlreadyPaid: string;
       lineId: string;
       netSalary: string;
     }>`
       select l.id as "lineId",l.employee_id as "employeeId",
              l.net_salary::text as "netSalary",
              l.delivered_order_earnings::text as "deliveredOrderEarnings",
+             l.salary_advance_recovery::text as "salaryAdvanceRecovery",
+             l.variable_earnings_already_paid::text as "variableAlreadyPaid",
              -- Straight off the allocated snapshots. No join to orders and no
              -- join to the earning rules: the posted figure must be the one
              -- recorded at delivery time, so a later rate change or a returned
@@ -750,7 +758,7 @@ export class OperationalSourceLoader {
         from payroll_entries l
        where l.company_id=${event.companyId}::uuid
          and l.payroll_period_id=${event.sourceEntityId}::uuid
-         and l.status not in ('held','reversed') and l.net_salary>0
+         and l.status not in ('held','reversed')
        order by l.employee_number_snapshot,l.id
     `.execute(database);
     const snapshottedTotal = payrollLines.rows.reduce(
@@ -787,13 +795,16 @@ export class OperationalSourceLoader {
           // identifiable on its own Journal line while the finalized payroll
           // total, and every figure derived from it, stays exactly as approved.
           const net = new Decimal(line.netSalary);
+          const variablePaid = new Decimal(line.variableAlreadyPaid);
+          const salaryAdvance = new Decimal(line.salaryAdvanceRecovery);
+          const recognized = net.plus(variablePaid).plus(salaryAdvance);
           // Capped at Net Salary. Deductions and advances can exceed the rest
           // of the line, and an uncapped split would emit a negative remainder
           // -- silently dropped by component() -- leaving a debit larger than
           // the credit and a Journal rejected as unbalanced. Both parts are
           // non-negative and sum to exactly Net Salary.
-          const orderEarnings = Decimal.min(new Decimal(line.deliveredOrderEarnings), net);
-          const remainingSalary = net.minus(orderEarnings);
+          const orderEarnings = Decimal.min(new Decimal(line.deliveredOrderEarnings), recognized);
+          const remainingSalary = recognized.minus(orderEarnings);
           return [
             component(
               "payroll_expense",
@@ -821,6 +832,22 @@ export class OperationalSourceLoader {
               `Delivered Order Earnings ${row.periodReference}`,
             ),
             component(
+              "employee_interim_payroll_clearing",
+              line.variableAlreadyPaid,
+              "credit",
+              "employee_interim_payroll_clearing",
+              dimensions,
+              `Clear interim variable earnings ${row.periodReference}`,
+            ),
+            component(
+              "employee_advances",
+              line.salaryAdvanceRecovery,
+              "credit",
+              "employee_advances",
+              dimensions,
+              `Recover Salary Advance ${row.periodReference}`,
+            ),
+            component(
               "payroll_payable",
               line.netSalary,
               "credit",
@@ -840,6 +867,8 @@ export class OperationalSourceLoader {
         // at Journal level would store the same audit trail twice.
         payrollLines: payrollLines.rows.map((line) => ({
           deliveredOrderEarnings: line.deliveredOrderEarnings,
+          salaryAdvanceRecovery: line.salaryAdvanceRecovery,
+          variableAlreadyPaid: line.variableAlreadyPaid,
           employeeId: line.employeeId,
           lineId: line.lineId,
           netSalary: line.netSalary,
@@ -931,6 +960,52 @@ export class OperationalSourceLoader {
       metadata: { ...base, allocations: allocations.rows },
       sourceReference: row.paymentNumber,
     };
+  }
+
+  private async employeeEarlyPayment(
+    database: Kysely<DatabaseSchema>,
+    event: OperationalAccountingEventRecord,
+    kind: "salary_advance" | "variable",
+  ): Promise<OperationalJournalFacts> {
+    const table = kind === "variable" ? "employee_variable_earning_payments" : "employee_salary_advances";
+    const result = await sql<{
+      amount: string;
+      employeeId: string;
+      fundingGlId: string | null;
+      paymentDate: string;
+      paymentMethod: string;
+      reference: string;
+      status: string;
+    }>`
+      select p.employee_id as "employeeId",p.payment_date::text as "paymentDate",
+             p.payment_method as "paymentMethod",p.amount_paid::text as amount,
+             ${sql.raw(kind === "variable" ? "p.payment_number" : "p.advance_number")} as reference,
+             p.status,coalesce(c.linked_gl_account_id,b.linked_gl_account_id) as "fundingGlId"
+        from ${sql.raw(table)} p
+        left join company_cash_accounts c on c.id=p.company_cash_account_id and c.company_id=p.company_id
+        left join company_bank_accounts b on b.id=p.company_bank_account_id and b.company_id=p.company_id
+       where p.id=${event.sourceEntityId}::uuid and p.company_id=${event.companyId}::uuid
+       for share of p
+    `.execute(database);
+    const row=result.rows[0];
+    if(row===undefined||row.status!=="confirmed"||row.fundingGlId===null){
+      this.invalidSource("accounting_employee_early_payment_invalid");
+    }
+    const mappingKey=kind==="variable"?"employee_interim_payroll_clearing":"employee_advances";
+    const componentType: AccountingFinancialComponent["componentType"] =
+      kind === "variable" ? "employee_interim_payroll_clearing" : "employee_advances";
+    const base={employeeId:row.employeeId,sourceEntityId:event.sourceEntityId,
+      sourceEntityType:kind==="variable"?"employee_variable_earning_payment":"employee_salary_advance",
+      sourceReference:row.reference,subledgerId:row.employeeId,subledgerType:"employee"};
+    return{accountingDate:row.paymentDate,components:present([
+      component(componentType,row.amount,"debit",mappingKey,base,
+        kind==="variable"?`Interim variable earnings ${row.reference}`:`Salary Advance ${row.reference}`),
+      component("payroll_cash_payment",row.amount,"credit","employee_payroll_cash_payment",
+        {...base,accountOverrideId:row.fundingGlId,employeeEarlyPaymentFunding:true},
+        `${row.paymentMethod} paid ${row.reference}`),
+    ]),description:kind==="variable"?`Employee variable earnings interim payment ${row.reference}`:
+      `Employee Salary Advance ${row.reference}`,journalSource:"employee_payroll",metadata:base,
+      sourceReference:row.reference};
   }
 
   private async driverFeeAccrual(

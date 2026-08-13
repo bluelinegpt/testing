@@ -385,6 +385,11 @@ export function TraderSettlementsWorkspace({
      write: everything below is prefill, and the existing dialog still owns
      eligibility, oldest-first allocation and confirmation. */
   const deepLink = useWorkflowDeepLink(settlementDialogs);
+  const returnToOrigin = () => {
+    if (deepLink.returnTo === null) return false;
+    session?.navigate(deepLink.returnTo);
+    return session !== undefined;
+  };
   const [deepLinkTraderId, setDeepLinkTraderId] = useState<string>();
   const [deepLinkOrderId, setDeepLinkOrderId] = useState<string>();
   /* Shown when a receipt deep link cannot lawfully open the dialog: the target
@@ -753,9 +758,13 @@ export function TraderSettlementsWorkspace({
             setReceiptNotice(t("traderSettlements.originatingOrderIneligible"))
           }
 
-          onClose={() => setNewSettlementOpen(false)}
+          onClose={() => {
+            setNewSettlementOpen(false);
+            returnToOrigin();
+          }}
           onCreated={(settlementId) => {
             setNewSettlementOpen(false);
+            if (returnToOrigin()) return;
             refresh();
             openDetail(settlementId);
           }}
@@ -806,8 +815,15 @@ export function TraderSettlementsWorkspace({
       {receiptTarget === undefined ? null : (
         <MoneyReceivedDialog
           api={api}
-          onClose={() => setReceiptTarget(undefined)}
-          onConfirmed={refresh}
+          onClose={() => {
+            setReceiptTarget(undefined);
+            returnToOrigin();
+          }}
+          onConfirmed={() => {
+            // Keep the success acknowledgement visible. Its Close action then
+            // returns to Order Search through the originating deep link.
+            refresh();
+          }}
           settlement={receiptTarget}
         />
       )}

@@ -86,11 +86,147 @@ final class StatusChip extends StatelessWidget {
     return Semantics(
       label: '${AppLocalizations.of(context).currentStatus}: $label',
       child: Chip(
-        avatar: Icon(Icons.circle, size: 12, color: color),
+        backgroundColor: color.withValues(alpha: .10),
+        side: BorderSide(color: color.withValues(alpha: .25)),
+        visualDensity: VisualDensity.compact,
+        avatar: Icon(Icons.circle, size: 9, color: color),
         label: Text(label),
       ),
     );
   }
+}
+
+/// Shared blue identity banner used by the live role dashboards and profile.
+final class BluelineHeaderCard extends StatelessWidget {
+  const BluelineHeaderCard({
+    required this.title,
+    required this.subtitle,
+    required this.icon,
+    super.key,
+    this.trailing,
+  });
+  final String title, subtitle;
+  final IconData icon;
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.all(AppSpacing.lg),
+    decoration: BoxDecoration(
+      gradient: const LinearGradient(
+        colors: [Color(0xFF155EEF), Color(0xFF004EEB)],
+        begin: AlignmentDirectional.topStart,
+        end: AlignmentDirectional.bottomEnd,
+      ),
+      borderRadius: BorderRadius.circular(24),
+      boxShadow: const [
+        BoxShadow(
+          color: Color(0x35155EEF),
+          blurRadius: 18,
+          offset: Offset(0, 8),
+        ),
+      ],
+    ),
+    child: Row(
+      children: [
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: .16),
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Icon(icon, color: Colors.white, size: 28),
+        ),
+        const SizedBox(width: AppSpacing.md),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                subtitle,
+                style: const TextStyle(
+                  color: Color(0xFFD1E0FF),
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                title,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 20,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
+          ),
+        ),
+        // ignore: use_null_aware_elements
+        if (trailing case final value?) value,
+      ],
+    ),
+  );
+}
+
+final class BluelineSectionCard extends StatelessWidget {
+  const BluelineSectionCard({
+    required this.child,
+    super.key,
+    this.padding = const EdgeInsets.all(AppSpacing.md),
+  });
+  final Widget child;
+  final EdgeInsetsGeometry padding;
+  @override
+  Widget build(BuildContext context) => Card(
+    child: Padding(padding: padding, child: child),
+  );
+}
+
+final class BluelineInfoRow extends StatelessWidget {
+  const BluelineInfoRow({
+    required this.icon,
+    required this.label,
+    required this.value,
+    super.key,
+    this.trailing,
+  });
+  final IconData icon;
+  final String label, value;
+  final Widget? trailing;
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 7),
+    child: Row(
+      children: [
+        Icon(icon, size: 18, color: Theme.of(context).colorScheme.primary),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                value,
+                style: Theme.of(
+                  context,
+                ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+              ),
+            ],
+          ),
+        ),
+        // ignore: use_null_aware_elements
+        if (trailing case final value?) value,
+      ],
+    ),
+  );
 }
 
 final class SummaryCard extends StatelessWidget {
@@ -126,6 +262,7 @@ final class SummaryCard extends StatelessWidget {
       button: onTap != null,
       label: '$title, $formatted',
       child: Card(
+        clipBehavior: Clip.antiAlias,
         child: InkWell(
           onTap: onTap,
           borderRadius: BorderRadius.circular(16),
@@ -135,13 +272,23 @@ final class SummaryCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.max,
               children: [
-                Container(
-                  padding: const EdgeInsets.all(AppSpacing.xs),
-                  decoration: BoxDecoration(
-                    color: scheme.primary.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Icon(icon, size: 20, color: scheme.primary),
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(AppSpacing.xs),
+                      decoration: BoxDecoration(
+                        color: scheme.primary.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Icon(icon, size: 20, color: scheme.primary),
+                    ),
+                    const Spacer(),
+                    Icon(
+                      Icons.arrow_forward_ios_rounded,
+                      size: 14,
+                      color: scheme.primary,
+                    ),
+                  ],
                 ),
                 const Spacer(),
                 if (loading)
@@ -151,8 +298,8 @@ final class SummaryCard extends StatelessWidget {
                     formatted,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                      fontWeight: FontWeight.w700,
+                    style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
                     ),
                   ),
                 const SizedBox(height: AppSpacing.xs / 2),
@@ -232,6 +379,7 @@ final class OrderCard extends StatelessWidget {
       order.area,
     ].whereType<String>().where((value) => value.trim().isNotEmpty).join(', ');
     return Card(
+      clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(16),
@@ -288,18 +436,32 @@ final class OrderCard extends StatelessWidget {
               ],
               if (showCustomer && order.mobileNumber != null) ...[
                 const SizedBox(height: AppSpacing.xs / 2),
-                Directionality(
-                  textDirection: TextDirection.ltr,
-                  child: Text(order.mobileNumber!, style: mutedStyle),
+                Row(
+                  children: [
+                    const Icon(Icons.phone_outlined, size: 14),
+                    const SizedBox(width: 4),
+                    Directionality(
+                      textDirection: TextDirection.ltr,
+                      child: Text(order.mobileNumber!, style: mutedStyle),
+                    ),
+                  ],
                 ),
               ],
               if (showCustomer && order.addressSummary != null) ...[
                 const SizedBox(height: AppSpacing.xs / 2),
-                Text(
-                  order.addressSummary!,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: mutedStyle,
+                Row(
+                  children: [
+                    const Icon(Icons.location_on_outlined, size: 14),
+                    const SizedBox(width: 4),
+                    Expanded(
+                      child: Text(
+                        order.addressSummary!,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: mutedStyle,
+                      ),
+                    ),
+                  ],
                 ),
               ],
               // COD/fee figures stay a compact, muted line — visible, but

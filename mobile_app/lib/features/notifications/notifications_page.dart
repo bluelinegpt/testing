@@ -188,23 +188,37 @@ final class _NotificationTile extends StatelessWidget {
       bodyParams: item.bodyParams,
       l10n: l10n,
     );
+    final scheme = Theme.of(context).colorScheme;
     return Card(
       color: item.isRead
           ? null
-          : Theme.of(context).colorScheme.primaryContainer,
+          : scheme.primaryContainer.withValues(alpha: .42),
       child: ListTile(
-        leading: Icon(_iconFor(item.notificationType)),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.md,
+          vertical: AppSpacing.xs,
+        ),
+        leading: Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: scheme.primary.withValues(alpha: .10),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Icon(_iconFor(item.notificationType), color: scheme.primary),
+        ),
         title: Text(
           title,
-          style: item.isRead
-              ? null
-              : const TextStyle(fontWeight: FontWeight.bold),
+          style: Theme.of(context).textTheme.titleSmall?.copyWith(
+            fontWeight: item.isRead ? FontWeight.w600 : FontWeight.w800,
+          ),
         ),
         subtitle: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (body != null) Text(body),
+            if (body != null)
+              Text(body, maxLines: 2, overflow: TextOverflow.ellipsis),
+            const SizedBox(height: 5),
             Text(
               _formatTimestamp(item.createdAt, locale),
               style: Theme.of(context).textTheme.bodySmall,
@@ -213,7 +227,7 @@ final class _NotificationTile extends StatelessWidget {
         ),
         trailing: item.isRead
             ? null
-            : const Icon(Icons.circle, size: 10, color: AppColors.info),
+            : const Icon(Icons.circle, size: 9, color: AppColors.info),
         onTap: onTap,
       ),
     );

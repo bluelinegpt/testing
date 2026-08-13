@@ -94,6 +94,8 @@ export function expenseSourcePath(type: string, sourceId: string): string | unde
   switch (type) {
     case "general_expense":
       return `/accounting/general-expenses/${sourceId}`;
+    case "driver_collection_expense":
+      return `/drivers/collections/${sourceId}`;
     case "outsourced_driver_fee":
       return `/payroll/driver-fees/payments/${sourceId}`;
     case "payroll":

@@ -92,6 +92,49 @@ export class AuthenticationRepository {
     return result.rows.length === 1 ? result.rows[0] : undefined;
   }
 
+  /**
+   * A marketplace Customer account (`account_kind = 'customer'`,
+   * `company_id IS NULL`) by username, email, or mobile -- the same
+   * three-way identifier match `findCompanyAccount` uses, but without the
+   * `companies` join/subdomain filter that would drop every Company-less
+   * row (mirrors `findPlatformAccount`'s Company-less shape instead).
+   *
+   * Shared Commerce Foundation Prompt 3A.
+   */
+  public async findCustomerAccount(
+    identifier: string,
+    normalizedMobile: string | undefined,
+  ): Promise<AccountLoginRecord | undefined> {
+    const result = await sql<AccountLoginRecord>`
+      select a.id,
+             a.company_id as "companyId",
+             a.account_kind as kind,
+             a.username,
+             coalesce(cc.name, a.username) as "displayName",
+             a.password_hash as "passwordHash",
+             a.status as "accountStatus",
+             a.failed_login_attempts as "failedLoginAttempts",
+             a.locked_until as "lockedUntil",
+             a.force_password_change as "forcePasswordChange",
+             a.temporary_password_expires_at as "temporaryPasswordExpiresAt",
+             null::text as "companyStatus"
+        from accounts a
+        left join commerce_customers cc on cc.account_id = a.id
+       where a.company_id is null
+         and a.account_kind = 'customer'
+         and (
+           a.normalized_username = lower(btrim(${identifier}))
+           or a.normalized_email = lower(btrim(${identifier}))
+           or (
+             ${normalizedMobile ?? null}::text is not null
+             and a.normalized_mobile_number = ${normalizedMobile ?? null}
+           )
+         )
+       limit 2
+    `.execute(this.database);
+    return result.rows.length === 1 ? result.rows[0] : undefined;
+  }
+
   public async findPlatformAccount(identifier: string): Promise<AccountLoginRecord | undefined> {
     const result = await sql<AccountLoginRecord>`
       select a.id,

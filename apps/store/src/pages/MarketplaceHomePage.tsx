@@ -233,6 +233,11 @@ function HomeSectionView({
         <div className="store-note">
           <h2 className="store-note__title">{t(section.titleKey)}</h2>
           <p className="store-note__body">{t(bodyKey)}</p>
+          {section.kind === "customer_account" ? (
+            <Link className="store-button store-button--quiet" to={localePath("/login")}>
+              {t("auth.login")}
+            </Link>
+          ) : null}
         </div>
       </section>
     );

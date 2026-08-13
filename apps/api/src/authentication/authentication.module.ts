@@ -45,6 +45,13 @@ import { TemporaryPasswordService } from "./temporary-password.service.js";
     // guard wrote a target the rest of the request could not see.
     RequestSecurityContextStore,
     CompanyHostResolver,
+    // Exported for `CommerceCustomerAuthModule` (Shared Commerce Foundation
+    // Prompt 3A): both are already fully generic over `account_kind` and
+    // company-less accounts (session creation/lookup, lockout, token
+    // hashing), so the Customer auth flow reuses them directly instead of
+    // duplicating session/lockout logic in a parallel repository.
+    AuthenticationRepository,
+    SessionTokenService,
   ],
   providers: [
     AccountSetupService,

@@ -43,6 +43,8 @@
     "test:reset:database": "vitest run src/platform/reset-company-test-data.database.test.ts",
     "security:bootstrap-platform": "tsx src/platform/run-platform-administrator-bootstrap.ts",
     "security:bootstrap-platform:prod": "node dist/platform/run-platform-administrator-bootstrap.js",
+    "security:reset-platform-admin-password": "tsx src/platform/run-platform-administrator-password-reset.ts",
+    "security:reset-platform-admin-password:prod": "node dist/platform/run-platform-administrator-password-reset.js",
     "dev:seed-taxonomy": "tsx src/platform/run-marketplace-taxonomy-seed.ts",
     "dev:seed-commerce": "tsx src/platform/run-commerce-development-seed.ts",
     "dev:seed-commerce-media": "tsx src/platform/run-commerce-media-seed.ts",

@@ -130,7 +130,8 @@ export class PayrollQueryService {
                as "driverCommissionTotal",
              coalesce(sum(l.earning_adjustments_total) filter (where l.status<>'reversed'),0)::text
                as "earningAdjustmentTotal",
-             coalesce(sum(l.deduction_adjustments_total+l.advances)
+             coalesce(sum(l.deduction_adjustments_total+l.advances
+               +l.variable_earnings_already_paid+l.salary_advance_recovery)
                filter (where l.status<>'reversed'),0)::text
                as "deductionTotal",
              coalesce(sum(l.net_salary) filter (where l.status<>'reversed'),0)::text
@@ -166,6 +167,10 @@ export class PayrollQueryService {
              employment_type_snapshot as "employmentType", department_snapshot as department,
              basic_salary_snapshot::text as "basicSalary", allowance_total::text as allowances,
              employee_driver_commission::text as "driverCommission",
+             delivered_order_earnings::text as "deliveredOrderEarnings",
+             collection_earnings::text as "collectionEarnings",
+             variable_earnings_already_paid::text as "variableEarningsAlreadyPaid",
+             salary_advance_recovery::text as "salaryAdvanceRecovery",
              earning_adjustments_total::text as "earningAdjustments",
              (deduction_adjustments_total+advances)::text as deductions,
              gross_earnings::text as "grossEarnings", net_salary::text as "netSalary",
@@ -204,6 +209,9 @@ export class PayrollQueryService {
              l.allowance_total::text as "allowanceTotal",
              l.employee_driver_commission::text as "driverCommission",
              l.delivered_order_earnings::text as "deliveredOrderEarnings",
+             l.collection_earnings::text as "collectionEarnings",
+             l.variable_earnings_already_paid::text as "variableEarningsAlreadyPaid",
+             l.salary_advance_recovery::text as "salaryAdvanceRecovery",
              l.earning_adjustments_total::text as "earningAdjustments",
              (l.deduction_adjustments_total+l.advances)::text as deductions,
              l.gross_earnings::text as "grossEarnings", l.net_salary::text as "netSalary",

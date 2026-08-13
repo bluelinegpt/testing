@@ -52,6 +52,19 @@ import {
 } from "./outsourced-driver-fee.dto.js";
 import { OutsourcedDriverFeeService } from "./outsourced-driver-fee.service.js";
 import { OutsourcedDriverFeeReportService } from "./outsourced-driver-fee-report.service.js";
+// Runtime classes are required by Nest validation metadata.
+// eslint-disable-next-line @typescript-eslint/consistent-type-imports
+import {
+  CalculateEmployeeDriverEarningPeriodDto,
+  DriverEarningsQueryDto,
+  DriverMonthlyPaymentsQueryDto,
+  ReconcileEmployeeDriverEarningsDto,
+  EmployeeMoneyPaymentDto,
+  EmployeeMoneyReasonDto,
+  SaveOutsourcedCollectionRuleDto,
+  SalaryAdvanceAvailabilityQueryDto,
+} from "./driver-earnings.dto.js";
+import { DriverEarningsService } from "./driver-earnings.service.js";
 
 @ApiTags("payroll")
 @ApiBearerAuth()
@@ -71,7 +84,130 @@ export class PayrollController {
     private readonly outsourcedDriverFees: OutsourcedDriverFeeService,
     @Inject(OutsourcedDriverFeeReportService)
     private readonly outsourcedDriverFeeReports: OutsourcedDriverFeeReportService,
+    @Inject(DriverEarningsService) private readonly driverEarnings: DriverEarningsService,
   ) {}
+
+  @RequireAnyPermission("payroll.view", "outsourced_driver_fees.view", "users_roles.manage")
+  @Get("driver-earnings")
+  public driverEarningsSummary(@Query() query: DriverEarningsQueryDto) {
+    return this.driverEarnings.summary(query);
+  }
+
+  @RequireAnyPermission("payroll.view", "payroll.pay", "users_roles.manage")
+  @Get("driver-earnings/monthly-payments")
+  public driverMonthlyPayments(@Query() query: DriverMonthlyPaymentsQueryDto) {
+    return this.driverEarnings.monthlyPayments(query.month, query.driverId);
+  }
+
+  @RequireAnyPermission("payroll.pay", "users_roles.manage")
+  @Post("driver-earnings/reconcile")
+  public reconcileEmployeeDriverEarnings(
+    @Body() input: ReconcileEmployeeDriverEarningsDto,
+    @Req() request: Request,
+  ) {
+    return this.driverEarnings.reconcile(input, this.correlationId(request));
+  }
+
+  @RequireAnyPermission("payroll.pay", "users_roles.manage")
+  @Post("driver-earnings/periods/preview")
+  public previewEmployeeDriverEarningPeriod(
+    @Body() input: CalculateEmployeeDriverEarningPeriodDto,
+  ) {
+    return this.driverEarnings.previewPeriod(input);
+  }
+
+  @RequireAnyPermission("payroll.pay", "users_roles.manage")
+  @Post("driver-earnings/periods")
+  public confirmEmployeeDriverEarningPeriod(
+    @Body() input: CalculateEmployeeDriverEarningPeriodDto,
+    @Req() request: Request,
+  ) {
+    return this.driverEarnings.confirmPeriod(input, this.correlationId(request));
+  }
+
+  @RequireAnyPermission("payroll.view", "payroll.pay", "users_roles.manage")
+  @Get("driver-earnings/periods")
+  public employeeDriverEarningPeriods(@Query("driverId", new ParseUUIDPipe()) driverId: string) {
+    return this.driverEarnings.periods(driverId);
+  }
+
+  @RequireAnyPermission("payroll.pay", "users_roles.manage")
+  @Post("driver-earnings/employee/payments")
+  public payEmployeeDriverEarnings(
+    @Body() input: EmployeeMoneyPaymentDto,
+    @Headers("x-idempotency-key") idempotencyKey: string | undefined,
+    @Req() request: Request,
+  ) {
+    return this.driverEarnings.payVariableEarnings(
+      input,
+      idempotencyKey,
+      this.correlationId(request),
+    );
+  }
+
+  @RequireAnyPermission("payroll.reverse", "users_roles.manage")
+  @Post("driver-earnings/employee/payments/:paymentId/reverse")
+  public reverseEmployeeDriverEarnings(
+    @Param("paymentId", new ParseUUIDPipe()) paymentId: string,
+    @Body() input: EmployeeMoneyReasonDto,
+    @Req() request: Request,
+  ) {
+    return this.driverEarnings.reverseVariablePayment(
+      paymentId,
+      input.reason,
+      this.correlationId(request),
+    );
+  }
+
+  @RequireAnyPermission("payroll.pay", "users_roles.manage")
+  @Get("salary-advances/availability")
+  public salaryAdvanceAvailability(@Query() query: SalaryAdvanceAvailabilityQueryDto) {
+    return this.driverEarnings.salaryAdvanceAvailability(query.employeeId, query.paymentDate);
+  }
+
+  @RequireAnyPermission("payroll.pay", "users_roles.manage")
+  @Post("salary-advances")
+  public paySalaryAdvance(
+    @Body() input: EmployeeMoneyPaymentDto,
+    @Headers("x-idempotency-key") idempotencyKey: string | undefined,
+    @Req() request: Request,
+  ) {
+    return this.driverEarnings.paySalaryAdvance(input, idempotencyKey, this.correlationId(request));
+  }
+
+  @RequireAnyPermission("payroll.reverse", "users_roles.manage")
+  @Post("salary-advances/:advanceId/reverse")
+  public reverseSalaryAdvance(
+    @Param("advanceId", new ParseUUIDPipe()) advanceId: string,
+    @Body() input: EmployeeMoneyReasonDto,
+    @Req() request: Request,
+  ) {
+    return this.driverEarnings.reverseSalaryAdvance(
+      advanceId,
+      input.reason,
+      this.correlationId(request),
+    );
+  }
+
+  @RequireAnyPermission("outsourced_driver_fees.view", "users_roles.manage")
+  @Get("outsourced-driver-fees/drivers/:driverId/collection-rules")
+  public outsourcedCollectionRules(@Param("driverId", new ParseUUIDPipe()) driverId: string) {
+    return this.driverEarnings.outsourcedCollectionRules(driverId);
+  }
+
+  @RequireAnyPermission("outsourced_driver_fees.manage", "users_roles.manage")
+  @Post("outsourced-driver-fees/drivers/:driverId/collection-rules")
+  public setOutsourcedCollectionRule(
+    @Param("driverId", new ParseUUIDPipe()) driverId: string,
+    @Body() input: SaveOutsourcedCollectionRuleDto,
+    @Req() request: Request,
+  ) {
+    return this.driverEarnings.setOutsourcedCollectionRule(
+      driverId,
+      input,
+      this.correlationId(request),
+    );
+  }
 
   @RequireAnyPermission("outsourced_driver_fees.view", "users_roles.manage")
   @Get("outsourced-driver-fees/drivers/:driverId/statement")

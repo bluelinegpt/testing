@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { FormEvent, ReactElement } from "react";
 
 import {
@@ -48,9 +48,44 @@ export function CompanyAdministrators({
   const [sessionsForUsername, setSessionsForUsername] = useState<string | undefined>(undefined);
   const [sessions, setSessions] = useState<readonly CompanySession[] | undefined>(undefined);
   const [sessionsError, setSessionsError] = useState(false);
+  /**
+   * `deletionTarget` is set SYNCHRONOUSLY on click, before the eligibility
+   * request even starts. That is what makes the panel appear the instant
+   * someone clicks Delete, in a loading state naming the row they clicked --
+   * rather than only appearing once the network call resolves, by which point
+   * a click on any row but the last had already scrolled out of the area the
+   * click happened in.
+   *
+   * The error from a failed eligibility check is kept SEPARATE from the
+   * page's general `error` banner. That banner sits at the top of the page,
+   * so a deletion attempted on a row far down the Administrators table would
+   * show its error a screen-height away from the click that caused it --
+   * exactly the same defect as the confirmation panel, in the other
+   * direction. `deletionError` renders inside the same anchored panel as
+   * everything else about this action.
+   */
+  const [deletionTarget, setDeletionTarget] = useState<CompanyUser | undefined>(undefined);
   const [deletion, setDeletion] = useState<UserDeletionEligibility | undefined>(undefined);
   const [deletionLoading, setDeletionLoading] = useState(false);
+  const [deletionError, setDeletionError] = useState<string | undefined>(undefined);
   const [deletionConfirmation, setDeletionConfirmation] = useState("");
+  const [deletionSuccessMessage, setDeletionSuccessMessage] = useState<string | undefined>(
+    undefined,
+  );
+  const deletionPanelRef = useRef<HTMLElement>(null);
+
+  // Scrolls the panel into view the moment a target is chosen -- on the
+  // click, not on the response -- so it is visible regardless of which row
+  // in the table was clicked or how long the eligibility check takes.
+  useEffect(() => {
+    if (deletionTarget === undefined) return;
+    // Not just an optional element -- `scrollIntoView` itself is absent in
+    // jsdom, so the method is checked directly rather than only the ref.
+    const panel = deletionPanelRef.current;
+    if (typeof panel?.scrollIntoView === "function") {
+      panel.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, [deletionTarget]);
 
   const load = useCallback(async () => {
     if (!canRead) return;
@@ -172,20 +207,59 @@ export function CompanyAdministrators({
   }
 
   async function inspectDeletion(user: CompanyUser): Promise<void> {
+    // Set BEFORE the request, not after: this is what makes the panel appear
+    // on the click rather than on the response, in a "checking" state that
+    // already names the user, so there is a visible reaction to the click no
+    // matter how slow or fast the network is.
+    setDeletionTarget(user);
     setDeletion(undefined);
+    setDeletionError(undefined);
+    setDeletionSuccessMessage(undefined);
     setDeletionConfirmation("");
     setDeletionLoading(true);
-    setError(undefined);
     try {
       setDeletion(await platformApi.userDeletionEligibility(companyId, user.accountId));
-    } catch (failure) {
-      setError(
-        failure instanceof PlatformApiError
-          ? failure.message
-          : "Unable to check whether this user can be deleted.",
-      );
+    } catch {
+      // A normal `eligible: false` result never reaches here -- it is a 200
+      // response, not a thrown error. This branch is reserved for a check
+      // that could not be completed at all: the request failed, or the
+      // server itself errored. The message is fixed rather than the raw
+      // server text -- unlike a genuine business-rule outcome (eligible or
+      // blocked, both explained by the server), a failed CHECK should not
+      // surface backend internals, and a fixed message is one less thing
+      // that needs translating or auditing for leakage later.
+      setDeletionError("Unable to check whether this user can be deleted.");
     } finally {
       setDeletionLoading(false);
+    }
+  }
+
+  async function executeDeletion(): Promise<void> {
+    if (deletionTarget === undefined || deletion === undefined) return;
+    setBusy(true);
+    setDeletionError(undefined);
+    try {
+      await platformApi.deleteUser(companyId, deletion.accountId, deletionConfirmation);
+      setDeletionTarget(undefined);
+      setDeletion(undefined);
+      setDeletionConfirmation("");
+      setDeletionSuccessMessage("User deleted successfully.");
+      await load();
+      // Deleting an Administrator can change whether the Company still has
+      // one, which the readiness panel above this section reports.
+      onChanged();
+    } catch (failure) {
+      // Eligibility can change between the preview and this click -- another
+      // administrator's action, a role change, a new record for this user.
+      // The server re-checks at commit time and this is that check's real
+      // answer, which is more useful than a generic retry prompt would be.
+      setDeletionError(
+        failure instanceof PlatformApiError
+          ? failure.message
+          : "User could not be deleted because dependencies changed. Refresh and try again.",
+      );
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -525,61 +599,146 @@ export function CompanyAdministrators({
         </section>
       )}
 
-      {deletionLoading ? <p role="status">Checking deletion eligibility...</p> : null}
-      {deletion === undefined ? null : (
-        <section aria-labelledby="user-deletion-heading">
-          <h4 id="user-deletion-heading">Delete user</h4>
-          <p>
-            {deletion.eligible
-              ? `${deletion.username} has no historical dependencies and may be permanently deleted.`
-              : deletion.reason}
-          </p>
-          {deletion.blockingCategories.length === 0 ? null : (
-            <ul>
-              {deletion.blockingCategories.map((blocker) => (
-                <li key={blocker.category}>{blocker.category}: {blocker.rows}</li>
-              ))}
-            </ul>
-          )}
-          {deletion.eligible ? (
+      {deletionSuccessMessage === undefined ? null : (
+        <p className="platform-linkbox" role="status">
+          {deletionSuccessMessage}
+        </p>
+      )}
+
+      {/*
+        ONE panel, ONE place, for every state this action can be in --
+        checking, failed-to-check, blocked, or eligible. Anchored by
+        `deletionPanelRef` and scrolled into view the instant a row's Delete
+        button is clicked (see the effect above), so the panel is where the
+        click happened rather than wherever it falls in the page's fixed
+        layout. Point 2's four expected outcomes and point 14's "visible near
+        the action" are the same requirement seen from two directions, and
+        this is the one structure that satisfies both: exactly one visible
+        state is reachable from a click, and it is always in the same,
+        findable place.
+      */}
+      {deletionTarget === undefined ? null : (
+        <section aria-labelledby="user-deletion-heading" ref={deletionPanelRef}>
+          <h4 id="user-deletion-heading">
+            Delete user: {deletionTarget.displayName ?? deletionTarget.username}
+          </h4>
+
+          {deletionLoading ? (
+            <p role="status">
+              Checking whether {deletionTarget.username} can be deleted…
+            </p>
+          ) : deletionError !== undefined ? (
+            <div role="alert">
+              <p>{deletionError}</p>
+              <div className="platform-actions">
+                <button
+                  className="platform-button platform-button--quiet"
+                  onClick={() => void inspectDeletion(deletionTarget)}
+                  type="button"
+                >
+                  Retry
+                </button>
+                <button
+                  className="platform-button platform-button--quiet"
+                  onClick={() => setDeletionTarget(undefined)}
+                  type="button"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : deletion === undefined ? null : deletion.eligible ? (
             <>
+              <dl className="platform-detail-list">
+                <dt>User Name</dt>
+                <dd>{deletion.displayName ?? deletion.username}</dd>
+                <dt>Username/login</dt>
+                <dd>{deletion.username}</dd>
+                <dt>Company</dt>
+                <dd>{deletion.companyName}</dd>
+                <dt>Role</dt>
+                <dd>{deletionTarget.roles.join(", ") || "—"}</dd>
+              </dl>
+              <p role="alert">This permanently deletes the user account.</p>
+              <p>
+                To permanently delete this user, type exactly:{" "}
+                <code>{deletion.confirmationChallenge}</code>
+              </p>
               <label className="platform-field" htmlFor="delete-user-confirmation">
-                <span>Type {deletion.confirmationChallenge} to confirm</span>
+                <span>Confirmation</span>
                 <input
+                  autoComplete="off"
                   id="delete-user-confirmation"
                   onChange={(event) => setDeletionConfirmation(event.target.value)}
+                  placeholder={deletion.confirmationChallenge}
                   value={deletionConfirmation}
                 />
               </label>
-              <button
-                className="platform-button"
-                disabled={busy || deletionConfirmation !== deletion.confirmationChallenge}
-                onClick={() => {
-                  void run(async () => {
-                    await platformApi.deleteUser(
-                      companyId,
-                      deletion.accountId,
-                      deletionConfirmation,
-                    );
-                    setDeletion(undefined);
-                    setDeletionConfirmation("");
-                  });
-                }}
-                type="button"
-              >
-                Permanently delete user
-              </button>
+              {deletionConfirmation.length === 0 ||
+              deletionConfirmation === deletion.confirmationChallenge ? null : (
+                <p className="platform-warning" role="alert">
+                  Confirmation does not match. Type <code>{deletion.confirmationChallenge}</code>{" "}
+                  exactly.
+                </p>
+              )}
+              <div className="platform-actions">
+                <button
+                  className="platform-button platform-button--quiet"
+                  disabled={busy}
+                  onClick={() => setDeletionTarget(undefined)}
+                  type="button"
+                >
+                  Cancel
+                </button>
+                <button
+                  className="platform-button"
+                  disabled={busy || deletionConfirmation !== deletion.confirmationChallenge}
+                  onClick={() => void executeDeletion()}
+                  title={
+                    deletionConfirmation === deletion.confirmationChallenge
+                      ? undefined
+                      : `Type ${deletion.confirmationChallenge} exactly to enable this button`
+                  }
+                  type="button"
+                >
+                  Permanently Delete User
+                </button>
+              </div>
             </>
           ) : (
-            <p className="platform-muted">Recommended action: Deactivate</p>
+            <>
+              <dl className="platform-detail-list">
+                <dt>User Name</dt>
+                <dd>{deletion.displayName ?? deletion.username}</dd>
+                <dt>Username/login</dt>
+                <dd>{deletion.username}</dd>
+                <dt>Company</dt>
+                <dd>{deletion.companyName}</dd>
+                <dt>Role</dt>
+                <dd>{deletionTarget.roles.join(", ") || "—"}</dd>
+              </dl>
+              <p role="alert">{deletion.reason}</p>
+              {(deletion.blockingCategories ?? []).length === 0 ? null : (
+                <ul>
+                  {(deletion.blockingCategories ?? []).map((blocker) => (
+                    <li key={blocker.category}>
+                      {blocker.category}: {blocker.rows}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <p className="platform-muted">
+                Recommended action: {deletion.recommendedAction === "deactivate" ? "Deactivate" : "—"}
+              </p>
+              <button
+                className="platform-button platform-button--quiet"
+                onClick={() => setDeletionTarget(undefined)}
+                type="button"
+              >
+                Cancel
+              </button>
+            </>
           )}
-          <button
-            className="platform-button platform-button--quiet"
-            onClick={() => setDeletion(undefined)}
-            type="button"
-          >
-            Cancel
-          </button>
         </section>
       )}
     </>

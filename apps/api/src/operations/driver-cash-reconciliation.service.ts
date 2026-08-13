@@ -870,6 +870,19 @@ export class DriverCashReconciliationService {
         },
         identity.identityId,
       );
+      await this.outsourcedDriverFees.createForConfirmedCollection(
+        transaction,
+        {
+          businessDate: header.rows[0]!.businessDate,
+          countsForCollectionEarning: input.countsForCollectionEarning === true,
+          driverId,
+          orderCount:
+            orders.length > 0 ? orders.length : (input.manualCollectedOrderCount ?? 0),
+          reconciliationId,
+        },
+        identity.identityId,
+        correlationId,
+      );
 
       const actorRole = await this.history.actorRole(transaction, companyId, identity.identityId);
       for (const order of orders) {

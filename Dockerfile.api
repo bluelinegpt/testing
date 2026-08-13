@@ -16,7 +16,7 @@ FROM node:24-bookworm-slim AS runtime
 ENV NODE_ENV=production
 WORKDIR /opt/app/apps/api
 COPY --chown=node:node --from=build /opt/api ./
-COPY --chown=node:node database/migrations /opt/app/database/migrations
+COPY --chown=node:node database/migrations /opt/app/apps/api/database/migrations
 USER node
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \

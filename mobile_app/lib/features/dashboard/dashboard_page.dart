@@ -125,12 +125,21 @@ final class _RoleDashboardPageState extends ConsumerState<RoleDashboardPage> {
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.all(AppSpacing.md),
         children: [
-          Text(
-            '${l10n.welcome}, ${user.displayName}',
-            style: Theme.of(context).textTheme.headlineSmall,
+          BluelineHeaderCard(
+            title: user.displayName,
+            subtitle: '${l10n.welcome} • ${roleLabel(user, l10n)}',
+            icon: user.isDriverPresentation
+                ? Icons.local_shipping_outlined
+                : Icons.business_center_outlined,
           ),
-          const SizedBox(height: AppSpacing.xs),
-          Text(roleLabel(user, l10n)),
+          const SizedBox(height: AppSpacing.sm),
+          Text(
+            roleLabel(user, l10n),
+            style: Theme.of(context).textTheme.labelLarge?.copyWith(
+              color: Theme.of(context).colorScheme.primary,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
           const SizedBox(height: AppSpacing.lg),
           if (user.hasRole(UserRole.trader) && user.can('orders.create')) ...[
             FilledButton.icon(

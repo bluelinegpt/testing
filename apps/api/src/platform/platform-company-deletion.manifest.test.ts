@@ -55,14 +55,32 @@ describe("permanent Company deletion manifest", () => {
     // (`device_registrations`, `notification_outbox_events`), both reviewed
     // and correctly classified as direct-delete — see the comment above
     // `NEW_DIRECT_TABLES` in `platform-company-deletion.manifest.ts`.
-    expect(COMPANY_DELETION_DIRECT_TABLES.size).toBe(129);
+    // 129 -> 134: the 2026-08-12 review classified five new payroll tables
+    // (`employee_salary_advances`, `employee_salary_advance_payroll_
+    // allocations`, `employee_variable_earning_payments`,
+    // `employee_variable_earning_payment_allocations`,
+    // `outsourced_driver_collection_earning_rules`) — see the same comment
+    // block for the full FK/trigger review.
+    // 134 -> 136: the same day's later review classified
+    // `employee_driver_earning_periods` and its allocation child
+    // `employee_driver_earning_period_delivery_sources` — new tables from
+    // the still-evolving parallel Driver Earnings work, both direct
+    // `company_id`, no special handling needed.
+    expect(COMPANY_DELETION_DIRECT_TABLES.size).toBe(136);
     expect(COMPANY_DELETION_MANIFEST_HASH).toMatch(/^[a-f0-9]{64}$/);
   });
 
   it("classifies the only reviewed indirect ownership paths explicitly", () => {
+    // 2026-08-12: `store_orders` / `store_order_items` added — genuinely
+    // Company-owned via `store_orders.delivery_company_id` (a direct,
+    // restricting FK to `companies` under a non-standard column name), not
+    // global — see the comment above `COMPANY_DELETION_INDIRECT` in
+    // `platform-company-deletion.manifest.ts`.
     expect(COMPANY_DELETION_INDIRECT.map((entry) => entry.table)).toEqual([
       "role_permissions",
       "storefront_marketplace_categories",
+      "store_orders",
+      "store_order_items",
     ]);
   });
 

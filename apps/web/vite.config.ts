@@ -1,7 +1,54 @@
+import { execSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vitest/config";
 
+// The short commit SHA of the last commit that actually touched THIS app's
+// own folder, baked in at build time so a screen can show it (see
+// VersionBadge) -- the one reliable way to tell "am I looking at local or the
+// Render deploy, and which commit is it actually running" without trusting a
+// deploy dashboard that can lag the real build.
+//
+// Deliberately `git log -- .`, not `git rev-parse HEAD`: this is a monorepo,
+// so repo-wide HEAD is the same value for every app regardless of which app's
+// code actually changed -- a commit that only touched apps/api would still
+// make apps/web's badge change, which is exactly the discrepancy this fixes.
+// Must stay identical to Documentation/deployment-registry.json's own
+// per-app commit (see scripts/deployment-registry.mjs's currentCommitInfo),
+// or the badge and the Deployment Registry screen disagree on what "this
+// app's version" means.
+//
+// Falls back to "dev" outside a git checkout (e.g. a stripped Docker build
+// context) rather than failing the build over a cosmetic label.
+function commitSha(): string {
+  try {
+    return execSync("git log -1 --format=%h -- .", { cwd: __dirname }).toString().trim() || "dev";
+  } catch {
+    return "dev";
+  }
+}
+
+// Documentation/deployment-registry.json lives at the repo root (one catalog
+// shared by every app), not inside apps/web -- read and inline it the same
+// way as the commit SHA rather than importing across the package boundary,
+// which Vite's default fs allow-list would otherwise reject. Falls back to an
+// empty catalog rather than failing the build if the file is ever missing.
+function deploymentRegistry(): unknown {
+  try {
+    const path = resolve(__dirname, "../../Documentation/deployment-registry.json");
+    return JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    return { apps: [] };
+  }
+}
+
 export default defineConfig({
+  define: {
+    __APP_VERSION__: JSON.stringify(commitSha()),
+    __DEPLOYMENT_REGISTRY__: JSON.stringify(deploymentRegistry()),
+  },
   plugins: [react()],
   server: {
     port: 5174,

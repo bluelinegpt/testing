@@ -8,6 +8,7 @@ import { BrowserRouter } from "react-router-dom";
 import "./theme/bootstrap-theme.js";
 
 import { App } from "./App.js";
+import { PlatformErrorBoundary } from "./app/PlatformErrorBoundary.js";
 import { PlatformSessionProvider } from "./app/PlatformSession.js";
 import "./styles/platform.css";
 
@@ -16,10 +17,12 @@ if (container === null) throw new Error("Platform root element is missing");
 
 createRoot(container).render(
   <StrictMode>
-    <BrowserRouter>
-      <PlatformSessionProvider>
-        <App />
-      </PlatformSessionProvider>
-    </BrowserRouter>
+    <PlatformErrorBoundary>
+      <BrowserRouter>
+        <PlatformSessionProvider>
+          <App />
+        </PlatformSessionProvider>
+      </BrowserRouter>
+    </PlatformErrorBoundary>
   </StrictMode>,
 );

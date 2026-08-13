@@ -55,26 +55,20 @@ final class _DriverDetailCard extends StatelessWidget {
   final Widget? trailing;
 
   @override
-  Widget build(BuildContext context) => Card(
-    child: Padding(
-      padding: const EdgeInsets.all(AppSpacing.md),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(
-                icon,
-                size: 18,
-                color: Theme.of(context).colorScheme.primary,
-              ),
-              if (trailing != null) ...[const Spacer(), trailing!],
-            ],
-          ),
-          const SizedBox(height: AppSpacing.xs),
-          ...children,
-        ],
-      ),
+  Widget build(BuildContext context) => BluelineSectionCard(
+    padding: const EdgeInsets.all(AppSpacing.md),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(icon, size: 18, color: Theme.of(context).colorScheme.primary),
+            if (trailing != null) ...[const Spacer(), trailing!],
+          ],
+        ),
+        const SizedBox(height: AppSpacing.xs),
+        ...children,
+      ],
     ),
   );
 }
@@ -281,23 +275,35 @@ final class DriverStatusActionsCard extends StatelessWidget {
                 child: Text(l10n.startDelivery),
               ),
             if (actions.contains(DriverAction.markDelivered))
-              FilledButton(
+              FilledButton.icon(
                 onPressed: busy
                     ? null
                     : () => onAction(DriverAction.markDelivered),
-                child: Text(l10n.delivered),
+                icon: const Icon(Icons.check_circle_outline),
+                style: FilledButton.styleFrom(
+                  backgroundColor: AppColors.success,
+                ),
+                label: Text(l10n.delivered),
               ),
             if (actions.contains(DriverAction.hold))
-              OutlinedButton(
+              OutlinedButton.icon(
                 onPressed: busy ? null : () => onAction(DriverAction.hold),
-                child: Text(l10n.hold),
+                icon: const Icon(Icons.pause_circle_outline),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.warning,
+                ),
+                label: Text(l10n.hold),
               ),
             if (actions.contains(DriverAction.returnToBranch))
-              OutlinedButton(
+              OutlinedButton.icon(
                 onPressed: busy
                     ? null
                     : () => onAction(DriverAction.returnToBranch),
-                child: Text(l10n.returnToBranchAction),
+                icon: const Icon(Icons.keyboard_return),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.error,
+                ),
+                label: Text(l10n.returnToBranchAction),
               ),
           ],
         ),

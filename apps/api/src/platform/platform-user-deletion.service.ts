@@ -277,7 +277,7 @@ export class PlatformUserDeletionService {
       blockingRows > 0
         ? "This user has historical activity. Deactivate instead."
         : isLastAdministrator
-          ? "This is the Company's last Administrator. Deletion would leave the Company with no administrative access."
+          ? "This user is the last Company Administrator. Create another administrator before deleting this user."
           : null;
 
     return {
@@ -351,6 +351,15 @@ export class PlatformUserDeletionService {
         );
       }
 
+      // The role summary is captured for the audit snapshot before any row
+      // that could answer this question is removed.
+      const roles = (
+        await sql<{ code: string }>`
+          select r.code from account_roles ar join roles r on r.id = ar.role_id
+           where ar.account_id = ${accountId}::uuid order by r.code
+        `.execute(transaction)
+      ).rows.map((row) => row.code);
+
       /**
        * The audit entry is written BEFORE the rows go, and inside the same
        * transaction.
@@ -359,10 +368,19 @@ export class PlatformUserDeletionService {
        * deleted once the account no longer exists. Writing it afterwards would
        * mean a failure between the delete and the audit leaves a user gone with
        * no record of who removed them; writing it inside means a failure to
-       * audit rolls the deletion back.
+       * audit rolls the deletion back -- and this row only becomes durable if
+       * the WHOLE transaction, deletes included, commits.
        *
        * `audit_events.actor_account_id` points at the PLATFORM actor, who is
        * not being deleted, so the RESTRICT key on that column is satisfied.
+       * `subject_id` carries no foreign key at all, by design (see
+       * `platform-audit.service.ts`), so this row survives the account it
+       * describes with no special handling required.
+       *
+       * The eligibility and confirmation results are captured explicitly,
+       * not just implied by the row existing: a reader of this audit later
+       * should not have to infer "it must have been eligible" from the
+       * absence of a denial entry.
        */
       await this.audit.record({
         action: "platform.company_user.deleted",
@@ -375,6 +393,13 @@ export class PlatformUserDeletionService {
           displayName: state.displayName,
           status: state.isActive ? "active" : "inactive",
           companyName: state.companyName,
+          roles,
+          eligibilityResult: {
+            eligible: state.eligible,
+            blockingRows: state.blockingRows,
+            isLastAdministrator: state.isLastAdministrator,
+          },
+          confirmationResult: "matched",
         },
         after: { deleted: true },
         result: "success",
@@ -382,6 +407,22 @@ export class PlatformUserDeletionService {
         ipAddress: actor.ip,
         userAgent: actor.userAgent,
       });
+
+      /**
+       * The narrow technical permission to execute the delete the checks
+       * above have already approved -- not a second eligibility system. Set
+       * as late as possible, immediately before the one statement that needs
+       * it, and only for the account row this specific request has locked,
+       * confirmed, and matched.
+       *
+       * `SET LOCAL` is scoped by PostgreSQL to this transaction alone: it
+       * cannot outlive COMMIT or ROLLBACK, and no other session or concurrent
+       * connection can observe it while it is set. See
+       * `20260816100000_platform_user_deletion_guard_exception` for the
+       * trigger-side half of this and the evidence that it does not weaken
+       * `roles_no_delete` or any other path.
+       */
+      await sql`set local blueline.platform_user_delete = 'on'`.execute(transaction);
 
       // Deletion order follows the foreign keys inward: everything pointing at
       // the account first, the account last.
@@ -398,9 +439,34 @@ export class PlatformUserDeletionService {
         delete from company_users
          where account_id = ${accountId}::uuid and company_id = ${companyId}::uuid
       `.execute(transaction);
-      await sql`
+      const removed = await sql`
         delete from accounts where id = ${accountId}::uuid and company_id = ${companyId}::uuid
       `.execute(transaction);
+
+      /**
+       * Verified, not assumed. `numAffectedRows` from the DELETE itself is
+       * the direct answer to "is the account gone" -- a concurrent second
+       * attempt on the same account (see the concurrency test) would find
+       * zero rows here rather than silently reporting success twice.
+       */
+      if ((removed.numAffectedRows ?? 0n) !== 1n) {
+        throw new ApplicationException(
+          "user_deletion_failed",
+          "The account could not be deleted. It may have already been removed.",
+          HttpStatus.CONFLICT,
+        );
+      }
+
+      // The Company itself must remain untouched by this operation -- this
+      // service deletes exactly one account and nothing that owns it.
+      const companyIntact = (
+        await sql<{ n: string }>`
+          select count(*)::bigint as n from companies where id = ${companyId}::uuid
+        `.execute(transaction)
+      ).rows[0]?.n;
+      if (companyIntact !== "1") {
+        throw new Error("Company row unexpectedly missing after user deletion");
+      }
 
       return { deleted: true, username: state.username };
     });

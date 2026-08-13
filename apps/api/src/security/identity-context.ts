@@ -1,4 +1,4 @@
-export type IdentityKind = "platform_administrator" | "company_user" | "trader" | "driver";
+export type IdentityKind = "platform_administrator" | "company_user" | "trader" | "driver" | "customer";
 
 export interface IdentityContext {
   readonly identityId: string;

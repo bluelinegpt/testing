@@ -16,8 +16,9 @@ import {
   DriverFeeReports,
   OutsourcedDriverFeesWorkspace,
 } from "./OutsourcedDriverFeesWorkspace.js";
+import { DriverEarningsWorkspace } from "./DriverEarningsWorkspace.js";
 
-type PayrollTab = "driverFees" | "employees" | "payments" | "reports";
+type PayrollTab = "driverEarnings" | "driverFees" | "employees" | "payments" | "reports";
 type PeriodStatus =
   "approved" | "calculated" | "closed" | "draft" | "paid" | "partially_paid" | "reversed";
 
@@ -608,7 +609,7 @@ export function PayrollWorkspace({
       <PageHeader
         actions={
           <>
-            {tab !== "driverFees" && can("payroll.manage") ? (
+            {!(["driverFees","driverEarnings"] as PayrollTab[]).includes(tab) && can("payroll.manage") ? (
               <button
                 className="button button-primary"
                 onClick={() => setDialog({ kind: "create" })}
@@ -637,6 +638,7 @@ export function PayrollWorkspace({
         {(
           [
             "employees",
+            "driverEarnings",
             ...(can("outsourced_driver_fees.view") ? (["driverFees"] as const) : []),
             "payments",
             "reports",
@@ -654,7 +656,7 @@ export function PayrollWorkspace({
         ))}
       </div>
 
-      {tab === "driverFees" ? null : (
+      {tab === "driverFees" || tab === "driverEarnings" ? null : (
         <section
           ref={payrollActionsRef}
           className="payroll-toolbar"
@@ -721,7 +723,7 @@ export function PayrollWorkspace({
         </section>
       )}
 
-      {tab === "driverFees" ? null : (
+      {tab === "driverFees" || tab === "driverEarnings" ? null : (
         <SummaryCards money={money} period={period} summary={summary} />
       )}
 
@@ -731,7 +733,9 @@ export function PayrollWorkspace({
         <AccountingRelatedPanel api={api} sourceId={selectedPeriodId} sourceType="payroll_period" />
       ) : null}
 
-      {tab === "driverFees" ? (
+      {tab === "driverEarnings" ? (
+        <DriverEarningsWorkspace api={api} canPay={can("payroll.pay")} />
+      ) : tab === "driverFees" ? (
         <OutsourcedDriverFeesWorkspace
           accrualDetailId={feeAccrualDetailId}
           api={api}

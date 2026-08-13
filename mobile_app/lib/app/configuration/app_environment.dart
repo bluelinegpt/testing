@@ -7,6 +7,7 @@ final class AppConfiguration {
     required this.realtimeUrl,
     required this.verboseLogging,
     required this.enableMockServices,
+    required this.appCommit,
   });
 
   factory AppConfiguration.fromDefines() {
@@ -27,6 +28,13 @@ final class AppConfiguration {
       'REALTIME_URL',
       defaultValue: 'ws://127.0.0.1:3000/realtime',
     );
+    // The short commit SHA this build was made from -- passed at build time
+    // via `--dart-define=APP_COMMIT=$(git rev-parse --short HEAD)`, the same
+    // way apps/web's vite.config.ts bakes __APP_VERSION__ in, never
+    // hand-typed. Falls back to 'dev' when not supplied (a debug run without
+    // the flag), rather than failing the build over a diagnostic label. See
+    // the "Crash reporting" section of CLAUDE.md/AGENTS.md.
+    const appCommit = String.fromEnvironment('APP_COMMIT', defaultValue: 'dev');
     final configuration = AppConfiguration(
       environment: environment,
       apiBaseUrl: Uri.parse(apiUrl),
@@ -36,6 +44,7 @@ final class AppConfiguration {
         defaultValue: true,
       ),
       enableMockServices: const bool.fromEnvironment('ENABLE_MOCK_SERVICES'),
+      appCommit: appCommit,
     );
     configuration.validateForStartup();
     return configuration;
@@ -46,6 +55,7 @@ final class AppConfiguration {
   final Uri realtimeUrl;
   final bool verboseLogging;
   final bool enableMockServices;
+  final String appCommit;
 
   void validateForStartup() {
     if (environment != AppEnvironment.production) return;

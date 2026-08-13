@@ -203,9 +203,13 @@ export async function createFixtureCompany(
   const suffix = randomUUID().slice(0, 8);
   const code = `${runId}-${sanitizeLabel(label)}-${suffix}`.slice(0, 60);
   const subdomain = `c-${sanitizeSubdomain(label)}-${suffix}`.slice(0, 60);
+  // `companies.environment` defaults to `production` at the schema level —
+  // every fixture builder must override it explicitly, or a leaked/committed
+  // row inherits Production's 48-hour deletion wait for no reason connected
+  // to what it actually is.
   await sql`
-    insert into companies (id, code, subdomain, name_en, status, activated_at)
-    values (${companyId}::uuid, ${code}, ${subdomain}, ${`Communication Co ${label}`}, 'active', now())
+    insert into companies (id, code, subdomain, name_en, status, environment, activated_at)
+    values (${companyId}::uuid, ${code}, ${subdomain}, ${`Communication Co ${label}`}, 'active', 'development', now())
   `.execute(transaction);
   return { code, companyId, subdomain };
 }

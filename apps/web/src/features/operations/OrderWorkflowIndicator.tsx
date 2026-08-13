@@ -164,6 +164,13 @@ export function OrderWorkflowIndicator({
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
+  // A click pins the panel open. Hover remains a lightweight preview, while
+  // the pinned form stays available as the pointer travels to its actions.
+  const [pinned, setPinned] = useState(false);
+  // Pointer events can cross from the chip to the portalled panel before React
+  // has committed the state update. Keep the interaction truth synchronously
+  // as well, so the mouse-leave grace timer cannot dismiss a just-clicked chip.
+  const pinnedRef = useRef(false);
   const [position, setPosition] = useState<PanelPosition | null>(null);
   const panelId = useId();
   const wrapperRef = useRef<HTMLSpanElement | null>(null);
@@ -185,6 +192,8 @@ export function OrderWorkflowIndicator({
       if (event.key !== "Escape") return;
       event.stopPropagation();
       setOpen(false);
+      setPinned(false);
+      pinnedRef.current = false;
       suppressFocusOpen.current = true;
       wrapperRef.current?.querySelector("button")?.focus();
     };
@@ -229,6 +238,8 @@ export function OrderWorkflowIndicator({
       if (wrapperRef.current?.contains(target ?? null) === true) return;
       if (panelRef.current?.contains(target ?? null) === true) return;
       setOpen(false);
+      setPinned(false);
+      pinnedRef.current = false;
     };
     document.addEventListener("pointerdown", onPointerDown, true);
     return () => document.removeEventListener("pointerdown", onPointerDown, true);
@@ -249,7 +260,15 @@ export function OrderWorkflowIndicator({
 
   const scheduleClose = () => {
     cancelClose();
+    if (pinnedRef.current) return;
     closeTimer.current = setTimeout(() => setOpen(false), 120);
+  };
+
+  const focusRemainsInsideControl = (nextTarget: EventTarget | null) => {
+    const node = nextTarget as Node | null;
+    return (
+      wrapperRef.current?.contains(node) === true || panelRef.current?.contains(node) === true
+    );
   };
 
   const tone = stateTone[guidance.workflowState] ?? "gray";
@@ -261,6 +280,15 @@ export function OrderWorkflowIndicator({
   const actionHref = () => {
     if (guidance.nextActionRoute === null) return null;
     const params = new URLSearchParams(guidance.nextActionParams);
+    if (
+      orderNumber !== undefined &&
+      ["/drivers", "/trader-settlements"].includes(guidance.nextActionRoute)
+    ) {
+      // Operational actions return to Order Search. The operator can process
+      // the next waiting Order immediately instead of being taken into the
+      // originating Order detail page.
+      params.set("returnTo", "/orders");
+    }
     const query = params.toString();
     return query === "" ? guidance.nextActionRoute : `${guidance.nextActionRoute}?${query}`;
   };
@@ -270,8 +298,12 @@ export function OrderWorkflowIndicator({
       className="order-workflow"
       onBlur={(event) => {
         // Closes only when focus leaves the whole control, so tabbing from the
-        // trigger INTO the action link does not dismiss it.
-        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOpen(false);
+        // trigger INTO the portalled action panel does not dismiss it.
+        if (!focusRemainsInsideControl(event.relatedTarget)) {
+          setOpen(false);
+          setPinned(false);
+          pinnedRef.current = false;
+        }
       }}
       onMouseEnter={() => {
         cancelClose();
@@ -284,7 +316,31 @@ export function OrderWorkflowIndicator({
         aria-controls={panelId}
         aria-expanded={open}
         className={`order-workflow-chip order-workflow-${tone}`}
-        onClick={() => setOpen((current) => !current)}
+        onClick={(event) => {
+          // Pointer input is handled synchronously below. Keep click for
+          // keyboard activation (Enter/Space), where `detail` is zero.
+          if (event.detail !== 0) return;
+          cancelClose();
+          if (pinnedRef.current) {
+            pinnedRef.current = false;
+            setPinned(false);
+            setOpen(false);
+            return;
+          }
+          pinnedRef.current = true;
+          setPinned(true);
+          setOpen(true);
+        }}
+        onPointerDown={(event) => {
+          // Pin on pointer-down so neither a row-level click handler nor the
+          // brief trip to the portalled panel can consume the interaction.
+          event.stopPropagation();
+          cancelClose();
+          const next = !pinnedRef.current;
+          pinnedRef.current = next;
+          setPinned(next);
+          setOpen(next);
+        }}
         onFocus={() => {
           if (suppressFocusOpen.current) {
             suppressFocusOpen.current = false;

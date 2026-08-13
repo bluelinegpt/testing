@@ -4,6 +4,19 @@ import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('DEV API prefix resolves the Login endpoint exactly once', () {
+    final baseUrl = Uri.parse('http://192.168.68.108:5174/api/v1');
+
+    expect(
+      ApiClient.effectiveBaseUrl(baseUrl).toString(),
+      'http://192.168.68.108:5174/api/v1/',
+    );
+    expect(
+      ApiClient.endpointUrl(baseUrl, 'auth/login').toString(),
+      'http://192.168.68.108:5174/api/v1/auth/login',
+    );
+  });
+
   test('API errors map standardized status and correlation ID', () {
     final response = Response<Object?>(
       requestOptions: RequestOptions(),

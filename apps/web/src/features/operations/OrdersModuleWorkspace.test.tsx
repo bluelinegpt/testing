@@ -73,9 +73,11 @@ describe("OrdersModuleWorkspace", () => {
           return Promise.resolve({
             filteredCount: 40,
             items: [order],
+            matchingCount: 40,
             page: 1,
             pageSize: 25,
-            totalCount: 50,
+            totalCount: 40,
+            tabTotalCount: 40,
           });
         }
         // Areas are paginated; every other collection is still a plain array.
@@ -103,6 +105,7 @@ describe("OrdersModuleWorkspace", () => {
     await screen.findByText("SER-000001");
     expect(api.get).toHaveBeenCalledWith(expect.stringContaining("quickView=active"));
     expect(api.get).toHaveBeenCalledWith(expect.stringContaining("pageSize=25"));
+    expect(screen.getByText("40 Active Orders")).toBeInTheDocument();
 
     fireEvent.click(screen.getByLabelText("Select all Orders on this page"));
     fireEvent.click(screen.getByRole("button", { name: "Select all 40 matching Orders" }));
@@ -114,6 +117,83 @@ describe("OrdersModuleWorkspace", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "SER-000001" }));
     expect(onNavigate).toHaveBeenCalledWith("/orders/ORD-000001");
+  });
+
+  it("shows matching and tab-scoped totals when a narrowing filter is applied", async () => {
+    const api = {
+      get: vi.fn((path: string) => {
+        if (path.startsWith("operations/orders?")) {
+          const filtered = path.includes("search=Aisha");
+          return Promise.resolve({
+            filteredCount: filtered ? 6 : 10,
+            items: [order],
+            matchingCount: filtered ? 6 : 10,
+            page: 1,
+            pageSize: 25,
+            totalCount: 10,
+            tabTotalCount: 10,
+          });
+        }
+        if (path.startsWith("configuration/areas")) {
+          return Promise.resolve({ items: [], page: 1, pageSize: 100, total: 0 });
+        }
+        return Promise.resolve([]);
+      }),
+      post: vi.fn().mockResolvedValue({}),
+    };
+
+    renderWithRouter(
+      <OrdersModuleWorkspace
+        api={api as unknown as ApiClient}
+        onNavigate={vi.fn()}
+        permissions={["users_roles.manage"]}
+      />,
+    );
+
+    expect(await screen.findByText("10 Active Orders")).toBeInTheDocument();
+    const search = screen.getByPlaceholderText("Search orders");
+    fireEvent.change(search, { target: { value: "Aisha" } });
+    fireEvent.keyDown(search, { key: "Enter" });
+
+    expect(await screen.findByText("6 matching of 10 Active Orders")).toBeInTheDocument();
+  });
+
+  it("uses the matching total, not the tab total, to enable server pagination", async () => {
+    const api = {
+      get: vi.fn((path: string) => {
+        if (path.startsWith("operations/orders?")) {
+          const secondPage = path.includes("page=2");
+          return Promise.resolve({
+            filteredCount: 30,
+            items: [order],
+            matchingCount: 30,
+            page: secondPage ? 2 : 1,
+            pageSize: 25,
+            totalCount: 100,
+            tabTotalCount: 100,
+          });
+        }
+        if (path.startsWith("configuration/areas")) {
+          return Promise.resolve({ items: [], page: 1, pageSize: 100, total: 0 });
+        }
+        return Promise.resolve([]);
+      }),
+      post: vi.fn().mockResolvedValue({}),
+    };
+
+    renderWithRouter(
+      <OrdersModuleWorkspace
+        api={api as unknown as ApiClient}
+        onNavigate={vi.fn()}
+        permissions={["users_roles.manage"]}
+      />,
+    );
+
+    await screen.findByText("100 Active Orders");
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    await waitFor(() =>
+      expect(api.get).toHaveBeenCalledWith(expect.stringContaining("page=2")),
+    );
   });
 
   it("enables Close order and hides Trader settlements for a delivered Free Order", async () => {
@@ -964,6 +1044,7 @@ describe("Collect from Driver — consolidated into one workflow", () => {
 
     await screen.findByText("SER-000010");
     fireEvent.click(screen.getByRole("button", { name: "Order actions" }));
+    expect(screen.queryByRole("button", { name: "Close order" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Collect money from driver" }));
 
     expect(onNavigate).toHaveBeenCalledWith(

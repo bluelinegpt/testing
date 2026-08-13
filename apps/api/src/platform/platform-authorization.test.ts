@@ -62,16 +62,23 @@ describe("Platform permission catalogue", () => {
     expect(new Set(codes).size).toBe(codes.length);
   });
 
-  it("stays the minimum Phase 1 set", () => {
+  it("stays the deliberately-scoped set", () => {
     // Codes for billing, Company reset, WhatsApp, Storefront, Mobile and
-    // integrity auto-fix are deliberately absent: a permission nothing enforces
-    // is a control that appears to exist and does not.
+    // integrity AUTO-FIX are deliberately absent: a permission nothing
+    // enforces is a control that appears to exist and does not.
+    // `platform.integrity.read` is present -- the Integration Integrity
+    // Checker's detector IS implemented, read-only, per the three-tier
+    // remediation policy agreed 2026-08-04; only the auto-fix half stays
+    // unseeded.
     expect(PLATFORM_PERMISSIONS.map((permission) => permission.code).sort()).toEqual([
       "platform.access",
       "platform.audit.read",
       "platform.companies.delete",
       "platform.companies.manage",
       "platform.companies.read",
+      "platform.errors.manage",
+      "platform.errors.read",
+      "platform.integrity.read",
       "platform.users.manage",
       "platform.users.read",
     ]);
@@ -100,7 +107,18 @@ describe("Platform permission catalogue", () => {
       resolve(process.cwd(), "../../database/migrations/20260812000000_company_deletion_foundation.ts"),
       "utf8",
     );
-    const migrations = foundationMigration + deletionMigration;
+    const errorReportsMigration = readFileSync(
+      resolve(process.cwd(), "../../database/migrations/20260820000000_client_error_reports.ts"),
+      "utf8",
+    );
+    const integrityMigration = readFileSync(
+      resolve(
+        process.cwd(),
+        "../../database/migrations/20260821000000_integrity_check_permission.ts",
+      ),
+      "utf8",
+    );
+    const migrations = foundationMigration + deletionMigration + errorReportsMigration + integrityMigration;
     for (const permission of PLATFORM_PERMISSIONS) expect(migrations).toContain(`'${permission.code}'`);
     expect(migrations).toContain(`'${PLATFORM_SUPER_ADMIN_ROLE_CODE}'`);
     // Idempotent on an environment that has already been migrated.

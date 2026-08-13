@@ -472,71 +472,326 @@ describe("Company Administrators section", () => {
     expect(revokedAll).toBe(false);
   });
 
-  it("permanently deletes an eligible unused user only after typed confirmation", async () => {
-    const routes = baseRoutes(fullAccess, [user({ state: "disabled" })]);
-    routes[`GET platform/companies/${companyId}/users/${accountId}/deletion-eligibility`] = {
-      body: {
-        eligible: true,
-        accountId,
-        username: "admin.acme",
-        displayName: "Admin",
-        companyId,
-        companyName: "Test Delivery",
-        activeSessions: 0,
-        isLastAdministrator: false,
-        blockingRows: 0,
-        blockingCategories: [],
-        recommendedAction: "delete",
-        reason: null,
-        confirmationChallenge: "DELETE admin.acme",
-      },
-      status: 200,
-    };
-    let confirmation: unknown;
-    routes[`POST platform/companies/${companyId}/users/${accountId}/delete`] = (body) => {
-      confirmation = (body as { confirmation?: string }).confirmation;
-      return { body: { deleted: true }, status: 200 };
-    };
-    vi.stubGlobal("fetch", stubFetch(routes));
-    renderDetail();
-
-    fireEvent.click(await screen.findByRole("button", { name: "Delete user" }));
-    const remove = await screen.findByRole("button", { name: "Permanently delete user" });
-    expect(remove).toBeDisabled();
-    fireEvent.change(screen.getByLabelText(/DELETE admin\.acme/), {
-      target: { value: "DELETE admin.acme" },
+  /**
+   * Delete User feedback.
+   *
+   * The reported defect was not the eligibility contract -- the API already
+   * returns a complete, well-formed response for every case. It was that the
+   * panel showing that response rendered in a fixed spot at the end of the
+   * component regardless of which row's Delete button was clicked, so on a
+   * table of any real size the result appeared a screen-height or more below
+   * the click with nothing drawing the eye there. These tests exercise the
+   * panel through every state a click can reach, and specifically assert
+   * that SOMETHING targeting the clicked user is visible immediately, before
+   * the network call resolves -- the property a scrolled-out-of-view panel
+   * would still technically satisfy in the DOM while failing for a real
+   * person looking at the screen.
+   */
+  describe("Delete user", () => {
+    const eligibility = (overrides: Record<string, unknown> = {}): object => ({
+      eligible: true,
+      accountId,
+      username: "admin.acme",
+      displayName: "Admin",
+      companyId,
+      companyName: "Test Delivery",
+      activeSessions: 0,
+      isLastAdministrator: false,
+      blockingRows: 0,
+      blockingCategories: [],
+      recommendedAction: "delete",
+      reason: null,
+      confirmationChallenge: "DELETE admin.acme",
+      ...overrides,
     });
-    fireEvent.click(remove);
-    await waitFor(() => expect(confirmation).toBe("DELETE admin.acme"));
-  });
 
-  it("blocks permanent user deletion when the server reports history", async () => {
-    const routes = baseRoutes(fullAccess, [user({ state: "disabled" })]);
-    routes[`GET platform/companies/${companyId}/users/${accountId}/deletion-eligibility`] = {
-      body: {
-        eligible: false,
-        accountId,
-        username: "admin.acme",
-        displayName: "Admin",
-        companyId,
-        companyName: "Test Delivery",
-        activeSessions: 0,
-        isLastAdministrator: false,
-        blockingRows: 2,
-        blockingCategories: [{ category: "Orders", rows: 2 }],
-        recommendedAction: "deactivate",
-        reason: "This user has historical activity. Deactivate instead.",
-        confirmationChallenge: "DELETE admin.acme",
-      },
-      status: 200,
-    };
-    vi.stubGlobal("fetch", stubFetch(routes));
-    renderDetail();
+    /** 1. Click Delete -> loading eligibility, visible immediately. */
+    it("shows a loading state for the clicked user the instant Delete is pressed", async () => {
+      const routes = baseRoutes(fullAccess, [user({ state: "disabled" })]);
+      // Never resolves within the test: proves the loading state renders on
+      // the click itself, not once the network call happens to finish.
+      routes[`GET platform/companies/${companyId}/users/${accountId}/deletion-eligibility`] =
+        () => new Promise<never>(() => undefined) as never;
+      vi.stubGlobal("fetch", stubFetch(routes));
+      renderDetail();
 
-    fireEvent.click(await screen.findByRole("button", { name: "Delete user" }));
-    expect(await screen.findByText(/historical activity/)).toBeInTheDocument();
-    expect(screen.getByText("Orders: 2")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Permanently delete user" })).toBeNull();
+      fireEvent.click(await screen.findByRole("button", { name: "Delete user" }));
+      // Another `role="status"` already exists on the page (the readiness
+      // warning banner), so the check is on the specific text plus its role,
+      // not on being the only status region present.
+      const checking = await screen.findByText(/checking whether admin\.acme can be deleted/i);
+      expect(checking).toHaveAttribute("role", "status");
+      // The heading names the row, not just "Delete user" -- confirming
+      // which of several rows the panel is currently about.
+      expect(screen.getByRole("heading", { name: /Delete user: علي المدير/ })).toBeInTheDocument();
+    });
+
+    /** 2. Eligible -> confirmation appears, with the required fields. */
+    it("shows the full confirmation dialog for an eligible user", async () => {
+      const routes = baseRoutes(fullAccess, [user({ state: "disabled" })]);
+      routes[`GET platform/companies/${companyId}/users/${accountId}/deletion-eligibility`] = {
+        body: eligibility(),
+        status: 200,
+      };
+      vi.stubGlobal("fetch", stubFetch(routes));
+      renderDetail();
+
+      fireEvent.click(await screen.findByRole("button", { name: "Delete user" }));
+      await screen.findByText("This permanently deletes the user account.");
+      // Scoped to the panel: "admin.acme" and "company_admin" also appear in
+      // the table row behind it.
+      const panel = within(screen.getByRole("heading", { name: /^Delete user:/ }).closest("section")!);
+      expect(panel.getByText("admin.acme")).toBeInTheDocument();
+      expect(panel.getByText("Test Delivery")).toBeInTheDocument();
+      expect(panel.getByText("company_admin")).toBeInTheDocument();
+      expect(panel.getByText(/DELETE admin\.acme/)).toBeInTheDocument();
+    });
+
+    /** 3. Blocked -> blocker message appears, with categories, no raw table names. */
+    it("blocks permanent user deletion when the server reports history", async () => {
+      const routes = baseRoutes(fullAccess, [user({ state: "disabled" })]);
+      routes[`GET platform/companies/${companyId}/users/${accountId}/deletion-eligibility`] = {
+        body: eligibility({
+          eligible: false,
+          blockingRows: 2,
+          blockingCategories: [{ category: "Orders", rows: 2 }],
+          recommendedAction: "deactivate",
+          reason: "This user has historical activity. Deactivate instead.",
+        }),
+        status: 200,
+      };
+      vi.stubGlobal("fetch", stubFetch(routes));
+      renderDetail();
+
+      fireEvent.click(await screen.findByRole("button", { name: "Delete user" }));
+      expect(await screen.findByText(/historical activity/)).toBeInTheDocument();
+      expect(screen.getByText("Orders: 2")).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Permanently Delete User" })).toBeNull();
+      // Never a raw SQL identifier -- "Orders" is a category, not a table.
+      expect(screen.queryByText(/order_expenses|orders_/)).toBeNull();
+    });
+
+    /** 4. Last Admin -> specific message. */
+    it("shows the specific last-administrator message, not a generic failure", async () => {
+      const routes = baseRoutes(fullAccess, [user({ state: "disabled" })]);
+      routes[`GET platform/companies/${companyId}/users/${accountId}/deletion-eligibility`] = {
+        body: eligibility({
+          eligible: false,
+          isLastAdministrator: true,
+          recommendedAction: "deactivate",
+          reason:
+            "This user is the last Company Administrator. Create another administrator before deleting this user.",
+        }),
+        status: 200,
+      };
+      vi.stubGlobal("fetch", stubFetch(routes));
+      renderDetail();
+
+      fireEvent.click(await screen.findByRole("button", { name: "Delete user" }));
+      expect(
+        await screen.findByText(
+          "This user is the last Company Administrator. Create another administrator before deleting this user.",
+        ),
+      ).toBeInTheDocument();
+    });
+
+    /** 5. Historical dependency -> Deactivate recommendation shown. */
+    it("recommends Deactivate for a user with historical dependencies", async () => {
+      const routes = baseRoutes(fullAccess, [user({ state: "disabled" })]);
+      routes[`GET platform/companies/${companyId}/users/${accountId}/deletion-eligibility`] = {
+        body: eligibility({
+          eligible: false,
+          blockingRows: 3,
+          blockingCategories: [
+            { category: "Audit history", rows: 2 },
+            { category: "Other records", rows: 1 },
+          ],
+          recommendedAction: "deactivate",
+          reason: "This user has historical activity. Deactivate instead.",
+        }),
+        status: 200,
+      };
+      vi.stubGlobal("fetch", stubFetch(routes));
+      renderDetail();
+
+      fireEvent.click(await screen.findByRole("button", { name: "Delete user" }));
+      expect(await screen.findByText(/Recommended action: Deactivate/)).toBeInTheDocument();
+      expect(screen.getByText("Audit history: 2")).toBeInTheDocument();
+      expect(screen.getByText("Other records: 1")).toBeInTheDocument();
+    });
+
+    /** 6. Eligibility API error -> visible error, with Retry, near the action. */
+    it("shows a visible, retryable error when the eligibility check itself fails", async () => {
+      const routes = baseRoutes(fullAccess, [user({ state: "disabled" })]);
+      let attempts = 0;
+      routes[`GET platform/companies/${companyId}/users/${accountId}/deletion-eligibility`] = () => {
+        attempts += 1;
+        return attempts === 1
+          ? { body: { error: { code: "internal", message: "boom" } }, status: 500 }
+          : { body: eligibility(), status: 200 };
+      };
+      vi.stubGlobal("fetch", stubFetch(routes));
+      renderDetail();
+
+      fireEvent.click(await screen.findByRole("button", { name: "Delete user" }));
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "Unable to check whether this user can be deleted.",
+      );
+      // Distinct from the page's general error banner: it must not require
+      // scrolling to the top of a long Administrators table to find it.
+      expect(screen.getByRole("heading", { name: /Delete user: علي المدير/ })).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+      await screen.findByText("This permanently deletes the user account.");
+      expect(attempts).toBe(2);
+    });
+
+    /** 7. Confirmation mismatch -> delete disabled. */
+    it("keeps the delete button disabled until the exact confirmation is typed", async () => {
+      const routes = baseRoutes(fullAccess, [user({ state: "disabled" })]);
+      routes[`GET platform/companies/${companyId}/users/${accountId}/deletion-eligibility`] = {
+        body: eligibility(),
+        status: 200,
+      };
+      vi.stubGlobal("fetch", stubFetch(routes));
+      renderDetail();
+
+      fireEvent.click(await screen.findByRole("button", { name: "Delete user" }));
+      const remove = await screen.findByRole("button", { name: "Permanently Delete User" });
+      expect(remove).toBeDisabled();
+
+      const input = screen.getByLabelText("Confirmation");
+      fireEvent.change(input, { target: { value: "delete admin.acme" } });
+      expect(remove).toBeDisabled();
+      fireEvent.change(input, { target: { value: "DELETE admin.acme " } });
+      expect(remove).toBeDisabled();
+    });
+
+    /** Explicit rejection of the exact wrong answers a confused administrator
+     * is likely to type, plus the visible mismatch helper text. */
+    it("rejects YES, confirm, and a partial challenge, and shows the mismatch helper", async () => {
+      const routes = baseRoutes(fullAccess, [user({ state: "disabled" })]);
+      routes[`GET platform/companies/${companyId}/users/${accountId}/deletion-eligibility`] = {
+        body: eligibility(),
+        status: 200,
+      };
+      vi.stubGlobal("fetch", stubFetch(routes));
+      renderDetail();
+
+      fireEvent.click(await screen.findByRole("button", { name: "Delete user" }));
+      const remove = await screen.findByRole("button", { name: "Permanently Delete User" });
+      const input = screen.getByLabelText("Confirmation");
+
+      for (const wrong of ["YES", "confirm", "DELETE admin"]) {
+        fireEvent.change(input, { target: { value: wrong } });
+        expect(remove).toBeDisabled();
+        expect(screen.getByText(/Confirmation does not match/)).toBeInTheDocument();
+      }
+
+      fireEvent.change(input, { target: { value: "DELETE admin.acme" } });
+      expect(screen.queryByText(/Confirmation does not match/)).toBeNull();
+      expect(remove).not.toBeDisabled();
+    });
+
+    /** 8 & 9. Confirmation correct -> delete executes; success removes the row. */
+    it("executes deletion on exact confirmation, shows success, and removes the row without a refresh", async () => {
+      const routes = baseRoutes(fullAccess, [user({ state: "disabled" })]);
+      routes[`GET platform/companies/${companyId}/users/${accountId}/deletion-eligibility`] = {
+        body: eligibility(),
+        status: 200,
+      };
+      let confirmationSent: unknown;
+      let secondUsersFetch = false;
+      routes[`POST platform/companies/${companyId}/users/${accountId}/delete`] = (body) => {
+        confirmationSent = (body as { confirmation?: string }).confirmation;
+        return { body: { deleted: true, username: "admin.acme" }, status: 200 };
+      };
+      const originalUsersRoute = routes[`GET platform/companies/${companyId}/users`];
+      routes[`GET platform/companies/${companyId}/users`] = () => {
+        const already = secondUsersFetch;
+        secondUsersFetch = true;
+        // The row is gone from the SERVER'S next answer -- this is what
+        // "remove the row" actually depends on: the client re-fetches after
+        // a successful delete rather than editing local state by guesswork.
+        return already ? { body: { items: [] }, status: 200 } : (originalUsersRoute as StubResponse);
+      };
+      vi.stubGlobal("fetch", stubFetch(routes));
+      renderDetail();
+
+      fireEvent.click(await screen.findByRole("button", { name: "Delete user" }));
+      const remove = await screen.findByRole("button", { name: "Permanently Delete User" });
+      fireEvent.change(screen.getByLabelText("Confirmation"), {
+        target: { value: "DELETE admin.acme" },
+      });
+      expect(remove).not.toBeDisabled();
+      fireEvent.click(remove);
+
+      await waitFor(() => expect(confirmationSent).toBe("DELETE admin.acme"));
+      expect(await screen.findByText("User deleted successfully.")).toBeInTheDocument();
+      // The confirmation panel closes; the row is gone from the next fetch.
+      await waitFor(() =>
+        expect(screen.queryByRole("heading", { name: /Delete user: علي المدير/ })).toBeNull(),
+      );
+      await waitFor(() => expect(screen.queryByText("admin.acme")).toBeNull());
+    });
+
+    /** 10. Execute-time dependency change -> visible failure, not a silent no-op. */
+    it("shows a visible failure when eligibility changes between preview and execute", async () => {
+      const routes = baseRoutes(fullAccess, [user({ state: "disabled" })]);
+      routes[`GET platform/companies/${companyId}/users/${accountId}/deletion-eligibility`] = {
+        body: eligibility(),
+        status: 200,
+      };
+      routes[`POST platform/companies/${companyId}/users/${accountId}/delete`] = {
+        body: {
+          error: {
+            code: "user_deletion_not_eligible",
+            message: "This user has historical activity. Deactivate instead.",
+          },
+        },
+        status: 409,
+      };
+      vi.stubGlobal("fetch", stubFetch(routes));
+      renderDetail();
+
+      fireEvent.click(await screen.findByRole("button", { name: "Delete user" }));
+      const remove = await screen.findByRole("button", { name: "Permanently Delete User" });
+      fireEvent.change(screen.getByLabelText("Confirmation"), {
+        target: { value: "DELETE admin.acme" },
+      });
+      fireEvent.click(remove);
+
+      // `findByRole` alone would resolve against the eligible view's OWN
+      // "This permanently deletes..." alert, which is already on screen the
+      // moment the button is clicked -- it does not wait for content to
+      // CHANGE, only for a match to exist, and one already does. Asserting
+      // on the text and letting `waitFor` retry is what actually waits for
+      // the failed request to resolve and replace it.
+      await waitFor(() =>
+        expect(screen.getByRole("alert")).toHaveTextContent(/historical activity/),
+      );
+      // The row must still be there -- the delete did NOT silently succeed.
+      expect(screen.getByText("admin.acme")).toBeInTheDocument();
+    });
+
+    /** 11. No silent/no-op path: every one of the four states is reachable and visible. */
+    it("never leaves a click with no visible reaction", async () => {
+      const routes = baseRoutes(fullAccess, [user({ state: "disabled" })]);
+      routes[`GET platform/companies/${companyId}/users/${accountId}/deletion-eligibility`] = {
+        body: eligibility({ eligible: false, reason: "This account is not eligible for permanent deletion." }),
+        status: 200,
+      };
+      vi.stubGlobal("fetch", stubFetch(routes));
+      renderDetail();
+
+      expect(screen.queryByRole("heading", { name: /^Delete user:/ })).toBeNull();
+      fireEvent.click(await screen.findByRole("button", { name: "Delete user" }));
+      // Something is on screen for this user before AND after the request
+      // resolves -- never a click that produces nothing at all.
+      expect(screen.getByRole("heading", { name: /^Delete user:/ })).toBeInTheDocument();
+      await screen.findByText("This account is not eligible for permanent deletion.");
+      expect(screen.getByRole("heading", { name: /^Delete user:/ })).toBeInTheDocument();
+    });
   });
 });
 

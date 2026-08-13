@@ -3,6 +3,7 @@ import { I18nextProvider } from "react-i18next";
 import { MemoryRouter } from "react-router-dom";
 
 import { App } from "../App.js";
+import { CustomerSessionProvider } from "../auth/customer-session-context.js";
 import { storeI18n } from "../localization/i18n.js";
 
 import { taxonomyLabel } from "./CategoryPages.js";
@@ -20,7 +21,9 @@ function renderAt(path: string) {
   return render(
     <I18nextProvider i18n={storeI18n}>
       <MemoryRouter initialEntries={[path]}>
-        <App />
+        <CustomerSessionProvider>
+          <App />
+        </CustomerSessionProvider>
       </MemoryRouter>
     </I18nextProvider>,
   );

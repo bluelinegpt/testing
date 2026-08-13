@@ -96,6 +96,9 @@ const routePermissions: Readonly<Record<string, readonly string[]>> = {
   "/configuration/roles": [manage],
   "/support": [manage],
   "/communication": [manage, "communication.operator.read"],
+  // Repo/deploy state, not Company business data -- gated the same as
+  // Support (`manage` only), not a dedicated permission.
+  "/administration/deployment-status": [manage],
 };
 
 const landingPriority = ["/dashboard", "/orders", "/orders/create"] as const;

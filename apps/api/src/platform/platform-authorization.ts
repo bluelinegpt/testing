@@ -47,6 +47,14 @@ export const PLATFORM_COMPANIES_DELETE = "platform.companies.delete";
 export const PLATFORM_USERS_READ = "platform.users.read";
 export const PLATFORM_USERS_MANAGE = "platform.users.manage";
 export const PLATFORM_AUDIT_READ = "platform.audit.read";
+export const PLATFORM_ERRORS_READ = "platform.errors.read";
+export const PLATFORM_ERRORS_MANAGE = "platform.errors.manage";
+// Read-only detector only -- no "platform.integrity.manage"/auto-fix
+// permission exists yet, deliberately, matching this file's own rule that a
+// seeded permission must have real behaviour behind it. Auto-repair is a
+// later, separate decision per the three-tier remediation policy agreed
+// 2026-08-04, not something to seed ahead of actually building it.
+export const PLATFORM_INTEGRITY_READ = "platform.integrity.read";
 
 /**
  * The Phase 1 permission set, in the order the seed migration writes them.
@@ -64,6 +72,15 @@ export const PLATFORM_PERMISSIONS: readonly { code: string; description: string 
   { code: PLATFORM_USERS_READ, description: "View the users of a Company from the Platform" },
   { code: PLATFORM_USERS_MANAGE, description: "Manage the users of a Company from the Platform" },
   { code: PLATFORM_AUDIT_READ, description: "View Platform and Company audit history" },
+  { code: PLATFORM_ERRORS_READ, description: "View captured application errors on the Platform" },
+  {
+    code: PLATFORM_ERRORS_MANAGE,
+    description: "Triage and resolve captured application errors",
+  },
+  {
+    code: PLATFORM_INTEGRITY_READ,
+    description: "View cross-module data integrity findings on the Platform",
+  },
 ];
 
 /** Code of the system Platform role the bootstrap administrator receives. */

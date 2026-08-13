@@ -1,0 +1,14 @@
+#!/bin/sh
+# Runs right before commits leave this machine. Any app still sitting at
+# needs_deploy is about to actually reach the remote, so advance it to
+# pushed_awaiting_confirmation. The remaining step -- confirmed_live -- is
+# deliberately never touched by a hook: it means "Render is actually showing
+# it", which nothing on this machine can verify. Only a human checking the
+# Render dashboard (or telling Claude/Codex to relay that) can set it.
+
+set -eu
+cd "$(git rev-parse --show-toplevel)"
+
+for app in web api platform-web store; do
+  node scripts/deployment-registry.mjs mark-pushed "$app"
+done

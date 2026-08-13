@@ -36,6 +36,10 @@
   --platform-text: #eef2f9;
   --platform-muted: #97a3ba;
   --platform-accent: #4c8dff;
+  /* Purple secondary accent, used only by Dashboard analytics (a second
+     Orders Trend series, the Environment donut) — never for status meaning,
+     which stays on the ok/warn/bad/alert scale above. */
+  --platform-accent-secondary: #a78bfa;
   /* Text placed ON the accent. Not a shade of the accent: it has to stay
      readable against it in both themes, so it is its own variable. */
   --platform-on-accent: #06101f;
@@ -73,6 +77,7 @@
   --platform-text: #16203a;
   --platform-muted: #5a6884;
   --platform-accent: #2563eb;
+  --platform-accent-secondary: #7c3aed;
   --platform-on-accent: #ffffff;
   --platform-danger: #c02626;
 
@@ -159,16 +164,25 @@ body {
   font-size: 13px;
 }
 
-.platform-field input {
+.platform-field input,
+.platform-field textarea {
   padding: 10px 12px;
   border: 1px solid var(--platform-border);
   border-radius: 8px;
   background: var(--platform-surface);
   color: var(--platform-text);
   font-size: 15px;
+  font-family: inherit;
+  resize: vertical;
+}
+
+.platform-field textarea[readonly] {
+  background: var(--platform-surface-raised);
+  color: var(--platform-muted);
 }
 
 .platform-field input:focus-visible,
+.platform-field textarea:focus-visible,
 .platform-button:focus-visible,
 .platform-nav__link:focus-visible {
   outline: 2px solid var(--platform-accent);
@@ -227,6 +241,24 @@ body {
   margin: 0;
   font-size: 17px;
   font-weight: 600;
+}
+
+.platform-header__title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.platform-version-badge {
+  padding: 1px 6px;
+  border: 1px solid var(--platform-border);
+  border-radius: 6px;
+  color: var(--platform-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  opacity: 0.7;
+  pointer-events: none;
+  user-select: text;
 }
 
 .platform-header__account {
@@ -521,6 +553,60 @@ body {
 }
 
 /* -------------------------------------------------------------------------
+   Confirmation dialog (Close Company, and any future typed-confirmation flow)
+   ------------------------------------------------------------------------- */
+
+.platform-dialog {
+  background: var(--platform-surface-raised);
+  border: 1px solid var(--platform-border);
+  border-radius: 12px;
+  color: var(--platform-text);
+  margin: auto;
+  max-width: 480px;
+  padding: 0;
+  width: min(90vw, 480px);
+}
+
+.platform-dialog::backdrop {
+  background: rgba(4, 8, 16, 0.6);
+}
+
+.platform-dialog__body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px 24px 24px;
+}
+
+.platform-dialog__body h3 {
+  margin: 0;
+}
+
+.platform-dialog__facts {
+  display: grid;
+  gap: 4px 12px;
+  grid-template-columns: auto 1fr;
+  margin: 0;
+}
+
+.platform-dialog__facts dt {
+  color: var(--platform-muted);
+  font-size: 13px;
+}
+
+.platform-dialog__facts dd {
+  font-size: 13px;
+  margin: 0;
+}
+
+.platform-dialog__actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 4px;
+}
+
+/* -------------------------------------------------------------------------
    Audit browser
    ------------------------------------------------------------------------- */
 
@@ -608,4 +694,321 @@ body {
 .platform-theme-control button[aria-pressed="true"] {
   background: var(--platform-accent);
   color: var(--platform-on-accent);
+}
+
+/*
+ * User-deletion panel identity block (Name / Username / Company / Role).
+ * Same grid shape as `.platform-audit__detail`, sized for prose rather than
+ * JSON: no `overflow-wrap: anywhere`, since these are short human-readable
+ * fields rather than dense structured data.
+ */
+.platform-detail-list {
+  display: grid;
+  gap: 0.35rem 0.75rem;
+  grid-template-columns: auto 1fr;
+  margin: 0.5rem 0;
+}
+
+.platform-detail-list dt {
+  color: var(--platform-muted);
+  font-size: 0.85rem;
+}
+
+.platform-detail-list dd {
+  font-size: 0.9rem;
+  margin: 0;
+}
+
+/*
+ * Platform Dashboard.
+ *
+ * Compact, high-density KPI/chart layout — an operational control center, not
+ * a marketing page. Cards wrap on narrow screens; charts and the Company
+ * table scroll horizontally in their own container rather than the page.
+ */
+.platform-dashboard__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.platform-dashboard__filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.75rem;
+}
+
+.platform-dashboard__asof {
+  color: var(--platform-muted);
+  font-size: 0.8rem;
+}
+
+.platform-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 0.75rem;
+  margin: 1rem 0;
+}
+
+.platform-kpi-card {
+  border: 1px solid var(--platform-border);
+  border-radius: 10px;
+  background: var(--platform-surface-raised);
+  padding: 0.85rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.platform-kpi-card__label {
+  color: var(--platform-muted);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.platform-kpi-card__value {
+  font-size: 1.5rem;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.platform-kpi-card__meta {
+  font-size: 0.8rem;
+  color: var(--platform-muted);
+}
+
+.platform-kpi-card__meta--up {
+  color: var(--platform-ok-text);
+}
+
+.platform-kpi-card__meta--down {
+  color: var(--platform-bad-text);
+}
+
+.platform-chart-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: 0.85rem;
+  margin: 1rem 0;
+}
+
+.platform-chart-grid--wide {
+  grid-template-columns: 1fr;
+}
+
+.platform-chart-card {
+  border: 1px solid var(--platform-border);
+  border-radius: 10px;
+  background: var(--platform-surface-raised);
+  padding: 0.9rem 1rem;
+  min-width: 0;
+}
+
+.platform-chart-card h3 {
+  margin: 0 0 0.6rem;
+  font-size: 0.95rem;
+}
+
+.platform-chart-card__scroll {
+  overflow-x: auto;
+}
+
+.platform-attention-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 0.65rem;
+  margin: 1rem 0;
+}
+
+.platform-attention-card {
+  border: 1px solid var(--platform-border);
+  border-left-width: 4px;
+  border-radius: 8px;
+  background: var(--platform-surface-raised);
+  padding: 0.65rem 0.85rem;
+}
+
+.platform-attention-card--critical {
+  border-left-color: var(--platform-bad-border);
+}
+
+.platform-attention-card--warning {
+  border-left-color: var(--platform-warn-border);
+}
+
+.platform-attention-card--info {
+  border-left-color: var(--platform-border);
+}
+
+.platform-attention-card__count {
+  font-size: 1.3rem;
+  font-weight: 700;
+}
+
+.platform-attention-card__label {
+  color: var(--platform-muted);
+  font-size: 0.82rem;
+}
+
+.platform-attention-card__list {
+  margin: 0.4rem 0 0;
+  padding-left: 1.1rem;
+  font-size: 0.8rem;
+  color: var(--platform-muted);
+}
+
+.platform-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  margin-top: 0.5rem;
+  font-size: 0.8rem;
+  color: var(--platform-muted);
+}
+
+.platform-legend__swatch {
+  display: inline-block;
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 2px;
+  margin-right: 0.35rem;
+  vertical-align: -1px;
+}
+
+/* -------------------------------------------------------------------------
+   Deployment Registry
+   ------------------------------------------------------------------------- */
+
+.platform-summary-strip {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.75rem;
+  margin: 1rem 0;
+}
+
+.platform-summary-card {
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--platform-border);
+  border-radius: 10px;
+  background: var(--platform-surface-raised);
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.platform-summary-card__label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--platform-muted);
+}
+
+.platform-summary-card__value {
+  font-size: 24px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.platform-summary-card--ok .platform-summary-card__value {
+  color: var(--platform-ok-text);
+}
+
+.platform-summary-card--warn .platform-summary-card__value {
+  color: var(--platform-warn-text);
+}
+
+.platform-summary-card--info .platform-summary-card__value {
+  color: var(--platform-accent);
+}
+
+/* Registry status badges — distinct from the Company status/environment
+   badges above: those describe a Company's own lifecycle, these describe
+   whether a commit has reached Render. Kept as separate modifiers rather
+   than reusing --live/--incomplete/--draft so the two vocabularies never
+   get crossed. needs_deploy uses the "bad" (not "warn") token deliberately:
+   it is the state most likely to be forgotten -- committed but never
+   pushed -- so it gets the strongest visual signal. */
+.platform-badge--registry-live {
+  border-color: var(--platform-ok-border);
+  color: var(--platform-ok-text);
+}
+
+.platform-badge--registry-inflight {
+  border-color: var(--platform-warn-border);
+  color: var(--platform-warn-text);
+}
+
+.platform-badge--registry-pending {
+  border-color: var(--platform-bad-border);
+  color: var(--platform-bad-text);
+}
+
+.platform-pending-note {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--platform-warn-text);
+}
+
+.platform-row-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.platform-registry-footnote {
+  margin-top: 1rem;
+  padding: 0.7rem 0.85rem;
+  border: 1px dashed var(--platform-border);
+  border-radius: 8px;
+  font-size: 12.5px;
+}
+
+/* -------------------------------------------------------------------------
+   Error Handler
+   ------------------------------------------------------------------------- */
+
+/* Criticality: distinct from the registry's badges above -- these describe
+   risk to triage, not deploy state, so a separate scale even though it
+   reuses the same ok/warn/bad tokens. high uses "bad" deliberately: a
+   crash is never a routine, low-attention event. */
+.platform-badge--severity-high {
+  border-color: var(--platform-bad-border);
+  color: var(--platform-bad-text);
+}
+
+.platform-badge--severity-medium {
+  border-color: var(--platform-warn-border);
+  color: var(--platform-warn-text);
+}
+
+.platform-badge--severity-low {
+  color: var(--platform-muted);
+}
+
+.platform-badge--status-open {
+  border-color: var(--platform-warn-border);
+  color: var(--platform-warn-text);
+}
+
+.platform-badge--status-resolved {
+  border-color: var(--platform-ok-border);
+  color: var(--platform-ok-text);
+}
+
+.platform-dialog--wide {
+  max-width: 640px;
+  width: min(92vw, 640px);
+}
+
+.platform-mono-textarea {
+  font-family: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+  font-size: 12px;
+  white-space: pre;
+  overflow-x: auto;
 }

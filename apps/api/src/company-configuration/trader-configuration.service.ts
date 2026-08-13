@@ -77,8 +77,23 @@ export class TraderConfigurationService {
           from trader_service_prices
          group by company_id, trader_id
       ), outstanding as (
+        -- 'unsettled' alone is not enough: an Order that has not yet been
+        -- delivered (still 'new'/'out_for_delivery') or whose Driver cash
+        -- has not been reconciled has had no COD actually collected, so
+        -- there is nothing to owe the Trader for yet. Without this, a
+        -- freshly-created Order inflates this figure the moment it exists,
+        -- before a single AED has changed hands. 'closed' is a delivered
+        -- Order's own terminal state (see changeOrderStatus's delivered ->
+        -- closed transition), not a different lifecycle, so it stays
+        -- eligible here the same way 'delivered' is -- mirrors the more
+        -- careful version of this same calculation in settlementSummary()
+        -- below, which this list query never matched.
         select company_id, trader_id, coalesce(sum(trader_net_payable), 0) amount
-          from orders where trader_settlement_status = 'unsettled' group by company_id, trader_id
+          from orders
+         where trader_settlement_status = 'unsettled'
+           and delivery_status in ('delivered', 'closed')
+           and driver_reconciliation_status in ('reconciled', 'not_applicable')
+         group by company_id, trader_id
       )
       select t.id, t.code, t.name_en as name, t.mobile_number as "mobileNumber",
              (t.mobile_number !~ '^9715[0-9]{8}$') as "mobileWarning",

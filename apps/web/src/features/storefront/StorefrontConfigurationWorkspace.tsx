@@ -140,12 +140,32 @@ interface SelectableTrader {
 
 export function StorefrontConfigurationWorkspace({
   api,
+  onCreated,
   permissions,
   storefrontId,
+  traderId,
 }: {
   readonly api: ApiClient;
   readonly permissions: readonly string[];
   readonly storefrontId?: string | undefined;
+  /**
+   * Fired once a Trader's own Store is created.
+   *
+   * The Trader shell uses this to unlock "Products" immediately (§25/§32 of
+   * the Trader Portal UX prompt) rather than requiring a manual refresh or a
+   * detour through another screen before the Store the Trader just created
+   * becomes usable.
+   */
+  readonly onCreated?: (() => void) | undefined;
+  /**
+   * The caller's own Trader id, from the Trader portal shell.
+   *
+   * Enables the Trader-owned "Create Your Store" experience below. Absent
+   * (undefined) when this component is mounted from the Company side, where
+   * creation instead means picking one of the Company's Traders — a
+   * different form entirely, kept below under `companyMode`.
+   */
+  readonly traderId?: string | undefined;
 }) {
   const { t } = useTranslation();
   const [storefront, setStorefront] = useState<StorefrontConfiguration>();
@@ -255,6 +275,23 @@ export function StorefrontConfigurationWorkspace({
       }
     },
     [api, storefront],
+  );
+
+  /** The same advisory check, before any Storefront exists to key it to. */
+  const checkSlugAvailability = useCallback(
+    async (candidate: string) => {
+      if (candidate.trim() === "") {
+        setSlugState(undefined);
+        return;
+      }
+      const query = new URLSearchParams({ slug: candidate });
+      try {
+        setSlugState(await api.get<SlugState>(`operations/trader-storefronts/slug-availability?${query.toString()}`));
+      } catch {
+        setSlugState(undefined);
+      }
+    },
+    [api],
   );
 
   const save = async () => {
@@ -418,7 +455,7 @@ export function StorefrontConfigurationWorkspace({
             <select onChange={(event) => setNewTemplate(event.target.value)} value={newTemplate}>
               {templates.map((template) => (
                 <option key={template} value={template}>
-                  {t(`storefront.template.${template}`)}
+                  {t(`storefront.templates.${template}`)}
                 </option>
               ))}
             </select>
@@ -428,7 +465,7 @@ export function StorefrontConfigurationWorkspace({
             <select onChange={(event) => setNewTheme(event.target.value)} value={newTheme}>
               {themes.map((theme) => (
                 <option key={theme} value={theme}>
-                  {t(`storefront.theme.${theme}`)}
+                  {t(`storefront.themes.${theme}`)}
                 </option>
               ))}
             </select>
@@ -442,6 +479,148 @@ export function StorefrontConfigurationWorkspace({
             {t("common.create")}
           </button>
         </fieldset>
+      </section>
+    );
+  }
+
+  /**
+   * A Trader with no Store yet.
+   *
+   * The one field a Trader supplies that a Company user does not is which
+   * Trader owns the Store — here that is already known (`traderId`), so this
+   * form is display name, slug and appearance only. The slug availability
+   * check runs against the same `slug-availability` endpoint the edit screen
+   * uses below, because a second uniqueness implementation is exactly how the
+   * two eventually disagree.
+   */
+  if (!companyMode && storefront === undefined && traderId !== undefined) {
+    const createOwnStore = async () => {
+      setBusy(true);
+      setError(undefined);
+      try {
+        await api.post("operations/trader-storefronts", {
+          businessTemplate: newTemplate,
+          displayName: newName,
+          slug: newSlug === "" ? suggestSlug(newName) : newSlug,
+          theme: newTheme,
+          traderId,
+        });
+        setReload((current) => current + 1);
+        onCreated?.();
+      } catch (cause) {
+        setError(cause instanceof ApiError ? cause.code : "storefront_save_failed");
+      } finally {
+        setBusy(false);
+      }
+    };
+    return (
+      <section className="accounting-page storefront-page">
+        <header className="page-heading-copy">
+          <h1>{t("storefront.createYourStore")}</h1>
+          <p>{t("storefront.createYourStoreLead")}</p>
+        </header>
+        {error !== undefined ? (
+          <div className="alert alert-danger" role="alert">
+            {t(`storefront.errors.${error}`, t("common.operationFailed"))}
+          </div>
+        ) : null}
+        <div className="accounting-form">
+          <fieldset className="accounting-form-section" disabled={busy}>
+            <legend>{t("storefront.sections.identity")}</legend>
+            <div className="accounting-form-grid">
+              <label>
+                {t("storefront.fields.displayName")}
+                <input
+                  onChange={(event) => {
+                    setNewName(event.target.value);
+                    if (newSlug === "") setNewSlug(suggestSlug(event.target.value));
+                  }}
+                  required
+                  value={newName}
+                />
+              </label>
+              <label>
+                {t("storefront.fields.slug")}
+                {/* The domain prefix is shown, not typed — the Trader only
+                    ever enters the part that is actually theirs to choose,
+                    and seeing the real address the moment they type answers
+                    "what will my customers actually see" without waiting for
+                    a save. */}
+                <div className="storefront-slug-preview" dir="ltr">
+                  <span className="storefront-slug-preview__domain">store.bluelinegpt.com/</span>
+                  <input
+                    dir="ltr"
+                    onChange={(event) => setNewSlug(event.target.value)}
+                    onBlur={() => {
+                      void checkSlugAvailability(newSlug);
+                    }}
+                    required
+                    value={newSlug}
+                  />
+                </div>
+                {slugState !== undefined ? (
+                  <p className={slugState.available ? "field-hint-ok" : "field-hint-error"}>
+                    {slugState.available
+                      ? t("storefront.slugAvailable", { slug: slugState.normalised })
+                      : t(
+                          `storefront.errors.${slugState.reason ?? "storefront_slug_taken"}`,
+                          t("storefront.slugTaken"),
+                        )}
+                  </p>
+                ) : null}
+              </label>
+            </div>
+          </fieldset>
+
+          <fieldset className="accounting-form-section" disabled={busy}>
+            <legend>{t("storefront.sections.appearance")}</legend>
+            <div className="accounting-form-grid">
+              <label>
+                {t("storefront.fields.businessTemplate")}
+                <select onChange={(event) => setNewTemplate(event.target.value)} value={newTemplate}>
+                  {templates.map((template) => (
+                    <option key={template} value={template}>
+                      {t(`storefront.templates.${template}`)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                {t("storefront.fields.theme")}
+                <select onChange={(event) => setNewTheme(event.target.value)} value={newTheme}>
+                  {themes.map((theme) => (
+                    <option key={theme} value={theme}>
+                      {t(`storefront.themes.${theme}`)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          </fieldset>
+
+          {/* Disabled with an EXPLAINED reason (§24), not a silently grey
+              button — a Trader should never have to guess which field is
+              incomplete. */}
+          {newName.trim() === "" ? (
+            <p className="field-hint">{t("storefront.createBlockedName")}</p>
+          ) : newSlug.trim() === "" ? (
+            <p className="field-hint">{t("storefront.createBlockedSlug")}</p>
+          ) : slugState?.available === false ? (
+            <p className="field-hint-error">{t("storefront.createBlockedSlugTaken")}</p>
+          ) : null}
+          <div className="heading-actions">
+            <button
+              className="button button-primary"
+              disabled={
+                newName.trim() === "" || newSlug.trim() === "" || slugState?.available === false
+              }
+              onClick={() => void createOwnStore()}
+              type="button"
+            >
+              {busy ? t("common.saving") : t("storefront.createYourStore")}
+            </button>
+          </div>
+        </div>
       </section>
     );
   }
@@ -539,7 +718,7 @@ export function StorefrontConfigurationWorkspace({
           >
             {templates.map((template) => (
               <option key={template} value={template}>
-                {t(`storefront.template.${template}`)}
+                {t(`storefront.templates.${template}`)}
               </option>
             ))}
           </select>
@@ -553,7 +732,7 @@ export function StorefrontConfigurationWorkspace({
           >
             {themes.map((theme) => (
               <option key={theme} value={theme}>
-                {t(`storefront.theme.${theme}`)}
+                {t(`storefront.themes.${theme}`)}
               </option>
             ))}
           </select>

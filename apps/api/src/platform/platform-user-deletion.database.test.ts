@@ -192,7 +192,9 @@ describe.skipIf(!runTests)("Platform user deletion", () => {
           expect(firstEligibility.eligible).toBe(false);
           expect(firstEligibility.isLastAdministrator).toBe(true);
           expect(firstEligibility.recommendedAction).toBe("deactivate");
-          expect(String(firstEligibility.reason)).toContain("last Administrator");
+          expect(firstEligibility.reason).toBe(
+            "This user is the last Company Administrator. Create another administrator before deleting this user.",
+          );
 
           // A second administrator removes that particular blocker.
           const secondId = await addAdministrator("second");
@@ -346,72 +348,138 @@ describe.skipIf(!runTests)("Platform user deletion", () => {
           ).expect(201);
 
           // ---------------------------------------------------------------
-          // EXECUTION IS BLOCKED BY THE SCHEMA, DELIBERATELY
+          // The historical user (`first`) is STILL rejected at execute time,
+          // confirmation valid or not -- the guard exception must never
+          // reach an ineligible account. This is checked BEFORE the eligible
+          // deletion below runs, because -- see the note on the shared
+          // transaction manager at the top of this file -- once the
+          // Platform service's own `SET LOCAL` has been issued inside a
+          // savepoint that is RELEASED (not rolled back), Postgres keeps it
+          // active for the rest of THIS transaction. Testing "still blocked"
+          // after a real deletion has already run would risk measuring that
+          // savepoint quirk instead of the product. Ordering this first
+          // avoids the ambiguity entirely; the dedicated bypass-containment
+          // suite below proves the real isolation guarantee with genuine
+          // separate transactions instead.
+          await post(`${usersUrl}/${firstId}/delete`, manageCookie, {
+            confirmation: withHistory.confirmationChallenge,
+          }).expect(409);
+          expect(
+            (
+              await sql<{ n: string }>`select count(*)::bigint n from accounts where id = ${firstId}::uuid`.execute(
+                transaction,
+              )
+            ).rows[0]?.n,
+          ).toBe("1");
+
+          // ---------------------------------------------------------------
+          // THE ELIGIBLE USER IS ACTUALLY DELETED
           // ---------------------------------------------------------------
           //
-          // `company_user_accounts_no_delete` is a BEFORE DELETE trigger on
-          // `accounts` running `reject_administration_delete()`:
-          //
-          //     if tg_table_name = 'accounts'
-          //        and old.account_kind <> 'company_user' then return old; end if;
-          //     raise exception 'Administrative identities and Roles cannot be deleted';
-          //
-          // It lets a PLATFORM administrator row be deleted and refuses a
-          // COMPANY user -- the exact inverse of what this feature needs. The
-          // same function also protects `roles`.
-          //
-          // That is a deliberate product decision already encoded in the
-          // schema: Company identities are deactivated, never removed. Removing
-          // the guard is not a refactor, it reverses that decision, so it needs
-          // an explicit approval rather than a quiet migration.
-          //
-          // This assertion pins the CURRENT behaviour. When the guard is given
-          // a scoped exception for this path, this test fails and is replaced
-          // by the deletion assertions -- which is the right way round: the
-          // suite tells the truth today and demands attention the moment the
-          // decision is made.
-          const attempt = await post(`${usersUrl}/${secondId}/delete`, manageCookie, {
-            confirmation: secondEligibility.confirmationChallenge,
-          });
-          expect(attempt.status).toBe(409);
-          expect(attempt.body.error.code).toBe("database_integrity_conflict");
-
-          // Nothing partial was left behind: the transaction rolled back whole.
-          for (const [table, column] of [
-            ["accounts", "id"],
-            ["account_roles", "account_id"],
-            ["company_users", "account_id"],
-          ] as const) {
-            expect(
+          // Everything the removable-records list promises is verified
+          // directly, not inferred from a 200. This is the proof that
+          // `20260816100000_platform_user_deletion_guard_exception` really
+          // lets an already-approved deletion complete, and that it removes
+          // exactly the identity/access rows it says it will.
+          const secondRoleId = (
+            await sql<{ role_id: string }>`select role_id from account_roles where account_id=${secondId}::uuid limit 1`.execute(
+              transaction,
+            )
+          ).rows[0]?.role_id;
+          await sql`
+            insert into account_sessions (id, account_id, company_id, token_hash, expires_at)
+            values (${randomUUID()}::uuid, ${secondId}::uuid, ${companyId}::uuid, ${randomUUID().replace(/-/g, "") + randomUUID().replace(/-/g, "")}, now() + interval '1 hour')
+          `.execute(transaction);
+          expect(
+            Number(
               (
-                await sql<{ n: string }>`
-                  select count(*)::bigint n from ${sql.ref(table)}
-                   where ${sql.ref(column)} = ${secondId}::uuid
-                `.execute(transaction)
+                await sql<{ n: string }>`select count(*)::bigint n from account_sessions where account_id=${secondId}::uuid`.execute(
+                  transaction,
+                )
               ).rows[0]?.n,
-            ).toBe("1");
-          }
+            ),
+          ).toBeGreaterThan(0);
 
-          // And the Company is untouched.
+          const beforeCompanies = (
+            await sql<{ n: string }>`select count(*)::bigint n from companies`.execute(transaction)
+          ).rows[0]?.n;
+
+          const executed = await post(`${usersUrl}/${secondId}/delete`, manageCookie, {
+            confirmation: secondEligibility.confirmationChallenge,
+          }).expect(200);
+          expect(executed.body.deleted).toBe(true);
+          expect(executed.body.username).toBe(`second.${suffix}`);
+
+          const goneFrom = async (table: string, column: string): Promise<string | undefined> =>
+            (
+              await sql<{ n: string }>`
+                select count(*)::bigint n from ${sql.ref(table)} where ${sql.ref(column)} = ${secondId}::uuid
+              `.execute(transaction)
+            ).rows[0]?.n;
+          expect(await goneFrom("accounts", "id")).toBe("0");
+          expect(await goneFrom("company_users", "account_id")).toBe("0");
+          expect(await goneFrom("account_roles", "account_id")).toBe("0");
+          expect(await goneFrom("account_sessions", "account_id")).toBe("0");
+          expect(await goneFrom("password_reset_tokens", "account_id")).toBe("0");
+
+          // The Company survives, unchanged in count, with its accounting
+          // setup intact, and the OTHER administrator (`first`, ineligible
+          // but present) is unaffected.
+          expect(
+            (await sql<{ n: string }>`select count(*)::bigint n from companies`.execute(transaction))
+              .rows[0]?.n,
+          ).toBe(beforeCompanies);
           expect(
             Number(
               (
                 await sql<{ n: string }>`
-                  select count(*)::bigint n from chart_of_accounts
-                   where company_id = ${companyId}::uuid
+                  select count(*)::bigint n from chart_of_accounts where company_id = ${companyId}::uuid
                 `.execute(transaction)
               ).rows[0]?.n,
             ),
           ).toBeGreaterThanOrEqual(20);
+          expect(
+            (
+              await sql<{ n: string }>`select count(*)::bigint n from accounts where id = ${firstId}::uuid`.execute(
+                transaction,
+              )
+            ).rows[0]?.n,
+          ).toBe("1");
 
-          // Refused attempts ARE audited in production: `recordBestEffort`
-          // writes through the service's own pool connection, so it survives
-          // the deletion transaction rolling back. It is deliberately NOT
-          // asserted here, because this harness overrides DATABASE with the
-          // test's transaction -- the denial audit therefore shares the
-          // rollback and would read as zero. Asserting it would be asserting a
-          // property of the harness, not of the product. The code path is
-          // covered in `platform-user-deletion.rules.test.ts`.
+          // The role grant itself (not the assignment) is untouched -- only
+          // the deleted account's OWN grant went, not the role definition.
+          expect(
+            (
+              await sql<{ n: string }>`select count(*)::bigint n from roles where id = ${secondRoleId}::uuid`.execute(
+                transaction,
+              )
+            ).rows[0]?.n,
+          ).toBe("1");
+
+          // The Platform audit for the completed deletion is present in the
+          // shared transaction (both the success record and the service's
+          // own `this.audit.record` write through the SAME overridden
+          // DATABASE provider). It carries a snapshot, not a reference: the
+          // username and Company name are readable even though the account
+          // is gone, and no secret material is present.
+          const survivingAudit = (
+            await sql<{ before: unknown; result: string }>`
+              select before_data as before, result from audit_events
+               where company_id = ${companyId}::uuid and subject_id = ${secondId}
+                 and action = 'platform.company_user.deleted'
+               order by occurred_at desc limit 1
+            `.execute(transaction)
+          ).rows[0];
+          expect(survivingAudit?.result).toBe("success");
+          const auditText = JSON.stringify(survivingAudit?.before);
+          expect(auditText).toContain(`second.${suffix}`);
+          expect(auditText.toLowerCase()).not.toMatch(/password|token_hash|session/);
+
+          // A second attempt on the same, now-gone account is a 404, not a
+          // second "success" and not a silent no-op.
+          await post(`${usersUrl}/${secondId}/delete`, manageCookie, {
+            confirmation: secondEligibility.confirmationChallenge,
+          }).expect(404);
         } finally {
           await app?.close();
         }

@@ -12,6 +12,7 @@ AppConfiguration production({
   realtimeUrl: Uri.parse(realtime),
   verboseLogging: verbose,
   enableMockServices: mocks,
+  appCommit: 'test',
 );
 
 void main() {
@@ -42,6 +43,7 @@ void main() {
       realtimeUrl: Uri.parse('ws://127.0.0.1:3000/realtime'),
       verboseLogging: true,
       enableMockServices: true,
+      appCommit: 'test',
     );
     expect(configuration.validateForStartup, returnsNormally);
   });

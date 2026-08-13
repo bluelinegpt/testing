@@ -1316,7 +1316,9 @@ export function CreateOrderDialog({
                       <>
                         <div>
                           <span>{t("operations.codAmount")}</span>
-                          <strong>{money(quote?.codAmount ?? codAmount)}</strong>
+                          <strong>
+                            {money(quote?.codAmount ?? (codInput.ok ? codAmount : "0.00"))}
+                          </strong>
                         </div>
                         <div>
                           <span>{t("operations.serviceFee")}</span>

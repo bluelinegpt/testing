@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { FormEvent, ReactElement } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
@@ -46,6 +46,13 @@ export function CompanyDetailPage(): ReactElement {
   const [deletionKey, setDeletionKey] = useState<string | undefined>(undefined);
   const [deleteConfirmation, setDeleteConfirmation] = useState("");
   const [deletionStatus, setDeletionStatus] = useState<string | undefined>(undefined);
+  const [deletionPreviewError, setDeletionPreviewError] = useState<
+    { code: string | undefined; message: string } | undefined
+  >(undefined);
+  const closeDialogRef = useRef<HTMLDialogElement>(null);
+  const [closeReason, setCloseReason] = useState("");
+  const [closeConfirmation, setCloseConfirmation] = useState("");
+  const [closeError, setCloseError] = useState<string | undefined>(undefined);
 
   const load = useCallback(async () => {
     setFailed(false);
@@ -118,21 +125,34 @@ export function CompanyDetailPage(): ReactElement {
     }
   }
 
-  async function closeCompany(): Promise<void> {
+  function openCloseDialog(): void {
+    setCloseReason("");
+    setCloseConfirmation("");
+    setCloseError(undefined);
+    closeDialogRef.current?.showModal();
+  }
+
+  function cancelClose(): void {
+    closeDialogRef.current?.close();
+    setCloseReason("");
+    setCloseConfirmation("");
+    setCloseError(undefined);
+  }
+
+  async function confirmClose(): Promise<void> {
     if (company === undefined) return;
-    const reason = globalThis.prompt("Reason for closing this Company:");
-    if (reason === null || reason.trim().length < 3) return;
-    const confirmation = globalThis.prompt(
-      `No Company data will be deleted by closing the Company. Type CLOSE ${company.code} to confirm.`,
-    );
-    if (confirmation === null) return;
     setBusy(true);
-    setError(undefined);
+    setCloseError(undefined);
     try {
-      await platformApi.closeCompany(companyId, reason.trim(), confirmation);
+      await platformApi.closeCompany(companyId, closeReason.trim(), closeConfirmation);
+      closeDialogRef.current?.close();
+      setCloseReason("");
+      setCloseConfirmation("");
       await load();
     } catch (failure) {
-      setError(failure instanceof PlatformApiError ? failure.message : "The Company could not be closed.");
+      setCloseError(
+        failure instanceof PlatformApiError ? failure.message : "The Company could not be closed.",
+      );
     } finally {
       setBusy(false);
     }
@@ -141,7 +161,7 @@ export function CompanyDetailPage(): ReactElement {
   async function runDeletionPreview(): Promise<void> {
     const key = globalThis.crypto.randomUUID();
     setBusy(true);
-    setError(undefined);
+    setDeletionPreviewError(undefined);
     setDeletionBackup(undefined);
     setDeletionStatus("Preparing deletion preview");
     try {
@@ -149,10 +169,39 @@ export function CompanyDetailPage(): ReactElement {
       setDeletionKey(key);
       setDeletionStatus("Preview ready");
     } catch (failure) {
-      setError(failure instanceof PlatformApiError ? failure.message : "Unable to run deletion preview.");
+      // A dedicated, inline state -- not the page-level banner. A preview
+      // failure is a normal, expected outcome of this specific action (a
+      // stale operation, a permission gap, a genuine integrity conflict),
+      // not a page-wide error, and it needs its own Retry right where the
+      // click happened.
+      setDeletionPreviewError({
+        code: failure instanceof PlatformApiError ? failure.code : undefined,
+        message:
+          failure instanceof PlatformApiError ? failure.message : "Unable to run deletion preview.",
+      });
       setDeletionStatus(undefined);
     } finally {
       setBusy(false);
+    }
+  }
+
+  /** A short, safe label for a known preview-failure code -- the raw backend
+   * message is always shown too, this just gives the reader a category
+   * before they read it. Falls back to a generic label for anything not
+   * recognized, since an unrecognized code must still read as "blocked",
+   * never as silence. */
+  function deletionPreviewErrorLabel(code: string | undefined): string {
+    switch (code) {
+      case "company_deletion_preview_not_eligible":
+        return "Company is not ready for a deletion preview";
+      case "company_deletion_preview_in_progress":
+        return "Existing deletion operation must be refreshed";
+      case "permission_denied":
+        return "Permission denied";
+      case "database_integrity_conflict":
+        return "Database integrity conflict";
+      default:
+        return "Deletion preview blocked";
     }
   }
 
@@ -163,6 +212,16 @@ export function CompanyDetailPage(): ReactElement {
     setDeletionStatus("Creating and verifying full-database backup");
     try {
       setDeletionBackup(await platformApi.companyDeletionBackup(companyId, deletionPreview.operationId));
+      // The preview snapshot was taken before a backup existed, so its own
+      // `readyForDelete` is stale the moment the backup completes -- the
+      // button that creates the backup is only reachable when the preview
+      // already carries zero blockers, so a verified backup is the one
+      // remaining condition and readiness can be updated locally rather
+      // than showing a stale "NO" next to a flow that has, in fact, just
+      // become ready.
+      setDeletionPreview((current) =>
+        current === undefined ? current : { ...current, readyForDelete: true },
+      );
       setDeletionStatus("Backup verified — ready for final confirmation");
     } catch (failure) {
       setError(failure instanceof PlatformApiError ? failure.message : "Unable to create verified backup.");
@@ -529,13 +588,84 @@ export function CompanyDetailPage(): ReactElement {
               <button
                 className="platform-button platform-button--quiet"
                 disabled={busy}
-                onClick={() => void closeCompany()}
+                onClick={openCloseDialog}
                 type="button"
               >
                 Close Company
               </button>
             ) : null}
           </div>
+          <dialog className="platform-dialog" ref={closeDialogRef}>
+            <form
+              className="platform-dialog__body"
+              method="dialog"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void confirmClose();
+              }}
+            >
+              <h3>Close Company</h3>
+              <dl className="platform-dialog__facts">
+                <dt>Company Name</dt>
+                <dd>{company.nameEn}</dd>
+                <dt>Company Code</dt>
+                <dd>{company.code}</dd>
+                <dt>Environment</dt>
+                <dd>{company.environment}</dd>
+                <dt>Current Status</dt>
+                <dd>{company.status}</dd>
+              </dl>
+              <p className="platform-warning" role="status">
+                No Company data will be deleted by closing the Company.
+              </p>
+              <label className="platform-field" htmlFor="close-reason">
+                <span>Reason for closing this Company</span>
+                <input
+                  autoFocus
+                  id="close-reason"
+                  onChange={(event) => setCloseReason(event.target.value)}
+                  required
+                  type="text"
+                  value={closeReason}
+                />
+              </label>
+              <label className="platform-field" htmlFor="close-confirmation">
+                <span>Type CLOSE {company.code} to confirm</span>
+                <input
+                  autoComplete="off"
+                  id="close-confirmation"
+                  onChange={(event) => setCloseConfirmation(event.target.value)}
+                  value={closeConfirmation}
+                />
+              </label>
+              {closeError === undefined ? null : (
+                <p className="platform-login__error" role="alert">
+                  {closeError}
+                </p>
+              )}
+              <div className="platform-dialog__actions">
+                <button
+                  className="platform-button platform-button--quiet"
+                  disabled={busy}
+                  onClick={cancelClose}
+                  type="button"
+                >
+                  Cancel
+                </button>
+                <button
+                  className="platform-button"
+                  disabled={
+                    busy ||
+                    closeReason.trim().length < 3 ||
+                    closeConfirmation !== `CLOSE ${company.code}`
+                  }
+                  type="submit"
+                >
+                  Close Company
+                </button>
+              </div>
+            </form>
+          </dialog>
           {company.status === "closed" ? (
             <section aria-labelledby="deletion-foundation-heading">
               <h4 id="deletion-foundation-heading">Permanent Company deletion</h4>
@@ -558,6 +688,24 @@ export function CompanyDetailPage(): ReactElement {
                   Run Deletion Preview
                 </button>
               ) : null}
+              {deletionPreviewError === undefined ? null : (
+                <div className="platform-review" role="alert">
+                  <p>
+                    <strong>{deletionPreviewErrorLabel(deletionPreviewError.code)}</strong>
+                  </p>
+                  <p className="platform-warning">{deletionPreviewError.message}</p>
+                  {canDelete ? (
+                    <button
+                      className="platform-button platform-button--quiet"
+                      disabled={busy}
+                      onClick={() => void runDeletionPreview()}
+                      type="button"
+                    >
+                      Retry Deletion Preview
+                    </button>
+                  ) : null}
+                </div>
+              )}
               {deletionPreview === undefined ? null : (
                 <div className="platform-review">
                   <p role="status">READY FOR DELETE: {deletionPreview.readyForDelete ? "YES" : "NO"}</p>
@@ -569,6 +717,11 @@ export function CompanyDetailPage(): ReactElement {
                     <p key={module}>{module}: {count}</p>
                   ))}
                   {(deletionPreview.blockers ?? []).map((blocker) => <p className="platform-warning" key={blocker}>{blocker}</p>)}
+                  {(deletionPreview.unknownReferences ?? []).map((reference) => (
+                    <p className="platform-warning" key={reference}>
+                      {reference}
+                    </p>
+                  ))}
                   <button
                     className="platform-button platform-button--quiet"
                     disabled={busy || (deletionPreview.blockers ?? []).length > 0 || !deletionEligibility?.eligible}

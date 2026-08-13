@@ -375,15 +375,17 @@ function PaymentPreviewPanel({
   );
 }
 
-function RecordPaymentWorkflow({
+export function RecordPaymentWorkflow({
   client,
   companyId,
+  embedded = false,
   onCancel,
   onConfirmed,
   preselectedExpenseId,
 }: {
   readonly client: AccountingApi;
   readonly companyId: string;
+  readonly embedded?: boolean;
   readonly onCancel: () => void;
   readonly onConfirmed: (expenseId: string) => void;
   readonly preselectedExpenseId?: string | undefined;
@@ -625,16 +627,18 @@ function RecordPaymentWorkflow({
   return (
     <section className="accounting-payment-workflow">
       <LoadPanel error={context.error} loading={context.loading} onRefresh={context.refresh}>
-        <ExpenseSelector
-          client={client}
-          companyId={companyId}
-          onSelect={(next) => {
-            setExpense(next);
-            setError(undefined);
-          }}
-          preselectedExpenseId={preselectedExpenseId}
-          selected={expense}
-        />
+        {embedded && expense !== undefined ? null : (
+          <ExpenseSelector
+            client={client}
+            companyId={companyId}
+            onSelect={(next) => {
+              setExpense(next);
+              setError(undefined);
+            }}
+            preselectedExpenseId={preselectedExpenseId}
+            selected={expense}
+          />
+        )}
         {expense === undefined ? null : (
           <>
             <section className="accounting-preview-panel">

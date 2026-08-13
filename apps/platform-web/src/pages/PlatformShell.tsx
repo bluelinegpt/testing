@@ -2,6 +2,7 @@ import { type ReactElement, useEffect, useState } from "react";
 import { NavLink, Navigate, Route, Routes } from "react-router-dom";
 
 import { usePlatformSession } from "../app/PlatformSession.js";
+import { VersionBadge } from "../components/VersionBadge.js";
 import {
   type ThemePreference,
   applyThemePreference,
@@ -13,6 +14,10 @@ import { AuditPage } from "./AuditPage.js";
 import { CompaniesPage } from "./CompaniesPage.js";
 import { CompanyDetailPage } from "./CompanyDetailPage.js";
 import { CreateCompanyPage } from "./CreateCompanyPage.js";
+import { DashboardPage } from "./DashboardPage.js";
+import { DeploymentRegistryPage } from "./DeploymentRegistryPage.js";
+import { ErrorsPage } from "./ErrorsPage.js";
+import { IntegrityCheckPage } from "./IntegrityCheckPage.js";
 
 interface NavigationItem {
   readonly label: string;
@@ -30,31 +35,12 @@ const navigation: readonly NavigationItem[] = [
   { label: "Dashboard", path: "/", permission: "platform.access" },
   { label: "Companies", path: "/companies", permission: "platform.companies.read" },
   { label: "Audit", path: "/audit", permission: "platform.audit.read" },
+  // Repo/deploy state, not Company data — gated on the same base permission
+  // as Dashboard rather than a Company-scoped one.
+  { label: "Deployment registry", path: "/deployment-registry", permission: "platform.access" },
+  { label: "Error Handler", path: "/errors", permission: "platform.errors.read" },
+  { label: "Integrity Checker", path: "/integrity", permission: "platform.integrity.read" },
 ];
-
-function DashboardPage(): ReactElement {
-  const session = usePlatformSession();
-  return (
-    <section className="platform-panel">
-      <h2>Platform Administration</h2>
-      <p>
-        Signed in as <strong>{session.identity?.displayName}</strong>.
-      </p>
-      <p className="platform-muted">
-        Company lifecycle and profile management arrive in the next phase. Nothing on this screen
-        acts on a Company.
-      </p>
-      <h3>Effective Platform permissions</h3>
-      <ul className="platform-permission-list">
-        {(session.identity?.permissions ?? []).map((permission) => (
-          <li key={permission}>
-            <code>{permission}</code>
-          </li>
-        ))}
-      </ul>
-    </section>
-  );
-}
 
 const themeOptions: readonly { code: ThemePreference; label: string }[] = [
   { code: "light", label: "Light" },
@@ -113,7 +99,10 @@ export function PlatformShell(): ReactElement {
       <header className="platform-header">
         <div>
           <p className="platform-header__eyebrow">BluelineGPT</p>
-          <p className="platform-header__title">Platform Administration</p>
+          <div className="platform-header__title-row">
+            <p className="platform-header__title">Platform Administration</p>
+            <VersionBadge />
+          </div>
         </div>
         <div className="platform-header__account">
           <ThemeControl />
@@ -161,6 +150,13 @@ export function PlatformShell(): ReactElement {
             ) : null}
             {session.can("platform.audit.read") ? (
               <Route element={<AuditPage />} path="/audit" />
+            ) : null}
+            <Route element={<DeploymentRegistryPage />} path="/deployment-registry" />
+            {session.can("platform.errors.read") ? (
+              <Route element={<ErrorsPage />} path="/errors" />
+            ) : null}
+            {session.can("platform.integrity.read") ? (
+              <Route element={<IntegrityCheckPage />} path="/integrity" />
             ) : null}
             <Route element={<Navigate replace to="/" />} path="*" />
           </Routes>

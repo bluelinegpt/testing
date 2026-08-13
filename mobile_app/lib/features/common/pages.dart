@@ -3,11 +3,15 @@ import 'package:bluelinegpt_mobile/app/providers.dart';
 import 'package:bluelinegpt_mobile/app/configuration/app_environment.dart';
 import 'package:bluelinegpt_mobile/app/theme/app_theme.dart';
 import 'package:bluelinegpt_mobile/core/auth/auth_models.dart';
+import 'package:bluelinegpt_mobile/core/network/api_client.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:bluelinegpt_mobile/shared/widgets/mobile_ui_components.dart';
+
+String displayAppVersion(PackageInfo? info) =>
+    '${info?.version ?? '…'}+${info?.buildNumber ?? '…'}';
 
 final class StartupPage extends StatelessWidget {
   const StartupPage({super.key});
@@ -77,7 +81,7 @@ final class _LoginPageState extends ConsumerState<LoginPage> {
     final configuration = ref.watch(configurationProvider);
     return Scaffold(
       appBar: AppBar(
-        title: Text(l10n.login),
+        title: const Text('BluelineGPT'),
         actions: [
           IconButton(
             tooltip: l10n.language,
@@ -104,91 +108,115 @@ final class _LoginPageState extends ConsumerState<LoginPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      const Icon(
-                        Icons.local_shipping_outlined,
-                        size: 64,
-                        color: AppColors.primary,
-                      ),
-                      const SizedBox(height: AppSpacing.lg),
-                      TextFormField(
-                        key: const Key('loginIdentifierField'),
-                        controller: _identifier,
-                        autofillHints: const [
-                          AutofillHints.username,
-                          AutofillHints.email,
-                        ],
-                        textInputAction: TextInputAction.next,
-                        decoration: InputDecoration(labelText: l10n.identifier),
-                        validator: (value) =>
-                            value == null || value.trim().isEmpty
-                            ? l10n.requiredField
-                            : null,
+                      const BluelineHeaderCard(
+                        title: 'BluelineGPT',
+                        subtitle: 'Delivery operations',
+                        icon: Icons.local_shipping_outlined,
                       ),
                       const SizedBox(height: AppSpacing.md),
-                      TextFormField(
-                        key: const Key('loginPasswordField'),
-                        controller: _password,
-                        autofillHints: const [AutofillHints.password],
-                        obscureText: _obscurePassword,
-                        textInputAction: TextInputAction.done,
-                        decoration: InputDecoration(
-                          labelText: l10n.password,
-                          suffixIcon: IconButton(
-                            key: const Key('loginPasswordVisibilityToggle'),
-                            tooltip: _obscurePassword
-                                ? l10n.showPassword
-                                : l10n.hidePassword,
-                            icon: Icon(
-                              _obscurePassword
-                                  ? Icons.visibility
-                                  : Icons.visibility_off,
+                      BluelineSectionCard(
+                        padding: const EdgeInsets.all(AppSpacing.lg),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Text(
+                              l10n.login,
+                              style: Theme.of(context).textTheme.headlineSmall
+                                  ?.copyWith(fontWeight: FontWeight.w800),
                             ),
-                            onPressed: () => setState(
-                              () => _obscurePassword = !_obscurePassword,
+                            const SizedBox(height: AppSpacing.lg),
+                            TextFormField(
+                              key: const Key('loginIdentifierField'),
+                              controller: _identifier,
+                              autofillHints: const [
+                                AutofillHints.username,
+                                AutofillHints.email,
+                              ],
+                              textInputAction: TextInputAction.next,
+                              decoration: InputDecoration(
+                                labelText: l10n.identifier,
+                              ),
+                              validator: (value) =>
+                                  value == null || value.trim().isEmpty
+                                  ? l10n.requiredField
+                                  : null,
                             ),
-                          ),
-                        ),
-                        validator: (value) => value == null || value.isEmpty
-                            ? l10n.requiredField
-                            : null,
-                        onFieldSubmitted: (_) => _submit(),
-                      ),
-                      if (failure != null) ...[
-                        const SizedBox(height: AppSpacing.md),
-                        Semantics(
-                          liveRegion: true,
-                          child: Text(
-                            _failureMessage(l10n, failure),
-                            style: TextStyle(
-                              color: Theme.of(context).colorScheme.error,
-                            ),
-                          ),
-                        ),
-                      ],
-                      const SizedBox(height: AppSpacing.lg),
-                      FilledButton(
-                        onPressed: authentication.isLoading ? null : _submit,
-                        child: authentication.isLoading
-                            ? const SizedBox.square(
-                                dimension: 20,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
+                            const SizedBox(height: AppSpacing.md),
+                            TextFormField(
+                              key: const Key('loginPasswordField'),
+                              controller: _password,
+                              autofillHints: const [AutofillHints.password],
+                              obscureText: _obscurePassword,
+                              textInputAction: TextInputAction.done,
+                              decoration: InputDecoration(
+                                labelText: l10n.password,
+                                suffixIcon: IconButton(
+                                  key: const Key(
+                                    'loginPasswordVisibilityToggle',
+                                  ),
+                                  tooltip: _obscurePassword
+                                      ? l10n.showPassword
+                                      : l10n.hidePassword,
+                                  icon: Icon(
+                                    _obscurePassword
+                                        ? Icons.visibility
+                                        : Icons.visibility_off,
+                                  ),
+                                  onPressed: () => setState(
+                                    () => _obscurePassword = !_obscurePassword,
+                                  ),
                                 ),
-                              )
-                            : Text(l10n.login),
-                      ),
-                      TextButton(
-                        onPressed: () => context.go('/forgot-password'),
-                        child: Text(l10n.forgotPassword),
+                              ),
+                              validator: (value) =>
+                                  value == null || value.isEmpty
+                                  ? l10n.requiredField
+                                  : null,
+                              onFieldSubmitted: (_) => _submit(),
+                            ),
+                            if (failure != null) ...[
+                              const SizedBox(height: AppSpacing.md),
+                              Semantics(
+                                liveRegion: true,
+                                child: Text(
+                                  _failureMessage(l10n, failure),
+                                  style: TextStyle(
+                                    color: Theme.of(context).colorScheme.error,
+                                  ),
+                                ),
+                              ),
+                            ],
+                            const SizedBox(height: AppSpacing.lg),
+                            FilledButton(
+                              onPressed: authentication.isLoading
+                                  ? null
+                                  : _submit,
+                              child: authentication.isLoading
+                                  ? const SizedBox.square(
+                                      dimension: 20,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    )
+                                  : Text(l10n.login),
+                            ),
+                            TextButton(
+                              onPressed: () => context.go('/forgot-password'),
+                              child: Text(l10n.forgotPassword),
+                            ),
+                          ],
+                        ),
                       ),
                       if (configuration.environment !=
                           AppEnvironment.production) ...[
                         const SizedBox(height: AppSpacing.lg),
-                        _LoginDiagnostics(
-                          configuration: configuration,
-                          failureCode: authState?.failureCode,
-                          failureKind: authState?.failureKind,
-                          failureStatus: authState?.failureStatus,
+                        BluelineSectionCard(
+                          padding: const EdgeInsets.all(AppSpacing.sm),
+                          child: _LoginDiagnostics(
+                            configuration: configuration,
+                            failureCode: authState?.failureCode,
+                            failureKind: authState?.failureKind,
+                            failureStatus: authState?.failureStatus,
+                          ),
                         ),
                       ],
                     ],
@@ -248,9 +276,14 @@ final class _LoginDiagnostics extends StatelessWidget {
           configuration.environment == AppEnvironment.development
               ? 'DEV'
               : 'STAGING',
-          'Ver: ${info?.version ?? '…'}+${info?.buildNumber ?? '…'}',
+          'Ver: ${displayAppVersion(info)}',
           if (exposeHost)
-            'IP: ${configuration.apiBaseUrl.host}${configuration.apiBaseUrl.hasPort ? ':${configuration.apiBaseUrl.port}' : ''}',
+            // The complete prefix is intentionally shown in DEV so a physical
+            // device build proves it has `/api/v1` exactly once. No tokens,
+            // credentials, request bodies, or response data are exposed.
+            'API: ${configuration.apiBaseUrl}',
+          if (exposeHost)
+            'Login: ${ApiClient.endpointUrl(configuration.apiBaseUrl, 'auth/login')}',
           'Error: $error',
         ].join('\n'),
         style: Theme.of(context).textTheme.bodySmall,
@@ -409,70 +442,102 @@ final class _AccountPageState extends ConsumerState<AccountPage> {
     return ListView(
       padding: const EdgeInsets.all(AppSpacing.lg),
       children: [
-        ListTile(
-          leading: const Icon(Icons.person_outline),
-          title: Text(user.displayName),
-          subtitle: Text(roleLabel(user, l10n)),
+        BluelineHeaderCard(
+          title: user.displayName,
+          subtitle: roleLabel(user, l10n),
+          icon: user.isDriverPresentation
+              ? Icons.local_shipping_outlined
+              : Icons.person_outline,
         ),
-        ListTile(
-          leading: const Icon(Icons.language),
-          title: Text(l10n.language),
-          subtitle: Text(
-            Localizations.localeOf(context).languageCode.toUpperCase(),
+        const SizedBox(height: AppSpacing.lg),
+        Text(
+          l10n.settings,
+          style: Theme.of(
+            context,
+          ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+        ),
+        const SizedBox(height: AppSpacing.sm),
+        BluelineSectionCard(
+          child: Column(
+            children: [
+              ListTile(
+                leading: const Icon(Icons.language),
+                title: Text(l10n.language),
+                subtitle: Text(
+                  Localizations.localeOf(context).languageCode.toUpperCase(),
+                ),
+              ),
+              FutureBuilder<PackageInfo>(
+                future: PackageInfo.fromPlatform(),
+                builder: (_, snapshot) => ListTile(
+                  leading: const Icon(Icons.info_outline),
+                  title: Text(l10n.appVersion),
+                  // PackageInfo is also the source used by the DEV Login panel.
+                  // Keep the runtime build number visible here rather than a
+                  // hard-coded marketing version.
+                  trailing: Text(
+                    '+${snapshot.data?.buildNumber ?? '…'}',
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  subtitle: Text(snapshot.data?.version ?? '—'),
+                ),
+              ),
+            ],
           ),
-        ),
-        FutureBuilder<PackageInfo>(
-          future: PackageInfo.fromPlatform(),
-          builder: (_, snapshot) => ListTile(
-            leading: const Icon(Icons.info_outline),
-            title: Text(l10n.appVersion),
-            subtitle: Text(snapshot.data?.version ?? '—'),
-          ),
-        ),
-        if (user.hasRole(UserRole.trader)) ...[
-          ListTile(
-            leading: const Icon(Icons.account_balance_wallet_outlined),
-            title: Text(l10n.financialSummary),
-            onTap: () => context.push('/trader/finance'),
-          ),
-          ListTile(
-            leading: const Icon(Icons.payments_outlined),
-            title: Text(l10n.settlements),
-            onTap: () => context.push('/trader/settlements'),
-          ),
-          ListTile(
-            leading: const Icon(Icons.receipt_long_outlined),
-            title: Text(l10n.accountStatement),
-            onTap: () => context.push('/trader/statement'),
-          ),
-        ],
-        ListTile(
-          leading: const Icon(Icons.password),
-          title: Text(l10n.changePassword),
-          onTap: () => context.push('/change-password'),
-        ),
-        ListTile(
-          leading: const Icon(Icons.help_outline),
-          title: Text(l10n.helpSupport),
-          subtitle: Text(l10n.notImplemented),
-        ),
-        ListTile(
-          leading: const Icon(Icons.privacy_tip_outlined),
-          title: Text(l10n.privacyPolicy),
-          subtitle: Text(l10n.notImplemented),
-        ),
-        ListTile(
-          leading: const Icon(Icons.description_outlined),
-          title: Text(l10n.termsConditions),
-          subtitle: Text(l10n.notImplemented),
-        ),
-        ListTile(
-          leading: const Icon(Icons.settings_outlined),
-          title: Text(l10n.settings),
-          onTap: () => context.push('/settings'),
         ),
         const SizedBox(height: AppSpacing.md),
-        FilledButton.tonalIcon(
+        BluelineSectionCard(
+          child: Column(
+            children: [
+              if (user.hasRole(UserRole.trader)) ...[
+                ListTile(
+                  leading: const Icon(Icons.account_balance_wallet_outlined),
+                  title: Text(l10n.financialSummary),
+                  onTap: () => context.push('/trader/finance'),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.payments_outlined),
+                  title: Text(l10n.settlements),
+                  onTap: () => context.push('/trader/settlements'),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.receipt_long_outlined),
+                  title: Text(l10n.accountStatement),
+                  onTap: () => context.push('/trader/statement'),
+                ),
+              ],
+              ListTile(
+                leading: const Icon(Icons.password),
+                title: Text(l10n.changePassword),
+                onTap: () => context.push('/change-password'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.help_outline),
+                title: Text(l10n.helpSupport),
+                subtitle: Text(l10n.notImplemented),
+              ),
+              ListTile(
+                leading: const Icon(Icons.privacy_tip_outlined),
+                title: Text(l10n.privacyPolicy),
+                subtitle: Text(l10n.notImplemented),
+              ),
+              ListTile(
+                leading: const Icon(Icons.description_outlined),
+                title: Text(l10n.termsConditions),
+                subtitle: Text(l10n.notImplemented),
+              ),
+              ListTile(
+                leading: const Icon(Icons.settings_outlined),
+                title: Text(l10n.settings),
+                onTap: () => context.push('/settings'),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: AppSpacing.md),
+        FilledButton.icon(
           key: const Key('logoutButton'),
           onPressed: _loggingOut
               ? null
@@ -505,6 +570,7 @@ final class _AccountPageState extends ConsumerState<AccountPage> {
                     if (mounted) setState(() => _loggingOut = false);
                   }
                 },
+          style: FilledButton.styleFrom(backgroundColor: AppColors.error),
           icon: _loggingOut
               ? const SizedBox.square(
                   dimension: 16,
@@ -765,7 +831,11 @@ final class RoleAwareShell extends ConsumerWidget {
         onDestinationSelected: (index) => context.go(items[index].path),
         destinations: [
           for (final item in items)
-            NavigationDestination(icon: Icon(item.icon), label: item.label),
+            NavigationDestination(
+              icon: Icon(item.icon),
+              selectedIcon: Icon(item.icon, color: AppColors.primary),
+              label: item.label,
+            ),
         ],
       ),
     );

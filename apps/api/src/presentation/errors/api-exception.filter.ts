@@ -5,6 +5,8 @@ import type { Logger } from "nestjs-pino";
 
 import { ApplicationException } from "./application.exception.js";
 import type { ApiErrorResponse } from "../http/api-error.js";
+import type { ClientErrorReportService } from "../../observability/client-error-report.service.js";
+import type { RequestSecurityContextStore } from "../../security/request-security-context.js";
 
 const statusCodes: Record<number, string> = {
   [HttpStatus.BAD_REQUEST]: "validation_error",
@@ -17,7 +19,20 @@ const statusCodes: Record<number, string> = {
 
 @Catch()
 export class ApiExceptionFilter implements ExceptionFilter {
-  public constructor(private readonly logger: Logger) {}
+  /**
+   * `errorReports`/`securityContext` are optional: this filter is
+   * constructed manually in `bootstrap/create-application.ts`, outside
+   * Nest's DI container, and `api-exception.filter.test.ts` constructs it
+   * with just a logger. When present, every 500 is also captured into
+   * `client_error_reports` for the Platform's Error Handler screen -- the
+   * same durable record a frontend crash gets, so a backend crash no longer
+   * lives only in Render's own log stream.
+   */
+  public constructor(
+    private readonly logger: Logger,
+    private readonly errorReports?: ClientErrorReportService,
+    private readonly securityContext?: RequestSecurityContextStore,
+  ) {}
 
   public catch(exception: unknown, host: ArgumentsHost): void {
     const context = host.switchToHttp();
@@ -56,6 +71,19 @@ export class ApiExceptionFilter implements ExceptionFilter {
 
     if (status >= 500) {
       this.logger.error({ correlationId, err: exception, path: request.path }, "Request failed");
+      // Fire-and-forget: `reportServerError` already swallows its own
+      // failures internally, and this response must reach the caller
+      // whether or not the capture succeeds.
+      void this.errorReports?.reportServerError({
+        correlationId,
+        identity: this.currentIdentity(),
+        // Deliberately the REAL message, not `safeMessage` above -- that one
+        // is sanitized for the client ("An unexpected error occurred.") and
+        // would make every captured report identical and useless to triage.
+        message: exception instanceof Error ? exception.message : String(exception),
+        path: request.path,
+        stack: exception instanceof Error ? (exception.stack ?? null) : null,
+      });
     } else if (databaseIntegrityError) {
       /**
        * A database integrity error is logged with the constraint that fired.
@@ -109,6 +137,21 @@ export class ApiExceptionFilter implements ExceptionFilter {
       this.logger.warn({ code, correlationId, path: request.path, status }, "Request rejected");
     }
     response.status(status).json(payload);
+  }
+
+  /**
+   * Best-effort read of the current identity, for the captured error report
+   * only. `RequestSecurityContextStore.current()` throws when no identity is
+   * attached -- entirely normal for a request that failed before
+   * authentication ran -- so that case is just "no identity to attach",
+   * never a reason to lose the capture.
+   */
+  private currentIdentity() {
+    try {
+      return this.securityContext?.current().identity;
+    } catch {
+      return undefined;
+    }
   }
 
   private isDatabaseIntegrityError(exception: unknown): boolean {

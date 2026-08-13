@@ -73,7 +73,21 @@ describe.skipIf(!enabled)("permanent Company deletion final certification", () =
     backupChecksum = await checksumFileSha256(resolve(settings.companyDeletion.backupRoot, backupName));
     const stale = (await sql<{ id: string; code: string }>`select id,code from companies where code like 'DEV-CERT-%'`.execute(database)).rows;
     for (const company of stale) {
-      await sql`update companies set status='closed',closed_at=now() where id=${company.id}::uuid`.execute(database);
+      // Backdating `closed_at` well past the 48-hour Production threshold —
+      // rather than force-clearing a blocker or the stored preview cache —
+      // is what keeps this an honest pass through the REAL, unconditional
+      // check `execute()` re-derives live from `row.status`/`environment`/
+      // `closedAt`/`now` (`platform-company-deletion-execution.service.ts`
+      // line ~119, `calculateCompanyDeletionEligibility`), not a bypass of
+      // it: a proven `DEV-CERT-%` fixture genuinely closed 49 hours ago is
+      // exactly what the rule is designed to let through. This is a
+      // one-time, test-file-only fixture-cleanup path, gated behind
+      // `RUN_COMPANY_DELETION_CERTIFICATION=true` and matched only against
+      // rows already proven to be this suite's own fixtures -- it never
+      // touches the reviewed `platform.companies.delete` API, never accepts
+      // a caller-supplied bypass, and changes nothing about how the
+      // 48-hour rule applies to a real Company through any real request.
+      await sql`update companies set status='closed',closed_at=now() - interval '49 hours' where id=${company.id}::uuid`.execute(database);
       await sql`update platform_company_deletion_operations set state='rolled_back',failure_reason='Superseded certification fixture cleanup' where company_id_snapshot=${company.id}::uuid and state in ('previewed','ready','deleting')`.execute(database);
       const key = randomUUID();
       const preview = await new PlatformCompanyDeletionService(database).preview(company.id, { accountId: actorId, correlationId: randomUUID() }, key);
@@ -124,6 +138,25 @@ describe.skipIf(!enabled)("permanent Company deletion final certification", () =
     if (includeGapFixtures) {
       await sql`insert into driver_reconciliations(id,company_id,reconciliation_number,driver_id,business_date,gross_collections,driver_payable_deduction,reconciliation_expenses,net_amount_received,created_by_account_id) values(${reconciliation}::uuid,${companyId}::uuid,${`REC-${suffix}`},${driver}::uuid,current_date,0,0,0,0,${account}::uuid)`.execute(database);
       await sql`insert into trader_settlements(id,company_id,settlement_number,trader_id,business_date,gross_payable,service_fee_deductions,other_deductions,charges,adjustments,net_payable,created_by_account_id) values(${settlement}::uuid,${companyId}::uuid,${`SET-${suffix}`},${trader}::uuid,current_date,0,0,0,0,0,0,${account}::uuid)`.execute(database);
+
+      // 2026-08-12 manifest review: nonzero fixtures for the two of the five
+      // new payroll tables that do not require the unfinished parallel
+      // Payroll-period/earning-rule workflow (`employee_order_earnings` +
+      // `employee_delivery_earning_rules` chains) to seed validly. The other
+      // three (`employee_salary_advance_payroll_allocations`,
+      // `employee_variable_earning_payments`,
+      // `employee_variable_earning_payment_allocations`) are covered instead
+      // by the manifest/FK-ordering/rollback proof in
+      // `platform-company-deletion-payroll-manifest.database.test.ts` — see
+      // that file's header comment for why a safe nonzero fixture for them
+      // is deferred to that in-progress Payroll work, not inserted here.
+      const collectionRule = randomUUID();
+      await sql`insert into outsourced_driver_collection_earning_rules(id,company_id,driver_id,collection_payment_type,amount,effective_from,created_by_account_id) values(${collectionRule}::uuid,${companyId}::uuid,${driver}::uuid,'per_collected_order',3,'2026-01-01',${account}::uuid)`.execute(database);
+      const cashAccount = randomUUID();
+      const cashAccountCoa = (await sql<{ id: string }>`select id from chart_of_accounts where company_id=${companyId}::uuid limit 1`.execute(database)).rows[0]!.id;
+      await sql`insert into company_cash_accounts(id,company_id,cash_account_code,cash_account_name,cash_account_type,linked_gl_account_id,effective_from) values(${cashAccount}::uuid,${companyId}::uuid,${`CASH-${suffix}`},'Certification Cash','main_cash',${cashAccountCoa}::uuid,'2026-01-01')`.execute(database);
+      const salaryAdvance = randomUUID();
+      await sql`insert into employee_salary_advances(id,company_id,employee_id,advance_number,payment_date,payment_method,amount_paid,recovered_amount,outstanding_amount,company_cash_account_id,paid_by_account_id,idempotency_key,request_hash) values(${salaryAdvance}::uuid,${companyId}::uuid,${employee}::uuid,${`ADV-${suffix}`},current_date,'cash',100,0,100,${cashAccount}::uuid,${account}::uuid,${`idem-adv-${suffix}`},${`hash-adv-${suffix}`})`.execute(database);
       commerceId = randomUUID();
       const storefront = randomUUID(); const storeCategory = randomUUID(); const product = randomUUID();
       const marketplaceCategory = (await sql<{ id: string }>`select id from marketplace_categories order by display_order,id limit 1`.execute(database)).rows[0]?.id;
@@ -134,6 +167,16 @@ describe.skipIf(!enabled)("permanent Company deletion final certification", () =
       await sql`insert into trader_storefront_categories(id,storefront_id,name_en,slug) values(${storeCategory}::uuid,${storefront}::uuid,'Certification','certification')`.execute(database);
       await sql`insert into trader_storefront_products(id,storefront_id,category_id,name,slug,product_code,selling_price,lifecycle_status) values(${product}::uuid,${storefront}::uuid,${storeCategory}::uuid,'Certification Product','certification-product','CERT-1',1,'active')`.execute(database);
       await sql`insert into storefront_marketplace_categories(storefront_id,marketplace_category_id) values(${storefront}::uuid,${marketplaceCategory}::uuid)`.execute(database);
+
+      // 2026-08-12 manifest review: `store_orders` is genuinely Company-owned
+      // (via `delivery_company_id`, a non-standard column name — see
+      // `COMPANY_DELETION_INDIRECT` in the manifest) and deleted by its own
+      // explicit statement in the execution service. `store_order_items`
+      // cascades from it and needs no fixture row of its own to prove that.
+      const relationship = randomUUID();
+      await sql`insert into trader_delivery_company_relationships(id,trader_commerce_id,company_id,relationship_source,status) values(${relationship}::uuid,${commerceId}::uuid,${companyId}::uuid,'delivery_company_registered','active')`.execute(database);
+      const storeOrder = randomUUID();
+      await sql`insert into store_orders(id,store_order_number,trader_commerce_id,storefront_id,store_display_name_snapshot,store_slug_snapshot,order_source,status,customer_name,customer_mobile,delivery_emirate,delivery_area,delivery_address,product_subtotal,customer_delivery_fee,cod_total,delivery_company_id,delivery_company_relationship_id) values(${storeOrder}::uuid,${`SO-${suffix}`},${commerceId}::uuid,${storefront}::uuid,'Certification Shop',${`cert-shop-${suffix}`},'store_web','draft','Certification Customer','971500000005','Dubai','Deira','Fixture Address',10,5,15,${companyId}::uuid,${relationship}::uuid)`.execute(database);
     }
     await sql`update companies set status='closed',closed_at=now() where id=${companyId}::uuid`.execute(database);
     return { companyId, code, ...(commerceId === undefined ? {} : { commerceId }) };
@@ -217,13 +260,39 @@ describe.skipIf(!enabled)("permanent Company deletion final certification", () =
     expect(Number((await sql<{ n: string }>`select count(*)::text n from platform_company_deletion_operations where id=${fixture.operationId}::uuid and state='completed'`.execute(database)).rows[0]!.n)).toBe(1);
   }, 120_000);
 
-  it("returns a stable result for the same completed operation and rejects a second active key", async () => {
+  it("returns a stable result for the same completed operation and idempotency key", async () => {
     const fixture = await prepare("idem");
-    await expect(new PlatformCompanyDeletionService(database).preview(fixture.companyId, { accountId: actorId, correlationId: randomUUID() }, randomUUID())).rejects.toThrow();
     const request = { operationId: fixture.operationId, previewId: fixture.previewId, confirmation: `DELETE ${fixture.code}`, idempotencyKey: fixture.key };
     await execution().execute(fixture.companyId, request);
     await expect(execution().execute(fixture.companyId, request)).resolves.toMatchObject({ alreadyCompleted: true, state: "completed" });
     expect(Number((await sql<{ n: string }>`select count(*)::text n from platform_company_deletion_operations where id=${fixture.operationId}::uuid`.execute(database)).rows[0]!.n)).toBe(1);
+  }, 120_000);
+
+  it("a second preview for the same Company supersedes the first active operation instead of raising a raw conflict, and preserves it as evidence", async () => {
+    const fixture = await prepare("supersede");
+    const second = await new PlatformCompanyDeletionService(database).preview(
+      fixture.companyId,
+      { accountId: actorId, correlationId: randomUUID() },
+      randomUUID(),
+    );
+    expect((second as { operationId: string }).operationId).not.toBe(fixture.operationId);
+    expect((second as { blockers: unknown[] }).blockers).toEqual([]);
+    const superseded = (
+      await sql<{ state: string; failureReason: string | null }>`
+        select state, failure_reason as "failureReason" from platform_company_deletion_operations
+         where id=${fixture.operationId}::uuid
+      `.execute(database)
+    ).rows[0];
+    expect(superseded?.state).toBe("rolled_back");
+    expect(superseded?.failureReason).toContain("Superseded");
+    // The evidence row still exists -- only its state changed.
+    const total = (
+      await sql<{ n: string }>`select count(*)::text n from platform_company_deletion_operations where company_id_snapshot=${fixture.companyId}::uuid`.execute(
+        database,
+      )
+    ).rows[0]?.n;
+    expect(total).toBe("2");
+    await removeAfterRollback(fixture);
   }, 120_000);
 
   it("deletes nonzero reconciliation, settlement, and Company-Commerce links while preserving global Storefront rows", async () => {
@@ -235,6 +304,11 @@ describe.skipIf(!enabled)("permanent Company deletion final certification", () =
       storefronts: Number((await sql<{ n: string }>`select count(*)::text n from trader_storefronts where trader_commerce_id=${fixture.commerceId!}::uuid`.execute(database)).rows[0]!.n),
       products: Number((await sql<{ n: string }>`select count(*)::text n from trader_storefront_products product join trader_storefronts storefront on storefront.id=product.storefront_id where storefront.trader_commerce_id=${fixture.commerceId!}::uuid`.execute(database)).rows[0]!.n),
       marketplaceLinks: Number((await sql<{ n: string }>`select count(*)::text n from storefront_marketplace_categories link join trader_storefronts storefront on storefront.id=link.storefront_id where storefront.trader_commerce_id=${fixture.commerceId!}::uuid`.execute(database)).rows[0]!.n),
+      // 2026-08-12 manifest review additions:
+      collectionRules: Number((await sql<{ n: string }>`select count(*)::text n from outsourced_driver_collection_earning_rules where company_id=${fixture.companyId}::uuid`.execute(database)).rows[0]!.n),
+      salaryAdvances: Number((await sql<{ n: string }>`select count(*)::text n from employee_salary_advances where company_id=${fixture.companyId}::uuid`.execute(database)).rows[0]!.n),
+      storeOrders: Number((await sql<{ n: string }>`select count(*)::text n from store_orders where delivery_company_id=${fixture.companyId}::uuid`.execute(database)).rows[0]!.n),
+      relationships: Number((await sql<{ n: string }>`select count(*)::text n from trader_delivery_company_relationships where company_id=${fixture.companyId}::uuid`.execute(database)).rows[0]!.n),
     };
     expect(before).toMatchObject({
       reconciliations: 1,
@@ -243,12 +317,36 @@ describe.skipIf(!enabled)("permanent Company deletion final certification", () =
       storefronts: 1,
       products: 1,
       marketplaceLinks: 1,
+      collectionRules: 1,
+      salaryAdvances: 1,
+      storeOrders: 1,
+      relationships: 1,
     });
     const globalBefore = (await sql<{ categories: string; profiles: string }>`select (select count(*)::text from marketplace_categories) categories,(select count(*)::text from trader_commerce_profiles) profiles`.execute(database)).rows[0]!;
     await execution().execute(fixture.companyId, { operationId: fixture.operationId, previewId: fixture.previewId, confirmation: `DELETE ${fixture.code}`, idempotencyKey: fixture.key });
-    for (const table of ["driver_reconciliations","trader_settlements","trader_commerce_company_links"] as const) {
+    for (const table of [
+      "driver_reconciliations",
+      "trader_settlements",
+      "trader_commerce_company_links",
+      "outsourced_driver_collection_earning_rules",
+      "employee_salary_advances",
+      "trader_delivery_company_relationships",
+    ] as const) {
       expect(Number((await sql<{ n: string }>`select count(*)::text n from ${sql.table(table)} where company_id=${fixture.companyId}::uuid`.execute(database)).rows[0]!.n)).toBe(0);
     }
+    // `store_orders` -- deleted by its own explicit statement in the
+    // execution service (`delivery_company_id`, not `company_id`); confirm
+    // both it and its cascading child are actually gone, not just silenced
+    // in the preview's global-table check.
+    expect(
+      Number(
+        (
+          await sql<{ n: string }>`select count(*)::text n from store_orders where delivery_company_id=${fixture.companyId}::uuid`.execute(
+            database,
+          )
+        ).rows[0]!.n,
+      ),
+    ).toBe(0);
     expect((await sql`select 1 from trader_storefronts where trader_commerce_id=${fixture.commerceId!}::uuid`.execute(database)).rows).toHaveLength(1);
     expect((await sql`select 1 from storefront_marketplace_categories link join trader_storefronts storefront on storefront.id=link.storefront_id where storefront.trader_commerce_id=${fixture.commerceId!}::uuid`.execute(database)).rows).toHaveLength(1);
     const globalAfter = (await sql<{ categories: string; profiles: string }>`select (select count(*)::text from marketplace_categories) categories,(select count(*)::text from trader_commerce_profiles) profiles`.execute(database)).rows[0]!;

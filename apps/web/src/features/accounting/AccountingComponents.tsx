@@ -479,13 +479,16 @@ export function RecordForm({
   fields,
   initial = emptyRecord,
   onCancel,
+  onSecondarySubmit,
   onSubmit,
   patch,
+  secondarySubmitLabel,
   submitLabel,
 }: {
   readonly fields: readonly FieldDefinition[];
   readonly initial?: AccountingRecord;
   readonly onCancel: () => void;
+  readonly onSecondarySubmit?: ((value: Record<string, unknown>) => Promise<void>) | undefined;
   readonly onSubmit: (value: Record<string, unknown>) => Promise<void>;
   /**
    * Sets one or more fields' values from outside the form -- e.g.
@@ -499,12 +502,14 @@ export function RecordForm({
    * React applies any of them.
    */
   readonly patch?: readonly { readonly name: string; readonly value: string }[] | undefined;
+  readonly secondarySubmitLabel?: string | undefined;
   readonly submitLabel: string;
 }) {
   const { t } = useTranslation();
   const [values, setValues] = useState<Record<string, unknown>>(() => ({ ...initial }));
   const [error, setError] = useState<string>();
   const [pending, setPending] = useState(false);
+  const secondarySubmit = useRef(false);
   const id = useId();
 
   useEffect(() => {
@@ -598,7 +603,9 @@ export function RecordForm({
     }
     setPending(true);
     try {
-      await onSubmit(payload);
+      await (secondarySubmit.current && onSecondarySubmit !== undefined
+        ? onSecondarySubmit(payload)
+        : onSubmit(payload));
     } catch (cause) {
       if (cause instanceof ApiError) {
         const message = t(`accounting.errors.codes.${cause.code}`, {
@@ -611,6 +618,7 @@ export function RecordForm({
       }
     } finally {
       setPending(false);
+      secondarySubmit.current = false;
     }
   };
   const visibleFields = fields.filter((field) => field.hidden !== true);
@@ -762,6 +770,18 @@ export function RecordForm({
         <button className="button button-primary" disabled={pending} type="submit">
           {submitLabel}
         </button>
+        {onSecondarySubmit === undefined || secondarySubmitLabel === undefined ? null : (
+          <button
+            className="button button-primary"
+            disabled={pending}
+            onClick={() => {
+              secondarySubmit.current = true;
+            }}
+            type="submit"
+          >
+            {secondarySubmitLabel}
+          </button>
+        )}
       </footer>
     </form>
   );

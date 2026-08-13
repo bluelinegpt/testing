@@ -70,6 +70,29 @@ export class AuthenticationService {
     return this.login(account, input);
   }
 
+  /**
+   * Sign-in for a marketplace Customer account (`account_kind = 'customer'`,
+   * `company_id: null`). Shares the exact same private `login()` — lockout,
+   * password verification, session creation — every other kind uses, so
+   * lockout/session behaviour can never drift between Company, Platform and
+   * Customer sign-in. The only Customer-specific step is identifier lookup
+   * (`findCustomerAccount`, no Company/subdomain involved).
+   *
+   * Shared Commerce Foundation Prompt 3A.
+   */
+  public async loginCustomer(input: {
+    createdIp?: string | undefined;
+    identifier: string;
+    password: string;
+    userAgent?: string | undefined;
+  }): Promise<LoginResult> {
+    const account = await this.repository.findCustomerAccount(
+      input.identifier.trim(),
+      normalizeUaeMobile(input.identifier),
+    );
+    return this.login(account, input);
+  }
+
   public async authenticate(accessToken: string): Promise<IdentityContext> {
     const session = await this.repository.findActiveSession(this.sessionTokens.hash(accessToken));
     if (session === undefined) {

@@ -4,6 +4,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 
 import { ApiClient } from "../api/api-client.js";
 import type { LoginResponse } from "../api/contracts.js";
+import { registerErrorReportingClient } from "../api/error-reporting-client.js";
 import { AccountSetupView } from "../features/authentication/AccountSetupView.js";
 import { LoginView } from "../features/authentication/LoginView.js";
 import { PasswordChangeView } from "../features/authentication/PasswordChangeView.js";
@@ -40,7 +41,11 @@ export function App() {
   const location = useLocation();
   const navigate = useNavigate();
   const currentLanguage = normalizeLocale(i18n.resolvedLanguage);
-  const api = useMemo(() => new ApiClient(), []);
+  const api = useMemo(() => {
+    const client = new ApiClient();
+    registerErrorReportingClient(client);
+    return client;
+  }, []);
   const [session, setSession] = useState<LoginResponse>();
   // True until the silent restoration attempt below has answered, so neither
   // the login form nor a protected page is shown on a guess.

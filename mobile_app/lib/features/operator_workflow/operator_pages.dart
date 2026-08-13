@@ -480,16 +480,29 @@ final class _OperatorOrderDetailsPageState
               ),
               audience: OrderAudience.operatorRole,
             ),
-            ListTile(
-              title: Text(l10n.traderLabel),
-              subtitle: Text(order.traderName),
+            const SizedBox(height: AppSpacing.sm),
+            BluelineSectionCard(
+              child: Column(
+                children: [
+                  BluelineInfoRow(
+                    icon: Icons.storefront_outlined,
+                    label: l10n.traderLabel,
+                    value: order.traderName,
+                  ),
+                  BluelineInfoRow(
+                    icon: Icons.person_pin_circle_outlined,
+                    label: l10n.assignedDriverLabel,
+                    value: order.driverName ?? l10n.notAvailable,
+                  ),
+                  if (order.notes != null)
+                    BluelineInfoRow(
+                      icon: Icons.notes_outlined,
+                      label: l10n.notes,
+                      value: order.notes!,
+                    ),
+                ],
+              ),
             ),
-            ListTile(
-              title: Text(l10n.assignedDriverLabel),
-              subtitle: Text(order.driverName ?? l10n.notAvailable),
-            ),
-            if (order.notes != null)
-              ListTile(title: Text(l10n.notes), subtitle: Text(order.notes!)),
             if (hasActions) ...[
               const SizedBox(height: AppSpacing.sm),
               Text(

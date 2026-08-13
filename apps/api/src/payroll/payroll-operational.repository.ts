@@ -25,6 +25,8 @@ export class PayrollOperationalRepository {
       deductionAdjustments: string;
       held: boolean;
       paid: string;
+      salaryAdvanceRecovery: string;
+      variableAlreadyPaid: string;
     }>`
       select l.basic_salary_snapshot::text as "basicSalary",
              l.allowance_total::text as "allowanceTotal",
@@ -32,6 +34,8 @@ export class PayrollOperationalRepository {
              l.delivered_order_earnings::text as "deliveredOrderEarnings",
              l.collection_earnings::text as "collectionEarnings",
              l.advances::text as advances, l.amount_paid::text as paid,
+             l.variable_earnings_already_paid::text as "variableAlreadyPaid",
+             l.salary_advance_recovery::text as "salaryAdvanceRecovery",
              l.salary_hold_snapshot as held,
              coalesce(sum(a.amount) filter (
                where a.status='active' and a.direction='earning'
@@ -76,7 +80,11 @@ export class PayrollOperationalRepository {
           .plus(row.deliveredOrderEarnings)
           .plus(row.collectionEarnings)
           .plus(earning);
-    const net = gross.minus(deduction).minus(row.held ? 0 : row.advances);
+    const net = gross
+      .minus(deduction)
+      .minus(row.held ? 0 : row.advances)
+      .minus(row.held ? 0 : row.variableAlreadyPaid)
+      .minus(row.held ? 0 : row.salaryAdvanceRecovery);
     if (net.isNegative()) {
       throw new ApplicationException(
         "payroll_line_negative_net_salary",
@@ -134,7 +142,8 @@ export class PayrollOperationalRepository {
                    as collection_earnings,
                  coalesce(sum(earning_adjustments_total) filter (where status <> 'reversed'),0)
                    as earning_adjustments,
-                 coalesce(sum(deduction_adjustments_total + advances)
+                 coalesce(sum(deduction_adjustments_total + advances
+                   + variable_earnings_already_paid + salary_advance_recovery)
                    filter (where status <> 'reversed'),0) as deductions,
                  coalesce(sum(net_salary) filter (where status <> 'reversed'),0) as net_salary,
                  coalesce(sum(amount_paid) filter (where status <> 'reversed'),0) as paid,

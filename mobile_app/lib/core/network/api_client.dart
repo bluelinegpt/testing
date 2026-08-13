@@ -78,7 +78,7 @@ final class ApiClient {
           // Dio resolves relative request paths against this URI. A missing
           // trailing slash makes `/api/v1` behave like a file and turns
           // `auth/login` into `/api/auth/login`, which is not an API route.
-          baseUrl: _directoryBaseUrl(baseUrl),
+          baseUrl: effectiveBaseUrl(baseUrl).toString(),
           connectTimeout: const Duration(seconds: 15),
           receiveTimeout: const Duration(seconds: 30),
           sendTimeout: const Duration(seconds: 30),
@@ -99,6 +99,17 @@ final class ApiClient {
 
   final Dio _dio;
   final Future<String?> Function() tokenProvider;
+
+  /// The configured API prefix treated as a directory for relative endpoints.
+  ///
+  /// This deliberately does not add `/api/v1`; the environment configuration
+  /// owns that prefix so every flavor can point at its intended API gateway.
+  static Uri effectiveBaseUrl(Uri baseUrl) =>
+      Uri.parse(_directoryBaseUrl(baseUrl));
+
+  /// Resolves a relative API endpoint against the configured API prefix.
+  static Uri endpointUrl(Uri baseUrl, String endpoint) =>
+      effectiveBaseUrl(baseUrl).resolve(endpoint);
 
   static String _directoryBaseUrl(Uri baseUrl) {
     final value = baseUrl.toString();

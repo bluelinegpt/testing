@@ -44,6 +44,7 @@ import {
 } from "../features/operations/OrdersModuleWorkspace.js";
 import { TraderReceivablesWorkspace } from "../features/operations/TraderReceivablesWorkspace.js";
 import { TraderSettlementsWorkspace } from "../features/operations/TraderSettlementsWorkspace.js";
+import { DeploymentStatusPage } from "../features/administration/DeploymentStatusPage.js";
 import { SupportWorkspace } from "../features/support/SupportWorkspace.js";
 import { CommunicationCenter } from "../features/communication/CommunicationCenter.js";
 import { CompanyAppShell } from "./CompanyAppShell.js";
@@ -411,6 +412,8 @@ export function CompanyWorkspace({
     );
   } else if (path === "/support") {
     content = <SupportWorkspace api={api} />;
+  } else if (path === "/administration/deployment-status") {
+    content = <DeploymentStatusPage />;
   } else {
     content = (
       <section className="route-message">

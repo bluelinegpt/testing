@@ -1,4 +1,4 @@
-import { promises as fileSystem } from "node:fs";
+import { existsSync, promises as fileSystem } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -13,6 +13,14 @@ import type { DatabaseSchema } from "./database.types.js";
 loadEnvironment({ path: resolve(process.cwd(), "../../.env") });
 
 const settings = configuration();
+// Source workspaces keep migrations at the repository root. The production
+// image copies them below the deployed API so imports inside each migration
+// resolve the API's own Kysely dependency instead of looking for a nonexistent
+// /opt/app/node_modules directory.
+const deployedMigrationFolder = resolve(process.cwd(), "database/migrations");
+const migrationFolder = existsSync(deployedMigrationFolder)
+  ? deployedMigrationFolder
+  : resolve(process.cwd(), "../../database/migrations");
 const pool = new Pool({
   application_name: "blueline-migrations",
   connectionTimeoutMillis: settings.database.connectionTimeoutMs,
@@ -26,7 +34,7 @@ const migrator = new Migrator({
   provider: new FileMigrationProvider({
     fs: fileSystem,
     import: (modulePath) => import(pathToFileURL(modulePath).href),
-    migrationFolder: resolve(process.cwd(), "../../database/migrations"),
+    migrationFolder,
     path: { join: (...parts: string[]) => resolve(...parts) },
   }),
 });

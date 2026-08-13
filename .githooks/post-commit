@@ -1,0 +1,18 @@
+#!/bin/sh
+# Runs after every commit. Figures out which app(s) this commit touched and
+# flips their Documentation/deployment-registry.json entry to needs_deploy,
+# with the real commit/date/description/author read from git -- not typed by
+# whichever agent made the commit, so it can't be forgotten or gotten wrong.
+#
+# This updates the registry file in the working tree but does NOT amend the
+# commit that just happened (amending automatically is its own hazard) -- the
+# registry change rides along in whichever commit comes next, or can be
+# committed on its own with `git commit -am "chore: update deployment registry"`.
+
+set -eu
+cd "$(git rev-parse --show-toplevel)"
+
+apps=$(node scripts/deployment-registry.mjs touched-apps HEAD~1 HEAD 2>/dev/null || true)
+for app in $apps; do
+  node scripts/deployment-registry.mjs mark-needs-deploy "$app"
+done

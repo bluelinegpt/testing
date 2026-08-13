@@ -33,6 +33,7 @@ import { PayrollReportService } from "../payroll/payroll-report.service.js";
 import { EmployeeCollectionEarningService } from "../payroll/employee-collection-earning.service.js";
 import { OutsourcedDriverFeeService } from "../payroll/outsourced-driver-fee.service.js";
 import { OutsourcedDriverFeeReportService } from "../payroll/outsourced-driver-fee-report.service.js";
+import { DriverEarningsService } from "../payroll/driver-earnings.service.js";
 import {
   OperationsController,
   PortalController,
@@ -91,6 +92,7 @@ import { TraderSettlementService } from "./trader-settlement.service.js";
     EmployeeCollectionEarningService,
     OutsourcedDriverFeeService,
     OutsourcedDriverFeeReportService,
+    DriverEarningsService,
     PayrollAdjustmentService,
     PayrollCalculationService,
     PayrollOperationSupport,

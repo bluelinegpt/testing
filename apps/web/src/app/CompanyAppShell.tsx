@@ -22,6 +22,7 @@ import { useTranslation } from "react-i18next";
 import { NavLink, useLocation } from "react-router-dom";
 
 import type { LoginResponse } from "../api/contracts.js";
+import { VersionBadge } from "../components/VersionBadge.js";
 import { normalizeLocale, storeLocale, type SupportedLocale } from "../localization/locale.js";
 import type { ThemePreference } from "../theme/theme-preference.js";
 import { useCompanyBranding } from "./CompanyBrandingContext.js";
@@ -208,6 +209,10 @@ export function CompanyAppShell({
             items: [
               { icon: MessageSquare, label: t("nav.communicationCenter"), path: "/communication" },
               { label: t("nav.supportCases"), path: "/support" },
+              {
+                label: t("nav.deploymentStatus"),
+                path: "/administration/deployment-status",
+              },
             ],
           },
           {
@@ -393,7 +398,10 @@ export function CompanyAppShell({
           </button>
           <div className="top-header-title">
             <span title={companyName}>{companyName}</span>
-            <strong>{pageTitle}</strong>
+            <span className="top-header-title-row">
+              <strong>{pageTitle}</strong>
+              <VersionBadge inline />
+            </span>
           </div>
           <div className="top-header-controls">
             <div className="top-header-language" aria-label={t("language.label")} role="group">
@@ -479,6 +487,7 @@ function groupForPath(pathname: string): MenuGroupId | undefined {
   if (pathname === "/cash-management" || pathname === "/payroll") return "accounting";
   if (pathname.startsWith("/accounting")) return "accounting";
   if (pathname.startsWith("/configuration")) return "configuration";
+  if (pathname.startsWith("/administration")) return "administration";
   if (["/support"].includes(normalizePath(pathname))) return "administration";
   if (pathname.startsWith("/reports")) return "reports";
   return undefined;

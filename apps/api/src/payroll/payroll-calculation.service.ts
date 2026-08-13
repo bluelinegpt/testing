@@ -199,6 +199,27 @@ export class PayrollCalculationService {
            set payroll_period_id=null, payroll_entry_id=null, allocated_at=null
          where company_id=${companyId}::uuid and payroll_period_id=${periodId}::uuid
       `.execute(transaction);
+      // Recalculation also releases the additive early-payment links. The
+      // payment/allocation history itself remains immutable; only its draft
+      // Payroll destination is recomputed.
+      await sql`
+        update employee_variable_earning_payment_allocations a
+           set payroll_entry_id=null
+          from payroll_entries l
+         where a.company_id=${companyId}::uuid and a.payroll_entry_id=l.id
+           and l.company_id=a.company_id and l.payroll_period_id=${periodId}::uuid
+      `.execute(transaction);
+      await sql`update employee_driver_earning_period_payroll_allocations a
+        set reversed_at=now() from payroll_entries l
+        where a.company_id=${companyId}::uuid and a.payroll_entry_id=l.id
+          and l.company_id=a.company_id and l.payroll_period_id=${periodId}::uuid
+          and a.reversed_at is null`.execute(transaction);
+      await sql`
+        delete from employee_salary_advance_payroll_allocations a using payroll_entries l
+         where a.company_id=${companyId}::uuid and a.payroll_entry_id=l.id
+           and l.company_id=a.company_id and l.payroll_period_id=${periodId}::uuid
+      `.execute(transaction);
+      await this.refreshSalaryAdvanceBalances(transaction, companyId);
 
       const employees = await sql<EmployeeCandidate>`
         select id, employee_number as "employeeNumber", name_en as "nameEn",
@@ -414,6 +435,19 @@ export class PayrollCalculationService {
           period.start,
           period.end,
         );
+        const earningPeriods = await this.resolveDriverEarningPeriods(
+          transaction,
+          companyId,
+          employee.id,
+          period.start,
+          period.end,
+        );
+        const variableAlreadyPaid = await this.resolveVariableAlreadyPaid(
+          transaction,
+          companyId,
+          orderEarnings.earningIds,
+          collectionEarnings.factIds,
+        ).then((amount) => amount.plus(earningPeriods.interimPaid));
         const salaryRow = salary.rows[0]!;
         const payableStart = this.latestDate(
           period.start,
@@ -440,17 +474,28 @@ export class PayrollCalculationService {
           .plus(allowanceTotal)
           .plus(commission.amount)
           .plus(orderEarnings.amount)
-          .plus(collectionEarnings.amount);
+          .plus(earningPeriods.delivery)
+          .plus(collectionEarnings.amount)
+          .plus(earningPeriods.collection);
+        const salaryAdvanceRecovery = await this.salaryAdvanceAvailable(
+          transaction,
+          companyId,
+          employee.id,
+          period.end,
+          gross.minus(variableAlreadyPaid),
+        );
         const lineId = await this.upsertCalculatedLine(transaction, {
           actorId,
           allowanceTotal,
           basic,
-          collectionEarnings: collectionEarnings.amount,
+          collectionEarnings: collectionEarnings.amount.plus(earningPeriods.collection),
           commission: commission.amount,
           companyId,
-          deliveredOrderEarnings: orderEarnings.amount,
+          deliveredOrderEarnings: orderEarnings.amount.plus(earningPeriods.delivery),
           employee,
           gross,
+          salaryAdvanceRecovery,
+          variableAlreadyPaid,
           periodId,
           periodReference: period.periodReference,
           salaryVersionId: salaryRow.id,
@@ -459,6 +504,16 @@ export class PayrollCalculationService {
           delete from payroll_line_allowances
            where company_id=${companyId}::uuid and payroll_line_id=${lineId}::uuid
         `.execute(transaction);
+        for (const earningPeriod of earningPeriods.items) {
+          const allocated = Decimal.max(
+            new Decimal(earningPeriod.totalEarnings).minus(earningPeriod.interimPaid),
+            0,
+          );
+          await sql`insert into employee_driver_earning_period_payroll_allocations(
+            company_id,period_id,payroll_entry_id,allocated_amount)
+            values(${companyId}::uuid,${earningPeriod.id}::uuid,${lineId}::uuid,
+              ${allocated.toFixed(2)})`.execute(transaction);
+        }
         for (const allowance of proratedAllowances) {
           await sql`
             insert into payroll_line_allowances (
@@ -503,6 +558,23 @@ export class PayrollCalculationService {
                and payroll_period_id is null
           `.execute(transaction);
         }
+        await sql`
+          update employee_variable_earning_payment_allocations
+             set payroll_entry_id=${lineId}::uuid
+           where company_id=${companyId}::uuid and reversed_at is null
+             and (
+               employee_order_earning_id=any(${orderEarnings.earningIds}::uuid[])
+               or employee_collection_fact_id=any(${collectionEarnings.factIds}::uuid[])
+             )
+        `.execute(transaction);
+        await this.allocateSalaryAdvances(
+          transaction,
+          companyId,
+          employee.id,
+          lineId,
+          period.end,
+          salaryAdvanceRecovery,
+        );
         await sql`
           delete from payroll_commission_links
            where company_id=${companyId}::uuid and payroll_entry_id=${lineId}::uuid
@@ -708,6 +780,7 @@ export class PayrollCalculationService {
         basic_salary_snapshot=0, allowance_total=0, employee_driver_commission=0,
         delivered_order_earnings=0,
         earning_adjustments_total=0, deduction_adjustments_total=0, advances=0,
+        variable_earnings_already_paid=0,salary_advance_recovery=0,
         gross_earnings=0, net_salary=0, amount_paid=0, outstanding_amount=0,
         salary_hold_snapshot=true,
         salary_hold_reason_snapshot=excluded.salary_hold_reason_snapshot,
@@ -746,6 +819,8 @@ export class PayrollCalculationService {
       deliveredOrderEarnings: Decimal;
       employee: EmployeeCandidate;
       gross: Decimal;
+      salaryAdvanceRecovery: Decimal;
+      variableAlreadyPaid: Decimal;
       periodId: string;
       periodReference: string;
       salaryVersionId: string;
@@ -759,6 +834,7 @@ export class PayrollCalculationService {
         basic_salary_snapshot, employee_driver_commission, delivered_order_earnings,
         collection_earnings, allowance_total,
         earning_adjustments_total, deduction_adjustments_total, advances,
+        variable_earnings_already_paid, salary_advance_recovery,
         gross_earnings, net_salary, amount_paid, outstanding_amount,
         salary_hold_snapshot, status, source_marker, created_by_account_id,
         calculated_by_account_id, calculated_at
@@ -771,8 +847,11 @@ export class PayrollCalculationService {
         ${input.commission.toFixed(2)}, ${input.deliveredOrderEarnings.toFixed(2)},
         ${input.collectionEarnings.toFixed(2)},
         ${input.allowanceTotal.toFixed(2)}, 0, 0, 0,
-        ${input.gross.toFixed(2)}, ${input.gross.toFixed(2)}, 0,
-        ${input.gross.toFixed(2)}, false, 'calculated', 'new_payroll',
+        ${input.variableAlreadyPaid.toFixed(2)},${input.salaryAdvanceRecovery.toFixed(2)},
+        ${input.gross.toFixed(2)},
+        ${input.gross.minus(input.variableAlreadyPaid).minus(input.salaryAdvanceRecovery).toFixed(2)}, 0,
+        ${input.gross.minus(input.variableAlreadyPaid).minus(input.salaryAdvanceRecovery).toFixed(2)},
+        false, 'calculated', 'new_payroll',
         ${input.actorId}::uuid, ${input.actorId}::uuid, now()
       )
       on conflict (company_id, payroll_period_id, employee_id) do update set
@@ -789,11 +868,15 @@ export class PayrollCalculationService {
         allowance_total=excluded.allowance_total,
         earning_adjustments_total=payroll_entries.earning_adjustments_total,
         deduction_adjustments_total=payroll_entries.deduction_adjustments_total,
+        variable_earnings_already_paid=excluded.variable_earnings_already_paid,
+        salary_advance_recovery=excluded.salary_advance_recovery,
         gross_earnings=excluded.gross_earnings+payroll_entries.earning_adjustments_total,
         net_salary=excluded.gross_earnings+payroll_entries.earning_adjustments_total
-          -payroll_entries.deduction_adjustments_total-payroll_entries.advances,
+          -payroll_entries.deduction_adjustments_total-payroll_entries.advances
+          -excluded.variable_earnings_already_paid-excluded.salary_advance_recovery,
         outstanding_amount=excluded.gross_earnings+payroll_entries.earning_adjustments_total
           -payroll_entries.deduction_adjustments_total-payroll_entries.advances
+          -excluded.variable_earnings_already_paid-excluded.salary_advance_recovery
           -payroll_entries.amount_paid,
         salary_hold_snapshot=false, salary_hold_reason_snapshot=null,
         salary_hold_from_snapshot=null, salary_hold_to_snapshot=null,
@@ -854,6 +937,99 @@ export class PayrollCalculationService {
    * `for update` on the facts is what makes the later allocation safe against a
    * concurrent calculation of an adjacent period.
    */
+  private async resolveVariableAlreadyPaid(
+    database: Kysely<DatabaseSchema>,
+    companyId: string,
+    deliveryIds: readonly string[],
+    collectionIds: readonly string[],
+  ): Promise<Decimal> {
+    const result = await sql<{ amount: string }>`
+      select coalesce(sum(a.allocated_amount),0)::text as amount
+        from employee_variable_earning_payment_allocations a
+        join employee_variable_earning_payments p
+          on p.id=a.payment_id and p.company_id=a.company_id
+       where a.company_id=${companyId}::uuid and a.reversed_at is null
+         and p.status='confirmed'
+         and (a.employee_order_earning_id=any(${deliveryIds}::uuid[])
+           or a.employee_collection_fact_id=any(${collectionIds}::uuid[]))
+    `.execute(database);
+    return new Decimal(result.rows[0]?.amount ?? 0);
+  }
+
+  private async salaryAdvanceAvailable(
+    database: Kysely<DatabaseSchema>,
+    companyId: string,
+    employeeId: string,
+    periodEnd: string,
+    maximum: Decimal,
+  ): Promise<Decimal> {
+    const result = await sql<{ amount: string }>`
+      select coalesce(sum(outstanding_amount),0)::text as amount
+        from employee_salary_advances
+       where company_id=${companyId}::uuid and employee_id=${employeeId}::uuid
+         and status in('confirmed','partially_recovered') and payment_date<=${periodEnd}::date
+    `.execute(database);
+    return Decimal.min(new Decimal(result.rows[0]?.amount ?? 0), Decimal.max(maximum, 0));
+  }
+
+  private async allocateSalaryAdvances(
+    database: Kysely<DatabaseSchema>,
+    companyId: string,
+    employeeId: string,
+    lineId: string,
+    periodEnd: string,
+    amount: Decimal,
+  ): Promise<void> {
+    if (amount.isZero()) return;
+    const advances = await sql<{ id: string; outstanding: string }>`
+      select id,outstanding_amount::text as outstanding from employee_salary_advances
+       where company_id=${companyId}::uuid and employee_id=${employeeId}::uuid
+         and status in('confirmed','partially_recovered') and payment_date<=${periodEnd}::date
+       order by payment_date,created_at,id for update
+    `.execute(database);
+    let remaining = amount;
+    let order = 1;
+    for (const advance of advances.rows) {
+      if (remaining.isZero()) break;
+      const allocated = Decimal.min(remaining, advance.outstanding);
+      await sql`insert into employee_salary_advance_payroll_allocations(
+        company_id,advance_id,payroll_entry_id,allocated_amount,allocation_order)
+        values(${companyId}::uuid,${advance.id}::uuid,${lineId}::uuid,
+          ${allocated.toFixed(2)},${order})`.execute(database);
+      await sql`update employee_salary_advances
+        set recovered_amount=recovered_amount+${allocated.toFixed(2)},
+            outstanding_amount=outstanding_amount-${allocated.toFixed(2)},
+            status=case when outstanding_amount-${allocated.toFixed(2)}=0
+              then 'recovered' else 'partially_recovered' end,
+            updated_at=now(),version=version+1
+        where id=${advance.id}::uuid and company_id=${companyId}::uuid`.execute(database);
+      remaining = remaining.minus(allocated);
+      order += 1;
+    }
+  }
+
+  private async refreshSalaryAdvanceBalances(
+    database: Kysely<DatabaseSchema>,
+    companyId: string,
+  ): Promise<void> {
+    await sql`update employee_salary_advances a set
+      recovered_amount=coalesce((select sum(p.allocated_amount)
+        from employee_salary_advance_payroll_allocations p
+        where p.company_id=a.company_id and p.advance_id=a.id and p.reversed_at is null),0),
+      outstanding_amount=a.amount_paid-coalesce((select sum(p.allocated_amount)
+        from employee_salary_advance_payroll_allocations p
+        where p.company_id=a.company_id and p.advance_id=a.id and p.reversed_at is null),0),
+      status=case when coalesce((select sum(p.allocated_amount)
+        from employee_salary_advance_payroll_allocations p
+        where p.company_id=a.company_id and p.advance_id=a.id and p.reversed_at is null),0)=0 then 'confirmed'
+        when coalesce((select sum(p.allocated_amount)
+          from employee_salary_advance_payroll_allocations p
+          where p.company_id=a.company_id and p.advance_id=a.id and p.reversed_at is null),0)=a.amount_paid
+          then 'recovered' else 'partially_recovered' end,
+      updated_at=now(),version=a.version+1
+      where a.company_id=${companyId}::uuid and a.status<>'reversed'`.execute(database);
+  }
+
   private async resolveCollectionEarnings(
     database: Kysely<DatabaseSchema>,
     companyId: string,
@@ -884,6 +1060,9 @@ export class PayrollCalculationService {
          and f.counts_for_collection_earning
          and f.payroll_period_id is null
          and f.business_date between ${periodStart}::date and ${periodEnd}::date
+         and not exists(select 1 from employee_driver_earning_periods p
+           where p.company_id=f.company_id and p.employee_id=f.employee_id and p.status<>'reversed'
+             and f.business_date between p.date_from and p.date_to)
        order by f.business_date, f.id
          for update of f
     `.execute(database);
@@ -900,6 +1079,8 @@ export class PayrollCalculationService {
       if (row.paymentType === "per_collected_order") {
         amount = amount.plus(new Decimal(row.rate ?? 0).times(row.collectedOrderCount));
       } else if (row.paymentType === "flat_per_confirmed_collection") {
+        // Legacy read compatibility only: new flat rules are rejected by both
+        // Employee and outsourced collection rule write DTOs/services.
         amount = amount.plus(new Decimal(row.rate ?? 0));
       }
     }
@@ -922,12 +1103,42 @@ export class PayrollCalculationService {
          and e.earning_month = date_trunc('month', ${periodStart}::date)::date
          and (e.delivered_at at time zone coalesce(cs.timezone, 'Asia/Dubai'))::date
                between ${periodStart}::date and ${periodEnd}::date
+         and not exists(select 1 from employee_driver_earning_period_delivery_sources s
+           where s.company_id=e.company_id and s.employee_order_earning_id=e.id)
        order by e.delivered_at, e.id
          for update of e
     `.execute(database);
     return {
       amount: result.rows.reduce((sum, row) => sum.plus(row.amount), new Decimal(0)),
       earningIds: result.rows.map((row) => row.id),
+    };
+  }
+
+  private async resolveDriverEarningPeriods(
+    database: Kysely<DatabaseSchema>, companyId: string, employeeId: string,
+    periodStart: string, periodEnd: string,
+  ) {
+    const result = await sql<{ collection: string; delivery: string; id: string; interimPaid: string; totalEarnings: string }>`
+      select p.id,p.delivery_earnings::text as delivery,p.collection_earnings::text as collection,
+        p.total_earnings::text as "totalEarnings",coalesce(i.paid,0)::text as "interimPaid"
+      from employee_driver_earning_periods p
+      left join lateral(select sum(a.allocated_amount) as paid
+        from employee_driver_earning_period_payment_allocations a
+        join employee_variable_earning_payments ep on ep.id=a.payment_id and ep.company_id=a.company_id
+        where a.company_id=p.company_id and a.period_id=p.id and a.reversed_at is null
+          and ep.status='confirmed') i on true
+      where p.company_id=${companyId}::uuid and p.employee_id=${employeeId}::uuid and p.status<>'reversed'
+        and p.date_from>=${periodStart}::date and p.date_to<=${periodEnd}::date
+        and not exists(select 1 from employee_driver_earning_period_payroll_allocations pa
+          join payroll_entries pe on pe.id=pa.payroll_entry_id and pe.company_id=pa.company_id
+          where pa.company_id=p.company_id and pa.period_id=p.id and pa.reversed_at is null
+            and pe.approved_at is not null)
+      order by p.date_from,p.id for update of p`.execute(database);
+    return {
+      collection: result.rows.reduce((sum,row)=>sum.plus(row.collection),new Decimal(0)),
+      delivery: result.rows.reduce((sum,row)=>sum.plus(row.delivery),new Decimal(0)),
+      interimPaid: result.rows.reduce((sum,row)=>sum.plus(row.interimPaid),new Decimal(0)),
+      items: result.rows,
     };
   }
 

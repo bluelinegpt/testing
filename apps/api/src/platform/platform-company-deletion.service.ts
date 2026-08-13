@@ -231,20 +231,66 @@ export class PlatformCompanyDeletionService {
     }
     const readyForDelete = false;
 
-    const operation = (
-      await sql<{ id: string }>`
-        insert into platform_company_deletion_operations (
-          company_id_snapshot, company_code_snapshot, company_name_snapshot, environment,
-          closed_at, eligible_at, requested_by_account_id, state, correlation_id, idempotency_key
-        ) values (
-          ${company.id}::uuid, ${company.code}, ${company.name}, ${company.environment},
-          ${company.closedAt}::timestamptz, ${eligibility.eligibleAt}::timestamptz,
-          ${actor.accountId}::uuid, ${blockers.length === 0 ? "previewed" : "blocked"}, ${actor.correlationId}, ${idempotencyKey}
-        )
-        on conflict (idempotency_key) do update set updated_at = now()
-        returning id
-      `.execute(this.database)
-    ).rows[0];
+    // `platform_company_deletion_one_active` allows at most one operation in
+    // `previewed`/`ready`/`deleting` per Company at a time -- correct, since
+    // two concurrent deletion attempts on the same Company must never race.
+    // But a Platform administrator re-running "Run Deletion Preview" (a new
+    // browser tab, a retry after closing the page, simply clicking it again)
+    // is not a second concurrent attempt at all -- it is the normal way to
+    // refresh a preview, and previously hit this same constraint as a raw,
+    // unmapped Postgres error surfaced to the user as a generic integrity
+    // conflict. A prior active operation for THIS Company is superseded here
+    // -- marked `rolled_back` with a clear reason, never overwritten in
+    // place -- before the fresh preview is recorded, so every prior attempt
+    // remains in the table as permanent evidence and a fresh preview always
+    // succeeds. `completed`/`completed_cleanup_pending` operations are never
+    // touched: the partial index this guards does not even include them, so
+    // they can never conflict with a new preview in the first place.
+    await sql`
+      update platform_company_deletion_operations
+         set state = 'rolled_back',
+             failure_reason = 'Superseded by a newer deletion preview for the same Company',
+             updated_at = now()
+       where company_id_snapshot = ${company.id}::uuid
+         and state in ('previewed', 'ready', 'deleting')
+    `.execute(this.database);
+
+    let operation: { id: string } | undefined;
+    try {
+      operation = (
+        await sql<{ id: string }>`
+          insert into platform_company_deletion_operations (
+            company_id_snapshot, company_code_snapshot, company_name_snapshot, environment,
+            closed_at, eligible_at, requested_by_account_id, state, correlation_id, idempotency_key
+          ) values (
+            ${company.id}::uuid, ${company.code}, ${company.name}, ${company.environment},
+            ${company.closedAt}::timestamptz, ${eligibility.eligibleAt}::timestamptz,
+            ${actor.accountId}::uuid, ${blockers.length === 0 ? "previewed" : "blocked"}, ${actor.correlationId}, ${idempotencyKey}
+          )
+          on conflict (idempotency_key) do update set updated_at = now()
+          returning id
+        `.execute(this.database)
+      ).rows[0];
+    } catch (error) {
+      // The supersede step above eliminates the ordinary "stale operation"
+      // case. What can still reach here is a genuine race -- two preview
+      // requests for the same Company landing within the same instant --
+      // and a caller should see a clear, safe, retryable reason, not a raw
+      // Postgres constraint name surfaced as a generic conflict.
+      if (
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        (error as { code?: unknown }).code === "23505"
+      ) {
+        throw new ApplicationException(
+          "company_deletion_preview_in_progress",
+          "Another deletion preview for this Company started at the same moment. Retry the preview.",
+          HttpStatus.CONFLICT,
+        );
+      }
+      throw error;
+    }
     if (operation === undefined) throw new Error("Deletion preview operation was not recorded");
 
     const preview = (

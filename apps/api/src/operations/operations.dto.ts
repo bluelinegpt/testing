@@ -559,7 +559,19 @@ export class CreateOrderDto {
 // The authenticated Trader is always resolved from the active portal profile.
 // Accepting a Trader identifier from the browser would allow an unsafe
 // cross-profile selection, so it is deliberately absent from this contract.
-export class CreateTraderPortalOrderDto extends OmitType(CreateOrderDto, ["traderId"] as const) {}
+export class CreateTraderPortalOrderDto extends OmitType(CreateOrderDto, ["traderId"] as const) {
+  /**
+   * Which of the Trader's linked Delivery Companies this Order belongs to
+   * (Trader Portal Prompt 3T-C, Part D). Optional: absent (or matching the
+   * caller's own session Company) keeps today's behaviour unchanged. See
+   * `OperationsService.resolveTraderPortalDeliveryCompany` for how this is
+   * validated -- an unrelated or inactive Company is rejected server-side
+   * regardless of what the client sends.
+   */
+  @IsOptional()
+  @IsUUID()
+  public readonly deliveryCompanyId?: string;
+}
 
 // Partial edit of an existing order's business fields before delivery. Every field is
 // optional; only the provided fields change. Changing the Trader, or the Customer + address
@@ -682,6 +694,18 @@ export class ImportOrdersCsvDto {
   @IsString()
   @MaxLength(100000)
   public readonly csv!: string;
+}
+
+export class ImportTraderPortalOrdersCsvDto extends ImportOrdersCsvDto {
+  /**
+   * Which Delivery Company the WHOLE batch belongs to (Trader Portal Prompt
+   * 3T-C, Part D) — one selection for the entire CSV, not a per-row column;
+   * every row resolves to that Company's own Trader record. Same validation
+   * as `CreateTraderPortalOrderDto.deliveryCompanyId`.
+   */
+  @IsOptional()
+  @IsUUID()
+  public readonly deliveryCompanyId?: string;
 }
 
 export class RegisterOrderAttachmentDto {
@@ -1622,3 +1646,37 @@ export class TraderCollectionListQueryDto extends TraderCollectionFilterDto {
 
 // Summary-cards endpoint: no pagination, same filter vocabulary as the list.
 export class TraderCollectionSummaryQueryDto extends TraderCollectionFilterDto {}
+
+/**
+ * A Trader editing its own portal profile.
+ *
+ * Deliberately excludes `name` and `mobileNumber`: those are the primary
+ * identity fields already referenced by Delivery Orders and settlements, and
+ * changing them from the portal without a verification step is out of scope
+ * here (Trader Workspace Prompt 3T-A, §42).
+ */
+export class UpdateTraderPortalProfileDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  public contactPerson?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(32)
+  public telephone?: string | null;
+
+  @IsOptional()
+  @IsEmail()
+  @MaxLength(200)
+  public email?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  public commercialNumber?: string | null;
+
+  @IsOptional()
+  @IsIn(["en", "ar"])
+  public preferredLanguage?: string;
+}

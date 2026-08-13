@@ -180,9 +180,26 @@ final class _DriverOrdersPageState extends ConsumerState<DriverOrdersPage> {
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.all(AppSpacing.md),
         children: [
-          Text(
-            l10n.driverOrdersLimited,
-            style: Theme.of(context).textTheme.bodySmall,
+          BluelineSectionCard(
+            padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.md,
+              vertical: AppSpacing.sm,
+            ),
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.local_shipping_outlined,
+                  color: AppColors.primary,
+                ),
+                const SizedBox(width: AppSpacing.sm),
+                Expanded(
+                  child: Text(
+                    l10n.driverOrdersLimited,
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ),
+              ],
+            ),
           ),
           const SizedBox(height: AppSpacing.md),
           FutureBuilder<_DriverOrdersLoad>(

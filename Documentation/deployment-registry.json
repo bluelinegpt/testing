@@ -1,0 +1,57 @@
+{
+  "$comment": "Local-version-vs-Render status catalog, shown on /administration/deployment-status (Company Portal) and Platform Administration's Deployment Registry screen. Kept current by .githooks/post-commit and .githooks/pre-push via scripts/deployment-registry.mjs -- not by hand. confirmed_live/confirmedLiveAt are the one exception: only a human confirming Render is actually showing the change sets those (scripts/deployment-registry.mjs mark-confirmed-live).",
+  "apps": [
+    {
+      "id": "api",
+      "displayName": "API",
+      "path": "apps/api",
+      "renderService": "bluelinegpt-api-test",
+      "status": "pushed_awaiting_confirmation",
+      "localCommit": "fc1bfa4",
+      "localCommitDate": "2026-08-12",
+      "lastChangeDescription": "fix(api): stop type-only imports from erasing DTO validation",
+      "lastChangeBy": "claude",
+      "confirmedLiveCommit": null,
+      "confirmedLiveAt": null
+    },
+    {
+      "id": "web",
+      "displayName": "Main app",
+      "path": "apps/web",
+      "renderService": "bluelinegpt-web-test",
+      "status": "needs_deploy",
+      "localCommit": "6a3c710",
+      "localCommitDate": "2026-08-13",
+      "lastChangeDescription": "fix(operations): load areas per emirate and simplify grouping labels",
+      "lastChangeBy": "claude",
+      "confirmedLiveCommit": null,
+      "confirmedLiveAt": null
+    },
+    {
+      "id": "platform-web",
+      "displayName": "Platform admin",
+      "path": "apps/platform-web",
+      "renderService": null,
+      "status": "pushed_awaiting_confirmation",
+      "localCommit": "783db97",
+      "localCommitDate": "2026-08-11",
+      "lastChangeDescription": "chore: sync local application changes",
+      "lastChangeBy": "claude",
+      "confirmedLiveCommit": null,
+      "confirmedLiveAt": null
+    },
+    {
+      "id": "store",
+      "displayName": "Store",
+      "path": "apps/store",
+      "renderService": null,
+      "status": "pushed_awaiting_confirmation",
+      "localCommit": "b19889c",
+      "localCommitDate": "2026-08-09",
+      "lastChangeDescription": "BluelineGPT checkpoint before GitHub testing deployment",
+      "lastChangeBy": "human",
+      "confirmedLiveCommit": null,
+      "confirmedLiveAt": null
+    }
+  ]
+}

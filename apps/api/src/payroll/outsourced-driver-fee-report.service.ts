@@ -66,7 +66,7 @@ export class OutsourcedDriverFeeReportService {
         coalesce(refs.references,'') as "paymentReferences",
         coalesce(refs.reconciliations,'') as "collectionReferences"
       from outsourced_driver_fee_accruals f
-      join orders o on o.id=f.order_id and o.company_id=f.company_id
+      left join orders o on o.id=f.order_id and o.company_id=f.company_id
       left join lateral (
         select sum(x.allocated_amount) as amount from outsourced_driver_fee_payment_allocations x
         join outsourced_driver_fee_payments p on p.id=x.payment_id and p.company_id=x.company_id
@@ -301,7 +301,7 @@ export class OutsourcedDriverFeeReportService {
         coalesce(cu.display_name,a.username) as "createdBy",f.created_at::text as "createdAt"
       from outsourced_driver_fee_accruals f
       join drivers d on d.id=f.driver_id and d.company_id=f.company_id
-      join orders o on o.id=f.order_id and o.company_id=f.company_id
+      left join orders o on o.id=f.order_id and o.company_id=f.company_id
       left join accounts a on a.id=f.created_by_account_id and a.company_id=f.company_id
       left join company_users cu on cu.account_id=a.id and cu.company_id=a.company_id
       where f.company_id=${companyId}::uuid and f.accrual_business_date between ${query.from}::date and ${query.to}::date
@@ -378,7 +378,7 @@ export class OutsourcedDriverFeeReportService {
         x.reversed_at::text as "allocationReversedAt"
       from outsourced_driver_fee_payment_allocations x
       join outsourced_driver_fee_accruals f on f.id=x.accrual_id and f.company_id=x.company_id
-      join orders o on o.id=f.order_id and o.company_id=f.company_id
+      left join orders o on o.id=f.order_id and o.company_id=f.company_id
       where x.company_id=${companyId}::uuid and x.payment_id=${paymentId}::uuid
       order by x.allocation_order,x.id
     `.execute(this.database);

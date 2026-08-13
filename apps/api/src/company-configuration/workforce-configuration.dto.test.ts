@@ -5,6 +5,7 @@ import { validate } from "class-validator";
 import {
   CreateCommissionRuleDto,
   EmployeeAllowanceDto,
+  SaveCollectionEarningRuleDto,
   SaveDriverDto,
   SaveEmployeeDto,
 } from "./workforce-configuration.dto.js";
@@ -104,5 +105,18 @@ describe("workforce configuration DTOs", () => {
     const invalid = Object.assign(new CreateCommissionRuleDto(), { ...valid, rate: -1 });
     await expect(validate(valid)).resolves.toEqual([]);
     await expect(validate(invalid)).resolves.not.toEqual([]);
+  });
+
+  it("accepts None and Per Collected Order but rejects legacy flat collection rules", async () => {
+    const rule = (collectionPaymentType: string, amount: number) =>
+      Object.assign(new SaveCollectionEarningRuleDto(), {
+        amount,
+        collectionPaymentType,
+        effectiveFrom: "2026-08-08",
+      });
+    await expect(validate(rule("none", 0))).resolves.toEqual([]);
+    await expect(validate(rule("per_collected_order", 1))).resolves.toEqual([]);
+    const errors = await validate(rule("flat_per_confirmed_collection", 5));
+    expect(errors.map((error) => error.property)).toContain("collectionPaymentType");
   });
 });

@@ -4,15 +4,23 @@ import { StoreChrome } from "./components/StoreChrome.js";
 import { storeConfiguration } from "./config/environment.js";
 import { LocaleScope } from "./routing/locale-routing.js";
 import type { SupportedLanguage } from "./localization/i18n.js";
+import { AccountPage } from "./pages/AccountPage.js";
 import {
   CategoriesPage,
   CategoryDetailPage,
   SubcategoryPage,
 } from "./pages/CategoryPages.js";
+import { ForgotPasswordPage } from "./pages/ForgotPasswordPage.js";
+import { LoginPage } from "./pages/LoginPage.js";
 import { MarketplaceHomePage } from "./pages/MarketplaceHomePage.js";
+import { MyOrdersPage } from "./pages/MyOrdersPage.js";
+import { OrderDetailPage } from "./pages/OrderDetailPage.js";
 import { ProductPage } from "./pages/ProductPage.js";
+import { RegisterPage } from "./pages/RegisterPage.js";
+import { ResetPasswordPage } from "./pages/ResetPasswordPage.js";
 import { ReservedRoutePage } from "./pages/ReservedRoutePage.js";
 import { StorePage } from "./pages/StorePage.js";
+import { TrackPage } from "./pages/TrackPage.js";
 import { MessageState } from "./components/States.js";
 
 /**
@@ -80,19 +88,15 @@ function LocalisedRoutes({ locale }: { readonly locale: SupportedLanguage | null
           element={<SubcategoryPage />}
           path="categories/:categorySlug/:subcategorySlug"
         />
-        {[
-          "search",
-          "register",
-          "login",
-          "account",
-          "orders",
-          "cart",
-          "checkout",
-          "track",
-          "support",
-          "privacy",
-          "terms",
-        ].map((path) => (
+        <Route element={<RegisterPage />} path="register" />
+        <Route element={<LoginPage />} path="login" />
+        <Route element={<ForgotPasswordPage />} path="forgot-password" />
+        <Route element={<ResetPasswordPage />} path="reset-password" />
+        <Route element={<AccountPage />} path="account" />
+        <Route element={<MyOrdersPage />} path="account/orders" />
+        <Route element={<OrderDetailPage />} path="account/orders/:storeOrderNumber" />
+        <Route element={<TrackPage />} path="track" />
+        {["search", "cart", "checkout", "support", "privacy", "terms"].map((path) => (
           <Route element={<ReservedRoutePage />} key={path} path={path} />
         ))}
         <Route element={<ProductPage />} path=":storeSlug/products/:productSlug" />

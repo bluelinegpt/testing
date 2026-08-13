@@ -10,5 +10,5 @@
     "types": ["node"]
   },
   "include": ["server/**/*.ts", "src/seo/**/*.ts"],
-  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx"]
+  "exclude": ["server/**/*.test.ts", "src/**/*.test.ts", "src/**/*.test.tsx"]
 }

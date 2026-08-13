@@ -31,6 +31,13 @@ ThemeData buildAppTheme() {
     useMaterial3: true,
     colorScheme: scheme,
     scaffoldBackgroundColor: AppColors.background,
+    appBarTheme: const AppBarTheme(
+      backgroundColor: Colors.white,
+      foregroundColor: Color(0xFF101828),
+      elevation: 0,
+      surfaceTintColor: Colors.white,
+      titleTextStyle: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+    ),
     visualDensity: VisualDensity.standard,
     inputDecorationTheme: const InputDecorationTheme(
       border: OutlineInputBorder(
@@ -39,7 +46,8 @@ ThemeData buildAppTheme() {
       contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 14),
     ),
     cardTheme: const CardThemeData(
-      elevation: 0,
+      elevation: 1,
+      shadowColor: Color(0x14000000),
       margin: EdgeInsets.zero,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.all(Radius.circular(16)),
@@ -50,6 +58,19 @@ ThemeData buildAppTheme() {
       style: FilledButton.styleFrom(
         minimumSize: const Size(48, 48),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+    ),
+    navigationBarTheme: NavigationBarThemeData(
+      height: 76,
+      backgroundColor: Colors.white,
+      indicatorColor: AppColors.primary.withValues(alpha: .14),
+      labelTextStyle: WidgetStateProperty.resolveWith(
+        (states) => TextStyle(
+          fontWeight: states.contains(WidgetState.selected)
+              ? FontWeight.w700
+              : FontWeight.w500,
+          fontSize: 11,
+        ),
       ),
     ),
   );

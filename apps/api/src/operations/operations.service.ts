@@ -21,6 +21,7 @@ import type { DatabaseSchema } from "../infrastructure/database/database.types.j
 import { KyselyTransactionManager } from "../infrastructure/database/transaction-manager.js";
 import { ApplicationException } from "../presentation/errors/application.exception.js";
 import { normalizeReferenceTerm, unifiedOrderSearchPredicate } from "./order-search.js";
+import { traderCommerceOrderScopePairs } from "./trader-commerce-order-scope.js";
 import { mobileComparisonKey, normalizeUaeMobile } from "../shared/uae-mobile.js";
 import { PushOutboxWriter } from "../push/push-outbox-writer.service.js";
 import { IdentityContextAccessor } from "../security/identity-context.js";
@@ -36,6 +37,7 @@ import type {
   CreateTraderDto,
   FinancialPaymentDto,
   ImportOrdersCsvDto,
+  ImportTraderPortalOrdersCsvDto,
   OrderIdentifierAvailabilityQueryDto,
   OrderQuoteDto,
   RegisterInternationalShipmentDto,
@@ -150,10 +152,14 @@ export interface OperationsOrderPage {
   /** Present when Delivery Activity resolved a Date Mode; absent otherwise. */
   readonly appliedDateMode?: AppliedReportDateMode;
   readonly filteredCount: number;
+  /** Rows matching the selected tab and the optional filters. */
+  readonly matchingCount: number;
   readonly items: readonly OperationsOrder[];
   readonly page: number;
   readonly pageSize: 25 | 50 | 100;
   readonly totalCount: number;
+  /** Rows in the selected tab before optional filters are applied. */
+  readonly tabTotalCount: number;
 }
 
 export interface OperationsOrderQuote {
@@ -387,12 +393,91 @@ export interface PortalOrder {
   readonly emirateNameAr: string | null;
 }
 
+/**
+ * One Order row, safe for a Trader session.
+ *
+ * An explicit allow-list, not `OperationsOrder` narrowed down: a field added
+ * to `OperationsOrder` later must be deliberately added here too, rather than
+ * reaching a Trader's browser by default.
+ */
+export interface TraderPortalOrderSummary {
+  readonly areaName: string;
+  readonly codAmount: string;
+  readonly customerAddress: string;
+  readonly customerAmountDue: string;
+  readonly customerMobileNumber: string;
+  readonly customerName: string;
+  /**
+   * The Delivery Company that processed this Order. Present only from
+   * `traderPortalOrdersPageAllCompanies` -- the single-Company `orders()`
+   * delegate has nothing else to put here, since every row already belongs
+   * to the caller's one session Company, so it stays absent there rather
+   * than repeating a value the caller already knows.
+   */
+  readonly deliveryCompanyId?: string;
+  readonly deliveryCompanyName?: string;
+  readonly deliveryStatus: string;
+  readonly id: string;
+  readonly orderDate: string;
+  readonly orderNumber: string;
+  readonly referenceNumber: string | null;
+  readonly serviceFee: string;
+}
+
+export interface TraderPortalOrderPage {
+  readonly filteredCount: number;
+  readonly items: readonly TraderPortalOrderSummary[];
+  readonly page: number;
+  readonly pageSize: 25 | 50 | 100;
+  readonly totalCount: number;
+}
+
 export interface TraderPortalProfile {
   readonly code: string;
+  readonly commercialNumber: string | null;
+  readonly contactPerson: string | null;
   readonly email: string | null;
   readonly id: string;
   readonly mobileNumber: string;
   readonly name: string;
+  readonly nameAr: string | null;
+  /** The account's own display preference, not a Trader business field. */
+  readonly preferredLanguage: string;
+  readonly telephone: string | null;
+}
+
+export interface TraderPortalDashboard {
+  readonly commerce: {
+    readonly activeProducts: number;
+    readonly deliveryCompanyCount: number;
+    readonly draftProducts: number;
+    readonly hasStore: boolean;
+    readonly storeName: string | null;
+    readonly storeStatus: string | null;
+    readonly storeUrl: string | null;
+    readonly totalProducts: number;
+  };
+  readonly orders: {
+    readonly active: number;
+    readonly cancelled: number;
+    readonly delivered: number;
+    readonly newOrders: number;
+    readonly returned: number;
+    readonly total: number;
+  };
+  /** Current-month figures only; see the Dashboard's own period label. */
+  readonly period: {
+    readonly monthCodTotal: string;
+    readonly monthLabel: string;
+  };
+  readonly recentOrders: readonly {
+    readonly amountDue: string;
+    readonly customerName: string;
+    readonly deliveryCompanyName: string | null;
+    readonly orderDate: string;
+    readonly orderNumber: string;
+    readonly status: string;
+  }[];
 }
 
 export interface TraderPortalArea {
@@ -885,8 +970,13 @@ export class OperationsService {
         or (${quickView} = 'hold' and o.delivery_status = 'hold')
         or (${quickView} = 'cancelled' and o.delivery_status = 'cancelled'))
     `;
-    const filterPredicate = sql`
+    const tabPredicate = sql`
       ${quickViewPredicate}
+      and (${ownDriverId}::uuid is null or o.assigned_driver_id = ${ownDriverId}::uuid)
+      and (${deliveredOnly} = false or o.delivered_at is not null)
+    `;
+    const filterPredicate = sql`
+      ${tabPredicate}
       -- Deprecated dedicated Reference filter, kept for callers that still send
       -- it; the web no longer renders a field for it. Now matched against the
       -- normalised column so it uses the trigram index instead of scanning, and
@@ -1077,17 +1167,17 @@ export class OperationsService {
       }
       limit ${pageSize} offset ${offset}
     `.execute(this.database);
-    const counts = await sql<{ filteredCount: number; totalCount: number }>`
+    const counts = await sql<{ matchingCount: number; tabTotalCount: number }>`
       select
-        (select count(*)::int from orders where company_id = ${companyId}::uuid) as "totalCount",
-        count(*)::int as "filteredCount"
+        count(*) filter (where ${filterPredicate})::int as "matchingCount",
+        count(*) filter (where ${tabPredicate})::int as "tabTotalCount"
       from orders o
       join traders t on t.id = o.trader_id and t.company_id = o.company_id
       -- The shared filter predicate reaches the Emirate through the Area, so
       -- the count must join it too. Both queries use the same predicate; only
       -- one of them joining is how the Emirate filter broke the whole list.
       join areas a on a.id = o.area_id and a.company_id = o.company_id
-      where o.company_id = ${companyId}::uuid and ${filterPredicate}
+      where o.company_id = ${companyId}::uuid
     `.execute(this.database);
     // ONE Business Day configuration query for the whole page. Calling the
     // resolver per Order would be an N+1; deriving the date in SQL would
@@ -1130,11 +1220,13 @@ export class OperationsService {
     }));
     return {
       ...(applied === undefined ? {} : { appliedDateMode: applied }),
-      filteredCount: counts.rows[0]?.filteredCount ?? 0,
+      filteredCount: counts.rows[0]?.matchingCount ?? 0,
+      matchingCount: counts.rows[0]?.matchingCount ?? 0,
       items,
       page,
       pageSize,
-      totalCount: counts.rows[0]?.totalCount ?? 0,
+      totalCount: counts.rows[0]?.tabTotalCount ?? 0,
+      tabTotalCount: counts.rows[0]?.tabTotalCount ?? 0,
     };
   }
 
@@ -1732,12 +1824,217 @@ export class OperationsService {
       identity.profileId,
     );
     const result = await sql<TraderPortalProfile>`
-      select id,code,name_en as name,mobile_number as "mobileNumber",email
-        from traders
-       where id=${trader.id}::uuid and company_id=${identity.companyId}::uuid
+      select t.id, t.code, t.name_en as name, t.name_ar as "nameAr",
+             t.mobile_number as "mobileNumber", t.telephone, t.email,
+             t.contact_person as "contactPerson", t.commercial_number as "commercialNumber",
+             coalesce(a.preferred_language, 'en') as "preferredLanguage"
+        from traders t
+        left join accounts a on a.id = ${identity.identityId}::uuid
+       where t.id=${trader.id}::uuid and t.company_id=${identity.companyId}::uuid
        limit 1
     `.execute(this.database);
     return result.rows[0]!;
+  }
+
+  /**
+   * Fields a Trader may edit about itself from the portal.
+   *
+   * The primary login mobile and Trader name are deliberately absent: §42 of
+   * the workspace prompt treats them as identity-sensitive and defers a
+   * verification flow to a later prompt, rather than letting a Trader quietly
+   * change the number Delivery Orders and settlements already reference.
+   */
+  public async updateTraderPortalProfile(input: {
+    readonly commercialNumber?: string | null;
+    readonly contactPerson?: string | null;
+    readonly email?: string | null;
+    readonly preferredLanguage?: string;
+    readonly telephone?: string | null;
+  }): Promise<TraderPortalProfile> {
+    const identity = this.identities.current();
+    if (identity.companyId === null) {
+      throw new ApplicationException(
+        "tenant_required",
+        "A Company account is required",
+        HttpStatus.FORBIDDEN,
+      );
+    }
+    const trader = await this.traderForAccount(
+      identity.companyId,
+      identity.identityId,
+      identity.profileId,
+    );
+    await this.transactions.execute(async (transaction) => {
+      await sql`
+        update traders set
+          contact_person = ${input.contactPerson === undefined ? sql`contact_person` : input.contactPerson},
+          telephone = ${input.telephone === undefined ? sql`telephone` : input.telephone},
+          email = ${input.email === undefined ? sql`email` : input.email},
+          commercial_number =
+            ${input.commercialNumber === undefined ? sql`commercial_number` : input.commercialNumber},
+          updated_at = now(), version = version + 1
+        where id = ${trader.id}::uuid and company_id = ${identity.companyId}::uuid
+      `.execute(transaction);
+      if (input.preferredLanguage !== undefined) {
+        await sql`
+          update accounts set preferred_language = ${input.preferredLanguage}, updated_at = now()
+           where id = ${identity.identityId}::uuid
+        `.execute(transaction);
+      }
+    });
+    return this.traderPortalProfile();
+  }
+
+  /**
+   * The Trader's own Dashboard.
+   *
+   * Reports the Trader's EXISTING Delivery Orders (this Company context's
+   * `orders` rows) alongside a read-only Commerce summary. It does not invent
+   * a Store Order concept — that domain does not exist yet, and this Dashboard
+   * is explicit that "Orders" here means Delivery Orders. When the Store Order
+   * domain lands, its KPIs are added beside these, not blended into them.
+   */
+  public async traderPortalDashboard(): Promise<TraderPortalDashboard> {
+    const identity = this.identities.current();
+    if (identity.companyId === null) {
+      throw new ApplicationException(
+        "tenant_required",
+        "A Company account is required",
+        HttpStatus.FORBIDDEN,
+      );
+    }
+    const trader = await this.traderForAccount(
+      identity.companyId,
+      identity.identityId,
+      identity.profileId,
+    );
+
+    const orderCounts = await sql<{
+      active: string;
+      cancelled: string;
+      delivered: string;
+      newOrders: string;
+      returned: string;
+      total: string;
+    }>`
+      select
+        count(*) filter (where delivery_status = 'new') as "newOrders",
+        count(*) filter (
+          where delivery_status in ('in_branch', 'assigned_to_driver', 'out_for_delivery', 'hold')
+        ) as active,
+        count(*) filter (where delivery_status = 'delivered') as delivered,
+        count(*) filter (where delivery_status = 'cancelled') as cancelled,
+        count(*) filter (
+          where delivery_status in ('returned_to_branch', 'returned_to_trader')
+        ) as returned,
+        count(*) as total
+        from orders
+       where company_id = ${identity.companyId}::uuid and trader_id = ${trader.id}::uuid
+    `.execute(this.database);
+
+    const monthCod = await sql<{ total: string }>`
+      select coalesce(sum(cod_amount), 0)::text as total
+        from orders
+       where company_id = ${identity.companyId}::uuid and trader_id = ${trader.id}::uuid
+         and order_date >= date_trunc('month', now())
+    `.execute(this.database);
+
+    const recent = await sql<{
+      amountDue: string;
+      customerName: string;
+      companyName: string;
+      orderDate: string;
+      orderNumber: string;
+      status: string;
+    }>`
+      select o.order_number as "orderNumber", o.order_date::text as "orderDate",
+             o.customer_name as "customerName", o.delivery_status as status,
+             o.customer_amount_due::text as "amountDue", c.name_en as "companyName"
+        from orders o
+        join companies c on c.id = o.company_id
+       where o.company_id = ${identity.companyId}::uuid and o.trader_id = ${trader.id}::uuid
+       order by o.order_date desc, o.created_at desc
+       limit 5
+    `.execute(this.database);
+
+    // Trader Commerce is optional: a Trader who has never touched My Store
+    // gets zeros here rather than an error, because a Dashboard that fails to
+    // load over a Store that does not exist yet is a worse first screen than
+    // an honest empty summary.
+    const commerce = await sql<{
+      activeProducts: string;
+      deliveryCompanyCount: string;
+      draftProducts: string;
+      slug: string | null;
+      status: string | null;
+      storeName: string | null;
+      storefrontId: string | null;
+      totalProducts: string;
+    }>`
+      with commerce_identity as (
+        select trader_commerce_id from trader_commerce_company_links
+         where trader_id = ${trader.id}::uuid
+      ),
+      store as (
+        select s.id, s.display_name, s.slug, s.status, s.trader_commerce_id
+          from trader_storefronts s
+          join commerce_identity ci on ci.trader_commerce_id = s.trader_commerce_id
+      )
+      select
+        store.id as "storefrontId", store.display_name as "storeName", store.slug, store.status,
+        coalesce(
+          (select count(*) from trader_storefront_products p
+            where p.storefront_id = store.id and p.lifecycle_status = 'active'), 0) as "activeProducts",
+        coalesce(
+          (select count(*) from trader_storefront_products p
+            where p.storefront_id = store.id and p.lifecycle_status = 'draft'), 0) as "draftProducts",
+        coalesce(
+          (select count(*) from trader_storefront_products p
+            where p.storefront_id = store.id), 0) as "totalProducts",
+        coalesce(
+          (select count(*) from trader_delivery_company_relationships r
+            where r.trader_commerce_id = store.trader_commerce_id and r.status = 'active'), 0)
+          as "deliveryCompanyCount"
+        from commerce_identity
+        left join store on store.trader_commerce_id = commerce_identity.trader_commerce_id
+    `.execute(this.database);
+
+    const commerceRow = commerce.rows[0];
+    const counts = orderCounts.rows[0]!;
+    return {
+      commerce: {
+        activeProducts: Number(commerceRow?.activeProducts ?? 0),
+        deliveryCompanyCount: Number(commerceRow?.deliveryCompanyCount ?? 0),
+        draftProducts: Number(commerceRow?.draftProducts ?? 0),
+        hasStore: commerceRow?.storefrontId !== undefined && commerceRow.storefrontId !== null,
+        storeName: commerceRow?.storeName ?? null,
+        storeStatus: commerceRow?.status ?? null,
+        storeUrl: commerceRow?.slug !== null && commerceRow?.slug !== undefined
+          ? `/store/${commerceRow.slug}`
+          : null,
+        totalProducts: Number(commerceRow?.totalProducts ?? 0),
+      },
+      orders: {
+        active: Number(counts.active),
+        cancelled: Number(counts.cancelled),
+        delivered: Number(counts.delivered),
+        newOrders: Number(counts.newOrders),
+        returned: Number(counts.returned),
+        total: Number(counts.total),
+      },
+      period: {
+        monthCodTotal: monthCod.rows[0]?.total ?? "0",
+        monthLabel: new Date().toISOString().slice(0, 7),
+      },
+      recentOrders: recent.rows.map((row) => ({
+        amountDue: row.amountDue,
+        customerName: row.customerName,
+        deliveryCompanyName: row.companyName,
+        orderDate: row.orderDate,
+        orderNumber: row.orderNumber,
+        status: row.status,
+      })),
+    };
   }
 
   public async traderPortalAreas(): Promise<readonly TraderPortalArea[]> {
@@ -1762,6 +2059,83 @@ export class OperationsService {
     return result.rows;
   }
 
+  /**
+   * Which Delivery Company (and that Company's own Trader record) a Trader
+   * Portal write should land under — the write-side counterpart of
+   * `traderPortalOrdersPageAllCompanies`'s read-side aggregation (Trader
+   * Portal Prompt 3T-C, Part D).
+   *
+   * The set of companies eligible for `target` is the exact same UNION
+   * `traderPortalOrdersPageAllCompanies` reads from — the caller's own
+   * session Company, always, plus every Company its Trader Commerce identity
+   * is actively linked to. Reusing that set (rather than inventing a second
+   * one) means "which Companies can I see Orders for" and "which Companies
+   * can I create an Order under" can never drift apart.
+   *
+   * Resolution alone is always safe and always cross-Company: it never
+   * writes anything, and correctly rejects an unrelated or inactive Company
+   * regardless of what the actual write does with the result.
+   *
+   * ---------------------------------------------------------------------------
+   * WHY `accountId` IS PART OF THE RESULT
+   * ---------------------------------------------------------------------------
+   *
+   * `orders`, `order_status_history`, `order_events`, `order_assignments`,
+   * `customers`, `customer_addresses`, `file_objects` and `import_batches`
+   * all carry a COMPOSITE actor foreign key —
+   * `(*_account_id, company_id) references accounts(id, company_id)` — so
+   * writing under a Company other than the caller's own session Company
+   * requires an account that actually belongs to THAT Company. The caller's
+   * own login account never does. `target.accountId` is the resolved
+   * Company Trader record's OWN account (`traders.account_id`) for
+   * `target.companyId` — genuinely valid there — and is passed as
+   * `createOrder`'s/`importOrdersCsv`'s `actingAccountIdOverride` by the two
+   * callers below whenever `target.companyId !== identity.companyId`. This
+   * satisfies every one of those constraints without touching
+   * `IdentityContextAccessor`, `TenantContextAccessor`, `identities.current()`,
+   * or the login/session model itself.
+   */
+  private async resolveTraderPortalDeliveryCompany(
+    ownCompanyId: string,
+    callerTraderId: string,
+    requestedCompanyId: string | undefined,
+  ): Promise<{ readonly accountId: string; readonly companyId: string; readonly traderId: string }> {
+    const scopePairs = traderCommerceOrderScopePairs(callerTraderId);
+    const result = await sql<{ accountId: string; companyId: string; traderId: string }>`
+      select scope."companyId", scope."traderId", t.account_id as "accountId"
+        from (
+          select "companyId", "traderId" from (${scopePairs}) scope
+          union
+          select ${ownCompanyId}::uuid as "companyId", ${callerTraderId}::uuid as "traderId"
+        ) scope
+        join traders t on t.id = scope."traderId" and t.company_id = scope."companyId"
+    `.execute(this.database);
+    const options = result.rows;
+    // Unreachable in practice — the UNION above always contributes the
+    // caller's own Company — but kept as an explicit, honest guard rather
+    // than trusting that invariant silently (§ Part A: "zero Companies
+    // blocks manual Order creation").
+    if (options.length === 0) {
+      throw new ApplicationException(
+        "no_delivery_company_available",
+        "No Delivery Company is available for this Trader",
+        HttpStatus.FORBIDDEN,
+      );
+    }
+    if (requestedCompanyId === undefined) {
+      return options.find((option) => option.companyId === ownCompanyId) ?? options[0]!;
+    }
+    const match = options.find((option) => option.companyId === requestedCompanyId);
+    if (match === undefined) {
+      throw new ApplicationException(
+        "delivery_company_not_linked",
+        "The selected Delivery Company is not an active relationship for this Trader",
+        HttpStatus.FORBIDDEN,
+      );
+    }
+    return match;
+  }
+
   public async createTraderPortalOrder(
     input: CreateTraderPortalOrderDto,
     correlationId: string,
@@ -1775,7 +2149,7 @@ export class OperationsService {
         HttpStatus.FORBIDDEN,
       );
     }
-    const trader = await this.traderForAccount(
+    const callerTrader = await this.traderForAccount(
       identity.companyId,
       identity.identityId,
       identity.profileId,
@@ -1790,16 +2164,43 @@ export class OperationsService {
     // Trader/Area table, which is what it should always have been. A configured
     // zero price therefore succeeds with no reason demanded of the Trader.
     const {
+      deliveryCompanyId,
       serviceFee: _clientServiceFee,
       serviceFeeOverrideReason: _clientReason,
       ...pricedByCompany
     } = input;
     void _clientServiceFee;
     void _clientReason;
-    return this.createOrder(
-      { ...pricedByCompany, traderId: trader.id },
-      correlationId,
-      idempotencyKey,
+    const target = await this.resolveTraderPortalDeliveryCompany(
+      identity.companyId,
+      callerTrader.id,
+      deliveryCompanyId,
+    );
+    // Own Company: no override needed, identical to today's behaviour.
+    if (target.companyId === identity.companyId) {
+      return this.createOrder(
+        { ...pricedByCompany, traderId: target.traderId },
+        correlationId,
+        idempotencyKey,
+      );
+    }
+    // A different, actively-linked Company: `tenants.run()` redirects
+    // `resolveServiceFee`'s (and everything else's) `companyId` to the
+    // target Company for the duration of this one call -- so pricing
+    // resolves from THAT Company's own Trader/Area table, not the caller's
+    // session Company -- and `target.accountId` (that Company's own linked
+    // Trader account) satisfies every composite actor FK `createOrder`
+    // writes through. See `resolveTraderPortalDeliveryCompany`'s doc
+    // comment for the full reasoning.
+    return this.tenants.run(
+      { companyId: target.companyId, identityId: identity.identityId },
+      () =>
+        this.createOrder(
+          { ...pricedByCompany, traderId: target.traderId },
+          correlationId,
+          idempotencyKey,
+          target.accountId,
+        ),
     );
   }
 
@@ -1882,6 +2283,367 @@ export class OperationsService {
       limit 100
     `.execute(this.database);
     return result.rows;
+  }
+
+  /**
+   * The Trader's own Orders, searchable and paginated.
+   *
+   * ---------------------------------------------------------------------------
+   * WHY THIS DELEGATES RATHER THAN QUERYING AGAIN
+   * ---------------------------------------------------------------------------
+   *
+   * `traderPortalOrders()` above is an unbounded `limit 100` list with no
+   * search, filter or paging — adequate for the Dashboard's "recent Orders",
+   * inadequate as a Trader's actual Order list (Trader Workspace Prompt 3T-B,
+   * §4/§45: "no unbounded list"). Rather than write a second search/filter/sort
+   * implementation, this forces `traderId` to the authenticated Trader and
+   * hands the SAME filters to `orders()` — the identical engine the Company
+   * portal's Orders page already uses, including unified search, quickView
+   * status grouping and the reference-number index.
+   *
+   * `filters.traderId` from the caller is never read: only the server-derived
+   * `trader.id` is ever passed through, so a manipulated `traderId` in a
+   * request body cannot reach another Trader's Orders (§11/§42).
+   *
+   * ---------------------------------------------------------------------------
+   * WHY THE RESULT IS REDACTED BEFORE IT LEAVES THIS METHOD
+   * ---------------------------------------------------------------------------
+   *
+   * `orders()` was built for a Company Operator and its row shape reflects
+   * that: `companyRevenue`, `orderProfit`, `traderNetPayable`,
+   * `outsourcedDriverFee*`, `assignedDriverId/Name/Mobile`,
+   * `accountingEventId/JournalId` and confirmable-settlement identifiers are
+   * all present on every row, unconditionally — the query has no notion of
+   * caller kind. Returning that unchanged to a Trader session would leak
+   * Company financial internals and Driver identity over the wire even if the
+   * Trader UI never renders them (§7/§34/§70 of the Customer/Trader prompts
+   * both name this exact category of leak).
+   *
+   * Redacted into `TraderPortalOrderSummary` — a purpose-built, explicit
+   * allow-list — rather than reusing `OperationsOrder` as-is or padding
+   * `PortalOrder`'s shape with placeholder values it has no data for.
+   */
+  public async traderPortalOrdersPage(
+    filters: Omit<OperationsOrderFilters, "traderId">,
+  ): Promise<TraderPortalOrderPage> {
+    const identity = this.identities.current();
+    if (identity.companyId === null) {
+      throw new ApplicationException(
+        "tenant_required",
+        "A Company account is required",
+        HttpStatus.FORBIDDEN,
+      );
+    }
+    const trader = await this.traderForAccount(
+      identity.companyId,
+      identity.identityId,
+      identity.profileId,
+    );
+    const result = await this.orders({ ...filters, traderId: trader.id });
+    return {
+      filteredCount: result.filteredCount,
+      items: result.items.map(
+        (order): TraderPortalOrderSummary => ({
+          areaName: order.areaName,
+          codAmount: order.codAmount,
+          customerAddress: order.customerAddress,
+          customerAmountDue: order.customerAmountDue,
+          customerMobileNumber: order.customerMobileNumber,
+          customerName: order.customerName,
+          deliveryStatus: order.deliveryStatus,
+          id: order.id,
+          orderDate: order.orderDate,
+          orderNumber: order.orderNumber,
+          referenceNumber: order.referenceNumber ?? null,
+          serviceFee: order.serviceFee,
+        }),
+      ),
+      page: result.page,
+      pageSize: result.pageSize,
+      totalCount: result.totalCount,
+    };
+  }
+
+  /**
+   * The Trader's Orders across every Delivery Company its Trader Commerce
+   * identity is linked to -- "one common Trader Order history" (Trader
+   * Portal Prompt 3T-C, Part C).
+   *
+   * ---------------------------------------------------------------------------
+   * WHY THIS IS A SEPARATE METHOD, NOT A WIDER `traderPortalOrdersPage`
+   * ---------------------------------------------------------------------------
+   *
+   * `traderPortalOrdersPage` delegates to `orders()`, the shared engine the
+   * Company Operator also uses, which is scoped by `tenants.current().companyId`
+   * -- one Company, always. That scoping is exactly what Driver Cash
+   * Reconciliation and Trader Settlements are built on, so `orders()` and
+   * `traderPortalOrdersPage` are left completely untouched here.
+   *
+   * This method instead resolves every `(company_id, trader_id)` pair the
+   * caller's Trader Commerce identity is actively linked to
+   * (`traderCommerceOrderScopePairs`, read-only, see that module's comment)
+   * and runs its own bounded, redacted query against that set. It deliberately
+   * re-implements only the filters the Trader Portal's toolbar actually
+   * offers -- search, status quick-view, Order Date range, paging -- rather
+   * than the full sort/driver/Delivery-Activity/financial-column surface
+   * `orders()` carries for the Operator, which this Trader-facing view has no
+   * business exposing or needing.
+   */
+  public async traderPortalOrdersPageAllCompanies(
+    filters: Pick<
+      OperationsOrderFilters,
+      "dateFrom" | "dateTo" | "page" | "pageSize" | "quickView" | "search"
+    > & { readonly deliveryCompanyId?: string | undefined },
+  ): Promise<TraderPortalOrderPage> {
+    const identity = this.identities.current();
+    if (identity.companyId === null) {
+      throw new ApplicationException(
+        "tenant_required",
+        "A Company account is required",
+        HttpStatus.FORBIDDEN,
+      );
+    }
+    const trader = await this.traderForAccount(
+      identity.companyId,
+      identity.identityId,
+      identity.profileId,
+    );
+
+    const search = this.optionalFilter(filters.search);
+    const dateFrom = this.optionalDate(filters.dateFrom);
+    const dateTo = this.optionalDate(filters.dateTo);
+    const deliveryCompanyId = this.optionalUuidFilter(filters.deliveryCompanyId);
+    const quickView = filters.quickView ?? "active";
+    const page = Number.isInteger(filters.page) && (filters.page ?? 0) > 0 ? (filters.page ?? 1) : 1;
+    const pageSize = ([25, 50, 100] as const).includes(filters.pageSize ?? 25)
+      ? (filters.pageSize ?? 25)
+      : 25;
+    const offset = (page - 1) * pageSize;
+
+    const quickViewPredicate = sql`
+      (${quickView} = 'all'
+        or (${quickView} = 'active' and o.delivery_status not in ('hold', 'closed', 'cancelled'))
+        or (${quickView} = 'closed' and o.delivery_status = 'closed')
+        or (${quickView} = 'hold' and o.delivery_status = 'hold')
+        or (${quickView} = 'cancelled' and o.delivery_status = 'cancelled'))
+    `;
+    const scopePairs = traderCommerceOrderScopePairs(trader.id);
+    // `scopePairs` is empty for a Trader with no Trader Commerce identity yet
+    // (no `trader_commerce_company_links` row at all -- most Traders, until
+    // they touch My Store). Without this UNION such a Trader would see zero
+    // Orders instead of their own, which is a regression, not a narrowing:
+    // the caller's own `(company_id, trader_id)` pair is always in scope for
+    // its own session regardless of whether a Commerce identity exists.
+    const filterPredicate = sql`
+      (o.company_id, o.trader_id) in (
+        select "companyId", "traderId" from (${scopePairs}) scope
+        union
+        select ${identity.companyId}::uuid, ${trader.id}::uuid
+      )
+      and (${deliveryCompanyId}::uuid is null or o.company_id = ${deliveryCompanyId}::uuid)
+      and ${quickViewPredicate}
+      and ${unifiedOrderSearchPredicate(search)}
+      and (${dateFrom}::date is null or o.order_date >= ${dateFrom}::date)
+      and (${dateTo}::date is null or o.order_date <= ${dateTo}::date)
+    `;
+
+    const countResult = await sql<{ total: string }>`
+      select count(*)::text as total
+        from orders o
+       where ${filterPredicate}
+    `.execute(this.database);
+
+    const result = await sql<{
+      areaName: string;
+      codAmount: string;
+      companyId: string;
+      companyName: string;
+      customerAddress: string;
+      customerAmountDue: string;
+      customerMobileNumber: string;
+      customerName: string;
+      deliveryStatus: string;
+      id: string;
+      orderDate: string;
+      orderNumber: string;
+      referenceNumber: string | null;
+      serviceFee: string;
+    }>`
+      select o.id, o.order_number as "orderNumber", o.order_date::text as "orderDate",
+             o.reference_number as "referenceNumber",
+             coalesce(o.customer_area_name_ar_snapshot,a.name_ar,
+                      o.customer_area_name_snapshot,a.name_en) as "areaName",
+             o.customer_name as "customerName",
+             o.customer_address as "customerAddress",
+             o.customer_mobile_number as "customerMobileNumber",
+             o.cod_amount::text as "codAmount",
+             o.service_fee::text as "serviceFee",
+             o.customer_amount_due::text as "customerAmountDue",
+             o.delivery_status as "deliveryStatus",
+             o.company_id as "companyId",
+             c.name_en as "companyName"
+        from orders o
+        join areas a on a.id = o.area_id and a.company_id = o.company_id
+        join companies c on c.id = o.company_id
+       where ${filterPredicate}
+       order by o.order_date desc, o.created_at desc, o.order_number
+       limit ${pageSize} offset ${offset}
+    `.execute(this.database);
+
+    const totalCount = Number(countResult.rows[0]?.total ?? 0);
+    return {
+      filteredCount: totalCount,
+      items: result.rows.map(
+        (order): TraderPortalOrderSummary => ({
+          areaName: order.areaName,
+          codAmount: order.codAmount,
+          customerAddress: order.customerAddress,
+          customerAmountDue: order.customerAmountDue,
+          customerMobileNumber: order.customerMobileNumber,
+          customerName: order.customerName,
+          deliveryCompanyId: order.companyId,
+          deliveryCompanyName: order.companyName,
+          deliveryStatus: order.deliveryStatus,
+          id: order.id,
+          orderDate: order.orderDate,
+          orderNumber: order.orderNumber,
+          referenceNumber: order.referenceNumber ?? null,
+          serviceFee: order.serviceFee,
+        }),
+      ),
+      page,
+      pageSize,
+      totalCount,
+    };
+  }
+
+  /**
+   * The Delivery Companies the caller's Trader Commerce identity is actively
+   * linked to -- populates the Trader Orders "Delivery Company" filter
+   * without requiring a Store to already exist (unlike
+   * `operations/trader-storefronts/:id/delivery-companies`, which is
+   * Store-scoped). Read-only, same `trader_commerce_company_links` fan-out as
+   * `traderPortalOrdersPageAllCompanies`.
+   */
+  public async traderPortalLinkedDeliveryCompanies(): Promise<
+    readonly { readonly id: string; readonly isOwn: boolean; readonly name: string }[]
+  > {
+    const identity = this.identities.current();
+    if (identity.companyId === null) {
+      throw new ApplicationException(
+        "tenant_required",
+        "A Company account is required",
+        HttpStatus.FORBIDDEN,
+      );
+    }
+    const trader = await this.traderForAccount(
+      identity.companyId,
+      identity.identityId,
+      identity.profileId,
+    );
+    const scopePairs = traderCommerceOrderScopePairs(trader.id);
+    // `isOwn` marks the ONE Company the caller is actually logged into —
+    // the only Company Order creation and bulk import can currently write
+    // under (`assertTraderPortalWriteStaysInOwnCompany`). The UI uses this
+    // to disable the other, merely-visible-not-yet-writable options rather
+    // than let a Trader submit a form that is certain to be rejected.
+    const result = await sql<{ id: string; isOwn: boolean; name: string }>`
+      select distinct c.id, c.name_en as name, c.id = ${identity.companyId}::uuid as "isOwn"
+        from companies c
+        join (${scopePairs}) scope on scope."companyId" = c.id
+       order by "isOwn" desc, c.name_en
+    `.execute(this.database);
+    return result.rows;
+  }
+
+  /**
+   * Bulk Order creation for a Trader, reusing the Company import engine.
+   *
+   * ---------------------------------------------------------------------------
+   * WHY THE CSV IS RE-WRITTEN RATHER THAN A SECOND IMPORTER BUILT
+   * ---------------------------------------------------------------------------
+   *
+   * `importOrdersCsv` already owns every rule this needs — column validation,
+   * per-row pricing from the Trader/Area table, the zero-fee-needs-a-reason
+   * check, atomic all-or-nothing failure, and the row-level result the UI
+   * shows as a preview of what happened. Building a parallel Trader importer
+   * would be exactly the second Order engine §3/§69 forbid.
+   *
+   * So the only new work is enforcing Trader scope BEFORE that engine ever
+   * runs: any `traderId` or `driverId` column the Trader's file supplies is
+   * dropped — a Trader manually assigning a Driver or naming a different
+   * Trader is not a typo to correct, it is exactly the input this method
+   * exists to refuse — and a `traderId` column is added back with the
+   * server-resolved Trader on every row. `importOrdersCsv` then sees a file
+   * that looks exactly like one the Trader's own portal produced honestly.
+   */
+  public async createTraderPortalOrdersImport(
+    input: ImportTraderPortalOrdersCsvDto,
+    correlationId: string,
+  ): Promise<OperationsOrderImportResult> {
+    const identity = this.identities.current();
+    if (identity.companyId === null) {
+      throw new ApplicationException(
+        "tenant_required",
+        "A Company account is required",
+        HttpStatus.FORBIDDEN,
+      );
+    }
+    const callerTrader = await this.traderForAccount(
+      identity.companyId,
+      identity.identityId,
+      identity.profileId,
+    );
+    // One Delivery Company for the whole batch (Part D): resolved once,
+    // before any row is read, exactly like the single-Order path above —
+    // never per-row, and never from a column inside the CSV itself.
+    const target = await this.resolveTraderPortalDeliveryCompany(
+      identity.companyId,
+      callerTrader.id,
+      input.deliveryCompanyId,
+    );
+    const scoped = this.scopeCsvToTrader(
+      String((input as { csv?: unknown }).csv ?? ""),
+      target.traderId,
+    );
+    if (target.companyId === identity.companyId) {
+      return this.importOrdersCsv({ csv: scoped }, correlationId);
+    }
+    // Same cross-Company write bridge as `createTraderPortalOrder`: redirect
+    // `companyId` for this one call, and use the target Company's own
+    // linked Trader account for every composite-FK'd actor column
+    // `importOrdersCsv` writes through (`file_objects`, `import_batches`,
+    // and — via `insertOrder`/`resolveImportedCustomer` — `orders`,
+    // `order_status_history`, `order_events`, `order_assignments`,
+    // `customers`, `customer_addresses`).
+    return this.tenants.run(
+      { companyId: target.companyId, identityId: identity.identityId },
+      () => this.importOrdersCsv({ csv: scoped }, correlationId, target.accountId),
+    );
+  }
+
+  /** Strips any `traderId`/`driverId` column and forces the given Trader. */
+  private scopeCsvToTrader(csv: string, traderId: string): string {
+    const rows = this.parseCsv(csv).filter((row) => row.some((cell) => cell.trim().length > 0));
+    if (rows.length === 0) return csv;
+    const header = rows[0]!.map((cell) => cell.trim());
+    const dropped = new Set(["traderid", "driverid"]);
+    const keepIndexes = header
+      .map((name, position) => [name, position] as const)
+      .filter(([name]) => !dropped.has(name.toLowerCase()));
+    const writeRow = (cells: readonly string[]): string =>
+      cells
+        .map((cell) =>
+          /[",\n\r]/.test(cell) ? `"${cell.replaceAll('"', '""')}"` : cell,
+        )
+        .join(",");
+    const rebuilt = [
+      writeRow([...keepIndexes.map(([name]) => name), "traderId"]),
+      ...rows.slice(1).map((row) =>
+        writeRow([...keepIndexes.map(([, index]) => row[index] ?? ""), traderId]),
+      ),
+    ];
+    return rebuilt.join("\n");
   }
 
   public async driverPortalOrders(): Promise<readonly PortalOrder[]> {
@@ -2464,9 +3226,31 @@ export class OperationsService {
     input: CreateOrderDto,
     correlationId: string,
     idempotencyKey?: string,
+    /**
+     * Overrides which account this Order (and its Customer, if inline) is
+     * recorded as created by. Every existing caller omits this and gets
+     * today's exact behaviour: `identity.identityId`, the session's own
+     * account.
+     *
+     * Exists ONLY for the Trader Portal's cross-Company write bridge
+     * (`createTraderPortalOrder`, Trader Portal Prompt 3T-C, Part A/B):
+     * `orders`, `order_status_history`, `order_events`, `order_assignments`,
+     * `customers` and `customer_addresses` all carry a COMPOSITE foreign key
+     * — `(*_account_id, company_id) references accounts(id, company_id)` —
+     * so writing under a Company other than the caller's own session Company
+     * requires an account that actually belongs to THAT Company. The
+     * caller's own login account never does. Passing the target Company's
+     * own linked Trader account here (resolved server-side, never from the
+     * client) satisfies every one of those constraints without touching
+     * `IdentityContextAccessor`/`TenantContextAccessor`, `identities.current()`,
+     * or the login/session model itself — `identity.kind`/`identity.permissions`
+     * (role label, override-fee permission) still come from the real caller.
+     */
+    actingAccountIdOverride?: string,
   ): Promise<OperationsOrder> {
     const { companyId } = this.tenants.current();
     const identity = this.identities.current();
+    const actingAccountId = actingAccountIdOverride ?? identity.identityId;
     const actorRole =
       identity.kind === "trader"
         ? "Trader"
@@ -2609,7 +3393,7 @@ export class OperationsService {
         await this.resolveCreateOrderCustomer(transaction, {
           companyId,
           correlationId,
-          createdByAccountId: identity.identityId,
+          createdByAccountId: actingAccountId,
           ...(input.customerAddressId === undefined
             ? {}
             : { customerAddressId: input.customerAddressId }),
@@ -2741,7 +3525,7 @@ export class OperationsService {
           ${companyId}::uuid, ${orderNumber}, ${serialNumber}, ${serialNumberNormalized},
           ${referenceNumber}, ${referenceNumberNormalized}, 'trader_deduction_v1',
           current_date, ${traderRow.id}::uuid,
-          ${area.id}::uuid, ${identity.identityId}::uuid,
+          ${area.id}::uuid, ${actingAccountId}::uuid,
           ${driverRow?.id ?? null}::uuid,${customerRow.id}::uuid,${customerAddressRow.id}::uuid,
           ${customerName}, ${customerMobileNumber},${customerSecondMobileNumber}, ${customerAddress},
           ${latitude ?? null},${longitude ?? null},${notes},${customerRow.code},
@@ -2777,7 +3561,7 @@ export class OperationsService {
             company_id, order_id, driver_id, assigned_by_account_id
           ) values (
             ${companyId}::uuid, ${orderId}::uuid, ${driverRow.id}::uuid,
-            ${identity.identityId}::uuid
+            ${actingAccountId}::uuid
           )
         `.execute(transaction);
       }
@@ -2787,7 +3571,7 @@ export class OperationsService {
           company_id, order_id, status_dimension, to_status, changed_by_account_id
         ) values (
           ${companyId}::uuid, ${orderId}::uuid, 'delivery', ${deliveryStatus},
-          ${identity.identityId}::uuid
+          ${actingAccountId}::uuid
         )
       `.execute(transaction);
       await sql`
@@ -2797,7 +3581,7 @@ export class OperationsService {
           related_driver_id
         ) values (
           ${companyId}::uuid, ${orderId}::uuid, 'order.created', 'user_action',
-          'delivery_status', to_jsonb(${deliveryStatus}::text), ${identity.identityId}::uuid,
+          'delivery_status', to_jsonb(${deliveryStatus}::text), ${actingAccountId}::uuid,
           ${actorRole}, 'web_portal', ${correlationId}, ${driverRow?.id ?? null}::uuid
         )
       `.execute(transaction);
@@ -2810,7 +3594,7 @@ export class OperationsService {
           ) values (
             ${companyId}::uuid, ${orderId}::uuid, 'order.driver_assigned',
             'driver_assignment', 'assigned_driver_id', to_jsonb(${driverRow.id}::text),
-            ${identity.identityId}::uuid, ${actorRole}, 'web_portal', ${correlationId},
+            ${actingAccountId}::uuid, ${actorRole}, 'web_portal', ${correlationId},
             ${driverRow.id}::uuid
           )
         `.execute(transaction);
@@ -2818,7 +3602,7 @@ export class OperationsService {
       await this.recordOrderUsageEvent(transaction, companyId, orderId);
       await this.audit(transaction, {
         action: "order.create",
-        actorId: identity.identityId,
+        actorId: actingAccountId,
         after: { orderNumber, traderId: traderRow.id, driverId: driverRow?.id ?? null },
         companyId,
         correlationId,
@@ -2827,7 +3611,7 @@ export class OperationsService {
       });
       await this.audit(transaction, {
         action: "customer.selected_for_order",
-        actorId: identity.identityId,
+        actorId: actingAccountId,
         after: {
           customerAddressId: customerAddressRow.id,
           customerId: customerRow.id,
@@ -2843,7 +3627,7 @@ export class OperationsService {
       if (pricing.overrideApplied) {
         await this.audit(transaction, {
           action: "order.service_fee_override",
-          actorId: identity.identityId,
+          actorId: actingAccountId,
           after: {
             configuredFee: pricing.configuredFee.toFixed(2),
             overriddenFee: pricing.finalFee.toFixed(2),
@@ -2863,7 +3647,7 @@ export class OperationsService {
             ${companyId}::uuid, ${orderId}::uuid, 'order.service_fee_override',
             'financial_change', 'service_fee',
             to_jsonb(${pricing.configuredFee.toFixed(2)}::text),
-            to_jsonb(${pricing.finalFee.toFixed(2)}::text), ${identity.identityId}::uuid,
+            to_jsonb(${pricing.finalFee.toFixed(2)}::text), ${actingAccountId}::uuid,
               ${actorRole}, 'web_portal', ${pricing.overrideReason}, ${correlationId}
           )
         `.execute(transaction);
@@ -2887,7 +3671,7 @@ export class OperationsService {
             ${companyId}::uuid, ${orderId}::uuid, 'order.zero_service_fee',
             'financial_change', 'service_fee',
             to_jsonb(${pricing.configuredFee.toFixed(2)}::text),
-            to_jsonb(${pricing.finalFee.toFixed(2)}::text), ${identity.identityId}::uuid,
+            to_jsonb(${pricing.finalFee.toFixed(2)}::text), ${actingAccountId}::uuid,
               ${actorRole}, 'web_portal', ${pricing.overrideReason}, ${correlationId}
           )
         `.execute(transaction);
@@ -3077,9 +3861,14 @@ export class OperationsService {
   public async importOrdersCsv(
     input: ImportOrdersCsvDto,
     correlationId: string,
+    /** Same override, same reason, as `createOrder`'s -- see that parameter's
+     * doc comment. Every existing caller omits this and gets today's exact
+     * behaviour: `identity.identityId`. */
+    actingAccountIdOverride?: string,
   ): Promise<OperationsOrderImportResult> {
     const { companyId } = this.tenants.current();
     const identity = this.identities.current();
+    const actingAccountId = actingAccountIdOverride ?? identity.identityId;
     const csv = String((input as { readonly csv?: unknown }).csv ?? "");
     const parsed = this.parseOrdersCsv(csv);
     const errors = parsed.errors.slice();
@@ -3116,7 +3905,7 @@ export class OperationsService {
           ${companyId}::uuid, 'database', ${`imports/${companyId}/${importNumber}.csv`},
           ${`${importNumber}.csv`}, 'text/csv', ${Buffer.byteLength(csv, "utf8")},
           ${createHash("sha256").update(csv).digest("hex")}, 'private', 'clean',
-          ${identity.identityId}::uuid
+          ${actingAccountId}::uuid
         )
         returning id
       `.execute(transaction);
@@ -3132,7 +3921,7 @@ export class OperationsService {
         ) values (
           ${companyId}::uuid, ${importNumber}, 'orders', ${fileId}::uuid, 'csv-v1',
           'importing', ${parsed.totalRows}, ${parsed.rows.length}, 0, 0,
-          ${identity.identityId}::uuid, null
+          ${actingAccountId}::uuid, null
         )
         returning id
       `.execute(transaction);
@@ -3155,14 +3944,14 @@ export class OperationsService {
         const created = await this.insertOrder(transaction, {
           ...row,
           correlationId,
-          createdByAccountId: identity.identityId,
+          createdByAccountId: actingAccountId,
           importBatchId,
         }).catch((cause: unknown) => {
           throw this.importRowFailure(cause, rowNumber, row.referenceNumber ?? null);
         });
         await this.audit(transaction, {
           action: "order.import_create",
-          actorId: identity.identityId,
+          actorId: actingAccountId,
           after: { importNumber, orderNumber: created.orderNumber },
           companyId,
           correlationId,

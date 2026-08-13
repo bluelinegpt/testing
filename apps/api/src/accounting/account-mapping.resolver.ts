@@ -126,6 +126,25 @@ export class AccountMappingResolver {
         }
         account = override.rows[0];
       }
+      if (current.metadata?.employeeEarlyPaymentFunding === true && typeof overrideId === "string") {
+        const override = await sql<typeof account>`
+          select id as "accountId",code as "accountCode",name_en as "accountNameEn",
+                 name_ar as "accountNameAr",is_active as active,is_posting_account as posting,
+                 is_control_account as control,control_account_type as "controlType"
+            from chart_of_accounts
+           where id=${overrideId}::uuid and company_id=${companyId}::uuid
+             and account_type='asset' and account_class in('cash','bank')
+           for share
+        `.execute(database);
+        if (override.rows[0] === undefined) {
+          throw new ApplicationException(
+            "accounting_employee_payment_funding_invalid",
+            "The selected Employee payment account cannot receive postings",
+            HttpStatus.CONFLICT,
+          );
+        }
+        account = override.rows[0];
+      }
       if (!account.active || !account.posting) {
         throw new ApplicationException(
           account.active
@@ -138,6 +157,8 @@ export class AccountMappingResolver {
       const requiredControlType: Readonly<Record<string, string>> = {
         driver_collection_fee_offset: "driver_payable",
         employee_payroll_payable: "payroll_payable",
+        employee_advances: "employee_advances",
+        employee_interim_payroll_clearing: "employee_interim_payroll_clearing",
         general_expense_payable: "accounts_payable",
         order_cod_receivable: "accounts_receivable",
         outsourced_driver_payable: "driver_payable",

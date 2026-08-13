@@ -22,10 +22,12 @@ export const reservedStoreSlugs: ReadonlySet<string> = new Set([
   "categories",
   "category",
   "search",
-  // Customer account surfaces, reserved ahead of customer authentication.
+  // Customer account surfaces (Shared Commerce Foundation Prompt 3A).
   "register",
   "login",
   "logout",
+  "forgot-password",
+  "reset-password",
   "account",
   "orders",
   "cart",

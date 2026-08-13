@@ -27,6 +27,7 @@ import {
   type AccountingColumn,
 } from "./AccountingComponents.js";
 import { RelatedRecords, type RelatedRecord } from "./RelatedRecords.js";
+import { RecordPaymentWorkflow } from "./ExpensePaymentsPage.js";
 import {
   EventFailureDetails,
   EventLifecycleBanner,
@@ -111,17 +112,24 @@ const notYetRecognized = (expected: string) => <NotYetRecognizedAmount expected=
  * Payment workflow with this Expense already selected.
  */
 function ExpensePaymentPanel({
+  client,
   canRecordPayment,
+  companyId,
   expense,
   expenseId,
+  onPaymentRecorded,
   onNavigate,
 }: {
+  readonly client: AccountingApi;
   readonly canRecordPayment: boolean;
+  readonly companyId: string;
   readonly expense: AccountingRecord;
   readonly expenseId: string;
+  readonly onPaymentRecorded: () => void;
   readonly onNavigate: (path: string) => void;
 }) {
   const { t } = useTranslation();
+  const [recordingPayment, setRecordingPayment] = useState(false);
   const payments = Array.isArray(expense.payments)
     ? (expense.payments as readonly AccountingRecord[])
     : [];
@@ -162,13 +170,28 @@ function ExpensePaymentPanel({
         <div className="accounting-lifecycle-actions">
           <button
             className="button button-primary"
-            onClick={() => onNavigate(`/accounting/expense-payments/new/${expenseId}`)}
+            onClick={() => setRecordingPayment((current) => !current)}
             type="button"
           >
-            {t("accounting.actions.recordPayment")}
+            {recordingPayment
+              ? t("common.cancel")
+              : t("accounting.actions.recordPayment", { defaultValue: "Pay this expense" })}
           </button>
         </div>
       ) : null}
+      {!recordingPayment ? null : (
+        <RecordPaymentWorkflow
+          client={client}
+          companyId={companyId}
+          embedded
+          onCancel={() => setRecordingPayment(false)}
+          onConfirmed={() => {
+            setRecordingPayment(false);
+            onPaymentRecorded();
+          }}
+          preselectedExpenseId={expenseId}
+        />
+      )}
       <h4>{t("accounting.payments.relatedPayments")}</h4>
       <AccountingTable
         columns={[
@@ -3571,6 +3594,40 @@ export function AccountingResourcePage({
     setCreating(false);
     refresh();
   };
+  const submitAndSendForApproval = async (payload: Record<string, unknown>) => {
+    if (section !== "expenses") return submitCreate(payload);
+    const { amount, ...header } = payload;
+    const categoryId = String(header.categoryId ?? "");
+    const description = String(header.description ?? "").trim();
+    const category = normalizePage(expenseCategoryOptions.data).find(
+      (row) => String(row.id) === categoryId,
+    );
+    const vatTreatment = String(category?.defaultVatTreatment ?? "out_of_scope");
+    const vatRate =
+      vatTreatment === "standard_rated" && companySettings.data?.vatEnabled === true
+        ? String(companySettings.data.vatRate ?? "0")
+        : "0";
+    const created = await client.post<AccountingRecord>(definition.createPath!, {
+      ...header,
+      lines: [
+        {
+          categoryId,
+          description,
+          quantity: "1",
+          unitAmount: amount,
+          vatTreatment,
+          vatRate,
+          ...(vatTreatment === "partially_recoverable" ? { recoverablePercentage: "100" } : {}),
+        },
+      ],
+    });
+    await client.post(`general-expenses/${String(created.id)}/submit`, {
+      reason: "Created and submitted for approval",
+      version: Number(created.version),
+    });
+    setCreating(false);
+    refresh();
+  };
   const submitOpeningBalanceLines = async (payload: Record<string, unknown>) => {
     await client.put(`${definition.listPath}/${id}/lines`, payload);
     setEditingOpeningBalanceLines(false);
@@ -4052,9 +4109,12 @@ export function AccountingResourcePage({
               ) : null}
               {section === "expenses" && id !== undefined ? (
                 <ExpensePaymentPanel
+                  client={client}
                   canRecordPayment={permissionSet.manage}
+                  companyId={companyId}
                   expense={detail}
                   expenseId={id}
+                  onPaymentRecorded={refresh}
                   onNavigate={onNavigate}
                 />
               ) : null}
@@ -4171,8 +4231,16 @@ export function AccountingResourcePage({
             <RecordForm
               fields={createFields}
               onCancel={() => setCreating(false)}
+              onSecondarySubmit={section === "expenses" ? submitAndSendForApproval : undefined}
               onSubmit={submitCreate}
               patch={section === "expenses" ? categoryPatch : undefined}
+              secondarySubmitLabel={
+                section === "expenses"
+                  ? t("accounting.actions.createAndSubmit", {
+                      defaultValue: "Create & Send for Approval",
+                    })
+                  : undefined
+              }
               submitLabel={t("common.create")}
             />
           </>

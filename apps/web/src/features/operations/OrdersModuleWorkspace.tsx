@@ -559,37 +559,61 @@ export function OrdersModuleWorkspace({
     setExcludedIds(new Set());
   };
   const orderSelected = (id: string) => (allMatching ? !excludedIds.has(id) : selectedIds.has(id));
-  // Build area-to-emirate-code mapping from loaded areas data
-  // Map both English and Arabic area names to emirate codes
+  // Build area-to-emirate mapping from multiple sources
   const areaEmirateMap = useMemo(() => {
-    const map = new Map<string, string>();
+    const map = new Map<string, { code: string; name: string }>();
 
-    // Use the loaded areas data to build area-to-emirate mapping
-    // Include both English (nameEn) and Arabic (nameAr) names
+    // First priority: Use loaded areas data
+    const emirateCodeToName = new Map<string, string>();
+    for (const emirate of emirates) {
+      emirateCodeToName.set(emirate.code.toUpperCase(), emirate.nameEn);
+    }
+
     for (const area of areas) {
       if (area.emirateCode) {
         const emirateCode = area.emirateCode.toUpperCase();
-        // Map English name
+        const emirateName = emirateCodeToName.get(emirateCode) || emirateCode;
+        const mapping = { code: emirateCode, name: emirateName };
+
         if (area.nameEn) {
-          map.set(area.nameEn, emirateCode);
+          map.set(area.nameEn, mapping);
         }
-        // Map Arabic name
         if (area.nameAr) {
-          map.set(area.nameAr, emirateCode);
+          map.set(area.nameAr, mapping);
         }
       }
     }
 
-    // As fallback, also extract from orders that have emirateNameEn
+    // Second priority: Extract from orders that have emirateNameEn
     for (const order of orderItems) {
       if (order.areaName && order.emirateNameEn && !map.has(order.areaName)) {
-        const emirateCode = order.emirateNameEn.substring(0, 3).toUpperCase();
-        map.set(order.areaName, emirateCode);
+        const emirateName = order.emirateNameEn;
+        const emirateCode = emirateName.substring(0, 3).toUpperCase();
+        map.set(order.areaName, { code: emirateCode, name: emirateName });
+      }
+    }
+
+    // Third priority: Try to infer from emirate names based on area patterns
+    // Map Arabic area names to emirates by checking all orders
+    if (map.size < orderItems.length) {
+      const areaToEmirateByName = new Map<string, string>();
+      for (const order of orderItems) {
+        if (order.areaName && order.emirateNameEn) {
+          areaToEmirateByName.set(order.areaName, order.emirateNameEn);
+        }
+      }
+
+      // Apply the inferred mappings
+      for (const [areaName, emirateName] of areaToEmirateByName) {
+        if (!map.has(areaName)) {
+          const emirateCode = emirateName.substring(0, 3).toUpperCase();
+          map.set(areaName, { code: emirateCode, name: emirateName });
+        }
       }
     }
 
     return map;
-  }, [areas, orderItems]);
+  }, [areas, orderItems, emirates]);
 
   const groups = useMemo(
     () => groupVisibleOrders(orderItems, grouping, t, areaEmirateMap),
@@ -4542,18 +4566,18 @@ function groupVisibleOrders(
       case "area": {
         const areaName = order.areaName ?? t("operations.unknown");
         // Try emirateNameEn first, then fall back to areaEmirateMap lookup
-        let emirateCode: string | undefined;
+        let emirateInfo: { code: string; name: string } | undefined;
 
         if (order.emirateNameEn) {
-          emirateCode = order.emirateNameEn.substring(0, 3).toUpperCase();
+          emirateInfo = { code: order.emirateNameEn.substring(0, 3).toUpperCase(), name: order.emirateNameEn };
         } else if (areaEmirateMap) {
           // Try to find emirate by matching area name exactly (works for Arabic and English)
-          emirateCode = areaEmirateMap.get(areaName);
+          emirateInfo = areaEmirateMap.get(areaName);
         }
 
-        // If we found emirate code, use the full format; otherwise just show area
-        if (emirateCode) {
-          return `${emirateCode} - ${areaName}`;
+        // If we found emirate info, use the full format; otherwise just show area
+        if (emirateInfo) {
+          return `${emirateInfo.name} - ${areaName}`;
         }
         return areaName;
       }

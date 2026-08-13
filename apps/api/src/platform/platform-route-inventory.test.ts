@@ -15,6 +15,7 @@ import {
   PlatformCompanyDeletionController,
   PlatformTargetCompanyController,
 } from "./platform-company.controller.js";
+import { PlatformDashboardController } from "./platform-dashboard.controller.js";
 
 /**
  * The Platform route inventory, enumerated rather than assumed.
@@ -41,6 +42,7 @@ const platformControllers = [
   PlatformAuthController,
   PlatformCompanyController,
   PlatformCompanyDeletionController,
+  PlatformDashboardController,
   PlatformTargetCompanyController,
   PlatformCompanyUserController,
 ];

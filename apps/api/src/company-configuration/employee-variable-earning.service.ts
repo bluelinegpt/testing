@@ -25,11 +25,7 @@ export interface VariableEarningRules {
   readonly delivery: readonly VariableEarningRule[];
 }
 
-export const collectionPaymentTypes = [
-  "none",
-  "per_collected_order",
-  "flat_per_confirmed_collection",
-] as const;
+export const collectionPaymentTypes = ["none", "per_collected_order"] as const;
 
 /**
  * Employee Driver variable earnings — the management surface for rules that
@@ -117,7 +113,8 @@ export class EmployeeVariableEarningService {
     }
     return this.replaceRule(employeeId, input.effectiveFrom, input.effectiveTo, correlationId, {
       audit: "employee.delivery_earning_rule.set",
-      insert: (database, companyId, actorId) => sql<VariableEarningRule>`
+      insert: (database, companyId, actorId) =>
+        sql<VariableEarningRule>`
         insert into employee_delivery_earning_rules (
           company_id, employee_id, amount_per_order, effective_from, effective_to,
           created_by_account_id
@@ -144,6 +141,13 @@ export class EmployeeVariableEarningService {
     },
     correlationId: string,
   ): Promise<VariableEarningRule> {
+    if (!collectionPaymentTypes.includes(input.collectionPaymentType)) {
+      throw new ApplicationException(
+        "employee_collection_payment_type_unsupported",
+        "Collection Payment Type must be None or Per Collected Order",
+        HttpStatus.BAD_REQUEST,
+      );
+    }
     const none = input.collectionPaymentType === "none";
     // Mirrors `employee_collection_earning_rules_amount_check`. Checked here so
     // the operator gets a sentence rather than an integrity error.
@@ -163,7 +167,8 @@ export class EmployeeVariableEarningService {
     }
     return this.replaceRule(employeeId, input.effectiveFrom, input.effectiveTo, correlationId, {
       audit: "employee.collection_earning_rule.set",
-      insert: (database, companyId, actorId) => sql<VariableEarningRule>`
+      insert: (database, companyId, actorId) =>
+        sql<VariableEarningRule>`
         insert into employee_collection_earning_rules (
           company_id, employee_id, collection_payment_type, amount, effective_from,
           effective_to, created_by_account_id

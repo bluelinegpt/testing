@@ -39,6 +39,24 @@ flutter run --flavor staging --dart-define-from-file=config/staging.example.json
 flutter run --flavor prod --dart-define-from-file=config/production.example.json
 ```
 
+### Build version (crash reports)
+
+Every crash this app reports (see `lib/core/reliability/crash_reporter.dart`)
+is tagged with the exact commit it was built from, the same way every other
+BluelineGPT app's version badge works — so a crash on the Platform's Error
+Handler screen can be tied to a specific build, not just "the mobile app".
+This is NOT baked in automatically the way Vite does it for the web apps;
+Flutter has no equivalent build-time hook, so it must be passed explicitly:
+
+```powershell
+flutter run --flavor dev --dart-define-from-file=config/development.json --dart-define=APP_COMMIT=$(git rev-parse --short HEAD)
+flutter build apk --flavor prod --dart-define-from-file=config/production.example.json --dart-define=APP_COMMIT=$(git rev-parse --short HEAD)
+```
+
+Omitting the flag is fine for a quick local debug run — it falls back to
+`"dev"` rather than failing the build — but any build that will actually be
+installed on a device should always include it.
+
 ### Physical Android device development
 
 `config/development.json` is the development-only LAN configuration. It currently

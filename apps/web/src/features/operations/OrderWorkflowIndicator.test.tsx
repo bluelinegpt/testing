@@ -84,6 +84,31 @@ describe("OrderWorkflowIndicator", () => {
     expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 
+  it("pins the panel open when the hovered status chip is clicked", () => {
+    setup();
+    const trigger = screen.getByRole("button", { name: /Collect from Driver/i });
+    const wrapper = trigger.parentElement as HTMLElement;
+
+    fireEvent.mouseEnter(wrapper);
+    fireEvent.pointerDown(trigger);
+    fireEvent.mouseLeave(wrapper);
+
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("keeps the portalled panel open while focus moves to one of its actions", () => {
+    setup();
+    const trigger = screen.getByRole("button", { name: /Collect from Driver/i });
+    fireEvent.focus(trigger);
+    const action = screen.getByRole("button", { name: "Collect Money from Driver" });
+
+    fireEvent.blur(trigger, { relatedTarget: action });
+    fireEvent.focus(action);
+
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+
   it("opens on keyboard focus, so it is not hover-only", () => {
     setup();
     fireEvent.focus(screen.getByRole("button"));
@@ -124,7 +149,9 @@ describe("OrderWorkflowIndicator", () => {
     const { navigations } = setup();
     fireEvent.focus(screen.getByRole("button"));
     fireEvent.click(screen.getByRole("button", { name: "Collect Money from Driver" }));
-    expect(navigations).toStrictEqual(["/drivers?driverId=driver-1&orderNumber=ORD-0001"]);
+    expect(navigations).toStrictEqual([
+      "/drivers?driverId=driver-1&orderNumber=ORD-0001&returnTo=%2Forders",
+    ]);
   });
 
   it("explains the action but disables it without permission", () => {

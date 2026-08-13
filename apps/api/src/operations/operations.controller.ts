@@ -42,6 +42,8 @@ import {
   OperationsService,
   type PortalOrder,
   type TraderPortalArea,
+  type TraderPortalDashboard,
+  type TraderPortalOrderPage,
   type TraderPortalProfile,
   type PublicOrderTracking,
   type OperationsTraderSettlementDetail,
@@ -107,6 +109,7 @@ import {
   CreateTraderDto,
   FinancialPaymentDto,
   ImportOrdersCsvDto,
+  ImportTraderPortalOrdersCsvDto,
   OrderIdentifierAvailabilityQueryDto,
   OrderQuoteDto,
   RegisterInternationalShipmentDto,
@@ -119,6 +122,7 @@ import {
   TraderAccountStatementQueryDto,
   UpdateOrderDto,
   GenerateShipmentManifestDto,
+  UpdateTraderPortalProfileDto,
 } from "./operations.dto.js";
 
 @ApiTags("operations")
@@ -1006,6 +1010,22 @@ export class PortalController {
   }
 
   @RequireIdentityKinds("trader")
+  @ApiOperation({ summary: "Update the authenticated Trader's own editable profile fields" })
+  @Patch("trader/profile")
+  public updateTraderProfile(
+    @Body() body: UpdateTraderPortalProfileDto,
+  ): Promise<TraderPortalProfile> {
+    return this.operations.updateTraderPortalProfile(body);
+  }
+
+  @RequireIdentityKinds("trader")
+  @ApiOperation({ summary: "Show the authenticated Trader's Dashboard summary" })
+  @Get("trader/dashboard")
+  public traderDashboard(): Promise<TraderPortalDashboard> {
+    return this.operations.traderPortalDashboard();
+  }
+
+  @RequireIdentityKinds("trader")
   @ApiOperation({ summary: "List active delivery Areas available to the authenticated Trader" })
   @Get("trader/areas")
   public traderAreas(): Promise<readonly TraderPortalArea[]> {
@@ -1017,6 +1037,92 @@ export class PortalController {
   @Get("trader/orders")
   public traderOrders(): Promise<readonly PortalOrder[]> {
     return this.operations.traderPortalOrders();
+  }
+
+  /**
+   * The searchable, paginated Trader Orders list (Trader Workspace Prompt
+   * 3T-B, §4/§45). `traderId` is deliberately absent from the query params —
+   * there is no client input that could name a different Trader here, unlike
+   * the Company `orders()` endpoint above which legitimately filters by any
+   * Trader in the Company.
+   */
+  @RequireIdentityKinds("trader")
+  @ApiOperation({ summary: "Search the authenticated Trader's own Orders, paginated" })
+  @Get("trader/orders/search")
+  public traderOrdersSearch(
+    @Query("search") search?: string,
+    @Query("deliveryStatus") deliveryStatus?: string,
+    @Query("referenceNumber") referenceNumber?: string,
+    @Query("dateFrom") dateFrom?: string,
+    @Query("dateTo") dateTo?: string,
+    @Query("quickView") quickView?: "active" | "all" | "cancelled" | "closed" | "hold",
+    @Query("page") page?: string,
+    @Query("pageSize") pageSize?: string,
+    @Query("sortBy") sortBy?: "amountToCollect" | "createdAt" | "orderDate" | "orderNumber",
+    @Query("sortDirection") sortDirection?: "asc" | "desc",
+  ): Promise<TraderPortalOrderPage> {
+    return this.operations.traderPortalOrdersPage({
+      dateFrom,
+      dateTo,
+      deliveryStatus,
+      page: Number(page),
+      pageSize: Number(pageSize) as 25 | 50 | 100,
+      quickView,
+      referenceNumber,
+      search,
+      sortBy,
+      sortDirection,
+    });
+  }
+
+  /**
+   * The same Trader's Orders, aggregated across every Delivery Company its
+   * Trader Commerce identity is linked to (Trader Portal Prompt 3T-C, Part
+   * C) -- "one common Trader Order history" instead of the single session
+   * Company `traderOrdersSearch` above is limited to. Read-only; see
+   * `traderPortalOrdersPageAllCompanies` for why this is a separate method
+   * rather than a parameter on the existing one.
+   */
+  @RequireIdentityKinds("trader")
+  @ApiOperation({ summary: "Search the authenticated Trader's Orders across all Delivery Companies" })
+  @Get("trader/orders/search/all-companies")
+  public traderOrdersSearchAllCompanies(
+    @Query("search") search?: string,
+    @Query("dateFrom") dateFrom?: string,
+    @Query("dateTo") dateTo?: string,
+    @Query("deliveryCompanyId") deliveryCompanyId?: string,
+    @Query("quickView") quickView?: "active" | "all" | "cancelled" | "closed" | "hold",
+    @Query("page") page?: string,
+    @Query("pageSize") pageSize?: string,
+  ): Promise<TraderPortalOrderPage> {
+    return this.operations.traderPortalOrdersPageAllCompanies({
+      dateFrom,
+      dateTo,
+      deliveryCompanyId,
+      page: Number(page),
+      pageSize: Number(pageSize) as 25 | 50 | 100,
+      quickView,
+      search,
+    });
+  }
+
+  @RequireIdentityKinds("trader")
+  @ApiOperation({ summary: "List Delivery Companies the authenticated Trader is linked to" })
+  @Get("trader/orders/companies")
+  public traderOrdersCompanies(): Promise<
+    readonly { readonly id: string; readonly isOwn: boolean; readonly name: string }[]
+  > {
+    return this.operations.traderPortalLinkedDeliveryCompanies();
+  }
+
+  @RequireIdentityKinds("trader")
+  @ApiOperation({ summary: "Import several Orders owned by the authenticated Trader from CSV" })
+  @Post("trader/orders/import-csv")
+  public importTraderOrdersCsv(
+    @Body() input: ImportTraderPortalOrdersCsvDto,
+    @Req() request: Request,
+  ): Promise<OperationsOrderImportResult> {
+    return this.operations.createTraderPortalOrdersImport(input, this.correlationId(request));
   }
 
   @RequireIdentityKinds("trader")

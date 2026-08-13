@@ -9,7 +9,9 @@ import { Logger } from "nestjs-pino";
 import { AppModule } from "../app.module.js";
 import { CommunicationRealtimeGateway } from "../communication/communication-realtime.gateway.js";
 import type { AppConfiguration } from "../configuration/environment.js";
+import { ClientErrorReportService } from "../observability/client-error-report.service.js";
 import { ApiExceptionFilter } from "../presentation/errors/api-exception.filter.js";
+import { RequestSecurityContextStore } from "../security/request-security-context.js";
 
 export interface BluelineApplication {
   listen(): Promise<void>;
@@ -22,6 +24,8 @@ export async function createApplication(): Promise<BluelineApplication> {
   const config = app.get<ConfigService<AppConfiguration, true>>(ConfigService);
   const logger = app.get(Logger);
   const realtime = app.get(CommunicationRealtimeGateway);
+  const errorReports = app.get(ClientErrorReportService);
+  const securityContext = app.get(RequestSecurityContextStore);
 
   app.useLogger(logger);
   app.enableShutdownHooks();
@@ -53,7 +57,7 @@ export async function createApplication(): Promise<BluelineApplication> {
       whitelist: true,
     }),
   );
-  app.useGlobalFilters(new ApiExceptionFilter(logger));
+  app.useGlobalFilters(new ApiExceptionFilter(logger, errorReports, securityContext));
 
   if (config.get("app.environment", { infer: true }) !== "production") {
     const document = SwaggerModule.createDocument(

@@ -28,6 +28,8 @@ import {
   PlatformCompanyDeletionController,
   PlatformTargetCompanyController,
 } from "./platform-company.controller.js";
+import { PlatformDashboardController } from "./platform-dashboard.controller.js";
+import { PlatformDashboardService } from "./platform-dashboard.service.js";
 import { PlatformTargetCompanyGuard } from "./platform-target-company.guard.js";
 import { PlatformService } from "./platform.service.js";
 
@@ -52,6 +54,7 @@ import { PlatformService } from "./platform.service.js";
     PlatformAuthController,
     PlatformCompanyController,
     PlatformCompanyDeletionController,
+    PlatformDashboardController,
     PlatformTargetCompanyController,
     PlatformCompanyUserController,
   ],
@@ -62,6 +65,7 @@ import { PlatformService } from "./platform.service.js";
     PlatformAuditService,
     PlatformAuditQueryService,
     PlatformCompanyService,
+    PlatformDashboardService,
     PlatformCompanyDeletionService,
     PlatformCompanyDeletionExecutionService,
     { provide: COMPANY_DELETION_FAILURE_INJECTOR, useValue: noCompanyDeletionFailure },

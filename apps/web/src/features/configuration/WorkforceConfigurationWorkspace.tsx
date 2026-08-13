@@ -19,6 +19,18 @@ import { parseMoneyInput } from "../../utils/numeric-input.js";
 
 type WorkforceKind = "employees" | "drivers";
 type Detail = Record<string, unknown>;
+type VariableEarningRule = {
+  amount: string;
+  effectiveFrom: string;
+  effectiveTo: string | null;
+  id: string;
+  isCurrent: boolean;
+  paymentType?: string;
+};
+type VariableEarningRules = {
+  collection: VariableEarningRule[];
+  delivery: VariableEarningRule[];
+};
 
 export function WorkforceConfigurationWorkspace({
   api,
@@ -423,6 +435,10 @@ function WorkforceForm({
   // reads it from the linked Driver's type.
   const [engagement, setEngagement] = useState(String(detail?.driver_type ?? "employee"));
   const [addRoleOpen, setAddRoleOpen] = useState(false);
+  const [earningRules, setEarningRules] = useState<VariableEarningRules>();
+  const [deliveryEnabled, setDeliveryEnabled] = useState(false);
+  const [collectionType, setCollectionType] = useState("none");
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const initialEmployeeActive = detail?.is_active !== false;
   const [employeeActive, setEmployeeActive] = useState(initialEmployeeActive);
   const selectedRole = roles.find((role) => String(role.id) === roleId);
@@ -438,12 +454,24 @@ function WorkforceForm({
     void api
       .get<Detail[]>("configuration/employee-roles")
       .then((result) => setRoles(Array.isArray(result) ? result : []));
+    if (mode === "edit" && detail?.id && detail.driver_type) {
+      void api
+        .get<VariableEarningRules>(`configuration/employees/${String(detail.id)}/variable-earnings`)
+        .then((result) => {
+          setEarningRules(result);
+          setDeliveryEnabled(result.delivery.some((rule) => rule.isCurrent));
+          setCollectionType(
+            result.collection.find((rule) => rule.isCurrent)?.paymentType ?? "none",
+          );
+        });
+    }
   }, [api]);
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
     setSaving(true);
     setError(undefined);
+    setFieldErrors({});
     try {
       if (mode === "edit" && employeeStatusChanged) {
         const id = String(detail?.id ?? "");
@@ -459,6 +487,31 @@ function WorkforceForm({
       const allowanceAmounts = Array.from({ length: 4 }, (_, index) =>
         parseMoneyInput(String(data.get(`allowanceAmount${index}`) ?? "0")),
       );
+      const deliveryAmount = parseMoneyInput(String(data.get("deliveryAmount") ?? "0"));
+      const collectionAmount = parseMoneyInput(String(data.get("collectionAmount") ?? "0"));
+      const deliveryFrom = String(data.get("deliveryFrom") ?? "");
+      const deliveryTo = optional(data, "deliveryTo");
+      const collectionFrom = String(data.get("collectionFrom") ?? "");
+      const collectionTo = optional(data, "collectionTo");
+      const earningErrors: Record<string, string> = {};
+      if (isDriverRole && engagement === "employee" && deliveryEnabled) {
+        if (!deliveryAmount.ok || deliveryAmount.value <= 0)
+          earningErrors.deliveryAmount = t("workforce.positiveAmountRequired");
+        if (!deliveryFrom) earningErrors.deliveryFrom = t("workforce.dateRequired");
+        if (deliveryTo && deliveryTo <= deliveryFrom)
+          earningErrors.deliveryTo = t("workforce.invalidDateRange");
+      }
+      if (isDriverRole && collectionType !== "none") {
+        if (!collectionAmount.ok || collectionAmount.value <= 0)
+          earningErrors.collectionAmount = t("workforce.positiveAmountRequired");
+        if (!collectionFrom) earningErrors.collectionFrom = t("workforce.dateRequired");
+        if (collectionTo && collectionTo <= collectionFrom)
+          earningErrors.collectionTo = t("workforce.invalidDateRange");
+      }
+      if (Object.keys(earningErrors).length > 0) {
+        setFieldErrors(earningErrors);
+        return;
+      }
       if (!basicSalary.ok || !outsourcedFee.ok || allowanceAmounts.some((amount) => !amount.ok)) {
         setError(t("workforce.invalidAmount"));
         return;
@@ -509,6 +562,38 @@ function WorkforceForm({
         mode === "create"
           ? await api.post<Detail>("configuration/employees", payload)
           : await api.patch<Detail>(`configuration/employees/${id}`, payload);
+      const employeeId = String(saved.id ?? id);
+      const currentDelivery = earningRules?.delivery.find((rule) => rule.isCurrent);
+      const deliveryChanged =
+        deliveryEnabled &&
+        (currentDelivery === undefined ||
+          Number(currentDelivery.amount) !== (deliveryAmount.ok ? deliveryAmount.value : 0) ||
+          currentDelivery.effectiveFrom !== deliveryFrom ||
+          (currentDelivery.effectiveTo ?? "") !== (deliveryTo ?? ""));
+      if (mode === "edit" && isDriverRole && engagement === "employee" && deliveryChanged) {
+        await api.post(`configuration/employees/${employeeId}/variable-earnings/delivery`, {
+          amountPerOrder: deliveryAmount.ok ? deliveryAmount.value : 0,
+          effectiveFrom: deliveryFrom,
+          ...(deliveryTo ? { effectiveTo: deliveryTo } : {}),
+        });
+      }
+      const currentCollection = earningRules?.collection.find((rule) => rule.isCurrent);
+      const collectionChanged =
+        currentCollection === undefined
+          ? collectionType !== "none"
+          : currentCollection.paymentType !== collectionType ||
+            Number(currentCollection.amount) !==
+              (collectionType === "none" ? 0 : collectionAmount.ok ? collectionAmount.value : 0) ||
+            currentCollection.effectiveFrom !== collectionFrom ||
+            (currentCollection.effectiveTo ?? "") !== (collectionTo ?? "");
+      if (mode === "edit" && isDriverRole && collectionChanged) {
+        await api.post(`configuration/employees/${employeeId}/variable-earnings/collection`, {
+          amount: collectionType === "none" ? 0 : collectionAmount.ok ? collectionAmount.value : 0,
+          collectionPaymentType: collectionType,
+          effectiveFrom: collectionFrom || today(),
+          ...(collectionTo ? { effectiveTo: collectionTo } : {}),
+        });
+      }
       if (employeeStatusChanged) {
         await api.patch(`configuration/employees/${String(saved.id ?? id)}/status`, {
           isActive: employeeActive,
@@ -517,12 +602,22 @@ function WorkforceForm({
       }
       await onSaved();
     } catch (caught) {
+      const earningError =
+        caught instanceof ApiError &&
+        [
+          "employee_delivery_rate_invalid",
+          "employee_collection_rate_invalid",
+          "employee_earning_period_invalid",
+        ].includes(caught.code)
+          ? t("workforce.variableEarningInvalid")
+          : caught instanceof ApiError && caught.code.includes("overlap")
+            ? t("workforce.variableEarningOverlap")
+            : undefined;
       setError(
-        caught instanceof ApiError && caught.code === "employee_salary_effective_date_overlap"
-          ? t("workforce.salaryEffectiveDateConflict")
-          : caught instanceof Error
-            ? caught.message
-            : t("common.saveFailed"),
+        earningError ??
+          (caught instanceof ApiError && caught.code === "employee_salary_effective_date_overlap"
+            ? t("workforce.salaryEffectiveDateConflict")
+            : t("common.saveFailed")),
       );
     } finally {
       setSaving(false);
@@ -672,6 +767,18 @@ function WorkforceForm({
               </label>
             </fieldset>
           ) : null}
+          {isDriverRole && mode === "edit" ? (
+            <DriverVariableEarningsFields
+              collectionType={collectionType}
+              deliveryEnabled={deliveryEnabled}
+              engagement={engagement}
+              errors={fieldErrors}
+              onCollectionType={setCollectionType}
+              onDeliveryEnabled={setDeliveryEnabled}
+              {...(earningRules ? { rules: earningRules } : {})}
+              t={t}
+            />
+          ) : null}
           {salaried ? (
             <fieldset>
               <legend>{t("workforce.compensation")}</legend>
@@ -774,6 +881,166 @@ function WorkforceForm({
         />
       ) : null}
     </Modal>
+  );
+}
+
+function DriverVariableEarningsFields({
+  collectionType,
+  deliveryEnabled,
+  engagement,
+  errors,
+  onCollectionType,
+  onDeliveryEnabled,
+  rules,
+  t,
+}: {
+  collectionType: string;
+  deliveryEnabled: boolean;
+  engagement: string;
+  errors: Record<string, string>;
+  onCollectionType: (value: string) => void;
+  onDeliveryEnabled: (value: boolean) => void;
+  rules?: VariableEarningRules;
+  t: (key: string) => string;
+}) {
+  const delivery = rules?.delivery.find((rule) => rule.isCurrent);
+  const collection = rules?.collection.find((rule) => rule.isCurrent);
+  const history = [...(rules?.delivery ?? []), ...(rules?.collection ?? [])].filter(
+    (rule) => !rule.isCurrent,
+  );
+  return (
+    <fieldset data-testid="driver-variable-earnings">
+      <legend>{t("workforce.driverVariableEarnings")}</legend>
+      {engagement === "employee" ? (
+        <section>
+          <h3>{t("workforce.deliveryEarnings")}</h3>
+          <label className="field-checkbox">
+            <input
+              checked={deliveryEnabled}
+              onChange={(event) => onDeliveryEnabled(event.target.checked)}
+              type="checkbox"
+            />
+            <span>{t("workforce.eligibleDeliveryEarnings")}</span>
+          </label>
+          {deliveryEnabled ? (
+            <>
+              <EarningInput
+                {...(errors.deliveryAmount ? { error: errors.deliveryAmount } : {})}
+                label={t("workforce.feePerDeliveredOrder")}
+                name="deliveryAmount"
+                value={delivery?.amount ?? ""}
+              />
+              <EarningDate
+                {...(errors.deliveryFrom ? { error: errors.deliveryFrom } : {})}
+                label={t("workforce.effectiveFrom")}
+                name="deliveryFrom"
+                value={delivery?.effectiveFrom ?? today()}
+              />
+              <EarningDate
+                {...(errors.deliveryTo ? { error: errors.deliveryTo } : {})}
+                label={t("workforce.effectiveTo")}
+                name="deliveryTo"
+                value={delivery?.effectiveTo ?? ""}
+              />
+            </>
+          ) : null}
+        </section>
+      ) : null}
+      <section>
+        <h3>{t("workforce.collectionEarnings")}</h3>
+        <label className="field">
+          <span>{t("workforce.collectionPaymentType")}</span>
+          <select
+            name="collectionType"
+            onChange={(event) => onCollectionType(event.target.value)}
+            value={collectionType}
+          >
+            <option value="none">{t("workforce.collectionNone")}</option>
+            <option value="per_collected_order">{t("workforce.perCollectedOrder")}</option>
+          </select>
+        </label>
+        {collectionType !== "none" ? (
+          <>
+            <EarningInput
+              {...(errors.collectionAmount ? { error: errors.collectionAmount } : {})}
+              label={t("workforce.amountAed")}
+              name="collectionAmount"
+              value={collection?.amount ?? ""}
+            />
+            <EarningDate
+              {...(errors.collectionFrom ? { error: errors.collectionFrom } : {})}
+              label={t("workforce.effectiveFrom")}
+              name="collectionFrom"
+              value={collection?.effectiveFrom ?? today()}
+            />
+            <EarningDate
+              {...(errors.collectionTo ? { error: errors.collectionTo } : {})}
+              label={t("workforce.effectiveTo")}
+              name="collectionTo"
+              value={collection?.effectiveTo ?? ""}
+            />
+          </>
+        ) : null}
+      </section>
+      {history.length > 0 ? (
+        <details>
+          <summary>{t("workforce.rateHistory")}</summary>
+          <ul className="simple-list">
+            {history.map((rule) => (
+              <li key={rule.id}>
+                {rule.amount} AED · {rule.effectiveFrom} – {rule.effectiveTo ?? "—"}
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
+    </fieldset>
+  );
+}
+
+function EarningInput({
+  error,
+  label,
+  name,
+  value,
+}: {
+  error?: string;
+  label: string;
+  name: string;
+  value: string;
+}) {
+  return (
+    <label className="field">
+      <span>{label}</span>
+      <input
+        aria-invalid={Boolean(error)}
+        defaultValue={value}
+        min="0.01"
+        name={name}
+        step="0.01"
+        type="number"
+      />
+      {error ? <span className="field-error">{error}</span> : null}
+    </label>
+  );
+}
+function EarningDate({
+  error,
+  label,
+  name,
+  value,
+}: {
+  error?: string;
+  label: string;
+  name: string;
+  value: string;
+}) {
+  return (
+    <label className="field">
+      <span>{label}</span>
+      <input aria-invalid={Boolean(error)} defaultValue={value} name={name} type="date" />
+      {error ? <span className="field-error">{error}</span> : null}
+    </label>
   );
 }
 
@@ -918,11 +1185,20 @@ export function WorkforceDetailWorkspace({
 }) {
   const { t } = useTranslation();
   const [detail, setDetail] = useState<Detail>();
+  const [earningRules, setEarningRules] = useState<VariableEarningRules>();
   const [dialog, setDialog] = useState<"document" | "commission" | "calculation" | "payment">();
   const [error, setError] = useState<string>();
   const load = useCallback(async () => {
     try {
-      setDetail(await api.get<Detail>(`configuration/${kind}/${encodeURIComponent(code)}`));
+      const loaded = await api.get<Detail>(`configuration/${kind}/${encodeURIComponent(code)}`);
+      setDetail(loaded);
+      if (kind === "employees" && loaded.driver_type) {
+        setEarningRules(
+          await api.get<VariableEarningRules>(
+            `configuration/employees/${String(loaded.id)}/variable-earnings`,
+          ),
+        );
+      }
     } catch {
       setError(t("common.loadFailed"));
     }
@@ -1045,6 +1321,9 @@ export function WorkforceDetailWorkspace({
         profileMobileNumber={String(detail.mobile_number ?? "")}
         profileName={String(detail.name_en ?? "")}
       />
+      {kind === "employees" && detail.driver_type ? (
+        <CurrentVariableEarnings {...(earningRules ? { rules: earningRules } : {})} t={t} />
+      ) : null}
       <DetailTable
         title={t("workforce.documents")}
         rows={documents}
@@ -1106,6 +1385,43 @@ export function WorkforceDetailWorkspace({
         />
       )}
     </>
+  );
+}
+function CurrentVariableEarnings({
+  rules,
+  t,
+}: {
+  rules?: VariableEarningRules;
+  t: (key: string) => string;
+}) {
+  const delivery = rules?.delivery.find((rule) => rule.isCurrent);
+  const collection = rules?.collection.find((rule) => rule.isCurrent);
+  const rows = [
+    ...(delivery
+      ? [
+          {
+            ...delivery,
+            earning: t("workforce.deliveryEarnings"),
+            payment: t("workforce.perDeliveredOrder"),
+          },
+        ]
+      : []),
+    ...(collection
+      ? [
+          {
+            ...collection,
+            earning: t("workforce.collectionEarnings"),
+            payment: t(`workforce.collectionTypes.${collection.paymentType ?? "none"}`),
+          },
+        ]
+      : []),
+  ];
+  return (
+    <DetailTable
+      title={`${t("workforce.driverVariableEarnings")} — ${t("workforce.currentRule")}`}
+      rows={rows}
+      columns={["earning", "payment", "amount", "effectiveFrom", "effectiveTo"]}
+    />
   );
 }
 function Info({ label, value }: { label: string; value: string }) {

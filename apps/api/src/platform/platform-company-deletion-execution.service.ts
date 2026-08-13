@@ -184,6 +184,15 @@ export class PlatformCompanyDeletionExecutionService {
 
         await sql`delete from role_permissions using roles where role_permissions.role_id=roles.id and roles.company_id=${companyId}::uuid`.execute(transaction);
         await sql`delete from storefront_marketplace_categories using trader_storefronts where storefront_marketplace_categories.storefront_id=trader_storefronts.id and trader_storefronts.company_id=${companyId}::uuid`.execute(transaction);
+        // `store_orders.delivery_company_id` is Company-ownership under a
+        // non-standard column name -- the generic loop below assumes
+        // `company_id` literally, so this table is handled here instead,
+        // same as the two lines above. Runs before `orders` is deleted in
+        // the generic loop: `store_orders.delivery_order_id -> orders` would
+        // otherwise RESTRICT that delete. `store_order_items` cascades from
+        // this delete (`ON DELETE CASCADE`) and needs no statement of its
+        // own.
+        await sql`delete from store_orders where delivery_company_id=${companyId}::uuid`.execute(transaction);
         for (const cycle of COMPANY_DELETION_CYCLE_BREAKS) {
           const assignments = cycle.columns.map((column) => `${quote(column)}=null`).join(",");
           await sql`update ${sql.table(cycle.table)} set ${sql.raw(assignments)} where company_id=${companyId}::uuid`.execute(transaction);

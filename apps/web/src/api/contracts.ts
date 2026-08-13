@@ -501,10 +501,12 @@ export interface OperationsOrderPage {
   /** Present on Delivery Activity responses. */
   readonly appliedDateMode?: AppliedReportDateMode;
   readonly filteredCount: number;
+  readonly matchingCount?: number;
   readonly items: readonly OperationsOrder[];
   readonly page: number;
   readonly pageSize: 25 | 50 | 100;
   readonly totalCount: number;
+  readonly tabTotalCount?: number;
 }
 
 export interface OperationsOrderDetail extends OperationsOrder {
@@ -610,6 +612,34 @@ export interface PortalOrder {
   readonly serviceFee: string;
   readonly traderName: string;
   readonly traderSettlementStatus: string;
+}
+
+/** One Order row from the searchable Trader Orders list — an explicit
+    allow-list, distinct from the Company `OperationsOrder` shape. */
+export interface TraderPortalOrderSummary {
+  readonly areaName: string;
+  readonly codAmount: string;
+  readonly customerAddress: string;
+  readonly customerAmountDue: string;
+  readonly customerMobileNumber: string;
+  readonly customerName: string;
+  /** Present only from the cross-Company `trader/orders/search/all-companies` route. */
+  readonly deliveryCompanyId?: string;
+  readonly deliveryCompanyName?: string;
+  readonly deliveryStatus: string;
+  readonly id: string;
+  readonly orderDate: string;
+  readonly orderNumber: string;
+  readonly referenceNumber: string | null;
+  readonly serviceFee: string;
+}
+
+export interface TraderPortalOrderPage {
+  readonly filteredCount: number;
+  readonly items: readonly TraderPortalOrderSummary[];
+  readonly page: number;
+  readonly pageSize: 25 | 50 | 100;
+  readonly totalCount: number;
 }
 
 /** One row's outcome. Optional throughout: an older API build omits it. */

@@ -4,6 +4,24 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#101936" />
+    <!--
+      Prompt 3D: PWA/App-readiness foundation. The manifest and icon links
+      live in the static shell (not injected per-request) so they survive
+      `injectMetadata`'s per-route SEO rewrite untouched -- that function only
+      replaces the html/title tags and appends just before the closing head
+      tag, never removing existing head elements. Icons are a clearly-
+      identified development-safe placeholder (see
+      apps/store/public/icons/README.md); final Store/App artwork is pending
+      and not fabricated here.
+    -->
+    <link href="/manifest.webmanifest" rel="manifest" />
+    <link href="/favicon.ico" rel="icon" sizes="any" />
+    <link href="/apple-touch-icon.png" rel="apple-touch-icon" />
+    <!-- iOS has no manifest support; these are the standalone-mode
+         equivalents so "Add to Home Screen" behaves sanely there too. -->
+    <meta content="yes" name="apple-mobile-web-app-capable" />
+    <meta content="BluelineGPT" name="apple-mobile-web-app-title" />
+    <meta content="default" name="apple-mobile-web-app-status-bar-style" />
     <title>BluelineGPT Store</title>
   </head>
   <body>

@@ -422,11 +422,8 @@ export class SaveDeliveryEarningRuleDto {
 }
 
 export class SaveCollectionEarningRuleDto {
-  @IsIn(["none", "per_collected_order", "flat_per_confirmed_collection"])
-  public readonly collectionPaymentType!:
-    | "none"
-    | "per_collected_order"
-    | "flat_per_confirmed_collection";
+  @IsIn(["none", "per_collected_order"])
+  public readonly collectionPaymentType!: "none" | "per_collected_order";
 
   /** Must be 0 for `none`, and above 0 for either paid type. */
   @IsNumber({ allowInfinity: false, allowNaN: false, maxDecimalPlaces: 2 })

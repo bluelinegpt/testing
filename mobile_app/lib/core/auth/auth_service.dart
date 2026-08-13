@@ -173,37 +173,42 @@ final class SessionAuthenticationService implements AuthenticationService {
       /* corrupted local metadata is ignored */
     }
     try {
-      await api.logout();
+      await api.logout().timeout(const Duration(seconds: 4));
     } on Object {
       /* local logout must still succeed */
     }
     try {
-      await deviceRegistration.deregister();
+      await deviceRegistration.deregister().timeout(const Duration(seconds: 3));
     } on Object {
       /* optional */
     }
     try {
-      await notifications.clearRegistration();
+      await notifications.clearRegistration().timeout(
+        const Duration(seconds: 3),
+      );
     } on Object {
       /* optional */
     }
     try {
-      await realtime.disconnect();
+      await realtime.disconnect().timeout(const Duration(seconds: 3));
     } on Object {
       /* optional */
     }
     try {
       if (user != null) {
-        await driverOfflineStore.clearScope(
-          userId: user.id,
-          companyId: user.companyId,
-        );
+        await driverOfflineStore
+            .clearScope(userId: user.id, companyId: user.companyId)
+            .timeout(const Duration(seconds: 3));
       }
     } on Object {
       /* optional — the Driver offline cache/queue must never block logout */
     }
-    if (user != null) await privateCache.clear(user.companyId, user.id);
-    await storage.clearSession();
+    try {
+      if (user != null) await privateCache.clear(user.companyId, user.id);
+    } finally {
+      // Local credentials must be removed even when every remote cleanup fails.
+      await storage.clearSession();
+    }
   }
 
   @override

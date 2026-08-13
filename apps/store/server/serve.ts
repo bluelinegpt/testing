@@ -55,6 +55,14 @@ import { escapeHtml, injectMetadata } from "../src/seo/render-metadata.js";
  * internal error text of any kind.
  */
 
+/**
+ * Must match `apps/api/src/authentication/session-cookie.ts` exactly --
+ * two separate deployments agreeing on the same contract, not shared code
+ * (this server does not import from `apps/api`).
+ */
+const sessionCsrfHeader = "x-blueline-session";
+const sessionCsrfValue = "cookie";
+
 const port = Number.parseInt(process.env.STORE_PORT ?? "8081", 10);
 const publicDirectory = resolve(process.env.STORE_ROOT ?? "dist");
 const apiOrigin = process.env.STORE_API_ORIGIN ?? "http://localhost:3000";
@@ -75,12 +83,37 @@ const contentTypes = new Map([
   [".woff2", "font/woff2"],
   [".xml", "application/xml; charset=utf-8"],
   [".txt", "text/plain; charset=utf-8"],
+  // Prompt 3D: the Web App Manifest. `application/manifest+json` is the
+  // standard MIME (RFC-registered); `application/json` also works in every
+  // browser tested but the specific type is what `pnpm run build`'s own
+  // manifest test asserts against, so it is declared explicitly rather than
+  // left to fall through to `application/octet-stream` below.
+  [".webmanifest", "application/manifest+json"],
 ]);
 
 function addSecurityHeaders(response: ServerResponse): void {
   response.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
   response.setHeader("X-Content-Type-Options", "nosniff");
   response.setHeader("X-Frame-Options", "DENY");
+}
+
+/**
+ * Static-asset Cache-Control (Prompt 3D §21/§63/§64).
+ *
+ * Vite content-hashes everything under `/assets/` (`index-<hash>.js`), so a
+ * given URL's bytes never change -- `immutable` is correct and safe there.
+ * Everything else served from `public/` (manifest, icons, favicon) keeps a
+ * STABLE filename that CAN change contents on a future deploy (e.g. real
+ * production artwork replacing the 3D placeholder), so it gets a short,
+ * revalidating cache instead of a long immutable one.
+ */
+function staticCacheControl(pathname: string): string {
+  if (pathname.startsWith("/assets/")) return "public, max-age=31536000, immutable";
+  // The service worker script itself must always be revalidated -- a long
+  // cache here would delay every browser's own update check (§18: explicit
+  // versioning is only useful if the script that owns it is fetched fresh).
+  if (pathname === "/sw.js") return "no-cache";
+  return "public, max-age=3600";
 }
 
 /** A bounded public API read. Returns null on any failure, never throws. */
@@ -103,6 +136,7 @@ async function apiGet<T>(path: string): Promise<T | null> {
 
 interface RouteMatch {
   readonly kind:
+    | "account"
     | "category"
     | "categoryIndex"
     | "marketplace"
@@ -112,6 +146,27 @@ interface RouteMatch {
   readonly locale: SeoLocale;
   readonly segments: readonly string[];
 }
+
+/**
+ * Customer account surfaces (Shared Commerce Foundation Prompt 3A). None of
+ * these are Store slugs -- `reserved-slugs.ts` already guarantees that -- so
+ * matching them here, before the generic single-segment "store" case, is
+ * exactly as safe as the `categories` special-case above it.
+ */
+const accountSurfaceSlugs = new Set([
+  "register",
+  "login",
+  "logout",
+  "forgot-password",
+  "reset-password",
+  "account",
+  // Prompt 3C: My Orders is a Customer-authenticated surface with no public
+  // content of its own -- same `noindex,nofollow` treatment as `account`
+  // itself, not the "genuine 404" path. Tracking is public but similarly has
+  // no static content to render server-side (its content only exists after
+  // the Customer submits the form), so it gets the same shell treatment.
+  "track",
+]);
 
 /**
  * Which public document a path refers to.
@@ -141,6 +196,19 @@ function matchRoute(pathname: string): RouteMatch | null {
     if (segments.length === 3) return { kind: "subcategory", locale, segments: segments.slice(1) };
     return null;
   }
+  if (segments.length === 1 && accountSurfaceSlugs.has(segments[0]!)) {
+    return { kind: "account", locale, segments };
+  }
+  // My Orders / Order Detail (Prompt 3C, §15/§19): `account/orders` and
+  // `account/orders/{storeOrderNumber}` are Customer-authenticated surfaces,
+  // not Store slugs -- matched here, before the generic single/triple-segment
+  // cases below, exactly like `categories` above it.
+  if (segments.length === 2 && segments[0] === "account" && segments[1] === "orders") {
+    return { kind: "account", locale, segments: ["account/orders"] };
+  }
+  if (segments.length === 3 && segments[0] === "account" && segments[1] === "orders") {
+    return { kind: "account", locale, segments: ["account/orders"] };
+  }
   if (segments.length === 1) return { kind: "store", locale, segments };
   if (segments.length === 3 && segments[1] === "products") {
     return { kind: "product", locale, segments: [segments[0]!, segments[2]!] };
@@ -162,6 +230,18 @@ async function documentFor(match: RouteMatch): Promise<DocumentResult> {
 
   if (match.kind === "categoryIndex") {
     return { document: categoryIndexSeoDocument(base), status: 200 };
+  }
+
+  if (match.kind === "account") {
+    // A real page, not a 404 -- a direct reload of `/en/login` must render
+    // correctly (§21/§58) -- but never crawlable: `noindex,nofollow` and no
+    // sitemap entry, since none of these carry public content and
+    // `reset-password` specifically may carry a one-time token in its query
+    // string that must never be cached or indexed.
+    return {
+      document: notFoundSeoDocument({ ...base, path: match.segments[0] ?? "" }),
+      status: 200,
+    };
   }
 
   if (match.kind === "store") {
@@ -253,9 +333,13 @@ function robotsTxt(): string {
     "Disallow: /account",
     "Disallow: /login",
     "Disallow: /register",
+    "Disallow: /forgot-password",
+    "Disallow: /reset-password",
     "Disallow: /cart",
     "Disallow: /checkout",
     "Disallow: /orders",
+    "Disallow: /account/orders",
+    "Disallow: /track",
     // Commerce media is public and is exactly what `og:image` points at. It
     // must be listed BEFORE the broader `/api/` rule: a scraper that honours
     // robots would otherwise refuse to fetch the share image, and the WhatsApp
@@ -348,7 +432,11 @@ const shellPath = join(publicDirectory, "index.html");
  * browser with no error anywhere in the chain. Uploaded Store and Product
  * media travel this path, so this must stay binary-safe.
  */
-async function proxyApi(url: URL, response: ServerResponse): Promise<void> {
+async function proxyApi(
+  url: URL,
+  response: ServerResponse,
+  request?: { readonly body: Buffer | undefined; readonly cookie: string | undefined; readonly method: string },
+): Promise<void> {
   const target = `${apiOrigin}${url.pathname}${url.search}`;
   const controller = new AbortController();
   const timer = setTimeout(() => {
@@ -356,21 +444,39 @@ async function proxyApi(url: URL, response: ServerResponse): Promise<void> {
   }, apiTimeoutMs);
   try {
     const upstream = await fetch(target, {
-      headers: { accept: "application/json" },
+      ...(request?.body === undefined ? {} : { body: new Uint8Array(request.body) }),
+      headers: {
+        accept: "application/json",
+        // Only the two headers a Customer-auth mutation actually needs are
+        // forwarded -- the session Cookie itself, and the CSRF header the
+        // API's own guard requires alongside it (§34). Nothing else about
+        // the original request (its own Host, its own User-Agent, etc.)
+        // crosses this boundary.
+        ...(request?.cookie === undefined ? {} : { cookie: request.cookie }),
+        ...(request?.body === undefined ? {} : { "content-type": "application/json" }),
+        [sessionCsrfHeader]: sessionCsrfValue,
+      },
+      method: request?.method ?? "GET",
       signal: controller.signal,
     });
     const body = Buffer.from(await upstream.arrayBuffer());
     const contentType = upstream.headers.get("content-type") ?? "application/json";
     // Media is content-addressed by an immutable file id, so it can be cached
-    // hard; API reads must not be.
+    // hard; API reads must not be, and a Customer-auth response never is.
     const cacheControl = contentType.startsWith("image/")
       ? "public, max-age=86400"
       : "no-store";
-    response.writeHead(upstream.status, {
+    const headers: import("node:http").OutgoingHttpHeaders = {
       "Cache-Control": cacheControl,
       "Content-Length": body.length,
       "Content-Type": contentType,
-    });
+    };
+    // §33: the Customer session cookie the API issues on register/login/
+    // password-reset must reach the browser, or every one of those flows
+    // silently fails to actually sign the Customer in.
+    const setCookie = upstream.headers.getSetCookie?.() ?? [];
+    if (setCookie.length > 0) headers["Set-Cookie"] = setCookie;
+    response.writeHead(upstream.status, headers);
     response.end(body);
   } catch {
     response.writeHead(502, { "Cache-Control": "no-store", "Content-Type": "application/json" });
@@ -397,17 +503,52 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
    * means the API origin stays a deployment detail rather than something baked
    * into the built bundle.
    *
-   * Only GET and HEAD are forwarded. The public Store is read-only, and a
-   * proxy that will forward anything is a far larger surface than the one
-   * feature that needs it.
+   * ---------------------------------------------------------------------------
+   * WHY CUSTOMER-AUTH PATHS ARE THE ONE EXCEPTION TO "GET/HEAD ONLY"
+   * ---------------------------------------------------------------------------
+   *
+   * The public Store is read-only EXCEPT for its own Customer identity
+   * (Shared Commerce Foundation Prompt 3A) — register/login/logout/password
+   * reset/profile/address mutations are genuinely POST/PATCH/DELETE. Only
+   * `commerce/customer-auth/*` and `commerce/customer/*` are exempted from
+   * the method restriction below; every other API path stays GET/HEAD-only,
+   * unchanged. This also forwards the request Cookie (so an authenticated
+   * mutation carries the Customer's session) and the response's Set-Cookie
+   * (so register/login/reset actually leave the browser signed in).
    */
   if (pathname.startsWith("/api/")) {
-    if (request.method !== "GET" && request.method !== "HEAD") {
+    const isCustomerAuthPath =
+      pathname.startsWith("/api/v1/commerce/customer-auth/") ||
+      pathname.startsWith("/api/v1/commerce/customer/");
+    // Prompt 3C: the ONE public (unauthenticated) mutation this Store makes --
+    // guest tracking (§27) genuinely needs a POST body (Order number, mobile,
+    // tracking token), and none of those belong in a URL/query string. No
+    // session cookie is required or forwarded for it, unlike the Customer-auth
+    // paths above -- it is not a Customer-identity request at all.
+    const isPublicStoreOrderTrackPath = pathname === "/api/v1/public/store-orders/track";
+    const isExemptFromMethodRestriction = isCustomerAuthPath || isPublicStoreOrderTrackPath;
+    if (!isExemptFromMethodRestriction && request.method !== "GET" && request.method !== "HEAD") {
       response.writeHead(405, { Allow: "GET, HEAD", "Content-Type": "application/json" });
       response.end('{"error":"method_not_allowed"}');
       return;
     }
-    await proxyApi(url, response);
+    if (isExemptFromMethodRestriction && request.method !== "GET" && request.method !== "HEAD") {
+      const chunks: Buffer[] = [];
+      for await (const chunk of request) {
+        chunks.push(chunk as Buffer);
+      }
+      await proxyApi(url, response, {
+        body: chunks.length === 0 ? undefined : Buffer.concat(chunks),
+        cookie: isPublicStoreOrderTrackPath ? undefined : request.headers.cookie,
+        method: request.method ?? "GET",
+      });
+      return;
+    }
+    await proxyApi(
+      url,
+      response,
+      isCustomerAuthPath ? { body: undefined, cookie: request.headers.cookie, method: "GET" } : undefined,
+    );
     return;
   }
 
@@ -417,12 +558,18 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
     return;
   }
   if (pathname === "/robots.txt") {
-    response.writeHead(200, { "Content-Type": contentTypes.get(".txt")! });
+    response.writeHead(200, {
+      "Cache-Control": "public, max-age=3600",
+      "Content-Type": contentTypes.get(".txt")!,
+    });
     response.end(robotsTxt());
     return;
   }
   if (pathname === "/sitemap.xml") {
-    response.writeHead(200, { "Content-Type": contentTypes.get(".xml")! });
+    response.writeHead(200, {
+      "Cache-Control": "public, max-age=3600",
+      "Content-Type": contentTypes.get(".xml")!,
+    });
     response.end(await sitemapXml());
     return;
   }
@@ -430,6 +577,7 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
   const asset = resolveAsset(pathname);
   if (asset !== undefined) {
     response.writeHead(200, {
+      "Cache-Control": staticCacheControl(pathname),
       "Content-Type": contentTypes.get(extname(asset)) ?? "application/octet-stream",
     });
     createReadStream(asset).pipe(response);
@@ -445,13 +593,30 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
       path: pathname,
       siteName,
     });
-    response.writeHead(404, { "Content-Type": contentTypes.get(".html")! });
+    response.writeHead(404, {
+      "Cache-Control": "no-store",
+      "Content-Type": contentTypes.get(".html")!,
+    });
     response.end(injectMetadata(shell, document));
     return;
   }
 
   const { document, status } = await documentFor(match);
-  response.writeHead(status, { "Content-Type": contentTypes.get(".html")! });
+  // Prompt 3D §21/§22: the "account" shell (login, register, /account,
+  // /account/orders, tracking) is the entry point to authenticated Customer
+  // data. The HTML itself carries no Customer data -- React fetches that
+  // client-side against the API's own already-`no-store` endpoints -- but
+  // the shell response is marked `no-store` anyway, defense in depth, so
+  // neither a browser's back/forward cache nor an intermediate proxy is
+  // ever the reason an old account page reappears. Every genuinely public
+  // document (marketplace/category/Store/Product) gets a short, always-
+  // revalidated cache instead: Trader-edited content should not need a
+  // manual cache-bust to show up, but repeat crawler hits within a minute
+  // are cheap to skip recomputing.
+  response.writeHead(status, {
+    "Cache-Control": match.kind === "account" ? "no-store" : "public, max-age=60, must-revalidate",
+    "Content-Type": contentTypes.get(".html")!,
+  });
   response.end(injectMetadata(shell, document));
 }
 
