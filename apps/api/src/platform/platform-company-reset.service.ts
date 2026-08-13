@@ -252,7 +252,7 @@ export class PlatformCompanyResetService {
       `insert into audit_events (
          company_id, actor_account_id, action, subject_type, subject_id,
          before_data, after_data, correlation_id, actor_role, source, result, source_application
-       ) values ($1, $2, 'platform.company.data_reset', 'company', $1,
+       ) values ($1::uuid, $2::uuid, 'platform.company.data_reset', 'company', $1::text,
                  $3::jsonb, $4::jsonb, $5, 'platform_administrator', 'platform_portal',
                  'success', 'platform-web')`,
       [
