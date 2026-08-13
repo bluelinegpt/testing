@@ -287,9 +287,7 @@ export function OrdersModuleWorkspace({
     filters.deliveryDateTo,
     filters.businessDateFrom,
     filters.businessDateTo,
-    filters.cashStatus,
     filters.referenceNumber,
-    filters.settlementStatus,
     filters.search,
     filters.traderId,
   ].some((value) => value !== "");
@@ -4594,7 +4592,7 @@ function groupVisibleOrders(
       case "area":
         return `area:${order.areaName ?? "unknown"}`;
       case "trader":
-        return `trader:${order.traderId ?? "unknown"}`;
+        return `trader:${order.traderName ?? "unknown"}`;
       case "driver":
         return `driver:${order.assignedDriverId ?? "unassigned"}`;
       case "status":
@@ -4613,7 +4611,7 @@ function groupVisibleOrders(
 
     const grouped = new Map<string, OperationsOrder[]>();
     for (const order of items) {
-      const key = getGroupKey(dimensions[level], order);
+      const key = getGroupKey(dimensions[level]!, order);
       const existing = grouped.get(key) ?? [];
       existing.push(order);
       grouped.set(key, existing);
@@ -4623,7 +4621,7 @@ function groupVisibleOrders(
       const isLeaf = level === dimensions.length - 1;
       return {
         key,
-        label: getGroupLabel(dimensions[level], groupedOrders[0]!),
+        label: getGroupLabel(dimensions[level]!, groupedOrders[0]!),
         level,
         orders: isLeaf ? groupedOrders : [],
         children: isLeaf ? [] : buildHierarchy(groupedOrders, dimensions, level + 1),
