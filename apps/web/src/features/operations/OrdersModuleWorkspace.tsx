@@ -534,9 +534,31 @@ export function OrdersModuleWorkspace({
     setExcludedIds(new Set());
   };
   const orderSelected = (id: string) => (allMatching ? !excludedIds.has(id) : selectedIds.has(id));
+  // Build area-to-emirate-code mapping from actual orders
+  const areaEmirateMap = useMemo(() => {
+    const map = new Map<string, string>();
+
+    // First, build a emirate name -> code map
+    const emirateNameToCode = new Map<string, string>();
+    for (const emirate of emirates) {
+      emirateNameToCode.set(emirate.nameEn.toLowerCase(), emirate.code.toUpperCase());
+    }
+
+    // Then, extract area-to-emirate mappings from orders
+    for (const order of orderItems) {
+      if (order.areaName && order.emirateNameEn) {
+        const emirateCode = emirateNameToCode.get(order.emirateNameEn.toLowerCase())
+          || order.emirateNameEn.substring(0, 3).toUpperCase();
+        map.set(order.areaName, emirateCode);
+      }
+    }
+
+    return map;
+  }, [orderItems, emirates]);
+
   const groups = useMemo(
-    () => groupVisibleOrders(orderItems, grouping, t),
-    [orderItems, grouping, t],
+    () => groupVisibleOrders(orderItems, grouping, t, areaEmirateMap),
+    [orderItems, grouping, t, areaEmirateMap],
   );
   const changeGrouping = (next: OrderGrouping) => {
     if (allMatching) {
@@ -4472,6 +4494,7 @@ function groupVisibleOrders(
   orders: readonly OperationsOrder[],
   grouping: OrderGrouping,
   t: TFunction,
+  areaEmirateMap?: Map<string, string>,
 ): readonly VisibleOrderGroup[] {
   if (grouping === "" || grouping.length === 0) return [];
 
@@ -4483,9 +4506,18 @@ function groupVisibleOrders(
     switch (dimension) {
       case "area": {
         const areaName = order.areaName ?? t("operations.unknown");
-        // Use emirate name if available, otherwise just show area
+        // Try emirateNameEn first, then fall back to areaEmirateMap lookup
+        let emirateCode: string | undefined;
+
         if (order.emirateNameEn) {
-          const emirateCode = order.emirateNameEn.substring(0, 3).toUpperCase();
+          emirateCode = order.emirateNameEn.substring(0, 3).toUpperCase();
+        } else if (areaEmirateMap) {
+          // Try to find emirate by matching known area names or emirate names
+          emirateCode = areaEmirateMap.get(areaName.toLowerCase());
+        }
+
+        // If we found emirate code, use the full format; otherwise just show area
+        if (emirateCode) {
           return `${emirateCode} - ${areaName}`;
         }
         return areaName;
