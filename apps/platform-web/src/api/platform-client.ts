@@ -33,6 +33,7 @@ export class PlatformApiError extends Error {
     message: string,
     public readonly code: string,
     public readonly status: number,
+    public readonly correlationId?: string,
   ) {
     super(message);
     this.name = "PlatformApiError";
@@ -40,7 +41,11 @@ export class PlatformApiError extends Error {
 }
 
 interface ErrorPayload {
-  readonly error?: { readonly code?: string; readonly message?: string };
+  readonly error?: {
+    readonly code?: string;
+    readonly message?: string;
+    readonly correlationId?: string;
+  };
 }
 
 const defaultTimeoutMs = 15_000;
@@ -69,10 +74,21 @@ async function request<TResponse>(
       const payload = (response.headers.get("content-type") ?? "").includes("application/json")
         ? ((await response.json()) as ErrorPayload)
         : undefined;
+      const correlationId = payload?.error?.correlationId;
+      // The API deliberately sanitizes 500s to a generic sentence — the real
+      // message is captured server-side into the Error Handler. Showing that
+      // generic sentence alone strands the reader; what they need is where
+      // the details went and the reference to find them by.
+      const message =
+        response.status >= 500
+          ? "The server hit an unexpected error. The full details were recorded in the " +
+            `Error Handler screen${correlationId === undefined ? "" : ` under reference ${correlationId}`}.`
+          : (payload?.error?.message ?? "The request could not be completed");
       throw new PlatformApiError(
-        payload?.error?.message ?? "The request could not be completed",
+        message,
         payload?.error?.code ?? "request_failed",
         response.status,
+        correlationId,
       );
     }
     if (response.status === 204) return undefined;
