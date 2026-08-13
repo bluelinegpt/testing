@@ -4482,11 +4482,13 @@ function groupVisibleOrders(
   const getGroupLabel = (dimension: string, order: OperationsOrder): string => {
     switch (dimension) {
       case "area": {
-        const emirateCode = order.emirateNameEn
-          ? order.emirateNameEn.substring(0, 3).toUpperCase()
-          : "???";
         const areaName = order.areaName ?? t("operations.unknown");
-        return `${emirateCode} - ${areaName}`;
+        // Use emirate name if available, otherwise just show area
+        if (order.emirateNameEn) {
+          const emirateCode = order.emirateNameEn.substring(0, 3).toUpperCase();
+          return `${emirateCode} - ${areaName}`;
+        }
+        return areaName;
       }
       case "trader":
         return order.traderName ?? t("operations.unknown");
