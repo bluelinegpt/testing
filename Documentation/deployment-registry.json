@@ -6,38 +6,38 @@
       "displayName": "API",
       "path": "apps/api",
       "renderService": "bluelinegpt-api-test",
-      "status": "needs_deploy",
+      "status": "confirmed_live",
       "localCommit": "27e356a",
       "localCommitDate": "2026-08-14",
       "lastChangeDescription": "feat(web): tenant-aware same-origin API proxy so company portals work on custom domains",
       "lastChangeBy": "human",
-      "confirmedLiveCommit": "cf6a09b",
-      "confirmedLiveAt": "2026-08-13"
+      "confirmedLiveCommit": "27e356a",
+      "confirmedLiveAt": "2026-08-14"
     },
     {
       "id": "web",
       "displayName": "Main app",
       "path": "apps/web",
       "renderService": "bluelinegpt-web-test",
-      "status": "needs_deploy",
+      "status": "confirmed_live",
       "localCommit": "27e356a",
       "localCommitDate": "2026-08-14",
       "lastChangeDescription": "feat(web): tenant-aware same-origin API proxy so company portals work on custom domains",
       "lastChangeBy": "human",
-      "confirmedLiveCommit": "17c934c",
-      "confirmedLiveAt": "2026-08-13"
+      "confirmedLiveCommit": "27e356a",
+      "confirmedLiveAt": "2026-08-14"
     },
     {
       "id": "platform-web",
       "displayName": "Platform admin",
       "path": "apps/platform-web",
       "renderService": "bluelinegpt-platform-test",
-      "status": "needs_deploy",
+      "status": "confirmed_live",
       "localCommit": "27e356a",
       "localCommitDate": "2026-08-14",
       "lastChangeDescription": "feat(web): tenant-aware same-origin API proxy so company portals work on custom domains",
       "lastChangeBy": "human",
-      "confirmedLiveCommit": "d424b70",
+      "confirmedLiveCommit": "27e356a",
       "confirmedLiveAt": "2026-08-14"
     },
     {
