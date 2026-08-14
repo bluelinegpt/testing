@@ -47,7 +47,17 @@ export function BusinessAccessPanel({
   const [employeeRoleIds, setEmployeeRoleIds] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [temporaryCredentials, setTemporaryCredentials] = useState<TemporaryCredentials>();
+  const [copiedField, setCopiedField] = useState<string>();
   const [error, setError] = useState<string>();
+  const copyValue = async (field: string, value: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopiedField(field);
+    } catch {
+      // Clipboard access can be refused (permissions, insecure context); the
+      // value stays visible on screen, so manual selection still works.
+    }
+  };
   const message = (cause: unknown, fallback: string) =>
     cause instanceof ApiError
       ? t(`access.errors.codes.${cause.code}`, { defaultValue: cause.message || fallback })
@@ -416,21 +426,50 @@ export function BusinessAccessPanel({
       {temporaryCredentials ? (
         <Modal
           closeLabel={t("common.close")}
-          onRequestClose={() => setTemporaryCredentials(undefined)}
+          onRequestClose={() => {
+            setTemporaryCredentials(undefined);
+            setCopiedField(undefined);
+          }}
           title={t("access.temporaryPassword")}
           titleId="business-access-temporary-password"
         >
           <p>{t("access.temporaryPasswordWarning")}</p>
+          {kind === "trader" && profileMobileNumber ? (
+            <p>
+              <strong>{t("access.loginMobile")}:</strong> <bdi>{profileMobileNumber}</bdi>{" "}
+              <button
+                onClick={() => void copyValue("mobile", profileMobileNumber)}
+                type="button"
+              >
+                {copiedField === "mobile" ? t("common.copied") : t("common.copy")}
+              </button>
+            </p>
+          ) : null}
           <p>
-            <strong>{t("userAdmin.username")}:</strong> <bdi>{temporaryCredentials.username}</bdi>
+            <strong>{t("userAdmin.username")}:</strong> <bdi>{temporaryCredentials.username}</bdi>{" "}
+            <button
+              onClick={() => void copyValue("username", temporaryCredentials.username)}
+              type="button"
+            >
+              {copiedField === "username" ? t("common.copied") : t("common.copy")}
+            </button>
           </p>
           <div className="temporary-password-value">
-            <bdi>{temporaryCredentials.password}</bdi>
+            <bdi>{temporaryCredentials.password}</bdi>{" "}
+            <button
+              onClick={() => void copyValue("password", temporaryCredentials.password)}
+              type="button"
+            >
+              {copiedField === "password" ? t("common.copied") : t("common.copy")}
+            </button>
           </div>
           <div className="modal-actions">
             <button
               className="button button-primary"
-              onClick={() => setTemporaryCredentials(undefined)}
+              onClick={() => {
+                setTemporaryCredentials(undefined);
+                setCopiedField(undefined);
+              }}
               type="button"
             >
               {t("common.done")}

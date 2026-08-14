@@ -927,6 +927,7 @@
   },
   common: {
     copy: "نسخ",
+    copied: "تم النسخ",
     originatingOrderIneligible: "لم يعد هذا الطلب مؤهلاً لتحصيل السائق.",
     open: "فتح",
     none: "لا يوجد",
@@ -2788,6 +2789,7 @@
     mobileOptional: "رقم الهاتف المتحرك (اختياري)",
     temporaryPassword: "كلمة المرور المؤقتة",
     temporaryPasswordWarning: "انسخ كلمة المرور الآن. تظهر فقط ضمن نتيجة إنشاء هذا الحساب.",
+    loginMobile: "رقم الهاتف (لتسجيل الدخول)",
     linkExisting: "اختر مستخدماً موجوداً",
     link: "ربط المستخدم",
     noLinkedUser: "لا يوجد مستخدم مرتبط.",

@@ -940,6 +940,7 @@ export const englishTranslations = {
   },
   common: {
     copy: "Copy",
+    copied: "Copied",
     originatingOrderIneligible: "This Order is no longer eligible for Driver collection.",
     open: "Open",
     none: "None",
@@ -2827,6 +2828,7 @@ export const englishTranslations = {
     temporaryPassword: "Temporary Password",
     temporaryPasswordWarning:
       "Copy this password now. It is shown only for this account-creation result.",
+    loginMobile: "Mobile Number (used to sign in)",
     linkExisting: "Select an existing User",
     link: "Link User",
     noLinkedUser: "No User is linked.",

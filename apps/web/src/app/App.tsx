@@ -17,6 +17,11 @@ import {
   storeLocale,
   type SupportedLocale,
 } from "../localization/locale.js";
+import {
+  applyThemePreference,
+  isThemePreference,
+  type ThemePreference,
+} from "../theme/theme-preference.js";
 import { CompanyWorkspace } from "./CompanyWorkspace.js";
 import { canAccessCompanyPath, firstAuthorizedCompanyPath } from "./company-access.js";
 
@@ -36,6 +41,30 @@ const languages = [
   { code: "ar", label: "العربية" },
 ] as const;
 
+/**
+ * The trader/driver portal has no Company branding context to persist a theme
+ * preference server-side (that is a company-user feature), so the public shell
+ * remembers the PREFERENCE locally. `blueline.theme` still caches only the
+ * RESOLVED theme for the before-paint bootstrap; this key is the choice the
+ * three buttons show.
+ */
+const THEME_PREFERENCE_STORAGE_KEY = "blueline.theme.preference";
+
+const themeOptions: readonly { code: ThemePreference; labelKey: string }[] = [
+  { code: "light", labelKey: "theme.light" },
+  { code: "dark", labelKey: "theme.dark" },
+  { code: "system", labelKey: "theme.system" },
+];
+
+function storedThemePreference(): ThemePreference {
+  try {
+    const value = globalThis.localStorage?.getItem(THEME_PREFERENCE_STORAGE_KEY);
+    return isThemePreference(value) ? value : "system";
+  } catch {
+    return "system";
+  }
+}
+
 export function App() {
   const { i18n, t } = useTranslation();
   const location = useLocation();
@@ -47,6 +76,7 @@ export function App() {
     return client;
   }, []);
   const [session, setSession] = useState<LoginResponse>();
+  const [themePreference, setThemePreference] = useState<ThemePreference>(storedThemePreference);
   // True until the silent restoration attempt below has answered, so neither
   // the login form nor a protected page is shown on a guess.
   const [restoring, setRestoring] = useState(true);
@@ -77,6 +107,14 @@ export function App() {
     document.documentElement.lang = currentLanguage;
     document.documentElement.dir = directionForLocale(currentLanguage);
   }, [currentLanguage]);
+
+  // Applies the stored preference on mount and every change. The bootstrap
+  // module already painted the CACHED resolved theme before React ran; this
+  // re-resolves "system" against the current OS setting so the buttons and
+  // the page never disagree.
+  useEffect(() => {
+    applyThemePreference(themePreference);
+  }, [themePreference]);
 
   /**
    * Silent session restoration.
@@ -123,6 +161,17 @@ export function App() {
   const changeLanguage = async (locale: SupportedLocale) => {
     await i18n.changeLanguage(locale);
     storeLocale(locale, globalThis.localStorage);
+  };
+
+  const changeTheme = (preference: ThemePreference) => {
+    setThemePreference(preference);
+    applyThemePreference(preference);
+    try {
+      globalThis.localStorage?.setItem(THEME_PREFERENCE_STORAGE_KEY, preference);
+    } catch {
+      // Preference storage is best-effort; the applied theme still holds for
+      // this session.
+    }
   };
 
   const logout = async () => {
@@ -200,6 +249,18 @@ export function App() {
                 type="button"
               >
                 {language.label}
+              </button>
+            ))}
+          </div>
+          <div className="theme-control" aria-label={t("theme.label")} role="group">
+            {themeOptions.map((theme) => (
+              <button
+                aria-pressed={themePreference === theme.code}
+                key={theme.code}
+                onClick={() => changeTheme(theme.code)}
+                type="button"
+              >
+                {t(theme.labelKey)}
               </button>
             ))}
           </div>
