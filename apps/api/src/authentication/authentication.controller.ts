@@ -54,7 +54,21 @@ export class AuthenticationController {
     // The Company comes from the host the request arrived on, never from the
     // client. An unresolved host is handled by the service as an ordinary
     // failed sign-in so it cannot be used to probe for Companies.
-    const companySubdomain = this.companyHosts.resolve(request.headers.host ?? request.hostname);
+    //
+    // `x-blueline-tenant-host` carries the ORIGINAL portal host when the
+    // request travels through the portal's own same-origin `/api` proxy
+    // (apps/web and apps/platform-web `serve.mjs`): hosting routers direct
+    // upstream requests by the Host header, so the proxy must rewrite Host to
+    // the API's own name and forward the tenant host separately. Trusting the
+    // header is equivalent to trusting Host itself — both name the tenant,
+    // neither grants access, and resolution failure is still answered with the
+    // same generic invalid-credentials response as a wrong password.
+    const tenantHost = request.headers["x-blueline-tenant-host"];
+    const companySubdomain = this.companyHosts.resolve(
+      (Array.isArray(tenantHost) ? tenantHost[0] : tenantHost) ??
+        request.headers.host ??
+        request.hostname,
+    );
     const result = await this.authentication.loginCompany({
       companySubdomain,
       createdIp,

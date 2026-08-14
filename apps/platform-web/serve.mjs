@@ -26,6 +26,11 @@ function proxyApi(request, response) {
       headers: {
         ...request.headers,
         host: proxyTargetUrl.host,
+        // The original host, forwarded the same way apps/web does. For the
+        // Platform host it resolves to a reserved subdomain — which is the
+        // correct outcome: a Company sign-in aimed at the Platform host must
+        // not fall back to the development Company.
+        "x-blueline-tenant-host": request.headers.host ?? "",
         // The API trusts this for scheme detection behind proxies; the
         // browser-facing hop here is whatever Render terminated.
         "x-forwarded-proto": "https",

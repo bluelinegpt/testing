@@ -1,9 +1,52 @@
 import { createReadStream, existsSync, statSync } from "node:fs";
-import { createServer } from "node:http";
+import { createServer, request as httpRequest } from "node:http";
+import { request as httpsRequest } from "node:https";
 import { extname, isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
 
 const port = Number.parseInt(process.env.WEB_PORT ?? "8080", 10);
 const publicDirectory = resolve(process.env.WEB_ROOT ?? "dist");
+/**
+ * Same-origin API proxy, mirroring `apps/platform-web/serve.mjs`. The session
+ * cookie is HttpOnly `SameSite=Lax` by design, so the API must be reachable
+ * under the portal's own origin — exactly what the Vite dev server already
+ * does locally. Two headers matter on the way through:
+ *   - Host is rewritten to the API's own name, because hosting routers
+ *     direct requests by Host and would refuse the portal's.
+ *   - `x-blueline-tenant-host` carries the ORIGINAL host, because that is
+ *     how the API tells WHICH Company portal (`dana.tawseelhub.com`,
+ *     `xyz.tawseelhub.com`, ...) a sign-in belongs to.
+ * Set API_PROXY_TARGET to the API service origin and build the SPA with the
+ * relative VITE_API_BASE_URL=/api/v1.
+ */
+const apiProxyTarget = process.env.API_PROXY_TARGET;
+const proxyTargetUrl = apiProxyTarget === undefined ? undefined : new URL(apiProxyTarget);
+
+function proxyApi(request, response) {
+  const makeRequest = proxyTargetUrl.protocol === "https:" ? httpsRequest : httpRequest;
+  const upstream = makeRequest(
+    {
+      headers: {
+        ...request.headers,
+        host: proxyTargetUrl.host,
+        "x-blueline-tenant-host": request.headers.host ?? "",
+        "x-forwarded-proto": "https",
+      },
+      hostname: proxyTargetUrl.hostname,
+      method: request.method,
+      path: request.url,
+      port: proxyTargetUrl.port === "" ? undefined : Number(proxyTargetUrl.port),
+    },
+    (upstreamResponse) => {
+      response.writeHead(upstreamResponse.statusCode ?? 502, upstreamResponse.headers);
+      upstreamResponse.pipe(response);
+    },
+  );
+  upstream.on("error", () => {
+    if (!response.headersSent) response.writeHead(502, { "Content-Type": "application/json" });
+    response.end('{"error":{"code":"bad_gateway","message":"API upstream unreachable"}}');
+  });
+  request.pipe(upstream);
+}
 const connectSources = process.env.WEB_CONNECT_SRC ?? "'self' https:";
 if (/[;\r\n]/.test(connectSources)) {
   throw new Error("WEB_CONNECT_SRC contains invalid CSP characters");
@@ -44,6 +87,10 @@ function resolveAsset(requestUrl) {
 }
 
 const server = createServer((request, response) => {
+  if (proxyTargetUrl !== undefined && (request.url ?? "").startsWith("/api/")) {
+    proxyApi(request, response);
+    return;
+  }
   addSecurityHeaders(response);
   if (request.url === "/healthz") {
     response.writeHead(200, { "Cache-Control": "no-store", "Content-Type": "application/json" });
