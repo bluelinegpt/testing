@@ -7,9 +7,9 @@
       "path": "apps/api",
       "renderService": "bluelinegpt-api-test",
       "status": "needs_deploy",
-      "localCommit": "65f1c2a",
+      "localCommit": "83a85e8",
       "localCommitDate": "2026-08-15",
-      "lastChangeDescription": "feat(api): six-digit Company Mobile Code with login resolution for the mobile app",
+      "lastChangeDescription": "feat(mobile): Company-code first-launch screen with per-company login targeting",
       "lastChangeBy": "human",
       "confirmedLiveCommit": "27e356a",
       "confirmedLiveAt": "2026-08-14"
