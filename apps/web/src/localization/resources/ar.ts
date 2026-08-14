@@ -1281,14 +1281,14 @@
     expandSidebar: "توسيع الشريط الجانبي",
     openNavigation: "فتح قائمة التنقل",
     pageNotFound: "الصفحة غير موجودة",
-    pageNotFoundDescription: "هذه الصفحة غير متاحة في بوابة BluelineGPT الحالية.",
-    poweredBy: "مشغّل بواسطة Tawseelhub.com",
+    pageNotFoundDescription: "هذه الصفحة غير متاحة في بوابة TawseelHub الحالية.",
+    poweredBy: "مشغّل بواسطة TawseelHub.com",
     returnToDashboard: "العودة إلى لوحة المعلومات",
     signedInAs: "تم تسجيل الدخول باسم",
     subtitle: "نظام إدارة التوصيل",
     workflowErrorTitle: "تعذر عرض هذه الشاشة",
     workflowErrorDescription:
-      "لا تزال جلستك وبقية نظام BluelineGPT متاحة. صحح الإدخال أو حاول فتح الشاشة مرة أخرى.",
+      "لا تزال جلستك وبقية نظام TawseelHub متاحة. صحح الإدخال أو حاول فتح الشاشة مرة أخرى.",
   },
   preferences: {
     title: "تفضيلاتي",
@@ -3134,7 +3134,7 @@
     passwordMismatch: "يجب أن تتطابق كلمة المرور الجديدة مع تأكيدها.",
     passwordPolicy: "استخدم 8 أحرف على الأقل ولا تعد استخدام كلمة المرور الحالية.",
     changePassword: "تغيير كلمة المرور",
-    passwordChangeHelp: "اختر كلمة مرور جديدة قبل متابعة استخدام BluelineGPT.",
+    passwordChangeHelp: "اختر كلمة مرور جديدة قبل متابعة استخدام TawseelHub.",
   },
   traderReceivables: {
     // Page

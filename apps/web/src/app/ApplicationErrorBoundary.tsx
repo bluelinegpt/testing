@@ -15,7 +15,7 @@ export function ApplicationErrorBoundary() {
   }, [error]);
   return (
     <main className="error-page" role="alert">
-      <h1>Unable to open BluelineGPT</h1>
+      <h1>Unable to open TawseelHub</h1>
       <p>Please refresh the page. If the problem continues, contact support.</p>
     </main>
   );

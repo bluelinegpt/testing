@@ -138,11 +138,11 @@ export const en = {
     },
   },
   footer: {
-    company: "BluelineGPT",
+    company: "TawseelHub",
     customer: "For customers",
     legal: "Legal",
     privacy: "Privacy",
-    rights: "BluelineGPT Store",
+    rights: "TawseelHub Store",
     support: "Support",
     tagline: "Shop local stores across the UAE and pay cash on delivery.",
     terms: "Terms",
@@ -154,7 +154,7 @@ export const en = {
       title: "Your account",
     },
     app: {
-      body: "The BluelineGPT Store app is on its way.",
+      body: "The TawseelHub Store app is on its way.",
       title: "Shop on the go",
     },
     bestsellers: { title: "Bestsellers" },
@@ -164,7 +164,7 @@ export const en = {
       title: "Nothing to show yet",
     },
     featuredStores: {
-      subtitle: "Shops open on BluelineGPT right now",
+      subtitle: "Shops open on TawseelHub right now",
       title: "Featured stores",
     },
     hero: {

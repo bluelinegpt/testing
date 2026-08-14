@@ -51,7 +51,7 @@ export function PlatformLoginPage(): ReactElement {
   return (
     <main className="platform-login">
       <form className="platform-login__card" onSubmit={(event) => void submit(event)}>
-        <p className="platform-login__eyebrow">Tawseelhub</p>
+        <p className="platform-login__eyebrow">TawseelHub</p>
         <h1 className="platform-login__title">Platform Administration</h1>
         <p className="platform-login__subtitle">{platformConfiguration.siteName}</p>
 

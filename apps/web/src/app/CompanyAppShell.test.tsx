@@ -85,8 +85,8 @@ describe("CompanyAppShell branding", () => {
     expect((await screen.findAllByText("Acme Logistics")).length).toBeGreaterThan(0);
     expect(screen.getByText("Fast Delivery")).toBeInTheDocument();
     expect(screen.queryByText("Delivery Management System")).not.toBeInTheDocument();
-    // "Powered by Tawseelhub.com" may remain as a small reference, not the identity.
-    expect(screen.getByText("Powered by Tawseelhub.com")).toBeInTheDocument();
+    // "Powered by TawseelHub.com" may remain as a small reference, not the identity.
+    expect(screen.getByText("Powered by TawseelHub.com")).toBeInTheDocument();
   });
 
   it("hides the subtitle row when no subtitle is configured", async () => {

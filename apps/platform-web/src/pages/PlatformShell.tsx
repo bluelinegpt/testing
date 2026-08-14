@@ -98,7 +98,7 @@ export function PlatformShell(): ReactElement {
     <div className="platform-shell">
       <header className="platform-header">
         <div>
-          <p className="platform-header__eyebrow">Tawseelhub</p>
+          <p className="platform-header__eyebrow">TawseelHub</p>
           <div className="platform-header__title-row">
             <p className="platform-header__title">Platform Administration</p>
             <VersionBadge />

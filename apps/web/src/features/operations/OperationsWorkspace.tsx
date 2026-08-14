@@ -1178,7 +1178,7 @@ export function openOrderWaybill(
   <main class="waybill">
     <section class="waybill-header">
       <div>
-        <div class="brand">BluelineGPT</div>
+        <div class="brand">TawseelHub</div>
         <h1>${escapeHtml(labels.printTitle)}</h1>
       </div>
       <div class="number">${escapeHtml(detail.orderNumber)}</div>
@@ -1297,7 +1297,7 @@ function CashTable({
   // TODO: no endpoint exposes the Company name after login; see the Stage 6
   // report. Until GET configuration/settings returns it, the report falls back
   // to the product name rather than displaying an invented Company identity.
-  companyName = "BluelineGPT",
+  companyName = "TawseelHub",
   onNavigate,
   orders,
 }: {

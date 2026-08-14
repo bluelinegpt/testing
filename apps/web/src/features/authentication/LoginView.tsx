@@ -58,7 +58,7 @@ export function LoginView({
             B
           </span>
           <div>
-            <strong>BluelineGPT</strong>
+            <strong>TawseelHub</strong>
             <span>{t("auth.workspace")}</span>
           </div>
         </div>

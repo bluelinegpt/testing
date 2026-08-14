@@ -113,7 +113,7 @@ describe("locale-prefixed routes", () => {
   it("keeps the prefix on in-app links", async () => {
     renderAt("/ar/categories");
     // The brand link, not the skip link that precedes it in the DOM.
-    const brand = await screen.findByRole("link", { name: /BluelineGPT/i });
+    const brand = await screen.findByRole("link", { name: /TawseelHub/i });
     expect(brand).toHaveAttribute("href", "/ar");
   });
 
@@ -121,7 +121,7 @@ describe("locale-prefixed routes", () => {
     // Otherwise the first click silently moves the shopper onto a different
     // URL space from the one they arrived on.
     renderAt("/categories");
-    const brand = await screen.findByRole("link", { name: /BluelineGPT/i });
+    const brand = await screen.findByRole("link", { name: /TawseelHub/i });
     expect(brand).toHaveAttribute("href", "/");
   });
 

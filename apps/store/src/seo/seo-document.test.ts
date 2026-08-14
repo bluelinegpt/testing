@@ -23,7 +23,7 @@ import { escapeHtml, escapeJsonLd, injectMetadata, renderMetadata } from "./rend
  */
 
 const origin = "https://store.bluelinegpt.com";
-const siteName = "BluelineGPT Store";
+const siteName = "TawseelHub Store";
 
 const store = {
   displayName: "Dev Commerce Store",
@@ -321,7 +321,7 @@ describe("Escaping hostile Trader text", () => {
 
 describe("Shell injection", () => {
   const shell =
-    '<!doctype html><html lang="en" dir="ltr"><head><meta charset="UTF-8" /><title>BluelineGPT Store</title></head><body></body></html>';
+    '<!doctype html><html lang="en" dir="ltr"><head><meta charset="UTF-8" /><title>TawseelHub Store</title></head><body></body></html>';
 
   it("replaces the shell title rather than adding a second one", () => {
     const document = storeSeoDocument({ locale: "en", origin, siteName, store });

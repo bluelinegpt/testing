@@ -1305,14 +1305,14 @@ export const englishTranslations = {
     expandSidebar: "Expand sidebar",
     openNavigation: "Open navigation",
     pageNotFound: "Page not found",
-    pageNotFoundDescription: "This page is not available in the current BluelineGPT portal.",
-    poweredBy: "Powered by Tawseelhub.com",
+    pageNotFoundDescription: "This page is not available in the current TawseelHub portal.",
+    poweredBy: "Powered by TawseelHub.com",
     returnToDashboard: "Return to dashboard",
     signedInAs: "Signed in as",
     subtitle: "Delivery Management System",
     workflowErrorTitle: "This screen could not be displayed",
     workflowErrorDescription:
-      "Your session and the rest of BluelineGPT are still available. Correct the input or try this screen again.",
+      "Your session and the rest of TawseelHub are still available. Correct the input or try this screen again.",
   },
   preferences: {
     title: "My Preferences",
@@ -3177,7 +3177,7 @@ export const englishTranslations = {
     passwordMismatch: "New Password and Confirm New Password must match.",
     passwordPolicy: "Use at least 8 characters and do not reuse your current password.",
     changePassword: "Change Password",
-    passwordChangeHelp: "Choose a new password before continuing to BluelineGPT.",
+    passwordChangeHelp: "Choose a new password before continuing to TawseelHub.",
   },
   traderReceivables: {
     // Page

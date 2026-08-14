@@ -178,11 +178,11 @@ export function App() {
   return (
     <div className="app-shell public-shell">
       <header className="topbar public-topbar">
-        <div className="brand" aria-label="BluelineGPT">
+        <div className="brand" aria-label="TawseelHub">
           <span className="brand-mark" aria-hidden="true">
-            B
+            T
           </span>
-          <span>BluelineGPT</span>
+          <span>TawseelHub</span>
         </div>
         <div className="topbar-actions">
           {session === undefined ? null : (

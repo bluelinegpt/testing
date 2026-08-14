@@ -35,5 +35,5 @@ function validateBase(value: string | undefined): string {
 
 export const platformConfiguration: PlatformConfiguration = {
   apiBaseUrl: validateBase(environment.VITE_API_BASE_URL),
-  siteName: environment.VITE_PLATFORM_SITE_NAME ?? "Tawseelhub Platform Administration",
+  siteName: environment.VITE_PLATFORM_SITE_NAME ?? "TawseelHub Platform Administration",
 };

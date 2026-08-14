@@ -45,5 +45,5 @@ export const storeConfiguration: StoreConfiguration = {
     marketplaceHomeEnabled: flag(environment.VITE_MARKETPLACE_HOME_ENABLED, true),
     storePublicEnabled: flag(environment.VITE_STORE_PUBLIC_ENABLED, true),
   },
-  siteName: environment.VITE_STORE_SITE_NAME ?? "BluelineGPT Store",
+  siteName: environment.VITE_STORE_SITE_NAME ?? "TawseelHub Store",
 };
