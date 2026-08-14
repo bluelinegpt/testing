@@ -22,6 +22,7 @@ import {
   isThemePreference,
   type ThemePreference,
 } from "../theme/theme-preference.js";
+import tawseelhubIcon from "../assets/tawseelhub-icon.png";
 import { CompanyWorkspace } from "./CompanyWorkspace.js";
 import { canAccessCompanyPath, firstAuthorizedCompanyPath } from "./company-access.js";
 
@@ -228,9 +229,7 @@ export function App() {
     <div className="app-shell public-shell">
       <header className="topbar public-topbar">
         <div className="brand" aria-label="TawseelHub">
-          <span className="brand-mark" aria-hidden="true">
-            T
-          </span>
+          <img alt="" aria-hidden="true" className="brand-mark" src={tawseelhubIcon} />
           <span>TawseelHub</span>
         </div>
         <div className="topbar-actions">

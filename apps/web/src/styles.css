@@ -1611,6 +1611,15 @@ textarea {
   background: #087e8b;
   font-weight: 800;
 }
+/* The marks are the TawseelHub logo image now. The artwork ships on its own
+   near-white ground, so the tile stays white in BOTH themes — an app-icon
+   look — instead of tinting with the brand color behind a letter. */
+img.brand-mark,
+img.login-brand-mark {
+  background: #ffffff;
+  object-fit: cover;
+  padding: 2px;
+}
 .brand-mark {
   width: 34px;
   height: 34px;

@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 
 import type { ApiClient } from "../../api/api-client.js";
 import type { LoginResponse } from "../../api/contracts.js";
+import tawseelhubIcon from "../../assets/tawseelhub-icon.png";
 
 export function LoginView({
   api,
@@ -54,9 +55,7 @@ export function LoginView({
     <main className="login-main">
       <section className="login-tool" aria-labelledby="login-title">
         <div className="login-brand-block">
-          <span className="login-brand-mark" aria-hidden="true">
-            B
-          </span>
+          <img alt="" aria-hidden="true" className="login-brand-mark" src={tawseelhubIcon} />
           <div>
             <strong>TawseelHub</strong>
             <span>{t("auth.workspace")}</span>
