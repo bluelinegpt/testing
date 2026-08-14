@@ -1525,6 +1525,36 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Order placed on Hold.'**
   String get orderPlacedOnHold;
+
+  /// No description provided for @companyCode.
+  ///
+  /// In en, this message translates to:
+  /// **'Company code'**
+  String get companyCode;
+
+  /// No description provided for @companyCodeHelp.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter the 6-digit code from your company\'s QR sheet or printed report, or ask your administrator for it.'**
+  String get companyCodeHelp;
+
+  /// No description provided for @companyCodeInvalid.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter the 6-digit company code.'**
+  String get companyCodeInvalid;
+
+  /// No description provided for @companyCodeContinue.
+  ///
+  /// In en, this message translates to:
+  /// **'Continue'**
+  String get companyCodeContinue;
+
+  /// No description provided for @changeCompany.
+  ///
+  /// In en, this message translates to:
+  /// **'Change company'**
+  String get changeCompany;
 }
 
 class _AppLocalizationsDelegate

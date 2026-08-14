@@ -239,5 +239,10 @@
   "driverRefreshAction": "تحديث",
   "holdStatus": "معلّق",
   "hold": "تعليق",
-  "orderPlacedOnHold": "تم تعليق الطلب."
+  "orderPlacedOnHold": "تم تعليق الطلب.",
+  "companyCode": "رمز الشركة",
+  "companyCodeHelp": "أدخل الرمز المكوّن من 6 أرقام من ورقة QR الخاصة بشركتك أو من التقرير المطبوع، أو اطلبه من المسؤول.",
+  "companyCodeInvalid": "أدخل رمز الشركة المكوّن من 6 أرقام.",
+  "companyCodeContinue": "متابعة",
+  "changeCompany": "تغيير الشركة"
 }

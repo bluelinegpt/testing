@@ -15,6 +15,7 @@ import 'package:go_router/go_router.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
   final auth = ref.watch(authenticationProvider).value;
+  final companyCode = ref.watch(companyCodeProvider);
   return GoRouter(
     initialLocation: '/dashboard',
     redirect: (context, state) {
@@ -22,11 +23,18 @@ final routerProvider = Provider<GoRouter>((ref) {
         auth,
         state.matchedLocation,
         intended: state.uri.queryParameters['from'],
+        // Only a RESOLVED absence routes to the Company-code screen; while
+        // storage is still loading the value is unknown, not missing.
+        hasCompanyCode: companyCode.isLoading || companyCode.value != null,
       );
     },
     errorBuilder: (context, state) =>
         MessagePage(message: AppLocalizations.of(context).notFound),
     routes: [
+      GoRoute(
+        path: '/company-code',
+        builder: (_, _) => const CompanyCodePage(),
+      ),
       GoRoute(path: '/login', builder: (_, _) => const LoginPage()),
       GoRoute(
         path: '/forgot-password',
@@ -153,12 +161,25 @@ String? redirectFor(
   AuthenticationState? auth,
   String location, {
   String? intended,
+  bool hasCompanyCode = true,
 }) {
   final publicRoute =
       location == '/login' ||
       location == '/forgot-password' ||
       location.startsWith('/track/');
+  // A device with no Company chosen cannot aim a login anywhere, so the
+  // Company-code screen comes before everything except public tracking (a
+  // tracking link carries its own token and belongs to no signed-in flow).
+  // An AUTHENTICATED session is deliberately not interrupted: it proves a
+  // Company was already resolved server-side.
+  if (!hasCompanyCode &&
+      (auth == null || !auth.isAuthenticated) &&
+      location != '/company-code' &&
+      !location.startsWith('/track/')) {
+    return '/company-code';
+  }
   if (auth == null || !auth.isAuthenticated) {
+    if (location == '/company-code') return null;
     return publicRoute ? null : '/login?from=${Uri.encodeComponent(location)}';
   }
   if (auth.user!.forcePasswordChange && location != '/change-password') {

@@ -435,6 +435,11 @@ export interface TraderPortalOrderPage {
 export interface TraderPortalProfile {
   readonly code: string;
   readonly commercialNumber: string | null;
+  /**
+   * The Company's six-digit Mobile Code, for the Trader portal's "Mobile App
+   * — Scan QR" panel. Authenticated Traders only — never on a public route.
+   */
+  readonly companyMobileCode: string;
   readonly contactPerson: string | null;
   readonly email: string | null;
   readonly id: string;
@@ -1827,8 +1832,10 @@ export class OperationsService {
       select t.id, t.code, t.name_en as name, t.name_ar as "nameAr",
              t.mobile_number as "mobileNumber", t.telephone, t.email,
              t.contact_person as "contactPerson", t.commercial_number as "commercialNumber",
-             coalesce(a.preferred_language, 'en') as "preferredLanguage"
+             coalesce(a.preferred_language, 'en') as "preferredLanguage",
+             c.mobile_code as "companyMobileCode"
         from traders t
+        join companies c on c.id = t.company_id
         left join accounts a on a.id = ${identity.identityId}::uuid
        where t.id=${trader.id}::uuid and t.company_id=${identity.companyId}::uuid
        limit 1

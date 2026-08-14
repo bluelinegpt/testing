@@ -72,8 +72,11 @@ final class ApiErrorMapper {
 }
 
 final class ApiClient {
-  ApiClient({required Uri baseUrl, required this.tokenProvider})
-    : _dio = Dio(
+  ApiClient({
+    required Uri baseUrl,
+    required this.tokenProvider,
+    this.companyCodeProvider,
+  }) : _dio = Dio(
         BaseOptions(
           // Dio resolves relative request paths against this URI. A missing
           // trailing slash makes `/api/v1` behave like a file and turns
@@ -90,6 +93,15 @@ final class ApiClient {
         onRequest: (options, handler) async {
           final token = await tokenProvider();
           if (token != null) options.headers['Authorization'] = 'Bearer $token';
+          // The Company Mobile Code aims requests — most importantly
+          // `auth/login` — at the Company this installation belongs to. The
+          // server treats it exactly like the web's Host header: it selects
+          // the tenant, never grants access, and an unknown code fails with
+          // the same generic response as a wrong password.
+          final companyCode = await companyCodeProvider?.call();
+          if (companyCode != null && companyCode.isNotEmpty) {
+            options.headers['X-Blueline-Company-Code'] = companyCode;
+          }
           options.headers['X-Correlation-ID'] = _correlationId();
           handler.next(options);
         },
@@ -99,6 +111,7 @@ final class ApiClient {
 
   final Dio _dio;
   final Future<String?> Function() tokenProvider;
+  final Future<String?> Function()? companyCodeProvider;
 
   /// The configured API prefix treated as a directory for relative endpoints.
   ///

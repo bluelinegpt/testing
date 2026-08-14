@@ -25,6 +25,12 @@ export interface CompanyLogoMetadata {
 
 export interface CompanyProfile {
   readonly logo: CompanyLogoMetadata | null;
+  /**
+   * The six-digit Company Mobile Code the mobile app signs in with. Shown to
+   * signed-in Company and Trader users only (the QR panel and printed
+   * reports); deliberately absent from every public/unauthenticated response.
+   */
+  readonly mobileCode: string;
   readonly nameAr: string | null;
   readonly nameEn: string;
   readonly subtitleAr: string | null;
@@ -55,6 +61,7 @@ export interface LogoContent {
 
 interface CompanyProfileRow {
   readonly logoFileId: string | null;
+  readonly mobileCode: string;
   readonly nameAr: string | null;
   readonly nameEn: string;
   readonly subtitleAr: string | null;
@@ -92,6 +99,7 @@ export class CompanyProfileService {
     const logo = row.logoFileId === null ? null : await this.readLogoMetadata(companyId);
     return {
       logo,
+      mobileCode: row.mobileCode,
       nameAr: row.nameAr,
       nameEn: row.nameEn,
       subtitleAr: row.subtitleAr,
@@ -297,7 +305,8 @@ export class CompanyProfileService {
              subtitle_en as "subtitleEn",
              subtitle_ar as "subtitleAr",
              telephone,
-             logo_file_id as "logoFileId"
+             logo_file_id as "logoFileId",
+             mobile_code as "mobileCode"
       from companies
       where id = ${companyId}::uuid
     `.execute(database);

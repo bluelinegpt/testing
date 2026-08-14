@@ -44,7 +44,16 @@ export async function createApplication(): Promise<BluelineApplication> {
   // still refused by the browser. The custom session header is added to the
   // allowed set because cookie-authenticated mutations must carry it.
   app.enableCors({
-    allowedHeaders: ["Authorization", "Content-Type", "X-Blueline-Session", "X-Idempotency-Key"],
+    allowedHeaders: [
+      "Authorization",
+      "Content-Type",
+      "X-Blueline-Session",
+      "X-Idempotency-Key",
+      // The mobile app's Company selector. Native clients ignore CORS; this
+      // entry exists so a future browser build of the app is not mysteriously
+      // blocked on its very first preflight.
+      "X-Blueline-Company-Code",
+    ],
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     origin: config.get("app.corsOrigins", { infer: true }),

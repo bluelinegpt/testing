@@ -81,7 +81,7 @@ final class _LoginPageState extends ConsumerState<LoginPage> {
     final configuration = ref.watch(configurationProvider);
     return Scaffold(
       appBar: AppBar(
-        title: const Text('BluelineGPT'),
+        title: const Text('TawseelHub'),
         actions: [
           IconButton(
             tooltip: l10n.language,
@@ -109,7 +109,7 @@ final class _LoginPageState extends ConsumerState<LoginPage> {
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       const BluelineHeaderCard(
-                        title: 'BluelineGPT',
+                        title: 'TawseelHub',
                         subtitle: 'Delivery operations',
                         icon: Icons.local_shipping_outlined,
                       ),
@@ -202,6 +202,11 @@ final class _LoginPageState extends ConsumerState<LoginPage> {
                             TextButton(
                               onPressed: () => context.go('/forgot-password'),
                               child: Text(l10n.forgotPassword),
+                            ),
+                            TextButton(
+                              key: const Key('changeCompanyLink'),
+                              onPressed: () => context.go('/company-code'),
+                              child: Text(l10n.changeCompany),
                             ),
                           ],
                         ),
@@ -302,6 +307,156 @@ final class _LoginDiagnostics extends StatelessWidget {
       'invalidResponse' => 'INVALID_RESPONSE',
       _ => 'UNKNOWN_ERROR',
     };
+  }
+}
+
+/// First-launch Company selection — the mobile counterpart of the web's
+/// per-Company address.
+///
+/// One installed app serves every Company, so the device must say which one
+/// it belongs to before a login can be aimed anywhere. The six-digit Company
+/// Mobile Code comes from the portal's QR panel or a printed report; typing
+/// it and scanning the QR are interchangeable (the QR simply encodes the same
+/// digits — scanner support is a planned follow-up). The choice is stored on
+/// the device and survives logout; the login screen offers "Change company"
+/// for the rare device that moves between Companies.
+///
+/// Deliberately NO Company name is shown when a code is entered: confirming
+/// a name from a code alone would let anyone enumerate which Companies exist.
+/// The paper the code was read from carries the name, and the dashboard
+/// states it immediately after a successful sign-in.
+final class CompanyCodePage extends ConsumerStatefulWidget {
+  const CompanyCodePage({super.key});
+  @override
+  ConsumerState<CompanyCodePage> createState() => _CompanyCodePageState();
+}
+
+final class _CompanyCodePageState extends ConsumerState<CompanyCodePage> {
+  final _formKey = GlobalKey<FormState>();
+  final _code = TextEditingController();
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Pre-fills the stored code so "Change company" shows what is currently
+    // set. Resolved by `startupProvider` before the router ever gets here.
+    _code.text = ref.read(companyCodeProvider).value ?? '';
+  }
+
+  @override
+  void dispose() {
+    _code.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('TawseelHub'),
+        actions: [
+          IconButton(
+            tooltip: l10n.language,
+            onPressed: () {
+              final next = Localizations.localeOf(context).languageCode == 'ar'
+                  ? const Locale('en')
+                  : const Locale('ar');
+              ref.read(localeProvider.notifier).change(next);
+            },
+            icon: const Icon(Icons.language),
+          ),
+        ],
+      ),
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+            padding: const EdgeInsets.all(AppSpacing.lg),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 440),
+              child: Form(
+                key: _formKey,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    BluelineHeaderCard(
+                      title: 'TawseelHub',
+                      subtitle: l10n.companyCode,
+                      icon: Icons.qr_code_2_outlined,
+                    ),
+                    const SizedBox(height: AppSpacing.md),
+                    BluelineSectionCard(
+                      padding: const EdgeInsets.all(AppSpacing.lg),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Text(
+                            l10n.companyCode,
+                            style: Theme.of(context).textTheme.headlineSmall
+                                ?.copyWith(fontWeight: FontWeight.w800),
+                          ),
+                          const SizedBox(height: AppSpacing.sm),
+                          Text(l10n.companyCodeHelp),
+                          const SizedBox(height: AppSpacing.lg),
+                          TextFormField(
+                            key: const Key('companyCodeField'),
+                            controller: _code,
+                            keyboardType: TextInputType.number,
+                            maxLength: 6,
+                            // Digits are LTR even in the Arabic layout.
+                            textDirection: TextDirection.ltr,
+                            textAlign: TextAlign.center,
+                            style: Theme.of(context).textTheme.headlineSmall
+                                ?.copyWith(letterSpacing: 8),
+                            decoration: InputDecoration(
+                              labelText: l10n.companyCode,
+                              counterText: '',
+                            ),
+                            validator: (value) =>
+                                RegExp(r'^[0-9]{6}$').hasMatch(value ?? '')
+                                ? null
+                                : l10n.companyCodeInvalid,
+                            onFieldSubmitted: (_) => _submit(),
+                          ),
+                          const SizedBox(height: AppSpacing.lg),
+                          FilledButton(
+                            key: const Key('companyCodeContinueButton'),
+                            onPressed: _saving ? null : _submit,
+                            child: _saving
+                                ? const SizedBox.square(
+                                    dimension: 20,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : Text(l10n.companyCodeContinue),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _submit() async {
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+    setState(() => _saving = true);
+    try {
+      await ref
+          .read(companyCodeProvider.notifier)
+          .change(_code.text.trim());
+      if (mounted) context.go('/login');
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
   }
 }
 

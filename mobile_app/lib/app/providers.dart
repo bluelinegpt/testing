@@ -40,6 +40,7 @@ final apiClientProvider = Provider<ApiClient>((ref) {
   return ApiClient(
     baseUrl: ref.watch(configurationProvider).apiBaseUrl,
     tokenProvider: () => storage.read(SensitiveKey.accessToken),
+    companyCodeProvider: () => storage.read(SensitiveKey.companyMobileCode),
   );
 });
 final authenticationApiProvider = Provider<AuthenticationApi>(
@@ -202,6 +203,29 @@ final localeProvider = AsyncNotifierProvider<LocaleController, Locale>(
   LocaleController.new,
 );
 
+/// The six-digit Company Mobile Code this installation belongs to.
+///
+/// `null` means the device has not chosen a Company yet, which routes the
+/// user to the Company-code screen before login (`redirectFor`). Device-level
+/// state like [LocaleController]: it survives logout, because signing out of
+/// an account does not move the phone to a different Company.
+final class CompanyCodeController extends AsyncNotifier<String?> {
+  @override
+  Future<String?> build() =>
+      ref.read(storageProvider).read(SensitiveKey.companyMobileCode);
+
+  Future<void> change(String code) async {
+    await ref
+        .read(storageProvider)
+        .write(SensitiveKey.companyMobileCode, code);
+    state = AsyncData(code);
+  }
+}
+
+final companyCodeProvider = AsyncNotifierProvider<CompanyCodeController, String?>(
+  CompanyCodeController.new,
+);
+
 final startupProvider = FutureProvider<void>((ref) async {
   // Firebase must be initialized before `authenticationProvider.future`
   // resolves — `restore()` (triggered by reading it below) calls
@@ -213,6 +237,9 @@ final startupProvider = FutureProvider<void>((ref) async {
   await ref.read(notificationServiceProvider).initialize();
   await ref.read(authenticationProvider.future);
   await ref.read(localeProvider.future);
+  // Resolved before first paint so the router's redirect can send a device
+  // with no Company chosen to the Company-code screen instead of login.
+  await ref.read(companyCodeProvider.future);
 });
 
 final offlineProvider = StreamProvider<bool>((ref) async* {

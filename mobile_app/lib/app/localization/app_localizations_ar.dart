@@ -749,4 +749,20 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String get orderPlacedOnHold => 'تم تعليق الطلب.';
+
+  @override
+  String get companyCode => 'رمز الشركة';
+
+  @override
+  String get companyCodeHelp =>
+      'أدخل الرمز المكوّن من 6 أرقام من ورقة QR الخاصة بشركتك أو من التقرير المطبوع، أو اطلبه من المسؤول.';
+
+  @override
+  String get companyCodeInvalid => 'أدخل رمز الشركة المكوّن من 6 أرقام.';
+
+  @override
+  String get companyCodeContinue => 'متابعة';
+
+  @override
+  String get changeCompany => 'تغيير الشركة';
 }

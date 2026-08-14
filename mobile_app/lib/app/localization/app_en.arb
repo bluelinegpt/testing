@@ -239,5 +239,10 @@
   "driverRefreshAction": "Refresh",
   "holdStatus": "On Hold",
   "hold": "Hold",
-  "orderPlacedOnHold": "Order placed on Hold."
+  "orderPlacedOnHold": "Order placed on Hold.",
+  "companyCode": "Company code",
+  "companyCodeHelp": "Enter the 6-digit code from your company's QR sheet or printed report, or ask your administrator for it.",
+  "companyCodeInvalid": "Enter the 6-digit company code.",
+  "companyCodeContinue": "Continue",
+  "changeCompany": "Change company"
 }

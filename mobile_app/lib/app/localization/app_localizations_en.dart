@@ -756,4 +756,19 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get orderPlacedOnHold => 'Order placed on Hold.';
+
+  @override
+  String get companyCode => 'Company code';
+
+  @override
+  String get companyCodeHelp => 'Enter the 6-digit code from your company\'s QR sheet or printed report, or ask your administrator for it.';
+
+  @override
+  String get companyCodeInvalid => 'Enter the 6-digit company code.';
+
+  @override
+  String get companyCodeContinue => 'Continue';
+
+  @override
+  String get changeCompany => 'Change company';
 }

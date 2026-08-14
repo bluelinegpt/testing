@@ -12,7 +12,12 @@ enum SensitiveKey {
   // session data, so (like `locale`) it survives `clearSession()` and is
   // never cleared on logout.
   notificationPermissionAsked('notification_permission_asked'),
-  notificationPermissionDenialCount('notification_permission_denial_count');
+  notificationPermissionDenialCount('notification_permission_denial_count'),
+  // The six-digit Company Mobile Code chosen at first launch. Device-level
+  // like `locale`: it identifies WHICH Company this installation belongs to,
+  // not who is signed in, so logout and failed logins must not erase it —
+  // a Driver who signs out should not have to re-scan the Company QR.
+  companyMobileCode('company_mobile_code');
 
   const SensitiveKey(this.value);
   final String value;
@@ -47,7 +52,8 @@ final class SecureSensitiveStorage implements SensitiveStorage {
       (key) =>
           key != SensitiveKey.locale &&
           key != SensitiveKey.notificationPermissionAsked &&
-          key != SensitiveKey.notificationPermissionDenialCount,
+          key != SensitiveKey.notificationPermissionDenialCount &&
+          key != SensitiveKey.companyMobileCode,
     )) {
       await delete(key);
     }
@@ -63,7 +69,8 @@ final class MemorySensitiveStorage implements SensitiveStorage {
       (key, _) =>
           key != SensitiveKey.locale &&
           key != SensitiveKey.notificationPermissionAsked &&
-          key != SensitiveKey.notificationPermissionDenialCount,
+          key != SensitiveKey.notificationPermissionDenialCount &&
+          key != SensitiveKey.companyMobileCode,
     );
   }
 
