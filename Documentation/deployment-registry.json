@@ -31,14 +31,14 @@
       "id": "platform-web",
       "displayName": "Platform admin",
       "path": "apps/platform-web",
-      "renderService": null,
-      "status": "pushed_awaiting_confirmation",
+      "renderService": "bluelinegpt-platform-test",
+      "status": "confirmed_live",
       "localCommit": "d424b70",
       "localCommitDate": "2026-08-14",
       "lastChangeDescription": "feat(platform-web): same-origin API proxy in the static server so SameSite=Lax sessions survive Render",
       "lastChangeBy": "human",
-      "confirmedLiveCommit": null,
-      "confirmedLiveAt": null
+      "confirmedLiveCommit": "d424b70",
+      "confirmedLiveAt": "2026-08-14"
     },
     {
       "id": "store",
