@@ -13,6 +13,29 @@ import 'package:bluelinegpt_mobile/shared/widgets/mobile_ui_components.dart';
 String displayAppVersion(PackageInfo? info) =>
     '${info?.version ?? '…'}+${info?.buildNumber ?? '…'}';
 
+/// The TawseelHub logo, centered — shown above the sign-in and Company-code
+/// forms. A plain rounded image rather than a themed tile: the artwork ships
+/// on its own near-white ground, which reads as an app-icon card on any
+/// background.
+final class AppBrandLogo extends StatelessWidget {
+  const AppBrandLogo({super.key, this.size = 72});
+  final double size;
+  @override
+  Widget build(BuildContext context) => Center(
+    child: ClipRRect(
+      borderRadius: BorderRadius.circular(16),
+      child: Image.asset(
+        'assets/branding/tawseelhub_icon.png',
+        width: size,
+        height: size,
+        fit: BoxFit.cover,
+        // The screen still works if the asset ever fails to bundle.
+        errorBuilder: (_, _, _) => const SizedBox.shrink(),
+      ),
+    ),
+  );
+}
+
 final class StartupPage extends StatelessWidget {
   const StartupPage({super.key});
   @override
@@ -108,6 +131,8 @@ final class _LoginPageState extends ConsumerState<LoginPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
+                      const AppBrandLogo(),
+                      const SizedBox(height: AppSpacing.md),
                       const BluelineHeaderCard(
                         title: 'TawseelHub',
                         subtitle: 'Delivery operations',
@@ -381,6 +406,8 @@ final class _CompanyCodePageState extends ConsumerState<CompanyCodePage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
+                    const AppBrandLogo(),
+                    const SizedBox(height: AppSpacing.md),
                     BluelineHeaderCard(
                       title: 'TawseelHub',
                       subtitle: l10n.companyCode,

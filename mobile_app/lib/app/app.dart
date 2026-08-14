@@ -42,7 +42,7 @@ final class _RoutedApp extends ConsumerWidget {
     ref.watch(driverSyncControllerProvider);
     return MaterialApp.router(
       debugShowCheckedModeBanner: false,
-      title: 'BluelineGPT',
+      title: 'TawseelHub',
       theme: buildAppTheme(),
       locale: locale,
       supportedLocales: AppLocalizations.supportedLocales,

@@ -15,11 +15,11 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>BluelineGPT</string>
+	<string>TawseelHub</string>
 	<key>FirebaseAppDelegateProxyEnabled</key>
 	<true/>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>BluelineGPT needs microphone access to record voice messages.</string>
+	<string>TawseelHub needs microphone access to record voice messages.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>fetch</string>

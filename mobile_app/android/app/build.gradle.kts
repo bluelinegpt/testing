@@ -44,16 +44,16 @@ android {
         create("dev") {
             dimension = "environment"
             applicationIdSuffix = ".dev"
-            resValue("string", "app_name", "BluelineGPT Dev")
+            resValue("string", "app_name", "TawseelHub Dev")
         }
         create("staging") {
             dimension = "environment"
             applicationIdSuffix = ".staging"
-            resValue("string", "app_name", "BluelineGPT Staging")
+            resValue("string", "app_name", "TawseelHub Staging")
         }
         create("prod") {
             dimension = "environment"
-            resValue("string", "app_name", "BluelineGPT")
+            resValue("string", "app_name", "TawseelHub")
         }
     }
 
