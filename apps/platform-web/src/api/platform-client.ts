@@ -208,6 +208,8 @@ export interface CompanyDetail {
   readonly code: string;
   readonly nameEn: string;
   readonly subdomain: string;
+  /** Six-digit code the mobile app signs in with. */
+  readonly mobileCode: string;
   readonly status: CompanyStatus;
   readonly environment: CompanyEnvironment;
   readonly countryCode: string;

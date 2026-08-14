@@ -3,6 +3,7 @@ import { type FormEvent, useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { ApiError, type ApiClient } from "../../api/api-client.js";
+import { MobileAppQrPanel } from "../../components/MobileAppQrPanel.js";
 import type {
   LoginResponse,
   OperationsOrderImportResult,
@@ -31,6 +32,7 @@ type PortalArea = {
 type TraderProfile = {
   readonly code: string;
   readonly commercialNumber: string | null;
+  readonly companyMobileCode: string;
   readonly contactPerson: string | null;
   readonly email: string | null;
   readonly id: string;
@@ -91,6 +93,7 @@ export function PortalWorkspace({
     | "store"
   >(isDriver ? "orders" : "dashboard");
   const [notice, setNotice] = useState<string>();
+  const [mobileQrOpen, setMobileQrOpen] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<PortalOrder>();
   const [editingOrder, setEditingOrder] = useState<PortalOrder>();
   const [creatingOrder, setCreatingOrder] = useState(false);
@@ -220,6 +223,11 @@ export function PortalWorkspace({
           >
             {t("portal.changePassword")}
           </button>
+          {isDriver ? null : (
+            <button onClick={() => setMobileQrOpen(true)} type="button">
+              {t("shell.mobileAppQr")}
+            </button>
+          )}
         </nav>
         <button
           className="button button-secondary logout-button"
@@ -229,6 +237,13 @@ export function PortalWorkspace({
           {t("auth.logout")}
         </button>
       </aside>
+      {mobileQrOpen ? (
+        <MobileAppQrPanel
+          code={profile?.companyMobileCode}
+          companyName={displayName}
+          onRequestClose={() => setMobileQrOpen(false)}
+        />
+      ) : null}
       <section className="admin-content">
         {notice ? <div className="alert alert-success">{notice}</div> : null}
         {view === "password" ? (

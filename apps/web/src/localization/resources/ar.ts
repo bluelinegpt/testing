@@ -1284,6 +1284,7 @@
     pageNotFound: "الصفحة غير موجودة",
     pageNotFoundDescription: "هذه الصفحة غير متاحة في بوابة TawseelHub الحالية.",
     poweredBy: "مشغّل بواسطة TawseelHub.com",
+    mobileAppQr: "تطبيق الجوال — رمز QR",
     returnToDashboard: "العودة إلى لوحة المعلومات",
     signedInAs: "تم تسجيل الدخول باسم",
     subtitle: "نظام إدارة التوصيل",
@@ -1297,6 +1298,11 @@
       "اختر اللغة المستخدمة للبحث عن بيانات العمل وعرضها في البوابة. لا يغيّر هذا لغة واجهة التطبيق أو اتجاه التخطيط.",
     searchAndDisplayText: "لغة البحث وعرض البيانات",
     saved: "تم حفظ التفضيل.",
+  },
+  mobileQr: {
+    title: "تطبيق الجوال — امسح رمز QR",
+    help: "امسح هذا الرمز (أو اكتب الرقم) في الشاشة الأولى لتطبيق TawseelHub لربطه بهذه الشركة.",
+    print: "طباعة",
   },
   companyProfile: {
     companyId: "معرّف الشركة",

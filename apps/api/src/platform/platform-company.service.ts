@@ -214,6 +214,7 @@ export class PlatformCompanyService {
     const company = (
       await sql<Record<string, unknown>>`
         select c.id, c.code, c.name_en as "nameEn", c.name_ar as "nameAr", c.subdomain,
+               c.mobile_code as "mobileCode",
                c.status, c.environment, c.country_code as "countryCode",
                c.contact_name as "contactName", c.telephone, c.email, c.address_en as "addressEn",
                c.trade_license_number as "tradeLicenseNumber",

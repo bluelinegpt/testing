@@ -458,6 +458,7 @@ export function CompanyDetailPage(): ReactElement {
             ["Code", company.code],
             ["Subdomain", company.subdomain],
             ["Environment", company.environment],
+            ["Mobile app code", company.mobileCode],
             ["Contact name", company.contactName ?? "\u2014"],
             ["Telephone", company.telephone ?? "\u2014"],
             ["Email", company.email ?? "\u2014"],

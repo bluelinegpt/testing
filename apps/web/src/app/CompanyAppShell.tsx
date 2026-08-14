@@ -10,6 +10,7 @@ import {
   MessageSquare,
   PanelLeftClose,
   PanelLeftOpen,
+  QrCode,
   Settings,
   ShieldCheck,
   Store,
@@ -22,6 +23,7 @@ import { useTranslation } from "react-i18next";
 import { NavLink, useLocation } from "react-router-dom";
 
 import type { LoginResponse } from "../api/contracts.js";
+import { MobileAppQrPanel } from "../components/MobileAppQrPanel.js";
 import { VersionBadge } from "../components/VersionBadge.js";
 import { normalizeLocale, storeLocale, type SupportedLocale } from "../localization/locale.js";
 import type { ThemePreference } from "../theme/theme-preference.js";
@@ -115,6 +117,28 @@ export function CompanyAppShell({
   const signedInDisplayName = session.identity.displayName?.trim() || session.identity.username;
   const [collapsed, setCollapsed] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [mobileQrOpen, setMobileQrOpen] = useState(false);
+  const [mobileCode, setMobileCode] = useState<string>();
+
+  // Fetched lazily the first time the QR panel opens; the code never changes,
+  // so one fetch serves the whole session. Cookie-authenticated like every
+  // other request from this shell.
+  useEffect(() => {
+    if (!mobileQrOpen || mobileCode !== undefined) return;
+    let active = true;
+    fetch("/api/v1/company-profile", {
+      credentials: "include",
+      headers: { Accept: "application/json", "X-Blueline-Session": "cookie" },
+    })
+      .then((response) => (response.ok ? response.json() : undefined))
+      .then((profile: { mobileCode?: string } | undefined) => {
+        if (active && profile?.mobileCode !== undefined) setMobileCode(profile.mobileCode);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [mobileQrOpen, mobileCode]);
   const [expandedGroup, setExpandedGroup] = useState<MenuGroupId | undefined>(() =>
     groupForPath(location.pathname),
   );
@@ -374,6 +398,14 @@ export function CompanyAppShell({
         </nav>
 
         <div className="sidebar-footer">
+          <button
+            className="sidebar-logout-button"
+            onClick={() => setMobileQrOpen(true)}
+            type="button"
+          >
+            <QrCode aria-hidden="true" size={18} />
+            <span>{t("shell.mobileAppQr")}</span>
+          </button>
           <button className="sidebar-logout-button" onClick={() => void onLogout()} type="button">
             <LogOut aria-hidden="true" size={18} />
             <span>{t("auth.logout")}</span>
@@ -381,6 +413,13 @@ export function CompanyAppShell({
           <p className="powered-by">{t("shell.poweredBy")}</p>
         </div>
       </aside>
+      {mobileQrOpen ? (
+        <MobileAppQrPanel
+          code={mobileCode}
+          companyName={companyName}
+          onRequestClose={() => setMobileQrOpen(false)}
+        />
+      ) : null}
 
       <div className="company-main-column">
         <header className="company-top-header">

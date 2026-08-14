@@ -1308,6 +1308,7 @@ export const englishTranslations = {
     pageNotFound: "Page not found",
     pageNotFoundDescription: "This page is not available in the current TawseelHub portal.",
     poweredBy: "Powered by TawseelHub.com",
+    mobileAppQr: "Mobile App — Scan QR",
     returnToDashboard: "Return to dashboard",
     signedInAs: "Signed in as",
     subtitle: "Delivery Management System",
@@ -1321,6 +1322,11 @@ export const englishTranslations = {
       "Choose the language used to search and display business data across the portal. This does not change the application interface language or layout direction.",
     searchAndDisplayText: "Search and Display Text",
     saved: "Preference saved.",
+  },
+  mobileQr: {
+    title: "Mobile App — Scan QR",
+    help: "Scan this code (or type the number) on the TawseelHub mobile app's first screen to connect it to this company.",
+    print: "Print",
   },
   companyProfile: {
     companyId: "Company ID",

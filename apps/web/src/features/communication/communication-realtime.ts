@@ -42,7 +42,11 @@ export class CommunicationRealtimeConnection {
   private cursor: string | undefined;
   private readonly delivered = new Set<string>();
   private reconnectAttempt = 0;
-  private reconnectTimer: number | undefined;
+  // `ReturnType<typeof setTimeout>` rather than `number`: with `@types/node`
+  // in the workspace (a transitive dev dependency), `globalThis.setTimeout`
+  // resolves to the Node overload returning `Timeout`. This form is correct
+  // under either typing and changes nothing at runtime.
+  private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   private closedByCaller = false;
 
   public constructor(
