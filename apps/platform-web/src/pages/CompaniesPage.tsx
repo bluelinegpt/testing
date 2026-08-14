@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 
 import { platformApi, type CompanyPage } from "../api/platform-client.js";
 import { usePlatformSession } from "../app/PlatformSession.js";
+import { companyPortalUrl } from "../config/company-portal.js";
 
 /**
  * The Company list.
@@ -165,6 +166,7 @@ export function CompaniesPage(): ReactElement {
                 <th scope="col">Admin</th>
                 <th scope="col">Onboarding</th>
                 <SortHeader column="createdAt" label="Created" />
+                <th scope="col">Portal</th>
               </tr>
             </thead>
             <tbody>
@@ -206,6 +208,16 @@ export function CompaniesPage(): ReactElement {
                     </span>
                   </td>
                   <td>{new Date(company.createdAt).toISOString().slice(0, 10)}</td>
+                  <td>
+                    <a
+                      className="platform-button platform-button--quiet"
+                      href={companyPortalUrl(company.subdomain)}
+                      rel="noreferrer"
+                      target="_blank"
+                    >
+                      Open
+                    </a>
+                  </td>
                 </tr>
               ))}
             </tbody>

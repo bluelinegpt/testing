@@ -146,7 +146,7 @@ describe("public Storefront home page", () => {
     expect(screen.queryByText(/design prototype/i)).toBeNull();
     expect(screen.queryByText(/sample data only/i)).toBeNull();
     // The attribution itself stays.
-    expect(screen.getByText(/Powered by BluelineGPT/i)).toBeInTheDocument();
+    expect(screen.getByText(/Powered by Tawseelhub\.com/i)).toBeInTheDocument();
   });
 
   it("shows a genuinely empty catalogue as empty rather than as sample goods", async () => {

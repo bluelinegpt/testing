@@ -16,6 +16,7 @@ import {
   type ReadinessSummary,
 } from "../api/platform-client.js";
 import { usePlatformSession } from "../app/PlatformSession.js";
+import { companyPortalUrl } from "../config/company-portal.js";
 import { CompanyAdministrators } from "./CompanyAdministrators.js";
 
 /**
@@ -359,9 +360,19 @@ export function CompanyDetailPage(): ReactElement {
             </span>
           </p>
         </div>
-        <Link className="platform-button platform-button--quiet" to="/companies">
-          Back
-        </Link>
+        <div className="platform-actions">
+          <a
+            className="platform-button"
+            href={companyPortalUrl(company.subdomain)}
+            rel="noreferrer"
+            target="_blank"
+          >
+            Open Portal
+          </a>
+          <Link className="platform-button platform-button--quiet" to="/companies">
+            Back
+          </Link>
+        </div>
       </div>
 
       {error === undefined ? null : (

@@ -126,8 +126,8 @@ export function StorefrontFooter() {
           `toStoreConfig`, so the sample stores keep the disclaimer. */}
       <p className="sf-footer-legal">
         {config.isPersisted === true
-          ? "Powered by BluelineGPT delivery network."
-          : "Storefront design prototype — sample data only. Powered by BluelineGPT delivery network."}
+          ? "Powered by Tawseelhub.com delivery network."
+          : "Storefront design prototype — sample data only. Powered by Tawseelhub.com delivery network."}
       </p>
     </footer>
   );

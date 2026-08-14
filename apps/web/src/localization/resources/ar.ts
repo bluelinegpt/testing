@@ -1282,7 +1282,7 @@
     openNavigation: "فتح قائمة التنقل",
     pageNotFound: "الصفحة غير موجودة",
     pageNotFoundDescription: "هذه الصفحة غير متاحة في بوابة BluelineGPT الحالية.",
-    poweredBy: "مشغّل بواسطة BluelineGPT",
+    poweredBy: "مشغّل بواسطة Tawseelhub.com",
     returnToDashboard: "العودة إلى لوحة المعلومات",
     signedInAs: "تم تسجيل الدخول باسم",
     subtitle: "نظام إدارة التوصيل",

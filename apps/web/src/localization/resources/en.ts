@@ -1306,7 +1306,7 @@ export const englishTranslations = {
     openNavigation: "Open navigation",
     pageNotFound: "Page not found",
     pageNotFoundDescription: "This page is not available in the current BluelineGPT portal.",
-    poweredBy: "Powered by BluelineGPT",
+    poweredBy: "Powered by Tawseelhub.com",
     returnToDashboard: "Return to dashboard",
     signedInAs: "Signed in as",
     subtitle: "Delivery Management System",
