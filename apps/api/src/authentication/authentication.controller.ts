@@ -8,6 +8,7 @@ import type { AppConfiguration } from "../configuration/environment.js";
 import { DeviceRegistrationService } from "../push/device-registration.service.js";
 import { IdentityContextAccessor } from "../security/identity-context.js";
 import { CompanyHostResolver } from "../tenancy/company-host-resolver.js";
+import { CompanyMobileCodeResolver } from "../tenancy/company-mobile-code-resolver.js";
 import { AllowPasswordChangeRequired, Public } from "./authentication.decorators.js";
 // Runtime class values are required for Nest validation metadata.
 // eslint-disable-next-line @typescript-eslint/consistent-type-imports
@@ -23,6 +24,8 @@ export class AuthenticationController {
     @Inject(AuthenticationService) private readonly authentication: AuthenticationService,
     @Inject(IdentityContextAccessor) private readonly identities: IdentityContextAccessor,
     @Inject(CompanyHostResolver) private readonly companyHosts: CompanyHostResolver,
+    @Inject(CompanyMobileCodeResolver)
+    private readonly companyMobileCodes: CompanyMobileCodeResolver,
     @Inject(DeviceRegistrationService)
     private readonly deviceRegistrations: DeviceRegistrationService,
     @Inject(AuthenticationRepository) private readonly repository: AuthenticationRepository,
@@ -51,24 +54,38 @@ export class AuthenticationController {
     @Req() request: Request,
     @Res({ passthrough: true }) response: Response,
   ): Promise<LoginResult> {
-    // The Company comes from the host the request arrived on, never from the
-    // client. An unresolved host is handled by the service as an ordinary
-    // failed sign-in so it cannot be used to probe for Companies.
+    // The Company comes from the request's own addressing, never from the
+    // login form. An unresolved Company is handled by the service as an
+    // ordinary failed sign-in so neither path can be used to probe for
+    // Companies. Two addressing schemes, one per client family:
+    //
+    // `x-blueline-company-code` is the mobile app's six-digit Company Mobile
+    // Code, stored on the device at first launch (scanned from a portal QR
+    // panel or a printed report). It takes precedence because a device that
+    // sends it has explicitly chosen its Company; the API's own host would
+    // resolve to the development fallback otherwise.
     //
     // `x-blueline-tenant-host` carries the ORIGINAL portal host when the
     // request travels through the portal's own same-origin `/api` proxy
     // (apps/web and apps/platform-web `serve.mjs`): hosting routers direct
     // upstream requests by the Host header, so the proxy must rewrite Host to
-    // the API's own name and forward the tenant host separately. Trusting the
-    // header is equivalent to trusting Host itself — both name the tenant,
-    // neither grants access, and resolution failure is still answered with the
-    // same generic invalid-credentials response as a wrong password.
+    // the API's own name and forward the tenant host separately. Trusting
+    // either header is equivalent to trusting Host itself — all three merely
+    // AIM the login at a Company, none grants access.
+    const mobileCodeHeader = request.headers["x-blueline-company-code"];
+    const mobileCode = Array.isArray(mobileCodeHeader) ? mobileCodeHeader[0] : mobileCodeHeader;
     const tenantHost = request.headers["x-blueline-tenant-host"];
-    const companySubdomain = this.companyHosts.resolve(
-      (Array.isArray(tenantHost) ? tenantHost[0] : tenantHost) ??
-        request.headers.host ??
-        request.hostname,
-    );
+    // A PRESENT code is decisive even when unknown: falling through to host
+    // resolution would land a mistyped code on the development fallback
+    // Company instead of the generic failure the design promises.
+    const companySubdomain =
+      mobileCode !== undefined
+        ? await this.companyMobileCodes.resolve(mobileCode)
+        : this.companyHosts.resolve(
+            (Array.isArray(tenantHost) ? tenantHost[0] : tenantHost) ??
+              request.headers.host ??
+              request.hostname,
+          );
     const result = await this.authentication.loginCompany({
       companySubdomain,
       createdIp,

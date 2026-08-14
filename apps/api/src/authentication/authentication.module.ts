@@ -12,6 +12,7 @@ import {
 } from "../security/request-security-context.js";
 import { RequestSecurityContextMiddleware } from "../security/request-security-context.middleware.js";
 import { CompanyHostResolver } from "../tenancy/company-host-resolver.js";
+import { CompanyMobileCodeResolver } from "../tenancy/company-mobile-code-resolver.js";
 import { TENANT_CONTEXT_ACCESSOR, TenantContextAccessor } from "../tenancy/tenant-context.js";
 // Re-provided here rather than imported via `PushModule` — `PushModule`
 // itself imports `AuthenticationModule` (for `IdentityContextAccessor`), so
@@ -57,6 +58,7 @@ import { TemporaryPasswordService } from "./temporary-password.service.js";
     AccountSetupService,
     AuthenticationRepository,
     CompanyHostResolver,
+    CompanyMobileCodeResolver,
     AuthenticationService,
     DeviceRegistrationService,
     PasswordHasher,
