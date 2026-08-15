@@ -477,9 +477,7 @@ final class _CompanyCodePageState extends ConsumerState<CompanyCodePage> {
     if (!(_formKey.currentState?.validate() ?? false)) return;
     setState(() => _saving = true);
     try {
-      await ref
-          .read(companyCodeProvider.notifier)
-          .change(_code.text.trim());
+      await ref.read(companyCodeProvider.notifier).change(_code.text.trim());
       if (mounted) context.go('/login');
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -642,6 +640,23 @@ final class _AccountPageState extends ConsumerState<AccountPage> {
         BluelineSectionCard(
           child: Column(
             children: [
+              // Sourced from `/auth/me` (`companyName`/`companyNameAr`,
+              // `companies.name_en`/`name_ar`), never a local guess.
+              // Platform Administrator/Customer accounts have no Company, so
+              // this row is simply omitted for them rather than showing an
+              // empty value.
+              if (companyDisplayName(
+                    user,
+                    Localizations.localeOf(context).languageCode,
+                  )
+                  case final companyName?) ...[
+                ListTile(
+                  leading: const Icon(Icons.business_outlined),
+                  title: Text(l10n.companyLabel),
+                  subtitle: Text(companyName),
+                ),
+                const Divider(height: 1),
+              ],
               ListTile(
                 leading: const Icon(Icons.language),
                 title: Text(l10n.language),

@@ -10,6 +10,8 @@ export interface IdentityContext {
   readonly profileLinkId?: string;
   readonly profileType?: "employee" | "driver" | "trader";
   readonly profileId?: string;
+  readonly companyName?: string;
+  readonly companyNameAr?: string;
 }
 
 export abstract class IdentityContextAccessor {

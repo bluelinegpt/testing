@@ -1172,6 +1172,12 @@ abstract class AppLocalizations {
   /// **'Return to Branch'**
   String get returnToBranchAction;
 
+  /// No description provided for @companyLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Company'**
+  String get companyLabel;
+
   /// No description provided for @traderLabel.
   ///
   /// In en, this message translates to:

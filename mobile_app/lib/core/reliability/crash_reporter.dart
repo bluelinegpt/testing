@@ -44,7 +44,7 @@ Future<void> reportCrash(Object error, StackTrace stack, {String? path}) async {
         'message': _truncate(error.toString(), 2000),
         'stack': _truncate(stack.toString(), 8000),
         'appCommit': configuration.appCommit,
-        if (path != null) 'path': path,
+        'path': ?path,
       },
     );
   } catch (_) {

@@ -259,6 +259,8 @@ final class SessionAuthenticationService implements AuthenticationService {
     // the JSON for every identity except a resolved Driver User — see
     // `AuthenticatedUser.isDriverPresentation`.
     final linkedDriverId = verified['linkedDriverId'] as String?;
+    final companyName = verified['companyName'] as String?;
+    final companyNameAr = verified['companyNameAr'] as String?;
     if ((role == UserRole.trader || role == UserRole.driver) &&
         (profileId == null || profileType != role!.code)) {
       access = AccountAccessState.missingProfile;
@@ -285,6 +287,8 @@ final class SessionAuthenticationService implements AuthenticationService {
             verified['forcePasswordChange'] == true ||
             identity['forcePasswordChange'] == true,
         linkedDriverId: linkedDriverId,
+        companyName: companyName,
+        companyNameAr: companyNameAr,
       ),
     );
   }

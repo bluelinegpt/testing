@@ -113,6 +113,8 @@ export class AuthenticationService {
       ...(session.profileLinkId === null ? {} : { profileLinkId: session.profileLinkId }),
       ...(session.profileType === null ? {} : { profileType: session.profileType }),
       ...(session.profileId === null ? {} : { profileId: session.profileId }),
+      ...(session.companyName === null ? {} : { companyName: session.companyName }),
+      ...(session.companyNameAr === null ? {} : { companyNameAr: session.companyNameAr }),
     };
   }
 

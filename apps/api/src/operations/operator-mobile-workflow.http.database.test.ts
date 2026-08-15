@@ -467,6 +467,11 @@ describe.skipIf(!runHttpTests)("Operator mobile workflow HTTP boundary", () => {
             .expect(200);
           expect(driverUserIdentity.body.kind).toBe("company_user");
           expect(driverUserIdentity.body.linkedDriverId).toBe(driverUser.driverId);
+          // Company name is always present alongside identity — every
+          // Company-scoped account (Driver User or plain Operator alike)
+          // gets it, sourced from `companies.name_en`/`name_ar`, never a
+          // client-side guess.
+          expect(driverUserIdentity.body.companyName).toBe("Operator Mobile Co");
 
           const plainOperatorIdentity = await request(server)
             .get("/api/v1/auth/me")
@@ -474,6 +479,7 @@ describe.skipIf(!runHttpTests)("Operator mobile workflow HTTP boundary", () => {
             .expect(200);
           expect(plainOperatorIdentity.body.kind).toBe("company_user");
           expect(plainOperatorIdentity.body.linkedDriverId).toBeUndefined();
+          expect(plainOperatorIdentity.body.companyName).toBe("Operator Mobile Co");
 
           // --- Order detail: narrow Operator permission now works --------------
           const detail = await authed(narrowOperator.token)(

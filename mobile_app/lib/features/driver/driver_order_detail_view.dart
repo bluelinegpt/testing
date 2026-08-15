@@ -134,22 +134,23 @@ final class DriverStyleOrderFields extends StatelessWidget {
           icon: Icons.receipt_long_outlined,
           trailing: StatusChip(status: order.status),
           children: [
+            // Reference Number is the important identifier here — the
+            // emphasized `titleMedium` value. Serial Number is still always
+            // shown (never dropped), just as a plain secondary field below
+            // it, matching the same precedence `OrderCard` uses on the list.
             _FieldRow(
-              label: l10n.serialNumber,
+              label: l10n.reference,
               valueWidget: Directionality(
                 textDirection: TextDirection.ltr,
                 child: Text(
-                  order.serialNumber,
+                  (reference == null || reference.isEmpty)
+                      ? l10n.emptyValuePlaceholder
+                      : reference,
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
               ),
             ),
-            _FieldRow(
-              label: l10n.reference,
-              value: (reference == null || reference.isEmpty)
-                  ? l10n.emptyValuePlaceholder
-                  : reference,
-            ),
+            _FieldRow(label: l10n.serialNumber, value: order.serialNumber),
           ],
         ),
         const SizedBox(height: AppSpacing.sm),

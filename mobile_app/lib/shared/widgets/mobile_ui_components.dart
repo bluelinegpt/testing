@@ -361,11 +361,14 @@ final class OrderCard extends StatelessWidget {
     final mutedStyle = theme.textTheme.bodySmall?.copyWith(
       color: theme.colorScheme.onSurfaceVariant,
     );
-    // Serial/Reference — whichever is available — is the card's primary,
-    // emphasized identifier; the raw internal `orderNumber` becomes a
-    // smaller secondary line rather than disappearing outright. When
-    // neither is available, `orderNumber` is shown at full emphasis instead
-    // (never left with no primary identifier at all).
+    // Reference Number is the card's primary, emphasized identifier — the
+    // business-facing value Traders/Operators actually work from. Serial
+    // Number is the secondary line whenever it's available and isn't
+    // already the primary (never dropped just because Reference exists,
+    // and never the raw internal `orderNumber` unless Serial is also
+    // missing). When neither Reference nor Serial is available,
+    // `orderNumber` is shown at full emphasis instead (never left with no
+    // primary identifier at all).
     final reference = order.externalReference?.trim();
     final serial = order.serialNumber?.trim();
     final primaryLabel = (reference != null && reference.isNotEmpty)
@@ -373,7 +376,10 @@ final class OrderCard extends StatelessWidget {
         : (serial != null && serial.isNotEmpty)
         ? serial
         : order.orderNumber;
-    final showSecondaryOrderNumber = primaryLabel != order.orderNumber;
+    final secondaryIsSerial =
+        primaryLabel == reference && serial != null && serial.isNotEmpty;
+    final secondaryLabel = secondaryIsSerial ? serial : order.orderNumber;
+    final showSecondaryOrderNumber = secondaryLabel != primaryLabel;
     final areaLine = [
       order.emirate,
       order.area,
@@ -409,7 +415,12 @@ final class OrderCard extends StatelessWidget {
                             ),
                           ),
                           if (showSecondaryOrderNumber)
-                            Text(order.orderNumber, style: mutedStyle),
+                            Text(
+                              secondaryIsSerial
+                                  ? '${l10n.serialNumber}: $secondaryLabel'
+                                  : secondaryLabel,
+                              style: mutedStyle,
+                            ),
                         ],
                       ),
                     ),

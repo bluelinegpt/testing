@@ -324,6 +324,152 @@ void main() {
     });
   });
 
+  group('Company name — Dashboard + Account page', () {
+    AuthenticatedUser withCompany({String? companyNameAr}) => AuthenticatedUser(
+      id: 'company-user-1',
+      companyId: 'company-1',
+      displayName: 'D123',
+      roles: {UserRole.operatorRole},
+      permissions: {'mobile.operator.access', 'orders.update_delivery_status'},
+      accessState: AccountAccessState.active,
+      companyName: 'Operator Mobile Co',
+      companyNameAr: companyNameAr,
+    );
+    AuthenticatedUser withoutCompany() => AuthenticatedUser(
+      id: 'company-user-2',
+      companyId: 'company-1',
+      displayName: 'No Company Name',
+      roles: {UserRole.operatorRole},
+      permissions: {'mobile.operator.access', 'orders.update_delivery_status'},
+      accessState: AccountAccessState.active,
+    );
+
+    testWidgets('Dashboard shows the Company name when present', (
+      tester,
+    ) async {
+      final operatorRepository = FakeOperatorRepository(
+        summaryResult: const OperatorDashboardSummary(
+          activeTotal: 0,
+          byStatus: {},
+          deliveredToday: 0,
+          returnPending: 0,
+        ),
+      );
+      await tester.pumpWidget(
+        _wrapDashboard(
+          const RoleDashboardPage(),
+          operatorRepository: operatorRepository,
+          user: withCompany(),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Operator Mobile Co'), findsOneWidget);
+    });
+
+    testWidgets(
+      'Dashboard shows nothing extra when the Company name is absent',
+      (tester) async {
+        final operatorRepository = FakeOperatorRepository(
+          summaryResult: const OperatorDashboardSummary(
+            activeTotal: 0,
+            byStatus: {},
+            deliveredToday: 0,
+            returnPending: 0,
+          ),
+        );
+        await tester.pumpWidget(
+          _wrapDashboard(
+            const RoleDashboardPage(),
+            operatorRepository: operatorRepository,
+            user: withoutCompany(),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('Operator Mobile Co'), findsNothing);
+      },
+    );
+
+    testWidgets('Account page shows a Company row when present', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            authenticationServiceProvider.overrideWithValue(
+              _FakeAuthenticationService(
+                AuthenticationState(
+                  AuthenticationStatus.authenticated,
+                  session: _sessionFor(withCompany()),
+                ),
+              ),
+            ),
+          ],
+          child: MaterialApp(
+            supportedLocales: AppLocalizations.supportedLocales,
+            localizationsDelegates: const [
+              AppLocalizations.delegate,
+              GlobalMaterialLocalizations.delegate,
+              GlobalWidgetsLocalizations.delegate,
+              GlobalCupertinoLocalizations.delegate,
+            ],
+            home: const Scaffold(body: AccountPage()),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Company'), findsOneWidget);
+      expect(find.text('Operator Mobile Co'), findsOneWidget);
+    });
+
+    testWidgets('Account page omits the Company row when absent', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            authenticationServiceProvider.overrideWithValue(
+              _FakeAuthenticationService(
+                AuthenticationState(
+                  AuthenticationStatus.authenticated,
+                  session: _sessionFor(withoutCompany()),
+                ),
+              ),
+            ),
+          ],
+          child: MaterialApp(
+            supportedLocales: AppLocalizations.supportedLocales,
+            localizationsDelegates: const [
+              AppLocalizations.delegate,
+              GlobalMaterialLocalizations.delegate,
+              GlobalWidgetsLocalizations.delegate,
+              GlobalCupertinoLocalizations.delegate,
+            ],
+            home: const Scaffold(body: AccountPage()),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Company'), findsNothing);
+    });
+
+    test(
+      'Arabic locale prefers companyNameAr, falls back to English when absent',
+      () {
+        expect(
+          companyDisplayName(
+            withCompany(companyNameAr: 'شركة تشغيل المشغل'),
+            'ar',
+          ),
+          'شركة تشغيل المشغل',
+        );
+        // No Arabic name set — falls back to the English one rather than
+        // showing nothing.
+        expect(companyDisplayName(withCompany(), 'ar'), 'Operator Mobile Co');
+        expect(companyDisplayName(withoutCompany(), 'ar'), isNull);
+      },
+    );
+  });
+
   group('RoleDashboardPage — Driver User (Prompt: Driver User correction)', () {
     testWidgets(
       'selects the Operator repository/endpoint, never the driver-portal one',

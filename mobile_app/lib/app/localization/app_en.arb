@@ -180,6 +180,7 @@
   "reference": "Reference",
   "emptyValuePlaceholder": "—",
   "returnToBranchAction": "Return to Branch",
+  "companyLabel": "Company",
   "traderLabel": "Trader",
   "mobileLabel": "Mobile",
   "loadMore": "Load more",

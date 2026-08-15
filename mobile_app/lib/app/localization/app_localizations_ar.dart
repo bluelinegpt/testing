@@ -563,6 +563,9 @@ class AppLocalizationsAr extends AppLocalizations {
   String get returnToBranchAction => 'إرجاع إلى الفرع';
 
   @override
+  String get companyLabel => 'الشركة';
+
+  @override
   String get traderLabel => 'التاجر';
 
   @override

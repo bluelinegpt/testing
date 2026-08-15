@@ -41,6 +41,8 @@ final class AuthenticatedUser {
     this.profileType,
     this.forcePasswordChange = false,
     this.linkedDriverId,
+    this.companyName,
+    this.companyNameAr,
   });
   final String id;
   final String companyId;
@@ -51,6 +53,13 @@ final class AuthenticatedUser {
   final String? profileId;
   final String? profileType;
   final bool forcePasswordChange;
+
+  /// The authenticated Company's display name — sourced from `/auth/me`
+  /// (`companyName`/`companyNameAr`, `companies.name_en`/`name_ar`), never
+  /// guessed or cached locally. `null` for a Platform Administrator (no
+  /// Company) or a Customer account.
+  final String? companyName;
+  final String? companyNameAr;
 
   /// Present only for a `company_user` ("Driver User") whose linked Employee
   /// backs a `drivers.employee_id` record — the backend's single
@@ -73,6 +82,21 @@ final class AuthenticatedUser {
   /// rather than re-deriving the same decision independently.
   bool get isDriverPresentation =>
       hasRole(UserRole.driver) || linkedDriverId != null;
+}
+
+/// The Company's display name in the viewer's locale — Arabic when available
+/// and the app is in Arabic, English otherwise, `null` only when the account
+/// genuinely has no Company (Platform Administrator/Customer) or the backend
+/// hasn't sent one. Never fabricated — the same "show nothing rather than a
+/// wrong guess" convention `driver_order_detail_view.dart`'s emirate-name
+/// locale selection already uses.
+String? companyDisplayName(AuthenticatedUser user, String locale) {
+  final nameAr = user.companyNameAr?.trim();
+  final nameEn = user.companyName?.trim();
+  final preferred = locale == 'ar' ? nameAr : nameEn;
+  if (preferred != null && preferred.isNotEmpty) return preferred;
+  final fallback = locale == 'ar' ? nameEn : nameAr;
+  return (fallback != null && fallback.isNotEmpty) ? fallback : null;
 }
 
 @immutable

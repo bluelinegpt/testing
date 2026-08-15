@@ -140,6 +140,19 @@ final class _RoleDashboardPageState extends ConsumerState<RoleDashboardPage> {
               fontWeight: FontWeight.w700,
             ),
           ),
+          if (companyDisplayName(
+                user,
+                Localizations.localeOf(context).languageCode,
+              )
+              case final name?) ...[
+            const SizedBox(height: AppSpacing.xs / 2),
+            Text(
+              name,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
           const SizedBox(height: AppSpacing.lg),
           if (user.hasRole(UserRole.trader) && user.can('orders.create')) ...[
             FilledButton.icon(

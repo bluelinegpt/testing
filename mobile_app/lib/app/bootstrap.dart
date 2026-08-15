@@ -12,7 +12,9 @@ Future<void> bootstrap() async {
       WidgetsFlutterBinding.ensureInitialized();
       FlutterError.onError = (details) {
         FlutterError.presentError(details);
-        unawaited(reportCrash(details.exception, details.stack ?? StackTrace.current));
+        unawaited(
+          reportCrash(details.exception, details.stack ?? StackTrace.current),
+        );
         Zone.current.handleUncaughtError(
           details.exception,
           details.stack ?? StackTrace.current,

@@ -29,6 +29,9 @@ export interface AuthenticatedSessionRecord {
   readonly profileLinkId: string | null;
   readonly profileType: "employee" | "driver" | "trader" | null;
   readonly profileId: string | null;
+  /** `null` for a Platform Administrator (`companyId` is also `null` there). */
+  readonly companyName: string | null;
+  readonly companyNameAr: string | null;
 }
 
 export interface ActiveProfileRecord {
@@ -231,6 +234,7 @@ export class AuthenticationRepository {
              a.account_kind as kind
              ,a.force_password_change as "forcePasswordChange"
              ,s.profile_link_id as "profileLinkId",s.profile_type as "profileType",s.profile_id as "profileId"
+             ,c.name_en as "companyName",c.name_ar as "companyNameAr"
         from account_sessions s
         join accounts a on a.id = s.account_id
         left join companies c on c.id = a.company_id
