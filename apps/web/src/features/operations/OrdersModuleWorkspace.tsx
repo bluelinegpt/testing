@@ -3670,7 +3670,16 @@ function availableActions(order: OperationsOrder): readonly RowAction[] {
 }
 
 function singleSelection(orderId: string): SelectionPayload {
-  return { ...initialFilters, orderIds: [orderId], selectionMode: "ids" };
+  // Explicit-ID selection needs no filter fields at all -- matches the "ids"
+  // branch of cleanSelectionPayload() above. Spreading the full initialFilters
+  // (all ~16 keys, mostly "") used to send several properties the server's
+  // OrderSelectionDto does not declare at all (rejected outright by
+  // forbidNonWhitelisted) plus empty strings on the ones it does declare as
+  // optional UUID/date fields (rejected because @IsOptional only skips an
+  // undefined value, not a defined-but-empty one) -- collapsing to the
+  // generic "Request validation failed." on every single-Order quick action
+  // (Assign Driver, and anything else built on this helper).
+  return { orderIds: [orderId], selectionMode: "ids" };
 }
 
 /**
