@@ -127,10 +127,12 @@ export function BusinessAccessPanel({
   };
 
   const employeeUsername = (profileMobileNumber ?? "").replace(/\D/g, "");
-  const employeeCreationRoles = roles.filter((role) => {
-    const name = role.name.trim().toLowerCase();
-    return name === "company administrator" || name === "orders";
-  });
+  // Every ACTIVE Company role. This was a hardcoded two-name whitelist
+  // ("company administrator"/"orders"), which hid every role a Company
+  // defined itself — a Driver-role Employee could not be given Driver
+  // Operations access from here at all. The Users screen already offers the
+  // full role list for the same account kind, so parity is the safe shape.
+  const employeeCreationRoles = roles;
   const createEmployeeUser = async () => {
     if (!employeeUsername || employeeRoleIds.length === 0) return;
     setSaving(true);
