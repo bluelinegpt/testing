@@ -58,7 +58,18 @@ android {
     }
 
     // Release signing is intentionally not sourced from this repository.
-    // CI or the release operator must inject an approved private signing configuration.
+    // CI or the release operator must inject an approved private signing
+    // configuration. Until it does, release builds fall back to the local
+    // auto-generated DEBUG keystore — not a secret, different on every
+    // machine — because Android refuses to install an UNSIGNED apk at all
+    // ("package appears to be invalid"), which made sideloading staging
+    // builds onto test phones impossible. A CI-injected config must replace
+    // this assignment for any store or customer distribution.
+    buildTypes {
+        release {
+            signingConfig = signingConfigs.getByName("debug")
+        }
+    }
 }
 
 kotlin {
