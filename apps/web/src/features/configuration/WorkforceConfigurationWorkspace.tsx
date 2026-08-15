@@ -468,10 +468,18 @@ function WorkforceForm({
   }, [api]);
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const data = new FormData(event.currentTarget);
+    const formElement = event.currentTarget;
+    const data = new FormData(formElement);
     setSaving(true);
     setError(undefined);
     setFieldErrors({});
+    // Every refusal surfaces at the TOP of the form and scrolls there. The
+    // inline per-field messages alone sit below the fold of this tall modal,
+    // which made a rejected Save look like a Save that did nothing.
+    const showFormError = (message: string) => {
+      setError(message);
+      formElement.scrollIntoView({ behavior: "smooth", block: "start" });
+    };
     try {
       if (mode === "edit" && employeeStatusChanged) {
         const id = String(detail?.id ?? "");
@@ -510,10 +518,11 @@ function WorkforceForm({
       }
       if (Object.keys(earningErrors).length > 0) {
         setFieldErrors(earningErrors);
+        showFormError(t("workforce.variableEarningInvalid"));
         return;
       }
       if (!basicSalary.ok || !outsourcedFee.ok || allowanceAmounts.some((amount) => !amount.ok)) {
-        setError(t("workforce.invalidAmount"));
+        showFormError(t("workforce.invalidAmount"));
         return;
       }
       const common = {
@@ -544,7 +553,7 @@ function WorkforceForm({
         salaryEffectiveFrom: String(data.get("salaryEffectiveFrom") ?? today()),
       };
       if (roleId === "") {
-        setError(t("workforce.roleRequired"));
+        showFormError(t("workforce.roleRequired"));
         setSaving(false);
         return;
       }
@@ -613,7 +622,7 @@ function WorkforceForm({
           : caught instanceof ApiError && caught.code.includes("overlap")
             ? t("workforce.variableEarningOverlap")
             : undefined;
-      setError(
+      showFormError(
         earningError ??
           (caught instanceof ApiError && caught.code === "employee_salary_effective_date_overlap"
             ? t("workforce.salaryEffectiveDateConflict")
@@ -631,7 +640,13 @@ function WorkforceForm({
       title={t(mode === "create" ? "workforce.createEmployee" : "common.edit")}
       titleId="workforce-form-title"
     >
-      <form onSubmit={(event) => void submit(event)}>
+      {/* noValidate: this form already has its own validation (earningErrors,
+          fieldErrors, showFormError) with visible messages. Without it, the
+          browser's NATIVE constraint validation (e.g. the delivery amount's
+          min="0.01") silently blocks submission before `submit` ever runs —
+          and its tooltip is invisible when the offending field is scrolled
+          out of view in this tall modal, which read as "Save does nothing". */}
+      <form noValidate onSubmit={(event) => void submit(event)}>
         {error === undefined ? null : <div className="alert alert-error">{error}</div>}
         <div className="workforce-form-grid">
           <fieldset>
