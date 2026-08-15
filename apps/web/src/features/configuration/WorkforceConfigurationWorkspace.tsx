@@ -570,7 +570,7 @@ function WorkforceForm({
           Number(currentDelivery.amount) !== (deliveryAmount.ok ? deliveryAmount.value : 0) ||
           currentDelivery.effectiveFrom !== deliveryFrom ||
           (currentDelivery.effectiveTo ?? "") !== (deliveryTo ?? ""));
-      if (mode === "edit" && isDriverRole && engagement === "employee" && deliveryChanged) {
+      if (isDriverRole && engagement === "employee" && deliveryChanged) {
         await api.post(`configuration/employees/${employeeId}/variable-earnings/delivery`, {
           amountPerOrder: deliveryAmount.ok ? deliveryAmount.value : 0,
           effectiveFrom: deliveryFrom,
@@ -586,7 +586,7 @@ function WorkforceForm({
               (collectionType === "none" ? 0 : collectionAmount.ok ? collectionAmount.value : 0) ||
             currentCollection.effectiveFrom !== collectionFrom ||
             (currentCollection.effectiveTo ?? "") !== (collectionTo ?? "");
-      if (mode === "edit" && isDriverRole && collectionChanged) {
+      if (isDriverRole && collectionChanged) {
         await api.post(`configuration/employees/${employeeId}/variable-earnings/collection`, {
           amount: collectionType === "none" ? 0 : collectionAmount.ok ? collectionAmount.value : 0,
           collectionPaymentType: collectionType,
@@ -767,7 +767,11 @@ function WorkforceForm({
               </label>
             </fieldset>
           ) : null}
-          {isDriverRole && mode === "edit" ? (
+          {/* Shown in BOTH modes since 2026-08-15: creating a Driver used to
+              require save → reopen → edit just to enter the earning rates.
+              The rules are posted right after the create call returns the new
+              employee id. */}
+          {isDriverRole ? (
             <DriverVariableEarningsFields
               collectionType={collectionType}
               deliveryEnabled={deliveryEnabled}
