@@ -6,10 +6,10 @@
       "displayName": "API",
       "path": "apps/api",
       "renderService": "bluelinegpt-api-test",
-      "status": "pushed_awaiting_confirmation",
-      "localCommit": "81d824b",
+      "status": "needs_deploy",
+      "localCommit": "320a6eb",
       "localCommitDate": "2026-08-15",
-      "lastChangeDescription": "feat(accounting): open the Company's own creation-date period automatically; surface Driver Expenses' explanation instead of an unexplained Disabled row",
+      "lastChangeDescription": "feat(mobile): show Company name after login and on Account page; keep Reference Number primary over Serial Number",
       "lastChangeBy": "claude",
       "confirmedLiveCommit": "27e356a",
       "confirmedLiveAt": "2026-08-14"
