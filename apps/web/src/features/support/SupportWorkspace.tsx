@@ -35,14 +35,24 @@ export function SupportWorkspace({ api }: { api: ApiClient }) {
     event.preventDefault();
     setSaving(true);
     setError(undefined);
-    const form = new FormData(event.currentTarget);
+    /* Captured now, synchronously: a DOM event's `currentTarget` is cleared
+       the instant the synchronous part of the handler returns, which happens
+       here at the first `await` below. Reading `event.currentTarget` again
+       afterwards -- as the `.reset()` call used to -- is `null` by then, so
+       that line threw on every single submission, was swallowed by the
+       generic catch, and reported "could not be saved" even though the
+       Support Case had already been created successfully. That is what
+       produced the duplicate identical cases: each "failed" attempt had in
+       fact gone through, so retrying only created another one. */
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
     try {
       await api.post<SupportCase>("support/cases", {
         description: String(form.get("description") ?? ""),
         priority: String(form.get("priority") ?? "normal"),
         title: String(form.get("title") ?? ""),
       });
-      event.currentTarget.reset();
+      formElement.reset();
       await load();
     } catch {
       setError(t("support.saveFailed"));
