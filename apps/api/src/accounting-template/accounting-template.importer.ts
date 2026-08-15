@@ -598,15 +598,23 @@ export class AccountingTemplateImporter {
    * a creation date in February it would be April of the PREVIOUS year.
    *
    * -----------------------------------------------------------------
-   * PERIODS ARE CREATED `future`, NOT `open`
+   * EXACTLY ONE PERIOD IS CREATED `open` — THE ONE CONTAINING TODAY
    * -----------------------------------------------------------------
    *
-   * This mirrors how the reference Company's calendar actually exists in the
-   * database: all twelve periods sit at `future` until someone opens one.
-   * Opening a period is an accounting decision with a posting consequence, and
-   * onboarding is not the place to make it silently. It also keeps the rule in
-   * §32's spirit: accounting requirements belong to accounting configuration,
-   * not to Platform onboarding.
+   * Every OTHER period still sits at `future` until someone opens it — that
+   * part of the original reasoning stands: opening a period ahead of its own
+   * time is a real accounting decision with a posting consequence, and
+   * onboarding must not make that call for periods that have not arrived yet.
+   *
+   * The one period covering the Company's own creation date is different: a
+   * Company created today, using an approved template, has nothing to decide
+   * about THAT period — of course today can post. Leaving it `future` too
+   * meant Automatic Posting was unconditionally blocked for every new
+   * Company until a human found the Fiscal Periods screen and opened it by
+   * hand, which is the exact first-day friction the standard starter roles
+   * fix (see standard-company-roles.ts) was already removing for Roles.
+   * Decided 2026-08-15, at the request of the person actually onboarding
+   * Companies.
    */
   private async createFiscalCalendar(
     transaction: Transaction<DatabaseSchema>,
@@ -645,16 +653,25 @@ export class AccountingTemplateImporter {
 
     for (let index = 0; index < template.fiscalPolicy.periodsPerYear; index += 1) {
       const period = monthStart(index);
+      const periodStart = `${period.y}-${pad(period.m)}-01`;
+      const periodEnd = `${period.y}-${pad(period.m)}-${pad(lastDay(period.y, period.m))}`;
+      // Only the period covering the Company's own creation date opens
+      // immediately -- see this method's own comment above for why.
+      const status = input.effectiveFrom >= periodStart && input.effectiveFrom <= periodEnd
+        ? "open"
+        : "future";
       await sql`
         insert into accounting_periods (
           id, company_id, fiscal_year_id, period_number, period_code, name,
-          period_start, period_end, status, is_adjustment_period, created_by_account_id
+          period_start, period_end, status, is_adjustment_period, created_by_account_id,
+          opened_at, opened_by_account_id
         ) values (
           ${randomUUID()}::uuid, ${input.companyId}::uuid, ${fiscalYearId}::uuid,
           ${index + 1}, ${`${startYear}-P${pad(index + 1)}`}, ${`Period ${index + 1}`},
-          ${`${period.y}-${pad(period.m)}-01`}::date,
-          ${`${period.y}-${pad(period.m)}-${pad(lastDay(period.y, period.m))}`}::date,
-          'future', false, ${platformCreator}
+          ${periodStart}::date, ${periodEnd}::date,
+          ${status}, false, ${platformCreator},
+          ${status === "open" ? sql`now()` : null},
+          ${status === "open" ? platformCreator : null}
         )
       `.execute(transaction);
     }

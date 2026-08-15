@@ -173,6 +173,7 @@ export function AutomaticPostingPage({
                   <th>{t("accounting.setup.lastSuccessfulPosting")}</th>
                   <th>{t("accounting.setup.nextAction", { defaultValue: "Next action" })}</th>
                   <th>{t("accounting.setup.action")}</th>
+                  <th>{t("accounting.setup.notes", { defaultValue: "Notes" })}</th>
                 </tr>
               </thead>
               <tbody>
@@ -186,7 +187,15 @@ export function AutomaticPostingPage({
                   const missing = Array.isArray(area.missingMappings)
                     ? area.missingMappings.map(String)
                     : [];
-                  const nextAction = !ready
+                  // The backend already explains areas like Driver Expenses,
+                  // whose postings ride along with a different area's Event
+                  // and so are never independently enabled — this was
+                  // computed all along, just never shown, which left a
+                  // permanently-"Disabled" row with no visible reason.
+                  const warnings = Array.isArray(area.warnings) ? area.warnings.map(String) : [];
+                  const nextAction = warnings.length > 0
+                    ? "—"
+                    : !ready
                     ? t("accounting.automaticPosting.nextResolveBlockers", {
                         defaultValue: "Resolve the blockers",
                       })
@@ -227,6 +236,7 @@ export function AutomaticPostingPage({
                         <button
                           className="button button-secondary"
                           disabled={
+                            warnings.length > 0 ||
                             !rights.configure ||
                             busy !== undefined ||
                             !accountingEnabled ||
@@ -267,6 +277,7 @@ export function AutomaticPostingPage({
                               )}
                         </button>
                       </td>
+                      <td>{warnings.length === 0 ? "—" : warnings.join(" ")}</td>
                     </tr>
                   );
                 })}
