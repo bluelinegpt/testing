@@ -13,6 +13,7 @@ import type { DatabaseSchema } from "../infrastructure/database/database.types.j
 import { ApplicationException } from "../presentation/errors/application.exception.js";
 import { isReservedCompanySubdomain } from "../tenancy/reserved-subdomains.js";
 import { PlatformAuditService, redactSensitive } from "./platform-audit.service.js";
+import { STANDARD_COMPANY_ROLES } from "./standard-company-roles.js";
 
 /**
  * Company lifecycle and onboarding for the Platform Portal.
@@ -518,6 +519,28 @@ export class PlatformCompanyService {
           values (${companyId}::uuid, 'AED', ${input.defaultLanguage}, ${input.timezone})
         `.execute(transaction);
 
+        // Standard starter roles (Driver Operations, Accountant) — see
+        // standard-company-roles.ts for why these two and not more.
+        // `is_system = false`: unlike the Company Administrator role created
+        // later with the first user, these are ordinary, fully editable
+        // roles from the moment the Company exists.
+        for (const role of STANDARD_COMPANY_ROLES) {
+          const roleId = (
+            await sql<{ id: string }>`
+              insert into roles (company_id, code, name, description, is_active, is_system)
+              values (${companyId}::uuid, ${role.code}, ${role.name}, ${role.description}, true, false)
+              returning id
+            `.execute(transaction)
+          ).rows[0]?.id;
+          if (roleId === undefined) throw new Error(`Standard role '${role.code}' was not created`);
+          for (const permission of role.permissions) {
+            await sql`
+              insert into role_permissions (role_id, permission_code)
+              values (${roleId}::uuid, ${permission})
+            `.execute(transaction);
+          }
+        }
+
         let summary: Record<string, unknown> | null = null;
         let areasSeeded = 0;
         // The version actually resolved and applied, not the caller's request
@@ -589,6 +612,7 @@ export class PlatformCompanyService {
               ? `${input.accountingTemplateCode}@${appliedTemplateVersion}`
               : null,
             areasSeeded,
+            standardRolesSeeded: STANDARD_COMPANY_ROLES.map((role) => role.code),
           },
           correlationId: actor.correlationId,
           ip: actor.ip,
