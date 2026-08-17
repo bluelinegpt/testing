@@ -396,13 +396,15 @@ export class AutomaticPostingService {
                    then automatic_posting_areas
                    else array_append(automatic_posting_areas,${area}) end
                  else array_remove(automatic_posting_areas,${area}) end,
-               automatic_posting_enabled=case when ${enabled} then true
-                 else cardinality(array_remove(automatic_posting_areas,${area}))>0 end,
-               automatic_posting_enabled_by_account_id=case when ${enabled}
-                 then ${actorId}::uuid else automatic_posting_enabled_by_account_id end,
-               automatic_posting_enabled_at=case when ${enabled}
-                 then coalesce(automatic_posting_enabled_at,now())
-                 else automatic_posting_enabled_at end,
+               /* Area selection and the global switch are deliberately separate.
+                  Changing one area must never silently activate global posting.
+                  Removing the final area is the only case that forces global off. */
+               automatic_posting_enabled=case
+                 when not ${enabled}
+                   and cardinality(array_remove(automatic_posting_areas,${area}))=0
+                 then false
+                 else automatic_posting_enabled
+               end,
                automatic_posting_disabled_by_account_id=case
                  when not ${enabled}
                    and cardinality(array_remove(automatic_posting_areas,${area}))=0
