@@ -41,6 +41,7 @@
 /** Stable codes. The frontend localizes these; they are never shown raw. */
 export type OrderWorkflowState =
   | "awaiting_driver_assignment"
+  | "awaiting_collect_order_completion"
   | "awaiting_delivery"
   | "awaiting_delivery_start"
   | "awaiting_return_processing"
@@ -151,9 +152,7 @@ const settlementComplete = new Set(["money_received_by_trader", "not_eligible"])
 /** Settlement values that mean money has gone out but is not confirmed. */
 const settlementSent = new Set(["money_sent_to_trader"]);
 
-export function deriveOrderWorkflowGuidance(
-  input: OrderWorkflowInput,
-): OrderWorkflowGuidance {
+export function deriveOrderWorkflowGuidance(input: OrderWorkflowInput): OrderWorkflowGuidance {
   const {
     accountingRequired,
     accountingEventId = null,
@@ -182,6 +181,8 @@ export function deriveOrderWorkflowGuidance(
   const traderSettlementStatus = explicitFreeNoValue
     ? "not_eligible"
     : storedTraderSettlementStatus;
+  const signedTraderPayable = Number(traderNetPayable ?? Number.NaN);
+  const noTraderPaymentDue = Number.isFinite(signedTraderPayable) && signedTraderPayable <= 0;
 
   const orderRoute = `/orders/${encodeURIComponent(orderNumber)}`;
   /* Status and Assign actions target the Orders LIST, because the row dialogs
@@ -259,6 +260,36 @@ export function deriveOrderWorkflowGuidance(
       };
     }
     return complete("complete");
+  }
+
+  if (deliveryStatus === "collect_order") {
+    // Early Collect Orders were created in this status before a Driver was
+    // chosen. Keep those existing records actionable instead of presenting
+    // them as complete and forcing a data repair.
+    if (assignedDriverId === null) {
+      return {
+        completionBlockerCode: null,
+        isFinanciallyComplete: false,
+        nextActionCode: "assign_driver",
+        nextActionParams: { ...orderParams, openDialog: "assign_driver" },
+        nextActionRoute: orderListRoute,
+        waitingFor: "awaiting_driver_assignment",
+        workflowState: "awaiting_driver_assignment",
+      };
+    }
+    return {
+      completionBlockerCode: null,
+      isFinanciallyComplete: false,
+      nextActionCode: "close_order",
+      nextActionParams: {
+        ...orderParams,
+        openDialog: "change_status",
+        suggestedStatus: "closed",
+      },
+      nextActionRoute: orderListRoute,
+      waitingFor: "awaiting_collect_order_completion",
+      workflowState: "awaiting_collect_order_completion",
+    };
   }
 
   // ------------------------------------------------------------- in delivery
@@ -375,7 +406,10 @@ export function deriveOrderWorkflowGuidance(
     };
   }
 
-  if (traderSettlementStatus === "unsettled" || traderSettlementStatus === "partially_settled") {
+  if (
+    !noTraderPaymentDue &&
+    (traderSettlementStatus === "unsettled" || traderSettlementStatus === "partially_settled")
+  ) {
     return {
       completionBlockerCode: null,
       isFinanciallyComplete: false,
@@ -450,7 +484,7 @@ export function deriveOrderWorkflowGuidance(
       : complete(deliveryStatus === "closed" ? "complete" : "no_accounting_required");
   }
 
-  if (settlementComplete.has(traderSettlementStatus)) {
+  if (settlementComplete.has(traderSettlementStatus) || noTraderPaymentDue) {
     /* The ledger decides, not the Order's money fields.
 
        Previously this branch reported "Accounting pending" whenever the Order
@@ -588,31 +622,29 @@ export function deriveOrderWorkflowGuidance(
  * check when the action is actually performed -- a client that ignored this map
  * entirely would gain nothing.
  */
-export const orderNextActionPermissions: Readonly<
-  Record<OrderNextActionCode, readonly string[]>
-> = {
-  // Navigation-only actions are NOT gated here: the destination screen already
-  // enforces its own permissions, and hiding a read-only link would leave the
-  // user with an explanation and no way to look at the record.
-  assign_driver: ["orders.assign_driver"],
-  collect_from_driver: ["reconciliations.create"],
-  confirm_trader_received: ["settlements.create"],
-  close_order: ["orders.update_delivery_status"],
-  none: [],
-  open_accounting: [],
-  open_order: [],
-  confirm_return_to_trader: ["orders.update_delivery_status"],
-  mark_delivered: ["orders.update_delivery_status"],
-  open_journal: [],
-  process_return: ["orders.update_delivery_status"],
-  review_settlement: [],
-  start_delivery: ["orders.update_delivery_status"],
-  open_settlement: [],
-  review_account_mapping: [],
-  review_duplicate_posting: [],
-  review_fiscal_period: [],
-  pay_trader: ["settlements.create"],
-  review_return: [],
-  view_collection: [],
-};
-
+export const orderNextActionPermissions: Readonly<Record<OrderNextActionCode, readonly string[]>> =
+  {
+    // Navigation-only actions are NOT gated here: the destination screen already
+    // enforces its own permissions, and hiding a read-only link would leave the
+    // user with an explanation and no way to look at the record.
+    assign_driver: ["orders.assign_driver"],
+    collect_from_driver: ["reconciliations.create"],
+    confirm_trader_received: ["settlements.create"],
+    close_order: ["orders.update_delivery_status"],
+    none: [],
+    open_accounting: [],
+    open_order: [],
+    confirm_return_to_trader: ["orders.update_delivery_status"],
+    mark_delivered: ["orders.update_delivery_status"],
+    open_journal: [],
+    process_return: ["orders.update_delivery_status"],
+    review_settlement: [],
+    start_delivery: ["orders.update_delivery_status"],
+    open_settlement: [],
+    review_account_mapping: [],
+    review_duplicate_posting: [],
+    review_fiscal_period: [],
+    pay_trader: ["settlements.create"],
+    review_return: [],
+    view_collection: [],
+  };

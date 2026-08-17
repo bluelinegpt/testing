@@ -53,7 +53,7 @@ describe("approved template registry", () => {
   /**
    * v2 carries the UAE's delivery Areas, embedded from the canonical
    * reference list rather than from any Company's live data — see
-   * `TemplateArea`. All seven Emirates must be represented, and the count
+   * `TemplateArea`. All Emirates-equivalent records must be represented, and the count
    * matches the reference list the CLI reports when the template was built.
    */
   it("loads v2 with a complete Areas section", () => {
@@ -61,7 +61,13 @@ describe("approved template registry", () => {
     const areas = loaded.template.areas ?? [];
     expect(areas.length).toBeGreaterThan(400);
     const emirateCodes = new Set(areas.map((area) => area.emirateCode));
-    expect(emirateCodes).toEqual(new Set(["AUH", "DXB", "SHJ", "AJM", "UAQ", "RAK", "FUJ"]));
+    expect(emirateCodes).toEqual(new Set([
+      "AUH", "DXB", "SHJ", "AJM", "UAQ", "RAK", "FUJ", "WST", "OAA", "EST",
+    ]));
+    for (const code of ["WST", "OAA", "EST"]) {
+      expect(areas.filter((area) => area.emirateCode === code && area.nameEn === "All Areas"))
+        .toHaveLength(1);
+    }
     for (const area of areas) {
       expect(area.nameEn.trim()).not.toBe("");
       expect(area.nameAr.trim()).not.toBe("");

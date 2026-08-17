@@ -17,6 +17,7 @@ import type {
   BulkAssignDriverDto,
   BulkChangeOrderStatusDto,
   OrderSelectionDto,
+  ReactivateHoldOrdersDto,
 } from "./operations.dto.js";
 
 interface SelectedOrder {
@@ -27,6 +28,7 @@ interface SelectedOrder {
   readonly id: string;
   readonly isFreeOrder: boolean;
   readonly orderNumber: string;
+  readonly orderType: "collect_order" | "delivery";
   readonly returnStatus: string;
   readonly settlementStatus: string;
   readonly amountCollected: string;
@@ -59,6 +61,110 @@ export class OrdersWorkflowService {
     private readonly outsourcedDriverFees: OutsourcedDriverFeeService,
     @Inject(PushOutboxWriter) private readonly pushOutbox: PushOutboxWriter,
   ) {}
+
+  public async reactivateHoldOrders(input: ReactivateHoldOrdersDto, correlationId: string) {
+    this.assertAnyPermission("orders.update_delivery_status");
+    if (input.orders.length === 0)
+      throw new ApplicationException(
+        "hold_reactivation_empty",
+        "Select at least one Hold Order",
+        HttpStatus.BAD_REQUEST,
+      );
+    const { companyId } = this.tenants.current();
+    const actor = this.identities.current();
+    const normalized = input.orders.map((row) => ({
+      ...row,
+      normalized: row.newSerialNumber
+        .normalize("NFKC")
+        .trim()
+        .replace(/\s+/gu, " ")
+        .toLocaleLowerCase("en-US"),
+    }));
+    const batchKeys = new Set(normalized.map((row) => `${row.newSerialDate}:${row.normalized}`));
+    if (batchKeys.size !== normalized.length)
+      throw new ApplicationException(
+        "hold_reactivation_duplicate_serial",
+        "Serial Numbers must be unique inside the batch",
+        HttpStatus.CONFLICT,
+      );
+    return this.transactions.execute(async (transaction) => {
+      const ids = normalized.map((row) => row.orderId);
+      const current = await sql<{
+        assignedDriverId: string | null;
+        id: string;
+        orderDate: string;
+        orderNumber: string;
+        serialNumber: string | null;
+        status: string;
+      }>`
+        select id,order_number "orderNumber",serial_number "serialNumber",order_date::text "orderDate",
+          delivery_status status,assigned_driver_id "assignedDriverId" from orders
+        where company_id=${companyId}::uuid and id in (${sql.join(ids.map((id) => sql`${id}::uuid`))}) order by id for update`.execute(
+        transaction,
+      );
+      if (current.rows.length !== ids.length || current.rows.some((row) => row.status !== "hold"))
+        throw new ApplicationException(
+          "hold_reactivation_requires_hold",
+          "Every selected Order must still be on Hold",
+          HttpStatus.CONFLICT,
+        );
+      const conflicts = await sql<{
+        id: string;
+      }>`select o.id from orders o where o.company_id=${companyId}::uuid
+        and o.id not in (${sql.join(ids.map((id) => sql`${id}::uuid`))}) and exists(select 1 from jsonb_to_recordset(${JSON.stringify(normalized)}::jsonb)
+          as x("newSerialDate" date,normalized text) where x."newSerialDate"=o.order_date and x.normalized=o.serial_number_normalized) limit 1`.execute(
+        transaction,
+      );
+      if (conflicts.rows[0])
+        throw new ApplicationException(
+          "hold_reactivation_serial_exists",
+          "A Serial Number already exists for its selected date",
+          HttpStatus.CONFLICT,
+        );
+      const actorRole = await this.history.actorRole(transaction, companyId, actor.identityId);
+      await sql`select set_config('blueline.hold_reactivation','on',true)`.execute(transaction);
+      for (const next of normalized) {
+        const old = current.rows.find((row) => row.id === next.orderId)!;
+        if (next.newStatus !== "in_branch" && old.assignedDriverId === null)
+          throw new ApplicationException(
+            "hold_reactivation_driver_required",
+            `Order ${old.orderNumber} requires a Driver for the selected status`,
+            HttpStatus.CONFLICT,
+          );
+        await sql`insert into order_serial_history(company_id,order_id,old_serial_number,old_serial_date,new_serial_number,new_serial_date,old_status,new_status,reason,changed_by_account_id)
+          values(${companyId}::uuid,${old.id}::uuid,${old.serialNumber},${old.orderDate}::date,${next.newSerialNumber},${next.newSerialDate}::date,'hold',${next.newStatus},'Hold Reactivation',${actor.identityId}::uuid)`.execute(
+          transaction,
+        );
+        await sql`update orders set serial_number=${next.newSerialNumber},serial_number_normalized=${next.normalized},order_date=${next.newSerialDate}::date,
+          delivery_status=${next.newStatus},delivery_reason=null,updated_at=now(),version=version+1 where id=${old.id}::uuid and company_id=${companyId}::uuid`.execute(
+          transaction,
+        );
+        await this.history.statusHistory(transaction, {
+          actorId: actor.identityId,
+          companyId,
+          from: "hold",
+          orderId: old.id,
+          reason: "Hold Reactivation",
+          to: next.newStatus,
+        });
+        await this.history.orderEvent(transaction, {
+          actorId: actor.identityId,
+          actorRole,
+          category: "status_change",
+          companyId,
+          correlationId,
+          eventType: "order.hold_reactivated",
+          fieldName: "serial_number",
+          newValue: `${next.newSerialNumber} / ${next.newSerialDate}`,
+          orderId: old.id,
+          previousValue: `${old.serialNumber ?? "—"} / ${old.orderDate}`,
+          reason: "Hold Reactivation",
+          source: "web_portal",
+        });
+      }
+      return { processedCount: normalized.length };
+    });
+  }
 
   public async assignmentPreview(input: BulkAssignDriverDto): Promise<BulkActionPreview> {
     this.assertAnyPermission("orders.assign_driver");
@@ -105,7 +211,9 @@ export class OrdersWorkflowService {
         const nextStatus =
           isReassignment || order.deliveryStatus === "hold"
             ? order.deliveryStatus
-            : "assigned_to_driver";
+            : order.orderType === "collect_order" || order.deliveryStatus === "collect_order"
+              ? "collect_order"
+              : "assigned_to_driver";
         await sql`
           update orders
              set assigned_driver_id = ${driver.id}::uuid,
@@ -280,9 +388,9 @@ export class OrdersWorkflowService {
       return "Driver is already assigned to this Order";
     }
     if (order.assignedDriverId === null) {
-      return ["new", "in_branch", "hold"].includes(order.deliveryStatus)
+      return ["new", "in_branch", "hold", "collect_order"].includes(order.deliveryStatus)
         ? null
-        : "Only New, In-Branch, or Hold Orders are eligible for assignment";
+        : "Only New, In-Branch, Hold, or Collect Orders are eligible for assignment";
     }
     return ["assigned_to_driver", "hold"].includes(order.deliveryStatus)
       ? null
@@ -335,8 +443,8 @@ export class OrdersWorkflowService {
       return null;
     }
     if (target === "closed") {
-      if (!["delivered", "returned_to_trader"].includes(order.deliveryStatus)) {
-        return "Only Delivered or Returned to Trader Orders can be closed";
+      if (!["delivered", "returned_to_trader", "collect_order"].includes(order.deliveryStatus)) {
+        return "Only Delivered, Returned to Trader, or Collect Orders can be closed";
       }
       if (!["reconciled", "not_applicable"].includes(order.driverReconciliationStatus)) {
         return "Driver Cash is not complete";
@@ -411,9 +519,9 @@ export class OrdersWorkflowService {
           ? "not_eligible"
           : deliveredFreeNoValue
             ? "not_eligible"
-          : status === "closed" || status === "in_branch"
-            ? order.settlementStatus
-            : "unsettled";
+            : status === "closed" || status === "in_branch"
+              ? order.settlementStatus
+              : "unsettled";
     await sql`
       update orders
          set delivery_status = ${status}, delivery_reason = ${input.reason},
@@ -475,6 +583,7 @@ export class OrdersWorkflowService {
       if (ids.length === 0) return [];
       const result = await sql<SelectedOrder>`
         select id, order_number as "orderNumber", assigned_driver_id as "assignedDriverId",
+               order_type as "orderType",
                delivery_status as "deliveryStatus", return_status as "returnStatus",
                driver_reconciliation_status as "driverReconciliationStatus",
                trader_settlement_status as "settlementStatus",
@@ -495,6 +604,7 @@ export class OrdersWorkflowService {
     const quickView = input.quickView ?? "active";
     const result = await sql<SelectedOrder>`
       select o.id, o.order_number as "orderNumber", o.assigned_driver_id as "assignedDriverId",
+             o.order_type as "orderType",
              o.delivery_status as "deliveryStatus", o.return_status as "returnStatus",
              o.driver_reconciliation_status as "driverReconciliationStatus",
              o.trader_settlement_status as "settlementStatus",
@@ -507,7 +617,7 @@ export class OrdersWorkflowService {
       join traders t on t.id = o.trader_id and t.company_id = o.company_id
       where o.company_id = ${companyId}::uuid
         and (${quickView} = 'all'
-          or (${quickView} = 'active' and o.delivery_status not in ('hold', 'closed', 'cancelled'))
+          or (${quickView} = 'active' and o.delivery_status in ('new','in_branch','assigned_to_driver','out_for_delivery','hold','delivered','returned_to_branch','returned_to_trader','collect_order'))
           or (${quickView} = 'closed' and o.delivery_status = 'closed')
           or (${quickView} = 'hold' and o.delivery_status = 'hold')
           or (${quickView} = 'cancelled' and o.delivery_status = 'cancelled'))
@@ -516,6 +626,7 @@ export class OrdersWorkflowService {
           or o.customer_mobile_number ilike '%' || ${search} || '%'
           or t.name_en ilike '%' || ${search} || '%')
         and (${input.deliveryStatus ?? null}::text is null or o.delivery_status = ${input.deliveryStatus ?? null})
+        and (${input.orderType ?? null}::text is null or o.order_type=${input.orderType ?? null})
         and (${input.cashStatus ?? null}::text is null or o.driver_reconciliation_status = ${input.cashStatus ?? null})
         and (${input.settlementStatus ?? null}::text is null or o.trader_settlement_status = ${input.settlementStatus ?? null})
         and (${input.traderId ?? null}::uuid is null or o.trader_id = ${input.traderId ?? null}::uuid)

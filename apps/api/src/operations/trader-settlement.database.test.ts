@@ -25,7 +25,7 @@ import type { IdentityContext, IdentityContextAccessor } from "../security/ident
 import type { TenantContext, TenantContextAccessor } from "../tenancy/tenant-context.js";
 
 import type { DriverCollectionPdfService } from "./driver-collection-pdf.service.js";
-import { PaymentFundingAccountService } from "../accounting/payment-funding-account.service.js";
+import type { PaymentFundingAccountService } from "../accounting/payment-funding-account.service.js";
 import { OperationsHistoryWriter } from "./operations-history.writer.js";
 import type { CreateTraderSettlementDto } from "./operations.dto.js";
 import { TraderSettlementService } from "./trader-settlement.service.js";
@@ -228,6 +228,8 @@ describe.skipIf(!runDatabaseTests)("trader settlement", () => {
             readonly deliveryStatus?: string;
             readonly driverReconciliationStatus?: string;
             readonly netPayable: number;
+            readonly grossPayable?: number;
+            readonly paidServiceFee?: number;
             readonly settlementStatus?: string;
             readonly traderId?: string;
             readonly traderPaidAmount?: number;
@@ -259,7 +261,7 @@ describe.skipIf(!runDatabaseTests)("trader settlement", () => {
               ${traderId}::uuid, ${areaId}::uuid, ${company.accountId}::uuid,
               'Settlement Customer', '971509999998', 'Settlement address', 1,
               'customer_pays_cod_and_fee', 0, 'legacy_unattributed', 'legacy_unattributed',
-              ${net}, 0, ${net}, ${paid},
+              ${options.grossPayable ?? net}, ${options.paidServiceFee ?? 0}, ${net}, ${paid},
               ${options.deliveryStatus ?? "delivered"},
               ${options.driverReconciliationStatus ?? "reconciled"},
               ${options.settlementStatus ?? "unsettled"}, 'not_applicable',
@@ -951,6 +953,53 @@ describe.skipIf(!runDatabaseTests)("trader settlement", () => {
         expect(companyBList.items.some((row) => row.settlementId === bankResult.settlementId)).toBe(
           false,
         );
+        useCompany(companyA);
+
+        // Signed Trader positions offset before any cash payment is proposed.
+        const companyC = await createCompany("SIGNED-POSITIVE");
+        useCompany(companyC);
+        const traderReceivable = await createOrder(companyC, {
+          grossPayable: 0, netPayable: -20, paidServiceFee: 20,
+        });
+        const traderPayable = await createOrder(companyC, {
+          grossPayable: 100, netPayable: 80, paidServiceFee: 20,
+        });
+        const signedProposal = await service.proposeAllocation({
+          amount: 80,
+          traderId: companyC.traderId,
+        });
+        expect(signedProposal.totalAllocated).toBe("60.00");
+        expect(signedProposal.unallocatedAmount).toBe("20.00");
+        expect(signedProposal.allocations).toEqual([
+          expect.objectContaining({ allocatedAmount: "60.00", orderId: traderPayable.id }),
+        ]);
+        await expectRejection(
+          () => service.createPayment(
+            basePayment(companyC.traderId, [{ amount: 80, orderId: traderPayable.id }]),
+            randomUUID(),
+            `key-signed-overpay-${randomUUID()}`,
+          ),
+          "settlement_exceeds_trader_net_position",
+        );
+        await service.createPayment(
+          basePayment(companyC.traderId, [{ amount: 60, orderId: traderPayable.id }]),
+          randomUUID(),
+          `key-signed-net-${randomUUID()}`,
+        );
+        expect((await statusOf(traderReceivable.id)).outstanding).toBe("-20.00");
+        expect((await statusOf(traderPayable.id)).outstanding).toBe("20.00");
+
+        const companyD = await createCompany("SIGNED-NEGATIVE");
+        useCompany(companyD);
+        await createOrder(companyD, { grossPayable: 0, netPayable: -20, paidServiceFee: 20 });
+        await createOrder(companyD, { grossPayable: 10, netPayable: -10, paidServiceFee: 20 });
+        const negativeProposal = await service.proposeAllocation({
+          amount: 1,
+          traderId: companyD.traderId,
+        });
+        expect(negativeProposal.totalAllocated).toBe("0.00");
+        expect(negativeProposal.unallocatedAmount).toBe("1.00");
+        expect(negativeProposal.allocations).toEqual([]);
         useCompany(companyA);
 
         // --- Permissions -----------------------------------------------------------

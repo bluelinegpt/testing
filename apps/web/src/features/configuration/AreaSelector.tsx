@@ -29,6 +29,7 @@ export function AreaSelector({
   emirateLabel,
   includeDisabled = false,
   onChange,
+  required = true,
   searchDebounceMs,
   value,
 }: {
@@ -44,6 +45,7 @@ export function AreaSelector({
    */
   includeDisabled?: boolean | undefined;
   onChange: (area: CompanyArea | undefined) => void;
+  required?: boolean | undefined;
   /** Test seam: 0 removes the real-time typeahead wait. */
   searchDebounceMs?: number | undefined;
   value: CompanyArea | undefined;
@@ -92,7 +94,7 @@ export function AreaSelector({
 
   return (
     <div className="area-selector">
-      <label className="field required-field">
+      <label className={required ? "field required-field" : "field"}>
         <span>{emirateLabel ?? t("areas.emirate")}</span>
         <select
           disabled={disabled === true || loading}
@@ -132,6 +134,7 @@ export function AreaSelector({
             onChange={onChange}
             path={searchPath}
             placeholder={t("areas.searchPlaceholder")}
+            required={required}
             value={value}
           />
         )}

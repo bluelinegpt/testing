@@ -186,10 +186,15 @@ describe("legacy compatibility edges", () => {
     parentColumns: ["company_id", "id"],
   });
 
-  it("declares only the reviewed Storefront -> Trader edge", () => {
+  it("declares only the reviewed Storefront compatibility edges", () => {
     expect(
       LEGACY_COMPATIBILITY_EDGES.map((entry) => `${entry.child}.${entry.columns.join("+")}`),
-    ).toEqual(["trader_storefronts.company_id+trader_id"]);
+    ).toEqual([
+      "trader_storefronts.company_id+trader_id",
+      "store_orders.delivery_order_id",
+      "store_orders.delivery_company_relationship_id",
+      "store_orders.delivery_company_relationship_id+trader_commerce_id+delivery_company_id",
+    ]);
     // Every entry must say why, so the next reader is not left guessing.
     for (const entry of LEGACY_COMPATIBILITY_EDGES) {
       expect(entry.reason.length, `${entry.child} needs a recorded reason`).toBeGreaterThan(40);

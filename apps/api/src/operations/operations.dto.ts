@@ -141,12 +141,16 @@ export class OrderSelectionDto {
   public readonly search?: string;
 
   @IsOptional()
-  @IsIn(["active", "all", "hold", "closed", "cancelled"])
-  public readonly quickView?: "active" | "all" | "cancelled" | "closed" | "hold";
+  @IsIn(["active", "all", "hold", "closed", "cancelled", "accountant"])
+  public readonly quickView?: "active" | "all" | "cancelled" | "closed" | "hold" | "accountant";
 
   @IsOptional()
   @IsString()
   public readonly deliveryStatus?: string;
+
+  @IsOptional()
+  @IsIn(["delivery", "collect_order"])
+  public readonly orderType?: "collect_order" | "delivery";
 
   @IsOptional()
   @IsString()
@@ -205,6 +209,26 @@ export class BulkChangeOrderStatusDto extends OrderSelectionDto {
   @IsOptional()
   @IsBoolean()
   public readonly allowPartial?: boolean;
+}
+
+export class ReactivateHoldOrderRowDto {
+  @IsUUID() public readonly orderId!: string;
+  @IsString()
+  @MinLength(1)
+  @MaxLength(160)
+  @Matches(orderIdentifierPattern, orderIdentifierMessage)
+  @TrimText()
+  public readonly newSerialNumber!: string;
+  @Matches(/^\d{4}-\d{2}-\d{2}$/) public readonly newSerialDate!: string;
+  @IsIn(["in_branch", "assigned_to_driver", "out_for_delivery"])
+  public readonly newStatus!: "assigned_to_driver" | "in_branch" | "out_for_delivery";
+}
+export class ReactivateHoldOrdersDto {
+  @IsArray()
+  @ArrayMaxSize(100)
+  @ValidateNested({ each: true })
+  @Type(() => ReactivateHoldOrderRowDto)
+  public readonly orders!: readonly ReactivateHoldOrderRowDto[];
 }
 
 // Settles several delivered orders of ONE trader in a single "money out" settlement.
@@ -410,6 +434,10 @@ export class InlineOrderCustomerDto {
 }
 
 export class CreateOrderDto {
+  @IsOptional()
+  @IsIn(["delivery", "collect_order"])
+  public readonly orderType?: "collect_order" | "delivery";
+
   /*
    * A deliberate free delivery. Never inferred from zero amounts -- a
    * zero-valued Order can equally be a pricing gap, and the two must stay
@@ -466,24 +494,32 @@ export class CreateOrderDto {
   @IsUUID()
   public readonly traderId!: string;
 
+  @ValidateIf((dto: CreateOrderDto) => dto.orderType !== "collect_order" || dto.areaId !== undefined)
   @IsUUID()
-  public readonly areaId!: string;
+  public readonly areaId?: string;
 
   @IsOptional()
   @IsUUID()
   public readonly driverId?: string;
 
+  @ValidateIf(
+    (dto: CreateOrderDto) => dto.orderType !== "collect_order" || dto.customerName !== undefined,
+  )
   @IsString()
   @MinLength(1)
   @MaxLength(160)
-  public readonly customerName!: string;
+  public readonly customerName?: string;
 
+  @ValidateIf(
+    (dto: CreateOrderDto) =>
+      dto.orderType !== "collect_order" || dto.customerMobileNumber !== undefined,
+  )
   @IsString()
   @TrimText()
   @MinLength(1, mobileRequiredMessage)
   @MaxLength(mobileMaxLength)
   @Matches(noControlChars, mobileCharsMessage)
-  public readonly customerMobileNumber!: string;
+  public readonly customerMobileNumber?: string;
 
   @IsOptional()
   @IsString()

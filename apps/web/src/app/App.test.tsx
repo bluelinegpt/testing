@@ -45,6 +45,7 @@ describe("App", () => {
     expect(screen.getByRole("navigation")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Orders" }));
+    expect(router.state.location.pathname).toBe("/orders");
     const ordersLink = screen.getByRole("link", { name: "All orders" });
     expect(ordersLink).toBeInTheDocument();
     fireEvent.click(ordersLink);

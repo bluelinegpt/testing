@@ -466,6 +466,7 @@ export interface OperationsOrder {
   readonly id: string;
   readonly orderDate: string;
   readonly orderNumber: string;
+  readonly orderType?: "collect_order" | "delivery";
   readonly orderProfit: string;
   readonly outsourcedDriverFeeAmount: string | null;
   readonly outsourcedDriverFeeOutstanding: string | null;

@@ -115,7 +115,7 @@ export class DriverEarningsService {
         total_earnings,calculated_by_account_id)
         values(${companyId}::uuid,${calculation.employeeId}::uuid,${input.driverId}::uuid,
           ${input.dateFrom}::date,${input.dateTo}::date,'locked',${calculation.deliveredOrders},
-          ${input.collectedOrderCount},${calculation.deliveryEarnings},${calculation.collectionRate},
+          ${calculation.collectedOrders},${calculation.deliveryEarnings},${calculation.collectionRate},
           ${calculation.collectionEarnings},${calculation.totalEarnings},${actorId}::uuid)
         returning id`.execute(transaction);
       const periodId = inserted.rows[0]!.id;
@@ -126,6 +126,10 @@ export class DriverEarningsService {
           transaction,
         );
       }
+      await sql`update employee_collect_order_earnings set earning_period_id=${periodId}::uuid
+        where company_id=${companyId}::uuid and id in (${sql.join(calculation.collectionSources.length>0
+          ? calculation.collectionSources.map(source=>sql`${source.id}::uuid`):[sql`null::uuid`])})
+          and earning_period_id is null`.execute(transaction);
       const result = { ...calculation, periodId, status: "locked" };
       await this.history.audit(transaction, {
         action: "employee_driver.earning_period.locked",
@@ -155,7 +159,8 @@ export class DriverEarningsService {
       case when coalesce(a.interim_paid,0)+coalesce(pa.payroll_paid,0)=0 then 'unpaid'
         when coalesce(a.interim_paid,0)+coalesce(pa.payroll_paid,0)<p.total_earnings then 'partially_paid' else 'paid' end as status,
       p.calculated_at as "calculatedAt",p.locked_at as "lockedAt"
-      ,coalesce(ds.sources,'[]'::jsonb) as "deliverySources"
+      ,coalesce(ds.sources,'[]'::jsonb) as "deliverySources",
+      coalesce(csx.sources,'[]'::jsonb) as "collectionSources"
       from employee_driver_earning_periods p
       left join lateral(select sum(x.allocated_amount) as interim_paid
         from employee_driver_earning_period_payment_allocations x
@@ -181,6 +186,16 @@ export class DriverEarningsService {
         left join traders t on t.id=o.trader_id and t.company_id=o.company_id
         left join company_settings cs on cs.company_id=e.company_id
         where s.company_id=p.company_id and s.period_id=p.id) ds on true
+      left join lateral(select jsonb_agg(jsonb_build_object('id',x.id,'orderId',o.id,
+        'serialNumber',o.serial_number,'serialDate',o.order_date::text,'orderNumber',o.order_number,
+        'referenceNumber',o.reference_number,'customer',o.customer_name,
+        'area',coalesce(a.name_en,''),
+        'closeDate',(x.closed_at at time zone coalesce(cset.timezone,'Asia/Dubai'))::date::text,
+        'rate',x.rate_snapshot::text,'earned',x.earned_amount::text) order by x.closed_at,x.id) sources
+        from employee_collect_order_earnings x join orders o on o.id=x.order_id and o.company_id=x.company_id
+        left join areas a on a.id=o.area_id and a.company_id=o.company_id
+        left join company_settings cset on cset.company_id=x.company_id
+        where x.company_id=p.company_id and x.earning_period_id=p.id) csx on true
       where p.company_id=${companyId}::uuid and p.driver_id=${driverId}::uuid and p.status<>'reversed'
       order by p.date_from desc,p.id`.execute(this.database);
     const items = result.rows;
@@ -407,7 +422,19 @@ export class DriverEarningsService {
         and not exists(select 1 from employee_driver_earning_period_delivery_sources s where s.company_id=e.company_id and s.employee_order_earning_id=e.id)
       order by e.delivered_at,e.id ${lock ? sql`for update of e` : sql``}`.execute(database);
     const deliveryAmount = delivery.rows.reduce((sum, row) => sum.plus(row.amount), new Decimal(0));
-    const collectionAmount = collectionRate.times(input.collectedOrderCount);
+    const collectionSources=await sql<{id:string;orderId:string;serialNumber:string|null;serialDate:string;orderNumber:string;referenceNumber:string|null;customer:string;area:string;closeDate:string;rate:string;amount:string}>`select x.id,o.id as "orderId",
+      o.serial_number as "serialNumber",o.order_date::text as "serialDate",o.order_number as "orderNumber",
+      o.reference_number as "referenceNumber",o.customer_name as customer,
+      coalesce(a.name_en,'') as area,
+      (x.closed_at at time zone coalesce(cs.timezone,'Asia/Dubai'))::date::text as "closeDate",
+      x.rate_snapshot::text as rate,x.earned_amount::text amount
+      from employee_collect_order_earnings x join orders o on o.id=x.order_id and o.company_id=x.company_id
+      left join areas a on a.id=o.area_id and a.company_id=o.company_id
+      left join company_settings cs on cs.company_id=x.company_id
+      where x.company_id=${companyId}::uuid and x.employee_id=${employeeId}::uuid and x.earning_period_id is null
+        and (x.closed_at at time zone coalesce(cs.timezone,'Asia/Dubai'))::date between ${input.dateFrom}::date and ${input.dateTo}::date
+      order by x.closed_at,x.id ${lock?sql`for update of x`:sql``}`.execute(database);
+    const collectionAmount=collectionSources.rows.reduce((sum,row)=>sum.plus(row.amount),new Decimal(0));
     if (deliveryAmount.plus(collectionAmount).lte(0))
       throw new ApplicationException(
         "employee_driver_earning_period_empty",
@@ -422,7 +449,7 @@ export class DriverEarningsService {
       from employee_driver_earning_periods where company_id=${companyId}::uuid and employee_id=${employeeId}::uuid and status<>'reversed'
       order by date_to desc limit 1`.execute(database);
     return {
-      collectedOrders: input.collectedOrderCount,
+      collectedOrders: collectionSources.rows.length,
       collectionEarnings: collectionAmount.toFixed(2),
       collectionRate: collectionRate.toFixed(2),
       dateFrom: input.dateFrom,
@@ -430,6 +457,7 @@ export class DriverEarningsService {
       deliveredOrders: delivery.rows.length,
       deliveryEarnings: deliveryAmount.toFixed(2),
       deliverySources: delivery.rows,
+      collectionSources: collectionSources.rows,
       employeeId,
       lastPeriod: last.rows[0] ?? null,
       nextAvailableStart: last.rows[0]?.nextStart ?? null,

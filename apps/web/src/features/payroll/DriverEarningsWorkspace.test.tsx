@@ -25,6 +25,19 @@ const sources = ["ORD-000028", "ORD-000029", "ORD-000034"].map((orderNumber, ind
   serialNumber: String(index + 1),
   trader: "Noon",
 }));
+const collectionSources = Array.from({ length: 5 }, (_, index) => ({
+  amount: "1.00",
+  area: "Dubai",
+  closeDate: "2026-08-08",
+  customer: `Collection Customer ${index + 1}`,
+  id: `collection-earning-${index}`,
+  orderId: `collection-order-${index}`,
+  orderNumber: `COL-${String(index + 1).padStart(6, "0")}`,
+  rate: "1.00",
+  referenceNumber: null,
+  serialDate: "2026-08-08",
+  serialNumber: String(index + 101),
+}));
 const locked = {
   id: "period-1",
   dateFrom: "2026-08-01",
@@ -143,8 +156,10 @@ describe("DriverEarningsWorkspace period confirmation", () => {
     const post = vi.fn(async (path: string) => {
       if (path.endsWith("/preview"))
         return {
+          collectedOrders: 5,
           collectionEarnings: "5.00",
           collectionRate: "1.00",
+          collectionSources,
           deliveredOrders: 3,
           deliveryEarnings: "6.00",
           deliverySources: sources,
@@ -157,14 +172,11 @@ describe("DriverEarningsWorkspace period confirmation", () => {
     fireEvent.change(await screen.findByRole("combobox", { name: "Driver" }), {
       target: { value: "ahmad" },
     });
-    fireEvent.change(screen.getByLabelText("Number of Collected Orders"), {
-      target: { value: "5" },
-    });
+    expect(screen.queryByLabelText("Number of Collected Orders")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Calculate Now" }));
     fireEvent.click(await screen.findByRole("button", { name: "Confirm & Lock Earnings" }));
     expect(await screen.findByText("Earning Period Confirmed")).toBeInTheDocument();
     expect(post).toHaveBeenLastCalledWith("operations/payroll/driver-earnings/periods", {
-      collectedOrderCount: 5,
       dateFrom: expect.any(String),
       dateTo: expect.any(String),
       driverId: "ahmad",
@@ -188,8 +200,10 @@ describe("DriverEarningsWorkspace period confirmation", () => {
           : { items: [driver] },
     );
     const post = vi.fn(async () => ({
+      collectedOrders: 5,
       collectionEarnings: "5.00",
       collectionRate: "1.00",
+      collectionSources,
       deliveredOrders: 3,
       deliveryEarnings: "6.00",
       deliverySources: sources,
@@ -199,14 +213,19 @@ describe("DriverEarningsWorkspace period confirmation", () => {
     fireEvent.change(await screen.findByRole("combobox", { name: "Driver" }), {
       target: { value: "ahmad" },
     });
-    fireEvent.change(screen.getByLabelText("Number of Collected Orders"), {
-      target: { value: "5" },
-    });
+    expect(screen.queryByLabelText("Number of Collected Orders")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Calculate Now" }));
     expect(await screen.findByText("Delivery Transactions to Include")).toBeInTheDocument();
     for (const order of ["ORD-000028", "ORD-000029", "ORD-000034"])
       expect(screen.getByRole("link", { name: order })).toHaveAttribute("href", `/orders/${order}`);
     expect(screen.getByText("Collection Earning Detail")).toBeInTheDocument();
+    expect(screen.getByText((_, element) =>
+      element?.tagName === "P" && element.textContent?.replace(/\s+/g, " ") === "Number of Collected Orders: 5",
+    )).toBeInTheDocument();
+    expect(screen.getByText((_, element) =>
+      element?.tagName === "P" && /Collection Rate:.*AED\s*1\.00/.test(element.textContent ?? ""),
+    )).toBeInTheDocument();
+    expect(screen.getByText("COL-000001")).toBeInTheDocument();
     expect(screen.getAllByText(/AED\s*6\.00/).length).toBeGreaterThanOrEqual(2);
     expect(screen.queryByText(/driverEarnings\./)).not.toBeInTheDocument();
   });
@@ -220,8 +239,10 @@ describe("DriverEarningsWorkspace period confirmation", () => {
           : { items: [driver] },
     );
     const post = vi.fn(async () => ({
+      collectedOrders: 5,
       collectionEarnings: "5.00",
       collectionRate: "1.00",
+      collectionSources,
       deliveredOrders: 3,
       deliveryEarnings: "6.00",
       deliverySources: sources.slice(0, 2),

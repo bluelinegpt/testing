@@ -13,7 +13,6 @@ import type { ReportLanguage } from "./driver-collection-report-html.js";
 export interface ManifestOrder {
   readonly areaName: string;
   readonly codAmount: string;
-  readonly customerAddress: string;
   readonly customerMobileNumber: string;
   readonly customerName: string;
   readonly customerSecondMobileNumber: string | null;
@@ -22,9 +21,10 @@ export interface ManifestOrder {
   readonly deliveryStatusLabel: string;
   readonly emirateName: string | null;
   readonly notes: string | null;
-  readonly packageCount: number;
+  readonly orderNumber: string;
   readonly referenceNumber: string | null;
   readonly serialNumber: string;
+  readonly serviceFee: string;
   readonly traderName: string;
 }
 
@@ -56,12 +56,10 @@ export interface ManifestData {
     readonly countReturned: number;
     readonly totalCod: string;
     readonly totalOrders: number;
-    readonly totalPackages: number;
   };
 }
 
 interface Labels {
-  readonly address: string;
   readonly area: string;
   readonly cancelled: string;
   readonly cod: string;
@@ -87,22 +85,21 @@ interface Labels {
   readonly numberOfOrders: string;
   readonly operationsHandover: string;
   readonly orderSerial: string;
+  readonly orderNumber: string;
   readonly outForDelivery: string;
-  readonly packages: string;
   readonly receivedBy: string;
   readonly returned: string;
   readonly reportDate: string;
   readonly secondMobile: string;
+  readonly serviceFee: string;
   readonly title: string;
   readonly totalCod: string;
   readonly totalOrders: string;
-  readonly totalPackages: string;
   readonly trader: string;
 }
 
 const LABELS: Record<ReportLanguage, Labels> = {
   ar: {
-    address: "عنوان العميل",
     area: "المنطقة",
     cancelled: "ملغى",
     cod: "الدفع عند الاستلام",
@@ -128,20 +125,19 @@ const LABELS: Record<ReportLanguage, Labels> = {
     numberOfOrders: "عدد الطلبات",
     operationsHandover: "تسليم العمليات",
     orderSerial: "الرقم التسلسلي للطلب",
+    orderNumber: "رقم الطلب",
     outForDelivery: "خرج للتوصيل",
-    packages: "الطرود",
     receivedBy: "استلمه / أرجعه",
     returned: "مرتجع",
     reportDate: "تاريخ التقرير",
     secondMobile: "جوال إضافي",
+    serviceFee: "رسوم الخدمة",
     title: "كشف شحنات السائق",
     totalCod: "إجمالي الدفع عند الاستلام",
     totalOrders: "إجمالي الطلبات",
-    totalPackages: "إجمالي الطرود",
     trader: "التاجر",
   },
   en: {
-    address: "Customer Address",
     area: "Area",
     cancelled: "Cancelled",
     cod: "COD Amount",
@@ -167,16 +163,16 @@ const LABELS: Record<ReportLanguage, Labels> = {
     numberOfOrders: "Number of Orders",
     operationsHandover: "Operations Handover",
     orderSerial: "Order Serial Number",
+    orderNumber: "Order Number",
     outForDelivery: "Out for Delivery",
-    packages: "Packages",
     receivedBy: "Returned/Received By",
     returned: "Returned",
     reportDate: "Report Date",
     secondMobile: "Second Mobile",
+    serviceFee: "Service Fee",
     title: "Driver Shipment Manifest",
     totalCod: "Total COD",
     totalOrders: "Total Orders",
-    totalPackages: "Total Packages",
     trader: "Trader",
   },
 };
@@ -217,6 +213,7 @@ export function buildDriverShipmentManifestHtml(
         "<tr>" +
         `<td class="num">${index + 1}</td>` +
         `<td class="mono">${escapeHtml(order.serialNumber)}</td>` +
+        `<td class="mono">${escapeHtml(order.orderNumber ?? "")}</td>` +
         `<td class="mono">${order.referenceNumber === null ? "" : escapeHtml(order.referenceNumber)}</td>` +
         `<td>${escapeHtml(order.traderName)}</td>` +
         `<td>${escapeHtml(order.customerName)}</td>` +
@@ -224,9 +221,8 @@ export function buildDriverShipmentManifestHtml(
         `<td class="mono">${order.customerSecondMobileNumber === null ? "" : escapeHtml(order.customerSecondMobileNumber)}</td>` +
         `<td>${order.emirateName === null ? "" : escapeHtml(order.emirateName)}</td>` +
         `<td>${escapeHtml(order.areaName)}</td>` +
-        `<td>${escapeHtml(order.customerAddress)}</td>` +
-        `<td class="num">${escapeHtml(String(order.packageCount))}</td>` +
         `<td class="num">${money(order.codAmount)}</td>` +
+        `<td class="num">${money(order.serviceFee ?? "0")}</td>` +
         /* Notes, not Delivery Status. A manifest is signed at handover, when
            every Order on it is going out, so the status column read the same on
            every line. A free-text note is what the Driver actually needs in
@@ -240,6 +236,7 @@ export function buildDriverShipmentManifestHtml(
     [
       labels.lineNumber,
       labels.orderSerial,
+      labels.orderNumber,
       labels.externalReference,
       labels.trader,
       labels.customer,
@@ -247,9 +244,8 @@ export function buildDriverShipmentManifestHtml(
       labels.secondMobile,
       labels.emirate,
       labels.area,
-      labels.address,
-      labels.packages,
       labels.cod,
+      labels.serviceFee,
       labels.notes,
     ]
       .map((label) => `<th>${escapeHtml(label)}</th>`)
@@ -317,7 +313,7 @@ export function buildDriverShipmentManifestHtml(
     `</div>`;
 
   const style = `
-    @page { size: A4 portrait; margin: 10mm 7mm 14mm; }
+    @page { size: A4 landscape; margin: 10mm 7mm 14mm; }
     * { box-sizing: border-box; }
     body { font-family: "Segoe UI", Tahoma, Arial, sans-serif; color: #111; margin: 0; font-size: 9px; }
     .report-header { border-bottom: 2px solid #333; margin-bottom: 10px; padding-bottom: 8px; }
@@ -331,32 +327,27 @@ export function buildDriverShipmentManifestHtml(
     .meta-label { color: #555; }
     .meta-value { font-weight: 600; }
     .section-title { font-size: 13px; margin: 14px 0 6px; }
-    table.grid { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 6.8px; margin-bottom: 8px; }
-    table.grid th, table.grid td { border: 1px solid #999; padding: 1.5px 2px; text-align: start; overflow-wrap: anywhere; line-height: 1.15; }
+    table.grid { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 15px; margin-bottom: 8px; }
+    table.grid th, table.grid td { border: 1px solid #999; padding: 4px; text-align: start; overflow-wrap: anywhere; line-height: 1.25; }
     table.grid thead { display: table-header-group; }
     table.grid thead th { background: #f0f0f0; }
     table.grid td.num, table.grid th.num { text-align: end; white-space: nowrap; }
     .mono { font-variant-numeric: tabular-nums; }
-    /* Every one of the 13 columns is sized, in per cent of the printed width.
-       Only columns 1-11 used to be, which left the last two splitting the whole
-       remainder between them -- that is why COD Amount was so wide while
-       Customer Mobile wrapped a 10-digit number onto two lines. COD Amount is
-       sized for its longest real value, "AED 9999.00"; amounts do not exceed
-       four digits. Notes is free text, so it takes the widest share after the
-       Customer Address. The percentages must total 100. */
-    table.grid th:nth-child(1), table.grid td:nth-child(1) { width: 2%; }
-    table.grid th:nth-child(2), table.grid td:nth-child(2) { width: 4%; }
+     /* Every approved manifest column is explicitly sized. The percentages
+        total 100 so PDF pagination cannot assign an unpredictable remainder. */
+    table.grid th:nth-child(1), table.grid td:nth-child(1) { width: 3%; }
+    table.grid th:nth-child(2), table.grid td:nth-child(2) { width: 7%; }
     table.grid th:nth-child(3), table.grid td:nth-child(3) { width: 7%; }
-    table.grid th:nth-child(4), table.grid td:nth-child(4) { width: 9%; }
-    table.grid th:nth-child(5), table.grid td:nth-child(5) { width: 9%; }
-    table.grid th:nth-child(6), table.grid td:nth-child(6) { width: 8%; }
-    table.grid th:nth-child(7), table.grid td:nth-child(7) { width: 8%; }
-    table.grid th:nth-child(8), table.grid td:nth-child(8) { width: 7%; }
+    table.grid th:nth-child(4), table.grid td:nth-child(4) { width: 8%; }
+    table.grid th:nth-child(5), table.grid td:nth-child(5) { width: 8%; }
+    table.grid th:nth-child(6), table.grid td:nth-child(6) { width: 10%; }
+    table.grid th:nth-child(7), table.grid td:nth-child(7) { width: 9%; }
+    table.grid th:nth-child(8), table.grid td:nth-child(8) { width: 8%; }
     table.grid th:nth-child(9), table.grid td:nth-child(9) { width: 7%; }
-    table.grid th:nth-child(10), table.grid td:nth-child(10) { width: 15%; }
-    table.grid th:nth-child(11), table.grid td:nth-child(11) { width: 5%; }
-    table.grid th:nth-child(12), table.grid td:nth-child(12) { width: 7%; }
-    table.grid th:nth-child(13), table.grid td:nth-child(13) { width: 12%; }
+    table.grid th:nth-child(10), table.grid td:nth-child(10) { width: 7%; }
+    table.grid th:nth-child(11), table.grid td:nth-child(11) { width: 8%; }
+    table.grid th:nth-child(12), table.grid td:nth-child(12) { width: 8%; }
+    table.grid th:nth-child(13), table.grid td:nth-child(13) { width: 10%; }
     .summary-section { margin-top: 12px; max-width: 460px; }
     /* Side by side rather than stacked. Each keeps its own underline so the
        label still reads as attached to its own figure. */

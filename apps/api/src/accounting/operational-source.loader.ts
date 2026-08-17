@@ -341,6 +341,7 @@ export class OperationalSourceLoader {
       row.financialModelVersion === null
         ? row.companyRevenue
         : money(new Decimal(row.serviceFeeNet ?? 0).plus(row.additionalFees ?? 0).toString());
+    const traderPosition=new Decimal(row.traderNetPayable);
     return {
       accountingDate: row.deliveredDate,
       components: present([
@@ -352,14 +353,10 @@ export class OperationalSourceLoader {
           dimensions,
           `Order ${row.orderNumber} receivable`,
         ),
-        component(
-          "trader_payable",
-          row.traderNetPayable,
-          "credit",
-          "trader_payable",
-          dimensions,
-          `Order ${row.orderNumber} Trader payable`,
-        ),
+        traderPosition.greaterThan(0)?component("trader_payable",traderPosition.toString(),"credit","trader_payable",dimensions,
+          `Order ${row.orderNumber} Trader payable`):undefined,
+        traderPosition.lessThan(0)?component("cod_receivable",traderPosition.abs().toString(),"debit","order_cod_receivable",dimensions,
+          `Order ${row.orderNumber} Trader receivable`):undefined,
         component(
           "service_fee_revenue",
           revenue,

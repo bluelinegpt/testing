@@ -264,6 +264,28 @@ describe("CreateOrderDialog", () => {
     if (context.task.result?.state === "fail") dumpTrace(context.task.name);
   });
 
+  it("creates a Collect Order without mandatory Customer details", async () => {
+    const { api, resolve } = setup();
+    await selectTraderOnly();
+    fireEvent.change(screen.getByLabelText(/Order type/i), {
+      target: { value: "collect_order" },
+    });
+    expect(screen.getByLabelText(/Customer name/i)).not.toBeRequired();
+    expect(screen.getByLabelText(/^Mobile number$/i)).not.toBeRequired();
+    expect(screen.queryByLabelText(/Assigned driver/i)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Create order" }));
+
+    const creates = api.post.mock.calls.filter(([path]) => path === "operations/orders");
+    expect(creates).toHaveLength(1);
+    expect(creates[0]?.[1]).toMatchObject({ orderType: "collect_order" });
+    expect(creates[0]?.[1]).not.toHaveProperty("customerName");
+    expect(creates[0]?.[1]).not.toHaveProperty("customerMobileNumber");
+    expect(creates[0]?.[1]).not.toHaveProperty("inlineCustomer");
+    expect(creates[0]?.[1]).not.toHaveProperty("areaId");
+    expect(creates[0]?.[1]).not.toHaveProperty("driverId");
+    resolve({ orderNumber: "ORD-000500", serialNumber: "000123" });
+  });
+
   it("selecting an existing Customer populates its saved details in the Order form", async () => {
     setup();
     // There is no separate read-only name field: the Customer field itself is
@@ -306,11 +328,11 @@ describe("CreateOrderDialog", () => {
     expect(creates[0]?.[1]).toMatchObject({
       additionalFees: 0,
       customerMobileNumber: "0506468441",
-      driverId: undefined,
       referenceNumber: "REF-A1",
       serialNumber: "000123",
       serviceFee: undefined,
     });
+    expect(creates[0]?.[1]).not.toHaveProperty("driverId");
     expect(creates[0]?.[2]).toHaveProperty("X-Idempotency-Key");
     resolve({ orderNumber: "ORD-000123", serialNumber: "000123" });
     expect(await screen.findByText(/000123/)).toBeInTheDocument();
@@ -373,7 +395,12 @@ describe("CreateOrderDialog", () => {
       }
       if (path === "configuration/emirates") {
         return Promise.resolve([
-          { code: "DXB", id: area.emirateId, nameAr: area.emirateNameAr, nameEn: area.emirateNameEn },
+          {
+            code: "DXB",
+            id: area.emirateId,
+            nameAr: area.emirateNameAr,
+            nameEn: area.emirateNameEn,
+          },
         ]);
       }
       if (path === "operations/orders/next-serial-number") {
@@ -447,9 +474,7 @@ describe("CreateOrderDialog", () => {
     fireEvent.change(reason, {
       target: { value: "Free delivery test" },
     });
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Create order" })).toBeEnabled(),
-    );
+    await waitFor(() => expect(screen.getByRole("button", { name: "Create order" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "Create order" }));
 
     // ...and does not stop this one, because it was never a pricing question.
@@ -473,9 +498,7 @@ describe("CreateOrderDialog", () => {
     fireEvent.click(screen.getByLabelText("Free Order"));
     const reason = await screen.findByLabelText("Free Order Reason");
     fireEvent.change(reason, { target: { value: "   " } });
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Create order" })).toBeEnabled(),
-    );
+    await waitFor(() => expect(screen.getByRole("button", { name: "Create order" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "Create order" }));
 
     const reasonErrors = await screen.findAllByText("Enter a reason for the Free Order.");

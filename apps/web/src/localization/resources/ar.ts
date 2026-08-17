@@ -995,7 +995,8 @@
     totalCashRequired: "إجمالي النقد المطلوب",
     paymentsRemainSeparate:
       "تُسجل أرباح السائق وسلفة الراتب كمعاملتين منفصلتين. هذا الإجمالي مخصص لتخطيط النقد فقط.",
-    confirmPeriodMessage: "تأكيد أرباح السائق للفترة {{dateFrom}} – {{dateTo}}؟ بعد التأكيد لا يمكن تغيير التواريخ أو مصادر التوصيل أو عدد طلبات التحصيل.",
+    confirmPeriodMessage:
+      "تأكيد أرباح السائق للفترة {{dateFrom}} – {{dateTo}}؟ بعد التأكيد لا يمكن تغيير التواريخ أو مصادر التوصيل أو عدد طلبات التحصيل.",
     periodLocked: "تم تأكيد فترة الأرباح وقفلها.",
     earningPeriodConfirmed: "تم تأكيد فترة الأرباح",
     periodOutstanding: "المتبقي للفترة",
@@ -1501,6 +1502,7 @@
     state: {
       awaiting_driver_assignment:
         "\u064a\u062d\u062a\u0627\u062c \u0633\u0627\u0626\u0642\u064b\u0627",
+      awaiting_collect_order_completion: "بانتظار السائق",
       awaiting_delivery: "\u062e\u0627\u0631\u062c \u0644\u0644\u062a\u0648\u0635\u064a\u0644",
       awaiting_delivery_start: "جاهز للإرسال",
       awaiting_return_processing:
@@ -1519,6 +1521,7 @@
     },
     waitingFor: {
       awaiting_driver_assignment: "\u062a\u0639\u064a\u064a\u0646 \u0633\u0627\u0626\u0642.",
+      awaiting_collect_order_completion: "إكمال السائق لمهمة التحصيل.",
       awaiting_delivery:
         "\u0646\u062a\u064a\u062c\u0629 \u0627\u0644\u062a\u0648\u0635\u064a\u0644.",
       awaiting_delivery_start: "بدء التوصيل.",
@@ -1541,6 +1544,8 @@
     why: {
       awaiting_driver_assignment:
         "\u0644\u0645 \u064a\u062a\u0645 \u062a\u0639\u064a\u064a\u0646 \u0633\u0627\u0626\u0642 \u0628\u0639\u062f.",
+      awaiting_collect_order_completion:
+        "تم تعيين طلب التحصيل وسيبقى مفتوحًا حتى يغلق السائق المهمة.",
       awaiting_delivery:
         "\u0627\u0644\u0637\u0631\u062f \u0645\u0639 \u0627\u0644\u0633\u0627\u0626\u0642 \u0648\u0644\u0645 \u062a\u064f\u0633\u062c\u0651\u0644 \u0646\u062a\u064a\u062c\u0629 \u0627\u0644\u062a\u0648\u0635\u064a\u0644.",
       awaiting_delivery_start: "تم تعيين سائق ولم يخرج الطرد بعد.",
@@ -1877,6 +1882,10 @@
     contactAdminForArea: "لا توجد منطقة مطابقة؟ اطلب من المسؤول إنشاءها.",
     customerPaysCodAndFee: "العميل يدفع قيمة التحصيل والرسوم",
     customerPaysCod: "العميل يدفع مبلغ التحصيل",
+    financialHandling: "المعالجة المالية",
+    accountantCollect: "تحصيل من السائق",
+    accountantPay: "الدفع للتاجر",
+    duplicateSerialInBatch: "الرقم التسلسلي {{serial}} مستخدم بالفعل في دفعة إعادة التفعيل هذه.",
     serialNumber: "الرقم التسلسلي",
     referenceNumber: "الرقم المرجعي",
 
@@ -1893,6 +1902,24 @@
     totalDeductions: "إجمالي الخصومات",
     systemOrderNumber: "رقم الطلب الداخلي",
     internalDelivery: "توصيل داخلي",
+    collectOrder: "احضار طلب",
+    collectOrderFinancialHint:
+      "طلب استلام تشغيلي فقط — الدفع عند الاستلام ورسوم الخدمة وتحصيل السائق وتسوية التاجر كلها 0.00 درهم.",
+    copyNumbers: "نسخ الأرقام",
+    copyNumbersSuccess: "تم نسخ {{count}} من أرقام الجوال والمناطق.",
+    copyNumbersPartial: "تم نسخ {{copied}}. يوجد {{invalid}} طلب برقم جوال غير صالح.",
+    exportExcel: "تصدير إلى Excel",
+    reactivateHoldOrders: "إعادة تفعيل الطلبات المعلقة",
+    oldSerialNumber: "الرقم التسلسلي القديم",
+    newSerialNumber: "الرقم التسلسلي الجديد",
+    oldSerialDate: "تاريخ الرقم القديم",
+    newSerialDate: "تاريخ الرقم الجديد",
+    newStatus: "الحالة الجديدة",
+    serialNumbersToChange: "الأرقام التسلسلية التي ستتغير: {{count}}",
+    confirmAndUpdate: "تأكيد وتحديث",
+    duplicateSerialBatch: "يجب أن تكون الأرقام التسلسلية فريدة داخل الدفعة.",
+    holdReactivationFailed: "تعذر إعادة تفعيل الطلبات المعلقة بأمان.",
+    nextSerialFailed: "تعذر اقتراح الرقم التسلسلي التالي.",
     loadMore: "تحميل المزيد",
     mobileFormatError:
       "رقم الهاتف غير صالح. استخدم 10 أرقام تبدأ بـ 05، مثل 0506468442، أو 9715XXXXXXXX.",
@@ -2122,7 +2149,8 @@
     processEligibleOnly:
       "تغيير الطلبات التي يمكنها هذا الانتقال وتخطي الباقي (إذا لم يُحدد، يُلغى التغيير بالكامل عند وجود أي طلب غير مؤهل)",
     quickView: {
-      delivery: "نشاط التسليم",
+      accountant: "المحاسب",
+      delivery: "نشاط العمليات",
       active: "الطلبات النشطة",
       all: "كل الطلبات",
       cancelled: "الملغاة",
@@ -2141,6 +2169,7 @@
       cancelled: "الطلبات الملغاة",
       closed: "الطلبات المغلقة",
       delivery: "الطلبات المسلمة",
+      accountant: "طلبات المحاسبة",
       hold: "الطلبات المعلقة",
     },
     returnDriverFee: "رسوم سائق الإرجاع",
@@ -2229,6 +2258,7 @@
     active: "نشط",
     assigned: "معين",
     assigned_to_driver: "معين للسائق",
+    collect_order: "احضار طلب",
     cancelled: "ملغى",
     closed: "مغلق",
     completed: "مكتمل",
@@ -3611,7 +3641,8 @@
     salaryOutstanding: "الراتب غير المدفوع",
     driverEarningsOutstanding: "أرباح السائق غير المدفوعة",
     advanceOutstanding: "رصيد السلفة المتبقي",
-    advanceSeparationNote: "تبقى سلفة الراتب منفصلة عن الراتب وأرباح السائق. تُدرج ضمن النقد المدفوع ولا تُدرج ضمن الدخل المكتسب.",
+    advanceSeparationNote:
+      "تبقى سلفة الراتب منفصلة عن الراتب وأرباح السائق. تُدرج ضمن النقد المدفوع ولا تُدرج ضمن الدخل المكتسب.",
     monthlyPaymentReport: "تقرير مدفوعات السائق الشهري",
     printSavePdf: "طباعة / حفظ PDF",
     account: "حساب النقد",
@@ -3626,7 +3657,8 @@
     collectionRate: "معدل التحصيل",
     totalEarnings: "إجمالي الأرباح",
     confirmEarnings: "تأكيد الأرباح",
-    confirmPeriodMessage: "تأكيد الأرباح للفترة {{dateFrom}} – {{dateTo}}؟\n\nبعد التأكيد لا يمكن تغيير فترة الأرباح أو مصادر طلبات التوصيل أو عدد الطلبات المُحصلة.",
+    confirmPeriodMessage:
+      "تأكيد الأرباح للفترة {{dateFrom}} – {{dateTo}}؟\n\nبعد التأكيد لا يمكن تغيير فترة الأرباح أو مصادر طلبات التوصيل أو عدد الطلبات المُحصلة.",
     periodLocked: "تم قفل فترة الأرباح.",
     periodHistory: "سجل الفترات",
     period: "الفترة",
@@ -3678,11 +3710,14 @@
     mappingWarning:
       "حساب مقاصة الرواتب المؤقتة للموظفين غير مُعد. يمكن عرض الأرباح، لكن الدفع غير متاح.",
     deliveryTransactions: "معاملات التوصيل",
-    lockedDeliveryIntegrityError: "تفاصيل مصادر التوصيل المقفلة لا تتطابق مع هذه الفترة. يلزم إجراء مراجعة.",
+    lockedDeliveryIntegrityError:
+      "تفاصيل مصادر التوصيل المقفلة لا تتطابق مع هذه الفترة. يلزم إجراء مراجعة.",
     periodDetails: "تفاصيل الفترة",
     viewDetails: "عرض التفاصيل",
     deliveryTransactionsToInclude: "معاملات التوصيل المراد تضمينها",
     collectionEarningDetail: "تفاصيل أرباح التحصيل",
+    closeDate: "تاريخ الإغلاق",
+    area: "المنطقة",
     serialNumber: "الرقم التسلسلي",
     serialDate: "تاريخ التسلسل",
     orderNumber: "رقم الطلب",
@@ -3696,8 +3731,10 @@
     viewOrder: "عرض الطلب",
     detailTotal: "إجمالي التفاصيل",
     noEligibleDeliveryTransactions: "لا توجد معاملات توصيل مؤهلة لهذه الفترة.",
-    deliveryIntegrityError: "تفاصيل معاملات التوصيل لا تطابق أرباح التوصيل المحتسبة. تم منع التأكيد.",
-    sourceAllocationPeriodLevel: "تُخصص الدفعات على مستوى فترة الأرباح؛ ولا تُنسب مبالغ الدفع إلى مصدر فردي.",
+    deliveryIntegrityError:
+      "تفاصيل معاملات التوصيل لا تطابق أرباح التوصيل المحتسبة. تم منع التأكيد.",
+    sourceAllocationPeriodLevel:
+      "تُخصص الدفعات على مستوى فترة الأرباح؛ ولا تُنسب مبالغ الدفع إلى مصدر فردي.",
     earningPeriodConfirmed: "تم تأكيد فترة الأرباح",
     periodOutstanding: "المتبقي للفترة",
     paymentExceedsOutstanding: "لا يمكن أن يتجاوز مبلغ الدفع الرصيد المتبقي للفترة.",

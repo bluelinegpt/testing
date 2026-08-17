@@ -392,7 +392,12 @@ export class TraderSettlementService {
       input.traderId,
       false,
     );
-    let remaining = new Decimal(input.amount);
+    const capacity = await this.traderNetSettlementCapacity(
+      this.database,
+      companyId,
+      input.traderId,
+    );
+    let remaining = Decimal.min(new Decimal(input.amount), capacity);
     const allocations: TraderAllocationProposalLine[] = [];
     for (const order of orders) {
       if (remaining.lessThanOrEqualTo(0)) break;
@@ -418,7 +423,7 @@ export class TraderSettlementService {
       requestedAmount: this.money(new Decimal(input.amount)).toFixed(2),
       totalAllocated: totalAllocated.toFixed(2),
       traderId: input.traderId,
-      unallocatedAmount: this.money(remaining).toFixed(2),
+      unallocatedAmount: this.money(new Decimal(input.amount).minus(totalAllocated)).toFixed(2),
     };
   }
 
@@ -582,6 +587,19 @@ export class TraderSettlementService {
           "One or more allocations exceed the Order's current outstanding balance",
           HttpStatus.CONFLICT,
           overAllocated.map((order) => order.orderNumber),
+        );
+      }
+      const settlementCapacity = await this.traderNetSettlementCapacity(
+        transaction,
+        companyId,
+        input.traderId,
+      );
+      if (new Decimal(input.amount).greaterThan(settlementCapacity)) {
+        throw new ApplicationException(
+          "settlement_exceeds_trader_net_position",
+          "The payment cannot exceed the Trader's signed net payable balance",
+          HttpStatus.CONFLICT,
+          [`Available amount: ${this.money(settlementCapacity).toFixed(2)}`],
         );
       }
 
@@ -2078,6 +2096,23 @@ export class TraderSettlementService {
        for update of o
     `.execute(database);
     return result.rows;
+  }
+
+  private async traderNetSettlementCapacity(
+    database: Kysely<DatabaseSchema>,
+    companyId: string,
+    traderId: string,
+  ): Promise<Decimal> {
+    const result = await sql<{ amount: string }>`
+      select coalesce(sum(o.trader_outstanding_balance), 0)::text as amount
+        from orders o
+       where o.company_id = ${companyId}::uuid
+         and o.trader_id = ${traderId}::uuid
+         and o.delivery_status = 'delivered'
+         and o.driver_reconciliation_status in ('reconciled', 'not_applicable')
+         and o.trader_settlement_status in ('unsettled', 'partially_settled')
+    `.execute(database);
+    return Decimal.max(new Decimal(result.rows[0]?.amount ?? 0), 0);
   }
 
   private assertOrdersSettleable(orders: readonly EligibleTraderOrder[], traderId: string): void {

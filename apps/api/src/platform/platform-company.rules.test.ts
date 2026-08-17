@@ -87,6 +87,7 @@ describe("Platform Company route protection", () => {
         "suspend",
         "reactivate",
         "close",
+        "moveToProduction",
       ].includes(route.method);
       const hasManage = permissions.includes("platform.companies.manage");
       if (mutating !== hasManage) wrong.push(`${route.controller}.${route.method} (${method})`);

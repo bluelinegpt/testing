@@ -1,5 +1,6 @@
 import { HttpStatus, Inject, Injectable } from "@nestjs/common";
 import { Decimal } from "decimal.js";
+import { accountingXlsx } from "../accounting/accounting-xlsx.js";
 import { type Kysely, sql } from "kysely";
 
 import { CompanyProfileService } from "../company-profile/company-profile.service.js";
@@ -34,7 +35,6 @@ interface ManifestOrderRow {
   readonly areaName: string;
   readonly assignedDriverId: string | null;
   readonly codAmount: string;
-  readonly customerAddress: string;
   readonly customerMobileNumber: string;
   readonly customerName: string;
   readonly customerSecondMobileNumber: string | null;
@@ -43,7 +43,7 @@ interface ManifestOrderRow {
   readonly emirateName: string | null;
   readonly notes: string | null;
   readonly orderNumber: string;
-  readonly packageCount: number;
+  readonly serviceFee: string;
   readonly referenceNumber: string | null;
   readonly serialNumber: string | null;
   readonly traderName: string;
@@ -126,8 +126,8 @@ export class DriverShipmentManifestService {
              o.customer_mobile_number as "customerMobileNumber",
              o.customer_second_mobile_number as "customerSecondMobileNumber",
              e.name_en as "emirateName", a.name_en as "areaName",
-             o.customer_address as "customerAddress", o.customer_amount_due::text as "codAmount",
-             o.package_count as "packageCount",
+             o.cod_amount::text as "codAmount",
+             o.service_fee::text as "serviceFee",
              o.customer_delivery_notes_snapshot as "deliveryInstructions", o.notes,
              o.delivery_status as "deliveryStatus"
         from orders o
@@ -167,8 +167,8 @@ export class DriverShipmentManifestService {
              o.customer_mobile_number as "customerMobileNumber",
              o.customer_second_mobile_number as "customerSecondMobileNumber",
              e.name_en as "emirateName", a.name_en as "areaName",
-             o.customer_address as "customerAddress", o.customer_amount_due::text as "codAmount",
-             o.package_count as "packageCount",
+             o.cod_amount::text as "codAmount",
+             o.service_fee::text as "serviceFee",
              o.customer_delivery_notes_snapshot as "deliveryInstructions", o.notes,
              o.delivery_status as "deliveryStatus"
         from orders o
@@ -185,12 +185,13 @@ export class DriverShipmentManifestService {
            or t.name_en ilike '%' || ${input.search?.trim() || null} || '%')
          and (${input.quickView ?? "active"} = 'all'
            or (${input.quickView ?? "active"} = 'active'
-             and o.delivery_status not in ('hold', 'closed', 'cancelled'))
+             and o.delivery_status in ('new','in_branch','assigned_to_driver','out_for_delivery','hold','delivered','returned_to_branch','returned_to_trader','collect_order'))
            or (${input.quickView ?? "active"} = 'hold' and o.delivery_status = 'hold')
            or (${input.quickView ?? "active"} = 'closed' and o.delivery_status = 'closed')
            or (${input.quickView ?? "active"} = 'cancelled' and o.delivery_status = 'cancelled'))
          and (${input.deliveryStatus?.trim() || null}::text is null
            or o.delivery_status = ${input.deliveryStatus?.trim() || null})
+         and (${input.orderType ?? null}::text is null or o.order_type=${input.orderType ?? null})
          and (${input.cashStatus?.trim() || null}::text is null
            or o.driver_reconciliation_status = ${input.cashStatus?.trim() || null})
          and (${input.settlementStatus?.trim() || null}::text is null
@@ -258,7 +259,6 @@ export class DriverShipmentManifestService {
           .catch(() => null)
       : null;
     const totalCod = orders.reduce((sum, row) => sum.plus(row.codAmount), new Decimal(0));
-    const totalPackages = orders.reduce((sum, row) => sum + row.packageCount, 0);
     const countBy = (status: string) =>
       orders.filter((row) => row.deliveryStatus === status).length;
     // A short, non-persisted reference for display only — the Manifest is
@@ -285,7 +285,6 @@ export class DriverShipmentManifestService {
       orders: orders.map((row) => ({
         areaName: row.areaName,
         codAmount: new Decimal(row.codAmount).toFixed(2),
-        customerAddress: row.customerAddress,
         customerMobileNumber: row.customerMobileNumber,
         customerName: row.customerName,
         customerSecondMobileNumber: row.customerSecondMobileNumber,
@@ -294,9 +293,10 @@ export class DriverShipmentManifestService {
         deliveryStatusLabel: deliveryStatusLabels[row.deliveryStatus] ?? row.deliveryStatus,
         emirateName: row.emirateName,
         notes: row.notes,
-        packageCount: row.packageCount,
+        orderNumber: row.orderNumber,
         referenceNumber: row.referenceNumber,
         serialNumber: row.serialNumber ?? row.orderNumber,
+        serviceFee: new Decimal(row.serviceFee).toFixed(2),
         traderName: row.traderName,
       })),
       summary: {
@@ -308,7 +308,6 @@ export class DriverShipmentManifestService {
         countReturned: countBy("returned_to_branch") + countBy("returned_to_trader"),
         totalCod: totalCod.toFixed(2),
         totalOrders: orders.length,
-        totalPackages,
       },
     };
   }
@@ -346,5 +345,56 @@ export class DriverShipmentManifestService {
     );
     const filename = `Driver-Manifest-${safeDriverName}-${dateStamp}.pdf`;
     return { bytes, filename };
+  }
+
+  public async manifestExcel(
+    input: GenerateShipmentManifestDto,
+  ): Promise<{ bytes: Buffer; filename: string }> {
+    const { companyId } = this.tenants.current();
+    const data = await this.buildManifestData(companyId, input);
+    const generatedAt = new Intl.DateTimeFormat("en-GB", {
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      month: "2-digit",
+      timeZone: "Asia/Dubai",
+      year: "numeric",
+    }).format(new Date());
+    const columns = [
+      "serialNumber",
+      "orderNumber",
+      "referenceNumber",
+      "traderName",
+      "customerName",
+      "customerMobileNumber",
+      "customerSecondMobileNumber",
+      "emirateName",
+      "areaName",
+      "codAmount",
+      "serviceFee",
+      "notes",
+    ];
+    const rows = data.orders.map((row) => ({
+      serialNumber: row.serialNumber,
+      orderNumber: row.orderNumber,
+      referenceNumber: row.referenceNumber ?? "",
+      traderName: row.traderName,
+      customerName: row.customerName,
+      customerMobileNumber: row.customerMobileNumber,
+      customerSecondMobileNumber: row.customerSecondMobileNumber ?? "",
+      emirateName: row.emirateName ?? "",
+      areaName: row.areaName,
+      codAmount: row.codAmount,
+      serviceFee: row.serviceFee,
+      notes: row.notes ?? "",
+    }));
+    const bytes = accountingXlsx(columns, rows, [
+      ["Manifest Date and Time", `${generatedAt} (UAE)`],
+      ["Driver", data.header.driverName],
+      ["Orders", data.header.orderCount],
+    ]);
+    const safe = data.header.driverName.replaceAll(/[^A-Za-z0-9]+/g, "-");
+    const date = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Dubai" }).format(new Date());
+    return { bytes, filename: `Driver-Shipment-Manifest-${safe}-${date}.xlsx` };
   }
 }

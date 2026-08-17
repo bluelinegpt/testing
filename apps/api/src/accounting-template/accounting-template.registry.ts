@@ -65,7 +65,7 @@ export const approvedTemplates: readonly ApprovedTemplate[] = [
     templateVersion: 2,
     displayName: "UAE Delivery Standard",
     fileName: "uae-delivery-standard-v2.json",
-    sha256: "9dd3b1186aea6957bfe8e013de8afe6bea1d5710aa0876885d84acaf5d35e772",
+    sha256: "696ba5a2941dbb215904796e39b65ae0481e21a3fe9317d6ef75b94f6ef1d1c8",
   },
 ];
 

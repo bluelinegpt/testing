@@ -76,6 +76,7 @@ describe("Platform permission catalogue", () => {
       "platform.companies.delete",
       "platform.companies.manage",
       "platform.companies.read",
+      "platform.companies.reset",
       "platform.errors.manage",
       "platform.errors.read",
       "platform.integrity.read",
@@ -118,7 +119,8 @@ describe("Platform permission catalogue", () => {
       ),
       "utf8",
     );
-    const migrations = foundationMigration + deletionMigration + errorReportsMigration + integrityMigration;
+    const resetMigration = readFileSync(resolve(process.cwd(), "../../database/migrations/20260822000000_company_reset_permission.ts"), "utf8");
+    const migrations = foundationMigration + deletionMigration + errorReportsMigration + integrityMigration + resetMigration;
     for (const permission of PLATFORM_PERMISSIONS) expect(migrations).toContain(`'${permission.code}'`);
     expect(migrations).toContain(`'${PLATFORM_SUPER_ADMIN_ROLE_CODE}'`);
     // Idempotent on an environment that has already been migrated.

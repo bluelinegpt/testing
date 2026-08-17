@@ -29,13 +29,7 @@ export class ReconcileEmployeeDriverEarningsDto {
   @IsDateString() public readonly dateTo!: string;
 }
 
-export class CalculateEmployeeDriverEarningPeriodDto extends ReconcileEmployeeDriverEarningsDto {
-  @Type(() => Number)
-  @IsInt()
-  @Min(0)
-  @Max(1000000)
-  public readonly collectedOrderCount!: number;
-}
+export class CalculateEmployeeDriverEarningPeriodDto extends ReconcileEmployeeDriverEarningsDto {}
 
 export class EmployeeMoneyPaymentDto {
   @IsUUID() public readonly employeeId!: string;

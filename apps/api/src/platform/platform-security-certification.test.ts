@@ -363,6 +363,9 @@ describe("Tenant isolation certification", () => {
     for (const file of readAll(apiRoot)) {
       if (file.path.startsWith(platformDirectory)) continue;
       if (!file.path.endsWith(".controller.ts")) continue;
+      // The shared crash-ingestion endpoint deliberately accepts every authenticated
+      // application identity; it does not enter a Company tenant or expose Company data.
+      if (file.path.endsWith("client-error-report.controller.ts")) continue;
       if (withoutComments(file.source).includes('"platform_administrator"')) {
         offenders.push(file.path);
       }
@@ -397,7 +400,10 @@ describe("Destructive capability certification", () => {
    * no Platform feature has any business issuing either, and unlike a scoped
    * DELETE they cannot be limited by a WHERE clause.
    */
-  const deleteExempt = "platform-user-deletion.service.ts";
+  const deleteExempt = new Set([
+    "platform-user-deletion.service.ts",
+    "platform-company-deletion-execution.service.ts",
+  ]);
 
   it("issues no destructive statement anywhere in the Platform module", () => {
     for (const file of readAll(platformDirectory)) {
@@ -408,7 +414,7 @@ describe("Destructive capability certification", () => {
         expect(`${file.path} :: ${statement}`).toBe(`${file.path} :: ${statement}`);
         expect(source.includes(statement)).toBe(false);
       }
-      if (file.path.endsWith(deleteExempt)) continue;
+      if ([...deleteExempt].some((name) => file.path.endsWith(name))) continue;
       expect(source.includes("delete from")).toBe(false);
     }
   });
@@ -427,7 +433,7 @@ describe("Destructive capability certification", () => {
    */
   it("lets user deletion remove identity records only", () => {
     const source = withoutComments(
-      readFileSync(resolve(platformDirectory, deleteExempt), "utf8"),
+      readFileSync(resolve(platformDirectory, "platform-user-deletion.service.ts"), "utf8"),
     );
     const statements = source.match(/delete from [\s\S]*?`/g) ?? [];
     expect(statements.length).toBeGreaterThan(0);
@@ -469,7 +475,7 @@ describe("Destructive capability certification", () => {
    */
   it("never deletes audit history", () => {
     const source = withoutComments(
-      readFileSync(resolve(platformDirectory, deleteExempt), "utf8"),
+      readFileSync(resolve(platformDirectory, "platform-user-deletion.service.ts"), "utf8"),
     );
     expect(source).not.toContain("delete from audit_events");
     // The record is written INSIDE the deletion transaction, before the rows

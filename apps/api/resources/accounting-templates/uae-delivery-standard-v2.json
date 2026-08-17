@@ -886,6 +886,21 @@
   ],
   "areas": [
     {
+      "emirateCode": "WST",
+      "nameAr": "جميع المناطق",
+      "nameEn": "All Areas"
+    },
+    {
+      "emirateCode": "OAA",
+      "nameAr": "جميع المناطق",
+      "nameEn": "All Areas"
+    },
+    {
+      "emirateCode": "EST",
+      "nameAr": "جميع المناطق",
+      "nameEn": "All Areas"
+    },
+    {
       "emirateCode": "AJM",
       "nameAr": "وسط مدينة عجمان",
       "nameEn": "Ajman City Centre"

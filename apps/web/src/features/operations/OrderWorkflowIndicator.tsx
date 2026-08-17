@@ -46,6 +46,7 @@ const stateTone: Readonly<Record<string, "blue" | "amber" | "green" | "red" | "g
   awaiting_accounting_posting: "amber",
   awaiting_delivery: "blue",
   awaiting_driver_assignment: "blue",
+  awaiting_collect_order_completion: "blue",
   awaiting_driver_collection: "amber",
   awaiting_return_processing: "amber",
   awaiting_trader_payment: "amber",

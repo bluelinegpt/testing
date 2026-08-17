@@ -87,6 +87,7 @@ export function CreateOrderDialog({
      a zero COD and a zero fee: those two numbers also describe a pricing gap,
      and the operator's intent is what the backend stores and audits. */
   const [isFreeOrder, setIsFreeOrder] = useState(false);
+  const [orderType, setOrderType] = useState<"collect_order" | "delivery">("delivery");
   const [freeOrderReason, setFreeOrderReason] = useState("");
   // Inline "add pricing": create a reusable trader service price for this
   // Emirate/Area instead of pricing the single order manually.
@@ -164,10 +165,15 @@ export function CreateOrderDialog({
   // A Customer is captured by typing a Name directly (new) or selecting a saved
   // one; either way the Name must be present. No separate "select a Customer"
   // gate and no UAE mobile-format gate — those are handled inline/advisory.
-  if (customerName.trim() === "")
+  if (orderType !== "collect_order" && customerName.trim() === "")
     validationErrors.customerName = t("operations.errors.customerNameRequired");
-  if (mobile.trim() === "") validationErrors.mobile = t("operations.errors.mobileRequired");
-  if (area === undefined) validationErrors.area = t("operations.errors.areaRequired");
+  if (orderType !== "collect_order" && mobile.trim() === "")
+    validationErrors.mobile = t("operations.errors.mobileRequired");
+  if (
+    area === undefined &&
+    (orderType !== "collect_order" || customerName.trim() !== "" || mobile.trim() !== "")
+  )
+    validationErrors.area = t("operations.errors.areaRequired");
   /* Address is optional on every path. A NEW Customer captured without one gets
      no saved address record at all, rather than a placeholder -- so there is no
      longer an inline-create case that needs to ask for it. */
@@ -176,12 +182,12 @@ export function CreateOrderDialog({
     validationErrors.additionalFees = t("operations.errors.additionalInvalid");
   if (!packageCountInput.ok || packageCountInput.value < 1)
     validationErrors.packageCount = t("operations.errors.packagesInvalid");
-  if (isFreeOrder) {
+  if (isFreeOrder || orderType === "collect_order") {
     /* Pricing is deliberately NOT validated here. A Free Order is an intentional
        override, not a missing-pricing failure, so an unpriced Trader/Area must
        not block it -- that blocker is exactly the problem this feature removes.
        The backend skips resolution for the same reason. */
-    if (freeOrderReason.trim() === "")
+    if (isFreeOrder && freeOrderReason.trim() === "")
       validationErrors.freeOrderReason = t("operations.errors.freeOrderReasonRequired");
   } else if (pricingMissing) {
     if (!(manualFee !== "" && manualFeeInput.ok))
@@ -376,7 +382,7 @@ export function CreateOrderDialog({
     // A Free Order is an approved business decision, not a pricing request.
     // Stop any pending quote state immediately so it cannot disable submission
     // or reintroduce an unresolved-pricing validation error.
-    if (isFreeOrder) {
+    if (isFreeOrder || orderType === "collect_order") {
       setQuoteLoading(false);
       return;
     }
@@ -438,6 +444,7 @@ export function CreateOrderDialog({
     enteredFee,
     enteredReason,
     isFreeOrder,
+    orderType,
     overrideValid,
     requoteNonce,
     t,
@@ -510,7 +517,7 @@ export function CreateOrderDialog({
       focusField(firstError);
       return;
     }
-    if (submittingRef.current || trader === undefined || area === undefined) return;
+    if (submittingRef.current || trader === undefined) return;
     submittingRef.current = true;
     setSaving(true);
     setError(undefined);
@@ -519,12 +526,19 @@ export function CreateOrderDialog({
       const order = await api.post<OperationsOrder>(
         "operations/orders",
         {
-          additionalFees: isFreeOrder ? 0 : additionalFeesInput.ok ? additionalFeesInput.value : 0,
-          areaId: area.id,
-          codAmount: isFreeOrder ? 0 : codInput.ok ? codInput.value : 0,
+          additionalFees:
+            isFreeOrder || orderType === "collect_order"
+              ? 0
+              : additionalFeesInput.ok
+                ? additionalFeesInput.value
+                : 0,
+          ...(area === undefined ? {} : { areaId: area.id }),
+          codAmount:
+            isFreeOrder || orderType === "collect_order" ? 0 : codInput.ok ? codInput.value : 0,
           // The backend forces both to zero regardless; sending them honestly
           // keeps the request readable in a network log.
           isFreeOrder,
+          orderType,
           ...(isFreeOrder ? { freeOrderReason: freeOrderReason.trim() } : {}),
           customerAddress: address.trim(),
           customerAddressId: customer?.addressId,
@@ -535,10 +549,10 @@ export function CreateOrderDialog({
           customerLongitude: customer?.longitude == null ? undefined : Number(customer.longitude),
           // Mobile is sent exactly as typed (trimmed only). The API normalizes
           // recognisable UAE forms; it is not forced to a canonical shape here.
-          customerMobileNumber: mobile.trim(),
-          customerName: customerName.trim(),
+          ...(customerName.trim() === "" ? {} : { customerName: customerName.trim() }),
+          ...(mobile.trim() === "" ? {} : { customerMobileNumber: mobile.trim() }),
           customerSecondMobileNumber: secondMobile.trim() === "" ? undefined : secondMobile.trim(),
-          driverId: driverId || undefined,
+          ...(orderType === "collect_order" || driverId === "" ? {} : { driverId }),
           notes: notes.trim() || undefined,
           packageCount: packageCountInput.ok ? packageCountInput.value : 0,
           referenceNumber: referenceNumber.trim() || undefined,
@@ -548,12 +562,13 @@ export function CreateOrderDialog({
           traderId: trader.id,
           // No existing Customer selected: create one atomically from the typed
           // Order details in the same transaction (no separate modal, no orphan).
-          ...(customer !== undefined
+          ...(customer !== undefined ||
+          (orderType === "collect_order" && customerName.trim() === "" && mobile.trim() === "")
             ? {}
             : {
                 inlineCustomer: {
                   address: address.trim(),
-                  areaId: area.id,
+                  areaId: area!.id,
                   mobileNumber: mobile.trim(),
                   name: customerName.trim(),
                   ...(secondMobile.trim() === ""
@@ -670,7 +685,9 @@ export function CreateOrderDialog({
                     <h3 id="order-customer-heading">{t("operations.orderCustomerInfo")}</h3>
                   </div>
                   <div className="form-grid">
-                    <label className="field required-field">
+                    <label
+                      className={orderType === "collect_order" ? "field" : "field required-field"}
+                    >
                       <span>{t("operations.serialNumber")}</span>
                       <input
                         aria-describedby={describedBy("serialNumber")}
@@ -745,7 +762,9 @@ export function CreateOrderDialog({
                       </small>
                     )}
                   </label>
-                  <label className="field required-field">
+                  <label
+                    className={orderType === "collect_order" ? "field" : "field required-field"}
+                  >
                     <span>{t("operations.customerName")}</span>
                     <div data-field="customer">
                       <SearchCombobox
@@ -780,6 +799,7 @@ export function CreateOrderDialog({
                         }}
                         path="configuration/customers/search"
                         placeholder={t("operations.customerSearchOrType")}
+                        required={orderType !== "collect_order"}
                         value={customer}
                       />
                     </div>
@@ -795,7 +815,9 @@ export function CreateOrderDialog({
                     )}
                   </label>
                   {customer !== undefined && customerAddresses.length > 1 ? (
-                    <label className="field required-field">
+                    <label
+                      className={orderType === "collect_order" ? "field" : "field required-field"}
+                    >
                       <span>{t("customerConfig.addresses")}</span>
                       <select
                         onChange={(event) => {
@@ -862,7 +884,7 @@ export function CreateOrderDialog({
                           clearServerError("mobile");
                         }}
                         placeholder={t("common.mobilePlaceholder")}
-                        required
+                        required={orderType !== "collect_order"}
                         value={mobile}
                       />
                       {errorFor("mobile") !== undefined ? (
@@ -903,7 +925,10 @@ export function CreateOrderDialog({
                       ) : null}
                     </label>
                   </div>
-                  <div data-field="area">
+                  <div
+                    className={orderType === "collect_order" ? "field" : "required-field"}
+                    data-field="area"
+                  >
                     <AreaSelector
                       allowCreate={canCreateArea && customer === undefined}
                       api={api}
@@ -914,6 +939,7 @@ export function CreateOrderDialog({
                         clearServerError("area");
                       }}
                       {...(searchDebounceMs === undefined ? {} : { searchDebounceMs })}
+                      required={orderType !== "collect_order"}
                       value={area}
                     />
                     {errorFor("area") === undefined ? null : (
@@ -956,92 +982,124 @@ export function CreateOrderDialog({
                     <h3 id="delivery-financial-heading">{t("operations.deliveryFinancialInfo")}</h3>
                   </div>
                   <div className="form-grid">
-                    <div className="field">
+                    <label className="field">
                       <span>{t("operations.orderType")}</span>
-                      <strong>{t("operations.internalDelivery")}</strong>
-                    </div>
-                    <div className="field">
-                      <span>{t("operations.paymentCondition")}</span>
-                      <strong>{t("operations.customerPaysCod")}</strong>
-                    </div>
-                  </div>
-                  <label className="field">
-                    <span>{t("operations.assignedDriver")}</span>
-                    <select onChange={(event) => setDriverId(event.target.value)} value={driverId}>
-                      <option value="">{t("operations.unassigned")}</option>
-                      {drivers
-                        .filter((driver) => driver.status === "active")
-                        .map((driver) => (
-                          <option key={driver.id} value={driver.id}>
-                            {driver.code} - {driver.name}
-                          </option>
-                        ))}
-                    </select>
-                  </label>
-                  {/* Sits with the money, because that is what it changes. */}
-                  <div className="field free-order-toggle">
-                    <label className="checkbox-row">
-                      <input
-                        checked={isFreeOrder}
-                        id="order-free"
+                      <select
+                        value={orderType}
                         onChange={(event) => {
-                          const next = event.target.checked;
-                          setIsFreeOrder(next);
-                          if (next) {
-                            // Zero the money immediately so the operator never
-                            // types it, and drop the unresolved-pricing blocker:
-                            // this Order is priced by decision, not by lookup.
+                          const next = event.target.value as "collect_order" | "delivery";
+                          setOrderType(next);
+                          if (next === "collect_order") {
+                            setDriverId("");
+                            setIsFreeOrder(false);
+                            setFreeOrderReason("");
                             setCodAmount("0.00");
                             setAdditionalFees("0.00");
                             setPricingMissing(false);
                             setQuoteError(undefined);
-                            setQuoteLoading(false);
-                          } else {
-                            // Leaving Free clears the reason so it cannot be
-                            // submitted on an Order that is no longer free, and
-                            // hands pricing back to the normal flow rather than
-                            // restoring a stale fee.
-                            setFreeOrderReason("");
-                            setRequoteNonce((nonce) => nonce + 1);
                           }
-                          clearServerError("freeOrderReason");
                         }}
-                        type="checkbox"
-                      />
-                      <span>{t("operations.freeOrder")}</span>
+                      >
+                        <option value="delivery">{t("operations.internalDelivery")}</option>
+                        <option value="collect_order">{t("operations.collectOrder")}</option>
+                      </select>
                     </label>
-                    {isFreeOrder ? (
-                      <>
-                        <small className="field-hint">{t("operations.freeOrderHint")}</small>
-                        <label className="field required-field">
-                          <span>{t("operations.freeOrderReason")}</span>
-                          <input
-                            aria-describedby={describedBy("freeOrderReason")}
-                            aria-invalid={errorFor("freeOrderReason") !== undefined}
-                            id="order-free-reason"
-                            maxLength={300}
-                            onChange={(event) => {
-                              setFreeOrderReason(event.target.value);
-                              clearServerError("freeOrderReason");
-                            }}
-                            value={freeOrderReason}
-                          />
-                          {errorFor("freeOrderReason") === undefined ? null : (
-                            <small className="field-error" id="order-freeOrderReason-error">
-                              {errorFor("freeOrderReason")}
-                            </small>
-                          )}
-                        </label>
-                      </>
-                    ) : null}
+                    <div className="field">
+                      <span>
+                        {orderType === "collect_order"
+                          ? t("operations.financialHandling")
+                          : t("operations.paymentCondition")}
+                      </span>
+                      <strong>
+                        {t(
+                          orderType === "collect_order"
+                            ? "operations.collectOrderFinancialHint"
+                            : "operations.customerPaysCod",
+                        )}
+                      </strong>
+                    </div>
                   </div>
+                  {orderType === "collect_order" ? null : (
+                    <label className="field">
+                      <span>{t("operations.assignedDriver")}</span>
+                      <select onChange={(event) => setDriverId(event.target.value)} value={driverId}>
+                        <option value="">{t("operations.unassigned")}</option>
+                        {drivers
+                          .filter((driver) => driver.status === "active")
+                          .map((driver) => (
+                            <option key={driver.id} value={driver.id}>
+                              {driver.code} - {driver.name}
+                            </option>
+                          ))}
+                      </select>
+                    </label>
+                  )}
+                  {/* Sits with the money, because that is what it changes. */}
+                  {orderType === "collect_order" ? null : (
+                    <div className="field free-order-toggle">
+                      <label className="checkbox-row">
+                        <input
+                          checked={isFreeOrder}
+                          id="order-free"
+                          onChange={(event) => {
+                            const next = event.target.checked;
+                            setIsFreeOrder(next);
+                            if (next) {
+                              // Zero the money immediately so the operator never
+                              // types it, and drop the unresolved-pricing blocker:
+                              // this Order is priced by decision, not by lookup.
+                              setCodAmount("0.00");
+                              setAdditionalFees("0.00");
+                              setPricingMissing(false);
+                              setQuoteError(undefined);
+                              setQuoteLoading(false);
+                            } else {
+                              // Leaving Free clears the reason so it cannot be
+                              // submitted on an Order that is no longer free, and
+                              // hands pricing back to the normal flow rather than
+                              // restoring a stale fee.
+                              setFreeOrderReason("");
+                              setRequoteNonce((nonce) => nonce + 1);
+                            }
+                            clearServerError("freeOrderReason");
+                          }}
+                          type="checkbox"
+                        />
+                        <span>{t("operations.freeOrder")}</span>
+                      </label>
+                      {isFreeOrder ? (
+                        <>
+                          <small className="field-hint">{t("operations.freeOrderHint")}</small>
+                          <label className="field required-field">
+                            <span>{t("operations.freeOrderReason")}</span>
+                            <input
+                              aria-describedby={describedBy("freeOrderReason")}
+                              aria-invalid={errorFor("freeOrderReason") !== undefined}
+                              id="order-free-reason"
+                              maxLength={300}
+                              onChange={(event) => {
+                                setFreeOrderReason(event.target.value);
+                                clearServerError("freeOrderReason");
+                              }}
+                              value={freeOrderReason}
+                            />
+                            {errorFor("freeOrderReason") === undefined ? null : (
+                              <small className="field-error" id="order-freeOrderReason-error">
+                                {errorFor("freeOrderReason")}
+                              </small>
+                            )}
+                          </label>
+                        </>
+                      ) : null}
+                    </div>
+                  )}
                   <div className="form-grid">
                     <label className="field required-field">
                       <span>{t("operations.codAmount")}</span>
                       <input
                         aria-describedby={describedBy("codAmount")}
                         aria-invalid={errorFor("codAmount") !== undefined}
-                        disabled={isFreeOrder}
+                        disabled={isFreeOrder || orderType === "collect_order"}
                         id="order-cod"
                         min="0"
                         onChange={(event) => {
@@ -1070,6 +1128,7 @@ export function CreateOrderDialog({
                       aria-describedby={describedBy("additionalFees")}
                       aria-invalid={errorFor("additionalFees") !== undefined}
                       id="order-additional"
+                      disabled={isFreeOrder || orderType === "collect_order"}
                       min="0"
                       onChange={(event) => setAdditionalFees(event.target.value)}
                       step="0.01"
@@ -1082,11 +1141,17 @@ export function CreateOrderDialog({
                       </small>
                     )}
                   </label>
-                  {isFreeOrder ? (
+                  {isFreeOrder || orderType === "collect_order" ? (
                     // No pricing UI at all while Free: nothing to resolve, and
                     // nothing for the operator to override.
                     <div className="fee-override" role="group">
-                      <p className="field-hint">{t("operations.freeOrderFeeLocked")}</p>
+                      <p className="field-hint">
+                        {t(
+                          orderType === "collect_order"
+                            ? "operations.collectOrderFinancialHint"
+                            : "operations.freeOrderFeeLocked",
+                        )}
+                      </p>
                     </div>
                   ) : pricingMissing ? (
                     <div className="fee-override pricing-missing" role="group">
@@ -1309,62 +1374,64 @@ export function CreateOrderDialog({
                       value={notes}
                     />
                   </label>
-                  <div className="quote-panel" aria-live="polite">
-                    {quoteLoading ? (
-                      <strong className="quote-loading">{t("operations.pricingLoading")}</strong>
-                    ) : quoteError === undefined ? (
-                      <>
-                        <div>
-                          <span>{t("operations.codAmount")}</span>
-                          <strong>
-                            {money(quote?.codAmount ?? (codInput.ok ? codAmount : "0.00"))}
-                          </strong>
-                        </div>
-                        <div>
-                          <span>{t("operations.serviceFee")}</span>
-                          <strong>{money(quote?.serviceFee)}</strong>
-                        </div>
-                        <div>
-                          <span>{t("operations.additionalFees")}</span>
-                          <strong>{money(quote?.additionalFees)}</strong>
-                        </div>
-                        {quote?.vatEnabled ? (
+                  {orderType === "collect_order" ? null : (
+                    <div className="quote-panel" aria-live="polite">
+                      {quoteLoading ? (
+                        <strong className="quote-loading">{t("operations.pricingLoading")}</strong>
+                      ) : quoteError === undefined ? (
+                        <>
                           <div>
-                            <span>{t("operations.vatAmount")}</span>
-                            <strong>{money(quote.vatAmount)}</strong>
+                            <span>{t("operations.codAmount")}</span>
+                            <strong>
+                              {money(quote?.codAmount ?? (codInput.ok ? codAmount : "0.00"))}
+                            </strong>
                           </div>
-                        ) : null}
+                          <div>
+                            <span>{t("operations.serviceFee")}</span>
+                            <strong>{money(quote?.serviceFee)}</strong>
+                          </div>
+                          <div>
+                            <span>{t("operations.additionalFees")}</span>
+                            <strong>{money(quote?.additionalFees)}</strong>
+                          </div>
+                          {quote?.vatEnabled ? (
+                            <div>
+                              <span>{t("operations.vatAmount")}</span>
+                              <strong>{money(quote.vatAmount)}</strong>
+                            </div>
+                          ) : null}
+                          <div>
+                            <span>{t("operations.totalDeductions")}</span>
+                            <strong>{money(quote?.totalDeductions)}</strong>
+                          </div>
+                          <div className={negativeTraderPayable ? "summary-invalid" : undefined}>
+                            <span>{t("operations.amountDueToTrader")}</span>
+                            <strong>{money(quote?.traderNetPayable)}</strong>
+                          </div>
+                          <div className="summary-total">
+                            <span>{t("operations.totalAmountToCollect")}</span>
+                            <strong>{money(quote?.customerAmountDue)}</strong>
+                          </div>
+                          {negativeTraderPayable ? (
+                            <small className="field-error">
+                              {t("operations.errors.deductionsExceedCod")}
+                            </small>
+                          ) : null}
+                          {quote?.vatEnabled ? (
+                            <small>
+                              {t("operations.vatRateApplied", {
+                                rate: Number(quote.vatRate).toFixed(2),
+                              })}
+                            </small>
+                          ) : null}
+                        </>
+                      ) : (
                         <div>
-                          <span>{t("operations.totalDeductions")}</span>
-                          <strong>{money(quote?.totalDeductions)}</strong>
+                          <small className="field-error">{quoteError}</small>
                         </div>
-                        <div className={negativeTraderPayable ? "summary-invalid" : undefined}>
-                          <span>{t("operations.amountDueToTrader")}</span>
-                          <strong>{money(quote?.traderNetPayable)}</strong>
-                        </div>
-                        <div className="summary-total">
-                          <span>{t("operations.totalAmountToCollect")}</span>
-                          <strong>{money(quote?.customerAmountDue)}</strong>
-                        </div>
-                        {negativeTraderPayable ? (
-                          <small className="field-error">
-                            {t("operations.errors.deductionsExceedCod")}
-                          </small>
-                        ) : null}
-                        {quote?.vatEnabled ? (
-                          <small>
-                            {t("operations.vatRateApplied", {
-                              rate: Number(quote.vatRate).toFixed(2),
-                            })}
-                          </small>
-                        ) : null}
-                      </>
-                    ) : (
-                      <div>
-                        <small className="field-error">{quoteError}</small>
-                      </div>
-                    )}
-                  </div>
+                      )}
+                    </div>
+                  )}
                 </section>
               </div>
               {/* Sits at the END of the scrolling body, directly above the action

@@ -7,7 +7,6 @@ import {
 import { Decimal } from "decimal.js";
 import { describe, expect, it } from "vitest";
 
-import { ApplicationException } from "../presentation/errors/application.exception.js";
 import { OperationsService } from "./operations.service.js";
 
 type FinancialResult = Readonly<
@@ -103,26 +102,21 @@ describe("prospective Order financial model", () => {
     expect(result.traderNetPayable.toFixed(2)).toBe("85.00");
   });
 
-  it("rejects a new Order when deductions exceed COD", () => {
-    let captured: unknown;
-    try {
-      service.calculateOrderFinancials({
-        additionalFees: new Decimal(5),
-        codAmount: new Decimal(10),
+  it("retains a signed negative Trader position when fees exceed COD", () => {
+    const result = service.calculateOrderFinancials({
+        additionalFees: new Decimal(0),
+        codAmount: new Decimal(0),
         driverCost: new Decimal(0),
         prospective: true,
-        serviceFee: new Decimal(10),
+        serviceFee: new Decimal(20),
         vatPolicy: {
-          enabled: true,
-          priceMode: "exclusive",
-          rate: new Decimal(5),
+          enabled: false,
+          priceMode: null,
+          rate: new Decimal(0),
         },
       });
-    } catch (error) {
-      captured = error;
-    }
-
-    expect(captured).toBeInstanceOf(ApplicationException);
-    expect((captured as ApplicationException).errorCode).toBe("order_deductions_exceed_cod");
+    expect(result.customerAmountDue.toFixed(2)).toBe("0.00");
+    expect(result.companyRevenue.toFixed(2)).toBe("20.00");
+    expect(result.traderNetPayable.toFixed(2)).toBe("-20.00");
   });
 });

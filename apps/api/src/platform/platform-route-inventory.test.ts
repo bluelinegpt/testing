@@ -7,7 +7,11 @@ import {
   REQUIRED_PERMISSIONS,
 } from "../authentication/authentication.decorators.js";
 import { PlatformAuditController } from "./platform-audit.controller.js";
-import { PLATFORM_ACCESS, PLATFORM_PERMISSION_PREFIX } from "./platform-authorization.js";
+import {
+  PLATFORM_ACCESS,
+  PLATFORM_COMPANIES_RESET,
+  PLATFORM_PERMISSION_PREFIX,
+} from "./platform-authorization.js";
 import { PlatformAuthController } from "./platform-auth.controller.js";
 import { PlatformCompanyUserController } from "./platform-company-user.controller.js";
 import {
@@ -31,11 +35,6 @@ import { PlatformDashboardController } from "./platform-dashboard.controller.js"
  */
 const ROUTE_PATH_METADATA = "path";
 const CONTROLLER_PATH_METADATA = "path";
-
-/** Strips block and line comments so prose is never mistaken for behaviour. */
-function withoutComments(source: string): string {
-  return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
-}
 
 const platformControllers = [
   PlatformAuditController,
@@ -148,6 +147,7 @@ describe("Platform route inventory", () => {
       "revokeSession",
       "revokeAll",
       "deleteUser",
+      "moveToProduction",
     ];
     const bad: string[] = [];
     for (const route of routes) {
@@ -207,25 +207,26 @@ describe("Platform route inventory", () => {
     }
   });
 
-  /**
-   * The Company reset engine lives in the same directory but must never be
-   * reachable over HTTP. Registering it would create a destructive surface the
-   * Company Maintenance phase has not yet designed controls for.
-   */
-  it("registers no reset capability in the Platform module", () => {
-    // Comments are stripped first: the module's own prose explains WHY the
-    // reset tools are not registered, and that explanation must not be read as
-    // evidence that they are.
-    const moduleSource = withoutComments(
-      readFileSync(resolve(process.cwd(), "src/platform/platform.module.ts"), "utf8"),
-    );
-    expect(moduleSource.toLowerCase()).not.toContain("reset");
-    const directory = resolve(process.cwd(), "src/platform");
-    for (const file of readdirSync(directory)) {
-      if (!file.endsWith(".controller.ts")) continue;
-      const source = readFileSync(resolve(directory, file), "utf8");
-      expect(source).not.toContain("reset-company-test-data");
+  it("exposes Company reset only through its dedicated guarded Platform routes", () => {
+    const resetRoutes = routes.filter((route) => route.path.includes("/reset-"));
+    expect(resetRoutes.map((route) => `${route.method}:${route.path}`).sort()).toEqual([
+      "resetExecute:platform/companies/:companyId/reset-execute",
+      "resetPreview:platform/companies/:companyId/reset-preview",
+    ]);
+    for (const route of resetRoutes) {
+      expect(route.controller).toBe("PlatformTargetCompanyController");
+      expect(route.kinds).toContain("platform_administrator");
+      expect(route.permissions).toContain(PLATFORM_ACCESS);
+      expect(route.permissions).toContain(PLATFORM_COMPANIES_RESET);
+      expect(route.permissions).not.toContain("platform.companies.manage");
     }
+
+    const controllerSource = readFileSync(
+      resolve(process.cwd(), "src/platform/platform-company.controller.ts"),
+      "utf8",
+    );
+    expect(controllerSource).toContain("@UseGuards(PlatformTargetCompanyGuard)");
+    expect(controllerSource).toContain("@RequirePlatformPermissions(PLATFORM_COMPANIES_RESET)");
   });
 });
 
@@ -247,12 +248,12 @@ describe("Platform permission catalogue certification", () => {
     expect(roleService).toContain("code not like 'platform.%'");
   });
 
-  it("adds no reset, billing or impersonation permission in Phase 1", () => {
+  it("adds no billing, impersonation or maintenance permission", () => {
     const authorization = readFileSync(
       resolve(process.cwd(), "src/platform/platform-authorization.ts"),
       "utf8",
     );
-    for (const forbidden of ["reset", "billing", "impersonat", "maintenance"]) {
+    for (const forbidden of ["billing", "impersonat", "maintenance"]) {
       expect(authorization.toLowerCase()).not.toContain(`platform.${forbidden}`);
     }
   });

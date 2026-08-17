@@ -27,6 +27,19 @@ interface DeliverySource {
   serialNumber: string | null;
   trader: string | null;
 }
+interface CollectionSource {
+  area: string;
+  closeDate: string;
+  customer: string;
+  earned: string;
+  id: string;
+  orderId: string;
+  orderNumber: string;
+  rate: string;
+  referenceNumber: string | null;
+  serialDate: string;
+  serialNumber: string | null;
+}
 interface EarningPeriod {
   id: string;
   dateFrom: string;
@@ -42,6 +55,7 @@ interface EarningPeriod {
   outstanding: string;
   status: "unpaid" | "partially_paid" | "paid";
   deliverySources: readonly DeliverySource[];
+  collectionSources: readonly CollectionSource[];
 }
 interface EarningsSource {
   id: string;
@@ -141,8 +155,9 @@ export function DriverEarningsWorkspace({ api, canPay }: { api: ApiClient; canPa
   monthStart.setDate(1);
   const [dateFrom, setDateFrom] = useState(monthStart.toISOString().slice(0, 10));
   const [dateTo, setDateTo] = useState(new Date().toISOString().slice(0, 10));
-  const [collectedOrderCount, setCollectedOrderCount] = useState("0");
   const [periodPreview, setPeriodPreview] = useState<{
+    collectedOrders: number;
+    collectionSources: readonly (Omit<CollectionSource, "earned"> & { amount: string })[];
     collectionEarnings: string;
     collectionRate: string;
     deliveredOrders: number;
@@ -209,6 +224,8 @@ export function DriverEarningsWorkspace({ api, canPay }: { api: ApiClient; canPa
     setError(undefined);
     try {
       const result = await api.post<{
+        collectedOrders: number;
+        collectionSources: readonly (Omit<CollectionSource, "earned"> & { amount: string })[];
         collectionEarnings: string;
         collectionRate: string;
         deliveredOrders: number;
@@ -216,7 +233,6 @@ export function DriverEarningsWorkspace({ api, canPay }: { api: ApiClient; canPa
         deliverySources: readonly (Omit<DeliverySource, "earned"> & { amount: string })[];
         totalEarnings: string;
       }>("operations/payroll/driver-earnings/periods/preview", {
-        collectedOrderCount: Number(collectedOrderCount),
         dateFrom,
         dateTo,
         driverId,
@@ -260,7 +276,6 @@ export function DriverEarningsWorkspace({ api, canPay }: { api: ApiClient; canPa
     setBusy(true);
     try {
       await api.post("operations/payroll/driver-earnings/periods", {
-        collectedOrderCount: Number(collectedOrderCount),
         dateFrom,
         dateTo,
         driverId,
@@ -507,19 +522,6 @@ export function DriverEarningsWorkspace({ api, canPay }: { api: ApiClient; canPa
             />
           </label>
         </div>
-        <label className="field">
-          <span>{t("driverEarnings.collectedOrderCount")}</span>
-          <input
-            min="0"
-            step="1"
-            type="number"
-            value={collectedOrderCount}
-            onChange={(event) => {
-              setCollectedOrderCount(event.target.value);
-              setPeriodPreview(undefined);
-            }}
-          />
-        </label>
         {canPay ? (
           <div className="button-row">
             <button
@@ -563,7 +565,7 @@ export function DriverEarningsWorkspace({ api, canPay }: { api: ApiClient; canPa
             <div>
               <strong>{t("driverEarnings.collection")}</strong>
               <br />
-              {count(Number(collectedOrderCount))} {t("driverEarnings.orders")} ×{" "}
+              {count(periodPreview.collectedOrders)} {t("driverEarnings.orders")} ×{" "}
               {money(periodPreview.collectionRate)} = {money(periodPreview.collectionEarnings)}
             </div>
             <div>
@@ -598,9 +600,12 @@ export function DriverEarningsWorkspace({ api, canPay }: { api: ApiClient; canPa
             />
             <CollectionDetail
               amount={periodPreview.collectionEarnings}
-              count={Number(collectedOrderCount)}
+              count={periodPreview.collectedOrders}
               rate={periodPreview.collectionRate}
               title={t("driverEarnings.collectionEarningDetail")}
+            />
+            <CollectionTransactions
+              sources={periodPreview.collectionSources.map(({ amount, ...source }) => ({ ...source, earned: amount }))}
             />
           </>
         ) : null}
@@ -1081,7 +1086,33 @@ function PeriodSourceDetails({ period }: { period: EarningPeriod }) {
         rate={period.collectionRate}
         title={t("driverEarnings.collectionEarningDetail")}
       />
+      <CollectionTransactions sources={period.collectionSources ?? []} />
     </section>
+  );
+}
+
+function CollectionTransactions({ sources }: { sources: readonly CollectionSource[] }) {
+  const { i18n, t } = useTranslation();
+  const locale = normalizeLocale(i18n.resolvedLanguage);
+  if (sources.length === 0) return null;
+  return (
+    <div className="card table-shell">
+      <h3>{t("driverEarnings.collectionTransactions")}</h3>
+      <table><thead><tr>
+        <th>{t("driverEarnings.serialNumber")}</th><th>{t("driverEarnings.serialDate")}</th>
+        <th>{t("driverEarnings.orderNumber")}</th><th>{t("driverEarnings.referenceNumber")}</th>
+        <th>{t("driverEarnings.customer")}</th><th>{t("driverEarnings.area")}</th>
+        <th>{t("driverEarnings.closeDate")}</th><th>{t("driverEarnings.rate")}</th>
+        <th>{t("driverEarnings.earned")}</th><th>{t("driverEarnings.action")}</th>
+      </tr></thead><tbody>{sources.map((source) => <tr key={source.id}>
+        <td>{source.serialNumber ?? "—"}</td><td>{source.serialDate}</td>
+        <td>{source.orderNumber}</td><td>{source.referenceNumber ?? "—"}</td>
+        <td>{source.customer}</td><td>{source.area}</td><td>{source.closeDate}</td>
+        <td>{formatCurrency(source.rate, "AED", locale)}</td>
+        <td>{formatCurrency(source.earned, "AED", locale)}</td>
+        <td><a href={`/orders/${encodeURIComponent(source.orderNumber)}`}>{t("driverEarnings.viewOrder")}</a></td>
+      </tr>)}</tbody></table>
+    </div>
   );
 }
 

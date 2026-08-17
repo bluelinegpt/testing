@@ -17,7 +17,6 @@ function manyOrders(count: number): readonly ManifestOrder[] {
   return Array.from({ length: count }, (_unused, index) => ({
     areaName: `Area ${index}`,
     codAmount: "50.00",
-    customerAddress: `Villa ${index}, Street ${index}`,
     customerMobileNumber: `97150000${String(index).padStart(4, "0")}`,
     customerName: `Customer ${index}`,
     customerSecondMobileNumber: null,
@@ -26,9 +25,10 @@ function manyOrders(count: number): readonly ManifestOrder[] {
     deliveryStatusLabel: "Assigned to Driver",
     emirateName: "Dubai",
     notes: null,
-    packageCount: 1,
+    orderNumber: `ORD-${index}`,
     referenceNumber: `REF-${index}`,
     serialNumber: `SER-${index}`,
+    serviceFee: "5.00",
     traderName: `Trader ${index}`,
   }));
 }
@@ -61,7 +61,6 @@ const baseData: ManifestData = {
     countReturned: 0,
     totalCod: "150.00",
     totalOrders: 3,
-    totalPackages: 3,
   },
 };
 

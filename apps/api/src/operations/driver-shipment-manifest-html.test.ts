@@ -25,7 +25,6 @@ const sample: ManifestData = {
     {
       areaName: "Deira",
       codAmount: "150.00",
-      customerAddress: "Villa 12, Street 4",
       customerMobileNumber: "971500000002",
       customerName: "Test Customer",
       customerSecondMobileNumber: "971500000003",
@@ -34,9 +33,10 @@ const sample: ManifestData = {
       deliveryStatusLabel: "Assigned to Driver",
       emirateName: "Dubai",
       notes: "Fragile",
-      packageCount: 2,
+      orderNumber: "ORD-9",
       referenceNumber: "REF-9",
       serialNumber: "SER-9",
+      serviceFee: "20.00",
       traderName: "Test Trader",
     },
   ],
@@ -49,7 +49,6 @@ const sample: ManifestData = {
     countReturned: 0,
     totalCod: "150.00",
     totalOrders: 1,
-    totalPackages: 2,
   },
 };
 
@@ -62,19 +61,26 @@ describe("buildDriverShipmentManifestHtml", () => {
     expect(html).toContain("MAN-ABC123");
     expect(html).toContain("SER-9");
     expect(html).toContain("REF-9");
-    expect(html).toContain("Test Trader");
+    expect(html).toContain("ORD-9");
     expect(html).toContain("Test Customer");
     expect(html).toContain("971500000002");
-    expect(html).toContain("971500000003");
-    expect(html).toContain("Dubai");
     expect(html).toContain("Deira");
-    expect(html).toContain("Villa 12, Street 4");
     expect(html).toContain("AED 150.00");
+    expect(html).toContain("AED 20.00");
     expect(html).toContain("Fragile");
     expect(html).toContain("Test Company");
     expect(html).toContain("Delivery operations");
     expect(html).toContain("Test Driver");
     expect(html).toContain("Outsourced");
+    expect(html).not.toContain("<th>Customer Address</th>");
+    expect(html).not.toContain("Villa 12, Street 4");
+    expect(html).not.toContain("<th>Packages</th>");
+    expect(html).toContain("<th>Trader</th>");
+    expect(html).toContain("Test Trader");
+    expect(html).toContain("<th>Second Mobile</th>");
+    expect(html).toContain("<th>Emirate</th>");
+    expect(html).not.toContain("Total Packages");
+    expect(html).toContain("font-size: 15px");
     // Signatures for Driver, Operations Handover and Returned/Received By.
     expect(html).toContain("Operations Handover");
     expect(html).toContain("Returned/Received By");

@@ -20,7 +20,7 @@ import {
 } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { NavLink, useLocation } from "react-router-dom";
+import { NavLink, useLocation, useNavigate } from "react-router-dom";
 
 import type { LoginResponse } from "../api/contracts.js";
 import { MobileAppQrPanel } from "../components/MobileAppQrPanel.js";
@@ -39,13 +39,7 @@ function brandInitials(name: string): string {
 }
 
 type MenuGroupId =
-  | "orders"
-  | "traders"
-  | "drivers"
-  | "accounting"
-  | "configuration"
-  | "administration"
-  | "reports";
+  "orders" | "traders" | "drivers" | "accounting" | "configuration" | "administration" | "reports";
 
 interface MenuItem {
   readonly icon?: LucideIcon;
@@ -142,6 +136,7 @@ export function CompanyAppShell({
   const [expandedGroup, setExpandedGroup] = useState<MenuGroupId | undefined>(() =>
     groupForPath(location.pathname),
   );
+  const navigate = useNavigate();
   const drawerRef = useRef<HTMLElement>(null);
   const mainRef = useRef<HTMLElement>(null);
   const homePath = firstAuthorizedCompanyPath(session.identity.permissions);
@@ -378,9 +373,10 @@ export function CompanyAppShell({
               expanded={expandedGroup === group.id}
               group={group}
               key={group.id}
-              onToggle={() =>
-                setExpandedGroup((current) => (current === group.id ? undefined : group.id))
-              }
+              onToggle={() => {
+                if (group.id === "orders") void navigate("/orders");
+                setExpandedGroup((current) => (current === group.id ? undefined : group.id));
+              }}
               pathname={location.pathname}
             />
           ))}
@@ -389,9 +385,10 @@ export function CompanyAppShell({
               expanded={expandedGroup === group.id}
               group={group}
               key={group.id}
-              onToggle={() =>
-                setExpandedGroup((current) => (current === group.id ? undefined : group.id))
-              }
+              onToggle={() => {
+                if (group.id === "orders") void navigate("/orders");
+                setExpandedGroup((current) => (current === group.id ? undefined : group.id));
+              }}
               pathname={location.pathname}
             />
           ))}

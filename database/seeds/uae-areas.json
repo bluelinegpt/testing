@@ -1,4 +1,7 @@
 [
+  { "emirateCode": "WST", "nameEn": "All Areas", "nameAr": "جميع المناطق" },
+  { "emirateCode": "OAA", "nameEn": "All Areas", "nameAr": "جميع المناطق" },
+  { "emirateCode": "EST", "nameEn": "All Areas", "nameAr": "جميع المناطق" },
   {
     "emirateCode": "AUH",
     "nameEn": "Abu Dhabi City",

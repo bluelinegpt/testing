@@ -46,6 +46,33 @@ describe("delivery in progress", () => {
     expect(guidance.isFinanciallyComplete).toBe(false);
   });
 
+  it("keeps an existing unassigned Collect Order open for Driver assignment", () => {
+    const guidance = derive({
+      assignedDriverId: null,
+      accountingRequired: false,
+      deliveryStatus: "collect_order",
+      driverReconciliationStatus: "not_applicable",
+      traderSettlementStatus: "not_eligible",
+    });
+    expect(guidance.workflowState).toBe("awaiting_driver_assignment");
+    expect(guidance.nextActionCode).toBe("assign_driver");
+    expect(guidance.isFinanciallyComplete).toBe(false);
+  });
+
+  it("keeps an assigned Collect Order open until the Driver closes it", () => {
+    const guidance = derive({
+      assignedDriverId: "driver-1",
+      accountingRequired: false,
+      deliveryStatus: "collect_order",
+      driverReconciliationStatus: "not_applicable",
+      traderSettlementStatus: "not_eligible",
+    });
+    expect(guidance.workflowState).toBe("awaiting_collect_order_completion");
+    expect(guidance.nextActionCode).toBe("close_order");
+    expect(guidance.nextActionParams).toMatchObject({ suggestedStatus: "closed" });
+    expect(guidance.isFinanciallyComplete).toBe(false);
+  });
+
   it("asks for the delivery RESULT once a Driver holds the parcel", () => {
     const guidance = derive({ deliveryStatus: "out_for_delivery" });
     expect(guidance.workflowState).toBe("awaiting_delivery");
@@ -255,7 +282,13 @@ describe("route and parameter safety", () => {
       const route = derive(overrides).nextActionRoute;
       if (route !== null) expect(known).toContain(route);
     }
-    expect(derive({ accountingRequired: false, driverReconciliationStatus: "reconciled", traderSettlementStatus: "money_received_by_trader" }).nextActionRoute).toBeNull();
+    expect(
+      derive({
+        accountingRequired: false,
+        driverReconciliationStatus: "reconciled",
+        traderSettlementStatus: "money_received_by_trader",
+      }).nextActionRoute,
+    ).toBeNull();
   });
 
   it("declares a permission for every action code it can emit", () => {
@@ -264,7 +297,9 @@ describe("route and parameter safety", () => {
     const codes: OrderWorkflowInput[] = [];
     void codes;
     for (const code of Object.keys(orderNextActionPermissions)) {
-      expect(orderNextActionPermissions[code as keyof typeof orderNextActionPermissions]).toBeDefined();
+      expect(
+        orderNextActionPermissions[code as keyof typeof orderNextActionPermissions],
+      ).toBeDefined();
     }
     expect(orderNextActionPermissions.none).toStrictEqual([]);
     expect(orderNextActionPermissions.pay_trader.length).toBeGreaterThan(0);
@@ -435,7 +470,12 @@ describe("accounting state from the ledger", () => {
 
   it("emits only Accounting routes that exist", () => {
     // Exact-record routes are a prefix match; the list routes are exact.
-    const known = ["/accounting/events", "/accounting/journals", "/accounting/fiscal-periods", "/accounting/mappings"];
+    const known = [
+      "/accounting/events",
+      "/accounting/journals",
+      "/accounting/fiscal-periods",
+      "/accounting/mappings",
+    ];
     for (const state of [
       "accounting_event_missing",
       "accounting_event_waiting",
@@ -513,6 +553,19 @@ describe("smart next action", () => {
       orderNumber: "ORD-0001",
       traderId: "trader-1",
     });
+  });
+
+  it("does not offer Pay Trader for a zero or negative signed Trader position", () => {
+    for (const traderNetPayable of ["0.00", "-25.00"]) {
+      const guidance = derive({
+        accountingRequired: false,
+        driverReconciliationStatus: "not_applicable",
+        traderNetPayable,
+        traderSettlementStatus: "unsettled",
+      });
+      expect(guidance.nextActionCode).not.toBe("pay_trader");
+      expect(guidance.isFinanciallyComplete).toBe(true);
+    }
   });
 
   it("closes a delivered Free Order instead of offering Trader or Driver money workflows", () => {

@@ -45,20 +45,13 @@ describe("Employee Driver earning reconciliation DTO", () => {
       expect.arrayContaining(["driverId", "dateFrom"]),
     );
   });
-  it("accepts zero manual collections and rejects negative or fractional counts", async () => {
-    const period = (count: number) =>
-      Object.assign(new CalculateEmployeeDriverEarningPeriodDto(), {
-        collectedOrderCount: count,
-        driverId: "10000000-0000-4000-8000-000000000001",
-        dateFrom: "2026-08-01",
-        dateTo: "2026-08-15",
-      });
-    await expect(validate(period(0))).resolves.toEqual([]);
-    expect((await validate(period(-1))).map((error) => error.property)).toContain(
-      "collectedOrderCount",
-    );
-    expect((await validate(period(1.5))).map((error) => error.property)).toContain(
-      "collectedOrderCount",
-    );
+  it("calculates a period from Driver and date range without a manual collection count", async () => {
+    const period = Object.assign(new CalculateEmployeeDriverEarningPeriodDto(), {
+      driverId: "10000000-0000-4000-8000-000000000001",
+      dateFrom: "2026-08-01",
+      dateTo: "2026-08-15",
+    });
+    await expect(validate(period)).resolves.toEqual([]);
+    expect(Object.keys(period)).not.toContain("collectedOrderCount");
   });
 });

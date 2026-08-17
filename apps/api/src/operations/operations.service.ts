@@ -120,11 +120,13 @@ export interface OperationsOrderFilters {
   readonly dateTo?: string | undefined;
   readonly deliveryStatus?: string | undefined;
   readonly driverId?: string | undefined;
+  readonly orderType?: "collect_order" | "delivery" | undefined;
   /** External Reference Number, partial match. Distinct from `search`. */
   readonly referenceNumber?: string | undefined;
   readonly search?: string | undefined;
   readonly settlementStatus?: string | undefined;
-  readonly quickView?: "active" | "all" | "cancelled" | "closed" | "hold" | undefined;
+  readonly quickView?:
+    "active" | "all" | "cancelled" | "closed" | "hold" | "accountant" | undefined;
   /**
    * Delivery Activity: only Orders that actually reached a customer.
    *
@@ -266,6 +268,7 @@ export interface OperationsOrder {
   readonly isFreeOrder?: boolean;
   readonly orderDate: string;
   readonly orderNumber: string;
+  readonly orderType?: "collect_order" | "delivery";
   readonly orderProfit: string;
   readonly outsourcedDriverFeeAmount: string | null;
   readonly outsourcedDriverFeeOutstanding: string | null;
@@ -673,9 +676,12 @@ interface ResolvedServiceFee {
   readonly servicePriceId: string | null;
 }
 
-interface InsertOrderInput extends CreateOrderDto {
+interface InsertOrderInput
+  extends Omit<CreateOrderDto, "customerMobileNumber" | "customerName"> {
   readonly correlationId: string;
   readonly createdByAccountId: string;
+  readonly customerMobileNumber: string;
+  readonly customerName: string;
   readonly importBatchId?: string;
 }
 
@@ -923,6 +929,7 @@ export class OperationsService {
     // deprecated filter reaches the same index the unified search uses.
     const referenceTerm = referenceNumber === null ? null : normalizeReferenceTerm(referenceNumber);
     const deliveryStatus = this.optionalFilter(filters.deliveryStatus);
+    const orderType = this.optionalFilter(filters.orderType);
     const cashStatus = this.optionalFilter(filters.cashStatus);
     const settlementStatus = this.optionalFilter(filters.settlementStatus);
     const traderId = this.optionalUuidFilter(filters.traderId);
@@ -970,10 +977,42 @@ export class OperationsService {
     const serialSortKey = "nullif(regexp_replace(o.serial_number,'[^0-9]','','g'),'')::bigint";
     const quickViewPredicate = sql`
       (${quickView} = 'all'
-        or (${quickView} = 'active' and o.delivery_status not in ('hold', 'closed', 'cancelled'))
+        or (${quickView} = 'active' and o.delivery_status in ('new','in_branch','assigned_to_driver','out_for_delivery','hold','delivered','returned_to_branch','returned_to_trader','collect_order'))
         or (${quickView} = 'closed' and o.delivery_status = 'closed')
         or (${quickView} = 'hold' and o.delivery_status = 'hold')
-        or (${quickView} = 'cancelled' and o.delivery_status = 'cancelled'))
+        or (${quickView} = 'cancelled' and o.delivery_status = 'cancelled')
+        or (${quickView} = 'accountant'
+          and o.delivery_status = 'delivered'
+          and (
+            o.driver_reconciliation_status = 'pending'
+            or (
+              o.driver_reconciliation_status in ('reconciled', 'not_applicable')
+              and o.trader_net_payable > 0
+              and o.trader_settlement_status in ('unsettled', 'partially_settled')
+            )
+            or (
+              o.driver_reconciliation_status in ('reconciled', 'not_applicable')
+              and o.trader_settlement_status = 'money_sent_to_trader'
+              and 1 = (
+                select count(*)
+                from trader_settlement_orders accountant_tso
+                join trader_settlements accountant_s
+                  on accountant_s.id = accountant_tso.settlement_id
+                 and accountant_s.company_id = accountant_tso.company_id
+                where accountant_tso.company_id = o.company_id
+                  and accountant_tso.order_id = o.id
+                  and accountant_s.reversal_of_id is null
+                  and accountant_s.status = 'confirmed'
+                  and not exists (
+                    select 1
+                    from trader_settlements accountant_reversal
+                    where accountant_reversal.company_id = accountant_s.company_id
+                      and accountant_reversal.reversal_of_id = accountant_s.id
+                  )
+              )
+            )
+          )
+        ))
     `;
     const tabPredicate = sql`
       ${quickViewPredicate}
@@ -991,6 +1030,7 @@ export class OperationsService {
            or o.reference_number_normalized like '%' || ${referenceTerm}::text || '%')
       and ${unifiedOrderSearchPredicate(search)}
       and (${deliveryStatus}::text is null or o.delivery_status = ${deliveryStatus})
+      and (${orderType}::text is null or o.order_type = ${orderType})
       and (${cashStatus}::text is null or o.driver_reconciliation_status = ${cashStatus})
       and (${settlementStatus}::text is null or o.trader_settlement_status = ${settlementStatus})
       and (${traderId}::uuid is null or o.trader_id = ${traderId}::uuid)
@@ -1034,6 +1074,7 @@ export class OperationsService {
              o.customer_amount_due::text as "customerAmountDue",
              o.amount_collected::text as "amountCollected",
              o.is_free_order as "isFreeOrder",
+             o.order_type as "orderType",
              o.vat_amount::text as "vatAmount",
              o.company_revenue::text as "companyRevenue",
              o.order_profit::text as "orderProfit",
@@ -1074,7 +1115,7 @@ export class OperationsService {
              acct.journal_id as "accountingJournalId"
       from orders o
       join traders t on t.id = o.trader_id and t.company_id = o.company_id
-      join areas a on a.id = o.area_id and a.company_id = o.company_id
+      left join areas a on a.id = o.area_id and a.company_id = o.company_id
       left join drivers d on d.id = o.assigned_driver_id and d.company_id = o.company_id
       left join outsourced_driver_fee_accruals fee
         on fee.order_id = o.id and fee.company_id = o.company_id
@@ -1181,7 +1222,7 @@ export class OperationsService {
       -- The shared filter predicate reaches the Emirate through the Area, so
       -- the count must join it too. Both queries use the same predicate; only
       -- one of them joining is how the Emirate filter broke the whole list.
-      join areas a on a.id = o.area_id and a.company_id = o.company_id
+      left join areas a on a.id = o.area_id and a.company_id = o.company_id
       where o.company_id = ${companyId}::uuid
     `.execute(this.database);
     // ONE Business Day configuration query for the whole page. Calling the
@@ -1374,7 +1415,7 @@ export class OperationsService {
              now()::text as "exportedAt"
       from orders o
       join traders t on t.id = o.trader_id and t.company_id = o.company_id
-      join areas a on a.id = o.area_id and a.company_id = o.company_id
+      left join areas a on a.id = o.area_id and a.company_id = o.company_id
       left join drivers d on d.id = o.assigned_driver_id and d.company_id = o.company_id
       where o.company_id = ${companyId}::uuid
         -- The same two fragments as the list, so an export reproduces exactly
@@ -1779,7 +1820,7 @@ export class OperationsService {
       from tracking_tokens tt
       join orders o on o.id = tt.order_id and o.company_id = tt.company_id
       join companies c on c.id = tt.company_id and c.status = 'active'
-      join areas a on a.id = o.area_id and a.company_id = o.company_id
+      left join areas a on a.id = o.area_id and a.company_id = o.company_id
       left join drivers d on d.id = o.assigned_driver_id and d.company_id = o.company_id
       left join order_status_history h on h.order_id = o.id and h.company_id = o.company_id
       where tt.token_hash = ${tokenHash}
@@ -2016,9 +2057,10 @@ export class OperationsService {
         hasStore: commerceRow?.storefrontId !== undefined && commerceRow.storefrontId !== null,
         storeName: commerceRow?.storeName ?? null,
         storeStatus: commerceRow?.status ?? null,
-        storeUrl: commerceRow?.slug !== null && commerceRow?.slug !== undefined
-          ? `/store/${commerceRow.slug}`
-          : null,
+        storeUrl:
+          commerceRow?.slug !== null && commerceRow?.slug !== undefined
+            ? `/store/${commerceRow.slug}`
+            : null,
         totalProducts: Number(commerceRow?.totalProducts ?? 0),
       },
       orders: {
@@ -2106,7 +2148,11 @@ export class OperationsService {
     ownCompanyId: string,
     callerTraderId: string,
     requestedCompanyId: string | undefined,
-  ): Promise<{ readonly accountId: string; readonly companyId: string; readonly traderId: string }> {
+  ): Promise<{
+    readonly accountId: string;
+    readonly companyId: string;
+    readonly traderId: string;
+  }> {
     const scopePairs = traderCommerceOrderScopePairs(callerTraderId);
     const result = await sql<{ accountId: string; companyId: string; traderId: string }>`
       select scope."companyId", scope."traderId", t.account_id as "accountId"
@@ -2199,15 +2245,13 @@ export class OperationsService {
     // Trader account) satisfies every composite actor FK `createOrder`
     // writes through. See `resolveTraderPortalDeliveryCompany`'s doc
     // comment for the full reasoning.
-    return this.tenants.run(
-      { companyId: target.companyId, identityId: identity.identityId },
-      () =>
-        this.createOrder(
-          { ...pricedByCompany, traderId: target.traderId },
-          correlationId,
-          idempotencyKey,
-          target.accountId,
-        ),
+    return this.tenants.run({ companyId: target.companyId, identityId: identity.identityId }, () =>
+      this.createOrder(
+        { ...pricedByCompany, traderId: target.traderId },
+        correlationId,
+        idempotencyKey,
+        target.accountId,
+      ),
     );
   }
 
@@ -2282,7 +2326,7 @@ export class OperationsService {
              e.name_ar as "emirateNameAr"
       from orders o
       join traders t on t.id = o.trader_id and t.company_id = o.company_id
-      join areas a on a.id = o.area_id and a.company_id = o.company_id
+      left join areas a on a.id = o.area_id and a.company_id = o.company_id
       left join emirates e on e.id = a.emirate_id
       where o.company_id = ${identity.companyId}::uuid
         and o.trader_id = ${trader.id}::uuid
@@ -2349,22 +2393,20 @@ export class OperationsService {
     const result = await this.orders({ ...filters, traderId: trader.id });
     return {
       filteredCount: result.filteredCount,
-      items: result.items.map(
-        (order): TraderPortalOrderSummary => ({
-          areaName: order.areaName,
-          codAmount: order.codAmount,
-          customerAddress: order.customerAddress,
-          customerAmountDue: order.customerAmountDue,
-          customerMobileNumber: order.customerMobileNumber,
-          customerName: order.customerName,
-          deliveryStatus: order.deliveryStatus,
-          id: order.id,
-          orderDate: order.orderDate,
-          orderNumber: order.orderNumber,
-          referenceNumber: order.referenceNumber ?? null,
-          serviceFee: order.serviceFee,
-        }),
-      ),
+      items: result.items.map((order): TraderPortalOrderSummary => ({
+        areaName: order.areaName,
+        codAmount: order.codAmount,
+        customerAddress: order.customerAddress,
+        customerAmountDue: order.customerAmountDue,
+        customerMobileNumber: order.customerMobileNumber,
+        customerName: order.customerName,
+        deliveryStatus: order.deliveryStatus,
+        id: order.id,
+        orderDate: order.orderDate,
+        orderNumber: order.orderNumber,
+        referenceNumber: order.referenceNumber ?? null,
+        serviceFee: order.serviceFee,
+      })),
       page: result.page,
       pageSize: result.pageSize,
       totalCount: result.totalCount,
@@ -2421,7 +2463,8 @@ export class OperationsService {
     const dateTo = this.optionalDate(filters.dateTo);
     const deliveryCompanyId = this.optionalUuidFilter(filters.deliveryCompanyId);
     const quickView = filters.quickView ?? "active";
-    const page = Number.isInteger(filters.page) && (filters.page ?? 0) > 0 ? (filters.page ?? 1) : 1;
+    const page =
+      Number.isInteger(filters.page) && (filters.page ?? 0) > 0 ? (filters.page ?? 1) : 1;
     const pageSize = ([25, 50, 100] as const).includes(filters.pageSize ?? 25)
       ? (filters.pageSize ?? 25)
       : 25;
@@ -2429,7 +2472,7 @@ export class OperationsService {
 
     const quickViewPredicate = sql`
       (${quickView} = 'all'
-        or (${quickView} = 'active' and o.delivery_status not in ('hold', 'closed', 'cancelled'))
+        or (${quickView} = 'active' and o.delivery_status in ('new','in_branch','assigned_to_driver','out_for_delivery','hold','delivered','returned_to_branch','returned_to_trader','collect_order'))
         or (${quickView} = 'closed' and o.delivery_status = 'closed')
         or (${quickView} = 'hold' and o.delivery_status = 'hold')
         or (${quickView} = 'cancelled' and o.delivery_status = 'cancelled'))
@@ -2490,7 +2533,7 @@ export class OperationsService {
              o.company_id as "companyId",
              c.name_en as "companyName"
         from orders o
-        join areas a on a.id = o.area_id and a.company_id = o.company_id
+        left join areas a on a.id = o.area_id and a.company_id = o.company_id
         join companies c on c.id = o.company_id
        where ${filterPredicate}
        order by o.order_date desc, o.created_at desc, o.order_number
@@ -2500,24 +2543,22 @@ export class OperationsService {
     const totalCount = Number(countResult.rows[0]?.total ?? 0);
     return {
       filteredCount: totalCount,
-      items: result.rows.map(
-        (order): TraderPortalOrderSummary => ({
-          areaName: order.areaName,
-          codAmount: order.codAmount,
-          customerAddress: order.customerAddress,
-          customerAmountDue: order.customerAmountDue,
-          customerMobileNumber: order.customerMobileNumber,
-          customerName: order.customerName,
-          deliveryCompanyId: order.companyId,
-          deliveryCompanyName: order.companyName,
-          deliveryStatus: order.deliveryStatus,
-          id: order.id,
-          orderDate: order.orderDate,
-          orderNumber: order.orderNumber,
-          referenceNumber: order.referenceNumber ?? null,
-          serviceFee: order.serviceFee,
-        }),
-      ),
+      items: result.rows.map((order): TraderPortalOrderSummary => ({
+        areaName: order.areaName,
+        codAmount: order.codAmount,
+        customerAddress: order.customerAddress,
+        customerAmountDue: order.customerAmountDue,
+        customerMobileNumber: order.customerMobileNumber,
+        customerName: order.customerName,
+        deliveryCompanyId: order.companyId,
+        deliveryCompanyName: order.companyName,
+        deliveryStatus: order.deliveryStatus,
+        id: order.id,
+        orderDate: order.orderDate,
+        orderNumber: order.orderNumber,
+        referenceNumber: order.referenceNumber ?? null,
+        serviceFee: order.serviceFee,
+      })),
       page,
       pageSize,
       totalCount,
@@ -2623,9 +2664,8 @@ export class OperationsService {
     // and — via `insertOrder`/`resolveImportedCustomer` — `orders`,
     // `order_status_history`, `order_events`, `order_assignments`,
     // `customers`, `customer_addresses`).
-    return this.tenants.run(
-      { companyId: target.companyId, identityId: identity.identityId },
-      () => this.importOrdersCsv({ csv: scoped }, correlationId, target.accountId),
+    return this.tenants.run({ companyId: target.companyId, identityId: identity.identityId }, () =>
+      this.importOrdersCsv({ csv: scoped }, correlationId, target.accountId),
     );
   }
 
@@ -2640,15 +2680,13 @@ export class OperationsService {
       .filter(([name]) => !dropped.has(name.toLowerCase()));
     const writeRow = (cells: readonly string[]): string =>
       cells
-        .map((cell) =>
-          /[",\n\r]/.test(cell) ? `"${cell.replaceAll('"', '""')}"` : cell,
-        )
+        .map((cell) => (/[",\n\r]/.test(cell) ? `"${cell.replaceAll('"', '""')}"` : cell))
         .join(",");
     const rebuilt = [
       writeRow([...keepIndexes.map(([name]) => name), "traderId"]),
-      ...rows.slice(1).map((row) =>
-        writeRow([...keepIndexes.map(([, index]) => row[index] ?? ""), traderId]),
-      ),
+      ...rows
+        .slice(1)
+        .map((row) => writeRow([...keepIndexes.map(([, index]) => row[index] ?? ""), traderId])),
     ];
     return rebuilt.join("\n");
   }
@@ -2692,7 +2730,7 @@ export class OperationsService {
              e.name_ar as "emirateNameAr"
       from orders o
       join traders t on t.id = o.trader_id and t.company_id = o.company_id
-      join areas a on a.id = o.area_id and a.company_id = o.company_id
+      left join areas a on a.id = o.area_id and a.company_id = o.company_id
       left join emirates e on e.id = a.emirate_id
       where o.company_id = ${identity.companyId}::uuid
         and o.assigned_driver_id = ${driver.id}::uuid
@@ -2749,7 +2787,7 @@ export class OperationsService {
              e.name_ar as "emirateNameAr"
       from orders o
       join traders t on t.id = o.trader_id and t.company_id = o.company_id
-      join areas a on a.id = o.area_id and a.company_id = o.company_id
+      left join areas a on a.id = o.area_id and a.company_id = o.company_id
       left join emirates e on e.id = a.emirate_id
       where o.company_id = ${companyId}::uuid
         and o.id = ${orderId}::uuid
@@ -2873,7 +2911,6 @@ export class OperationsService {
                where o.delivery_status = 'delivered'
                  and o.driver_reconciliation_status in ('reconciled', 'not_applicable')
                  and o.trader_settlement_status not in ('not_eligible', 'reversed')
-                 and o.trader_outstanding_balance > 0
              ), 0)::text as "unsettledNetPayable"
       from traders t
       left join orders o on o.trader_id = t.id and o.company_id = t.company_id
@@ -3277,26 +3314,49 @@ export class OperationsService {
     const serialNumberNormalized = this.normalizeOrderIdentifier(serialNumber);
     const referenceNumberNormalized =
       referenceNumber === null ? null : this.normalizeOrderIdentifier(referenceNumber);
+    const collectOrder = input.orderType === "collect_order";
+    const requestedDriverId = collectOrder ? undefined : input.driverId;
     const inlineCustomer = input.inlineCustomer;
+    const customerOmitted =
+      collectOrder &&
+      input.customerId === undefined &&
+      input.customerAddressId === undefined &&
+      inlineCustomer === undefined &&
+      (input.customerName?.trim() ?? "") === "" &&
+      (input.customerMobileNumber?.trim() ?? "") === "";
+    const orderAreaId = input.areaId ?? inlineCustomer?.areaId;
+    if (!customerOmitted && orderAreaId === undefined) {
+      throw new ApplicationException(
+        "area_required",
+        "Select an Area when Customer details are entered",
+        HttpStatus.BAD_REQUEST,
+      );
+    }
     const hasExistingCustomer =
       input.customerId !== undefined && input.customerAddressId !== undefined;
-    if (hasExistingCustomer === (inlineCustomer !== undefined)) {
+    if (!customerOmitted && hasExistingCustomer === (inlineCustomer !== undefined)) {
       throw new ApplicationException(
         "order_customer_selection_invalid",
         "Select an existing Customer or enter one new Customer",
         HttpStatus.BAD_REQUEST,
       );
     }
-    if (inlineCustomer !== undefined && inlineCustomer.areaId !== input.areaId) {
+    if (
+      inlineCustomer !== undefined &&
+      input.areaId !== undefined &&
+      inlineCustomer.areaId !== input.areaId
+    ) {
       throw new ApplicationException(
         "customer_area_mismatch",
         "The new Customer Area must match the Order Area",
         HttpStatus.BAD_REQUEST,
       );
     }
-    const customerName = (inlineCustomer?.name ?? input.customerName).trim();
+    const customerName = (inlineCustomer?.name ?? input.customerName ?? "").trim();
     const customerMobileNumber = (
-      inlineCustomer?.mobileNumber ?? input.customerMobileNumber
+      inlineCustomer?.mobileNumber ??
+      input.customerMobileNumber ??
+      ""
     ).trim();
     const customerSecondMobileNumber =
       (inlineCustomer?.secondMobileNumber ?? input.customerSecondMobileNumber)?.trim() || null;
@@ -3324,7 +3384,7 @@ export class OperationsService {
           customerMobileNumber,
           customerName,
           customerSecondMobileNumber,
-          driverId: input.driverId ?? null,
+          driverId: requestedDriverId ?? null,
           notes,
           packageCount,
           referenceNumber,
@@ -3396,20 +3456,23 @@ export class OperationsService {
         );
       }
 
-      const { address: customerAddressRow, customer: customerRow } =
-        await this.resolveCreateOrderCustomer(transaction, {
-          companyId,
-          correlationId,
-          createdByAccountId: actingAccountId,
-          ...(input.customerAddressId === undefined
-            ? {}
-            : { customerAddressId: input.customerAddressId }),
-          ...(input.customerId === undefined ? {} : { customerId: input.customerId }),
-          ...(inlineCustomer === undefined ? {} : { inlineCustomer }),
-          orderAreaId: input.areaId,
-        });
-      const latitude = input.customerLatitude ?? customerAddressRow.latitude;
-      const longitude = input.customerLongitude ?? customerAddressRow.longitude;
+      const resolvedCustomer = customerOmitted
+        ? undefined
+        : await this.resolveCreateOrderCustomer(transaction, {
+            companyId,
+            correlationId,
+            createdByAccountId: actingAccountId,
+            ...(input.customerAddressId === undefined
+              ? {}
+              : { customerAddressId: input.customerAddressId }),
+            ...(input.customerId === undefined ? {} : { customerId: input.customerId }),
+            ...(inlineCustomer === undefined ? {} : { inlineCustomer }),
+            orderAreaId: orderAreaId!,
+          });
+      const customerAddressRow = resolvedCustomer?.address;
+      const customerRow = resolvedCustomer?.customer;
+      const latitude = input.customerLatitude ?? customerAddressRow?.latitude ?? null;
+      const longitude = input.customerLongitude ?? customerAddressRow?.longitude ?? null;
       if (
         (latitude === null || latitude === undefined) !==
         (longitude === null || longitude === undefined)
@@ -3421,14 +3484,15 @@ export class OperationsService {
         );
       }
       const customerLocationLink =
-        input.customerLocationLink?.trim() || customerAddressRow.locationLink;
+        input.customerLocationLink?.trim() || customerAddressRow?.locationLink || null;
       const customerDeliveryNotes =
         input.customerDeliveryNotes?.trim() ||
-        customerAddressRow.deliveryInstructions ||
-        customerRow.deliveryNotes;
+        customerAddressRow?.deliveryInstructions ||
+        customerRow?.deliveryNotes ||
+        null;
 
       const driverRow =
-        input.driverId === undefined
+        requestedDriverId === undefined
           ? undefined
           : (
               await sql<{ id: string; name: string; outsourcedFee: string | null }>`
@@ -3436,12 +3500,12 @@ export class OperationsService {
                        name_en as name,
                        outsourced_fee_per_delivered_order::text as "outsourcedFee"
                 from drivers
-                where id = ${input.driverId}::uuid
+                where id = ${requestedDriverId}::uuid
                   and company_id = ${companyId}::uuid
                   and account_status = 'active'
               `.execute(transaction)
             ).rows[0];
-      if (input.driverId !== undefined && driverRow === undefined) {
+      if (requestedDriverId !== undefined && driverRow === undefined) {
         throw new ApplicationException(
           "driver_not_found",
           "The selected driver is not active in this Company",
@@ -3449,7 +3513,10 @@ export class OperationsService {
         );
       }
 
-      const area = await this.activeArea(transaction, companyId, input.areaId);
+      const area =
+        input.areaId === undefined
+          ? undefined
+          : await this.activeArea(transaction, companyId, input.areaId);
       /*
        * A Free Order is a decision, so it does not ask the pricing engine a
        * question it has already answered. Skipping `resolveServiceFee` is the
@@ -3466,7 +3533,7 @@ export class OperationsService {
        * words that justify the free delivery; `is_free_order` remains what
        * distinguishes this from a configured-zero price.
        */
-      const freeOrder = input.isFreeOrder === true;
+      const freeOrder = !collectOrder && input.isFreeOrder === true;
       const freeOrderReason = freeOrder ? (input.freeOrderReason ?? "").trim() : null;
       if (freeOrder && freeOrderReason === "") {
         throw new ApplicationException(
@@ -3475,39 +3542,48 @@ export class OperationsService {
           HttpStatus.BAD_REQUEST,
         );
       }
-      const pricing = freeOrder
-        ? {
-            configuredFee: this.money(new Decimal(0)),
-            finalFee: this.money(new Decimal(0)),
-            overrideApplied: false,
-            overrideReason: freeOrderReason,
-            provenance: "manual" as const,
-            servicePriceId: null,
-          }
-        : await this.resolveServiceFee(transaction, {
-            areaId: area.id,
-            companyId,
-            permissions: identity.permissions,
-            ...(input.serviceFee === undefined ? {} : { requestedFee: input.serviceFee }),
-            ...(input.serviceFeeOverrideReason === undefined
-              ? {}
-              : { requestedReason: input.serviceFeeOverrideReason }),
-            traderId: traderRow.id,
-          });
+      const pricing =
+        freeOrder || collectOrder
+          ? {
+              configuredFee: this.money(new Decimal(0)),
+              finalFee: this.money(new Decimal(0)),
+              overrideApplied: false,
+              overrideReason:
+                freeOrderReason ?? (collectOrder ? "Collect Order — operational only" : null),
+              provenance: "manual" as const,
+              servicePriceId: null,
+            }
+          : await this.resolveServiceFee(transaction, {
+              areaId: area!.id,
+              companyId,
+              permissions: identity.permissions,
+              ...(input.serviceFee === undefined ? {} : { requestedFee: input.serviceFee }),
+              ...(input.serviceFeeOverrideReason === undefined
+                ? {}
+                : { requestedReason: input.serviceFeeOverrideReason }),
+              traderId: traderRow.id,
+            });
       const vatPolicy = await this.vatPolicy(transaction, companyId);
       const orderNumber = await this.nextOrderNumber(transaction, companyId);
       const driverCost = new Decimal(driverRow?.outsourcedFee ?? 0);
       const financials = this.calculateOrderFinancials({
         // Both forced, never trusted from the client: a free Order with a COD is
         // not a state this system recognises.
-        additionalFees: freeOrder ? new Decimal(0) : new Decimal(additionalFees),
-        codAmount: freeOrder ? new Decimal(0) : new Decimal(input.codAmount),
-        driverCost,
+        additionalFees: freeOrder || collectOrder ? new Decimal(0) : new Decimal(additionalFees),
+        codAmount: freeOrder || collectOrder ? new Decimal(0) : new Decimal(input.codAmount),
+        driverCost: collectOrder ? new Decimal(0) : driverCost,
         prospective: true,
         serviceFee: pricing.finalFee,
         vatPolicy,
       });
-      const deliveryStatus = driverRow === undefined ? "new" : "assigned_to_driver";
+      // A Collect Order is not complete when it is created. Without a Driver
+      // it starts New so the normal assignment action is available. Once a
+      // Driver is already supplied it can enter the collect task directly.
+      const deliveryStatus = collectOrder
+        ? "collect_order"
+        : driverRow === undefined
+          ? "new"
+          : "assigned_to_driver";
 
       const inserted = await sql<{ id: string }>`
         insert into orders (
@@ -3527,18 +3603,18 @@ export class OperationsService {
           vat_price_mode_snapshot,company_revenue,order_profit,delivery_status,trader_settlement_status,
           pricing_provenance_status, trader_service_price_id,
           configured_service_fee_snapshot, final_service_fee_snapshot,
-          service_fee_override_reason, is_free_order, free_order_reason
+          service_fee_override_reason, is_free_order, free_order_reason, order_type
         ) values (
           ${companyId}::uuid, ${orderNumber}, ${serialNumber}, ${serialNumberNormalized},
           ${referenceNumber}, ${referenceNumberNormalized}, 'trader_deduction_v1',
           current_date, ${traderRow.id}::uuid,
-          ${area.id}::uuid, ${actingAccountId}::uuid,
-          ${driverRow?.id ?? null}::uuid,${customerRow.id}::uuid,${customerAddressRow.id}::uuid,
+          ${area?.id ?? null}::uuid, ${actingAccountId}::uuid,
+          ${driverRow?.id ?? null}::uuid,${customerRow?.id ?? null}::uuid,${customerAddressRow?.id ?? null}::uuid,
           ${customerName}, ${customerMobileNumber},${customerSecondMobileNumber}, ${customerAddress},
-          ${latitude ?? null},${longitude ?? null},${notes},${customerRow.code},
-          ${customerRow.customerReference},${customerAddressRow.areaCode},${customerAddressRow.areaNameEn},
-          ${customerAddressRow.areaNameAr},${customerAddressRow.areaNameAr === null},
-          ${customerLocationLink},${customerDeliveryNotes},'resolved',
+          ${latitude ?? null},${longitude ?? null},${notes},${customerRow?.code ?? null},
+          ${customerRow?.customerReference ?? null},${customerAddressRow?.areaCode ?? null},${customerAddressRow?.areaNameEn ?? null},
+          ${customerAddressRow?.areaNameAr ?? null},${customerAddressRow === undefined ? null : customerAddressRow.areaNameAr === null},
+          ${customerLocationLink},${customerDeliveryNotes},${customerOmitted ? "not_applicable" : "resolved"},
           ${packageCount}, 'customer_pays_cod_trader_pays_fee',
           ${financials.codAmount.toFixed(2)}, ${financials.serviceFee.toFixed(2)},
           ${financials.serviceFeeNetAmount.toFixed(2)},${financials.serviceFeeVatAmount.toFixed(2)},
@@ -3546,14 +3622,14 @@ export class OperationsService {
           ${financials.totalDeductions.toFixed(2)},${financials.customerAmountDue.toFixed(2)},
           ${financials.codAmount.toFixed(2)},${financials.serviceFeeNetAmount.plus(financials.serviceFeeVatAmount).toFixed(2)},
           ${financials.additionalFees.plus(financials.additionalFeeVatAmount).toFixed(2)},
-          ${financials.traderNetPayable.toFixed(2)},${driverCost.toFixed(2)},
+          ${financials.traderNetPayable.toFixed(2)},${collectOrder ? "0.00" : driverCost.toFixed(2)},
           ${financials.vatAmount.toFixed(2)},${vatPolicy.enabled},${vatPolicy.rate.toFixed(4)},
           ${vatPolicy.enabled ? vatPolicy.priceMode : null},
           ${financials.companyRevenue.toFixed(2)}, ${financials.orderProfit.toFixed(2)},
-          ${deliveryStatus}, ${freeOrder ? "not_eligible" : "unsettled"},
+          ${deliveryStatus}, ${freeOrder || collectOrder ? "not_eligible" : "unsettled"},
           ${pricing.provenance}, ${pricing.servicePriceId}::uuid,
           ${pricing.configuredFee.toFixed(2)}, ${pricing.finalFee.toFixed(2)},
-          ${pricing.overrideReason}, ${freeOrder}, ${freeOrderReason}
+          ${pricing.overrideReason}, ${freeOrder}, ${freeOrderReason}, ${collectOrder ? "collect_order" : "delivery"}
         )
         returning id
       `.execute(transaction);
@@ -3616,20 +3692,22 @@ export class OperationsService {
         subjectId: orderId,
         subjectType: "order",
       });
-      await this.audit(transaction, {
-        action: "customer.selected_for_order",
-        actorId: actingAccountId,
-        after: {
-          customerAddressId: customerAddressRow.id,
-          customerId: customerRow.id,
-          orderId,
-          orderNumber,
-        },
-        companyId,
-        correlationId,
-        subjectId: customerRow.id,
-        subjectType: "customer",
-      });
+      if (customerRow !== undefined && customerAddressRow !== undefined) {
+        await this.audit(transaction, {
+          action: "customer.selected_for_order",
+          actorId: actingAccountId,
+          after: {
+            customerAddressId: customerAddressRow.id,
+            customerId: customerRow.id,
+            orderId,
+            orderNumber,
+          },
+          companyId,
+          correlationId,
+          subjectId: customerRow.id,
+          subjectType: "customer",
+        });
+      }
 
       if (pricing.overrideApplied) {
         await this.audit(transaction, {
@@ -3708,7 +3786,7 @@ export class OperationsService {
         additionalFees: financials.additionalFees.toFixed(2),
         additionalFeeVatAmount: financials.additionalFeeVatAmount.toFixed(2),
         amountCollected: "0.00",
-        areaName: area.nameAr ?? area.nameEn,
+        areaName: area?.nameAr ?? area?.nameEn ?? "",
         assignedDriverId: driverRow?.id ?? null,
         assignedDriverMobile: null,
         assignedDriverName: driverRow?.name ?? null,
@@ -3952,6 +4030,8 @@ export class OperationsService {
           ...row,
           correlationId,
           createdByAccountId: actingAccountId,
+          customerMobileNumber: row.customerMobileNumber ?? "",
+          customerName: row.customerName ?? "",
           importBatchId,
         }).catch((cause: unknown) => {
           throw this.importRowFailure(cause, rowNumber, row.referenceNumber ?? null);
@@ -4541,11 +4621,7 @@ export class OperationsService {
         ? await this.currentEmployeeDriverId()
         : undefined;
     const actingAsDriverUser = ownDriverIdForStatusChange !== undefined;
-    if (
-      identity.kind === "company_user" &&
-      !hasOperatorStatusPermission &&
-      !actingAsDriverUser
-    ) {
+    if (identity.kind === "company_user" && !hasOperatorStatusPermission && !actingAsDriverUser) {
       // No broad Operator permission, and not a Driver User either (no
       // linked Driver at all) — the same rejection the guard used to give,
       // just relocated here.
@@ -4633,6 +4709,7 @@ export class OperationsService {
         deliveryStatus: string;
         driverReconciliationStatus: string;
         isFreeOrder: boolean;
+        orderType: string;
         returnStatus: string;
         settlementStatus: string;
         traderNetPayable: string;
@@ -4643,6 +4720,7 @@ export class OperationsService {
                delivery_status as "deliveryStatus",
                driver_reconciliation_status as "driverReconciliationStatus",
                is_free_order as "isFreeOrder",
+               order_type as "orderType",
                return_status as "returnStatus",
                trader_settlement_status as "settlementStatus",
                trader_net_payable::text as "traderNetPayable"
@@ -4711,6 +4789,7 @@ export class OperationsService {
       const driverTransitions: Readonly<Record<string, readonly string[]>> = {
         assigned_to_driver: ["out_for_delivery"],
         out_for_delivery: ["hold", "delivered", "returned_to_branch"],
+        collect_order: ["closed"],
       };
       // Operations/admin can drive every step of the lifecycle, including the
       // driver-facing moves (out for delivery, delivered, return to branch),
@@ -4724,6 +4803,7 @@ export class OperationsService {
         delivered: ["closed"],
         returned_to_branch: ["returned_to_trader"],
         returned_to_trader: ["closed"],
+        collect_order: ["closed"],
       };
       // A Driver User gets exactly the narrow set a genuine Driver gets here
       // too — never the broader Operator lifecycle, regardless of holding
@@ -4823,9 +4903,9 @@ export class OperationsService {
             ? "not_eligible"
             : deliveredFreeNoValue
               ? "not_eligible"
-            : status === "closed" || status === "in_branch"
-              ? order.settlementStatus
-              : "unsettled";
+              : status === "closed" || status === "in_branch"
+                ? order.settlementStatus
+                : "unsettled";
       await sql`
         update orders
            set delivery_status = ${status},
@@ -4887,8 +4967,13 @@ export class OperationsService {
       // want to know, not every internal step (Section O: "keep this
       // operational, not noisy").
       if (
-        ["out_for_delivery", "delivered", "returned_to_branch", "returned_to_trader", "cancelled"]
-          .includes(status)
+        [
+          "out_for_delivery",
+          "delivered",
+          "returned_to_branch",
+          "returned_to_trader",
+          "cancelled",
+        ].includes(status)
       ) {
         await this.pushOutbox.writeOrderStatusChanged(transaction, {
           companyId,
@@ -5473,7 +5558,7 @@ export class OperationsService {
              ${orderAccountingColumns}
       from orders o
       join traders t on t.id = o.trader_id and t.company_id = o.company_id
-      join areas a on a.id = o.area_id and a.company_id = o.company_id
+      left join areas a on a.id = o.area_id and a.company_id = o.company_id
       left join emirates e on e.id = a.emirate_id
       left join drivers d on d.id = o.assigned_driver_id and d.company_id = o.company_id
       left join outsourced_driver_fee_accruals fee
@@ -6402,7 +6487,7 @@ export class OperationsService {
              o.trader_settlement_status as "traderSettlementStatus"
       from orders o
       join traders t on t.id = o.trader_id and t.company_id = o.company_id
-      join areas a on a.id = o.area_id and a.company_id = o.company_id
+      left join areas a on a.id = o.area_id and a.company_id = o.company_id
       left join drivers d on d.id = o.assigned_driver_id and d.company_id = o.company_id
       where o.id = ${orderId}::uuid and o.company_id = ${companyId}::uuid
       limit 1
@@ -6459,13 +6544,6 @@ export class OperationsService {
       .plus(serviceFeeVatAmount)
       .plus(additionalFees)
       .plus(additionalFeeVatAmount);
-    if (input.prospective && totalDeductions.greaterThan(input.codAmount)) {
-      throw new ApplicationException(
-        "order_deductions_exceed_cod",
-        "Total Company deductions cannot exceed the COD Amount",
-        HttpStatus.BAD_REQUEST,
-      );
-    }
     const vatAmount = input.prospective
       ? serviceFeeVatAmount.plus(additionalFeeVatAmount)
       : serviceFeeVatAmount;

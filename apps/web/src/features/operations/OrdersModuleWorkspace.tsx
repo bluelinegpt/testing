@@ -39,6 +39,7 @@ import type {
   OperationsOrderQuote,
   OperationsOrderDetail,
   OperationsOrderPage,
+  OperationsPendingCashOrder,
   OperationsTrader,
   OperationsTraderOption,
   OperationsTrackingLink,
@@ -63,7 +64,6 @@ import { localizeName } from "../../localization/localize-name.js";
 import { parseMoneyInput, parseNumericInput } from "../../utils/numeric-input.js";
 import { useSessionAccess } from "../../app/SessionAccessContext.js";
 import { useListState } from "../accounting/use-list-state.js";
-import { BusinessDateFilterControls } from "./BusinessDateFilterControls.js";
 import {
   orderAccountingStatus,
   orderFeeSource,
@@ -82,12 +82,12 @@ import { SettlementDetailDialog } from "./TraderSettlementsWorkspace.js";
  * backend expresses Delivery Activity through `deliveredOnly`, and sending an
  * unrecognised quick view would silently fall through to the Active predicate.
  */
-type QuickView = "active" | "all" | "hold" | "cancelled" | "closed" | "delivery";
+type QuickView = "active" | "all" | "hold" | "cancelled" | "closed" | "delivery" | "accountant";
 
 /** Quick views the backend actually understands. */
-const backendQuickViews = new Set(["active", "all", "hold", "cancelled", "closed"]);
+const backendQuickViews = new Set(["active", "all", "hold", "cancelled", "closed", "accountant"]);
 type OrderGrouping = "" | ("area" | "trader" | "driver" | "status")[];
-type BulkAction = "assign" | "manifest" | "status";
+type BulkAction = "assign" | "manifest" | "reactivate" | "status";
 
 interface OrderFilters {
   areaId: string;
@@ -99,6 +99,7 @@ interface OrderFilters {
   dateTo: string;
   deliveryStatus: string;
   driverId: string;
+  orderType: string;
   quickView: QuickView;
   // Delivery Activity. Empty in every other view, so `filterQuery` omits them
   // and no other quick view can be affected by a stale value.
@@ -119,12 +120,19 @@ interface SelectionPayload extends Partial<OrderFilters> {
   selectionMode: "filter" | "ids";
 }
 
+interface AccountantPayOrder {
+  readonly id: string;
+  readonly orderNumber: string;
+  readonly serialNumber: string;
+}
+
 const bulkSelectionFilterKeys = [
   "areaId",
   "dateFrom",
   "dateTo",
   "deliveryStatus",
   "driverId",
+  "orderType",
   "quickView",
   "search",
   "traderId",
@@ -181,6 +189,7 @@ const initialFilters: OrderFilters = {
   dateTo: "",
   deliveryStatus: "",
   driverId: "",
+  orderType: "",
   quickView: "active",
   deliveredOnly: "",
   deliveryDateFrom: "",
@@ -259,6 +268,12 @@ export function OrdersModuleWorkspace({
     list.setFilters(update(filters) as unknown as Record<string, string>);
   const [data, setData] = useState<OperationsOrderPage>();
   const [holdCount, setHoldCount] = useState(0);
+  const [accountantCollect] = useState<readonly OperationsPendingCashOrder[]>([]);
+  const [accountantSection, setAccountantSection] = useState<"collect" | "pay">("collect");
+  const [, setAccountantRefreshNonce] = useState(0);
+  const [accountantPayOrders] = useState<Readonly<Record<string, readonly AccountantPayOrder[]>>>(
+    {},
+  );
   const [emirates, setEmirates] = useState<readonly Emirate[]>([]);
   const [filterEmirateId, setFilterEmirateId] = useState("");
   /* The search box types into local state and reaches the filter -- and so the
@@ -283,6 +298,7 @@ export function OrdersModuleWorkspace({
     filters.dateTo,
     filters.deliveryStatus,
     filters.driverId,
+    filters.orderType,
     filters.deliveryDateFrom,
     filters.deliveryDateTo,
     filters.businessDateFrom,
@@ -345,21 +361,21 @@ export function OrdersModuleWorkspace({
   useEffect(() => {
     let active = true;
     void (async () => {
-      const [holdOrders, loadedDrivers, loadedTraders] = await Promise.all([
+      const [holdOrders, loadedDrivers, loadedTraders] = await Promise.allSettled([
         api.get<OperationsOrderPage>("operations/orders?page=1&pageSize=25&quickView=hold"),
         api.get<readonly OperationsDriver[]>("operations/drivers"),
         api.get<readonly OperationsTrader[]>("operations/traders"),
-      ]).catch(() => [undefined, undefined, undefined] as const);
+      ]);
       if (!active) return;
-      if (holdOrders !== undefined) {
-        setHoldCount(holdOrders.tabTotalCount ?? holdOrders.filteredCount);
+      if (holdOrders.status === "fulfilled") {
+        setHoldCount(holdOrders.value.tabTotalCount ?? holdOrders.value.filteredCount);
       }
-      if (loadedDrivers !== undefined) {
-        setDrivers(loadedDrivers.filter((driver) => driver.status === "active"));
+      if (loadedDrivers.status === "fulfilled") {
+        setDrivers(loadedDrivers.value.filter((driver) => driver.status === "active"));
       }
       // Active only, exactly as before the split.
-      if (loadedTraders !== undefined) {
-        setTraders(loadedTraders.filter((trader) => trader.status === "active"));
+      if (loadedTraders.status === "fulfilled") {
+        setTraders(loadedTraders.value.filter((trader) => trader.status === "active"));
       }
 
       // Load areas for each emirate to build area-emirate mapping
@@ -369,7 +385,11 @@ export function OrdersModuleWorkspace({
           const allAreas: CompanyArea[] = [];
           for (const emirate of emirates) {
             try {
-              const response = await api.get<{ items: readonly CompanyArea[]; total: number; hasMore: boolean }>(
+              const response = await api.get<{
+                items: readonly CompanyArea[];
+                total: number;
+                hasMore: boolean;
+              }>(
                 `configuration/areas/search?emirateId=${encodeURIComponent(emirate.id)}&activeOnly=true`,
               );
               console.log(`Areas for ${emirate.nameEn}:`, response);
@@ -389,7 +409,10 @@ export function OrdersModuleWorkspace({
           console.error("Areas loading failed:", error);
         }
       } else {
-        console.log("Skipping areas load - emirates not ready", { emiratesLength: emirates.length, active });
+        console.log("Skipping areas load - emirates not ready", {
+          emiratesLength: emirates.length,
+          active,
+        });
       }
     })();
     return () => {
@@ -514,11 +537,6 @@ export function OrdersModuleWorkspace({
   // Delivery Activity adds two columns. Derived once so every colspan below
   // moves with the header instead of being hardcoded in several places.
   const deliveryView = filters.quickView === "delivery";
-  const deliveryColumns = deliveryView ? 2 : 0;
-
-  const applyDeliveryFilter = (patch: Record<string, string>) => {
-    list.setFilters(patch);
-  };
 
   const selectQuickView = (view: QuickView) => {
     list.setFilters({
@@ -528,11 +546,26 @@ export function OrdersModuleWorkspace({
       deliveryDateFrom: "",
       deliveryDateTo: "",
       ...(view === "delivery"
-        ? { dateMode: "calendar_date", deliveredOnly: "true" }
+        ? { dateMode: "", deliveredOnly: "" }
         : { dateMode: "", deliveredOnly: "" }),
     });
   };
-  const orderItems = Array.isArray(data?.items) ? data.items : [];
+  const loadedOrderItems = Array.isArray(data?.items) ? data.items : [];
+  const deliveryActivityExcludedActions = new Set([
+    "collect_from_driver",
+    "pay_trader",
+    "close_order",
+    "none",
+  ]);
+  const orderItems = deliveryView
+    ? loadedOrderItems.filter(
+        (order) =>
+          order.deliveryStatus !== "closed" &&
+          order.deliveryStatus !== "cancelled" &&
+          order.workflowGuidance?.workflowState !== "complete" &&
+          !deliveryActivityExcludedActions.has(order.workflowGuidance?.nextActionCode ?? "none"),
+      )
+    : loadedOrderItems;
   const traderFilterOptions = Array.isArray(traders) ? traders : [];
   const driverFilterOptions = Array.isArray(drivers) ? drivers : [];
   const emirateFilterOptions = Array.isArray(emirates) ? emirates : [];
@@ -566,6 +599,24 @@ export function OrdersModuleWorkspace({
     setAllMatching(false);
     setSelectedIds(new Set());
     setExcludedIds(new Set());
+  };
+  const copyNumbers = async () => {
+    const valid: string[] = [];
+    let invalid = 0;
+    for (const order of bulkSelectedOrders) {
+      const mobile = normalizeUaeMobile(order.customerMobileNumber);
+      if (mobile === undefined) {
+        invalid += 1;
+        continue;
+      }
+      valid.push(`+${mobile} - ${order.areaName}`);
+    }
+    if (valid.length > 0) await navigator.clipboard.writeText(valid.join("\n"));
+    setOrderActionNotice(
+      invalid === 0
+        ? t("operations.copyNumbersSuccess", { count: valid.length })
+        : t("operations.copyNumbersPartial", { copied: valid.length, invalid }),
+    );
   };
   const orderSelected = (id: string) => (allMatching ? !excludedIds.has(id) : selectedIds.has(id));
   // Build area-to-emirate mapping from areas configuration
@@ -604,7 +655,7 @@ export function OrdersModuleWorkspace({
       mapSize: map.size,
       areasCount: areas.length,
       emiratesCount: emirates.length,
-      mapEntries: Array.from(map.entries()).slice(0, 5)
+      mapEntries: Array.from(map.entries()).slice(0, 5),
     });
 
     return map;
@@ -649,7 +700,10 @@ export function OrdersModuleWorkspace({
 
       return [
         <Fragment key={group.key}>
-          <tr className={`order-group-row order-group-level-${group.level}`} style={{ paddingLeft }}>
+          <tr
+            className={`order-group-row order-group-level-${group.level}`}
+            style={{ paddingLeft }}
+          >
             <td style={{ paddingLeft: `${paddingLeft}px` }}>
               {canSelectOrders ? (
                 <GroupSelectionCheckbox
@@ -662,7 +716,7 @@ export function OrdersModuleWorkspace({
                 />
               ) : null}
             </td>
-            <td colSpan={13 + deliveryColumns}>
+            <td colSpan={13}>
               {hasChildren ? (
                 <button
                   aria-expanded={expanded}
@@ -676,9 +730,7 @@ export function OrdersModuleWorkspace({
                     <ChevronRight aria-hidden="true" size={18} />
                   )}
                   <strong>{group.label}</strong>
-                  <span>
-                    {t("operations.visibleOrderCount", { count: allOrderIds.length })}
-                  </span>
+                  <span>{t("operations.visibleOrderCount", { count: allOrderIds.length })}</span>
                   {selectedInGroup > 0 ? (
                     <span>
                       {t("operations.groupSelectedCount", {
@@ -690,9 +742,7 @@ export function OrdersModuleWorkspace({
               ) : (
                 <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                   <strong>{group.label}</strong>
-                  <span>
-                    {t("operations.visibleOrderCount", { count: leafOrders.length })}
-                  </span>
+                  <span>{t("operations.visibleOrderCount", { count: leafOrders.length })}</span>
                 </div>
               )}
             </td>
@@ -767,23 +817,6 @@ export function OrdersModuleWorkspace({
         <td>
           <DeliveryStatusBadge order={order} />
         </td>
-        {!deliveryView ? null : (
-          <>
-            {/* Backend values only. No fallback to Order Date, Created At,
-                Updated At or status history, and no Business Date arithmetic
-                in the browser. */}
-            <td dir="ltr" className="nowrap-cell">
-              {order.deliveredAt == null
-                ? t("operations.historicalDeliveryTimestampUnavailable")
-                : formatDateTime(order.deliveredAt, locale)}
-            </td>
-            <td dir="ltr" className="nowrap-cell">
-              {order.deliveryBusinessDate == null
-                ? t("operations.historicalDeliveryTimestampUnavailable")
-                : formatDate(order.deliveryBusinessDate, locale)}
-            </td>
-          </>
-        )}
         <td>
           <OrderAccountingBadge order={order} />
         </td>
@@ -850,7 +883,9 @@ export function OrdersModuleWorkspace({
       )}
       <section className="orders-workspace">
         <div className="orders-quick-views" role="tablist" aria-label={t("operations.orderViews")}>
-          {(["active", "hold", "all", "closed", "cancelled", "delivery"] as const).map((view) => (
+          {(
+            ["active", "hold", "all", "closed", "cancelled", "delivery", "accountant"] as const
+          ).map((view) => (
             <button
               aria-selected={filters.quickView === view}
               className={filters.quickView === view ? "active" : undefined}
@@ -861,445 +896,554 @@ export function OrdersModuleWorkspace({
             >
               {t(`operations.quickView.${view}`)}
               {view === "hold" ? <span className="tab-count">{holdCount}</span> : null}
+              {view === "accountant" && filters.quickView === "accountant" ? (
+                <span className="tab-count">{tabTotalCount}</span>
+              ) : null}
             </button>
           ))}
         </div>
-        {/* Delivery Activity only. The same shared control the three other
-            activity screens use — a second Date Mode component would be a
-            second opinion about where a business day begins. */}
-        {filters.quickView !== "delivery" ? null : (
-          <BusinessDateFilterControls
-            applied={data?.appliedDateMode}
-            authoritativeTimestampLabel={t("operations.deliveryDateTime")}
-            businessDateFrom={filters.businessDateFrom}
-            businessDateTo={filters.businessDateTo}
-            calendarDateFrom={filters.deliveryDateFrom}
-            calendarDateTo={filters.deliveryDateTo}
-            calendarFromLabel={t("operations.deliveryDateFrom")}
-            calendarKeyFrom="deliveryDateFrom"
-            calendarKeyTo="deliveryDateTo"
-            calendarToLabel={t("operations.deliveryDateTo")}
-            dateMode={filters.dateMode}
-            historicalWarningLabel={t("operations.historicalDeliveryExcluded")}
-            onChange={applyDeliveryFilter}
-          />
-        )}
-        <div className="orders-filter-bar">
-          {/* One field for every identifier an operator has to hand. The
+        {false ? (
+          <section className="card" aria-label={t("operations.quickView.accountant")}>
+            <div className="orders-quick-views" role="tablist">
+              <button
+                className={accountantSection === "collect" ? "active" : undefined}
+                onClick={() => setAccountantSection("collect")}
+                role="tab"
+                type="button"
+              >
+                {t("operations.accountantCollect")}{" "}
+                <span className="tab-count">{accountantCollect.length}</span>
+              </button>
+              <button
+                className={accountantSection === "pay" ? "active" : undefined}
+                onClick={() => setAccountantSection("pay")}
+                role="tab"
+                type="button"
+              >
+                {t("operations.accountantPay")}{" "}
+                <span className="tab-count">
+                  {traders.filter((trader) => Number(trader.unsettledNetPayable) > 0).length}
+                </span>
+              </button>
+              <button
+                aria-label={t("common.refresh")}
+                className="button"
+                onClick={() => setAccountantRefreshNonce((current) => current + 1)}
+                title={t("common.refresh")}
+                type="button"
+              >
+                <RefreshCw aria-hidden="true" size={17} /> {t("common.refresh")}
+              </button>
+            </div>
+            <div className="table-shell">
+              <table>
+                <thead>
+                  <tr>
+                    <th>
+                      {accountantSection === "collect"
+                        ? t("operations.driver")
+                        : t("operations.trader")}
+                    </th>
+                    <th>{t("operations.orderNumber")}</th>
+                    <th>{t("operations.amount")}</th>
+                    <th>{t("common.actions")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {accountantSection === "collect"
+                    ? accountantCollect.map((item) => (
+                        <tr key={item.id}>
+                          <td>{item.assignedDriverName}</td>
+                          <td>{item.orderNumber}</td>
+                          <td>{formatCurrency(item.amountCollected, "AED", locale)}</td>
+                          <td>
+                            <button
+                              onClick={() =>
+                                onNavigate(
+                                  collectFromDriverPath({
+                                    driverId: item.driverId,
+                                    orderIds: [item.id],
+                                  }),
+                                )
+                              }
+                              type="button"
+                            >
+                              {t("operations.accountantCollect")}
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    : traders
+                        .filter((trader) => Number(trader.unsettledNetPayable) > 0)
+                        .map((trader) => (
+                          <tr key={trader.id}>
+                            <td>{trader.name}</td>
+                            <td>
+                              {(accountantPayOrders[trader.id] ?? []).map((order) => (
+                                <button
+                                  className="order-number-link"
+                                  key={order.id}
+                                  onClick={() =>
+                                    onNavigate(`/orders/${encodeURIComponent(order.orderNumber)}`)
+                                  }
+                                  type="button"
+                                >
+                                  {order.serialNumber || order.orderNumber}
+                                </button>
+                              ))}
+                            </td>
+                            <td>{formatCurrency(trader.unsettledNetPayable, "AED", locale)}</td>
+                            <td>
+                              <button
+                                onClick={() =>
+                                  onNavigate(
+                                    `/trader-settlements?traderId=${encodeURIComponent(trader.id)}`,
+                                  )
+                                }
+                                type="button"
+                              >
+                                {t("operations.accountantPay")}
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        ) : null}
+        <>
+          <div className="orders-filter-bar">
+            {/* One field for every identifier an operator has to hand. The
               separate Reference Number input that used to sit beside this was
               removed with the unified search: the backend now matches Order
               Number, Reference, Customer Name and Mobile from this single term,
               so a second box asked the operator to classify their own input and
               left the filter row visibly uneven. */}
-          <label className="orders-search">
-            <Search aria-hidden="true" size={17} />
-            <span className="sr-only">{t("operations.searchOrders")}</span>
-            <input
-              onChange={(event) => setSearchText(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key !== "Enter") return;
-                // The box is not inside a form, but preventDefault keeps this
-                // safe if it is ever moved into one.
-                event.preventDefault();
-                updateFilters({ search: searchText });
-              }}
-              placeholder={t("operations.searchOrdersPlaceholder")}
-              value={searchText}
-            />
-          </label>
-          {/* Name only, and searchable. The code stays matchable so anyone who
+            <label className="orders-search">
+              <Search aria-hidden="true" size={17} />
+              <span className="sr-only">{t("operations.searchOrders")}</span>
+              <input
+                onChange={(event) => setSearchText(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key !== "Enter") return;
+                  // The box is not inside a form, but preventDefault keeps this
+                  // safe if it is ever moved into one.
+                  event.preventDefault();
+                  updateFilters({ search: searchText });
+                }}
+                placeholder={t("operations.searchOrdersPlaceholder")}
+                value={searchText}
+              />
+            </label>
+            {/* Name only, and searchable. The code stays matchable so anyone who
               knows "TRD-000002" can still type it, but it is not printed on
               every row where it only crowds out the name. */}
-          <label className="filter-select filter-combobox-field">
-            <span className="sr-only">{t("operations.trader")}</span>
-            <FilterCombobox
-              emptyText={t("operations.noTradersFound")}
-              label={t("operations.trader")}
-              onChange={(value) => updateFilters({ traderId: value })}
-              options={traderFilterOptions.map((trader) => ({
-                id: trader.id,
-                label: trader.name,
-                searchText: trader.code,
-              }))}
-              value={filters.traderId}
-            />
-          </label>
-          <label className="filter-select filter-combobox-field">
-            <span className="sr-only">{t("operations.driver")}</span>
-            <FilterCombobox
-              emptyText={t("operations.noDriversFound")}
-              label={t("operations.driver")}
-              onChange={(value) => updateFilters({ driverId: value })}
-              options={driverFilterOptions.map((driver) => ({
-                id: driver.id,
-                label: driver.name,
-                searchText: driver.code,
-              }))}
-              value={filters.driverId}
-            />
-          </label>
-          <FilterSelect
-            label={t("areas.emirate")}
-            onChange={(value) => {
-              setFilterEmirateId(value);
-              setFilterArea(undefined);
-              // Area is cleared because it belongs to the previous Emirate.
-              updateFilters({ areaId: "", emirateId: value });
-            }}
-            value={filterEmirateId}
-          >
-            {emirateFilterOptions.map((emirate) => (
-              <option key={emirate.id} value={emirate.id}>
-                {localizeName(textLanguage, { ar: emirate.nameAr, en: emirate.nameEn })}
-              </option>
-            ))}
-          </FilterSelect>
-          <label className="filter-select filter-area">
-            <span className="sr-only">{t("operations.areaField")}</span>
-            {filterEmirateId === "" ? (
-              <input disabled placeholder={t("areas.selectEmirateFirst")} readOnly value="" />
-            ) : (
-              <SearchCombobox<CompanyArea>
-                api={api}
-                emptyText={t("areas.noneFound")}
-                getLabel={(area) =>
-                  localizeName(textLanguage, { ar: area.nameAr, en: area.nameEn })
-                }
-                key={filterEmirateId}
-                label={t("operations.areaField")}
-                onChange={(area) => {
-                  setFilterArea(area);
-                  updateFilters({ areaId: area?.id ?? "" });
-                }}
-                path={`configuration/areas/search?emirateId=${encodeURIComponent(
-                  filterEmirateId,
-                )}&activeOnly=true`}
-                placeholder={t("areas.searchPlaceholder")}
-                value={filterArea}
+            <label className="filter-select filter-combobox-field">
+              <span className="sr-only">{t("operations.trader")}</span>
+              <FilterCombobox
+                emptyText={t("operations.noTradersFound")}
+                label={t("operations.trader")}
+                onChange={(value) => updateFilters({ traderId: value })}
+                options={traderFilterOptions.map((trader) => ({
+                  id: trader.id,
+                  label: trader.name,
+                  searchText: trader.code,
+                }))}
+                value={filters.traderId}
               />
-            )}
-          </label>
-          <FilterSelect
-            label={t("operations.deliveryStatus")}
-            onChange={(value) => updateFilters({ deliveryStatus: value })}
-            value={filters.deliveryStatus}
-          >
-            {deliveryStatuses.map((status) => (
-              <option key={status} value={status}>
-                {t(`statuses.${status}`)}
-              </option>
-            ))}
-          </FilterSelect>
-          <div className="filter-grouping-multi-select" id="grouping-popover-anchor">
+            </label>
+            <label className="filter-select filter-combobox-field">
+              <span className="sr-only">{t("operations.driver")}</span>
+              <FilterCombobox
+                emptyText={t("operations.noDriversFound")}
+                label={t("operations.driver")}
+                onChange={(value) => updateFilters({ driverId: value })}
+                options={driverFilterOptions.map((driver) => ({
+                  id: driver.id,
+                  label: driver.name,
+                  searchText: driver.code,
+                }))}
+                value={filters.driverId}
+              />
+            </label>
+            <FilterSelect
+              label={t("areas.emirate")}
+              onChange={(value) => {
+                setFilterEmirateId(value);
+                setFilterArea(undefined);
+                // Area is cleared because it belongs to the previous Emirate.
+                updateFilters({ areaId: "", emirateId: value });
+              }}
+              value={filterEmirateId}
+            >
+              {emirateFilterOptions.map((emirate) => (
+                <option key={emirate.id} value={emirate.id}>
+                  {localizeName(textLanguage, { ar: emirate.nameAr, en: emirate.nameEn })}
+                </option>
+              ))}
+            </FilterSelect>
+            <label className="filter-select filter-area">
+              <span className="sr-only">{t("operations.areaField")}</span>
+              {filterEmirateId === "" ? (
+                <input disabled placeholder={t("areas.selectEmirateFirst")} readOnly value="" />
+              ) : (
+                <SearchCombobox<CompanyArea>
+                  api={api}
+                  emptyText={t("areas.noneFound")}
+                  getLabel={(area) =>
+                    localizeName(textLanguage, { ar: area.nameAr, en: area.nameEn })
+                  }
+                  key={filterEmirateId}
+                  label={t("operations.areaField")}
+                  onChange={(area) => {
+                    setFilterArea(area);
+                    updateFilters({ areaId: area?.id ?? "" });
+                  }}
+                  path={`configuration/areas/search?emirateId=${encodeURIComponent(
+                    filterEmirateId,
+                  )}&activeOnly=true`}
+                  placeholder={t("areas.searchPlaceholder")}
+                  value={filterArea}
+                />
+              )}
+            </label>
+            <FilterSelect
+              label={t("operations.deliveryStatus")}
+              onChange={(value) => updateFilters({ deliveryStatus: value })}
+              value={filters.deliveryStatus}
+            >
+              {deliveryStatuses.map((status) => (
+                <option key={status} value={status}>
+                  {t(`statuses.${status}`)}
+                </option>
+              ))}
+            </FilterSelect>
+            <FilterSelect
+              label={t("operations.orderType")}
+              onChange={(value) => updateFilters({ orderType: value })}
+              value={filters.orderType}
+            >
+              <option value="delivery">{t("operations.internalDelivery")}</option>
+              <option value="collect_order">{t("operations.collectOrder")}</option>
+            </FilterSelect>
+            <div className="filter-grouping-multi-select" id="grouping-popover-anchor">
+              <button
+                className="grouping-button"
+                onClick={() => {
+                  const popover = document.getElementById("grouping-popover");
+                  if (popover?.style.display === "none" || !popover?.style.display) {
+                    popover!.style.display = "block";
+                  } else {
+                    popover!.style.display = "none";
+                  }
+                }}
+                type="button"
+              >
+                <span className="grouping-label">
+                  {t("operations.grouping")}
+                  {Array.isArray(grouping) && grouping.length > 0 && (
+                    <>
+                      :{" "}
+                      <span className="grouping-values">
+                        {grouping
+                          .map((d) =>
+                            d === "area"
+                              ? t("operations.groupByArea", { defaultValue: "Area" })
+                              : d === "trader"
+                                ? t("operations.groupByTrader", { defaultValue: "Trader" })
+                                : d === "driver"
+                                  ? t("operations.groupByDriver")
+                                  : t("operations.groupByStatus"),
+                          )
+                          .join(", ")}
+                      </span>
+                    </>
+                  )}
+                </span>
+                <ChevronDown aria-hidden="true" size={16} style={{ marginLeft: "6px" }} />
+              </button>
+              <div
+                className="grouping-popover"
+                id="grouping-popover"
+                style={{ display: "none" }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <label className="grouping-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={Array.isArray(grouping) && grouping.includes("area")}
+                    onChange={() => toggleGroupingDimension("area")}
+                  />
+                  Area
+                </label>
+                <label className="grouping-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={Array.isArray(grouping) && grouping.includes("trader")}
+                    onChange={() => toggleGroupingDimension("trader")}
+                  />
+                  Trader
+                </label>
+                <label className="grouping-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={Array.isArray(grouping) && grouping.includes("driver")}
+                    onChange={() => toggleGroupingDimension("driver")}
+                  />
+                  Driver
+                </label>
+                <label className="grouping-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={Array.isArray(grouping) && grouping.includes("status")}
+                    onChange={() => toggleGroupingDimension("status")}
+                  />
+                  Status
+                </label>
+                {grouping !== "" && (
+                  <>
+                    <div className="grouping-divider" />
+                    <button
+                      className="grouping-clear-button"
+                      onClick={() => {
+                        clearAllGrouping();
+                        document.getElementById("grouping-popover")!.style.display = "none";
+                      }}
+                      type="button"
+                    >
+                      {t("operations.clearGrouping")}
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+            <label className="filter-date">
+              <span>{t("operations.dateFrom")}</span>
+              <input
+                onChange={(event) => updateFilters({ dateFrom: event.target.value })}
+                type="date"
+                value={filters.dateFrom}
+              />
+            </label>
+            <label className="filter-date">
+              <span>{t("operations.dateTo")}</span>
+              <input
+                onChange={(event) => updateFilters({ dateTo: event.target.value })}
+                type="date"
+                value={filters.dateTo}
+              />
+            </label>
             <button
-              className="grouping-button"
+              className="button button-link"
               onClick={() => {
-                const popover = document.getElementById("grouping-popover");
-                if (popover?.style.display === "none" || !popover?.style.display) {
-                  popover!.style.display = "block";
-                } else {
-                  popover!.style.display = "none";
-                }
+                // Clear Filters keeps the selected view and the page size; it
+                // clears the filters that apply to it and resets the page.
+                list.setFilters({
+                  ...Object.fromEntries(orderFilterKeys.map((key) => [key, ""])),
+                  quickView: filters.quickView,
+                  ...(filters.quickView === "delivery" ? { dateMode: "", deliveredOnly: "" } : {}),
+                });
+                setFilterEmirateId("");
+                setFilterArea(undefined);
               }}
               type="button"
             >
-              <span className="grouping-label">
-                {t("operations.grouping")}
-                {Array.isArray(grouping) && grouping.length > 0 && (
-                  <>
-                    :{" "}
-                    <span className="grouping-values">
-                      {grouping
-                        .map((d) =>
-                          d === "area"
-                            ? t("operations.groupByArea", { defaultValue: "Area" })
-                            : d === "trader"
-                              ? t("operations.groupByTrader", { defaultValue: "Trader" })
-                              : d === "driver"
-                                ? t("operations.groupByDriver")
-                                : t("operations.groupByStatus"),
-                        )
-                        .join(", ")}
-                    </span>
-                  </>
-                )}
-              </span>
-              <ChevronDown aria-hidden="true" size={16} style={{ marginLeft: "6px" }} />
+              {t("operations.clearFilters")}
             </button>
-            <div
-              className="grouping-popover"
-              id="grouping-popover"
-              style={{ display: "none" }}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <label className="grouping-checkbox">
-                <input
-                  type="checkbox"
-                  checked={Array.isArray(grouping) && grouping.includes("area")}
-                  onChange={() => toggleGroupingDimension("area")}
-                />
-                Area
-              </label>
-              <label className="grouping-checkbox">
-                <input
-                  type="checkbox"
-                  checked={Array.isArray(grouping) && grouping.includes("trader")}
-                  onChange={() => toggleGroupingDimension("trader")}
-                />
-                Trader
-              </label>
-              <label className="grouping-checkbox">
-                <input
-                  type="checkbox"
-                  checked={Array.isArray(grouping) && grouping.includes("driver")}
-                  onChange={() => toggleGroupingDimension("driver")}
-                />
-                Driver
-              </label>
-              <label className="grouping-checkbox">
-                <input
-                  type="checkbox"
-                  checked={Array.isArray(grouping) && grouping.includes("status")}
-                  onChange={() => toggleGroupingDimension("status")}
-                />
-                Status
-              </label>
-              {grouping !== "" && (
-                <>
-                  <div className="grouping-divider" />
+          </div>
+
+          {selectedCount > 0 ? (
+            <div className="bulk-toolbar" role="region" aria-label={t("operations.bulkActions")}>
+              <div>
+                <CheckSquare aria-hidden="true" size={18} />
+                <strong>
+                  {t("operations.selectedCount", {
+                    count: summary?.selectedCount ?? selectedCount,
+                  })}
+                </strong>
+                <span>
+                  {formatCurrency(summary?.selectedAmountToCollect ?? "0", "AED", locale)}
+                </span>
+              </div>
+              <div className="bulk-actions">
+                {canAssignDriver ? (
+                  <button onClick={() => setBulkAction("assign")} type="button">
+                    <Truck aria-hidden="true" size={17} />
+                    {t("operations.assignDriver")}
+                  </button>
+                ) : null}
+                {canReconcile ? (
                   <button
-                    className="grouping-clear-button"
-                    onClick={() => {
-                      clearAllGrouping();
-                      document.getElementById("grouping-popover")!.style.display = "none";
-                    }}
+                    onClick={() =>
+                      onNavigate(
+                        collectFromDriverPath({
+                          driverId: bulkSelectedOrders[0]?.assignedDriverId ?? filters.driverId,
+                          orderIds: bulkSelectedOrders.map((order) => order.id),
+                        }),
+                      )
+                    }
                     type="button"
                   >
-                    {t("operations.clearGrouping")}
+                    <HandCoins aria-hidden="true" size={17} />
+                    {t("operations.actions.collectMoney")}
                   </button>
-                </>
-              )}
-            </div>
-          </div>
-          <label className="filter-date">
-            <span>{t("operations.dateFrom")}</span>
-            <input
-              onChange={(event) => updateFilters({ dateFrom: event.target.value })}
-              type="date"
-              value={filters.dateFrom}
-            />
-          </label>
-          <label className="filter-date">
-            <span>{t("operations.dateTo")}</span>
-            <input
-              onChange={(event) => updateFilters({ dateTo: event.target.value })}
-              type="date"
-              value={filters.dateTo}
-            />
-          </label>
-          <button
-            className="button button-link"
-            onClick={() => {
-              // Clear Filters keeps the selected view and the page size; it
-              // clears the filters that apply to it and resets the page.
-              list.setFilters({
-                ...Object.fromEntries(orderFilterKeys.map((key) => [key, ""])),
-                quickView: filters.quickView,
-                ...(filters.quickView === "delivery"
-                  ? { dateMode: "calendar_date", deliveredOnly: "true" }
-                  : {}),
-              });
-              setFilterEmirateId("");
-              setFilterArea(undefined);
-            }}
-            type="button"
-          >
-            {t("operations.clearFilters")}
-          </button>
-        </div>
-
-        {selectedCount > 0 ? (
-          <div className="bulk-toolbar" role="region" aria-label={t("operations.bulkActions")}>
-            <div>
-              <CheckSquare aria-hidden="true" size={18} />
-              <strong>
-                {t("operations.selectedCount", { count: summary?.selectedCount ?? selectedCount })}
-              </strong>
-              <span>{formatCurrency(summary?.selectedAmountToCollect ?? "0", "AED", locale)}</span>
-            </div>
-            <div className="bulk-actions">
-              {canAssignDriver ? (
-                <button onClick={() => setBulkAction("assign")} type="button">
-                  <Truck aria-hidden="true" size={17} />
-                  {t("operations.assignDriver")}
-                </button>
-              ) : null}
-              {canReconcile ? (
+                ) : null}
+                {canSettle ? (
+                  <button onClick={() => onNavigate("/trader-settlements")} type="button">
+                    <Banknote aria-hidden="true" size={17} />
+                    {t("operations.actions.moneyOut")}
+                  </button>
+                ) : null}
+                {canUpdateStatus ? (
+                  <button onClick={() => setBulkAction("status")} type="button">
+                    <MoreHorizontal aria-hidden="true" size={17} />
+                    {t("operations.changeStatus")}
+                  </button>
+                ) : null}
+                {canManifest ? (
+                  <button onClick={() => setBulkAction("manifest")} type="button">
+                    <Printer aria-hidden="true" size={17} />
+                    {t("operations.actions.printManifest")}
+                  </button>
+                ) : null}
+                {canUpdateStatus && filters.quickView === "hold" && !allMatching ? (
+                  <button onClick={() => setBulkAction("reactivate")} type="button">
+                    {t("operations.reactivateHoldOrders")}
+                  </button>
+                ) : null}
                 <button
-                  onClick={() =>
-                    onNavigate(
-                      collectFromDriverPath({
-                        driverId: bulkSelectedOrders[0]?.assignedDriverId ?? filters.driverId,
-                        orderIds: bulkSelectedOrders.map((order) => order.id),
-                      }),
-                    )
-                  }
+                  disabled={allMatching || bulkSelectedOrders.length === 0}
+                  onClick={() => void copyNumbers()}
                   type="button"
                 >
-                  <HandCoins aria-hidden="true" size={17} />
-                  {t("operations.actions.collectMoney")}
+                  {t("operations.copyNumbers")}
                 </button>
-              ) : null}
-              {canSettle ? (
-                <button onClick={() => onNavigate("/trader-settlements")} type="button">
-                  <Banknote aria-hidden="true" size={17} />
-                  {t("operations.actions.moneyOut")}
+                <button className="button-link" onClick={clearSelection} type="button">
+                  {t("common.clear")}
                 </button>
-              ) : null}
-              {canUpdateStatus ? (
-                <button onClick={() => setBulkAction("status")} type="button">
-                  <MoreHorizontal aria-hidden="true" size={17} />
-                  {t("operations.changeStatus")}
-                </button>
-              ) : null}
-              {canManifest ? (
-                <button onClick={() => setBulkAction("manifest")} type="button">
-                  <Printer aria-hidden="true" size={17} />
-                  {t("operations.actions.printManifest")}
-                </button>
-              ) : null}
-              <button className="button-link" onClick={clearSelection} type="button">
-                {t("common.clear")}
-              </button>
+              </div>
             </div>
-          </div>
-        ) : null}
+          ) : null}
 
-        {orderActionNotice === undefined ? null : (
-          <div className="alert alert-info" role="status">
-            {orderActionNotice}
-          </div>
-        )}
-        <div className="orders-table-scroll" ref={ordersScrollRef}>
-          <table className="orders-table">
-            <thead>
-              <tr>
-                <th>
-                  {(grouping === "" || grouping.length === 0) && canSelectOrders ? (
-                    <input
-                      aria-label={t("operations.selectCurrentPage")}
-                      checked={pageSelected}
-                      onChange={togglePage}
-                      type="checkbox"
-                    />
-                  ) : (
-                    <span className="sr-only">{t("operations.groupSelection")}</span>
-                  )}
-                </th>
-                <th>{t("operations.serialNumber")}</th>
-                <th>{t("operations.referenceNumber")}</th>
-                <th>{t("operations.trader")}</th>
-                <th>{t("operations.customer")}</th>
-                <th>{t("operations.assignedDriver")}</th>
-                <th>{t("operations.codAmount")}</th>
-                <th>{t("operations.totalDeductions")}</th>
-                <th>{t("operations.amountDueToTrader")}</th>
-                <th>{t("operations.amountToCollect")}</th>
-                <th>{t("operations.deliveryStatus")}</th>
-                {!deliveryView ? null : (
-                  <>
-                    <th>{t("operations.deliveryDateTime")}</th>
-                    <th>{t("operations.deliveryBusinessDate")}</th>
-                  </>
-                )}
-                <th>{t("operations.accountingColumn")}</th>
-                <th>{t("operations.financialStatusColumn")}</th>
-                <th>
-                  <span className="sr-only">{t("common.actions")}</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {grouping === ""
-                ? orderItems.map(renderOrderRow)
-                : renderGroupsRecursive(groups)}
-              {!loading && orderItems.length === 0 ? (
+          {orderActionNotice === undefined ? null : (
+            <div className="alert alert-info" role="status">
+              {orderActionNotice}
+            </div>
+          )}
+          <div className="orders-table-scroll" ref={ordersScrollRef}>
+            <table className="orders-table">
+              <thead>
                 <tr>
-                  <td className="empty-state" colSpan={14 + deliveryColumns}>
-                    {t("operations.noOrders")}
-                  </td>
+                  <th>
+                    {(grouping === "" || grouping.length === 0) && canSelectOrders ? (
+                      <input
+                        aria-label={t("operations.selectCurrentPage")}
+                        checked={pageSelected}
+                        onChange={togglePage}
+                        type="checkbox"
+                      />
+                    ) : (
+                      <span className="sr-only">{t("operations.groupSelection")}</span>
+                    )}
+                  </th>
+                  <th>{t("operations.serialNumber")}</th>
+                  <th>{t("operations.referenceNumber")}</th>
+                  <th>{t("operations.trader")}</th>
+                  <th>{t("operations.customer")}</th>
+                  <th>{t("operations.assignedDriver")}</th>
+                  <th>{t("operations.codAmount")}</th>
+                  <th>{t("operations.totalDeductions")}</th>
+                  <th>{t("operations.amountDueToTrader")}</th>
+                  <th>{t("operations.amountToCollect")}</th>
+                  <th>{t("operations.deliveryStatus")}</th>
+                  <th>{t("operations.accountingColumn")}</th>
+                  <th>{t("operations.financialStatusColumn")}</th>
+                  <th>
+                    <span className="sr-only">{t("common.actions")}</span>
+                  </th>
                 </tr>
-              ) : null}
-            </tbody>
-          </table>
-        </div>
-        {/* Placed after the table and before the selection and pagination
+              </thead>
+              <tbody>
+                {grouping === "" ? orderItems.map(renderOrderRow) : renderGroupsRecursive(groups)}
+                {!loading && orderItems.length === 0 ? (
+                  <tr>
+                    <td className="empty-state" colSpan={14}>
+                      {t("operations.noOrders")}
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
+          {/* Placed after the table and before the selection and pagination
             controls, so a sticky bar can never sit on top of them. */}
-        <StickyHorizontalScrollbar
-          label={t("operations.ordersHorizontalScroll")}
-          targetRef={ordersScrollRef}
-        />
-        {(grouping === "" || grouping.length === 0) &&
-        pageSelected &&
-        !allMatching &&
-        matchingCount > pageIds.length ? (
-          <button
-            className="select-all-matching"
-            onClick={() => {
-              setAllMatching(true);
-              setSelectedIds(new Set());
-            }}
-            type="button"
-          >
-            {t("operations.selectAllMatching", { count: matchingCount })}
-          </button>
-        ) : null}
-        <footer className="orders-pagination">
-          <span>
-            {hasNarrowingFilters
-              ? t("operations.resultCountFilteredScoped", {
-                  matching: matchingCount,
-                  scope: t(`operations.countScope.${filters.quickView}`),
-                  total: tabTotalCount,
-                })
-              : t("operations.resultCountScoped", {
-                  count: tabTotalCount,
-                  scope: t(`operations.countScope.${filters.quickView}`),
-                })}
-          </span>
-          <label>
-            <span>{t("operations.pageSize")}</span>
-            <select
-              onChange={(event) => {
-                setPageSize(Number(event.target.value) as 25 | 50 | 100);
+          <StickyHorizontalScrollbar
+            label={t("operations.ordersHorizontalScroll")}
+            targetRef={ordersScrollRef}
+          />
+          {(grouping === "" || grouping.length === 0) &&
+          pageSelected &&
+          !allMatching &&
+          matchingCount > pageIds.length ? (
+            <button
+              className="select-all-matching"
+              onClick={() => {
+                setAllMatching(true);
+                setSelectedIds(new Set());
               }}
-              value={pageSize}
+              type="button"
             >
-              {[25, 50, 100].map((size) => (
-                <option key={size}>{size}</option>
-              ))}
-            </select>
-          </label>
-          <button
-            aria-label={t("operations.previousPage")}
-            className="icon-button"
-            disabled={page <= 1}
-            onClick={() => setPage(page - 1)}
-            type="button"
-          >
-            <ChevronLeft aria-hidden="true" size={18} />
-          </button>
-          <strong>{page}</strong>
-          <button
-            aria-label={t("operations.nextPage")}
-            className="icon-button"
-            disabled={page * pageSize >= matchingCount}
-            onClick={() => setPage(page + 1)}
-            type="button"
-          >
-            <ChevronRight aria-hidden="true" size={18} />
-          </button>
-        </footer>
+              {t("operations.selectAllMatching", { count: matchingCount })}
+            </button>
+          ) : null}
+          <footer className="orders-pagination">
+            <span>
+              {hasNarrowingFilters
+                ? t("operations.resultCountFilteredScoped", {
+                    matching: matchingCount,
+                    scope: t(`operations.countScope.${filters.quickView}`),
+                    total: tabTotalCount,
+                  })
+                : t("operations.resultCountScoped", {
+                    count: tabTotalCount,
+                    scope: t(`operations.countScope.${filters.quickView}`),
+                  })}
+            </span>
+            <label>
+              <span>{t("operations.pageSize")}</span>
+              <select
+                onChange={(event) => {
+                  setPageSize(Number(event.target.value) as 25 | 50 | 100);
+                }}
+                value={pageSize}
+              >
+                {[25, 50, 100].map((size) => (
+                  <option key={size}>{size}</option>
+                ))}
+              </select>
+            </label>
+            <button
+              aria-label={t("operations.previousPage")}
+              className="icon-button"
+              disabled={page <= 1}
+              onClick={() => setPage(page - 1)}
+              type="button"
+            >
+              <ChevronLeft aria-hidden="true" size={18} />
+            </button>
+            <strong>{page}</strong>
+            <button
+              aria-label={t("operations.nextPage")}
+              className="icon-button"
+              disabled={page * pageSize >= matchingCount}
+              onClick={() => setPage(page + 1)}
+              type="button"
+            >
+              <ChevronRight aria-hidden="true" size={18} />
+            </button>
+          </footer>
+        </>
       </section>
       {createOpen ? (
         <CreateOrderDialog
@@ -1349,6 +1493,18 @@ export function OrdersModuleWorkspace({
           api={api}
           onClose={() => setBulkAction(undefined)}
           selection={manifestSelection}
+        />
+      ) : null}
+      {bulkAction === "reactivate" ? (
+        <HoldReactivationDialog
+          api={api}
+          orders={bulkSelectedOrders}
+          onClose={() => setBulkAction(undefined)}
+          onComplete={async () => {
+            setBulkAction(undefined);
+            clearSelection();
+            await load();
+          }}
         />
       ) : null}
     </>
@@ -2376,8 +2532,7 @@ export function OrderDetailsWorkspace({
   const isDriverSelfServiceUser =
     !isOfficeStatusUser && permissions.includes("orders.driver_self_service");
   const canHold =
-    isOfficeStatusUser ||
-    (isDriverSelfServiceUser && detail.deliveryStatus === "out_for_delivery");
+    isOfficeStatusUser || (isDriverSelfServiceUser && detail.deliveryStatus === "out_for_delivery");
   return (
     <>
       <div className="order-detail-header">
@@ -3155,7 +3310,7 @@ function DriverShipmentManifestDialog({
   const reportLanguage = branding?.textLanguage === "ar" ? "ar" : "en";
   const [preview, setPreview] = useState<{
     header: { driverMobile: string; driverName: string; orderCount: number };
-    summary: { totalCod: string; totalOrders: number; totalPackages: number };
+    summary: { totalCod: string; totalOrders: number };
   }>();
   const [error, setError] = useState<string>();
   const pdf = useReconciliationPdfActions(api);
@@ -3165,7 +3320,7 @@ function DriverShipmentManifestDialog({
     try {
       const result = await api.post<{
         header: { driverMobile: string; driverName: string; orderCount: number };
-        summary: { totalCod: string; totalOrders: number; totalPackages: number };
+        summary: { totalCod: string; totalOrders: number };
       }>("operations/cash/driver-shipment-manifest/data", selection);
       setPreview(result);
     } catch (requestError) {
@@ -3178,7 +3333,7 @@ function DriverShipmentManifestDialog({
     void api
       .post<{
         header: { driverMobile: string; driverName: string; orderCount: number };
-        summary: { totalCod: string; totalOrders: number; totalPackages: number };
+        summary: { totalCod: string; totalOrders: number };
       }>("operations/cash/driver-shipment-manifest/data", selection)
       .then((result) => active && setPreview(result))
       .catch((requestError) =>
@@ -3200,6 +3355,23 @@ function DriverShipmentManifestDialog({
       selection,
     );
     if (requestError !== undefined) {
+      setError(message(requestError, t("operations.manifestPreviewFailed")));
+    }
+  };
+  const exportExcel = async () => {
+    setError(undefined);
+    try {
+      const blob = await api.postBinary("operations/cash/driver-shipment-manifest/xlsx", selection);
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      const manifestDate = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Asia/Dubai",
+      }).format(new Date());
+      anchor.download = `Driver-Shipment-Manifest-${(preview?.header.driverName ?? "Driver").replaceAll(/[^A-Za-z0-9]+/g, "-")}-${manifestDate}.xlsx`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+    } catch (requestError) {
       setError(message(requestError, t("operations.manifestPreviewFailed")));
     }
   };
@@ -3242,10 +3414,6 @@ function DriverShipmentManifestDialog({
               <dt>{t("operations.manifestTotalCod")}</dt>
               <dd>{formatCurrency(preview.summary.totalCod, "AED", locale)}</dd>
             </div>
-            <div>
-              <dt>{t("operations.manifestTotalPackages")}</dt>
-              <dd>{preview.summary.totalPackages}</dd>
-            </div>
           </dl>
           {error === undefined ? null : <div className="alert alert-error">{error}</div>}
           <div className="modal-actions">
@@ -3270,12 +3438,216 @@ function DriverShipmentManifestDialog({
             >
               {pdf.busy === "download" ? t("common.loading") : t("operations.downloadPdf")}
             </button>
+            <button
+              disabled={pdf.busy !== undefined}
+              onClick={() => void exportExcel()}
+              type="button"
+            >
+              {t("operations.exportExcel")}
+            </button>
             <button className="button button-primary" onClick={onClose} type="button">
               {t("common.close")}
             </button>
           </div>
         </>
       )}
+    </Modal>
+  );
+}
+
+function HoldReactivationDialog({
+  api,
+  orders,
+  onClose,
+  onComplete,
+}: {
+  api: ApiClient;
+  orders: readonly OperationsOrder[];
+  onClose: () => void;
+  onComplete: () => Promise<void>;
+}) {
+  const { t } = useTranslation();
+  const today = new Date().toISOString().slice(0, 10);
+  const [rows, setRows] = useState(() =>
+    orders.map((order) => ({
+      order,
+      newSerialNumber: "",
+      newSerialDate: today,
+      newStatus: order.assignedDriverId ? "assigned_to_driver" : "in_branch",
+    })),
+  );
+  const [error, setError] = useState<string>();
+  const [busy, setBusy] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  useEffect(() => {
+    void api
+      .get<{ serialNumber: string }>("operations/orders/next-serial-number")
+      .then((result) => {
+        const base = Number(result.serialNumber);
+        setRows((current) =>
+          current.map((row, index) => ({
+            ...row,
+            newSerialNumber: Number.isFinite(base)
+              ? String(base + index)
+              : `${result.serialNumber}-${index + 1}`,
+          })),
+        );
+      })
+      .catch(() => setError(t("operations.nextSerialFailed")));
+  }, [api, t]);
+  const batchKeys = rows.map(
+    (row) => `${row.newSerialDate}:${row.newSerialNumber.trim().toLowerCase()}`,
+  );
+  const duplicateKeys = new Set(
+    batchKeys.filter(
+      (key, index) => key.slice(key.indexOf(":") + 1) !== "" && batchKeys.indexOf(key) !== index,
+    ),
+  );
+  const duplicate = duplicateKeys.size > 0;
+  const submit = async () => {
+    if (duplicate || rows.some((row) => !row.newSerialNumber.trim()))
+      return setError(t("operations.duplicateSerialBatch"));
+    setBusy(true);
+    setError(undefined);
+    try {
+      await api.post("operations/orders/hold-reactivation", {
+        orders: rows.map((row) => ({
+          orderId: row.order.id,
+          newSerialNumber: row.newSerialNumber,
+          newSerialDate: row.newSerialDate,
+          newStatus: row.newStatus,
+        })),
+      });
+      await onComplete();
+    } catch (cause) {
+      setError(message(cause, t("operations.holdReactivationFailed")));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal
+      className="modal-wide"
+      closeLabel={t("common.close")}
+      onRequestClose={onClose}
+      title={t("operations.reactivateHoldOrders")}
+      titleId="hold-reactivation-title"
+    >
+      {error ? <div className="alert alert-error">{error}</div> : null}
+      <div className="table-shell">
+        <table>
+          <thead>
+            <tr>
+              <th>{t("operations.orderNumber")}</th>
+              <th>{t("operations.customer")}</th>
+              <th>{t("operations.trader")}</th>
+              <th>{t("operations.oldSerialNumber")}</th>
+              <th>{t("operations.oldSerialDate")}</th>
+              <th>{t("operations.newSerialNumber")}</th>
+              <th>{t("operations.newSerialDate")}</th>
+              <th>{t("operations.newStatus")}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, index) => (
+              <tr key={row.order.id}>
+                <td>{row.order.orderNumber}</td>
+                <td>{row.order.customerName}</td>
+                <td>{row.order.traderName}</td>
+                <td>{row.order.serialNumber}</td>
+                <td>{row.order.orderDate}</td>
+                <td>
+                  <input
+                    aria-invalid={duplicateKeys.has(batchKeys[index] ?? "")}
+                    value={row.newSerialNumber}
+                    onChange={(e) =>
+                      setRows((current) =>
+                        current.map((x, i) =>
+                          i === index ? { ...x, newSerialNumber: e.target.value } : x,
+                        ),
+                      )
+                    }
+                  />
+                  {duplicateKeys.has(batchKeys[index] ?? "") ? (
+                    <small className="field-error" role="alert">
+                      {t("operations.duplicateSerialInBatch", {
+                        serial: row.newSerialNumber,
+                      })}
+                    </small>
+                  ) : null}
+                </td>
+                <td>
+                  <input
+                    type="date"
+                    value={row.newSerialDate}
+                    onChange={(e) =>
+                      setRows((current) =>
+                        current.map((x, i) =>
+                          i === index ? { ...x, newSerialDate: e.target.value } : x,
+                        ),
+                      )
+                    }
+                  />
+                </td>
+                <td>
+                  <select
+                    value={row.newStatus}
+                    onChange={(e) =>
+                      setRows((current) =>
+                        current.map((x, i) =>
+                          i === index ? { ...x, newStatus: e.target.value } : x,
+                        ),
+                      )
+                    }
+                  >
+                    <option value="in_branch">{t("statuses.in_branch")}</option>
+                    {row.order.assignedDriverId ? (
+                      <>
+                        <option value="assigned_to_driver">
+                          {t("statuses.assigned_to_driver")}
+                        </option>
+                        <option value="out_for_delivery">{t("statuses.out_for_delivery")}</option>
+                      </>
+                    ) : null}
+                  </select>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {confirming ? (
+        <div className="card">
+          <strong>
+            {t("operations.selectedOrders")}: {rows.length}
+          </strong>
+          <p>{t("operations.serialNumbersToChange", { count: rows.length })}</p>
+        </div>
+      ) : null}
+      <div className="modal-actions">
+        <button onClick={onClose} type="button">
+          {t("common.cancel")}
+        </button>
+        {confirming ? (
+          <button
+            className="button button-primary"
+            disabled={busy || duplicate}
+            onClick={() => void submit()}
+            type="button"
+          >
+            {t("operations.confirmAndUpdate")}
+          </button>
+        ) : (
+          <button
+            className="button button-primary"
+            disabled={duplicate}
+            onClick={() => setConfirming(true)}
+            type="button"
+          >
+            {t("common.continue")}
+          </button>
+        )}
+      </div>
     </Modal>
   );
 }
@@ -3316,7 +3688,8 @@ type OrderStatusKey =
   | "money_received_by_trader"
   | "settlement_reversed"
   | "closed"
-  | "cancelled";
+  | "cancelled"
+  | "collect_order";
 
 // Delivery, cash and settlement remain independent controls in storage. This is the
 // single operator-facing status, ordered by the latest meaningful lifecycle event.
@@ -3599,13 +3972,14 @@ const actionTargetStatus: Partial<Record<RowAction, string>> = {
 const driverSelfServiceActions: Readonly<Record<string, readonly RowAction[]>> = {
   assigned_to_driver: ["markOutForDelivery"],
   out_for_delivery: ["hold", "markDelivered", "returnToBranch"],
+  collect_order: ["close"],
 };
 
 function closeEligible(order: OperationsOrder): boolean {
   if (order.workflowGuidance?.nextActionCode === "close_order") return true;
   const status = order.deliveryStatus;
   return (
-    ["delivered", "returned_to_trader"].includes(status) &&
+    ["delivered", "returned_to_trader", "collect_order"].includes(status) &&
     ["reconciled", "not_applicable"].includes(order.driverReconciliationStatus) &&
     ["money_received_by_trader", "not_eligible"].includes(order.traderSettlementStatus) &&
     (status !== "returned_to_trader" || order.returnStatus === "returned_to_trader")
@@ -3627,7 +4001,9 @@ function availableActions(order: OperationsOrder): readonly RowAction[] {
   const base = ((): readonly RowAction[] => {
     switch (order.deliveryStatus) {
       case "new":
-        return ["markInBranch", "assignDriver", "hold", "cancel"];
+        return order.orderType === "collect_order"
+          ? ["assignDriver", "cancel"]
+          : ["markInBranch", "assignDriver", "hold", "cancel"];
       case "in_branch":
         return ["assignDriver", "cancel"];
       case "assigned_to_driver":
@@ -3659,6 +4035,8 @@ function availableActions(order: OperationsOrder): readonly RowAction[] {
             : (["moneyOut"] as const)),
           ...(closeEligible(order) ? (["close"] as const) : []),
         ];
+      case "collect_order":
+        return order.assignedDriverId === null ? ["assignDriver"] : ["close"];
       default:
         return [];
     }
@@ -4573,7 +4951,10 @@ function groupVisibleOrders(
         let emirateInfo: { code: string; name: string } | undefined;
 
         if (order.emirateNameEn) {
-          emirateInfo = { code: order.emirateNameEn.substring(0, 3).toUpperCase(), name: order.emirateNameEn };
+          emirateInfo = {
+            code: order.emirateNameEn.substring(0, 3).toUpperCase(),
+            name: order.emirateNameEn,
+          };
         } else if (areaEmirateMap) {
           // Try to find emirate by matching area name exactly (works for Arabic and English)
           emirateInfo = areaEmirateMap.get(areaName);
@@ -4642,9 +5023,7 @@ function groupVisibleOrders(
     return result.sort((left, right) => {
       if (dimension === "status") {
         const leftStatus = deriveOrderStatus(left.children[0]?.orders[0] ?? left.orders[0]!).key;
-        const rightStatus = deriveOrderStatus(
-          right.children[0]?.orders[0] ?? right.orders[0]!,
-        ).key;
+        const rightStatus = deriveOrderStatus(right.children[0]?.orders[0] ?? right.orders[0]!).key;
         return (statusOrder.get(leftStatus) ?? 999) - (statusOrder.get(rightStatus) ?? 999);
       }
       if (dimension === "driver") {
@@ -4793,6 +5172,7 @@ const deliveryStatuses = [
   "returned_to_trader",
   "cancelled",
   "closed",
+  "collect_order",
 ] as const;
 const visibleOrderStatuses: readonly OrderStatusKey[] = [
   "new",

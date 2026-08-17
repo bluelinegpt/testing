@@ -116,6 +116,7 @@ import {
   RegisterOrderAttachmentDto,
   OrderSelectionDto,
   ReverseDriverReconciliationDto,
+  ReactivateHoldOrdersDto,
   TraderSettlementEligibleOrdersQueryDto,
   TraderSettlementListQueryDto,
   TraderSettlementSummaryQueryDto,
@@ -170,6 +171,7 @@ export class OperationsController {
   public orders(
     @Query("search") search?: string,
     @Query("deliveryStatus") deliveryStatus?: string,
+    @Query("orderType") orderType?: "collect_order" | "delivery",
     @Query("cashStatus") cashStatus?: string,
     @Query("settlementStatus") settlementStatus?: string,
     @Query("traderId") traderId?: string,
@@ -179,7 +181,8 @@ export class OperationsController {
     @Query("referenceNumber") referenceNumber?: string,
     @Query("dateFrom") dateFrom?: string,
     @Query("dateTo") dateTo?: string,
-    @Query("quickView") quickView?: "active" | "all" | "cancelled" | "closed" | "hold",
+    @Query("quickView")
+    quickView?: "active" | "all" | "cancelled" | "closed" | "hold" | "accountant",
     @Query("deliveredOnly") deliveredOnly?: string,
     @Query("deliveryDateFrom") deliveryDateFrom?: string,
     @Query("deliveryDateTo") deliveryDateTo?: string,
@@ -196,6 +199,7 @@ export class OperationsController {
       dateFrom,
       dateTo,
       deliveryStatus,
+      orderType,
       driverId,
       areaId,
       emirateId,
@@ -641,6 +645,33 @@ export class OperationsController {
     response.send(bytes);
   }
 
+  @RequireAnyPermission("orders.update_delivery_status", "users_roles.manage")
+  @Post("orders/hold-reactivation")
+  public reactivateHoldOrders(@Body() input: ReactivateHoldOrdersDto, @Req() request: Request) {
+    return this.ordersWorkflow.reactivateHoldOrders(input, this.correlationId(request));
+  }
+
+  @RequireAnyPermission(
+    "reports.export",
+    "orders.assign_driver",
+    "orders.update_delivery_status",
+    "users_roles.manage",
+  )
+  @Post("cash/driver-shipment-manifest/xlsx")
+  public async driverShipmentManifestExcel(
+    @Body() input: GenerateShipmentManifestDto,
+    @Res() response: Response,
+  ): Promise<void> {
+    const report = await this.manifest.manifestExcel(input);
+    response.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
+    response.setHeader("Content-Disposition", `attachment; filename="${report.filename}"`);
+    response.setHeader("X-Content-Type-Options", "nosniff");
+    response.send(report.bytes);
+  }
+
   @RequireAnyPermission("reconciliations.reverse", "users_roles.manage")
   @ApiOperation({ summary: "Reverse a confirmed Driver cash reconciliation with a reason" })
   @Post("cash/reconciliations/:reconciliationId/reverse")
@@ -1084,7 +1115,9 @@ export class PortalController {
    * rather than a parameter on the existing one.
    */
   @RequireIdentityKinds("trader")
-  @ApiOperation({ summary: "Search the authenticated Trader's Orders across all Delivery Companies" })
+  @ApiOperation({
+    summary: "Search the authenticated Trader's Orders across all Delivery Companies",
+  })
   @Get("trader/orders/search/all-companies")
   public traderOrdersSearchAllCompanies(
     @Query("search") search?: string,

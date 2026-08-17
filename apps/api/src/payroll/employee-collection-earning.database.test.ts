@@ -207,6 +207,61 @@ const addRule = (
     ${from}::date,${to ?? null}::date)`.execute(transaction);
 
 describe.skipIf(!runDatabaseTests)("employee driver collection earnings", () => {
+  it("derives immutable earning sources from eligible closed Collect Orders", async () => {
+    await inRolledBackTransaction(async (transaction) => {
+      const fixture = await seed(transaction, "COLLECT");
+      await sql`insert into company_settings(company_id,timezone)
+        values(${fixture.companyId}::uuid,'Asia/Dubai')`.execute(transaction);
+      await addRule(transaction, fixture, "per_collected_order", 1, "2026-08-01");
+      const createCollect = async (number: string, driverId: string) => {
+        const id = randomUUID();
+        await sql`insert into orders(id,company_id,order_number,order_date,trader_id,area_id,
+          created_by_account_id,customer_name,customer_mobile_number,customer_address,package_count,
+          payment_condition,final_service_fee_snapshot,assigned_driver_id,customer_provenance_status,
+          pricing_provenance_status,service_fee_override_reason,order_type,delivery_status,driver_reconciliation_status,
+          trader_settlement_status)
+          values(${id}::uuid,${fixture.companyId}::uuid,${number},'2026-08-10',${fixture.traderId}::uuid,
+          ${fixture.areaId}::uuid,${fixture.actorId}::uuid,'Pickup Customer','971500000009','Pickup',1,
+          'customer_pays_cod_and_fee',0,${driverId}::uuid,'legacy_unattributed','legacy_unattributed','Collect Order',
+          'collect_order','collect_order','not_applicable','not_eligible')`.execute(transaction);
+        return id;
+      };
+      const eligible = await createCollect("COLLECT-ELIGIBLE", fixture.driverId);
+      const open = await createCollect("COLLECT-OPEN", fixture.driverId);
+      const wrongDriver = await createCollect("COLLECT-WRONG", fixture.outsourcedDriverId);
+      const outside = await createCollect("COLLECT-OUTSIDE", fixture.driverId);
+      await sql`update orders set delivery_status='closed',closed_at='2026-08-12T08:00:00Z'
+        where id=${eligible}::uuid`.execute(transaction);
+      await sql`update orders set delivery_status='closed',closed_at='2026-08-12T08:00:00Z'
+        where id=${wrongDriver}::uuid`.execute(transaction);
+      await sql`update orders set delivery_status='closed',closed_at='2026-09-02T08:00:00Z'
+        where id=${outside}::uuid`.execute(transaction);
+      const august = await sql<{amount:string;orderId:string;rate:string}>`select earned_amount::text amount,
+        order_id "orderId",rate_snapshot::text rate from employee_collect_order_earnings
+        where company_id=${fixture.companyId}::uuid and employee_id=${fixture.employeeId}::uuid
+          and closed_at>='2026-08-01' and closed_at<'2026-09-01' order by order_id`.execute(transaction);
+      expect(august.rows).toEqual([{ amount: "1.00", orderId: eligible, rate: "1.00" }]);
+      expect(august.rows.some(row=>row.orderId===open||row.orderId===wrongDriver||row.orderId===outside)).toBe(false);
+
+      const periodId=randomUUID();
+      await sql`insert into employee_driver_earning_periods(id,company_id,employee_id,driver_id,date_from,date_to,
+        delivered_order_count,collected_order_count,delivery_earnings,collection_rate_snapshot,
+        collection_earnings,total_earnings,calculated_by_account_id)
+        values(${periodId}::uuid,${fixture.companyId}::uuid,${fixture.employeeId}::uuid,${fixture.driverId}::uuid,
+        '2026-08-01','2026-08-31',0,1,0,1,1,1,${fixture.actorId}::uuid)`.execute(transaction);
+      await sql`update employee_collect_order_earnings set earning_period_id=${periodId}::uuid
+        where company_id=${fixture.companyId}::uuid and order_id=${eligible}::uuid and earning_period_id is null`.execute(transaction);
+      const reusable=await sql<{n:number}>`select count(*)::int n from employee_collect_order_earnings
+        where company_id=${fixture.companyId}::uuid and order_id=${eligible}::uuid and earning_period_id is null`.execute(transaction);
+      expect(reusable.rows[0]?.n).toBe(0);
+      await sql`update orders set customer_name='Changed Later' where id=${eligible}::uuid`.execute(transaction);
+      const snapshot=await sql<{amount:string;periodId:string;rate:string}>`select earned_amount::text amount,
+        earning_period_id "periodId",rate_snapshot::text rate from employee_collect_order_earnings
+        where company_id=${fixture.companyId}::uuid and order_id=${eligible}::uuid`.execute(transaction);
+      expect(snapshot.rows[0]).toEqual({amount:"1.00",periodId,rate:"1.00"});
+    });
+  });
+
   it("captures three linked Orders as one fact with no monetary amount", async () => {
     await inRolledBackTransaction(async (transaction) => {
       const fixture = await seed(transaction, "CEA");

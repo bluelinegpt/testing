@@ -29,6 +29,7 @@ import {
   createCalendarDateReportModeServiceStub,
 } from "../test/business-day-stubs.js";
 import { OutsourcedDriverFeeService } from "../payroll/outsourced-driver-fee.service.js";
+import { EmployeeCollectionEarningService } from "../payroll/employee-collection-earning.service.js";
 import { PushOutboxWriter } from "../push/push-outbox-writer.service.js";
 import { OrdersWorkflowService } from "./orders-workflow.service.js";
 
@@ -181,6 +182,7 @@ describe.skipIf(!runDatabaseTests)("OperationsHistoryWriter consumers", () => {
             readonly deliveryStatus?: string;
             readonly driverId?: string;
             readonly reconciliationStatus?: string;
+            readonly serialNumber?: string;
             readonly settlementStatus?: string;
           } = {},
         ): Promise<string> => {
@@ -189,6 +191,7 @@ describe.skipIf(!runDatabaseTests)("OperationsHistoryWriter consumers", () => {
           await sql`
             insert into orders (
               id, company_id, order_number, order_date, trader_id, area_id,
+              serial_number, serial_number_normalized,
               created_by_account_id, assigned_driver_id, customer_name,
               customer_mobile_number, customer_address, package_count, payment_condition,
               amount_collected, customer_amount_due, driver_cost,
@@ -199,7 +202,9 @@ describe.skipIf(!runDatabaseTests)("OperationsHistoryWriter consumers", () => {
               service_fee_override_reason
             ) values (
               ${orderId}::uuid, ${company.companyId}::uuid, ${`HIS-${suffix}`}, current_date,
-              ${company.traderId}::uuid, ${company.areaId}::uuid, ${company.accountId}::uuid,
+              ${company.traderId}::uuid, ${company.areaId}::uuid,
+              ${options.serialNumber ?? null}, ${options.serialNumber?.normalize("NFKC").trim().replace(/\s+/gu, " ").toLocaleLowerCase("en-US") ?? null},
+              ${company.accountId}::uuid,
               ${options.driverId ?? null}::uuid,
               'Customer', '971500000004', 'Address', 1, 'customer_pays_cod_and_fee',
               ${options.amountCollected ?? 0}, 100, 0, 100, 0, 0, 0, 0, 100,
@@ -475,6 +480,59 @@ describe.skipIf(!runDatabaseTests)("OperationsHistoryWriter consumers", () => {
         );
         expect(closedAfterPayment.processedCount).toBe(1);
 
+        // --- Hold reactivation: three rows, transactional rollback and history ---
+        const heldOrders = await Promise.all([
+          makeOrder(companyA, { deliveryStatus: "hold", driverId: companyA.driverId, serialNumber: "OLD 101" }),
+          makeOrder(companyA, { deliveryStatus: "hold", serialNumber: "OLD 102" }),
+          makeOrder(companyA, { deliveryStatus: "hold", driverId: companyA.driverId, serialNumber: "OLD 103" }),
+        ]);
+        const reactivationDate = "2026-08-17";
+        await expect(
+          workflow.reactivateHoldOrders(
+            {
+              orders: heldOrders.map((orderId, index) => ({
+                orderId,
+                newSerialDate: reactivationDate,
+                newSerialNumber: `NEW ${index + 101}`,
+                newStatus: index === 1 ? "out_for_delivery" : "in_branch",
+              })),
+            },
+            randomUUID(),
+          ),
+        ).rejects.toMatchObject({ errorCode: "hold_reactivation_driver_required" });
+        const rolledBack = await sql<{ count: number }>`select count(*)::int count from orders
+          where id in (${sql.join(heldOrders.map((id) => sql`${id}::uuid`))})
+            and delivery_status='hold' and serial_number like 'OLD %'`.execute(transaction);
+        expect(rolledBack.rows[0]?.count).toBe(3);
+
+        const reactivated = await workflow.reactivateHoldOrders(
+          {
+            orders: heldOrders.map((orderId, index) => ({
+              orderId,
+              newSerialDate: reactivationDate,
+              newSerialNumber: ` New   ${index + 101} `,
+              newStatus: "in_branch",
+            })),
+          },
+          `corr-${randomUUID()}`,
+        );
+        expect(reactivated.processedCount).toBe(3);
+        const serialHistory = await sql<{
+          newSerial: string; oldSerial: string; reason: string;
+        }>`select new_serial_number "newSerial",old_serial_number "oldSerial",reason
+          from order_serial_history where order_id in (${sql.join(heldOrders.map((id) => sql`${id}::uuid`))})
+          order by old_serial_number`.execute(transaction);
+        expect(serialHistory.rows).toEqual([
+          { newSerial: " New   101 ", oldSerial: "OLD 101", reason: "Hold Reactivation" },
+          { newSerial: " New   102 ", oldSerial: "OLD 102", reason: "Hold Reactivation" },
+          { newSerial: " New   103 ", oldSerial: "OLD 103", reason: "Hold Reactivation" },
+        ]);
+        const reactivatedRows = await sql<{ count: number }>`select count(*)::int count from orders
+          where id in (${sql.join(heldOrders.map((id) => sql`${id}::uuid`))})
+            and delivery_status='in_branch' and order_date=${reactivationDate}::date
+            and serial_number_normalized like 'new %'`.execute(transaction);
+        expect(reactivatedRows.rows[0]?.count).toBe(3);
+
         // --- Company isolation ---------------------------------------------
         const companyBOrder = await makeOrder(companyB);
         use(companyA);
@@ -561,6 +619,8 @@ describe.skipIf(!runDatabaseTests)("OperationsHistoryWriter consumers", () => {
         { provide: IdentityContextAccessor, useValue: { current: () => identity } },
         { provide: FileStoragePort, useValue: {} },
         { provide: ConfigService, useValue: { get: () => "local" } },
+        { provide: PushOutboxWriter, useValue: {} },
+        { provide: EmployeeCollectionEarningService, useValue: {} },
         KyselyTransactionManager,
         OperationsHistoryWriter,
         OrdersWorkflowService,

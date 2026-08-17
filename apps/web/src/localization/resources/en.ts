@@ -1520,6 +1520,7 @@ export const englishTranslations = {
     },
     state: {
       awaiting_driver_assignment: "Needs a Driver",
+      awaiting_collect_order_completion: "Waiting for Driver",
       awaiting_delivery: "Out for delivery",
       awaiting_delivery_start: "Ready to dispatch",
       awaiting_return_processing: "Return in progress",
@@ -1533,6 +1534,7 @@ export const englishTranslations = {
     },
     waitingFor: {
       awaiting_driver_assignment: "a Driver to be assigned.",
+      awaiting_collect_order_completion: "the Driver to complete the collection task.",
       awaiting_delivery: "the delivery result.",
       awaiting_delivery_start: "the delivery to start.",
       awaiting_return_processing: "the return to be processed.",
@@ -1546,6 +1548,8 @@ export const englishTranslations = {
     },
     why: {
       awaiting_driver_assignment: "No Driver has been assigned yet, so the Order cannot go out.",
+      awaiting_collect_order_completion:
+        "The Collect Order is assigned and remains open until the Driver closes the task.",
       awaiting_delivery:
         "The parcel is currently with the Driver. Record the delivery result before continuing with collection or settlement.",
       awaiting_delivery_start: "A Driver is assigned but the parcel has not gone out yet.",
@@ -1878,6 +1882,10 @@ export const englishTranslations = {
     contactAdminForArea: "No matching Area? Ask an administrator to create it.",
     customerPaysCodAndFee: "Customer pays COD and fee",
     customerPaysCod: "Customer pays COD amount",
+    financialHandling: "Financial handling",
+    accountantCollect: "Collect from Driver",
+    accountantPay: "Pay to Trader",
+    duplicateSerialInBatch: "Serial Number {{serial}} is already used in this reactivation batch.",
     serialNumber: "Serial Number",
     referenceNumber: "Reference Number",
 
@@ -1894,6 +1902,24 @@ export const englishTranslations = {
     totalDeductions: "Total Deductions",
     systemOrderNumber: "System Order Number",
     internalDelivery: "Internal delivery",
+    collectOrder: "Collect Order",
+    collectOrderFinancialHint:
+      "Operational pickup only — COD, service fee, Driver collection, and Trader settlement are all AED 0.00.",
+    copyNumbers: "Copy Numbers",
+    copyNumbersSuccess: "{{count}} mobile numbers and areas copied.",
+    copyNumbersPartial: "{{copied}} copied. {{invalid}} Order has an invalid mobile number.",
+    exportExcel: "Export to Excel",
+    reactivateHoldOrders: "Reactivate Hold Orders",
+    oldSerialNumber: "Old Serial Number",
+    newSerialNumber: "New Serial Number",
+    oldSerialDate: "Old Serial Date",
+    newSerialDate: "New Serial Date",
+    newStatus: "New Status",
+    serialNumbersToChange: "Serial numbers to change: {{count}}",
+    confirmAndUpdate: "Confirm & Update",
+    duplicateSerialBatch: "Serial Numbers must be unique inside the batch.",
+    holdReactivationFailed: "The Hold Orders could not be reactivated safely.",
+    nextSerialFailed: "The next Serial Number could not be suggested.",
     loadMore: "Load more",
     mobileFormatError:
       "That is not a valid UAE mobile number. Use 10 digits starting 05, like 0506468442, or 9715XXXXXXXX.",
@@ -2150,7 +2176,8 @@ export const englishTranslations = {
     processEligibleOnly:
       "Change the orders that can make this move and skip the rest (if unchecked, the whole change is cancelled when any selected order is not eligible)",
     quickView: {
-      delivery: "Delivery Activity",
+      accountant: "Accountant",
+      delivery: "Operation Activity",
       active: "Active Orders",
       all: "All Orders",
       cancelled: "Cancelled",
@@ -2169,6 +2196,7 @@ export const englishTranslations = {
       cancelled: "Cancelled Orders",
       closed: "Closed Orders",
       delivery: "Delivered Orders",
+      accountant: "Accounting Orders",
       hold: "Hold Orders",
     },
     returnDriverFee: "Return driver fee",
@@ -2254,6 +2282,7 @@ export const englishTranslations = {
     active: "Active",
     assigned: "Assigned",
     assigned_to_driver: "Assigned to driver",
+    collect_order: "Collect Order",
     cancelled: "Cancelled",
     closed: "Closed",
     completed: "Completed",
@@ -3627,11 +3656,16 @@ export const englishTranslations = {
     orderStatusReversed: "Reversed",
   },
   driverEarnings: {
-    views: { monthly: "Monthly overview", manage: "Calculate & pay", report: "Driver payment report" },
+    views: {
+      monthly: "Monthly overview",
+      manage: "Calculate & pay",
+      report: "Driver payment report",
+    },
     month: "Month",
     allDrivers: "All Drivers",
     filterByDriver: "Filter by Driver",
-    monthlyDescription: "Monthly view of every Driver's earnings, payments, advances, and deductions.",
+    monthlyDescription:
+      "Monthly view of every Driver's earnings, payments, advances, and deductions.",
     monthlyLoadFailed: "The monthly Driver payment information could not be loaded.",
     noMonthlyPayments: "No eligible Employee Drivers were found for this month.",
     salaryPaid: "Salary paid",
@@ -3655,7 +3689,8 @@ export const englishTranslations = {
     salaryOutstanding: "Unpaid salary",
     driverEarningsOutstanding: "Unpaid Driver earnings",
     advanceOutstanding: "Remaining advance balance",
-    advanceSeparationNote: "Salary advances remain separate from salary and Driver earnings. They are included in cash paid, but never in earned income.",
+    advanceSeparationNote:
+      "Salary advances remain separate from salary and Driver earnings. They are included in cash paid, but never in earned income.",
     monthlyPaymentReport: "Monthly Driver Payment Report",
     printSavePdf: "Print / Save PDF",
     account: "Cash account",
@@ -3731,6 +3766,8 @@ export const englishTranslations = {
     viewDetails: "View Details",
     deliveryTransactionsToInclude: "Delivery Transactions to Include",
     collectionEarningDetail: "Collection Earning Detail",
+    closeDate: "Close Date",
+    area: "Area",
     serialNumber: "Serial Number",
     serialDate: "Serial Date",
     orderNumber: "Order Number",

@@ -23,6 +23,7 @@ export function SearchCombobox<T extends SearchOption>({
   onQueryChange,
   path,
   placeholder,
+  required = true,
   value,
 }: {
   api: ApiClient;
@@ -41,6 +42,7 @@ export function SearchCombobox<T extends SearchOption>({
   onQueryChange?: ((query: string) => void) | undefined;
   path: string;
   placeholder: string;
+  required?: boolean;
   value: T | undefined;
 }) {
   const { t } = useTranslation();
@@ -125,7 +127,7 @@ export function SearchCombobox<T extends SearchOption>({
         aria-controls={listId}
         aria-expanded={open}
         aria-label={label}
-        aria-required="true"
+        aria-required={required}
         autoComplete="off"
         autoFocus={autoFocus}
         onBlur={() => {

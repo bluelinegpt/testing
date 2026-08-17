@@ -41,7 +41,7 @@ describe.skipIf(!runTests)("Platform Company onboarding", () => {
     const settings = configuration();
     const pool = new Pool({ connectionString: settings.database.url, max: 1 });
     const database = new Kysely<DatabaseSchema>({ dialect: new PostgresDialect({ pool }) });
-    const { template } = loadApprovedTemplate("UAE_DELIVERY_STANDARD", 1);
+    const { template } = loadApprovedTemplate("UAE_DELIVERY_STANDARD", 2);
 
     let savepointDepth = 0;
     try {
@@ -165,7 +165,7 @@ describe.skipIf(!runTests)("Platform Company onboarding", () => {
             timezone: "Asia/Dubai",
             defaultLanguage: "en",
             accountingTemplateCode: "UAE_DELIVERY_STANDARD",
-            accountingTemplateVersion: 1,
+            accountingTemplateVersion: 2,
             contactName: "Ops Lead",
             businessDayStart: "07:30",
             ...overrides,
@@ -235,9 +235,9 @@ describe.skipIf(!runTests)("Platform Company onboarding", () => {
           expect(company?.environment).toBe("sandbox");
           expect(company?.accounting_setup_status).toBe("ready");
           expect(company?.accounting_template_code).toBe("UAE_DELIVERY_STANDARD");
-          expect(company?.accounting_template_version).toBe(1);
+          expect(company?.accounting_template_version).toBe(2);
           expect(company?.accounting_template_sha256).toBe(
-            "2d66f8ee57cc17ce732a2ee3158f8e40131b8e815dfa9355ff13551070e06581",
+            "696ba5a2941dbb215904796e39b65ae0481e21a3fe9317d6ef75b94f6ef1d1c8",
           );
           expect(company?.contact_name).toBe("Ops Lead");
 
@@ -271,6 +271,15 @@ describe.skipIf(!runTests)("Platform Company onboarding", () => {
           expect(await counts("company_balance_policies")).toBe(1);
           expect(await counts("accounting_configurations")).toBe(1);
           expect(await counts("company_business_day_configurations")).toBe(1);
+          const newGeography = await sql<{ code: string; count: number }>`
+            select e.code,count(*)::int count from emirates e join areas a on a.emirate_id=e.id
+             where a.company_id=${companyId}::uuid and e.code in ('WST','OAA','EST')
+               and a.name_en='All Areas' and a.name_ar='جميع المناطق'
+             group by e.code order by e.code
+          `.execute(transaction);
+          expect(newGeography.rows).toEqual([
+            { code: "EST", count: 1 }, { code: "OAA", count: 1 }, { code: "WST", count: 1 },
+          ]);
 
           // ---------------------------------------------------------------
           // Zero transactional history — the whole point
@@ -392,10 +401,14 @@ describe.skipIf(!runTests)("Platform Company onboarding", () => {
           const staleCounters = (
             await sql<{ n: string }>`
               select count(*)::bigint n from company_reference_counters
-               where company_id = ${companyId}::uuid and next_value <> 1
+               where company_id = ${companyId}::uuid and reference_type <> 'area' and next_value <> 1
             `.execute(transaction)
           ).rows[0];
           expect(Number(staleCounters?.n)).toBe(0);
+          const areaCounter = await sql<{ nextValue: string }>`select next_value::text "nextValue"
+            from company_reference_counters where company_id=${companyId}::uuid and reference_type='area'`
+            .execute(transaction);
+          expect(Number(areaCounter.rows[0]?.nextValue)).toBe((template.areas ?? []).length + 1);
 
           // Business day: exactly one active rule, from the template.
           const businessDay = (
@@ -500,10 +513,15 @@ describe.skipIf(!runTests)("Platform Company onboarding", () => {
           const secondCounters = (
             await sql<{ n: string }>`
               select count(*)::bigint n from company_reference_counters
-               where company_id = ${secondId}::uuid and next_value = 1
+               where company_id = ${secondId}::uuid
+                 and reference_type <> 'area'
+                 and next_value = 1
             `.execute(transaction)
           ).rows[0];
-          expect(Number(secondCounters?.n)).toBe(template.referenceNumberPrefixes.length);
+          expect(Number(secondCounters?.n)).toBe(
+            template.referenceNumberPrefixes.filter((counter) => counter.referenceType !== "area")
+              .length,
+          );
           // Same codes, different Companies, no unique-constraint collision:
           // every business reference is scoped per Company.
           const sharedCodes = (

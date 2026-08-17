@@ -151,7 +151,7 @@ describe("OrdersModuleWorkspace", () => {
     );
 
     expect(await screen.findByText("10 Active Orders")).toBeInTheDocument();
-    const search = screen.getByPlaceholderText("Search orders");
+    const search = screen.getByRole("textbox", { name: "Search orders" });
     fireEvent.change(search, { target: { value: "Aisha" } });
     fireEvent.keyDown(search, { key: "Enter" });
 
@@ -190,7 +190,7 @@ describe("OrdersModuleWorkspace", () => {
     );
 
     await screen.findByText("100 Active Orders");
-    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    fireEvent.click(screen.getByRole("button", { name: "Next page" }));
     await waitFor(() =>
       expect(api.get).toHaveBeenCalledWith(expect.stringContaining("page=2")),
     );
@@ -712,7 +712,8 @@ describe("OrdersModuleWorkspace", () => {
     );
 
     await screen.findByText("SER-000001");
-    fireEvent.change(screen.getByLabelText("Grouping"), { target: { value: "status" } });
+    fireEvent.click(screen.getByRole("button", { name: "Grouping" }));
+    fireEvent.click(screen.getByLabelText("Status"));
 
     const holdGroupSelection = screen.getByLabelText("Select visible Orders in Hold");
     fireEvent.click(holdGroupSelection);
@@ -729,15 +730,13 @@ describe("OrdersModuleWorkspace", () => {
       ),
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /Hold.*1 visible Orders.*1 selected/ }));
-    expect(screen.queryByText("SER-000002")).not.toBeInTheDocument();
+    expect(screen.getByText("SER-000002")).toBeVisible();
     expect(holdGroupSelection).toBeChecked();
 
-    fireEvent.change(screen.getByLabelText("Grouping"), { target: { value: "driver" } });
-    expect(
-      screen.getByRole("button", { name: /Ahmed.*1 visible Orders.*1 selected/ }),
-    ).toBeVisible();
-    expect(screen.getByRole("button", { name: /Unassigned.*1 visible Orders/ })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: /Grouping/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Driver" }));
+    expect(screen.getByLabelText("Select visible Orders in Ahmed")).toBeVisible();
+    expect(screen.getByLabelText("Select visible Orders in Unassigned")).toBeVisible();
   });
 
   it("shows the Hold tab count and intentionally absent Reference Numbers", async () => {
@@ -772,6 +771,48 @@ describe("OrdersModuleWorkspace", () => {
     expect(screen.getByText("Not provided")).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Order actions" }));
     expect(screen.getByRole("button", { name: "Send out for delivery" })).toBeVisible();
+  });
+
+  it("reactivates three selected Hold Orders in one editable table", async () => {
+    const heldOrders = [heldOrder, {
+      ...heldOrder, id: "10000000-0000-4000-8000-000000000003", orderNumber: "ORD-000003", serialNumber: "SER-000003",
+    }, {
+      ...heldOrder, id: "10000000-0000-4000-8000-000000000004", orderNumber: "ORD-000004", serialNumber: "SER-000004",
+    }];
+    const api = {
+      get: vi.fn((path: string) => {
+        if (path === "operations/orders/next-serial-number") return Promise.resolve({ serialNumber: "500" });
+        if (path.startsWith("operations/orders?")) return Promise.resolve({
+          filteredCount: 3, items: heldOrders, matchingCount: 3, page: 1, pageSize: 25, totalCount: 3, tabTotalCount: 3,
+        });
+        if (path.startsWith("configuration/areas")) return Promise.resolve({ items: [], page: 1, pageSize: 100, total: 0 });
+        return Promise.resolve([]);
+      }),
+      post: vi.fn().mockResolvedValue({ processedCount: 3 }),
+    };
+    renderWithRouter(
+      <OrdersModuleWorkspace api={api as unknown as ApiClient} onNavigate={vi.fn()} permissions={["users_roles.manage"]} />,
+      ["/orders?quickView=hold"],
+    );
+    await screen.findByText("SER-000004");
+    fireEvent.click(screen.getByLabelText("Select all Orders on this page"));
+    fireEvent.click(screen.getByRole("button", { name: "Reactivate Hold Orders" }));
+    const dialog = screen.getByRole("dialog", { name: "Reactivate Hold Orders" });
+    expect(within(dialog).getByText("ORD-000002")).toBeVisible();
+    expect(within(dialog).getByText("ORD-000003")).toBeVisible();
+    expect(within(dialog).getByText("ORD-000004")).toBeVisible();
+    await waitFor(() => expect(within(dialog).getAllByRole("textbox").map(input => (input as HTMLInputElement).value)).toEqual(["500", "501", "502"]));
+    fireEvent.change(within(dialog).getAllByRole("textbox")[0]!, { target: { value: "  New   500  " } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Continue" }));
+    expect(within(dialog).getByText("Selected Orders: 3")).toBeVisible();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Confirm & Update" }));
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith("operations/orders/hold-reactivation", {
+      orders: expect.arrayContaining([
+        expect.objectContaining({ newSerialNumber: "  New   500  ", orderId: heldOrder.id }),
+        expect.objectContaining({ newSerialNumber: "501" }),
+        expect.objectContaining({ newSerialNumber: "502" }),
+      ]),
+    }));
   });
 
   it("uses a searchable Emirate-aware Area filter without internal Area codes", async () => {
