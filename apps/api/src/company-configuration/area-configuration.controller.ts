@@ -55,6 +55,7 @@ export class AreaConfigurationController {
   ) {}
 
   @ApiOperation({ summary: "List the UAE Emirate master" })
+  @RequirePermissions()
   @RequireAnyPermission("orders.create", "users_roles.manage")
   @Get("emirates")
   public emirates(): Promise<readonly Emirate[]> {
@@ -68,6 +69,7 @@ export class AreaConfigurationController {
   }
 
   @ApiOperation({ summary: "Typeahead search over Areas for the shared selector" })
+  @RequirePermissions()
   @RequireAnyPermission("orders.create", "users_roles.manage")
   @Get("areas/search")
   public search(@Query() query: AreaSearchQueryDto): Promise<AreaSearchPage> {
@@ -81,6 +83,7 @@ export class AreaConfigurationController {
   }
 
   @ApiOperation({ summary: "Create an Area under an Emirate" })
+  @RequirePermissions()
   @RequireAnyPermission("orders.create", "users_roles.manage")
   @Post("areas")
   public create(@Body() input: CreateAreaDto, @Req() request: Request): Promise<ConfiguredArea> {

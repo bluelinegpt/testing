@@ -2408,6 +2408,13 @@ td:last-child {
   margin: 0;
   font-size: 21px;
 }
+.modal-heading-title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
 .close-button {
   width: 36px;
   height: 36px;

@@ -2,6 +2,8 @@ import { type ReactNode, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 
+import { VersionBadge } from "./VersionBadge.js";
+
 export function Modal({
   children,
   className = "",
@@ -81,7 +83,10 @@ export function Modal({
         role="dialog"
       >
         <header className="modal-heading">
-          <h2 id={titleId}>{title}</h2>
+          <div className="modal-heading-title">
+            <h2 id={titleId}>{title}</h2>
+            <VersionBadge inline />
+          </div>
           <button
             aria-label={closeLabel}
             className="close-button"
