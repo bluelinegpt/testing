@@ -169,7 +169,7 @@ export class TraderConfigurationService {
           second_mobile_number,email,commercial_number,tax_registration_number,pickup_area_id,
           pickup_address,location_link,latitude,longitude,notes,created_by_account_id)
         values(${companyId}::uuid,${code},${input.name.trim()},
-          ${input.contactPerson?.trim() || null},${input.mobileNumber.trim()},
+          ${input.contactPerson?.trim() || null},${input.mobileNumber?.trim() || null},
           ${input.secondMobileNumber?.trim() || null},${input.email?.trim() || null},
           ${input.commercialNumber?.trim() || null},${input.taxRegistrationNumber?.trim() || null},
           ${input.pickupAreaId ?? null}::uuid,${input.pickupAddress?.trim() || null},

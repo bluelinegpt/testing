@@ -55,6 +55,7 @@ import {
 import { PageHeader } from "../../components/PageHeader.js";
 import { FilterCombobox } from "../../components/FilterCombobox.js";
 import { SearchCombobox } from "../../components/SearchCombobox.js";
+import { AreaSelector } from "../configuration/AreaSelector.js";
 import { isUaeMobile, normalizeUaeMobile } from "../../domain/uae-mobile.js";
 import { formatCurrency, formatDate, formatDateTime } from "../../localization/formatters.js";
 import { normalizeLocale } from "../../localization/locale.js";
@@ -4511,6 +4512,7 @@ function canEditOrder(deliveryStatus: string): boolean {
 }
 
 interface EditOrderForm {
+  additionalFees: string;
   codAmount: string;
   customerAddress: string;
   customerMobileNumber: string;
@@ -4518,6 +4520,8 @@ interface EditOrderForm {
   customerSecondMobileNumber: string;
   notes: string;
   packageCount: string;
+  referenceNumber: string;
+  serialNumber: string;
   serviceFee: string;
   serviceFeeReason: string;
 }
@@ -4542,6 +4546,7 @@ function EditOrderDialog({
   const [form, setForm] = useState<EditOrderForm>();
   const [newTrader, setNewTrader] = useState<OperationsTraderOption>();
   const [newCustomer, setNewCustomer] = useState<CustomerOption>();
+  const [newArea, setNewArea] = useState<CompanyArea>();
   const [customerAddresses, setCustomerAddresses] = useState<readonly Record<string, unknown>[]>(
     [],
   );
@@ -4556,6 +4561,7 @@ function EditOrderDialog({
         if (!active) return;
         setDetail(loaded);
         setForm({
+          additionalFees: loaded.additionalFees ?? "0.00",
           codAmount: loaded.codAmount,
           customerAddress: loaded.customerAddress,
           customerMobileNumber: loaded.customerMobileNumber,
@@ -4563,6 +4569,8 @@ function EditOrderDialog({
           customerSecondMobileNumber: loaded.metadata.customerSecondMobileNumber ?? "",
           notes: loaded.metadata.notes ?? "",
           packageCount: String(loaded.metadata.packageCount),
+          referenceNumber: loaded.referenceNumber ?? "",
+          serialNumber: loaded.serialNumber ?? loaded.orderNumber,
           serviceFee: loaded.serviceFee,
           serviceFeeReason: "",
         });
@@ -4588,8 +4596,8 @@ function EditOrderDialog({
   const reasonNeeded = feeChanged && !identityChanged;
   const valid =
     form !== undefined &&
-    form.customerName.trim() !== "" &&
-    isUaeMobile(form.customerMobileNumber) &&
+    form.serialNumber.trim() !== "" &&
+    (form.customerMobileNumber.trim() === "" || isUaeMobile(form.customerMobileNumber)) &&
     (form.customerSecondMobileNumber.trim() === "" ||
       isUaeMobile(form.customerSecondMobileNumber)) &&
     // Address deliberately absent: optional on create, so optional on edit too.
@@ -4597,6 +4605,8 @@ function EditOrderDialog({
     Number(form.codAmount) >= 0 &&
     form.serviceFee !== "" &&
     Number(form.serviceFee) >= 0 &&
+    form.additionalFees !== "" &&
+    Number(form.additionalFees) >= 0 &&
     Number(form.packageCount) >= 1 &&
     (!reasonNeeded || form.serviceFeeReason.trim() !== "");
 
@@ -4613,10 +4623,14 @@ function EditOrderDialog({
         ...(newCustomer === undefined
           ? {}
           : { customerAddressId: newCustomer.addressId, customerId: newCustomer.id }),
+        ...(newArea === undefined ? {} : { areaId: newArea.id }),
+        additionalFees: Number(form.additionalFees),
         codAmount: Number(form.codAmount),
         customerAddress: form.customerAddress.trim(),
         customerMobileNumber:
-          normalizeUaeMobile(form.customerMobileNumber) ?? form.customerMobileNumber.trim(),
+          form.customerMobileNumber.trim() === ""
+            ? ""
+            : (normalizeUaeMobile(form.customerMobileNumber) ?? form.customerMobileNumber.trim()),
         customerName: form.customerName.trim(),
         customerSecondMobileNumber:
           form.customerSecondMobileNumber.trim() === ""
@@ -4625,6 +4639,8 @@ function EditOrderDialog({
               form.customerSecondMobileNumber.trim()),
         notes: form.notes,
         packageCount: Number(form.packageCount),
+        referenceNumber: form.referenceNumber.trim() || undefined,
+        serialNumber: form.serialNumber.trim(),
         ...(sendFee ? { serviceFee: Number(form.serviceFee) } : {}),
         serviceFeeReason:
           feeChanged && form.serviceFeeReason.trim() !== ""
@@ -4651,6 +4667,22 @@ function EditOrderDialog({
       ) : (
         <>
           <div className="form-grid">
+            <label className="field">
+              <span>{t("operations.serialNumber")}</span>
+              <input
+                maxLength={160}
+                onChange={(event) => update({ serialNumber: event.target.value })}
+                value={form.serialNumber}
+              />
+            </label>
+            <label className="field">
+              <span>{t("operations.referenceNumber")}</span>
+              <input
+                maxLength={160}
+                onChange={(event) => update({ referenceNumber: event.target.value })}
+                value={form.referenceNumber}
+              />
+            </label>
             <label className="field form-grid-single">
               <span>{t("operations.trader")}</span>
               <SearchCombobox
@@ -4737,6 +4769,18 @@ function EditOrderDialog({
                 </select>
               </label>
             ) : null}
+            <div className="field form-grid-single">
+              <AreaSelector
+                api={api}
+                includeDisabled
+                onChange={setNewArea}
+                required={false}
+                value={newArea}
+              />
+              {newArea === undefined && detail?.areaName ? (
+                <small>{detail.areaName}</small>
+              ) : null}
+            </div>
             <label className="field">
               <span>{t("operations.customerName")}</span>
               <input
@@ -4807,6 +4851,18 @@ function EditOrderDialog({
                 step="0.01"
                 type="number"
                 value={form.serviceFee}
+              />
+            </label>
+            <label className="field">
+              <span>{t("operations.additionalFees")}</span>
+              <input
+                className="no-spinner"
+                inputMode="decimal"
+                min="0"
+                onChange={(event) => update({ additionalFees: event.target.value })}
+                step="0.01"
+                type="number"
+                value={form.additionalFees}
               />
             </label>
             <label className="field form-grid-single">

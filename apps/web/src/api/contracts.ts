@@ -449,6 +449,8 @@ export interface OperationsOrder {
   readonly additionalFeeVatAmount?: string | null;
   readonly amountCollected: string;
   readonly areaName: string;
+  /** Present on Order detail responses. */
+  readonly areaId?: string;
   /** Present only on the single-order detail fetch, not the list. */
   readonly emirateNameEn?: string;
   readonly emirateNameAr?: string;

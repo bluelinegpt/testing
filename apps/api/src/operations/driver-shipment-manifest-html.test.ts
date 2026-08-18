@@ -61,12 +61,12 @@ describe("buildDriverShipmentManifestHtml", () => {
     expect(html).toContain("MAN-ABC123");
     expect(html).toContain("SER-9");
     expect(html).toContain("REF-9");
-    expect(html).toContain("ORD-9");
+    expect(html).not.toContain("ORD-9");
     expect(html).toContain("Test Customer");
     expect(html).toContain("971500000002");
     expect(html).toContain("Deira");
     expect(html).toContain("AED 150.00");
-    expect(html).toContain("AED 20.00");
+    expect(html).not.toContain("AED 20.00");
     expect(html).toContain("Fragile");
     expect(html).toContain("Test Company");
     expect(html).toContain("Delivery operations");
@@ -78,9 +78,12 @@ describe("buildDriverShipmentManifestHtml", () => {
     expect(html).toContain("<th>Trader</th>");
     expect(html).toContain("Test Trader");
     expect(html).toContain("<th>Second Mobile</th>");
-    expect(html).toContain("<th>Emirate</th>");
+    expect(html).not.toContain("<th>Emirate</th>");
+    expect(html).not.toContain("<th>Order Number</th>");
+    expect(html).not.toContain("<th>Service Fee</th>");
     expect(html).not.toContain("Total Packages");
-    expect(html).toContain("font-size: 15px");
+    expect(html).toContain("@page { size: A4 portrait;");
+    expect(html).toContain("font-size: 12px");
     // Signatures for Driver, Operations Handover and Returned/Received By.
     expect(html).toContain("Operations Handover");
     expect(html).toContain("Returned/Received By");

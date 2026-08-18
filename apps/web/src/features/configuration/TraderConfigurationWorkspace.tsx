@@ -617,10 +617,11 @@ export function TraderForm({
     const formElement = e.currentTarget;
     const f = new FormData(formElement);
     // Accept 0506468442, 9715XXXXXXXX or +9715XXXXXXXX and store one form.
-    const mobile = normalizeUaeMobile(String(f.get("mobileNumber")));
+    const mobileRaw = String(f.get("mobileNumber") ?? "").trim();
+    const mobile = mobileRaw === "" ? undefined : normalizeUaeMobile(mobileRaw);
     const secondRaw = String(f.get("secondMobileNumber") ?? "").trim();
     const secondMobile = secondRaw === "" ? undefined : normalizeUaeMobile(secondRaw);
-    if (mobile === undefined || (secondRaw !== "" && secondMobile === undefined)) {
+    if ((mobileRaw !== "" && mobile === undefined) || (secondRaw !== "" && secondMobile === undefined)) {
       setMobileError(t("traderConfig.mobileError"));
       setSaving(false);
       /* Move the caret to the field that stopped the save. A short line of red
@@ -628,7 +629,7 @@ export function TraderForm({
          symptom was "nothing happens and there is no error" when the message
          was in fact on screen the whole time. Focusing scrolls it into view and
          announces it, since the input owns `aria-describedby`. */
-      const invalid = mobile === undefined ? "mobileNumber" : "secondMobileNumber";
+      const invalid = mobileRaw !== "" && mobile === undefined ? "mobileNumber" : "secondMobileNumber";
       const field = formElement.elements.namedItem(invalid);
       if (field instanceof HTMLInputElement) field.focus();
       return;
@@ -712,7 +713,7 @@ export function TraderForm({
             <input autoFocus defaultValue={detail?.name} name="name" required />
           </label>
           <div className="field-group">
-            <label className="field required-field">
+            <label className="field">
               <span>{t("traderConfig.mobile")}</span>
               <input
                 aria-describedby={mobileError === undefined ? undefined : "trader-mobile-error"}
@@ -721,7 +722,6 @@ export function TraderForm({
                 inputMode="tel"
                 name="mobileNumber"
                 placeholder={t("common.mobilePlaceholder")}
-                required
               />
             </label>
             {mobileError === undefined ? null : (

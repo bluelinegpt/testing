@@ -122,17 +122,17 @@ export class DriverShipmentManifestService {
     const result = await sql<ManifestOrderRow>`
       select o.serial_number as "serialNumber", o.order_number as "orderNumber",
              o.reference_number as "referenceNumber", o.assigned_driver_id as "assignedDriverId",
-             t.name_en as "traderName", o.customer_name as "customerName",
-             o.customer_mobile_number as "customerMobileNumber",
+             t.name_en as "traderName", coalesce(o.customer_name, '') as "customerName",
+             coalesce(o.customer_mobile_number, '') as "customerMobileNumber",
              o.customer_second_mobile_number as "customerSecondMobileNumber",
-             e.name_en as "emirateName", a.name_en as "areaName",
+             e.name_en as "emirateName", coalesce(a.name_en, '') as "areaName",
              o.cod_amount::text as "codAmount",
              o.service_fee::text as "serviceFee",
              o.customer_delivery_notes_snapshot as "deliveryInstructions", o.notes,
              o.delivery_status as "deliveryStatus"
         from orders o
         join traders t on t.id = o.trader_id and t.company_id = o.company_id
-        join areas a on a.id = o.area_id and a.company_id = o.company_id
+        left join areas a on a.id = o.area_id and a.company_id = o.company_id
         left join emirates e on e.id = a.emirate_id
        where o.company_id = ${companyId}::uuid
          and o.id in (${sql.join(orderIds.map((id) => sql`${id}::uuid`))})
@@ -163,17 +163,17 @@ export class DriverShipmentManifestService {
     const result = await sql<ManifestOrderRow>`
       select o.serial_number as "serialNumber", o.order_number as "orderNumber",
              o.reference_number as "referenceNumber", o.assigned_driver_id as "assignedDriverId",
-             t.name_en as "traderName", o.customer_name as "customerName",
-             o.customer_mobile_number as "customerMobileNumber",
+             t.name_en as "traderName", coalesce(o.customer_name, '') as "customerName",
+             coalesce(o.customer_mobile_number, '') as "customerMobileNumber",
              o.customer_second_mobile_number as "customerSecondMobileNumber",
-             e.name_en as "emirateName", a.name_en as "areaName",
+             e.name_en as "emirateName", coalesce(a.name_en, '') as "areaName",
              o.cod_amount::text as "codAmount",
              o.service_fee::text as "serviceFee",
              o.customer_delivery_notes_snapshot as "deliveryInstructions", o.notes,
              o.delivery_status as "deliveryStatus"
         from orders o
         join traders t on t.id = o.trader_id and t.company_id = o.company_id
-        join areas a on a.id = o.area_id and a.company_id = o.company_id
+        left join areas a on a.id = o.area_id and a.company_id = o.company_id
         left join emirates e on e.id = a.emirate_id
        where o.company_id = ${companyId}::uuid
          and o.assigned_driver_id is not null
@@ -362,30 +362,24 @@ export class DriverShipmentManifestService {
     }).format(new Date());
     const columns = [
       "serialNumber",
-      "orderNumber",
       "referenceNumber",
       "traderName",
       "customerName",
       "customerMobileNumber",
       "customerSecondMobileNumber",
-      "emirateName",
       "areaName",
       "codAmount",
-      "serviceFee",
       "notes",
     ];
     const rows = data.orders.map((row) => ({
       serialNumber: row.serialNumber,
-      orderNumber: row.orderNumber,
       referenceNumber: row.referenceNumber ?? "",
       traderName: row.traderName,
       customerName: row.customerName,
       customerMobileNumber: row.customerMobileNumber,
       customerSecondMobileNumber: row.customerSecondMobileNumber ?? "",
-      emirateName: row.emirateName ?? "",
       areaName: row.areaName,
       codAmount: row.codAmount,
-      serviceFee: row.serviceFee,
       notes: row.notes ?? "",
     }));
     const bytes = accountingXlsx(columns, rows, [

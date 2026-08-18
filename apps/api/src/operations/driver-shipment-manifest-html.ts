@@ -213,16 +213,13 @@ export function buildDriverShipmentManifestHtml(
         "<tr>" +
         `<td class="num">${index + 1}</td>` +
         `<td class="mono">${escapeHtml(order.serialNumber)}</td>` +
-        `<td class="mono">${escapeHtml(order.orderNumber ?? "")}</td>` +
         `<td class="mono">${order.referenceNumber === null ? "" : escapeHtml(order.referenceNumber)}</td>` +
         `<td>${escapeHtml(order.traderName)}</td>` +
         `<td>${escapeHtml(order.customerName)}</td>` +
         `<td class="mono">${escapeHtml(order.customerMobileNumber)}</td>` +
         `<td class="mono">${order.customerSecondMobileNumber === null ? "" : escapeHtml(order.customerSecondMobileNumber)}</td>` +
-        `<td>${order.emirateName === null ? "" : escapeHtml(order.emirateName)}</td>` +
         `<td>${escapeHtml(order.areaName)}</td>` +
         `<td class="num">${money(order.codAmount)}</td>` +
-        `<td class="num">${money(order.serviceFee ?? "0")}</td>` +
         /* Notes, not Delivery Status. A manifest is signed at handover, when
            every Order on it is going out, so the status column read the same on
            every line. A free-text note is what the Driver actually needs in
@@ -236,16 +233,13 @@ export function buildDriverShipmentManifestHtml(
     [
       labels.lineNumber,
       labels.orderSerial,
-      labels.orderNumber,
       labels.externalReference,
       labels.trader,
       labels.customer,
       labels.mobile,
       labels.secondMobile,
-      labels.emirate,
       labels.area,
       labels.cod,
-      labels.serviceFee,
       labels.notes,
     ]
       .map((label) => `<th>${escapeHtml(label)}</th>`)
@@ -313,7 +307,7 @@ export function buildDriverShipmentManifestHtml(
     `</div>`;
 
   const style = `
-    @page { size: A4 landscape; margin: 10mm 7mm 14mm; }
+    @page { size: A4 portrait; margin: 10mm 7mm 14mm; }
     * { box-sizing: border-box; }
     body { font-family: "Segoe UI", Tahoma, Arial, sans-serif; color: #111; margin: 0; font-size: 9px; }
     .report-header { border-bottom: 2px solid #333; margin-bottom: 10px; padding-bottom: 8px; }
@@ -327,7 +321,7 @@ export function buildDriverShipmentManifestHtml(
     .meta-label { color: #555; }
     .meta-value { font-weight: 600; }
     .section-title { font-size: 13px; margin: 14px 0 6px; }
-    table.grid { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 15px; margin-bottom: 8px; }
+    table.grid { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 12px; margin-bottom: 8px; }
     table.grid th, table.grid td { border: 1px solid #999; padding: 4px; text-align: start; overflow-wrap: anywhere; line-height: 1.25; }
     table.grid thead { display: table-header-group; }
     table.grid thead th { background: #f0f0f0; }
@@ -335,19 +329,16 @@ export function buildDriverShipmentManifestHtml(
     .mono { font-variant-numeric: tabular-nums; }
      /* Every approved manifest column is explicitly sized. The percentages
         total 100 so PDF pagination cannot assign an unpredictable remainder. */
-    table.grid th:nth-child(1), table.grid td:nth-child(1) { width: 3%; }
-    table.grid th:nth-child(2), table.grid td:nth-child(2) { width: 7%; }
-    table.grid th:nth-child(3), table.grid td:nth-child(3) { width: 7%; }
-    table.grid th:nth-child(4), table.grid td:nth-child(4) { width: 8%; }
-    table.grid th:nth-child(5), table.grid td:nth-child(5) { width: 8%; }
-    table.grid th:nth-child(6), table.grid td:nth-child(6) { width: 10%; }
-    table.grid th:nth-child(7), table.grid td:nth-child(7) { width: 9%; }
-    table.grid th:nth-child(8), table.grid td:nth-child(8) { width: 8%; }
-    table.grid th:nth-child(9), table.grid td:nth-child(9) { width: 7%; }
-    table.grid th:nth-child(10), table.grid td:nth-child(10) { width: 7%; }
-    table.grid th:nth-child(11), table.grid td:nth-child(11) { width: 8%; }
-    table.grid th:nth-child(12), table.grid td:nth-child(12) { width: 8%; }
-    table.grid th:nth-child(13), table.grid td:nth-child(13) { width: 10%; }
+    table.grid th:nth-child(1), table.grid td:nth-child(1) { width: 4%; }
+    table.grid th:nth-child(2), table.grid td:nth-child(2) { width: 10%; }
+    table.grid th:nth-child(3), table.grid td:nth-child(3) { width: 11%; }
+    table.grid th:nth-child(4), table.grid td:nth-child(4) { width: 11%; }
+    table.grid th:nth-child(5), table.grid td:nth-child(5) { width: 12%; }
+    table.grid th:nth-child(6), table.grid td:nth-child(6) { width: 12%; }
+    table.grid th:nth-child(7), table.grid td:nth-child(7) { width: 11%; }
+    table.grid th:nth-child(8), table.grid td:nth-child(8) { width: 10%; }
+    table.grid th:nth-child(9), table.grid td:nth-child(9) { width: 9%; }
+    table.grid th:nth-child(10), table.grid td:nth-child(10) { width: 10%; }
     .summary-section { margin-top: 12px; max-width: 460px; }
     /* Side by side rather than stacked. Each keeps its own underline so the
        label still reads as attached to its own figure. */

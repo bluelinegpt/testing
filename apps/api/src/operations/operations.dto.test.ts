@@ -21,6 +21,33 @@ const validCreateOrder = {
 };
 
 describe("Order DTO validation", () => {
+  it("accepts a Collect Order without Customer, mobile, Emirate, Area, or Driver", async () => {
+    const input = plainToInstance(CreateOrderDto, {
+      additionalFees: 0,
+      codAmount: 0,
+      customerAddress: "",
+      orderType: "collect_order",
+      packageCount: 1,
+      serialNumber: "7",
+      traderId: "20000000-0000-4000-8000-000000000001",
+    });
+
+    await expect(validate(input)).resolves.toEqual([]);
+  });
+
+  it("accepts a delivery Order without Customer or mobile", async () => {
+    const input = plainToInstance(CreateOrderDto, {
+      areaId: "10000000-0000-4000-8000-000000000001",
+      codAmount: 100,
+      customerAddress: "",
+      packageCount: 1,
+      serialNumber: "8",
+      traderId: "20000000-0000-4000-8000-000000000001",
+    });
+
+    await expect(validate(input)).resolves.toEqual([]);
+  });
+
   it("accepts Hold as an Order delivery status", async () => {
     const input = plainToInstance(ChangeOrderStatusDto, {
       reason: "Customer requested a later delivery",

@@ -165,10 +165,6 @@ export function CreateOrderDialog({
   // A Customer is captured by typing a Name directly (new) or selecting a saved
   // one; either way the Name must be present. No separate "select a Customer"
   // gate and no UAE mobile-format gate — those are handled inline/advisory.
-  if (orderType !== "collect_order" && customerName.trim() === "")
-    validationErrors.customerName = t("operations.errors.customerNameRequired");
-  if (orderType !== "collect_order" && mobile.trim() === "")
-    validationErrors.mobile = t("operations.errors.mobileRequired");
   if (
     area === undefined &&
     (orderType !== "collect_order" || customerName.trim() !== "" || mobile.trim() !== "")
@@ -562,8 +558,7 @@ export function CreateOrderDialog({
           traderId: trader.id,
           // No existing Customer selected: create one atomically from the typed
           // Order details in the same transaction (no separate modal, no orphan).
-          ...(customer !== undefined ||
-          (orderType === "collect_order" && customerName.trim() === "" && mobile.trim() === "")
+          ...(customer !== undefined || customerName.trim() === "" || mobile.trim() === ""
             ? {}
             : {
                 inlineCustomer: {
@@ -762,9 +757,7 @@ export function CreateOrderDialog({
                       </small>
                     )}
                   </label>
-                  <label
-                    className={orderType === "collect_order" ? "field" : "field required-field"}
-                  >
+                  <label className="field">
                     <span>{t("operations.customerName")}</span>
                     <div data-field="customer">
                       <SearchCombobox
@@ -799,7 +792,7 @@ export function CreateOrderDialog({
                         }}
                         path="configuration/customers/search"
                         placeholder={t("operations.customerSearchOrType")}
-                        required={orderType !== "collect_order"}
+                        required={false}
                         value={customer}
                       />
                     </div>
@@ -815,9 +808,7 @@ export function CreateOrderDialog({
                     )}
                   </label>
                   {customer !== undefined && customerAddresses.length > 1 ? (
-                    <label
-                      className={orderType === "collect_order" ? "field" : "field required-field"}
-                    >
+                    <label className="field">
                       <span>{t("customerConfig.addresses")}</span>
                       <select
                         onChange={(event) => {
@@ -864,7 +855,7 @@ export function CreateOrderDialog({
                     </label>
                   ) : null}
                   <div className="form-grid">
-                    <label className="field required-field">
+                    <label className="field">
                       <span>{t("operations.mobile")}</span>
                       <input
                         aria-describedby={
@@ -884,7 +875,7 @@ export function CreateOrderDialog({
                           clearServerError("mobile");
                         }}
                         placeholder={t("common.mobilePlaceholder")}
-                        required={orderType !== "collect_order"}
+                        required={false}
                         value={mobile}
                       />
                       {errorFor("mobile") !== undefined ? (

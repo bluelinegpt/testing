@@ -850,17 +850,22 @@ describe("CreateOrderDialog validation (Phase 3)", () => {
     resolve({ orderNumber: "ORD-000400", serialNumber: "000123" });
   });
 
-  it("keeps an empty Primary Mobile blocking even for a typed new Customer", async () => {
-    setup();
+  it("allows a new Order with a typed Customer name and no Primary Mobile", async () => {
+    const { api, resolve } = setup();
     await selectTraderOnly();
     await typeNewCustomerAndArea("No Phone Buyer");
     fireEvent.change(screen.getByLabelText("Customer address"), { target: { value: "Somewhere" } });
     fireEvent.change(screen.getByLabelText("COD amount"), { target: { value: "100" } });
-    // Mobile deliberately left empty.
+    await screen.findAllByText("AED 90.00");
+    // Mobile deliberately left empty: the typed details stay on the Order and
+    // no incomplete saved-Customer record is created.
     fireEvent.click(screen.getByRole("button", { name: "Create order" }));
-    expect(
-      await screen.findByRole("button", { name: "Enter a mobile number." }),
-    ).toBeInTheDocument();
+    const creates = api.post.mock.calls.filter(([path]) => path === "operations/orders");
+    expect(creates).toHaveLength(1);
+    expect(creates[0]?.[1]).toMatchObject({ customerName: "No Phone Buyer" });
+    expect(creates[0]?.[1]).not.toHaveProperty("customerMobileNumber");
+    expect(creates[0]?.[1]).not.toHaveProperty("inlineCustomer");
+    resolve({ orderNumber: "ORD-000401", serialNumber: "000123" });
   });
 
   it("maps a duplicate-Customer backend error to the Customer field and preserves values", async () => {

@@ -251,7 +251,6 @@ export class AreaConfigurationService {
 
       if (emirateId !== before.emirateId) {
         await this.assertEmirateExists(transaction, emirateId);
-        await this.assertEmirateChangeIsSafe(transaction, areaId, companyId);
       }
 
       try {
@@ -381,41 +380,6 @@ export class AreaConfigurationService {
         "emirate_not_found",
         "The selected Emirate does not exist",
         HttpStatus.BAD_REQUEST,
-      );
-    }
-  }
-
-  /**
-   * Moving an Area between Emirates would reinterpret every record already
-   * filed under it, so it is refused once the Area is in use. Renaming stays
-   * allowed because it does not change which Emirate the data belongs to.
-   */
-  private async assertEmirateChangeIsSafe(
-    transaction: Parameters<Parameters<KyselyTransactionManager["execute"]>[0]>[0],
-    areaId: string,
-    companyId: string,
-  ): Promise<void> {
-    const result = await sql<{ references: string }>`
-      select (
-        (select count(*) from customer_addresses where area_id = ${areaId}::uuid
-           and company_id = ${companyId}::uuid) +
-        (select count(*) from traders where pickup_area_id = ${areaId}::uuid
-           and company_id = ${companyId}::uuid) +
-        (select count(*) from trader_area_prices where area_id = ${areaId}::uuid
-           and company_id = ${companyId}::uuid) +
-        (select count(*) from employees where area_id = ${areaId}::uuid
-           and company_id = ${companyId}::uuid) +
-        (select count(*) from drivers where area_id = ${areaId}::uuid
-           and company_id = ${companyId}::uuid)
-      )::text as "references"
-    `.execute(transaction);
-    if (Number(result.rows[0]?.references ?? 0) > 0) {
-      throw new ApplicationException(
-        "area_emirate_change_blocked",
-        "This Area is already used by Traders, Customers, pricing or Orders. " +
-          "Changing its Emirate would make those records inconsistent. " +
-          "Disable this Area and create a new one under the correct Emirate instead.",
-        HttpStatus.CONFLICT,
       );
     }
   }

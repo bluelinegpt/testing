@@ -3145,7 +3145,7 @@ export class OperationsService {
     const { companyId } = this.tenants.current();
     const identity = this.identities.current();
     const name = input.nameEn.trim();
-    const mobileNumber = input.mobileNumber.trim();
+    const mobileNumber = input.mobileNumber?.trim() || null;
     const passwordHash = await this.passwords.hash(randomUUID());
     try {
       const createdTrader = await this.transactions.execute(async (transaction) => {
@@ -3189,7 +3189,7 @@ export class OperationsService {
       return {
         code: createdTrader.code,
         id: createdTrader.traderId,
-        mobileNumber,
+        mobileNumber: mobileNumber ?? "",
         name,
         openOrders: 0,
         status: "active",
@@ -3318,12 +3318,9 @@ export class OperationsService {
     const requestedDriverId = collectOrder ? undefined : input.driverId;
     const inlineCustomer = input.inlineCustomer;
     const customerOmitted =
-      collectOrder &&
       input.customerId === undefined &&
       input.customerAddressId === undefined &&
-      inlineCustomer === undefined &&
-      (input.customerName?.trim() ?? "") === "" &&
-      (input.customerMobileNumber?.trim() ?? "") === "";
+      inlineCustomer === undefined;
     const orderAreaId = input.areaId ?? inlineCustomer?.areaId;
     if (!customerOmitted && orderAreaId === undefined) {
       throw new ApplicationException(
@@ -4145,9 +4142,12 @@ export class OperationsService {
           vatPriceModeSnapshot: "exclusive" | "inclusive" | null;
           vatRateSnapshot: string | null;
           notes: string | null;
+          orderDate: string;
           orderProfit: string;
           packageCount: number;
           pricingProvenance: string;
+          referenceNumber: string | null;
+          serialNumber: string;
           serviceFee: string;
           traderId: string;
           traderName: string;
@@ -4176,9 +4176,12 @@ export class OperationsService {
                  o.vat_price_mode_snapshot as "vatPriceModeSnapshot",
                  o.vat_rate_snapshot::text as "vatRateSnapshot",
                  o.notes,
+                 o.order_date::text as "orderDate",
                  o.order_profit::text as "orderProfit",
                  o.package_count as "packageCount",
                  o.pricing_provenance_status as "pricingProvenance",
+                 o.reference_number as "referenceNumber",
+                 o.serial_number as "serialNumber",
                  o.service_fee::text as "serviceFee",
                  o.trader_id as "traderId",
                  t.name_en as "traderName",
@@ -4225,6 +4228,39 @@ export class OperationsService {
           changes.push({ category, field, next: after, previous: before, reason: null });
         }
       };
+
+      const serialNumber = input.serialNumber ?? current.serialNumber;
+      const serialNumberNormalized = this.normalizeOrderIdentifier(serialNumber);
+      const referenceNumber =
+        input.referenceNumber === undefined ? current.referenceNumber : input.referenceNumber;
+      const referenceNumberNormalized =
+        referenceNumber === null ? null : this.normalizeOrderIdentifier(referenceNumber);
+      if (serialNumber !== current.serialNumber || referenceNumber !== current.referenceNumber) {
+        const duplicate = await sql<{ referenceExists: boolean; serialExists: boolean }>`
+          select exists(select 1 from orders where company_id=${companyId}::uuid
+            and id<>${orderId}::uuid and order_date=${current.orderDate}::date
+            and serial_number_normalized=${serialNumberNormalized}) as "serialExists",
+            exists(select 1 from orders where company_id=${companyId}::uuid
+            and id<>${orderId}::uuid and ${referenceNumberNormalized}::text is not null
+            and reference_number_normalized=${referenceNumberNormalized}) as "referenceExists"
+        `.execute(transaction);
+        if (duplicate.rows[0]?.serialExists) {
+          throw new ApplicationException(
+            "order_serial_already_exists_for_date",
+            `Serial Number "${serialNumber}" is already used on this date`,
+            HttpStatus.CONFLICT,
+          );
+        }
+        if (duplicate.rows[0]?.referenceExists) {
+          throw new ApplicationException(
+            "reference_number_exists",
+            `Reference Number "${referenceNumber}" is already used`,
+            HttpStatus.CONFLICT,
+          );
+        }
+        track("serial_number", "user_action", current.serialNumber, serialNumber);
+        track("reference_number", "user_action", current.referenceNumber, referenceNumber);
+      }
 
       // --- Trader change ------------------------------------------------------
       const traderChanged = input.traderId !== undefined && input.traderId !== current.traderId;
@@ -4339,6 +4375,38 @@ export class OperationsService {
         track("delivery_area", "user_action", current.areaNameSnapshot, addr.areaName);
       }
 
+      // A directly selected Area is valid for manually entered/optional Customers too.
+      // It deliberately wins over the previous Area when no saved Customer address was
+      // selected in this edit.
+      if (!customerChanged && input.areaId !== undefined && input.areaId !== current.areaId) {
+        const selectedArea = (
+          await sql<{ id: string; name: string }>`
+            select id, name_en as name from areas
+             where id=${input.areaId}::uuid and company_id=${companyId}::uuid and is_active
+          `.execute(transaction)
+        ).rows[0];
+        if (selectedArea === undefined) {
+          throw new ApplicationException(
+            "area_not_found",
+            "The selected Area is not active in this Company",
+            HttpStatus.BAD_REQUEST,
+          );
+        }
+        areaId = selectedArea.id;
+        track("delivery_area", "user_action", current.areaNameSnapshot, selectedArea.name);
+        customerColumns = {
+          addressId: current.customerAddressId,
+          areaCode: "",
+          areaName: selectedArea.name,
+          areaNameAr: null,
+          code: current.customerCodeSnapshot ?? "",
+          customerId: current.customerId,
+          deliveryNotes: null,
+          locationLink: null,
+          reference: null,
+        };
+      }
+
       // --- Pricing ------------------------------------------------------------
       const areaChanged = areaId !== current.areaId;
       const identityRepriced = traderChanged || areaChanged;
@@ -4399,7 +4467,7 @@ export class OperationsService {
           }
         : await this.vatPolicy(transaction, companyId);
       const financials = this.calculateOrderFinancials({
-        additionalFees: new Decimal(current.additionalFees ?? 0),
+        additionalFees: new Decimal(input.additionalFees ?? current.additionalFees ?? 0),
         codAmount: nextCod,
         driverCost: new Decimal(current.driverCost),
         prospective: isProspective,
@@ -4458,6 +4526,20 @@ export class OperationsService {
           reason: (input.serviceFeeReason ?? "").trim() || null,
         });
       }
+      if (
+        input.additionalFees !== undefined &&
+        !this.money(new Decimal(input.additionalFees)).equals(
+          this.money(new Decimal(current.additionalFees ?? 0)),
+        )
+      ) {
+        changes.push({
+          category: "financial_change",
+          field: "additional_fees",
+          next: this.money(new Decimal(input.additionalFees)).toFixed(2),
+          previous: this.money(new Decimal(current.additionalFees ?? 0)).toFixed(2),
+          reason: null,
+        });
+      }
 
       if (changes.length === 0) return;
 
@@ -4480,7 +4562,11 @@ export class OperationsService {
 
       await sql`
         update orders
-           set trader_id = ${traderId}::uuid,
+           set serial_number=${serialNumber},
+               serial_number_normalized=${serialNumberNormalized},
+               reference_number=${referenceNumber},
+               reference_number_normalized=${referenceNumberNormalized},
+               trader_id = ${traderId}::uuid,
                customer_id = ${customerColumns?.customerId ?? current.customerId}::uuid,
                customer_address_id = ${
                  customerColumns?.addressId ?? current.customerAddressId
@@ -5512,6 +5598,7 @@ export class OperationsService {
   private async orderById(companyId: string, orderId: string): Promise<OperationsOrder> {
     const result = await sql<OperationsOrder>`
       select o.id,
+             o.area_id as "areaId",
              o.order_number as "orderNumber",
              o.serial_number as "serialNumber",
              o.reference_number as "referenceNumber",

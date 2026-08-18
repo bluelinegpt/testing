@@ -502,18 +502,13 @@ export class CreateOrderDto {
   @IsUUID()
   public readonly driverId?: string;
 
-  @ValidateIf(
-    (dto: CreateOrderDto) => dto.orderType !== "collect_order" || dto.customerName !== undefined,
-  )
+  @IsOptional()
   @IsString()
   @MinLength(1)
   @MaxLength(160)
   public readonly customerName?: string;
 
-  @ValidateIf(
-    (dto: CreateOrderDto) =>
-      dto.orderType !== "collect_order" || dto.customerMobileNumber !== undefined,
-  )
+  @IsOptional()
   @IsString()
   @TrimText()
   @MinLength(1, mobileRequiredMessage)
@@ -614,6 +609,21 @@ export class CreateTraderPortalOrderDto extends OmitType(CreateOrderDto, ["trade
 // (which sets the Area), re-prices the order.
 export class UpdateOrderDto {
   @IsOptional()
+  @IsString()
+  @MinLength(1)
+  @MaxLength(160)
+  @Matches(orderIdentifierPattern, orderIdentifierMessage)
+  @TrimText()
+  public readonly serialNumber?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(160)
+  @Matches(orderIdentifierPattern, orderIdentifierMessage)
+  @OptionalTrimmedText()
+  public readonly referenceNumber?: string;
+
+  @IsOptional()
   @IsUUID()
   public readonly traderId?: string;
 
@@ -670,6 +680,11 @@ export class UpdateOrderDto {
   @IsString()
   @MaxLength(500)
   public readonly serviceFeeReason?: string;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  public readonly additionalFees?: number;
 
   @IsOptional()
   @IsInt()
@@ -806,9 +821,10 @@ export class CreateTraderDto {
   @MaxLength(160)
   public readonly contactPerson?: string;
 
+  @IsOptional()
   @IsString()
   @MaxLength(32)
-  public readonly mobileNumber!: string;
+  public readonly mobileNumber?: string;
 
   @IsOptional()
   @IsEmail()
