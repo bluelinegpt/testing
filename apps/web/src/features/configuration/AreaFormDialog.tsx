@@ -24,6 +24,7 @@ export function AreaFormDialog({
   api,
   area,
   defaultEmirateId,
+  emirates: suppliedEmirates,
   onClose,
   onSaved,
 }: {
@@ -32,6 +33,8 @@ export function AreaFormDialog({
   area?: CompanyArea | undefined;
   /** Prefills the Emirate when the parent form already chose one. */
   defaultEmirateId?: string | undefined;
+  /** Reuse an already-loaded selector list when opened inline from an Order. */
+  emirates?: readonly Emirate[] | undefined;
   onClose: () => void;
   onSaved: (area: CompanyArea) => void;
 }) {
@@ -39,17 +42,22 @@ export function AreaFormDialog({
   const locale = normalizeLocale(i18n.resolvedLanguage);
   const editing = area !== undefined;
 
-  const [emirates, setEmirates] = useState<readonly Emirate[]>([]);
+  const [emirates, setEmirates] = useState<readonly Emirate[]>(suppliedEmirates ?? []);
   const [emirateId, setEmirateId] = useState(area?.emirateId ?? defaultEmirateId ?? "");
   const [nameEn, setNameEn] = useState(area?.nameEn ?? "");
   const [nameAr, setNameAr] = useState(area?.nameAr ?? "");
   const [notes, setNotes] = useState(area?.notes ?? "");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [error, setError] = useState<string>();
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(suppliedEmirates === undefined);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
+    if (suppliedEmirates !== undefined) {
+      setEmirates(suppliedEmirates);
+      setLoading(false);
+      return;
+    }
     let active = true;
     void api
       .get<readonly Emirate[]>("configuration/emirates")
@@ -59,7 +67,7 @@ export function AreaFormDialog({
     return () => {
       active = false;
     };
-  }, [api, t]);
+  }, [api, suppliedEmirates, t]);
 
   const emirateLabel = (emirate: Emirate) => (locale === "ar" ? emirate.nameAr : emirate.nameEn);
 

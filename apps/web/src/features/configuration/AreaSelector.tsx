@@ -161,6 +161,7 @@ export function AreaSelector({
         <AreaFormDialog
           api={api}
           defaultEmirateId={emirateId}
+          emirates={emirates}
           onClose={() => setAddOpen(false)}
           onSaved={(area) => {
             setAddOpen(false);

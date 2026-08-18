@@ -209,15 +209,13 @@ export function buildDriverShipmentManifestHtml(
 
   const orderRows = data.orders
     .map(
-      (order, index) =>
+      (order) =>
         "<tr>" +
-        `<td class="num">${index + 1}</td>` +
         `<td class="mono">${escapeHtml(order.serialNumber)}</td>` +
         `<td class="mono">${order.referenceNumber === null ? "" : escapeHtml(order.referenceNumber)}</td>` +
         `<td>${escapeHtml(order.traderName)}</td>` +
         `<td>${escapeHtml(order.customerName)}</td>` +
         `<td class="mono">${escapeHtml(order.customerMobileNumber)}</td>` +
-        `<td class="mono">${order.customerSecondMobileNumber === null ? "" : escapeHtml(order.customerSecondMobileNumber)}</td>` +
         `<td>${escapeHtml(order.areaName)}</td>` +
         `<td class="num">${money(order.codAmount)}</td>` +
         /* Notes, not Delivery Status. A manifest is signed at handover, when
@@ -231,13 +229,11 @@ export function buildDriverShipmentManifestHtml(
   const orderTable =
     `<table class="grid"><thead><tr>` +
     [
-      labels.lineNumber,
       labels.orderSerial,
       labels.externalReference,
       labels.trader,
       labels.customer,
       labels.mobile,
-      labels.secondMobile,
       labels.area,
       labels.cod,
       labels.notes,
@@ -329,16 +325,14 @@ export function buildDriverShipmentManifestHtml(
     .mono { font-variant-numeric: tabular-nums; }
      /* Every approved manifest column is explicitly sized. The percentages
         total 100 so PDF pagination cannot assign an unpredictable remainder. */
-    table.grid th:nth-child(1), table.grid td:nth-child(1) { width: 4%; }
+    table.grid th:nth-child(1), table.grid td:nth-child(1) { width: 10%; }
     table.grid th:nth-child(2), table.grid td:nth-child(2) { width: 10%; }
-    table.grid th:nth-child(3), table.grid td:nth-child(3) { width: 11%; }
-    table.grid th:nth-child(4), table.grid td:nth-child(4) { width: 11%; }
+    table.grid th:nth-child(3), table.grid td:nth-child(3) { width: 18%; }
+    table.grid th:nth-child(4), table.grid td:nth-child(4) { width: 10%; }
     table.grid th:nth-child(5), table.grid td:nth-child(5) { width: 12%; }
-    table.grid th:nth-child(6), table.grid td:nth-child(6) { width: 12%; }
-    table.grid th:nth-child(7), table.grid td:nth-child(7) { width: 11%; }
-    table.grid th:nth-child(8), table.grid td:nth-child(8) { width: 10%; }
-    table.grid th:nth-child(9), table.grid td:nth-child(9) { width: 9%; }
-    table.grid th:nth-child(10), table.grid td:nth-child(10) { width: 10%; }
+    table.grid th:nth-child(6), table.grid td:nth-child(6) { width: 8%; }
+    table.grid th:nth-child(7), table.grid td:nth-child(7) { width: 10%; }
+    table.grid th:nth-child(8), table.grid td:nth-child(8) { width: 22%; }
     .summary-section { margin-top: 12px; max-width: 460px; }
     /* Side by side rather than stacked. Each keeps its own underline so the
        label still reads as attached to its own figure. */

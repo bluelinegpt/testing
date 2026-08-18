@@ -77,7 +77,9 @@ describe("buildDriverShipmentManifestHtml", () => {
     expect(html).not.toContain("<th>Packages</th>");
     expect(html).toContain("<th>Trader</th>");
     expect(html).toContain("Test Trader");
-    expect(html).toContain("<th>Second Mobile</th>");
+    expect(html).not.toContain("<th>Second Mobile</th>");
+    expect(html).toContain("<th>Order Serial Number</th>");
+    expect(html).not.toContain("<th>#</th>");
     expect(html).not.toContain("<th>Emirate</th>");
     expect(html).not.toContain("<th>Order Number</th>");
     expect(html).not.toContain("<th>Service Fee</th>");
@@ -95,7 +97,7 @@ describe("buildDriverShipmentManifestHtml", () => {
     expect(html).toContain('lang="ar"');
     expect(html).toContain("كشف شحنات السائق");
     expect(html).toContain("شركة الاختبار");
-    // Serial numbers, references and amounts are never translated.
+    // User-entered Serial, references and amounts are never translated.
     expect(html).toContain("SER-9");
     expect(html).toContain("REF-9");
     expect(html).toContain("AED 150.00");
@@ -215,6 +217,20 @@ describe("buildDriverShipmentManifestHtml", () => {
     expect(mobileColumn).toBeGreaterThan(0);
     expect(codColumn).toBeGreaterThan(0);
     expect(widthOf(mobileColumn)).toBeGreaterThanOrEqual(widthOf(codColumn));
+  });
+
+  it("prioritizes Trader and Notes space over Customer", () => {
+    const html = buildDriverShipmentManifestHtml(sample, "en", "now");
+    const headers = [...html.matchAll(/<th>([^<]*)<\/th>/g)].map((match) => match[1]);
+    const widthOf = (header: string) => {
+      const column = headers.indexOf(header) + 1;
+      return Number(
+        new RegExp(`td:nth-child\\(${column}\\) \\{ width: (\\d+)%`).exec(html)?.[1] ?? "0",
+      );
+    };
+
+    expect(widthOf("Trader")).toBeGreaterThan(widthOf("Customer"));
+    expect(widthOf("Notes")).toBeGreaterThan(widthOf("Customer"));
   });
 
   it("prints Notes as the last column, in place of Delivery Status", () => {

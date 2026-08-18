@@ -92,6 +92,23 @@ describe("AreaFormDialog", () => {
     expect(screen.queryByLabelText("Area Code")).not.toBeInTheDocument();
   });
 
+  it("reuses supplied Emirates when opened inline instead of loading them again", async () => {
+    const api = createApi();
+    render(
+      <AreaFormDialog
+        api={api as unknown as ApiClient}
+        defaultEmirateId={dubaiId}
+        emirates={emirates}
+        onClose={vi.fn()}
+        onSaved={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("option", { name: "Dubai" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Emirate")).toHaveValue(dubaiId);
+    expect(api.get).not.toHaveBeenCalled();
+  });
+
   it("shows the duplicate rule against the name field", async () => {
     const api = createApi({
       post: vi
