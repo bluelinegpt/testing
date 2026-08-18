@@ -6,10 +6,10 @@
       "displayName": "API",
       "path": "apps/api",
       "renderService": "bluelinegpt-api-test",
-      "status": "pushed_awaiting_confirmation",
-      "localCommit": "1ee46fc",
+      "status": "needs_deploy",
+      "localCommit": "0718760",
       "localCommitDate": "2026-08-18",
-      "lastChangeDescription": "Fix inline area authorization and show modal versions",
+      "lastChangeDescription": "Adjust driver manifest number and area columns",
       "lastChangeBy": "codex",
       "confirmedLiveCommit": "27e356a",
       "confirmedLiveAt": "2026-08-14"
