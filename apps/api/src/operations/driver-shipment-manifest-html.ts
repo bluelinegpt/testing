@@ -190,10 +190,6 @@ function money(value: string): string {
   return `AED ${escapeHtml(value)}`;
 }
 
-function driverTypeLabel(labels: Labels, type: "employee" | "outsourced"): string {
-  return type === "employee" ? labels.driverTypeEmployee : labels.driverTypeOutsourced;
-}
-
 /**
  * Pure: builds the full manifest HTML document. Never calls any API and never
  * mutates Order data — a failure here can only throw before any PDF bytes are
@@ -269,14 +265,8 @@ export function buildDriverShipmentManifestHtml(
     `</div></div>` +
     `<h1 class="report-title">${escapeHtml(labels.title)}</h1>` +
     `<div class="meta-grid">` +
-    headerMeta(labels.manifestNumber, data.header.manifestNumber) +
     headerMeta(labels.reportDate, generatedAt) +
     headerMeta(labels.driver, data.header.driverName) +
-    headerMeta(labels.driverMobile, data.header.driverMobile) +
-    headerMeta(labels.driverType, driverTypeLabel(labels, data.header.driverType)) +
-    headerMeta(labels.numberOfOrders, String(data.header.orderCount)) +
-    headerMeta(labels.generatedBy, data.header.generatedBy) +
-    headerMeta(labels.generatedAt, generatedAt) +
     `</div>` +
     `</header>`;
 
@@ -312,7 +302,7 @@ export function buildDriverShipmentManifestHtml(
     .company-name { font-size: 14px; font-weight: 800; }
     .company-subtitle, .company-telephone { font-size: 9px; color: #444; }
     .report-title { font-size: 16px; margin: 6px 0 5px; }
-    .meta-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px 10px; font-size: 8.5px; }
+    .meta-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 3px 18px; font-size: 8.5px; }
     .meta-item { display: flex; justify-content: space-between; border-bottom: 1px dotted #ccc; padding: 2px 0; }
     .meta-label { color: #555; }
     .meta-value { font-weight: 600; }
@@ -325,14 +315,14 @@ export function buildDriverShipmentManifestHtml(
     .mono { font-variant-numeric: tabular-nums; }
      /* Every approved manifest column is explicitly sized. The percentages
         total 100 so PDF pagination cannot assign an unpredictable remainder. */
-    table.grid th:nth-child(1), table.grid td:nth-child(1) { width: 10%; }
+    table.grid th:nth-child(1), table.grid td:nth-child(1) { width: 7%; }
     table.grid th:nth-child(2), table.grid td:nth-child(2) { width: 10%; }
     table.grid th:nth-child(3), table.grid td:nth-child(3) { width: 18%; }
     table.grid th:nth-child(4), table.grid td:nth-child(4) { width: 10%; }
     table.grid th:nth-child(5), table.grid td:nth-child(5) { width: 12%; }
     table.grid th:nth-child(6), table.grid td:nth-child(6) { width: 8%; }
     table.grid th:nth-child(7), table.grid td:nth-child(7) { width: 10%; }
-    table.grid th:nth-child(8), table.grid td:nth-child(8) { width: 22%; }
+    table.grid th:nth-child(8), table.grid td:nth-child(8) { width: 25%; }
     .summary-section { margin-top: 12px; max-width: 460px; }
     /* Side by side rather than stacked. Each keeps its own underline so the
        label still reads as attached to its own figure. */
