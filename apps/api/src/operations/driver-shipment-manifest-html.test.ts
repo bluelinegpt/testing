@@ -78,7 +78,7 @@ describe("buildDriverShipmentManifestHtml", () => {
     expect(html).toContain("<th>Trader</th>");
     expect(html).toContain("Test Trader");
     expect(html).not.toContain("<th>Second Mobile</th>");
-    expect(html).toContain("<th>Order Serial Number</th>");
+    expect(html).toContain("<th>No</th>");
     expect(html).not.toContain("<th>#</th>");
     expect(html).not.toContain("<th>Emirate</th>");
     expect(html).not.toContain("<th>Order Number</th>");
@@ -236,7 +236,8 @@ describe("buildDriverShipmentManifestHtml", () => {
 
     expect(widthOf("Trader")).toBeGreaterThan(widthOf("Customer"));
     expect(widthOf("Notes")).toBeGreaterThan(widthOf("Customer"));
-    expect(widthOf("Order Serial Number")).toBeLessThan(widthOf("Customer"));
+    expect(widthOf("No")).toBeLessThan(widthOf("Customer"));
+    expect(widthOf("Area")).toBeGreaterThan(widthOf("No"));
   });
 
   it("prints Notes as the last column, in place of Delivery Status", () => {

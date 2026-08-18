@@ -124,7 +124,7 @@ const LABELS: Record<ReportLanguage, Labels> = {
     notes: "ملاحظات",
     numberOfOrders: "عدد الطلبات",
     operationsHandover: "تسليم العمليات",
-    orderSerial: "الرقم التسلسلي للطلب",
+    orderSerial: "الرقم",
     orderNumber: "رقم الطلب",
     outForDelivery: "خرج للتوصيل",
     receivedBy: "استلمه / أرجعه",
@@ -162,7 +162,7 @@ const LABELS: Record<ReportLanguage, Labels> = {
     notes: "Notes",
     numberOfOrders: "Number of Orders",
     operationsHandover: "Operations Handover",
-    orderSerial: "Order Serial Number",
+    orderSerial: "No",
     orderNumber: "Order Number",
     outForDelivery: "Out for Delivery",
     receivedBy: "Returned/Received By",
@@ -315,12 +315,12 @@ export function buildDriverShipmentManifestHtml(
     .mono { font-variant-numeric: tabular-nums; }
      /* Every approved manifest column is explicitly sized. The percentages
         total 100 so PDF pagination cannot assign an unpredictable remainder. */
-    table.grid th:nth-child(1), table.grid td:nth-child(1) { width: 7%; }
+    table.grid th:nth-child(1), table.grid td:nth-child(1) { width: 5%; }
     table.grid th:nth-child(2), table.grid td:nth-child(2) { width: 10%; }
     table.grid th:nth-child(3), table.grid td:nth-child(3) { width: 18%; }
     table.grid th:nth-child(4), table.grid td:nth-child(4) { width: 10%; }
     table.grid th:nth-child(5), table.grid td:nth-child(5) { width: 12%; }
-    table.grid th:nth-child(6), table.grid td:nth-child(6) { width: 8%; }
+    table.grid th:nth-child(6), table.grid td:nth-child(6) { width: 10%; }
     table.grid th:nth-child(7), table.grid td:nth-child(7) { width: 10%; }
     table.grid th:nth-child(8), table.grid td:nth-child(8) { width: 25%; }
     .summary-section { margin-top: 12px; max-width: 460px; }
