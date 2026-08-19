@@ -105,7 +105,8 @@ export function AgentChat() {
       setBusy(true);
       await ensureConversation();
     } catch (err) {
-      setError("I'm having trouble connecting right now. Please try again, or choose Contact Tawseelhub.");
+      setHandoffRequested(true);
+      setError(isRtl ? 'يوسف غير متصل الآن. يمكنك المتابعة معنا على واتساب.' : 'Yousef is temporarily unavailable. Please continue with us on WhatsApp.');
       trackEvent('agent_error', { channel: 'website', language, page: window.location.pathname, actionResult: 'conversation_create_failed' });
     } finally {
       setBusy(false);
@@ -138,7 +139,8 @@ export function AgentChat() {
       if (result.intent === 'handoff') trackEvent('agent_handoff_requested', { channel: 'website', language: result.language, intent: result.intent, page: window.location.pathname });
       if (result.intent === 'handoff' || result.humanState === 'waiting_for_human' || result.conversationMode === 'paused' || /whatsapp|person|human|team|واتساب|شخص|موظف|فريق/i.test(text)) setHandoffRequested(true);
     } catch (err) {
-      setError("I'm having trouble connecting right now. Please try again, or choose Contact Tawseelhub.");
+      setHandoffRequested(true);
+      setError(isRtl ? 'يوسف غير متصل الآن. يمكنك المتابعة معنا على واتساب.' : 'Yousef is temporarily unavailable. Please continue with us on WhatsApp.');
       trackEvent('agent_error', { channel: 'website', language, page: window.location.pathname, actionResult: 'message_failed' });
     } finally {
       setBusy(false);
@@ -168,7 +170,8 @@ export function AgentChat() {
       setHumanState(created.humanState ?? 'ai_active');
       trackEvent('agent_conversation_started', { channel: 'website', language: nextLanguage, page: window.location.pathname });
     } catch (err) {
-      setError(nextLanguage === 'ar' ? 'أواجه مشكلة في الاتصال الآن. الرجاء المحاولة مرة أخرى.' : "I'm having trouble connecting right now. Please try again, or choose Contact Tawseelhub.");
+      setHandoffRequested(true);
+      setError(nextLanguage === 'ar' ? 'يوسف غير متصل الآن. يمكنك المتابعة معنا على واتساب.' : 'Yousef is temporarily unavailable. Please continue with us on WhatsApp.');
       trackEvent('agent_error', { channel: 'website', language: nextLanguage, page: window.location.pathname, actionResult: 'conversation_create_failed' });
     } finally {
       setBusy(false);

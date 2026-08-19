@@ -33,6 +33,13 @@ export interface WhatsAppPublicSettings {
   readonly url: string | null;
 }
 
+const fallbackWhatsAppSettings: WhatsAppPublicSettings = {
+  enabled: true,
+  label: "Chat on WhatsApp",
+  number: "971506898604",
+  url: "https://wa.me/971506898604",
+};
+
 export function buildWhatsAppMessageUrl(url: string, message: string): string {
   const separator = url.includes("?") ? "&" : "?";
   return `${url}${separator}text=${encodeURIComponent(message)}`;
@@ -68,8 +75,13 @@ export async function sendAgentMessage(token: string, message: string, language:
 }
 
 export async function getWhatsAppSettings(): Promise<WhatsAppPublicSettings> {
-  const response = await fetch(`${base()}/public/agent/whatsapp/settings`, { method: "GET" });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) return { enabled: false, label: "Chat on WhatsApp", number: "", url: null };
-  return body as WhatsAppPublicSettings;
+  try {
+    const response = await fetch(`${base()}/public/agent/whatsapp/settings`, { method: "GET" });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) return fallbackWhatsAppSettings;
+    const settings = body as WhatsAppPublicSettings;
+    return settings.enabled && settings.url ? settings : fallbackWhatsAppSettings;
+  } catch {
+    return fallbackWhatsAppSettings;
+  }
 }
