@@ -137,7 +137,7 @@ export function AgentChat() {
       if (result.intent === 'trader') trackEvent('agent_trader_application_started', { channel: 'website', language: result.language, intent: result.intent, page: window.location.pathname });
       if (result.intent === 'delivery_company_demo') trackEvent('agent_demo_request_started', { channel: 'website', language: result.language, intent: result.intent, page: window.location.pathname });
       if (result.intent === 'handoff') trackEvent('agent_handoff_requested', { channel: 'website', language: result.language, intent: result.intent, page: window.location.pathname });
-      if (result.intent === 'handoff' || result.humanState === 'waiting_for_human' || result.conversationMode === 'paused' || /whatsapp|person|human|team|واتساب|شخص|موظف|فريق/i.test(text)) setHandoffRequested(true);
+      if (result.humanState === 'waiting_for_human' || result.conversationMode === 'paused' || /whatsapp|واتساب/i.test(text)) setHandoffRequested(true);
     } catch (err) {
       setHandoffRequested(true);
       setError(isRtl ? 'يوسف غير متصل الآن. يمكنك المتابعة معنا على واتساب.' : 'Yousef is temporarily unavailable. Please continue with us on WhatsApp.');

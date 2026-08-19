@@ -24,7 +24,7 @@ const mapRow = (row: Record<string, unknown>) => Object.fromEntries(Object.entri
 const compact = (value: Record<string, unknown>) => Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined && v !== null && v !== ""));
 const socialIntents = new Set<AgentIntent>(["greeting", "small_talk", "thanks", "goodbye"]);
 const businessInfoIntents = new Set<AgentIntent>(["general_question", "product_feature_question", "current_feature_status", "clarification", "unknown"]);
-const workflowIntents = new Set<AgentIntent>(["customer_quote", "trader", "delivery_company_demo"]);
+const workflowIntents = new Set<AgentIntent>(["customer_quote", "trader", "delivery_company_demo", "handoff"]);
 const genericAnswerIntents = new Set<AgentIntent>(["general_question", "unknown"]);
 const privateDirectoryOrCustomerInfo = /delivery companies|company directory|which traders|traders .*use|traders .*using|another customer|customer'?s information|customer'?s conversation|أسماء شركات التوصيل|شركات التوصيل المسجلة|أي تجار|معلومات عميل|محادثة عميل/i;
 const quoteSlotOrder: Array<keyof AgentSlots> = ["requesterName", "requesterMobile", "pickupEmirate", "pickupArea", "deliveryEmirate", "deliveryArea", "packageType", "weightKg", "pickupDate", "deliveryAddress"];
@@ -218,11 +218,15 @@ export class AgentService {
         code: (error as { code?: string; message?: string }).code ?? (error as { message?: string }).message?.slice(0, 80) ?? "provider_failed",
         diagnostics: this.model.diagnostics(),
       }, "Tawseelhub Agent model provider failed");
-      const safe = input.channel === "website" ? this.humanWaitingMessage(conversation.language as AgentLanguage) : "I'm unable to complete that request right now. You can try again, or I can pass your request to the Tawseelhub team.";
-      await this.appendMessage(String(conversation.id), "assistant", safe, { providerError: true }, { channel: input.channel, direction: "outbound", ...(input.provider === undefined ? {} : { provider: input.provider }) });
-      if (input.channel === "website") await this.markWebsiteHumanRequested(String(conversation.id), String(conversation.conversation_mode ?? "ai_active"), "Model provider failed");
+      const language = conversation.language as AgentLanguage;
+      const offline = input.channel === "website" && !settings.humanHandoffEnabled;
+      const safe = input.channel === "website" ? (offline ? this.humanUnavailableAskForContactMessage(language, state) : this.humanWaitingMessage(language)) : "I'm unable to complete that request right now. You can try again, or I can pass your request to the Tawseelhub team.";
+      const fallbackState = offline ? this.humanUnavailableContactState(state) : state;
+      await this.appendMessage(String(conversation.id), "assistant", safe, { providerError: true, state: fallbackState }, { channel: input.channel, direction: "outbound", ...(input.provider === undefined ? {} : { provider: input.provider }) });
+      if (input.channel === "website" && !offline) await this.markWebsiteHumanRequested(String(conversation.id), String(conversation.conversation_mode ?? "ai_active"), "Model provider failed");
+      if (offline) await sql`update platform_agent_conversations set current_intent='handoff',status='waiting_for_user',requester_type='unknown',audience=${fallbackState.audience ?? "unknown"},state=${JSON.stringify(fallbackState)}::jsonb,review_status=case when review_status='new' then 'follow_up' else review_status end,last_customer_message_at=now(),last_channel=${input.channel},updated_at=now(),last_message_at=now() where id=${conversation.id}::uuid`.execute(this.db);
       const updated = (await sql<Record<string, unknown>>`select * from platform_agent_conversations where id=${conversation.id}::uuid`.execute(this.db)).rows[0]!;
-      return { ...(await this.publicConversation(updated)), reply: safe, intent: "handoff", language: conversation.language };
+      return { ...(await this.publicConversation(updated)), reply: safe, intent: "handoff", language };
     }
     const turnIntent = this.resolveTurnIntent(input.text, model.intent, state);
     const mergedSlots = this.mergeSlots(state.slots, model.extracted, model.wantsCorrection);
@@ -240,13 +244,14 @@ export class AgentService {
     if (interruption) response = interruption;
     else if (state.pendingAction && model.wantsConfirmation) response = await this.executePending(String(conversation.id), state.pendingAction.type, nextState);
     else response = await this.previousRequestQuestionResponse(String(conversation.id), input.text, model.language, nextState)
-      ?? await this.nextResponse(String(conversation.id), turnIntent, model.language, nextState, String(conversation.status ?? ""), input.channel);
+      ?? await this.nextResponse(String(conversation.id), turnIntent, model.language, nextState, String(conversation.status ?? ""), input.channel, settings);
     const mergedState = response.structured?.state as AgentState | undefined ?? nextState;
     const identity = this.identityFromState(mergedState);
     const classification = this.classificationFor(response.intent ?? model.intent, mergedState);
     const acknowledged = response.structured?.suppressReturningAcknowledgement ? response.content : await this.returningCustomerAcknowledgement(String(conversation.id), model.language, state, mergedState, response.content);
-    const isWebsiteHandoff = input.channel === "website" && (response.intent ?? model.intent) === "handoff";
-    await sql`update platform_agent_conversations set language=${model.language},current_intent=${response.intent ?? model.intent},status=${response.status ?? "waiting_for_user"},requester_type=${this.requesterType(response.intent ?? model.intent)},audience=${mergedState.audience ?? "unknown"},customer_name=${identity.name},mobile_number=${identity.mobileOriginal},mobile_number_normalized=${identity.mobileNormalized},email=${identity.email},operational_classification=${classification},state=${JSON.stringify(mergedState)}::jsonb,conversation_mode=case when ${isWebsiteHandoff} then 'paused' else conversation_mode end,review_status=case when ${isWebsiteHandoff} and review_status='new' then 'open' else review_status end,mode_changed_at=case when ${isWebsiteHandoff} then now() else mode_changed_at end,updated_at=now(),last_message_at=now() where id=${conversation.id}::uuid`.execute(this.db);
+    const isWebsiteHandoff = input.channel === "website" && response.structured?.websiteHumanRequested === true;
+    const reviewStatusOverride = typeof response.structured?.reviewStatus === "string" ? response.structured.reviewStatus : null;
+    await sql`update platform_agent_conversations set language=${model.language},current_intent=${response.intent ?? model.intent},status=${response.status ?? "waiting_for_user"},requester_type=${this.requesterType(response.intent ?? model.intent)},audience=${mergedState.audience ?? "unknown"},customer_name=${identity.name},mobile_number=${identity.mobileOriginal},mobile_number_normalized=${identity.mobileNormalized},email=${identity.email},operational_classification=${classification},state=${JSON.stringify(mergedState)}::jsonb,conversation_mode=case when ${isWebsiteHandoff} then 'paused' else conversation_mode end,review_status=case when ${reviewStatusOverride} is not null then ${reviewStatusOverride} when ${isWebsiteHandoff} and review_status='new' then 'open' else review_status end,mode_changed_at=case when ${isWebsiteHandoff} then now() else mode_changed_at end,updated_at=now(),last_message_at=now() where id=${conversation.id}::uuid`.execute(this.db);
     if (isWebsiteHandoff) await this.recordModeHistory(String(conversation.id), String(conversation.conversation_mode ?? "ai_active"), "paused", null, "Human requested from website chat");
     const assistantMessageId = await this.appendMessage(String(conversation.id), "assistant", acknowledged, response.structured, { channel: input.channel, direction: "outbound", ...(input.provider === undefined ? {} : { provider: input.provider }) });
     if (input.channel === "whatsapp" && input.provider) {
@@ -263,10 +268,10 @@ export class AgentService {
     return { ...(await this.publicConversation(updated)), reply: acknowledged, intent: response.intent ?? turnIntent, language: model.language };
   }
 
-  private async nextResponse(conversationId: string, intent: AgentIntent, language: AgentLanguage, state: AgentState, currentStatus = "", channel?: AgentChannel) {
+  private async nextResponse(conversationId: string, intent: AgentIntent, language: AgentLanguage, state: AgentState, currentStatus = "", channel?: AgentChannel, settings?: { humanHandoffEnabled?: boolean }) {
     if (socialIntents.has(intent)) return this.socialResponse(intent, language);
     if (currentStatus === "completed" && state.lastBusinessIntent === "customer_quote" && !state.pendingAction) return this.completedQuoteFollowUp(language);
-    if (intent === "handoff") return this.prepareHandoff(state, language, "requested_by_user", channel);
+    if (intent === "handoff") return this.prepareHandoff(conversationId, state, language, "requested_by_user", channel, settings?.humanHandoffEnabled ?? true);
     if (intent === "customer_quote") return this.quoteStep(state, language);
     if (intent === "trader") return this.traderStep(state, language);
     if (intent === "delivery_company_demo") return this.demoStep(state, language);
@@ -447,8 +452,9 @@ export class AgentService {
     return { content: `Your demo request has been received. Reference: ${result.referenceNumber}.\nDo you have another question, or how can I help you now?`, intent: "delivery_company_demo" as const, status: "completed", structured: { state: this.completedWorkflowState(state) } };
   }
 
-  private prepareHandoff(state: AgentState, language: AgentLanguage, reason: string, channel?: AgentChannel) {
+  private async prepareHandoff(conversationId: string, state: AgentState, language: AgentLanguage, reason: string, channel?: AgentChannel, humanHandoffEnabled = true) {
     if (channel === "website") {
+      if (!humanHandoffEnabled) return this.offlineHumanFollowUpStep(conversationId, state, language, reason);
       return { content: this.humanWaitingMessage(language), intent: "handoff" as const, status: "waiting_for_user", structured: { state: this.completedWorkflowState(state), websiteHumanRequested: true } };
     }
     const summary = compact({ reason, name: state.slots.contactName ?? state.slots.requesterName ?? state.slots.contactPerson, mobile: state.slots.mobile ?? state.slots.mobileNumber ?? state.slots.requesterMobile, email: state.slots.email ?? state.slots.requesterEmail });
@@ -465,12 +471,57 @@ export class AgentService {
     return rest;
   }
 
-  private async createHandoff(conversationId: string, state: AgentState, reason: string) {
+  private async offlineHumanFollowUpStep(conversationId: string, state: AgentState, language: AgentLanguage, reason: string) {
+    const slots = state.slots;
+    const name = slots.contactName ?? slots.requesterName ?? slots.contactPerson;
+    const mobile = slots.mobile ?? slots.mobileNumber ?? slots.requesterMobile;
+    if (!name) return {
+      content: this.humanUnavailableAskForContactMessage(language, state),
+      intent: "handoff" as const,
+      status: "waiting_for_user",
+      structured: { state: { ...state, lastBusinessIntent: "handoff" as const, lastAskedSlot: "contactName" as const } },
+    };
+    if (!mobile) return {
+      content: language === "ar" ? "لا يوجد موظف متاح الآن. ما رقم الهاتف المتحرك الذي يمكن لفريق العمليات التواصل معك عليه؟" : "No human agent is available right now. What mobile number should our operations team use to contact you?",
+      intent: "handoff" as const,
+      status: "waiting_for_user",
+      structured: { state: { ...state, slots: { ...slots, contactName: name, requesterName: slots.requesterName ?? name }, lastBusinessIntent: "handoff" as const, lastAskedSlot: "mobile" as const } },
+    };
+    return this.createHandoff(conversationId, { ...state, slots: { ...slots, contactName: name, mobile, mobileNumber: slots.mobileNumber ?? mobile, requesterMobile: slots.requesterMobile ?? mobile } }, reason, {
+      content: language === "ar"
+        ? "شكراً لك. تم حفظ معلوماتك، وسيتواصل معك فريق العمليات قريباً. هل لديك سؤال آخر، أو كيف يمكنني مساعدتك الآن؟"
+        : "Thank you. I saved your information, and our operations team will get back to you soon. Do you have another question, or how can I help you now?",
+      reviewStatus: "follow_up",
+    });
+  }
+
+  private async createHandoff(conversationId: string, state: AgentState, reason: string, options?: { content?: string; reviewStatus?: "open" | "follow_up" }) {
+    const existing = (await sql<{ reference_number: string }>`
+      select reference_number
+      from platform_agent_handoffs
+      where conversation_id=${conversationId}::uuid
+        and status not in('resolved','closed')
+      order by created_at desc
+      limit 1
+    `.execute(this.db)).rows[0];
+    if (existing) {
+      return {
+        content: options?.content ?? `I already passed this to the Tawseelhub team. Reference: ${existing.reference_number}.\nDo you have another question, or how can I help you now?`,
+        intent: "handoff" as const,
+        status: "handed_off",
+        structured: { state: this.completedWorkflowState(state), ...(options?.reviewStatus ? { reviewStatus: options.reviewStatus } : {}) },
+      };
+    }
     const ref = await reference(this.db, "platform_agent_handoff_reference_seq", "HAND");
     const s = state.slots;
     const inserted = await sql<{ id: string }>`insert into platform_agent_handoffs(reference_number,conversation_id,reason,contact_name,mobile,email,status) values(${ref},${conversationId}::uuid,${reason},${s.contactName ?? s.requesterName ?? s.contactPerson ?? null},${s.mobile ?? s.mobileNumber ?? s.requesterMobile ?? null},${s.email ?? s.requesterEmail ?? null},'new') returning id`.execute(this.db);
     await sql`insert into platform_agent_handoff_history(handoff_id,old_status,new_status,notes) values(${inserted.rows[0]!.id}::uuid,null,'new','Created by Tawseelhub Agent'); insert into platform_agent_actions(conversation_id,action_type,status,request_snapshot,response_snapshot) values(${conversationId}::uuid,'create_handoff','completed',${JSON.stringify(this.redactSlots(s))}::jsonb,${JSON.stringify({ referenceNumber: ref })}::jsonb)`.execute(this.db);
-    return { content: `I have passed this to the Tawseelhub team. Reference: ${ref}.\nDo you have another question, or how can I help you now?`, intent: "handoff" as const, status: "handed_off", structured: { state: this.completedWorkflowState(state) } };
+    return {
+      content: options?.content ?? `I have passed this to the Tawseelhub team. Reference: ${ref}.\nDo you have another question, or how can I help you now?`,
+      intent: "handoff" as const,
+      status: "handed_off",
+      structured: { state: this.completedWorkflowState(state), ...(options?.reviewStatus ? { reviewStatus: options.reviewStatus } : {}) },
+    };
   }
 
   private async previousRequestQuestionResponse(conversationId: string, text: string, language: AgentLanguage, state: AgentState) {
@@ -1443,7 +1494,7 @@ export class AgentService {
 
   private applySequentialWorkflowAnswer(text: string, intent: AgentIntent, previousState: AgentState, slots: AgentSlots): AgentSlots {
     const answer = text.trim();
-    if (!["customer_quote", "trader", "delivery_company_demo"].includes(intent) || !previousState.lastAskedSlot || !answer || answer.length > 120 || /[?؟]/.test(answer)) return slots;
+    if (!["customer_quote", "trader", "delivery_company_demo", "handoff"].includes(intent) || !previousState.lastAskedSlot || !answer || answer.length > 120 || /[?؟]/.test(answer)) return slots;
     const previousMissing = previousState.lastAskedSlot;
     if (!previousMissing || slots[previousMissing] !== undefined && slots[previousMissing] !== "") return slots;
     if (previousMissing === "pickupEmirate" || previousMissing === "deliveryEmirate" || previousMissing === "emirate") {
@@ -1473,6 +1524,8 @@ export class AgentService {
       if (/\b(i sell|we sell|need delivery|orders?|instagram|shopify|store|trader)\b/i.test(answer)) return slots;
       return { ...slots, contactPerson: answer, contactName: slots.contactName ?? answer };
     }
+    if (previousMissing === "contactName") return { ...slots, contactName: answer, requesterName: slots.requesterName ?? answer };
+    if (previousMissing === "mobile") return { ...slots, mobile: answer, mobileNumber: slots.mobileNumber ?? answer, requesterMobile: slots.requesterMobile ?? answer };
     if (previousMissing === "mobileNumber") return { ...slots, mobileNumber: answer, requesterMobile: slots.requesterMobile ?? answer };
     if (previousMissing === "email") return { ...slots, email: answer, requesterEmail: slots.requesterEmail ?? answer };
     if (previousMissing === "pickupBusinessArea") return { ...slots, pickupBusinessArea: answer, pickupArea: slots.pickupArea ?? answer };
@@ -1609,6 +1662,27 @@ export class AgentService {
     return language === "ar"
       ? "طلبت من فريق Tawseelhub الانضمام إلى هذه المحادثة. يمكنك الاستمرار في الكتابة هنا أثناء الانتظار."
       : "I’ve asked the Tawseelhub team to join this chat. You can continue typing here while you wait.";
+  }
+
+  private humanUnavailableAskForContactMessage(language: AgentLanguage, state: AgentState) {
+    const slots = state.slots;
+    const hasName = Boolean(slots.contactName ?? slots.requesterName ?? slots.contactPerson);
+    return language === "ar"
+      ? hasName
+        ? "لا يوجد موظف متاح الآن. سأحفظ معلوماتك وسيتواصل معك فريق العمليات قريباً. ما رقم الهاتف المتحرك الذي يمكن التواصل معك عليه؟"
+        : "لا يوجد موظف متاح الآن. سأحفظ معلوماتك وسيتواصل معك فريق العمليات قريباً. ما اسمك؟"
+      : hasName
+        ? "No human agent is available right now. I’ll save your information and our operations team will get back to you soon. What mobile number should we use?"
+        : "No human agent is available right now. I’ll save your information and our operations team will get back to you soon. What is your name?";
+  }
+
+  private humanUnavailableContactState(state: AgentState): AgentState {
+    const slots = state.slots;
+    return {
+      ...state,
+      lastBusinessIntent: "handoff",
+      lastAskedSlot: slots.contactName ?? slots.requesterName ?? slots.contactPerson ? "mobile" : "contactName",
+    };
   }
 
   private async markWebsiteHumanRequested(conversationId: string, oldMode: string, comment: string) {
