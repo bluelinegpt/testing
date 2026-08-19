@@ -3,8 +3,8 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { config as loadEnvironment } from "dotenv";
-import { Kysely, PostgresDialect } from "kysely";
-import { FileMigrationProvider, Migrator } from "kysely/migration";
+import { Kysely, PostgresDialect, sql } from "kysely";
+import { FileMigrationProvider, Migrator, type Migration, type MigrationProvider } from "kysely/migration";
 import { Pool } from "pg";
 
 import { configuration } from "../../configuration/environment.js";
@@ -29,14 +29,36 @@ const pool = new Pool({
   query_timeout: settings.database.queryTimeoutMs,
 });
 const database = new Kysely<DatabaseSchema>({ dialect: new PostgresDialect({ pool }) });
+const fileMigrationProvider = new FileMigrationProvider({
+  fs: fileSystem,
+  import: (modulePath) => import(pathToFileURL(modulePath).href),
+  migrationFolder,
+  path: { join: (...parts: string[]) => resolve(...parts) },
+});
+const provider: MigrationProvider = {
+  async getMigrations(): Promise<Record<string, Migration>> {
+    const migrations = await fileMigrationProvider.getMigrations();
+    /**
+     * One Neon environment briefly recorded this migration under the
+     * colliding 20260902012000 timestamp before the repair was renamed to
+     * 20260902012500. Kysely treats any executed-but-missing name as
+     * corruption, so keep a virtual no-op alias available to unblock that
+     * environment without adding a duplicate timestamp file or mutating data.
+     */
+    migrations["20260902012000_collect_order_assignment_customer_optional"] ??= {
+      async up(db) {
+        await sql`select 1`.execute(db);
+      },
+      async down(db) {
+        await sql`select 1`.execute(db);
+      },
+    };
+    return migrations;
+  },
+};
 const migrator = new Migrator({
   db: database,
-  provider: new FileMigrationProvider({
-    fs: fileSystem,
-    import: (modulePath) => import(pathToFileURL(modulePath).href),
-    migrationFolder,
-    path: { join: (...parts: string[]) => resolve(...parts) },
-  }),
+  provider,
 });
 
 try {
