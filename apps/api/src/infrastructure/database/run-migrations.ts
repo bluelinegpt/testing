@@ -53,6 +53,15 @@ const provider: MigrationProvider = {
         await sql`select 1`.execute(db);
       },
     };
+    const legacyAssignmentMigration = await sql<{ exists: boolean }>`
+      select exists (
+        select 1 from kysely_migration
+        where name = '20260902012000_collect_order_assignment_customer_optional'
+      ) as "exists"
+    `.execute(database);
+    if (legacyAssignmentMigration.rows[0]?.exists === true) {
+      delete migrations["20260902012500_collect_order_assignment_customer_optional"];
+    }
     return migrations;
   },
 };
