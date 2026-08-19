@@ -92,6 +92,27 @@ export class LocalFileStorageAdapter extends FileStoragePort {
     await rm(this.absolutePathFor(storageKey), { force: true });
   }
 
+  public override async storeWebsite(
+    storageKey: string,
+    content: Uint8Array,
+  ): Promise<StoredFileReference> {
+    this.assertWebsiteKey(storageKey);
+    const absolutePath = this.absolutePathFor(storageKey);
+    await mkdir(dirname(absolutePath), { recursive: true });
+    await writeFile(absolutePath, Buffer.from(content), { flag: "wx", mode: 0o600 });
+    return { storageKey };
+  }
+
+  public override async readWebsite(storageKey: string): Promise<Uint8Array> {
+    this.assertWebsiteKey(storageKey);
+    return readFile(this.absolutePathFor(storageKey));
+  }
+
+  public override async deleteWebsite(storageKey: string): Promise<void> {
+    this.assertWebsiteKey(storageKey);
+    await rm(this.absolutePathFor(storageKey), { force: true });
+  }
+
   /**
    * Commerce operations may only touch the Commerce namespace.
    *
@@ -102,6 +123,12 @@ export class LocalFileStorageAdapter extends FileStoragePort {
   private assertCommerceKey(storageKey: string): void {
     if (!storageKey.startsWith("commerce/")) {
       throw new Error("Refusing to operate on a non-Commerce storage key");
+    }
+  }
+
+  private assertWebsiteKey(storageKey: string): void {
+    if (!storageKey.startsWith("website/")) {
+      throw new Error("Refusing to operate on a non-Website storage key");
     }
   }
 

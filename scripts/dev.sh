@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Starts the BlueLineGPT dev servers (API on :3000, Web on :5174) in one terminal.
-# Both run together; press Ctrl+C once to stop both.
+# Starts the BlueLineGPT dev servers (API on :3000, Public on :5174, Portal on :5177) in one terminal.
+# All run together; press Ctrl+C once to stop them.
 # Usage (Git Bash / macOS / Linux, from anywhere):  bash scripts/dev.sh
 
 set -euo pipefail
@@ -14,16 +14,19 @@ fi
 
 echo "Starting BlueLineGPT dev servers from $root"
 echo "  API -> http://localhost:3000"
-echo "  Web -> http://localhost:5174"
+echo "  Public -> http://localhost:5174"
+echo "  Portal -> http://localhost:5177"
 
 pnpm --filter @blueline/api dev &
 api_pid=$!
+pnpm --filter @blueline/public-web dev &
+public_pid=$!
 pnpm --filter @blueline/web dev &
 web_pid=$!
 
 # Stop both servers when this script is interrupted or exits.
-trap 'kill "$api_pid" "$web_pid" 2>/dev/null || true' EXIT INT TERM
+trap 'kill "$api_pid" "$public_pid" "$web_pid" 2>/dev/null || true' EXIT INT TERM
 
 echo ""
-echo "Both servers starting. When ready, open http://localhost:5174 (Ctrl+C to stop both)."
+echo "Servers starting. Home page: http://localhost:5174  Company Portal: http://localhost:5177 (Ctrl+C to stop all)."
 wait

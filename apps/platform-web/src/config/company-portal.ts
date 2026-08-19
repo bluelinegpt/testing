@@ -3,7 +3,7 @@
  * Platform itself is running rather than from configuration:
  *
  *   platform.tawseelhub.com  ->  https://<subdomain>.tawseelhub.com
- *   localhost:5176 (dev)     ->  http://<subdomain>.localhost:5174
+ *   localhost:5176 (dev)     ->  http://localhost:5177
  *
  * Deriving from the current host keeps the link correct on any future domain
  * with zero settings — the Platform always lives at `platform.<domain>` and
@@ -14,5 +14,6 @@ export function companyPortalUrl(subdomain: string): string {
   if (hostname.startsWith("platform.")) {
     return `${protocol}//${subdomain}.${hostname.slice("platform.".length)}`;
   }
-  return `http://${subdomain}.localhost:5174`;
+  void subdomain;
+  return "http://localhost:5177";
 }

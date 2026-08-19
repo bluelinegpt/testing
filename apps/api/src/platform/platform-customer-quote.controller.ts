@@ -1,0 +1,7 @@
+import { Body,Controller,Get,Inject,Param,Patch,Post } from "@nestjs/common";
+import { ManualOfferDto,MarketplaceSettingsDto } from "../customer-quotes/customer-quote.dto.js";
+import { CustomerQuoteService } from "../customer-quotes/customer-quote.service.js";
+import { IdentityContextAccessor } from "../security/identity-context.js";
+import { RequirePlatformPermissions } from "./platform-authorization.js";
+const READ="platform.customer_quotes.read",MANAGE="platform.customer_quotes.manage",SETTINGS="platform.customer_marketplace.manage";
+@Controller("platform/customer-quotes") export class PlatformCustomerQuoteController{constructor(@Inject(CustomerQuoteService) private readonly service:CustomerQuoteService,@Inject(IdentityContextAccessor) private readonly identity:IdentityContextAccessor){} @RequirePlatformPermissions(READ) @Get() list(){return this.service.platformList();} @RequirePlatformPermissions(READ) @Get("settings/current") current(){return this.service.settings();} @RequirePlatformPermissions(SETTINGS) @Patch("settings/current") update(@Body()body:MarketplaceSettingsDto){return this.service.updateSettings(this.identity.current().identityId,body);} @RequirePlatformPermissions(READ) @Get(":id") detail(@Param("id")id:string){return this.service.platformDetail(id);} @RequirePlatformPermissions(MANAGE) @Post(":id/offers") create(@Param("id")id:string,@Body()body:ManualOfferDto){return this.service.manualOffer(id,body);}}

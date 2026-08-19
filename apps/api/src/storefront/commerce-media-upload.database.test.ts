@@ -96,6 +96,15 @@ class TempStorage implements FileStoragePort {
   public deletePrivate(): never {
     throw new Error("not used");
   }
+  public storeWebsite(): never {
+    throw new Error("not used");
+  }
+  public readWebsite(): never {
+    throw new Error("not used");
+  }
+  public deleteWebsite(): never {
+    throw new Error("not used");
+  }
 }
 
 interface Fixture {

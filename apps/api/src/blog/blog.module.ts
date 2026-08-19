@@ -1,0 +1,1 @@
+import{Module}from"@nestjs/common";import{AuthenticationModule}from"../authentication/authentication.module.js";import{PublicBlogController}from"./blog.controller.js";import{BlogService}from"./blog.service.js";@Module({imports:[AuthenticationModule],controllers:[PublicBlogController],providers:[BlogService],exports:[BlogService]})export class BlogModule{}

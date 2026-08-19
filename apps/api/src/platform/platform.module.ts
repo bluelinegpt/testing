@@ -5,6 +5,18 @@ import { AuthenticationModule } from "../authentication/authentication.module.js
 import { FilesModule } from "../files/files.module.js";
 import { UserAdministrationModule } from "../users/user-administration.module.js";
 import { PlatformAuditController } from "./platform-audit.controller.js";
+import { DemoRequestsModule } from "../demo-requests/demo-requests.module.js";
+import { PlatformDemoRequestController } from "./platform-demo-request.controller.js";
+import { TraderApplicationsModule } from "../trader-applications/trader-applications.module.js";
+import { PlatformTraderApplicationController } from "./platform-trader-application.controller.js";
+import { CustomerQuotesModule } from "../customer-quotes/customer-quotes.module.js";
+import { PlatformCustomerQuoteController } from "./platform-customer-quote.controller.js";
+import { BlogModule } from "../blog/blog.module.js";
+import { PlatformBlogController } from "./platform-blog.controller.js";
+import { WebsiteCmsModule } from "../website-cms/website-cms.module.js";
+import { PlatformWebsiteCmsController } from "./platform-website-cms.controller.js";
+import { AgentModule } from "../agent/agent.module.js";
+import { PlatformAgentController } from "./platform-agent.controller.js";
 import { PlatformAuditQueryService } from "./platform-audit.query.js";
 import { PlatformAuditService } from "./platform-audit.service.js";
 import { PlatformCompanyUserController } from "./platform-company-user.controller.js";
@@ -56,11 +68,17 @@ import { PlatformService } from "./platform.service.js";
     PlatformCompanyController,
     PlatformCompanyDeletionController,
     PlatformDashboardController,
+    PlatformDemoRequestController,
+    PlatformTraderApplicationController,
+    PlatformCustomerQuoteController,
+    PlatformBlogController,
+    PlatformWebsiteCmsController,
+    PlatformAgentController,
     PlatformTargetCompanyController,
     PlatformCompanyUserController,
   ],
   exports: [PlatformService, PlatformAuditService, PlatformCompanyService],
-  imports: [AuthenticationModule, FilesModule, UserAdministrationModule],
+  imports: [AuthenticationModule, DemoRequestsModule, TraderApplicationsModule, CustomerQuotesModule, BlogModule, WebsiteCmsModule, AgentModule, FilesModule, UserAdministrationModule],
   providers: [
     PlatformService,
     PlatformAuditService,

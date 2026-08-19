@@ -1,0 +1,11 @@
+import "reflect-metadata";
+import { BadRequestException } from "@nestjs/common";
+import { plainToInstance } from "class-transformer";
+import { validate } from "class-validator";
+import { describe, expect, it } from "vitest";
+import { PUBLIC_ROUTE } from "../authentication/authentication.decorators.js";
+import { CreateTraderApplicationDto } from "./trader-application.dto.js";
+import { normalizeTraderMobile } from "./trader-application.service.js";
+import { PublicTraderApplicationController } from "./public-trader-application.controller.js";
+const valid={storeName:"Atlas Store",contactPerson:"Amina Noor",mobileNumber:"0501234567",email:"amina@example.ae",primaryCategory:"fashion",additionalCategories:[],pickupEmirate:"dubai",pickupArea:"Business Bay",channels:[{type:"instagram",handle:"atlas"}],monthlyOrderRange:"100_500",deliveryEmirates:["dubai","sharjah"],paymentMix:"mixed",fragileProducts:false,temperatureControlled:false,hasExistingDeliveryCompany:false,consent:true,landingPage:"/traders/register"};
+describe("Trader application public contract",()=>{it("accepts a complete application without a Delivery Company",async()=>expect(await validate(plainToInstance(CreateTraderApplicationDto,valid))).toHaveLength(0));it("accepts submitted Delivery Company details",async()=>expect(await validate(plainToInstance(CreateTraderApplicationDto,{...valid,hasExistingDeliveryCompany:true,existingDeliveryCompanyName:"Dana Delivery"}))).toHaveLength(0));it("rejects invalid email and URL",async()=>{const errors=await validate(plainToInstance(CreateTraderApplicationDto,{...valid,email:"bad",website:"javascript:alert(1)"}));expect(errors.map(x=>x.property)).toEqual(expect.arrayContaining(["email","website"]));});it("does not accept internal workflow fields",()=>expect(Object.keys(new CreateTraderApplicationDto())).not.toContain("status"));it("normalizes UAE mobile numbers",()=>expect(normalizeTraderMobile("050 123 4567")).toBe("+971501234567"));it("rejects invalid UAE mobile numbers",()=>expect(()=>normalizeTraderMobile("123")).toThrow(BadRequestException));it("marks only submission as public",()=>expect(Reflect.getMetadata(PUBLIC_ROUTE,PublicTraderApplicationController.prototype.create)).toBe(true));});

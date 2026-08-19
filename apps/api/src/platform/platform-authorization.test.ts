@@ -63,7 +63,7 @@ describe("Platform permission catalogue", () => {
   });
 
   it("stays the deliberately-scoped set", () => {
-    // Codes for billing, Company reset, WhatsApp, Storefront, Mobile and
+    // Codes for billing, Storefront, Mobile and
     // integrity AUTO-FIX are deliberately absent: a permission nothing
     // enforces is a control that appears to exist and does not.
     // `platform.integrity.read` is present -- the Integration Integrity
@@ -72,16 +72,40 @@ describe("Platform permission catalogue", () => {
     // unseeded.
     expect(PLATFORM_PERMISSIONS.map((permission) => permission.code).sort()).toEqual([
       "platform.access",
+      "platform.agent.manage",
+      "platform.agent.read",
+      "platform.agent.whatsapp.manage",
+      "platform.agent.whatsapp.read",
+      "platform.agent.whatsapp.reply",
+      "platform.agent.whatsapp.takeover",
       "platform.audit.read",
+      "platform.blog.categories.manage",
+      "platform.blog.create",
+      "platform.blog.edit",
+      "platform.blog.publish",
+      "platform.blog.read",
       "platform.companies.delete",
       "platform.companies.manage",
       "platform.companies.read",
       "platform.companies.reset",
+      "platform.customer_marketplace.manage",
+      "platform.customer_quotes.manage",
+      "platform.customer_quotes.read",
       "platform.errors.manage",
       "platform.errors.read",
       "platform.integrity.read",
+      "platform.leads.manage",
+      "platform.leads.read",
+      "platform.public_site_settings.manage",
+      "platform.trader_applications.manage",
+      "platform.trader_applications.read",
       "platform.users.manage",
       "platform.users.read",
+      "platform.website.manage",
+      "platform.website.media.manage",
+      "platform.website.publish",
+      "platform.website.read",
+      "platform.website.seo.manage",
     ]);
   });
 
@@ -120,7 +144,13 @@ describe("Platform permission catalogue", () => {
       "utf8",
     );
     const resetMigration = readFileSync(resolve(process.cwd(), "../../database/migrations/20260822000000_company_reset_permission.ts"), "utf8");
-    const migrations = foundationMigration + deletionMigration + errorReportsMigration + integrityMigration + resetMigration;
+    const leadsMigration = readFileSync(resolve(process.cwd(), "../../database/migrations/20260824000000_platform_demo_requests.ts"), "utf8");
+    const traderApplicationsMigration = readFileSync(resolve(process.cwd(), "../../database/migrations/20260825000000_platform_trader_applications.ts"), "utf8");
+    const customerQuotesMigration = readFileSync(resolve(process.cwd(), "../../database/migrations/20260826000000_customer_quote_marketplace.ts"), "utf8");
+    const blogMigration = readFileSync(resolve(process.cwd(), "../../database/migrations/20260827000000_platform_blog_and_tracking.ts"), "utf8");
+    const agentMigration = readFileSync(resolve(process.cwd(), "../../database/migrations/20260828000000_tawseelhub_agent_core.ts"), "utf8");
+    const websiteCmsMigration = readFileSync(resolve(process.cwd(), "../../database/migrations/20260905000000_controlled_website_cms.ts"), "utf8");
+    const migrations = foundationMigration + deletionMigration + errorReportsMigration + integrityMigration + resetMigration + leadsMigration + traderApplicationsMigration + customerQuotesMigration + blogMigration + agentMigration + websiteCmsMigration;
     for (const permission of PLATFORM_PERMISSIONS) expect(migrations).toContain(`'${permission.code}'`);
     expect(migrations).toContain(`'${PLATFORM_SUPER_ADMIN_ROLE_CODE}'`);
     // Idempotent on an environment that has already been migrated.

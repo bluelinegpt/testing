@@ -46,4 +46,23 @@ export abstract class FileStoragePort {
   public abstract readCommerce(storageKey: string): Promise<Uint8Array>;
 
   public abstract deleteCommerce(storageKey: string): Promise<void>;
+
+  public storeWebsite(
+    storageKey: string,
+    content: Uint8Array,
+  ): Promise<StoredFileReference> {
+    void storageKey;
+    void content;
+    throw new Error("Website media storage is not implemented by this adapter");
+  }
+
+  public readWebsite(storageKey: string): Promise<Uint8Array> {
+    void storageKey;
+    throw new Error("Website media storage is not implemented by this adapter");
+  }
+
+  public deleteWebsite(storageKey: string): Promise<void> {
+    void storageKey;
+    throw new Error("Website media storage is not implemented by this adapter");
+  }
 }

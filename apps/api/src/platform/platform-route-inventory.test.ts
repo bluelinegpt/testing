@@ -20,6 +20,12 @@ import {
   PlatformTargetCompanyController,
 } from "./platform-company.controller.js";
 import { PlatformDashboardController } from "./platform-dashboard.controller.js";
+import { PlatformDemoRequestController } from "./platform-demo-request.controller.js";
+import { PlatformTraderApplicationController } from "./platform-trader-application.controller.js";
+import { PlatformCustomerQuoteController } from "./platform-customer-quote.controller.js";
+import { PlatformBlogController } from "./platform-blog.controller.js";
+import { PlatformWebsiteCmsController } from "./platform-website-cms.controller.js";
+import { PlatformAgentController } from "./platform-agent.controller.js";
 
 /**
  * The Platform route inventory, enumerated rather than assumed.
@@ -42,6 +48,12 @@ const platformControllers = [
   PlatformCompanyController,
   PlatformCompanyDeletionController,
   PlatformDashboardController,
+  PlatformDemoRequestController,
+  PlatformTraderApplicationController,
+  PlatformCustomerQuoteController,
+  PlatformBlogController,
+  PlatformWebsiteCmsController,
+  PlatformAgentController,
   PlatformTargetCompanyController,
   PlatformCompanyUserController,
 ];
@@ -147,13 +159,41 @@ describe("Platform route inventory", () => {
       "revokeSession",
       "revokeAll",
       "deleteUser",
+      "status",
+      "note",
+      "resolve",
+      "updateSettings",
+      "createCategory",
+      "createKnowledge",
+      "updateKnowledge",
+      "handoffStatus",
+      "conversationReview",
+      "conversationComment",
+      "whatsAppReply",
+      "conversationMode",
+      "savePage",
+      "publishPage",
+      "savePricing",
+      "publishPricing",
+      "saveFeature",
+      "publishFeature",
+      "saveFaq",
+      "publishFaq",
+      "saveContact",
+      "publishContact",
+      "saveNavigation",
+      "uploadMedia",
       "moveToProduction",
     ];
     const bad: string[] = [];
     for (const route of routes) {
       if (route.isPublic) continue;
       const shouldManage = mutating.includes(route.method);
-      const hasManage = route.permissions.some((code) => code.endsWith(".manage"));
+      const hasManage =
+        route.method !== "settings" &&
+        route.permissions.some((code) =>
+          [".manage", ".create", ".edit", ".publish", ".reply", ".takeover"].some((suffix) => code.endsWith(suffix)),
+        );
       if (shouldManage !== hasManage) bad.push(`${route.controller}.${route.method}`);
     }
     expect(bad).toEqual([]);

@@ -51,6 +51,13 @@ export interface AppConfiguration {
      */
     firebaseServiceAccountJson: string | undefined;
   };
+  whatsapp: {
+    accessToken: string | undefined;
+    appSecret: string | undefined;
+    phoneNumberId: string | undefined;
+    verifyToken: string | undefined;
+    graphApiBaseUrl: string;
+  };
   tenancy: {
     /**
      * Host suffix the Company subdomain is taken from, e.g. "bluelinegpt.com"
@@ -104,7 +111,7 @@ function parseCorsOrigins(
     throw new Error("CORS_ORIGINS is required in production");
   }
 
-  const origins = (value ?? "http://localhost:5174")
+  const origins = (value ?? "http://localhost:5174,http://localhost:5177")
     .split(",")
     .map((origin) => origin.trim())
     .filter(Boolean);
@@ -308,6 +315,13 @@ export function configuration(): AppConfiguration {
         process.env.FIREBASE_SERVICE_ACCOUNT_JSON?.trim() === ""
           ? undefined
           : process.env.FIREBASE_SERVICE_ACCOUNT_JSON,
+    },
+    whatsapp: {
+      accessToken: process.env.WHATSAPP_ACCESS_TOKEN?.trim() || undefined,
+      appSecret: process.env.WHATSAPP_APP_SECRET?.trim() || undefined,
+      phoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID?.trim() || undefined,
+      verifyToken: process.env.WHATSAPP_VERIFY_TOKEN?.trim() || undefined,
+      graphApiBaseUrl: process.env.WHATSAPP_GRAPH_API_BASE_URL?.trim() || "https://graph.facebook.com/v20.0",
     },
   };
 }

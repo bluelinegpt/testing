@@ -31,7 +31,12 @@ export async function createApplication(): Promise<BluelineApplication> {
   app.enableShutdownHooks();
   app.setGlobalPrefix("api/v1");
   app.use(helmet());
-  app.use(express.json({ limit: `${config.get("app.requestBodyLimitMb", { infer: true })}mb` }));
+  app.use(express.json({
+    limit: `${config.get("app.requestBodyLimitMb", { infer: true })}mb`,
+    verify: (request, _response, buffer) => {
+      (request as typeof request & { rawBody?: Buffer }).rawBody = Buffer.from(buffer);
+    },
+  }));
   app.use(
     express.urlencoded({
       extended: false,

@@ -1,5 +1,6 @@
 export interface PlatformConfiguration {
   readonly apiBaseUrl: string;
+  readonly publicWebBaseUrl: string;
   readonly siteName: string;
 }
 
@@ -35,5 +36,6 @@ function validateBase(value: string | undefined): string {
 
 export const platformConfiguration: PlatformConfiguration = {
   apiBaseUrl: validateBase(environment.VITE_API_BASE_URL),
+  publicWebBaseUrl: validateBase(environment.VITE_PUBLIC_WEB_BASE_URL ?? "http://localhost:5174"),
   siteName: environment.VITE_PLATFORM_SITE_NAME ?? "TawseelHub Platform Administration",
 };

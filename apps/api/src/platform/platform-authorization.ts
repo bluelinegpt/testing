@@ -55,6 +55,30 @@ export const PLATFORM_ERRORS_MANAGE = "platform.errors.manage";
 // later, separate decision per the three-tier remediation policy agreed
 // 2026-08-04, not something to seed ahead of actually building it.
 export const PLATFORM_INTEGRITY_READ = "platform.integrity.read";
+export const PLATFORM_LEADS_READ = "platform.leads.read";
+export const PLATFORM_LEADS_MANAGE = "platform.leads.manage";
+export const PLATFORM_TRADER_APPLICATIONS_READ = "platform.trader_applications.read";
+export const PLATFORM_TRADER_APPLICATIONS_MANAGE = "platform.trader_applications.manage";
+export const PLATFORM_CUSTOMER_QUOTES_READ = "platform.customer_quotes.read";
+export const PLATFORM_CUSTOMER_QUOTES_MANAGE = "platform.customer_quotes.manage";
+export const PLATFORM_CUSTOMER_MARKETPLACE_MANAGE = "platform.customer_marketplace.manage";
+export const PLATFORM_BLOG_READ = "platform.blog.read";
+export const PLATFORM_BLOG_CREATE = "platform.blog.create";
+export const PLATFORM_BLOG_EDIT = "platform.blog.edit";
+export const PLATFORM_BLOG_PUBLISH = "platform.blog.publish";
+export const PLATFORM_BLOG_CATEGORIES_MANAGE = "platform.blog.categories.manage";
+export const PLATFORM_PUBLIC_SITE_SETTINGS_MANAGE = "platform.public_site_settings.manage";
+export const PLATFORM_WEBSITE_READ = "platform.website.read";
+export const PLATFORM_WEBSITE_MANAGE = "platform.website.manage";
+export const PLATFORM_WEBSITE_PUBLISH = "platform.website.publish";
+export const PLATFORM_WEBSITE_MEDIA_MANAGE = "platform.website.media.manage";
+export const PLATFORM_WEBSITE_SEO_MANAGE = "platform.website.seo.manage";
+export const PLATFORM_AGENT_READ = "platform.agent.read";
+export const PLATFORM_AGENT_MANAGE = "platform.agent.manage";
+export const PLATFORM_AGENT_WHATSAPP_READ = "platform.agent.whatsapp.read";
+export const PLATFORM_AGENT_WHATSAPP_REPLY = "platform.agent.whatsapp.reply";
+export const PLATFORM_AGENT_WHATSAPP_TAKEOVER = "platform.agent.whatsapp.takeover";
+export const PLATFORM_AGENT_WHATSAPP_MANAGE = "platform.agent.whatsapp.manage";
 // Guards the Company test-data reset (wipe transactional data, keep the
 // Company shell). The reset itself additionally refuses any Company whose
 // own environment is 'production' — the permission grants the button, the
@@ -86,6 +110,30 @@ export const PLATFORM_PERMISSIONS: readonly { code: string; description: string 
     code: PLATFORM_INTEGRITY_READ,
     description: "View cross-module data integrity findings on the Platform",
   },
+  { code: PLATFORM_LEADS_READ, description: "View public website demo requests" },
+  { code: PLATFORM_LEADS_MANAGE, description: "Manage public website demo request workflow" },
+  { code: PLATFORM_TRADER_APPLICATIONS_READ, description: "View Trader self-registration applications" },
+  { code: PLATFORM_TRADER_APPLICATIONS_MANAGE, description: "Manage Trader self-registration applications" },
+  { code: PLATFORM_CUSTOMER_QUOTES_READ, description: "View customer quote requests" },
+  { code: PLATFORM_CUSTOMER_QUOTES_MANAGE, description: "Manage customer quote requests and offers" },
+  { code: PLATFORM_CUSTOMER_MARKETPLACE_MANAGE, description: "Manage customer marketplace commission and expiry" },
+  { code: PLATFORM_BLOG_READ, description: "View Website Content" },
+  { code: PLATFORM_BLOG_CREATE, description: "Create Blog drafts" },
+  { code: PLATFORM_BLOG_EDIT, description: "Edit Blog content" },
+  { code: PLATFORM_BLOG_PUBLISH, description: "Publish and unpublish Blog content" },
+  { code: PLATFORM_BLOG_CATEGORIES_MANAGE, description: "Manage Blog categories and authors" },
+  { code: PLATFORM_PUBLIC_SITE_SETTINGS_MANAGE, description: "Manage public SEO and tracking settings" },
+  { code: PLATFORM_WEBSITE_READ, description: "View Website CMS" },
+  { code: PLATFORM_WEBSITE_MANAGE, description: "Manage Website CMS drafts" },
+  { code: PLATFORM_WEBSITE_PUBLISH, description: "Publish Website CMS content" },
+  { code: PLATFORM_WEBSITE_MEDIA_MANAGE, description: "Manage Website media" },
+  { code: PLATFORM_WEBSITE_SEO_MANAGE, description: "Manage Website SEO" },
+  { code: PLATFORM_AGENT_READ, description: "View Agent conversations, handoffs and knowledge" },
+  { code: PLATFORM_AGENT_MANAGE, description: "Manage Agent settings, knowledge and handoffs" },
+  { code: PLATFORM_AGENT_WHATSAPP_READ, description: "View WhatsApp Agent integration status and conversations" },
+  { code: PLATFORM_AGENT_WHATSAPP_REPLY, description: "Reply to WhatsApp customers from Platform" },
+  { code: PLATFORM_AGENT_WHATSAPP_TAKEOVER, description: "Take over or return WhatsApp conversations to Yousef" },
+  { code: PLATFORM_AGENT_WHATSAPP_MANAGE, description: "Manage WhatsApp Agent integration settings" },
   {
     code: PLATFORM_COMPANIES_RESET,
     description: "Reset a development or demo Company's transactional data",

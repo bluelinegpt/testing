@@ -18,6 +18,12 @@ import { DashboardPage } from "./DashboardPage.js";
 import { DeploymentRegistryPage } from "./DeploymentRegistryPage.js";
 import { ErrorsPage } from "./ErrorsPage.js";
 import { IntegrityCheckPage } from "./IntegrityCheckPage.js";
+import { DemoRequestsPage } from "./DemoRequestsPage.js";
+import { TraderApplicationsPage } from "./TraderApplicationsPage.js";
+import { CustomerQuotesPage } from "./CustomerQuotesPage.js";
+import { WebsiteContentPage } from "./WebsiteContentPage.js";
+import { AgentAdminPage } from "./AgentAdminPage.js";
+import { CommerceIntegrationsPage } from "./CommerceIntegrationsPage.js";
 
 interface NavigationItem {
   readonly label: string;
@@ -34,6 +40,12 @@ interface NavigationItem {
 const navigation: readonly NavigationItem[] = [
   { label: "Dashboard", path: "/", permission: "platform.access" },
   { label: "Companies", path: "/companies", permission: "platform.companies.read" },
+  { label: "Website Leads", path: "/demo-requests", permission: "platform.leads.read" },
+  { label: "Trader Applications", path: "/trader-applications", permission: "platform.trader_applications.read" },
+  { label: "Customer Quotes", path: "/customer-quotes", permission: "platform.customer_quotes.read" },
+  { label: "Website", path: "/website", permission: "platform.website.read" },
+  { label: "Agent", path: "/agent", permission: "platform.agent.read" },
+  { label: "Commerce Integrations", path: "/commerce-integrations", permission: "platform.access" },
   { label: "Audit", path: "/audit", permission: "platform.audit.read" },
   // Repo/deploy state, not Company data — gated on the same base permission
   // as Dashboard rather than a Company-scoped one.
@@ -151,6 +163,22 @@ export function PlatformShell(): ReactElement {
             {session.can("platform.audit.read") ? (
               <Route element={<AuditPage />} path="/audit" />
             ) : null}
+            {session.can("platform.leads.read") ? (
+              <><Route element={<DemoRequestsPage />} path="/demo-requests" /><Route element={<DemoRequestsPage />} path="/demo-requests/:demoRequestId" /></>
+            ) : null}
+            {session.can("platform.trader_applications.read") ? (
+              <><Route element={<TraderApplicationsPage />} path="/trader-applications" /><Route element={<TraderApplicationsPage />} path="/trader-applications/:applicationId" /></>
+            ) : null}
+            {session.can("platform.customer_quotes.read") ? (
+              <><Route element={<CustomerQuotesPage />} path="/customer-quotes" /><Route element={<CustomerQuotesPage />} path="/customer-quotes/:id" /></>
+            ) : null}
+            {session.can("platform.website.read") ? (
+              <><Route element={<WebsiteContentPage />} path="/website" /><Route element={<WebsiteContentPage preview />} path="/website/:id/preview" /><Route element={<WebsiteContentPage />} path="/website/:id" /><Route element={<Navigate replace to="/website" />} path="/website-content" /><Route element={<WebsiteContentPage preview />} path="/website-content/:id/preview" /><Route element={<WebsiteContentPage />} path="/website-content/:id" /></>
+            ) : null}
+            {session.can("platform.agent.read") ? (
+              <Route element={<AgentAdminPage />} path="/agent" />
+            ) : null}
+            <Route element={<CommerceIntegrationsPage />} path="/commerce-integrations" />
             <Route element={<DeploymentRegistryPage />} path="/deployment-registry" />
             {session.can("platform.errors.read") ? (
               <Route element={<ErrorsPage />} path="/errors" />

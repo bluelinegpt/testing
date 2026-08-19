@@ -8,10 +8,11 @@ rem One command to start everything. Safe to run repeatedly: it stops the
 rem previous BlueLineGPT servers first, waits for their ports to be released,
 rem and only then starts fresh ones.
 rem
-rem   API ......... http://localhost:3000   @blueline/api
-rem   Web ......... http://localhost:5174   @blueline/web
-rem   Store ....... http://localhost:5175   @blueline/store
-rem   Platform .... http://localhost:5176   @blueline/platform-web
+rem   API ............ http://localhost:3000   @blueline/api
+rem   Public site .... http://localhost:5174   @blueline/public-web
+rem   Storefront ..... http://localhost:5175   @blueline/store
+rem   Platform ....... http://localhost:5176   @blueline/platform-web
+rem   Company Portal . http://localhost:5177   @blueline/web
 rem
 rem Every Vite server here is configured with `strictPort: true`, so a port
 rem left behind by a previous run is a hard failure rather than a silent move
@@ -24,7 +25,7 @@ rem WHAT THIS SCRIPT DELIBERATELY DOES NOT DO
 rem   - It never runs `taskkill /IM node.exe`. Codex, Claude, other projects and
 rem     unrelated Node tools are commonly running on the same machine, and a
 rem     blanket kill would take them with it. Only a process that is BOTH
-rem     listening on one of the four ports above AND is node.exe is stopped.
+rem     listening on one of the five ports above AND is node.exe is stopped.
 rem   - It runs no migration, seed, reset, bootstrap or accounting import. It
 rem     starts servers and nothing else. Those are administrative operations
 rem     with their own commands, and doing them on every start would make an
@@ -62,20 +63,22 @@ echo.
 call :closewindows
 
 call :stopapi
-call :stopsvc "API      " 3000 "BlueLineGPT API (port 3000)"
-call :stopsvc "Web      " 5174 "BlueLineGPT Web (port 5174)"
-call :stopsvc "Store    " 5175 "BlueLineGPT Store (port 5175)"
-call :stopsvc "Platform " 5176 "BlueLineGPT Platform (port 5176)"
+call :stopsvc "API        " 3000 "BlueLineGPT API (port 3000)"
+call :stopsvc "Public     " 5174 "BlueLineGPT Public Site (port 5174)"
+call :stopsvc "Store      " 5175 "BlueLineGPT Storefront (port 5175)"
+call :stopsvc "Platform   " 5176 "BlueLineGPT Platform (port 5176)"
+call :stopsvc "Portal     " 5177 "BlueLineGPT Company Portal (port 5177)"
 
 echo.
 echo Waiting for ports to be released...
 echo.
 
 set "BLOCKED="
-call :waitfree "API      " 3000
-call :waitfree "Web      " 5174
-call :waitfree "Store    " 5175
-call :waitfree "Platform " 5176
+call :waitfree "API        " 3000
+call :waitfree "Public     " 5174
+call :waitfree "Store      " 5175
+call :waitfree "Platform   " 5176
+call :waitfree "Portal     " 5177
 
 if defined BLOCKED (
   echo.
@@ -90,10 +93,11 @@ echo.
 echo Starting BlueLineGPT...
 echo.
 
-call :startsvc "API      " "BlueLineGPT API (port 3000)"      @blueline/api
-call :startsvc "Web      " "BlueLineGPT Web (port 5174)"      @blueline/web
-call :startsvc "Store    " "BlueLineGPT Store (port 5175)"    @blueline/store
-call :startsvc "Platform " "BlueLineGPT Platform (port 5176)" @blueline/platform-web
+call :startsvc "API        " "BlueLineGPT API (port 3000)"             @blueline/api
+call :startsvc "Public     " "BlueLineGPT Public Site (port 5174)"     @blueline/public-web 5174
+call :startsvc "Store      " "BlueLineGPT Storefront (port 5175)"      @blueline/store 5175
+call :startsvc "Platform   " "BlueLineGPT Platform (port 5176)"        @blueline/platform-web 5176
+call :startsvc "Portal     " "BlueLineGPT Company Portal (port 5177)"  @blueline/web 5177
 
 echo.
 echo Waiting for each service to listen...
@@ -102,10 +106,11 @@ echo.
 rem A window opening is not a server starting. Each port is polled until it is
 rem actually accepting connections, so "started" means started.
 set "FAILED="
-call :waitup "API      " 3000
-call :waitup "Web      " 5174
-call :waitup "Store    " 5175
-call :waitup "Platform " 5176
+call :waitup "API        " 3000
+call :waitup "Public     " 5174
+call :waitup "Store      " 5175
+call :waitup "Platform   " 5176
+call :waitup "Portal     " 5177
 
 echo.
 echo ----------------------------------------
@@ -118,7 +123,7 @@ if defined FAILED (
   echo BlueLineGPT started
 )
 echo.
-echo Company Portal:
+echo Public Home Page:
 echo   http://localhost:5174
 echo.
 echo Storefront:
@@ -126,6 +131,9 @@ echo   http://localhost:5175
 echo.
 echo Platform Admin:
 echo   http://localhost:5176
+echo.
+echo Company Portal / Daily Operations:
+echo   http://localhost:5177
 echo.
 echo API:
 echo   http://localhost:3000
@@ -144,7 +152,11 @@ rem ===========================================================================
 shift
 echo Starting %~1 ...
 echo.
-call pnpm --filter %~1 dev
+if "%~2"=="" (
+  call pnpm --filter %~1 dev
+) else (
+  call pnpm --filter %~1 dev -- --port %~2
+)
 echo.
 echo %~1 has exited.
 pause
@@ -292,10 +304,14 @@ goto :waitfree_loop
 
 
 rem ===========================================================================
-rem :startsvc <label> <window-title> <package>
+rem :startsvc <label> <window-title> <package> [port]
 rem ===========================================================================
 :startsvc
-start "%~2" cmd /k ""%~f0" --serve %3"
+if "%~4"=="" (
+  start "%~2" cmd /k ""%~f0" --serve %3"
+) else (
+  start "%~2" cmd /k ""%~f0" --serve %3 %4"
+)
 echo %~1 .......... starting
 exit /b 0
 

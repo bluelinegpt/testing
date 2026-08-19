@@ -251,6 +251,14 @@ export interface DatabaseSchema {
   platform_blog_publication_history: UntypedTable;
   platform_public_redirects: UntypedTable;
   platform_public_site_settings: UntypedTable;
+  platform_website_pages: UntypedTable;
+  platform_website_pricing_plans: UntypedTable;
+  platform_website_features: UntypedTable;
+  platform_website_faqs: UntypedTable;
+  platform_website_media: UntypedTable;
+  platform_website_navigation_items: UntypedTable;
+  platform_website_contact_settings: UntypedTable;
+  platform_website_revisions: UntypedTable;
   permissions: UntypedTable;
   messages: UntypedTable;
   notification_outbox_events: UntypedTable;
