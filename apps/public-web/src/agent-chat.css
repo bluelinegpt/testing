@@ -1,0 +1,312 @@
+.agent-chat {
+  bottom: 18px;
+  position: fixed;
+  right: 18px;
+  z-index: 60;
+}
+.agent-chat--rtl {
+  left: 18px;
+  right: auto;
+}
+.agent-chat__floating-actions {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+.agent-chat--rtl .agent-chat__floating-actions {
+  flex-direction: row-reverse;
+  justify-content: flex-start;
+}
+.agent-chat__launcher {
+  align-items: center;
+  background: #0f4c81;
+  border: 0;
+  border-radius: 999px;
+  box-shadow: 0 18px 45px rgba(15, 76, 129, 0.28);
+  color: #fff;
+  cursor: pointer;
+  display: flex;
+  gap: 10px;
+  min-height: 52px;
+  padding: 8px 18px 8px 8px;
+}
+.agent-chat__floating-whatsapp {
+  align-items: center;
+  background: transparent;
+  border-radius: 999px;
+  box-shadow: 0 18px 45px rgba(24, 167, 93, 0.24);
+  color: #fff;
+  display: flex;
+  height: 52px;
+  justify-content: center;
+  text-decoration: none;
+  width: 52px;
+  white-space: nowrap;
+}
+.agent-chat__floating-whatsapp img {
+  border-radius: 14px;
+  display: block;
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+.agent-chat--rtl .agent-chat__launcher {
+  padding: 8px 8px 8px 18px;
+}
+.agent-chat__launcher span {
+  align-items: center;
+  background: #f4b63d;
+  border-radius: 50%;
+  color: #0d2638;
+  display: inline-flex;
+  font-weight: 800;
+  height: 36px;
+  justify-content: center;
+  width: 36px;
+}
+.agent-chat__launcher b {
+  font-size: 0.92rem;
+  letter-spacing: 0;
+}
+.agent-chat__panel {
+  background: #fff;
+  border: 1px solid rgba(15, 76, 129, 0.14);
+  border-radius: 8px;
+  box-shadow: 0 24px 70px rgba(18, 35, 52, 0.22);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  max-height: min(680px, calc(100vh - 32px));
+  overflow: hidden;
+  width: min(390px, calc(100vw - 28px));
+}
+.agent-chat__header {
+  align-items: center;
+  background: #0d2638;
+  color: #fff;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 42px 1fr auto auto auto;
+  min-width: 0;
+  padding: 12px;
+}
+.agent-chat__header img {
+  background: #fff;
+  border-radius: 6px;
+  height: 34px;
+  object-fit: contain;
+  padding: 4px;
+  width: 42px;
+}
+.agent-chat__header div {
+  min-width: 0;
+}
+.agent-chat__header strong,
+.agent-chat__header span {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.agent-chat__header strong {
+  font-size: 0.95rem;
+}
+.agent-chat__header span {
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 0.72rem;
+}
+.agent-chat__header button {
+  background: rgba(255, 255, 255, 0.11);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 6px;
+  color: #fff;
+  cursor: pointer;
+  height: 32px;
+  min-width: 32px;
+}
+.agent-chat__messages {
+  background: #f6f8fb;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 310px;
+  overflow-y: auto;
+  padding: 14px;
+}
+.agent-chat__bubble {
+  border-radius: 8px;
+  line-height: 1.45;
+  max-width: 88%;
+  overflow-wrap: anywhere;
+  padding: 10px 12px;
+}
+.agent-chat__bubble p {
+  margin: 0;
+}
+.agent-chat__bubble p + p {
+  margin-top: 4px;
+}
+.agent-chat__bubble--assistant,
+.agent-chat__bubble--system {
+  align-self: flex-start;
+  background: #fff;
+  border: 1px solid #e3e9ef;
+  color: #243746;
+}
+.agent-chat__bubble--platform_staff {
+  align-self: flex-start;
+  background: #fff8e8;
+  border: 1px solid #f2cf84;
+  color: #243746;
+}
+.agent-chat__bubble--platform_staff strong {
+  color: #0d3b5f;
+  display: block;
+  font-size: 0.78rem;
+  margin-bottom: 4px;
+}
+.agent-chat__bubble--user {
+  align-self: flex-end;
+  background: #0f4c81;
+  color: #fff;
+}
+.agent-chat__status {
+  align-self: center;
+  background: #e8f1fb;
+  border: 1px solid #c8ddee;
+  border-radius: 999px;
+  color: #0d3b5f;
+  font-size: 0.78rem;
+  font-weight: 700;
+  margin: 0;
+  padding: 6px 10px;
+  text-align: center;
+}
+.agent-chat__quick-actions {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 1fr 1fr;
+}
+.agent-chat__quick-actions button {
+  background: #fff;
+  border: 1px solid #d5e0ea;
+  border-radius: 6px;
+  color: #0d3b5f;
+  cursor: pointer;
+  font-weight: 700;
+  min-height: 40px;
+  padding: 8px;
+}
+.agent-chat__typing,
+.agent-chat__error {
+  color: #52677a;
+  font-size: 0.85rem;
+  margin: 0;
+}
+.agent-chat__error {
+  color: #9f2d20;
+}
+.agent-chat__whatsapp {
+  align-self: flex-start;
+  background: #18a75d;
+  border-radius: 999px;
+  color: #fff;
+  font-size: 0.86rem;
+  font-weight: 800;
+  padding: 9px 13px;
+}
+.agent-chat__link-button {
+  align-self: flex-start;
+  background: transparent;
+  border: 0;
+  color: #0f4c81;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.86rem;
+  font-weight: 800;
+  padding: 4px 0;
+  text-decoration: underline;
+}
+.agent-chat__form {
+  align-items: end;
+  background: #fff;
+  border-top: 1px solid #e3e9ef;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 1fr auto;
+  padding: 12px;
+}
+.agent-chat__form label {
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  height: 1px;
+  overflow: hidden;
+  position: absolute;
+  white-space: nowrap;
+  width: 1px;
+}
+.agent-chat__form input {
+  border: 1px solid #cbd7e2;
+  border-radius: 6px;
+  font: inherit;
+  min-height: 42px;
+  min-width: 0;
+  padding: 0 12px;
+}
+.agent-chat__form button {
+  background: #f4b63d;
+  border: 0;
+  border-radius: 6px;
+  color: #162938;
+  cursor: pointer;
+  font-weight: 800;
+  min-height: 42px;
+  padding: 0 14px;
+}
+.agent-chat__form button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+.agent-chat__privacy {
+  background: #fff;
+  color: #52677a;
+  font-size: 0.75rem;
+  padding: 0 12px 12px;
+  text-decoration: underline;
+}
+@media (max-width: 560px) {
+  .agent-chat,
+  .agent-chat--rtl {
+    bottom: 0;
+    left: 0;
+    right: 0;
+  }
+  .agent-chat__floating-actions {
+    bottom: 14px;
+    left: 14px;
+    position: fixed;
+    right: 14px;
+    width: auto;
+  }
+  .agent-chat--rtl .agent-chat__floating-actions {
+    justify-content: flex-start;
+  }
+  .agent-chat__launcher,
+  .agent-chat__floating-whatsapp {
+    flex: 0 1 auto;
+    min-height: 48px;
+  }
+  .agent-chat__launcher b {
+    max-width: 34vw;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .agent-chat__floating-whatsapp {
+    height: 48px;
+    width: 48px;
+  }
+  .agent-chat__panel {
+    border-radius: 8px 8px 0 0;
+    max-height: 86vh;
+    width: 100vw;
+  }
+}
