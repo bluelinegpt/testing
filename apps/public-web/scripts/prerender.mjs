@@ -11,6 +11,7 @@ const routes = [
   ['/integrations', 'Commerce Integrations', 'Prepare to connect Salla, Shopify and WooCommerce orders to delivery operations through planned Tawseelhub integrations.'],
   ['/resources', 'Delivery Operations Resources', 'Practical resources for UAE delivery companies covering COD, failed deliveries, operations and connected sales channels.'],
   ['/blog', 'Tawseelhub Insights', 'Insights for delivery companies and Traders building more connected delivery operations in the UAE.'],
+  ['/pricing', 'Tawseelhub Pricing | AED Plans for Delivery Companies', 'Review Tawseelhub pricing in AED, from a free tier up to high-volume delivery operations. Request a demo for the right plan.'],
   ...['delivery-operations','cod-finance','business-growth','last-mile-delivery','uae-delivery-guides','salla','shopify','woocommerce'].map(slug => [`/blog/category/${slug}`, 'Tawseelhub Blog', 'Practical guidance for UAE delivery operations.']),
   ['/about', 'About Tawseelhub', 'Learn why Tawseelhub is building a connected delivery operating system for delivery businesses in the UAE.'],
   ['/contact', 'Contact Tawseelhub', 'Contact the Tawseelhub team about delivery operations, partnerships and the platform.'],
