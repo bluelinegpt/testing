@@ -33,9 +33,9 @@
       "path": "apps/platform-web",
       "renderService": "bluelinegpt-platform-test",
       "status": "needs_deploy",
-      "localCommit": "045ee11",
+      "localCommit": "df8de78",
       "localCommitDate": "2026-08-20",
-      "lastChangeDescription": "Add human agent availability flow",
+      "lastChangeDescription": "Fix blog preview image sizing",
       "lastChangeBy": "codex",
       "confirmedLiveCommit": "27e356a",
       "confirmedLiveAt": "2026-08-14"
