@@ -132,6 +132,16 @@ export const PURGE_TABLES = new Set([
   "employee_variable_earning_payment_allocations",
   "employee_variable_earning_payments",
   "outsourced_driver_collection_earning_rules",
+  // Commerce integration and Collect Order helper rows for the reset Company.
+  // These are directly Company-scoped and may reference Traders/Orders that
+  // this training reset removes, so they must be removed first.
+  "commerce_integration_area_mappings",
+  "commerce_integration_connections",
+  "commerce_integration_events",
+  "commerce_integration_oauth_states",
+  "commerce_integration_order_links",
+  "employee_collect_order_earnings",
+  "order_serial_history",
   // Business masters — approved for this full-cycle development reset (Prompt 2A)
   "customer_addresses",
   "customers",
@@ -246,6 +256,57 @@ export const PRESERVE_TABLES = new Set([
   "platform_company_deletion_cleanup_items",
   "platform_company_deletion_operations",
   "platform_company_deletion_previews",
+  /*
+   * Platform, marketing, agent and customer-quote marketplace content. These
+   * are not delivery training rows for one Company reset. Some carry
+   * `company_id` as participation, offer, or configuration metadata, but they
+   * belong to Platform/marketplace administration and must survive a training
+   * reset exactly like audit/configuration data.
+   */
+  "commerce_integration_credentials",
+  "company_customer_quote_participation",
+  "company_customer_quote_pricing_profiles",
+  "company_customer_quote_pricing_rules",
+  "platform_agent_actions",
+  "platform_agent_conversation_comments",
+  "platform_agent_conversation_status_history",
+  "platform_agent_conversations",
+  "platform_agent_handoff_history",
+  "platform_agent_handoffs",
+  "platform_agent_knowledge",
+  "platform_agent_messages",
+  "platform_agent_settings",
+  "platform_agent_whatsapp_webhooks",
+  "platform_blog_article_tags",
+  "platform_blog_articles",
+  "platform_blog_authors",
+  "platform_blog_categories",
+  "platform_blog_publication_history",
+  "platform_blog_tags",
+  "platform_customer_marketplace_settings",
+  "platform_customer_quote_history",
+  "platform_customer_quote_notes",
+  "platform_customer_quote_offers",
+  "platform_customer_quote_requests",
+  "platform_demo_request_history",
+  "platform_demo_request_notes",
+  "platform_demo_requests",
+  "platform_help_articles",
+  "platform_help_categories",
+  "platform_public_redirects",
+  "platform_public_site_settings",
+  "platform_trader_application_channels",
+  "platform_trader_application_history",
+  "platform_trader_application_notes",
+  "platform_trader_applications",
+  "platform_website_contact_settings",
+  "platform_website_faqs",
+  "platform_website_features",
+  "platform_website_media",
+  "platform_website_navigation_items",
+  "platform_website_pages",
+  "platform_website_pricing_plans",
+  "platform_website_revisions",
 ]);
 
 /**
@@ -270,6 +331,47 @@ export const GLOBAL_TABLES = new Set([
   "permissions",
   "role_permissions",
   "trader_commerce_profiles",
+  "commerce_integration_credentials",
+  "company_customer_quote_pricing_rules",
+  "platform_agent_actions",
+  "platform_agent_conversation_comments",
+  "platform_agent_conversation_status_history",
+  "platform_agent_conversations",
+  "platform_agent_handoff_history",
+  "platform_agent_handoffs",
+  "platform_agent_knowledge",
+  "platform_agent_messages",
+  "platform_agent_settings",
+  "platform_agent_whatsapp_webhooks",
+  "platform_blog_article_tags",
+  "platform_blog_articles",
+  "platform_blog_authors",
+  "platform_blog_categories",
+  "platform_blog_publication_history",
+  "platform_blog_tags",
+  "platform_customer_marketplace_settings",
+  "platform_customer_quote_history",
+  "platform_customer_quote_notes",
+  "platform_customer_quote_requests",
+  "platform_demo_request_history",
+  "platform_demo_request_notes",
+  "platform_demo_requests",
+  "platform_help_articles",
+  "platform_help_categories",
+  "platform_public_redirects",
+  "platform_public_site_settings",
+  "platform_trader_application_channels",
+  "platform_trader_application_history",
+  "platform_trader_application_notes",
+  "platform_trader_applications",
+  "platform_website_contact_settings",
+  "platform_website_faqs",
+  "platform_website_features",
+  "platform_website_media",
+  "platform_website_navigation_items",
+  "platform_website_pages",
+  "platform_website_pricing_plans",
+  "platform_website_revisions",
 ]);
 
 /**
@@ -362,6 +464,15 @@ export const LEGACY_COMPATIBILITY_EDGES: {
     reason:
       "composite variant of the relationship edge; RESTRICT in the database, same " +
       "delegation as the delivery_order_id edge above",
+  },
+  {
+    child: "commerce_integration_credentials",
+    parent: "commerce_integration_connections",
+    columns: ["connection_id"],
+    reason:
+      "credential rows intentionally carry no company_id; the directly scoped connection is " +
+      "removed only when no preserved credential row still references it, otherwise the " +
+      "database RESTRICT constraint aborts the reset",
   },
 ];
 

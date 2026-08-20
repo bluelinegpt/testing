@@ -186,7 +186,7 @@ describe("legacy compatibility edges", () => {
     parentColumns: ["company_id", "id"],
   });
 
-  it("declares only the reviewed Storefront compatibility edges", () => {
+  it("declares only the reviewed compatibility edges", () => {
     expect(
       LEGACY_COMPATIBILITY_EDGES.map((entry) => `${entry.child}.${entry.columns.join("+")}`),
     ).toEqual([
@@ -194,6 +194,7 @@ describe("legacy compatibility edges", () => {
       "store_orders.delivery_order_id",
       "store_orders.delivery_company_relationship_id",
       "store_orders.delivery_company_relationship_id+trader_commerce_id+delivery_company_id",
+      "commerce_integration_credentials.connection_id",
     ]);
     // Every entry must say why, so the next reader is not left guessing.
     for (const entry of LEGACY_COMPATIBILITY_EDGES) {
