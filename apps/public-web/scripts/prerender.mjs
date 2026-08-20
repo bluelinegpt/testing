@@ -20,6 +20,7 @@ const routes = [
 ];
 
 const dynamicBlogRoutes = [];
+const dynamicHelpRoutes = [];
 try {
   const endpoint = process.env.PUBLIC_API_BASE_URL ?? 'http://127.0.0.1:3000/api/v1';
   const response = await fetch(`${endpoint}/public/blog/sitemap-entries`);
@@ -34,11 +35,26 @@ try {
       }
     }
   }
+
+  const helpResponse = await fetch(`${endpoint}/public/website/help`);
+  if (helpResponse.ok) {
+    const helpHome = await helpResponse.json();
+    for (const article of helpHome.articles ?? []) {
+      const path = `/resources/${article.slug}`;
+      if (!routes.some(([existingPath]) => existingPath === path)) {
+        dynamicHelpRoutes.push([
+          path,
+          article.title ?? 'Tawseelhub Help Center',
+          article.summary ?? 'Tawseelhub Help Center guide.',
+        ]);
+      }
+    }
+  }
 } catch {
-  console.warn('[prerender] Blog sitemap feed unavailable; emitting static public routes only.');
+  console.warn('[prerender] Dynamic sitemap feeds unavailable; emitting static public routes only.');
 }
 
-const allRoutes = [...routes, ...dynamicBlogRoutes];
+const allRoutes = [...routes, ...dynamicBlogRoutes, ...dynamicHelpRoutes];
 const template = await readFile('dist/index.html', 'utf8');
 for (const [path, title, description] of allRoutes) {
   const canonical = `${siteUrl}${path}`;
