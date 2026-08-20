@@ -11,6 +11,7 @@ const routes = [
   ['/integrations', 'Commerce Integrations', 'Prepare to connect Salla, Shopify and WooCommerce orders to delivery operations through planned Tawseelhub integrations.'],
   ['/resources', 'Delivery Operations Resources', 'Practical resources for UAE delivery companies covering COD, failed deliveries, operations and connected sales channels.'],
   ['/blog', 'Tawseelhub Insights', 'Insights for delivery companies and Traders building more connected delivery operations in the UAE.'],
+  ['/blog/manage-cod-delivery-operations', 'How Delivery Companies Can Manage COD More Efficiently', 'Learn how delivery companies can improve COD collection, driver reconciliation, Trader settlements, accounting visibility and operational control with one connected system.'],
   ['/pricing', 'Tawseelhub Pricing | AED Plans for Delivery Companies', 'Review Tawseelhub pricing in AED, from a free tier up to high-volume delivery operations. Request a demo for the right plan.'],
   ...['delivery-operations','cod-finance','business-growth','last-mile-delivery','uae-delivery-guides','salla','shopify','woocommerce'].map(slug => [`/blog/category/${slug}`, 'Tawseelhub Blog', 'Practical guidance for UAE delivery operations.']),
   ['/about', 'About Tawseelhub', 'Learn why Tawseelhub is building a connected delivery operating system for delivery businesses in the UAE.'],
@@ -18,8 +19,28 @@ const routes = [
   ['/request-demo', 'Request a Tawseelhub Demo', 'Request a tailored demonstration of Tawseelhub for your UAE delivery company.'],
 ];
 
+const dynamicBlogRoutes = [];
+try {
+  const endpoint = process.env.PUBLIC_API_BASE_URL ?? 'http://127.0.0.1:3000/api/v1';
+  const response = await fetch(`${endpoint}/public/blog/sitemap-entries`);
+  if (response.ok) {
+    for (const entry of await response.json()) {
+      if (!routes.some(([path]) => path === entry.path) && entry.path.startsWith('/blog/')) {
+        dynamicBlogRoutes.push([
+          entry.path,
+          'Tawseelhub Blog',
+          'Practical guidance for UAE delivery operations.',
+        ]);
+      }
+    }
+  }
+} catch {
+  console.warn('[prerender] Blog sitemap feed unavailable; emitting static public routes only.');
+}
+
+const allRoutes = [...routes, ...dynamicBlogRoutes];
 const template = await readFile('dist/index.html', 'utf8');
-for (const [path, title, description] of routes) {
+for (const [path, title, description] of allRoutes) {
   const canonical = `${siteUrl}${path}`;
   const fullTitle = /tawseelhub/i.test(title) ? title : `${title} | Tawseelhub`;
   const metadata = `<link rel="canonical" href="${canonical}" /><link rel="alternate" hreflang="en" href="${canonical}" /><link rel="alternate" hreflang="x-default" href="${canonical}" /><meta property="og:title" content="${fullTitle}" /><meta property="og:description" content="${description}" /><meta property="og:type" content="website" /><meta property="og:url" content="${canonical}" /><meta property="og:image" content="${siteUrl}/og.png" /><meta name="twitter:card" content="summary_large_image" /><meta name="twitter:title" content="${fullTitle}" /><meta name="twitter:description" content="${description}" /><meta name="twitter:image" content="${siteUrl}/og.png" />`;
@@ -31,11 +52,6 @@ for (const [path, title, description] of routes) {
   await writeFile(join(targetDirectory, 'index.html'), html);
 }
 
-const sitemapPaths = routes.map(([path]) => path).filter(path => path !== '/traders/register');
-try {
-  const endpoint = process.env.PUBLIC_API_BASE_URL ?? 'http://127.0.0.1:3000/api/v1';
-  const response = await fetch(`${endpoint}/public/blog/sitemap-entries`);
-  if (response.ok) for (const entry of await response.json()) if (!sitemapPaths.includes(entry.path)) sitemapPaths.push(entry.path);
-} catch { console.warn('[prerender] Blog sitemap feed unavailable; emitting static public routes only.'); }
+const sitemapPaths = allRoutes.map(([path]) => path).filter(path => path !== '/traders/register');
 const sitemap = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${sitemapPaths.map(path => `  <url><loc>${siteUrl}${path}</loc></url>`).join('\n')}\n</urlset>\n`;
 await writeFile('dist/sitemap.xml', sitemap);
