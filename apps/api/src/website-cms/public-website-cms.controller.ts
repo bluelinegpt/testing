@@ -23,6 +23,27 @@ export class PublicWebsiteCmsController {
   }
 
   @Public()
+  @Get("help")
+  @Header("Cache-Control", "public, max-age=60, stale-while-revalidate=300")
+  public helpHome(@Query("locale") locale?: string) {
+    return this.cms.helpHome(locale);
+  }
+
+  @Public()
+  @Get("help/search")
+  @Header("Cache-Control", "public, max-age=60, stale-while-revalidate=300")
+  public helpSearch(@Query("locale") locale?: string, @Query("q") query?: string, @Query("audience") audience?: string, @Query("category") category?: string) {
+    return this.cms.helpSearch(locale, query, audience, category);
+  }
+
+  @Public()
+  @Get("help/articles/:slug")
+  @Header("Cache-Control", "public, max-age=60, stale-while-revalidate=300")
+  public helpArticle(@Param("slug") slug: string, @Query("locale") locale?: string) {
+    return this.cms.helpArticle(slug, locale);
+  }
+
+  @Public()
   @Get("media/:id")
   @Header("Cache-Control", "public, max-age=86400, immutable")
   public async media(@Param("id") id: string, @Res() response: Response) {

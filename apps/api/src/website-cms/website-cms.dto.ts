@@ -113,3 +113,44 @@ export class MediaAltDto {
   @IsString() @MinLength(2) @MaxLength(300) altText!: string;
   @IsOptional() @IsString() @MaxLength(500) caption?: string;
 }
+
+export class HelpCategoryDto {
+  @Matches(/^[a-z0-9]+(?:-[a-z0-9]+)*$/) slug!: string;
+  @IsIn(["en", "ar"]) locale = "en";
+  @IsString() @MinLength(2) @MaxLength(120) name!: string;
+  @IsString() @MaxLength(500) description = "";
+  @IsIn(["delivery_company", "trader", "customer", "integration_developer", "all"]) audience = "all";
+  @IsOptional() @IsString() @MaxLength(60) icon?: string;
+  @IsBoolean() visible = true;
+  @Type(() => Number) @IsInt() @Min(0) @Max(10000) sortOrder = 100;
+}
+
+export class HelpArticleBlockDto {
+  @IsIn(["paragraph", "h2", "h3", "bullet_list", "numbered_list", "image", "blockquote"]) type!: string;
+  @IsOptional() @IsString() @MaxLength(3000) text?: string;
+  @IsOptional() @IsArray() @ArrayMaxSize(40) @IsString({ each: true }) items?: string[];
+  @IsOptional() @Matches(/^(https:\/\/[^?#]+|\/api\/v1\/public\/website\/media\/[A-Za-z0-9_-]+)$/) url?: string;
+  @IsOptional() @IsString() @MaxLength(300) alt?: string;
+}
+
+export class HelpArticleDto {
+  @Matches(/^[a-z0-9]+(?:-[a-z0-9]+)*$/) slug!: string;
+  @IsIn(["en", "ar"]) locale = "en";
+  @IsString() @MinLength(5) @MaxLength(180) title!: string;
+  @IsString() @MinLength(10) @MaxLength(600) summary!: string;
+  @IsArray() @ArrayMaxSize(80) @ValidateNested({ each: true }) @Type(() => HelpArticleBlockDto) body!: HelpArticleBlockDto[];
+  @Matches(/^[a-z0-9]+(?:-[a-z0-9]+)*$/) categorySlug!: string;
+  @IsIn(["delivery_company", "trader", "customer", "integration_developer", "all"]) audience = "all";
+  @IsBoolean() featured = false;
+  @IsBoolean() availableToAgent = false;
+  @IsArray() @ArrayMaxSize(12) @IsString({ each: true }) relatedSlugs: string[] = [];
+  @Type(() => Number) @IsInt() @Min(0) @Max(10000) sortOrder = 100;
+  @IsString() @MinLength(5) @MaxLength(200) seoTitle!: string;
+  @IsString() @MinLength(20) @MaxLength(320) metaDescription!: string;
+  @IsOptional() @Matches(/^\/resources\/[a-z0-9]+(?:-[a-z0-9]+)*$/) canonicalPath?: string;
+  @IsBoolean() robotsIndex = true;
+  @IsBoolean() robotsFollow = true;
+  @IsOptional() @IsString() @MaxLength(200) ogTitle?: string;
+  @IsOptional() @IsString() @MaxLength(320) ogDescription?: string;
+  @IsOptional() @IsUrl({ protocols: ["https"], require_protocol: true }) ogImage?: string;
+}

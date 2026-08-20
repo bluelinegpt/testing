@@ -7,6 +7,8 @@ import { DATABASE } from "../infrastructure/database/database.tokens.js";
 import type { DatabaseSchema } from "../infrastructure/database/database.types.js";
 import type {
   MediaAltDto,
+  HelpArticleDto,
+  HelpCategoryDto,
   NavigationItemDto,
   PricingPlanDto,
   WebsiteContactSettingsDto,
@@ -44,10 +46,34 @@ function cleanText(value: string | null | undefined): string | null {
 
 function requireSafePath(path: string): string {
   const cleaned = cleanText(path) ?? "";
-  if (!allowedRoutes.has(cleaned) && !cleaned.startsWith("/blog/category/") && !cleaned.startsWith("/blog/")) {
+  if (!allowedRoutes.has(cleaned) && !cleaned.startsWith("/blog/category/") && !cleaned.startsWith("/blog/") && !cleaned.startsWith("/resources/")) {
     throw new BadRequestException("Destination must be an approved public route.");
   }
   return cleaned;
+}
+
+function helpArticlePayload(input: HelpArticleDto) {
+  return {
+    title: cleanText(input.title),
+    summary: cleanText(input.summary),
+    body: input.body.map((block) => ({
+      type: block.type,
+      ...(block.text ? { text: cleanText(block.text) } : {}),
+      ...(block.items ? { items: block.items.map((item) => cleanText(item)).filter(Boolean) } : {}),
+      ...(block.url ? { url: block.url } : {}),
+      ...(block.alt ? { alt: cleanText(block.alt) } : {}),
+    })),
+    seo: {
+      title: cleanText(input.seoTitle),
+      description: cleanText(input.metaDescription),
+      canonical: input.canonicalPath ? requireSafePath(input.canonicalPath) : `/resources/${input.slug}`,
+      robotsIndex: input.robotsIndex,
+      robotsFollow: input.robotsFollow,
+      ogTitle: cleanText(input.ogTitle),
+      ogDescription: cleanText(input.ogDescription),
+      ogImage: input.ogImage ?? null,
+    },
+  };
 }
 
 function pagePayload(input: WebsitePageContentDto) {
@@ -165,13 +191,21 @@ export class WebsiteCmsService {
       where language = 'en'
         and ((status = 'published' and published_at <= now()) or (status = 'scheduled' and scheduled_at <= now()))
     `.execute(this.db)).rows;
+    const help = (await sql<{ path: string; updated_at: Date }>`
+      select '/resources/' || slug as path, greatest(updated_at, coalesce(published_at, updated_at)) as updated_at
+      from platform_help_articles
+      where locale = 'en'
+        and status = 'published'
+        and robots_index = true
+    `.execute(this.db)).rows;
     const pagePaths = pages.map((row) => ({
       path: row.page_key === "home" ? "/" : `/${row.page_key}`,
       lastmod: row.updated_at,
     }));
     const navigationPaths = navigation.map((row) => ({ path: row.destination, lastmod: row.updated_at }));
     const blogPaths = blog.map((row) => ({ path: row.path, lastmod: row.updated_at }));
-    return [...new Map([...pagePaths, ...navigationPaths, ...blogPaths].map((entry) => [entry.path, entry])).values()].sort((a, b) => a.path.localeCompare(b.path));
+    const helpPaths = help.map((row) => ({ path: row.path, lastmod: row.updated_at }));
+    return [...new Map([...pagePaths, ...navigationPaths, ...blogPaths, ...helpPaths].map((entry) => [entry.path, entry])).values()].sort((a, b) => a.path.localeCompare(b.path));
   }
 
   public async overview() {
@@ -182,24 +216,143 @@ export class WebsiteCmsService {
         (select count(*)::int from platform_blog_articles where status='draft') as "draftBlogPosts",
         (select count(*)::int from platform_blog_articles where status='scheduled') as "scheduledPosts",
         (select count(*)::int from platform_blog_articles where status='published') as "publishedPosts",
+        (select count(*)::int from platform_help_articles where status='draft') as "draftHelpArticles",
+        (select count(*)::int from platform_help_articles where status='published') as "publishedHelpArticles",
         (select max(created_at) from platform_website_revisions) as "lastPublished"
     `.execute(this.db)).rows[0];
     return row;
   }
 
   public async adminBundle() {
-    const [overview, pages, pricing, features, faqs, media, navigation, contact, revisions] = await Promise.all([
+    const [overview, pages, pricing, features, faqs, helpCategories, helpArticles, media, navigation, contact, revisions] = await Promise.all([
       this.overview(),
       sql<any>`select * from platform_website_pages order by page_key, locale`.execute(this.db),
       sql<any>`select * from platform_website_pricing_plans order by sort_order, plan_key, locale`.execute(this.db),
       sql<any>`select * from platform_website_features order by sort_order, slug, locale`.execute(this.db),
       sql<any>`select * from platform_website_faqs order by sort_order, faq_key, locale`.execute(this.db),
+      sql<any>`select * from platform_help_categories order by sort_order, slug, locale`.execute(this.db),
+      sql<any>`select a.*, c.slug as category_slug, c.name as category_name from platform_help_articles a left join platform_help_categories c on c.id=a.category_id order by a.sort_order, a.slug, a.locale`.execute(this.db),
       sql<any>`select id, public_url as "publicUrl", original_filename as "originalFilename", media_type as "mediaType", size_bytes as "sizeBytes", alt_text as "altText", caption, created_at as "createdAt" from platform_website_media where deleted_at is null order by created_at desc limit 50`.execute(this.db),
       sql<any>`select * from platform_website_navigation_items order by sort_order, item_key, locale`.execute(this.db),
       sql<any>`select * from platform_website_contact_settings where id=true`.execute(this.db),
       sql<any>`select entity_type as "entityType", entity_key as "entityKey", locale, event_type as "eventType", created_at as "createdAt" from platform_website_revisions order by created_at desc limit 30`.execute(this.db),
     ]);
-    return { overview, pages: pages.rows, pricing: pricing.rows, features: features.rows, faqs: faqs.rows, media: media.rows, navigation: navigation.rows, contact: contact.rows[0], revisions: revisions.rows };
+    return { overview, pages: pages.rows, pricing: pricing.rows, features: features.rows, faqs: faqs.rows, helpCategories: helpCategories.rows, helpArticles: helpArticles.rows, media: media.rows, navigation: navigation.rows, contact: contact.rows[0], revisions: revisions.rows };
+  }
+
+  public async helpHome(locale = "en") {
+    const safeLocale = locale === "ar" ? "ar" : "en";
+    const categories = (await sql<any>`
+      select c.id, c.slug, c.locale, c.name, c.description, c.audience, c.icon, c.sort_order as "sortOrder",
+        count(a.id)::int as "articleCount"
+      from platform_help_categories c
+      left join platform_help_articles a on a.category_id = c.id and a.status = 'published'
+      where c.visible = true and c.locale in (${safeLocale}, 'en')
+      group by c.id
+      order by case when c.locale=${safeLocale} then 0 else 1 end, c.sort_order, c.name
+    `.execute(this.db)).rows;
+    const articles = (await sql<any>`
+      select a.slug, a.locale, a.title, a.summary, a.audience, a.featured, a.sort_order as "sortOrder",
+        c.slug as "categorySlug", c.name as "categoryName"
+      from platform_help_articles a
+      left join platform_help_categories c on c.id = a.category_id
+      where a.status = 'published' and a.locale in (${safeLocale}, 'en')
+      order by case when a.locale=${safeLocale} then 0 else 1 end, a.featured desc, a.sort_order, a.title
+    `.execute(this.db)).rows;
+    const prefer = (rows: any[], key: string) => Object.values(rows.reduce((acc, row) => {
+      acc[row[key]] = acc[row[key]] && acc[row[key]].locale === safeLocale ? acc[row[key]] : row;
+      return acc;
+    }, {} as Record<string, any>));
+    return { locale: safeLocale, direction: safeLocale === "ar" ? "rtl" : "ltr", categories: prefer(categories, "slug"), articles: prefer(articles, "slug") };
+  }
+
+  public async helpSearch(locale = "en", query = "", audience = "all", category = "") {
+    const safeLocale = locale === "ar" ? "ar" : "en";
+    const q = `%${(cleanText(query) ?? "").toLowerCase()}%`;
+    const audienceFilter = audience === "all" ? null : audience;
+    const categoryFilter = cleanText(category);
+    const articles = (await sql<any>`
+      select a.slug, a.locale, a.title, a.summary, a.audience, c.slug as "categorySlug", c.name as "categoryName", 'article' as type
+      from platform_help_articles a
+      left join platform_help_categories c on c.id = a.category_id
+      where a.status = 'published'
+        and a.locale in (${safeLocale}, 'en')
+        and (${audienceFilter}::text is null or a.audience in (${audienceFilter}, 'all'))
+        and (${categoryFilter}::text is null or c.slug = ${categoryFilter})
+        and (${q} = '%%' or lower(a.title) like ${q} or lower(a.summary) like ${q} or lower(a.body::text) like ${q})
+      order by case when a.locale=${safeLocale} then 0 else 1 end, a.featured desc, a.sort_order, a.title
+      limit 50
+    `.execute(this.db)).rows;
+    const faqs = (await sql<any>`
+      select faq_key as slug, locale, published_data->>'question' as title, published_data->>'answer' as summary, audience, category as "categorySlug", category as "categoryName", 'faq' as type
+      from platform_website_faqs
+      where status = 'published' and visible = true and published_data is not null
+        and locale in (${safeLocale}, 'en')
+        and (${audienceFilter}::text is null or audience in (${audienceFilter}, 'all'))
+        and (${q} = '%%' or lower(published_data->>'question') like ${q} or lower(published_data->>'answer') like ${q})
+      order by case when locale=${safeLocale} then 0 else 1 end, sort_order
+      limit 20
+    `.execute(this.db)).rows;
+    return { locale: safeLocale, results: [...articles, ...faqs].slice(0, 60) };
+  }
+
+  public async helpArticle(slug: string, locale = "en") {
+    const safeLocale = locale === "ar" ? "ar" : "en";
+    const article = (await sql<any>`
+      select a.*, c.slug as "categorySlug", c.name as "categoryName", c.description as "categoryDescription"
+      from platform_help_articles a
+      left join platform_help_categories c on c.id = a.category_id
+      where a.slug=${slug} and a.status='published' and a.locale in (${safeLocale}, 'en')
+      order by case when a.locale=${safeLocale} then 0 else 1 end
+      limit 1
+    `.execute(this.db)).rows[0];
+    if (!article) throw new NotFoundException("help_article_not_found");
+    const related = (await sql<any>`
+      select slug, title, summary
+      from platform_help_articles
+      where status='published' and locale=${article.locale} and slug = any(${article.related_slugs}::text[])
+      order by sort_order
+    `.execute(this.db)).rows;
+    return { article, related };
+  }
+
+  public async saveHelpCategory(input: HelpCategoryDto, actor: string) {
+    const row = (await sql<any>`
+      insert into platform_help_categories(slug,locale,name,description,audience,icon,visible,sort_order)
+      values(${input.slug},${input.locale},${cleanText(input.name)},${cleanText(input.description) ?? ""},${input.audience},${cleanText(input.icon)},${input.visible},${input.sortOrder})
+      on conflict(slug,locale) do update set name=excluded.name,description=excluded.description,audience=excluded.audience,icon=excluded.icon,visible=excluded.visible,sort_order=excluded.sort_order,updated_at=now()
+      returning *
+    `.execute(this.db)).rows[0];
+    await this.revision(actor, "help_category", input.slug, input.locale, "saved", row);
+    return row;
+  }
+
+  public async saveHelpArticle(input: HelpArticleDto, actor: string) {
+    const category = (await sql<{ id: string }>`select id from platform_help_categories where slug=${input.categorySlug} and locale=${input.locale}`.execute(this.db)).rows[0];
+    if (!category) throw new NotFoundException("help_category_not_found");
+    const payload = helpArticlePayload(input);
+    const row = (await sql<any>`
+      insert into platform_help_articles(slug,locale,title,summary,body,category_id,audience,status,sort_order,featured,available_to_agent,related_slugs,seo_title,meta_description,canonical_path,robots_index,robots_follow,og_title,og_description,og_image,created_by_account_id,updated_by_account_id)
+      values(${input.slug},${input.locale},${payload.title},${payload.summary},${JSON.stringify(payload.body)}::jsonb,${category.id}::uuid,${input.audience},'draft',${input.sortOrder},${input.featured},${input.availableToAgent},${input.relatedSlugs},${payload.seo.title},${payload.seo.description},${payload.seo.canonical},${payload.seo.robotsIndex},${payload.seo.robotsFollow},${payload.seo.ogTitle},${payload.seo.ogDescription},${payload.seo.ogImage},${actor}::uuid,${actor}::uuid)
+      on conflict(slug,locale) do update set title=excluded.title,summary=excluded.summary,body=excluded.body,category_id=excluded.category_id,audience=excluded.audience,status=case when platform_help_articles.status='archived' then 'draft' else platform_help_articles.status end,sort_order=excluded.sort_order,featured=excluded.featured,available_to_agent=excluded.available_to_agent,related_slugs=excluded.related_slugs,seo_title=excluded.seo_title,meta_description=excluded.meta_description,canonical_path=excluded.canonical_path,robots_index=excluded.robots_index,robots_follow=excluded.robots_follow,og_title=excluded.og_title,og_description=excluded.og_description,og_image=excluded.og_image,updated_by_account_id=excluded.updated_by_account_id,updated_at=now()
+      returning *
+    `.execute(this.db)).rows[0];
+    await this.revision(actor, "help_article", input.slug, input.locale, "draft_saved", payload);
+    return row;
+  }
+
+  public async publishHelpArticle(slug: string, locale: string, actor: string) {
+    const row = (await sql<any>`update platform_help_articles set status='published',published_by_account_id=${actor}::uuid,published_at=coalesce(published_at,now()),updated_at=now() where slug=${slug} and locale=${locale} returning *`.execute(this.db)).rows[0];
+    if (!row) throw new NotFoundException("help_article_not_found");
+    await this.revision(actor, "help_article", slug, locale, "published", row);
+    return row;
+  }
+
+  public async archiveHelpArticle(slug: string, locale: string, actor: string) {
+    const row = (await sql<any>`update platform_help_articles set status='archived',updated_by_account_id=${actor}::uuid,updated_at=now() where slug=${slug} and locale=${locale} returning *`.execute(this.db)).rows[0];
+    if (!row) throw new NotFoundException("help_article_not_found");
+    await this.revision(actor, "help_article", slug, locale, "archived", row);
+    return row;
   }
 
   private async revision(actor: string, entityType: string, entityKey: string, locale: string | null, eventType: string, snapshot: object) {

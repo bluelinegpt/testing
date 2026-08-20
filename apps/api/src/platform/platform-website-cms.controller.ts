@@ -4,6 +4,8 @@ import { ApiConsumes } from "@nestjs/swagger";
 
 import { IdentityContextAccessor } from "../security/identity-context.js";
 import {
+  HelpArticleDto,
+  HelpCategoryDto,
   MediaAltDto,
   NavigationItemDto,
   PricingPlanDto,
@@ -87,6 +89,30 @@ export class PlatformWebsiteCmsController {
   @Post("faqs/:faqKey/:locale/publish")
   public publishFaq(@Param("faqKey") faqKey: string, @Param("locale") locale: string, @Body() _body: PublishDto) {
     return this.cms.publishFaq(faqKey, locale, this.actor());
+  }
+
+  @RequirePlatformPermissions(PLATFORM_WEBSITE_MANAGE)
+  @Patch("help/categories/:slug/:locale")
+  public saveHelpCategory(@Param("slug") slug: string, @Param("locale") locale: string, @Body() body: HelpCategoryDto) {
+    return this.cms.saveHelpCategory({ ...body, slug, locale }, this.actor());
+  }
+
+  @RequirePlatformPermissions(PLATFORM_WEBSITE_MANAGE)
+  @Patch("help/articles/:slug/:locale")
+  public saveHelpArticle(@Param("slug") slug: string, @Param("locale") locale: string, @Body() body: HelpArticleDto) {
+    return this.cms.saveHelpArticle({ ...body, slug, locale }, this.actor());
+  }
+
+  @RequirePlatformPermissions(PLATFORM_WEBSITE_PUBLISH)
+  @Post("help/articles/:slug/:locale/publish")
+  public publishHelpArticle(@Param("slug") slug: string, @Param("locale") locale: string, @Body() _body: PublishDto) {
+    return this.cms.publishHelpArticle(slug, locale, this.actor());
+  }
+
+  @RequirePlatformPermissions(PLATFORM_WEBSITE_PUBLISH)
+  @Post("help/articles/:slug/:locale/archive")
+  public archiveHelpArticle(@Param("slug") slug: string, @Param("locale") locale: string, @Body() _body: PublishDto) {
+    return this.cms.archiveHelpArticle(slug, locale, this.actor());
   }
 
   @RequirePlatformPermissions(PLATFORM_WEBSITE_MANAGE)

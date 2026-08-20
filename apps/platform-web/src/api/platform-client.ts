@@ -193,7 +193,7 @@ export interface DemoRequestSummary { readonly id:string;readonly referenceNumbe
 export interface DemoRequestDetail extends DemoRequestSummary { readonly website:string|null;readonly currentSystem:string|null;readonly mainChallenges:string|null;readonly featuresOfInterest:readonly string[];readonly notes:string|null;readonly source:string;readonly landingPage:string;readonly referrer:string|null;readonly utmSource:string|null;readonly utmMedium:string|null;readonly utmCampaign:string|null;readonly utmTerm:string|null;readonly utmContent:string|null;readonly gclid:string|null;readonly convertedCompanyId:string|null;readonly convertedCompanyName:string|null;readonly agentConversationId?:string|null;readonly history:readonly Record<string,unknown>[];readonly internalNotes:readonly {id:string;noteText:string;authorUsername:string|null;createdAt:string}[]; }
 export interface DemoRequestPage { readonly items:readonly DemoRequestSummary[];readonly total:number;readonly page:number;readonly pageSize:number; }
 export interface DemoRequestFilters { readonly search?:string;readonly status?:string;readonly country?:string;readonly emirate?:string;readonly preferredContactMethod?:string;readonly createdFrom?:string;readonly createdTo?:string;readonly page?:number;readonly pageSize?:number;readonly sort?:"newest"|"oldest"; }
-export interface WebsiteCmsBundle { readonly overview:Record<string,unknown>;readonly pages:any[];readonly pricing:any[];readonly features:any[];readonly faqs:any[];readonly media:any[];readonly navigation:any[];readonly contact:any;readonly revisions:any[]; }
+export interface WebsiteCmsBundle { readonly overview:Record<string,unknown>;readonly pages:any[];readonly pricing:any[];readonly features:any[];readonly faqs:any[];readonly helpCategories:any[];readonly helpArticles:any[];readonly media:any[];readonly navigation:any[];readonly contact:any;readonly revisions:any[]; }
 
 export interface UpdateErrorReportInput {
   readonly severity?: "high" | "medium" | "low";
@@ -690,7 +690,7 @@ export const platformApi = {
   async demoRequest(id:string):Promise<DemoRequestDetail>{const result=await request<DemoRequestDetail>(`platform/demo-requests/${id}`,{method:"GET"});if(result===undefined)throw new PlatformApiError("Empty demo request response","empty",500);return result;},
   async updateDemoRequestStatus(id:string,input:{status:DemoRequestStatus;reason?:string;demoScheduledAt?:string;convertedCompanyId?:string}):Promise<DemoRequestDetail>{const result=await request<DemoRequestDetail>(`platform/demo-requests/${id}/status`,{method:"PATCH",body:input});if(result===undefined)throw new PlatformApiError("Empty demo request response","empty",500);return result;},
   async addDemoRequestNote(id:string,text:string):Promise<void>{await request(`platform/demo-requests/${id}/notes`,{method:"POST",body:{text}});},
-  async websiteCms():Promise<WebsiteCmsBundle>{const result=await request<WebsiteCmsBundle>("platform/website",{method:"GET"});return result??{overview:{},pages:[],pricing:[],features:[],faqs:[],media:[],navigation:[],contact:null,revisions:[]};},
+  async websiteCms():Promise<WebsiteCmsBundle>{const result=await request<WebsiteCmsBundle>("platform/website",{method:"GET"});return result??{overview:{},pages:[],pricing:[],features:[],faqs:[],helpCategories:[],helpArticles:[],media:[],navigation:[],contact:null,revisions:[]};},
   async saveWebsitePage(pageKey:string,locale:string,input:any):Promise<any>{return await request<any>(`platform/website/pages/${pageKey}/${locale}/draft`,{method:"PATCH",body:input});},
   async publishWebsitePage(pageKey:string,locale:string):Promise<any>{return await request<any>(`platform/website/pages/${pageKey}/${locale}/publish`,{method:"POST",body:{}});},
   async saveWebsitePricing(planKey:string,locale:string,input:any):Promise<any>{return await request<any>(`platform/website/pricing/${planKey}/${locale}/draft`,{method:"PATCH",body:input});},
@@ -699,6 +699,10 @@ export const platformApi = {
   async publishWebsiteFeature(slug:string,locale:string):Promise<any>{return await request<any>(`platform/website/features/${slug}/${locale}/publish`,{method:"POST",body:{}});},
   async saveWebsiteFaq(faqKey:string,locale:string,input:any):Promise<any>{return await request<any>(`platform/website/faqs/${faqKey}/${locale}`,{method:"PATCH",body:input});},
   async publishWebsiteFaq(faqKey:string,locale:string):Promise<any>{return await request<any>(`platform/website/faqs/${faqKey}/${locale}/publish`,{method:"POST",body:{}});},
+  async saveHelpCategory(slug:string,locale:string,input:any):Promise<any>{return await request<any>(`platform/website/help/categories/${slug}/${locale}`,{method:"PATCH",body:input});},
+  async saveHelpArticle(slug:string,locale:string,input:any):Promise<any>{return await request<any>(`platform/website/help/articles/${slug}/${locale}`,{method:"PATCH",body:input});},
+  async publishHelpArticle(slug:string,locale:string):Promise<any>{return await request<any>(`platform/website/help/articles/${slug}/${locale}/publish`,{method:"POST",body:{}});},
+  async archiveHelpArticle(slug:string,locale:string):Promise<any>{return await request<any>(`platform/website/help/articles/${slug}/${locale}/archive`,{method:"POST",body:{}});},
   async saveWebsiteContact(input:any):Promise<any>{return await request<any>("platform/website/contact/draft",{method:"PATCH",body:input});},
   async publishWebsiteContact():Promise<any>{return await request<any>("platform/website/contact/publish",{method:"POST",body:{}});},
   async saveWebsiteNavigation(itemKey:string,locale:string,input:any):Promise<any>{return await request<any>(`platform/website/navigation/${itemKey}/${locale}`,{method:"PATCH",body:input});},

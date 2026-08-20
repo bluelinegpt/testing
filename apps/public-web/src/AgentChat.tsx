@@ -51,6 +51,14 @@ export function AgentChat() {
     inputRef.current?.focus();
   }, [open]);
 
+  useEffect(() => {
+    const handler = () => {
+      void openChat();
+    };
+    window.addEventListener('tawseelhub:open-agent', handler);
+    return () => window.removeEventListener('tawseelhub:open-agent', handler);
+  });
+
   function scrollMessagesToBottom(behavior: ScrollBehavior = 'smooth') {
     window.requestAnimationFrame(() => {
       messagesEndRef.current?.scrollIntoView({ block: 'end', behavior });
