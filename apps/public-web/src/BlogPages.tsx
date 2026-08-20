@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
-import { apiUrl } from "./api-base";
+import { apiUrl, publicAssetUrl } from "./api-base";
 import { trackEvent } from "./analytics";
 import { applyPageMetadata } from "./seo";
 type Card = {
@@ -141,11 +141,12 @@ export function BlogListingPage() {
   );
 }
 function CardView({ article, featured = false }: { article: Card; featured?: boolean }) {
+  const imageUrl = publicAssetUrl(article.featuredImageUrl);
   return (
     <article className={featured ? "blog-card featured" : ""}>
-      {article.featuredImageUrl && (
+      {imageUrl && (
         <img
-          src={article.featuredImageUrl}
+          src={imageUrl}
           alt={article.featuredImageAlt ?? ""}
           loading={featured ? "eager" : "lazy"}
         />
@@ -188,13 +189,15 @@ export function BlogArticlePage() {
   useEffect(() => {
     if (!data) return;
     const a = data.article;
+    const featuredImageUrl = publicAssetUrl(a.featured_image_public_url);
+    const socialImageUrl = publicAssetUrl(a.social_image_url);
     applyPageMetadata(
       String(a.seo_title ?? a.title),
       String(a.meta_description ?? a.excerpt),
       `/blog/${a.slug}`,
       {
         type: "article",
-        image: String(a.social_image_url ?? a.featured_image_public_url ?? ""),
+        image: socialImageUrl || featuredImageUrl,
         canonical: String(a.canonical_url ?? ""),
         robots: `${a.robots_index ? "index" : "noindex"},${a.robots_follow ? "follow" : "nofollow"}`,
       },
@@ -221,7 +224,7 @@ export function BlogArticlePage() {
         logo: { "@type": "ImageObject", url: "https://tawseelhub.com/tawseelhub-logo.png" },
       },
       mainEntityOfPage: `https://tawseelhub.com/blog/${a.slug}`,
-      ...(a.featured_image_public_url ? { image: a.featured_image_public_url } : {}),
+      ...(featuredImageUrl ? { image: featuredImageUrl } : {}),
     });
     document.head.append(schema);
     return () => schema.remove();
@@ -236,6 +239,7 @@ export function BlogArticlePage() {
     );
   if (!data) return <section className="article-empty">Loading article…</section>;
   const a = data.article;
+  const featuredImageUrl = publicAssetUrl(a.featured_image_public_url);
   return (
     <article className="article-page" dir={locale === "ar" ? "rtl" : "ltr"} lang={locale}>
       <nav aria-label="Breadcrumb">
@@ -253,10 +257,10 @@ export function BlogArticlePage() {
             : ""}
         </small>
       </header>
-      {a.featured_image_public_url && (
+      {featuredImageUrl && (
         <img
           className="article-image"
-          src={a.featured_image_public_url}
+          src={featuredImageUrl}
           alt={a.featured_image_alt ?? ""}
         />
       )}
