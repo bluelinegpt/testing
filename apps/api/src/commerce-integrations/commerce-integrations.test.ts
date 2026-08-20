@@ -6,11 +6,13 @@ import { CommerceProviderRouter } from "./commerce-provider.router.js";
 import { MockCommerceProvider, signMockCommercePayload } from "./mock-commerce.provider.js";
 import { SallaCommerceProvider, signSallaWebhookPayload } from "./salla-commerce.provider.js";
 import { ShopifyCommerceProvider, normalizeShopifyShopDomain, signShopifyWebhookPayload, verifyShopifyCallbackHmac } from "./shopify-commerce.provider.js";
+import { WooCommerceCommerceProvider, normalizeWooCommerceStoreUrl, signWooCommerceWebhookPayload } from "./woocommerce-commerce.provider.js";
 
 describe("CommerceProviderRouter", () => {
   const originalNodeEnv = process.env.NODE_ENV;
   const originalMockFlag = process.env.COMMERCE_MOCK_PROVIDER_ENABLED;
   const originalShopifyFlag = process.env.SHOPIFY_INTEGRATION_ENABLED;
+  const originalWooFlag = process.env.WOOCOMMERCE_INTEGRATION_ENABLED;
 
   afterEach(() => {
     process.env.NODE_ENV = originalNodeEnv;
@@ -18,6 +20,8 @@ describe("CommerceProviderRouter", () => {
     else process.env.COMMERCE_MOCK_PROVIDER_ENABLED = originalMockFlag;
     if (originalShopifyFlag === undefined) delete process.env.SHOPIFY_INTEGRATION_ENABLED;
     else process.env.SHOPIFY_INTEGRATION_ENABLED = originalShopifyFlag;
+    if (originalWooFlag === undefined) delete process.env.WOOCOMMERCE_INTEGRATION_ENABLED;
+    else process.env.WOOCOMMERCE_INTEGRATION_ENABLED = originalWooFlag;
   });
 
   it("registers Mock Commerce as the only enabled provider outside production", () => {
@@ -50,6 +54,17 @@ describe("CommerceProviderRouter", () => {
     const router = new CommerceProviderRouter();
     expect(router.list().find((provider) => provider.key === "shopify")?.capabilities.oauth).toBe(true);
     expect(router.get("shopify").label).toBe("Shopify");
+  });
+
+  it("registers WooCommerce only when the feature flag is enabled", () => {
+    process.env.WOOCOMMERCE_INTEGRATION_ENABLED = "false";
+    expect(new CommerceProviderRouter().list().find((provider) => provider.key === "woocommerce")?.enabled).toBe(false);
+    expect(() => new CommerceProviderRouter().get("woocommerce")).toThrow(BadRequestException);
+
+    process.env.WOOCOMMERCE_INTEGRATION_ENABLED = "true";
+    const router = new CommerceProviderRouter();
+    expect(router.list().find((provider) => provider.key === "woocommerce")?.capabilities.api_keys).toBe(true);
+    expect(router.get("woocommerce").label).toBe("WooCommerce");
   });
 });
 
@@ -256,6 +271,101 @@ describe("ShopifyCommerceProvider", () => {
         line_items: [{ title: "Discounted item", quantity: 1 }],
       },
       headers: { "x-shopify-topic": "orders/updated", "x-shopify-webhook-id": "webhook-2" },
+    });
+
+    expect(event.eventType).toBe("order.updated");
+    expect(event.order?.codRequired).toBe(false);
+    expect(event.order?.codAmount).toBe(0);
+    expect(event.order?.customerName).toBe("Guest Buyer");
+    expect(event.order?.customerEmail).toBe("guest@example.test");
+  });
+});
+
+describe("WooCommerceCommerceProvider", () => {
+  const originalSecretSeed = process.env.WOOCOMMERCE_WEBHOOK_SECRET_SEED;
+
+  afterEach(() => {
+    if (originalSecretSeed === undefined) delete process.env.WOOCOMMERCE_WEBHOOK_SECRET_SEED;
+    else process.env.WOOCOMMERCE_WEBHOOK_SECRET_SEED = originalSecretSeed;
+  });
+
+  it("normalizes only safe production store URLs", () => {
+    expect(normalizeWooCommerceStoreUrl("https://Shop.Example.com/store?x=1#fragment")).toBe("https://shop.example.com");
+    expect(() => normalizeWooCommerceStoreUrl("javascript:alert(1)")).toThrow("woocommerce_store_url_invalid");
+    expect(() => normalizeWooCommerceStoreUrl("http://shop.example.com")).toThrow("woocommerce_https_required");
+    expect(() => normalizeWooCommerceStoreUrl("https://localhost")).toThrow("woocommerce_store_url_private");
+    expect(() => normalizeWooCommerceStoreUrl("https://127.0.0.1")).toThrow("woocommerce_store_url_private");
+    expect(() => normalizeWooCommerceStoreUrl("https://10.0.0.5")).toThrow("woocommerce_store_url_private");
+    expect(() => normalizeWooCommerceStoreUrl("http://127.0.0.1", { production: false })).toThrow("woocommerce_store_url_private");
+    expect(normalizeWooCommerceStoreUrl("http://127.0.0.1:8080", { allowPrivate: true, production: false })).toBe("http://127.0.0.1:8080");
+  });
+
+  it("verifies WooCommerce webhook signatures against the raw body and connection reference", () => {
+    process.env.WOOCOMMERCE_WEBHOOK_SECRET_SEED = "woocommerce-test-seed";
+    const provider = new WooCommerceCommerceProvider();
+    const rawBody = Buffer.from(JSON.stringify({ id: 1045, number: "1045" }));
+    const reference = "CIN-000777";
+    const secret = createHmac("sha256", "woocommerce-test-seed").update(`woocommerce:${reference}`).digest("hex");
+    const signature = signWooCommerceWebhookPayload(rawBody, secret);
+
+    expect(provider.verifyWebhook({ body: {}, connectionReference: reference, rawBody, signature })).toBe(true);
+    expect(provider.verifyWebhook({ body: {}, connectionReference: reference, rawBody, signature: "bad-signature" })).toBe(false);
+    expect(provider.verifyWebhook({ body: {}, connectionReference: "CIN-OTHER", rawBody, signature })).toBe(false);
+  });
+
+  it("normalizes WooCommerce COD orders into the generic commerce order shape", () => {
+    const event = new WooCommerceCommerceProvider().parseWebhook({
+      body: {
+        id: 1045,
+        number: "1045",
+        status: "processing",
+        currency: "AED",
+        total: "250.00",
+        payment_method: "cod",
+        payment_method_title: "Cash on Delivery",
+        billing: { first_name: "Aiman", last_name: "Noor", phone: "0506468441", email: "aiman@example.test", country: "AE" },
+        shipping: { first_name: "Aiman", last_name: "Noor", phone: "0506468441", address_1: "Warehouse 5", city: "Dubai", state: "Dubai", country: "AE" },
+        line_items: [{ product_id: 55, sku: "SKU-55", name: "Package", quantity: 2 }],
+        date_modified_gmt: "2026-08-20T10:00:00",
+      },
+      headers: { "x-wc-webhook-topic": "order.created", "x-wc-delivery-id": "delivery-1" },
+    });
+
+    expect(event).toMatchObject({
+      eventType: "order.created",
+      externalEventId: "delivery-1",
+      externalReference: "1045",
+      order: {
+        codAmount: 250,
+        codRequired: true,
+        countryCode: "AE",
+        currency: "AED",
+        customerEmail: "aiman@example.test",
+        customerMobile: "0506468441",
+        externalOrderId: "1045",
+        externalOrderNumber: "1045",
+        packageCount: 1,
+      },
+    });
+    expect(event.order?.area).toContain("Dubai");
+    expect(event.order?.items[0]).toMatchObject({ externalProductId: "55", quantity: 2, sku: "SKU-55" });
+  });
+
+  it("normalizes WooCommerce prepaid guest orders with zero COD", () => {
+    const event = new WooCommerceCommerceProvider().parseWebhook({
+      body: {
+        id: 1046,
+        number: "1046",
+        status: "processing",
+        currency: "AED",
+        total: "199.00",
+        payment_method: "stripe",
+        payment_method_title: "Credit Card",
+        billing: { first_name: "Guest", last_name: "Buyer", phone: "+971501111111", email: "guest@example.test", country: "AE" },
+        shipping: { first_name: "Guest", last_name: "Buyer", address_1: "Villa 1", city: "Ajman", state: "Ajman", country: "AE" },
+        line_items: [{ name: "Discounted item", quantity: 1 }],
+      },
+      headers: { "x-wc-webhook-topic": "order.updated", "x-wc-webhook-id": "wh-2" },
     });
 
     expect(event.eventType).toBe("order.updated");

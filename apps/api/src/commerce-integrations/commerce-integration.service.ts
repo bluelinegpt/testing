@@ -1,5 +1,6 @@
 import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { lookup } from "node:dns/promises";
 import { type Kysely, sql } from "kysely";
 
 import { DATABASE } from "../infrastructure/database/database.tokens.js";
@@ -9,7 +10,8 @@ import { CommerceProviderRouter } from "./commerce-provider.router.js";
 import type { CommerceWebhookHeaders, NormalizedCommerceEvent, NormalizedCommerceOrder } from "./commerce-integration.types.js";
 import { signMockCommercePayload } from "./mock-commerce.provider.js";
 import { normalizeShopifyShopDomain, verifyShopifyCallbackHmac } from "./shopify-commerce.provider.js";
-import type { CommerceAreaMappingDto, CreateMockCommerceConnectionDto, CreateTraderMockCommerceConnectionDto, DisconnectCommerceConnectionDto, SimulateCommerceEventDto, StartSallaConnectionDto, StartShopifyConnectionDto, StartTraderSallaConnectionDto, StartTraderShopifyConnectionDto } from "./commerce-integration.dto.js";
+import type { CommerceAreaMappingDto, ConnectTraderWooCommerceConnectionDto, CreateMockCommerceConnectionDto, CreateTraderMockCommerceConnectionDto, DisconnectCommerceConnectionDto, SimulateCommerceEventDto, StartSallaConnectionDto, StartShopifyConnectionDto, StartTraderSallaConnectionDto, StartTraderShopifyConnectionDto } from "./commerce-integration.dto.js";
+import { isBlockedIp, normalizeWooCommerceStoreUrl, wooCommerceWebhookSecret } from "./woocommerce-commerce.provider.js";
 
 const mapRow = (row: Record<string, unknown>) => Object.fromEntries(Object.entries(row).map(([key, value]) => [key.replace(/_([a-z])/g, (_m, letter: string) => letter.toUpperCase()), value]));
 const ref = async (db: Kysely<DatabaseSchema>, sequence: string, prefix: string) => {
@@ -20,6 +22,8 @@ const normalizeIdentifier = (value: string) => value.normalize("NFKC").trim().re
 const normalizeMobile = (value: string) => value.replace(/[^\d]/g, "").replace(/^05/, "9715");
 const sanitizePayload = (value: unknown) => JSON.parse(JSON.stringify(value, (key, item) => /secret|token|key|signature|password/i.test(key) ? "[redacted]" : item)) as Record<string, unknown>;
 const asRecord = (value: unknown): Record<string, unknown> => value && typeof value === "object" ? value as Record<string, unknown> : {};
+const asString = (value: unknown, fallback = ""): string => typeof value === "string" && value.trim() ? value.trim() : typeof value === "number" ? String(value) : fallback;
+const firstString = (values: readonly unknown[], fallback = "") => values.map((value) => asString(value)).find(Boolean) ?? fallback;
 type CommerceEventTerminalStatus = "succeeded" | "duplicate";
 type TraderCommerceContext = {
   readonly companyId: string;
@@ -30,6 +34,7 @@ const hashSecret = (value: string) => createHash("sha256").update(value).digest(
 const sallaScopes = "orders.read orders.write webhooks.read_write offline_access";
 const shopifyScopes = "read_orders,read_fulfillments,write_fulfillments";
 const shopifyApiVersion = () => process.env.SHOPIFY_ADMIN_API_VERSION?.trim() || "2026-07";
+const wooCommerceApiVersion = "wc/v3";
 
 @Injectable()
 export class CommerceIntegrationService {
@@ -48,7 +53,6 @@ export class CommerceIntegrationService {
     return {
       items: [
         ...this.providers.list().filter((provider) => includeMockProvider || provider.key !== "mock_commerce"),
-        { key: "woocommerce", label: "WooCommerce", enabled: false, capabilities: [] },
       ],
     };
   }
@@ -206,6 +210,50 @@ export class CommerceIntegrationService {
       shopDomain: input.shopDomain,
       redirectAfter: input.redirectAfter ?? "/integrations",
     });
+  }
+
+  public async connectTraderWooCommerce(input: ConnectTraderWooCommerceConnectionDto) {
+    const provider = this.providers.get("woocommerce");
+    const context = await this.currentTraderContext(input.traderCommerceId);
+    const allowPrivate = process.env.NODE_ENV !== "production" && process.env.WOOCOMMERCE_ALLOW_PRIVATE_STORE_URLS === "true";
+    const origin = normalizeWooCommerceStoreUrl(input.storeUrl, { allowPrivate, production: process.env.NODE_ENV === "production" });
+    await this.assertSafeWooCommerceOrigin(origin);
+    const store = await this.fetchWooCommerceStoreIdentity(origin, input.consumerKey, input.consumerSecret);
+    const existing = (await sql<Record<string, unknown>>`
+      select id,trader_id from commerce_integration_connections
+      where provider='woocommerce' and external_store_id=${origin} and status not in ('disconnected','revoked')
+      limit 1
+    `.execute(this.db)).rows[0];
+    if (existing) throw new BadRequestException(String(existing.trader_id) === context.traderId ? "woocommerce_store_already_connected" : "woocommerce_store_connected_to_another_trader");
+
+    const actor = this.identity.current().identityId;
+    const reference = await ref(this.db, "commerce_integration_connection_reference_seq", "CIN");
+    const inserted = await sql<Record<string, unknown>>`
+      insert into commerce_integration_connections(reference_number,company_id,trader_id,trader_commerce_id,provider,external_store_id,external_store_name,status,connection_mode,health_status,capabilities,sync_cursor,connected_at,created_by_account_id)
+      values(${reference},${context.companyId}::uuid,${context.traderId}::uuid,${context.traderCommerceId}::uuid,'woocommerce',${origin},${store.name},'pending',${input.connectionMode ?? "inbound_only"},'unknown',${JSON.stringify(provider.capabilities())}::jsonb,${JSON.stringify({ storeOrigin: origin, apiVersion: wooCommerceApiVersion, docsVersion: "WP REST API wc/v3" })}::jsonb,null,${actor}::uuid)
+      returning id
+    `.execute(this.db);
+    const connectionId = String(inserted.rows[0]!.id);
+    await this.storeCredentialReference(connectionId, "consumer_key", `woocommerce:consumer_key:${connectionId}`);
+    await this.storeCredentialReference(connectionId, "consumer_secret", `woocommerce:consumer_secret:${connectionId}`);
+    await this.storeCredentialReference(connectionId, "webhook_secret", `woocommerce:webhook_secret:${connectionId}`);
+
+    try {
+      const webhooks = await this.createWooCommerceWebhooks(origin, input.consumerKey, input.consumerSecret, reference);
+      await sql`
+        update commerce_integration_connections
+        set status='connected',health_status='healthy',connected_at=now(),last_health_check_at=now(),sync_cursor=sync_cursor || ${JSON.stringify({ webhooks })}::jsonb,updated_at=now()
+        where id=${connectionId}::uuid
+      `.execute(this.db);
+      return this.connection(connectionId);
+    } catch (cause) {
+      await sql`
+        update commerce_integration_connections
+        set status='error',health_status='degraded',last_error_at=now(),last_error_code='woocommerce_webhook_setup_failed',last_error_message_safe='WooCommerce API was verified, but webhook setup could not be completed.',updated_at=now()
+        where id=${connectionId}::uuid
+      `.execute(this.db);
+      throw cause;
+    }
   }
 
   public async completeShopifyCallback(query: Record<string, string | undefined>) {
@@ -728,7 +776,77 @@ export class CommerceIntegrationService {
     return row;
   }
 
-  private async storeCredentialReference(connectionId: string, kind: "access_token" | "refresh_token" | "webhook_secret", reference: string) {
+  private async assertSafeWooCommerceOrigin(origin: string) {
+    const parsed = new URL(origin);
+    const allowPrivate = process.env.NODE_ENV !== "production" && process.env.WOOCOMMERCE_ALLOW_PRIVATE_STORE_URLS === "true";
+    if (allowPrivate) return;
+    if (isBlockedIp(parsed.hostname)) throw new BadRequestException("woocommerce_store_url_private");
+    let addresses: readonly { address: string }[];
+    try {
+      addresses = await lookup(parsed.hostname, { all: true, verbatim: true });
+    } catch {
+      throw new BadRequestException("woocommerce_store_dns_failed");
+    }
+    if (addresses.length === 0 || addresses.some((address) => isBlockedIp(address.address))) {
+      throw new BadRequestException("woocommerce_store_url_private");
+    }
+  }
+
+  private async fetchWooCommerceStoreIdentity(origin: string, consumerKey: string, consumerSecret: string) {
+    const payload = await this.wooCommerceRequest(origin, "system_status", consumerKey, consumerSecret);
+    const environment = asRecord(payload.environment);
+    const settings = asRecord(payload.settings);
+    const homeUrl = asString(environment.home_url ?? environment.site_url);
+    const safeName = firstString([settings.title, environment.site_title, homeUrl, origin], new URL(origin).hostname);
+    return { name: safeName.slice(0, 120), origin };
+  }
+
+  private async createWooCommerceWebhooks(origin: string, consumerKey: string, consumerSecret: string, connectionReference: string) {
+    const baseUrl = process.env.WOOCOMMERCE_WEBHOOK_CALLBACK_BASE_URL?.trim() || process.env.SHOPIFY_WEBHOOK_CALLBACK_BASE_URL?.trim();
+    if (!baseUrl) throw new BadRequestException("woocommerce_webhook_base_url_not_configured");
+    const secret = wooCommerceWebhookSecret(connectionReference);
+    if (!secret) throw new BadRequestException("woocommerce_webhook_secret_not_configured");
+    const deliveryUrl = `${baseUrl.replace(/\/$/u, "")}/api/v1/integrations/commerce/woocommerce/webhook/${connectionReference}`;
+    const topics = ["order.created", "order.updated", "order.deleted"];
+    const created: { readonly id: string; readonly topic: string }[] = [];
+    for (const topic of topics) {
+      const payload = await this.wooCommerceRequest(origin, "webhooks", consumerKey, consumerSecret, {
+        body: {
+          delivery_url: deliveryUrl,
+          name: `Tawseelhub ${topic}`,
+          secret,
+          status: "active",
+          topic,
+        },
+        method: "POST",
+      });
+      created.push({ id: String(payload.id ?? ""), topic });
+    }
+    return { callbackUrlConfigured: true, topics: created, secretConfigured: true };
+  }
+
+  private async wooCommerceRequest(origin: string, path: string, consumerKey: string, consumerSecret: string, options: { readonly body?: unknown; readonly method?: "GET" | "POST" } = {}) {
+    const endpoint = new URL(`/wp-json/${wooCommerceApiVersion}/${path.replace(/^\/+/u, "")}`, origin);
+    const init: RequestInit = {
+      headers: {
+        Accept: "application/json",
+        Authorization: `Basic ${Buffer.from(`${consumerKey}:${consumerSecret}`).toString("base64")}`,
+        ...(options.body === undefined ? {} : { "Content-Type": "application/json" }),
+      },
+      method: options.method ?? "GET",
+      redirect: "manual",
+      signal: AbortSignal.timeout(12000),
+    };
+    if (options.body !== undefined) init.body = JSON.stringify(options.body);
+    const response = await fetch(endpoint, init);
+    if (response.status >= 300 && response.status < 400) throw new BadRequestException("woocommerce_redirect_not_allowed");
+    const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
+    if (response.status === 401 || response.status === 403) throw new BadRequestException("woocommerce_api_unauthorized");
+    if (!response.ok) throw new BadRequestException("woocommerce_api_unavailable");
+    return payload;
+  }
+
+  private async storeCredentialReference(connectionId: string, kind: "access_token" | "refresh_token" | "webhook_secret" | "consumer_key" | "consumer_secret", reference: string) {
     await sql`
       insert into commerce_integration_credentials(connection_id,credential_kind,secret_reference,status)
       values(${connectionId}::uuid,${kind},${reference},'configured')

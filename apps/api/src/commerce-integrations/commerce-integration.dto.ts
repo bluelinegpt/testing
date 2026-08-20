@@ -78,3 +78,11 @@ export class StartTraderShopifyConnectionDto {
   @IsString() @MinLength(6) @MaxLength(255) public readonly shopDomain!: string;
   @IsOptional() @IsString() @MaxLength(500) public readonly redirectAfter?: string;
 }
+
+export class ConnectTraderWooCommerceConnectionDto {
+  @IsOptional() @IsUUID() public readonly traderCommerceId?: string;
+  @IsString() @MinLength(8) @MaxLength(500) public readonly storeUrl!: string;
+  @IsString() @MinLength(6) @MaxLength(160) public readonly consumerKey!: string;
+  @IsString() @MinLength(6) @MaxLength(160) public readonly consumerSecret!: string;
+  @IsOptional() @IsIn(["inbound_only", "bidirectional"]) public readonly connectionMode?: "inbound_only" | "bidirectional";
+}

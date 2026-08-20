@@ -31,7 +31,7 @@ function titleize(value: string | undefined) {
 function providerCopy(provider: Provider) {
   if (provider.key === "salla") return "Connect your Salla store so Tawseelhub can receive delivery orders.";
   if (provider.key === "shopify") return "Connect Shopify to import orders and keep fulfillment activity visible.";
-  if (provider.key === "woocommerce") return "WooCommerce is planned next. It is shown here so Traders know it is coming.";
+  if (provider.key === "woocommerce") return "Connect your WooCommerce store and automatically import eligible orders into Tawseelhub.";
   return "Test commerce connector for local validation only.";
 }
 
@@ -54,6 +54,9 @@ export function TraderCommerceIntegrationsView({ api }: { readonly api: ApiClien
   const [message, setMessage] = useState<string>();
   const [error, setError] = useState<string>();
   const [shopDomain, setShopDomain] = useState("");
+  const [wooStoreUrl, setWooStoreUrl] = useState("");
+  const [wooConsumerKey, setWooConsumerKey] = useState("");
+  const [wooConsumerSecret, setWooConsumerSecret] = useState("");
   const [mockStoreName, setMockStoreName] = useState("Test Store");
 
   const visibleProviders = useMemo(
@@ -129,6 +132,25 @@ export function TraderCommerceIntegrationsView({ api }: { readonly api: ApiClien
       });
       await load();
       return "Test store connected.";
+    });
+  }
+
+  async function connectWooCommerce(event: FormEvent) {
+    event.preventDefault();
+    if (!wooStoreUrl.trim() || !wooConsumerKey.trim() || !wooConsumerSecret.trim()) {
+      setError("Enter the WooCommerce Store URL, Consumer Key, and Consumer Secret first.");
+      return;
+    }
+    await guarded(async () => {
+      await api.post("portal/trader/commerce-integrations/connections/woocommerce/connect", {
+        consumerKey: wooConsumerKey.trim(),
+        consumerSecret: wooConsumerSecret.trim(),
+        connectionMode: "inbound_only",
+        storeUrl: wooStoreUrl.trim(),
+      });
+      setWooConsumerSecret("");
+      await load();
+      return "WooCommerce store connected. Your Consumer Secret is not shown again.";
     });
   }
 
@@ -209,6 +231,41 @@ export function TraderCommerceIntegrationsView({ api }: { readonly api: ApiClien
                 </label>
                 <button className="button button-secondary" disabled={busy || !provider.enabled} type="submit">
                   Connect Test Store
+                </button>
+              </form>
+            ) : provider.key === "woocommerce" ? (
+              <form className="stacked-form" onSubmit={(event) => void connectWooCommerce(event)}>
+                <label>
+                  WooCommerce store URL
+                  <input
+                    dir="ltr"
+                    onChange={(event) => setWooStoreUrl(event.target.value)}
+                    placeholder="https://shop.example.com"
+                    value={wooStoreUrl}
+                  />
+                </label>
+                <label>
+                  Consumer Key
+                  <input
+                    dir="ltr"
+                    onChange={(event) => setWooConsumerKey(event.target.value)}
+                    placeholder="ck_..."
+                    value={wooConsumerKey}
+                  />
+                </label>
+                <label>
+                  Consumer Secret
+                  <input
+                    autoComplete="new-password"
+                    dir="ltr"
+                    onChange={(event) => setWooConsumerSecret(event.target.value)}
+                    placeholder="cs_..."
+                    type="password"
+                    value={wooConsumerSecret}
+                  />
+                </label>
+                <button className="button button-primary" disabled={busy || !provider.enabled} type="submit">
+                  Connect WooCommerce
                 </button>
               </form>
             ) : (

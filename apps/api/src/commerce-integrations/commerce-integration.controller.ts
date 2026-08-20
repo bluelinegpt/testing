@@ -5,7 +5,7 @@ import { RequirePlatformPermissions } from "../platform/platform-authorization.j
 import { Throttle } from "@nestjs/throttler";
 
 import { CommerceIntegrationService } from "./commerce-integration.service.js";
-import { CommerceAreaMappingDto, CreateMockCommerceConnectionDto, CreateTraderMockCommerceConnectionDto, DisconnectCommerceConnectionDto, SimulateCommerceEventDto, StartSallaConnectionDto, StartShopifyConnectionDto, StartTraderSallaConnectionDto, StartTraderShopifyConnectionDto } from "./commerce-integration.dto.js";
+import { CommerceAreaMappingDto, ConnectTraderWooCommerceConnectionDto, CreateMockCommerceConnectionDto, CreateTraderMockCommerceConnectionDto, DisconnectCommerceConnectionDto, SimulateCommerceEventDto, StartSallaConnectionDto, StartShopifyConnectionDto, StartTraderSallaConnectionDto, StartTraderShopifyConnectionDto } from "./commerce-integration.dto.js";
 
 @Controller("integrations/commerce")
 export class CommerceIntegrationWebhookController {
@@ -28,14 +28,28 @@ export class CommerceIntegrationWebhookController {
     @Headers("x-shopify-webhook-id") shopifyWebhookId?: string,
     @Headers("x-shopify-event-id") shopifyEventId?: string,
     @Headers("x-shopify-api-version") shopifyApiVersion?: string,
+    @Headers("x-wc-webhook-topic") wooTopic?: string,
+    @Headers("x-wc-webhook-resource") wooResource?: string,
+    @Headers("x-wc-webhook-event") wooEvent?: string,
+    @Headers("x-wc-webhook-signature") wooSignature?: string,
+    @Headers("x-wc-webhook-id") wooWebhookId?: string,
+    @Headers("x-wc-delivery-id") wooDeliveryId?: string,
+    @Headers("x-wc-webhook-delivery-id") wooWebhookDeliveryId?: string,
   ) {
-    return this.commerce.webhook(provider, connectionReference, body, request.rawBody, signature ?? sallaSignature ?? shopifySignature, {
+    return this.commerce.webhook(provider, connectionReference, body, request.rawBody, signature ?? sallaSignature ?? shopifySignature ?? wooSignature, {
       "x-shopify-api-version": shopifyApiVersion,
       "x-shopify-event-id": shopifyEventId,
       "x-shopify-hmac-sha256": shopifySignature,
       "x-shopify-shop-domain": shopifyShopDomain,
       "x-shopify-topic": shopifyTopic,
       "x-shopify-webhook-id": shopifyWebhookId,
+      "x-wc-delivery-id": wooDeliveryId,
+      "x-wc-webhook-delivery-id": wooWebhookDeliveryId,
+      "x-wc-webhook-event": wooEvent,
+      "x-wc-webhook-id": wooWebhookId,
+      "x-wc-webhook-resource": wooResource,
+      "x-wc-webhook-signature": wooSignature,
+      "x-wc-webhook-topic": wooTopic,
     });
   }
 
@@ -80,6 +94,11 @@ export class TraderCommerceIntegrationController {
   @Post("connections/shopify/start")
   public startShopify(@Body() body: StartTraderShopifyConnectionDto) {
     return this.commerce.startTraderShopifyConnection(body);
+  }
+
+  @Post("connections/woocommerce/connect")
+  public connectWooCommerce(@Body() body: ConnectTraderWooCommerceConnectionDto) {
+    return this.commerce.connectTraderWooCommerce(body);
   }
 
   @Get("connections/:id")

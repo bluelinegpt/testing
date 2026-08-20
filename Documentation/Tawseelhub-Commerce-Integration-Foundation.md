@@ -25,9 +25,10 @@ The active adapters are:
 
 - `mock_commerce`, for local development/acceptance only;
 - `salla`, enabled only when `SALLA_INTEGRATION_ENABLED=true`;
-- `shopify`, enabled only when `SHOPIFY_INTEGRATION_ENABLED=true`.
+- `shopify`, enabled only when `SHOPIFY_INTEGRATION_ENABLED=true`;
+- `woocommerce`, enabled only when `WOOCOMMERCE_INTEGRATION_ENABLED=true`.
 
-`woocommerce` remains a registered future provider only.
+WooCommerce uses the provider-approved REST API key model and connects from the authenticated Trader Portal, not Platform Administration.
 
 ## Capability model
 
