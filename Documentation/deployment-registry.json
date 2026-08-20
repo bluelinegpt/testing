@@ -6,7 +6,7 @@
       "displayName": "API",
       "path": "apps/api",
       "renderService": "bluelinegpt-api-test",
-      "status": "needs_deploy",
+      "status": "pushed_awaiting_confirmation",
       "localCommit": "5e6b97b",
       "localCommitDate": "2026-08-20",
       "lastChangeDescription": "Allow safe permanent deletion after newer platform and commerce tables were added",
