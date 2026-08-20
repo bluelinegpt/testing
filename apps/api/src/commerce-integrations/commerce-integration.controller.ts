@@ -1,11 +1,11 @@
 import { Body, Controller, Get, Headers, HttpCode, Inject, Param, Post, Query, Req } from "@nestjs/common";
 import type { Request } from "express";
-import { Public } from "../authentication/authentication.decorators.js";
+import { Public, RequireIdentityKinds } from "../authentication/authentication.decorators.js";
 import { RequirePlatformPermissions } from "../platform/platform-authorization.js";
 import { Throttle } from "@nestjs/throttler";
 
 import { CommerceIntegrationService } from "./commerce-integration.service.js";
-import { CommerceAreaMappingDto, CreateMockCommerceConnectionDto, DisconnectCommerceConnectionDto, SimulateCommerceEventDto, StartSallaConnectionDto, StartShopifyConnectionDto } from "./commerce-integration.dto.js";
+import { CommerceAreaMappingDto, CreateMockCommerceConnectionDto, CreateTraderMockCommerceConnectionDto, DisconnectCommerceConnectionDto, SimulateCommerceEventDto, StartSallaConnectionDto, StartShopifyConnectionDto, StartTraderSallaConnectionDto, StartTraderShopifyConnectionDto } from "./commerce-integration.dto.js";
 
 @Controller("integrations/commerce")
 export class CommerceIntegrationWebhookController {
@@ -49,6 +49,72 @@ export class CommerceIntegrationWebhookController {
   @Get("shopify/oauth/callback")
   public shopifyCallback(@Query() query: Record<string, string | undefined>) {
     return this.commerce.completeShopifyCallback(query);
+  }
+}
+
+@RequireIdentityKinds("trader")
+@Controller("portal/trader/commerce-integrations")
+export class TraderCommerceIntegrationController {
+  public constructor(@Inject(CommerceIntegrationService) private readonly commerce: CommerceIntegrationService) {}
+
+  @Get("providers")
+  public providers() {
+    return this.commerce.traderProviderInventory();
+  }
+
+  @Get("connections")
+  public connections(@Query() query: Record<string, string | undefined>) {
+    return this.commerce.traderConnections(query);
+  }
+
+  @Post("connections/mock")
+  public createMock(@Body() body: CreateTraderMockCommerceConnectionDto) {
+    return this.commerce.createTraderMockConnection(body);
+  }
+
+  @Post("connections/salla/start")
+  public startSalla(@Body() body: StartTraderSallaConnectionDto) {
+    return this.commerce.startTraderSallaConnection(body);
+  }
+
+  @Post("connections/shopify/start")
+  public startShopify(@Body() body: StartTraderShopifyConnectionDto) {
+    return this.commerce.startTraderShopifyConnection(body);
+  }
+
+  @Get("connections/:id")
+  public connection(@Param("id") id: string) {
+    return this.commerce.traderConnection(id);
+  }
+
+  @Post("connections/:id/disconnect")
+  public disconnect(@Param("id") id: string, @Body() body: DisconnectCommerceConnectionDto) {
+    return this.commerce.traderDisconnect(id, body);
+  }
+
+  @Post("connections/:id/reconnect")
+  public reconnect(@Param("id") id: string) {
+    return this.commerce.traderReconnect(id);
+  }
+
+  @Post("connections/:id/sync")
+  public sync(@Param("id") id: string) {
+    return this.commerce.traderSyncNow(id);
+  }
+
+  @Post("connections/:id/area-mappings")
+  public areaMapping(@Param("id") id: string, @Body() body: CommerceAreaMappingDto) {
+    return this.commerce.traderSaveAreaMapping(id, body);
+  }
+
+  @Get("connections/:id/areas")
+  public areaOptions(@Param("id") id: string, @Query() query: Record<string, string | undefined>) {
+    return this.commerce.traderAreaOptions(id, query);
+  }
+
+  @Get("connections/:id/events")
+  public events(@Param("id") id: string, @Query() query: Record<string, string | undefined>) {
+    return this.commerce.traderEvents(id, query);
   }
 }
 

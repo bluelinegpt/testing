@@ -20,6 +20,7 @@ import { ProductCatalogueWorkspace } from "../storefront/ProductCatalogueWorkspa
 import { StorefrontConfigurationWorkspace } from "../storefront/StorefrontConfigurationWorkspace.js";
 
 import { type TraderDashboardData, TraderDashboardView } from "./TraderDashboardView.js";
+import { TraderCommerceIntegrationsView } from "./TraderCommerceIntegrationsView.js";
 
 type PortalArea = {
   readonly emirateId: string;
@@ -90,6 +91,7 @@ export function PortalWorkspace({
     | "password"
     | "products"
     | "profile"
+    | "integrations"
     | "store"
   >(isDriver ? "orders" : "dashboard");
   const [notice, setNotice] = useState<string>();
@@ -207,6 +209,13 @@ export function PortalWorkspace({
               >
                 {t("portal.nav.deliveryCompanies")}
               </button>
+              <button
+                aria-current={view === "integrations" ? "page" : undefined}
+                onClick={() => setView("integrations")}
+                type="button"
+              >
+                {t("portal.nav.integrations")}
+              </button>
             </>
           )}
           <button
@@ -322,6 +331,8 @@ export function PortalWorkspace({
             permissions={FULL_STORE_PERMISSIONS}
             traderId={profile?.id}
           />
+        ) : !isDriver && view === "integrations" ? (
+          <TraderCommerceIntegrationsView api={api} />
         ) : !isDriver && view === "products" && storefrontId !== undefined ? (
           <ProductCatalogueWorkspace
             api={api}

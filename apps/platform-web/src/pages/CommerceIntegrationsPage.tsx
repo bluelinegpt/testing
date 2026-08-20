@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 
 import { platformApi } from "../api/platform-client.js";
 
@@ -35,27 +35,21 @@ function defaultOrder() {
 
 export function CommerceIntegrationsPage() {
   const [providers, setProviders] = useState<any[]>([]);
-  const [targets, setTargets] = useState<any[]>([]);
   const [connections, setConnections] = useState<any[]>([]);
   const [selected, setSelected] = useState<any | null>(null);
   const [areas, setAreas] = useState<any[]>([]);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [createDraft, setCreateDraft] = useState({ targetKey: "", externalStoreName: "Noor Test Store", externalStoreId: "", shopDomain: "" });
   const [simulation, setSimulation] = useState({ eventType: "order.created", externalEventId: "", invalidSignature: false, simulateFailure: "", order: defaultOrder() });
   const [mappingDraft, setMappingDraft] = useState({ externalValue: "Aweer", areaId: "" });
 
-  const selectedTarget = useMemo(() => targets.find((target) => createDraft.targetKey === `${target.companyId}:${target.traderId}:${target.traderCommerceId}`), [createDraft.targetKey, targets]);
-
   async function load(keepSelectedId?: string) {
-    const [providerResult, targetResult, connectionResult] = await Promise.all([
+    const [providerResult, connectionResult] = await Promise.all([
       platformApi.commerceProviders(),
-      platformApi.commerceMockTargets(),
       platformApi.commerceConnections({ pageSize: 50 }),
     ]);
     setProviders(providerResult.items ?? []);
-    setTargets(targetResult.items ?? []);
     setConnections(connectionResult.items ?? []);
     const nextSelectedId = keepSelectedId ?? selected?.id ?? connectionResult.items?.[0]?.id;
     if (nextSelectedId) await openConnection(nextSelectedId);
@@ -83,65 +77,6 @@ export function CommerceIntegrationsPage() {
     } finally {
       setBusy(false);
     }
-  }
-
-  async function createMockConnection(event: FormEvent) {
-    event.preventDefault();
-    if (!selectedTarget) {
-      setError("Select a Trader target first.");
-      return;
-    }
-    await guarded(async () => {
-      const detail = await platformApi.createMockCommerceConnection({
-        companyId: selectedTarget.companyId,
-        traderId: selectedTarget.traderId,
-        traderCommerceId: selectedTarget.traderCommerceId,
-        externalStoreName: createDraft.externalStoreName,
-        externalStoreId: createDraft.externalStoreId || undefined,
-        connectionMode: "bidirectional",
-      });
-      await load(detail.id);
-      return "Mock Commerce store connected.";
-    });
-  }
-
-  async function connectSalla() {
-    if (!selectedTarget) {
-      setError("Select a Trader target first.");
-      return;
-    }
-    await guarded(async () => {
-      const result = await platformApi.startSallaCommerceConnection({
-        companyId: selectedTarget.companyId,
-        redirectAfter: "/commerce-integrations",
-        traderCommerceId: selectedTarget.traderCommerceId,
-        traderId: selectedTarget.traderId,
-      });
-      if (!result?.authorizationUrl) return "Salla authorization could not be started.";
-      window.location.assign(result.authorizationUrl);
-    });
-  }
-
-  async function connectShopify() {
-    if (!selectedTarget) {
-      setError("Select a Trader target first.");
-      return;
-    }
-    if (!createDraft.shopDomain.trim()) {
-      setError("Enter the Shopify store domain first, for example noor-store.myshopify.com.");
-      return;
-    }
-    await guarded(async () => {
-      const result = await platformApi.startShopifyCommerceConnection({
-        companyId: selectedTarget.companyId,
-        redirectAfter: "/commerce-integrations",
-        shopDomain: createDraft.shopDomain,
-        traderCommerceId: selectedTarget.traderCommerceId,
-        traderId: selectedTarget.traderId,
-      });
-      if (!result?.authorizationUrl) return "Shopify authorization could not be started.";
-      window.location.assign(result.authorizationUrl);
-    });
   }
 
   async function simulate(input: Partial<typeof simulation> = {}) {
@@ -224,7 +159,7 @@ export function CommerceIntegrationsPage() {
         <div>
           <p className="platform-page__eyebrow">Commerce</p>
           <h1>Commerce Integrations</h1>
-          <p>Connect test stores, verify webhook behavior, and confirm provider orders become normal Tawseelhub Orders.</p>
+          <p>Monitor Trader-owned store connections, review webhook behavior, and support failed provider events.</p>
         </div>
       </div>
       {message ? <p className="platform-success">{message}</p> : null}
@@ -240,39 +175,11 @@ export function CommerceIntegrationsPage() {
               </span>
             ))}
           </div>
-          <p className="platform-muted">Mock Commerce remains available for local testing. Salla and Shopify become connectable when the API has the provider app credentials configured.</p>
-
-          <form className="platform-form" onSubmit={createMockConnection}>
-            <h3>Connect Store</h3>
-            <label className="platform-field">
-              Trader / Company
-              <select value={createDraft.targetKey} onChange={(event) => setCreateDraft({ ...createDraft, targetKey: event.target.value })}>
-                <option value="">Select active Trader commerce relationship</option>
-                {targets.map((target) => (
-                  <option key={`${target.companyId}:${target.traderId}:${target.traderCommerceId}`} value={`${target.companyId}:${target.traderId}:${target.traderCommerceId}`}>
-                    {target.companyName} · {target.traderName}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="platform-field">
-              Store name
-              <input value={createDraft.externalStoreName} onChange={(event) => setCreateDraft({ ...createDraft, externalStoreName: event.target.value })} />
-            </label>
-            <label className="platform-field">
-              Store ID (optional)
-              <input placeholder="Leave blank for generated mock store ID" value={createDraft.externalStoreId} onChange={(event) => setCreateDraft({ ...createDraft, externalStoreId: event.target.value })} />
-            </label>
-            <label className="platform-field">
-              Shopify Store Domain
-              <input placeholder="example.myshopify.com" value={createDraft.shopDomain} onChange={(event) => setCreateDraft({ ...createDraft, shopDomain: event.target.value })} />
-            </label>
-            <div className="lead-contact-actions">
-              <button className="platform-button platform-button--primary" disabled={busy} type="button" onClick={() => void connectSalla()}>Connect Salla</button>
-              <button className="platform-button platform-button--primary" disabled={busy} type="button" onClick={() => void connectShopify()}>Connect Shopify</button>
-              <button className="platform-button platform-button--quiet" disabled={busy} type="submit">Connect Mock Store</button>
-            </div>
-          </form>
+          <p className="platform-muted">
+            Platform is now a monitoring and support console for commerce integrations. Traders connect Salla,
+            Shopify, and future providers from their own Trader Portal so the company and Trader are always
+            taken from the authenticated session.
+          </p>
         </div>
 
         <div className="platform-card">

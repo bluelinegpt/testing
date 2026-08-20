@@ -1,4 +1,4 @@
-import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { type Kysely, sql } from "kysely";
 
@@ -9,7 +9,7 @@ import { CommerceProviderRouter } from "./commerce-provider.router.js";
 import type { CommerceWebhookHeaders, NormalizedCommerceEvent, NormalizedCommerceOrder } from "./commerce-integration.types.js";
 import { signMockCommercePayload } from "./mock-commerce.provider.js";
 import { normalizeShopifyShopDomain, verifyShopifyCallbackHmac } from "./shopify-commerce.provider.js";
-import type { CommerceAreaMappingDto, CreateMockCommerceConnectionDto, DisconnectCommerceConnectionDto, SimulateCommerceEventDto, StartSallaConnectionDto, StartShopifyConnectionDto } from "./commerce-integration.dto.js";
+import type { CommerceAreaMappingDto, CreateMockCommerceConnectionDto, CreateTraderMockCommerceConnectionDto, DisconnectCommerceConnectionDto, SimulateCommerceEventDto, StartSallaConnectionDto, StartShopifyConnectionDto, StartTraderSallaConnectionDto, StartTraderShopifyConnectionDto } from "./commerce-integration.dto.js";
 
 const mapRow = (row: Record<string, unknown>) => Object.fromEntries(Object.entries(row).map(([key, value]) => [key.replace(/_([a-z])/g, (_m, letter: string) => letter.toUpperCase()), value]));
 const ref = async (db: Kysely<DatabaseSchema>, sequence: string, prefix: string) => {
@@ -21,6 +21,11 @@ const normalizeMobile = (value: string) => value.replace(/[^\d]/g, "").replace(/
 const sanitizePayload = (value: unknown) => JSON.parse(JSON.stringify(value, (key, item) => /secret|token|key|signature|password/i.test(key) ? "[redacted]" : item)) as Record<string, unknown>;
 const asRecord = (value: unknown): Record<string, unknown> => value && typeof value === "object" ? value as Record<string, unknown> : {};
 type CommerceEventTerminalStatus = "succeeded" | "duplicate";
+type TraderCommerceContext = {
+  readonly companyId: string;
+  readonly traderCommerceId: string;
+  readonly traderId: string;
+};
 const hashSecret = (value: string) => createHash("sha256").update(value).digest("hex");
 const sallaScopes = "orders.read orders.write webhooks.read_write offline_access";
 const shopifyScopes = "read_orders,read_fulfillments,write_fulfillments";
@@ -36,6 +41,16 @@ export class CommerceIntegrationService {
 
   public providerInventory() {
     return { items: this.providers.list() };
+  }
+
+  public traderProviderInventory() {
+    const includeMockProvider = process.env.NODE_ENV !== "production";
+    return {
+      items: [
+        ...this.providers.list().filter((provider) => includeMockProvider || provider.key !== "mock_commerce"),
+        { key: "woocommerce", label: "WooCommerce", enabled: false, capabilities: [] },
+      ],
+    };
   }
 
   public async mockTargets() {
@@ -75,6 +90,18 @@ export class CommerceIntegrationService {
     return this.connection(String(inserted.rows[0]!.id));
   }
 
+  public async createTraderMockConnection(input: CreateTraderMockCommerceConnectionDto) {
+    const context = await this.currentTraderContext(input.traderCommerceId);
+    return this.createMockConnection({
+      companyId: context.companyId,
+      traderId: context.traderId,
+      traderCommerceId: context.traderCommerceId,
+      externalStoreName: input.externalStoreName,
+      connectionMode: input.connectionMode ?? "bidirectional",
+      ...(input.externalStoreId ? { externalStoreId: input.externalStoreId } : {}),
+    });
+  }
+
   public async startSallaConnection(input: StartSallaConnectionDto) {
     this.providers.get("salla");
     const clientId = process.env.SALLA_CLIENT_ID?.trim();
@@ -98,6 +125,16 @@ export class CommerceIntegrationService {
     url.searchParams.set("scope", sallaScopes);
     url.searchParams.set("state", state);
     return { authorizationUrl: url.toString(), expiresInSeconds: 600, provider: "salla" };
+  }
+
+  public async startTraderSallaConnection(input: StartTraderSallaConnectionDto) {
+    const context = await this.currentTraderContext(input.traderCommerceId);
+    return this.startSallaConnection({
+      companyId: context.companyId,
+      traderId: context.traderId,
+      traderCommerceId: context.traderCommerceId,
+      redirectAfter: input.redirectAfter ?? "/integrations",
+    });
   }
 
   public async completeSallaCallback(query: Record<string, string | undefined>) {
@@ -158,6 +195,17 @@ export class CommerceIntegrationService {
     url.searchParams.set("redirect_uri", redirectUri);
     url.searchParams.set("state", state);
     return { authorizationUrl: url.toString(), expiresInSeconds: 600, provider: "shopify", shopDomain };
+  }
+
+  public async startTraderShopifyConnection(input: StartTraderShopifyConnectionDto) {
+    const context = await this.currentTraderContext(input.traderCommerceId);
+    return this.startShopifyConnection({
+      companyId: context.companyId,
+      traderId: context.traderId,
+      traderCommerceId: context.traderCommerceId,
+      shopDomain: input.shopDomain,
+      redirectAfter: input.redirectAfter ?? "/integrations",
+    });
   }
 
   public async completeShopifyCallback(query: Record<string, string | undefined>) {
@@ -229,6 +277,38 @@ export class CommerceIntegrationService {
     return { items: rows.rows.map(mapRow), page, pageSize, total: Number(total.rows[0]?.count ?? "0") };
   }
 
+  public async traderConnections(query: Record<string, string | undefined> = {}) {
+    const context = await this.currentTraderContext();
+    const pageSize = Math.min(Math.max(Number(query.pageSize ?? 25) || 25, 1), 100);
+    const page = Math.max(Number(query.page ?? 1) || 1, 1);
+    const offset = (page - 1) * pageSize;
+    const filters = [
+      sql`connection.company_id=${context.companyId}::uuid`,
+      sql`connection.trader_id=${context.traderId}::uuid`,
+    ];
+    if (query.status && query.status !== "all") filters.push(sql`connection.status=${query.status}`);
+    if (query.provider && query.provider !== "all") filters.push(sql`connection.provider=${query.provider}`);
+    if (query.search?.trim()) {
+      const search = `%${query.search.trim().toLowerCase()}%`;
+      filters.push(sql`(lower(connection.reference_number) like ${search} or lower(connection.external_store_name) like ${search})`);
+    }
+    const where = sql.join(filters, sql` and `);
+    const rows = await sql<Record<string, unknown>>`
+      select connection.*,
+        coalesce(event_counts.total_events,0)::int total_events,
+        coalesce(event_counts.failed_events,0)::int failed_events,
+        coalesce(order_counts.imported_orders,0)::int imported_orders
+      from commerce_integration_connections connection
+      left join lateral (select count(*) total_events,count(*) filter(where status in('failed','retrying','rejected')) failed_events from commerce_integration_events where connection_id=connection.id) event_counts on true
+      left join lateral (select count(*) imported_orders from commerce_integration_order_links where connection_id=connection.id) order_counts on true
+      where ${where}
+      order by connection.updated_at desc
+      limit ${pageSize} offset ${offset}
+    `.execute(this.db);
+    const total = await sql<{ count: string }>`select count(*)::text count from commerce_integration_connections connection where ${where}`.execute(this.db);
+    return { items: rows.rows.map(mapRow), page, pageSize, total: Number(total.rows[0]?.count ?? "0") };
+  }
+
   public async connection(id: string) {
     const connection = (await sql<Record<string, unknown>>`
       select connection.*,company.name_en company_name,trader.name_en trader_name,exists(select 1 from commerce_integration_credentials credential where credential.connection_id=connection.id and credential.status='configured') credential_configured
@@ -244,6 +324,11 @@ export class CommerceIntegrationService {
       where mapping.connection_id=${id}::uuid order by mapping.created_at desc
     `.execute(this.db);
     return { ...mapRow(connection), credentialConfigured: Boolean(connection.credential_configured), events: events.items, mappings: mappings.rows.map(mapRow) };
+  }
+
+  public async traderConnection(id: string) {
+    await this.traderConnectionById(id);
+    return this.connection(id);
   }
 
   public async events(connectionId: string, query: Record<string, string | undefined> = {}) {
@@ -268,6 +353,16 @@ export class CommerceIntegrationService {
     `.execute(this.db);
     const total = await sql<{ count: string }>`select count(*)::text count from commerce_integration_events event where ${where}`.execute(this.db);
     return { items: rows.rows.map(mapRow), page, pageSize, total: Number(total.rows[0]?.count ?? "0") };
+  }
+
+  public async traderEvents(connectionId: string, query: Record<string, string | undefined> = {}) {
+    await this.traderConnectionById(connectionId);
+    return this.events(connectionId, query);
+  }
+
+  public async traderAreaOptions(connectionId: string, query: Record<string, string | undefined> = {}) {
+    await this.traderConnectionById(connectionId);
+    return this.areaOptions(connectionId, query);
   }
 
   public async areaOptions(connectionId: string, query: Record<string, string | undefined> = {}) {
@@ -315,6 +410,19 @@ export class CommerceIntegrationService {
     return this.webhook("mock_commerce", String(connection.reference_number), body, undefined, signature);
   }
 
+  public async traderSyncNow(connectionId: string) {
+    const connection = await this.traderConnectionById(connectionId);
+    const eventId = await this.insertEvent({
+      connection,
+      eventType: "sync.requested",
+      externalEventId: `trader-sync-${Date.now()}`,
+      payload: { requestedBy: "trader_portal" },
+      status: "succeeded",
+    });
+    await sql`update commerce_integration_connections set last_success_at=now(),updated_at=now() where id=${connectionId}::uuid`.execute(this.db);
+    return { eventId, status: "recorded", message: "Sync request recorded." };
+  }
+
   public async retryEvent(eventId: string) {
     const event = (await sql<Record<string, unknown>>`select * from commerce_integration_events where id=${eventId}::uuid`.execute(this.db)).rows[0];
     if (!event) throw new NotFoundException();
@@ -351,9 +459,19 @@ export class CommerceIntegrationService {
     return this.connection(id);
   }
 
+  public async traderDisconnect(id: string, input: DisconnectCommerceConnectionDto) {
+    await this.traderConnectionById(id);
+    return this.disconnect(id, input);
+  }
+
   public async reconnect(id: string) {
     await sql`update commerce_integration_connections set status='connected',health_status='healthy',connected_at=coalesce(connected_at,now()),disconnected_at=null,disconnected_by_account_id=null,disconnect_reason=null,updated_at=now() where id=${id}::uuid`.execute(this.db);
     return this.connection(id);
+  }
+
+  public async traderReconnect(id: string) {
+    await this.traderConnectionById(id);
+    return this.reconnect(id);
   }
 
   public async saveAreaMapping(connectionId: string, input: CommerceAreaMappingDto) {
@@ -365,6 +483,11 @@ export class CommerceIntegrationService {
       on conflict(connection_id,provider,normalized_external_value) do update set area_id=excluded.area_id,status='active',updated_at=now()
     `.execute(this.db);
     return this.connection(connectionId);
+  }
+
+  public async traderSaveAreaMapping(connectionId: string, input: CommerceAreaMappingDto) {
+    await this.traderConnectionById(connectionId);
+    return this.saveAreaMapping(connectionId, input);
   }
 
   public async outboundDelivered(orderId: string) {
@@ -568,6 +691,39 @@ export class CommerceIntegrationService {
 
   private async connectionById(id: string) {
     const row = (await sql<Record<string, unknown>>`select * from commerce_integration_connections where id=${id}::uuid`.execute(this.db)).rows[0];
+    if (!row) throw new NotFoundException();
+    return row;
+  }
+
+  private async currentTraderContext(preferredTraderCommerceId?: string): Promise<TraderCommerceContext> {
+    const identity = this.identity.current();
+    if (identity.kind !== "trader" || identity.profileType !== "trader" || !identity.companyId || !identity.profileId) {
+      throw new ForbiddenException("trader_identity_required");
+    }
+    const link = (await sql<Record<string, unknown>>`
+      select trader_commerce_id
+      from trader_commerce_company_links
+      where company_id=${identity.companyId}::uuid
+        and trader_id=${identity.profileId}::uuid
+        and status='active'
+        and (${preferredTraderCommerceId ?? null}::uuid is null or trader_commerce_id=${preferredTraderCommerceId ?? null}::uuid)
+      order by created_at desc
+      limit 1
+    `.execute(this.db)).rows[0];
+    if (!link) throw new BadRequestException("trader_commerce_link_not_found");
+    return {
+      companyId: identity.companyId,
+      traderId: identity.profileId,
+      traderCommerceId: String(link.trader_commerce_id),
+    };
+  }
+
+  private async traderConnectionById(id: string) {
+    const context = await this.currentTraderContext();
+    const row = (await sql<Record<string, unknown>>`
+      select * from commerce_integration_connections
+      where id=${id}::uuid and company_id=${context.companyId}::uuid and trader_id=${context.traderId}::uuid
+    `.execute(this.db)).rows[0];
     if (!row) throw new NotFoundException();
     return row;
   }

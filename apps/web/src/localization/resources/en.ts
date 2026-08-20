@@ -3060,6 +3060,7 @@ export const englishTranslations = {
     nav: {
       dashboard: "Dashboard",
       deliveryCompanies: "Delivery Companies",
+      integrations: "Integrations",
       myStore: "My Store",
       products: "Products",
     },

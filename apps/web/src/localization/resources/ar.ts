@@ -3018,6 +3018,7 @@
     nav: {
       dashboard: "لوحة التحكم",
       deliveryCompanies: "شركات التوصيل",
+      integrations: "التكاملات",
       myStore: "متجري",
       products: "المنتجات",
     },

@@ -60,3 +60,21 @@ export class StartShopifyConnectionDto {
   @IsString() @MinLength(6) @MaxLength(255) public readonly shopDomain!: string;
   @IsOptional() @IsString() @MaxLength(500) public readonly redirectAfter?: string;
 }
+
+export class CreateTraderMockCommerceConnectionDto {
+  @IsOptional() @IsUUID() public readonly traderCommerceId?: string;
+  @IsString() @MinLength(2) @MaxLength(120) public readonly externalStoreName!: string;
+  @IsOptional() @IsString() @MaxLength(120) public readonly externalStoreId?: string;
+  @IsOptional() @IsIn(["inbound_only", "bidirectional"]) public readonly connectionMode?: "inbound_only" | "bidirectional";
+}
+
+export class StartTraderSallaConnectionDto {
+  @IsOptional() @IsUUID() public readonly traderCommerceId?: string;
+  @IsOptional() @IsString() @MaxLength(500) public readonly redirectAfter?: string;
+}
+
+export class StartTraderShopifyConnectionDto {
+  @IsOptional() @IsUUID() public readonly traderCommerceId?: string;
+  @IsString() @MinLength(6) @MaxLength(255) public readonly shopDomain!: string;
+  @IsOptional() @IsString() @MaxLength(500) public readonly redirectAfter?: string;
+}

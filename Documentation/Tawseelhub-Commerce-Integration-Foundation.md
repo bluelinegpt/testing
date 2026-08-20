@@ -41,7 +41,7 @@ Capabilities are explicit booleans:
 - webhooks/polling;
 - OAuth/API key style auth.
 
-The Platform UI reads these flags so future adapters can be shown without inventing a new screen each time.
+The Trader Portal reads these flags for connection cards. Platform reads them only for diagnostics and provider readiness.
 
 ## Connection model
 
@@ -54,6 +54,22 @@ Connections belong to:
 - external store identity.
 
 The same Trader may have multiple stores and multiple providers. Active store uniqueness is protected by provider plus external store ID, not by provider alone.
+
+## Ownership model
+
+The Trader Portal owns normal store connection and lifecycle actions:
+
+- connect Salla;
+- connect Shopify;
+- connect Mock Commerce in local/test only;
+- view the Trader's own connected stores;
+- request sync;
+- disconnect/reconnect the Trader's own connection;
+- maintain mapping fixes available to that Trader.
+
+Trader Portal APIs derive Company, Trader, and Trader Commerce profile from the authenticated Trader session. Browser payloads must not be trusted for `companyId` or `traderId`.
+
+Platform Administration is a support and monitoring console only. Platform users may view connections, inspect sanitized event logs, retry failed events, test health, force disconnect/reconnect for support, and manage mapping fixes. Platform should not present the normal Salla/Shopify connect flow, because that creates ownership ambiguity and lets an operator pick the Trader manually.
 
 ## Credentials model
 
