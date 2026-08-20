@@ -6,7 +6,7 @@
       "displayName": "API",
       "path": "apps/api",
       "renderService": "bluelinegpt-api-test",
-      "status": "needs_deploy",
+      "status": "pushed_awaiting_confirmation",
       "localCommit": "ac6aed3",
       "localCommitDate": "2026-08-21",
       "lastChangeDescription": "Fix production agent fallback and SEO metadata",
