@@ -29,6 +29,10 @@ export const routeDefinitions = [
   { path: '/request-demo', title: 'Request a Tawseelhub Demo', description: 'Request a tailored international Tawseelhub demo for your delivery company.' },
 ] as const;
 
+export function isDynamicContentRoute(pathname: string): boolean {
+  return pathname.startsWith('/blog/') || /^\/resources\/[^/]+\/?$/.test(pathname);
+}
+
 const navItems = [
   ['/delivery-companies', 'Solutions'], ['/send-a-package', 'Send a Package'], ['/traders', 'Store'],
   ['/pricing', 'Pricing'], ['/resources', 'Help'], ['/blog', 'Blog'],
@@ -93,7 +97,9 @@ function AppLayout() {
   const setLocale = (next: Locale) => { localStorage.setItem('tawseelhub.locale', next); setCms(null); setLocaleState(next); };
   useEffect(() => { let cancelled=false; document.documentElement.lang = locale; document.documentElement.dir = locale === 'ar' ? 'rtl' : 'ltr'; setCms(null); void loadWebsiteCms(locale).then(next=>{ if(!cancelled) setCms(next); }); return () => { cancelled = true; }; }, [locale]);
   useEffect(() => {
-    applyPageMetadata(location.pathname === '/' && homeSeo?.title ? homeSeo.title : route.title, location.pathname === '/' && homeSeo?.description ? homeSeo.description : route.description, location.pathname === '/' && homeSeo?.canonical ? homeSeo.canonical : route.path, location.pathname === '/' && homeSeo ? { robots: `${homeSeo.robotsIndex === false ? 'noindex' : 'index'},${homeSeo.robotsFollow === false ? 'nofollow' : 'follow'}` } : {});
+    if (!isDynamicContentRoute(location.pathname)) {
+      applyPageMetadata(location.pathname === '/' && homeSeo?.title ? homeSeo.title : route.title, location.pathname === '/' && homeSeo?.description ? homeSeo.description : route.description, location.pathname === '/' && homeSeo?.canonical ? homeSeo.canonical : route.path, location.pathname === '/' && homeSeo ? { robots: `${homeSeo.robotsIndex === false ? 'noindex' : 'index'},${homeSeo.robotsFollow === false ? 'nofollow' : 'follow'}` } : {});
+    }
     setMenuOpen(false);
     window.scrollTo({ top: 0, behavior: 'instant' });
   }, [route, location.pathname, homeSeo]);

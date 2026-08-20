@@ -69,7 +69,13 @@ export class AgentModelRouterProvider implements AgentModelProvider {
         code: "agent_openai_not_configured",
         providerType: diagnostics.providerType,
       };
-      throw new Error("agent_openai_not_configured");
+      this.lastSuccess = {
+        at: new Date().toISOString(),
+        latencyMs: 0,
+        model: "tawseelhub-rules-v1",
+        providerType: "deterministic",
+      };
+      return deterministicResult;
     }
     const started = Date.now();
     try {

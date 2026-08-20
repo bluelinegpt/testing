@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { routeDefinitions } from './App';
+import { isDynamicContentRoute, routeDefinitions } from './App';
 
 describe('public website route foundation', () => {
   it('includes every required public route exactly once', () => {
@@ -14,5 +14,14 @@ describe('public website route foundation', () => {
   it('provides unique metadata for every route', () => {
     expect(new Set(routeDefinitions.map((route) => route.title)).size).toBe(routeDefinitions.length);
     for (const route of routeDefinitions) expect(route.description.length).toBeGreaterThan(50);
+  });
+
+  it('lets dynamic Blog and Help pages own their metadata after hydration', () => {
+    expect(isDynamicContentRoute('/blog/manage-cod-delivery-operations')).toBe(true);
+    expect(isDynamicContentRoute('/blog/category/delivery-operations')).toBe(true);
+    expect(isDynamicContentRoute('/resources/what-is-tawseelhub')).toBe(true);
+    expect(isDynamicContentRoute('/')).toBe(false);
+    expect(isDynamicContentRoute('/blog')).toBe(false);
+    expect(isDynamicContentRoute('/resources')).toBe(false);
   });
 });

@@ -80,12 +80,14 @@ describe("AgentModelRouterProvider", () => {
     expect(router.diagnostics()).toMatchObject({ configured: false, providerType: "unconfigured" });
   });
 
-  it("does not silently run production without OpenAI", async () => {
+  it("keeps Yousef available in production by using rules fallback when OpenAI is missing", async () => {
     vi.stubEnv("NODE_ENV", "production");
-    const { router } = createRouter({ configured: false });
+    const { openai, router } = createRouter({ configured: false });
 
-    await expect(router.classifyAndExtract(input)).rejects.toThrow("agent_openai_not_configured");
+    await expect(router.classifyAndExtract(input)).resolves.toEqual(deterministicResult);
+    expect(openai.classifyAndExtract).not.toHaveBeenCalled();
     expect(router.diagnostics().lastError?.code).toContain("agent_openai_not_configured");
+    expect(router.diagnostics().lastSuccess).toMatchObject({ model: "tawseelhub-rules-v1", providerType: "deterministic" });
   });
 
   it("honors explicit human handoff requests before model routing", async () => {
