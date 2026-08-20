@@ -1772,6 +1772,37 @@ button.agent-live-indicator {
   max-width: 62rem;
 }
 
+.blog-draft-preview .article-page > header {
+  margin: 0 auto 1.5rem;
+  max-width: 54rem;
+}
+
+.blog-draft-preview .article-image {
+  aspect-ratio: 16 / 9;
+  border-radius: 1rem;
+  display: block;
+  margin: 1.5rem auto;
+  max-height: 32rem;
+  max-width: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+
+.blog-draft-preview .article-body {
+  margin: 1.5rem auto 0;
+  max-width: 48rem;
+}
+
+.blog-draft-preview .article-body img {
+  border-radius: 0.85rem;
+  display: block;
+  height: auto;
+  margin: 1.25rem auto;
+  max-height: 28rem;
+  max-width: 100%;
+  object-fit: contain;
+}
+
 .platform-success {
   background: #effcf6;
   border: 1px solid #b8ecd5;
