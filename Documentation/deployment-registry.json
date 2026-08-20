@@ -33,9 +33,9 @@
       "path": "apps/platform-web",
       "renderService": "bluelinegpt-platform-test",
       "status": "needs_deploy",
-      "localCommit": "df8de78",
+      "localCommit": "1e35a93",
       "localCommitDate": "2026-08-20",
-      "lastChangeDescription": "Fix blog preview image sizing",
+      "lastChangeDescription": "Fix blog CMS media image URLs",
       "lastChangeBy": "codex",
       "confirmedLiveCommit": "27e356a",
       "confirmedLiveAt": "2026-08-14"
