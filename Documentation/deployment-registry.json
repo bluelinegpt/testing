@@ -7,9 +7,9 @@
       "path": "apps/api",
       "renderService": "bluelinegpt-api-test",
       "status": "needs_deploy",
-      "localCommit": "0dcef2f",
+      "localCommit": "3679f96",
       "localCommitDate": "2026-08-20",
-      "lastChangeDescription": "Add WooCommerce commerce integration",
+      "lastChangeDescription": "Approve the current UAE accounting template used when creating companies",
       "lastChangeBy": "codex",
       "confirmedLiveCommit": "27e356a",
       "confirmedLiveAt": "2026-08-14"
