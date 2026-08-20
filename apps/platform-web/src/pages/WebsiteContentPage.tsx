@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any,@typescript-eslint/no-unsafe-assignment,@typescript-eslint/no-unsafe-member-access */
-import { useEffect, useState } from "react";
+import { useEffect, useState, type SyntheticEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import { platformApi, type WebsiteCmsBundle } from "../api/platform-client.js";
 import { usePlatformSession } from "../app/PlatformSession.js";
@@ -14,6 +14,8 @@ const imageUrlPattern=/^(https:\/\/[^?#]+\.(?:jpe?g|png|webp)(?:[?#].*)?|\/api\/
 const slugify=(value:string)=>value.toLowerCase().replace(/^\/?blog\//,"").replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"").replace(/-{2,}/g,"-");
 const articlePath=(slug:string)=>`/blog/${slug||"article-slug"}`;
 const articleUrl=(slug:string)=>`${publicWebBase}${articlePath(slug)}`;
+const articleImageFallback=(slug:string)=>slug==="manage-cod-delivery-operations"?`${publicWebBase}/blog-images/manage-cod-delivery-operations.jpg`:"";
+const useArticleImageFallback=(event:SyntheticEvent<HTMLImageElement>,slug:string)=>{const fallback=articleImageFallback(slug);if(!fallback||event.currentTarget.src===fallback){event.currentTarget.remove();return}event.currentTarget.src=fallback;};
 const validateImageUrl=(value:string)=>!value.trim()||imageUrlPattern.test(value.trim())?"":"Please select a valid image or enter a direct HTTPS image URL.";
 const cmsMediaUrl=(value:string|undefined|null)=>{
   const path=String(value??"").trim();
@@ -81,7 +83,7 @@ function BlogDraftPreview({id}:{id:string}){
   if(error)return <section className="platform-panel"><Link to={`/website/${id}`}>← Back to editor</Link><p role="alert">{error}</p></section>;
   if(!data)return <section className="platform-panel"><p>Loading draft preview…</p></section>;
   const a=data.article;
-  return <section className="platform-panel blog-draft-preview"><Link to={`/website/${id}`}>← Back to editor</Link><p className="platform-muted">Draft preview · not public · noindex</p><article className="article-page"><header><span>{a.category}</span><h1>{a.title}</h1><p>{a.excerpt}</p><small>{a.author}</small></header>{a.featured_image_public_url?<img className="article-image" src={cmsMediaUrl(a.featured_image_public_url)} alt={a.featured_image_alt??""}/>:null}<div className="article-body">{(a.content??[]).map((b:any,i:number)=><PreviewBlock key={i} block={b}/>)}</div></article></section>
+  return <section className="platform-panel blog-draft-preview"><Link to={`/website/${id}`}>← Back to editor</Link><p className="platform-muted">Draft preview · not public · noindex</p><article className="article-page"><header><span>{a.category}</span><h1>{a.title}</h1><p>{a.excerpt}</p><small>{a.author}</small></header>{a.featured_image_public_url?<img className="article-image" src={cmsMediaUrl(a.featured_image_public_url)} alt={a.featured_image_alt??""} onError={event=>useArticleImageFallback(event,a.slug)}/>:null}<div className="article-body">{(a.content??[]).map((b:any,i:number)=><PreviewBlock key={i} block={b}/>)}</div></article></section>
 }
 
 function PreviewBlock({block}:{block:any}){if(block.type==="h2")return <h2>{block.text}</h2>;if(block.type==="h3")return <h3>{block.text}</h3>;if(block.type==="blockquote")return <blockquote>{block.text}</blockquote>;if(block.type==="bullet_list")return <ul>{block.items?.map((x:string)=><li key={x}>{x}</li>)}</ul>;if(block.type==="numbered_list")return <ol>{block.items?.map((x:string)=><li key={x}>{x}</li>)}</ol>;return <p>{block.text}</p>}

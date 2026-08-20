@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type SyntheticEvent } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { apiUrl, publicAssetUrl } from "./api-base";
 import { trackEvent } from "./analytics";
@@ -44,6 +44,21 @@ async function api<T>(path: string): Promise<T> {
   return response.json();
 }
 const currentLocale = () => localStorage.getItem("tawseelhub.locale") === "ar" ? "ar" : "en";
+function articleImageFallback(slug: string): string {
+  return slug === "manage-cod-delivery-operations"
+    ? "/blog-images/manage-cod-delivery-operations.jpg"
+    : "";
+}
+
+function useArticleImageFallback(event: SyntheticEvent<HTMLImageElement>, slug: string): void {
+  const fallback = articleImageFallback(slug);
+  if (!fallback || event.currentTarget.src.endsWith(fallback)) {
+    event.currentTarget.remove();
+    return;
+  }
+  event.currentTarget.src = fallback;
+}
+
 export function BlogListingPage() {
   const { categorySlug } = useParams(),
     [query, setQuery] = useSearchParams(),
@@ -149,6 +164,7 @@ function CardView({ article, featured = false }: { article: Card; featured?: boo
           src={imageUrl}
           alt={article.featuredImageAlt ?? ""}
           loading={featured ? "eager" : "lazy"}
+          onError={(event) => useArticleImageFallback(event, article.slug)}
         />
       )}
       <div>
@@ -262,6 +278,7 @@ export function BlogArticlePage() {
           className="article-image"
           src={featuredImageUrl}
           alt={a.featured_image_alt ?? ""}
+          onError={(event) => useArticleImageFallback(event, a.slug)}
         />
       )}
       <div className="article-layout">
