@@ -6,7 +6,7 @@
       "displayName": "API",
       "path": "apps/api",
       "renderService": "bluelinegpt-api-test",
-      "status": "needs_deploy",
+      "status": "pushed_awaiting_confirmation",
       "localCommit": "11814eb",
       "localCommitDate": "2026-08-20",
       "lastChangeDescription": "Preserve newer platform global tables during permanent company deletion preview",
