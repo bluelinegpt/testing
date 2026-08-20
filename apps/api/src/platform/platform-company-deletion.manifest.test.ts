@@ -73,10 +73,10 @@ describe("permanent Company deletion manifest", () => {
     // `client_error_reports` (crash reports; carries `company_id`, so its
     // rows for the deleted Company go with it — while the reset manifest
     // PRESERVES it, because a training reset must keep diagnostic history).
-    // Verified 2026-08-14 that the manifest now equals the live
-    // `information_schema` inventory exactly: 139 = 139, no differences in
-    // either direction.
-    expect(COMPANY_DELETION_DIRECT_TABLES.size).toBe(139);
+    // 139 -> 149: the 2026-08-20 review classified Commerce Integration,
+    // Customer Quote, Collect Order earning and Order Serial History tables
+    // added after the previous manifest review.
+    expect(COMPANY_DELETION_DIRECT_TABLES.size).toBe(149);
     expect(COMPANY_DELETION_MANIFEST_HASH).toMatch(/^[a-f0-9]{64}$/);
   });
 
@@ -91,6 +91,8 @@ describe("permanent Company deletion manifest", () => {
       "storefront_marketplace_categories",
       "store_orders",
       "store_order_items",
+      "commerce_integration_credentials",
+      "company_customer_quote_pricing_rules",
     ]);
   });
 

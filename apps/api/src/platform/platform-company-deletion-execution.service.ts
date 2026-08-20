@@ -184,6 +184,7 @@ export class PlatformCompanyDeletionExecutionService {
 
         await sql`delete from role_permissions using roles where role_permissions.role_id=roles.id and roles.company_id=${companyId}::uuid`.execute(transaction);
         await sql`delete from storefront_marketplace_categories using trader_storefronts where storefront_marketplace_categories.storefront_id=trader_storefronts.id and trader_storefronts.company_id=${companyId}::uuid`.execute(transaction);
+        await sql`delete from commerce_integration_credentials using commerce_integration_connections where commerce_integration_credentials.connection_id=commerce_integration_connections.id and commerce_integration_connections.company_id=${companyId}::uuid`.execute(transaction);
         // `store_orders.delivery_company_id` is Company-ownership under a
         // non-standard column name -- the generic loop below assumes
         // `company_id` literally, so this table is handled here instead,
@@ -193,6 +194,9 @@ export class PlatformCompanyDeletionExecutionService {
         // this delete (`ON DELETE CASCADE`) and needs no statement of its
         // own.
         await sql`delete from store_orders where delivery_company_id=${companyId}::uuid`.execute(transaction);
+        await sql`update platform_customer_quote_requests set selected_offer_id=null where selected_offer_id in (select id from platform_customer_quote_offers where company_id=${companyId}::uuid)`.execute(transaction);
+        await sql`delete from platform_customer_quote_offers where company_id=${companyId}::uuid`.execute(transaction);
+        await sql`delete from company_customer_quote_pricing_rules using company_customer_quote_pricing_profiles where company_customer_quote_pricing_rules.pricing_profile_id=company_customer_quote_pricing_profiles.id and company_customer_quote_pricing_profiles.company_id=${companyId}::uuid`.execute(transaction);
         for (const cycle of COMPANY_DELETION_CYCLE_BREAKS) {
           const assignments = cycle.columns.map((column) => `${quote(column)}=null`).join(",");
           await sql`update ${sql.table(cycle.table)} set ${sql.raw(assignments)} where company_id=${companyId}::uuid`.execute(transaction);

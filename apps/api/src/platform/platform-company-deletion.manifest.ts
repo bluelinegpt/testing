@@ -54,6 +54,39 @@ const SHARED_PRESERVE = [
   // these two follow the identical, already-reviewed convention.
   "store_orders",
   "store_order_items",
+  "commerce_integration_credentials",
+  "company_customer_quote_pricing_rules",
+  "platform_customer_marketplace_settings",
+  "platform_customer_quote_requests",
+  "platform_customer_quote_history",
+  "platform_customer_quote_notes",
+  "platform_trader_applications",
+  "platform_trader_application_channels",
+  "platform_trader_application_history",
+  "platform_trader_application_notes",
+  "platform_blog_categories",
+  "platform_blog_authors",
+  "platform_blog_tags",
+  "platform_blog_articles",
+  "platform_blog_article_tags",
+  "platform_blog_publication_history",
+  "platform_public_redirects",
+  "platform_public_site_settings",
+  "platform_agent_settings",
+  "platform_agent_knowledge",
+  "platform_agent_conversations",
+  "platform_agent_messages",
+  "platform_agent_actions",
+  "platform_agent_handoffs",
+  "platform_agent_handoff_history",
+  "platform_website_pages",
+  "platform_website_pricing_plans",
+  "platform_website_features",
+  "platform_website_faqs",
+  "platform_website_media",
+  "platform_website_navigation_items",
+  "platform_website_contact_settings",
+  "platform_website_revisions",
 ] as const;
 
 /** Tables added after the reset manifest's last business-data review. */
@@ -84,6 +117,16 @@ const NEW_DIRECT_TABLES = [
   "employee_driver_earning_period_delivery_sources",
   "employee_driver_earning_period_payment_allocations",
   "employee_driver_earning_period_payroll_allocations",
+  "commerce_integration_connections",
+  "commerce_integration_oauth_states",
+  "commerce_integration_events",
+  "commerce_integration_order_links",
+  "commerce_integration_area_mappings",
+  "company_customer_quote_participation",
+  "company_customer_quote_pricing_profiles",
+  "platform_customer_quote_offers",
+  "employee_collect_order_earnings",
+  "order_serial_history",
 ] as const;
 
 // Prompt 15 (push notifications) added two new Company-scoped tables —
@@ -201,6 +244,16 @@ export const COMPANY_DELETION_INDIRECT = [
   {
     table: "store_order_items",
     ownership: "store_order_items.store_order_id -> store_orders.id (on delete cascade)",
+  },
+  {
+    table: "commerce_integration_credentials",
+    ownership:
+      "commerce_integration_credentials.connection_id -> commerce_integration_connections.id where connections.company_id = target",
+  },
+  {
+    table: "company_customer_quote_pricing_rules",
+    ownership:
+      "company_customer_quote_pricing_rules.pricing_profile_id -> company_customer_quote_pricing_profiles.id where profiles.company_id = target",
   },
 ] as const;
 
