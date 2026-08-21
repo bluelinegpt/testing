@@ -6,10 +6,10 @@
       "displayName": "API",
       "path": "apps/api",
       "renderService": "bluelinegpt-api-test",
-      "status": "pushed_awaiting_confirmation",
-      "localCommit": "ac6aed3",
+      "status": "needs_deploy",
+      "localCommit": "017c20f",
       "localCommitDate": "2026-08-21",
-      "lastChangeDescription": "Fix production agent fallback and SEO metadata",
+      "lastChangeDescription": "Fix Arabic public website acceptance blockers",
       "lastChangeBy": "codex",
       "confirmedLiveCommit": "27e356a",
       "confirmedLiveAt": "2026-08-14"
