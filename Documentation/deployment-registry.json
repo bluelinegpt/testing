@@ -6,7 +6,7 @@
       "displayName": "API",
       "path": "apps/api",
       "renderService": "bluelinegpt-api-test",
-      "status": "needs_deploy",
+      "status": "pushed_awaiting_confirmation",
       "localCommit": "c47ddfc",
       "localCommitDate": "2026-08-21",
       "lastChangeDescription": "Fix public agent website message update",
