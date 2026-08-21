@@ -30,9 +30,9 @@ const faqs = [
   ["send-package-fit", "en", "Can customers request a package quotation?", "Yes. The public website can collect package quote requests. Instant prices appear only for configured UAE routes; other shipments go for manual quotation.", "customer", "send-package", true, 20],
   ["pricing-gap", "en", "Why is the 5,001–10,000 order range not priced?", "That range is intentionally kept for confirmation with the Tawseelhub team, so the website does not publish an unapproved price.", "delivery_company", "pricing", true, 30],
   ["arabic-support", "en", "Does the website support Arabic?", "Yes. Public website content can be managed in English and Arabic, with right-to-left display for Arabic pages.", "all", "website", true, 40],
-  ["delivery-company-fit", "ar", "هل توصيل هب مخصص لشركات التوصيل؟", "نعم. توصيل هب مصمم لشركات التوصيل التي تحتاج إلى إدارة الطلبات والسائقين والتحصيل والتسويات والمحاسبة والرواتب والتقارير من مكان واحد.", "all", "عام", true, 10],
+  ["delivery-company-fit", "ar", "هل Tawseelhub مخصص لشركات التوصيل؟", "نعم. Tawseelhub مصمم لشركات التوصيل التي تحتاج إلى إدارة الطلبات والسائقين والتحصيل والتسويات والمحاسبة والرواتب والتقارير من مكان واحد.", "all", "عام", true, 10],
   ["send-package-fit", "ar", "هل يمكن للعميل طلب عرض سعر لشحنة؟", "نعم. يمكن للموقع استقبال طلبات عروض أسعار الشحنات. تظهر الأسعار الفورية فقط للمسارات الإماراتية المعدة مسبقاً، أما الحالات الأخرى فتذهب للمراجعة اليدوية.", "customer", "الشحنات", true, 20],
-  ["pricing-gap", "ar", "لماذا لا يوجد سعر لنطاق 5,001 إلى 10,000 طلب؟", "هذا النطاق محفوظ للتأكيد مع فريق توصيل هب حتى لا ينشر الموقع سعراً غير معتمد.", "delivery_company", "الأسعار", true, 30],
+  ["pricing-gap", "ar", "لماذا لا يوجد سعر لنطاق 5,001 إلى 10,000 طلب؟", "هذا النطاق محفوظ للتأكيد مع فريق Tawseelhub حتى لا ينشر الموقع سعراً غير معتمد.", "delivery_company", "الأسعار", true, 30],
   ["arabic-support", "ar", "هل يدعم الموقع اللغة العربية؟", "نعم. يمكن إدارة محتوى الموقع بالإنجليزية والعربية مع عرض عربي من اليمين إلى اليسار.", "all", "الموقع", true, 40],
 ] as const;
 

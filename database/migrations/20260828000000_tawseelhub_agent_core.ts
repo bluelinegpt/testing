@@ -119,7 +119,7 @@ insert into platform_agent_knowledge(language,title,content,category,status,sort
 ('en','What Tawseelhub does','Tawseelhub is a Delivery Operating System for UAE delivery companies. It helps manage orders, drivers, COD collections, Trader settlements, accounting, payroll, reports, Trader relationships, customer quote opportunities and planned commerce integrations.','general','published',10),
 ('en','Planned commerce integrations','Salla, Shopify and WooCommerce are planned integrations. Tawseelhub should not describe them as live until the backend integration is actually available.','integrations','published',20),
 ('en','Delivery company privacy','Tawseelhub does not expose a public Delivery Company directory in customer quote or Trader application conversations. Relationships are verified by the Platform team.','privacy','published',30),
-('ar','ما هي توصيل هب','توصيل هب نظام تشغيل لشركات التوصيل في دولة الإمارات لإدارة الطلبات والسائقين والتحصيل والتسويات والتقارير وعلاقات التجار.','general','published',10);
+('ar','ما هو Tawseelhub؟','Tawseelhub نظام تشغيل لشركات التوصيل في دولة الإمارات لإدارة الطلبات والسائقين والتحصيل والتسويات والتقارير وعلاقات التجار.','general','published',10);
 
 insert into permissions(code,description) values
 ('platform.agent.read','View Agent conversations, handoffs and knowledge'),

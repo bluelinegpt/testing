@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { isDynamicContentRoute, routeDefinitions } from './App';
+import { routeMetadata } from './public-localization';
 
 describe('public website route foundation', () => {
   it('includes every required public route exactly once', () => {
@@ -23,5 +24,11 @@ describe('public website route foundation', () => {
     expect(isDynamicContentRoute('/')).toBe(false);
     expect(isDynamicContentRoute('/blog')).toBe(false);
     expect(isDynamicContentRoute('/resources')).toBe(false);
+  });
+
+  it('keeps the Tawseelhub brand un-translated in Arabic metadata', () => {
+    const rendered = JSON.stringify(routeMetadata.ar);
+    expect(rendered).toContain('Tawseelhub');
+    expect(rendered).not.toContain('توصيل هب');
   });
 });

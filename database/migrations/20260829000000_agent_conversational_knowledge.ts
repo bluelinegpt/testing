@@ -13,13 +13,13 @@ create index if not exists platform_agent_knowledge_retrieval_idx
   on platform_agent_knowledge(language,status,visibility,category,feature_status,audience,sort_order);
 
 update platform_agent_knowledge
-set content='توصيل هب نظام تشغيل لشركات التوصيل في دولة الإمارات لإدارة الطلبات والسائقين والتحصيل والتسويات والتقارير وعلاقات التجار.',
+set content='Tawseelhub نظام تشغيل لشركات التوصيل في دولة الإمارات لإدارة الطلبات والسائقين والتحصيل والتسويات والتقارير وعلاقات التجار.',
     audience='all',
     feature_status='live',
     visibility='public_agent'
 where language='ar'
   and category in('general','Tawseelhub Overview')
-  and (content like '%???%' or title='ما هي توصيل هب');
+  and (content like '%???%' or title='ما هو Tawseelhub؟' or title='ما هي توصيل هب');
 
 update platform_agent_knowledge
 set category='Tawseelhub Overview', audience='all', feature_status='live', visibility='public_agent'

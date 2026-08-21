@@ -63,7 +63,7 @@ describe("RulesAgentModelProvider", () => {
       language: "ar",
       previousIntent: "unknown",
       state: baseState,
-      text: "ما هو توصيل هب؟",
+      text: "ما هو Tawseelhub؟",
     });
 
     expect(result.intent).toBe("general_question");
@@ -160,6 +160,12 @@ describe("RulesAgentModelProvider", () => {
 
   it("does not let previous small talk trap later business questions", async () => {
     await expect(provider.classifyAndExtract({ language: "en", previousIntent: "small_talk", state: baseState, text: "What is Tawseelhub?" })).resolves.toMatchObject({ intent: "general_question" });
+  });
+
+  it("keeps Arabic Tawseelhub and price questions in supported rules fallback paths", async () => {
+    await expect(provider.classifyAndExtract({ language: "en", previousIntent: "unknown", state: baseState, text: "مرحبا" })).resolves.toMatchObject({ intent: "greeting", language: "ar" });
+    await expect(provider.classifyAndExtract({ language: "en", previousIntent: "unknown", state: baseState, text: "شو هو Tawseelhub؟" })).resolves.toMatchObject({ intent: "general_question", language: "ar" });
+    await expect(provider.classifyAndExtract({ language: "en", previousIntent: "unknown", state: baseState, text: "كم السعر؟" })).resolves.toMatchObject({ intent: "customer_quote", language: "ar" });
   });
 
   it("keeps Delivery Company directory requests out of the quote workflow", async () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { arabicGeneralFallback, generalKnowledgeContent, isAgentPriceQuestionText, isCorruptedArabicText, publicAgentLabel } from "./agent.service.js";
+import { arabicGeneralFallback, generalKnowledgeContent, isAgentPriceQuestionText, isCorruptedArabicText, persistableAgentConversationIntent, publicAgentLabel } from "./agent.service.js";
 
 describe("AgentService general knowledge content", () => {
   it("does not show corrupted question-mark Arabic seed data to visitors", () => {
@@ -12,7 +12,7 @@ describe("AgentService general knowledge content", () => {
   });
 
   it("keeps valid Arabic and English knowledge content unchanged", () => {
-    const arabic = "توصيل هب منصة لإدارة عمليات التوصيل.";
+    const arabic = "Tawseelhub منصة لإدارة عمليات التوصيل.";
     const english = "Tawseelhub is a Delivery Operating System.";
 
     expect(generalKnowledgeContent("ar", arabic)).toBe(arabic);
@@ -32,5 +32,15 @@ describe("AgentService quote workflow helpers", () => {
   it("renders internal enum values as public labels", () => {
     expect(publicAgentLabel("small_parcel")).toBe("Small Parcel");
     expect(publicAgentLabel("same_day")).toBe("Same Day");
+  });
+});
+
+describe("AgentService conversation persistence helpers", () => {
+  it("stores social turns as a durable general question intent without changing visitor replies", () => {
+    expect(persistableAgentConversationIntent("greeting")).toBe("general_question");
+    expect(persistableAgentConversationIntent("small_talk")).toBe("general_question");
+    expect(persistableAgentConversationIntent("thanks")).toBe("general_question");
+    expect(persistableAgentConversationIntent("goodbye")).toBe("general_question");
+    expect(persistableAgentConversationIntent("customer_quote")).toBe("customer_quote");
   });
 });

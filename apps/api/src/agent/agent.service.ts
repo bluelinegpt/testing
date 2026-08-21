@@ -8,9 +8,10 @@ import { DATABASE } from "../infrastructure/database/database.tokens.js";
 import type { DatabaseSchema } from "../infrastructure/database/database.types.js";
 import { TraderApplicationService } from "../trader-applications/trader-application.service.js";
 import type { AgentConversationReviewDto, AgentKnowledgeDto, AgentSettingsDto } from "./agent.dto.js";
-import type { AgentChannel, AgentIntent, AgentKnowledgeContext, AgentLanguage, AgentSlots, AgentState } from "./agent.types.js";
+import type { AgentChannel, AgentIntent, AgentKnowledgeContext, AgentLanguage, AgentModelResult, AgentSlots, AgentState } from "./agent.types.js";
 import { AgentModelRouterProvider } from "./agent-model-router.provider.js";
 import { agentQuickActions, agentQuickActionsArabic, arabicGreeting, englishGreeting } from "./agent-instructions.js";
+import { RulesAgentModelProvider } from "./rules-agent-model.provider.js";
 import { MetaWhatsAppCloudProvider, SandboxWhatsAppProvider, type WhatsAppProvider } from "./whatsapp-provider.js";
 
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
@@ -40,10 +41,13 @@ const arabicPriceQuestionPattern = /كم\s*(?:السعر|يكلف|التكلفة
 const continueExistingPattern = /^(continue|continue previous|show my quote|show quote|old quote|previous quote|same quote|use existing|existing|تابع|كمل|اكمل|وريني السعر|اعرض السعر|الطلب السابق)$/i;
 const newShipmentPattern = /^(new shipment|start new|start over|another package|new package|new quote|shipment new|شحنة جديدة|طلب جديد|ابدأ جديد|ابدا جديد|طرد جديد)$/i;
 const skipPattern = /^(skip|no|not now|later|i don't have it|dont have it|لا|تخطي|بعدان|بعدين|ما عندي|ليس الآن)$/i;
-export const arabicGeneralFallback = "توصيل هب نظام تشغيل لشركات التوصيل في دولة الإمارات. يساعد في إدارة الطلبات والسائقين والتحصيل النقدي وتسويات التجار والتقارير وعلاقات التجار وطلبات الأسعار.";
+export const arabicGeneralFallback = "Tawseelhub نظام تشغيل لشركات التوصيل في دولة الإمارات. يساعد في إدارة الطلبات والسائقين والتحصيل النقدي وتسويات التجار والتقارير وعلاقات التجار وطلبات الأسعار.";
+const safeRulesClassifier = new RulesAgentModelProvider();
 export const isCorruptedArabicText = (value: string) => /\?{3,}/.test(value) && !/[\u0600-\u06ff]/.test(value);
 export const isAgentPriceQuestionText = (value: string) => priceQuestionPattern.test(value.trim()) || arabicPriceQuestionPattern.test(value.trim());
 export const publicAgentLabel = (value: unknown): string => String(value ?? "").replace(/_/g, " ").replace(/\s+/g, " ").trim().replace(/\b[a-z]/g, (letter) => letter.toUpperCase());
+export const persistableAgentConversationIntent = (intent: AgentIntent): AgentIntent =>
+  socialIntents.has(intent) ? "general_question" : intent;
 export function generalKnowledgeContent(language: AgentLanguage, storedContent: string | undefined): string {
   if (language === "ar" && (storedContent === undefined || isCorruptedArabicText(storedContent))) return arabicGeneralFallback;
   return storedContent ?? "I do not have confirmed information for that yet.";
@@ -210,7 +214,7 @@ export class AgentService {
       const updated = (await sql<Record<string, unknown>>`select * from platform_agent_conversations where id=${conversation.id}::uuid`.execute(this.db)).rows[0]!;
       return { ...(await this.publicConversation(updated)), reply: response.content, intent: "clarification", language };
     }
-    let model;
+    let model: AgentModelResult;
     try {
       model = await this.model.classifyAndExtract({ text: input.text, language: input.language ?? conversation.language as AgentLanguage, previousIntent: this.previousIntentForClassification(conversation.current_intent as AgentIntent, state), state });
     } catch (error) {
@@ -218,15 +222,22 @@ export class AgentService {
         code: (error as { code?: string; message?: string }).code ?? (error as { message?: string }).message?.slice(0, 80) ?? "provider_failed",
         diagnostics: this.model.diagnostics(),
       }, "Tawseelhub Agent model provider failed");
-      const language = conversation.language as AgentLanguage;
-      const offline = input.channel === "website" && !settings.humanHandoffEnabled;
-      const safe = input.channel === "website" ? (offline ? this.humanUnavailableAskForContactMessage(language, state) : this.humanWaitingMessage(language)) : "I'm unable to complete that request right now. You can try again, or I can pass your request to the Tawseelhub team.";
-      const fallbackState = offline ? this.humanUnavailableContactState(state) : state;
-      await this.appendMessage(String(conversation.id), "assistant", safe, { providerError: true, state: fallbackState }, { channel: input.channel, direction: "outbound", ...(input.provider === undefined ? {} : { provider: input.provider }) });
-      if (input.channel === "website" && !offline) await this.markWebsiteHumanRequested(String(conversation.id), String(conversation.conversation_mode ?? "ai_active"), "Model provider failed");
-      if (offline) await sql`update platform_agent_conversations set current_intent='handoff',status='waiting_for_user',requester_type='unknown',audience=${fallbackState.audience ?? "unknown"},state=${JSON.stringify(fallbackState)}::jsonb,review_status=case when review_status='new' then 'follow_up' else review_status end,last_customer_message_at=now(),last_channel=${input.channel},updated_at=now(),last_message_at=now() where id=${conversation.id}::uuid`.execute(this.db);
-      const updated = (await sql<Record<string, unknown>>`select * from platform_agent_conversations where id=${conversation.id}::uuid`.execute(this.db)).rows[0]!;
-      return { ...(await this.publicConversation(updated)), reply: safe, intent: "handoff", language };
+      try {
+        model = await safeRulesClassifier.classifyAndExtract({ text: input.text, language: input.language ?? conversation.language as AgentLanguage, previousIntent: this.previousIntentForClassification(conversation.current_intent as AgentIntent, state), state });
+      } catch (rulesError) {
+        this.logger.error({
+          code: (rulesError as { code?: string; message?: string }).code ?? (rulesError as { message?: string }).message?.slice(0, 80) ?? "rules_failed",
+        }, "Tawseelhub Agent rules fallback failed");
+        const language = conversation.language as AgentLanguage;
+        const offline = input.channel === "website" && !settings.humanHandoffEnabled;
+        const safe = input.channel === "website" ? (offline ? this.humanUnavailableAskForContactMessage(language, state) : this.humanWaitingMessage(language)) : "I'm unable to complete that request right now. You can try again, or I can pass your request to the Tawseelhub team.";
+        const fallbackState = offline ? this.humanUnavailableContactState(state) : state;
+        await this.appendMessage(String(conversation.id), "assistant", safe, { providerError: true, rulesError: true, state: fallbackState }, { channel: input.channel, direction: "outbound", ...(input.provider === undefined ? {} : { provider: input.provider }) });
+        if (input.channel === "website" && !offline) await this.markWebsiteHumanRequested(String(conversation.id), String(conversation.conversation_mode ?? "ai_active"), "Model provider and rules fallback failed");
+        if (offline) await sql`update platform_agent_conversations set current_intent='handoff',status='waiting_for_user',requester_type='unknown',audience=${fallbackState.audience ?? "unknown"},state=${JSON.stringify(fallbackState)}::jsonb,review_status=case when review_status='new' then 'follow_up' else review_status end,last_customer_message_at=now(),last_channel=${input.channel},updated_at=now(),last_message_at=now() where id=${conversation.id}::uuid`.execute(this.db);
+        const updated = (await sql<Record<string, unknown>>`select * from platform_agent_conversations where id=${conversation.id}::uuid`.execute(this.db)).rows[0]!;
+        return { ...(await this.publicConversation(updated)), reply: safe, intent: "handoff", language };
+      }
     }
     const turnIntent = this.resolveTurnIntent(input.text, model.intent, state);
     const mergedSlots = this.mergeSlots(state.slots, model.extracted, model.wantsCorrection);
@@ -247,11 +258,13 @@ export class AgentService {
       ?? await this.nextResponse(String(conversation.id), turnIntent, model.language, nextState, String(conversation.status ?? ""), input.channel, settings);
     const mergedState = response.structured?.state as AgentState | undefined ?? nextState;
     const identity = this.identityFromState(mergedState);
-    const classification = this.classificationFor(response.intent ?? model.intent, mergedState);
+    const responseIntent = response.intent ?? model.intent;
+    const persistedIntent = persistableAgentConversationIntent(responseIntent);
+    const classification = this.classificationFor(responseIntent, mergedState);
     const acknowledged = response.structured?.suppressReturningAcknowledgement ? response.content : await this.returningCustomerAcknowledgement(String(conversation.id), model.language, state, mergedState, response.content);
     const isWebsiteHandoff = input.channel === "website" && response.structured?.websiteHumanRequested === true;
     const reviewStatusOverride = typeof response.structured?.reviewStatus === "string" ? response.structured.reviewStatus : null;
-    await sql`update platform_agent_conversations set language=${model.language},current_intent=${response.intent ?? model.intent},status=${response.status ?? "waiting_for_user"},requester_type=${this.requesterType(response.intent ?? model.intent)},audience=${mergedState.audience ?? "unknown"},customer_name=${identity.name},mobile_number=${identity.mobileOriginal},mobile_number_normalized=${identity.mobileNormalized},email=${identity.email},operational_classification=${classification},state=${JSON.stringify(mergedState)}::jsonb,conversation_mode=case when ${isWebsiteHandoff} then 'paused' else conversation_mode end,review_status=case when ${reviewStatusOverride} is not null then ${reviewStatusOverride} when ${isWebsiteHandoff} and review_status='new' then 'open' else review_status end,mode_changed_at=case when ${isWebsiteHandoff} then now() else mode_changed_at end,updated_at=now(),last_message_at=now() where id=${conversation.id}::uuid`.execute(this.db);
+    await sql`update platform_agent_conversations set language=${model.language},current_intent=${persistedIntent},status=${response.status ?? "waiting_for_user"},requester_type=${this.requesterType(responseIntent)},audience=${mergedState.audience ?? "unknown"},customer_name=${identity.name},mobile_number=${identity.mobileOriginal},mobile_number_normalized=${identity.mobileNormalized},email=${identity.email},operational_classification=${classification},state=${JSON.stringify(mergedState)}::jsonb,conversation_mode=case when ${isWebsiteHandoff} then 'paused' else conversation_mode end,review_status=case when ${reviewStatusOverride}::text is not null then ${reviewStatusOverride}::text when ${isWebsiteHandoff} and review_status='new' then 'open' else review_status end,mode_changed_at=case when ${isWebsiteHandoff} then now() else mode_changed_at end,updated_at=now(),last_message_at=now() where id=${conversation.id}::uuid`.execute(this.db);
     if (isWebsiteHandoff) await this.recordModeHistory(String(conversation.id), String(conversation.conversation_mode ?? "ai_active"), "paused", null, "Human requested from website chat");
     const assistantMessageId = await this.appendMessage(String(conversation.id), "assistant", acknowledged, response.structured, { channel: input.channel, direction: "outbound", ...(input.provider === undefined ? {} : { provider: input.provider }) });
     if (input.channel === "whatsapp" && input.provider) {
@@ -265,7 +278,7 @@ export class AgentService {
       await sql`update platform_agent_settings set whatsapp_last_outbound_at=case when ${send.status}<>'failed' then now() else whatsapp_last_outbound_at end, whatsapp_last_error_code=${send.failureCode ?? null} where id=true`.execute(this.db);
     }
     const updated = (await sql<Record<string, unknown>>`select * from platform_agent_conversations where id=${conversation.id}::uuid`.execute(this.db)).rows[0]!;
-    return { ...(await this.publicConversation(updated)), reply: acknowledged, intent: response.intent ?? turnIntent, language: model.language };
+    return { ...(await this.publicConversation(updated)), reply: acknowledged, intent: responseIntent ?? turnIntent, language: model.language };
   }
 
   private async nextResponse(conversationId: string, intent: AgentIntent, language: AgentLanguage, state: AgentState, currentStatus = "", channel?: AgentChannel, settings?: { humanHandoffEnabled?: boolean }) {
@@ -461,7 +474,7 @@ export class AgentService {
     const visibleSummary = compact({ name: summary.name, mobile: summary.mobile, email: summary.email });
     const visibleLines = this.lines(visibleSummary);
     const content = language === "ar"
-      ? `أستطيع تحويل ذلك إلى فريق توصيل هب. ${visibleLines ? `هل تؤكد بيانات التواصل؟\n${visibleLines}` : "يرجى مشاركة الاسم ورقم الهاتف للتواصل."}`
+      ? `أستطيع تحويل ذلك إلى فريق Tawseelhub. ${visibleLines ? `هل تؤكد بيانات التواصل؟\n${visibleLines}` : "يرجى مشاركة الاسم ورقم الهاتف للتواصل."}`
       : `I can pass this to the Tawseelhub team. ${visibleLines ? `Please confirm the best contact details.\n${visibleLines}` : "Please share your name and mobile number for follow-up."}`;
     return { content, intent: "handoff" as const, status: "action_pending", structured: { state: { ...state, pendingAction: { type: "create_handoff", summary } } } };
   }
