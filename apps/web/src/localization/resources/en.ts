@@ -1877,6 +1877,8 @@ export const englishTranslations = {
     collectionConfirmed: "Collection {{number}} confirmed.",
     addNewArea: "Add new area",
     amountDueToTrader: "Amount due to Trader",
+    traderReceivableDue: "Trader receivable to collect",
+    collectTraderReceivableHint: "Collect from Trader as a receivable",
     areaAlreadyExists: "An Area with this code or name already exists.",
     areaCreateFailed: "The Area could not be created.",
     contactAdminForArea: "No matching Area? Ask an administrator to create it.",

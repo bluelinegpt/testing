@@ -2720,6 +2720,14 @@ export function OrderDetailsWorkspace({
               t("operations.amountDueToTrader"),
               money(detail.metadata.traderNetPayable, locale),
             ] as const,
+            ...(traderReceivableDue(detail) <= 0
+              ? []
+              : [
+                  [
+                    t("operations.traderReceivableDue"),
+                    `${money(String(traderReceivableDue(detail)), locale)} — ${t("operations.collectTraderReceivableHint")}`,
+                  ] as const,
+                ]),
             [t("operations.driverCost"), money(detail.metadata.driverCost, locale)] as const,
             [
               t("operations.returnDriverFee"),
@@ -5149,6 +5157,12 @@ function GroupSelectionCheckbox({
     <input aria-label={label} checked={checked} onChange={onChange} ref={ref} type="checkbox" />
   );
 }
+function traderReceivableDue(detail: OperationsOrderDetail): number {
+  const totalDeductions = Number(detail.totalDeductions ?? 0);
+  const codAmount = Number(detail.codAmount ?? 0);
+  return Math.max(totalDeductions - codAmount, 0);
+}
+
 function platformQuoteFee(detail: OperationsOrderDetail): string | null {
   if (!detail.serviceFeeOverrideReason?.startsWith("Platform customer quote ")) return null;
   const additionalFees = Number(detail.additionalFees ?? 0);

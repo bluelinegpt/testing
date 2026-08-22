@@ -1,4 +1,4 @@
-﻿export const arabicTranslations = {
+export const arabicTranslations = {
   auth: {
     companyLoadFailed: "تعذر تحميل الشركات. يرجى التحديث والمحاولة مرة أخرى.",
     companyRequired: "اختر شركة للمتابعة.",
@@ -1877,6 +1877,8 @@
     collectionConfirmed: "تم تأكيد التحصيل {{number}}.",
     addNewArea: "إضافة منطقة جديدة",
     amountDueToTrader: "المبلغ المستحق للتاجر",
+    traderReceivableDue: "ذمم مدينة على التاجر للتحصيل",
+    collectTraderReceivableHint: "حصّلها من التاجر كذمم مدينة",
     areaAlreadyExists: "توجد منطقة بهذا الرمز أو الاسم بالفعل.",
     areaCreateFailed: "تعذر إنشاء المنطقة.",
     contactAdminForArea: "لا توجد منطقة مطابقة؟ اطلب من المسؤول إنشاءها.",

@@ -18,6 +18,7 @@ type FinancialResult = Readonly<
     | "serviceFeeNetAmount"
     | "serviceFeeVatAmount"
     | "totalDeductions"
+    | "traderReceivableDue"
     | "traderNetPayable"
     | "vatAmount",
     Decimal
@@ -102,7 +103,7 @@ describe("prospective Order financial model", () => {
     expect(result.traderNetPayable.toFixed(2)).toBe("85.00");
   });
 
-  it("retains a signed negative Trader position when fees exceed COD", () => {
+  it("moves a Trader-paid fee excess into a receivable instead of negative settlement", () => {
     const result = service.calculateOrderFinancials({
         additionalFees: new Decimal(0),
         codAmount: new Decimal(0),
@@ -117,6 +118,7 @@ describe("prospective Order financial model", () => {
       });
     expect(result.customerAmountDue.toFixed(2)).toBe("0.00");
     expect(result.companyRevenue.toFixed(2)).toBe("20.00");
-    expect(result.traderNetPayable.toFixed(2)).toBe("-20.00");
+    expect(result.traderNetPayable.toFixed(2)).toBe("0.00");
+    expect(result.traderReceivableDue.toFixed(2)).toBe("20.00");
   });
 });

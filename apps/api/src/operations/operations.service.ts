@@ -667,6 +667,7 @@ interface OrderFinancials {
   readonly serviceFeeNetAmount: Decimal;
   readonly serviceFeeVatAmount: Decimal;
   readonly totalDeductions: Decimal;
+  readonly traderReceivableDue: Decimal;
   readonly traderNetPayable: Decimal;
   readonly vatAmount: Decimal;
 }
@@ -3618,6 +3619,10 @@ export class OperationsService {
         : driverRow === undefined
           ? "new"
           : "assigned_to_driver";
+      const traderSettlementStatus =
+        freeOrder || collectOrder || financials.traderNetPayable.isZero()
+          ? "not_eligible"
+          : "unsettled";
 
       const inserted = await sql<{ id: string }>`
         insert into orders (
@@ -3660,7 +3665,7 @@ export class OperationsService {
           ${financials.vatAmount.toFixed(2)},${vatPolicy.enabled},${vatPolicy.rate.toFixed(4)},
           ${vatPolicy.enabled ? vatPolicy.priceMode : null},
           ${financials.companyRevenue.toFixed(2)}, ${financials.orderProfit.toFixed(2)},
-          ${deliveryStatus}, ${freeOrder || collectOrder ? "not_eligible" : "unsettled"},
+          ${deliveryStatus}, ${traderSettlementStatus},
           ${pricing.provenance}, ${pricing.servicePriceId}::uuid,
           ${pricing.configuredFee.toFixed(2)}, ${pricing.finalFee.toFixed(2)},
           ${pricing.overrideReason}, ${freeOrder}, ${freeOrderReason}, ${collectOrder ? "collect_order" : "delivery"}
@@ -3671,6 +3676,15 @@ export class OperationsService {
       if (orderId === undefined) {
         throw new Error("Order creation did not return an identifier");
       }
+      await this.createOrderTraderReceivableIfNeeded(transaction, {
+        actorAccountId: actingAccountId,
+        amountDue: financials.traderReceivableDue,
+        companyId,
+        correlationId,
+        orderId,
+        orderNumber,
+        traderId: traderRow.id,
+      });
 
       if (driverRow !== undefined) {
         await sql`
@@ -6278,6 +6292,9 @@ export class OperationsService {
       vatPolicy,
     });
     const deliveryStatus = driverRow === undefined ? "new" : "assigned_to_driver";
+    const traderSettlementStatus = financials.traderNetPayable.isZero()
+      ? "not_eligible"
+      : "unsettled";
 
     const inserted = await sql<{ id: string }>`
       insert into orders (
@@ -6318,7 +6335,7 @@ export class OperationsService {
         ${financials.traderNetPayable.toFixed(2)}, ${driverCost.toFixed(2)},
         ${financials.vatAmount.toFixed(2)},${vatPolicy.enabled},${vatPolicy.rate.toFixed(4)},
         ${vatPolicy.enabled ? vatPolicy.priceMode : null},${financials.companyRevenue.toFixed(2)},
-        ${financials.orderProfit.toFixed(2)}, ${deliveryStatus}, 'unsettled',
+        ${financials.orderProfit.toFixed(2)}, ${deliveryStatus}, ${traderSettlementStatus},
         ${pricing.provenance}, ${pricing.servicePriceId}::uuid,
         ${pricing.configuredFee.toFixed(2)}, ${pricing.finalFee.toFixed(2)},
         ${pricing.overrideReason}
@@ -6329,6 +6346,15 @@ export class OperationsService {
     if (orderId === undefined) {
       throw new Error("Order creation did not return an identifier");
     }
+    await this.createOrderTraderReceivableIfNeeded(database, {
+      actorAccountId: input.createdByAccountId,
+      amountDue: financials.traderReceivableDue,
+      companyId,
+      correlationId: input.correlationId,
+      orderId,
+      orderNumber,
+      traderId: traderRow.id,
+    });
 
     if (driverRow !== undefined) {
       await sql`
@@ -6684,9 +6710,13 @@ export class OperationsService {
       : input.vatPolicy.enabled && input.vatPolicy.priceMode === "exclusive"
         ? input.codAmount.plus(input.serviceFee).plus(serviceFeeVatAmount)
         : input.codAmount.plus(input.serviceFee);
+    const signedTraderPosition = input.codAmount.minus(totalDeductions);
     const traderNetPayable = input.prospective
-      ? input.codAmount.minus(totalDeductions)
+      ? Decimal.max(signedTraderPosition, 0)
       : Decimal.max(input.codAmount.minus(input.serviceFee), 0);
+    const traderReceivableDue = input.prospective
+      ? Decimal.max(signedTraderPosition.negated(), 0)
+      : new Decimal(0);
     return {
       additionalFees: this.money(additionalFees),
       additionalFeeVatAmount: this.money(additionalFeeVatAmount),
@@ -6698,11 +6728,61 @@ export class OperationsService {
       serviceFeeNetAmount: this.money(serviceFeeNetAmount),
       serviceFeeVatAmount: this.money(serviceFeeVatAmount),
       totalDeductions: this.money(totalDeductions),
+      traderReceivableDue: this.money(traderReceivableDue),
       traderNetPayable: this.money(traderNetPayable),
       vatAmount: this.money(vatAmount),
     };
   }
 
+  private async createOrderTraderReceivableIfNeeded(
+    database: Parameters<Parameters<KyselyTransactionManager["execute"]>[0]>[0],
+    input: {
+      readonly actorAccountId: string;
+      readonly amountDue: Decimal;
+      readonly companyId: string;
+      readonly correlationId: string;
+      readonly orderId: string;
+      readonly orderNumber: string;
+      readonly traderId: string;
+    },
+  ): Promise<void> {
+    const amountDue = this.money(input.amountDue);
+    if (amountDue.lessThanOrEqualTo(0)) {
+      return;
+    }
+    const receivableNumber = await this.nextReferenceNumber(
+      database,
+      input.companyId,
+      "trader_receivable",
+      "RCV",
+    );
+    const reason = "Order service fee owed by Trader";
+    await sql`
+      insert into trader_receivables (
+        company_id, receivable_number, trader_id, source_type, source_reference,
+        business_date, original_amount_due, amount_collected, status, reason, notes,
+        created_by_account_id
+      ) values (
+        ${input.companyId}::uuid, ${receivableNumber}, ${input.traderId}::uuid,
+        'service_charge', ${input.orderNumber}, current_date, ${amountDue.toFixed(2)},
+        0, 'outstanding', ${reason},
+        ${`Created automatically because Order ${input.orderNumber} has fees greater than COD. Collect from Trader as a Receivable, not a negative settlement.`},
+        ${input.actorAccountId}::uuid
+      )
+      on conflict do nothing
+    `.execute(database);
+    await sql`
+      insert into order_events (
+        company_id, order_id, event_type, event_category, field_name, new_value,
+        actor_account_id, actor_role, source, correlation_id
+      ) values (
+        ${input.companyId}::uuid, ${input.orderId}::uuid,
+        'trader_receivable.created_from_order', 'financial_change',
+        'trader_receivable_due', to_jsonb(${amountDue.toFixed(2)}::text),
+        ${input.actorAccountId}::uuid, 'Company User', 'system', ${input.correlationId}
+      )
+    `.execute(database);
+  }
   private calculateVatAmount(serviceFee: Decimal, vatPolicy: VatPolicy): Decimal {
     if (!vatPolicy.enabled || vatPolicy.rate.isZero()) {
       return new Decimal(0);
