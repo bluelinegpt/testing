@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
 
 import { type ErrorReport, type ErrorReportPage, platformApi } from "../api/platform-client.js";
+import { usePlatformSession } from "../app/PlatformSession.js";
 
 /**
  * The Error Handler -- every captured crash from any app (`web`, `api`,
@@ -20,6 +21,8 @@ const severityLabel: Record<string, string> = { high: "High", low: "Low", medium
 const statusLabel: Record<string, string> = { open: "Open", resolved: "Resolved" };
 
 export function ErrorsPage(): ReactElement {
+  const session = usePlatformSession();
+  const canManage = session.can("platform.errors.manage");
   const [search, setSearch] = useState("");
   const [sourceApp, setSourceApp] = useState("");
   const [severity, setSeverity] = useState("");
@@ -27,7 +30,9 @@ export function ErrorsPage(): ReactElement {
   const [page, setPage] = useState(1);
   const [data, setData] = useState<ErrorReportPage | undefined>(undefined);
   const [failed, setFailed] = useState(false);
+  const [deleteError, setDeleteError] = useState<string>();
   const [selected, setSelected] = useState<ErrorReport>();
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
   const load = useCallback(() => {
     let cancelled = false;
@@ -35,7 +40,10 @@ export function ErrorsPage(): ReactElement {
     void platformApi
       .errors({ page, search, severity, sourceApp, status })
       .then((result) => {
-        if (!cancelled) setData(result);
+        if (!cancelled) {
+          setData(result);
+          setSelectedIds([]);
+        }
       })
       .catch(() => {
         if (!cancelled) setFailed(true);
@@ -48,6 +56,41 @@ export function ErrorsPage(): ReactElement {
   useEffect(() => load(), [load]);
 
   const pageCount = data === undefined ? 1 : Math.max(1, Math.ceil(data.total / data.pageSize));
+  const visibleReports = data?.items ?? [];
+  const selectedSet = new Set(selectedIds);
+  const allVisibleSelected =
+    visibleReports.length > 0 && visibleReports.every((report) => selectedSet.has(report.id));
+
+  const toggleSelected = (id: string, checked: boolean) => {
+    setSelectedIds((current) =>
+      checked ? [...new Set([...current, id])] : current.filter((selectedId) => selectedId !== id),
+    );
+  };
+
+  const toggleAllVisible = (checked: boolean) => {
+    setSelectedIds(checked ? visibleReports.map((report) => report.id) : []);
+  };
+
+  const deleteSelected = async () => {
+    if (selectedIds.length === 0) return;
+    if (
+      !window.confirm(
+        `Delete ${selectedIds.length} selected error report(s)? This cannot be undone.`,
+      )
+    ) {
+      return;
+    }
+    setDeleteError(undefined);
+    try {
+      await platformApi.deleteErrors(selectedIds);
+      if (selected !== undefined && selectedIds.includes(selected.id)) setSelected(undefined);
+      load();
+    } catch (error) {
+      setDeleteError(
+        error instanceof Error ? error.message : "Selected error reports could not be deleted.",
+      );
+    }
+  };
 
   return (
     <section className="platform-panel">
@@ -125,6 +168,33 @@ export function ErrorsPage(): ReactElement {
         </label>
       </div>
 
+      {canManage && data !== undefined ? (
+        <div className="lead-contact-actions">
+          <label className="agent-row-select">
+            <input
+              checked={allVisibleSelected}
+              onChange={(event) => toggleAllVisible(event.target.checked)}
+              type="checkbox"
+            />{" "}
+            <span>Select all visible</span>
+          </label>
+          <button
+            className="platform-button platform-button--danger"
+            disabled={selectedIds.length === 0}
+            onClick={() => void deleteSelected()}
+            type="button"
+          >
+            Delete selected{selectedIds.length === 0 ? "" : ` (${selectedIds.length})`}
+          </button>
+        </div>
+      ) : null}
+
+      {deleteError === undefined ? null : (
+        <p className="platform-login__error" role="alert">
+          {deleteError}
+        </p>
+      )}
+
       {failed ? (
         <p role="alert">The error list could not be loaded.</p>
       ) : data === undefined ? (
@@ -136,6 +206,7 @@ export function ErrorsPage(): ReactElement {
           <table className="platform-table">
             <thead>
               <tr>
+                {canManage ? <th scope="col">Select</th> : null}
                 <th scope="col">Company</th>
                 <th scope="col">Application</th>
                 <th scope="col">Criticality</th>
@@ -151,6 +222,18 @@ export function ErrorsPage(): ReactElement {
                   onClick={() => setSelected(report)}
                   style={{ cursor: "pointer" }}
                 >
+                  {canManage ? (
+                    <td onClick={(event) => event.stopPropagation()}>
+                      <input
+                        aria-label={`Select error from ${report.sourceApp} at ${new Date(
+                          report.occurredAt,
+                        ).toLocaleString()}`}
+                        checked={selectedSet.has(report.id)}
+                        onChange={(event) => toggleSelected(report.id, event.target.checked)}
+                        type="checkbox"
+                      />
+                    </td>
+                  ) : null}
                   <td>{report.companyName ?? <span className="platform-muted">—</span>}</td>
                   <td>{report.sourceApp}</td>
                   <td>

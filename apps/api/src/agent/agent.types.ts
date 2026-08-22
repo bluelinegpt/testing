@@ -67,6 +67,7 @@ export interface AgentState {
   audience?: "delivery_company" | "trader" | "customer" | "unknown";
   discussedTopics?: string[];
   lastBusinessIntent?: AgentIntent;
+  conversationFrame?: ConversationFrame;
   historicalContext?: {
     latestReference?: string;
     latestStatus?: string;
@@ -77,12 +78,46 @@ export interface AgentState {
     status: string;
   };
   deliveryAddressSkipped?: boolean;
+  pendingGeneralFollowUp?: "public_explanation" | "feature_choice" | "trader_registration_explained";
   pendingAction?: {
     type: "calculate_customer_quote" | "submit_trader_application" | "submit_demo_request" | "create_handoff";
     summary: Record<string, unknown>;
   };
   lastAskedSlot?: keyof AgentSlots;
   seenInboundMessageIds?: string[];
+}
+
+export type ConversationMode = "conversation" | "workflow" | "human_handoff";
+export type WorkflowState = "inactive" | "active" | "paused" | "cancelled" | "completed";
+export type UserAction = "explain" | "start" | "continue" | "cancel" | "pause" | "switch_topic" | "clarify" | "handoff" | "unknown";
+export type ConversationTopic =
+  | "general"
+  | "delivery_company"
+  | "trader"
+  | "send_package"
+  | "pricing"
+  | "drivers"
+  | "cod"
+  | "reconciliation"
+  | "settlement"
+  | "accounting"
+  | "payroll"
+  | "reports"
+  | "integrations"
+  | "stores"
+  | "mobile"
+  | "support"
+  | "privacy"
+  | "other";
+
+export interface ConversationFrame {
+  mode: ConversationMode;
+  topic: ConversationTopic;
+  workflow: "none" | "shipment_quote" | "trader_registration" | "demo_request" | "human_handoff" | string;
+  workflowState: WorkflowState;
+  lastExplicitUserAction: UserAction;
+  decision: string;
+  reason: string;
 }
 
 export interface AgentModelInput {

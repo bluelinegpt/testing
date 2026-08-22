@@ -1,0 +1,100 @@
+### Tawseelhub health - live
+GET https://bluelinegpt-api-test.onrender.com/api/v1/health/live
+
+### Tawseelhub health - ready
+GET https://bluelinegpt-api-test.onrender.com/api/v1/health/ready
+
+### Send a Package quote - sanitized UAE example
+POST https://bluelinegpt-api-test.onrender.com/api/v1/public/customer-quotes
+Content-Type: application/json
+
+{
+  "requesterName": "Sample Customer",
+  "requesterMobile": "+971501112222",
+  "requesterEmail": "customer@example.com",
+  "pickupCountryCode": "AE",
+  "pickupCountryName": "United Arab Emirates",
+  "pickupEmirate": "ajman",
+  "pickupArea": "Al Rashidiya",
+  "pickupAddress": "Sample pickup building, Ajman",
+  "pickupContactName": "Sample Customer",
+  "pickupMobile": "+971501112222",
+  "deliveryCountryCode": "AE",
+  "deliveryCountryName": "United Arab Emirates",
+  "deliveryEmirate": "dubai",
+  "deliveryArea": "Business Bay",
+  "deliveryAddress": "Sample delivery tower, Dubai",
+  "recipientName": "Sample Recipient",
+  "recipientMobile": "+971502223333",
+  "packageType": "small_parcel",
+  "description": "Small package",
+  "weightKg": 1,
+  "lengthCm": 25,
+  "widthCm": 20,
+  "heightCm": 10,
+  "quantity": 1,
+  "requestedServiceType": "standard",
+  "pickupDate": "2026-08-25",
+  "codRequired": false,
+  "specialHandlingFlags": [],
+  "declaredValue": 100,
+  "declaredValueCurrency": "AED",
+  "quoteCurrency": "AED",
+  "goodsConfirmation": true,
+  "landingPage": "/send-package"
+}
+
+### Demo request - sanitized example
+POST https://bluelinegpt-api-test.onrender.com/api/v1/public/demo-requests
+Content-Type: application/json
+
+{
+  "companyName": "Sample Delivery LLC",
+  "contactPerson": "Sample Manager",
+  "mobileNumber": "+971501112222",
+  "email": "demo@example.com",
+  "country": "United Arab Emirates",
+  "emirate": "dubai",
+  "approximateDriverCount": 25,
+  "approximateMonthlyOrders": 2500,
+  "approximateTraderCount": 80,
+  "preferredContactMethod": "whatsapp",
+  "featuresOfInterest": ["order_management", "driver_management", "cod_collections", "reports"],
+  "mainChallenges": "Need better COD and driver assignment visibility.",
+  "consent": true,
+  "landingPage": "/request-demo"
+}
+
+### Trader application - sanitized example
+POST https://bluelinegpt-api-test.onrender.com/api/v1/public/trader-applications
+Content-Type: application/json
+
+{
+  "storeName": "Sample Fashion Store",
+  "contactPerson": "Sample Trader",
+  "mobileNumber": "0501234567",
+  "email": "trader@example.com",
+  "website": "https://store.example.com",
+  "primaryCategory": "fashion",
+  "additionalCategories": [],
+  "pickupEmirate": "dubai",
+  "pickupArea": "Business Bay",
+  "channels": [
+    { "type": "shopify", "url": "https://store.example.com" }
+  ],
+  "monthlyOrderRange": "1001_3000",
+  "deliveryEmirates": ["dubai", "sharjah", "ajman"],
+  "paymentMix": "mixed",
+  "codPercentage": 60,
+  "fragileProducts": false,
+  "temperatureControlled": false,
+  "hasExistingDeliveryCompany": false,
+  "consent": true,
+  "landingPage": "/traders/register"
+}
+
+### Public blog list
+GET https://bluelinegpt-api-test.onrender.com/api/v1/public/blog
+
+### Public blog article by slug
+GET https://bluelinegpt-api-test.onrender.com/api/v1/public/blog/articles/manage-cod-delivery-operations

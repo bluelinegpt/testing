@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, Inject, Param, Patch, Post, Query, Req } from "@nestjs/common";
+import { Body, Controller, Delete, Get, HttpCode, Inject, Param, Patch, Post, Query, Req } from "@nestjs/common";
 import type { Request } from "express";
 // Runtime import is required for Nest constructor injection metadata.
 // eslint-disable-next-line @typescript-eslint/consistent-type-imports
@@ -18,4 +18,5 @@ export class PlatformDemoRequestController {
   @RequirePlatformPermissions(PLATFORM_LEADS_READ) @Get(":id") public detail(@Param("id") id:string):Promise<object>{return this.leads.detail(id);}
   @RequirePlatformPermissions(PLATFORM_LEADS_MANAGE) @Patch(":id/status") public status(@Param("id") id:string,@Body() input:DemoRequestStatusDto,@Req() request:Request):Promise<object>{return this.leads.transition(id,input.status,{reason:input.reason,demoScheduledAt:input.demoScheduledAt,convertedCompanyId:input.convertedCompanyId},this.actor(request));}
   @RequirePlatformPermissions(PLATFORM_LEADS_MANAGE) @HttpCode(201) @Post(":id/notes") public note(@Param("id") id:string,@Body() input:AddDemoRequestNoteDto,@Req() request:Request):Promise<object>{return this.leads.addNote(id,input.text,this.actor(request));}
+  @RequirePlatformPermissions(PLATFORM_LEADS_MANAGE) @Delete() public bulkDelete(@Body() input:{ids?:string[]},@Req() request:Request):Promise<object>{return this.leads.bulkDelete(input.ids??[],this.actor(request));}
 }

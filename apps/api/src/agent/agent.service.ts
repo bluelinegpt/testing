@@ -10,6 +10,7 @@ import { TraderApplicationService } from "../trader-applications/trader-applicat
 import type { AgentConversationReviewDto, AgentKnowledgeDto, AgentSettingsDto } from "./agent.dto.js";
 import type { AgentChannel, AgentIntent, AgentKnowledgeContext, AgentLanguage, AgentModelResult, AgentSlots, AgentState } from "./agent.types.js";
 import { AgentModelRouterProvider } from "./agent-model-router.provider.js";
+import { agentIntentFromWorkflow, decideNextFrame, stateWithFrame } from "./conversation-frame.js";
 import { agentQuickActions, agentQuickActionsArabic, arabicGreeting, englishGreeting } from "./agent-instructions.js";
 import { RulesAgentModelProvider } from "./rules-agent-model.provider.js";
 import { MetaWhatsAppCloudProvider, SandboxWhatsAppProvider, type WhatsAppProvider } from "./whatsapp-provider.js";
@@ -45,12 +46,234 @@ export const arabicGeneralFallback = "Tawseelhub نظام تشغيل لشركا�
 const safeRulesClassifier = new RulesAgentModelProvider();
 export const isCorruptedArabicText = (value: string) => /\?{3,}/.test(value) && !/[\u0600-\u06ff]/.test(value);
 export const isAgentPriceQuestionText = (value: string) => priceQuestionPattern.test(value.trim()) || arabicPriceQuestionPattern.test(value.trim());
+export const isAgentPlatformPricingQuestionText = (value: string) => /system price|price .*system|system .*price|platform price|price .*platform|platform .*price|software price|price .*software|software .*price|product pricing|your prices?|your pricing|how (?:is|are).*prices?|subscription|monthly plan|pricing page|سعر النظام|سعر استخدام النظام|سعر.*النظام|النظام.*سعر|اشتراك|باقة|باقات|رسوم النظام|تكلفة النظام/i.test(value.trim());
+export const isAgentAnyPricingTopicText = (value: string) => {
+  if (isAgentPlatformPricingQuestionText(value)) return true;
+  const text = value.trim();
+  const asksDeliveryQuote = /shipment|package|parcel|delivery price|delivery quote|send|pickup|drop(?:off)?|شحنة|طرد|سعر توصيل|عرض سعر توصيل|استلام|توصيل/i.test(text);
+  return isAgentPriceQuestionText(text) && !asksDeliveryQuote;
+};
+export const isAgentAffirmativeText = (value: string) => /^(yes|y|ok|okay|sure|please|confirm|نعم|اي|إي|ايوه|أيوه|تمام|اوكي|أوكي|أكيد|اكيد)$/i.test(value.trim());
+export const isAgentDeductionQuestionText = (value: string) => {
+  const lower = value.toLowerCase().trim();
+  const asksWhy = /\bwhy\b|\bwhat\s+for\b|ليش|ليه|لماذا|لشو|شو سبب|ما سبب/.test(lower);
+  const feeWords = /deduct|deduction|charge|fee|fees|subscription|monthly|cost|خصم|تخصم|تخصمون|رسوم|اشتراك|تكلفة|تحاسب|تدفع/.test(lower);
+  return asksWhy && feeWords;
+};
+export const isAgentConfusionText = (value: string) => /not clear|unclear|confusing|confused|i do not understand|i don't understand|what do you mean|الكلام غير مفهوم|غير مفهوم|مش فاهم|ما فهمت|شو تقصد/i.test(value.trim());
+export const isAgentTraderUsageQuestionText = (value: string) => {
+  const lower = value.toLowerCase().trim();
+  const mentionsTrader = /trader|seller|merchant|store|تاجر|متجر/.test(lower);
+  const asksHow = /\bhow\b|\bwhat\b|كيف|شلون|شو|ما/.test(lower);
+  const usageWords = /use|work|benefit|system|platform|manage|يستخدم|يستفيد|يشتغل|النظام|المنصة|يدير/.test(lower);
+  return mentionsTrader && asksHow && usageWords;
+};
+export const isAgentFeatureExplanationText = (value: string) => /driver management|manage drivers|drivers|cod|cash on delivery|collections|settlements|reports|payroll|إدارة السائقين|ادارة السائقين|السائقين|المندوبين|تحصيل|COD|التسويات|تسويات|التقارير|تقارير|الرواتب|رواتب/i.test(value.trim());
+export const isAgentTraderExplanationChoiceText = (value: string) => /^(trader|traders|seller|sellers|merchant|merchants|store|stores|the trader|for traders|التاجر|التجار|للتاجر|للتجار|تاجر|تجار|المتجر|المتاجر)$/i.test(value.trim());
+export const isAgentExplainOnlyText = (value: string) => /explain only|just explain|no request|no order|what request|اشرح فقط|فقط اشرح|اشرح النظام|انت فقط اشرح|أنت فقط اشرح|لا يوجد طلب|لايوجد طلب|ما في طلب|اي طلب|أي طلب|وانت مالك|وأنت مالك/i.test(value.trim());
+const traderRegistrationChoicePattern = /trader registration|register as trader|تسجيل.*تاجر|التسجيل كتاجر|كتاجر|تاجر/i;
+const emailAddressPattern = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i;
 export const publicAgentLabel = (value: unknown): string => String(value ?? "").replace(/_/g, " ").replace(/\s+/g, " ").trim().replace(/\b[a-z]/g, (letter) => letter.toUpperCase());
 export const persistableAgentConversationIntent = (intent: AgentIntent): AgentIntent =>
   socialIntents.has(intent) ? "general_question" : intent;
+export function privacyBoundaryResponse(language: AgentLanguage): string {
+  return language === "ar"
+    ? "لا أستطيع مشاركة بيانات خاصة أو داخلية، مثل أسماء شركات التوصيل أو التجار، معلومات عملاء آخرين، العمولات، الأرقام الداخلية، الملاحظات الداخلية أو أي أسرار. أقدر أشرح لك طريقة استخدام Tawseelhub أو أساعدك في طلبك الخاص فقط."
+    : "I can’t share private or internal information such as Delivery Company or Trader names, other customers’ data, commissions, internal IDs, staff notes, credentials or secrets. I can explain how Tawseelhub works or help with your own request.";
+}
 export function generalKnowledgeContent(language: AgentLanguage, storedContent: string | undefined): string {
   if (language === "ar" && (storedContent === undefined || isCorruptedArabicText(storedContent))) return arabicGeneralFallback;
   return storedContent ?? "I do not have confirmed information for that yet.";
+}
+export function contextualGeneralFollowUpResponse(text: string, language: AgentLanguage, previousState: AgentState, currentState: AgentState): { content: string; intent: AgentIntent; status: string; structured: { suppressReturningAcknowledgement: true; state: AgentState } } | undefined {
+  if (isAgentFeatureExplanationText(text) && !/(demo|عرض تجريبي|احجز|book|submit|send request|أرسل طلب|ارسل طلب)/i.test(text)) {
+    const { pendingAction: _pendingAction, lastAskedSlot: _lastAskedSlot, pendingGeneralFollowUp: _pendingGeneralFollowUp, ...baseState } = currentState;
+    const content = featureExplanationText(text, language);
+    return { content, intent: "product_feature_question", status: "waiting_for_user", structured: { suppressReturningAcknowledgement: true, state: { ...baseState, lastBusinessIntent: "product_feature_question", pendingGeneralFollowUp: "feature_choice" } } };
+  }
+  if (previousState.lastAskedSlot && previousState.lastBusinessIntent && workflowIntents.has(previousState.lastBusinessIntent) && isAgentExplainOnlyText(text)) {
+    const { pendingAction: _pendingAction, lastAskedSlot: _lastAskedSlot, pendingGeneralFollowUp: _pendingGeneralFollowUp, ...baseState } = currentState;
+    const content = language === "ar"
+      ? "تمام، أوقفت نموذج الطلب. Tawseelhub هو نظام يساعد شركات التوصيل والتجار على تنظيم الطلبات والتوصيل والتحصيل COD والتسويات والتقارير في مكان واحد. بالنسبة للتاجر، الفائدة أنه يستطيع ربط طلباته مع شركة التوصيل ومتابعة حالة الطلب والتحصيل والتسوية بشكل أوضح. هل تريد شرح جزء معيّن من النظام؟"
+      : "Understood — I’ve stopped the request form. Tawseelhub helps Delivery Companies and Traders organize orders, delivery, COD collections, settlements and reports in one place. For a Trader, the value is connecting orders with a Delivery Company and following delivery status, COD and settlement more clearly. Which part of the system would you like explained?";
+    return { content, intent: "general_question", status: "waiting_for_user", structured: { suppressReturningAcknowledgement: true, state: { ...baseState, lastBusinessIntent: "general_question", pendingGeneralFollowUp: "feature_choice" } } };
+  }
+  if ((previousState.pendingGeneralFollowUp === "public_explanation" || previousState.pendingGeneralFollowUp === "feature_choice") && isAgentTraderExplanationChoiceText(text)) {
+    const { pendingAction: _pendingAction, lastAskedSlot: _lastAskedSlot, pendingGeneralFollowUp: _pendingGeneralFollowUp, ...baseState } = currentState;
+    const content = language === "ar"
+      ? "بالنسبة للتاجر، Tawseelhub يساعده على ربط متجره أو طلباته مع شركة توصيل، متابعة حالة الطلبات، معرفة ما تم تحصيله COD، ومتابعة التسويات حسب الاتفاق مع شركة التوصيل. هذا شرح للنظام فقط، وليس طلب تسجيل. هل تريد شرح التسجيل كتاجر أم متابعة الطلبات والتحصيل؟"
+      : "For a Trader, Tawseelhub helps connect the store or orders with a Delivery Company, follow delivery status, track COD collected, and follow settlements based on the agreement with the Delivery Company. This is only an explanation, not a registration request. Would you like me to explain Trader registration or order/COD follow-up?";
+    return { content, intent: "general_question", status: "waiting_for_user", structured: { suppressReturningAcknowledgement: true, state: { ...baseState, audience: "trader", lastBusinessIntent: "general_question", pendingGeneralFollowUp: "feature_choice" } } };
+  }
+  if (previousState.pendingAction && isAgentConfusionText(text)) {
+    const { pendingAction: _pendingAction, lastAskedSlot: _lastAskedSlot, pendingGeneralFollowUp: _pendingGeneralFollowUp, ...baseState } = currentState;
+    const content = language === "ar"
+      ? "أعتذر، سأوضحها ببساطة. كنت أراجع تفاصيل طلب قبل الإرسال، لكن لن أرسله إلا إذا أكدت ذلك بوضوح. هل تريد شرح الخطوة، أم نبدأ من جديد؟"
+      : "Sorry — let me make that clearer. I was reviewing details before submission, but I will not submit anything unless you clearly confirm. Would you like me to explain the step, or should we start again?";
+    return { content, intent: "general_question", status: "waiting_for_user", structured: { suppressReturningAcknowledgement: true, state: baseState } };
+  }
+  if (isAgentDeductionQuestionText(text)) {
+    const content = language === "ar"
+      ? "Tawseelhub لا يخصم مبلغاً من العميل بشكل عشوائي. التكلفة تكون إما اشتراكاً شهرياً لشركة التوصيل حسب حجم الطلبات، أو سعر توصيل لكل شحنة حسب المسار والاتفاق. إذا تقصد خصماً في طلب أو فاتورة محددة، أرسل رقم المرجع لأتحقق منه."
+      : "Tawseelhub does not randomly deduct money from customers. Costs are either a monthly subscription for the Delivery Company based on order volume, or a delivery charge for a shipment based on the route and agreement. If you mean a specific deduction on a request or invoice, send the reference number and I can check it.";
+    const { pendingGeneralFollowUp: _pendingGeneralFollowUp, ...clearedState } = currentState;
+    return { content, intent: "general_question", status: "waiting_for_user", structured: { suppressReturningAcknowledgement: true, state: clearedState } };
+  }
+  if (isAgentAnyPricingTopicText(text)) {
+    const { pendingAction: _pendingAction, lastAskedSlot: _lastAskedSlot, pendingGeneralFollowUp: _pendingGeneralFollowUp, ...baseState } = currentState;
+    return {
+      content: platformPricingResponse(language),
+      intent: "general_question",
+      status: "waiting_for_user",
+      structured: { suppressReturningAcknowledgement: true, state: { ...baseState, lastBusinessIntent: "general_question" } },
+    };
+  }
+  if (previousState.pendingGeneralFollowUp === "feature_choice" && traderRegistrationChoicePattern.test(text) && !isAgentTraderExplanationChoiceText(text)) {
+    const { pendingAction: _pendingAction, lastAskedSlot: _lastAskedSlot, pendingGeneralFollowUp: _pendingGeneralFollowUp, ...baseState } = currentState;
+    const content = language === "ar"
+      ? "التسجيل كتاجر يعني أن المتجر يترك بياناته في Tawseelhub حتى يستطيع فريق العمليات ربطه بخدمة التوصيل المناسبة ومتابعة الطلبات والتحصيل لاحقاً. إذا أردت التسجيل، سأبدأ معك من أول سؤال ولن أستخدم تفاصيل قديمة بدون تأكيد. هل تريد أن نبدأ طلب تسجيل تاجر الآن؟"
+      : "Trader registration means the store leaves its details with Tawseelhub so the operations team can connect it to the right delivery service and later manage orders and COD follow-up. If you want to register, I’ll start from the first question and won’t reuse old details without confirmation. Should we start a Trader application now?";
+    return { content, intent: "general_question", status: "waiting_for_user", structured: { suppressReturningAcknowledgement: true, state: { ...baseState, pendingGeneralFollowUp: "trader_registration_explained" } } };
+  }
+  if (previousState.pendingGeneralFollowUp === "trader_registration_explained" && isAgentAffirmativeText(text)) {
+    const { pendingAction: _pendingAction, lastAskedSlot: _lastAskedSlot, pendingGeneralFollowUp: _pendingGeneralFollowUp, ...baseState } = currentState;
+    const content = language === "ar"
+      ? "تمام، لنبدأ طلب تسجيل التاجر. ما اسم المتجر؟"
+      : "Great, let’s start the Trader application. What is the store name?";
+    return { content, intent: "trader", status: "waiting_for_user", structured: { suppressReturningAcknowledgement: true, state: { ...baseState, slots: {}, lastBusinessIntent: "trader", lastAskedSlot: "storeName" } } };
+  }
+  if (previousState.pendingGeneralFollowUp && isAgentAffirmativeText(text)) {
+    const content = language === "ar"
+      ? "تمام. أي جزء تريدني أشرحه: التحصيل COD، إدارة السائقين، تسويات التجار، التقارير، الأسعار، أو التسجيل كتاجر؟"
+      : "Sure. Which part should I explain: COD collections, driver management, Trader settlements, reports, pricing, or Trader registration?";
+    return { content, intent: "general_question", status: "waiting_for_user", structured: { suppressReturningAcknowledgement: true, state: { ...currentState, pendingGeneralFollowUp: "feature_choice" } } };
+  }
+  return undefined;
+}
+function featureExplanationText(text: string, language: AgentLanguage): string {
+  const lower = text.toLowerCase();
+  if (/driver management|manage drivers|drivers|إدارة السائقين|ادارة السائقين|السائقين|المندوبين/.test(lower)) {
+    return language === "ar"
+      ? "إدارة السائقين في Tawseelhub تعني أن شركة التوصيل تستطيع تنظيم بيانات السائقين، متابعة الطلبات المسندة لكل سائق، مراقبة حالة التسليم، وربط عمل السائقين بالتحصيل COD والتقارير. هذا شرح للميزة فقط، وليس طلب عرض تجريبي. هل تريد شرح التحصيل مع السائقين أم تقارير أداء السائقين؟"
+      : "Driver management in Tawseelhub helps a Delivery Company organize driver records, follow assigned orders, monitor delivery status, and connect driver activity to COD collections and reports. This is only a feature explanation, not a demo request. Would you like me to explain driver collections or driver performance reports?";
+  }
+  if (/cod|cash on delivery|collection|تحصيل/.test(lower)) {
+    return language === "ar"
+      ? "التحصيل COD في Tawseelhub يساعد على ربط مبلغ التحصيل بالطلب والسائق والتاجر، ثم متابعة ما تم تحصيله وما يحتاج تسوية أو مطابقة. هل تريد شرح تحصيل السائقين أم تسويات التجار؟"
+      : "COD in Tawseelhub connects collected amounts to the order, driver and Trader, then tracks what was collected and what needs settlement or reconciliation. Would you like driver collection or Trader settlement explained?";
+  }
+  if (/settlement|التسويات|تسويات/.test(lower)) {
+    return language === "ar"
+      ? "التسويات تساعد على متابعة المبالغ المستحقة للتجار أو على السائقين بعد التسليم والتحصيل، حتى تكون الأرصدة والتقارير أوضح. هل تريد شرح تسويات التجار أم تقارير التحصيل؟"
+      : "Settlements help track amounts payable to Traders or due from drivers after delivery and COD collection, so balances and reports stay clear. Would you like Trader settlements or collection reports explained?";
+  }
+  if (/report|reports|التقارير|تقارير/.test(lower)) {
+    return language === "ar"
+      ? "التقارير في Tawseelhub تعرض صورة تشغيلية عن الطلبات والسائقين والتحصيل والتسويات وأداء التوصيل، حسب إعدادات الشركة. هل تريد مثالاً على تقرير السائقين أم تقرير COD؟"
+      : "Reports in Tawseelhub show operational visibility across orders, drivers, COD, settlements and delivery performance depending on company setup. Would you like an example of driver reports or COD reports?";
+  }
+  return language === "ar"
+    ? "هذه ميزة داخل نظام Tawseelhub لإدارة عمليات التوصيل. أشرحها لك بدون بدء أي طلب. أي جزء تريد تفاصيل أكثر عنه؟"
+    : "This is a Tawseelhub delivery operations feature. I can explain it without starting any request. Which part would you like more detail on?";
+}
+function platformPricingResponse(language: AgentLanguage): string {
+  return language === "ar"
+    ? "أسعار استخدام نظام Tawseelhub موجودة هنا: https://tawseelhub.com/pricing"
+    : "Tawseelhub system pricing is available here: https://tawseelhub.com/pricing";
+}
+export function publicConversationIntroStep(text: string, language: AgentLanguage, state: AgentState): { content: string; intent: AgentIntent; status: string; structured: { state: AgentState } } | undefined {
+  const slots = { ...state.slots };
+  const answer = text.trim();
+  const previousMissing = state.lastAskedSlot;
+  const isQuestion = /[?؟]/.test(answer);
+  const isNonAnswer = !answer || isQuestion || /^(hi|hello|hey|مرحبا|هلا|السلام عليكم|كيفك|كيف الحال)$/i.test(answer);
+  const normalizedMobileAnswer = answer.replace(/\D/g, "");
+  const isUaeMobileAnswer = /^05\d{8}$/.test(normalizedMobileAnswer) || /^5\d{8}$/.test(normalizedMobileAnswer) || /^9715\d{8}$/.test(normalizedMobileAnswer);
+
+  if (previousMissing === "contactName" && !isNonAnswer && answer.length <= 80) {
+    slots.contactName = answer;
+    slots.requesterName = slots.requesterName ?? answer;
+    slots.contactPerson = slots.contactPerson ?? answer;
+  }
+  if (previousMissing === "requesterMobile") {
+    if (isUaeMobileAnswer) {
+      slots.requesterMobile = answer;
+      slots.mobileNumber = slots.mobileNumber ?? answer;
+      slots.mobile = slots.mobile ?? answer;
+    } else if (answer) {
+      return {
+        content: language === "ar" ? "رقم الهاتف غير واضح. اكتب رقم موبايل إماراتي مثل 0501234567." : "The mobile number is not clear. Please enter a UAE mobile like 0501234567.",
+        intent: "general_question",
+        status: "waiting_for_user",
+        structured: { state: { ...state, slots, lastBusinessIntent: "general_question", lastAskedSlot: "requesterMobile" } },
+      };
+    }
+  }
+  if (previousMissing === "companyName" && !isNonAnswer && answer.length <= 120) {
+    slots.companyName = answer;
+    slots.storeName = slots.storeName ?? answer;
+  }
+  if (previousMissing === "email") {
+    const email = emailAddressPattern.exec(answer)?.[0]?.toLowerCase();
+    if (email) {
+      slots.email = email;
+      slots.requesterEmail = slots.requesterEmail ?? email;
+    } else if (answer) {
+      return {
+        content: language === "ar" ? "البريد الإلكتروني غير واضح. اكتب الإيميل بصيغة مثل name@example.com." : "The email is not clear. Please enter it like name@example.com.",
+        intent: "general_question",
+        status: "waiting_for_user",
+        structured: { state: { ...state, slots, lastBusinessIntent: "general_question", lastAskedSlot: "email" } },
+      };
+    }
+  }
+
+  const hasName = Boolean(slots.contactName ?? slots.requesterName ?? slots.contactPerson);
+  const hasMobile = Boolean(slots.requesterMobile ?? slots.mobileNumber ?? slots.mobile);
+  const hasBusinessName = Boolean(slots.companyName ?? slots.storeName);
+  const hasEmail = Boolean(slots.email ?? slots.requesterEmail);
+  if (!hasName) {
+    return {
+      content: language === "ar" ? "قبل أن أساعدك، ما اسمك؟" : "Before I help, what is your name?",
+      intent: "general_question",
+      status: "waiting_for_user",
+      structured: { state: { ...state, slots, lastBusinessIntent: "general_question", lastAskedSlot: "contactName" } },
+    };
+  }
+  if (!hasMobile) {
+    return {
+      content: language === "ar" ? "ما رقم الهاتف المتحرك في الإمارات؟" : "What UAE mobile number should we use?",
+      intent: "general_question",
+      status: "waiting_for_user",
+      structured: { state: { ...state, slots, lastBusinessIntent: "general_question", lastAskedSlot: "requesterMobile" } },
+    };
+  }
+  if (!hasBusinessName) {
+    return {
+      content: language === "ar" ? "ما اسم الشركة أو المتجر؟" : "What is the company or store name?",
+      intent: "general_question",
+      status: "waiting_for_user",
+      structured: { state: { ...state, slots, lastBusinessIntent: "general_question", lastAskedSlot: "companyName" } },
+    };
+  }
+  if (!hasEmail) {
+    return {
+      content: language === "ar" ? "ما البريد الإلكتروني للتواصل؟" : "What email should we use for contact?",
+      intent: "general_question",
+      status: "waiting_for_user",
+      structured: { state: { ...state, slots, lastBusinessIntent: "general_question", lastAskedSlot: "email" } },
+    };
+  }
+  if (previousMissing === "contactName" || previousMissing === "requesterMobile" || previousMissing === "companyName" || previousMissing === "email") {
+    const { lastAskedSlot: _lastAskedSlot, ...nextState } = { ...state, slots, lastBusinessIntent: "general_question" as const };
+    return {
+      content: language === "ar" ? "شكراً، تم حفظ بيانات التواصل. كيف يمكنني مساعدتك الآن؟" : "Thanks, I saved the contact details. How can I help you now?",
+      intent: "general_question",
+      status: "waiting_for_user",
+      structured: { state: nextState },
+    };
+  }
+  return undefined;
 }
 
 @Injectable()
@@ -65,13 +288,19 @@ export class AgentService {
     @Inject(AgentModelRouterProvider) private readonly model: AgentModelRouterProvider,
   ) {}
 
-  public async createWebsiteConversation(language?: AgentLanguage, visitorId?: string) {
+  private visitorIpHash(visitorIp?: string) {
+    const normalized = visitorIp?.trim().toLowerCase();
+    return normalized ? hash(`agent-ip:${normalized}`) : null;
+  }
+
+  public async createWebsiteConversation(language?: AgentLanguage, visitorId?: string, visitorIp?: string) {
     const sessionToken = token();
     const settings = await this.settings();
     if (!settings.agentEnabled || !settings.websiteChatEnabled) throw new BadRequestException("agent_disabled");
     const ref = await reference(this.db, "platform_agent_conversation_reference_seq", "AGT");
     const stableVisitorId = validUuid.test(visitorId ?? "") ? visitorId! : randomUUID();
-    await sql`insert into platform_agent_conversations(reference_number,public_session_token_hash,visitor_id,channel,language,current_intent,status,requester_type,audience,last_message_at,state) values(${ref},${hash(sessionToken)},${stableVisitorId}::uuid,'website',${language ?? settings.defaultLanguage},'unknown','active','unknown','unknown',now(),${JSON.stringify({ slots: {}, audience: "unknown", discussedTopics: [], visitorId: stableVisitorId })}::jsonb)`.execute(this.db);
+    const visitorIpHash = this.visitorIpHash(visitorIp);
+    await sql`insert into platform_agent_conversations(reference_number,public_session_token_hash,visitor_id,visitor_ip_hash,visitor_ip_seen_at,channel,language,current_intent,status,requester_type,audience,last_message_at,state) values(${ref},${hash(sessionToken)},${stableVisitorId}::uuid,${visitorIpHash},case when ${visitorIpHash}::text is not null then now() else null end,'website',${language ?? settings.defaultLanguage},'unknown','active','unknown','unknown',now(),${JSON.stringify({ slots: {}, audience: "unknown", discussedTopics: [], visitorId: stableVisitorId })}::jsonb)`.execute(this.db);
     const selectedLanguage = language ?? settings.defaultLanguage;
     const welcome = this.welcome(selectedLanguage);
     const quickActions = selectedLanguage === "ar" ? agentQuickActionsArabic : agentQuickActions;
@@ -84,8 +313,19 @@ export class AgentService {
     return this.publicConversation(conversation);
   }
 
-  public async receiveWebsiteMessage(sessionToken: string, text: string, language?: AgentLanguage) {
+  public async receiveWebsiteMessage(sessionToken: string, text: string, language?: AgentLanguage, visitorIp?: string) {
     const conversation = await this.findByToken(sessionToken);
+    const visitorIpHash = this.visitorIpHash(visitorIp);
+    if (visitorIpHash) {
+      await sql`
+        update platform_agent_conversations
+        set visitor_ip_hash=coalesce(visitor_ip_hash, ${visitorIpHash}),
+          visitor_ip_seen_at=now()
+        where id=${conversation.id}::uuid
+      `.execute(this.db);
+      conversation.visitor_ip_hash = String(conversation.visitor_ip_hash ?? visitorIpHash);
+      conversation.visitor_ip_seen_at = new Date().toISOString();
+    }
     return this.handleInbound(conversation, { channel: "website", text, ...(language === undefined ? {} : { language }) });
   }
 
@@ -200,12 +440,47 @@ export class AgentService {
       return { ...(await this.publicConversation(updated)), reply: null, intent: updated.current_intent, language: updated.language, automationSuppressed: true };
     }
     const settings = await this.settings();
+    const frame = decideNextFrame({
+      currentIntent: conversation.current_intent as AgentIntent,
+      message: input.text,
+      state,
+    });
+    this.logFrameDecision(String(conversation.id), frame);
+    if (frame.decision === "privacy_blocked") {
+      const language = input.language ?? conversation.language as AgentLanguage;
+      const { pendingAction: _pendingAction, lastAskedSlot: _lastAskedSlot, ...privacyBaseState } = state;
+      const framedState = stateWithFrame({
+        ...privacyBaseState,
+        lastBusinessIntent: "general_question",
+      }, frame);
+      const content = privacyBoundaryResponse(language);
+      await this.appendMessage(String(conversation.id), "assistant", content, { conversationFrame: frame, state: framedState }, { channel: input.channel, direction: "outbound", ...(input.provider === undefined ? {} : { provider: input.provider }) });
+      await sql`update platform_agent_conversations set language=${language},current_intent='general_question',status='waiting_for_user',audience=${framedState.audience ?? "unknown"},state=${JSON.stringify(framedState)}::jsonb,updated_at=now(),last_message_at=now() where id=${conversation.id}::uuid`.execute(this.db);
+      const updated = (await sql<Record<string, unknown>>`select * from platform_agent_conversations where id=${conversation.id}::uuid`.execute(this.db)).rows[0]!;
+      return { ...(await this.publicConversation(updated)), reply: content, intent: "general_question", language };
+    }
     if (input.channel === "whatsapp" && (!settings.whatsappAgentEnabled || settings.whatsappProvider === "disabled")) {
       await sql`update platform_agent_conversations set state=${JSON.stringify(state)}::jsonb, review_status='open', last_customer_message_at=now(), last_channel='whatsapp', updated_at=now(), last_message_at=now() where id=${conversation.id}::uuid`.execute(this.db);
       const updated = (await sql<Record<string, unknown>>`select * from platform_agent_conversations where id=${conversation.id}::uuid`.execute(this.db)).rows[0]!;
       return { ...(await this.publicConversation(updated)), reply: null, intent: updated.current_intent, language: updated.language, automationSuppressed: true };
     }
+    const intro = publicConversationIntroStep(input.text, input.language ?? conversation.language as AgentLanguage, state);
+    if (intro) {
+      const introState = intro.structured.state;
+      const identity = this.identityFromState(introState);
+      await this.appendMessage(String(conversation.id), "assistant", intro.content, intro.structured, { channel: input.channel, direction: "outbound", ...(input.provider === undefined ? {} : { provider: input.provider }) });
+      await sql`update platform_agent_conversations set language=${input.language ?? conversation.language as AgentLanguage},current_intent='general_question',status=${intro.status},audience=${introState.audience ?? "unknown"},customer_name=${identity.name},mobile_number=${identity.mobileOriginal},mobile_number_normalized=${identity.mobileNormalized},email=${identity.email},state=${JSON.stringify(introState)}::jsonb,updated_at=now(),last_message_at=now() where id=${conversation.id}::uuid`.execute(this.db);
+      const updated = (await sql<Record<string, unknown>>`select * from platform_agent_conversations where id=${conversation.id}::uuid`.execute(this.db)).rows[0]!;
+      return { ...(await this.publicConversation(updated)), reply: intro.content, intent: "general_question", language: input.language ?? conversation.language as AgentLanguage };
+    }
     if (state.lastAskedSlot && this.isClarification(input.text)) {
+      const contextualClarification = contextualGeneralFollowUpResponse(input.text, input.language ?? conversation.language as AgentLanguage, state, state);
+      if (contextualClarification) {
+        await this.appendMessage(String(conversation.id), "assistant", contextualClarification.content, contextualClarification.structured, { channel: input.channel, direction: "outbound", ...(input.provider === undefined ? {} : { provider: input.provider }) });
+        await sql`update platform_agent_conversations set language=${input.language ?? conversation.language as AgentLanguage},current_intent='general_question',status='waiting_for_user',state=${JSON.stringify(contextualClarification.structured.state)}::jsonb,updated_at=now(),last_message_at=now() where id=${conversation.id}::uuid`.execute(this.db);
+        const updated = (await sql<Record<string, unknown>>`select * from platform_agent_conversations where id=${conversation.id}::uuid`.execute(this.db)).rows[0]!;
+        return { ...(await this.publicConversation(updated)), reply: contextualClarification.content, intent: "general_question", language: input.language ?? conversation.language as AgentLanguage };
+      }
       const language = input.language ?? conversation.language as AgentLanguage;
       const response = this.fieldClarification(state.lastAskedSlot, language, state, input.text);
       await this.appendMessage(String(conversation.id), "assistant", response.content, { clarificationFor: state.lastAskedSlot }, { channel: input.channel, direction: "outbound", ...(input.provider === undefined ? {} : { provider: input.provider }) });
@@ -239,9 +514,12 @@ export class AgentService {
         return { ...(await this.publicConversation(updated)), reply: safe, intent: "handoff", language };
       }
     }
-    const turnIntent = this.resolveTurnIntent(input.text, model.intent, state);
+    const frameIntent = this.intentFromConversationFrame(frame, model.intent);
+    const turnIntent = (isAgentTraderUsageQuestionText(input.text) || isAgentFeatureExplanationText(input.text)) ? "product_feature_question" : this.resolveTurnIntent(input.text, frameIntent, state);
     const mergedSlots = this.mergeSlots(state.slots, model.extracted, model.wantsCorrection);
-    let nextState = this.enrichState(input.text, turnIntent, { ...state, slots: this.applySequentialWorkflowAnswer(input.text, turnIntent, state, mergedSlots) });
+    const frameScopedState = this.stateScopedByConversationFrame(state, frame);
+    let nextState = this.enrichState(input.text, turnIntent, { ...frameScopedState, slots: this.applySequentialWorkflowAnswer(input.text, turnIntent, frameScopedState, mergedSlots) });
+    nextState = stateWithFrame(nextState, frame);
     if (state.lastAskedSlot === "deliveryAddress" && this.isSkipAnswer(input.text)) {
       const { deliveryAddress: _deliveryAddress, ...remainingSlots } = nextState.slots;
       nextState = { ...nextState, deliveryAddressSkipped: true, slots: remainingSlots };
@@ -251,8 +529,10 @@ export class AgentService {
       nextState = rest;
     }
     let response: { content: string; structured?: Record<string, unknown>; status?: string; intent?: AgentIntent };
-    const interruption = await this.workflowInterruptionResponse(String(conversation.id), input.text, model.language, state, nextState);
-    if (interruption) response = interruption;
+    const contextualGeneralFollowUp = contextualGeneralFollowUpResponse(input.text, model.language, state, nextState);
+    const interruption = contextualGeneralFollowUp ? undefined : await this.workflowInterruptionResponse(String(conversation.id), input.text, model.language, state, nextState);
+    if (contextualGeneralFollowUp) response = contextualGeneralFollowUp;
+    else if (interruption) response = interruption;
     else if (state.pendingAction && model.wantsConfirmation) response = await this.executePending(String(conversation.id), state.pendingAction.type, nextState);
     else response = await this.previousRequestQuestionResponse(String(conversation.id), input.text, model.language, nextState)
       ?? await this.nextResponse(String(conversation.id), turnIntent, model.language, nextState, String(conversation.status ?? ""), input.channel, settings);
@@ -840,7 +1120,7 @@ export class AgentService {
     const latest = await this.latestUserMessage(conversationId);
     const knowledge = await this.retrieveKnowledge(latest, language, state);
     const fallback = () => this.safeBusinessFallback(latest, language, state, knowledge);
-    const generated = currentTurnIntent === "product_feature_question" || currentTurnIntent === "current_feature_status" || privateDirectoryOrCustomerInfo.test(latest)
+    const generated = currentTurnIntent === "product_feature_question" || currentTurnIntent === "current_feature_status" || privateDirectoryOrCustomerInfo.test(latest) || isAgentAnyPricingTopicText(latest)
       ? fallback()
       : await this.model.generateReply({
         audience: state.audience ?? "unknown",
@@ -852,7 +1132,9 @@ export class AgentService {
         text: latest,
       }, fallback);
     const content = this.enforceSingleQuestion(this.guardPublicReply(generated, language, fallback));
-    return { content, intent: currentTurnIntent, status: "waiting_for_user", structured: { state } };
+    const shouldRememberFollowUp = /[?؟]/.test(content) && (currentTurnIntent === "general_question" || currentTurnIntent === "product_feature_question" || currentTurnIntent === "current_feature_status");
+    const { pendingGeneralFollowUp: _pendingGeneralFollowUp, ...baseState } = state;
+    return { content, intent: currentTurnIntent, status: "waiting_for_user", structured: { state: shouldRememberFollowUp ? { ...baseState, pendingGeneralFollowUp: "public_explanation" } : baseState } };
   }
 
   public async adminConversations(query: Record<string, string | undefined> = {}) {
@@ -900,9 +1182,17 @@ export class AgentService {
           case
             when c.customer_id is not null then 'customer:' || c.customer_id::text
             when c.mobile_number_normalized is not null and c.mobile_number_normalized <> '' then 'mobile:' || c.mobile_number_normalized
+            when c.visitor_ip_hash is not null and c.visitor_ip_hash <> '' then 'ip:' || c.visitor_ip_hash
             when c.visitor_id is not null then 'visitor:' || c.visitor_id::text
             else 'conversation:' || c.id::text
           end identity_key,
+          case
+            when c.customer_id is not null then 'customer'
+            when c.mobile_number_normalized is not null and c.mobile_number_normalized <> '' then 'mobile'
+            when c.visitor_ip_hash is not null and c.visitor_ip_hash <> '' then 'ip'
+            when c.visitor_id is not null then 'visitor'
+            else 'conversation'
+          end identity_match_type,
           message_counts.message_count,
           unread_counts.unread_count,
           left(last_user.content,180) last_user_message,
@@ -960,6 +1250,8 @@ export class AgentService {
         (array_agg(b.mobile_number_normalized order by b.last_message_at desc nulls last))[1] mobile_number_normalized,
         (array_agg(b.email order by b.last_message_at desc nulls last))[1] email,
         (array_agg(b.audience order by b.last_message_at desc))[1] audience,
+        (array_agg(b.identity_match_type order by b.last_message_at desc))[1] identity_match_type,
+        bool_or(b.visitor_ip_hash is not null and b.visitor_ip_hash <> '') has_visitor_ip,
         (array_agg(b.assigned_to_account_id order by b.last_message_at desc))[1] assigned_to_account_id,
         (array_agg(assignee.username order by b.last_message_at desc))[1] assigned_to_username,
         count(*)::int conversation_count,
@@ -979,21 +1271,21 @@ export class AgentService {
         min(b.waiting_since) waiting_since
       from base b
       left join accounts assignee on assignee.id=b.assigned_to_account_id
-      group by b.business_date,b.identity_key,b.id
+      group by b.business_date,b.identity_key
       order by max(b.last_message_at) desc
       limit ${pageSize} offset ${offset}
     `.execute(this.db);
     const total = (await sql<{ count: string }>`
       with base as (
         select c.id,(c.last_message_at at time zone 'Asia/Dubai')::date business_date,
-          case when c.customer_id is not null then 'customer:' || c.customer_id::text when c.mobile_number_normalized is not null and c.mobile_number_normalized <> '' then 'mobile:' || c.mobile_number_normalized when c.visitor_id is not null then 'visitor:' || c.visitor_id::text else 'conversation:' || c.id::text end identity_key
+          case when c.customer_id is not null then 'customer:' || c.customer_id::text when c.mobile_number_normalized is not null and c.mobile_number_normalized <> '' then 'mobile:' || c.mobile_number_normalized when c.visitor_ip_hash is not null and c.visitor_ip_hash <> '' then 'ip:' || c.visitor_ip_hash when c.visitor_id is not null then 'visitor:' || c.visitor_id::text else 'conversation:' || c.id::text end identity_key
       from platform_agent_conversations c
       left join platform_customer_quote_requests q on q.id=c.linked_quote_request_id
       left join platform_trader_applications t on t.id=c.linked_trader_application_id
       left join platform_demo_requests d on d.id=c.linked_demo_request_id
       where ${where}
       )
-      select count(*)::text count from (select 1 from base group by business_date,identity_key,id) grouped
+      select count(*)::text count from (select 1 from base group by business_date,identity_key) grouped
     `.execute(this.db));
     const counters = (await sql<Record<string, unknown>>`
       select
@@ -1234,14 +1526,12 @@ export class AgentService {
 
   private async dailyThreadConversationIds(id: string): Promise<string[]> {
     if (!validUuid.test(id)) throw new NotFoundException();
-    const anchor = (await sql<{ business_date: string; identity_key: string }>`
+    const anchor = (await sql<{ business_date: string; customer_id: string | null; mobile_number_normalized: string | null; visitor_id: string | null; visitor_ip_hash: string | null }>`
       select (last_message_at at time zone 'Asia/Dubai')::date::text business_date,
-        case
-          when customer_id is not null then 'customer:' || customer_id::text
-          when mobile_number_normalized is not null and mobile_number_normalized <> '' then 'mobile:' || mobile_number_normalized
-          when visitor_id is not null then 'visitor:' || visitor_id::text
-          else 'conversation:' || id::text
-        end identity_key
+        customer_id::text,
+        mobile_number_normalized,
+        visitor_id::text,
+        visitor_ip_hash
       from platform_agent_conversations
       where id=${id}::uuid
     `.execute(this.db)).rows[0];
@@ -1250,26 +1540,26 @@ export class AgentService {
       select id
       from platform_agent_conversations
       where (last_message_at at time zone 'Asia/Dubai')::date::text=${anchor.business_date}
-        and case
-          when customer_id is not null then 'customer:' || customer_id::text
-          when mobile_number_normalized is not null and mobile_number_normalized <> '' then 'mobile:' || mobile_number_normalized
-          when visitor_id is not null then 'visitor:' || visitor_id::text
-          else 'conversation:' || id::text
-        end = ${anchor.identity_key}
+        and (
+          id=${id}::uuid
+          or
+          (${anchor.customer_id}::text is not null and customer_id::text=${anchor.customer_id})
+          or (${anchor.mobile_number_normalized}::text is not null and mobile_number_normalized=${anchor.mobile_number_normalized})
+          or (${anchor.visitor_id}::text is not null and visitor_id::text=${anchor.visitor_id})
+          or (${anchor.visitor_ip_hash}::text is not null and visitor_ip_hash=${anchor.visitor_ip_hash})
+        )
       order by last_message_at desc, created_at desc
     `.execute(this.db);
     return rows.rows.map((row) => row.id);
   }
 
   private async customerPreviousDays(id: string) {
-    const anchor = (await sql<{ business_date: string; identity_key: string }>`
+    const anchor = (await sql<{ business_date: string; customer_id: string | null; mobile_number_normalized: string | null; visitor_id: string | null; visitor_ip_hash: string | null }>`
       select (last_message_at at time zone 'Asia/Dubai')::date::text business_date,
-        case
-          when customer_id is not null then 'customer:' || customer_id::text
-          when mobile_number_normalized is not null and mobile_number_normalized <> '' then 'mobile:' || mobile_number_normalized
-          when visitor_id is not null then 'visitor:' || visitor_id::text
-          else 'conversation:' || id::text
-        end identity_key
+        customer_id::text,
+        mobile_number_normalized,
+        visitor_id::text,
+        visitor_ip_hash
       from platform_agent_conversations where id=${id}::uuid
     `.execute(this.db)).rows[0];
     if (!anchor) return [];
@@ -1277,16 +1567,22 @@ export class AgentService {
       select (last_message_at at time zone 'Asia/Dubai')::date::text business_date,
         count(*)::int conversation_count,
         sum(message_counts.message_count)::int message_count,
-        max(last_message_at) last_activity_at
+        max(last_message_at) last_activity_at,
+        array_remove(array[
+          case when bool_or(${anchor.customer_id}::text is not null and c.customer_id::text=${anchor.customer_id}) then 'customer' end,
+          case when bool_or(${anchor.mobile_number_normalized}::text is not null and c.mobile_number_normalized=${anchor.mobile_number_normalized}) then 'mobile' end,
+          case when bool_or(${anchor.visitor_id}::text is not null and c.visitor_id::text=${anchor.visitor_id}) then 'visitor' end,
+          case when bool_or(${anchor.visitor_ip_hash}::text is not null and c.visitor_ip_hash=${anchor.visitor_ip_hash}) then 'ip' end
+        ], null) match_signals
       from platform_agent_conversations c
       left join lateral (select count(*)::int message_count from platform_agent_messages where conversation_id=c.id) message_counts on true
       where (last_message_at at time zone 'Asia/Dubai')::date::text <> ${anchor.business_date}
-        and case
-          when customer_id is not null then 'customer:' || customer_id::text
-          when mobile_number_normalized is not null and mobile_number_normalized <> '' then 'mobile:' || mobile_number_normalized
-          when visitor_id is not null then 'visitor:' || visitor_id::text
-          else 'conversation:' || c.id::text
-        end = ${anchor.identity_key}
+        and (
+          (${anchor.customer_id}::text is not null and c.customer_id::text=${anchor.customer_id})
+          or (${anchor.mobile_number_normalized}::text is not null and c.mobile_number_normalized=${anchor.mobile_number_normalized})
+          or (${anchor.visitor_id}::text is not null and c.visitor_id::text=${anchor.visitor_id})
+          or (${anchor.visitor_ip_hash}::text is not null and c.visitor_ip_hash=${anchor.visitor_ip_hash})
+        )
       group by business_date
       order by business_date desc
       limit 12
@@ -1340,6 +1636,20 @@ export class AgentService {
       label: "Chat on WhatsApp",
       number,
       url: enabled ? `https://wa.me/${normalized}` : null,
+    };
+  }
+
+  public async publicAvailability() {
+    const row = (await sql<Record<string, unknown>>`
+      select agent_enabled, website_chat_enabled, human_handoff_enabled
+      from platform_agent_settings where id=true
+    `.execute(this.db)).rows[0]!;
+    const assistantAvailable = Boolean(row.agent_enabled) && Boolean(row.website_chat_enabled);
+    const humanAvailable = assistantAvailable && Boolean(row.human_handoff_enabled);
+    return {
+      assistantAvailable,
+      humanAvailable,
+      status: humanAvailable ? "available" : "unavailable",
     };
   }
 
@@ -1556,6 +1866,47 @@ export class AgentService {
     return classifiedIntent;
   }
 
+  private intentFromConversationFrame(frame: AgentState["conversationFrame"], classifiedIntent: AgentIntent): AgentIntent {
+    if (!frame) return classifiedIntent;
+    if (frame.decision === "explicit_workflow_start" || frame.decision === "workflow_continue" || frame.decision === "current_workflow_slot_response") {
+      return agentIntentFromWorkflow(frame.workflow) ?? classifiedIntent;
+    }
+    if (frame.decision === "human_handoff") return "handoff";
+    if (frame.decision === "privacy_blocked") return "general_question";
+    if (frame.mode === "conversation" && frame.workflowState !== "active") {
+      if (["drivers", "cod", "reconciliation", "settlement", "accounting", "payroll", "reports", "integrations", "stores", "mobile", "trader", "delivery_company"].includes(frame.topic)) return "product_feature_question";
+      if (frame.topic === "pricing") return "general_question";
+      return socialIntents.has(classifiedIntent) ? classifiedIntent : "general_question";
+    }
+    return classifiedIntent;
+  }
+
+  private stateScopedByConversationFrame(state: AgentState, frame: AgentState["conversationFrame"]): AgentState {
+    if (!frame) return state;
+    if (frame.decision === "bare_topic_information" || frame.decision === "workflow_paused_for_explanation" || frame.decision === "workflow_cancelled" || frame.decision === "informational_topic" || frame.decision === "privacy_blocked") {
+      const { pendingAction: _pendingAction, lastAskedSlot: _lastAskedSlot, pendingGeneralFollowUp: _pendingGeneralFollowUp, ...baseState } = state;
+      return {
+        ...baseState,
+        conversationFrame: frame,
+        lastBusinessIntent: "general_question",
+      };
+    }
+    return { ...state, conversationFrame: frame };
+  }
+
+  private logFrameDecision(conversationId: string, frame: NonNullable<AgentState["conversationFrame"]>): void {
+    this.logger.debug({
+      conversationId,
+      decision: frame.decision,
+      detectedAction: frame.lastExplicitUserAction,
+      detectedTopic: frame.topic,
+      mode: frame.mode,
+      workflow: frame.workflow,
+      workflowState: frame.workflowState,
+      reason: frame.reason,
+    }, "Tawseelhub Agent conversation frame decision");
+  }
+
   private previousIntentForClassification(currentIntent: AgentIntent, state: AgentState): AgentIntent {
     if (state.lastAskedSlot && state.lastBusinessIntent && workflowIntents.has(state.lastBusinessIntent)) return state.lastBusinessIntent;
     return currentIntent;
@@ -1631,10 +1982,12 @@ export class AgentService {
       if (typeof existing.reference === "string" && typeof existing.status === "string") state.existingRequest = { reference: existing.reference, status: existing.status };
     }
     if (object.deliveryAddressSkipped === true) state.deliveryAddressSkipped = true;
+    if (object.pendingGeneralFollowUp === "public_explanation" || object.pendingGeneralFollowUp === "feature_choice" || object.pendingGeneralFollowUp === "trader_registration_explained") state.pendingGeneralFollowUp = object.pendingGeneralFollowUp;
     if (object.historicalContext !== undefined) state.historicalContext = asObject(object.historicalContext) as NonNullable<AgentState["historicalContext"]>;
     if (object.pendingAction !== undefined) {
       state.pendingAction = object.pendingAction as NonNullable<AgentState["pendingAction"]>;
     }
+    if (object.conversationFrame !== undefined) state.conversationFrame = asObject(object.conversationFrame) as unknown as NonNullable<AgentState["conversationFrame"]>;
     return state;
   }
 
@@ -1852,6 +2205,7 @@ export class AgentService {
         ? "لا أستطيع مشاركة أسماء شركات التوصيل أو التجار أو معلومات أو محادثات عملاء آخرين. هذه معلومات خاصة داخل المنصة. إذا كنت تحتاج توصيلاً، أستطيع مساعدتك بطلب سعر أو تسجيل تاجر ليتم التعامل مع الطلب عبر المسار المناسب."
         : "I can’t share private Delivery Company names, Trader names, another customer’s information, or another customer’s conversation. That information is private inside the Platform. If you need delivery support, I can guide you through a package quote or Trader registration instead.";
     }
+    if (isAgentAnyPricingTopicText(text)) return platformPricingResponse(language);
     if (/reconciliation|driver collections|driver money/.test(lower)) return language === "ar"
       ? "تتم مطابقة السائق من خلال Driver Collections: تراجع الشركة الطلبات المسلّمة للسائق، وتسجل المبلغ الذي تم تسليمه نقداً أو بوسيلة دفع، ويبقى ذلك مرتبطاً بالتقارير والتسويات بدون تكرار نفس الطلب."
       : "Driver reconciliation is handled through Driver Collections: the company reviews delivered orders for a driver, records the cash or payment handed over, and keeps the result traceable for reports and downstream settlement. It is designed to avoid repeating the same order in multiple collections.";
@@ -1866,6 +2220,8 @@ export class AgentService {
         : "Tawseelhub helps Delivery Companies manage COD collections by connecting order amounts, driver collections, Trader balances, settlements, accounting and reports in one operating flow. The goal is to make collected cash traceable from delivery through reconciliation and Trader settlement. Which COD problem are you trying to solve first?";
     }
     if (language === "ar") {
+      if (isAgentFeatureExplanationText(text)) return featureExplanationText(text, language);
+      if (isAgentTraderUsageQuestionText(text)) return "يستخدم التاجر Tawseelhub لربط متجره أو طلباته مع عمليات التوصيل: تسجيل بيانات المتجر، تحديد موقع الاستلام، متابعة الطلبات، رؤية حالة التوصيل، ومتابعة التحصيل COD والتسويات حسب إعداد شركة التوصيل. التسجيل كتاجر هو الخطوة الأولى إذا كان يريد من فريق Tawseelhub مراجعة بياناته وربطه بخدمة توصيل مناسبة. هل تريد شرح التسجيل، أم متابعة الطلبات بعد التسجيل؟";
       if (/shopify|شوبيفاي/.test(lower)) return "تكامل Shopify مخطط وليس متاحاً حالياً. الهدف أن يحتفظ التاجر بمتجر Shopify بينما تنتقل طلبات التوصيل إلى Tawseelhub عند توفر التكامل.";
       if (/محاسبة|حسابات/.test(lower)) return "نعم، يوجد دعم محاسبي تشغيلي داخل Tawseelhub لمتابعة COD والتحصيل والتسويات والتقارير المالية المرتبطة بعمليات التوصيل.";
       if (/رواتب|راتب|Payroll/i.test(lower)) return "نعم، يوجد دعم للرواتب/مستحقات السائقين والموظفين حسب إعدادات الشركة، وليس كمنتج رواتب عام منفصل.";
@@ -1873,6 +2229,8 @@ export class AgentService {
       return knowledge.find((item) => /[\u0600-\u06ff]/.test(item.content))?.content ?? arabicGeneralFallback;
     }
     if (state.audience === "trader" && /receive.*money|paid|payment|settlement|my money/.test(lower)) return "You receive your money through Trader settlement: delivered orders and COD amounts are tracked, then the Delivery Company/Tawseelhub process records what is payable to you and follows it through statement and settlement status. Exact timing depends on the commercial arrangement.";
+    if (isAgentFeatureExplanationText(text)) return featureExplanationText(text, language);
+    if (isAgentTraderUsageQuestionText(text)) return "A Trader uses Tawseelhub to connect store/order details with delivery operations: store registration, pickup location, order follow-up, delivery status, COD tracking and settlement follow-up depending on the Delivery Company setup. Trader registration is the first step if they want Tawseelhub to review their details and connect them to a suitable delivery service. Would you like me to explain registration or order follow-up after registration?";
     if (/manage .*drivers|manage my drivers|drivers|driver management|fleet/.test(lower)) return "Yes. Tawseelhub supports Delivery Company driver operations such as keeping driver records, assigning orders, following delivery progress, and connecting driver activity to collections and reports. If you have 20 drivers, the main value is seeing orders, drivers and COD in one operating view.";
     if (/accounting|journal|financial/.test(lower)) return "Yes. Tawseelhub includes accounting-oriented records and reporting for delivery operations, so operational activity such as COD, collections and settlements can be followed more clearly. It is part of the operating system, not a separate public accounting product.";
     if (/payroll|salary|earning/.test(lower)) return "Yes. Payroll support is included for driver/employee compensation workflows in the delivery operating system. It should be used with the configured company rules rather than treated as a public standalone payroll app.";
@@ -1900,9 +2258,21 @@ export class AgentService {
 
   private guardPublicReply(text: string, language: AgentLanguage, fallback: () => string): string {
     const unsafe = /(api[_ -]?key|company[_ -]?id|commission|company net|net amount|marketplace priority|internal pricing|delivery company directory|show.*delivery companies|15\s*%)/i;
-    const trimmed = text.trim();
+    let trimmed = text.trim();
     if (!trimmed || trimmed.length > 1800 || unsafe.test(trimmed)) return fallback();
     if (language === "ar" && isCorruptedArabicText(trimmed)) return arabicGeneralFallback;
+    if (language === "ar") {
+      trimmed = trimmed
+        .replace(/^(?:مرحباً|أهلاً|اهلاً|هلا|Hi|Hello)?\s*[—–-]?\s*أنا\s+(?:يوسف|يوسُف|Yousef)[،,\s-]*(?:مساعد\s+)?(?:Tawseelhub|توصيلهَب|توصيلهب)?(?:\s*(?:AI|بالذكاء الاصطناعي|الآلي|Assistant|مساعد))?[.،,\s-]*/i, "")
+        .replace(/^(?:مرحباً|أهلاً|اهلاً|هلا|Hi|Hello)\s*[—–-]\s*(?:يوسف|Yousef)\s*(?:هنا|here)?[.،,\s-]*/i, "")
+        .replace(/توصيلهَب|توصيلهب|توصيل هب/g, "Tawseelhub")
+        .trim();
+    } else {
+      trimmed = trimmed
+        .replace(/^(?:Hi|Hello|Hey)\s*[—–-]\s*Yousef\s+here[.!,\s-]*/i, "")
+        .replace(/^I(?:'m| am)\s+Yousef[,\s-]*(?:Tawseelhub\s+)?(?:AI\s+)?Assistant\.?\s*/i, "")
+        .trim();
+    }
     return trimmed;
   }
 

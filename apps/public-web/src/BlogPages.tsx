@@ -3,6 +3,7 @@ import { Link, useParams, useSearchParams } from "react-router-dom";
 import { apiUrl, publicAssetUrl } from "./api-base";
 import { trackEvent } from "./analytics";
 import { applyPageMetadata } from "./seo";
+import { usePublicLocale } from "./public-localization";
 type Card = {
   slug: string;
   title: string;
@@ -43,7 +44,70 @@ async function api<T>(path: string): Promise<T> {
   if (!response.ok) throw new Error(response.status === 404 ? "not_found" : "load_failed");
   return response.json();
 }
-const currentLocale = () => localStorage.getItem("tawseelhub.locale") === "ar" ? "ar" : "en";
+const blogText = {
+  en: {
+    defaultTitle: "Tawseelhub Insights",
+    categoryTitle: "Blog Category",
+    eyebrow: "Delivery knowledge",
+    heroCopy: "Useful, practical thinking for stronger delivery operations across the UAE.",
+    categories: "Blog categories",
+    all: "All",
+    unavailableTitle: "Articles are temporarily unavailable",
+    unavailableCopy: "Please try again shortly.",
+    loading: "Loading articles…",
+    emptyTitle: "No published articles yet",
+    emptyCopy: "Platform staff can prepare reviewed content in Website Content.",
+    previous: "Previous",
+    next: "Next",
+    page: "Page",
+    minRead: "min read",
+    readPreview: "Read preview",
+    notFoundTitle: "Article not found",
+    notFoundCopy: "This article is not published or the address is incorrect.",
+    returnBlog: "Return to Blog",
+    loadingArticle: "Loading article…",
+    home: "Home",
+    blog: "Blog",
+    published: "Published",
+    updated: "Updated",
+    explore: "Explore Tawseelhub",
+    deliveryCompany: "Delivery Company platform",
+    traders: "Solutions for Traders",
+    sendPackage: "Send a Package",
+    related: "Related articles",
+  },
+  ar: {
+    defaultTitle: "مدونة Tawseelhub",
+    categoryTitle: "فئة المدونة",
+    eyebrow: "معرفة التوصيل",
+    heroCopy: "أفكار عملية مفيدة لبناء عمليات توصيل أقوى في الإمارات.",
+    categories: "فئات المدونة",
+    all: "الكل",
+    unavailableTitle: "المقالات غير متاحة مؤقتاً",
+    unavailableCopy: "يرجى المحاولة مرة أخرى بعد قليل.",
+    loading: "جاري تحميل المقالات…",
+    emptyTitle: "لا توجد مقالات منشورة بعد",
+    emptyCopy: "يمكن لفريق المنصة تجهيز محتوى مراجع من إدارة محتوى الموقع.",
+    previous: "السابق",
+    next: "التالي",
+    page: "صفحة",
+    minRead: "دقائق قراءة",
+    readPreview: "اقرأ المقال",
+    notFoundTitle: "المقال غير موجود",
+    notFoundCopy: "هذا المقال غير منشور أو أن العنوان غير صحيح.",
+    returnBlog: "العودة إلى المدونة",
+    loadingArticle: "جاري تحميل المقال…",
+    home: "الرئيسية",
+    blog: "المدونة",
+    published: "نشر",
+    updated: "تحديث",
+    explore: "استكشف Tawseelhub",
+    deliveryCompany: "منصة شركة التوصيل",
+    traders: "حلول للتجار",
+    sendPackage: "أرسل شحنة",
+    related: "مقالات ذات صلة",
+  },
+} as const;
 function articleImageFallback(slug: string): string {
   return slug === "manage-cod-delivery-operations"
     ? "/blog-images/manage-cod-delivery-operations.jpg"
@@ -68,7 +132,8 @@ export function BlogListingPage() {
     >([]),
     [failed, setFailed] = useState(false),
     page = Math.max(1, Number(query.get("page")) || 1),
-    locale = currentLocale();
+    locale = usePublicLocale();
+  const text = blogText[locale];
   useEffect(() => {
     setFailed(false);
     void Promise.all([
@@ -86,15 +151,15 @@ export function BlogListingPage() {
     });
   }, [categorySlug, page, locale]);
   const title = categorySlug
-    ? (categories.find((x) => x.slug === categorySlug)?.name ?? "Blog Category")
-    : "Tawseelhub Insights";
+    ? (categories.find((x) => x.slug === categorySlug)?.name ?? text.categoryTitle)
+    : text.defaultTitle;
   useEffect(
     () =>
       applyPageMetadata(
         `${title} | Tawseelhub`,
         categorySlug
-          ? `Tawseelhub articles about ${title}.`
-          : "Practical guidance for UAE delivery companies, Traders and modern last-mile operations.",
+          ? (locale === "ar" ? `مقالات Tawseelhub حول ${title}.` : `Tawseelhub articles about ${title}.`)
+          : (locale === "ar" ? "إرشادات عملية لشركات التوصيل والتجار وعمليات الميل الأخير الحديثة." : "Practical guidance for UAE delivery companies, Traders and modern last-mile operations."),
         categorySlug ? `/blog/category/${categorySlug}` : "/blog",
       ),
     [categorySlug, title],
@@ -104,13 +169,13 @@ export function BlogListingPage() {
       <section className="blog-hero" dir={locale === "ar" ? "rtl" : "ltr"} lang={locale}>
         <p className="eyebrow">
           <span />
-          Delivery knowledge
+          {text.eyebrow}
         </p>
         <h1>{title}</h1>
-        <p>Useful, practical thinking for stronger delivery operations across the UAE.</p>
+        <p>{text.heroCopy}</p>
       </section>
-      <nav className="blog-categories" aria-label="Blog categories">
-        <Link to="/blog">All</Link>
+      <nav className="blog-categories" aria-label={text.categories}>
+        <Link to="/blog">{text.all}</Link>
         {categories.map((c) => (
           <Link key={c.slug} to={`/blog/category/${c.slug}`}>
             {c.name}
@@ -120,15 +185,15 @@ export function BlogListingPage() {
       <section className="blog-listing">
         {failed ? (
           <div className="empty-content">
-            <h2>Articles are temporarily unavailable</h2>
-            <p>Please try again shortly.</p>
+            <h2>{text.unavailableTitle}</h2>
+            <p>{text.unavailableCopy}</p>
           </div>
         ) : !data ? (
-          <p>Loading articles…</p>
+          <p>{text.loading}</p>
         ) : data.items.length === 0 ? (
           <div className="empty-content">
-            <h2>No published articles yet</h2>
-            <p>Platform staff can prepare reviewed content in Website Content.</p>
+            <h2>{text.emptyTitle}</h2>
+            <p>{text.emptyCopy}</p>
           </div>
         ) : (
           <>
@@ -142,11 +207,11 @@ export function BlogListingPage() {
             </div>
             <div className="blog-pagination">
               {page > 1 && (
-                <button onClick={() => setQuery({ page: String(page - 1) })}>Previous</button>
+                <button onClick={() => setQuery({ page: String(page - 1) })}>{text.previous}</button>
               )}
-              <span>Page {page}</span>
+              <span>{text.page} {page}</span>
               {page * data.pageSize < data.total && (
-                <button onClick={() => setQuery({ page: String(page + 1) })}>Next</button>
+                <button onClick={() => setQuery({ page: String(page + 1) })}>{text.next}</button>
               )}
             </div>
           </>
@@ -157,6 +222,8 @@ export function BlogListingPage() {
 }
 function CardView({ article, featured = false }: { article: Card; featured?: boolean }) {
   const imageUrl = publicAssetUrl(article.featuredImageUrl);
+  const locale = usePublicLocale();
+  const text = blogText[locale];
   return (
     <article className={featured ? "blog-card featured" : ""}>
       {imageUrl && (
@@ -177,7 +244,7 @@ function CardView({ article, featured = false }: { article: Card; featured?: boo
         <p>{article.excerpt}</p>
         <small>
           {article.author} · {new Date(article.publishedAt).toLocaleDateString()} ·{" "}
-          {article.readingMinutes} min read
+          {article.readingMinutes} {text.minRead}
         </small>
       </div>
     </article>
@@ -190,7 +257,8 @@ export function BlogArticlePage() {
       related: Array<{ slug: string; title: string; excerpt: string }>;
     }>(),
     [missing, setMissing] = useState(false),
-    locale = currentLocale();
+    locale = usePublicLocale();
+  const text = blogText[locale];
   useEffect(() => {
     void api<any>(`/articles/${slug}?language=${locale}`)
       .then((x) => {
@@ -248,18 +316,18 @@ export function BlogArticlePage() {
   if (missing)
     return (
       <section className="article-empty">
-        <h1>Article not found</h1>
-        <p>This article is not published or the address is incorrect.</p>
-        <Link to="/blog">Return to Blog</Link>
+        <h1>{text.notFoundTitle}</h1>
+        <p>{text.notFoundCopy}</p>
+        <Link to="/blog">{text.returnBlog}</Link>
       </section>
     );
-  if (!data) return <section className="article-empty">Loading article…</section>;
+  if (!data) return <section className="article-empty">{text.loadingArticle}</section>;
   const a = data.article;
   const featuredImageUrl = publicAssetUrl(a.featured_image_public_url);
   return (
     <article className="article-page" dir={locale === "ar" ? "rtl" : "ltr"} lang={locale}>
       <nav aria-label="Breadcrumb">
-        <Link to="/">Home</Link> / <Link to="/blog">Blog</Link> /{" "}
+        <Link to="/">{text.home}</Link> / <Link to="/blog">{text.blog}</Link> /{" "}
         <Link to={`/blog/category/${a.category_slug}`}>{a.category}</Link>
       </nav>
       <header>
@@ -267,9 +335,9 @@ export function BlogArticlePage() {
         <h1>{a.title}</h1>
         <p>{a.excerpt}</p>
         <small>
-          {a.author} · Published {new Date(a.published_at).toLocaleDateString()}
+          {a.author} · {text.published} {new Date(a.published_at).toLocaleDateString(locale === "ar" ? "ar-AE" : "en-AE")}
           {a.updated_content_at
-            ? ` · Updated ${new Date(a.updated_content_at).toLocaleDateString()}`
+            ? ` · ${text.updated} ${new Date(a.updated_content_at).toLocaleDateString(locale === "ar" ? "ar-AE" : "en-AE")}`
             : ""}
         </small>
       </header>
@@ -288,14 +356,14 @@ export function BlogArticlePage() {
           ))}
         </div>
         <aside>
-          <h2>Explore Tawseelhub</h2>
-          <Link to="/delivery-companies">Delivery Company platform</Link>
-          <Link to="/traders">Solutions for Traders</Link>
-          <Link to="/send-a-package">Send a Package</Link>
+          <h2>{text.explore}</h2>
+          <Link to="/delivery-companies">{text.deliveryCompany}</Link>
+          <Link to="/traders">{text.traders}</Link>
+          <Link to="/send-a-package">{text.sendPackage}</Link>
         </aside>
       </div>
       <section className="related-articles">
-        <h2>Related articles</h2>
+        <h2>{text.related}</h2>
         {data.related.map((x) => (
           <article key={x.slug}>
             <h3>

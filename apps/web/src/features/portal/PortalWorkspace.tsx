@@ -583,7 +583,6 @@ function TraderOrderForm({
   const { i18n, t } = useTranslation();
   const locale = normalizeLocale(i18n.resolvedLanguage);
   const initialArea = order ? areas.find((area) => area.id === order.areaId) : areas[0];
-  const [serialNumber, setSerialNumber] = useState(order?.serialNumber ?? "");
   const [referenceNumber, setReferenceNumber] = useState(order?.referenceNumber ?? "");
   const [customerName, setCustomerName] = useState(order?.customerName ?? "");
   const [customerMobileNumber, setCustomerMobileNumber] = useState(
@@ -592,6 +591,7 @@ function TraderOrderForm({
   const [customerAddress, setCustomerAddress] = useState(order?.customerAddress ?? "");
   const [emirateId, setEmirateId] = useState(initialArea?.emirateId ?? "");
   const [areaId, setAreaId] = useState(order?.areaId ?? initialArea?.id ?? "");
+  const [areaSearch, setAreaSearch] = useState("");
   const [codAmount, setCodAmount] = useState(order?.codAmount ?? "0");
   const [packageCount, setPackageCount] = useState(String(order?.packageCount ?? 1));
   const [notes, setNotes] = useState(order?.notes ?? "");
@@ -611,7 +611,14 @@ function TraderOrderForm({
       ]),
     ).values(),
   );
-  const filteredAreas = areas.filter((area) => area.emirateId === emirateId);
+  const areaSearchTerm = areaSearch.trim().toLocaleLowerCase();
+  const filteredAreas = areas.filter((area) => {
+    if (area.emirateId !== emirateId) return false;
+    if (areaSearchTerm === "") return true;
+    return [area.nameEn, area.nameAr].some((name) =>
+      (name ?? "").toLocaleLowerCase().includes(areaSearchTerm),
+    );
+  });
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -653,7 +660,6 @@ function TraderOrderForm({
             notes: notes.trim() || undefined,
             packageCount: Number(packageCount),
             referenceNumber: referenceNumber.trim() || undefined,
-            serialNumber,
           },
           { "X-Idempotency-Key": idempotencyKey() },
         );
@@ -682,15 +688,6 @@ function TraderOrderForm({
       <form onSubmit={(event) => void submit(event)}>
         {!order ? (
           <>
-            <label className="field">
-              <span>{t("portal.serialNumber")} *</span>
-              <input
-                maxLength={160}
-                onChange={(event) => setSerialNumber(event.target.value)}
-                required
-                value={serialNumber}
-              />
-            </label>
             <label className="field">
               <span>{t("portal.referenceNumber")}</span>
               <input
@@ -760,6 +757,7 @@ function TraderOrderForm({
                 onChange={(event) => {
                   const nextEmirateId = event.target.value;
                   setEmirateId(nextEmirateId);
+                  setAreaSearch("");
                   setAreaId(areas.find((area) => area.emirateId === nextEmirateId)?.id ?? "");
                 }}
                 required
@@ -775,6 +773,11 @@ function TraderOrderForm({
             </label>
             <label className="field">
               <span>{t("portal.deliveryArea")} *</span>
+              <input
+                onChange={(event) => setAreaSearch(event.target.value)}
+                placeholder={t("areas.searchPlaceholder")}
+                value={areaSearch}
+              />
               <select onChange={(event) => setAreaId(event.target.value)} required value={areaId}>
                 <option value="">{t("common.select")}</option>
                 {filteredAreas.map((area) => (

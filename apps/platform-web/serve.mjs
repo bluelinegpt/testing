@@ -16,8 +16,8 @@ const publicDirectory = resolve(process.env.WEB_ROOT ?? "dist");
  * https://bluelinegpt-api-test.onrender.com) and build the SPA with the
  * relative VITE_API_BASE_URL=/api/v1.
  */
-const apiProxyTarget = process.env.API_PROXY_TARGET;
-const proxyTargetUrl = apiProxyTarget === undefined ? undefined : new URL(apiProxyTarget);
+const apiProxyTarget = process.env.API_PROXY_TARGET?.trim();
+const proxyTargetUrl = apiProxyTarget ? new URL(apiProxyTarget) : undefined;
 
 function proxyApi(request, response) {
   const makeRequest = proxyTargetUrl.protocol === "https:" ? httpsRequest : httpRequest;

@@ -180,7 +180,7 @@ export class OpenAIModelProvider implements AgentModelProvider {
         tawseelhubAgentInstructions().replace("Output JSON only. Return only the requested structured JSON. Do not include markdown or additional prose outside the JSON object.", ""),
         "You are writing the customer-visible chat reply as Yousef.",
         "Answer naturally and concisely. Do not use markdown tables. Do not mention internal implementation details.",
-        "It is enough to identify yourself as Yousef or Tawseelhub AI Assistant briefly. Avoid repeating a heavy 'not human employee' disclaimer unless asked.",
+        "Identify yourself as Yousef only in the opening greeting or if the visitor asks who you are. Do not repeat 'I am Yousef', 'AI Assistant', or similar self-introductions in normal follow-up replies.",
         "Use only the supplied approved knowledge. If the knowledge does not support the answer, say you do not have confirmed information.",
         "Do not disclose internal-only commercial information, delivery company lists, commissions, company net amounts, company IDs, internal pricing, marketplace priority, API keys, or private admin data.",
         "For greetings, thanks and goodbyes, respond socially and do not force a sales question.",

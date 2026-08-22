@@ -83,6 +83,24 @@ describe("RulesAgentModelProvider", () => {
     expect(result.extracted.hasExistingDeliveryCompany).toBe(false);
   });
 
+  it("treats Arabic questions about how Traders use the system as product explanation, not registration", async () => {
+    await expect(provider.classifyAndExtract({
+      language: "ar",
+      previousIntent: "general_question",
+      state: baseState,
+      text: "كيف للتاجر يستخدم النظام",
+    })).resolves.toMatchObject({ intent: "product_feature_question", language: "ar" });
+  });
+
+  it("treats Arabic driver management as product explanation, not a demo request", async () => {
+    await expect(provider.classifyAndExtract({
+      language: "ar",
+      previousIntent: "general_question",
+      state: baseState,
+      text: "اداره السائقين",
+    })).resolves.toMatchObject({ intent: "product_feature_question", language: "ar" });
+  });
+
   it("does not save an audience statement as the Trader contact person", async () => {
     const result = await provider.classifyAndExtract({
       language: "en",
@@ -166,6 +184,7 @@ describe("RulesAgentModelProvider", () => {
     await expect(provider.classifyAndExtract({ language: "en", previousIntent: "unknown", state: baseState, text: "مرحبا" })).resolves.toMatchObject({ intent: "greeting", language: "ar" });
     await expect(provider.classifyAndExtract({ language: "en", previousIntent: "unknown", state: baseState, text: "شو هو Tawseelhub؟" })).resolves.toMatchObject({ intent: "general_question", language: "ar" });
     await expect(provider.classifyAndExtract({ language: "en", previousIntent: "unknown", state: baseState, text: "كم السعر؟" })).resolves.toMatchObject({ intent: "customer_quote", language: "ar" });
+    await expect(provider.classifyAndExtract({ language: "en", previousIntent: "general_question", state: baseState, text: "ليش بتخصم" })).resolves.toMatchObject({ intent: "general_question", language: "ar" });
   });
 
   it("keeps Delivery Company directory requests out of the quote workflow", async () => {

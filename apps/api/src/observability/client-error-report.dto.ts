@@ -1,5 +1,8 @@
 import { Type } from "class-transformer";
 import {
+  ArrayMaxSize,
+  ArrayUnique,
+  IsArray,
   IsIn,
   IsInt,
   IsOptional,
@@ -124,4 +127,12 @@ export class UpdateClientErrorReportDto {
   @IsString()
   @MaxLength(4000)
   public readonly resolutionNotes?: string;
+}
+
+export class DeleteClientErrorReportsDto {
+  @IsArray()
+  @ArrayMaxSize(250)
+  @ArrayUnique()
+  @IsUUID(undefined, { each: true })
+  public readonly ids!: string[];
 }

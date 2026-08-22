@@ -123,6 +123,8 @@ export interface OperationsOrderFilters {
   readonly orderType?: "collect_order" | "delivery" | undefined;
   /** External Reference Number, partial match. Distinct from `search`. */
   readonly referenceNumber?: string | undefined;
+  /** Serial Number, partial match. Distinct from `search`. */
+  readonly serialNumber?: string | undefined;
   readonly search?: string | undefined;
   readonly settlementStatus?: string | undefined;
   readonly quickView?:
@@ -237,6 +239,10 @@ export interface OperationsOrder {
   readonly additionalFeeVatAmount: string | null;
   readonly amountCollected: string;
   readonly areaName: string;
+  readonly areaId?: string;
+  readonly areaNameEn?: string | null;
+  readonly areaNameAr?: string | null;
+  readonly emirateId?: string | null;
   /** Present only on the single-order detail fetch (`orderById`) — the list
       and export queries do not join `emirates`, so this is undefined there. */
   readonly emirateNameEn?: string;
@@ -928,6 +934,8 @@ export class OperationsService {
     // Normalised to match how reference_number_normalized is stored, so the
     // deprecated filter reaches the same index the unified search uses.
     const referenceTerm = referenceNumber === null ? null : normalizeReferenceTerm(referenceNumber);
+    const serialNumber = this.optionalFilter(filters.serialNumber);
+    const serialTerm = serialNumber === null ? null : this.normalizeOrderIdentifier(serialNumber);
     const deliveryStatus = this.optionalFilter(filters.deliveryStatus);
     const orderType = this.optionalFilter(filters.orderType);
     const cashStatus = this.optionalFilter(filters.cashStatus);
@@ -1028,6 +1036,8 @@ export class OperationsService {
       -- normalisation lower-cases and trims but never casts to a number.
       and (${referenceTerm}::text is null
            or o.reference_number_normalized like '%' || ${referenceTerm}::text || '%')
+      and (${serialTerm}::text is null
+           or o.serial_number_normalized = ${serialTerm}::text)
       and ${unifiedOrderSearchPredicate(search)}
       and (${deliveryStatus}::text is null or o.delivery_status = ${deliveryStatus})
       and (${orderType}::text is null or o.order_type = ${orderType})
@@ -1053,6 +1063,8 @@ export class OperationsService {
              o.reference_number as "referenceNumber",
              o.order_date::text as "orderDate",
              t.name_en as "traderName",
+             a.name_en as "areaNameEn",
+             a.name_ar as "areaNameAr",
              coalesce(o.customer_area_name_ar_snapshot,a.name_ar,
                       o.customer_area_name_snapshot,a.name_en) as "areaName",
              o.assigned_driver_id as "assignedDriverId",
@@ -1369,6 +1381,8 @@ export class OperationsService {
     // Normalised to match how reference_number_normalized is stored, so the
     // deprecated filter reaches the same index the unified search uses.
     const referenceTerm = referenceNumber === null ? null : normalizeReferenceTerm(referenceNumber);
+    const serialNumber = this.optionalFilter(filters.serialNumber);
+    const serialTerm = serialNumber === null ? null : this.normalizeOrderIdentifier(serialNumber);
     const deliveryStatus = this.optionalFilter(filters.deliveryStatus);
     const cashStatus = this.optionalFilter(filters.cashStatus);
     const settlementStatus = this.optionalFilter(filters.settlementStatus);
@@ -1389,6 +1403,8 @@ export class OperationsService {
              o.reference_number as "referenceNumber",
              o.order_date::text as "orderDate",
              t.name_en as "traderName",
+             a.name_en as "areaNameEn",
+             a.name_ar as "areaNameAr",
              coalesce(o.customer_area_name_ar_snapshot,a.name_ar,
                       o.customer_area_name_snapshot,a.name_en) as "areaName",
              o.assigned_driver_id as "assignedDriverId",
@@ -1420,8 +1436,10 @@ export class OperationsService {
       where o.company_id = ${companyId}::uuid
         -- The same two fragments as the list, so an export reproduces exactly
         -- what the operator saw on screen.
-        and (${referenceTerm}::text is null
+      and (${referenceTerm}::text is null
              or o.reference_number_normalized like '%' || ${referenceTerm}::text || '%')
+        and (${serialTerm}::text is null
+             or o.serial_number_normalized = ${serialTerm}::text)
         and ${unifiedOrderSearchPredicate(search)}
         and (${deliveryStatus}::text is null or o.delivery_status = ${deliveryStatus})
         and (${cashStatus}::text is null or o.driver_reconciliation_status = ${cashStatus})
@@ -2229,10 +2247,15 @@ export class OperationsService {
       callerTrader.id,
       deliveryCompanyId,
     );
-    // Own Company: no override needed, identical to today's behaviour.
+    // Trader Portal serial numbers are Company-owned operational identifiers.
+    // The Trader should not type or control them; generate the next serial in
+    // the target Company tenant scope immediately before creating the Order.
+    // Own Company: no override needed, identical to today's behaviour except
+    // for server-generated serial numbers.
     if (target.companyId === identity.companyId) {
+      const nextSerial = await this.nextSerialNumber();
       return this.createOrder(
-        { ...pricedByCompany, traderId: target.traderId },
+        { ...pricedByCompany, serialNumber: nextSerial.serialNumber, traderId: target.traderId },
         correlationId,
         idempotencyKey,
       );
@@ -2245,14 +2268,15 @@ export class OperationsService {
     // Trader account) satisfies every composite actor FK `createOrder`
     // writes through. See `resolveTraderPortalDeliveryCompany`'s doc
     // comment for the full reasoning.
-    return this.tenants.run({ companyId: target.companyId, identityId: identity.identityId }, () =>
-      this.createOrder(
-        { ...pricedByCompany, traderId: target.traderId },
+    return this.tenants.run({ companyId: target.companyId, identityId: identity.identityId }, async () => {
+      const nextSerial = await this.nextSerialNumber();
+      return this.createOrder(
+        { ...pricedByCompany, serialNumber: nextSerial.serialNumber, traderId: target.traderId },
         correlationId,
         idempotencyKey,
         target.accountId,
-      ),
-    );
+      );
+    });
   }
 
   public async updateTraderPortalOrder(
@@ -2311,6 +2335,8 @@ export class OperationsService {
              o.package_count as "packageCount",
              o.notes,
              t.name_en as "traderName",
+             a.name_en as "areaNameEn",
+             a.name_ar as "areaNameAr",
              coalesce(o.customer_area_name_ar_snapshot,a.name_ar,
                       o.customer_area_name_snapshot,a.name_en) as "areaName",
              o.customer_name as "customerName",
@@ -2322,6 +2348,7 @@ export class OperationsService {
              o.amount_collected::text as "amountCollected",
              o.delivery_status as "deliveryStatus",
              o.trader_settlement_status as "traderSettlementStatus",
+             e.id as "emirateId",
              e.name_en as "emirateNameEn",
              e.name_ar as "emirateNameAr"
       from orders o
@@ -2597,8 +2624,12 @@ export class OperationsService {
     // than let a Trader submit a form that is certain to be rejected.
     const result = await sql<{ id: string; isOwn: boolean; name: string }>`
       select distinct c.id, c.name_en as name, c.id = ${identity.companyId}::uuid as "isOwn"
-        from companies c
-        join (${scopePairs}) scope on scope."companyId" = c.id
+        from (
+          select scope."companyId", scope."traderId" from (${scopePairs}) scope
+          union
+          select ${identity.companyId}::uuid as "companyId", ${trader.id}::uuid as "traderId"
+        ) scope
+        join companies c on c.id = scope."companyId"
        order by "isOwn" desc, c.name_en
     `.execute(this.database);
     return result.rows;
@@ -2715,6 +2746,8 @@ export class OperationsService {
              o.package_count as "packageCount",
              o.notes,
              t.name_en as "traderName",
+             a.name_en as "areaNameEn",
+             a.name_ar as "areaNameAr",
              coalesce(o.customer_area_name_ar_snapshot,a.name_ar,
                       o.customer_area_name_snapshot,a.name_en) as "areaName",
              o.customer_name as "customerName",
@@ -2726,6 +2759,7 @@ export class OperationsService {
              o.amount_collected::text as "amountCollected",
              o.delivery_status as "deliveryStatus",
              o.trader_settlement_status as "traderSettlementStatus",
+             e.id as "emirateId",
              e.name_en as "emirateNameEn",
              e.name_ar as "emirateNameAr"
       from orders o
@@ -2772,6 +2806,8 @@ export class OperationsService {
              o.package_count as "packageCount",
              o.notes,
              t.name_en as "traderName",
+             a.name_en as "areaNameEn",
+             a.name_ar as "areaNameAr",
              coalesce(o.customer_area_name_ar_snapshot,a.name_ar,
                       o.customer_area_name_snapshot,a.name_en) as "areaName",
              o.customer_name as "customerName",
@@ -2783,6 +2819,7 @@ export class OperationsService {
              o.amount_collected::text as "amountCollected",
              o.delivery_status as "deliveryStatus",
              o.trader_settlement_status as "traderSettlementStatus",
+             e.id as "emirateId",
              e.name_en as "emirateNameEn",
              e.name_ar as "emirateNameAr"
       from orders o
@@ -5604,8 +5641,11 @@ export class OperationsService {
              o.reference_number as "referenceNumber",
              o.order_date::text as "orderDate",
              t.name_en as "traderName",
+             a.name_en as "areaNameEn",
+             a.name_ar as "areaNameAr",
              coalesce(o.customer_area_name_ar_snapshot,a.name_ar,
                       o.customer_area_name_snapshot,a.name_en) as "areaName",
+             e.id as "emirateId",
              e.name_en as "emirateNameEn",
              e.name_ar as "emirateNameAr",
              o.assigned_driver_id as "assignedDriverId",
@@ -6549,6 +6589,8 @@ export class OperationsService {
              o.reference_number as "referenceNumber",
              o.order_date::text as "orderDate",
              t.name_en as "traderName",
+             a.name_en as "areaNameEn",
+             a.name_ar as "areaNameAr",
              coalesce(o.customer_area_name_ar_snapshot,a.name_ar,
                       o.customer_area_name_snapshot,a.name_en) as "areaName",
              o.assigned_driver_id as "assignedDriverId",

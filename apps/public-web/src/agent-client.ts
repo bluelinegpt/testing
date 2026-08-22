@@ -33,6 +33,12 @@ export interface WhatsAppPublicSettings {
   readonly url: string | null;
 }
 
+export interface AgentAvailability {
+  readonly assistantAvailable: boolean;
+  readonly humanAvailable: boolean;
+  readonly status: "available" | "unavailable";
+}
+
 const fallbackWhatsAppSettings: WhatsAppPublicSettings = {
   enabled: true,
   label: "Chat on WhatsApp",
@@ -83,5 +89,16 @@ export async function getWhatsAppSettings(): Promise<WhatsAppPublicSettings> {
     return settings.enabled && settings.url ? settings : fallbackWhatsAppSettings;
   } catch {
     return fallbackWhatsAppSettings;
+  }
+}
+
+export async function getAgentAvailability(): Promise<AgentAvailability> {
+  try {
+    const response = await fetch(`${base()}/public/agent/availability`, { method: "GET" });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error("availability_unavailable");
+    return body as AgentAvailability;
+  } catch {
+    return { assistantAvailable: false, humanAvailable: false, status: "unavailable" };
   }
 }

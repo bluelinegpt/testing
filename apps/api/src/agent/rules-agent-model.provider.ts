@@ -59,13 +59,15 @@ function detectIntent(text: string, previous: AgentIntent): AgentIntent {
   if (/^(thank you|thanks|thx|nice|great|okay|ok|شكرا|مشكور|تمام)\W*$/i.test(lower)) return "thanks";
   if (/^(bye|goodbye|see you|مع السلامة|باي)\W*$/i.test(lower)) return "goodbye";
   if (/show me .*delivery companies|names? of delivery companies|delivery companies registered|registered .*delivery companies|delivery compan(?:y|ies) directory|company directory|which traders|traders .*using|another customer|customer.?s information|أسماء شركات التوصيل|شركات التوصيل المسجلة|أي تجار|معلومات عميل|محادثة عميل|commissions|commission/i.test(lower)) return "general_question";
+  if (/(?:why|what for|ليش|ليه|لماذا|لشو|شو سبب|ما سبب).*(?:deduct|charge|fee|fees|subscription|خصم|تخصم|تخصمون|رسوم|اشتراك|تكلفة|تحاسب|تدفع)/i.test(lower)) return "general_question";
   if (/human|person|agent|support team|customer support|call me|speak|complaint|dispute|موظف|انسان|اتصل/.test(lower)) return "handoff";
   if (/is .* live|currently live|available now|status|planned|on hold|roadmap|support .*shopify|support .*salla|support .*woocommerce|create a store|build a store|storefront|هل .*متاح|هل .*مباشر|هل .*شغال|شغال حال|جاهز/.test(lower)) return "current_feature_status";
   if (/request .*demo|book .*demo|delivery company demo|demo request|عرض تجريبي/.test(lower)) return "delivery_company_demo";
-  if (/manage traders|trader relationships|trader management|إدارة التجار/.test(lower)) return "product_feature_question";
+  if (/manage traders|trader relationships|trader management|إدارة التجار|إدارة السائقين|ادارة السائقين|السائقين|المندوبين/.test(lower)) return "product_feature_question";
+  if (/(?:how|what|كيف|شلون|شو|ما).*(?:trader|seller|merchant|store|تاجر|متجر).*(?:use|work|benefit|system|platform|manage|يستخدم|يستفيد|يشتغل|النظام|المنصة|يدير)|(?:trader|seller|merchant|store|تاجر|متجر).*(?:use|work|benefit|system|platform|manage|يستخدم|يستفيد|يشتغل|النظام|المنصة|يدير)/i.test(lower)) return "product_feature_question";
   if (/trader|store|seller|merchant|shopify|salla|woocommerce|instagram|online store|تاجر|متجر/.test(lower)) return "trader";
   if (/send .*package|send .*parcel|\bshipment\b|\bpackage\b|\bparcel\b|\bquote\b|\bpickup\b|\b\d+(?:\.\d+)?\s*kg\b|\bbox\b|أرسل|ارسل|إرسال|ارسال|شحنة|طرد|سعر|طلب توصيل|أحتاج توصيل|احتاج توصيل/.test(lower)) return "customer_quote";
-  if (/payroll|accounting|journal|cod|collection|reconciliation|settlement|report|driver money|driver collections|manage .*drivers|manage my drivers|manage traders|mobile app|driver app|storefront|courier|feature|how can .*help|كيف ممكن تساعد|ميزة|رواتب|محاسبة|تحصيل|تسوية|تقارير/.test(lower)) return "product_feature_question";
+  if (/payroll|accounting|journal|cod|collection|reconciliation|settlement|report|driver money|driver collections|manage .*drivers|manage my drivers|manage traders|mobile app|driver app|storefront|courier|feature|how can .*help|كيف ممكن تساعد|ميزة|رواتب|محاسبة|تحصيل|تسوية|تقارير|إدارة السائقين|ادارة السائقين/.test(lower)) return "product_feature_question";
   if (/driver|drivers|delivery company|courier company|demo|fleet|مندوب|سائق|شركة توصيل/.test(lower)) return "delivery_company_demo";
   if (isShortContinuation && continuableIntents.has(previous)) return previous;
   return "general_question";

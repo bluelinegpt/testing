@@ -451,6 +451,9 @@ export interface OperationsOrder {
   readonly areaName: string;
   /** Present on Order detail responses. */
   readonly areaId?: string;
+  readonly areaNameEn?: string | null;
+  readonly areaNameAr?: string | null;
+  readonly emirateId?: string | null;
   /** Present only on the single-order detail fetch, not the list. */
   readonly emirateNameEn?: string;
   readonly emirateNameAr?: string;

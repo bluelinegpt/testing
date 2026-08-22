@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createAgentConversation, sendAgentMessage } from './agent-client';
+import { createAgentConversation, getAgentAvailability, sendAgentMessage } from './agent-client';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -18,6 +18,17 @@ describe('agent client', () => {
 
     expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/v1/public/agent/conversations', expect.objectContaining({ method: 'POST' }));
     expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/v1/public/agent/conversations/token-1/messages', expect.objectContaining({ method: 'POST' }));
+  });
+
+  it('loads public human support availability without exposing private settings', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      json: async () => ({ assistantAvailable: true, humanAvailable: true, status: 'available' }),
+      ok: true,
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(getAgentAvailability()).resolves.toEqual({ assistantAvailable: true, humanAvailable: true, status: 'available' });
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/public/agent/availability', expect.objectContaining({ method: 'GET' }));
   });
 
   it('replaces raw backend route errors with a visitor-safe message', async () => {

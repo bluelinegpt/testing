@@ -9,9 +9,22 @@ import { CreateAgentConversationDto, SendAgentMessageDto, SimulateWhatsAppMessag
 export class PublicAgentController {
   public constructor(@Inject(AgentService) private readonly agent: AgentService) {}
 
+  private requestIp(request: Request) {
+    const forwarded = request.headers["x-forwarded-for"];
+    const realIp = request.headers["x-real-ip"];
+    const cfIp = request.headers["cf-connecting-ip"];
+    const raw = Array.isArray(cfIp) ? cfIp[0] : cfIp
+      ?? (Array.isArray(realIp) ? realIp[0] : realIp)
+      ?? (Array.isArray(forwarded) ? forwarded[0] : forwarded)
+      ?? request.ip
+      ?? request.socket.remoteAddress
+      ?? "";
+    return String(raw).split(",")[0]?.trim().replace(/^::ffff:/, "") || undefined;
+  }
+
   @Public() @Throttle({ default: { limit: 8, ttl: 60000 } }) @HttpCode(201) @Post("conversations")
-  public create(@Body() body: CreateAgentConversationDto) {
-    return this.agent.createWebsiteConversation(body.language, body.visitorId);
+  public create(@Body() body: CreateAgentConversationDto, @Req() request: Request) {
+    return this.agent.createWebsiteConversation(body.language, body.visitorId, this.requestIp(request));
   }
 
   @Public() @Throttle({ default: { limit: 30, ttl: 60000 } }) @Get("conversations/:token")
@@ -20,8 +33,8 @@ export class PublicAgentController {
   }
 
   @Public() @Throttle({ default: { limit: 18, ttl: 60000 } }) @Post("conversations/:token/messages")
-  public message(@Param("token") token: string, @Body() body: SendAgentMessageDto) {
-    return this.agent.receiveWebsiteMessage(token, body.message, body.language);
+  public message(@Param("token") token: string, @Body() body: SendAgentMessageDto, @Req() request: Request) {
+    return this.agent.receiveWebsiteMessage(token, body.message, body.language, this.requestIp(request));
   }
 
   @Public() @Throttle({ default: { limit: 20, ttl: 60000 } }) @Post("whatsapp/simulate")
@@ -32,6 +45,11 @@ export class PublicAgentController {
   @Public() @Get("whatsapp/settings")
   public whatsAppSettings() {
     return this.agent.publicWhatsAppSettings();
+  }
+
+  @Public() @Get("availability")
+  public availability() {
+    return this.agent.publicAvailability();
   }
 
   @Public() @Get("whatsapp/webhook")

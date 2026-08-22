@@ -49,9 +49,17 @@ Product and inventory synchronization are intentionally deferred.
 
 ## Connect flow
 
-1. Platform user opens Platform → Commerce Integrations.
-2. User selects the Tawseelhub Company/Trader commerce relationship.
-3. User enters the Shopify store domain, for example `example.myshopify.com`.
+Normal merchant setup is owned by the Trader Portal:
+
+```text
+Trader Portal
+→ Integrations
+→ Connect Shopify
+```
+
+1. Trader opens Trader Portal → Integrations → Connect Shopify.
+2. Trader enters the Shopify store domain, for example `example.myshopify.com`.
+3. Tawseelhub derives the Company/Trader/Profile context from the authenticated Trader session.
 4. Tawseelhub normalizes and validates that it is a legitimate `*.myshopify.com` domain.
 5. Tawseelhub creates a random one-time OAuth state linked server-side to the intended Company/Trader/Profile.
 6. User authorizes the app in Shopify.
@@ -80,9 +88,8 @@ Shopify events are normalized into the generic commerce event/order shape:
 
 ## Platform behavior
 
-Platform → Commerce Integrations shows Shopify as a real provider when enabled. It can:
+Platform → Commerce Integrations is monitor/support only. It can:
 
-- start Shopify OAuth;
 - show Shopify connections in the same connection table as Salla/Mock;
 - show status, health, last webhook/success/error, imported order count, and failed event count;
 - test health using the existing connection health action;
@@ -106,7 +113,7 @@ Platform → Commerce Integrations shows Shopify as a real provider when enabled
 3. Configure app scopes:
    `read_orders,read_fulfillments,write_fulfillments`.
 4. Configure `SHOPIFY_CLIENT_ID`, `SHOPIFY_CLIENT_SECRET`, `SHOPIFY_REDIRECT_URI`, `SHOPIFY_WEBHOOK_CALLBACK_BASE_URL`, and enable `SHOPIFY_INTEGRATION_ENABLED=true`.
-5. Connect a Shopify development store from Platform → Commerce Integrations → Connect Shopify.
+5. Connect a Shopify development store from Trader Portal → Integrations → Connect Shopify.
 6. Create a test COD order.
 7. Create a prepaid test order.
 8. Create a guest checkout test order.

@@ -52,15 +52,15 @@ const provider: MigrationProvider = {
      * corruption, so keep a virtual no-op alias available to unblock that
      * environment without adding a duplicate timestamp file or mutating data.
      */
-    migrations["20260902012000_collect_order_assignment_customer_optional"] ??= {
-      async up(db) {
-        await sql`select 1`.execute(db);
-      },
-      async down(db) {
-        await sql`select 1`.execute(db);
-      },
-    };
     if (hasLegacyAssignmentMigration) {
+      migrations["20260902012000_collect_order_assignment_customer_optional"] ??= {
+        async up(db) {
+          await sql`select 1`.execute(db);
+        },
+        async down(db) {
+          await sql`select 1`.execute(db);
+        },
+      };
       delete migrations["20260902012500_collect_order_assignment_customer_optional"];
     }
     return migrations;

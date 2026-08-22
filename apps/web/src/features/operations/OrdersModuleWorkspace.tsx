@@ -112,6 +112,7 @@ interface OrderFilters {
   businessDateTo: string;
   referenceNumber: string;
   search: string;
+  serialNumber: string;
   traderId: string;
 }
 
@@ -136,6 +137,7 @@ const bulkSelectionFilterKeys = [
   "orderType",
   "quickView",
   "search",
+  "serialNumber",
   "traderId",
 ] as const satisfies readonly (keyof OrderFilters)[];
 
@@ -200,6 +202,7 @@ const initialFilters: OrderFilters = {
   businessDateTo: "",
   referenceNumber: "",
   search: "",
+  serialNumber: "",
   traderId: "",
 };
 
@@ -284,6 +287,7 @@ export function OrdersModuleWorkspace({
      fired searches nobody asked for, on half-typed terms. Enter makes the
      search an explicit act. */
   const [searchText, setSearchText] = useState("");
+  const [serialSearchText, setSerialSearchText] = useState("");
   const [filterArea, setFilterArea] = useState<CompanyArea>();
   const [drivers, setDrivers] = useState<readonly OperationsDriver[]>([]);
   const [traders, setTraders] = useState<readonly OperationsTrader[]>([]);
@@ -306,6 +310,7 @@ export function OrdersModuleWorkspace({
     filters.businessDateTo,
     filters.referenceNumber,
     filters.search,
+    filters.serialNumber,
     filters.traderId,
   ].some((value) => value !== "");
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
@@ -1035,6 +1040,20 @@ export function OrdersModuleWorkspace({
                 }}
                 placeholder={t("operations.searchOrdersPlaceholder")}
                 value={searchText}
+              />
+            </label>
+            <label className="orders-search orders-serial-search">
+              <Search aria-hidden="true" size={17} />
+              <span className="sr-only">{t("operations.searchSerialNumber")}</span>
+              <input
+                onChange={(event) => setSerialSearchText(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key !== "Enter") return;
+                  event.preventDefault();
+                  updateFilters({ serialNumber: serialSearchText });
+                }}
+                placeholder={t("operations.searchSerialNumberPlaceholder")}
+                value={serialSearchText}
               />
             </label>
             {/* Name only, and searchable. The code stays matchable so anyone who
@@ -2684,9 +2703,12 @@ export function OrderDetailsWorkspace({
                     detail.serviceFeeOverrideReason,
                   ] as const,
                 ]),
-            ...(detail.additionalFees == null
+            ...(detail.additionalFees == null || platformQuoteFee(detail) !== null
               ? []
               : [[t("operations.additionalFees"), money(detail.additionalFees, locale)] as const]),
+            ...(platformQuoteFee(detail) === null
+              ? []
+              : [[t("operations.platformFee"), money(platformQuoteFee(detail)!, locale)] as const]),
             [t("operations.vatAmount"), money(detail.vatAmount, locale)] as const,
             ...(detail.totalDeductions == null
               ? []
@@ -4560,6 +4582,21 @@ function EditOrderDialog({
       .then((loaded) => {
         if (!active) return;
         setDetail(loaded);
+        if (loaded.areaId !== undefined && loaded.emirateId !== undefined && loaded.emirateId !== null) {
+          setNewArea({
+            code: "",
+            emirateCode: "",
+            emirateId: loaded.emirateId,
+            emirateNameAr: loaded.emirateNameAr ?? "",
+            emirateNameEn: loaded.emirateNameEn ?? "",
+            id: loaded.areaId,
+            isActive: true,
+            nameAr: loaded.areaNameAr ?? null,
+            nameEn: loaded.areaNameEn ?? loaded.areaName,
+            notes: null,
+            updatedAt: "",
+          });
+        }
         setForm({
           additionalFees: loaded.additionalFees ?? "0.00",
           codAmount: loaded.codAmount,
@@ -5111,6 +5148,14 @@ function GroupSelectionCheckbox({
   return (
     <input aria-label={label} checked={checked} onChange={onChange} ref={ref} type="checkbox" />
   );
+}
+function platformQuoteFee(detail: OperationsOrderDetail): string | null {
+  if (!detail.serviceFeeOverrideReason?.startsWith("Platform customer quote ")) return null;
+  const additionalFees = Number(detail.additionalFees ?? 0);
+  if (Number.isFinite(additionalFees) && additionalFees > 0) return additionalFees.toFixed(2);
+  const inferredFee =
+    Number(detail.companyRevenue) - Number(detail.serviceFee) - Number(detail.serviceFeeVatAmount ?? 0);
+  return Number.isFinite(inferredFee) && inferredFee > 0 ? inferredFee.toFixed(2) : null;
 }
 function money(value: string, locale: "ar" | "en"): string {
   return formatCurrency(value, "AED", locale);

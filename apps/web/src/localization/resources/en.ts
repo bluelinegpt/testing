@@ -1899,6 +1899,7 @@ export const englishTranslations = {
     referenceNumberExists: "This Reference Number is already used in this Company.",
     legacyIdentifier: "Legacy / not assigned",
     additionalFees: "Additional Fees",
+    platformFee: "Platform fee",
     totalDeductions: "Total Deductions",
     systemOrderNumber: "System Order Number",
     internalDelivery: "Internal delivery",
@@ -2044,6 +2045,8 @@ export const englishTranslations = {
     // looks like it failed.
     searchOrdersPlaceholder:
       "Search by Order No., Serial No., Reference No., Customer Name, or Mobile — press Enter",
+    searchSerialNumber: "Search by serial number",
+    searchSerialNumberPlaceholder: "Serial No. only — press Enter",
     selectArea: "Select an area",
     selectTrader: "Select a trader",
     status: "Status",
@@ -3072,7 +3075,7 @@ export const englishTranslations = {
       allDeliveryCompanies: "All Delivery Companies",
       deliveryCompany: "Delivery Company",
       deliveryCompanyDefault: "My Delivery Company (default)",
-      noDeliveryCompanyBlocked: "No Delivery Company is available for creating Orders.",
+      noDeliveryCompanyBlocked: "No delivery company is assigned to this trader yet. Please assign an active delivery company before creating orders.",
     },
     profile: {
       accountInformation: "Account Information",

@@ -758,12 +758,87 @@ export class CommerceIntegrationService {
       order by created_at desc
       limit 1
     `.execute(this.db)).rows[0];
-    if (!link) throw new BadRequestException("trader_commerce_link_not_found");
+    if (link) {
+      return {
+        companyId: identity.companyId,
+        traderId: identity.profileId,
+        traderCommerceId: String(link.trader_commerce_id),
+      };
+    }
+    if (preferredTraderCommerceId !== undefined) throw new BadRequestException("trader_commerce_link_not_found");
+
+    const created = await this.createTraderCommerceIdentity(identity.companyId, identity.profileId, identity.identityId);
     return {
       companyId: identity.companyId,
       traderId: identity.profileId,
-      traderCommerceId: String(link.trader_commerce_id),
+      traderCommerceId: created,
     };
+  }
+
+  private async createTraderCommerceIdentity(companyId: string, traderId: string, actorId: string | null): Promise<string> {
+    const created = await sql<{ id: string }>`
+      with source as (
+        select
+          gen_random_uuid() as commerce_id,
+          trader.id as trader_id,
+          trader.company_id as company_id,
+          trader.name_en as public_name,
+          nullif(btrim(coalesce(trader.contact_person, '')), '') as contact_name,
+          nullif(btrim(coalesce(trader.mobile_number, '')), '') as mobile_number,
+          nullif(btrim(coalesce(trader.telephone, '')), '') as telephone,
+          nullif(btrim(coalesce(trader.email, '')), '') as email,
+          nullif(btrim(coalesce(trader.address_en, '')), '') as address
+        from traders trader
+        where trader.id = ${traderId}::uuid and trader.company_id = ${companyId}::uuid
+          and not exists (
+            select 1 from trader_commerce_company_links existing
+            where existing.trader_id = trader.id
+          )
+      ),
+      created_profile as (
+        insert into trader_commerce_profiles (
+          id, public_name, contact_name, mobile_number, telephone, email, address,
+          registration_source, approval_status, is_active, created_by_account_id,
+          updated_by_account_id
+        )
+        select
+          source.commerce_id, source.public_name, source.contact_name,
+          source.mobile_number, source.telephone, source.email, source.address,
+          'delivery_company_registered', 'approved', true, ${actorId}::uuid, ${actorId}::uuid
+        from source
+        returning id
+      ),
+      created_relationship as (
+        insert into trader_delivery_company_relationships (
+          trader_commerce_id, company_id, trader_id, relationship_source, status,
+          enabled_for_store_orders, is_default_for_store_orders, created_by_account_id
+        )
+        select source.commerce_id, source.company_id, source.trader_id,
+               'delivery_company_registered', 'active', true, true, ${actorId}::uuid
+        from source
+        returning id
+      )
+      insert into trader_commerce_company_links (
+        trader_commerce_id, company_id, trader_id, link_source, status,
+        created_by_account_id
+      )
+      select source.commerce_id, source.company_id, source.trader_id,
+             'delivery_company_registered', 'active', ${actorId}::uuid
+      from source
+      returning trader_commerce_id as id
+    `.execute(this.db);
+    const row = created.rows[0];
+    if (row !== undefined) return row.id;
+
+    const existing = await sql<{ traderCommerceId: string }>`
+      select trader_commerce_id as "traderCommerceId"
+      from trader_commerce_company_links
+      where trader_id = ${traderId}::uuid and status = 'active'
+      limit 1
+    `.execute(this.db);
+    const linked = existing.rows[0];
+    if (linked !== undefined) return linked.traderCommerceId;
+    throw new BadRequestException("trader_commerce_link_not_found");
   }
 
   private async traderConnectionById(id: string) {

@@ -179,6 +179,7 @@ export class OperationsController {
     @Query("areaId") areaId?: string,
     @Query("emirateId") emirateId?: string,
     @Query("referenceNumber") referenceNumber?: string,
+    @Query("serialNumber") serialNumber?: string,
     @Query("dateFrom") dateFrom?: string,
     @Query("dateTo") dateTo?: string,
     @Query("quickView")
@@ -205,6 +206,7 @@ export class OperationsController {
       emirateId,
       referenceNumber,
       search,
+      serialNumber,
       quickView,
       // Delivery Activity. `dateFrom`/`dateTo` above still mean Order Date.
       deliveredOnly: deliveredOnly === "true",
@@ -319,6 +321,7 @@ export class OperationsController {
     @Query("areaId") areaId?: string,
     @Query("emirateId") emirateId?: string,
     @Query("referenceNumber") referenceNumber?: string,
+    @Query("serialNumber") serialNumber?: string,
     @Query("dateFrom") dateFrom?: string,
     @Query("dateTo") dateTo?: string,
   ): Promise<OperationsExportFile> {
@@ -332,6 +335,7 @@ export class OperationsController {
       emirateId,
       referenceNumber,
       search,
+      serialNumber,
       settlementStatus,
       traderId,
     });

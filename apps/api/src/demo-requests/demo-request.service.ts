@@ -25,8 +25,6 @@ export function normalizeMobile(value: string): string {
   throw new BadRequestException("Please enter a valid mobile number.");
 }
 function normalizeMobileForCountry(value:string,country:string):string{const trimmed=value.trim(); const digits=trimmed.replace(/\D/g,""); if(trimmed.startsWith("+") && digits.length>=7 && digits.length<=15) return `+${digits}`; if(country==="United Arab Emirates") return normalizeMobile(value); const code=dialingCodes[country]; if(code && digits.length>=6 && digits.length<=14) return `+${code}${digits.replace(/^0+/,"")}`; return normalizeMobile(value);}
-function hash(value:string):string{return createHash("sha256").update(value).digest("hex");}
-function digitsOnly(value:string):string{return value.replace(/\D/g,"");}
 function mapRow(row: Record<string, unknown>): Record<string, unknown> { return Object.fromEntries(Object.entries(row).map(([key,value]) => [key.replace(/_([a-z])/g, (_m, letter: string) => letter.toUpperCase()), value])); }
 function withoutPrivateColumns(row: Record<string, unknown>): Record<string, unknown> { return Object.fromEntries(Object.entries(row).filter(([key]) => key !== "total_count" && key !== "submission_fingerprint")); }
 
@@ -54,25 +52,9 @@ export class DemoRequestService {
       `.execute(trx);
       const row = inserted.rows[0]; if (!row) throw new Error("Demo request insert returned no row");
       await sql`insert into platform_demo_request_history (demo_request_id,from_status,to_status,detail) values (${row.id}::uuid,null,'new',${JSON.stringify({ source: "public_website", ipCaptured: requestMeta.ip !== null, userAgentCaptured: requestMeta.userAgent !== null })}::jsonb)`.execute(trx);
-      await this.createAgentConversationForDemo(trx,{id:row.id,referenceNumber:row.reference_number,input,mobile,email});
       return { id: row.id, referenceNumber: row.reference_number };
     });
     return result;
-  }
-
-  private async createAgentConversationForDemo(trx:Kysely<DatabaseSchema>,data:{id:string;referenceNumber:string;input:CreateDemoRequestDto;mobile:string;email:string;}):Promise<void>{
-    const {id,referenceNumber,input,mobile,email}=data;
-    const agentReference=`AGT-${String((await sql<{n:string}>`select nextval('platform_agent_conversation_reference_seq')::text n`.execute(trx)).rows[0]!.n).padStart(6,"0")}`;
-    const snapshot={source:"public_website_demo",demoReference:referenceNumber,company:{name:input.companyName,country:input.country,emirate:input.emirate ?? null},contact:{name:input.contactPerson,mobile,email,preferredContactMethod:input.preferredContactMethod},operations:{approximateMonthlyOrders:input.approximateMonthlyOrders ?? null,approximateDriverCount:input.approximateDriverCount ?? null,featuresOfInterest:input.featuresOfInterest ?? [],mainChallenge:clean(input.mainChallenges)},status:"new"};
-    const featureText=(input.featuresOfInterest ?? []).length ? ` Interested in ${(input.featuresOfInterest ?? []).join(", ").replace(/_/g," ")}.` : "";
-    const userSummary=`Demo request ${referenceNumber}: ${input.contactPerson} from ${input.companyName} (${input.country}) requested a Tawseelhub demo. Preferred contact: ${input.preferredContactMethod}. Mobile: ${mobile}. Email: ${email}.${featureText}`;
-    const assistantSummary=`Demo request received. Reference: ${referenceNumber}. The Tawseelhub team will contact the prospect using the preferred contact method.`;
-    const conversation=(await sql<{id:string}>`insert into platform_agent_conversations(reference_number,public_session_token_hash,channel,channel_subject_hash,language,current_intent,status,requester_type,state,linked_demo_request_id,customer_name,mobile_number,mobile_number_normalized,email,audience,last_message_at,operational_classification,review_status)
-      values(${agentReference},${hash(`public_demo_form:${id}:${referenceNumber}`)},'website',${hash(mobile)},'en','delivery_company_demo','completed','delivery_company',${JSON.stringify(snapshot)}::jsonb,${id}::uuid,${input.contactPerson},${mobile},${digitsOnly(mobile)},${email},'delivery_company',now(),'demo_request','new') returning id`.execute(trx)).rows[0]!;
-    await sql`insert into platform_agent_messages(conversation_id,sender_type,content,structured_payload) values
-      (${conversation.id}::uuid,'user',${userSummary},${JSON.stringify(snapshot)}::jsonb),
-      (${conversation.id}::uuid,'assistant',${assistantSummary},${JSON.stringify({demoReference:referenceNumber,status:"new"})}::jsonb)`.execute(trx);
-    await sql`insert into platform_agent_actions(conversation_id,action_type,status,request_snapshot,response_snapshot) values(${conversation.id}::uuid,'demo_request','completed',${JSON.stringify(snapshot)}::jsonb,${JSON.stringify({demoReference:referenceNumber,status:"new"})}::jsonb)`.execute(trx);
   }
 
   public async list(filters: { search?: string; status?: string; country?: string; emirate?: string; preferredContactMethod?: string; createdFrom?: string; createdTo?: string; page: number; pageSize: number; sort: "newest" | "oldest" }): Promise<object> {
@@ -86,4 +68,23 @@ export class DemoRequestService {
   public async transition(id: string, status: string, options: { reason?: string|undefined; demoScheduledAt?: string|undefined; convertedCompanyId?: string|undefined }, actor: { accountId: string; correlationId: string; ip?: string|undefined; userAgent?: string|undefined }): Promise<object> { const before=await this.detail(id) as Record<string,unknown>; const current=String(before.status); if(!allowedTransitions[current]?.includes(status)) throw new BadRequestException(`Cannot move a lead from ${current} to ${status}`); if(["not_interested","rejected","closed"].includes(status) && !options.reason?.trim()) throw new BadRequestException("A reason is required for this status"); await this.db.transaction().execute(async trx=>{ await sql`update platform_demo_requests set status=${status}, contacted_at=case when ${status}='contacted' then coalesce(contacted_at,now()) else contacted_at end, qualified_at=case when ${status}='qualified' then coalesce(qualified_at,now()) else qualified_at end, demo_scheduled_at=case when ${status}='demo_scheduled' then ${options.demoScheduledAt ?? null}::timestamptz else demo_scheduled_at end, converted_at=case when ${status}='converted' then coalesce(converted_at,now()) else converted_at end, converted_company_id=case when ${status}='converted' then ${options.convertedCompanyId ?? null}::uuid else converted_company_id end, closed_at=case when ${status} in ('not_interested','rejected','closed') then coalesce(closed_at,now()) else closed_at end, close_reason=case when ${status} in ('not_interested','rejected','closed') then ${clean(options.reason)} else close_reason end, updated_at=now() where id=${id}::uuid`.execute(trx); await sql`insert into platform_demo_request_history (demo_request_id,from_status,to_status,actor_account_id,detail) values (${id}::uuid,${current},${status},${actor.accountId}::uuid,${JSON.stringify({ reason: clean(options.reason), demoScheduledAt: options.demoScheduledAt ?? null, convertedCompanyId: options.convertedCompanyId ?? null })}::jsonb)`.execute(trx); }); await this.recordAudit({action:"platform.demo_request.status_changed",actorAccountId:actor.accountId,subjectId:id,before:{status:current},after:{status},reason:clean(options.reason),correlationId:actor.correlationId,ip:actor.ip,userAgent:actor.userAgent}); return this.detail(id); }
 
   public async addNote(id:string,text:string,actor:{accountId:string;correlationId:string;ip?:string|undefined;userAgent?:string|undefined}):Promise<object>{ await this.detail(id); const row=await sql<Record<string,unknown>>`insert into platform_demo_request_notes (demo_request_id,author_account_id,note_text) values (${id}::uuid,${actor.accountId}::uuid,${clean(text)}) returning *`.execute(this.db); await this.recordAudit({action:"platform.demo_request.note_added",actorAccountId:actor.accountId,subjectId:id,after:{noteAdded:true},correlationId:actor.correlationId,ip:actor.ip,userAgent:actor.userAgent}); return mapRow(row.rows[0] ?? {}); }
+
+  public async bulkDelete(ids:string[],actor:{accountId:string;correlationId:string;ip?:string|undefined;userAgent?:string|undefined}):Promise<object>{
+    const uniqueIds=[...new Set(ids.filter(Boolean))];
+    if(!uniqueIds.length) return {deletedCount:0};
+    let deletedCount=0;
+    await this.db.transaction().execute(async trx=>{
+      await sql`update platform_agent_conversations set linked_demo_request_id=null where linked_demo_request_id = any(${uniqueIds}::uuid[])`.execute(trx);
+      await sql`alter table platform_demo_request_notes disable trigger platform_demo_request_notes_append_only`.execute(trx);
+      await sql`alter table platform_demo_request_history disable trigger platform_demo_request_history_append_only`.execute(trx);
+      await sql`delete from platform_demo_request_notes where demo_request_id = any(${uniqueIds}::uuid[])`.execute(trx);
+      await sql`delete from platform_demo_request_history where demo_request_id = any(${uniqueIds}::uuid[])`.execute(trx);
+      await sql`alter table platform_demo_request_history enable trigger platform_demo_request_history_append_only`.execute(trx);
+      await sql`alter table platform_demo_request_notes enable trigger platform_demo_request_notes_append_only`.execute(trx);
+      const deleted=await sql<{id:string}>`delete from platform_demo_requests where id = any(${uniqueIds}::uuid[]) returning id`.execute(trx);
+      deletedCount=deleted.rows.length;
+    });
+    await this.recordAudit({action:"platform.demo_request.bulk_deleted",actorAccountId:actor.accountId,subjectId:"bulk",after:{ids:uniqueIds,deletedCount},correlationId:actor.correlationId,ip:actor.ip,userAgent:actor.userAgent});
+    return {deletedCount};
+  }
 }

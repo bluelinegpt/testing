@@ -1,12 +1,17 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
-import { buildWhatsAppMessageUrl, createAgentConversation, getAgentConversation, getWhatsAppSettings, sendAgentMessage, type AgentMessage, type WhatsAppPublicSettings } from './agent-client';
+import { buildWhatsAppMessageUrl, createAgentConversation, getAgentAvailability, getAgentConversation, getWhatsAppSettings, sendAgentMessage, type AgentAvailability, type AgentMessage, type WhatsAppPublicSettings } from './agent-client';
 import { trackEvent } from './analytics';
+import { getStoredPublicLocale, publicLocaleChangeEvent, savePublicLocale } from './public-localization';
 import './agent-chat.css';
 
 type Language = 'en' | 'ar';
 
-const fallbackQuickActions = ['Send a Package', 'Register as Trader', 'Delivery Company Demo', 'Learn About Tawseelhub'] as const;
+const fallbackQuickActions = {
+  en: ['Send a Package', 'Register as Trader', 'Delivery Company Demo', 'Learn About Tawseelhub'],
+  ar: ['أرسل شحنة', 'تسجيل تاجر', 'عرض لشركة توصيل', 'تعرف على Tawseelhub'],
+} as const;
 const visitorIdKey = 'tawseelhub-agent-visitor-id';
+const linkPattern = /(https?:\/\/[^\s،]+)/g;
 
 function visitorId() {
   const existing = window.localStorage.getItem(visitorIdKey);
@@ -16,16 +21,31 @@ function visitorId() {
   return created;
 }
 
+export function renderAgentMessageLine(line: string) {
+  const parts = line.split(linkPattern);
+  return parts.map((part, index) => {
+    if (/^https?:\/\//.test(part)) {
+      return (
+        <a href={part} key={`${part}-${index}`} target="_blank" rel="noreferrer">
+          {part}
+        </a>
+      );
+    }
+    return part;
+  });
+}
+
 export function AgentChat() {
   const [mounted, setMounted] = useState(false);
   const [open, setOpen] = useState(false);
-  const [language, setLanguage] = useState<Language>('en');
+  const [language, setLanguage] = useState<Language>(() => getStoredPublicLocale());
   const [token, setToken] = useState<string | null>(null);
   const [messages, setMessages] = useState<AgentMessage[]>([]);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [whatsapp, setWhatsapp] = useState<WhatsAppPublicSettings | null>(null);
+  const [availability, setAvailability] = useState<AgentAvailability>({ assistantAvailable: false, humanAvailable: false, status: 'unavailable' });
   const [handoffRequested, setHandoffRequested] = useState(false);
   const [humanState, setHumanState] = useState<'ai_active' | 'waiting_for_human' | 'human_active'>('ai_active');
   const panelRef = useRef<HTMLDivElement | null>(null);
@@ -33,17 +53,45 @@ export function AgentChat() {
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const isRtl = language === 'ar';
-  const launcherLabel = isRtl ? 'اسأل توصيل هب' : 'Ask Tawseelhub';
+  const launcherLabel = isRtl ? 'اسأل Tawseelhub' : 'Ask Tawseelhub';
+  const humanAvailable = availability.humanAvailable;
+  const humanStatusLabel = humanAvailable
+    ? (isRtl ? 'الدعم البشري متاح' : 'Human support available')
+    : (isRtl ? 'لا يوجد دعم بشري الآن' : 'Human support unavailable now');
   const welcome = useMemo(() => messages.length > 0 ? messages : [], [messages]);
   const visibleQuickActions = useMemo(() => {
     const payload = messages[0]?.structuredPayload;
-    return Array.isArray(payload?.quickActions) ? payload.quickActions.filter((item): item is string => typeof item === 'string') : [...fallbackQuickActions];
-  }, [messages]);
+    return Array.isArray(payload?.quickActions) ? payload.quickActions.filter((item): item is string => typeof item === 'string') : [...fallbackQuickActions[language]];
+  }, [language, messages]);
 
   useEffect(() => {
     const id = window.setTimeout(() => setMounted(true), 700);
     void getWhatsAppSettings().then(setWhatsapp);
+    void getAgentAvailability().then(setAvailability);
     return () => window.clearTimeout(id);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const refreshAvailability = async () => {
+      const nextAvailability = await getAgentAvailability();
+      if (!cancelled) setAvailability(nextAvailability);
+    };
+    const interval = window.setInterval(() => void refreshAvailability(), 30000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, []);
+
+  useEffect(() => {
+    const syncLanguage = () => setLanguage(getStoredPublicLocale());
+    window.addEventListener(publicLocaleChangeEvent, syncLanguage);
+    window.addEventListener('storage', syncLanguage);
+    return () => {
+      window.removeEventListener(publicLocaleChangeEvent, syncLanguage);
+      window.removeEventListener('storage', syncLanguage);
+    };
   }, []);
 
   useEffect(() => {
@@ -163,6 +211,7 @@ export function AgentChat() {
 
   async function changeLanguage() {
     const nextLanguage = language === 'en' ? 'ar' : 'en';
+    savePublicLocale(nextLanguage);
     setLanguage(nextLanguage);
     setToken(null);
     setMessages([]);
@@ -208,19 +257,24 @@ export function AgentChat() {
           <button className="agent-chat__launcher" type="button" onClick={() => void openChat()} aria-label={launcherLabel}>
             <span aria-hidden="true">T</span>
             <b>{launcherLabel}</b>
+            <i className={humanAvailable ? 'agent-chat__availability-dot agent-chat__availability-dot--online' : 'agent-chat__availability-dot agent-chat__availability-dot--offline'} title={humanStatusLabel} aria-label={humanStatusLabel} />
           </button>
         </div>
       ) : (
-        <section className="agent-chat__panel clarity-mask" data-clarity-mask="true" aria-label="Tawseelhub Assistant" ref={panelRef}>
+        <section className="agent-chat__panel clarity-mask" data-clarity-mask="true" aria-label={isRtl ? 'مساعد Tawseelhub' : 'Tawseelhub Assistant'} ref={panelRef}>
           <header className="agent-chat__header">
             <img src="/tawseelhub-logo.png" alt="" />
             <div>
-              <strong>{isRtl ? 'مساعد توصيل هب' : 'Tawseelhub Assistant'}</strong>
+              <strong>{isRtl ? 'مساعد Tawseelhub' : 'Tawseelhub Assistant'}</strong>
               <span>{isRtl ? 'لا تشارك معلومات حساسة غير مطلوبة' : 'Do not share unnecessary sensitive details'}</span>
+              <em className={humanAvailable ? 'agent-chat__availability agent-chat__availability--online' : 'agent-chat__availability agent-chat__availability--offline'}>
+                <i aria-hidden="true" />
+                {humanStatusLabel}
+              </em>
             </div>
-            <button type="button" onClick={() => void changeLanguage()} aria-label="Change chat language">{language.toUpperCase()}</button>
-            <button type="button" onClick={() => setOpen(false)} aria-label="Minimize chat">_</button>
-            <button type="button" onClick={() => { setOpen(false); setMessages([]); setToken(null); }} aria-label="Close chat">x</button>
+            <button type="button" onClick={() => void changeLanguage()} aria-label={isRtl ? 'تغيير لغة المحادثة إلى الإنجليزية' : 'Change chat language to Arabic'}>{language === 'en' ? 'AR' : 'EN'}</button>
+            <button type="button" onClick={() => setOpen(false)} aria-label={isRtl ? 'تصغير المحادثة' : 'Minimize chat'}>_</button>
+            <button type="button" onClick={() => { setOpen(false); setMessages([]); setToken(null); }} aria-label={isRtl ? 'إغلاق المحادثة' : 'Close chat'}>x</button>
           </header>
           <div className="agent-chat__messages" role="log" aria-live="polite" aria-relevant="additions" ref={messagesRef}>
             {humanState !== 'ai_active' ? (
@@ -233,11 +287,11 @@ export function AgentChat() {
             {welcome.map((message, index) => (
               <div className={`agent-chat__bubble agent-chat__bubble--${message.senderType}`} key={`${message.createdAt}-${index}`}>
                 {message.senderType === 'platform_staff' ? <strong>{isRtl ? 'فريق Tawseelhub' : 'Tawseelhub Team'}</strong> : null}
-                {message.content.split('\n').map((line) => <p key={line}>{line}</p>)}
+                {message.content.split('\n').map((line) => <p key={line}>{renderAgentMessageLine(line)}</p>)}
               </div>
             ))}
             {messages.length <= 1 ? (
-              <div className="agent-chat__quick-actions" aria-label="Quick actions">
+              <div className="agent-chat__quick-actions" aria-label={isRtl ? 'إجراءات سريعة' : 'Quick actions'}>
                 {visibleQuickActions.map((action) => <button key={action} type="button" onClick={() => void submitMessage(action)}>{action}</button>)}
               </div>
             ) : null}

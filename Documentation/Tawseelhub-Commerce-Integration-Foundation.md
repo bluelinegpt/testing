@@ -4,6 +4,16 @@ This foundation creates a provider-independent way for external commerce stores 
 
 ## Architecture
 
+```text
+External Commerce Platform
+        ↓
+Provider Adapter
+        ↓
+Generic Commerce Foundation
+        ↓
+Canonical Tawseelhub Order
+```
+
 - Commerce providers are registered through a provider router.
 - Each provider exposes one normalized interface: capabilities, webhook verification, webhook parsing, health check, and outbound status push.
 - Provider-specific payloads are translated into a normalized commerce order/event before Tawseelhub touches operational data.
@@ -29,6 +39,15 @@ The active adapters are:
 - `woocommerce`, enabled only when `WOOCOMMERCE_INTEGRATION_ENABLED=true`.
 
 WooCommerce uses the provider-approved REST API key model and connects from the authenticated Trader Portal, not Platform Administration.
+
+## Integration maturity
+
+| Provider | Code | Local tests | Real provider test | Production certification |
+| --- | --- | --- | --- | --- |
+| Salla | Ready | Pass/fixture-level | Pending | Pending |
+| Shopify | Ready | Pass/fixture-level | Pending | Pending |
+| WooCommerce | Ready | Pass/fixture-level | Pending | Pending |
+| Mock Commerce | Development only | Pass | Not applicable | Not available to production Traders |
 
 ## Capability model
 
@@ -72,6 +91,14 @@ Trader Portal APIs derive Company, Trader, and Trader Commerce profile from the 
 
 Platform Administration is a support and monitoring console only. Platform users may view connections, inspect sanitized event logs, retry failed events, test health, force disconnect/reconnect for support, and manage mapping fixes. Platform should not present the normal Salla/Shopify connect flow, because that creates ownership ambiguity and lets an operator pick the Trader manually.
 
+Normal merchant setup path:
+
+```text
+Trader Portal
+→ Integrations
+→ Connect <Provider>
+```
+
 ## Credentials model
 
 Credential rows store credential kind and a secret reference. Secret material is not returned to API callers. Platform diagnostics show only safe state such as “credential configured,” health, and sanitized errors.
@@ -97,6 +124,18 @@ The ledger enforces one event per `(connection_id, external_event_id)`. Replays 
 
 Order imports are also protected by `(connection_id, external_order_id)` in `commerce_integration_order_links`, so a new duplicate create event for the same external order is ignored.
 
+Typical event statuses are:
+
+- `received`
+- `processing`
+- `succeeded`
+- `duplicate`
+- `failed`
+- `retrying`
+- `rejected`
+
+Use the API/UI status returned by the current event ledger as source of truth if a provider adds more detailed states.
+
 ## Canonical Order mapping
 
 Imported orders become normal Tawseelhub Orders:
@@ -109,6 +148,12 @@ Imported orders become normal Tawseelhub Orders:
 - Delivery starts as normal `new`.
 
 Driver assignment, settlement, reporting, and operational handling remain the existing Tawseelhub workflows.
+
+Provider checkout shipping cost is not automatically Tawseelhub Service Fee. Tawseelhub pricing remains canonical.
+
+Provider updates can modify a Tawseelhub Order only while the canonical lifecycle permits it. Delivered/financial history is not blindly rewritten from provider updates. Provider cancellations also use the canonical Tawseelhub lifecycle; late cancellation may become a conflict or manual-review event.
+
+Outbound status synchronization is a generic capability, but provider guides describe what is actually enabled per provider. Do not assume every provider supports every Tawseelhub status.
 
 ## Retry and mapping model
 
@@ -154,3 +199,29 @@ Salla and Shopify now follow this adapter path. For WooCommerce, implement only 
 8. add provider-specific unit tests and replay/idempotency tests.
 
 Do not add provider-specific order tables, separate settlement workflows, or separate driver workflows.
+
+## Future provider checklist
+
+1. Register provider metadata.
+2. Define auth model.
+3. Define capability flags.
+4. Verify webhook signature from raw body.
+5. Normalize provider event.
+6. Normalize Order fields.
+7. Map payment/COD/prepaid safely.
+8. Map location and failure/retry behavior.
+9. Import into canonical Tawseelhub Order.
+10. Define update/cancel rules.
+11. Define outbound status rules.
+12. Handle errors, retries, and idempotency.
+13. Enforce tenant isolation from authenticated connection context.
+14. Add Trader Portal connection UI.
+15. Add Platform monitoring/support view.
+16. Add tests and provider documentation.
+
+## Provider guides
+
+- [Salla integration](Tawseelhub-Salla-Integration.md)
+- [Shopify integration](Tawseelhub-Shopify-Integration.md)
+- [WooCommerce integration](Tawseelhub-WooCommerce-Integration.md)
+- [Integration troubleshooting](Tawseelhub-Integration-Troubleshooting.md)

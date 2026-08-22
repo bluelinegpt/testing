@@ -51,16 +51,16 @@ export default defineConfig({
   },
   plugins: [react()],
   server: {
-    port: 5174,
+    port: 5177,
     // Serves the API under the web origin in development. Without this the web
-    // (127.0.0.1:5174) and the API (localhost:3000) are cross-site, so the
+    // (127.0.0.1:5177) and the API (localhost:3000) are cross-site, so the
     // browser withholds the SameSite=Lax session cookie and every reload signs
     // the user out — the exact defect this work removes. Set
     // VITE_API_BASE_URL=/api/v1 to use it.
     proxy: {
       "/api": {
         changeOrigin: false,
-        target: "http://localhost:3000",
+        target: "http://127.0.0.1:3000",
         ws: true,
       },
     },

@@ -23,14 +23,36 @@ function DemoRequestListPage(): ReactElement {
   const [page, setPage] = useState(1);
   const [data, setData] = useState<DemoRequestPage>();
   const [error, setError] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const session = usePlatformSession();
 
   const load = useCallback(() => {
     setError(false);
-    void platformApi.demoRequests({ search, status, country, emirate, preferredContactMethod: contact, sort, page }).then(setData).catch(() => setError(true));
+    void platformApi.demoRequests({ search, status, country, emirate, preferredContactMethod: contact, sort, page }).then((result) => {
+      setData(result);
+      setSelectedIds([]);
+    }).catch(() => setError(true));
   }, [contact, country, emirate, page, search, sort, status]);
 
   useEffect(load, [load]);
   const pages = Math.max(1, Math.ceil((data?.total ?? 0) / (data?.pageSize ?? 25)));
+  const canManage = session.can("platform.leads.manage");
+  const selectedSet = new Set(selectedIds);
+  const allVisibleSelected = Boolean(data?.items.length) && (data?.items ?? []).every((item) => selectedSet.has(String(item.id)));
+  const toggleSelected = (id: string, checked: boolean) => setSelectedIds((current) => checked ? [...new Set([...current, id])] : current.filter((item) => item !== id));
+  const toggleAllVisible = (checked: boolean) => setSelectedIds(checked ? (data?.items ?? []).map((item) => String(item.id)) : []);
+  async function deleteSelected() {
+    if (!selectedIds.length) return;
+    if (!window.confirm(`Delete ${selectedIds.length} selected website lead(s)? This cannot be undone.`)) return;
+    setDeleteError("");
+    try {
+      await platformApi.deleteDemoRequests(selectedIds);
+      load();
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : "Selected leads could not be deleted.");
+    }
+  }
 
   return (
     <section className="platform-panel">
@@ -48,12 +70,17 @@ function DemoRequestListPage(): ReactElement {
         <Field label="Preferred contact"><select onChange={(event) => { setPage(1); setContact(event.target.value); }} value={contact}><option value="">All methods</option><option value="phone">Phone</option><option value="whatsapp">WhatsApp</option><option value="email">Email</option></select></Field>
         <Field label="Sort"><select onChange={(event) => setSort(event.target.value as typeof sort)} value={sort}><option value="newest">Newest</option><option value="oldest">Oldest</option></select></Field>
       </div>
+      {canManage && data ? <div className="lead-contact-actions">
+        <label className="agent-row-select"><input checked={allVisibleSelected} onChange={(event) => toggleAllVisible(event.target.checked)} type="checkbox" /> <span>Select all visible</span></label>
+        <button className="platform-button platform-button--danger" disabled={!selectedIds.length} onClick={() => void deleteSelected()} type="button">Delete selected{selectedIds.length ? ` (${selectedIds.length})` : ""}</button>
+      </div> : null}
+      {deleteError ? <p role="alert">{deleteError}</p> : null}
       {error ? <p role="alert">The lead list could not be loaded.</p> : !data ? <p>Loading…</p> : data.items.length === 0 ? <p className="platform-muted">No leads match these filters.</p> : (
         <>
           <div className="platform-table-scroll">
             <table className="platform-table">
-              <thead><tr><th>Reference</th><th>Company</th><th>Contact</th><th>Mobile</th><th>Email</th><th>Country</th><th>Monthly Orders</th><th>Drivers</th><th>Preferred Contact</th><th>Status</th><th>CRM Link</th><th>Created</th></tr></thead>
-              <tbody>{data.items.map((item) => <tr key={item.id}><td><Link to={`/demo-requests/${item.id}`}>{item.referenceNumber}</Link></td><td>{item.companyName}</td><td>{item.contactPerson}</td><td>{item.mobileNumber}</td><td>{item.email}</td><td>{item.country}{item.emirate ? <><br /><span className="platform-muted">{label(item.emirate)}</span></> : null}</td><td>{item.approximateMonthlyOrders ?? "—"}</td><td>{item.approximateDriverCount ?? "—"}</td><td>{label(item.preferredContactMethod)}</td><td><span className="platform-badge">{label(item.status)}</span></td><td>{item.agentConversationReference ? <Link to={`/agent?search=${encodeURIComponent(item.agentConversationReference)}`}>{item.agentConversationReference}</Link> : "—"}</td><td>{new Date(item.createdAt).toLocaleString()}</td></tr>)}</tbody>
+              <thead><tr>{canManage ? <th>Select</th> : null}<th>Reference</th><th>Company</th><th>Contact</th><th>Mobile</th><th>Email</th><th>Country</th><th>Monthly Orders</th><th>Drivers</th><th>Preferred Contact</th><th>Status</th><th>CRM Link</th><th>Created</th></tr></thead>
+              <tbody>{data.items.map((item) => <tr key={item.id}>{canManage ? <td><input aria-label={`Select ${item.referenceNumber}`} checked={selectedSet.has(String(item.id))} onChange={(event) => toggleSelected(String(item.id), event.target.checked)} type="checkbox" /></td> : null}<td><Link to={`/demo-requests/${item.id}`}>{item.referenceNumber}</Link></td><td>{item.companyName}</td><td>{item.contactPerson}</td><td>{item.mobileNumber}</td><td>{item.email}</td><td>{item.country}{item.emirate ? <><br /><span className="platform-muted">{label(item.emirate)}</span></> : null}</td><td>{item.approximateMonthlyOrders ?? "—"}</td><td>{item.approximateDriverCount ?? "—"}</td><td>{label(item.preferredContactMethod)}</td><td><span className="platform-badge">{label(item.status)}</span></td><td>{item.agentConversationReference ? <Link to={`/agent?search=${encodeURIComponent(item.agentConversationReference)}`}>{item.agentConversationReference}</Link> : "—"}</td><td>{new Date(item.createdAt).toLocaleString()}</td></tr>)}</tbody>
             </table>
           </div>
           <div className="platform-pager"><button className="platform-button platform-button--quiet" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}>Previous</button><span>Page {page} of {pages} · {data.total} leads</span><button className="platform-button platform-button--quiet" disabled={page >= pages} onClick={() => setPage((value) => value + 1)}>Next</button></div>

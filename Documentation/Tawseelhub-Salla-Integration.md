@@ -7,7 +7,7 @@ This document describes the first real commerce provider adapter built on the ex
 ## What is implemented
 
 - Salla provider registration in the existing provider router.
-- OAuth start endpoint for Platform users.
+- OAuth start endpoint for authenticated Trader Portal users.
 - OAuth callback endpoint for Salla authorization returns.
 - Short-lived OAuth state table to protect callback state.
 - Salla webhook signature verification using the raw request body and `X-Salla-Signature`.
@@ -15,8 +15,8 @@ This document describes the first real commerce provider adapter built on the ex
 - Salla event mapping for created, updated, cancelled, app-authorized, and app-revoked events.
 - COD vs prepaid detection.
 - Customer, mobile, address, location, items, order number, amount, and currency mapping.
-- Provider capability display in the Platform Commerce Integrations screen.
-- Platform “Connect Salla” button that redirects to the Salla authorization URL when Salla credentials are configured.
+- Provider capability display in Trader Portal and Platform support views.
+- Trader Portal “Connect Salla” action that redirects to the Salla authorization URL when Salla credentials are configured.
 
 ## What is intentionally not complete without real Salla access
 
@@ -56,10 +56,22 @@ SALLA_INTEGRATION_ENABLED=true
 4. Configure webhooks to call:
    `/api/v1/integrations/commerce/salla/webhook/:connectionReference`
 5. Use the same webhook secret in Salla and `SALLA_WEBHOOK_SECRET`.
-6. Connect the test store from Platform → Commerce Integrations → Connect Salla.
+6. Connect the test store from Trader Portal → Integrations → Connect Salla.
 7. Create a real Salla test order.
 8. Confirm the Platform event ledger shows the Salla event as succeeded or duplicate.
 9. Confirm a normal Tawseelhub Order is created and linked through the commerce integration order link.
+
+## Tawseelhub connect flow
+
+Normal merchant setup is owned by the Trader Portal:
+
+```text
+Trader Portal
+→ Integrations
+→ Connect Salla
+```
+
+Platform Administration may monitor the resulting connection, inspect sanitized events, retry failed events after a mapping/configuration fix, and assist with support. Platform is not the normal place to initiate a merchant's Salla connection.
 
 ## Official Salla references used
 

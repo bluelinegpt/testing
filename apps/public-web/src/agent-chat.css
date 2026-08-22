@@ -31,6 +31,21 @@
   min-height: 52px;
   padding: 8px 18px 8px 8px;
 }
+.agent-chat__availability-dot {
+  border: 2px solid #fff;
+  border-radius: 999px;
+  display: inline-block;
+  height: 12px;
+  width: 12px;
+}
+.agent-chat__availability-dot--online {
+  background: #16a34a;
+  box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.18);
+}
+.agent-chat__availability-dot--offline {
+  background: #dc2626;
+  box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.18);
+}
 .agent-chat__floating-whatsapp {
   align-items: center;
   background: transparent;
@@ -112,6 +127,33 @@
 .agent-chat__header span {
   color: rgba(255, 255, 255, 0.72);
   font-size: 0.72rem;
+}
+.agent-chat__availability {
+  align-items: center;
+  display: inline-flex;
+  gap: 5px;
+  margin-top: 3px;
+  font-size: 0.68rem;
+  font-style: normal;
+  font-weight: 800;
+}
+.agent-chat__availability i {
+  border-radius: 999px;
+  display: inline-block;
+  height: 8px;
+  width: 8px;
+}
+.agent-chat__availability--online {
+  color: #86efac;
+}
+.agent-chat__availability--online i {
+  background: #22c55e;
+}
+.agent-chat__availability--offline {
+  color: #fca5a5;
+}
+.agent-chat__availability--offline i {
+  background: #ef4444;
 }
 .agent-chat__header button {
   background: rgba(255, 255, 255, 0.11);

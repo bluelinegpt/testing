@@ -686,10 +686,19 @@ export const platformApi = {
     return result ?? { items: [], page: 1, pageSize: 25, total: 0 };
   },
 
+  async deleteErrors(ids: string[]): Promise<{ deletedCount: number }> {
+    const result = await request<{ deletedCount: number }>("platform/errors", {
+      body: { ids },
+      method: "DELETE",
+    });
+    return result ?? { deletedCount: 0 };
+  },
+
   async demoRequests(filters:DemoRequestFilters={}):Promise<DemoRequestPage>{const query=new URLSearchParams();for(const [key,value] of Object.entries(filters)){if(value!==undefined&&value!=="")query.set(key,String(value));}const result=await request<DemoRequestPage>(`platform/demo-requests?${query.toString()}`,{method:"GET"});return result??{items:[],total:0,page:1,pageSize:25};},
   async demoRequest(id:string):Promise<DemoRequestDetail>{const result=await request<DemoRequestDetail>(`platform/demo-requests/${id}`,{method:"GET"});if(result===undefined)throw new PlatformApiError("Empty demo request response","empty",500);return result;},
   async updateDemoRequestStatus(id:string,input:{status:DemoRequestStatus;reason?:string;demoScheduledAt?:string;convertedCompanyId?:string}):Promise<DemoRequestDetail>{const result=await request<DemoRequestDetail>(`platform/demo-requests/${id}/status`,{method:"PATCH",body:input});if(result===undefined)throw new PlatformApiError("Empty demo request response","empty",500);return result;},
   async addDemoRequestNote(id:string,text:string):Promise<void>{await request(`platform/demo-requests/${id}/notes`,{method:"POST",body:{text}});},
+  async deleteDemoRequests(ids:string[]):Promise<any>{return await request<any>("platform/demo-requests",{method:"DELETE",body:{ids}});},
   async websiteCms():Promise<WebsiteCmsBundle>{const result=await request<WebsiteCmsBundle>("platform/website",{method:"GET"});return result??{overview:{},pages:[],pricing:[],features:[],faqs:[],helpCategories:[],helpArticles:[],media:[],navigation:[],contact:null,revisions:[]};},
   async saveWebsitePage(pageKey:string,locale:string,input:any):Promise<any>{return await request<any>(`platform/website/pages/${pageKey}/${locale}/draft`,{method:"PATCH",body:input});},
   async publishWebsitePage(pageKey:string,locale:string):Promise<any>{return await request<any>(`platform/website/pages/${pageKey}/${locale}/publish`,{method:"POST",body:{}});},
@@ -1057,6 +1066,9 @@ export const platformApi = {
   },
   async traderApplications(filters:Record<string,unknown>):Promise<TraderApplicationPage>{const result=await request<TraderApplicationPage>(`platform/trader-applications?${toQuery(filters)}`,{method:"GET"});return result??{items:[],total:0,page:1,pageSize:25};},
   async customerQuotes():Promise<any[]>{return await request<any[]>("platform/customer-quotes",{method:"GET"})??[];},
+  async platformFeeReceivables():Promise<any[]>{return await request<any[]>("platform/customer-quotes/platform-fees",{method:"GET"})??[];},
+  async recordPlatformFeePayment(receivableId:string,input:any):Promise<any>{return await request<any>(`platform/customer-quotes/platform-fees/${receivableId}/payments`,{method:"POST",body:input});},
+  async deleteCustomerQuotes(ids:string[]):Promise<any>{return await request<any>("platform/customer-quotes",{method:"DELETE",body:{ids}});},
   async blogArticles():Promise<any[]>{return await request<any[]>("platform/blog",{method:"GET"})??[];},
   async blogArticle(id:string):Promise<any>{return await request<any>(`platform/blog/${id}`,{method:"GET"});},
   async blogArticlePreview(id:string):Promise<any>{return await request<any>(`platform/blog/${id}/preview`,{method:"GET"});},
@@ -1103,8 +1115,10 @@ export const platformApi = {
   async customerMarketplaceSettings():Promise<any>{return await request<any>("platform/customer-quotes/settings/current",{method:"GET"});},
   async updateCustomerMarketplaceSettings(input:any):Promise<any>{return await request<any>("platform/customer-quotes/settings/current",{method:"PATCH",body:input});},
   async createManualCustomerOffer(id:string,input:any):Promise<any>{return await request<any>(`platform/customer-quotes/${id}/offers`,{method:"POST",body:input});},
+  async convertCustomerQuoteToOrder(id:string,input:any):Promise<any>{return await request<any>(`platform/customer-quotes/${id}/convert-to-order`,{method:"POST",body:input});},
   async traderApplication(id:string):Promise<TraderApplicationDetail>{const result=await request<TraderApplicationDetail>(`platform/trader-applications/${id}`,{method:"GET"});if(!result)throw new PlatformApiError("Empty Trader application response","empty",500);return result;},
   async updateTraderApplicationStatus(id:string,status:TraderApplicationStatus,reason?:string):Promise<TraderApplicationDetail>{const result=await request<TraderApplicationDetail>(`platform/trader-applications/${id}/status`,{method:"PATCH",body:{status,...(reason?{reason}:{})}});if(!result)throw new PlatformApiError("Empty Trader application response","empty",500);return result;},
   async addTraderApplicationNote(id:string,text:string):Promise<TraderApplicationDetail>{const result=await request<TraderApplicationDetail>(`platform/trader-applications/${id}/notes`,{method:"POST",body:{text}});if(!result)throw new PlatformApiError("Empty Trader application response","empty",500);return result;},
   async resolveTraderApplicationCompany(id:string,resolution:string,companyId?:string):Promise<TraderApplicationDetail>{const result=await request<TraderApplicationDetail>(`platform/trader-applications/${id}/delivery-company-resolution`,{method:"PATCH",body:{resolution,...(companyId?{companyId}:{})}});if(!result)throw new PlatformApiError("Empty Trader application response","empty",500);return result;},
+  async deleteTraderApplications(ids:string[]):Promise<any>{return await request<any>("platform/trader-applications",{method:"DELETE",body:{ids}});},
 };

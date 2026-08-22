@@ -86,6 +86,7 @@ export function AgentAdminPage() {
   const [knowledge, setKnowledge] = useState<any[]>([]);
   const [settings, setSettings] = useState<any | null>(null);
   const [selectedConversation, setSelectedConversation] = useState<any | null>(null);
+  const [selectedConversationIds, setSelectedConversationIds] = useState<string[]>([]);
   const [reviewDraft, setReviewDraft] = useState({ action: "", assignedToAccountId: "", classification: "general_enquiry", comment: "", status: "new" });
   const [internalComment, setInternalComment] = useState("");
   const [replyText, setReplyText] = useState("");
@@ -95,6 +96,8 @@ export function AgentAdminPage() {
   const [conversationLoading, setConversationLoading] = useState(true);
   const [conversationRefreshError, setConversationRefreshError] = useState<string | null>(null);
   const [lastLiveUpdate, setLastLiveUpdate] = useState<string | null>(null);
+  const [inboxCollapsed, setInboxCollapsed] = useState(false);
+  const [detailCollapsed, setDetailCollapsed] = useState(false);
   const [liveAgentSoundStatus, setLiveAgentSoundStatus] = useState<"ready" | "ringing" | "blocked" | "muted">("ready");
   const [liveAgentRingSilencedCount, setLiveAgentRingSilencedCount] = useState<number | null>(null);
   const [now, setNow] = useState(Date.now());
@@ -198,6 +201,11 @@ export function AgentAdminPage() {
       document.removeEventListener("visibilitychange", refreshWhenVisible);
     };
   }, [selectedConversation?.id, tab]);
+
+  useEffect(() => {
+    const visibleIds = new Set(conversations.map((item) => String(item.id)));
+    setSelectedConversationIds((current) => current.filter((id) => visibleIds.has(id)));
+  }, [conversations]);
 
   useEffect(() => {
     const interval = window.setInterval(() => setNow(Date.now()), 1000);
@@ -458,6 +466,44 @@ export function AgentAdminPage() {
     await load();
   }
 
+  function toggleConversationSelection(id: string, checked: boolean) {
+    setSelectedConversationIds((current) => {
+      if (checked) return current.includes(id) ? current : [...current, id];
+      return current.filter((item) => item !== id);
+    });
+  }
+
+  function toggleAllVisibleConversations(checked: boolean) {
+    setSelectedConversationIds(checked ? conversations.map((item) => String(item.id)) : []);
+  }
+
+  async function deleteSelectedConversations() {
+    if (!selectedConversationIds.length) return;
+    const count = selectedConversationIds.length;
+    const confirmed = window.confirm(`Permanently delete ${count} selected chat${count === 1 ? "" : "s"}? Use Hide instead if you may need them later.`);
+    if (!confirmed) return;
+    const idsToDelete = [...selectedConversationIds];
+    let deletedCount = 0;
+    for (const id of idsToDelete) {
+      try {
+        await platformApi.deleteAgentConversation(id);
+        deletedCount += 1;
+      } catch (error) {
+        console.error("Failed to delete selected agent conversation", error);
+      }
+    }
+    setSelectedConversationIds([]);
+    if (selectedConversation?.id && idsToDelete.includes(String(selectedConversation.id))) setSelectedConversation(null);
+    setConversationPage((current: any) => ({
+      ...current,
+      items: (current.items ?? []).filter((item: any) => !idsToDelete.includes(String(item.id))),
+      total: Math.max(Number(current.total ?? 0) - deletedCount, 0),
+    }));
+    setConversations((current) => current.filter((item) => !idsToDelete.includes(String(item.id))));
+    setMessage(deletedCount === count ? `Deleted ${deletedCount} selected chat${deletedCount === 1 ? "" : "s"}.` : `Deleted ${deletedCount} of ${count} selected chats. Refresh and try again for any remaining chats.`);
+    await load();
+  }
+
   const linkedLabel = (item: any) => [item.quoteReference ? `Quote ${item.quoteReference}` : item.hasQuote ? "Quote" : "", item.traderReference ? `Trader ${item.traderReference}` : item.hasTraderApplication ? "Trader" : "", item.demoReference ? `Demo ${item.demoReference}` : item.hasDemoRequest ? "Demo" : "", item.handoffStatus ? `Handoff ${item.handoffStatus}` : ""].filter(Boolean).join(", ") || "None";
   const modeLabel = (mode: string | undefined) => mode === "paused" ? "Waiting for Human" : mode === "human_active" ? "Human Active" : mode === "ai_resume" ? "Returned to Yousef" : "Yousef Active";
   const rowClass = (item: any) => [
@@ -477,6 +523,9 @@ export function AgentAdminPage() {
   const selectedWaitingDuration = waitingDuration(selectedConversation?.waitingSince);
   const selectedIsHidden = Boolean(selectedConversation?.hiddenAt);
   const selectedIsDeleted = Boolean(selectedConversation?.deletedAt);
+  const selectedConversationIdSet = new Set(selectedConversationIds);
+  const visibleConversationCount = conversations.length;
+  const allVisibleConversationsSelected = visibleConversationCount > 0 && conversations.every((item) => selectedConversationIdSet.has(String(item.id)));
   const openConversationFromRow = (event: KeyboardEvent<HTMLElement>, id: string) => {
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
@@ -485,7 +534,7 @@ export function AgentAdminPage() {
   };
 
   return (
-    <section className="platform-page">
+    <section className="platform-page agent-admin-page">
       <div className="platform-page__header">
         <div>
           <p className="platform-page__eyebrow">Website Content</p>
@@ -506,8 +555,12 @@ export function AgentAdminPage() {
             <div className="agent-console-title">
               <div>
                 <h2>Conversation Inbox</h2>
-                <p className="platform-muted">Live support queue. Rows update automatically without refreshing the page.</p>
-                <p className="platform-muted">Last update: {lastLiveUpdate ? formatDubaiTime(lastLiveUpdate) : "starting…"}</p>
+                {!inboxCollapsed ? (
+                  <>
+                    <p className="platform-muted">Live support queue. Rows update automatically without refreshing the page.</p>
+                    <p className="platform-muted">Last update: {lastLiveUpdate ? formatDubaiTime(lastLiveUpdate) : "starting…"}</p>
+                  </>
+                ) : null}
               </div>
               <div className="agent-live-status-stack">
                 <span className={`agent-live-indicator agent-live-indicator--${liveStatus}`}>{liveStatus === "live" ? "Live" : liveStatus === "updating" ? "Updating…" : "Reconnecting…"}</span>
@@ -528,9 +581,14 @@ export function AgentAdminPage() {
                 ) : (
                   <span className="agent-live-indicator agent-live-indicator--quiet">Sound ready</span>
                 )}
+                <button className="platform-button platform-button--quiet agent-collapse-button" type="button" onClick={() => setInboxCollapsed((value) => !value)}>
+                  {inboxCollapsed ? "Show filters" : "Collapse filters"}
+                </button>
               </div>
             </div>
-            <div className="lead-action-grid">
+            {!inboxCollapsed ? (
+              <>
+              <div className="lead-action-grid">
               <button className="platform-badge agent-counter-button" type="button" onClick={() => applyConversationShortcut({ needsReply: "all", status: "new" })}>New {conversationPage.counters?.new ?? 0}</button>
               <button className="platform-badge agent-counter-button" type="button" onClick={() => applyConversationShortcut({ needsReply: "all", status: "open,in_progress" })}>Open {conversationPage.counters?.open ?? 0}</button>
               <button className="platform-badge agent-counter-button" type="button" onClick={() => applyConversationShortcut({ needsReply: "all", status: "waiting_for_customer" })}>Waiting {conversationPage.counters?.waitingForCustomer ?? 0}</button>
@@ -568,6 +626,27 @@ export function AgentAdminPage() {
               <select value={conversationFilters.pageSize} onChange={(event) => setConversationFilter("pageSize", Number(event.target.value))}><option value={25}>25</option><option value={50}>50</option><option value={100}>100</option></select>
             </div>
             <p className="platform-muted">Use View, or click any conversation row, to open it.{conversationFilters.needsReply === "true" ? " Showing conversations that need a human reply." : ""}</p>
+            <div className="agent-bulk-actions" aria-label="Bulk conversation actions">
+              <label className="agent-bulk-select">
+                <input
+                  checked={allVisibleConversationsSelected}
+                  disabled={!visibleConversationCount}
+                  onChange={(event) => toggleAllVisibleConversations(event.target.checked)}
+                  type="checkbox"
+                />
+                Select all visible chats
+              </label>
+              <button
+                className="platform-button platform-button--danger"
+                disabled={!selectedConversationIds.length}
+                onClick={() => void deleteSelectedConversations()}
+                type="button"
+              >
+                Delete selected{selectedConversationIds.length ? ` (${selectedConversationIds.length})` : ""}
+              </button>
+            </div>
+              </>
+            ) : null}
             {conversationRefreshError ? <p className="platform-alert platform-alert--warning">{conversationRefreshError}</p> : null}
             <div className="agent-inbox-list" aria-label="Conversation inbox">
               {conversationLoading && !conversations.length ? <p className="platform-muted">Loading conversations...</p> : null}
@@ -581,6 +660,15 @@ export function AgentAdminPage() {
                 title="Open conversation detail"
               >
                 <div className="agent-inbox-item__topline">
+                  <label className="agent-row-select" onClick={(event) => event.stopPropagation()}>
+                    <input
+                      aria-label={`Select conversation ${item.referenceNumber ?? item.customerName ?? item.id}`}
+                      checked={selectedConversationIdSet.has(String(item.id))}
+                      onChange={(event) => toggleConversationSelection(String(item.id), event.target.checked)}
+                      type="checkbox"
+                    />
+                    <span>Select</span>
+                  </label>
                   <strong>{item.customerName ?? "Anonymous Visitor"}</strong>
                   <button className="platform-button platform-button--primary agent-view-button" type="button" onClick={(event) => { event.stopPropagation(); void openConversation(item.id); }}>View</button>
                 </div>
@@ -588,6 +676,7 @@ export function AgentAdminPage() {
                   <span>{titleize(item.operationalClassification)}</span>
                   <span>{titleize(item.channel)}</span>
                   <span>{item.mobileNumber ?? "No mobile"}</span>
+                  {item.identityMatchType === "ip" && Number(item.conversationCount ?? 1) > 1 ? <span className="platform-badge agent-ip-badge">Same IP</span> : item.hasVisitorIp ? <span className="platform-badge agent-ip-badge">IP captured</span> : null}
                 </div>
                 <div className="agent-inbox-item__state">
                   <span className="agent-mode-pill">{modeLabel(item.conversationMode)}</span>
@@ -612,28 +701,40 @@ export function AgentAdminPage() {
             </div>
           </div>
           <div className="platform-card agent-console-pane agent-console-pane--detail">
-            <h2>Active Conversation</h2>
-            {!selectedConversation ? <p className="platform-muted">Select a conversation to see the full saved chat, actions, and internal review comment.</p> : (
+            <div className="agent-console-title">
+              <h2>Active Conversation</h2>
+              <button className="platform-button platform-button--quiet agent-collapse-button" type="button" onClick={() => setDetailCollapsed((value) => !value)}>
+                {detailCollapsed ? "Show details" : "Collapse details"}
+              </button>
+            </div>
+            {!selectedConversation ? <p className="platform-muted">Select a conversation to see the full saved chat, actions, and internal review comment.</p> : null}
+            {selectedConversation ? (
               <>
-                <h3>{selectedConversation.customerName ?? "Anonymous"} · {selectedConversation.referenceNumber}</h3>
-                <p className="platform-muted">{selectedConversation.conversationCount ?? 1} session(s) in this Dubai business-day thread · {selectedConversation.channel} · {selectedConversation.language} · Mode: {selectedModeLabel}</p>
-                <div className="lead-action-grid">
-                  <span className="platform-badge">{selectedConversation.mobileNumber ?? "No mobile"}</span>
-                  <span className="platform-badge">{titleize(selectedConversation.audience)}</span>
-                  <span className="platform-badge">{titleize(selectedConversation.operationalClassification)}</span>
-                  <span className="platform-badge">{selectedConversation.email ?? "No email"}</span>
-                  <span className="platform-badge">Last channel {titleize(selectedConversation.lastChannel ?? selectedConversation.channel)}</span>
-                  <span className="platform-badge">Assigned to {selectedConversation.assignedToUsername ?? "Unassigned"}</span>
-                  {selectedIsHidden && !selectedIsDeleted ? <span className="platform-badge agent-hidden-badge">Hidden</span> : null}
-                  {selectedIsDeleted ? <span className="platform-badge agent-deleted-badge">Deleted</span> : null}
-                  {selectedWaitingCount > 0 ? <span className="agent-waiting-pill">● {selectedWaitingCount} waiting</span> : null}
-                  {selectedWaitingDuration ? <span className="agent-waiting-time">{selectedWaitingDuration}</span> : null}
-                </div>
-                <div className="agent-management-actions">
-                  {!selectedIsHidden && !selectedIsDeleted ? <button className="platform-button platform-button--quiet" type="button" onClick={() => void hideSelectedConversation()}>Hide this chat</button> : null}
-                  {selectedIsHidden || selectedIsDeleted ? <button className="platform-button platform-button--quiet" type="button" onClick={() => void unhideSelectedConversation()}>Unhide / Restore</button> : null}
-                  {!selectedIsDeleted ? <button className="platform-button platform-button--danger" type="button" onClick={() => void deleteSelectedConversation()}>Delete this chat</button> : null}
-                </div>
+                {!detailCollapsed ? (
+                  <div className="agent-detail-top">
+                    <h3>{selectedConversation.customerName ?? "Anonymous"} · {selectedConversation.referenceNumber}</h3>
+                    <p className="platform-muted">{selectedConversation.conversationCount ?? 1} session(s) in this Dubai business-day thread · {selectedConversation.channel} · {selectedConversation.language} · Mode: {selectedModeLabel}</p>
+                    <div className="lead-action-grid">
+                      <span className="platform-badge">{selectedConversation.mobileNumber ?? "No mobile"}</span>
+                      {selectedConversation.visitorIpHash ? <span className="platform-badge agent-ip-badge">IP captured</span> : null}
+                      <span className="platform-badge">{titleize(selectedConversation.audience)}</span>
+                      <span className="platform-badge">{titleize(selectedConversation.operationalClassification)}</span>
+                      <span className="platform-badge">{selectedConversation.email ?? "No email"}</span>
+                      <span className="platform-badge">Last channel {titleize(selectedConversation.lastChannel ?? selectedConversation.channel)}</span>
+                      <span className="platform-badge">Assigned to {selectedConversation.assignedToUsername ?? "Unassigned"}</span>
+                      {selectedIsHidden && !selectedIsDeleted ? <span className="platform-badge agent-hidden-badge">Hidden</span> : null}
+                      {selectedIsDeleted ? <span className="platform-badge agent-deleted-badge">Deleted</span> : null}
+                      {selectedConversation.previousDays?.length ? <span className="platform-badge">Related history {selectedConversation.previousDays.length} day(s)</span> : null}
+                      {selectedWaitingCount > 0 ? <span className="agent-waiting-pill">● {selectedWaitingCount} waiting</span> : null}
+                      {selectedWaitingDuration ? <span className="agent-waiting-time">{selectedWaitingDuration}</span> : null}
+                    </div>
+                    <div className="agent-management-actions">
+                      {!selectedIsHidden && !selectedIsDeleted ? <button className="platform-button platform-button--quiet" type="button" onClick={() => void hideSelectedConversation()}>Hide this chat</button> : null}
+                      {selectedIsHidden || selectedIsDeleted ? <button className="platform-button platform-button--quiet" type="button" onClick={() => void unhideSelectedConversation()}>Unhide / Restore</button> : null}
+                      {!selectedIsDeleted ? <button className="platform-button platform-button--danger" type="button" onClick={() => void deleteSelectedConversation()}>Delete this chat</button> : null}
+                    </div>
+                  </div>
+                ) : <p className="platform-muted">{selectedConversation.referenceNumber} details hidden. Conversation tools remain below.</p>}
                 <div className={selectedNeedsHumanControls ? "agent-live-controls agent-live-controls--attention" : "agent-live-controls"}>
                   <div>
                     <h3>Live Agent Controls</h3>
@@ -708,10 +809,10 @@ export function AgentAdminPage() {
                   <h3>History</h3>
                   <div className="platform-list">{selectedConversation.history?.length ? selectedConversation.history.map((item: any) => <article key={item.id}><strong>{item.oldStatus ?? "—"} → {item.newStatus}</strong><span>{new Date(item.createdAt).toLocaleString()} · {item.actorUsername ?? "Platform"} · Assignee {item.oldAssigneeUsername ?? "Unassigned"} → {item.newAssigneeUsername ?? "Unassigned"}</span><p>{item.comment ?? ""}</p></article>) : <p className="platform-muted">No status or assignment changes yet.</p>}</div>
                   <h3>Previous Customer Days</h3>
-                  <div className="platform-list">{selectedConversation.previousDays?.length ? selectedConversation.previousDays.map((item: any) => <article key={String(item.businessDate)}><strong>{formatDateOnly(item.businessDate)}</strong><span>{item.conversationCount} session(s) · {item.messageCount} messages · last {new Date(item.lastActivityAt).toLocaleString()}</span></article>) : <p className="platform-muted">No earlier identified history for this customer/contact.</p>}</div>
+                  <div className="platform-list">{selectedConversation.previousDays?.length ? selectedConversation.previousDays.map((item: any) => <article key={String(item.businessDate)}><strong>{formatDateOnly(item.businessDate)}</strong><span>{item.conversationCount} session(s) · {item.messageCount} messages · last {new Date(item.lastActivityAt).toLocaleString()} · matched by {(item.matchSignals ?? []).join(", ") || "known identity"}</span></article>) : <p className="platform-muted">No earlier identified history for this customer/contact.</p>}</div>
                 </details>
               </>
-            )}
+            ) : null}
           </div>
         </div>
       ) : null}
@@ -757,8 +858,12 @@ export function AgentAdminPage() {
             <label><input type="checkbox" checked={settings.whatsappPublicCtaEnabled ?? true} onChange={(event) => setSettings({ ...settings, whatsappPublicCtaEnabled: event.target.checked })} /> Public WhatsApp CTA Enabled</label>
             <label>WhatsApp Provider<select value={settings.whatsappProvider ?? "meta_cloud"} onChange={(event) => setSettings({ ...settings, whatsappProvider: event.target.value })}><option value="meta_cloud">Meta Cloud API</option><option value="sandbox">Sandbox / Local Test</option><option value="disabled">Disabled</option></select></label>
             <label>WhatsApp Business Number<input value={settings.whatsappBusinessNumber ?? ""} onChange={(event) => setSettings({ ...settings, whatsappBusinessNumber: event.target.value })} /></label>
-            <label><input type="checkbox" checked={settings.humanHandoffEnabled} onChange={(event) => setSettings({ ...settings, humanHandoffEnabled: event.target.checked })} /> Human Live Agent Available</label>
-            <p className="platform-muted">When ON, customers can wait for a Platform agent to take over. When OFF, Yousef collects the customer name and mobile number and saves a follow-up for the operations team.</p>
+            <label className={settings.humanHandoffEnabled ? "agent-availability-toggle agent-availability-toggle--online" : "agent-availability-toggle agent-availability-toggle--offline"}>
+              <input type="checkbox" checked={settings.humanHandoffEnabled} onChange={(event) => setSettings({ ...settings, humanHandoffEnabled: event.target.checked })} />
+              <span aria-hidden="true" />
+              <strong>{settings.humanHandoffEnabled ? "Human support available" : "Human support unavailable"}</strong>
+              <small>{settings.humanHandoffEnabled ? "Public chat shows green. Yousef can tell customers someone will reply soon." : "Public chat shows red. Yousef collects name and mobile for operations follow-up."}</small>
+            </label>
             <label>Assistant Display Name<input value={settings.assistantDisplayName} onChange={(event) => setSettings({ ...settings, assistantDisplayName: event.target.value })} /></label>
             <label>Default Language<select value={settings.defaultLanguage} onChange={(event) => setSettings({ ...settings, defaultLanguage: event.target.value })}><option value="en">English</option><option value="ar">Arabic</option></select></label>
             <label>Fallback Message<textarea rows={4} value={settings.generalFallbackMessage} onChange={(event) => setSettings({ ...settings, generalFallbackMessage: event.target.value })} /></label>

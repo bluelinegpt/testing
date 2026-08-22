@@ -134,6 +134,14 @@ Platform Administration is monitor/support only:
 
 Platform does not normally initiate WooCommerce connections.
 
+Normal merchant setup path:
+
+```text
+Trader Portal
+→ Integrations
+→ Connect WooCommerce
+```
+
 ## Common errors
 
 - `woocommerce_https_required`: production Store URL must use HTTPS.

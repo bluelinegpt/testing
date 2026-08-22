@@ -1,4 +1,16 @@
-import { Body, Controller, Get, Inject, Param, ParseUUIDPipe, Patch, Query } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Inject,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Query,
+} from "@nestjs/common";
 import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
 
 import {
@@ -13,6 +25,7 @@ import { ClientErrorReportService } from "./client-error-report.service.js";
 // runtime, so these query/body contracts are actually validated.
 // eslint-disable-next-line @typescript-eslint/consistent-type-imports
 import {
+  DeleteClientErrorReportsDto,
   ListClientErrorReportsQueryDto,
   UpdateClientErrorReportDto,
 } from "./client-error-report.dto.js";
@@ -60,5 +73,14 @@ export class PlatformErrorReportController {
     @Body() input: UpdateClientErrorReportDto,
   ): Promise<ClientErrorReportRow> {
     return this.reports.update(id, input);
+  }
+
+  @ApiBearerAuth()
+  @ApiOperation({ summary: "Delete selected captured error reports" })
+  @RequirePlatformPermissions(PLATFORM_ERRORS_MANAGE)
+  @Delete()
+  @HttpCode(HttpStatus.OK)
+  public bulkDelete(@Body() input: DeleteClientErrorReportsDto): Promise<{ deletedCount: number }> {
+    return this.reports.bulkDelete(input.ids);
   }
 }

@@ -1899,6 +1899,7 @@
     referenceNumberExists: "الرقم المرجعي مستخدم بالفعل في هذه الشركة.",
     legacyIdentifier: "قديم / غير مخصص",
     additionalFees: "رسوم إضافية",
+    platformFee: "رسوم المنصة",
     totalDeductions: "إجمالي الخصومات",
     systemOrderNumber: "رقم الطلب الداخلي",
     internalDelivery: "توصيل داخلي",
@@ -2040,6 +2041,8 @@
     searchOrders: "البحث في الطلبات",
     searchOrdersPlaceholder:
       "ابحث برقم الطلب أو التسلسلي أو المرجعي أو اسم العميل أو الهاتف — اضغط Enter",
+    searchSerialNumber: "البحث بالرقم التسلسلي",
+    searchSerialNumberPlaceholder: "الرقم التسلسلي فقط — اضغط Enter",
     selectArea: "اختر منطقة",
     selectTrader: "اختر تاجرًا",
     status: "الحالة",
@@ -3030,7 +3033,7 @@
       allDeliveryCompanies: "جميع شركات التوصيل",
       deliveryCompany: "شركة التوصيل",
       deliveryCompanyDefault: "شركة التوصيل الخاصة بي (افتراضي)",
-      noDeliveryCompanyBlocked: "لا توجد شركة توصيل متاحة لإنشاء الطلبات.",
+      noDeliveryCompanyBlocked: "لا توجد شركة توصيل مرتبطة بهذا التاجر حتى الآن. يرجى ربط شركة توصيل نشطة قبل إنشاء الطلبات.",
     },
     profile: {
       accountInformation: "معلومات الحساب",

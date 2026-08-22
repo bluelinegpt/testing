@@ -242,4 +242,14 @@ export class ClientErrorReportService {
     `.execute(this.database);
     return this.detail(id);
   }
+
+  public async bulkDelete(ids: readonly string[]): Promise<{ deletedCount: number }> {
+    if (ids.length === 0) return { deletedCount: 0 };
+    const result = await sql<{ id: string }>`
+      delete from client_error_reports
+       where id = any(${[...ids]}::uuid[])
+      returning id
+    `.execute(this.database);
+    return { deletedCount: result.rows.length };
+  }
 }

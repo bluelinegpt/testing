@@ -590,7 +590,10 @@ export class CreateOrderDto {
 // The authenticated Trader is always resolved from the active portal profile.
 // Accepting a Trader identifier from the browser would allow an unsafe
 // cross-profile selection, so it is deliberately absent from this contract.
-export class CreateTraderPortalOrderDto extends OmitType(CreateOrderDto, ["traderId"] as const) {
+export class CreateTraderPortalOrderDto extends OmitType(CreateOrderDto, [
+  "serialNumber",
+  "traderId",
+] as const) {
   /**
    * Which of the Trader's linked Delivery Companies this Order belongs to
    * (Trader Portal Prompt 3T-C, Part D). Optional: absent (or matching the
