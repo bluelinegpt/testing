@@ -7,9 +7,9 @@
       "path": "apps/api",
       "renderService": "bluelinegpt-api-test",
       "status": "needs_deploy",
-      "localCommit": "8d434f1",
+      "localCommit": "19c937c",
       "localCommitDate": "2026-08-22",
-      "lastChangeDescription": "Complete Tawseelhub acceptance fixes",
+      "lastChangeDescription": "Prevent negative trader settlements",
       "lastChangeBy": "codex",
       "confirmedLiveCommit": "27e356a",
       "confirmedLiveAt": "2026-08-14"
@@ -20,9 +20,9 @@
       "path": "apps/web",
       "renderService": "bluelinegpt-web-test",
       "status": "needs_deploy",
-      "localCommit": "8d434f1",
+      "localCommit": "19c937c",
       "localCommitDate": "2026-08-22",
-      "lastChangeDescription": "Complete Tawseelhub acceptance fixes",
+      "lastChangeDescription": "Prevent negative trader settlements",
       "lastChangeBy": "codex",
       "confirmedLiveCommit": "27e356a",
       "confirmedLiveAt": "2026-08-14"
