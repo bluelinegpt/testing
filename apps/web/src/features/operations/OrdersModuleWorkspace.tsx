@@ -114,6 +114,7 @@ interface OrderFilters {
   search: string;
   serialNumber: string;
   traderId: string;
+  workflowStep: string;
 }
 
 interface SelectionPayload extends Partial<OrderFilters> {
@@ -139,6 +140,7 @@ const bulkSelectionFilterKeys = [
   "search",
   "serialNumber",
   "traderId",
+  "workflowStep",
 ] as const satisfies readonly (keyof OrderFilters)[];
 
 type ManifestSelectionPayload = Partial<OrderFilters> & {
@@ -204,6 +206,7 @@ const initialFilters: OrderFilters = {
   search: "",
   serialNumber: "",
   traderId: "",
+  workflowStep: "",
 };
 
 /**
@@ -559,6 +562,7 @@ export function OrdersModuleWorkspace({
   const loadedOrderItems = Array.isArray(data?.items) ? data.items : [];
   const deliveryActivityExcludedActions = new Set([
     "collect_from_driver",
+    "collect_trader_receivable",
     "pay_trader",
     "close_order",
     "none",
@@ -1140,6 +1144,17 @@ export function OrdersModuleWorkspace({
               ))}
             </FilterSelect>
             <FilterSelect
+              label={t("operations.workflowStep")}
+              onChange={(value) => updateFilters({ workflowStep: value })}
+              value={filters.workflowStep}
+            >
+              {orderWorkflowStepFilters.map((step) => (
+                <option key={step} value={step}>
+                  {t(`operations.workflowStepFilters.${step}`)}
+                </option>
+              ))}
+            </FilterSelect>
+            <FilterSelect
               label={t("operations.orderType")}
               onChange={(value) => updateFilters({ orderType: value })}
               value={filters.orderType}
@@ -1468,7 +1483,6 @@ export function OrdersModuleWorkspace({
       {createOpen ? (
         <CreateOrderDialog
           api={api}
-          drivers={drivers}
           permissions={permissions}
           onClose={() => setCreateOpen(false)}
           onSaved={load}
@@ -3070,15 +3084,15 @@ export function OrderDetailsWorkspace({
         </div>
       </main>
       {editOpen ? (
-        <EditOrderDialog
+        <CreateOrderDialog
           api={api}
+          edit={{ orderId: detail.id, orderNumber: detail.orderNumber }}
           onClose={() => setEditOpen(false)}
           onSaved={async () => {
             setEditOpen(false);
             await load();
           }}
-          orderId={detail.id}
-          orderNumber={detail.orderNumber}
+          permissions={permissions}
         />
       ) : null}
       {holdOpen ? (
@@ -3255,9 +3269,7 @@ function BulkStatusDialog({
   const [partial, setPartial] = useState(false);
   const [error, setError] = useState<string>();
   const [saving, setSaving] = useState(false);
-  const reasonRequired = ["hold", "cancelled", "returned_to_branch", "returned_to_trader"].includes(
-    status,
-  );
+  const reasonRequired = ["hold", "cancelled", "returned_to_trader"].includes(status);
   const submit = async () => {
     if (reasonRequired && !reason.trim()) return;
     setSaving(true);
@@ -3987,7 +3999,7 @@ const actionTargetStatus: Partial<Record<RowAction, string>> = {
   markInBranch: "in_branch",
   markOutForDelivery: "out_for_delivery",
   hold: "hold",
-  returnToBranch: "returned_to_branch",
+  returnToBranch: "in_branch",
   returnToTrader: "returned_to_trader",
 };
 
@@ -4007,12 +4019,18 @@ const driverSelfServiceActions: Readonly<Record<string, readonly RowAction[]>> =
 };
 
 function closeEligible(order: OperationsOrder): boolean {
+  const hasOpenTraderReceivable = Number(order.traderReceivableOutstanding ?? 0) > 0;
+  if (hasOpenTraderReceivable) return false;
   if (order.workflowGuidance?.nextActionCode === "close_order") return true;
   const status = order.deliveryStatus;
+  const noTraderPaymentDue = Number(order.traderNetPayable) <= 0;
   return (
     ["delivered", "returned_to_trader", "collect_order"].includes(status) &&
     ["reconciled", "not_applicable"].includes(order.driverReconciliationStatus) &&
-    ["money_received_by_trader", "not_eligible"].includes(order.traderSettlementStatus) &&
+    (noTraderPaymentDue ||
+      ["money_sent_to_trader", "money_received_by_trader", "not_eligible"].includes(
+        order.traderSettlementStatus,
+      )) &&
     (status !== "returned_to_trader" || order.returnStatus === "returned_to_trader")
   );
 }
@@ -4036,7 +4054,12 @@ function availableActions(order: OperationsOrder): readonly RowAction[] {
           ? ["assignDriver", "cancel"]
           : ["markInBranch", "assignDriver", "hold", "cancel"];
       case "in_branch":
-        return ["assignDriver", "cancel"];
+        return [
+          ...(order.assignedDriverId === null ? (["assignDriver"] as const) : (["markOutForDelivery"] as const)),
+          "hold",
+          "returnToTrader",
+          "cancel",
+        ];
       case "assigned_to_driver":
         return ["markOutForDelivery", "hold", "cancel"];
       case "out_for_delivery":
@@ -4058,7 +4081,10 @@ function availableActions(order: OperationsOrder): readonly RowAction[] {
           ...(closeEligible(order) ? (["close"] as const) : []),
         ];
       case "returned_to_branch":
-        return ["returnToTrader"];
+        return [
+          ...(order.assignedDriverId === null ? [] : (["markOutForDelivery"] as const)),
+          "returnToTrader",
+        ];
       case "returned_to_trader":
         return [
           ...(settleDone || !traderSettlementActionApplicable(order)
@@ -4464,15 +4490,15 @@ function OrderRowActions({
         />
       ) : null}
       {editOpen ? (
-        <EditOrderDialog
+        <CreateOrderDialog
           api={api}
+          edit={{ orderId: order.id, orderNumber: order.orderNumber }}
           onClose={() => setEditOpen(false)}
           onSaved={async () => {
             setEditOpen(false);
             await onChanged();
           }}
-          orderId={order.id}
-          orderNumber={order.orderNumber}
+          permissions={permissions}
         />
       ) : null}
       {viewCollectionId === undefined ? null : (
@@ -4541,411 +4567,6 @@ function canEditOrder(deliveryStatus: string): boolean {
   return EDITABLE_STATUSES.includes(deliveryStatus);
 }
 
-interface EditOrderForm {
-  additionalFees: string;
-  codAmount: string;
-  customerAddress: string;
-  customerMobileNumber: string;
-  customerName: string;
-  customerSecondMobileNumber: string;
-  notes: string;
-  packageCount: string;
-  referenceNumber: string;
-  serialNumber: string;
-  serviceFee: string;
-  serviceFeeReason: string;
-}
-
-// Edits an order's business fields before delivery. Prefills from the full order detail, and
-// only asks for a reason when the service fee is changed (mirrors the create-time governance).
-function EditOrderDialog({
-  api,
-  onClose,
-  onSaved,
-  orderId,
-  orderNumber,
-}: {
-  api: ApiClient;
-  onClose: () => void;
-  onSaved: () => Promise<void>;
-  orderId: string;
-  orderNumber: string;
-}) {
-  const { t } = useTranslation();
-  const [detail, setDetail] = useState<OperationsOrderDetail>();
-  const [form, setForm] = useState<EditOrderForm>();
-  const [newTrader, setNewTrader] = useState<OperationsTraderOption>();
-  const [newCustomer, setNewCustomer] = useState<CustomerOption>();
-  const [newArea, setNewArea] = useState<CompanyArea>();
-  const [customerAddresses, setCustomerAddresses] = useState<readonly Record<string, unknown>[]>(
-    [],
-  );
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string>();
-
-  useEffect(() => {
-    let active = true;
-    void api
-      .get<OperationsOrderDetail>(`operations/order-details/${encodeURIComponent(orderNumber)}`)
-      .then((loaded) => {
-        if (!active) return;
-        setDetail(loaded);
-        if (loaded.areaId !== undefined && loaded.emirateId !== undefined && loaded.emirateId !== null) {
-          setNewArea({
-            code: "",
-            emirateCode: "",
-            emirateId: loaded.emirateId,
-            emirateNameAr: loaded.emirateNameAr ?? "",
-            emirateNameEn: loaded.emirateNameEn ?? "",
-            id: loaded.areaId,
-            isActive: true,
-            nameAr: loaded.areaNameAr ?? null,
-            nameEn: loaded.areaNameEn ?? loaded.areaName,
-            notes: null,
-            updatedAt: "",
-          });
-        }
-        setForm({
-          additionalFees: loaded.additionalFees ?? "0.00",
-          codAmount: loaded.codAmount,
-          customerAddress: loaded.customerAddress,
-          customerMobileNumber: loaded.customerMobileNumber,
-          customerName: loaded.customerName,
-          customerSecondMobileNumber: loaded.metadata.customerSecondMobileNumber ?? "",
-          notes: loaded.metadata.notes ?? "",
-          packageCount: String(loaded.metadata.packageCount),
-          referenceNumber: loaded.referenceNumber ?? "",
-          serialNumber: loaded.serialNumber ?? loaded.orderNumber,
-          serviceFee: loaded.serviceFee,
-          serviceFeeReason: "",
-        });
-      })
-      .catch((requestError) =>
-        active ? setError(message(requestError, t("operations.detailLoadFailed"))) : undefined,
-      );
-    return () => {
-      active = false;
-    };
-  }, [api, orderNumber, t]);
-
-  const update = (change: Partial<EditOrderForm>) =>
-    setForm((current) => (current === undefined ? current : { ...current, ...change }));
-
-  const identityChanged = newTrader !== undefined || newCustomer !== undefined;
-  const feeChanged =
-    detail !== undefined &&
-    form !== undefined &&
-    Number(form.serviceFee) !== Number(detail.serviceFee);
-  // A reason is only required for a pure fee override (same trader/area). When the trader or
-  // customer changes, the fee is re-priced for the new context, so no reason is needed.
-  const reasonNeeded = feeChanged && !identityChanged;
-  const valid =
-    form !== undefined &&
-    form.serialNumber.trim() !== "" &&
-    (form.customerMobileNumber.trim() === "" || isUaeMobile(form.customerMobileNumber)) &&
-    (form.customerSecondMobileNumber.trim() === "" ||
-      isUaeMobile(form.customerSecondMobileNumber)) &&
-    // Address deliberately absent: optional on create, so optional on edit too.
-    form.codAmount !== "" &&
-    Number(form.codAmount) >= 0 &&
-    form.serviceFee !== "" &&
-    Number(form.serviceFee) >= 0 &&
-    form.additionalFees !== "" &&
-    Number(form.additionalFees) >= 0 &&
-    Number(form.packageCount) >= 1 &&
-    (!reasonNeeded || form.serviceFeeReason.trim() !== "");
-
-  const submit = async () => {
-    if (form === undefined || !valid) return;
-    setSaving(true);
-    setError(undefined);
-    try {
-      // Send the fee only when the operator set it, or when nothing about the pricing context
-      // changed; on a trader/customer change with an untouched fee, let the server re-price.
-      const sendFee = feeChanged || !identityChanged;
-      await api.patch(`operations/orders/${orderId}`, {
-        ...(newTrader === undefined ? {} : { traderId: newTrader.id }),
-        ...(newCustomer === undefined
-          ? {}
-          : { customerAddressId: newCustomer.addressId, customerId: newCustomer.id }),
-        ...(newArea === undefined ? {} : { areaId: newArea.id }),
-        additionalFees: Number(form.additionalFees),
-        codAmount: Number(form.codAmount),
-        customerAddress: form.customerAddress.trim(),
-        customerMobileNumber:
-          form.customerMobileNumber.trim() === ""
-            ? ""
-            : (normalizeUaeMobile(form.customerMobileNumber) ?? form.customerMobileNumber.trim()),
-        customerName: form.customerName.trim(),
-        customerSecondMobileNumber:
-          form.customerSecondMobileNumber.trim() === ""
-            ? ""
-            : (normalizeUaeMobile(form.customerSecondMobileNumber) ??
-              form.customerSecondMobileNumber.trim()),
-        notes: form.notes,
-        packageCount: Number(form.packageCount),
-        referenceNumber: form.referenceNumber.trim() || undefined,
-        serialNumber: form.serialNumber.trim(),
-        ...(sendFee ? { serviceFee: Number(form.serviceFee) } : {}),
-        serviceFeeReason:
-          feeChanged && form.serviceFeeReason.trim() !== ""
-            ? form.serviceFeeReason.trim()
-            : undefined,
-      });
-      await onSaved();
-    } catch (requestError) {
-      setError(message(requestError, t("operations.editOrderFailed")));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <Modal
-      closeLabel={t("common.close")}
-      onRequestClose={onClose}
-      title={t("operations.editOrder")}
-      titleId="edit-order-title"
-    >
-      {form === undefined ? (
-        <div className="loading-row">{t("common.loading")}</div>
-      ) : (
-        <>
-          <div className="form-grid">
-            <label className="field">
-              <span>{t("operations.serialNumber")}</span>
-              <input
-                maxLength={160}
-                onChange={(event) => update({ serialNumber: event.target.value })}
-                value={form.serialNumber}
-              />
-            </label>
-            <label className="field">
-              <span>{t("operations.referenceNumber")}</span>
-              <input
-                maxLength={160}
-                onChange={(event) => update({ referenceNumber: event.target.value })}
-                value={form.referenceNumber}
-              />
-            </label>
-            <label className="field form-grid-single">
-              <span>{t("operations.trader")}</span>
-              <SearchCombobox
-                api={api}
-                emptyText={t("operations.noTradersFound")}
-                getLabel={(option: OperationsTraderOption) => `${option.code} - ${option.nameEn}`}
-                label={t("operations.trader")}
-                onChange={(selected) => setNewTrader(selected ?? undefined)}
-                path="operations/traders/search"
-                placeholder={
-                  detail === undefined
-                    ? t("operations.searchTrader")
-                    : `${t("operations.trader")}: ${detail.traderName}`
-                }
-                value={newTrader}
-              />
-            </label>
-            <label className="field form-grid-single">
-              <span>{t("customerConfig.customer")}</span>
-              <SearchCombobox
-                api={api}
-                emptyText={t("customerConfig.noCustomers")}
-                getLabel={(option: CustomerOption) =>
-                  `${option.code} - ${option.name} - ${option.mobileNumber}`
-                }
-                label={t("customerConfig.customer")}
-                onChange={(selected) => {
-                  setNewCustomer(selected ?? undefined);
-                  if (selected === undefined) {
-                    setCustomerAddresses([]);
-                    return;
-                  }
-                  update({
-                    customerAddress: selected.address,
-                    customerMobileNumber: selected.mobileNumber,
-                    customerName: selected.name,
-                    customerSecondMobileNumber: selected.secondMobileNumber ?? "",
-                  });
-                  void api
-                    .get<{ addresses: readonly Record<string, unknown>[] }>(
-                      `configuration/customers/${encodeURIComponent(selected.code)}`,
-                    )
-                    .then((loaded) => setCustomerAddresses(loaded.addresses))
-                    .catch(() => setCustomerAddresses([]));
-                }}
-                path="configuration/customers/search"
-                placeholder={
-                  detail === undefined
-                    ? t("customerConfig.searchPlaceholder")
-                    : `${t("customerConfig.customer")}: ${detail.customerName}`
-                }
-                value={newCustomer}
-              />
-            </label>
-            {newCustomer !== undefined && customerAddresses.length > 1 ? (
-              <label className="field form-grid-single">
-                <span>{t("customerConfig.addresses")}</span>
-                <select
-                  onChange={(event) => {
-                    const picked = customerAddresses.find(
-                      (item) => String(item.id) === event.target.value,
-                    );
-                    if (picked === undefined) return;
-                    const updated: CustomerOption = {
-                      ...newCustomer,
-                      address: String(picked.address),
-                      addressId: String(picked.id),
-                      areaCode: String(picked.areaCode),
-                      areaId: String(picked.areaId),
-                      areaName: String(picked.areaName),
-                    };
-                    setNewCustomer(updated);
-                    update({ customerAddress: updated.address });
-                  }}
-                  value={newCustomer.addressId}
-                >
-                  {customerAddresses
-                    .filter((item) => Boolean(item.isActive))
-                    .map((item) => (
-                      <option key={String(item.id)} value={String(item.id)}>
-                        {String(item.label ?? item.address)}
-                      </option>
-                    ))}
-                </select>
-              </label>
-            ) : null}
-            <div className="field form-grid-single">
-              <AreaSelector
-                api={api}
-                includeDisabled
-                onChange={setNewArea}
-                required={false}
-                value={newArea}
-              />
-              {newArea === undefined && detail?.areaName ? (
-                <small>{detail.areaName}</small>
-              ) : null}
-            </div>
-            <label className="field">
-              <span>{t("operations.customerName")}</span>
-              <input
-                onChange={(event) => update({ customerName: event.target.value })}
-                value={form.customerName}
-              />
-            </label>
-            <label className="field">
-              <span>{t("operations.mobile")}</span>
-              <input
-                autoComplete="tel"
-                inputMode="tel"
-                maxLength={16}
-                onChange={(event) => update({ customerMobileNumber: event.target.value })}
-                placeholder={t("common.mobilePlaceholder")}
-                value={form.customerMobileNumber}
-              />
-            </label>
-            <label className="field">
-              <span>{t("operations.secondMobile")}</span>
-              <input
-                autoComplete="tel"
-                inputMode="tel"
-                maxLength={16}
-                onChange={(event) => update({ customerSecondMobileNumber: event.target.value })}
-                placeholder={t("common.mobilePlaceholder")}
-                value={form.customerSecondMobileNumber}
-              />
-            </label>
-            <label className="field">
-              <span>{t("operations.packages")}</span>
-              <input
-                className="no-spinner"
-                inputMode="numeric"
-                min="1"
-                onChange={(event) => update({ packageCount: event.target.value })}
-                step="1"
-                type="number"
-                value={form.packageCount}
-              />
-            </label>
-            <label className="field form-grid-single">
-              <span>{t("operations.customerAddress")}</span>
-              <textarea
-                onChange={(event) => update({ customerAddress: event.target.value })}
-                value={form.customerAddress}
-              />
-            </label>
-            <label className="field">
-              <span>{t("operations.codAmount")}</span>
-              <input
-                className="no-spinner"
-                inputMode="decimal"
-                min="0"
-                onChange={(event) => update({ codAmount: event.target.value })}
-                step="0.01"
-                type="number"
-                value={form.codAmount}
-              />
-            </label>
-            <label className="field">
-              <span>{t("operations.serviceFee")}</span>
-              <input
-                className="no-spinner"
-                inputMode="decimal"
-                min="0"
-                onChange={(event) => update({ serviceFee: event.target.value })}
-                step="0.01"
-                type="number"
-                value={form.serviceFee}
-              />
-            </label>
-            <label className="field">
-              <span>{t("operations.additionalFees")}</span>
-              <input
-                className="no-spinner"
-                inputMode="decimal"
-                min="0"
-                onChange={(event) => update({ additionalFees: event.target.value })}
-                step="0.01"
-                type="number"
-                value={form.additionalFees}
-              />
-            </label>
-            <label className="field form-grid-single">
-              <span>{t("operations.notes")}</span>
-              <textarea
-                onChange={(event) => update({ notes: event.target.value })}
-                value={form.notes}
-              />
-            </label>
-            {feeChanged ? (
-              <label className="field form-grid-single">
-                <span>{t("operations.serviceFeeReason")}</span>
-                <input
-                  onChange={(event) => update({ serviceFeeReason: event.target.value })}
-                  value={form.serviceFeeReason}
-                />
-              </label>
-            ) : null}
-          </div>
-          {error === undefined ? null : <div className="alert alert-error">{error}</div>}
-          <div className="modal-actions">
-            <button className="button button-secondary" onClick={onClose} type="button">
-              {t("common.cancel")}
-            </button>
-            <button
-              className="button button-primary"
-              disabled={saving || !valid}
-              onClick={() => void submit()}
-              type="button"
-            >
-              {saving ? t("common.saving") : t("common.save")}
-            </button>
-          </div>
-        </>
-      )}
-    </Modal>
-  );
-}
 
 function DetailSection({
   rows,
@@ -5276,6 +4897,13 @@ function formatAuditValue(
   return String(value);
 }
 
+const orderWorkflowStepFilters = [
+  "complete",
+  "collect_from_driver",
+  "collect_from_trader",
+  "settle_trader",
+] as const;
+
 const deliveryStatuses = [
   "new",
   "in_branch",
@@ -5283,7 +4911,6 @@ const deliveryStatuses = [
   "out_for_delivery",
   "hold",
   "delivered",
-  "returned_to_branch",
   "returned_to_trader",
   "cancelled",
   "closed",
@@ -5298,7 +4925,6 @@ const visibleOrderStatuses: readonly OrderStatusKey[] = [
   "delivered",
   "money_collected",
   "money_sent_to_trader",
-  "returned_to_branch",
   "returned_to_trader",
   "settlement_reversed",
   "cancelled",
@@ -5312,8 +4938,8 @@ const bulkTargetStatuses = [
   "out_for_delivery",
   "hold",
   "delivered",
-  "returned_to_branch",
   "returned_to_trader",
   "cancelled",
   "closed",
 ] as const;
+

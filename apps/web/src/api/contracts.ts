@@ -460,6 +460,10 @@ export interface OperationsOrder {
   readonly assignedDriverId: string | null;
   readonly assignedDriverMobile: string | null;
   readonly assignedDriverName: string | null;
+  /** Present on list and detail responses; identifier only. */
+  readonly traderId?: string;
+  /** Deliberate free delivery: COD and every fee are fixed at zero. */
+  readonly isFreeOrder?: boolean;
   readonly codAmount: string;
   readonly companyRevenue: string;
   readonly customerAmountDue: string;
@@ -486,6 +490,10 @@ export interface OperationsOrder {
   readonly serialNumber?: string | null;
   readonly totalDeductions?: string | null;
   readonly traderNetPayable: string;
+  readonly traderReceivableId?: string | null;
+  readonly traderReceivableNumber?: string | null;
+  readonly traderReceivableOutstanding?: string | null;
+  readonly traderReceivableStatus?: string | null;
   readonly traderName: string;
   readonly traderSettlementStatus: string;
   /** Ledger-derived Accounting state for this Order. */

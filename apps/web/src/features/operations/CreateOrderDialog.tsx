@@ -6,14 +6,14 @@ import { ApiError, type ApiClient } from "../../api/api-client.js";
 import type {
   CompanyArea,
   CustomerOption,
-  OperationsDriver,
   OperationsOrder,
+  OperationsOrderDetail,
   OperationsOrderQuote,
   OperationsTraderOption,
   SearchPage,
 } from "../../api/contracts.js";
 import { Modal } from "../../components/Modal.js";
-import { isUaeMobile } from "../../domain/uae-mobile.js";
+import { isUaeMobile, normalizeUaeMobile } from "../../domain/uae-mobile.js";
 import { SearchCombobox } from "../../components/SearchCombobox.js";
 import { AreaSelector } from "../configuration/AreaSelector.js";
 import { PricingDialog, TraderForm } from "../configuration/TraderConfigurationWorkspace.js";
@@ -25,20 +25,27 @@ import { parseMoneyInput, parseNumericInput } from "../../utils/numeric-input.js
 
 export function CreateOrderDialog({
   api,
-  drivers,
+  edit,
   onClose,
   onSaved,
   permissions = [],
   searchDebounceMs,
 }: {
   api: ApiClient;
-  drivers: readonly OperationsDriver[];
+  /**
+   * Edit mode: pre-fills the form from the existing Order and submits a
+   * PATCH instead of a create. The Serial Number is shown read-only (it is
+   * immutable by database rule), and the free-order / order-type /
+   * payment-condition choices are locked to their creation values.
+   */
+  edit?: { orderId: string; orderNumber: string };
   onClose: () => void;
   onSaved: () => Promise<void>;
   permissions?: readonly string[];
   /** Test seam only: removes the real-time search debounce. Production uses the default. */
   searchDebounceMs?: number;
 }) {
+  const isEdit = edit !== undefined;
   const { i18n, t } = useTranslation();
   const locale = normalizeLocale(i18n.resolvedLanguage);
   // Bilingual business data (Trader/Emirate/Area names) follows the user's
@@ -54,7 +61,6 @@ export function CreateOrderDialog({
     [],
   );
   const [area, setArea] = useState<CompanyArea>();
-  const [driverId, setDriverId] = useState("");
   const [serialNumber, setSerialNumber] = useState("");
   const [referenceNumber, setReferenceNumber] = useState("");
   const [customerName, setCustomerName] = useState("");
@@ -88,6 +94,9 @@ export function CreateOrderDialog({
      and the operator's intent is what the backend stores and audits. */
   const [isFreeOrder, setIsFreeOrder] = useState(false);
   const [orderType, setOrderType] = useState<"collect_order" | "delivery">("delivery");
+  const [paymentCondition, setPaymentCondition] = useState<
+    "customer_pays_cod_and_fee" | "customer_pays_cod_trader_pays_fee"
+  >("customer_pays_cod_and_fee");
   const [freeOrderReason, setFreeOrderReason] = useState("");
   // Inline "add pricing": create a reusable trader service price for this
   // Emirate/Area instead of pricing the single order manually.
@@ -101,6 +110,10 @@ export function CreateOrderDialog({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string>();
   const [createdOrder, setCreatedOrder] = useState<OperationsOrder>();
+  // Edit mode only: the loaded Order this dialog is editing. The form stays in
+  // a loading state until it arrives, so pre-filled values never flash empty.
+  const [editDetail, setEditDetail] = useState<OperationsOrderDetail>();
+  const [editLoadError, setEditLoadError] = useState<string>();
   const [identifierError, setIdentifierError] = useState<string>();
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const [fieldErrorOverrides, setFieldErrorOverrides] = useState<Record<string, string>>({});
@@ -182,9 +195,14 @@ export function CreateOrderDialog({
     /* Pricing is deliberately NOT validated here. A Free Order is an intentional
        override, not a missing-pricing failure, so an unpriced Trader/Area must
        not block it -- that blocker is exactly the problem this feature removes.
-       The backend skips resolution for the same reason. */
-    if (isFreeOrder && freeOrderReason.trim() === "")
+       The backend skips resolution for the same reason. Edit mode never asks
+       for the free-order reason again: it was recorded at creation. */
+    if (!isEdit && isFreeOrder && freeOrderReason.trim() === "")
       validationErrors.freeOrderReason = t("operations.errors.freeOrderReasonRequired");
+  } else if (isEdit) {
+    /* The Order already carries a resolved fee. A quote is a preview here;
+       its absence or failure must not block saving unrelated changes. When
+       the Trader or Area changed, the backend re-prices on save. */
   } else if (pricingMissing) {
     if (!(manualFee !== "" && manualFeeInput.ok))
       validationErrors.pricing = t("operations.errors.manualFeeRequired");
@@ -243,7 +261,6 @@ export function CreateOrderDialog({
     trader !== undefined ||
     area !== undefined ||
     [
-      driverId,
       serialNumber,
       referenceNumber,
       customerName,
@@ -329,7 +346,82 @@ export function CreateOrderDialog({
     [api],
   );
 
+  // Edit mode: load the Order and pre-fill every editable field. The Trader
+  // and Area options are synthesised from the detail's identifier columns so
+  // the pickers show the current values without a second lookup; picking a
+  // different one replaces them exactly as on create.
   useEffect(() => {
+    if (edit === undefined) return;
+    let active = true;
+    void api
+      .get<OperationsOrderDetail>(`operations/order-details/${encodeURIComponent(edit.orderNumber)}`)
+      .then((loaded) => {
+        if (!active) return;
+        setEditDetail(loaded);
+        setSerialNumber(loaded.serialNumber ?? loaded.orderNumber);
+        setReferenceNumber(loaded.referenceNumber ?? "");
+        setCustomerName(loaded.customerName);
+        setMobile(loaded.customerMobileNumber);
+        setSecondMobile(loaded.metadata.customerSecondMobileNumber ?? "");
+        setAddress(loaded.customerAddress);
+        setCodAmount(loaded.codAmount);
+        setAdditionalFees(loaded.additionalFees ?? "0.00");
+        setPackageCount(String(loaded.metadata.packageCount));
+        setNotes(loaded.metadata.notes ?? "");
+        setIsFreeOrder(loaded.isFreeOrder === true);
+        if (loaded.orderType !== undefined) setOrderType(loaded.orderType);
+        if (
+          loaded.metadata.paymentCondition === "customer_pays_cod_and_fee" ||
+          loaded.metadata.paymentCondition === "customer_pays_cod_trader_pays_fee"
+        ) {
+          setPaymentCondition(loaded.metadata.paymentCondition);
+        }
+        if (loaded.traderId !== undefined) {
+          setTrader({
+            code: "",
+            id: loaded.traderId,
+            mobileNumber: "",
+            nameAr: null,
+            nameEn: loaded.traderName,
+            pickupAreaId: null,
+            pickupAreaNameAr: null,
+            pickupAreaNameEn: null,
+            pickupEmirateId: null,
+            pickupEmirateNameAr: null,
+            pickupEmirateNameEn: null,
+            secondMobileNumber: null,
+          });
+        }
+        if (loaded.areaId !== undefined && loaded.emirateId !== undefined && loaded.emirateId !== null) {
+          setArea({
+            code: "",
+            emirateCode: "",
+            emirateId: loaded.emirateId,
+            emirateNameAr: loaded.emirateNameAr ?? "",
+            emirateNameEn: loaded.emirateNameEn ?? "",
+            id: loaded.areaId,
+            isActive: true,
+            nameAr: loaded.areaNameAr ?? null,
+            nameEn: loaded.areaNameEn ?? loaded.areaName,
+            notes: null,
+            updatedAt: "",
+          });
+        }
+      })
+      .catch((requestError) => {
+        if (!active) return;
+        setEditLoadError(
+          requestError instanceof Error ? requestError.message : t("operations.detailLoadFailed"),
+        );
+      });
+    return () => {
+      active = false;
+    };
+  }, [api, edit, t]);
+
+  useEffect(() => {
+    // Edit mode keeps the Order's own Serial Number; never propose a new one.
+    if (isEdit) return;
     let active = true;
     void api
       .get<{ serialNumber: string }>("operations/orders/next-serial-number")
@@ -341,10 +433,14 @@ export function CreateOrderDialog({
     return () => {
       active = false;
     };
-  }, [api]);
+  }, [api, isEdit]);
 
   useEffect(() => {
     setIdentifierError(undefined);
+    // The availability probe has no "excluding this Order" parameter, so in
+    // edit mode it would always flag the Order's own identifiers as taken.
+    // Uniqueness is still enforced server-side on save.
+    if (isEdit) return;
     if (serialNumber.trim() === "") return;
     let active = true;
     const timer = window.setTimeout(() => {
@@ -370,7 +466,7 @@ export function CreateOrderDialog({
       active = false;
       window.clearTimeout(timer);
     };
-  }, [api, referenceNumber, serialNumber, t]);
+  }, [api, isEdit, referenceNumber, serialNumber, t]);
 
   useEffect(() => {
     setQuote(undefined);
@@ -398,7 +494,7 @@ export function CreateOrderDialog({
           areaId: area.id,
           additionalFees: additionalFeesInput.value,
           codAmount: codInput.value,
-          driverId: driverId || undefined,
+          paymentCondition,
           serviceFee: enteredFee,
           serviceFeeOverrideReason: enteredReason,
           traderId: trader.id,
@@ -436,11 +532,11 @@ export function CreateOrderDialog({
     area,
     additionalFees,
     codAmount,
-    driverId,
     enteredFee,
     enteredReason,
     isFreeOrder,
     orderType,
+    paymentCondition,
     overrideValid,
     requoteNonce,
     t,
@@ -499,10 +595,18 @@ export function CreateOrderDialog({
   };
 
   const requestClose = useCallback(() => {
-    if (createdOrder === undefined && dirty && !window.confirm(t("operations.discardOrderChanges")))
+    // Edit mode pre-fills every field, so `dirty` would always be true and the
+    // discard prompt would fire on every close; the previous Edit dialog never
+    // prompted either.
+    if (
+      !isEdit &&
+      createdOrder === undefined &&
+      dirty &&
+      !window.confirm(t("operations.discardOrderChanges"))
+    )
       return;
     onClose();
-  }, [createdOrder, dirty, onClose, t]);
+  }, [createdOrder, dirty, isEdit, onClose, t]);
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -519,6 +623,89 @@ export function CreateOrderDialog({
     setError(undefined);
     setFieldErrorOverrides({});
     try {
+      if (edit !== undefined && editDetail !== undefined) {
+        // Edit mode: send only what actually changed, exactly like the
+        // previous Edit dialog did — the backend treats absent fields as
+        // "keep". The Serial Number is immutable and never sent.
+        const payload: Record<string, unknown> = {};
+        const normalizedPrimaryMobile =
+          mobile.trim() === "" ? "" : (normalizeUaeMobile(mobile) ?? mobile.trim());
+        const currentPrimaryMobile =
+          editDetail.customerMobileNumber.trim() === ""
+            ? ""
+            : (normalizeUaeMobile(editDetail.customerMobileNumber) ??
+              editDetail.customerMobileNumber.trim());
+        const normalizedSecondMobile =
+          secondMobile.trim() === ""
+            ? ""
+            : (normalizeUaeMobile(secondMobile) ?? secondMobile.trim());
+        const currentSecondMobileRaw = editDetail.metadata.customerSecondMobileNumber ?? "";
+        const currentSecondMobile =
+          currentSecondMobileRaw.trim() === ""
+            ? ""
+            : (normalizeUaeMobile(currentSecondMobileRaw) ?? currentSecondMobileRaw.trim());
+        if (trader !== undefined && trader.id !== editDetail.traderId) {
+          payload.traderId = trader.id;
+        }
+        if (customer !== undefined) {
+          payload.customerId = customer.id;
+          payload.customerAddressId = customer.addressId;
+        }
+        if (area !== undefined && area.id !== editDetail.areaId) {
+          payload.areaId = area.id;
+        }
+        const nextReference = referenceNumber.trim();
+        const currentReference = editDetail.referenceNumber ?? "";
+        if (nextReference !== currentReference) {
+          payload.referenceNumber = nextReference === "" ? null : nextReference;
+        }
+        if (customerName.trim() !== editDetail.customerName) {
+          payload.customerName = customerName.trim();
+        }
+        if (normalizedPrimaryMobile !== currentPrimaryMobile && normalizedPrimaryMobile !== "") {
+          payload.customerMobileNumber = normalizedPrimaryMobile;
+        }
+        if (normalizedSecondMobile !== currentSecondMobile) {
+          payload.customerSecondMobileNumber = normalizedSecondMobile;
+        }
+        if (address.trim() !== editDetail.customerAddress) {
+          payload.customerAddress = address.trim();
+        }
+        if (notes.trim() !== (editDetail.metadata.notes ?? "")) {
+          payload.notes = notes.trim();
+        }
+        if (
+          packageCountInput.ok &&
+          packageCountInput.value !== editDetail.metadata.packageCount
+        ) {
+          payload.packageCount = packageCountInput.value;
+        }
+        if (!isFreeOrder) {
+          if (codInput.ok && codInput.value !== Number(editDetail.codAmount)) {
+            payload.codAmount = codInput.value;
+          }
+          if (
+            additionalFeesInput.ok &&
+            additionalFeesInput.value !== Number(editDetail.additionalFees ?? "0.00")
+          ) {
+            payload.additionalFees = additionalFeesInput.value;
+          }
+          if (enteredFee !== undefined && enteredFee !== Number(editDetail.serviceFee)) {
+            payload.serviceFee = enteredFee;
+            if (enteredReason !== undefined) {
+              payload.serviceFeeReason = enteredReason;
+            }
+          }
+        }
+        if (Object.keys(payload).length === 0) {
+          onClose();
+          return;
+        }
+        await api.patch(`operations/orders/${edit.orderId}`, payload);
+        await onSaved();
+        onClose();
+        return;
+      }
       const order = await api.post<OperationsOrder>(
         "operations/orders",
         {
@@ -548,11 +735,11 @@ export function CreateOrderDialog({
           ...(customerName.trim() === "" ? {} : { customerName: customerName.trim() }),
           ...(mobile.trim() === "" ? {} : { customerMobileNumber: mobile.trim() }),
           customerSecondMobileNumber: secondMobile.trim() === "" ? undefined : secondMobile.trim(),
-          ...(orderType === "collect_order" || driverId === "" ? {} : { driverId }),
           notes: notes.trim() || undefined,
           packageCount: packageCountInput.ok ? packageCountInput.value : 0,
           referenceNumber: referenceNumber.trim() || undefined,
           serialNumber: serialNumber.trim(),
+          paymentCondition,
           serviceFee: enteredFee,
           serviceFeeOverrideReason: enteredReason,
           traderId: trader.id,
@@ -662,10 +849,18 @@ export function CreateOrderDialog({
         className="order-modal"
         closeLabel={t("common.close")}
         onRequestClose={requestClose}
-        title={t("operations.createOrder")}
+        title={t(isEdit ? "operations.editOrder" : "operations.createOrder")}
         titleId="create-order-title"
       >
-        {createdOrder === undefined ? (
+        {isEdit && editDetail === undefined ? (
+          editLoadError === undefined ? (
+            <div className="loading-row">{t("common.loading")}</div>
+          ) : (
+            <div className="form-error" role="alert">
+              {editLoadError}
+            </div>
+          )
+        ) : createdOrder === undefined ? (
           <form
             className="order-form"
             noValidate
@@ -688,6 +883,9 @@ export function CreateOrderDialog({
                         aria-describedby={describedBy("serialNumber")}
                         aria-invalid={errorFor("serialNumber") !== undefined}
                         autoComplete="off"
+                        // Immutable once created (orders_manual_identifiers_immutable):
+                        // shown for context, never editable.
+                        disabled={isEdit}
                         id="order-serial"
                         maxLength={100}
                         onChange={(event) => {
@@ -976,12 +1174,15 @@ export function CreateOrderDialog({
                     <label className="field">
                       <span>{t("operations.orderType")}</span>
                       <select
+                        // The order type, payment condition and free-order flag
+                        // define the Order's financial identity; they are fixed
+                        // at creation and shown read-only when editing.
+                        disabled={isEdit}
                         value={orderType}
                         onChange={(event) => {
                           const next = event.target.value as "collect_order" | "delivery";
                           setOrderType(next);
                           if (next === "collect_order") {
-                            setDriverId("");
                             setIsFreeOrder(false);
                             setFreeOrderReason("");
                             setCodAmount("0.00");
@@ -995,42 +1196,42 @@ export function CreateOrderDialog({
                         <option value="collect_order">{t("operations.collectOrder")}</option>
                       </select>
                     </label>
-                    <div className="field">
-                      <span>
-                        {orderType === "collect_order"
-                          ? t("operations.financialHandling")
-                          : t("operations.paymentCondition")}
-                      </span>
-                      <strong>
-                        {t(
-                          orderType === "collect_order"
-                            ? "operations.collectOrderFinancialHint"
-                            : "operations.customerPaysCod",
-                        )}
-                      </strong>
-                    </div>
+                    {orderType === "collect_order" ? (
+                      <div className="field">
+                        <span>{t("operations.financialHandling")}</span>
+                        <strong>{t("operations.collectOrderFinancialHint")}</strong>
+                      </div>
+                    ) : (
+                      <label className="field">
+                        <span>{t("operations.paymentCondition")}</span>
+                        <select
+                          disabled={isEdit}
+                          value={paymentCondition}
+                          onChange={(event) =>
+                            setPaymentCondition(
+                              event.target.value as
+                                | "customer_pays_cod_and_fee"
+                                | "customer_pays_cod_trader_pays_fee",
+                            )
+                          }
+                        >
+                          <option value="customer_pays_cod_and_fee">
+                            {t("operations.paymentConditions.customer_pays_cod_and_fee")}
+                          </option>
+                          <option value="customer_pays_cod_trader_pays_fee">
+                            {t("operations.paymentConditions.customer_pays_cod_trader_pays_fee")}
+                          </option>
+                        </select>
+                      </label>
+                    )}
                   </div>
-                  {orderType === "collect_order" ? null : (
-                    <label className="field">
-                      <span>{t("operations.assignedDriver")}</span>
-                      <select onChange={(event) => setDriverId(event.target.value)} value={driverId}>
-                        <option value="">{t("operations.unassigned")}</option>
-                        {drivers
-                          .filter((driver) => driver.status === "active")
-                          .map((driver) => (
-                            <option key={driver.id} value={driver.id}>
-                              {driver.code} - {driver.name}
-                            </option>
-                          ))}
-                      </select>
-                    </label>
-                  )}
                   {/* Sits with the money, because that is what it changes. */}
                   {orderType === "collect_order" ? null : (
                     <div className="field free-order-toggle">
                       <label className="checkbox-row">
                         <input
                           checked={isFreeOrder}
+                          disabled={isEdit}
                           id="order-free"
                           onChange={(event) => {
                             const next = event.target.checked;
@@ -1058,7 +1259,7 @@ export function CreateOrderDialog({
                         />
                         <span>{t("operations.freeOrder")}</span>
                       </label>
-                      {isFreeOrder ? (
+                      {isFreeOrder && !isEdit ? (
                         <>
                           <small className="field-hint">{t("operations.freeOrderHint")}</small>
                           <label className="field required-field">
@@ -1469,10 +1670,16 @@ export function CreateOrderDialog({
                 </button>
                 <button
                   className="button button-primary"
-                  disabled={saving || (!isFreeOrder && quoteLoading)}
+                  disabled={saving || (!isEdit && !isFreeOrder && quoteLoading)}
                   type="submit"
                 >
-                  {saving ? t("operations.creatingOrder") : t("operations.createOrder")}
+                  {isEdit
+                    ? saving
+                      ? t("common.saving")
+                      : t("common.save")
+                    : saving
+                      ? t("operations.creatingOrder")
+                      : t("operations.createOrder")}
                 </button>
               </div>
             </footer>

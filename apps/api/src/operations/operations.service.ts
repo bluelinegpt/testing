@@ -5930,6 +5930,11 @@ const exportOpenTraderReceivablePredicate = sql`
              o.serial_number as "serialNumber",
              o.reference_number as "referenceNumber",
              o.order_date::text as "orderDate",
+             /* Identifier-only additions mirroring the list response, so the
+                Edit form can pre-fill without a second lookup. */
+             o.trader_id as "traderId",
+             o.is_free_order as "isFreeOrder",
+             o.order_type as "orderType",
              t.name_en as "traderName",
              a.name_en as "areaNameEn",
              a.name_ar as "areaNameAr",
