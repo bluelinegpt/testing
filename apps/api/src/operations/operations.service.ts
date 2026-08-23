@@ -127,6 +127,7 @@ export interface OperationsOrderFilters {
   readonly serialNumber?: string | undefined;
   readonly search?: string | undefined;
   readonly settlementStatus?: string | undefined;
+  readonly workflowStep?: "complete" | "collect_from_driver" | "collect_from_trader" | "settle_trader" | undefined;
   readonly quickView?:
     "active" | "all" | "cancelled" | "closed" | "hold" | "accountant" | undefined;
   /**
@@ -290,6 +291,10 @@ export interface OperationsOrder {
   readonly serviceFeeVatAmount: string | null;
   readonly totalDeductions: string | null;
   readonly traderNetPayable: string;
+  readonly traderReceivableId?: string | null;
+  readonly traderReceivableNumber?: string | null;
+  readonly traderReceivableOutstanding?: string | null;
+  readonly traderReceivableStatus?: string | null;
   readonly traderName: string;
   readonly traderSettlementStatus: string;
   readonly vatAmount: string;
@@ -667,6 +672,8 @@ interface OrderFinancials {
   readonly serviceFeeNetAmount: Decimal;
   readonly serviceFeeVatAmount: Decimal;
   readonly totalDeductions: Decimal;
+  readonly traderDeductions: Decimal;
+  readonly traderPaidServiceFee: Decimal;
   readonly traderReceivableDue: Decimal;
   readonly traderNetPayable: Decimal;
   readonly vatAmount: Decimal;
@@ -941,6 +948,7 @@ export class OperationsService {
     const orderType = this.optionalFilter(filters.orderType);
     const cashStatus = this.optionalFilter(filters.cashStatus);
     const settlementStatus = this.optionalFilter(filters.settlementStatus);
+    const workflowStep = this.optionalFilter(filters.workflowStep);
     const traderId = this.optionalUuidFilter(filters.traderId);
     // A Driver User must see only Orders assigned to them, regardless of
     // which Orders permission their Role happens to grant, and regardless of
@@ -954,6 +962,61 @@ export class OperationsService {
     const dateFrom = this.optionalDate(filters.dateFrom);
     const dateTo = this.optionalDate(filters.dateTo);
     const quickView = filters.quickView ?? "active";
+    const openTraderReceivablePredicate = sql`
+      exists (
+        select 1
+        from trader_receivables workflow_receivable
+        where workflow_receivable.company_id = o.company_id
+          and workflow_receivable.source_type = 'service_charge'
+          and workflow_receivable.source_reference = o.order_number
+          and workflow_receivable.status in ('outstanding', 'partially_collected')
+          and workflow_receivable.outstanding_amount > 0
+      )
+    `;
+    const failedAccountingPredicate = sql`
+      exists (
+        select 1
+        from accounting_events workflow_event
+        where workflow_event.company_id = o.company_id
+          and workflow_event.source_entity_type = 'order'
+          and workflow_event.source_reference = o.order_number
+          and workflow_event.id = (
+            select latest_workflow_event.id
+            from accounting_events latest_workflow_event
+            where latest_workflow_event.company_id = o.company_id
+              and latest_workflow_event.source_entity_type = 'order'
+              and latest_workflow_event.source_reference = o.order_number
+            order by latest_workflow_event.created_at desc, latest_workflow_event.id desc
+            limit 1
+          )
+          and workflow_event.processing_status = 'failed'
+      )
+    `;
+    const workflowStepPredicate = sql`
+      (${workflowStep}::text is null
+        or (${workflowStep} = 'collect_from_driver'
+          and o.delivery_status = 'delivered'
+          and o.driver_reconciliation_status = 'pending'
+          and o.customer_amount_due > 0)
+        or (${workflowStep} = 'collect_from_trader' and ${openTraderReceivablePredicate})
+        or (${workflowStep} = 'settle_trader'
+          and o.delivery_status = 'delivered'
+          and o.driver_reconciliation_status in ('reconciled', 'not_applicable')
+          and o.trader_net_payable > 0
+          and o.trader_settlement_status in ('unsettled', 'partially_settled'))
+        or (${workflowStep} = 'complete'
+          and o.delivery_status in ('delivered', 'closed', 'returned_to_trader', 'cancelled')
+          and not (o.delivery_status = 'delivered'
+            and o.driver_reconciliation_status = 'pending'
+            and o.customer_amount_due > 0)
+          and not (o.delivery_status = 'delivered'
+            and o.driver_reconciliation_status in ('reconciled', 'not_applicable')
+            and o.trader_net_payable > 0
+            and o.trader_settlement_status in ('unsettled', 'partially_settled', 'money_sent_to_trader'))
+          and not ${openTraderReceivablePredicate}
+          and not ${failedAccountingPredicate})
+      )
+    `;
     const delivery = await this.deliveryActivity(filters);
     const { applied, deliveredOnly } = delivery;
     const page =
@@ -1020,6 +1083,15 @@ export class OperationsService {
                   )
               )
             )
+            or exists (
+              select 1
+              from trader_receivables accountant_receivable
+              where accountant_receivable.company_id = o.company_id
+                and accountant_receivable.source_type = 'service_charge'
+                and accountant_receivable.source_reference = o.order_number
+                and accountant_receivable.status in ('outstanding', 'partially_collected')
+                and accountant_receivable.outstanding_amount > 0
+            )
           )
         ))
     `;
@@ -1041,6 +1113,7 @@ export class OperationsService {
            or o.serial_number_normalized = ${serialTerm}::text)
       and ${unifiedOrderSearchPredicate(search)}
       and (${deliveryStatus}::text is null or o.delivery_status = ${deliveryStatus})
+      and ${workflowStepPredicate}
       and (${orderType}::text is null or o.order_type = ${orderType})
       and (${cashStatus}::text is null or o.driver_reconciliation_status = ${cashStatus})
       and (${settlementStatus}::text is null or o.trader_settlement_status = ${settlementStatus})
@@ -1105,6 +1178,10 @@ export class OperationsService {
              fee.paid_amount::text as "outsourcedDriverFeePaid",
              fee.outstanding_amount::text as "outsourcedDriverFeeOutstanding",
              fee_payments.payment_numbers as "outsourcedDriverFeePaymentNumbers",
+             receivable.receivable_id as "traderReceivableId",
+             receivable.receivable_number as "traderReceivableNumber",
+             receivable.outstanding_amount as "traderReceivableOutstanding",
+             receivable.status as "traderReceivableStatus",
              o.return_status as "returnStatus",
              o.delivered_at::text as "deliveredAt",
              /* Authoritative Accounting state for this Order.
@@ -1216,6 +1293,20 @@ export class OperationsService {
             and p.status = 'confirmed'
         ) payments
       ) fee_payments on true
+      left join lateral (
+        select
+          r.id::text as receivable_id,
+          r.receivable_number,
+          greatest(r.original_amount_due - r.amount_collected, 0::numeric)::text as outstanding_amount,
+          r.status
+        from trader_receivables r
+        where r.company_id = o.company_id
+          and r.source_type = 'service_charge'
+          and r.source_reference = o.order_number
+          and r.status not in ('cancelled', 'reversed')
+        order by r.created_at desc
+        limit 1
+      ) receivable on true
       where o.company_id = ${companyId}::uuid
         and ${filterPredicate}
       order by ${
@@ -1274,6 +1365,9 @@ export class OperationsService {
         returnStatus: row.returnStatus ?? null,
         traderId: row.traderId ?? "",
         traderNetPayable: row.traderNetPayable,
+        traderReceivableId: row.traderReceivableId ?? null,
+        traderReceivableOutstanding: row.traderReceivableOutstanding ?? null,
+        traderReceivableStatus: row.traderReceivableStatus ?? null,
         traderSettlementStatus: row.traderSettlementStatus,
       }),
     }));
@@ -1387,12 +1481,68 @@ export class OperationsService {
     const deliveryStatus = this.optionalFilter(filters.deliveryStatus);
     const cashStatus = this.optionalFilter(filters.cashStatus);
     const settlementStatus = this.optionalFilter(filters.settlementStatus);
+    const workflowStep = this.optionalFilter(filters.workflowStep);
     const traderId = this.optionalUuidFilter(filters.traderId);
     const driverId = this.optionalUuidFilter(filters.driverId);
     const areaId = this.optionalUuidFilter(filters.areaId);
     const emirateId = this.optionalUuidFilter(filters.emirateId);
     const dateFrom = this.optionalDate(filters.dateFrom);
     const dateTo = this.optionalDate(filters.dateTo);
+const exportOpenTraderReceivablePredicate = sql`
+      exists (
+        select 1
+        from trader_receivables workflow_receivable
+        where workflow_receivable.company_id = o.company_id
+          and workflow_receivable.source_type = 'service_charge'
+          and workflow_receivable.source_reference = o.order_number
+          and workflow_receivable.status in ('outstanding', 'partially_collected')
+          and workflow_receivable.outstanding_amount > 0
+      )
+    `;
+    const exportFailedAccountingPredicate = sql`
+      exists (
+        select 1
+        from accounting_events workflow_event
+        where workflow_event.company_id = o.company_id
+          and workflow_event.source_entity_type = 'order'
+          and workflow_event.source_reference = o.order_number
+          and workflow_event.id = (
+            select latest_workflow_event.id
+            from accounting_events latest_workflow_event
+            where latest_workflow_event.company_id = o.company_id
+              and latest_workflow_event.source_entity_type = 'order'
+              and latest_workflow_event.source_reference = o.order_number
+            order by latest_workflow_event.created_at desc, latest_workflow_event.id desc
+            limit 1
+          )
+          and workflow_event.processing_status = 'failed'
+      )
+    `;
+    const exportWorkflowStepPredicate = sql`
+      (${workflowStep}::text is null
+        or (${workflowStep} = 'collect_from_driver'
+          and o.delivery_status = 'delivered'
+          and o.driver_reconciliation_status = 'pending'
+          and o.customer_amount_due > 0)
+        or (${workflowStep} = 'collect_from_trader' and ${exportOpenTraderReceivablePredicate})
+        or (${workflowStep} = 'settle_trader'
+          and o.delivery_status = 'delivered'
+          and o.driver_reconciliation_status in ('reconciled', 'not_applicable')
+          and o.trader_net_payable > 0
+          and o.trader_settlement_status in ('unsettled', 'partially_settled'))
+        or (${workflowStep} = 'complete'
+          and o.delivery_status in ('delivered', 'closed', 'returned_to_trader', 'cancelled')
+          and not (o.delivery_status = 'delivered'
+            and o.driver_reconciliation_status = 'pending'
+            and o.customer_amount_due > 0)
+          and not (o.delivery_status = 'delivered'
+            and o.driver_reconciliation_status in ('reconciled', 'not_applicable')
+            and o.trader_net_payable > 0
+            and o.trader_settlement_status in ('unsettled', 'partially_settled', 'money_sent_to_trader'))
+          and not ${exportOpenTraderReceivablePredicate}
+          and not ${exportFailedAccountingPredicate})
+      )
+    `;
     const result = await sql<
       OperationsOrder & {
         readonly exportedAt: string;
@@ -1443,6 +1593,7 @@ export class OperationsService {
              or o.serial_number_normalized = ${serialTerm}::text)
         and ${unifiedOrderSearchPredicate(search)}
         and (${deliveryStatus}::text is null or o.delivery_status = ${deliveryStatus})
+        and ${exportWorkflowStepPredicate}
         and (${cashStatus}::text is null or o.driver_reconciliation_status = ${cashStatus})
         and (${settlementStatus}::text is null or o.trader_settlement_status = ${settlementStatus})
         and (${traderId}::uuid is null or o.trader_id = ${traderId}::uuid)
@@ -3609,6 +3760,7 @@ export class OperationsService {
         driverCost: collectOrder ? new Decimal(0) : driverCost,
         prospective: true,
         serviceFee: pricing.finalFee,
+        paymentCondition: input.paymentCondition ?? "customer_pays_cod_and_fee",
         vatPolicy,
       });
       // A Collect Order is not complete when it is created. Without a Driver
@@ -3654,13 +3806,14 @@ export class OperationsService {
           ${customerRow?.customerReference ?? null},${customerAddressRow?.areaCode ?? null},${customerAddressRow?.areaNameEn ?? null},
           ${customerAddressRow?.areaNameAr ?? null},${customerAddressRow === undefined ? null : customerAddressRow.areaNameAr === null},
           ${customerLocationLink},${customerDeliveryNotes},${customerOmitted ? "not_applicable" : "resolved"},
-          ${packageCount}, 'customer_pays_cod_trader_pays_fee',
+          ${packageCount}, ${input.paymentCondition ?? "customer_pays_cod_and_fee"},
           ${financials.codAmount.toFixed(2)}, ${financials.serviceFee.toFixed(2)},
           ${financials.serviceFeeNetAmount.toFixed(2)},${financials.serviceFeeVatAmount.toFixed(2)},
           ${financials.additionalFees.toFixed(2)},${financials.additionalFeeVatAmount.toFixed(2)},
           ${financials.totalDeductions.toFixed(2)},${financials.customerAmountDue.toFixed(2)},
-          ${financials.codAmount.toFixed(2)},${financials.serviceFeeNetAmount.plus(financials.serviceFeeVatAmount).toFixed(2)},
-          ${financials.additionalFees.plus(financials.additionalFeeVatAmount).toFixed(2)},
+          ${financials.codAmount.toFixed(2)},
+          ${financials.traderPaidServiceFee.toFixed(2)},
+          ${financials.traderDeductions.toFixed(2)},
           ${financials.traderNetPayable.toFixed(2)},${collectOrder ? "0.00" : driverCost.toFixed(2)},
           ${financials.vatAmount.toFixed(2)},${vatPolicy.enabled},${vatPolicy.rate.toFixed(4)},
           ${vatPolicy.enabled ? vatPolicy.priceMode : null},
@@ -3921,6 +4074,7 @@ export class OperationsService {
       driverCost,
       prospective: true,
       serviceFee: pricing.finalFee,
+      paymentCondition: input.paymentCondition ?? "customer_pays_cod_and_fee",
       vatPolicy,
     });
     return {
@@ -4188,6 +4342,7 @@ export class OperationsService {
           deliveryStatus: string;
           driverCost: string;
           financialModelVersion: string | null;
+          isFreeOrder: boolean;
           additionalFees: string | null;
           vatEnabledSnapshot: boolean | null;
           vatPriceModeSnapshot: "exclusive" | "inclusive" | null;
@@ -4196,6 +4351,7 @@ export class OperationsService {
           orderDate: string;
           orderProfit: string;
           packageCount: number;
+          paymentCondition: string;
           pricingProvenance: string;
           referenceNumber: string | null;
           serialNumber: string;
@@ -4222,6 +4378,7 @@ export class OperationsService {
                  o.delivery_status as "deliveryStatus",
                  o.driver_cost::text as "driverCost",
                  o.financial_model_version as "financialModelVersion",
+                 o.is_free_order as "isFreeOrder",
                  o.additional_fees::text as "additionalFees",
                  o.vat_enabled_snapshot as "vatEnabledSnapshot",
                  o.vat_price_mode_snapshot as "vatPriceModeSnapshot",
@@ -4230,6 +4387,7 @@ export class OperationsService {
                  o.order_date::text as "orderDate",
                  o.order_profit::text as "orderProfit",
                  o.package_count as "packageCount",
+                 o.payment_condition as "paymentCondition",
                  o.pricing_provenance_status as "pricingProvenance",
                  o.reference_number as "referenceNumber",
                  o.serial_number as "serialNumber",
@@ -4250,7 +4408,66 @@ export class OperationsService {
       if (current === undefined) {
         throw new ApplicationException("order_not_found", "Order not found", HttpStatus.NOT_FOUND);
       }
+      const providedUpdateFields = Object.entries(input).filter(([, value]) => value !== undefined);
+      const sameMobileNumber = (nextValue: string | null, currentValue: string | null): boolean => {
+        const nextTrimmed = nextValue?.trim() || null;
+        const currentTrimmed = currentValue?.trim() || null;
+        if (nextTrimmed === currentTrimmed) return true;
+        if (nextTrimmed === null || currentTrimmed === null) return false;
+        return mobileComparisonKey(nextTrimmed) === mobileComparisonKey(currentTrimmed);
+      };
+      const providedOnlySafeIdentifierContactChange =
+        providedUpdateFields.length > 0 &&
+        providedUpdateFields.every(([field, value]) => {
+          switch (field) {
+            case "referenceNumber":
+              return true;
+            case "serialNumber":
+              return value === current.serialNumber;
+            case "traderId":
+              return value === current.traderId;
+            case "customerId":
+              return value === current.customerId;
+            case "customerAddressId":
+              return value === current.customerAddressId;
+            case "areaId":
+              return value === current.areaId;
+            case "customerName":
+              return String(value).trim() === current.customerName;
+            case "customerMobileNumber":
+              return sameMobileNumber(String(value), current.customerMobileNumber);
+            case "customerSecondMobileNumber": {
+              const nextSecondMobile = String(value).trim() || null;
+              return sameMobileNumber(nextSecondMobile, current.customerSecondMobileNumber);
+            }
+            case "customerAddress":
+              return String(value).trim() === current.customerAddress;
+            case "codAmount":
+              return this.money(new Decimal(Number(value))).equals(
+                this.money(new Decimal(current.codAmount)),
+              );
+            case "serviceFee":
+              return this.money(new Decimal(Number(value))).equals(
+                this.money(new Decimal(current.serviceFee)),
+              );
+            case "additionalFees":
+              return this.money(new Decimal(Number(value))).equals(
+                this.money(new Decimal(current.additionalFees ?? 0)),
+              );
+            case "packageCount":
+              return Number(value) === current.packageCount;
+            case "notes": {
+              const nextNotes = String(value).trim() || null;
+              return nextNotes === current.notes;
+            }
+            case "serviceFeeReason":
+              return String(value).trim() === "";
+            default:
+              return false;
+          }
+        });
       if (
+        !providedOnlySafeIdentifierContactChange &&
         !["new", "in_branch", "assigned_to_driver", "out_for_delivery"].includes(
           current.deliveryStatus,
         )
@@ -4261,7 +4478,6 @@ export class OperationsService {
           HttpStatus.CONFLICT,
         );
       }
-
       const changes: {
         category: string;
         field: string;
@@ -4313,6 +4529,53 @@ export class OperationsService {
         track("reference_number", "user_action", current.referenceNumber, referenceNumber);
       }
 
+      if (providedOnlySafeIdentifierContactChange) {
+        if (changes.length === 0) return;
+        await sql`
+          update orders
+             set reference_number=${referenceNumber},
+                 reference_number_normalized=${referenceNumberNormalized},
+                 updated_at = now(),
+                 version = version + 1
+           where id = ${orderId}::uuid and company_id = ${companyId}::uuid
+        `.execute(transaction);
+
+        const role = await sql<{ name: string }>`
+          select coalesce(string_agg(distinct r.name, ', ' order by r.name), a.account_kind) as name
+          from accounts a
+          left join account_roles ar on ar.account_id = a.id and ar.company_id = a.company_id
+          left join roles r on r.id = ar.role_id and r.company_id = ar.company_id
+          where a.id = ${identity.identityId}::uuid and a.company_id = ${companyId}::uuid
+          group by a.id
+        `.execute(transaction);
+        const actorRole = role.rows[0]?.name ?? identity.kind;
+        for (const change of changes) {
+          await sql`
+            insert into order_events (
+              company_id, order_id, event_type, event_category, field_name,
+              previous_value, new_value, actor_account_id, actor_role, source,
+              reason, correlation_id
+            ) values (
+              ${companyId}::uuid, ${orderId}::uuid, 'order.updated', ${change.category},
+              ${change.field},
+              ${change.previous === null ? null : sql`to_jsonb(${change.previous}::text)`},
+              ${change.next === null ? null : sql`to_jsonb(${change.next}::text)`},
+              ${identity.identityId}::uuid, ${actorRole}, 'web_portal',
+              ${change.reason}, ${correlationId}
+            )
+          `.execute(transaction);
+        }
+        await this.audit(transaction, {
+          action: "order.update",
+          actorId: identity.identityId,
+          after: { changedFields: changes.map((change) => change.field) },
+          companyId,
+          correlationId,
+          subjectId: orderId,
+          subjectType: "order",
+        });
+        return;
+      }
       // --- Trader change ------------------------------------------------------
       const traderChanged = input.traderId !== undefined && input.traderId !== current.traderId;
       let traderId = current.traderId;
@@ -4463,9 +4726,16 @@ export class OperationsService {
       const identityRepriced = traderChanged || areaChanged;
       const currentCod = new Decimal(current.codAmount);
       const currentFee = new Decimal(current.serviceFee);
-      const nextCod = input.codAmount === undefined ? currentCod : new Decimal(input.codAmount);
+      // A Free Order's financial identity is fixed at creation: zero COD, zero
+      // fees (createOrder forces all of them to zero). Edits must preserve
+      // that — re-pricing after a Trader/Area change would otherwise write the
+      // configured fee against a zero COD and violate
+      // orders_prospective_financial_model_check on save.
+      const isFreeOrder = current.isFreeOrder;
+      const nextCod =
+        isFreeOrder || input.codAmount === undefined ? currentCod : new Decimal(input.codAmount);
       const codChanged = !this.money(nextCod).equals(this.money(currentCod));
-      const manualFeeProvided = input.serviceFee !== undefined;
+      const manualFeeProvided = !isFreeOrder && input.serviceFee !== undefined;
       const manualFee = manualFeeProvided ? new Decimal(input.serviceFee ?? 0) : currentFee;
       const manualFeeChanged =
         !identityRepriced &&
@@ -4494,7 +4764,9 @@ export class OperationsService {
 
       // When the Trader or Area changes, re-run pricing so provenance/rule follow the new
       // context; otherwise a supplied fee is a manual override of the existing price.
-      const pricing = identityRepriced
+      // Free Orders are never re-priced: their fee is zero by definition.
+      const pricing =
+        identityRepriced && !isFreeOrder
         ? await this.resolveServiceFee(transaction, {
             areaId,
             companyId,
@@ -4518,11 +4790,14 @@ export class OperationsService {
           }
         : await this.vatPolicy(transaction, companyId);
       const financials = this.calculateOrderFinancials({
-        additionalFees: new Decimal(input.additionalFees ?? current.additionalFees ?? 0),
+        additionalFees: new Decimal(
+          isFreeOrder ? (current.additionalFees ?? 0) : (input.additionalFees ?? current.additionalFees ?? 0),
+        ),
         codAmount: nextCod,
         driverCost: new Decimal(current.driverCost),
         prospective: isProspective,
         serviceFee: finalFee,
+        paymentCondition: current.paymentCondition as "customer_pays_cod_and_fee" | "customer_pays_cod_trader_pays_fee",
         vatPolicy: currentVatPolicy,
       });
 
@@ -4578,6 +4853,7 @@ export class OperationsService {
         });
       }
       if (
+        !isFreeOrder &&
         input.additionalFees !== undefined &&
         !this.money(new Decimal(input.additionalFees)).equals(
           this.money(new Decimal(current.additionalFees ?? 0)),
@@ -4645,47 +4921,47 @@ export class OperationsService {
                  else customer_delivery_notes_snapshot end,
                pricing_provenance_status = ${pricingProvenance},
                trader_service_price_id = ${traderServicePriceId}::uuid,
-               configured_service_fee_snapshot = ${configuredFeeSnapshot},
-               final_service_fee_snapshot = ${financial.serviceFee},
+               configured_service_fee_snapshot = ${configuredFeeSnapshot}::numeric,
+               final_service_fee_snapshot = ${financial.serviceFee}::numeric,
                customer_name = ${next.customerName},
                customer_mobile_number = ${next.customerMobileNumber},
                customer_second_mobile_number = ${next.customerSecondMobileNumber},
                customer_address = ${next.customerAddress},
                package_count = ${next.packageCount},
                notes = ${next.notes},
-               cod_amount = ${financial.codAmount},
-               service_fee = ${financial.serviceFee},
+               cod_amount = ${financial.codAmount}::numeric,
+               service_fee = ${financial.serviceFee}::numeric,
                service_fee_net_amount = case when ${isProspective}
-                 then ${financials.serviceFeeNetAmount.toFixed(2)}
+                 then ${financials.serviceFeeNetAmount.toFixed(2)}::numeric
                  else service_fee_net_amount end,
                service_fee_vat_amount = case when ${isProspective}
-                 then ${financials.serviceFeeVatAmount.toFixed(2)}
+                 then ${financials.serviceFeeVatAmount.toFixed(2)}::numeric
                  else service_fee_vat_amount end,
                additional_fees = case when ${isProspective}
-                 then ${financials.additionalFees.toFixed(2)}
+                 then ${financials.additionalFees.toFixed(2)}::numeric
                  else additional_fees end,
                additional_fee_vat_amount = case when ${isProspective}
-                 then ${financials.additionalFeeVatAmount.toFixed(2)}
+                 then ${financials.additionalFeeVatAmount.toFixed(2)}::numeric
                  else additional_fee_vat_amount end,
                total_deductions = case when ${isProspective}
-                 then ${financials.totalDeductions.toFixed(2)}
+                 then ${financials.totalDeductions.toFixed(2)}::numeric
                  else total_deductions end,
-               vat_amount = ${financial.vatAmount},
-               customer_amount_due = ${financial.customerAmountDue},
-               company_revenue = ${financial.companyRevenue},
-               trader_gross_payable = ${financial.codAmount},
+               vat_amount = ${financial.vatAmount}::numeric,
+               customer_amount_due = ${financial.customerAmountDue}::numeric,
+               company_revenue = ${financial.companyRevenue}::numeric,
+               trader_gross_payable = ${financial.codAmount}::numeric,
                trader_paid_service_fee = case when ${isProspective}
                  then ${financials.serviceFeeNetAmount
                    .plus(financials.serviceFeeVatAmount)
-                   .toFixed(2)}
-                 else ${financial.serviceFee} end,
+                   .toFixed(2)}::numeric
+                 else ${financial.serviceFee}::numeric end,
                trader_deductions = case when ${isProspective}
                  then ${financials.additionalFees
                    .plus(financials.additionalFeeVatAmount)
-                   .toFixed(2)}
+                   .toFixed(2)}::numeric
                  else trader_deductions end,
-               trader_net_payable = ${financial.traderNetPayable},
-               order_profit = ${financial.orderProfit},
+               trader_net_payable = ${financial.traderNetPayable}::numeric,
+               order_profit = ${financial.orderProfit}::numeric,
                updated_at = now(),
                version = version + 1
          where id = ${orderId}::uuid and company_id = ${companyId}::uuid
@@ -4925,7 +5201,7 @@ export class OperationsService {
       // those remain Operations-only, unchanged from before this correction.
       const driverTransitions: Readonly<Record<string, readonly string[]>> = {
         assigned_to_driver: ["out_for_delivery"],
-        out_for_delivery: ["hold", "delivered", "returned_to_branch"],
+        out_for_delivery: ["hold", "delivered", "in_branch"],
         collect_order: ["closed"],
       };
       // Operations/admin can drive every step of the lifecycle, including the
@@ -4933,12 +5209,12 @@ export class OperationsService {
       // recorded against the operator's identity for the audit trail.
       const operationsTransitions: Readonly<Record<string, readonly string[]>> = {
         new: ["in_branch", "hold", "cancelled"],
-        in_branch: ["cancelled"],
+        in_branch: ["out_for_delivery", "hold", "returned_to_trader", "cancelled"],
         assigned_to_driver: ["out_for_delivery", "hold", "cancelled"],
-        out_for_delivery: ["hold", "delivered", "returned_to_branch", "cancelled"],
+        out_for_delivery: ["in_branch", "hold", "delivered", "cancelled"],
         hold: ["out_for_delivery", "delivered", "returned_to_trader", "cancelled"],
         delivered: ["closed"],
-        returned_to_branch: ["returned_to_trader"],
+        returned_to_branch: ["in_branch", "out_for_delivery", "returned_to_trader"],
         returned_to_trader: ["closed"],
         collect_order: ["closed"],
       };
@@ -4957,7 +5233,7 @@ export class OperationsService {
         );
       }
       if (
-        ["hold", "cancelled", "returned_to_branch", "returned_to_trader"].includes(status) &&
+        ["hold", "cancelled", "returned_to_trader"].includes(status) &&
         reason === null
       ) {
         throw new ApplicationException(
@@ -4990,7 +5266,7 @@ export class OperationsService {
           "money_sent_to_trader",
           "money_received_by_trader",
           "not_eligible",
-        ].includes(order.settlementStatus);
+        ].includes(order.settlementStatus) || Number(order.traderNetPayable) <= 0;
         const returnComplete =
           order.deliveryStatus !== "returned_to_trader" ||
           order.returnStatus === "returned_to_trader";
@@ -5005,6 +5281,7 @@ export class OperationsService {
 
       const amountDue = Number(order.customerAmountDue);
       const traderPayable = Number(order.traderNetPayable);
+      const noTraderPaymentDue = Number.isFinite(traderPayable) && traderPayable <= 0;
       const deliveredFreeNoValue =
         status === "delivered" &&
         order.isFreeOrder === true &&
@@ -5026,7 +5303,7 @@ export class OperationsService {
       const returnStatus =
         status === "hold"
           ? order.returnStatus
-          : status === "returned_to_branch" || status === "returned_to_trader"
+          : status === "returned_to_trader"
             ? status
             : status === "closed"
               ? order.returnStatus
@@ -5035,10 +5312,9 @@ export class OperationsService {
         status === "hold"
           ? order.settlementStatus
           : status === "cancelled" ||
-              status === "returned_to_branch" ||
               status === "returned_to_trader"
             ? "not_eligible"
-            : deliveredFreeNoValue
+            : deliveredFreeNoValue || noTraderPaymentDue
               ? "not_eligible"
               : status === "closed" || status === "in_branch"
                 ? order.settlementStatus
@@ -5694,6 +5970,10 @@ export class OperationsService {
              fee.paid_amount::text as "outsourcedDriverFeePaid",
              fee.outstanding_amount::text as "outsourcedDriverFeeOutstanding",
              fee_payments.payment_numbers as "outsourcedDriverFeePaymentNumbers",
+             receivable.receivable_id as "traderReceivableId",
+             receivable.receivable_number as "traderReceivableNumber",
+             receivable.outstanding_amount as "traderReceivableOutstanding",
+             receivable.status as "traderReceivableStatus",
              o.return_status as "returnStatus",
              o.delivered_at::text as "deliveredAt",
              ${orderAccountingColumns}
@@ -5717,6 +5997,20 @@ export class OperationsService {
             and p.status = 'confirmed'
         ) payments
       ) fee_payments on true
+      left join lateral (
+        select
+          r.id::text as receivable_id,
+          r.receivable_number,
+          greatest(r.original_amount_due - r.amount_collected, 0::numeric)::text as outstanding_amount,
+          r.status
+        from trader_receivables r
+        where r.company_id = o.company_id
+          and r.source_type = 'service_charge'
+          and r.source_reference = o.order_number
+          and r.status not in ('cancelled', 'reversed')
+        order by r.created_at desc
+        limit 1
+      ) receivable on true
       where o.company_id = ${companyId}::uuid and o.id = ${orderId}::uuid
     `.execute(this.database);
     const order = result.rows[0];
@@ -6289,6 +6583,7 @@ export class OperationsService {
       driverCost,
       prospective: true,
       serviceFee: pricing.finalFee,
+      paymentCondition: input.paymentCondition ?? "customer_pays_cod_and_fee",
       vatPolicy,
     });
     const deliveryStatus = driverRow === undefined ? "new" : "assigned_to_driver";
@@ -6325,13 +6620,13 @@ export class OperationsService {
         ${input.customerSecondMobileNumber?.trim() || null},${customerAddress},${customer.code},
         ${customer.customerReference},${area.code},${area.name},${customer.locationLink},
         ${customer.deliveryNotes},'resolved',${area.nameAr},${area.nameAr === null},${packageCount},
-        'customer_pays_cod_trader_pays_fee', ${financials.codAmount.toFixed(2)},
+        ${input.paymentCondition ?? "customer_pays_cod_and_fee"}, ${financials.codAmount.toFixed(2)},
         ${financials.serviceFee.toFixed(2)},${financials.serviceFeeNetAmount.toFixed(2)},
         ${financials.serviceFeeVatAmount.toFixed(2)},${financials.additionalFees.toFixed(2)},
         ${financials.additionalFeeVatAmount.toFixed(2)},${financials.totalDeductions.toFixed(2)},
         ${financials.customerAmountDue.toFixed(2)},${financials.codAmount.toFixed(2)},
-        ${financials.serviceFeeNetAmount.plus(financials.serviceFeeVatAmount).toFixed(2)},
-        ${financials.additionalFees.plus(financials.additionalFeeVatAmount).toFixed(2)},
+        ${financials.traderPaidServiceFee.toFixed(2)},
+          ${financials.traderDeductions.toFixed(2)},
         ${financials.traderNetPayable.toFixed(2)}, ${driverCost.toFixed(2)},
         ${financials.vatAmount.toFixed(2)},${vatPolicy.enabled},${vatPolicy.rate.toFixed(4)},
         ${vatPolicy.enabled ? vatPolicy.priceMode : null},${financials.companyRevenue.toFixed(2)},
@@ -6681,6 +6976,7 @@ export class OperationsService {
     readonly additionalFees?: Decimal;
     readonly codAmount: Decimal;
     readonly driverCost: Decimal;
+    readonly paymentCondition?: "customer_pays_cod_and_fee" | "customer_pays_cod_trader_pays_fee";
     readonly prospective?: boolean;
     readonly serviceFee: Decimal;
     readonly vatPolicy: VatPolicy;
@@ -6695,10 +6991,23 @@ export class OperationsService {
     const additionalFees = inclusive
       ? additionalFeeInput.minus(additionalFeeVatAmount)
       : additionalFeeInput;
-    const totalDeductions = serviceFeeNetAmount
+    const feeTotal = serviceFeeNetAmount
       .plus(serviceFeeVatAmount)
       .plus(additionalFees)
       .plus(additionalFeeVatAmount);
+    const customerPaysFee = input.paymentCondition !== "customer_pays_cod_trader_pays_fee";
+    const customerPaidFeeCoveredByCod = customerPaysFee && input.codAmount.greaterThan(0);
+    const traderPaidServiceFee = input.prospective
+      ? customerPaidFeeCoveredByCod || !customerPaysFee
+        ? serviceFeeNetAmount.plus(serviceFeeVatAmount)
+        : new Decimal(0)
+      : serviceFeeNetAmount.plus(serviceFeeVatAmount);
+    const traderDeductions = input.prospective
+      ? customerPaidFeeCoveredByCod || !customerPaysFee
+        ? additionalFees.plus(additionalFeeVatAmount)
+        : new Decimal(0)
+      : additionalFees.plus(additionalFeeVatAmount);
+    const totalDeductions = traderPaidServiceFee.plus(traderDeductions);
     const vatAmount = input.prospective
       ? serviceFeeVatAmount.plus(additionalFeeVatAmount)
       : serviceFeeVatAmount;
@@ -6706,7 +7015,11 @@ export class OperationsService {
       ? serviceFeeNetAmount.plus(additionalFees)
       : serviceFeeNetAmount;
     const customerAmountDue = input.prospective
-      ? input.codAmount
+      ? customerPaysFee
+        ? input.codAmount.greaterThan(0)
+          ? input.codAmount
+          : feeTotal
+        : input.codAmount
       : input.vatPolicy.enabled && input.vatPolicy.priceMode === "exclusive"
         ? input.codAmount.plus(input.serviceFee).plus(serviceFeeVatAmount)
         : input.codAmount.plus(input.serviceFee);
@@ -6714,7 +7027,7 @@ export class OperationsService {
     const traderNetPayable = input.prospective
       ? Decimal.max(signedTraderPosition, 0)
       : Decimal.max(input.codAmount.minus(input.serviceFee), 0);
-    const traderReceivableDue = input.prospective
+    const traderReceivableDue = input.prospective && !customerPaysFee
       ? Decimal.max(signedTraderPosition.negated(), 0)
       : new Decimal(0);
     return {
@@ -6728,12 +7041,13 @@ export class OperationsService {
       serviceFeeNetAmount: this.money(serviceFeeNetAmount),
       serviceFeeVatAmount: this.money(serviceFeeVatAmount),
       totalDeductions: this.money(totalDeductions),
+      traderDeductions: this.money(traderDeductions),
+      traderPaidServiceFee: this.money(traderPaidServiceFee),
       traderReceivableDue: this.money(traderReceivableDue),
       traderNetPayable: this.money(traderNetPayable),
       vatAmount: this.money(vatAmount),
     };
   }
-
   private async createOrderTraderReceivableIfNeeded(
     database: Parameters<Parameters<KyselyTransactionManager["execute"]>[0]>[0],
     input: {
@@ -7313,3 +7627,12 @@ export class OperationsService {
     `.execute(database);
   }
 }
+
+
+
+
+
+
+
+
+
