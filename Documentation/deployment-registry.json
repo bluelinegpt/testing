@@ -1,4 +1,4 @@
-{
+﻿{
   "$comment": "Local-version-vs-Render status catalog, shown on /administration/deployment-status (Company Portal) and Platform Administration's Deployment Registry screen. Kept current by .githooks/post-commit and .githooks/pre-push via scripts/deployment-registry.mjs -- not by hand. confirmed_live/confirmedLiveAt are the one exception: only a human confirming Render is actually showing the change sets those (scripts/deployment-registry.mjs mark-confirmed-live).",
   "apps": [
     {
@@ -7,9 +7,9 @@
       "path": "apps/api",
       "renderService": "bluelinegpt-api-test",
       "status": "needs_deploy",
-      "localCommit": "51b959c",
+      "localCommit": "c3f7b50",
       "localCommitDate": "2026-08-24",
-      "lastChangeDescription": "Fix editing a free order no longer fails with a data integrity error",
+      "lastChangeDescription": "Orders are now edited through the full Create Order form",
       "lastChangeBy": "claude",
       "confirmedLiveCommit": "27e356a",
       "confirmedLiveAt": "2026-08-14"
@@ -20,10 +20,10 @@
       "path": "apps/web",
       "renderService": "bluelinegpt-web-test",
       "status": "needs_deploy",
-      "localCommit": "19c937c",
-      "localCommitDate": "2026-08-22",
-      "lastChangeDescription": "Prevent negative trader settlements",
-      "lastChangeBy": "codex",
+      "localCommit": "c3f7b50",
+      "localCommitDate": "2026-08-24",
+      "lastChangeDescription": "Orders are now edited through the full Create Order form",
+      "lastChangeBy": "claude",
       "confirmedLiveCommit": "27e356a",
       "confirmedLiveAt": "2026-08-14"
     },
