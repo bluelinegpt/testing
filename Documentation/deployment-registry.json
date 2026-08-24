@@ -20,9 +20,9 @@
       "path": "apps/web",
       "renderService": "bluelinegpt-web-test",
       "status": "needs_deploy",
-      "localCommit": "a8b2dbf",
+      "localCommit": "6b72086",
       "localCommitDate": "2026-08-24",
-      "lastChangeDescription": "Fix reversing a Manual Journal always failing with a missing-date error",
+      "lastChangeDescription": "Fix the Payroll period toolbar overflowing sideways instead of wrapping",
       "lastChangeBy": "claude",
       "confirmedLiveCommit": "27e356a",
       "confirmedLiveAt": "2026-08-14"
