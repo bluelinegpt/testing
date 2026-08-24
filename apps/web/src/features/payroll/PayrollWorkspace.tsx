@@ -480,11 +480,10 @@ export function PayrollWorkspace({
     [reportLanguage],
   );
 
-  // Recent years through the current one, newest first -- a small, fixed
-  // list rather than open text entry, since a payroll history realistically
-  // never needs a distant year and a free-typed one could send an invalid
-  // dateFrom/dateTo pair to the query.
-  const periodYearOptions = Array.from({ length: 6 }, (_, index) => String(currentYear - index));
+  // Only the current year for now -- kept as its own field (rather than
+  // folded away) so a later request to browse prior years back is a one-line
+  // change to this list, not a rebuild of the filtering underneath it.
+  const periodYearOptions = [String(currentYear)];
   const changePeriodYear = (year: string) => {
     setPeriodYear(year);
     setPeriodFilters((current) => ({ ...current, dateFrom: `${year}-01-01`, dateTo: `${year}-12-31` }));
