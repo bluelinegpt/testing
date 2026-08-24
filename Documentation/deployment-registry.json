@@ -20,9 +20,9 @@
       "path": "apps/web",
       "renderService": "bluelinegpt-web-test",
       "status": "needs_deploy",
-      "localCommit": "981ffef",
+      "localCommit": "43036cc",
       "localCommitDate": "2026-08-24",
-      "lastChangeDescription": "Payroll Year field now shows only the current year",
+      "lastChangeDescription": "Every date field now defaults to dd/mm/yyyy across the whole app",
       "lastChangeBy": "claude",
       "confirmedLiveCommit": "27e356a",
       "confirmedLiveAt": "2026-08-14"
