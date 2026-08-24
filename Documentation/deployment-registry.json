@@ -19,10 +19,10 @@
       "displayName": "Main app",
       "path": "apps/web",
       "renderService": "bluelinegpt-web-test",
-      "status": "pushed_awaiting_confirmation",
-      "localCommit": "a833b2c",
+      "status": "needs_deploy",
+      "localCommit": "48c2e1c",
       "localCommitDate": "2026-08-24",
-      "lastChangeDescription": "The order workflow status badge is now clickable to jump straight to its action",
+      "lastChangeDescription": "Fix Reverse (Journals/Cash/Expense Payments) failing with a blank date",
       "lastChangeBy": "claude",
       "confirmedLiveCommit": "27e356a",
       "confirmedLiveAt": "2026-08-14"
