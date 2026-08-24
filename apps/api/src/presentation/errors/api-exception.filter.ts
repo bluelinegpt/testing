@@ -133,6 +133,21 @@ export class ApiExceptionFilter implements ExceptionFilter {
         },
         "Request rejected by a database constraint",
       );
+      // Also captured to the Error Handler screen: a console-only warning is
+      // invisible when the server runs unattended (Render) or in another
+      // window locally, yet "which rule rejected this save" is exactly what a
+      // triage needs. Same fixed-string message policy as the log line above —
+      // `detail` (which quotes offending VALUES) is still excluded.
+      void this.errorReports?.reportServerError({
+        correlationId,
+        identity: this.currentIdentity(),
+        message:
+          `Database constraint rejected ${request.method} ${request.path}: ` +
+          `${pgError.message ?? "unknown"} ` +
+          `(constraint: ${pgError.constraint ?? "n/a"}, table: ${pgError.table ?? "n/a"})`,
+        path: request.path,
+        stack: null,
+      });
     } else {
       this.logger.warn({ code, correlationId, path: request.path, status }, "Request rejected");
     }
