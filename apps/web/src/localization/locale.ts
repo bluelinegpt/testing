@@ -13,6 +13,21 @@ export function directionForLocale(locale: SupportedLocale): "ltr" | "rtl" {
   return locale === "ar" ? "rtl" : "ltr";
 }
 
+/**
+ * BCP-47 tag for the document's `lang` attribute -- deliberately more
+ * specific than the bare locale code (`en`/`ar`) used everywhere else in the
+ * app. Chromium's native `<input type="date">` picks its displayed day/month
+ * order from the nearest ancestor's `lang` attribute: plain `en` renders
+ * US-style mm/dd/yyyy, while `en-AE` (like nearly every English locale
+ * outside the US) renders dd/mm/yyyy -- matching this business's own UAE
+ * dates everywhere else in the app (the same region tag `formatDate`/
+ * `formatCurrency` already resolve through, see `localeTags` in
+ * `formatters.ts`).
+ */
+export function htmlLangForLocale(locale: SupportedLocale): string {
+  return locale === "ar" ? "ar-AE" : "en-AE";
+}
+
 export function readStoredLocale(storage: Pick<Storage, "getItem"> | undefined): SupportedLocale {
   if (storage === undefined) return defaultLocale;
 

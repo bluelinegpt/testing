@@ -13,6 +13,7 @@ import { StorefrontApp } from "../storefront/StorefrontApp.js";
 import { TrackingView } from "../features/tracking/TrackingView.js";
 import {
   directionForLocale,
+  htmlLangForLocale,
   normalizeLocale,
   storeLocale,
   type SupportedLocale,
@@ -105,7 +106,11 @@ export function App() {
   }
 
   useEffect(() => {
-    document.documentElement.lang = currentLanguage;
+    // The region-qualified tag, not the bare locale code: native
+    // `<input type="date">` fields render dd/mm/yyyy vs mm/dd/yyyy based on
+    // this attribute, and only a region-specific tag like en-AE gets that
+    // right (see htmlLangForLocale's own comment).
+    document.documentElement.lang = htmlLangForLocale(currentLanguage);
     document.documentElement.dir = directionForLocale(currentLanguage);
   }, [currentLanguage]);
 

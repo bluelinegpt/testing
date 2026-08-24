@@ -31,7 +31,9 @@ describe("App", () => {
 
     expect(await screen.findByRole("heading", { name: "تسجيل الدخول" })).toBeInTheDocument();
     expect(document.documentElement.dir).toBe("rtl");
-    expect(document.documentElement.lang).toBe("ar");
+    // Region-qualified, not the bare locale code: native date inputs read
+    // their dd/mm/yyyy vs mm/dd/yyyy order from this attribute.
+    expect(document.documentElement.lang).toBe("ar-AE");
     expect(localStorage.getItem(localeStorageKey)).toBe("ar");
   });
 
