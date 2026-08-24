@@ -4025,6 +4025,7 @@ export const englishTranslations = {
       dates: "Period Dates",
       deductions: "Deductions",
       deliveredOrderEarnings: "Delivered Order Earnings",
+      collectionEarnings: "Collection Earnings",
       earningAdjustments: "Earning Adjustments",
       employee: "Employee",
       employeeNumber: "Employee Number",

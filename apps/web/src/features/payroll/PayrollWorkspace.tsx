@@ -232,6 +232,7 @@ interface PayrollLineDetail {
     readonly ruleId: string;
   }[];
   readonly deliveredOrderEarnings: string;
+  readonly collectionEarnings: string;
   readonly department: string | null;
   readonly driverCommission: string;
   readonly driverCommissionSources: readonly {
@@ -2817,6 +2818,7 @@ function LineDetailDialog({
               [t("payroll.columns.basic"), money(detail.basicSalary)],
               [t("payroll.columns.commission"), money(detail.driverCommission)],
               [t("payroll.columns.deliveredOrderEarnings"), money(detail.deliveredOrderEarnings)],
+              [t("payroll.columns.collectionEarnings"), money(detail.collectionEarnings)],
               [
                 t("payroll.fields.deliveredOrderCount"),
                 // The count of qualifying Orders is the number of allocated

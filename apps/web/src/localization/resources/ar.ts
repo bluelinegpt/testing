@@ -3973,6 +3973,7 @@ export const arabicTranslations = {
       dates: "تواريخ الفترة",
       deductions: "الخصومات",
       deliveredOrderEarnings: "أرباح الطلبات المسلَّمة",
+      collectionEarnings: "أرباح التحصيل",
       earningAdjustments: "تعديلات الأرباح",
       employee: "الموظف",
       employeeNumber: "رقم الموظف",
