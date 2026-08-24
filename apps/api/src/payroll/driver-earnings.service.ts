@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import { HttpStatus, Inject, Injectable } from "@nestjs/common";
 import { Decimal } from "decimal.js";
@@ -432,6 +432,10 @@ export class DriverEarningsService {
       left join areas a on a.id=o.area_id and a.company_id=o.company_id
       left join company_settings cs on cs.company_id=x.company_id
       where x.company_id=${companyId}::uuid and x.employee_id=${employeeId}::uuid and x.earning_period_id is null
+        -- Excludes anything Payroll's own calculation already claimed directly
+        -- (resolveCollectOrderEarnings), so this preview/lock can never double
+        -- up with money a Calculate/Recalculate already picked up raw.
+        and x.payroll_period_id is null
         and (x.closed_at at time zone coalesce(cs.timezone,'Asia/Dubai'))::date between ${input.dateFrom}::date and ${input.dateTo}::date
       order by x.closed_at,x.id ${lock?sql`for update of x`:sql``}`.execute(database);
     const collectionAmount=collectionSources.rows.reduce((sum,row)=>sum.plus(row.amount),new Decimal(0));
@@ -820,6 +824,20 @@ export class DriverEarningsService {
         ) returning id
       `.execute(transaction);
       const paymentId = created.rows[0]!.id;
+
+      // Create cash/bank movement for variable earnings payment
+      if (input.paymentMethod) {
+        await this.createPaymentMovement(transaction, {
+          companyId,
+          paymentNumber,
+          paymentDate: input.paymentDate,
+          fundingAccountId: account.accountId,
+          amount: requested.toFixed(2),
+          paymentMethod: input.paymentMethod,
+          actorId,
+        });
+      }
+
       let remaining = requested;
       let order = 1;
       const allocations: Array<{ amount: string; sourceId: string; sourceType: string }> = [];
@@ -1035,6 +1053,20 @@ export class DriverEarningsService {
         transaction,
       );
       const advanceId = created.rows[0]!.id;
+
+      // Create cash/bank movement for salary advance payment
+      if (input.paymentMethod) {
+        await this.createPaymentMovement(transaction, {
+          companyId,
+          paymentNumber: advanceNumber,
+          paymentDate: input.paymentDate,
+          fundingAccountId: account.accountId,
+          amount: amount.toFixed(2),
+          paymentMethod: input.paymentMethod,
+          actorId,
+        });
+      }
+
       const response = {
         advanceId,
         advanceNumber,
@@ -1390,6 +1422,62 @@ export class DriverEarningsService {
       HttpStatus.NOT_FOUND,
     );
   }
+  private async createPaymentMovement(
+    transaction: Kysely<DatabaseSchema>,
+    options: {
+      readonly companyId: string;
+      readonly paymentNumber: string;
+      readonly paymentDate: string;
+      readonly fundingAccountId: string;
+      readonly amount: string;
+      readonly paymentMethod: string;
+      readonly actorId: string;
+    },
+  ): Promise<void> {
+    const movementType = options.paymentMethod === "cash" ? "cash_withdrawal" : "bank_withdrawal";
+    const movementNumber = await this.history.nextReferenceNumber(
+      transaction,
+      options.companyId,
+      "cash_bank_movement",
+      "CBM",
+    );
+    const movementId = randomUUID();
+
+    await sql`
+      insert into cash_bank_movements (
+        id, company_id, movement_number, movement_type, movement_date, accounting_date,
+        source_cash_account_id, source_bank_account_id, destination_cash_account_id,
+        destination_bank_account_id, amount, fee_amount, status, confirmed_by_account_id,
+        confirmed_at, created_by_account_id, created_at
+      ) values (
+        ${movementId}::uuid, ${options.companyId}::uuid, ${movementNumber},
+        ${movementType}::cash_bank_movement_type, ${options.paymentDate}::date,
+        ${options.paymentDate}::date,
+        ${options.paymentMethod === "cash" ? options.fundingAccountId : null}::uuid,
+        ${options.paymentMethod === "bank" ? options.fundingAccountId : null}::uuid,
+        null::uuid, null::uuid, ${new Decimal(options.amount).toFixed(2)}::numeric,
+        '0'::numeric, 'confirmed', ${options.actorId}::uuid, now(),
+        ${options.actorId}::uuid, now()
+      )
+    `.execute(transaction);
+
+    await sql`
+      insert into accounting_events (
+        id, company_id, event_type, event_version, accounting_date, actor_id,
+        source_entity_type, source_entity_id, source_reference, correlation_id,
+        description, metadata, created_at
+      ) values (
+        gen_random_uuid(), ${options.companyId}::uuid,
+        ${movementType}::accounting_event_type, 1, ${options.paymentDate}::date,
+        ${options.actorId}::uuid, 'cash_bank_movement', ${movementId}::uuid,
+        ${movementNumber}, ${movementId}::uuid,
+        ${'Employee payment ' + options.paymentNumber + ' cash/bank movement'},
+        ${JSON.stringify({ source: 'employee_payment', paymentNumber: options.paymentNumber })},
+        now()
+      )
+    `.execute(transaction);
+  }
+
   private reasonRequired(): never {
     throw new ApplicationException(
       "payment_reversal_reason_required",

@@ -208,6 +208,12 @@ export class PayrollCalculationService {
            set payroll_period_id=null, payroll_entry_id=null, allocated_at=null
          where company_id=${companyId}::uuid and payroll_period_id=${periodId}::uuid
       `.execute(transaction);
+      // Collect-Order earnings, released on the same terms.
+      await sql`
+        update employee_collect_order_earnings
+           set payroll_period_id=null, payroll_entry_id=null, allocated_at=null
+         where company_id=${companyId}::uuid and payroll_period_id=${periodId}::uuid
+      `.execute(transaction);
       // Recalculation also releases the additive early-payment links. The
       // payment/allocation history itself remains immutable; only its draft
       // Payroll destination is recomputed.
@@ -472,6 +478,15 @@ export class PayrollCalculationService {
                 totalEarnings: string;
               }[],
             };
+        const collectOrderEarnings = includeDriverEarnings
+          ? await this.resolveCollectOrderEarnings(
+              transaction,
+              companyId,
+              employee.id,
+              period.start,
+              period.end,
+            )
+          : { amount: new Decimal(0), collectedOrders: 0, earningIds: [] as string[] };
         const variableAlreadyPaid = await this.resolveVariableAlreadyPaid(
           transaction,
           companyId,
@@ -506,7 +521,8 @@ export class PayrollCalculationService {
           .plus(orderEarnings.amount)
           .plus(earningPeriods.delivery)
           .plus(collectionEarnings.amount)
-          .plus(earningPeriods.collection);
+          .plus(earningPeriods.collection)
+          .plus(collectOrderEarnings.amount);
         const salaryAdvanceRecovery = await this.salaryAdvanceAvailable(
           transaction,
           companyId,
@@ -518,7 +534,9 @@ export class PayrollCalculationService {
           actorId,
           allowanceTotal,
           basic,
-          collectionEarnings: collectionEarnings.amount.plus(earningPeriods.collection),
+          collectionEarnings: collectionEarnings.amount
+            .plus(earningPeriods.collection)
+            .plus(collectOrderEarnings.amount),
           commission: commission.amount,
           companyId,
           deliveredOrderEarnings: orderEarnings.amount.plus(earningPeriods.delivery),
@@ -585,6 +603,22 @@ export class PayrollCalculationService {
                    allocated_at=now()
              where company_id=${companyId}::uuid
                and id = any(${collectionEarnings.factIds}::uuid[])
+               and payroll_period_id is null
+          `.execute(transaction);
+        }
+        /* Same paid-once mechanism for Collect-Order earnings. The
+           `earning_period_id is null` guard in resolveCollectOrderEarnings
+           already kept this mutually exclusive with the Driver Earnings
+           Period lock; `payroll_period_id is null` here is the last word for
+           this path specifically. */
+        if (collectOrderEarnings.earningIds.length > 0) {
+          await sql`
+            update employee_collect_order_earnings
+               set payroll_period_id=${periodId}::uuid,
+                   payroll_entry_id=${lineId}::uuid,
+                   allocated_at=now()
+             where company_id=${companyId}::uuid
+               and id = any(${collectOrderEarnings.earningIds}::uuid[])
                and payroll_period_id is null
           `.execute(transaction);
         }
@@ -1140,6 +1174,45 @@ export class PayrollCalculationService {
     `.execute(database);
     return {
       amount: result.rows.reduce((sum, row) => sum.plus(row.amount), new Decimal(0)),
+      earningIds: result.rows.map((row) => row.id),
+    };
+  }
+
+  /**
+   * Collection Earnings for the `collect_order` Order type, allocated to
+   * Payroll directly -- the same way `resolveDeliveredOrderEarnings` reaches
+   * `employee_order_earnings`, no "Confirm & Lock Earnings" step required.
+   *
+   * `earned_amount` is a snapshot taken at close time (the DB trigger
+   * `capture_employee_collect_order_earning`); nothing here recomputes the
+   * rate. `earning_period_id is null` is what keeps this mutually exclusive
+   * with the Driver Earnings Period lock path: once a row is locked into a
+   * Period there, it is never also picked up raw here, and vice versa --
+   * `driver-earnings.service.ts`'s own preview/confirm query excludes rows
+   * this claims (`payroll_period_id is null`) for the same reason.
+   */
+  private async resolveCollectOrderEarnings(
+    database: Kysely<DatabaseSchema>,
+    companyId: string,
+    employeeId: string,
+    periodStart: string,
+    periodEnd: string,
+  ): Promise<{ amount: Decimal; collectedOrders: number; earningIds: string[] }> {
+    const result = await sql<{ amount: string; id: string }>`
+      select x.id, x.earned_amount::text as amount
+        from employee_collect_order_earnings x
+        left join company_settings cs on cs.company_id = x.company_id
+       where x.company_id=${companyId}::uuid and x.employee_id=${employeeId}::uuid
+         and x.payroll_period_id is null
+         and x.earning_period_id is null
+         and (x.closed_at at time zone coalesce(cs.timezone, 'Asia/Dubai'))::date
+               between ${periodStart}::date and ${periodEnd}::date
+       order by x.closed_at, x.id
+         for update of x
+    `.execute(database);
+    return {
+      amount: result.rows.reduce((sum, row) => sum.plus(row.amount), new Decimal(0)),
+      collectedOrders: result.rows.length,
       earningIds: result.rows.map((row) => row.id),
     };
   }
