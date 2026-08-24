@@ -7,9 +7,9 @@
       "path": "apps/api",
       "renderService": "bluelinegpt-api-test",
       "status": "needs_deploy",
-      "localCommit": "419c14e",
+      "localCommit": "fc166c9",
       "localCommitDate": "2026-08-24",
-      "lastChangeDescription": "Fix Calculate Payroll crashing when an employee has an outstanding salary advance",
+      "lastChangeDescription": "Fix creating a new payroll period being blocked after reversing the old one",
       "lastChangeBy": "claude",
       "confirmedLiveCommit": "27e356a",
       "confirmedLiveAt": "2026-08-14"
