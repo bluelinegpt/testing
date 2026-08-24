@@ -20,9 +20,9 @@
       "path": "apps/web",
       "renderService": "bluelinegpt-web-test",
       "status": "needs_deploy",
-      "localCommit": "decc614",
+      "localCommit": "981ffef",
       "localCommitDate": "2026-08-24",
-      "lastChangeDescription": "Payroll period picker now has a Year filter and labels reversed periods",
+      "lastChangeDescription": "Payroll Year field now shows only the current year",
       "lastChangeBy": "claude",
       "confirmedLiveCommit": "27e356a",
       "confirmedLiveAt": "2026-08-14"
