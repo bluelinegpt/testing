@@ -985,7 +985,7 @@ export class PayrollCalculationService {
       select id,outstanding_amount::text as outstanding from employee_salary_advances
        where company_id=${companyId}::uuid and employee_id=${employeeId}::uuid
          and status in('confirmed','partially_recovered') and payment_date<=${periodEnd}::date
-       order by payment_date,created_at,id for update
+       order by payment_date,advance_number,id for update
     `.execute(database);
     let remaining = amount;
     let order = 1;
