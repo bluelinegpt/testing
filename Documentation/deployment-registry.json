@@ -20,9 +20,9 @@
       "path": "apps/web",
       "renderService": "bluelinegpt-web-test",
       "status": "needs_deploy",
-      "localCommit": "48c2e1c",
+      "localCommit": "a8b2dbf",
       "localCommitDate": "2026-08-24",
-      "lastChangeDescription": "Fix Reverse (Journals/Cash/Expense Payments) failing with a blank date",
+      "lastChangeDescription": "Fix reversing a Manual Journal always failing with a missing-date error",
       "lastChangeBy": "claude",
       "confirmedLiveCommit": "27e356a",
       "confirmedLiveAt": "2026-08-14"
