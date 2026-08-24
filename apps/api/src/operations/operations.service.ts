@@ -4338,6 +4338,7 @@ const exportOpenTraderReceivablePredicate = sql`
           customerId: string;
           customerMobileNumber: string;
           customerName: string;
+          customerProvenanceStatus: string;
           customerSecondMobileNumber: string | null;
           deliveryStatus: string;
           driverCost: string;
@@ -4374,6 +4375,7 @@ const exportOpenTraderReceivablePredicate = sql`
                  o.customer_id as "customerId",
                  o.customer_mobile_number as "customerMobileNumber",
                  o.customer_name as "customerName",
+                 o.customer_provenance_status as "customerProvenanceStatus",
                  o.customer_second_mobile_number as "customerSecondMobileNumber",
                  o.delivery_status as "deliveryStatus",
                  o.driver_cost::text as "driverCost",
@@ -4694,8 +4696,8 @@ const exportOpenTraderReceivablePredicate = sql`
       // selected in this edit.
       if (!customerChanged && input.areaId !== undefined && input.areaId !== current.areaId) {
         const selectedArea = (
-          await sql<{ id: string; name: string }>`
-            select id, name_en as name from areas
+          await sql<{ code: string; id: string; name: string; nameAr: string | null }>`
+            select id, code, name_en as name, name_ar as "nameAr" from areas
              where id=${input.areaId}::uuid and company_id=${companyId}::uuid and is_active
           `.execute(transaction)
         ).rows[0];
@@ -4708,11 +4710,52 @@ const exportOpenTraderReceivablePredicate = sql`
         }
         areaId = selectedArea.id;
         track("delivery_area", "user_action", current.areaNameSnapshot, selectedArea.name);
+        // A 'resolved' Order must keep pointing at one of its Customer's saved
+        // addresses in the Order's Area (orders_customer_scope_guard) — the
+        // same invariant create enforces. Moving the Order to a new Area
+        // therefore links an existing address of this Customer there, or
+        // records a new one, exactly as create does for an inline Customer.
+        // The Customer's other addresses and Orders are untouched.
+        let addressId = current.customerAddressId;
+        if (current.customerProvenanceStatus === "resolved") {
+          const existingAddress = (
+            await sql<{ id: string }>`
+              select id from customer_addresses
+               where customer_id=${current.customerId}::uuid
+                 and company_id=${companyId}::uuid
+                 and area_id=${selectedArea.id}::uuid and is_active
+               order by is_default desc, created_at desc
+               limit 1
+            `.execute(transaction)
+          ).rows[0];
+          if (existingAddress !== undefined) {
+            addressId = existingAddress.id;
+          } else {
+            const createdAddress = (
+              await sql<{ id: string }>`
+                insert into customer_addresses(
+                  company_id, customer_id, area_id, address, is_default,
+                  created_by_account_id
+                ) values (
+                  ${companyId}::uuid, ${current.customerId}::uuid,
+                  ${selectedArea.id}::uuid,
+                  ${(input.customerAddress ?? current.customerAddress).trim()},
+                  false, ${identity.identityId}::uuid
+                )
+                returning id
+              `.execute(transaction)
+            ).rows[0];
+            if (createdAddress === undefined) {
+              throw new Error("Customer address creation returned no identifier");
+            }
+            addressId = createdAddress.id;
+          }
+        }
         customerColumns = {
-          addressId: current.customerAddressId,
-          areaCode: "",
+          addressId,
+          areaCode: selectedArea.code,
           areaName: selectedArea.name,
-          areaNameAr: null,
+          areaNameAr: selectedArea.nameAr,
           code: current.customerCodeSnapshot ?? "",
           customerId: current.customerId,
           deliveryNotes: null,
