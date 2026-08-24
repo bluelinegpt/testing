@@ -97,16 +97,18 @@ export class PayrollCalculationService {
     periodId: string,
     idempotencyKey: string | undefined,
     correlationId: string,
+    includeDriverEarnings = true,
   ): Promise<PayrollCalculationResult> {
-    return this.run(periodId, false, idempotencyKey, correlationId);
+    return this.run(periodId, false, idempotencyKey, correlationId, includeDriverEarnings);
   }
 
   public recalculate(
     periodId: string,
     idempotencyKey: string | undefined,
     correlationId: string,
+    includeDriverEarnings = true,
   ): Promise<PayrollCalculationResult> {
-    return this.run(periodId, true, idempotencyKey, correlationId);
+    return this.run(periodId, true, idempotencyKey, correlationId, includeDriverEarnings);
   }
 
   private async run(
@@ -114,6 +116,13 @@ export class PayrollCalculationService {
     recalculation: boolean,
     idempotencyKey: string | undefined,
     correlationId: string,
+    // Defaults to true: every Employee's configured Delivery and Collection
+    // Earnings are included, exactly as before this option existed. Set to
+    // false for a run that should leave driver earnings untouched entirely --
+    // nothing is added to gross/net for them, and nothing is claimed, so a
+    // later Calculate/Recalculate that includes them picks up the exact same
+    // unclaimed Orders and collections, still correctly.
+    includeDriverEarnings = true,
   ): Promise<PayrollCalculationResult> {
     this.support.assertPermission("payroll.manage");
     const { actorId, companyId } = this.support.context();
@@ -127,7 +136,7 @@ export class PayrollCalculationService {
           companyId,
           idempotencyKey,
           operation,
-          payload: { periodId, recalculation },
+          payload: { includeDriverEarnings, periodId, recalculation },
         },
       );
       if (reservation.replayResponse !== undefined) return reservation.replayResponse;
@@ -421,27 +430,48 @@ export class PayrollCalculationService {
           exceptions.push(commission.exception);
           continue;
         }
-        const orderEarnings = await this.resolveDeliveredOrderEarnings(
-          transaction,
-          companyId,
-          employee.id,
-          period.start,
-          period.end,
-        );
-        const collectionEarnings = await this.resolveCollectionEarnings(
-          transaction,
-          companyId,
-          employee.id,
-          period.start,
-          period.end,
-        );
-        const earningPeriods = await this.resolveDriverEarningPeriods(
-          transaction,
-          companyId,
-          employee.id,
-          period.start,
-          period.end,
-        );
+        // Left as empty/zero placeholders when the caller opted out: no Order,
+        // collection, or Driver Earning Period row is even looked at, so none
+        // is locked ("for update") or claimed below -- every one stays exactly
+        // as unclaimed as it was, for a later run to pick up normally.
+        const orderEarnings = includeDriverEarnings
+          ? await this.resolveDeliveredOrderEarnings(
+              transaction,
+              companyId,
+              employee.id,
+              period.start,
+              period.end,
+            )
+          : { amount: new Decimal(0), earningIds: [] as string[] };
+        const collectionEarnings = includeDriverEarnings
+          ? await this.resolveCollectionEarnings(
+              transaction,
+              companyId,
+              employee.id,
+              period.start,
+              period.end,
+            )
+          : { amount: new Decimal(0), collectedOrders: 0, collections: 0, factIds: [] as string[] };
+        const earningPeriods = includeDriverEarnings
+          ? await this.resolveDriverEarningPeriods(
+              transaction,
+              companyId,
+              employee.id,
+              period.start,
+              period.end,
+            )
+          : {
+              collection: new Decimal(0),
+              delivery: new Decimal(0),
+              interimPaid: new Decimal(0),
+              items: [] as {
+                collection: string;
+                delivery: string;
+                id: string;
+                interimPaid: string;
+                totalEarnings: string;
+              }[],
+            };
         const variableAlreadyPaid = await this.resolveVariableAlreadyPaid(
           transaction,
           companyId,

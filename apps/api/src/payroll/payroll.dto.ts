@@ -34,6 +34,16 @@ export class PayrollReasonDto {
   public readonly reason!: string;
 }
 
+export class CalculatePayrollPeriodDto {
+  // Optional and defaults to true (both calculate and recalculate already
+  // included every configured Delivery/Collection Earning automatically
+  // before this existed) -- explicitly false is the only way to opt out for
+  // this one run.
+  @IsOptional()
+  @IsBoolean()
+  public readonly includeDriverEarnings?: boolean;
+}
+
 export class CreatePayrollAdjustmentDto {
   @IsOptional()
   @IsUUID()

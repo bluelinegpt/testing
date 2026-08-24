@@ -4145,6 +4145,9 @@ export const englishTranslations = {
         "Recalculation refreshes all unapproved payroll snapshots and reports any changes.",
       noProration:
         "Monthly salary and allowances are prorated by payable calendar days in the Payroll period.",
+      includeDriverEarnings: "Calculate Delivery and Collection Earnings for this run",
+      includeDriverEarningsHint:
+        "Delivery and Collection Earnings will be left unclaimed for every Employee this run - nothing is paid, and they remain available for a later Calculate or Recalculate that includes them.",
       considered: "Employees Considered",
       calculated: "Employees Calculated",
       skipped: "Employees Skipped",

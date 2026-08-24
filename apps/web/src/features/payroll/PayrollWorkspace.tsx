@@ -1926,6 +1926,12 @@ function CalculationDialog({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string>();
   const [result, setResult] = useState<CalculationResult>();
+  // Defaults to on: every configured Delivery/Collection Earning is included
+  // automatically, exactly as it always was. Switching it off leaves those
+  // Orders and collections completely unclaimed for this run -- nothing is
+  // paid, nothing is marked as allocated -- so a later Calculate/Recalculate
+  // that includes them picks up the exact same ones, still correctly.
+  const [includeDriverEarnings, setIncludeDriverEarnings] = useState(true);
   const submit = async () => {
     setSaving(true);
     setError(undefined);
@@ -1933,7 +1939,7 @@ function CalculationDialog({
       const operation = recalculate ? "recalculate" : "calculate";
       const calculated = await api.post<CalculationResult>(
         `operations/payroll/periods/${period.id}/${operation}`,
-        undefined,
+        { includeDriverEarnings },
         { "x-idempotency-key": idempotency.keyFor(`${operation}:${period.id}`) },
       );
       setResult(calculated);
@@ -1968,6 +1974,19 @@ function CalculationDialog({
             )}
           </div>
           <p>{t("payroll.calculation.noProration")}</p>
+          <label className="checkbox-row">
+            <input
+              checked={includeDriverEarnings}
+              onChange={(event) => setIncludeDriverEarnings(event.target.checked)}
+              type="checkbox"
+            />
+            <span>{t("payroll.calculation.includeDriverEarnings")}</span>
+          </label>
+          {includeDriverEarnings ? null : (
+            <small className="field-hint">
+              {t("payroll.calculation.includeDriverEarningsHint")}
+            </small>
+          )}
           <div className="modal-actions">
             <button className="button button-secondary" onClick={onClose} type="button">
               {t("common.cancel")}

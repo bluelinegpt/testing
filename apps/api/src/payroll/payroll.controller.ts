@@ -23,6 +23,7 @@ import { PayrollCalculationService } from "./payroll-calculation.service.js";
 // Runtime classes are required by Nest validation metadata.
 // eslint-disable-next-line @typescript-eslint/consistent-type-imports
 import {
+  CalculatePayrollPeriodDto,
   ConfirmPayrollPaymentDto,
   CreatePayrollAdjustmentDto,
   CreatePayrollPeriodDto,
@@ -457,16 +458,23 @@ export class PayrollController {
   @Post("periods/:periodId/calculate")
   public calculate(
     @Param("periodId", new ParseUUIDPipe()) periodId: string,
+    @Body() body: CalculatePayrollPeriodDto,
     @Headers("x-idempotency-key") idempotencyKey: string | undefined,
     @Req() request: Request,
   ) {
-    return this.calculationService.calculate(periodId, idempotencyKey, this.correlationId(request));
+    return this.calculationService.calculate(
+      periodId,
+      idempotencyKey,
+      this.correlationId(request),
+      body.includeDriverEarnings ?? true,
+    );
   }
 
   @RequireAnyPermission("payroll.manage", "users_roles.manage")
   @Post("periods/:periodId/recalculate")
   public recalculate(
     @Param("periodId", new ParseUUIDPipe()) periodId: string,
+    @Body() body: CalculatePayrollPeriodDto,
     @Headers("x-idempotency-key") idempotencyKey: string | undefined,
     @Req() request: Request,
   ) {
@@ -474,6 +482,7 @@ export class PayrollController {
       periodId,
       idempotencyKey,
       this.correlationId(request),
+      body.includeDriverEarnings ?? true,
     );
   }
 
