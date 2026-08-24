@@ -336,7 +336,7 @@ export const englishTranslations = {
         "Execution failed. No item succeeded; failed items can be retried after their blockers are fixed.",
       generic: "Execution finished.",
       counters:
-        "Succeeded: {{succeeded}} · Failed: {{failed}} · Skipped: {{skipped}} · Duplicate: {{duplicate}}",
+        "Succeeded: {{succeeded}} Â· Failed: {{failed}} Â· Skipped: {{skipped}} Â· Duplicate: {{duplicate}}",
     },
     metadata: {
       validationService: "Validation Service",
@@ -641,7 +641,7 @@ export const englishTranslations = {
       reopenWarning:
         "Reopening this period allows accounting activity in it again and may affect reporting already issued for later periods. The close and its history are preserved.",
       readinessLine:
-        "{{passed}} passed · {{warning}} warning · {{failed}} failed · {{notApplicable}} not applicable",
+        "{{passed}} passed Â· {{warning}} warning Â· {{failed}} failed Â· {{notApplicable}} not applicable",
       reasonHint: "At least 3 characters.",
       yearEnd: "Execute Year-End",
       yearEndHeading: "Year-End Execution",
@@ -883,7 +883,7 @@ export const englishTranslations = {
       accounting_closing_account_not_found: "The selected user was not found.",
       accounting_permission_denied: "You do not have permission for this action.",
     },
-    timeline: { created: "Workflow created", moved: "{{from}} → {{to}}" },
+    timeline: { created: "Workflow created", moved: "{{from}} â†’ {{to}}" },
   },
   balanceControls: {
     // Retained for the case where the enforcement gate is closed again; the
@@ -903,7 +903,7 @@ export const englishTranslations = {
     confirmAction: "Confirm and Schedule",
     readOnly: "You do not have permission to change these controls.",
     saved: "The balance policy was scheduled.",
-    summaryLine: "Cash: {{cash}} · Bank: {{bank}} · Overdraft: {{limit}}",
+    summaryLine: "Cash: {{cash}} Â· Bank: {{bank}} Â· Overdraft: {{limit}}",
     projected: "From {{date}}: Cash — {{cash}}. Bank — {{bank}}. Overdraft limit: {{limit}}.",
     confirmLoosen:
       "This makes the control LESS restrictive: the system will allow negative balances it currently blocks. Confirm to schedule it.",
@@ -941,6 +941,7 @@ export const englishTranslations = {
   common: {
     copy: "Copy",
     copied: "Copied",
+    operationFailed: "The action could not be completed.",
     originatingOrderIneligible: "This Order is no longer eligible for Driver collection.",
     open: "Open",
     none: "None",
@@ -1089,6 +1090,7 @@ export const englishTranslations = {
     driverCode: "Driver code",
     drivers: "Drivers",
     driverType: "Driver type",
+    driverMobileRequired: "Mobile number is required for Driver employees.",
     effectiveFrom: "Effective from",
     effectiveTo: "Effective to",
     driverVariableEarnings: "Driver Variable Earnings",
@@ -1220,7 +1222,7 @@ export const englishTranslations = {
     deploymentStatus: "Deployment status",
     driverCashReconciliation: "Driver cash reconciliation",
     drivers: "Drivers",
-    // Repurposed from the master-data "All drivers" list (§1): Driver master
+    // Repurposed from the master-data "All drivers" list (Â§1): Driver master
     // data now lives only under Configuration; this nav entry is the
     // operational Driver Collections workspace.
     driversList: "Driver Collections",
@@ -1263,8 +1265,10 @@ export const englishTranslations = {
       breakEven: "Break-even / Zero",
       businessDateUnavailable:
         "Could not resolve today's date. Quick date filters are unavailable; enter dates manually.",
+      bankTransfer: "Bank transfer",
       businessDayMode: "Business Day",
       calendarDayMode: "Calendar Day",
+      cash: "Cash",
       dateFrom: "Date From",
       dateTo: "Date To",
       deliveredOrders: "Delivered Orders",
@@ -1279,10 +1283,15 @@ export const englishTranslations = {
       noData: "No data for the selected period.",
       orderIdentifier: "Order",
       payee: "Payee",
+      paymentMethod: "Payment Method",
       positive: "Positive",
       previewPdf: "Preview",
       downloadExcel: "Download Excel",
       runReport: "Run Report",
+      settlement: "Settlement",
+      showTraderPayments: "Show Trader payments",
+      showMoneyToCollectFromTraders: "Show money to collect from Traders",
+      showMoneyToPayToTraders: "Show money to pay Traders",
       summary: "Summary",
       thisMonth: "This Month",
       thisWeek: "This Week",
@@ -1290,6 +1299,20 @@ export const englishTranslations = {
       today: "Today",
       totalDeliveredOrders: "Total Delivered Orders",
       totalExpenses: "Total Expenses",
+      totalTraderPayments: "Total Trader Payments",
+      traderPayments: "Trader Payments",
+      moneyToCollectFromTraders: "Money to Collect from Traders",
+      totalMoneyToCollectFromTraders: "Total Money to Collect from Traders",
+      moneyToPayToTraders: "Money to Pay to Traders",
+      totalMoneyToPayToTraders: "Total Money to Pay to Traders",
+      moneyToPayToTradersHelp:
+        "Shows delivered Orders where the Company still needs to pay the Trader.",
+      amountToPay: "Amount to Pay",
+      previouslyPaid: "Previously Paid",
+      moneyToCollectFromTradersHelp:
+        "Shows outstanding amounts the Company still needs to collect from Traders in this date range.",
+      traderPaymentsHelp:
+        "Shows confirmed payments made to Traders in this date range. These are displayed for cash visibility and are not counted as operating expenses.",
       viewOrders: "View Orders",
       yesterday: "Yesterday",
     },
@@ -1526,6 +1549,7 @@ export const englishTranslations = {
       awaiting_return_processing: "Return in progress",
       awaiting_driver_collection: "Collect from Driver",
       awaiting_trader_payment: "Pay Trader",
+      awaiting_trader_receivable_collection: "Collect from Trader",
       awaiting_trader_receipt_confirmation: "Confirm receipt",
       awaiting_accounting_posting: "Accounting pending",
       no_accounting_required: "No Accounting Required",
@@ -1540,6 +1564,7 @@ export const englishTranslations = {
       awaiting_return_processing: "the return to be processed.",
       awaiting_driver_collection: "the money to be collected from the Driver.",
       awaiting_trader_payment: "the Trader to be paid.",
+      awaiting_trader_receivable_collection: "the service fee to be collected from the Trader.",
       awaiting_trader_receipt_confirmation: "the Trader to confirm they received the money.",
       awaiting_accounting_posting: "the Accounting posting.",
       no_accounting_required: "nothing. This Order does not reach the ledger.",
@@ -1558,6 +1583,8 @@ export const englishTranslations = {
         "The Driver has delivered, but the cash has not been confirmed as received. The Trader cannot be paid until this is handled.",
       awaiting_trader_payment:
         "Driver collection is complete, but this Order is still unsettled for the Trader.",
+      awaiting_trader_receivable_collection:
+        "The customer is not paying this service fee. Collect it from Trader Receivables before closing the Order.",
       awaiting_trader_receipt_confirmation:
         "Payment has been recorded, but the Trader has not confirmed receiving it.",
       awaiting_accounting_posting:
@@ -1587,6 +1614,7 @@ export const englishTranslations = {
       close_order: "Close Order",
       open_order: "Open Order",
       collect_from_driver: "Collect Money from Driver",
+      collect_trader_receivable: "Collect from Trader",
       pay_trader: "Pay Trader",
       confirm_trader_received: "Confirm Trader Received Money",
       open_settlement: "Open Settlement",
@@ -1701,6 +1729,7 @@ export const englishTranslations = {
     driverResults: "Driver search results",
     driverCode: "Driver code",
     driverType: "Driver type",
+    driverMobileRequired: "Mobile number is required for Driver employees.",
     pendingOrders: "Pending Orders",
     pendingCollectionTotal: "Pending collection total",
     eligibleOrders: "Eligible Orders",
@@ -1804,7 +1833,7 @@ export const englishTranslations = {
       error: "Needs review",
       ready: "Ready",
     },
-    fastEntrySummary: "{{ready}} ready · {{created}} created · {{total}} rows",
+    fastEntrySummary: "{{ready}} ready Â· {{created}} created Â· {{total}} rows",
     fastEntryTitle: "Fast order entry",
     fastEntryTotalCod: "Total COD in sheet: {{amount}}",
     fastEntryUsePastedRows: "Use pasted rows",
@@ -1882,8 +1911,8 @@ export const englishTranslations = {
     areaAlreadyExists: "An Area with this code or name already exists.",
     areaCreateFailed: "The Area could not be created.",
     contactAdminForArea: "No matching Area? Ask an administrator to create it.",
-    customerPaysCodAndFee: "Customer pays COD and fee",
-    customerPaysCod: "Customer pays COD amount",
+    customerPaysCodAndFee: "Pay by Customer",
+    customerPaysCod: "Pay by Trader",
     financialHandling: "Financial handling",
     accountantCollect: "Collect from Driver",
     accountantPay: "Pay to Trader",
@@ -1960,6 +1989,13 @@ export const englishTranslations = {
     deliveryPhoto: "Delivery photo",
     deliveryStatus: "Delivery status",
     financialStatusColumn: "Collection / Settlement",
+    workflowStep: "Workflow step",
+    workflowStepFilters: {
+      complete: "Complete",
+      collect_from_driver: "Collect from Driver",
+      collect_from_trader: "Collect from Trader",
+      settle_trader: "Settle Trader",
+    },
     currentOrderStatus: "Current Order Status",
     driver: "Driver",
     discardOrderChanges: "Discard the unsaved order information?",
@@ -2170,10 +2206,10 @@ export const englishTranslations = {
     orderOverview: "Order overview",
     orderViews: "Order quick views",
     pageSize: "Rows",
-    paymentCondition: "Payment condition",
+    paymentCondition: "Who pays?",
     paymentConditions: {
-      customer_pays_cod_and_fee: "Customer pays COD and service fee",
-      customer_pays_cod_trader_pays_fee: "Customer pays COD amount",
+      customer_pays_cod_and_fee: "Pay by Customer — collect COD and/or delivery fee from customer",
+      customer_pays_cod_trader_pays_fee: "Pay by Trader — collect delivery fee from Trader",
       prepaid_customer_pays_fee: "Prepaid; customer pays service fee",
       prepaid_trader_pays_fee: "Prepaid; trader pays service fee",
     },
@@ -2322,7 +2358,7 @@ export const englishTranslations = {
     settled: "Settled",
     money_received_by_trader: "Money received by trader",
     money_sent_to_trader: "Money sent to trader",
-    customer_pays_cod_and_fee: "Customer pays COD and service fee",
+    customer_pays_cod_and_fee: "Pay by Customer — collect COD and/or delivery fee from customer",
     uploaded: "Uploaded",
     validated: "Validated",
     validating: "Validating",
@@ -2369,6 +2405,7 @@ export const englishTranslations = {
     subtitle:
       "Products shown on the Trader's public store page. A Product becomes publicly visible only when it is active and its Storefront is published.",
     empty: "No Product matches these filters.",
+    emptyStore: "No products yet. Create your first product to start building your catalogue.",
     editor: {
       createTitle: "New Product",
       editTitle: "Edit Product",
@@ -2376,11 +2413,12 @@ export const englishTranslations = {
       saveFirst: "Save the Product before adding media and options.",
       noCategory: "No category",
       inactiveCategory: "inactive",
-      mediaReferenceOnly:
-        "Media is added as a reference: an https address or an existing storage reference. No file is uploaded here.",
       imageCount: "{{count}} of {{max}} images",
       mediaType: "Media type",
-      mediaUrl: "Media reference or URL",
+      imageUploadHint: "Upload a PNG, JPEG or WebP image, up to 5 MB.",
+      chooseImageFile: "Choose an image file",
+      uploadImage: "Upload image",
+      mediaUrl: "Video URL",
       posterUrl: "Video poster reference",
       altText: "Alt text",
       image: "Image",
@@ -2393,6 +2431,7 @@ export const englishTranslations = {
       addOptionGroup: "Add option group",
       optionValue: "Value",
       addOptionValue: "Add value",
+      removeValue: "Remove",
       optionRequired: "Customers must choose one",
       optionRequiredHint:
         "A required group needs at least one active value before the Product can be activated.",
@@ -2404,6 +2443,8 @@ export const englishTranslations = {
       moveMediaDown: "Move {{name}} later",
       moveGroupUp: "Move {{name}} earlier",
       moveGroupDown: "Move {{name}} later",
+      moveValueUp: "Move {{name}} earlier",
+      moveValueDown: "Move {{name}} later",
       activateGroup: "Activate",
       deactivateGroup: "Deactivate",
       optionHint: {
@@ -2426,7 +2467,7 @@ export const englishTranslations = {
       subtitle: "Sections customers browse on the public store page.",
       create: "New category",
       edit: "Edit category",
-      empty: "No category yet.",
+      empty: "No Store Categories yet. Create your first category to organize your products.",
       nameEn: "Name (English)",
       nameAr: "Name (Arabic)",
       slug: "Category URL",
@@ -2462,17 +2503,29 @@ export const englishTranslations = {
       dimensions: "Dimensions",
       specifications: "Specifications",
     },
+    template: {
+      fashion: "Fields for fashion products, such as material and size.",
+      electronics: "Fields for electronics products, such as brand and warranty.",
+      jewelry: "Fields for jewelry products, such as material and weight.",
+      general: "Fields for general products.",
+    },
     fields: {
       availability: "Availability",
       barcode: "Barcode (optional)",
       brand: "Brand (optional)",
       category: "Category",
+      fullDescription: "Full description",
       images: "Images",
       lifecycleStatus: "Status",
+      maximumQuantity: "Maximum order quantity",
+      minimumQuantity: "Minimum order quantity",
       name: "Product name",
+      previousPrice: "Previous price (optional)",
       productCode: "Product code",
       sellingPrice: "Selling price",
+      shortDescription: "Short description",
       sku: "SKU (optional)",
+      slug: "Product URL",
     },
     marketplace: {
       category: "Marketplace category",
@@ -2519,6 +2572,10 @@ export const englishTranslations = {
       product_media_image_limit: "A Product may have at most eight images.",
       product_media_video_limit: "A Product may have only one video.",
       product_media_last_image: "An active Product must keep at least one image.",
+      product_image_type: "Use a PNG, JPEG or WebP image.",
+      product_image_size: "That image is too large. The limit is 5 MB.",
+      commerce_media_invalid: "That image could not be used. Try a different PNG, JPEG or WebP file.",
+      commerce_media_required: "Choose an image file first.",
       product_category_not_in_storefront: "That category does not belong to this Storefront.",
       product_category_has_active_products:
         "Reassign or deactivate the active Products in this category first.",
@@ -2529,6 +2586,14 @@ export const englishTranslations = {
       storefront_product_permission_denied: "You do not have permission for that action.",
       product_load_failed: "The catalogue could not be loaded.",
       product_action_failed: "The action could not be completed.",
+      product_option_group_limit: "This Product already has the maximum number of option groups.",
+      product_option_value_limit: "This option group already has the maximum number of values.",
+      product_option_group_exists: "That option group already exists on this Product.",
+      product_option_value_exists: "That value already exists in this option group.",
+      product_option_group_not_found: "That option group was not found.",
+      product_option_value_not_found: "That option value was not found.",
+      product_media_primary_conflict: "Another image is already primary.",
+      product_media_not_found: "That media item was not found.",
     },
   },
   storefront: {
@@ -2563,12 +2628,20 @@ export const englishTranslations = {
       defaultBadge: "Default",
       disableLastConfirm:
         "Are you sure you want to remove all Delivery Companies from Store ordering? Your Store will remain available.",
-      noneConnected: "No Delivery Company is currently connected to this Store.",
+      ineligibleHint: "This relationship is not active and cannot be enabled for Store orders.",
+      noneConnected:
+        "No delivery companies are connected yet. Your Store and Products remain available, but Store checkout cannot assign a delivery company.",
       noneEnabled: "No Delivery Company is currently enabled for Store ordering.",
       sectionHint:
-        "Delivery Companies already connected to this Store. Enable the ones that may receive Store orders and choose a default.",
+        "Choose which connected delivery companies can receive Store Orders. If more than one is enabled, choose a default.",
       sectionTitle: "Delivery Companies",
       setDefault: "Set as default",
+      status: {
+        active: "Active",
+        inactive: "Inactive",
+        suspended: "Suspended",
+        terminated: "Terminated",
+      },
     },
     title: "Trader Storefront",
     subtitle:
@@ -2596,11 +2669,30 @@ export const englishTranslations = {
     defaultSuspendReason: "Suspended pending review",
     sections: {
       appearance: "Appearance",
+      branding: "Branding",
       identity: "Store Identity",
       information: "Store information",
       publication: "Publication",
       preview: "Preview",
     },
+    branding: {
+      chooseFile: "Choose an image file",
+      coverHint: "PNG, JPEG or WebP, up to 5 MB. Shown as a banner across the top of the public Store page.",
+      currentCover: "Current cover",
+      currentLogo: "Current logo",
+      logoHint: "PNG, JPEG or WebP, up to 5 MB.",
+      noCover: "No cover set",
+      removeCover: "Remove cover",
+      removeLogo: "Remove logo",
+      replaceCover: "Replace cover",
+      replaceLogo: "Replace logo",
+      uploadCover: "Upload cover",
+      uploadLogo: "Upload logo",
+    },
+    logoUploaded: "Logo uploaded.",
+    logoRemoved: "Logo removed.",
+    coverUploaded: "Cover uploaded.",
+    coverRemoved: "Cover removed.",
     fields: {
       brandAccentColor: "Accent colour",
       brandPrimaryColor: "Primary colour",
@@ -2663,6 +2755,9 @@ export const englishTranslations = {
       "remove-suspension": "Suspension removed.",
     },
     errors: {
+      brandImageType: "Use a PNG, JPEG or WebP image.",
+      brandImageSize: "That image is too large. The limit is 5 MB.",
+      commerce_media_invalid: "That image could not be used. Try a different PNG, JPEG or WebP file.",
       storefront_hours_incomplete: "Every business-hours row needs both days and hours.",
       storefront_slug_required: "Enter a store URL.",
       storefront_slug_too_short: "The store URL is too short.",
@@ -2672,6 +2767,11 @@ export const englishTranslations = {
       storefront_slug_taken: "That store URL is no longer available.",
       storefront_already_exists: "This Trader already has a Storefront.",
       storefront_not_found: "The Storefront was not found.",
+      storefront_delivery_relationship_ineligible:
+        "This Delivery Company relationship is not active and cannot be enabled for Store Orders.",
+      storefront_delivery_relationship_not_found: "That Delivery Company relationship was not found.",
+      storefront_delivery_load_failed: "Delivery Companies could not be loaded.",
+      storefront_delivery_save_failed: "The change could not be saved.",
       storefront_permission_denied: "You do not have permission for that action.",
       storefront_version_conflict:
         "This Storefront changed since it was loaded. Reload and try again.",
@@ -3214,6 +3314,11 @@ export const englishTranslations = {
     actionFailed: "The action could not be completed",
     invalidMobile: "Use 9715XXXXXXXX format.",
     passwordChangeTitle: "Change Temporary Password",
+    /* T10: the same form also opens from a voluntary "Change Password" nav
+       item, where the account's current password is not necessarily
+       temporary at all -- calling it that there is just wrong, not merely
+       imprecise. See PasswordChangeView's `voluntary` prop. */
+    passwordChangeTitleVoluntary: "Change Password",
     currentPassword: "Current Password",
     newPassword: "New Password",
     confirmNewPassword: "Confirm New Password",
@@ -3221,6 +3326,7 @@ export const englishTranslations = {
     passwordPolicy: "Use at least 8 characters and do not reuse your current password.",
     changePassword: "Change Password",
     passwordChangeHelp: "Choose a new password before continuing to TawseelHub.",
+    passwordChangeHelpVoluntary: "Choose a new password for your account.",
   },
   traderReceivables: {
     // Page
@@ -3248,6 +3354,7 @@ export const englishTranslations = {
 
     // Shared columns
     columnReceivableNumber: "Receivable Number",
+    columnOrderSerialNumber: "Order Serial Number",
     columnTrader: "Trader",
     columnBusinessDate: "Business Date",
     columnSourceType: "Source Type",
@@ -3276,6 +3383,11 @@ export const englishTranslations = {
     filterBusinessDateTo: "Business Date To",
     filterOutstandingOnly: "Outstanding only",
     clearFilters: "Clear filters",
+    selectReceivable: "Select {{number}}",
+    selectAllVisibleReceivables: "Select all visible receivables",
+    visibleOutstandingTotal: "Visible Outstanding Total",
+    selectedReceivables: "Selected Receivables",
+    selectedTotalAmount: "Selected Total Amount",
 
     // Collection filters
     filterCollectionNumber: "Collection Number",
@@ -3448,7 +3560,7 @@ export const englishTranslations = {
     // Page
     pageTitle: "Trader Settlements",
     pageSubtitle: "Manage money sent to Traders — full and partial payments, receipts, reversals.",
-    newSettlement: "New Settlement",
+    newSettlement: "Traders New Settlement",
     // Summary cards
     summaryEligiblePayable: "Eligible Trader Payable",
     summaryUnsettled: "Unsettled Amount",
@@ -3946,6 +4058,7 @@ export const englishTranslations = {
       acknowledgement: "Employee Acknowledgement",
       acknowledgementValue: "Acknowledgement Name",
       activePeriod: "Active Payroll Period",
+      periodYear: "Year",
       adjustmentType: "Adjustment Type",
       amount: "Amount",
       approvedAt: "Approved At",
@@ -5931,3 +6044,7 @@ export const englishTranslations = {
     navigation: "Administration navigation",
   },
 } as const;
+
+
+
+

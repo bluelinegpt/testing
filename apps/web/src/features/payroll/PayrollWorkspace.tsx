@@ -350,9 +350,16 @@ export function PayrollWorkspace({
   const [tab, setTab] = useState<PayrollTab>("employees");
   const [periods, setPeriods] = useState<Page<PeriodRow>>();
   const [periodPage, setPeriodPage] = useState(1);
+  // A Company accumulates a new Period every month, plus a reversed-and-recreated
+  // row whenever one gets redone -- left unfiltered, the Active Period picker only
+  // grows longer with every year of use. Scoping to one Year by default (this Year,
+  // changeable) keeps it to a manageable, current list without hiding any history:
+  // the dedicated Periods table below still has its own independent date filters.
+  const currentYear = new Date().getFullYear();
+  const [periodYear, setPeriodYear] = useState(String(currentYear));
   const [periodFilters, setPeriodFilters] = useState({
-    dateFrom: "",
-    dateTo: "",
+    dateFrom: `${currentYear}-01-01`,
+    dateTo: `${currentYear}-12-31`,
     month: "",
     outstandingOnly: false,
     search: "",
@@ -472,6 +479,17 @@ export function PayrollWorkspace({
       }).format(Number(value)),
     [reportLanguage],
   );
+
+  // Recent years through the current one, newest first -- a small, fixed
+  // list rather than open text entry, since a payroll history realistically
+  // never needs a distant year and a free-typed one could send an invalid
+  // dateFrom/dateTo pair to the query.
+  const periodYearOptions = Array.from({ length: 6 }, (_, index) => String(currentYear - index));
+  const changePeriodYear = (year: string) => {
+    setPeriodYear(year);
+    setPeriodFilters((current) => ({ ...current, dateFrom: `${year}-01-01`, dateTo: `${year}-12-31` }));
+    setPeriodPage(1);
+  };
 
   const loadPeriods = useCallback(async () => {
     const query = queryString({
@@ -662,6 +680,16 @@ export function PayrollWorkspace({
           className="payroll-toolbar"
           aria-label={t("payroll.actions.title")}
         >
+          <label className="field payroll-year-field">
+            <span>{t("payroll.fields.periodYear")}</span>
+            <select onChange={(event) => changePeriodYear(event.target.value)} value={periodYear}>
+              {periodYearOptions.map((year) => (
+                <option key={year} value={year}>
+                  {year}
+                </option>
+              ))}
+            </select>
+          </label>
           <label className="field">
             <span>{t("payroll.fields.activePeriod")}</span>
             <select
@@ -672,6 +700,9 @@ export function PayrollWorkspace({
               {periods?.items.map((item) => (
                 <option key={item.id} value={item.id}>
                   {item.periodReference} - {item.payrollMonth}
+                  {item.status === "reversed"
+                    ? ` (${t("payroll.status.reversed")})`
+                    : ""}
                 </option>
               ))}
             </select>

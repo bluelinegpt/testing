@@ -6223,6 +6223,12 @@ tr.row-highlighted {
   margin: 0;
 }
 
+/* A 4-digit Year picker does not need the same width as the Period
+   selector; overriding the shared 360px basis keeps it compact. */
+.payroll-toolbar > .payroll-year-field {
+  flex: 0 0 90px;
+}
+
 .payroll-primary-actions {
   align-items: center;
   display: flex;
