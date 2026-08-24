@@ -546,10 +546,29 @@ const definitions: Readonly<Partial<Record<AccountingSection, ResourceDefinition
       { key: "isActive", label: "Active" },
     ],
     createFields: [
-      { name: "code", required: true },
+      {
+        name: "code",
+        hidden: true,
+        helperText: "Auto-generated on save in the format EXP-000001",
+      },
       { name: "nameEn", required: true },
       { name: "nameAr" },
-      { name: "defaultExpenseMappingKey", required: true },
+      {
+        name: "defaultExpenseMappingKey",
+        required: true,
+        type: "select",
+        options: [
+          { label: "General expense", value: "general_expense" },
+          { label: "Fuel / Petrol", value: "fuel_expense" },
+          { label: "Salik / Toll", value: "salik_expense" },
+          { label: "Parking", value: "parking_expense" },
+          { label: "Driver advance", value: "driver_advance" },
+          { label: "Office rent", value: "office_rent_expense" },
+          { label: "Maintenance", value: "maintenance_expense" },
+          { label: "Bank charges", value: "bank_charges" },
+          { label: "Other operating expense", value: "other_operating_expense" },
+        ],
+      },
       {
         name: "defaultVatTreatment",
         required: true,
@@ -2151,6 +2170,14 @@ function ManualJournalEditor({
       await client.post(`${listPath}/${recordId}/reverse`, {
         reason: reverseReason.trim(),
         reversalReason: reverseReason.trim(),
+        // Required by ReverseJournalDto to resolve the Fiscal Period the
+        // reversal posts into. This form had no date field at all, so the
+        // request always reached the server without one -- `@Matches` alone
+        // does not reject an absent value, so it silently became `undefined`
+        // rather than a validation error, and the date-to-Period lookup then
+        // matched zero rows. Defaults to today, same as every other reversal
+        // in this app: a reversal is posted the day it is performed.
+        reversalDate: new Date().toISOString().slice(0, 10),
       });
       onSaved(recordId);
     } catch (error) {
