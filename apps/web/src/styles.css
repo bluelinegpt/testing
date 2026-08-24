@@ -1761,6 +1761,45 @@ textarea:focus-visible {
   border-radius: 5px;
   font-weight: 700;
 }
+/* T2 acceptance (Trader Acceptance Prompt T2, §41) and T3 (§40, carrying the
+   same standard forward to Category management): the Store Settings page's
+   primary controls (Save, Publish/Temporarily-close/Reopen/Unpublish,
+   Suspend) and the Store Category manager's controls (Create/Save, Edit,
+   Activate/Deactivate, Move Up/Down) must meet a 44px touch target. Scoped to
+   these two pages only -- raising the shared `.button` min-height app-wide
+   was a larger blast radius than these Store-management acceptance gates
+   call for. */
+.storefront-page .button,
+.storefront-products-page .button {
+  min-height: 44px;
+}
+/* T7 acceptance (Trader Acceptance Prompt T7, §52): Delivery Companies
+   renders both embedded in Store Settings (`.storefront-page`, already
+   44px via the rule above) and on its own dedicated nav page wrapped in
+   `.data-surface`, which the rule above does not reach. Styled directly on
+   the list itself so the enable/disable control and its action buttons are
+   44px in EITHER context, rather than depending on which page happens to
+   host it. */
+.storefront-delivery-list li {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  min-height: 44px;
+}
+.storefront-delivery-list label {
+  align-items: center;
+  display: flex;
+  gap: 0.5rem;
+  min-height: 44px;
+}
+.storefront-delivery-list input[type="checkbox"] {
+  height: 1.25rem;
+  width: 1.25rem;
+}
+.storefront-delivery-list .button {
+  min-height: 44px;
+}
 .button-wide {
   width: 100%;
   min-height: 46px;
@@ -5906,6 +5945,13 @@ tr.row-highlighted {
   gap: 10px;
   min-width: 240px;
 }
+/* T2: a Store cover is a banner, not a square mark -- widen the shared logo
+   preview tile rather than fork a whole new component for one dimension. */
+.storefront-cover-image {
+  width: 220px;
+  height: 96px;
+  object-fit: cover;
+}
 .company-logo-actions {
   display: flex;
   gap: 10px;
@@ -6160,6 +6206,12 @@ tr.row-highlighted {
   border: 1px solid var(--border, #d5dced);
   border-radius: 12px;
   display: flex;
+  /* The period selector plus five action buttons no longer fit on one line
+     at ordinary desktop widths -- this let the row (and the whole page)
+     overflow sideways below 980px's forced column layout instead of simply
+     dropping the actions to a second line, which .payroll-primary-actions
+     was already prepared to do on its own. */
+  flex-wrap: wrap;
   gap: 16px;
   justify-content: space-between;
   padding: 16px;
@@ -6723,6 +6775,14 @@ tr.row-highlighted {
   border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
   border-radius: 999px;
   font-weight: 700;
+}
+
+/* T7: a Delivery Company relationship's status (inactive/suspended/
+   terminated) needs to read as distinct from the normal "Active" badge
+   without a whole new badge system -- muted color is enough to separate
+   "this cannot be enabled" from every other pill on the page. */
+.badge-muted {
+  color: var(--muted, #64748b);
 }
 
 .accounting-report-card,
@@ -10297,4 +10357,79 @@ tr.row-highlighted {
 }
 .deployment-status-live {
   color: var(--success-color, #15803d);
+}
+
+/* Compact layout for Collect Money from Trader modal. */
+.trader-collection-form .workspace-step {
+  margin-bottom: 12px;
+  padding: 12px;
+}
+
+.trader-collection-form .workspace-step + .workspace-step {
+  margin-top: 10px;
+}
+
+.trader-collection-form .workspace-step h3 {
+  margin-bottom: 8px;
+}
+
+.trader-collection-form .trader-collection-trader-step {
+  padding-block: 10px;
+}
+
+.trader-collection-selected-trader {
+  min-height: 0;
+  padding: 6px 0;
+}
+
+.trader-collection-selected-trader span {
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.trader-collection-form .filter-drawer {
+  margin-bottom: 10px;
+  padding: 9px 12px;
+}
+
+.trader-collection-receivables-step .table-scroll-x,
+.trader-collection-amount-step .table-scroll-x {
+  max-height: 230px;
+  overflow: auto;
+}
+
+.trader-collection-form .reconciliation-summary {
+  margin: 8px 0 0;
+}
+
+.trader-collection-form .reconciliation-summary > div {
+  padding: 8px 10px;
+}
+
+.trader-collection-amount-step > .field {
+  max-width: 380px;
+}
+
+.trader-collection-payment-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
+  gap: 10px 14px;
+}
+
+.trader-collection-payment-grid .field {
+  margin: 0;
+}
+
+.trader-collection-notes-field {
+  grid-column: 1 / -1;
+}
+
+.trader-collection-notes-field textarea {
+  min-height: 64px;
+}
+
+@media (max-width: 760px) {
+  .trader-collection-payment-grid {
+    grid-template-columns: 1fr;
+  }
 }
