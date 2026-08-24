@@ -47,6 +47,7 @@ export type OrderWorkflowState =
   | "awaiting_return_processing"
   | "awaiting_driver_collection"
   | "awaiting_trader_payment"
+  | "awaiting_trader_receivable_collection"
   | "awaiting_trader_receipt_confirmation"
   | "awaiting_accounting_posting"
   | "no_accounting_required"
@@ -75,6 +76,7 @@ export type OrderNextActionCode =
   | "open_order"
   | "collect_from_driver"
   | "pay_trader"
+  | "collect_trader_receivable"
   | "confirm_trader_received"
   | "open_settlement"
   | "open_accounting"
@@ -137,6 +139,9 @@ export interface OrderWorkflowInput {
   readonly returnStatus: string | null;
   readonly traderId: string;
   readonly traderNetPayable?: string | null;
+  readonly traderReceivableId?: string | null;
+  readonly traderReceivableOutstanding?: string | null;
+  readonly traderReceivableStatus?: string | null;
   readonly traderSettlementStatus: string;
 }
 
@@ -169,6 +174,9 @@ export function deriveOrderWorkflowGuidance(input: OrderWorkflowInput): OrderWor
     orderNumber,
     traderId,
     traderNetPayable = null,
+    traderReceivableId = null,
+    traderReceivableOutstanding = null,
+    traderReceivableStatus = null,
     traderSettlementStatus: storedTraderSettlementStatus,
   } = input;
   const explicitFreeNoValue =
@@ -183,6 +191,12 @@ export function deriveOrderWorkflowGuidance(input: OrderWorkflowInput): OrderWor
     : storedTraderSettlementStatus;
   const signedTraderPayable = Number(traderNetPayable ?? Number.NaN);
   const noTraderPaymentDue = Number.isFinite(signedTraderPayable) && signedTraderPayable <= 0;
+  const traderReceivableOutstandingAmount = Number(traderReceivableOutstanding ?? Number.NaN);
+  const hasOpenTraderReceivable =
+    traderReceivableId !== null &&
+    !["cancelled", "collected", "reversed"].includes(traderReceivableStatus ?? "") &&
+    Number.isFinite(traderReceivableOutstandingAmount) &&
+    traderReceivableOutstandingAmount > 0;
 
   const orderRoute = `/orders/${encodeURIComponent(orderNumber)}`;
   /* Status and Assign actions target the Orders LIST, because the row dialogs
@@ -462,6 +476,21 @@ export function deriveOrderWorkflowGuidance(input: OrderWorkflowInput): OrderWor
     };
   }
 
+  if (hasOpenTraderReceivable) {
+    return {
+      completionBlockerCode: null,
+      isFinanciallyComplete: false,
+      nextActionCode: "collect_trader_receivable",
+      nextActionParams: {
+        ...orderParams,
+        ...traderParams,
+        receivableId: traderReceivableId,
+      },
+      nextActionRoute: `/trader-receivables/${encodeURIComponent(traderReceivableId)}`,
+      waitingFor: "awaiting_trader_receivable_collection",
+      workflowState: "awaiting_trader_receivable_collection",
+    };
+  }
   // ------------------------------------------------------------- accounting
   //
   // Operational finance is done. `accountingRequired` is the SAME expression
@@ -478,10 +507,14 @@ export function deriveOrderWorkflowGuidance(input: OrderWorkflowInput): OrderWor
     accountingState !== "accounting_event_missing" &&
     accountingState !== "accounting_not_required";
 
-  if (!accountingRequired && !ledgerHasEvent) {
-    return deliveryStatus === "delivered" && isFreeOrder
-      ? closeOrder("no_accounting_required")
-      : complete(deliveryStatus === "closed" ? "complete" : "no_accounting_required");
+  if (!accountingRequired && (!ledgerHasEvent || accountingState === "accounting_event_failed")) {
+    // Every financial leg is resolved (or this Order never touches one), but
+    // `delivered` is not the terminal delivery state -- `closed` is. A
+    // delivered Order sitting here still needs a person to move it there;
+    // reporting it as "complete" with nothing to do would leave it stuck.
+    // This applied only to Free Orders until it was noticed that a normal,
+    // fully-settled Order gets exactly the same silent dead end.
+    return deliveryStatus === "delivered" ? closeOrder("complete") : complete("complete");
   }
 
   if (settlementComplete.has(traderSettlementStatus) || noTraderPaymentDue) {
@@ -535,9 +568,9 @@ export function deriveOrderWorkflowGuidance(input: OrderWorkflowInput): OrderWor
       case "journal_posted":
         // Event posted AND Journal posted: the ledger is finished, so with
         // collection and settlement already complete the Order is complete.
-        return deliveryStatus === "delivered" && isFreeOrder
-          ? closeOrder("complete")
-          : complete("complete");
+        // `delivered` still needs a person to close it; only `closed` is
+        // truly done, regardless of Free Order status.
+        return deliveryStatus === "delivered" ? closeOrder("complete") : complete("complete");
       case "journal_pending":
         return {
           completionBlockerCode: null,
@@ -565,9 +598,9 @@ export function deriveOrderWorkflowGuidance(input: OrderWorkflowInput): OrderWor
     }
   }
 
-  return deliveryStatus === "delivered" && isFreeOrder
-    ? closeOrder("complete")
-    : complete("complete");
+  // Fallback: every money leg this function checks is already resolved.
+  // `delivered` still needs an explicit close; `closed` needs nothing further.
+  return deliveryStatus === "delivered" ? closeOrder("complete") : complete("complete");
 
   function blocked(
     code: OrderCompletionBlockerCode,
@@ -628,6 +661,7 @@ export const orderNextActionPermissions: Readonly<Record<OrderNextActionCode, re
     // enforces its own permissions, and hiding a read-only link would leave the
     // user with an explanation and no way to look at the record.
     assign_driver: ["orders.assign_driver"],
+    collect_trader_receivable: ["trader_receivables.create"],
     collect_from_driver: ["reconciliations.create"],
     confirm_trader_received: ["settlements.create"],
     close_order: ["orders.update_delivery_status"],

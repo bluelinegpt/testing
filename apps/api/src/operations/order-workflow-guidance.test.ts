@@ -167,6 +167,55 @@ describe("the money chain after delivery", () => {
   });
 });
 
+
+  it("waits to collect a Trader receivable before claiming no accounting is required", () => {
+    const guidance = derive({
+      accountingRequired: false,
+      driverReconciliationStatus: "not_applicable",
+      traderReceivableId: "receivable-1",
+      traderReceivableOutstanding: "25.00",
+      traderReceivableStatus: "outstanding",
+      traderSettlementStatus: "not_eligible",
+    });
+    expect(guidance.workflowState).toBe("awaiting_trader_receivable_collection");
+    expect(guidance.nextActionCode).toBe("collect_trader_receivable");
+    expect(guidance.nextActionRoute).toBe("/trader-receivables/receivable-1");
+    expect(guidance.isFinanciallyComplete).toBe(false);
+  });
+
+  it("allows a collected Trader receivable to fall through to close-Order completion", () => {
+    const guidance = derive({
+      accountingRequired: false,
+      driverReconciliationStatus: "not_applicable",
+      traderReceivableId: "receivable-1",
+      traderReceivableOutstanding: "0.00",
+      traderReceivableStatus: "collected",
+      traderSettlementStatus: "not_eligible",
+    });
+    expect(guidance.workflowState).toBe("complete");
+    // Every money leg is resolved, but `delivered` is not `closed` yet -- an
+    // explicit close is still due, Free Order or not.
+    expect(guidance.nextActionCode).toBe("close_order");
+    expect(guidance.isFinanciallyComplete).toBe(true);
+  });
+
+  it("ignores a stale failed delivery accounting event after Trader receivable collection makes the Order no-impact", () => {
+    const guidance = derive({
+      accountingRequired: false,
+      accountingEventId: "event-1",
+      accountingState: "accounting_event_failed",
+      driverReconciliationStatus: "not_applicable",
+      traderReceivableId: "receivable-1",
+      traderReceivableOutstanding: "0.00",
+      traderReceivableStatus: "collected",
+      traderSettlementStatus: "not_eligible",
+    });
+    expect(guidance.workflowState).toBe("complete");
+    expect(guidance.nextActionCode).toBe("close_order");
+    expect(guidance.completionBlockerCode).toBeNull();
+    expect(guidance.isFinanciallyComplete).toBe(true);
+  });
+
 describe("accounting", () => {
   it("asks for the Accounting posting once operational finance is done", () => {
     const guidance = derive({
@@ -185,9 +234,11 @@ describe("accounting", () => {
       driverReconciliationStatus: "reconciled",
       traderSettlementStatus: "money_received_by_trader",
     });
-    expect(guidance.workflowState).toBe("no_accounting_required");
-    expect(guidance.nextActionCode).toBe("none");
-    expect(guidance.nextActionRoute).toBeNull();
+    expect(guidance.workflowState).toBe("complete");
+    // No accounting Event is ever suggested -- but the Order is still sitting
+    // at `delivered`, so it still needs an explicit Close.
+    expect(guidance.nextActionCode).toBe("close_order");
+    expect(guidance.nextActionRoute).toBe("/orders");
     expect(guidance.isFinanciallyComplete).toBe(true);
   });
 });
@@ -263,6 +314,7 @@ describe("route and parameter safety", () => {
       "/accounting/events",
       "/orders",
       "/orders/ORD-0001",
+      "/trader-receivables/receivable-1",
     ]);
     const cases: Partial<OrderWorkflowInput>[] = [
       { deliveryStatus: "new", assignedDriverId: null },
@@ -274,6 +326,14 @@ describe("route and parameter safety", () => {
       { traderSettlementStatus: "reversed", driverReconciliationStatus: "reconciled" },
       { driverReconciliationStatus: "reconciled", traderSettlementStatus: "money_sent_to_trader" },
       {
+        accountingRequired: false,
+        driverReconciliationStatus: "not_applicable",
+        traderReceivableId: "receivable-1",
+        traderReceivableOutstanding: "25.00",
+        traderReceivableStatus: "outstanding",
+        traderSettlementStatus: "not_eligible",
+      },
+      {
         driverReconciliationStatus: "reconciled",
         traderSettlementStatus: "money_received_by_trader",
       },
@@ -282,13 +342,15 @@ describe("route and parameter safety", () => {
       const route = derive(overrides).nextActionRoute;
       if (route !== null) expect(known).toContain(route);
     }
+    // Every money leg resolved and no ledger impact -- but `delivered` still
+    // routes to an explicit Close, a known route, not to nothing.
     expect(
       derive({
         accountingRequired: false,
         driverReconciliationStatus: "reconciled",
         traderSettlementStatus: "money_received_by_trader",
       }).nextActionRoute,
-    ).toBeNull();
+    ).toBe("/orders");
   });
 
   it("declares a permission for every action code it can emit", () => {
@@ -324,7 +386,8 @@ describe("accounting state from the ledger", () => {
     const guidance = derive({ ...settled, accountingState: "journal_posted" });
     expect(guidance.workflowState).toBe("complete");
     expect(guidance.isFinanciallyComplete).toBe(true);
-    expect(guidance.nextActionCode).toBe("none");
+    // The ledger is finished, but `delivered` still needs an explicit Close.
+    expect(guidance.nextActionCode).toBe("close_order");
   });
 
   it("asks for the Journal when the Event posted but the Journal has not", () => {
@@ -415,8 +478,11 @@ describe("accounting state from the ledger", () => {
       // Even if a stale ledger state were present, No Accounting Required wins.
       accountingState: "accounting_event_missing",
     });
-    expect(guidance.workflowState).toBe("no_accounting_required");
-    expect(guidance.nextActionRoute).toBeNull();
+    expect(guidance.workflowState).toBe("complete");
+    // No Accounting action is offered -- but Close Order still is, since the
+    // Order has not reached `closed` yet.
+    expect(guidance.nextActionCode).toBe("close_order");
+    expect(guidance.nextActionRoute).toBe("/orders");
     expect(guidance.isFinanciallyComplete).toBe(true);
   });
 
@@ -577,7 +643,7 @@ describe("smart next action", () => {
       isFreeOrder: true,
       traderSettlementStatus: "not_eligible",
     });
-    expect(g.workflowState).toBe("no_accounting_required");
+    expect(g.workflowState).toBe("complete");
     expect(g.isFinanciallyComplete).toBe(true);
     expect(g.nextActionCode).toBe("close_order");
     expect(g.nextActionRoute).toBe("/orders");
@@ -616,7 +682,7 @@ describe("smart next action", () => {
     });
     expect(g.nextActionCode).toBe("close_order");
     expect(g.nextActionCode).not.toBe("pay_trader");
-    expect(g.workflowState).toBe("no_accounting_required");
+    expect(g.workflowState).toBe("complete");
   });
 
   it("asks for receipt confirmation once payment has gone out", () => {
@@ -689,6 +755,14 @@ describe("smart next action", () => {
       { driverReconciliationStatus: "pending" },
       { driverReconciliationStatus: "reconciled" },
       { driverReconciliationStatus: "reconciled", traderSettlementStatus: "money_sent_to_trader" },
+      {
+        accountingRequired: false,
+        driverReconciliationStatus: "not_applicable",
+        traderReceivableId: "receivable-1",
+        traderReceivableOutstanding: "25.00",
+        traderReceivableStatus: "outstanding",
+        traderSettlementStatus: "not_eligible",
+      },
     ];
     for (const overrides of cases) {
       const g = derive(overrides);
