@@ -7,9 +7,9 @@
       "path": "apps/api",
       "renderService": "bluelinegpt-api-test",
       "status": "needs_deploy",
-      "localCommit": "fa9b162",
+      "localCommit": "a833b2c",
       "localCommitDate": "2026-08-24",
-      "lastChangeDescription": "Changing an order's area now updates the customer address link correctly",
+      "lastChangeDescription": "A fully-resolved delivered order now offers Close Order, not just Free Orders",
       "lastChangeBy": "claude",
       "confirmedLiveCommit": "27e356a",
       "confirmedLiveAt": "2026-08-14"
@@ -20,9 +20,9 @@
       "path": "apps/web",
       "renderService": "bluelinegpt-web-test",
       "status": "needs_deploy",
-      "localCommit": "c3f7b50",
+      "localCommit": "a833b2c",
       "localCommitDate": "2026-08-24",
-      "lastChangeDescription": "Orders are now edited through the full Create Order form",
+      "lastChangeDescription": "The order workflow status badge is now clickable to jump straight to its action",
       "lastChangeBy": "claude",
       "confirmedLiveCommit": "27e356a",
       "confirmedLiveAt": "2026-08-14"
