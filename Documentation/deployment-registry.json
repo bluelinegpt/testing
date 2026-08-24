@@ -20,9 +20,9 @@
       "path": "apps/web",
       "renderService": "bluelinegpt-web-test",
       "status": "needs_deploy",
-      "localCommit": "43036cc",
+      "localCommit": "04b6980",
       "localCommitDate": "2026-08-24",
-      "lastChangeDescription": "Every date field now defaults to dd/mm/yyyy across the whole app",
+      "lastChangeDescription": "Payroll Line detail now shows Collection Earnings, already being calculated",
       "lastChangeBy": "claude",
       "confirmedLiveCommit": "27e356a",
       "confirmedLiveAt": "2026-08-14"
