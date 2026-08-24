@@ -20,9 +20,9 @@
       "path": "apps/web",
       "renderService": "bluelinegpt-web-test",
       "status": "needs_deploy",
-      "localCommit": "6b72086",
+      "localCommit": "decc614",
       "localCommitDate": "2026-08-24",
-      "lastChangeDescription": "Fix the Payroll period toolbar overflowing sideways instead of wrapping",
+      "lastChangeDescription": "Payroll period picker now has a Year filter and labels reversed periods",
       "lastChangeBy": "claude",
       "confirmedLiveCommit": "27e356a",
       "confirmedLiveAt": "2026-08-14"
