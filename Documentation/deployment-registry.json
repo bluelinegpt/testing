@@ -7,9 +7,9 @@
       "path": "apps/api",
       "renderService": "bluelinegpt-api-test",
       "status": "needs_deploy",
-      "localCommit": "3cf3762",
+      "localCommit": "c22ac49",
       "localCommitDate": "2026-08-24",
-      "lastChangeDescription": "Calculate Payroll now has an option to skip Delivery/Collection Earnings",
+      "lastChangeDescription": "Collect-Order earnings now flow into Payroll automatically, no manual lock needed",
       "lastChangeBy": "claude",
       "confirmedLiveCommit": "27e356a",
       "confirmedLiveAt": "2026-08-14"
