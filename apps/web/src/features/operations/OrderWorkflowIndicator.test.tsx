@@ -84,8 +84,46 @@ describe("OrderWorkflowIndicator", () => {
     expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 
-  it("pins the panel open when the hovered status chip is clicked", () => {
-    setup();
+  it("clicking the status chip navigates directly to the next action, same as its inner button", () => {
+    const { navigations } = setup();
+    const trigger = screen.getByRole("button", { name: /Collect from Driver/i });
+    const wrapper = trigger.parentElement as HTMLElement;
+
+    fireEvent.mouseEnter(wrapper);
+    fireEvent.pointerDown(trigger);
+    fireEvent.mouseLeave(wrapper);
+
+    // The chip itself is the shortcut: one click reaches the same destination
+    // the panel's own action button would, without pinning the panel open.
+    expect(navigations).toStrictEqual([
+      "/drivers?driverId=driver-1&orderNumber=ORD-0001&returnTo=%2Forders",
+    ]);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("still pins the panel open on click when there is no next action to jump to", () => {
+    const { navigations } = setup({
+      isFinanciallyComplete: true,
+      nextActionCode: "none",
+      nextActionRoute: null,
+      waitingFor: "complete",
+      workflowState: "complete",
+    });
+    const trigger = screen.getByRole("button", { name: /Complete/i });
+    const wrapper = trigger.parentElement as HTMLElement;
+
+    fireEvent.mouseEnter(wrapper);
+    fireEvent.pointerDown(trigger);
+    fireEvent.mouseLeave(wrapper);
+
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+    expect(navigations).toStrictEqual([]);
+  });
+
+  it("still pins the panel open on click without permission to act", () => {
+    const { navigations } = setup({}, ["orders.view"]);
     const trigger = screen.getByRole("button", { name: /Collect from Driver/i });
     const wrapper = trigger.parentElement as HTMLElement;
 
@@ -95,6 +133,7 @@ describe("OrderWorkflowIndicator", () => {
 
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     expect(trigger).toHaveAttribute("aria-expanded", "true");
+    expect(navigations).toStrictEqual([]);
   });
 
   it("keeps the portalled panel open while focus moves to one of its actions", () => {
@@ -440,6 +479,30 @@ describe("smart primary action", () => {
     expect(navigations[0]).toContain("returnTo=%2Forders");
   });
 
+  it("routes Trader-paid service fees to Trader Receivables", () => {
+    const { navigations } = setup(
+      {
+        nextActionCode: "collect_trader_receivable",
+        nextActionParams: {
+          orderNumber: "ORD-0001",
+          receivableId: "receivable-1",
+          returnTo: "/orders",
+        },
+        nextActionRoute: "/trader-receivables/receivable-1",
+        waitingFor: "awaiting_trader_receivable_collection",
+        workflowState: "awaiting_trader_receivable_collection",
+      },
+      ["trader_receivables.create"],
+    );
+    fireEvent.focus(screen.getByRole("button", { name: /Collect from Trader/i }));
+    const action = screen
+      .getByRole("dialog")
+      .querySelector(".order-workflow-action") as HTMLElement;
+    fireEvent.click(action);
+    expect(navigations).toStrictEqual([
+      "/trader-receivables?orderNumber=ORD-0001&returnTo=%2Forders&collectReceivableId=receivable-1",
+    ]);
+  });
   it("shows no primary action on a complete Order, but still offers View Order", () => {
     setup({
       isFinanciallyComplete: true,

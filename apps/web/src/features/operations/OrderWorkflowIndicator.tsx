@@ -50,6 +50,7 @@ const stateTone: Readonly<Record<string, "blue" | "amber" | "green" | "red" | "g
   awaiting_driver_collection: "amber",
   awaiting_return_processing: "amber",
   awaiting_trader_payment: "amber",
+  awaiting_trader_receivable_collection: "amber",
   awaiting_trader_receipt_confirmation: "blue",
   blocked: "red",
   complete: "green",
@@ -72,6 +73,7 @@ const actionPermissions: Readonly<Record<string, readonly string[]>> = {
   assign_driver: ["orders.assign_driver"],
   close_order: ["orders.update_delivery_status"],
   collect_from_driver: ["reconciliations.create"],
+  collect_trader_receivable: ["trader_receivables.create"],
   confirm_trader_received: ["settlements.create"],
   none: [],
   open_accounting: [],
@@ -281,6 +283,18 @@ export function OrderWorkflowIndicator({
   const actionHref = () => {
     if (guidance.nextActionRoute === null) return null;
     const params = new URLSearchParams(guidance.nextActionParams);
+    if (guidance.nextActionCode === "collect_trader_receivable") {
+      const receivableId = params.get("receivableId");
+      if (receivableId !== null && receivableId.trim() !== "") {
+        // The Order action is an instruction to collect money, not to inspect
+        // the Receivable. Route straight into the collection workflow and let
+        // the destination preselect this exact Receivable.
+        params.set("collectReceivableId", receivableId);
+        params.delete("receivableId");
+        const query = params.toString();
+        return query === "" ? "/trader-receivables" : `/trader-receivables?${query}`;
+      }
+    }
     if (
       orderNumber !== undefined &&
       ["/drivers", "/trader-settlements"].includes(guidance.nextActionRoute)
@@ -316,12 +330,27 @@ export function OrderWorkflowIndicator({
       <button
         aria-controls={panelId}
         aria-expanded={open}
+        aria-label={
+          canAct ? `${label} — ${t(`orderWorkflow.action.${guidance.nextActionCode}`)}` : label
+        }
         className={`order-workflow-chip order-workflow-${tone}`}
         onClick={(event) => {
           // Pointer input is handled synchronously below. Keep click for
           // keyboard activation (Enter/Space), where `detail` is zero.
           if (event.detail !== 0) return;
           cancelClose();
+          // A resolved, permitted next action: the chip IS the shortcut for it,
+          // same destination as the button inside the panel below. Hovering or
+          // tabbing to the chip still opens the panel first (via onMouseEnter /
+          // onFocus) so the explanation is visible before this fires.
+          if (canAct) {
+            const href = actionHref();
+            if (href !== null) onNavigate(href);
+            pinnedRef.current = false;
+            setPinned(false);
+            setOpen(false);
+            return;
+          }
           if (pinnedRef.current) {
             pinnedRef.current = false;
             setPinned(false);
@@ -333,10 +362,19 @@ export function OrderWorkflowIndicator({
           setOpen(true);
         }}
         onPointerDown={(event) => {
-          // Pin on pointer-down so neither a row-level click handler nor the
-          // brief trip to the portalled panel can consume the interaction.
+          // Pin (or act) on pointer-down so neither a row-level click handler
+          // nor the brief trip to the portalled panel can consume the
+          // interaction.
           event.stopPropagation();
           cancelClose();
+          if (canAct) {
+            const href = actionHref();
+            if (href !== null) onNavigate(href);
+            pinnedRef.current = false;
+            setPinned(false);
+            setOpen(false);
+            return;
+          }
           const next = !pinnedRef.current;
           pinnedRef.current = next;
           setPinned(next);
