@@ -814,7 +814,11 @@ export function ActionDialog({
 }) {
   const { t } = useTranslation();
   const [reason, setReason] = useState("");
-  const [date, setDate] = useState("");
+  // Defaults to today rather than blank: a reversal almost always posts on the
+  // day it is performed, and an empty date here means the request never
+  // resolves to a Fiscal Period at all -- a 409 the operator cannot self-serve
+  // out of. Still fully editable for the rare backdated reversal.
+  const [date, setDate] = useState(() => (requireDate ? new Date().toISOString().slice(0, 10) : ""));
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string>();
   const titleId = useId();
