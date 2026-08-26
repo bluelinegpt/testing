@@ -195,6 +195,92 @@ describe("AuthenticationService", () => {
     );
   });
 
+  /**
+   * Deployment Blocker 1 -- the exact root cause: `input.identifier`/
+   * `input.password` were read (`.trim()`, `normalizeUaeMobile()`,
+   * `passwordHasher.verify()`) without ever checking they were real,
+   * non-empty strings first. A malformed request that reached this service
+   * with `identifier: undefined` (confirmed live: the global `ValidationPipe`
+   * did not reliably reject it under the local `tsx watch` dev runtime for
+   * this specific multi-parameter-decorator route) threw an unhandled
+   * `TypeError` instead of a normal `ApplicationException` -- a 500, not a
+   * 401, and consequently a Platform Error Handler crash report for
+   * something that is really just a malformed login attempt.
+   */
+  describe("malformed login input (Deployment Blocker 1)", () => {
+    it.each([
+      ["identifier missing entirely", { password: "some-password" }],
+      ["identifier not a string", { identifier: 12345, password: "some-password" }],
+      ["identifier blank after trimming", { identifier: "   ", password: "some-password" }],
+      ["password missing entirely", { identifier: "operator" }],
+      ["password not a string", { identifier: "operator", password: 12345 }],
+      ["password empty string", { identifier: "operator", password: "" }],
+      ["both fields missing", {}],
+    ])("rejects %s as invalid_credentials, never a TypeError", async (_label, input) => {
+      const { repository, service } = createService();
+      await expect(
+        service.loginCompany({ companySubdomain: "acme", ...input } as never),
+      ).rejects.toMatchObject({ errorCode: "invalid_credentials", status: 401 });
+      // Never even reaches the account lookup -- a malformed request carries
+      // no less risk of enumeration than a wrong password would.
+      expect(repository.findCompanyAccount).not.toHaveBeenCalled();
+    });
+
+    it("rejects malformed input identically for loginPlatform and loginCustomer", async () => {
+      const { repository, service } = createService();
+      await expect(
+        service.loginPlatform({ identifier: undefined, password: "x" } as never),
+      ).rejects.toMatchObject({ errorCode: "invalid_credentials", status: 401 });
+      expect(repository.findPlatformAccount).not.toHaveBeenCalled();
+      await expect(
+        service.loginCustomer({ identifier: "x", password: undefined } as never),
+      ).rejects.toMatchObject({ errorCode: "invalid_credentials", status: 401 });
+    });
+  });
+
+  it("authenticates a Trader account successfully (stable Trader regression)", async () => {
+    const { repository, service } = createService({
+      account: { ...account, kind: "trader", username: "trader.trd-000013" },
+    });
+    repository.activeProfile.mockResolvedValueOnce({ id: "trader-profile-1" });
+    const result = await service.loginCompany({
+      companySubdomain: "dev",
+      identifier: "trader.trd-000013",
+      password: "correct-password",
+    });
+    expect(result.identity.kind).toBe("trader");
+    expect(result.identity.username).toBe("trader.trd-000013");
+  });
+
+  it("authenticates a Trader with no Store/Products/Delivery Company relationship yet -- login and Trader Commerce content are separate concerns (§13)", async () => {
+    const { repository, service } = createService({
+      account: { ...account, kind: "trader" },
+    });
+    // `activeProfile` resolving a bare Trader profile record -- no Store,
+    // no Product, no Delivery Company relationship attached to it at all --
+    // must still be enough to sign in. Only `profile === undefined` (no
+    // Trader record whatsoever) is rejected.
+    repository.activeProfile.mockResolvedValueOnce({ id: "trader-profile-with-no-store" });
+    const result = await service.loginCompany({
+      companySubdomain: "acme",
+      identifier: "operator",
+      password: "valid-password",
+    });
+    expect(result.identity.kind).toBe("trader");
+  });
+
+  it("rejects a Trader/Driver account with no linked profile record at all", async () => {
+    const { service } = createService({ account: { ...account, kind: "trader" } });
+    // activeProfile defaults to undefined in createService()'s mock.
+    await expect(
+      service.loginCompany({
+        companySubdomain: "acme",
+        identifier: "operator",
+        password: "valid-password",
+      }),
+    ).rejects.toMatchObject({ errorCode: "invalid_credentials", status: 401 });
+  });
+
   it("re-resolves account permissions for every active session request", async () => {
     const { repository, service } = createService();
     repository.findActiveSession.mockResolvedValue({
