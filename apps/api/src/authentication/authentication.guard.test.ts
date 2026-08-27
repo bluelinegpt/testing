@@ -46,9 +46,10 @@ describe("AuthenticationGuard", () => {
     const reflector = {
       getAllAndOverride: vi
         .fn()
-        .mockReturnValueOnce(false)
-        .mockReturnValueOnce(undefined)
-        .mockReturnValueOnce(["settlements.reverse"]),
+        .mockReturnValueOnce(false) // isPublic
+        .mockReturnValueOnce(undefined) // isOptional
+        .mockReturnValueOnce(undefined) // requiredKinds
+        .mockReturnValueOnce(["settlements.reverse"]), // requiredPermissions
     };
     const guard = new AuthenticationGuard(
       reflector as unknown as Reflector,
@@ -64,8 +65,9 @@ describe("AuthenticationGuard", () => {
     const reflector = {
       getAllAndOverride: vi
         .fn()
-        .mockReturnValueOnce(false)
-        .mockReturnValueOnce(["platform_administrator"]),
+        .mockReturnValueOnce(false) // isPublic
+        .mockReturnValueOnce(undefined) // isOptional
+        .mockReturnValueOnce(["platform_administrator"]), // requiredKinds
     };
     const guard = new AuthenticationGuard(
       reflector as unknown as Reflector,
@@ -195,5 +197,92 @@ describe("AuthenticationGuard", () => {
     await expect(
       guardFor(authenticate).canActivate(cookieContext({ cookie: sessionCookie })),
     ).rejects.toThrow("invalid_session");
+  });
+
+  /**
+   * `@OptionalAuthentication()` -- Customer Commerce Prompt C2/C3's
+   * Checkout/Place-Order routes. Unlike `@Public()`, this path DOES attempt
+   * to resolve a session, but never rejects the request for a missing or
+   * invalid one -- see the decorator's own doc comment for why `@Public()`
+   * was the wrong tool here (it never even tries, so a logged-in Customer's
+   * saved address could never be resolved through it).
+   */
+  describe("@OptionalAuthentication()", () => {
+    const optionalReflector = (kindsResult: unknown = undefined) => ({
+      getAllAndOverride: vi
+        .fn()
+        .mockReturnValueOnce(false) // isPublic
+        .mockReturnValueOnce(true) // isOptional
+        .mockReturnValue(kindsResult),
+    });
+
+    it("resolves and enters context for a valid bearer token", async () => {
+      const store = { enter: vi.fn() };
+      const guard = new AuthenticationGuard(
+        optionalReflector() as unknown as Reflector,
+        { authenticate: vi.fn().mockResolvedValue(identity) } as unknown as AuthenticationService,
+        store as unknown as RequestSecurityContextStore,
+      );
+      await expect(guard.canActivate(executionContext())).resolves.toBe(true);
+      expect(store.enter).toHaveBeenCalledWith({
+        identity,
+        tenant: { companyId: identity.companyId, identityId: identity.identityId },
+      });
+    });
+
+    it("proceeds as anonymous, never rejecting, when no token is present", async () => {
+      const store = { enter: vi.fn() };
+      const guard = new AuthenticationGuard(
+        optionalReflector() as unknown as Reflector,
+        { authenticate: vi.fn() } as unknown as AuthenticationService,
+        store as unknown as RequestSecurityContextStore,
+      );
+      await expect(
+        guard.canActivate(cookieContext({}) as unknown as ExecutionContext),
+      ).resolves.toBe(true);
+      expect(store.enter).not.toHaveBeenCalled();
+    });
+
+    it("proceeds as anonymous when the session is invalid/expired, never rejecting", async () => {
+      const store = { enter: vi.fn() };
+      const guard = new AuthenticationGuard(
+        optionalReflector() as unknown as Reflector,
+        { authenticate: vi.fn().mockRejectedValue(new Error("invalid_session")) } as unknown as AuthenticationService,
+        store as unknown as RequestSecurityContextStore,
+      );
+      await expect(guard.canActivate(executionContext())).resolves.toBe(true);
+      expect(store.enter).not.toHaveBeenCalled();
+    });
+
+    it("proceeds as anonymous for a cookie missing the CSRF header, never rejecting", async () => {
+      const authenticate = vi.fn().mockResolvedValue(identity);
+      const store = { enter: vi.fn() };
+      const guard = new AuthenticationGuard(
+        optionalReflector() as unknown as Reflector,
+        { authenticate } as unknown as AuthenticationService,
+        store as unknown as RequestSecurityContextStore,
+      );
+      await expect(
+        guard.canActivate(cookieContext({ cookie: sessionCookie, method: "POST" })),
+      ).resolves.toBe(true);
+      expect(authenticate).not.toHaveBeenCalled();
+      expect(store.enter).not.toHaveBeenCalled();
+    });
+
+    it("resolves a valid session-cookie-plus-CSRF-header pair", async () => {
+      const store = { enter: vi.fn() };
+      const guard = new AuthenticationGuard(
+        optionalReflector() as unknown as Reflector,
+        { authenticate: vi.fn().mockResolvedValue(identity) } as unknown as AuthenticationService,
+        store as unknown as RequestSecurityContextStore,
+      );
+      await expect(
+        guard.canActivate(cookieContext({ cookie: sessionCookie, csrf: "cookie", method: "POST" })),
+      ).resolves.toBe(true);
+      expect(store.enter).toHaveBeenCalledWith({
+        identity,
+        tenant: { companyId: identity.companyId, identityId: identity.identityId },
+      });
+    });
   });
 });

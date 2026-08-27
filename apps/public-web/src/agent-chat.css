@@ -126,14 +126,14 @@
 }
 .agent-chat__header span {
   color: rgba(255, 255, 255, 0.72);
-  font-size: 0.72rem;
+  font-size: 0.82rem;
 }
 .agent-chat__availability {
   align-items: center;
   display: inline-flex;
   gap: 5px;
   margin-top: 3px;
-  font-size: 0.68rem;
+  font-size: 0.8rem;
   font-style: normal;
   font-weight: 800;
 }

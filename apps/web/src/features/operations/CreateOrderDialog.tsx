@@ -376,6 +376,31 @@ export function CreateOrderDialog({
         ) {
           setPaymentCondition(loaded.metadata.paymentCondition);
         }
+        // Edit mode: set a synthetic customer object so SearchCombobox displays
+        // the loaded customer name in the input field.
+        setCustomer({
+          address: loaded.customerAddress,
+          addressId: "",
+          areaCode: "",
+          areaId: loaded.areaId ?? "",
+          areaName: loaded.areaNameEn ?? loaded.areaName,
+          areaNameAr: loaded.areaNameAr ?? null,
+          code: "",
+          customerReference: null,
+          deliveryInstructions: null,
+          deliveryNotes: null,
+          email: null,
+          emirateId: loaded.emirateId ?? "",
+          emirateNameAr: loaded.emirateNameAr ?? "",
+          emirateNameEn: loaded.emirateNameEn ?? "",
+          id: "",
+          latitude: null,
+          locationLink: null,
+          longitude: null,
+          mobileNumber: loaded.customerMobileNumber,
+          name: loaded.customerName,
+          secondMobileNumber: loaded.metadata.customerSecondMobileNumber ?? null,
+        });
         if (loaded.traderId !== undefined) {
           setTrader({
             code: "",

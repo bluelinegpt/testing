@@ -14,6 +14,7 @@ import {
   OptionGroupDto,
   OptionGroupUpdateDto,
   OptionValueDto,
+  OptionValueUpdateDto,
   ProductAvailabilityDto,
   ProductListQueryDto,
   ProductMediaDto,
@@ -220,6 +221,21 @@ export class StorefrontProductController {
   @Post("option-groups/:groupId/active")
   public setOptionActive(@Param("groupId") groupId: string, @Body() body: OptionActiveDto) {
     return this.products.setOptionGroupActive(groupId, body, randomUUID());
+  }
+
+  @ApiOperation({ summary: "Rename an option value" })
+  @Patch("option-values/:valueId")
+  public updateOptionValue(
+    @Param("valueId") valueId: string,
+    @Body() body: OptionValueUpdateDto,
+  ) {
+    return this.products.updateOptionValue(valueId, body, randomUUID());
+  }
+
+  @ApiOperation({ summary: "Remove (deactivate) an option value" })
+  @Post("option-values/:valueId/remove")
+  public removeOptionValue(@Param("valueId") valueId: string) {
+    return this.products.removeOptionValue(valueId, randomUUID());
   }
 }
 

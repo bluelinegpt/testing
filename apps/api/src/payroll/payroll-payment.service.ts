@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import { HttpStatus, Inject, Injectable } from "@nestjs/common";
 import { Decimal } from "decimal.js";
@@ -240,6 +240,15 @@ export class PayrollPaymentService {
         returning id
       `.execute(transaction);
       const paymentId = created.rows[0]!.id;
+      await this.createCashBankMovementForPayment(transaction, {
+        actorId,
+        amount: total.toFixed(2),
+        cashAccountId: fundingAccount.accountId,
+        companyId,
+        paymentDate: input.paymentDate,
+        paymentId,
+        paymentNumber,
+      });
       // The override audit is written only now, with the payment row it
       // justifies already inserted and its id known. Written before the insert
       // it would survive as an accusation about money that never moved if
@@ -335,6 +344,53 @@ export class PayrollPaymentService {
       });
       return result;
     });
+  }
+
+  private async createCashBankMovementForPayment(
+    database: Kysely<DatabaseSchema>,
+    input: {
+      actorId: string;
+      amount: string;
+      cashAccountId: string;
+      companyId: string;
+      paymentDate: string;
+      paymentId: string;
+      paymentNumber: string;
+    },
+  ): Promise<void> {
+    const movementNumber = await this.history.nextReferenceNumber(
+      database,
+      input.companyId,
+      "cash_bank_movement",
+      "CBM",
+    );
+    const movement = await sql<{ id: string }>`
+      insert into cash_bank_movements (
+        id,company_id,movement_number,movement_type,movement_date,accounting_date,
+        source_cash_account_id,amount,fee_amount,payment_method,reference_number,
+        description,status,correlation_id,idempotency_identity,accounting_event_id,
+        confirmed_by_account_id,confirmed_at,created_by_account_id,created_at
+      )
+      select ${randomUUID()}::uuid,${input.companyId}::uuid,${movementNumber},
+        'cash_withdrawal',${input.paymentDate}::date,${input.paymentDate}::date,
+        ${input.cashAccountId}::uuid,${input.amount}::numeric,0,'cash',${input.paymentNumber},
+        ${`Employee Payroll payment ${input.paymentNumber}`},'confirmed',${input.paymentId},
+        ${`payroll_payment:${input.paymentId}`},e.id,${input.actorId}::uuid,now(),
+        ${input.actorId}::uuid,now()
+      from accounting_events e
+      where e.company_id=${input.companyId}::uuid
+        and e.source_entity_type='payroll_payment'
+        and e.source_entity_id=${input.paymentId}::uuid
+        and e.event_type='employee_payroll_paid'
+      returning id
+    `.execute(database);
+    if (movement.rows[0] === undefined) {
+      throw new ApplicationException(
+        "payroll_cash_movement_not_created",
+        "The Payroll payment Cash/Bank Movement could not be created",
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
   }
 
   public async reverse(

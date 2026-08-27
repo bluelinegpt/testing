@@ -127,13 +127,20 @@ export class GeneralExpenseService {
         input.defaultExpenseMappingKey,
         input.effectiveFrom,
       );
+
+      // Auto-generate code if not provided
+      let finalCode = input.code?.trim().toUpperCase();
+      if (!finalCode) {
+        finalCode = await this.generateNextCategoryCode(transaction, context.companyId);
+      }
+
       const result = await sql<{ id: string }>`
         insert into general_expense_categories (
           company_id,code,name_en,name_ar,description,
           default_expense_mapping_key,default_vat_treatment,
           effective_from,effective_to,created_by_account_id
         ) values (
-          ${context.companyId}::uuid,${input.code.trim().toUpperCase()},
+          ${context.companyId}::uuid,${finalCode},
           ${input.nameEn.trim()},${input.nameAr?.trim() || null},
           ${input.description?.trim() || null},${input.defaultExpenseMappingKey.trim()},
           ${input.defaultVatTreatment},${input.effectiveFrom}::date,
@@ -145,7 +152,7 @@ export class GeneralExpenseService {
       const response = { id };
       await this.support.audit(transaction, {
         action: "general_expense_category_created",
-        after: { ...input, code: input.code.trim().toUpperCase() },
+        after: { ...input, code: finalCode },
         correlationId: id,
         subjectId: id,
         subjectType: "general_expense_category",
@@ -159,6 +166,25 @@ export class GeneralExpenseService {
       });
       return response;
     });
+  }
+
+  /**
+   * Generate the next available expense category code in the format EXP-000001.
+   * Queries existing codes in this company and returns the next sequential number.
+   */
+  private async generateNextCategoryCode(transaction: Kysely<DatabaseSchema>, companyId: string): Promise<string> {
+    const result = await sql<{ maxNumber: number | null }>`
+      select max(
+        cast(substring(code from 5) as integer)
+      ) as "maxNumber"
+      from general_expense_categories
+      where company_id = ${companyId}::uuid
+        and code ~ '^EXP-[0-9]{6}$'
+    `.execute(transaction);
+
+    const maxNumber = result.rows[0]?.maxNumber ?? 0;
+    const nextNumber = maxNumber + 1;
+    return `EXP-${String(nextNumber).padStart(6, "0")}`;
   }
 
   public async updateCategory(

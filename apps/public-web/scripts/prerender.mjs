@@ -6,7 +6,7 @@ const endpoint = process.env.PUBLIC_API_BASE_URL ?? 'http://127.0.0.1:3000/api/v
 const defaultImage = `${siteUrl}/og.png`;
 
 const staticRoutes = [
-  { path: '/', title: 'Delivery Operating System for UAE Delivery Companies', description: 'Manage orders, drivers, COD, Trader settlements, accounting and payroll with Tawseelhub — delivery management software built for the UAE.' },
+  { path: '/', title: 'Delivery Operating System for Delivery Companies | Tawseelhub', description: 'Tawseelhub is delivery management software that connects Orders, Drivers, COD collections, Trader settlements, accounting and payroll in one platform — built for UAE delivery companies.' },
   { path: '/delivery-companies', title: 'Delivery Management Software UAE | Tawseelhub Delivery Operating System', description: 'Tawseelhub is a Delivery Operating System for UAE delivery companies, combining orders, drivers, COD collections, Trader settlements, accounting, payroll and reporting.' },
   { path: '/send-a-package', title: 'Send a Package Across the UAE', description: 'Request a delivery quote for a package across the UAE with pickup, destination, package and COD details.' },
   { path: '/traders', title: 'Delivery Solutions for Traders & Online Sellers UAE | Tawseelhub', description: 'Register your business with Tawseelhub, connect your existing Delivery Company or let us help you find a suitable delivery partner for Salla, Shopify, WooCommerce and other sales channels.' },
@@ -17,6 +17,8 @@ const staticRoutes = [
   { path: '/pricing', title: 'Tawseelhub Pricing | AED Plans for Delivery Companies', description: 'Review Tawseelhub pricing in AED, from a free tier up to high-volume delivery operations. Request a demo for the right plan.' },
   { path: '/about', title: 'About Tawseelhub', description: 'Learn why Tawseelhub is building a connected delivery operating system for delivery businesses in the UAE.' },
   { path: '/contact', title: 'Contact Tawseelhub', description: 'Contact the Tawseelhub team about delivery operations, partnerships and the platform.' },
+  { path: '/privacy', title: 'Privacy Policy', description: 'How Tawseelhub handles personal data across the public website and platform.' },
+  { path: '/terms', title: 'Terms of Service', description: 'Terms governing use of the Tawseelhub website and platform.' },
   { path: '/request-demo', title: 'Request a Tawseelhub Demo', description: 'Request a tailored demonstration of Tawseelhub for your UAE delivery company.' },
   ...['delivery-operations', 'cod-finance', 'business-growth', 'last-mile-delivery', 'uae-delivery-guides', 'salla', 'shopify', 'woocommerce'].map((slug) => ({
     path: `/blog/category/${slug}`,

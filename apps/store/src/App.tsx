@@ -5,6 +5,8 @@ import { storeConfiguration } from "./config/environment.js";
 import { LocaleScope } from "./routing/locale-routing.js";
 import type { SupportedLanguage } from "./localization/i18n.js";
 import { AccountPage } from "./pages/AccountPage.js";
+import { CartPage } from "./pages/CartPage.js";
+import { CheckoutPage } from "./pages/CheckoutPage.js";
 import {
   CategoriesPage,
   CategoryDetailPage,
@@ -14,6 +16,7 @@ import { ForgotPasswordPage } from "./pages/ForgotPasswordPage.js";
 import { LoginPage } from "./pages/LoginPage.js";
 import { MarketplaceHomePage } from "./pages/MarketplaceHomePage.js";
 import { MyOrdersPage } from "./pages/MyOrdersPage.js";
+import { OrderConfirmationPage } from "./pages/OrderConfirmationPage.js";
 import { OrderDetailPage } from "./pages/OrderDetailPage.js";
 import { ProductPage } from "./pages/ProductPage.js";
 import { RegisterPage } from "./pages/RegisterPage.js";
@@ -96,7 +99,10 @@ function LocalisedRoutes({ locale }: { readonly locale: SupportedLanguage | null
         <Route element={<MyOrdersPage />} path="account/orders" />
         <Route element={<OrderDetailPage />} path="account/orders/:storeOrderNumber" />
         <Route element={<TrackPage />} path="track" />
-        {["search", "cart", "checkout", "support", "privacy", "terms"].map((path) => (
+        <Route element={<CartPage />} path="cart" />
+        <Route element={<CheckoutPage />} path="checkout" />
+        <Route element={<OrderConfirmationPage />} path="order-confirmation/:storeOrderNumber" />
+        {["search", "support", "privacy", "terms"].map((path) => (
           <Route element={<ReservedRoutePage />} key={path} path={path} />
         ))}
         <Route element={<ProductPage />} path=":storeSlug/products/:productSlug" />

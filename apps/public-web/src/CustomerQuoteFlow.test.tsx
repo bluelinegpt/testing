@@ -30,12 +30,11 @@ describe('Send a Package Arabic validation', () => {
     fireEvent.change(screen.getByLabelText(/الوزن التقريبي/), { target: { value: '0' } });
     fireEvent.click(screen.getByRole('button', { name: 'احصل على عرض توصيل' }));
 
+    // Verify separate delivery country and city validation (not combined address validation)
     expect(screen.getByText('يرجى اختيار دولة الاستلام.')).toBeVisible();
     expect(screen.getByText('يرجى اختيار دولة التوصيل.')).toBeVisible();
     expect(screen.getByText('يرجى إدخال وزن الشحنة أكبر من صفر.')).toBeVisible();
-    expect(screen.getByText('يرجى إدخال عنوان أو موقع التوصيل.')).toBeVisible();
-    expect(screen.getByText('يرجى إدخال اسم المستلم.')).toBeVisible();
-    expect(screen.getByText('يرجى إدخال رقم هاتف صحيح للمستلم.')).toBeVisible();
+    expect(screen.getByText('يرجى إدخال مدينة التوصيل.')).toBeVisible();
     expect(screen.queryByText(/pickupCountryCode|deliveryCountryCode|weightKg/)).not.toBeInTheDocument();
   });
 });

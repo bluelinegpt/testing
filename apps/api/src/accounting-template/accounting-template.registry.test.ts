@@ -62,7 +62,7 @@ describe("approved template registry", () => {
     expect(areas.length).toBeGreaterThan(400);
     const emirateCodes = new Set(areas.map((area) => area.emirateCode));
     expect(emirateCodes).toEqual(new Set([
-      "AUH", "DXB", "SHJ", "AJM", "UAQ", "RAK", "FUJ", "WST", "OAA", "EST",
+      "AAN", "AUH", "DXB", "SHJ", "AJM", "UAQ", "RAK", "FUJ", "WST", "OAA", "EST",
     ]));
     for (const code of ["WST", "OAA", "EST"]) {
       expect(areas.filter((area) => area.emirateCode === code && area.nameEn === "All Areas"))

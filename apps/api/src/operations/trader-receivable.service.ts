@@ -134,6 +134,7 @@ export interface TraderReceivableDetail {
 export interface TraderReceivableEligibleRow {
   readonly businessDate: string;
   readonly id: string;
+  readonly orderSerialNumber: string | null;
   readonly originalAmountDue: string;
   readonly outstandingAmount: string;
   readonly previouslyCollected: string;
@@ -679,13 +680,16 @@ export class TraderReceivableService {
       select r.id, r.receivable_number as "receivableNumber", r.trader_id as "traderId",
              t.name_en as "traderName",
              r.business_date::text as "businessDate", r.source_type as "sourceType",
-             r.source_reference as "sourceReference", r.reason,
+             r.source_reference as "sourceReference", ord.serial_number as "orderSerialNumber", r.reason,
              r.original_amount_due::text as "originalAmountDue",
              r.amount_collected::text as "previouslyCollected",
              r.outstanding_amount::text as "outstandingAmount", r.status,
              count(*) over()::int as total
         from trader_receivables r
         join traders t on t.id = r.trader_id and t.company_id = r.company_id
+        left join orders ord on ord.company_id = r.company_id
+          and r.source_type = 'service_charge'
+          and ord.order_number = r.source_reference
        where ${filters}
        order by ${sql.raw(sortColumn)} ${sql.raw(direction)}, r.receivable_number ${sql.raw(direction)}
        limit ${limit} offset ${offset}

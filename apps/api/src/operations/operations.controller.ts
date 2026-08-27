@@ -174,6 +174,8 @@ export class OperationsController {
     @Query("orderType") orderType?: "collect_order" | "delivery",
     @Query("cashStatus") cashStatus?: string,
     @Query("settlementStatus") settlementStatus?: string,
+    @Query("workflowStep")
+    workflowStep?: "complete" | "collect_from_driver" | "collect_from_trader" | "settle_trader",
     @Query("traderId") traderId?: string,
     @Query("driverId") driverId?: string,
     @Query("areaId") areaId?: string,
@@ -220,6 +222,7 @@ export class OperationsController {
       sortBy,
       sortDirection,
       settlementStatus,
+      workflowStep,
       traderId,
     };
     return this.operations.orders(filters);
@@ -316,6 +319,8 @@ export class OperationsController {
     @Query("deliveryStatus") deliveryStatus?: string,
     @Query("cashStatus") cashStatus?: string,
     @Query("settlementStatus") settlementStatus?: string,
+    @Query("workflowStep")
+    workflowStep?: "complete" | "collect_from_driver" | "collect_from_trader" | "settle_trader",
     @Query("traderId") traderId?: string,
     @Query("driverId") driverId?: string,
     @Query("areaId") areaId?: string,
@@ -337,6 +342,7 @@ export class OperationsController {
       search,
       serialNumber,
       settlementStatus,
+      workflowStep,
       traderId,
     });
   }

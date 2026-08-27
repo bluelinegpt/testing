@@ -21,6 +21,7 @@ import { StorefrontConfigurationWorkspace } from "../storefront/StorefrontConfig
 
 import { type TraderDashboardData, TraderDashboardView } from "./TraderDashboardView.js";
 import { TraderCommerceIntegrationsView } from "./TraderCommerceIntegrationsView.js";
+import { StoreOrdersView } from "./StoreOrdersView.js";
 
 type PortalArea = {
   readonly emirateId: string;
@@ -93,6 +94,7 @@ export function PortalWorkspace({
     | "profile"
     | "integrations"
     | "store"
+    | "store-orders"
   >(isDriver ? "orders" : "dashboard");
   const [notice, setNotice] = useState<string>();
   const [mobileQrOpen, setMobileQrOpen] = useState(false);
@@ -179,6 +181,19 @@ export function PortalWorkspace({
           </button>
           {isDriver ? null : (
             <>
+              {/* Its own dedicated page (§8 of Customer Commerce Prompt
+                  C5) -- deliberately not folded into the Trader Orders
+                  table above: a Store Order is a Customer's Commerce
+                  purchase awaiting the Trader's own confirmation, not yet
+                  (and for a no-Company Order, maybe never) a Delivery
+                  Order. */}
+              <button
+                aria-current={view === "store-orders" ? "page" : undefined}
+                onClick={() => setView("store-orders")}
+                type="button"
+              >
+                {t("portal.nav.storeOrders")}
+              </button>
               <button
                 aria-current={view === "store" ? "page" : undefined}
                 onClick={() => setView("store")}
@@ -262,6 +277,7 @@ export function PortalWorkspace({
               setNotice(t("portal.passwordChanged"));
               setView("orders");
             }}
+            voluntary
           />
         ) : view === "profile" ? (
           <TraderProfileSection
@@ -339,6 +355,8 @@ export function PortalWorkspace({
             permissions={FULL_STORE_PERMISSIONS}
             storefrontId={storefrontId}
           />
+        ) : !isDriver && view === "store-orders" ? (
+          <StoreOrdersView api={api} locale={locale} />
         ) : isDriver ? (
           <>
             {error ? (
@@ -1056,6 +1074,16 @@ function TraderOrdersTable({
       </div>
 
       <div className="data-surface">
+        {/*
+         * T8 -- this table never got the `.table-scroll-x` wrapper every other
+         * data table in the app uses (see `TraderDashboardView`'s Recent
+         * Orders table for the pattern this copies). Without it, `.data-surface`'s
+         * `overflow: hidden` clips the table at narrow widths instead of
+         * scrolling it -- on a 375px phone the Status/COD/Service Fee/Reference
+         * columns, and the View/Edit actions, were rendered off-screen and
+         * genuinely unreachable, not just visually cramped.
+         */}
+        <div className="table-scroll-x">
         <table>
           <thead>
             <tr>
@@ -1123,6 +1151,7 @@ function TraderOrdersTable({
             ) : null}
           </tbody>
         </table>
+        </div>
         {loading ? <div className="loading-row">{t("common.loading")}</div> : null}
 
         {result === undefined || result.filteredCount === 0 ? null : (

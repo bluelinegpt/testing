@@ -316,6 +316,36 @@ describe.skipIf(!runDatabaseTests)("Trader Storefront persistence", () => {
     });
   });
 
+  it("refuses a Trader session creating a Storefront for a DIFFERENT Trader in the SAME Company (T1 §31)", async () => {
+    await inRolledBackTransaction(async (transaction) => {
+      const fixture = await seed(transaction);
+      // A second Trader in the caller's OWN Company -- distinct from the
+      // cross-Company case above, this proves `assertTraderInScope`'s own
+      // `callerTrader !== traderId` guard, not just Company tenancy.
+      const colleagueTraderId = randomUUID();
+      await sql`insert into traders(id,company_id,code,name_en,mobile_number)
+        values(${colleagueTraderId}::uuid,${fixture.companyId}::uuid,${`T-COLLEAGUE-${fixture.companyId.slice(0, 8)}`},
+          'Colleague Trader','971500000012')`.execute(transaction);
+      const service = buildService(transaction, {
+        ...fixture,
+        kind: "trader",
+        traderProfileId: fixture.traderId,
+      });
+      await expect(
+        service.create(
+          {
+            businessTemplate: "general",
+            displayName: "Colleague's Store",
+            slug: "colleagues-store",
+            theme: "modern",
+            traderId: colleagueTraderId,
+          },
+          randomUUID(),
+        ),
+      ).rejects.toMatchObject({ errorCode: "storefront_not_found" });
+    });
+  });
+
   it("refuses to attach a Storefront to another Company's Trader", async () => {
     await inRolledBackTransaction(async (transaction) => {
       const fixture = await seed(transaction);

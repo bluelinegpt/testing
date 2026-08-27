@@ -107,5 +107,13 @@ import { TraderSettlementService } from "./trader-settlement.service.js";
     TraderAccountStatementService,
     TraderSettlementService,
   ],
+  // Customer Commerce Prompt C4: `OperationsService` is the single
+  // authoritative Delivery Order creation path (`createOrder`). Exporting it
+  // (nothing else) lets `StoreOrderConversionModule` reuse that exact method
+  // to create a real Delivery Order from a converted Store Order, rather
+  // than building a second Order-creation engine. No other provider here is
+  // exported -- this module's internal composition (balance control, payroll,
+  // DCR-adjacent services) stays exactly as private as it was.
+  exports: [OperationsService],
 })
 export class OperationsModule {}

@@ -191,6 +191,7 @@ export function ProductCatalogueWorkspace({
 
       <div className="accounting-toolbar">
         <button
+          className="button button-primary"
           disabled={!canManage}
           onClick={() => {
             setEditingId(undefined);
@@ -201,6 +202,7 @@ export function ProductCatalogueWorkspace({
           {t("productCatalogue.editor.createTitle")}
         </button>
         <button
+          className="button button-secondary"
           onClick={() => setPanel(panel === "categories" ? "none" : "categories")}
           type="button"
         >
@@ -280,7 +282,16 @@ export function ProductCatalogueWorkspace({
       {products === undefined ? (
         <div className="accounting-state">{t("common.loading")}</div>
       ) : products.length === 0 ? (
-        <div className="accounting-empty">{t("productCatalogue.empty")}</div>
+        <div className="accounting-empty">
+          {/* An empty Store catalogue and an over-narrow filter are different
+              situations for a Trader: one means "start creating," the other
+              means "loosen the search." Conflating them into one message
+              would tell a Trader with zero Products to adjust filters that
+              were never the reason the list is empty. */}
+          {search.trim() === "" && lifecycleFilter === "" && categoryFilter === ""
+            ? t("productCatalogue.emptyStore")
+            : t("productCatalogue.empty")}
+        </div>
       ) : (
         <div className="table-scroll-x">
           <table className="data-table accounting-table">
@@ -322,6 +333,7 @@ export function ProductCatalogueWorkspace({
                   </td>
                   <td>
                     <button
+                      className="button button-secondary"
                       onClick={() => {
                         setEditingId(product.id);
                         setPanel("product");
@@ -332,6 +344,13 @@ export function ProductCatalogueWorkspace({
                     </button>
                     {lifecycleActions(product.lifecycleStatus).map((action) => (
                       <button
+                        className={
+                          action === "activate"
+                            ? "button button-primary"
+                            : action === "archive"
+                              ? "button button-danger"
+                              : "button button-secondary"
+                        }
                         disabled={!canPublish || busy}
                         key={action}
                         onClick={() => void runAction(product, action)}
@@ -342,6 +361,7 @@ export function ProductCatalogueWorkspace({
                     ))}
                     {product.lifecycleStatus === "archived" ? null : (
                       <button
+                        className="button button-secondary"
                         disabled={!canManage || busy}
                         onClick={() => void toggleAvailability(product)}
                         type="button"
@@ -360,13 +380,23 @@ export function ProductCatalogueWorkspace({
       )}
 
       <div className="accounting-pagination">
-        <button disabled={page <= 1} onClick={() => setPage(page - 1)} type="button">
+        <button
+          className="button button-secondary"
+          disabled={page <= 1}
+          onClick={() => setPage(page - 1)}
+          type="button"
+        >
           {t("common.previous")}
         </button>
         <span>
           <bdi>{`${String(page)} / ${String(totalPages)}`}</bdi>
         </span>
-        <button disabled={page >= totalPages} onClick={() => setPage(page + 1)} type="button">
+        <button
+          className="button button-secondary"
+          disabled={page >= totalPages}
+          onClick={() => setPage(page + 1)}
+          type="button"
+        >
           {t("common.next")}
         </button>
       </div>

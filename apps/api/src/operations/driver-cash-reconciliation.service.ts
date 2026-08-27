@@ -393,7 +393,7 @@ export class DriverCashReconciliationService {
       with eligible as (
         select assigned_driver_id as driver_id,
                count(*)::int as "pendingOrderCount",
-               coalesce(sum(amount_collected), 0)::text as "pendingCollectionTotal"
+               coalesce(sum(customer_amount_due), 0)::text as "pendingCollectionTotal"
           from orders
          where company_id = ${companyId}::uuid
            and delivery_status = 'delivered'
@@ -437,7 +437,7 @@ export class DriverCashReconciliationService {
     const direction = query.sortDirection === "asc" ? "asc" : "desc";
     const sortColumn =
       query.sortBy === "amountCollected"
-        ? "o.amount_collected"
+        ? "o.customer_amount_due"
         : query.sortBy === "orderNumber"
           ? "o.order_number"
           : "o.delivered_at";
@@ -483,7 +483,7 @@ export class DriverCashReconciliationService {
       select o.id, o.order_number as "orderNumber", o.serial_number as "serialNumber",
              o.reference_number as "referenceNumber", o.delivered_at::text as "deliveredAt",
              o.customer_name as "customerName", t.name_en as "traderName",
-             a.name_en as "areaName", o.amount_collected::text as "amountCollected",
+             a.name_en as "areaName", o.customer_amount_due::text as "amountCollected",
              o.driver_reconciliation_status as "cashStatus",
              count(*) over()::int as total
         from orders o
@@ -495,7 +495,7 @@ export class DriverCashReconciliationService {
     `.execute(this.database);
     const totals = await sql<SelectionTotals>`
       select count(*)::int as "orderCount",
-             coalesce(sum(o.amount_collected), 0)::text as "collectionTotal"
+             coalesce(sum(o.customer_amount_due), 0)::text as "collectionTotal"
         from orders o
        where ${filters}
     `.execute(this.database);
@@ -786,10 +786,11 @@ export class DriverCashReconciliationService {
         const inserted = await sql<{ id: string }>`
           insert into driver_reconciliation_payments (
             company_id, reconciliation_id, payment_method, amount,
-            company_bank_account_id, bank_reference, created_by_account_id, payment_at
+            company_cash_account_id, company_bank_account_id, bank_reference, created_by_account_id, payment_at
           ) values (
             ${companyId}::uuid, ${reconciliationId}::uuid, ${payment.paymentMethod},
-            ${new Decimal(payment.amount).toFixed(2)}, ${payment.bankAccountId ?? null}::uuid,
+            ${new Decimal(payment.amount).toFixed(2)}, ${payment.paymentMethod === "cash" ? payment.cashAccountId ?? null : null}::uuid,
+            ${payment.paymentMethod === "bank_transfer" ? payment.bankAccountId ?? null : null}::uuid,
             ${payment.bankReference?.trim() || null}, ${identity.identityId}::uuid,
             coalesce(${payment.paymentDate ?? null}::date::timestamptz, now())
           ) returning id
@@ -811,6 +812,22 @@ export class DriverCashReconciliationService {
         reconciliationId,
         safeCollectionAmount: gross.minus(expenseTotal),
       });
+      // Create cash/bank movements for driver collection payments
+      // Records which cash/bank account received the collections
+      // Auto-populate payment accounts based on payment method
+      const paymentsWithAccounts = await this.populatePaymentAccounts(
+        transaction,
+        companyId,
+        input.payments,
+      );
+      await this.createCollectionMovements(transaction, {
+        companyId,
+        payments: paymentsWithAccounts,
+        reconciliationNumber,
+        businessDate: header.rows[0]!.businessDate,
+        actorId: identity.identityId,
+      });
+
       await sql`
         update driver_reconciliations
            set status = 'confirmed', confirmed_by_account_id = ${identity.identityId}::uuid,
@@ -1273,7 +1290,7 @@ export class DriverCashReconciliationService {
     this.assertAnyPermission("reconciliations.create");
     const { companyId } = this.tenants.current();
     const result = await sql<{ amountCollected: string }>`
-      select amount_collected::text as "amountCollected" from orders
+      select customer_amount_due::text as "amountCollected" from orders
       where id = ${orderId}::uuid and company_id = ${companyId}::uuid
     `.execute(this.database);
     const order = result.rows[0];
@@ -2493,7 +2510,7 @@ export class DriverCashReconciliationService {
         select id, order_number as "orderNumber", assigned_driver_id as "assignedDriverId",
                delivery_status as "deliveryStatus",
                driver_reconciliation_status as "driverReconciliationStatus",
-               amount_collected::text as "amountCollected",
+               customer_amount_due::text as "amountCollected",
                customer_amount_due::text as "customerAmountDue",
                trader_id as "traderId",
                trader_net_payable::text as "traderNetPayable"
@@ -2511,7 +2528,7 @@ export class DriverCashReconciliationService {
       select o.id, o.order_number as "orderNumber", o.assigned_driver_id as "assignedDriverId",
              o.delivery_status as "deliveryStatus",
              o.driver_reconciliation_status as "driverReconciliationStatus",
-             o.amount_collected::text as "amountCollected",
+             o.customer_amount_due::text as "amountCollected",
              o.customer_amount_due::text as "customerAmountDue",
              o.trader_id as "traderId",
              o.trader_net_payable::text as "traderNetPayable"
@@ -2606,13 +2623,14 @@ export class DriverCashReconciliationService {
         }
         continue;
       }
-      if (payment.bankAccountId === undefined || !payment.bankReference?.trim()) {
+      if (payment.bankAccountId === undefined || payment.bankAccountId === null) {
         throw new ApplicationException(
           "bank_payment_details_required",
-          "Bank Account and Bank Reference are required for Bank Transfer",
+          "Bank Account is required for Bank Transfer",
           HttpStatus.BAD_REQUEST,
         );
       }
+      // bank_reference is optional - if provided, it will be validated by database unique constraint
       const bank = await sql<{ id: string }>`
         select id from company_bank_accounts
         where id = ${payment.bankAccountId}::uuid and company_id = ${companyId}::uuid and is_active
@@ -2682,6 +2700,197 @@ export class DriverCashReconciliationService {
     return row;
   }
 
+  /**
+   * Auto-populate payment accounts based on payment method.
+   *
+   * For cash payments: uses company's primary main_cash account
+   * For bank payments: uses company's primary active bank account
+   *
+   * This ensures movements are always created with the correct funding account,
+   * even if the frontend didn't explicitly specify one.
+   */
+  private async populatePaymentAccounts(
+    transaction: Kysely<DatabaseSchema>,
+    companyId: string,
+    payments: readonly FinancialPaymentDto[],
+  ): Promise<
+    Array<
+      FinancialPaymentDto & {
+        readonly cashAccountId?: string;
+        readonly bankAccountId?: string;
+      }
+    >
+  > {
+    // Get default cash and bank accounts for this company
+    const [cashAccounts, bankAccounts] = await Promise.all([
+      sql<{ id: string }>`
+        select id from company_cash_accounts
+         where company_id=${companyId}::uuid and is_active
+           and cash_account_type='main_cash'
+         order by created_at asc
+         limit 1
+      `.execute(transaction),
+      sql<{ id: string }>`
+        select id from company_bank_accounts
+         where company_id=${companyId}::uuid and is_active
+         order by created_at asc
+         limit 1
+      `.execute(transaction),
+    ]);
+
+    const defaultCashAccountId = cashAccounts.rows[0]?.id;
+    const defaultBankAccountId = bankAccounts.rows[0]?.id;
+
+    // Populate payment accounts based on payment method
+    return payments.map((payment) => {
+      if (payment.paymentMethod === "cash" && !payment.cashAccountId && defaultCashAccountId) {
+        return { ...payment, cashAccountId: defaultCashAccountId };
+      }
+      if (
+        payment.paymentMethod === "bank_transfer" &&
+        !payment.bankAccountId &&
+        defaultBankAccountId
+      ) {
+        return { ...payment, bankAccountId: defaultBankAccountId };
+      }
+      return payment;
+    });
+  }
+
+  /**
+   * Create and confirm cash/bank movements for driver collection payments.
+   *
+   * When a Driver Collection is confirmed, a corresponding movement is recorded
+   * for each payment to track where the collected cash/bank deposit went.
+   *
+   * PHASE 2: Auto-generate cash/bank movements from confirmed Driver Collections.
+   * This fixes the audit trail gap where collections were recorded in accounting
+   * but no operational cash movements were recorded.
+   */
+  private async createCollectionMovements(
+    transaction: Kysely<DatabaseSchema>,
+    options: {
+      readonly companyId: string;
+      readonly payments: readonly FinancialPaymentDto[];
+      readonly reconciliationNumber: string;
+      readonly businessDate: string;
+      readonly actorId: string;
+    },
+  ): Promise<void> {
+    for (const payment of options.payments) {
+      if (!payment.paymentMethod) continue;
+
+      console.log("DEBUG: payment.paymentMethod =", payment.paymentMethod); // DEBUG
+
+      const isCash = payment.paymentMethod === "cash";
+      const isBank = payment.paymentMethod === "bank_transfer";
+
+      if (!isCash && !isBank) continue;
+
+      // Determine movement type and funding account
+      const movementType = isCash ? "cash_deposit" : "bank_deposit";
+
+      // For deposits: money comes IN TO company's cash/bank account
+      // Source is NULL (external source: driver, customer, bank)
+      // Destination is the company's cash/bank account receiving the money
+      const destinationCashAccountId = isCash ? payment.cashAccountId : null;
+      const destinationBankAccountId = isBank ? payment.bankAccountId : null;
+      const sourceCashAccountId = null; // Deposits have no company source account
+      const sourceBankAccountId = null;
+
+      // Generate unique movement number
+      const movementNumber = await this.history.nextReferenceNumber(
+        transaction,
+        options.companyId,
+        "cash_bank_movement",
+        "CBM",
+      );
+
+      const movementId = randomUUID();
+
+      // Create confirmed movement
+      // Note: driver_reconciliation_payments uses "bank_transfer", but cash_bank_movements uses "visa"
+      const paymentMethodForMovement = isCash ? "cash" : "visa";
+      const idempotencyKey = `${options.reconciliationNumber}_${movementNumber}`;
+      await sql`
+        insert into cash_bank_movements (
+          id,
+          company_id,
+          movement_number,
+          movement_type,
+          movement_date,
+          accounting_date,
+          source_cash_account_id,
+          source_bank_account_id,
+          destination_cash_account_id,
+          destination_bank_account_id,
+          amount,
+          fee_amount,
+          payment_method,
+          status,
+          correlation_id,
+          idempotency_identity,
+          confirmed_by_account_id,
+          confirmed_at,
+          created_by_account_id,
+          created_at
+        ) values (
+          ${movementId}::uuid,
+          ${options.companyId}::uuid,
+          ${movementNumber},
+          ${movementType},
+          ${options.businessDate}::date,
+          ${options.businessDate}::date,
+          ${sourceCashAccountId}::uuid,
+          ${sourceBankAccountId}::uuid,
+          ${destinationCashAccountId ?? null}::uuid,
+          ${destinationBankAccountId ?? null}::uuid,
+          ${new Decimal(payment.amount ?? 0).toFixed(2)}::numeric,
+          '0'::numeric,
+          ${paymentMethodForMovement},
+          'confirmed',
+          ${randomUUID()},
+          ${idempotencyKey},
+          ${options.actorId}::uuid,
+          now(),
+          ${options.actorId}::uuid,
+          now()
+        )
+      `.execute(transaction);
+
+      // Enqueue accounting event for GL posting
+      // The event will be picked up by OperationalSourceLoader to create GL entries
+      const eventHash = createHash("sha256")
+        .update(
+          JSON.stringify({
+            companyId: options.companyId,
+            movementId,
+            movementNumber,
+            amount: payment.amount,
+            businessDate: options.businessDate,
+          }),
+        )
+        .digest("hex");
+
+      await sql`
+        insert into accounting_events (
+          id, company_id, event_type, event_version, effective_accounting_date,
+          actor_id, actor_type, source_entity_type, source_entity_id, source_reference,
+          correlation_id, idempotency_key, event_hash, description, supplementary_metadata
+        ) values (
+          gen_random_uuid(), ${options.companyId}::uuid,
+          ${movementType === "cash_deposit" ? "driver_collection_confirmed" : "driver_collection_confirmed"},
+          1, ${options.businessDate}::date,
+          ${options.actorId}::uuid, 'account', 'cash_bank_movement', ${movementId}::uuid,
+          ${movementNumber}, ${movementId}::uuid, ${idempotencyKey},
+          ${eventHash},
+          ${'Driver collection ' + options.reconciliationNumber + ' movement'},
+          ${JSON.stringify({ source: 'driver_collection', reconciliationNumber: options.reconciliationNumber })}
+        )
+      `.execute(transaction);
+    }
+  }
+
   private assertAnyPermission(permission: string | readonly string[]): void {
     const permissions = this.identities.current().permissions;
     const required = Array.isArray(permission) ? permission : [permission];
@@ -2697,3 +2906,4 @@ export class DriverCashReconciliationService {
     }
   }
 }
+

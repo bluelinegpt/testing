@@ -337,11 +337,22 @@ export class OperationalSourceLoader {
       subledgerType: "trader",
       traderId: row.traderId,
     };
-    const revenue =
+    const fullRevenue =
       row.financialModelVersion === null
-        ? row.companyRevenue
-        : money(new Decimal(row.serviceFeeNet ?? 0).plus(row.additionalFees ?? 0).toString());
-    const traderPosition=new Decimal(row.traderNetPayable);
+        ? new Decimal(row.companyRevenue)
+        : new Decimal(row.serviceFeeNet ?? 0).plus(row.additionalFees ?? 0);
+    const fullVat = new Decimal(row.vatAmount);
+    const fullFeeWithVat = fullRevenue.plus(fullVat);
+    const traderPosition = new Decimal(row.traderNetPayable);
+    const customerFundedFee = Decimal.max(
+      new Decimal(row.customerAmountDue).minus(Decimal.max(traderPosition, 0)),
+      0,
+    );
+    const recognitionRatio = fullFeeWithVat.greaterThan(0)
+      ? Decimal.min(customerFundedFee.div(fullFeeWithVat), 1)
+      : new Decimal(0);
+    const revenue = money(fullRevenue.mul(recognitionRatio).toString());
+    const vatAmount = money(fullVat.mul(recognitionRatio).toString());
     return {
       accountingDate: row.deliveredDate,
       components: present([
@@ -367,7 +378,7 @@ export class OperationalSourceLoader {
         ),
         component(
           "output_vat",
-          row.vatAmount,
+          vatAmount,
           "credit",
           "output_vat",
           dimensions,
@@ -1385,3 +1396,4 @@ export class OperationalSourceLoader {
     );
   }
 }
+

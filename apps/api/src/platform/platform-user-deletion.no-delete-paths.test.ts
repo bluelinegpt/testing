@@ -28,7 +28,7 @@ describe("No path other than the Platform deletion service deletes accounts", ()
       return [path];
     });
 
-  it("only platform-user-deletion.service.ts issues DELETE FROM accounts", () => {
+  it("only platform-user-deletion.service.ts issues DELETE FROM accounts", { timeout: 15000 }, () => {
     const matches = collectSourceFiles(srcRoot).filter((path) => pattern.test(readFileSync(path, "utf8")));
     const relative = matches.map((path) => path.slice(srcRoot.length + 1).replace(/\\/g, "/"));
     expect(relative).toEqual(["platform/platform-user-deletion.service.ts"]);

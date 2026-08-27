@@ -348,6 +348,17 @@ export class DriverEarningsService {
         "Date To must be on or after Date From",
         HttpStatus.BAD_REQUEST,
       );
+
+    // Earning periods can only be locked for completed days (up to yesterday).
+    // Today's deliveries are still ongoing and should not be locked yet.
+    const isoString = new Date().toISOString();
+    const today = isoString.substring(0, 10); // YYYY-MM-DD format
+    if (input.dateTo >= today)
+      throw new ApplicationException(
+        "driver_earning_period_future_date",
+        `Earning periods can only be calculated for completed days. Date To must be before today (${today}).`,
+        HttpStatus.BAD_REQUEST,
+      );
     const driver = await sql<{ employeeId: string }>`select d.employee_id as "employeeId"
       from drivers d join employees e on e.id=d.employee_id and e.company_id=d.company_id
       where d.id=${input.driverId}::uuid and d.company_id=${companyId}::uuid

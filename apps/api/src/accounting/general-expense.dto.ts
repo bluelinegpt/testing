@@ -41,6 +41,22 @@ export const generalExpensePayeeTypes = [
   "other",
 ] as const;
 
+/**
+ * Allowed expense mapping keys for Expense Categories.
+ * These map to GL expense accounts and are shown to users as friendly labels.
+ */
+export const allowedExpenseMappingKeys = [
+  "general_expense",
+  "fuel_expense",
+  "salik_expense",
+  "parking_expense",
+  "driver_advance",
+  "office_rent_expense",
+  "maintenance_expense",
+  "bank_charges",
+  "other_operating_expense",
+] as const;
+
 export class GeneralExpenseReasonDto {
   @IsString()
   @MinLength(1)
@@ -58,6 +74,56 @@ export class GeneralExpenseReasonDto {
 }
 
 export class CreateGeneralExpenseCategoryDto {
+  /**
+   * Expense category code. If not provided on creation, it will be auto-generated
+   * in the format EXP-000001, EXP-000002, etc. On updates, it must match an
+   * existing category's code.
+   */
+  @IsOptional()
+  @IsString()
+  @Matches(categoryCodePattern)
+  public readonly code?: string;
+
+  @IsString()
+  @MinLength(1)
+  @MaxLength(160)
+  public readonly nameEn!: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(160)
+  public readonly nameAr?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  public readonly description?: string;
+
+  /**
+   * GL expense account mapping key. Allowed values are predefined:
+   * general_expense, fuel_expense, salik_expense, parking_expense,
+   * driver_advance, office_rent_expense, maintenance_expense, bank_charges,
+   * or other_operating_expense.
+   */
+  @IsIn(allowedExpenseMappingKeys)
+  public readonly defaultExpenseMappingKey!: string;
+
+  @IsIn(generalExpenseVatTreatments)
+  public readonly defaultVatTreatment!: string;
+
+  @IsDateString()
+  public readonly effectiveFrom!: string;
+
+  @IsOptional()
+  @IsDateString()
+  public readonly effectiveTo?: string;
+}
+
+export class UpdateGeneralExpenseCategoryDto {
+  /**
+   * Code is required in updates to preserve the existing code.
+   * Cannot be changed after creation.
+   */
   @IsString()
   @Matches(categoryCodePattern)
   public readonly code!: string;
@@ -77,6 +143,11 @@ export class CreateGeneralExpenseCategoryDto {
   @MaxLength(500)
   public readonly description?: string;
 
+  /**
+   * GL expense account mapping key. For NEW categories, must be from the
+   * allowed list. For updates, allows any value to preserve existing
+   * non-standard keys from before this constraint was added.
+   */
   @IsString()
   @MinLength(1)
   @MaxLength(100)
@@ -91,9 +162,7 @@ export class CreateGeneralExpenseCategoryDto {
   @IsOptional()
   @IsDateString()
   public readonly effectiveTo?: string;
-}
 
-export class UpdateGeneralExpenseCategoryDto extends CreateGeneralExpenseCategoryDto {
   @IsInt()
   @Min(1)
   @Type(() => Number)

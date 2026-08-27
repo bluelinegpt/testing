@@ -516,6 +516,116 @@ describe.skipIf(!runDatabaseTests)("Delivery Company relationships", () => {
       expect(updated.items.find((row) => row.isDefaultForStoreOrders)?.id).toBe(target.id);
     });
   });
+
+  /* -------------------------------------------------------------------
+     T7 -- enabling through the real service, and the inactive-status gap.
+
+     Only DISABLE and default-move were exercised through the actual
+     `StorefrontDeliveryService.update()` call path above; ENABLE never was.
+     And nothing previously checked `status` before allowing
+     `enabledForStoreOrders: true` -- a relationship the Company marked
+     inactive/suspended/terminated could be flipped on here even though
+     Store Order creation and Company-user Store access both already refuse
+     anything that isn't `status = 'active'`. Fixed in
+     `storefront-delivery.service.ts`; these tests lock in both the existing
+     enable path and the new guard.
+     ------------------------------------------------------------------- */
+
+  it("enables a relationship through the real service", async () => {
+    await inRolledBackTransaction(async (transaction) => {
+      const fixture = await seed(transaction);
+      await sql`insert into trader_delivery_company_relationships(
+          trader_commerce_id, company_id, relationship_source, status,
+          enabled_for_store_orders, is_default_for_store_orders)
+        values(${fixture.commerceId}::uuid, ${fixture.thirdCompanyId}::uuid,
+          'delivery_company_registered', 'active', false, false)`.execute(transaction);
+      const delivery = buildDeliveryService(transaction, {
+        actorId: fixture.actorId,
+        companyId: fixture.companyId,
+      });
+      const listed = await delivery.list(fixture.storefrontId);
+      const target = listed.items.find((row) => !row.enabledForStoreOrders)!;
+      const updated = await delivery.update(
+        fixture.storefrontId,
+        target.id,
+        { enabledForStoreOrders: true },
+        randomUUID(),
+      );
+      expect(updated.items.find((row) => row.id === target.id)?.enabledForStoreOrders).toBe(true);
+    });
+  });
+
+  it.each(["inactive", "suspended", "terminated"])(
+    "refuses to enable a %s relationship for Store Orders",
+    async (status) => {
+      await inRolledBackTransaction(async (transaction) => {
+        const fixture = await seed(transaction);
+        await sql`insert into trader_delivery_company_relationships(
+            trader_commerce_id, company_id, relationship_source, status,
+            enabled_for_store_orders, is_default_for_store_orders)
+          values(${fixture.commerceId}::uuid, ${fixture.thirdCompanyId}::uuid,
+            'delivery_company_registered', ${status}, false, false)`.execute(transaction);
+        const delivery = buildDeliveryService(transaction, {
+          actorId: fixture.actorId,
+          companyId: fixture.companyId,
+        });
+        const listed = await delivery.list(fixture.storefrontId);
+        const target = listed.items.find((row) => row.status === status)!;
+        await expect(
+          delivery.update(
+            fixture.storefrontId,
+            target.id,
+            { enabledForStoreOrders: true },
+            randomUUID(),
+          ),
+        ).rejects.toMatchObject({ errorCode: "storefront_delivery_relationship_ineligible" });
+        // Refused before anything was written.
+        const unchanged = await sql<{ enabledForStoreOrders: boolean }>`
+          select enabled_for_store_orders as "enabledForStoreOrders"
+            from trader_delivery_company_relationships where id = ${target.id}::uuid
+        `.execute(transaction);
+        expect(unchanged.rows[0]?.enabledForStoreOrders).toBe(false);
+      });
+    },
+  );
+
+  it("still allows disabling an already-enabled relationship even after its status turns ineligible", async () => {
+    await inRolledBackTransaction(async (transaction) => {
+      const fixture = await seed(transaction);
+      // A TRADER actor, not a Company user: a Company user's own access to
+      // the Store is itself gated on `status = 'active'` (see
+      // `accessibleStorefrontIds`), so suspending the relationship below
+      // would make the Store unreachable for that caller too and prove
+      // nothing about the enable/disable guard specifically. The Trader's
+      // own access is resolved through the separate, status-independent
+      // IDENTITY link instead.
+      const delivery = buildDeliveryService(transaction, {
+        actorId: fixture.actorId,
+        companyId: fixture.companyId,
+        kind: "trader",
+        traderProfileId: fixture.traderId,
+      });
+      const before = await delivery.list(fixture.storefrontId);
+      const relationship = before.items[0]!;
+      expect(relationship.enabledForStoreOrders).toBe(true);
+      // The Company deactivates the relationship out from under an already
+      // Store-order-enabled Trader -- turning it OFF must still work; only
+      // turning it ON is blocked by an ineligible status.
+      await sql`update trader_delivery_company_relationships
+                   set status = 'suspended' where id = ${relationship.id}::uuid`.execute(
+        transaction,
+      );
+      const updated = await delivery.update(
+        fixture.storefrontId,
+        relationship.id,
+        { enabledForStoreOrders: false },
+        randomUUID(),
+      );
+      expect(updated.items.find((row) => row.id === relationship.id)?.enabledForStoreOrders).toBe(
+        false,
+      );
+    });
+  });
 });
 
 // ----------------------------------------------------------------- legacy pair
@@ -709,6 +819,75 @@ describe.skipIf(!runDatabaseTests)("Manipulated identifiers", () => {
         companyId: fixture.companyId,
       });
       await expect(delivery.list(fixture.otherStorefrontId)).rejects.toThrow();
+    });
+  });
+
+  /* -------------------------------------------------------------------
+     T7 -- a Trader IDENTITY, not a Company user, attempting the same
+     cross-boundary reach. Every existing delivery-relationship security
+     test above drives `buildDeliveryService` as a `company_user`; none
+     exercises the Trader-actor branch of `accessibleStorefrontIds` for this
+     specific service, even though it is the one the actual Trader Portal
+     screen (`DeliveryCompaniesSection.tsx`) runs as.
+     ------------------------------------------------------------------- */
+
+  it("refuses a Trader session listing or modifying another Trader's delivery relationships", async () => {
+    await inRolledBackTransaction(async (transaction) => {
+      const fixture = await seed(transaction);
+      const traderDelivery = buildDeliveryService(transaction, {
+        actorId: fixture.actorId,
+        companyId: fixture.companyId,
+        kind: "trader",
+        traderProfileId: fixture.traderId,
+      });
+      await expect(traderDelivery.list(fixture.otherStorefrontId)).rejects.toThrow();
+
+      // The caller's OWN relationship id, but reached through the OTHER
+      // Store's id -- proves the storefrontId is what is checked, not just
+      // whether the relationship row happens to exist.
+      const ownDelivery = buildDeliveryService(transaction, {
+        actorId: fixture.actorId,
+        companyId: fixture.companyId,
+        kind: "trader",
+        traderProfileId: fixture.traderId,
+      });
+      const own = await ownDelivery.list(fixture.storefrontId);
+      const relationshipId = own.items[0]!.id;
+      await expect(
+        traderDelivery.update(
+          fixture.otherStorefrontId,
+          relationshipId,
+          { isDefaultForStoreOrders: true },
+          randomUUID(),
+        ),
+      ).rejects.toThrow();
+    });
+  });
+
+  it("refuses to mark an unrelated Company's relationship as Default through a legitimately-reached Store", async () => {
+    await inRolledBackTransaction(async (transaction) => {
+      const fixture = await seed(transaction);
+      // A relationship that genuinely exists, but under the OTHER Commerce
+      // identity -- id-guessing must not let a caller reach it via their
+      // own, otherwise-valid Storefront id.
+      const otherDelivery = buildDeliveryService(transaction, {
+        actorId: fixture.otherActorId,
+        companyId: fixture.otherCompanyId,
+      });
+      const theirs = (await otherDelivery.list(fixture.otherStorefrontId)).items[0]!;
+
+      const delivery = buildDeliveryService(transaction, {
+        actorId: fixture.actorId,
+        companyId: fixture.companyId,
+      });
+      await expect(
+        delivery.update(
+          fixture.storefrontId,
+          theirs.id,
+          { isDefaultForStoreOrders: true },
+          randomUUID(),
+        ),
+      ).rejects.toThrow();
     });
   });
 });

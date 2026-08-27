@@ -374,13 +374,24 @@ async function sitemapXml(): Promise<string> {
   add("");
   add("categories");
 
-  const stores = await apiGet<{ items: { slug: string }[] }>("public/storefronts");
+  // A Store or Product that opted out of indexing (`seoIndexable: false`)
+  // still resolves publicly -- that flag controls search-engine visibility,
+  // not access -- so it is NOT absent from these list responses the way an
+  // unpublished Store or a draft Product is. Left unchecked here, the sitemap
+  // would tell a crawler "index this" on the same page that renders
+  // `<meta name="robots" content="noindex">` -- a direct contradiction, not
+  // just noise.
+  const stores = await apiGet<{ items: { seoIndexable?: boolean; slug: string }[] }>(
+    "public/storefronts",
+  );
   for (const store of stores?.items ?? []) {
+    if (store.seoIndexable === false) continue;
     add(store.slug);
-    const products = await apiGet<{ items: { slug: string }[] }>(
+    const products = await apiGet<{ items: { seoIndexable?: boolean; slug: string }[] }>(
       `public/storefronts/${encodeURIComponent(store.slug)}/products?pageSize=48`,
     );
     for (const product of products?.items ?? []) {
+      if (product.seoIndexable === false) continue;
       add(`${store.slug}/products/${product.slug}`);
     }
   }

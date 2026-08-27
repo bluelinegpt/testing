@@ -8,6 +8,7 @@ import type { CompanySettings } from "../../api/contracts.js";
 import { PageHeader } from "../../components/PageHeader.js";
 import { parseMoneyInput, safeMoneyValue } from "../../utils/numeric-input.js";
 import { AddExpenseCategoryDialog } from "./AddExpenseCategoryDialog.js";
+import { AccountingRecoveryNavigation } from "./BatchOperationsPage.js";
 import {
   AttachmentPanel,
   AccountingDocumentActions,
@@ -648,15 +649,24 @@ const definitions: Readonly<Partial<Record<AccountingSection, ResourceDefinition
     // and are still shown, read-only, on an Expense's own detail page. See
     // the report for the full audit of why they were removed from Create.
     createFields: [
-      { name: "expenseDate", type: "date" },
-      { name: "accountingDate", type: "date" },
+      {
+        name: "expenseDate",
+        type: "date",
+        label: "Expense Date",
+        helperText: "Accounting date will be set automatically to match",
+      },
+      // accountingDate is auto-set to match expenseDate on the backend
       // Required here now that it also drives the accounting line
       // `submitCreate` builds automatically -- the backend line always needs
       // a Category (`GeneralExpenseLineDto.categoryId`).
       { name: "categoryId", required: true },
       { name: "payeeType" },
       { name: "payeeName" },
-      { name: "payeeContact" },
+      {
+        name: "payeeContact",
+        placeholder: "+971 50 123 4567",
+        helperText: "Mobile or phone number (e.g., +971 50 123 4567)",
+      },
       { name: "referenceNumber" },
       // Required here (unlike the header `description` column, which is
       // optional) because it becomes the accounting line's own description,
@@ -3320,7 +3330,6 @@ export function AccountingResourcePage({
     readonly record: AccountingRecord;
   }>();
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(() => new Set());
-  const [bulkPreview, setBulkPreview] = useState<AccountingRecord>();
   const [bulkReprocessing, setBulkReprocessing] = useState(false);
   const [editingDetail, setEditingDetail] = useState(false);
   const [revision, setRevision] = useState(0);
@@ -3783,6 +3792,7 @@ export function AccountingResourcePage({
         eyebrow={t("accounting.title")}
         title={title}
       />
+      {section === "events" ? <AccountingRecoveryNavigation active="events" /> : null}
       {detail === undefined ? (
         <>
           {definition.summaryPath === undefined ? null : (
@@ -3864,20 +3874,10 @@ export function AccountingResourcePage({
             selectedIds.size > 0 ? (
               <button
                 className="button button-secondary"
-                onClick={() => {
-                  void client
-                    .post<AccountingRecord>("events/reprocess-preview", {
-                      eventIds: [...selectedIds],
-                      reason: t("accounting.confirmation.confirmedByUser"),
-                    })
-                    .then((preview) => {
-                      setBulkPreview(preview);
-                      setBulkReprocessing(true);
-                    });
-                }}
+                onClick={() => setBulkReprocessing(true)}
                 type="button"
               >
-                {t("accounting.actions.bulkReprocess", { count: selectedIds.size })}
+                {t("accounting.actions.createReprocessBatch", { count: selectedIds.size })}
               </button>
             ) : null}
           </div>
@@ -4309,15 +4309,21 @@ export function AccountingResourcePage({
       )}
       {!bulkReprocessing ? null : (
         <ActionDialog
-          action="bulkReprocess"
+          action="createReprocessBatch"
           onClose={() => setBulkReprocessing(false)}
           onConfirm={async ({ reason }) => {
-            await client.post("events/reprocess", { eventIds: [...selectedIds], reason });
+            const created = await client.post<{ readonly id: string }>("batches", {
+              batchType: "accounting_event_reprocess",
+              reason,
+              sourceIds: [...selectedIds],
+            });
             setSelectedIds(new Set());
-            setBulkPreview(undefined);
-            refresh();
+            setBulkReprocessing(false);
+            onNavigate(`/accounting/batch-operations/${created.id}`);
           }}
-          recordReference={`${String(bulkPreview?.eligibleCount ?? 0)} / ${String(bulkPreview?.requestedCount ?? selectedIds.size)}`}
+          recordReference={t("accounting.confirmation.selectedEvents", {
+            count: selectedIds.size,
+          })}
           requireReason
         />
       )}

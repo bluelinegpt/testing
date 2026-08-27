@@ -175,7 +175,6 @@ function setup() {
   render(
     <CreateOrderDialog
       api={api as unknown as ApiClient}
-      drivers={[]}
       onClose={vi.fn()}
       onSaved={onSaved}
       permissions={["users_roles.manage", "orders.override_service_fee"]}
@@ -328,6 +327,7 @@ describe("CreateOrderDialog", () => {
     expect(creates[0]?.[1]).toMatchObject({
       additionalFees: 0,
       customerMobileNumber: "0506468441",
+      paymentCondition: "customer_pays_cod_and_fee",
       referenceNumber: "REF-A1",
       serialNumber: "000123",
       serviceFee: undefined,
@@ -430,7 +430,6 @@ describe("CreateOrderDialog", () => {
     render(
       <CreateOrderDialog
         api={api as unknown as ApiClient}
-        drivers={[]}
         onClose={vi.fn()}
         onSaved={vi.fn().mockResolvedValue(undefined)}
         permissions={["users_roles.manage"]}
@@ -568,7 +567,6 @@ describe("CreateOrderDialog", () => {
     render(
       <CreateOrderDialog
         api={api as unknown as ApiClient}
-        drivers={[]}
         onClose={vi.fn()}
         onSaved={vi.fn().mockResolvedValue(undefined)}
         permissions={["users_roles.manage"]}
@@ -639,7 +637,6 @@ describe("CreateOrderDialog", () => {
     render(
       <CreateOrderDialog
         api={api as unknown as ApiClient}
-        drivers={[]}
         onClose={vi.fn()}
         onSaved={vi.fn().mockResolvedValue(undefined)}
         permissions={["users_roles.manage"]}
@@ -799,7 +796,6 @@ describe("CreateOrderDialog validation (Phase 3)", () => {
     render(
       <CreateOrderDialog
         api={api as unknown as ApiClient}
-        drivers={[]}
         onClose={vi.fn()}
         onSaved={vi.fn().mockResolvedValue(undefined)}
         permissions={["users_roles.manage"]}
@@ -900,7 +896,6 @@ describe("CreateOrderDialog validation (Phase 3)", () => {
     render(
       <CreateOrderDialog
         api={api as unknown as ApiClient}
-        drivers={[]}
         onClose={vi.fn()}
         onSaved={vi.fn().mockResolvedValue(undefined)}
         permissions={["users_roles.manage"]}

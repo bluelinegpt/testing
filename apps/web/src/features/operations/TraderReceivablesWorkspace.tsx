@@ -47,6 +47,7 @@ interface TraderWithBalance {
 interface TraderReceivableEligibleRow {
   readonly businessDate: string;
   readonly id: string;
+  readonly orderSerialNumber?: string | null;
   readonly originalAmountDue: string;
   readonly outstandingAmount: string;
   readonly previouslyCollected: string;
@@ -356,6 +357,12 @@ export function TraderReceivablesWorkspace({
   const canManage = isAdministrator || permissions.includes("trader_receivables.create");
   const canReverse = isAdministrator || permissions.includes("trader_receivables.reverse");
   const canViewReport = canManage || permissions.includes("reports.export");
+  const directCollectQuery = useMemo(() => {
+    const params = new URLSearchParams(window.location.search);
+    const collectReceivableId = params.get("collectReceivableId")?.trim() || undefined;
+    const collectTraderId = params.get("collectTraderId")?.trim() || params.get("traderId")?.trim() || undefined;
+    return { collectReceivableId, collectTraderId };
+  }, []);
 
   // Opening a Collection-filtered URL must land on the Collections tab, or the
   // restored filters would be invisible. Computed once from the initial query in
@@ -410,8 +417,15 @@ export function TraderReceivablesWorkspace({
   const [collectionListError, setCollectionListError] = useState<string>();
 
   const [newReceivableOpen, setNewReceivableOpen] = useState(false);
-  const [collectMoneyOpen, setCollectMoneyOpen] = useState(false);
-  const [collectMoneyPresetTraderId, setCollectMoneyPresetTraderId] = useState<string>();
+  const [collectMoneyOpen, setCollectMoneyOpen] = useState(
+    () => directCollectQuery.collectTraderId !== undefined || directCollectQuery.collectReceivableId !== undefined,
+  );
+  const [collectMoneyPresetTraderId, setCollectMoneyPresetTraderId] = useState<string | undefined>(
+    directCollectQuery.collectTraderId,
+  );
+  const [collectMoneyPresetReceivableId, setCollectMoneyPresetReceivableId] = useState<string | undefined>(
+    directCollectQuery.collectReceivableId,
+  );
   const {
     close: closeReceivable,
     detailId: receivableDetailId,
@@ -542,8 +556,9 @@ export function TraderReceivablesWorkspace({
     }
   };
 
-  const openCollectMoney = (traderId?: string) => {
+  const openCollectMoney = (traderId?: string, receivableId?: string) => {
     setCollectMoneyPresetTraderId(traderId);
+    setCollectMoneyPresetReceivableId(receivableId);
     setCollectMoneyOpen(true);
   };
 
@@ -676,7 +691,7 @@ export function TraderReceivablesWorkspace({
                         <button onClick={() => openReceivable(row.id)} type="button">
                           {t("traderReceivables.actionView")}
                         </button>
-                        <button onClick={() => openCollectMoney(row.traderId)} type="button">
+                        <button onClick={() => openCollectMoney(row.traderId, row.id)} type="button">
                           {t("traderReceivables.actionCollectMoney")}
                         </button>
                         {row.status !== "outstanding" ? null : (
@@ -910,9 +925,16 @@ export function TraderReceivablesWorkspace({
           {...(collectMoneyPresetTraderId === undefined
             ? {}
             : { initialTraderId: collectMoneyPresetTraderId })}
-          onClose={() => setCollectMoneyOpen(false)}
+          {...(collectMoneyPresetReceivableId === undefined
+            ? {}
+            : { initialReceivableId: collectMoneyPresetReceivableId })}
+          onClose={() => {
+            setCollectMoneyOpen(false);
+            setCollectMoneyPresetReceivableId(undefined);
+          }}
           onCollected={(collectionId) => {
             setCollectMoneyOpen(false);
+            setCollectMoneyPresetReceivableId(undefined);
             refreshAll();
             openCollection(collectionId);
           }}
@@ -926,7 +948,7 @@ export function TraderReceivablesWorkspace({
           onClose={() => closeReceivable()}
           onCollectMoney={(traderId) => {
             closeReceivable();
-            openCollectMoney(traderId);
+            openCollectMoney(traderId, receivableDetailId);
           }}
           receivableId={receivableDetailId}
         />
@@ -1828,12 +1850,14 @@ type OutstandingFilters = typeof emptyOutstandingFilters;
 
 function CollectMoneyDialog({
   api,
+  initialReceivableId,
   initialTraderId,
   onClose,
   onCollected,
   reportLanguage,
 }: {
   api: ApiClient;
+  initialReceivableId?: string | undefined;
   initialTraderId?: string | undefined;
   onClose: () => void;
   onCollected: (collectionId: string) => void;
@@ -1845,6 +1869,7 @@ function CollectMoneyDialog({
   const [traderSearch, setTraderSearch] = useState("");
   const [tradersWithBalance, setTradersWithBalance] = useState<readonly TraderWithBalance[]>();
   const [trader, setTrader] = useState<TraderWithBalance>();
+  const [initialReceivableDetail, setInitialReceivableDetail] = useState<TraderReceivableDetail>();
 
   // Step 2 — Outstanding receivables (server-paginated, filterable).
   const [outstandingPage, setOutstandingPage] =
@@ -1856,6 +1881,10 @@ function CollectMoneyDialog({
   const outstandingRows = outstandingPage?.items ?? [];
   const outstandingTotal = outstandingPage?.total ?? 0;
   const outstandingPageCount = outstandingTotal === 0 ? 1 : Math.ceil(outstandingTotal / 50);
+  const [selectedReceivables, setSelectedReceivables] = useState<
+    ReadonlyMap<string, TraderReceivableEligibleRow>
+  >(() => new Map());
+  const [initialReceivableSelectionApplied, setInitialReceivableSelectionApplied] = useState(false);
 
   // Step 3 — Amount and allocation proposal.
   const [amount, setAmount] = useState("");
@@ -1888,16 +1917,48 @@ function CollectMoneyDialog({
   }, [api]);
 
   useEffect(() => {
-    if (initialTraderId === undefined || tradersWithBalance === undefined) return;
-    const preset = tradersWithBalance.find((row) => row.traderId === initialTraderId);
-    if (preset !== undefined) setTrader(preset);
+    if (initialReceivableId === undefined) return;
+    let active = true;
+    void api
+      .get<TraderReceivableDetail>(`operations/trader-receivables/receivables/${initialReceivableId}`)
+      .then((detail) => {
+        if (!active) return;
+        setInitialReceivableDetail(detail);
+      })
+      .catch(() => setOutstandingError(t("common.loadFailed")));
+    return () => {
+      active = false;
+    };
+  }, [api, initialReceivableId, t]);
+
+  useEffect(() => {
+    if (tradersWithBalance === undefined) return;
+    const traderId = initialTraderId ?? initialReceivableDetail?.traderId;
+    if (traderId === undefined) return;
+    const preset = tradersWithBalance.find((row) => row.traderId === traderId);
+    if (preset !== undefined) {
+      setTrader(preset);
+      return;
+    }
+    if (initialReceivableDetail !== undefined) {
+      setTrader({
+        outstandingAmount: initialReceivableDetail.outstandingAmount,
+        traderCode: initialReceivableDetail.traderCode ?? null,
+        traderId: initialReceivableDetail.traderId,
+        traderName: initialReceivableDetail.traderName,
+        traderNameAr: initialReceivableDetail.traderNameAr ?? null,
+      });
+    }
     // Only ever auto-select once, when the preset Trader first appears.
-  }, [tradersWithBalance, initialTraderId]);
+  }, [tradersWithBalance, initialTraderId, initialReceivableDetail]);
 
   const loadOutstanding = useCallback(() => {
     if (trader === undefined) return;
     setOutstandingError(undefined);
     const params = filterQuery(outstandingFilters);
+    if (initialReceivableDetail !== undefined) {
+      params.set("receivableNumber", initialReceivableDetail.receivableNumber);
+    }
     params.set("traderId", trader.traderId);
     params.set("page", String(outstandingPageIndex));
     params.set("pageSize", "50");
@@ -1907,7 +1968,7 @@ function CollectMoneyDialog({
       )
       .then(setOutstandingPage)
       .catch(() => setOutstandingError(t("common.loadFailed")));
-  }, [api, trader, outstandingFilters, outstandingPageIndex, t]);
+  }, [api, trader, initialReceivableDetail, outstandingFilters, outstandingPageIndex, t]);
 
   useEffect(() => loadOutstanding(), [loadOutstanding]);
 
@@ -1918,6 +1979,62 @@ function CollectMoneyDialog({
   const clearOutstandingFilters = () => {
     setOutstandingPageIndex(1);
     setOutstandingFilters(emptyOutstandingFilters);
+  };
+
+  const selectedRows = useMemo(
+    () => Array.from(selectedReceivables.values()),
+    [selectedReceivables],
+  );
+  const visibleOutstandingTotal = outstandingRows.reduce(
+    (sum, row) => sum + safeMoneyValue(row.outstandingAmount),
+    0,
+  );
+  const selectedOutstandingTotal = selectedRows.reduce(
+    (sum, row) => sum + safeMoneyValue(row.outstandingAmount),
+    0,
+  );
+  const visibleRowsSelected =
+    outstandingRows.length > 0 && outstandingRows.every((row) => selectedReceivables.has(row.id));
+
+  const syncSelectedReceivables = (rows: readonly TraderReceivableEligibleRow[]) => {
+    setProposal(undefined);
+    setProposalError(undefined);
+    setAllocations(
+      rows.map((row) => ({ amount: money(row.outstandingAmount), receivableId: row.id })),
+    );
+    idempotency.reset();
+  };
+
+
+  useEffect(() => {
+    if (initialReceivableId === undefined || initialReceivableSelectionApplied) return;
+    const target = outstandingRows.find((row) => row.id === initialReceivableId);
+    if (target === undefined) return;
+    const next = new Map<string, TraderReceivableEligibleRow>([[target.id, target]]);
+    setSelectedReceivables(next);
+    syncSelectedReceivables([target]);
+    setInitialReceivableSelectionApplied(true);
+  }, [initialReceivableId, initialReceivableSelectionApplied, outstandingRows]);
+  const toggleReceivable = (row: TraderReceivableEligibleRow, checked: boolean) => {
+    setSelectedReceivables((current) => {
+      const next = new Map(current);
+      if (checked) next.set(row.id, row);
+      else next.delete(row.id);
+      syncSelectedReceivables(Array.from(next.values()));
+      return next;
+    });
+  };
+
+  const toggleVisibleReceivables = (checked: boolean) => {
+    setSelectedReceivables((current) => {
+      const next = new Map(current);
+      for (const row of outstandingRows) {
+        if (checked) next.set(row.id, row);
+        else next.delete(row.id);
+      }
+      syncSelectedReceivables(Array.from(next.values()));
+      return next;
+    });
   };
 
   useEffect(() => {
@@ -1947,6 +2064,7 @@ function CollectMoneyDialog({
     setAmount("");
     setProposal(undefined);
     setAllocations([]);
+    setSelectedReceivables(new Map());
     setPaymentReference("");
     setOutstandingFilters(emptyOutstandingFilters);
     setOutstandingPageIndex(1);
@@ -1958,6 +2076,11 @@ function CollectMoneyDialog({
   // source of truth for allocation, never a client-side computation.
   useEffect(() => {
     const parsed = parseMoneyInput(amount, { allowZero: false });
+    if (selectedReceivables.size > 0) {
+      setProposal(undefined);
+      setProposalError(undefined);
+      return;
+    }
     if (trader === undefined || !parsed.ok) {
       setProposal(undefined);
       setAllocations([]);
@@ -1991,11 +2114,25 @@ function CollectMoneyDialog({
       active = false;
       window.clearTimeout(timer);
     };
-  }, [api, amount, trader, t]);
+  }, [api, amount, selectedReceivables.size, trader, t]);
+
+  const allocationDisplayLines = useMemo(
+    () =>
+      proposal?.allocations ??
+      selectedRows.map((row) => ({
+        businessDate: row.businessDate,
+        outstandingAfter: "0.00",
+        outstandingBefore: row.outstandingAmount,
+        proposedAmount: row.outstandingAmount,
+        receivableId: row.id,
+        receivableNumber: row.receivableNumber,
+      })),
+    [proposal, selectedRows],
+  );
 
   const proposalLineById = useMemo(
-    () => new Map((proposal?.allocations ?? []).map((line) => [line.receivableId, line])),
-    [proposal],
+    () => new Map(allocationDisplayLines.map((line) => [line.receivableId, line])),
+    [allocationDisplayLines],
   );
 
   const setLineAmount = (receivableId: string, value: string) => {
@@ -2044,7 +2181,7 @@ function CollectMoneyDialog({
     const parsed = parseMoneyInput(line.amount, { allowZero: false });
     return parsed.ok;
   });
-  const remainingDueAfter = (proposal?.allocations ?? []).reduce((sum, line) => {
+  const remainingDueAfter = allocationDisplayLines.reduce((sum, line) => {
     const current = allocations.find((row) => row.receivableId === line.receivableId)?.amount;
     const paidNow =
       current === undefined ? safeMoneyValue(line.proposedAmount) : safeMoneyValue(current);
@@ -2224,7 +2361,7 @@ function CollectMoneyDialog({
           </div>
         </div>
       ) : (
-        <form onSubmit={(event) => void (event.preventDefault(), confirm())}>
+        <form className="trader-collection-form" onSubmit={(event) => void (event.preventDefault(), confirm())}>
           {confirmError === undefined ? null : (
             <div className="alert alert-error" role="alert">
               {confirmError}
@@ -2232,7 +2369,7 @@ function CollectMoneyDialog({
           )}
 
           {/* Step 1 — Select Trader */}
-          <section className="workspace-step">
+          <section className="workspace-step trader-collection-trader-step">
             <h3>{t("traderReceivables.stepSelectTrader")}</h3>
             {trader === undefined ? (
               <>
@@ -2262,7 +2399,7 @@ function CollectMoneyDialog({
                 </ul>
               </>
             ) : (
-              <div className="detail-line">
+              <div className="detail-line trader-collection-selected-trader">
                 <span>{trader.traderName}</span>
                 <button onClick={() => setTrader(undefined)} type="button">
                   {t("common.change")}
@@ -2274,93 +2411,105 @@ function CollectMoneyDialog({
           {trader === undefined ? null : (
             <>
               {/* Step 2 — Outstanding Receivables */}
-              <section className="workspace-step">
+              <section className="workspace-step trader-collection-receivables-step">
                 <h3>{t("traderReceivables.stepOutstandingReceivables")}</h3>
                 {outstandingError === undefined ? null : (
                   <div className="alert alert-error">{outstandingError}</div>
                 )}
-                <div className="compact-filters">
-                  <label className="field">
-                    <span>{t("traderReceivables.filterReceivableNumber")}</span>
-                    <input
-                      onChange={(event) =>
-                        applyOutstandingFilter({ receivableNumber: event.target.value })
-                      }
-                      type="search"
-                      value={outstandingFilters.receivableNumber}
-                    />
-                  </label>
-                  <label className="field">
-                    <span>{t("traderReceivables.filterSourceType")}</span>
-                    <select
-                      onChange={(event) =>
-                        applyOutstandingFilter({ sourceType: event.target.value })
-                      }
-                      value={outstandingFilters.sourceType}
-                    >
-                      <option value="">{t("common.all")}</option>
-                      {sourceTypes.map((type) => (
-                        <option key={type} value={type}>
-                          {sourceTypeLabel(t, type)}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="field">
-                    <span>{t("traderReceivables.filterSourceReference")}</span>
-                    <input
-                      onChange={(event) =>
-                        applyOutstandingFilter({ sourceReference: event.target.value })
-                      }
-                      type="search"
-                      value={outstandingFilters.sourceReference}
-                    />
-                  </label>
-                  <label className="field">
-                    <span>{t("traderReceivables.filterBusinessDateFrom")}</span>
-                    <input
-                      onChange={(event) =>
-                        applyOutstandingFilter({ businessDateFrom: event.target.value })
-                      }
-                      type="date"
-                      value={outstandingFilters.businessDateFrom}
-                    />
-                  </label>
-                  <label className="field">
-                    <span>{t("traderReceivables.filterBusinessDateTo")}</span>
-                    <input
-                      onChange={(event) =>
-                        applyOutstandingFilter({ businessDateTo: event.target.value })
-                      }
-                      type="date"
-                      value={outstandingFilters.businessDateTo}
-                    />
-                  </label>
-                  <label className="field field-checkbox">
-                    <input
-                      checked={outstandingFilters.outstandingOnly}
-                      onChange={(event) =>
-                        applyOutstandingFilter({ outstandingOnly: event.target.checked })
-                      }
-                      type="checkbox"
-                    />
-                    <span>{t("traderReceivables.filterOutstandingOnly")}</span>
-                  </label>
-                  <div className="filter-actions">
-                    <button
-                      className="button button-secondary"
-                      onClick={clearOutstandingFilters}
-                      type="button"
-                    >
-                      {t("traderReceivables.clearFilters")}
-                    </button>
+                <details className="filter-drawer">
+                  <summary>{t("common.filter")}</summary>
+                  <div className="compact-filters">
+                    <label className="field">
+                      <span>{t("traderReceivables.filterReceivableNumber")}</span>
+                      <input
+                        onChange={(event) =>
+                          applyOutstandingFilter({ receivableNumber: event.target.value })
+                        }
+                        type="search"
+                        value={outstandingFilters.receivableNumber}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>{t("traderReceivables.filterSourceType")}</span>
+                      <select
+                        onChange={(event) =>
+                          applyOutstandingFilter({ sourceType: event.target.value })
+                        }
+                        value={outstandingFilters.sourceType}
+                      >
+                        <option value="">{t("common.all")}</option>
+                        {sourceTypes.map((type) => (
+                          <option key={type} value={type}>
+                            {sourceTypeLabel(t, type)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="field">
+                      <span>{t("traderReceivables.filterSourceReference")}</span>
+                      <input
+                        onChange={(event) =>
+                          applyOutstandingFilter({ sourceReference: event.target.value })
+                        }
+                        type="search"
+                        value={outstandingFilters.sourceReference}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>{t("traderReceivables.filterBusinessDateFrom")}</span>
+                      <input
+                        onChange={(event) =>
+                          applyOutstandingFilter({ businessDateFrom: event.target.value })
+                        }
+                        type="date"
+                        value={outstandingFilters.businessDateFrom}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>{t("traderReceivables.filterBusinessDateTo")}</span>
+                      <input
+                        onChange={(event) =>
+                          applyOutstandingFilter({ businessDateTo: event.target.value })
+                        }
+                        type="date"
+                        value={outstandingFilters.businessDateTo}
+                      />
+                    </label>
+                    <label className="field field-checkbox">
+                      <input
+                        checked={outstandingFilters.outstandingOnly}
+                        onChange={(event) =>
+                          applyOutstandingFilter({ outstandingOnly: event.target.checked })
+                        }
+                        type="checkbox"
+                      />
+                      <span>{t("traderReceivables.filterOutstandingOnly")}</span>
+                    </label>
+                    <div className="filter-actions">
+                      <button
+                        className="button button-secondary"
+                        onClick={clearOutstandingFilters}
+                        type="button"
+                      >
+                        {t("traderReceivables.clearFilters")}
+                      </button>
+                    </div>
                   </div>
-                </div>
+                </details>
                 <div className="table-scroll-x">
                   <table>
                     <thead>
                       <tr>
+                        <th scope="col">
+                          <input
+                            aria-label={t("traderReceivables.selectAllVisibleReceivables")}
+                            checked={visibleRowsSelected}
+                            onChange={(event) => toggleVisibleReceivables(event.target.checked)}
+                            type="checkbox"
+                          />
+                        </th>
                         <th scope="col">{t("traderReceivables.columnReceivableNumber")}</th>
+                        <th scope="col">{t("traderReceivables.columnOrderSerialNumber")}</th>
                         <th scope="col">{t("traderReceivables.columnBusinessDate")}</th>
                         <th scope="col">{t("traderReceivables.columnSourceType")}</th>
                         <th scope="col">{t("traderReceivables.columnSourceReference")}</th>
@@ -2374,7 +2523,18 @@ function CollectMoneyDialog({
                     <tbody>
                       {outstandingRows.map((row) => (
                         <tr key={row.id}>
+                          <td>
+                            <input
+                              aria-label={t("traderReceivables.selectReceivable", {
+                                number: row.receivableNumber,
+                              })}
+                              checked={selectedReceivables.has(row.id)}
+                              onChange={(event) => toggleReceivable(row, event.target.checked)}
+                              type="checkbox"
+                            />
+                          </td>
                           <td className="mono">{row.receivableNumber}</td>
+                          <td className="mono">{row.orderSerialNumber ?? "-"}</td>
                           <td>{row.businessDate.slice(0, 10)}</td>
                           <td>{sourceTypeLabel(t, row.sourceType)}</td>
                           <td className="mono">{row.sourceReference ?? "-"}</td>
@@ -2387,7 +2547,7 @@ function CollectMoneyDialog({
                       ))}
                       {outstandingRows.length === 0 && outstandingError === undefined ? (
                         <tr>
-                          <td className="empty-state" colSpan={9}>
+                          <td className="empty-state" colSpan={11}>
                             {t("traderReceivables.noEligibleReceivables")}
                           </td>
                         </tr>
@@ -2395,6 +2555,20 @@ function CollectMoneyDialog({
                     </tbody>
                   </table>
                 </div>
+                <dl className="reconciliation-summary">
+                  <div className="detail-line">
+                    <dt>{t("traderReceivables.visibleOutstandingTotal")}</dt>
+                    <dd>{money(visibleOutstandingTotal)}</dd>
+                  </div>
+                  <div className="detail-line">
+                    <dt>{t("traderReceivables.selectedReceivables")}</dt>
+                    <dd>{selectedRows.length}</dd>
+                  </div>
+                  <div className="detail-line">
+                    <dt>{t("traderReceivables.selectedTotalAmount")}</dt>
+                    <dd>{money(selectedOutstandingTotal)}</dd>
+                  </div>
+                </dl>
                 {outstandingTotal <= 50 ? null : (
                   <nav aria-label={t("common.pagination")} className="pagination">
                     <button
@@ -2422,7 +2596,7 @@ function CollectMoneyDialog({
               </section>
 
               {/* Step 3 — Amount and allocation */}
-              <section className="workspace-step">
+              <section className="workspace-step trader-collection-amount-step">
                 <h3>{t("traderReceivables.stepAmountAllocation")}</h3>
                 <label className="field required-field">
                   <span>{t("traderReceivables.fieldAmountReceived")}</span>
@@ -2459,7 +2633,7 @@ function CollectMoneyDialog({
                           </tr>
                         </thead>
                         <tbody>
-                          {(proposal?.allocations ?? []).map((line) => {
+                          {allocationDisplayLines.map((line) => {
                             const current =
                               allocations.find((row) => row.receivableId === line.receivableId)
                                 ?.amount ?? line.proposedAmount;
@@ -2517,8 +2691,9 @@ function CollectMoneyDialog({
               </section>
 
               {/* Step 4 — Payment Details */}
-              <section className="workspace-step">
+              <section className="workspace-step trader-collection-payment-step">
                 <h3>{t("traderReceivables.stepPaymentDetails")}</h3>
+                <div className="trader-collection-payment-grid">
                 <label className="field required-field">
                   <span>{t("traderReceivables.fieldPaymentDate")}</span>
                   <input
@@ -2575,10 +2750,11 @@ function CollectMoneyDialog({
                     </label>
                   </>
                 )}
-                <label className="field">
+                <label className="field trader-collection-notes-field">
                   <span>{t("traderReceivables.fieldNotes")}</span>
                   <textarea onChange={(event) => setNotes(event.target.value)} value={notes} />
                 </label>
+                </div>
               </section>
 
               {/* Step 5 — Review + Confirm */}
@@ -3099,3 +3275,5 @@ function ReverseCollectionDialog({
     </Modal>
   );
 }
+
+

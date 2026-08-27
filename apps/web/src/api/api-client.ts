@@ -7,6 +7,7 @@ interface ApiErrorPayload {
     readonly code?: string;
     readonly details?: readonly string[];
     readonly message?: string;
+    readonly correlationId?: string;
   };
 }
 
@@ -16,6 +17,7 @@ export class ApiError extends Error {
     public readonly code: string,
     public readonly status: number,
     public readonly details?: readonly string[],
+    public readonly correlationId?: string,
   ) {
     super(message);
     this.name = "ApiError";
@@ -125,6 +127,7 @@ export class ApiClient {
           payload?.error?.code ?? "request_failed",
           response.status,
           payload?.error?.details,
+          payload?.error?.correlationId,
         );
       }
       return await response.blob();
@@ -191,6 +194,7 @@ export class ApiClient {
           payload?.error?.code ?? "request_failed",
           response.status,
           payload?.error?.details,
+          payload?.error?.correlationId,
         );
       }
       if (response.status === 204) return undefined as TResponse;

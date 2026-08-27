@@ -22,6 +22,7 @@ import { BlogModule } from "./blog/blog.module.js";
 import { AgentModule } from "./agent/agent.module.js";
 import { createHttpLoggerOptions } from "./logging/http-logger.config.js";
 import { ObservabilityModule } from "./observability/observability.module.js";
+import { CommerceCheckoutModule } from "./commerce-checkout/commerce-checkout.module.js";
 import { OperationsModule } from "./operations/operations.module.js";
 import { PlatformModule } from "./platform/platform.module.js";
 import { PushModule } from "./push/push.module.js";
@@ -29,6 +30,7 @@ import { RoleModule } from "./roles/role.module.js";
 import { MarketplaceModule } from "./marketplace/marketplace.module.js";
 import { StorefrontModule } from "./storefront/storefront.module.js";
 import { StoreOrderModule } from "./store-order/store-order.module.js";
+import { StoreOrderConversionModule } from "./store-order-conversion/store-order-conversion.module.js";
 import { SupportModule } from "./support/support.module.js";
 import { UserAdministrationModule } from "./users/user-administration.module.js";
 
@@ -58,6 +60,7 @@ import { UserAdministrationModule } from "./users/user-administration.module.js"
     AuthenticationModule,
     CommerceIntegrationModule,
     CommerceCustomerModule,
+    CommerceCheckoutModule,
     AccountingModule,
     CompanyConfigurationModule,
     CompanyProfileModule,
@@ -69,6 +72,7 @@ import { UserAdministrationModule } from "./users/user-administration.module.js"
     RoleModule,
     StorefrontModule,
     StoreOrderModule,
+    StoreOrderConversionModule,
     MarketplaceModule,
     SupportModule,
     UserAdministrationModule,

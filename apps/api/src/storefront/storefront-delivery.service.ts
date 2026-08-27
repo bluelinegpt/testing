@@ -99,8 +99,10 @@ export class StorefrontDeliveryService {
         enabledForStoreOrders: boolean;
         id: string;
         isDefaultForStoreOrders: boolean;
+        status: string;
       }>`
         select id,
+               status,
                enabled_for_store_orders as "enabledForStoreOrders",
                is_default_for_store_orders as "isDefaultForStoreOrders"
           from trader_delivery_company_relationships
@@ -111,6 +113,20 @@ export class StorefrontDeliveryService {
       if (row === undefined) throw this.relationshipNotFound();
 
       const enabled = input.enabledForStoreOrders ?? row.enabledForStoreOrders;
+      // A relationship that is not `active` (inactive/suspended/terminated) is
+      // already refused everywhere it is CONSUMED -- Store Order creation and
+      // Company-user Store access both require `status = 'active'`. Enabling
+      // it here would leave the settings screen and the enforcement points
+      // disagreeing: a Trader could flip it on, see it listed as enabled, and
+      // then have every Order attempt against it fail for a reason this
+      // screen never explained.
+      if (enabled && row.status !== "active") {
+        throw new ApplicationException(
+          "storefront_delivery_relationship_ineligible",
+          "This Delivery Company relationship is not active and cannot be enabled for Store Orders",
+          HttpStatus.CONFLICT,
+        );
+      }
       // Disabling clears the default — see the class comment. Stated as a
       // derivation rather than a separate UPDATE so no intermediate state ever
       // exists in which a disabled row is still the default.

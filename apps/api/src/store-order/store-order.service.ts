@@ -121,6 +121,18 @@ export interface CreateStoreOrderInput {
   readonly deliveryAddress: string;
   readonly deliveryArea: string;
   readonly deliveryCompanyId?: string;
+  /** The Delivery Company's own authoritative Trader service fee (Customer
+   * Commerce Prompt C3 corrective) -- a SEPARATE business concept from
+   * `customerDeliveryFee`, never derived from it. They are equal today only
+   * because no `delivery_fee_payer` split exists yet; a future fee-payer
+   * policy (Trader absorbs delivery, or a markup) will make them diverge,
+   * and this field is what lets C4's Delivery Order conversion read the
+   * actual Company fee without re-deriving it from what the Customer paid.
+   * Defaults to 0 -- correct only when no Delivery Company is selected
+   * (`deliveryCompanyId` absent); a caller that selects a Company MUST pass
+   * its resolved, priced fee here or the Store Order silently underrepresents
+   * what the Company is actually owed. */
+  readonly deliveryCompanyServiceFee?: number;
   readonly deliveryEmirate: string;
   readonly deliveryInstructions?: string;
   readonly deliveryLocationLink?: string;
@@ -151,12 +163,18 @@ export interface CreatedStoreOrder extends StoreOrderView {
 
 export interface StoreOrderView {
   readonly codTotal: string;
+  readonly createdAt: string;
   readonly customerDeliveryFee: string;
   readonly customerId: string | null;
   readonly customerMobile: string;
   readonly customerName: string;
+  readonly deliveryAddress: string;
+  readonly deliveryArea: string;
   readonly deliveryCompanyId: string | null;
   readonly deliveryCompanyServiceFee: string;
+  readonly deliveryEmirate: string;
+  readonly deliveryInstructions: string | null;
+  readonly deliveryLocationLink: string | null;
   readonly id: string;
   readonly items: readonly StoreOrderItemView[];
   readonly platformFee: string;
@@ -389,9 +407,23 @@ export class StoreOrderService {
           HttpStatus.BAD_REQUEST,
         );
       }
-      // §29's documented current rule: COD total = product subtotal + the
-      // customer-facing delivery amount. No Checkout pricing rule is
-      // invented here -- this matches the DB's own
+      // C3 corrective, Part D: a SEPARATE money field from
+      // `customerDeliveryFee` -- never derived from it, never defaulted to
+      // it. Only 0 is a valid default (no Delivery Company selected); a
+      // caller selecting a Company is expected to have already resolved and
+      // priced it (§22/§24), so a negative value here is rejected the exact
+      // same way a negative Customer fee is.
+      const deliveryCompanyServiceFee = input.deliveryCompanyServiceFee ?? 0;
+      if (deliveryCompanyServiceFee < 0) {
+        throw new ApplicationException(
+          "store_order_delivery_fee_invalid",
+          "The delivery company service fee cannot be negative",
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      // §25/§29's documented current rule: COD total = product subtotal +
+      // the customer-facing delivery amount ONLY -- the Company's own
+      // service fee is never added a second time, matching the DB's own
       // store_orders_cod_total_identity_check exactly.
       const codTotal = (productSubtotal + customerDeliveryFee).toFixed(2);
 
@@ -456,7 +488,7 @@ export class StoreOrderService {
           ${input.customerName}, ${normalizedMobile}, ${input.customerEmail ?? null},
           ${input.deliveryEmirate}, ${input.deliveryArea}, ${input.deliveryAddress},
           ${input.deliveryLocationLink ?? null}, ${input.deliveryInstructions ?? null},
-          ${productSubtotal.toFixed(2)}, ${customerDeliveryFee.toFixed(2)}, 0,
+          ${productSubtotal.toFixed(2)}, ${customerDeliveryFee.toFixed(2)}, ${deliveryCompanyServiceFee.toFixed(2)},
           0, ${codTotal},
           ${deliveryCompanyId}::uuid, ${deliveryCompanyRelationshipId}::uuid,
           ${tracking.hash}, ${now},
@@ -496,12 +528,18 @@ export class StoreOrderService {
 
       return {
         codTotal,
+        createdAt: now.toISOString(),
         customerDeliveryFee: customerDeliveryFee.toFixed(2),
         customerId: callerCustomerId ?? null,
         customerMobile: normalizedMobile,
         customerName: input.customerName,
+        deliveryAddress: input.deliveryAddress,
+        deliveryArea: input.deliveryArea,
         deliveryCompanyId,
-        deliveryCompanyServiceFee: "0.00",
+        deliveryCompanyServiceFee: deliveryCompanyServiceFee.toFixed(2),
+        deliveryEmirate: input.deliveryEmirate,
+        deliveryInstructions: input.deliveryInstructions ?? null,
+        deliveryLocationLink: input.deliveryLocationLink ?? null,
         id: storeOrderId,
         items: itemViews,
         platformFee: "0.00",
@@ -745,7 +783,11 @@ export class StoreOrderService {
     `.execute(this.database);
   }
 
-  private async loadCustomerOrderDetail(storeOrderId: string): Promise<CustomerOrderDetailView> {
+  /** Public: reused by `StoreOrderSubmissionService` (C3) to build the
+   * post-Place-Order confirmation response and the idempotent-replay
+   * response, from the exact same Customer-safe projection My Orders and
+   * guest tracking already use. */
+  public async loadCustomerOrderDetail(storeOrderId: string): Promise<CustomerOrderDetailView> {
     const order = await sql<{
       id: string;
       storeOrderNumber: string;
@@ -939,7 +981,10 @@ export class StoreOrderService {
     return `${counter.prefix}-${counter.nextValue.padStart(6, "0")}`;
   }
 
-  private async loadStoreOrder(storeOrderId: string): Promise<StoreOrderView> {
+  /** Public: reused by `StoreOrderSubmissionService` (Customer Commerce
+   * Prompt C3) to build its own Customer-safe response, including on an
+   * idempotent replay where no new Store Order is created. */
+  public async loadStoreOrder(storeOrderId: string): Promise<StoreOrderView> {
     const order = await sql<{
       id: string;
       storeOrderNumber: string;
@@ -956,6 +1001,12 @@ export class StoreOrderService {
       platformFee: string;
       codTotal: string;
       deliveryCompanyId: string | null;
+      deliveryEmirate: string;
+      deliveryArea: string;
+      deliveryAddress: string;
+      deliveryInstructions: string | null;
+      deliveryLocationLink: string | null;
+      createdAt: Date;
     }>`
       select id, store_order_number as "storeOrderNumber", trader_commerce_id as "traderCommerceId",
              storefront_id as "storefrontId", store_display_name_snapshot as "storeDisplayNameSnapshot",
@@ -964,7 +1015,10 @@ export class StoreOrderService {
              product_subtotal::text as "productSubtotal", customer_delivery_fee::text as "customerDeliveryFee",
              delivery_company_service_fee::text as "deliveryCompanyServiceFee",
              platform_fee::text as "platformFee", cod_total::text as "codTotal",
-             delivery_company_id as "deliveryCompanyId"
+             delivery_company_id as "deliveryCompanyId",
+             delivery_emirate as "deliveryEmirate", delivery_area as "deliveryArea",
+             delivery_address as "deliveryAddress", delivery_instructions as "deliveryInstructions",
+             delivery_location_link as "deliveryLocationLink", created_at as "createdAt"
         from store_orders where id = ${storeOrderId}::uuid
     `.execute(this.database);
     const orderRow = order.rows[0];
@@ -998,12 +1052,18 @@ export class StoreOrderService {
 
     return {
       codTotal: orderRow.codTotal,
+      createdAt: orderRow.createdAt.toISOString(),
       customerDeliveryFee: orderRow.customerDeliveryFee,
       customerId: orderRow.customerId,
       customerMobile: orderRow.customerMobile,
       customerName: orderRow.customerName,
+      deliveryAddress: orderRow.deliveryAddress,
+      deliveryArea: orderRow.deliveryArea,
       deliveryCompanyId: orderRow.deliveryCompanyId,
       deliveryCompanyServiceFee: orderRow.deliveryCompanyServiceFee,
+      deliveryEmirate: orderRow.deliveryEmirate,
+      deliveryInstructions: orderRow.deliveryInstructions,
+      deliveryLocationLink: orderRow.deliveryLocationLink,
       id: orderRow.id,
       items: items.rows,
       platformFee: orderRow.platformFee,
@@ -1014,5 +1074,117 @@ export class StoreOrderService {
       storefrontId: orderRow.storefrontId,
       traderCommerceId: orderRow.traderCommerceId,
     };
+  }
+
+  /**
+   * Customer Commerce Prompt C5, §10-13: paginated/filterable Trader Store
+   * Order inbox -- the read side `traderListStoreOrders` never had (§13:
+   * "Do not load an unlimited history"). Ownership scope is identical to
+   * `traderListStoreOrders`/`traderStoreOrderDetail` (`accessibleCommerceIds`),
+   * kept as a SEPARATE method rather than modifying those two: nothing in
+   * the codebase called them yet (confirmed by re-audit), so there is
+   * nothing to risk breaking, but a new method name makes that
+   * non-breaking choice explicit for the next reader rather than assumed.
+   */
+  public async traderStoreOrderPage(
+    callerTraderId: string | null,
+    companyId: string,
+    options: {
+      readonly page?: number;
+      readonly pageSize?: number;
+      readonly search?: string;
+      readonly status?: StoreOrderStatus;
+    } = {},
+  ): Promise<Page<StoreOrderView>> {
+    const page = Math.max(1, options.page ?? 1);
+    const pageSize = Math.min(MAX_PAGE_SIZE, Math.max(1, options.pageSize ?? DEFAULT_PAGE_SIZE));
+    const scope = accessibleCommerceIds({ callerTraderId, companyId });
+    const statusFilter = options.status === undefined ? sql`true` : sql`o.status = ${options.status}`;
+    const search = options.search?.trim();
+    const searchFilter =
+      search === undefined || search === ""
+        ? sql`true`
+        : sql`(o.store_order_number ilike ${`%${search}%`} or o.customer_name ilike ${`%${search}%`} or o.customer_mobile ilike ${`%${search}%`})`;
+
+    const total = await sql<{ count: string }>`
+      select count(*)::text as count from store_orders o
+       where o.trader_commerce_id in (${scope}) and ${statusFilter} and ${searchFilter}
+    `.execute(this.database);
+    const rows = await sql<{ id: string }>`
+      select o.id from store_orders o
+       where o.trader_commerce_id in (${scope}) and ${statusFilter} and ${searchFilter}
+       order by o.created_at desc
+       limit ${pageSize} offset ${(page - 1) * pageSize}
+    `.execute(this.database);
+    return {
+      items: await Promise.all(rows.rows.map((row) => this.loadStoreOrder(row.id))),
+      page,
+      pageSize,
+      total: Number(total.rows[0]?.count ?? "0"),
+    };
+  }
+
+  /**
+   * Customer Commerce Prompt C5, Part F/G/J: the three explicit Trader
+   * actions on a no-Delivery-Company Store Order -- deliberately NOT a
+   * generic "set lifecycle to X" endpoint (§50): each action is its own
+   * narrow, named transition with its own authorization and precondition,
+   * reusing the SAME race-safe `transitionStoreOrderStatus` (row lock +
+   * validated transition graph) every action funnels through.
+   */
+  public async traderAcceptStoreOrder(
+    callerTraderId: string | null,
+    companyId: string,
+    storeOrderId: string,
+  ): Promise<StoreOrderView> {
+    await this.assertTraderOwnsStoreOrder(callerTraderId, companyId, storeOrderId);
+    await this.transitionStoreOrderStatus(storeOrderId, "confirmed");
+    return this.loadStoreOrder(storeOrderId);
+  }
+
+  public async traderCancelStoreOrder(
+    callerTraderId: string | null,
+    companyId: string,
+    storeOrderId: string,
+  ): Promise<StoreOrderView> {
+    await this.assertTraderOwnsStoreOrder(callerTraderId, companyId, storeOrderId);
+    await this.transitionStoreOrderStatus(storeOrderId, "cancelled");
+    return this.loadStoreOrder(storeOrderId);
+  }
+
+  /** §32/§35-37: the Trader fulfilled a no-Company Store Order outside the
+   * Tawseelhub Delivery Company network. Terminal -- `completed_external`
+   * has no outgoing transitions in the lifecycle graph (§37: no re-open, no
+   * later conversion, no Company assignment). */
+  public async traderCompleteExternalStoreOrder(
+    callerTraderId: string | null,
+    companyId: string,
+    storeOrderId: string,
+  ): Promise<StoreOrderView> {
+    await this.assertTraderOwnsStoreOrder(callerTraderId, companyId, storeOrderId);
+    await this.transitionStoreOrderStatus(storeOrderId, "completed_external");
+    return this.loadStoreOrder(storeOrderId);
+  }
+
+  private async assertTraderOwnsStoreOrder(
+    callerTraderId: string | null,
+    companyId: string,
+    storeOrderId: string,
+  ): Promise<void> {
+    const result = await sql<{ id: string }>`
+      select o.id from store_orders o
+       where o.id = ${storeOrderId}::uuid
+         and o.trader_commerce_id in (${accessibleCommerceIds({ callerTraderId, companyId })})
+    `.execute(this.database);
+    if (result.rows[0] === undefined) {
+      // Deliberately the SAME "not found" a nonexistent id would produce --
+      // an unrelated Trader gets no signal that a different Trader's Store
+      // Order exists at all (§49).
+      throw new ApplicationException(
+        "store_order_not_found",
+        "The Store Order was not found",
+        HttpStatus.NOT_FOUND,
+      );
+    }
   }
 }

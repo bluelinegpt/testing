@@ -5,6 +5,16 @@ export const demoRequestStatuses = ["new","reviewing","contacted","qualified","d
 export const emirates = ["abu_dhabi","dubai","sharjah","ajman","umm_al_quwain","ras_al_khaimah","fujairah"] as const;
 export const contactMethods = ["phone","whatsapp","email"] as const;
 export const interestFeatures = ["order_management","driver_management","cod_collections","trader_settlements","accounting","payroll","reports","mobile_apps","trader_portal","storefront_commerce","integrations","other"] as const;
+/**
+ * Discriminates WHICH public-website form produced this lead, so a general
+ * Contact-page enquiry is never confused with an actual sales-qualified
+ * demo request -- same underlying "Website Lead" infrastructure (table,
+ * admin screen, no new architecture), but a distinct, filterable source and
+ * its own reference-number prefix (see demo-request.service.ts).
+ * `source` column itself is free text up to 80 chars with no CHECK
+ * constraint, so this allow-list is enforced here, at the API boundary.
+ */
+export const leadSources = ["public_website", "contact_page"] as const;
 
 const trim = ({ value }: { value: unknown }): unknown => typeof value === "string" ? value.trim() : value;
 
@@ -27,6 +37,7 @@ export class CreateDemoRequestDto {
   @IsIn([true]) public readonly consent!: true;
   @IsOptional() @Transform(trim) @IsString() @MaxLength(200) public readonly companyFax?: string;
   @Transform(trim) @IsString() @MaxLength(500) public readonly landingPage!: string;
+  @IsOptional() @IsIn(leadSources) public readonly source?: (typeof leadSources)[number];
   @IsOptional() @Transform(trim) @IsString() @MaxLength(1000) public readonly referrer?: string;
   @IsOptional() @Transform(trim) @IsString() @MaxLength(200) public readonly utmSource?: string;
   @IsOptional() @Transform(trim) @IsString() @MaxLength(200) public readonly utmMedium?: string;
@@ -42,6 +53,7 @@ export class DemoRequestListQueryDto {
   @IsOptional() @Transform(trim) @IsString() @MaxLength(120) public readonly country?: string;
   @IsOptional() @IsIn(emirates) public readonly emirate?: (typeof emirates)[number];
   @IsOptional() @IsIn(contactMethods) public readonly preferredContactMethod?: (typeof contactMethods)[number];
+  @IsOptional() @IsIn(leadSources) public readonly source?: (typeof leadSources)[number];
   @IsOptional() @Transform(trim) @IsString() @MaxLength(10) public readonly createdFrom?: string;
   @IsOptional() @Transform(trim) @IsString() @MaxLength(10) public readonly createdTo?: string;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) public readonly page?: number;

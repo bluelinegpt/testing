@@ -49,7 +49,6 @@ interface DriverRow {
   readonly driverName: string;
   readonly driverType: "employee" | "outsourced";
 }
-
 interface ExpenseRow {
   readonly amount: string;
   readonly businessDate: string;
@@ -59,6 +58,53 @@ interface ExpenseRow {
   readonly reference: string;
   readonly sourceId: string;
   readonly type: string;
+}
+
+interface TraderPaymentRow {
+  readonly amount: string;
+  readonly businessDate: string;
+  readonly calendarDate: string;
+  readonly customerName: string;
+  readonly orderId: string;
+  readonly orderNumber: string;
+  readonly orderSerialNumber: string | null;
+  readonly originalAmountDue: string;
+  readonly paymentMethod: "bank_transfer" | "cash";
+  readonly previouslyPaid: string;
+  readonly reference: string;
+  readonly referenceNumber: string | null;
+  readonly settlementId: string;
+  readonly settlementNumber: string;
+  readonly traderName: string;
+}
+
+interface TraderReceivableDueRow {
+  readonly amountCollected: string;
+  readonly businessDate: string;
+  readonly calendarDate: string;
+  readonly orderSerialNumber: string | null;
+  readonly originalAmountDue: string;
+  readonly outstandingAmount: string;
+  readonly reason: string;
+  readonly receivableId: string;
+  readonly receivableNumber: string;
+  readonly sourceReference: string | null;
+  readonly traderName: string;
+}
+
+interface TraderPayableDueRow {
+  readonly businessDate: string;
+  readonly calendarDate: string;
+  readonly customerName: string;
+  readonly orderId: string;
+  readonly orderNumber: string;
+  readonly orderSerialNumber: string | null;
+  readonly originalAmountDue: string;
+  readonly outstandingAmount: string;
+  readonly previouslyPaid: string;
+  readonly referenceNumber: string | null;
+  readonly settlementStatus: string;
+  readonly traderName: string;
 }
 
 interface DriverOrderRow {
@@ -85,6 +131,12 @@ interface ReportData {
   readonly totalDeliveryIncome: string;
   readonly totalExpenses: string;
   readonly totalOrders: number;
+  readonly totalTraderPayments?: string;
+  readonly totalTraderPayables?: string;
+  readonly totalTraderReceivables?: string;
+  readonly traderPayables?: readonly TraderPayableDueRow[];
+  readonly traderPayments?: readonly TraderPaymentRow[];
+  readonly traderReceivables?: readonly TraderReceivableDueRow[];
 }
 
 /** Where a Reference Number's exact source record lives, reusing the
@@ -199,6 +251,9 @@ export function DailyOperationsSummaryReport({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState<"pdf" | "print" | "xlsx">();
+  const [showTraderPayments, setShowTraderPayments] = useState(false);
+  const [showTraderPayables, setShowTraderPayables] = useState(false);
+  const [showTraderReceivables, setShowTraderReceivables] = useState(false);
   const [expandedDriverId, setExpandedDriverId] = useState<string>();
   const [driverOrders, setDriverOrders] = useState<readonly DriverOrderRow[]>();
   const [driverOrdersLoading, setDriverOrdersLoading] = useState(false);
@@ -227,12 +282,17 @@ export function DailyOperationsSummaryReport({
     };
   }, [api, dateMode]);
 
-  const query = () =>
-    new URLSearchParams({
+  const query = () => {
+    const params = new URLSearchParams({
       dateFrom: normalizeReportDateInput(dateFrom),
       dateTo: normalizeReportDateInput(dateTo),
       dateMode,
-    }).toString();
+    });
+    if (showTraderPayments) params.set("includeTraderPayments", "true");
+    if (showTraderPayables) params.set("includeTraderPayables", "true");
+    if (showTraderReceivables) params.set("includeTraderReceivables", "true");
+    return params.toString();
+  };
 
   const changeDateMode = (next: DateMode) => {
     setDateMode(next);
@@ -305,8 +365,19 @@ export function DailyOperationsSummaryReport({
     }
   };
 
-  const money = (value: string) => formatCurrency(value, "AED", locale);
-  const netLabel =
+  // Defensive: a row's money field can arrive null/undefined if a backend
+  // column is unexpectedly empty for a given record (observed for a Trader
+  // Payment row whose source Order predates the current financial model).
+  // Falling back to "0.00" keeps the report on screen instead of crashing
+  // the whole page over one row's missing amount.
+  const money = (value: string | null | undefined) => formatCurrency(value ?? "0.00", "AED", locale);
+  const traderPayments = report?.traderPayments ?? [];
+  const totalTraderPayments = report?.totalTraderPayments ?? "0.00";
+  const traderPayables = report?.traderPayables ?? [];
+  const totalTraderPayables = report?.totalTraderPayables ?? "0.00";
+  const traderReceivables = report?.traderReceivables ?? [];
+  const totalTraderReceivables = report?.totalTraderReceivables ?? "0.00";
+const netLabel =
     report === undefined
       ? ""
       : report.netStatus === "positive"
@@ -402,6 +473,30 @@ export function DailyOperationsSummaryReport({
               type="date"
               value={dateTo}
             />
+          </label>
+          <label className="field field-checkbox">
+            <input
+              checked={showTraderPayments}
+              onChange={(event) => setShowTraderPayments(event.target.checked)}
+              type="checkbox"
+            />
+            <span>{t("reports.dailyOperationsSummary.showTraderPayments")}</span>
+          </label>
+          <label className="field field-checkbox">
+            <input
+              checked={showTraderReceivables}
+              onChange={(event) => setShowTraderReceivables(event.target.checked)}
+              type="checkbox"
+            />
+            <span>{t("reports.dailyOperationsSummary.showMoneyToCollectFromTraders")}</span>
+          </label>
+          <label className="field field-checkbox">
+            <input
+              checked={showTraderPayables}
+              onChange={(event) => setShowTraderPayables(event.target.checked)}
+              type="checkbox"
+            />
+            <span>{t("reports.dailyOperationsSummary.showMoneyToPayToTraders")}</span>
           </label>
           <button
             className="button button-primary"
@@ -575,6 +670,205 @@ export function DailyOperationsSummaryReport({
             </div>
           </section>
 
+          {showTraderReceivables ? (
+            <section className="detail-section">
+              <h2>{t("reports.dailyOperationsSummary.moneyToCollectFromTraders")}</h2>
+              <p className="muted-text">{t("reports.dailyOperationsSummary.moneyToCollectFromTradersHelp")}</p>
+              <div className="table-frame">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>{t("configuration.businessDay.businessDate")}</th>
+                      <th>{t("configuration.businessDay.calendarDate")}</th>
+                      <th>{t("operations.trader")}</th>
+                      <th>{t("traderReceivables.columnReceivableNumber")}</th>
+                      <th>{t("orders.serialNumber")}</th>
+                      <th>{t("traderReceivables.columnSourceReference")}</th>
+                      <th>{t("traderReceivables.columnOriginalAmountDue")}</th>
+                      <th>{t("traderReceivables.columnPreviouslyCollected")}</th>
+                      <th>{t("traderReceivables.columnOutstandingAmount")}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {traderReceivables.length === 0 ? (
+                      <tr>
+                        <td colSpan={9}>{t("reports.dailyOperationsSummary.noData")}</td>
+                      </tr>
+                    ) : (
+                      traderReceivables.map((row) => (
+                        <tr key={row.receivableId}>
+                          <td>{row.businessDate}</td>
+                          <td>{row.calendarDate}</td>
+                          <td>{row.traderName}</td>
+                          <td>
+                            <button
+                              className="link-button"
+                              onClick={() => onNavigate(`/trader-receivables/${row.receivableId}`)}
+                              type="button"
+                            >
+                              {row.receivableNumber}
+                            </button>
+                          </td>
+                          <td>{row.orderSerialNumber ?? "—"}</td>
+                          <td>{row.sourceReference ?? "—"}</td>
+                          <td>{money(row.originalAmountDue)}</td>
+                          <td>{money(row.amountCollected)}</td>
+                          <td>{money(row.outstandingAmount)}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                  <tfoot>
+                    <tr>
+                      <td colSpan={8}>
+                        <strong>{t("reports.dailyOperationsSummary.totalMoneyToCollectFromTraders")}</strong>
+                      </td>
+                      <td>
+                        <strong>{money(totalTraderReceivables)}</strong>
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </section>
+          ) : null}
+          {showTraderPayables ? (
+            <section className="detail-section">
+              <h2>{t("reports.dailyOperationsSummary.moneyToPayToTraders")}</h2>
+              <p className="muted-text">{t("reports.dailyOperationsSummary.moneyToPayToTradersHelp")}</p>
+              <div className="table-frame">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>{t("configuration.businessDay.businessDate")}</th>
+                      <th>{t("configuration.businessDay.calendarDate")}</th>
+                      <th>{t("operations.trader")}</th>
+                      <th>{t("orders.serialNumber")}</th>
+                      <th>{t("operations.referenceNumber")}</th>
+                      <th>{t("operations.customer")}</th>
+                      <th>{t("traderReceivables.columnOriginalAmountDue")}</th>
+                      <th>{t("reports.dailyOperationsSummary.previouslyPaid")}</th>
+                      <th>{t("reports.dailyOperationsSummary.amountToPay")}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {traderPayables.length === 0 ? (
+                      <tr>
+                        <td colSpan={9}>{t("reports.dailyOperationsSummary.noData")}</td>
+                      </tr>
+                    ) : (
+                      traderPayables.map((row) => (
+                        <tr key={row.orderId}>
+                          <td>{row.businessDate}</td>
+                          <td>{row.calendarDate}</td>
+                          <td>{row.traderName}</td>
+                          <td>
+                            <button
+                              className="link-button"
+                              onClick={() => onNavigate(orderDetailPath(row.orderNumber))}
+                              type="button"
+                            >
+                              {row.orderSerialNumber ?? row.orderNumber}
+                            </button>
+                          </td>
+                          <td>{row.referenceNumber ?? "—"}</td>
+                          <td>{row.customerName}</td>
+                          <td>{money(row.originalAmountDue)}</td>
+                          <td>{money(row.previouslyPaid)}</td>
+                          <td>{money(row.outstandingAmount)}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                  <tfoot>
+                    <tr>
+                      <td colSpan={8}>
+                        <strong>{t("reports.dailyOperationsSummary.totalMoneyToPayToTraders")}</strong>
+                      </td>
+                      <td>
+                        <strong>{money(totalTraderPayables)}</strong>
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </section>
+          ) : null}
+          {showTraderPayments ? (
+            <section className="detail-section">
+              <h2>{t("reports.dailyOperationsSummary.traderPayments")}</h2>
+              <p className="muted-text">{t("reports.dailyOperationsSummary.traderPaymentsHelp")}</p>
+              <div className="table-frame">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>{t("configuration.businessDay.businessDate")}</th>
+                      <th>{t("configuration.businessDay.calendarDate")}</th>
+                      <th>{t("operations.trader")}</th>
+                      <th>{t("orders.serialNumber")}</th>
+                      <th>{t("operations.referenceNumber")}</th>
+                      <th>{t("operations.customer")}</th>
+                      <th>{t("traderReceivables.columnOriginalAmountDue")}</th>
+                      <th>{t("reports.dailyOperationsSummary.previouslyPaid")}</th>
+                      <th>{t("operations.amount")}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {traderPayments.length === 0 ? (
+                      <tr>
+                        <td colSpan={9}>{t("reports.dailyOperationsSummary.noData")}</td>
+                      </tr>
+                    ) : (
+                      traderPayments.map((row) => (
+                        <tr key={`${row.settlementId}-${row.orderId}`}>
+                          <td>{row.businessDate}</td>
+                          <td>{row.calendarDate}</td>
+                          <td>{row.traderName}</td>
+                          <td>
+                            <button
+                              className="link-button"
+                              onClick={() => onNavigate(orderDetailPath(row.orderNumber))}
+                              type="button"
+                            >
+                              {row.orderSerialNumber ?? row.orderNumber}
+                            </button>
+                          </td>
+                          <td>
+                            {row.referenceNumber ? (
+                              <button
+                                className="link-button"
+                                onClick={() => onNavigate(`/trader-settlements/${row.settlementId}`)}
+                                type="button"
+                              >
+                                {row.referenceNumber}
+                              </button>
+                            ) : (
+                              "—"
+                            )}
+                          </td>
+                          <td>{row.customerName}</td>
+                          <td>{money(row.originalAmountDue)}</td>
+                          <td>{money(row.previouslyPaid)}</td>
+                          <td>{money(row.amount)}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                  <tfoot>
+                    <tr>
+                      <td colSpan={8}>
+                        <strong>{t("reports.dailyOperationsSummary.totalTraderPayments")}</strong>
+                      </td>
+                      <td>
+                        <strong>{money(totalTraderPayments)}</strong>
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </section>
+          ) : null}
+
           <section className="detail-section">
             <h2>{t("reports.dailyOperationsSummary.summary")}</h2>
             <dl className="detail-grid">
@@ -590,6 +884,18 @@ export function DailyOperationsSummaryReport({
                 <dt>{t("reports.dailyOperationsSummary.totalExpenses")}</dt>
                 <dd>{money(report.totalExpenses)}</dd>
               </div>
+              {showTraderReceivables ? (
+                <div className="detail-line">
+                  <dt>{t("reports.dailyOperationsSummary.totalMoneyToCollectFromTraders")}</dt>
+                  <dd>{money(totalTraderReceivables)}</dd>
+                </div>
+              ) : null}
+              {showTraderPayables ? (
+                <div className="detail-line">
+                  <dt>{t("reports.dailyOperationsSummary.totalMoneyToPayToTraders")}</dt>
+                  <dd>{money(totalTraderPayables)}</dd>
+                </div>
+              ) : null}
               <div className="detail-line">
                 <dt>{t("reports.dailyOperationsSummary.netResult")}</dt>
                 <dd

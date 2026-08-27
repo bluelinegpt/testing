@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { ApiError, type ApiClient } from "../../api/api-client.js";
@@ -45,7 +45,8 @@ export interface ProductOptionGroup {
   readonly name: string;
   readonly values: readonly {
     readonly displayOrder: number;
-    readonly id?: string;
+    readonly id: string;
+    readonly isActive: boolean;
     readonly value: string;
   }[];
 }
@@ -196,9 +197,18 @@ export function ProductEditor({
   const [mediaType, setMediaType] = useState<"image" | "video">("image");
   const [mediaAlt, setMediaAlt] = useState("");
   const [posterUrl, setPosterUrl] = useState("");
+  // Real image upload -- separate from `mediaUrl`, which stays the video
+  // workflow (no video upload transport exists yet; see the Media section
+  // below).
+  const [selectedImageFile, setSelectedImageFile] = useState<File>();
+  const [imageUploadError, setImageUploadError] = useState<string>();
+  const [imageUploadBusy, setImageUploadBusy] = useState(false);
+  const imageInputRef = useRef<HTMLInputElement>(null);
   const [groupName, setGroupName] = useState("");
   const [groupRequired, setGroupRequired] = useState(false);
   const [valueDraft, setValueDraft] = useState<Record<string, string>>({});
+  const [renamingValueId, setRenamingValueId] = useState<string>();
+  const [renameValueDraft, setRenameValueDraft] = useState("");
 
   const canManage = hasStorefrontPermission(permissions, "storefront_products.manage");
   const taxonomy = useMarketplaceTaxonomy(api);
@@ -247,48 +257,91 @@ export function ProductEditor({
   const archived = product?.lifecycleStatus === "archived";
   const editable = canManage && !archived;
 
+  /**
+   * The fields `CreateProductDto` accepts. The create endpoint is
+   * deliberately a minimal document -- SEO, Marketplace classification and
+   * template attributes are Platform/update concerns -- and the global
+   * ValidationPipe runs `forbidNonWhitelisted`, so anything outside this list
+   * belongs in the follow-up PATCH below, never in the initial POST.
+   */
+  const createFields = [
+    "name",
+    "slug",
+    "productCode",
+    "sellingPrice",
+    "previousPrice",
+    "categoryId",
+    "shortDescription",
+    "fullDescription",
+    "sku",
+    "barcode",
+    "brand",
+  ] as const;
+
   const save = async () => {
     setBusy(true);
     setError(undefined);
     try {
-      if (activeId === undefined) {
-        const created = await api.post<ProductDetail>("operations/trader-storefront-products", {
-          ...draft,
-          storefrontId,
-        });
+      let id = activeId;
+      let expectedVersion = Number(product?.version ?? 1);
+      // Fields the CREATE call below already sent, so the follow-up PATCH
+      // does not immediately re-send an unchanged value as a redundant
+      // second write on every single creation.
+      let alreadySent: readonly string[] = [];
+      if (id === undefined) {
+        const body: Record<string, unknown> = { storefrontId };
+        for (const key of createFields) {
+          if (draft[key] !== undefined) body[key] = draft[key];
+        }
+        const created = await api.post<ProductDetail>(
+          "operations/trader-storefront-products",
+          body,
+        );
         setProduct(created);
-        onSaved();
-      } else {
-        // Marketplace classification lives on its own endpoint, because it is
-        // Platform-scoped rather than part of the Product document. Stripped
-        // from the Product payload so the Product API is not asked to validate
-        // a taxonomy it does not own.
-        const {
-          marketplaceCategoryId,
-          marketplaceSubcategoryId,
-          ...productDraft
-        } = draft as Record<string, unknown>;
-        await api.patch(`operations/trader-storefront-products/${activeId}`, {
+        id = created.id;
+        expectedVersion = Number(created.version);
+        alreadySent = Object.keys(body).filter((key) => key !== "storefrontId");
+      }
+
+      // Marketplace classification lives on its own endpoint, because it is
+      // Platform-scoped rather than part of the Product document. Stripped
+      // from the Product payload so the Product API is not asked to validate
+      // a taxonomy it does not own. Applied on the FIRST save too -- a Trader
+      // who classifies a Product before its first Save should not have that
+      // choice silently discarded because the create endpoint doesn't carry it.
+      //
+      // Everything else in `draft` -- including the fields the CREATE step
+      // above already sent -- goes through this PATCH unfiltered. Re-sending
+      // an already-created field here is a harmless no-op (`UpdateProductDto`
+      // accepts the full set); the narrower `createFields` allow-list above
+      // exists ONLY to keep the strict, whitelisted create POST from being
+      // rejected, and does not apply to this broader update endpoint.
+      const { marketplaceCategoryId, marketplaceSubcategoryId, ...productDraft } =
+        draft as Record<string, unknown>;
+      const remainder = Object.fromEntries(
+        Object.entries(productDraft).filter(([key]) => !alreadySent.includes(key)),
+      );
+      if (Object.keys(remainder).length > 0 || Object.keys(attributes).length > 0) {
+        await api.patch(`operations/trader-storefront-products/${id}`, {
           // Blank SEO text is "no override", which is null. The database
           // rejects a blank override outright, so clearing a field the Trader
           // no longer wants must not surface as a validation error.
-          ...blankSeoToNull(productDraft),
-          expectedVersion: Number(product?.version ?? 1),
+          ...blankSeoToNull(remainder),
+          expectedVersion,
           templateAttributes: attributes,
         });
-        if (marketplaceCategoryId !== undefined || marketplaceSubcategoryId !== undefined) {
-          await api.patch(`operations/marketplace/products/${activeId}/classification`, {
-            marketplaceCategoryId:
-              (marketplaceCategoryId as string | null | undefined) ??
-              product?.marketplaceCategoryId ??
-              null,
-            marketplaceSubcategoryId:
-              (marketplaceSubcategoryId as string | null | undefined) ?? null,
-          });
-        }
-        setReload((current) => current + 1);
-        onSaved();
       }
+      if (marketplaceCategoryId !== undefined || marketplaceSubcategoryId !== undefined) {
+        await api.patch(`operations/marketplace/products/${id}/classification`, {
+          marketplaceCategoryId:
+            (marketplaceCategoryId as string | null | undefined) ??
+            product?.marketplaceCategoryId ??
+            null,
+          marketplaceSubcategoryId: (marketplaceSubcategoryId as string | null | undefined) ?? null,
+        });
+      }
+      setReload((current) => current + 1);
+      onSaved();
       setDraft({});
     } catch (cause) {
       setError(cause instanceof ApiError ? cause.code : "product_save_failed");
@@ -310,6 +363,110 @@ export function ProductEditor({
       setBusy(false);
     }
   };
+
+  /** Same as `call`, but for the endpoints (renaming an option value) that are a PATCH, not a POST. */
+  const patchCall = async (path: string, body?: unknown) => {
+    setBusy(true);
+    setError(undefined);
+    try {
+      await api.patch(path, body ?? {});
+      setReload((current) => current + 1);
+      onSaved();
+    } catch (cause) {
+      setError(cause instanceof ApiError ? cause.code : "product_action_failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const ACCEPTED_IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp"];
+  const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+
+  function chooseProductImage(file: File | undefined) {
+    setImageUploadError(undefined);
+    if (file === undefined) {
+      setSelectedImageFile(undefined);
+      return;
+    }
+    if (!ACCEPTED_IMAGE_TYPES.includes(file.type)) {
+      setSelectedImageFile(undefined);
+      setImageUploadError("productCatalogue.errors.product_image_type");
+      return;
+    }
+    if (file.size > MAX_IMAGE_BYTES) {
+      setSelectedImageFile(undefined);
+      setImageUploadError("productCatalogue.errors.product_image_size");
+      return;
+    }
+    setSelectedImageFile(file);
+  }
+
+  /**
+   * Real Product image upload.
+   *
+   * Two calls, matching the two invariants the backend keeps separate: the
+   * FILE (Trader-Commerce-owned, byte-validated) is created first via the
+   * dedicated upload route, then attaching it to this Product -- the
+   * eight-image cap, the primary-image rule, display order -- goes through
+   * the SAME `addMedia` endpoint the URL/video workflow already uses. There
+   * is one place that owns those invariants, not two.
+   */
+  async function uploadProductImage() {
+    if (activeId === undefined || selectedImageFile === undefined) return;
+    setImageUploadBusy(true);
+    setImageUploadError(undefined);
+    try {
+      const form = new FormData();
+      form.append("file", selectedImageFile);
+      const { fileId } = await api.postMultipart<{ fileId: string }>(
+        `operations/trader-storefronts/products/${activeId}/media/image`,
+        form,
+      );
+      await api.post(`operations/trader-storefront-products/${activeId}/media`, {
+        ...(mediaAlt === "" ? {} : { altText: mediaAlt }),
+        fileId,
+        mediaType: "image",
+      });
+      setSelectedImageFile(undefined);
+      setMediaAlt("");
+      if (imageInputRef.current !== null) imageInputRef.current.value = "";
+      setReload((current) => current + 1);
+      onSaved();
+    } catch (cause) {
+      setImageUploadError(
+        cause instanceof ApiError
+          ? `productCatalogue.errors.${cause.code}`
+          : "productCatalogue.errors.product_action_failed",
+      );
+    } finally {
+      setImageUploadBusy(false);
+    }
+  }
+
+  /**
+   * Move a Product image (or option group/value) up or down.
+   *
+   * The `reorder` endpoints accept a batch of entries and renumber whatever
+   * is sent; sending only the ONE moved row's `displayOrder ± 1` is a no-op
+   * whenever siblings are tied (every freshly-added row defaults to the same
+   * `displayOrder`) -- the exact class of bug found and fixed for Store
+   * Categories in T3. Moving within the CURRENTLY DISPLAYED order and
+   * renumbering the whole list sequentially guarantees the move is visible
+   * regardless of the values rows started with.
+   */
+  function reorderedEntries<T extends { readonly id: string }>(
+    items: readonly T[],
+    itemId: string,
+    delta: number,
+  ): readonly { readonly displayOrder: number; readonly id: string }[] | undefined {
+    const from = items.findIndex((entry) => entry.id === itemId);
+    const to = from + delta;
+    if (from === -1 || to < 0 || to >= items.length) return undefined;
+    const reordered = [...items];
+    const [moved] = reordered.splice(from, 1);
+    reordered.splice(to, 0, moved!);
+    return reordered.map((entry, index) => ({ displayOrder: index, id: entry.id }));
+  }
 
   const images = (product?.media ?? []).filter(
     (entry) => entry.mediaType === "image" && entry.isActive,
@@ -388,6 +545,7 @@ export function ProductEditor({
           />
         </label>
         <button
+          className="button button-secondary"
           onClick={() => setDraft({ ...draft, slug: suggestProductSlug(value("name")) })}
           type="button"
         >
@@ -584,10 +742,6 @@ export function ProductEditor({
           {/* 4. Media */}
           <fieldset disabled={!editable || busy}>
             <legend>{t("productCatalogue.editor.sections.media")}</legend>
-            {/* No upload infrastructure exists, so this is explicitly a
-                REFERENCE workflow: an https or storage-relative address the
-                server validates. Nothing here uploads a file. */}
-            <p className="form-hint">{t("productCatalogue.editor.mediaReferenceOnly")}</p>
             <p className="form-hint">
               {t("productCatalogue.editor.imageCount", {
                 count: images.length,
@@ -605,41 +759,78 @@ export function ProductEditor({
               </select>
             </label>
             <label>
-              {t("productCatalogue.editor.mediaUrl")}
-              <input onChange={(event) => setMediaUrl(event.target.value)} value={mediaUrl} />
-            </label>
-            <label>
               {t("productCatalogue.editor.altText")}
               <input onChange={(event) => setMediaAlt(event.target.value)} value={mediaAlt} />
             </label>
-            {mediaType === "video" ? (
-              <label>
-                {t("productCatalogue.editor.posterUrl")}
-                <input onChange={(event) => setPosterUrl(event.target.value)} value={posterUrl} />
-              </label>
-            ) : null}
-            <button
-              disabled={
-                mediaUrl.trim() === "" ||
-                (mediaType === "image" && images.length >= maximumImages) ||
-                (mediaType === "video" && video !== undefined)
-              }
-              onClick={() =>
-                void call(`operations/trader-storefront-products/${activeId}/media`, {
-                  ...(mediaAlt === "" ? {} : { altText: mediaAlt }),
-                  mediaType,
-                  mediaUrl,
-                  ...(mediaType === "video" && posterUrl !== "" ? { posterUrl } : {}),
-                }).then(() => {
-                  setMediaUrl("");
-                  setMediaAlt("");
-                  setPosterUrl("");
-                })
-              }
-              type="button"
-            >
-              {t("productCatalogue.editor.addMedia")}
-            </button>
+            {mediaType === "image" ? (
+              <>
+                {/* A real upload: the file is stored through the Trader's own
+                    Commerce media endpoint, then attached to this Product
+                    through the same `addMedia` call the video/URL workflow
+                    below still uses -- one place owns the eight-image cap,
+                    the primary rule and the display order. */}
+                <p className="form-hint">{t("productCatalogue.editor.imageUploadHint")}</p>
+                <label>
+                  {t("productCatalogue.editor.chooseImageFile")}
+                  <input
+                    accept="image/png,image/jpeg,image/webp"
+                    disabled={images.length >= maximumImages}
+                    onChange={(event) => chooseProductImage(event.target.files?.[0])}
+                    ref={imageInputRef}
+                    type="file"
+                  />
+                </label>
+                {imageUploadError !== undefined ? (
+                  <p className="form-field-error" role="alert">
+                    {t(imageUploadError, t("common.operationFailed"))}
+                  </p>
+                ) : null}
+                <button
+                  className="button button-primary"
+                  disabled={
+                    selectedImageFile === undefined ||
+                    imageUploadBusy ||
+                    images.length >= maximumImages
+                  }
+                  onClick={() => void uploadProductImage()}
+                  type="button"
+                >
+                  {imageUploadBusy
+                    ? t("common.working")
+                    : t("productCatalogue.editor.uploadImage")}
+                </button>
+              </>
+            ) : (
+              <>
+                <label>
+                  {t("productCatalogue.editor.mediaUrl")}
+                  <input onChange={(event) => setMediaUrl(event.target.value)} value={mediaUrl} />
+                </label>
+                <label>
+                  {t("productCatalogue.editor.posterUrl")}
+                  <input onChange={(event) => setPosterUrl(event.target.value)} value={posterUrl} />
+                </label>
+                <button
+                  className="button button-primary"
+                  disabled={mediaUrl.trim() === "" || video !== undefined}
+                  onClick={() =>
+                    void call(`operations/trader-storefront-products/${activeId}/media`, {
+                      ...(mediaAlt === "" ? {} : { altText: mediaAlt }),
+                      mediaType: "video",
+                      mediaUrl,
+                      ...(posterUrl !== "" ? { posterUrl } : {}),
+                    }).then(() => {
+                      setMediaUrl("");
+                      setMediaAlt("");
+                      setPosterUrl("");
+                    })
+                  }
+                  type="button"
+                >
+                  {t("productCatalogue.editor.addMedia")}
+                </button>
+              </>
+            )}
             {images.length >= maximumImages ? (
               <p className="form-field-error" role="status">
                 {t("productCatalogue.errors.product_media_image_limit")}
@@ -652,9 +843,9 @@ export function ProductEditor({
             ) : null}
 
             <ul className="product-media-list">
-              {(product?.media ?? [])
-                .filter((entry) => entry.isActive)
-                .map((entry) => (
+              {(() => {
+                const active = (product?.media ?? []).filter((entry) => entry.isActive);
+                return active.map((entry, index) => (
                   <li key={entry.id}>
                     {entry.mediaType === "image" ? (
                       <img alt={entry.altText ?? ""} height={64} src={entry.url} />
@@ -671,19 +862,16 @@ export function ProductEditor({
                       aria-label={t("productCatalogue.editor.moveMediaUp", {
                         name: entry.altText ?? entry.mediaType,
                       })}
-                      onClick={() =>
+                      className="button button-secondary"
+                      disabled={index === 0}
+                      onClick={() => {
+                        const entries = reorderedEntries(active, entry.id, -1);
+                        if (entries === undefined) return;
                         void call(
                           `operations/trader-storefront-products/${activeId}/media/reorder`,
-                          {
-                            entries: [
-                              {
-                                displayOrder: Math.max(0, entry.displayOrder - 1),
-                                id: entry.id,
-                              },
-                            ],
-                          },
-                        )
-                      }
+                          { entries },
+                        );
+                      }}
                       type="button"
                     >
                       {t("productCatalogue.editor.moveUp")}
@@ -692,18 +880,23 @@ export function ProductEditor({
                       aria-label={t("productCatalogue.editor.moveMediaDown", {
                         name: entry.altText ?? entry.mediaType,
                       })}
-                      onClick={() =>
+                      className="button button-secondary"
+                      disabled={index === active.length - 1}
+                      onClick={() => {
+                        const entries = reorderedEntries(active, entry.id, 1);
+                        if (entries === undefined) return;
                         void call(
                           `operations/trader-storefront-products/${activeId}/media/reorder`,
-                          { entries: [{ displayOrder: entry.displayOrder + 1, id: entry.id }] },
-                        )
-                      }
+                          { entries },
+                        );
+                      }}
                       type="button"
                     >
                       {t("productCatalogue.editor.moveDown")}
                     </button>
                     {entry.mediaType === "image" && !entry.isPrimary ? (
                       <button
+                        className="button button-secondary"
                         onClick={() =>
                           void call(
                             `operations/trader-storefront-products/media/${entry.id}/primary`,
@@ -715,6 +908,7 @@ export function ProductEditor({
                       </button>
                     ) : null}
                     <button
+                      className="button button-secondary"
                       onClick={() =>
                         void call(`operations/trader-storefront-products/media/${entry.id}/remove`)
                       }
@@ -723,7 +917,8 @@ export function ProductEditor({
                       {t("productCatalogue.editor.removeMedia")}
                     </button>
                   </li>
-                ))}
+                ));
+              })()}
             </ul>
           </fieldset>
 
@@ -745,6 +940,7 @@ export function ProductEditor({
             </label>
             <p className="form-hint">{t("productCatalogue.editor.optionRequiredHint")}</p>
             <button
+              className="button button-primary"
               disabled={groupName.trim() === ""}
               onClick={() =>
                 void call(
@@ -760,89 +956,196 @@ export function ProductEditor({
               {t("productCatalogue.editor.addOptionGroup")}
             </button>
             <ul className="product-option-list">
-              {(product?.options ?? []).map((group) => (
-                <li key={group.id}>
-                  <strong>{group.name}</strong>
-                  <span>
-                    {group.isRequired
-                      ? t("productCatalogue.editor.required")
-                      : t("productCatalogue.editor.optional")}
-                  </span>
-                  <span>{group.values.map((entry) => entry.value).join(", ")}</span>
-                  <button
-                    aria-label={t("productCatalogue.editor.moveGroupUp", { name: group.name })}
-                    onClick={() =>
-                      void call(
-                        `operations/trader-storefront-products/${activeId}/option-groups/reorder`,
-                        {
-                          entries: [
-                            {
-                              displayOrder: Math.max(0, group.displayOrder - 1),
-                              id: group.id,
-                            },
-                          ],
-                        },
-                      )
-                    }
-                    type="button"
-                  >
-                    {t("productCatalogue.editor.moveUp")}
-                  </button>
-                  <button
-                    aria-label={t("productCatalogue.editor.moveGroupDown", { name: group.name })}
-                    onClick={() =>
-                      void call(
-                        `operations/trader-storefront-products/${activeId}/option-groups/reorder`,
-                        { entries: [{ displayOrder: group.displayOrder + 1, id: group.id }] },
-                      )
-                    }
-                    type="button"
-                  >
-                    {t("productCatalogue.editor.moveDown")}
-                  </button>
+              {(() => {
+                const groups = product?.options ?? [];
+                return groups.map((group, groupIndex) => {
+                  const activeValues = group.values.filter((entry) => entry.isActive);
+                  return (
+                    <li key={group.id}>
+                      <strong>{group.name}</strong>
+                      <span>
+                        {group.isRequired
+                          ? t("productCatalogue.editor.required")
+                          : t("productCatalogue.editor.optional")}
+                      </span>
+                      {/* Move controls are ordinary buttons, so keyboard and
+                          screen-reader users get the same capability a
+                          drag-and-drop surface would otherwise withhold. */}
+                      <button
+                        aria-label={t("productCatalogue.editor.moveGroupUp", { name: group.name })}
+                        className="button button-secondary"
+                        disabled={groupIndex === 0}
+                        onClick={() => {
+                          const entries = reorderedEntries(groups, group.id, -1);
+                          if (entries === undefined) return;
+                          void call(
+                            `operations/trader-storefront-products/${activeId}/option-groups/reorder`,
+                            { entries },
+                          );
+                        }}
+                        type="button"
+                      >
+                        {t("productCatalogue.editor.moveUp")}
+                      </button>
+                      <button
+                        aria-label={t("productCatalogue.editor.moveGroupDown", {
+                          name: group.name,
+                        })}
+                        className="button button-secondary"
+                        disabled={groupIndex === groups.length - 1}
+                        onClick={() => {
+                          const entries = reorderedEntries(groups, group.id, 1);
+                          if (entries === undefined) return;
+                          void call(
+                            `operations/trader-storefront-products/${activeId}/option-groups/reorder`,
+                            { entries },
+                          );
+                        }}
+                        type="button"
+                      >
+                        {t("productCatalogue.editor.moveDown")}
+                      </button>
+                      <button
+                        className="button button-secondary"
+                        onClick={() =>
+                          void call(
+                            `operations/trader-storefront-products/option-groups/${group.id}/active`,
+                            { isActive: !group.isActive },
+                          )
+                        }
+                        type="button"
+                      >
+                        {group.isActive
+                          ? t("productCatalogue.editor.deactivateGroup")
+                          : t("productCatalogue.editor.activateGroup")}
+                      </button>
 
-                  <label>
-                    {t("productCatalogue.editor.optionValue")}
-                    <input
-                      onChange={(event) =>
-                        setValueDraft({ ...valueDraft, [group.id]: event.target.value })
-                      }
-                      value={valueDraft[group.id] ?? ""}
-                    />
-                  </label>
-                  <button
-                    disabled={(valueDraft[group.id] ?? "").trim() === ""}
-                    onClick={() =>
-                      void call(
-                        `operations/trader-storefront-products/option-groups/${group.id}/values`,
-                        { value: valueDraft[group.id] },
-                      ).then(() => setValueDraft({ ...valueDraft, [group.id]: "" }))
-                    }
-                    type="button"
-                  >
-                    {t("productCatalogue.editor.addOptionValue")}
-                  </button>
-                  <button
-                    onClick={() =>
-                      void call(
-                        `operations/trader-storefront-products/option-groups/${group.id}/active`,
-                        { isActive: !group.isActive },
-                      )
-                    }
-                    type="button"
-                  >
-                    {group.isActive
-                      ? t("productCatalogue.editor.deactivateGroup")
-                      : t("productCatalogue.editor.activateGroup")}
-                  </button>
-                </li>
-              ))}
+                      <ul className="product-option-value-list">
+                        {activeValues.map((entry, valueIndex) =>
+                          renamingValueId === entry.id ? (
+                            <li key={entry.id}>
+                              <input
+                                onChange={(event) => setRenameValueDraft(event.target.value)}
+                                value={renameValueDraft}
+                              />
+                              <button
+                                className="button button-primary"
+                                disabled={renameValueDraft.trim() === ""}
+                                onClick={() =>
+                                  void patchCall(
+                                    `operations/trader-storefront-products/option-values/${entry.id}`,
+                                    { value: renameValueDraft },
+                                  ).then(() => setRenamingValueId(undefined))
+                                }
+                                type="button"
+                              >
+                                {t("common.save")}
+                              </button>
+                              <button
+                                className="button button-secondary"
+                                onClick={() => setRenamingValueId(undefined)}
+                                type="button"
+                              >
+                                {t("common.cancel")}
+                              </button>
+                            </li>
+                          ) : (
+                            <li key={entry.id}>
+                              <span>{entry.value}</span>
+                              <button
+                                aria-label={t("productCatalogue.editor.moveValueUp", {
+                                  name: entry.value,
+                                })}
+                                className="button button-secondary"
+                                disabled={valueIndex === 0}
+                                onClick={() => {
+                                  const entries = reorderedEntries(activeValues, entry.id, -1);
+                                  if (entries === undefined) return;
+                                  void call(
+                                    `operations/trader-storefront-products/option-groups/${group.id}/values/reorder`,
+                                    { entries },
+                                  );
+                                }}
+                                type="button"
+                              >
+                                {t("productCatalogue.editor.moveUp")}
+                              </button>
+                              <button
+                                aria-label={t("productCatalogue.editor.moveValueDown", {
+                                  name: entry.value,
+                                })}
+                                className="button button-secondary"
+                                disabled={valueIndex === activeValues.length - 1}
+                                onClick={() => {
+                                  const entries = reorderedEntries(activeValues, entry.id, 1);
+                                  if (entries === undefined) return;
+                                  void call(
+                                    `operations/trader-storefront-products/option-groups/${group.id}/values/reorder`,
+                                    { entries },
+                                  );
+                                }}
+                                type="button"
+                              >
+                                {t("productCatalogue.editor.moveDown")}
+                              </button>
+                              <button
+                                className="button button-secondary"
+                                onClick={() => {
+                                  setRenamingValueId(entry.id);
+                                  setRenameValueDraft(entry.value);
+                                }}
+                                type="button"
+                              >
+                                {t("common.edit")}
+                              </button>
+                              <button
+                                className="button button-secondary"
+                                onClick={() =>
+                                  void call(
+                                    `operations/trader-storefront-products/option-values/${entry.id}/remove`,
+                                  )
+                                }
+                                type="button"
+                              >
+                                {t("productCatalogue.editor.removeValue")}
+                              </button>
+                            </li>
+                          ),
+                        )}
+                      </ul>
+
+                      <label>
+                        {t("productCatalogue.editor.optionValue")}
+                        <input
+                          onChange={(event) =>
+                            setValueDraft({ ...valueDraft, [group.id]: event.target.value })
+                          }
+                          value={valueDraft[group.id] ?? ""}
+                        />
+                      </label>
+                      <button
+                        className="button button-secondary"
+                        disabled={(valueDraft[group.id] ?? "").trim() === ""}
+                        onClick={() =>
+                          void call(
+                            `operations/trader-storefront-products/option-groups/${group.id}/values`,
+                            { value: valueDraft[group.id] },
+                          ).then(() => setValueDraft({ ...valueDraft, [group.id]: "" }))
+                        }
+                        type="button"
+                      >
+                        {t("productCatalogue.editor.addOptionValue")}
+                      </button>
+                    </li>
+                  );
+                });
+              })()}
             </ul>
           </fieldset>
         </>
       )}
 
-      <button onClick={onClose} type="button">
+      <button className="button button-secondary" onClick={onClose} type="button">
         {t("common.close")}
       </button>
     </section>

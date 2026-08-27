@@ -90,3 +90,37 @@ pattern to copy for a new app. Backend 500s are captured automatically by
 
 A new app is not done until its crash reporting is wired in, the same way
 it is not done without a version badge.
+
+Every centrally reported error is redacted before it is written
+(`apps/api/src/observability/error-report-redaction.ts` — targets
+`password`/`authorization`/`cookie`/`accessToken`/`refreshToken`/
+`resetToken`/`apiKey`/`secret`/`token` and bare `Bearer` values in the
+`message`/`stack`/`path` fields). Both public error-report routes are
+rate-limited (`@Throttle`) so a looping frontend failure cannot flood the
+Platform inbox. **Known gap, not yet fixed** — `apps/public-web`'s
+`installCrashReporting()` (`apps/public-web/src/error-reporting.ts`) posts a
+payload shape (`{message, stack, url, app}`) that does not match
+`ReportClientErrorDto`, and `'public-web'` is not an allowed `source_app`
+(neither the DTO's `@IsIn` list nor the `client_error_reports.source_app`
+CHECK constraint include it) — every report from that app currently fails
+validation silently. Fixing it needs an additive migration widening the
+CHECK constraint plus the DTO's allowed values; that has not been applied
+without explicit approval (see the constraint's own migration file for the
+exact `alter table ... drop constraint ... add constraint` this would need).
+
+**Every new Tawseelhub feature must integrate with this existing centralized
+Platform Error Handler for unexpected failures.** Before shipping a feature,
+be able to answer: what unexpected errors can it produce; how are they
+reported centrally (usually: nothing extra needed — an uncaught exception
+already reaches `ApiExceptionFilter` on the backend, or the nearest error
+boundary on the frontend); what expected validation/business errors are
+deliberately excluded (missing required field, invalid credentials, 404,
+duplicate reference, unauthorized, and similar stay as normal 4xx responses
+or local UI state, never a crash report); what sensitive data is redacted
+(handled automatically by `error-report-redaction.ts` for the fields listed
+above — do not log secrets outside that path either); what correlation
+context survives (the `x-correlation-id` request header / `request.id`,
+already threaded through automatically). Reuse this global/shared reporting
+path — do not build a module-specific error system, and do not add a second
+telemetry platform (Sentry, Crashlytics, Rollbar, Bugsnag, a new error
+table) without explicit approval.

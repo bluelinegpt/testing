@@ -76,6 +76,7 @@ interface ReportMetadata {
     readonly table: string;
   }[];
   readonly businessDate: string;
+  readonly dateBasis: "business" | "calendar";
   readonly businessDayStart: string;
   readonly displayEnd: string;
   readonly endUtc: string;
@@ -125,6 +126,7 @@ interface DrillDownRow {
 interface Filters {
   readonly accountId: string;
   readonly businessDate: string;
+  readonly dateBasis: "business" | "calendar";
   readonly partyId: string;
   readonly partyType: string;
   readonly paymentMethod: string;
@@ -141,7 +143,10 @@ function todayIso(): string {
 }
 
 function query(filters: Filters, extra: Readonly<Record<string, string>> = {}): string {
-  const parameters = new URLSearchParams({ businessDate: filters.businessDate });
+  const parameters = new URLSearchParams({
+    businessDate: filters.businessDate,
+    dateBasis: filters.dateBasis,
+  });
   if (filters.accountId !== "") parameters.set("accountId", filters.accountId);
   if (filters.paymentMethod !== "") parameters.set("paymentMethod", filters.paymentMethod);
   if (filters.partyType !== "") parameters.set("partyType", filters.partyType);
@@ -155,6 +160,7 @@ export function DailyCashActivityPage({ api }: { readonly api: ApiClient }) {
   const [draft, setDraft] = useState<Filters>(() => ({
     accountId: "",
     businessDate: todayIso(),
+    dateBasis: "calendar",
     partyId: "",
     partyType: "",
     paymentMethod: "",
@@ -292,6 +298,7 @@ export function DailyCashActivityPage({ api }: { readonly api: ApiClient }) {
     const reset: Filters = {
       accountId: "",
       businessDate: draft.businessDate,
+      dateBasis: "calendar",
       partyId: "",
       partyType: "",
       paymentMethod: "",
@@ -326,6 +333,21 @@ export function DailyCashActivityPage({ api }: { readonly api: ApiClient }) {
             type="date"
             value={draft.businessDate}
           />
+        </label>
+        <label>
+          {t("dailyCashActivity.filters.dateBasis")}
+          <select
+            onChange={(event) =>
+              setDraft({
+                ...draft,
+                dateBasis: event.target.value as "business" | "calendar",
+              })
+            }
+            value={draft.dateBasis}
+          >
+            <option value="calendar">{t("dailyCashActivity.dateBasis.calendar")}</option>
+            <option value="business">{t("dailyCashActivity.dateBasis.business")}</option>
+          </select>
         </label>
         <label>
           {t("dailyCashActivity.filters.account")}
@@ -469,6 +491,7 @@ export function DailyCashActivityPage({ api }: { readonly api: ApiClient }) {
               {(
                 [
                   ["businessDate", report.metadata.businessDate],
+                  ["dateBasis", t(`dailyCashActivity.dateBasis.${report.metadata.dateBasis}`)],
                   ["windowStart", report.metadata.startUtc],
                   ["windowEnd", report.metadata.displayEnd],
                   ["timezone", report.metadata.timezone],

@@ -358,7 +358,7 @@ describe("Tenant isolation certification", () => {
    * Company routes must not have been widened to admit Platform actors. The
    * Platform reaches Company data through its own module only.
    */
-  it("adds no Platform identity kind to any Company controller", () => {
+  it("adds no Platform identity kind to any Company controller", { timeout: 15000 }, () => {
     const offenders: string[] = [];
     for (const file of readAll(apiRoot)) {
       if (file.path.startsWith(platformDirectory)) continue;

@@ -1002,6 +1002,9 @@ function CreateDriverCollectionDialog({
 
   // Step 2 — Payment Method (Cash/Visa), immediately after Driver.
   const [paymentMethod, setPaymentMethod] = useState<"cash" | "visa">("cash");
+  const [bankAccounts, setBankAccounts] = useState<readonly { id: string; name: string }[]>([]);
+  const [selectedBankAccountId, setSelectedBankAccountId] = useState("");
+  const [bankReference, setBankReference] = useState("");
 
   // Step 3 — Eligible Orders.
   const [ordersPage, setOrdersPage] = useState<PagedResponse<EligibleOrderRow>>();
@@ -1091,6 +1094,19 @@ function CreateDriverCollectionDialog({
       .catch(() => undefined);
   }, [api]);
 
+  // Load bank accounts for Visa/Bank Transfer payments
+  useEffect(() => {
+    void api
+      .get<readonly { id: string; accountName: string; bankName: string }[]>(
+        "operations/accounting/cash-bank/bank-accounts?activeOnly=true",
+      )
+      .then((items) => setBankAccounts(items.map((item) => ({
+        id: item.id,
+        name: `${item.accountName} (${item.bankName})`
+      }))))
+      .catch(() => setBankAccounts([]));
+  }, [api]);
+
   const loadOrders = useCallback(() => {
     if (driver === undefined) return;
     void api
@@ -1121,6 +1137,8 @@ function CreateDriverCollectionDialog({
     setSelectedIds(new Set());
     setPreview(undefined);
     setManualDriverFeeAllocations(undefined);
+    setSelectedBankAccountId("");
+    setBankReference("");
     loadOrders();
   };
 
@@ -1198,22 +1216,41 @@ function CreateDriverCollectionDialog({
   const netExpected = preview === undefined ? 0 : Number(preview.netAmountExpected);
   const difference = money(Number(money(actualReceived || 0)) - netExpected);
 
+  const paymentRow: any = {
+    amount: Number(money(actualReceived)),
+    paymentMethod: paymentMethod === "visa" ? "bank_transfer" : "cash",
+  };
+  if (paymentMethod === "visa" && selectedBankAccountId) {
+    paymentRow.bankAccountId = selectedBankAccountId;
+    const trimmedRef = (bankReference ?? "").trim();
+    if (trimmedRef) {
+      paymentRow.bankReference = trimmedRef;
+    } else {
+      const today = new Date().toISOString().split("T")[0] as string;
+      const dateOnly = today.replace(/-/g, "");
+      const random = Math.random().toString(16).substring(2, 8).toUpperCase();
+      paymentRow.bankReference = "REF-" + dateOnly + "-" + random;
+    }
+  }
+
   const confirmPayload = {
     ...selection,
     collectionPaymentMethod: paymentMethod,
     driverFeeAllocations: manualDriverFeeAllocations,
     driverFeeOffsetAmount: Number(money(driverFeeOffset)),
     expenses: cleanExpenses,
-    payments:
-      actualReceived.trim() === ""
-        ? []
-        : [{ amount: Number(money(actualReceived)), paymentMethod: "cash" as const }],
+    payments: actualReceived.trim() === "" ? [] : [paymentRow],
   };
   const fingerprint = `${paymentMethod}|${materialFingerprint({
     excludedOrderIds: [],
     expenses: cleanExpenses.map((row) => ({ ...row, amount: String(row.amount) })),
     orderIds: [...selectedIds],
-    payments: confirmPayload.payments.map((row) => ({ ...row, amount: String(row.amount) })),
+    payments: confirmPayload.payments.map((row) => ({
+      amount: String(row.amount),
+      paymentMethod: row.paymentMethod,
+      bankAccountId: (row as any).bankAccountId,
+      bankReference: (row as any).bankReference || undefined
+    })),
     driverFeeOffsetAmount: driverFeeOffset,
     driverFeeAllocations: manualDriverFeeAllocations,
     selectionMode: "ids",
@@ -1227,6 +1264,7 @@ function CreateDriverCollectionDialog({
     expenseNeedingDescription === undefined &&
     actualReceived.trim() !== "" &&
     Number(difference) === 0 &&
+    (paymentMethod === "cash" || selectedBankAccountId !== "") &&
     !saving;
 
   const confirm = async () => {
@@ -1256,7 +1294,23 @@ function CreateDriverCollectionDialog({
       });
       idempotency.reset();
     } catch (error) {
-      setConfirmError(message(error, t("operations.reconciliationFailed")));
+      let errorMessage = t("operations.reconciliationFailed");
+
+      // Provide better error messages for common issues
+      if (error instanceof ApiError) {
+        if (error.code === "database_integrity_conflict" &&
+            error.message?.includes("bank_reference")) {
+          errorMessage = "Bank Reference must be unique. Please use a different reference number.";
+        } else if (error.code === "bank_payment_details_required") {
+          errorMessage = "Bank Account is required for Visa (card / bank) payments.";
+        } else if (error.details && error.details.length > 0 && error.details[0]) {
+          errorMessage = error.details[0];
+        } else if (error.message) {
+          errorMessage = error.message;
+        }
+      }
+
+      setConfirmError(errorMessage);
     } finally {
       setSaving(false);
     }
@@ -1423,6 +1477,35 @@ function CreateDriverCollectionDialog({
                       <option value="visa">{t("operations.paymentMethodVisa")}</option>
                     </select>
                   </label>
+                  {paymentMethod === "visa" ? (
+                    <>
+                      <label className="field required-field">
+                        <span>Bank Account</span>
+                        <select
+                          onChange={(event) => setSelectedBankAccountId(event.target.value)}
+                          value={selectedBankAccountId}
+                        >
+                          <option value="">{t("common.select")}</option>
+                          {bankAccounts.map((account) => (
+                            <option key={account.id} value={account.id}>
+                              {account.name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="field">
+                        <span>Bank Reference (optional)</span>
+                        <input
+                          onChange={(event) => setBankReference(event.target.value)}
+                          placeholder="e.g., TRX123456, REF-2026-08-25-001"
+                          type="text"
+                          value={bankReference}
+                          maxLength={80}
+                        />
+                        <small className="field-hint">Optional: Transaction reference or ID. If provided, must be unique.</small>
+                      </label>
+                    </>
+                  ) : null}
                 </section>
 
                 {/* Step 3 — Eligible Orders */}

@@ -7,6 +7,27 @@ import type { AccountingApi } from "./accounting-api.js";
 import type { AccountingRecord } from "./accounting-types.js";
 
 /**
+ * Predefined expense mapping keys with user-friendly labels.
+ * These must match the backend's allowedExpenseMappingKeys.
+ */
+const EXPENSE_MAPPING_OPTIONS = [
+  { label: "General expense", value: "general_expense" },
+  { label: "Fuel / Petrol", value: "fuel_expense" },
+  { label: "Salik / Toll", value: "salik_expense" },
+  { label: "Parking", value: "parking_expense" },
+  { label: "Driver advance", value: "driver_advance" },
+  { label: "Office rent", value: "office_rent_expense" },
+  { label: "Maintenance", value: "maintenance_expense" },
+  { label: "Bank charges", value: "bank_charges" },
+  { label: "Other operating expense", value: "other_operating_expense" },
+] as const;
+
+interface AccountOption {
+  readonly key: string;
+  readonly label: string;
+}
+
+/**
  * Inline "+ Add Category" for the General Expense form.
  *
  * Reuses the existing Category API exactly as the full Setup screen
@@ -40,42 +61,6 @@ import type { AccountingRecord } from "./accounting-types.js";
  * purpose, never a subsystem-reserved one nobody chose for this.
  */
 
-interface MappingRow {
-  readonly expenseAccountCode?: string | undefined;
-  readonly expenseAccountId?: string | undefined;
-  readonly isActive?: boolean | undefined;
-  readonly mappingKey?: string | undefined;
-}
-
-interface AccountRow {
-  readonly accountType?: string | undefined;
-  readonly id?: string | undefined;
-  readonly isActive?: boolean | undefined;
-  readonly isPostingAccount?: boolean | undefined;
-  readonly nameAr?: string | null | undefined;
-  readonly nameEn?: string | undefined;
-}
-
-interface GlAccountOption {
-  readonly label: string;
-  readonly mappingKey: string;
-}
-
-/** Uppercase, ASCII-safe, within the server's `code` pattern (max 32 chars). */
-function suggestCode(name: string, taken: ReadonlySet<string>): string {
-  const slug = name
-    .toUpperCase()
-    .replaceAll(/[^A-Z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 26);
-  const base = slug === "" ? "EXP" : `EXP-${slug}`.slice(0, 28);
-  if (!taken.has(base)) return base;
-  for (let suffix = 2; suffix < 100; suffix += 1) {
-    const candidate = `${base.slice(0, 28 - String(suffix).length - 1)}-${suffix}`;
-    if (!taken.has(candidate)) return candidate;
-  }
-  return base;
-}
 
 export function AddExpenseCategoryDialog({
   client,
@@ -94,102 +79,119 @@ export function AddExpenseCategoryDialog({
   const [nameEn, setNameEn] = useState("");
   const [nameAr, setNameAr] = useState("");
   const [code, setCode] = useState("");
-  const [codeTouched, setCodeTouched] = useState(false);
+  const [codeEditedManually, setCodeEditedManually] = useState(false);
   const [description, setDescription] = useState("");
-  const [mappingKey, setMappingKey] = useState("");
-  const [existingCodes, setExistingCodes] = useState<ReadonlySet<string>>(new Set());
-  const [glOptions, setGlOptions] = useState<readonly GlAccountOption[]>();
-  const [glOptionsError, setGlOptionsError] = useState<string>();
+  const [mappingKey, setMappingKey] = useState("general_expense");
   const [error, setError] = useState<string>();
   const [saving, setSaving] = useState(false);
+  const [accountOptions, setAccountOptions] = useState<readonly AccountOption[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [existingCodes, setExistingCodes] = useState(new Set<string>());
 
   useEffect(() => {
-    const controller = new AbortController();
-    void Promise.all([
-      client.get<readonly AccountingRecord[]>(
-        "general-expenses/categories",
-        undefined,
-        controller.signal,
-      ),
-      client.get<readonly MappingRow[]>("mappings", undefined, controller.signal),
-      client.accounts(undefined, controller.signal),
-    ])
-      .then(([categories, mappings, accounts]) => {
-        if (controller.signal.aborted) return;
-        setExistingCodes(
-          new Set(
-            categories
-              .map((category) => String(category.code ?? "").toUpperCase())
-              .filter((value) => value !== ""),
-          ),
-        );
-        // Vetted for THIS purpose: the schema default, plus any key an
-        // existing Category already relies on. Never a subsystem-reserved key
-        // (driver fees, payroll, bank charges) nobody chose for this.
-        const vettedKeys = new Set<string>(["general_expense"]);
-        for (const category of categories) {
-          const key = String(category.defaultExpenseMappingKey ?? "").trim();
-          if (key !== "") vettedKeys.add(key);
-        }
-        const accountsById = new Map(
-          (accounts as readonly AccountRow[]).map((row) => [row.id, row]),
-        );
-        const options: GlAccountOption[] = [];
-        for (const mapping of mappings) {
-          const key = mapping.mappingKey ?? "";
-          if (!vettedKeys.has(key) || mapping.isActive !== true) continue;
-          const account = accountsById.get(mapping.expenseAccountId);
-          if (
-            account === undefined ||
-            account.accountType !== "expense" ||
-            account.isActive !== true ||
-            account.isPostingAccount !== true
-          )
-            continue;
-          const name =
-            language === "ar" ? (account.nameAr ?? account.nameEn ?? key) : (account.nameEn ?? key);
-          options.push({
-            label:
-              mapping.expenseAccountCode === undefined
-                ? String(name)
-                : `${String(name)} (${mapping.expenseAccountCode})`,
-            mappingKey: key,
-          });
-        }
-        setGlOptions(options);
-        setMappingKey((current) => (current === "" ? (options[0]?.mappingKey ?? "") : current));
-      })
-      .catch((cause: unknown) => {
-        if (controller.signal.aborted) return;
-        setGlOptions([]);
-        setGlOptionsError(
-          cause instanceof ApiError
-            ? cause.message
-            : t("accounting.errors.load", { defaultValue: "Accounting data could not be loaded." }),
-        );
-      });
-    return () => controller.abort();
-    // Fetched once, when the dialog opens. `companyId` is in the dependency
-    // list purely so switching Companies without unmounting (should that ever
-    // happen) still refetches for the right tenant -- every request below is
-    // already Company-scoped server-side regardless.
-  }, [client, companyId, language, t]);
+    const load = async () => {
+      try {
+        const [accounts, mappings, categories] = await Promise.all([
+          client.accounts(),
+          client.get("mappings"),
+          client.get("general-expenses/categories"),
+        ]);
 
+        // Build a set of mapping keys already used by existing categories
+        const usedKeys = new Set<string>();
+        for (const category of categories as Array<{ defaultExpenseMappingKey: string }>) {
+          usedKeys.add(category.defaultExpenseMappingKey);
+        }
+
+        // Get eligible mapping keys: general_expense + keys already in use
+        const eligibleKeys = new Set<string>(["general_expense", ...usedKeys]);
+
+        // Build account options from eligible mappings
+        const options: AccountOption[] = [];
+        const seenMappings = new Set<string>();
+
+        for (const mapping of mappings as Array<{
+          mappingKey: string;
+          expenseAccountId: string;
+          expenseAccountCode: string;
+          isActive: boolean
+        }>) {
+          if (!mapping.isActive || !eligibleKeys.has(mapping.mappingKey)) continue;
+          if (seenMappings.has(mapping.mappingKey)) continue;
+          seenMappings.add(mapping.mappingKey);
+
+          // Find the corresponding account
+          const account = (accounts as Array<{ id: string; nameEn: string }>).find(
+            (a) => a.id === mapping.expenseAccountId,
+          );
+          if (account) {
+            options.push({
+              key: mapping.mappingKey,
+              label: `${account.nameEn} (${mapping.expenseAccountCode})`,
+            });
+          }
+        }
+
+        setAccountOptions(options);
+        if (options.length > 0) {
+          setMappingKey(options[0]!.key);
+        } else {
+          setMappingKey("");
+        }
+
+        // Collect existing category codes for collision detection
+        const codes = new Set<string>();
+        for (const category of categories as Array<{ code: string }>) {
+          codes.add(category.code);
+        }
+        setExistingCodes(codes);
+      } catch (cause) {
+        setError(t("accounting.errors.safe", {
+          defaultValue: "Could not load account options. Please try again.",
+        }));
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    void load();
+  }, [client, t]);
+
+  // Auto-generate code from name if not manually edited
   useEffect(() => {
-    if (codeTouched) return;
-    setCode(nameEn.trim() === "" ? "" : suggestCode(nameEn, existingCodes));
-  }, [codeTouched, existingCodes, nameEn]);
+    if (codeEditedManually) return;
+
+    const name = nameEn.trim();
+    if (name === "") {
+      setCode("");
+      return;
+    }
+
+    // Generate code: EXP-{NAME}, uppercase, replace non-alphanumeric with hyphens
+    const withoutPrefix = name
+      .toUpperCase()
+      .replace(/[^A-Z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+    let generated = `EXP-${withoutPrefix}`;
+
+    // Check for collisions and append a number if needed
+    let counter = 2;
+    while (existingCodes.has(generated)) {
+      generated = `EXP-${withoutPrefix}-${counter}`;
+      counter++;
+    }
+
+    setCode(generated);
+  }, [nameEn, codeEditedManually, existingCodes]);
+
+  const canSubmit = !loading && accountOptions.length > 0;
 
   const submit = async () => {
+    if (!canSubmit) return;
     setError(undefined);
     const trimmedName = nameEn.trim();
     if (trimmedName === "") {
       setError(t("accounting.expenseCategoryDialog.errors.nameRequired"));
-      return;
-    }
-    const trimmedCode = code.trim();
-    if (trimmedCode === "") {
-      setError(t("accounting.expenseCategoryDialog.errors.codeRequired"));
       return;
     }
     if (mappingKey === "") {
@@ -199,7 +201,7 @@ export function AddExpenseCategoryDialog({
     setSaving(true);
     try {
       const result = await client.post<{ id: string }>("general-expenses/categories", {
-        code: trimmedCode.toUpperCase(),
+        code: code.trim(),
         defaultExpenseMappingKey: mappingKey,
         defaultVatTreatment: "out_of_scope",
         description: description.trim() === "" ? undefined : description.trim(),
@@ -214,18 +216,17 @@ export function AddExpenseCategoryDialog({
     } catch (cause) {
       setError(
         cause instanceof ApiError
-          ? t(`accounting.errors.codes.${cause.code}`, { defaultValue: cause.message })
+          ? t(`accounting.errors.codes.${cause.code}`, {
+              defaultValue: cause.message,
+            })
           : t("accounting.errors.safe", {
-              defaultValue: "The operation could not be completed safely.",
+              defaultValue: "Expense category could not be saved. Please check required fields and try again.",
             }),
       );
     } finally {
       setSaving(false);
     }
   };
-
-  const loadingGlOptions = glOptions === undefined;
-  const noEligibleAccounts = !loadingGlOptions && glOptions.length === 0;
 
   return (
     <Modal
@@ -239,78 +240,73 @@ export function AddExpenseCategoryDialog({
           {error}
         </div>
       )}
-      <div className="accounting-form-grid">
-        <label>
-          <span className="accounting-field-label-row">
-            {t("accounting.expenseCategoryDialog.code")}
-          </span>
-          <small className="accounting-field-helper">
-            {t("accounting.expenseCategoryDialog.codeHelper")}
-          </small>
-          <input
-            onChange={(event) => {
-              setCodeTouched(true);
-              setCode(event.target.value);
-            }}
-            value={code}
-          />
-        </label>
-        <label>
-          <span className="accounting-field-label-row">
-            {t("accounting.expenseCategoryDialog.categoryName")}
-            <span className="accounting-field-required">*</span>
-          </span>
-          <input autoFocus onChange={(event) => setNameEn(event.target.value)} value={nameEn} />
-        </label>
-        <label>
-          <span className="accounting-field-label-row">
-            {t("accounting.expenseCategoryDialog.categoryNameAr")}
-          </span>
-          <input dir="rtl" onChange={(event) => setNameAr(event.target.value)} value={nameAr} />
-        </label>
-        <label>
-          <span className="accounting-field-label-row">
-            {t("accounting.expenseCategoryDialog.linkedGlAccount")}
-            <span className="accounting-field-required">*</span>
-          </span>
-          <small className="accounting-field-helper">
-            {t("accounting.expenseCategoryDialog.linkedGlAccountHelper")}
-          </small>
-          <select
-            disabled={loadingGlOptions || noEligibleAccounts}
-            onChange={(event) => setMappingKey(event.target.value)}
-            value={mappingKey}
-          >
-            {loadingGlOptions ? (
-              <option value="">{t("common.loading")}</option>
-            ) : noEligibleAccounts ? (
-              <option value="">{t("accounting.expenseCategoryDialog.noEligibleAccounts")}</option>
-            ) : (
-              glOptions.map((option) => (
-                <option key={option.mappingKey} value={option.mappingKey}>
+      {loading ? (
+        <div>{t("common.loading")}</div>
+      ) : (
+        <>
+          {accountOptions.length === 0 && (
+            <div className="alert alert-info">
+              No active Expense GL Account is configured yet. Ask an Accounting administrator to add one before creating a Category.
+            </div>
+          )}
+          <div className="accounting-form-grid">
+          <label>
+            <span className="accounting-field-label-row">
+              {t("accounting.expenseCategoryDialog.categoryName")}
+              <span className="accounting-field-required">*</span>
+            </span>
+            <input autoFocus onChange={(event) => setNameEn(event.target.value)} value={nameEn} />
+          </label>
+          <label>
+            <span className="accounting-field-label-row">
+              Category Code
+            </span>
+            <input
+              onChange={(event) => {
+                setCode(event.target.value);
+                setCodeEditedManually(event.target.value !== "");
+              }}
+              value={code}
+            />
+          </label>
+          <label>
+            <span className="accounting-field-label-row">
+              {t("accounting.expenseCategoryDialog.categoryNameAr")}
+            </span>
+            <input dir="rtl" onChange={(event) => setNameAr(event.target.value)} value={nameAr} />
+          </label>
+          <label>
+            <span className="accounting-field-label-row">
+              {t("accounting.expenseCategoryDialog.linkedGlAccount")}
+              <span className="accounting-field-required">*</span>
+            </span>
+            <select
+              onChange={(event) => setMappingKey(event.target.value)}
+              value={mappingKey}
+            >
+              {accountOptions.map((option) => (
+                <option key={option.key} value={option.key}>
                   {option.label}
                 </option>
-              ))
-            )}
-          </select>
-          {glOptionsError === undefined ? null : (
-            <small className="accounting-field-helper">{glOptionsError}</small>
-          )}
-        </label>
-        <label className="accounting-form-wide">
-          <span className="accounting-field-label-row">
-            {t("accounting.expenseCategoryDialog.description")}
-          </span>
-          <textarea onChange={(event) => setDescription(event.target.value)} value={description} />
-        </label>
-      </div>
+              ))}
+            </select>
+          </label>
+          <label className="accounting-form-wide">
+            <span className="accounting-field-label-row">
+              {t("accounting.expenseCategoryDialog.description")}
+            </span>
+            <textarea onChange={(event) => setDescription(event.target.value)} value={description} />
+          </label>
+          </div>
+        </>
+      )}
       <div className="modal-actions">
         <button className="button button-secondary" onClick={onClose} type="button">
           {t("common.cancel")}
         </button>
         <button
           className="button button-primary"
-          disabled={saving || noEligibleAccounts}
+          disabled={saving || !canSubmit}
           onClick={() => void submit()}
           type="button"
         >

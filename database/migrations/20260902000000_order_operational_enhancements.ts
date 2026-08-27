@@ -82,7 +82,7 @@ export async function up(database: Kysely<MigrationDatabase>): Promise<void> {
             order by x.effective_from desc limit 1) r on true
          where d.id=new.assigned_driver_id and d.company_id=new.company_id
            and d.driver_type='employee' and d.employee_id is not null
-        on conflict(company_id,order_id) do nothing;
+        on conflict(company_id,order_id) where order_id is not null do nothing;
       end if;
       return new;
     end $$;

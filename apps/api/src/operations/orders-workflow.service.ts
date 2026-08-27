@@ -295,7 +295,7 @@ export class OrdersWorkflowService {
     const identity = this.identities.current();
     const reason = input.reason?.trim() || null;
     if (
-      ["hold", "cancelled", "returned_to_branch", "returned_to_trader"].includes(
+      ["hold", "cancelled", "returned_to_trader"].includes(
         input.targetStatus,
       ) &&
       reason === null
@@ -425,10 +425,10 @@ export class OrdersWorkflowService {
       cancelled: ["new", "in_branch", "assigned_to_driver", "out_for_delivery", "hold"],
       delivered: ["out_for_delivery", "hold"],
       hold: ["new", "assigned_to_driver", "out_for_delivery"],
-      in_branch: ["new"],
-      out_for_delivery: ["assigned_to_driver", "hold"],
+      in_branch: ["new", "out_for_delivery", "returned_to_branch"],
+      out_for_delivery: ["assigned_to_driver", "hold", "in_branch", "returned_to_branch"],
       returned_to_branch: ["out_for_delivery"],
-      returned_to_trader: ["returned_to_branch", "hold"],
+      returned_to_trader: ["in_branch", "returned_to_branch", "hold"],
     };
     if (target in from) {
       if (from[target]?.includes(order.deliveryStatus) !== true) {
@@ -449,7 +449,9 @@ export class OrdersWorkflowService {
       if (!["reconciled", "not_applicable"].includes(order.driverReconciliationStatus)) {
         return "Driver Cash is not complete";
       }
+      const noTraderPaymentDue = new Decimal(order.traderNetPayable).lessThanOrEqualTo(0);
       if (
+        !noTraderPaymentDue &&
         !["money_sent_to_trader", "money_received_by_trader", "not_eligible"].includes(
           order.settlementStatus,
         )
@@ -486,11 +488,12 @@ export class OrdersWorkflowService {
     const order = input.order;
     const amountDue = Number(order.customerAmountDue);
     const traderPayable = Number(order.traderNetPayable);
+    const noTraderPaymentDue = Number.isFinite(traderPayable) && traderPayable <= 0;
     const deliveredFreeNoValue =
       status === "delivered" &&
       order.isFreeOrder === true &&
       amountDue === 0 &&
-      traderPayable === 0;
+      noTraderPaymentDue;
     const reconciliationStatus =
       status === "hold"
         ? order.driverReconciliationStatus
@@ -517,7 +520,7 @@ export class OrdersWorkflowService {
             status === "returned_to_branch" ||
             status === "returned_to_trader"
           ? "not_eligible"
-          : deliveredFreeNoValue
+          : deliveredFreeNoValue || noTraderPaymentDue
             ? "not_eligible"
             : status === "closed" || status === "in_branch"
               ? order.settlementStatus
@@ -602,6 +605,62 @@ export class OrdersWorkflowService {
     }
     const search = input.search?.trim() || null;
     const quickView = input.quickView ?? "active";
+    const workflowStep = input.workflowStep ?? null;
+    const openTraderReceivablePredicate = sql`
+      exists (
+        select 1
+        from trader_receivables workflow_receivable
+        where workflow_receivable.company_id = o.company_id
+          and workflow_receivable.source_type = 'service_charge'
+          and workflow_receivable.source_reference = o.order_number
+          and workflow_receivable.status in ('outstanding', 'partially_collected')
+          and workflow_receivable.outstanding_amount > 0
+      )
+    `;
+    const failedAccountingPredicate = sql`
+      exists (
+        select 1
+        from accounting_events workflow_event
+        where workflow_event.company_id = o.company_id
+          and workflow_event.source_entity_type = 'order'
+          and workflow_event.source_reference = o.order_number
+          and workflow_event.id = (
+            select latest_workflow_event.id
+            from accounting_events latest_workflow_event
+            where latest_workflow_event.company_id = o.company_id
+              and latest_workflow_event.source_entity_type = 'order'
+              and latest_workflow_event.source_reference = o.order_number
+            order by latest_workflow_event.created_at desc, latest_workflow_event.id desc
+            limit 1
+          )
+          and workflow_event.processing_status = 'failed'
+      )
+    `;
+    const workflowStepPredicate = sql`
+      (${workflowStep}::text is null
+        or (${workflowStep} = 'collect_from_driver'
+          and o.delivery_status = 'delivered'
+          and o.driver_reconciliation_status = 'pending'
+          and o.customer_amount_due > 0)
+        or (${workflowStep} = 'collect_from_trader' and ${openTraderReceivablePredicate})
+        or (${workflowStep} = 'settle_trader'
+          and o.delivery_status = 'delivered'
+          and o.driver_reconciliation_status in ('reconciled', 'not_applicable')
+          and o.trader_net_payable > 0
+          and o.trader_settlement_status in ('unsettled', 'partially_settled'))
+        or (${workflowStep} = 'complete'
+          and o.delivery_status in ('delivered', 'closed', 'returned_to_trader', 'cancelled')
+          and not (o.delivery_status = 'delivered'
+            and o.driver_reconciliation_status = 'pending'
+            and o.customer_amount_due > 0)
+          and not (o.delivery_status = 'delivered'
+            and o.driver_reconciliation_status in ('reconciled', 'not_applicable')
+            and o.trader_net_payable > 0
+            and o.trader_settlement_status in ('unsettled', 'partially_settled', 'money_sent_to_trader'))
+          and not ${openTraderReceivablePredicate}
+          and not ${failedAccountingPredicate})
+      )
+    `;
     const result = await sql<SelectedOrder>`
       select o.id, o.order_number as "orderNumber", o.assigned_driver_id as "assignedDriverId",
              o.order_type as "orderType",
@@ -626,6 +685,7 @@ export class OrdersWorkflowService {
           or o.customer_mobile_number ilike '%' || ${search} || '%'
           or t.name_en ilike '%' || ${search} || '%')
         and (${input.deliveryStatus ?? null}::text is null or o.delivery_status = ${input.deliveryStatus ?? null})
+        and ${workflowStepPredicate}
         and (${input.orderType ?? null}::text is null or o.order_type=${input.orderType ?? null})
         and (${input.cashStatus ?? null}::text is null or o.driver_reconciliation_status = ${input.cashStatus ?? null})
         and (${input.settlementStatus ?? null}::text is null or o.trader_settlement_status = ${input.settlementStatus ?? null})

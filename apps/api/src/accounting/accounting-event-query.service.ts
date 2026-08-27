@@ -160,7 +160,12 @@ export class AccountingEventQueryService {
     this.support.assertPermission("accounting.view");
     const { companyId } = this.support.context();
     const header = await sql<Record<string, unknown>>`
-      select e.*,j.journal_number as "journalNumber",r.journal_number as "reversalJournalNumber",
+      select e.*,
+             -- Keep the DATE field date-only. PostgreSQL's Date object parser
+             -- otherwise serialises it through UTC and Dubai can display the
+             -- preceding calendar day on the detail screen.
+             e.effective_accounting_date::text as effective_accounting_date,
+             j.journal_number as "journalNumber",r.journal_number as "reversalJournalNumber",
              -- camelCase aliases so Related Records can build routes without
              -- re-deriving them from the raw snake_case row. Additive only.
              e.journal_id as "journalId", e.reversal_journal_id as "reversalJournalId",
@@ -810,6 +815,17 @@ export class AccountingEventQueryService {
     this.support.assertPermission("accounting.view");
     const { companyId } = this.support.context();
     const pagination = this.support.pagination(query);
+    const sort = this.support.sorting(
+      query,
+      {
+        accountingDate: "e.effective_accounting_date",
+        eventType: "e.event_type",
+        journalNumber: numericReferenceOrder("j.journal_number"),
+        sourceReference: "e.source_reference",
+        status: "e.processing_status",
+      },
+      "accountingDate",
+    );
     const result = await sql<Record<string, unknown>>`
       select e.id as "eventId",e.operational_area as area,e.event_type as "eventType",
              e.source_entity_type as "sourceEntityType",e.source_entity_id as "sourceEntityId",
@@ -840,6 +856,7 @@ export class AccountingEventQueryService {
         ) c on true
        where e.company_id=${companyId}::uuid
          and (${query.area ?? null}::text is null or e.operational_area=${query.area ?? null})
+         and (${query.eventType ?? null}::text is null or e.event_type=${query.eventType ?? null})
          and (${query.dateFrom ?? null}::date is null or e.effective_accounting_date>=${query.dateFrom ?? null}::date)
          and (${query.dateTo ?? null}::date is null or e.effective_accounting_date<=${query.dateTo ?? null}::date)
          and (${query.result ?? null}::text is null or (
@@ -853,7 +870,8 @@ export class AccountingEventQueryService {
              else 'posted'
            end
          )=${query.result ?? null})
-       order by e.effective_accounting_date desc,e.created_at desc
+       order by ${sql.raw(sort.column)} ${sql.raw(sort.direction)} nulls last,
+                e.created_at desc,e.id desc
        limit ${pagination.limit} offset ${pagination.offset}
     `.execute(this.database);
     const total = Number(result.rows[0]?.totalRows ?? 0);
@@ -864,6 +882,8 @@ export class AccountingEventQueryService {
       }),
       page: pagination.page,
       pageSize: pagination.pageSize,
+      sortBy: sort.sortBy,
+      sortDirection: sort.sortDirection,
       total,
       totalPages: Math.ceil(total / pagination.pageSize),
     };

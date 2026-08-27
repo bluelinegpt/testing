@@ -43,7 +43,6 @@ const deliveryStatuses = [
   "out_for_delivery",
   "hold",
   "delivered",
-  "returned_to_branch",
   "returned_to_trader",
   "cancelled",
   "closed",
@@ -60,6 +59,7 @@ const deliveryStatuses = [
  */
 const allDeliveryStatuses = ["new", "assigned_to_driver", ...deliveryStatuses] as const;
 
+const orderWorkflowSteps = ["complete", "collect_from_driver", "collect_from_trader", "settle_trader"] as const;
 const paymentMethods = ["cash", "bank_transfer"] as const;
 const orderAttachmentTypes = ["delivery_photo", "expense", "waybill", "other"] as const;
 const orderIdentifierPattern = /^[\p{L}\p{N} _/-]+$/u;
@@ -80,6 +80,14 @@ export class FinancialPaymentDto {
   @IsOptional()
   @IsIn(paymentMethods)
   public readonly paymentMethod?: (typeof paymentMethods)[number];
+
+  @IsOptional()
+  @IsNumber()
+  public readonly amount?: number;
+
+  @IsOptional()
+  @IsUUID()
+  public readonly cashAccountId?: string;
 
   @IsOptional()
   @IsUUID()
@@ -160,6 +168,9 @@ export class OrderSelectionDto {
   @IsString()
   public readonly settlementStatus?: string;
 
+@IsOptional()
+  @IsIn(orderWorkflowSteps)
+  public readonly workflowStep?: (typeof orderWorkflowSteps)[number];
   @IsOptional()
   @IsUUID()
   public readonly traderId?: string;
@@ -191,7 +202,6 @@ const bulkTargetStatuses = [
   "out_for_delivery",
   "hold",
   "delivered",
-  "returned_to_branch",
   "returned_to_trader",
   "cancelled",
   "closed",
@@ -261,6 +271,10 @@ export class ReconciliationPaymentDto {
 
   @IsOptional()
   @IsUUID()
+  public readonly cashAccountId?: string;
+
+  @IsOptional()
+  @IsUUID()
   public readonly bankAccountId?: string;
 
   @IsOptional()
@@ -304,6 +318,10 @@ export class ReconciliationExpenseDto {
 }
 
 const collectionPaymentMethods = ["cash", "visa"] as const;
+const orderPaymentConditions = [
+  "customer_pays_cod_and_fee",
+  "customer_pays_cod_trader_pays_fee",
+] as const;
 
 export class DriverFeeOffsetAllocationDto {
   @IsUUID()
@@ -562,6 +580,10 @@ export class CreateOrderDto {
   public readonly codAmount!: number;
 
   @IsOptional()
+  @IsIn(orderPaymentConditions)
+  public readonly paymentCondition?: (typeof orderPaymentConditions)[number];
+
+  @IsOptional()
   @IsNumber()
   @Min(0)
   public readonly serviceFee?: number;
@@ -711,6 +733,10 @@ export class OrderQuoteDto {
   @IsNumber()
   @Min(0)
   public readonly codAmount!: number;
+
+  @IsOptional()
+  @IsIn(orderPaymentConditions)
+  public readonly paymentCondition?: (typeof orderPaymentConditions)[number];
 
   @IsOptional()
   @IsNumber()
@@ -877,7 +903,6 @@ const orderStatusFilters = [
   "assigned_to_driver",
   "out_for_delivery",
   "delivered",
-  "returned_to_branch",
   "returned_to_trader",
   "cancelled",
   "closed",

@@ -34,6 +34,7 @@ import type {
   OptionGroupDto,
   OptionGroupUpdateDto,
   OptionValueDto,
+  OptionValueUpdateDto,
   ProductAvailabilityDto,
   ProductListQueryDto,
   ProductMediaDto,
@@ -701,6 +702,25 @@ export class StorefrontProductService {
            set is_active = false, is_primary = false, updated_at = now()
          where id = ${mediaId}::uuid and storefront_id = ${scope.id}::uuid
       `.execute(transaction);
+      // Removing the PRIMARY image must not leave the Product with none: that
+      // is neither of the two safe outcomes ("blocked" or "another becomes
+      // primary") and a live Product would keep its public gallery but lose
+      // its hero/thumbnail/OG image silently. The lowest display_order among
+      // whatever remains is promoted automatically -- the same rule that
+      // already decides which image an Add starts as primary with.
+      if (media.isPrimary && media.mediaType === "image") {
+        await sql`
+          update trader_storefront_product_media
+             set is_primary = true, updated_at = now()
+           where id = (
+             select id from trader_storefront_product_media
+              where product_id = ${String(media.productId)}::uuid and media_type = 'image'
+                and is_active and id <> ${mediaId}::uuid
+              order by display_order, created_at
+              limit 1
+           )
+        `.execute(transaction);
+      }
       await this.audit(transaction, scope, "storefront_product.media_removed", correlationId, {
         mediaId,
         productId: String(media.productId),
@@ -741,7 +761,8 @@ export class StorefrontProductService {
         select count(*)::int as count from trader_storefront_product_option_groups
          where product_id = ${productId}::uuid
       `.execute(transaction);
-      if ((count.rows[0]?.count ?? 0) >= maximumOptionGroupsPerProduct) {
+      const existingGroups = count.rows[0]?.count ?? 0;
+      if (existingGroups >= maximumOptionGroupsPerProduct) {
         throw this.invalid("product_option_group_limit", "Too many option groups on this Product");
       }
       const inserted = await this.uniqueGuard(async () =>
@@ -750,7 +771,7 @@ export class StorefrontProductService {
             company_id, storefront_id, product_id, name, display_order, is_required
           ) values (
             ${scope.companyId}::uuid, ${scope.id}::uuid, ${productId}::uuid,
-            ${input.name.trim()}, ${input.displayOrder ?? 0}, ${input.isRequired ?? false}
+            ${input.name.trim()}, ${input.displayOrder ?? existingGroups}, ${input.isRequired ?? false}
           )
           returning id, name, display_order as "displayOrder", is_active as "isActive",
                     is_required as "isRequired"
@@ -773,7 +794,8 @@ export class StorefrontProductService {
         select count(*)::int as count from trader_storefront_product_option_values
          where option_group_id = ${groupId}::uuid
       `.execute(transaction);
-      if ((count.rows[0]?.count ?? 0) >= maximumOptionValuesPerGroup) {
+      const existingValues = count.rows[0]?.count ?? 0;
+      if (existingValues >= maximumOptionValuesPerGroup) {
         throw this.invalid("product_option_value_limit", "Too many values in this option group");
       }
       const inserted = await this.uniqueGuard(async () =>
@@ -782,7 +804,7 @@ export class StorefrontProductService {
             company_id, storefront_id, option_group_id, value, display_order
           ) values (
             ${scope.companyId}::uuid, ${scope.id}::uuid, ${groupId}::uuid,
-            ${input.value.trim()}, ${input.displayOrder ?? 0}
+            ${input.value.trim()}, ${input.displayOrder ?? existingValues}
           )
           returning id, value, display_order as "displayOrder", is_active as "isActive"
         `.execute(transaction),
@@ -886,6 +908,69 @@ export class StorefrontProductService {
     });
   }
 
+  /**
+   * Rename an option value in place.
+   *
+   * The value's id -- what a future Store Order snapshot would actually
+   * reference -- never changes; only the label does. A future Order that
+   * already snapshotted the OLD label keeps it, because a snapshot copies the
+   * text at the moment of selection rather than holding a live reference to
+   * this row.
+   */
+  public async updateOptionValue(
+    valueId: string,
+    input: OptionValueUpdateDto,
+    correlationId: string,
+  ) {
+    this.assertManage();
+    return this.transactions.execute(async (transaction) => {
+      const value = await this.loadOptionValue(transaction, valueId);
+      const scope = await this.storefrontScope(transaction, String(value.storefrontId));
+      const updated = await this.uniqueGuard(async () =>
+        sql<Record<string, unknown>>`
+          update trader_storefront_product_option_values
+             set value = ${input.value.trim()}, updated_at = now()
+           where id = ${valueId}::uuid and storefront_id = ${scope.id}::uuid
+          returning id, value, display_order as "displayOrder", is_active as "isActive"
+        `.execute(transaction),
+      );
+      await this.audit(transaction, scope, "storefront_product.options_changed", correlationId, {
+        optionGroupId: String(value.optionGroupId),
+        optionValueId: valueId,
+      });
+      return updated.rows[0]!;
+    });
+  }
+
+  /**
+   * Remove (deactivate) an option value.
+   *
+   * Deactivated, never deleted -- same rule as Product media and Store
+   * Categories: a value a customer already saw (in a future Order snapshot)
+   * must not disappear out from under that record. No current-Product
+   * completeness check runs here on purpose: unlike an active Product's last
+   * image, an option group is never mandatory (T4 activates with zero
+   * options), so removing a value can never retroactively break an already-
+   * Active Product.
+   */
+  public async removeOptionValue(valueId: string, correlationId: string) {
+    this.assertManage();
+    return this.transactions.execute(async (transaction) => {
+      const value = await this.loadOptionValue(transaction, valueId);
+      const scope = await this.storefrontScope(transaction, String(value.storefrontId));
+      await sql`
+        update trader_storefront_product_option_values
+           set is_active = false, updated_at = now()
+         where id = ${valueId}::uuid and storefront_id = ${scope.id}::uuid
+      `.execute(transaction);
+      await this.audit(transaction, scope, "storefront_product.options_changed", correlationId, {
+        optionGroupId: String(value.optionGroupId),
+        optionValueId: valueId,
+      });
+      return { removed: true, valueId };
+    });
+  }
+
   // ---------------------------------------------------------------- public
 
   public async publicCategories(storefrontSlug: string) {
@@ -926,6 +1011,7 @@ export class StorefrontProductService {
              p.selling_price::text as "sellingPrice", p.previous_price::text as "previousPrice",
              p.currency, p.availability_status as "availabilityStatus",
              p.template_attributes as "templateAttributes",
+             p.seo_indexable as "seoIndexable",
              c.slug as "categorySlug", c.name_en as "categoryName",
              count(*) over()::int as total,
              (select json_build_object(
@@ -1257,7 +1343,7 @@ export class StorefrontProductService {
   ): Promise<Record<string, unknown>> {
     const result = await sql<Record<string, unknown>>`
       select id, storefront_id as "storefrontId", product_id as "productId",
-             media_type as "mediaType"
+             media_type as "mediaType", is_primary as "isPrimary"
         from trader_storefront_product_media
        where id = ${mediaId}::uuid
          and storefront_id in (${this.accessibleStorefronts()})
@@ -1279,6 +1365,21 @@ export class StorefrontProductService {
     `.execute(executor);
     const row = result.rows[0];
     if (row === undefined) throw this.notFound("product_option_group_not_found");
+    return row;
+  }
+
+  private async loadOptionValue(
+    executor: Executor,
+    valueId: string,
+  ): Promise<Record<string, unknown>> {
+    const result = await sql<Record<string, unknown>>`
+      select id, storefront_id as "storefrontId", option_group_id as "optionGroupId"
+        from trader_storefront_product_option_values
+       where id = ${valueId}::uuid
+         and storefront_id in (${this.accessibleStorefronts()})
+    `.execute(executor);
+    const row = result.rows[0];
+    if (row === undefined) throw this.notFound("product_option_value_not_found");
     return row;
   }
 
@@ -1305,8 +1406,19 @@ export class StorefrontProductService {
              g.name, g.display_order as "displayOrder", g.is_active as "isActive",
              g.is_required as "isRequired",
              coalesce(
-               (select json_agg(json_build_object('value', v.value, 'displayOrder', v.display_order)
-                                order by v.display_order, v.value)
+               (select json_agg(
+                          ${
+                            publicOnly
+                              ? sql`json_build_object(
+                                  'value', v.value, 'displayOrder', v.display_order,
+                                  'isActive', v.is_active
+                                )`
+                              : sql`json_build_object(
+                                  'id', v.id, 'value', v.value, 'displayOrder', v.display_order,
+                                  'isActive', v.is_active
+                                )`
+                          }
+                          order by v.display_order, v.value)
                   from trader_storefront_product_option_values v
                  where v.option_group_id = g.id
                    ${publicOnly ? sql`and v.is_active` : sql``}),

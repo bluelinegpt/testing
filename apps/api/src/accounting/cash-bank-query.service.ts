@@ -546,7 +546,15 @@ export class CashBankQueryService {
        where company_id=${companyId}::uuid and movement_id=${id}::uuid and is_active
        order by uploaded_at,id
     `.execute(this.database);
-    return { ...movement.rows[0], attachments: attachments.rows };
+    // `m.*` exposes PostgreSQL DATE columns as JavaScript Date values in the
+    // technical-details payload. Serialising those values through UTC can turn
+    // a Dubai business date such as 2026-08-25 into 2026-08-24. Keep the
+    // explicit YYYY-MM-DD aliases above and remove only the duplicate raw DATE
+    // fields; all other raw audit fields remain available.
+    const detail = { ...movement.rows[0] };
+    delete detail.movement_date;
+    delete detail.accounting_date;
+    return { ...detail, attachments: attachments.rows };
   }
 
   public async summary() {
@@ -610,17 +618,25 @@ export class CashBankQueryService {
     const result = await sql<Record<string, unknown>>`
       with movements as (
         select source_cash_account_id as id,'cash'::text as kind,-amount-fee_amount as value
-          from cash_bank_movements where company_id=${companyId}::uuid
+          from cash_bank_movements m where company_id=${companyId}::uuid
            and status in('confirmed','reversed') and reversal_of_movement_id is null
+           and not exists(select 1 from accounting_events e where e.id=m.accounting_event_id
+             and e.company_id=m.company_id and e.source_entity_type<>'cash_bank_movement')
         union all select destination_cash_account_id,'cash',amount
-          from cash_bank_movements where company_id=${companyId}::uuid
+          from cash_bank_movements m where company_id=${companyId}::uuid
            and status in('confirmed','reversed') and reversal_of_movement_id is null
+           and not exists(select 1 from accounting_events e where e.id=m.accounting_event_id
+             and e.company_id=m.company_id and e.source_entity_type<>'cash_bank_movement')
         union all select source_bank_account_id,'bank',-amount-fee_amount
-          from cash_bank_movements where company_id=${companyId}::uuid
+          from cash_bank_movements m where company_id=${companyId}::uuid
            and status in('confirmed','reversed') and reversal_of_movement_id is null
+           and not exists(select 1 from accounting_events e where e.id=m.accounting_event_id
+             and e.company_id=m.company_id and e.source_entity_type<>'cash_bank_movement')
         union all select destination_bank_account_id,'bank',amount
-          from cash_bank_movements where company_id=${companyId}::uuid
+          from cash_bank_movements m where company_id=${companyId}::uuid
            and status in('confirmed','reversed') and reversal_of_movement_id is null
+           and not exists(select 1 from accounting_events e where e.id=m.accounting_event_id
+             and e.company_id=m.company_id and e.source_entity_type<>'cash_bank_movement')
         union all select o.source_cash_account_id,'cash',o.amount+o.fee_amount
           from cash_bank_movements r join cash_bank_movements o
             on o.id=r.reversal_of_movement_id and o.company_id=r.company_id
@@ -821,7 +837,15 @@ export class CashBankQueryService {
       select * from running
        where (${input.dateFrom ?? null}::date is null
          or "accountingDate"::date>=${input.dateFrom ?? null}::date)
-       order by "accountingDate","movementNumber",id
+         and (${input.movementType ?? null}::text is null
+           or "movementType"=${input.movementType ?? null}::text)
+         and (${input.status ?? null}::text is null
+           or status=${input.status ?? null}::text)
+         and (${input.search ?? null}::text is null or concat_ws(' ',
+           "movementNumber","referenceNumber",description,"movementType",status
+         ) ilike '%'||${input.search ?? null}::text||'%')
+       order by "accountingDate" ${input.sortDirection === "asc" ? sql`asc` : sql`desc`},
+                "movementNumber" ${input.sortDirection === "asc" ? sql`asc` : sql`desc`}, id
     `.execute(this.database);
     let openingBalance = result.rows[0]?.openingBalance;
     if (openingBalance === undefined) {

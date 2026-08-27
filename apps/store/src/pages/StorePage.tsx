@@ -18,6 +18,8 @@ import { ProductCard } from "../components/Cards.js";
 import { LoadingGrid, MessageState } from "../components/States.js";
 import { isReservedStoreSlug } from "../routing/reserved-slugs.js";
 
+import { taxonomyLabel } from "./CategoryPages.js";
+
 /**
  * A public Store at `/{store-slug}`.
  *
@@ -46,7 +48,7 @@ import { isReservedStoreSlug } from "../routing/reserved-slugs.js";
  */
 export function StorePage() {
   const { storeSlug = "" } = useParams();
-  const { t } = useTranslation();
+  const { i18n, t } = useTranslation();
   const [store, setStore] = useState<PublicStore>();
   const [products, setProducts] = useState<readonly PublicProduct[]>();
   const [categories, setCategories] = useState<readonly StoreCategory[]>();
@@ -170,7 +172,7 @@ export function StorePage() {
                 {categories.map((category) => (
                   <li key={category.slug}>
                     <span className="store-chip" dir="auto">
-                      {category.name}
+                      {taxonomyLabel(category, i18n.language)}
                     </span>
                   </li>
                 ))}

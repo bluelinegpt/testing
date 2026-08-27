@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 
 import { useCustomerSession } from "../auth/customer-session-context.js";
+import { useCart } from "../cart/cart-context.js";
 import { storeConfiguration } from "../config/environment.js";
 import {
   isLocalePrefix,
@@ -35,8 +36,9 @@ import { OfflineBanner } from "../pwa/OfflineBanner.js";
  * `useCustomerSession()` — "Sign In" anonymous, "My Account" authenticated
  * (§52) — never inferred from a Trader/Company/Platform cookie, which lives
  * under a completely separate origin and is never visible to this app.
- * Cart remains the same honest, styled, DISABLED "Coming soon" control it
- * always was — Store Orders/Cart are out of this prompt's scope.
+ * Cart is now a real link with a live item-count badge (Customer Commerce
+ * Prompt C1, §46) — the same "coming soon" control it always was, just no
+ * longer disabled, since the Cart it opens now exists.
  */
 export function StoreChrome({ children }: { readonly children: ReactNode }) {
   const { i18n, t } = useTranslation();
@@ -45,6 +47,7 @@ export function StoreChrome({ children }: { readonly children: ReactNode }) {
   const localePath = useLocalePath();
   const localePrefix = useLocalePrefix();
   const { session } = useCustomerSession();
+  const { itemCount } = useCart();
 
   /**
    * Switching language rewrites the URL when the URL carries a locale.
@@ -125,15 +128,23 @@ export function StoreChrome({ children }: { readonly children: ReactNode }) {
                 {session.status === "authenticated" ? t("auth.account.title") : t("auth.login")}
               </span>
             </Link>
-            <button
-              className="store-iconbutton"
-              disabled
-              title={`${t("common.cart")} — ${t("common.comingSoon")}`}
-              type="button"
+            <Link
+              className="store-iconbutton store-iconbutton--cart"
+              title={
+                itemCount > 0
+                  ? `${t("common.cart")} (${t("cart.itemCount", { count: itemCount })})`
+                  : t("common.cart")
+              }
+              to={localePath("/cart")}
             >
               <CartIcon />
               <span className="store-iconbutton__label">{t("common.cart")}</span>
-            </button>
+              {itemCount > 0 ? (
+                <span aria-hidden="true" className="store-cartbadge">
+                  {itemCount}
+                </span>
+              ) : null}
+            </Link>
 
             <div aria-label={t("common.language")} className="store-langswitch" role="group">
               {supportedLanguages.map((language) => (

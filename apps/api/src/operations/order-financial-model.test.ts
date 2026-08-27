@@ -18,6 +18,8 @@ type FinancialResult = Readonly<
     | "serviceFeeNetAmount"
     | "serviceFeeVatAmount"
     | "totalDeductions"
+    | "traderDeductions"
+    | "traderPaidServiceFee"
     | "traderReceivableDue"
     | "traderNetPayable"
     | "vatAmount",
@@ -30,6 +32,7 @@ type FinancialCalculator = {
     additionalFees: Decimal;
     codAmount: Decimal;
     driverCost: Decimal;
+    paymentCondition?: "customer_pays_cod_and_fee" | "customer_pays_cod_trader_pays_fee";
     prospective: boolean;
     serviceFee: Decimal;
     vatPolicy: {
@@ -105,20 +108,68 @@ describe("prospective Order financial model", () => {
 
   it("moves a Trader-paid fee excess into a receivable instead of negative settlement", () => {
     const result = service.calculateOrderFinancials({
-        additionalFees: new Decimal(0),
-        codAmount: new Decimal(0),
-        driverCost: new Decimal(0),
-        prospective: true,
-        serviceFee: new Decimal(20),
-        vatPolicy: {
-          enabled: false,
-          priceMode: null,
-          rate: new Decimal(0),
-        },
-      });
+      additionalFees: new Decimal(0),
+      codAmount: new Decimal(0),
+      driverCost: new Decimal(0),
+      paymentCondition: "customer_pays_cod_trader_pays_fee",
+      prospective: true,
+      serviceFee: new Decimal(20),
+      vatPolicy: {
+        enabled: false,
+        priceMode: null,
+        rate: new Decimal(0),
+      },
+    });
     expect(result.customerAmountDue.toFixed(2)).toBe("0.00");
     expect(result.companyRevenue.toFixed(2)).toBe("20.00");
+    expect(result.totalDeductions.toFixed(2)).toBe("20.00");
+    expect(result.traderPaidServiceFee.toFixed(2)).toBe("20.00");
     expect(result.traderNetPayable.toFixed(2)).toBe("0.00");
     expect(result.traderReceivableDue.toFixed(2)).toBe("20.00");
+  });
+  it("collects the service fee from the Customer when the Customer pays COD and fee", () => {
+    const result = service.calculateOrderFinancials({
+      additionalFees: new Decimal(0),
+      codAmount: new Decimal(0),
+      driverCost: new Decimal(0),
+      paymentCondition: "customer_pays_cod_and_fee",
+      prospective: true,
+      serviceFee: new Decimal(25),
+      vatPolicy: {
+        enabled: false,
+        priceMode: null,
+        rate: new Decimal(0),
+      },
+    });
+
+    expect(result.customerAmountDue.toFixed(2)).toBe("25.00");
+    expect(result.companyRevenue.toFixed(2)).toBe("25.00");
+    expect(result.totalDeductions.toFixed(2)).toBe("0.00");
+    expect(result.traderPaidServiceFee.toFixed(2)).toBe("0.00");
+    expect(result.traderNetPayable.toFixed(2)).toBe("0.00");
+    expect(result.traderReceivableDue.toFixed(2)).toBe("0.00");
+  });
+
+  it("deducts customer-paid fees from COD when COD covers the fee", () => {
+    const result = service.calculateOrderFinancials({
+      additionalFees: new Decimal(0),
+      codAmount: new Decimal(250),
+      driverCost: new Decimal(0),
+      paymentCondition: "customer_pays_cod_and_fee",
+      prospective: true,
+      serviceFee: new Decimal(10),
+      vatPolicy: {
+        enabled: false,
+        priceMode: null,
+        rate: new Decimal(0),
+      },
+    });
+
+    expect(result.customerAmountDue.toFixed(2)).toBe("250.00");
+    expect(result.companyRevenue.toFixed(2)).toBe("10.00");
+    expect(result.totalDeductions.toFixed(2)).toBe("10.00");
+    expect(result.traderPaidServiceFee.toFixed(2)).toBe("10.00");
+    expect(result.traderNetPayable.toFixed(2)).toBe("240.00");
+    expect(result.traderReceivableDue.toFixed(2)).toBe("0.00");
   });
 });

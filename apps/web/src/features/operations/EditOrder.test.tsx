@@ -9,6 +9,9 @@ import { OrderDetailsWorkspace } from "./OrdersModuleWorkspace.js";
 const detail: OperationsOrderDetail = {
   amountCollected: "0.00",
   areaName: "Dubai - Deira",
+  areaId: "area-1",
+  areaNameEn: "Deira",
+  areaNameAr: "الديرة",
   assignedDriverId: null,
   assignedDriverMobile: null,
   assignedDriverName: null,
@@ -21,6 +24,9 @@ const detail: OperationsOrderDetail = {
   customerName: "Aisha",
   deliveryStatus: "in_branch",
   driverReconciliationStatus: "not_applicable",
+  emirateId: "emirate-1",
+  emirateNameEn: "Dubai",
+  emirateNameAr: "دبي",
   events: [],
   history: [],
   id: "10000000-0000-4000-8000-000000000001",
@@ -50,6 +56,7 @@ const detail: OperationsOrderDetail = {
   returnStatus: "not_applicable",
   serviceFee: "10.00",
   totalDeductions: "10.00",
+  traderId: "trader-1",
   traderNetPayable: "90.00",
   traderName: "Test Trader",
   traderSettlementStatus: "not_eligible",
@@ -78,7 +85,14 @@ describe("Edit order", () => {
     fireEvent.click(editButton);
 
     // The dialog prefills from the order detail.
-    const nameInput = await screen.findByDisplayValue("Aisha");
+    await waitFor(
+      () => {
+        const input = screen.getByDisplayValue("Aisha");
+        expect(input).toBeInTheDocument();
+      },
+      { timeout: 3000 },
+    );
+    const nameInput = screen.getByDisplayValue("Aisha");
     fireEvent.change(nameInput, { target: { value: "Aisha Khan" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 

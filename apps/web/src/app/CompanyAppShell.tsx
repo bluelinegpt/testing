@@ -161,7 +161,6 @@ export function CompanyAppShell({
             label: t("nav.traders"),
             items: [
               { label: t("nav.traderSettlements"), path: "/trader-settlements" },
-              { label: t("nav.traderReceivables"), path: "/trader-receivables" },
             ],
           },
           {
@@ -192,6 +191,7 @@ export function CompanyAppShell({
               },
               { label: t("accounting.sections.journals"), path: "/accounting/journals" },
               { label: t("accounting.sections.events"), path: "/accounting/events" },
+              { label: t("nav.traderReceivables"), path: "/trader-receivables" },
               { label: t("accounting.sections.expenses"), path: "/accounting/expenses" },
               {
                 label: t("accounting.sections.cash-bank-movements"),
@@ -518,7 +518,8 @@ function NavigationGroup({
 
 function groupForPath(pathname: string): MenuGroupId | undefined {
   if (pathname.startsWith("/orders")) return "orders";
-  if (pathname === "/trader-settlements" || pathname === "/trader-receivables") return "traders";
+  if (pathname === "/trader-settlements") return "traders";
+  if (pathname === "/trader-receivables" || pathname.startsWith("/trader-receivables/")) return "accounting";
   if (pathname === "/drivers" || pathname === "/driver-cash-reconciliation") return "drivers";
   if (pathname === "/cash-management" || pathname === "/payroll") return "accounting";
   if (pathname.startsWith("/accounting")) return "accounting";

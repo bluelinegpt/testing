@@ -33,7 +33,7 @@ export function usePublicLocale(): PublicLocale {
 
 export const routeMetadata: Record<PublicLocale, Record<string, { title: string; description: string }>> = {
   en: {
-    '/': { title: 'Delivery Operating System for UAE Delivery Companies', description: 'Manage orders, drivers, COD, Trader settlements, accounting and payroll with Tawseelhub — delivery management software built for the UAE.' },
+    '/': { title: 'Delivery Operating System for Delivery Companies | Tawseelhub', description: 'Tawseelhub is delivery management software that connects Orders, Drivers, COD collections, Trader settlements, accounting and payroll in one platform — built for UAE delivery companies.' },
     '/delivery-companies': { title: 'Delivery Management Software UAE | Tawseelhub Delivery Operating System', description: 'Tawseelhub is a Delivery Operating System for UAE delivery companies, combining orders, drivers, COD collections, Trader settlements, accounting, payroll and reporting.' },
     '/send-a-package': { title: 'Send a Package | UAE & International Delivery Quotes', description: 'Request a UAE domestic or international delivery quotation with pickup, destination, package and contact details in one form.' },
     '/traders': { title: 'Delivery Solutions for Traders & Online Sellers UAE | Tawseelhub', description: 'Register your business with Tawseelhub, connect your existing Delivery Company or let us help you find a suitable delivery partner for Salla, Shopify, WooCommerce and other sales channels.' },
@@ -44,6 +44,8 @@ export const routeMetadata: Record<PublicLocale, Record<string, { title: string;
     '/pricing': { title: 'Tawseelhub Pricing | AED Plans for Delivery Companies', description: 'Review Tawseelhub pricing in AED, from a free tier up to high-volume delivery operations. Request a demo for the right plan.' },
     '/about': { title: 'About Tawseelhub', description: 'Learn why Tawseelhub is building a connected delivery operating system for delivery businesses in the UAE.' },
     '/contact': { title: 'Contact Tawseelhub', description: 'Contact the Tawseelhub team about delivery operations, partnerships and the platform.' },
+    '/privacy': { title: 'Privacy Policy | Tawseelhub', description: 'How Tawseelhub handles personal data across the public website and platform.' },
+    '/terms': { title: 'Terms of Service | Tawseelhub', description: 'Terms governing use of the Tawseelhub website and platform.' },
     '/request-demo': { title: 'Request a Tawseelhub Demo', description: 'Request a tailored international Tawseelhub demo for your delivery company.' },
   },
   ar: {
@@ -58,6 +60,8 @@ export const routeMetadata: Record<PublicLocale, Record<string, { title: string;
     '/pricing': { title: 'أسعار Tawseelhub | خطط شهرية بالدرهم', description: 'راجع أسعار Tawseelhub بالدرهم، من الخطة المجانية إلى خطط عمليات التوصيل عالية الحجم.' },
     '/about': { title: 'عن Tawseelhub', description: 'تعرف على سبب بناء Tawseelhub لنظام تشغيل توصيل مترابط لشركات التوصيل في الإمارات.' },
     '/contact': { title: 'تواصل مع Tawseelhub', description: 'تواصل مع فريق Tawseelhub بخصوص عمليات التوصيل والشراكات والمنصة.' },
+    '/privacy': { title: 'سياسة الخصوصية | Tawseelhub', description: 'كيف يتعامل Tawseelhub مع البيانات الشخصية عبر الموقع العام والمنصة.' },
+    '/terms': { title: 'شروط الخدمة | Tawseelhub', description: 'شروط استخدام موقع ومنصة Tawseelhub.' },
     '/request-demo': { title: 'اطلب عرض Tawseelhub', description: 'اطلب عرضاً مخصصاً من Tawseelhub لشركة التوصيل لديك.' },
   },
 };

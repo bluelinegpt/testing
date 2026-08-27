@@ -92,9 +92,22 @@ export class BlogService {
     ).rows;
     return { article, related };
   }
+  /**
+   * Public category list: only categories with at least one published
+   * article are returned, so an empty Draft-only category never appears on
+   * the public site. CMS category data itself is untouched -- this is a
+   * read filter on the public route only, not a deletion.
+   */
   async categories(language = "en") {
     return (
-      await sql<any>`select name,slug,description from platform_blog_categories where language=${language} and active order by sort_order,name`.execute(
+      await sql<any>`select c.name,c.slug,c.description from platform_blog_categories c
+         where c.language=${language} and c.active
+           and exists (
+             select 1 from platform_blog_articles a
+              where a.category_id=c.id and a.language=${language}
+                and ((a.status='published' and a.published_at<=now()) or (a.status='scheduled' and a.scheduled_at<=now()))
+           )
+         order by c.sort_order,c.name`.execute(
         this.db,
       )
     ).rows;

@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import { HttpStatus, Inject, Injectable } from "@nestjs/common";
 import { Decimal } from "decimal.js";
 import { type Kysely, sql } from "kysely";
@@ -12,6 +14,7 @@ import type {
   BalanceEnforcementResult,
   FundingAccountDeduction,
 } from "./balance-enforcement.coordinator.js";
+import { CashBankManagementService } from "./cash-bank-management.service.js";
 import { GeneralExpenseAccountingEventWriter } from "./general-expense-accounting-event.writer.js";
 import type {
   CreateGeneralExpensePaymentDto,
@@ -56,6 +59,8 @@ export class GeneralExpensePaymentService {
     private readonly fundingAccounts: PaymentFundingAccountService,
     @Inject(BalanceEnforcementCoordinator)
     private readonly balanceEnforcement: BalanceEnforcementCoordinator,
+    @Inject(CashBankManagementService)
+    private readonly cashBankManagement: CashBankManagementService,
   ) {}
 
   public async createAndConfirm(
@@ -214,6 +219,15 @@ export class GeneralExpensePaymentService {
           )
         `.execute(transaction);
       }
+      // Create and confirm cash/bank movements for each payment row.
+      // This records where the money came from (which cash/bank account),
+      // completing the audit trail: accounting entry + operational movement.
+      await this.createPaymentMovements(transaction, {
+        accountingDate: input.accountingDate ?? input.paymentDate,
+        paymentDate: input.paymentDate,
+        paymentNumber,
+        paymentRows: input.rows,
+      });
       // Only now, with the payment AND all of its rows inserted. One audit per
       // overridden funding account, keyed to this payment; the coordinator
       // skips any that already exist and the unique index behind it makes that
@@ -390,6 +404,122 @@ export class GeneralExpensePaymentService {
       });
       return response;
     });
+  }
+
+  /**
+   * Create and confirm cash/bank movements for a General Expense payment.
+   *
+   * When a General Expense payment is confirmed, a corresponding movement must
+   * be recorded to track where the money came from (which cash/bank account).
+   * This creates a "withdrawal" movement for each payment row, auto-confirming
+   * it so the audit trail is complete immediately.
+   *
+   * Movements are created WITHIN the payment confirmation transaction and
+   * auto-confirmed to keep them in sync with the payment status. If movement
+   * creation fails, the entire payment confirmation rolls back.
+   *
+   * PHASE 1: Auto-generate cash/bank movements from confirmed General Expense
+   * payments. This fixes the audit trail gap where expenses were marked as paid
+   * but no operational cash movements were recorded.
+   */
+  private async createPaymentMovements(
+    database: Kysely<DatabaseSchema>,
+    options: {
+      readonly accountingDate: string;
+      readonly paymentDate: string;
+      readonly paymentNumber: string;
+      readonly paymentRows: CreateGeneralExpensePaymentDto["rows"];
+    },
+  ): Promise<void> {
+    const { actorId, companyId } = this.support.context();
+
+    for (const [rowIndex, row] of options.paymentRows.entries()) {
+      const isCash = row.paymentMethod === "cash";
+      const movementType = isCash ? "cash_withdrawal" : "bank_withdrawal";
+      const sourceCashAccountId = isCash ? row.companyCashAccountId : null;
+      const sourceBankAccountId = isCash ? null : row.companyBankAccountId;
+
+      // Generate a unique movement number
+      const movementNumber = await this.history.nextReferenceNumber(
+        database,
+        companyId,
+        "cash_bank_movement",
+        "CBM",
+      );
+
+      const movementId = randomUUID();
+
+      // Create movement as "confirmed" status directly
+      // (bypasses draft step since we know the data is valid from payment confirmation)
+      await sql`
+        insert into cash_bank_movements (
+          id,
+          company_id,
+          movement_number,
+          movement_type,
+          movement_date,
+          accounting_date,
+          source_cash_account_id,
+          source_bank_account_id,
+          destination_cash_account_id,
+          destination_bank_account_id,
+          amount,
+          fee_amount,
+          payment_method,
+          reference_number,
+          description,
+          status,
+          correlation_id,
+          idempotency_identity,
+          confirmed_by_account_id,
+          confirmed_at,
+          created_by_account_id,
+          created_at
+        ) values (
+          ${movementId}::uuid,
+          ${companyId}::uuid,
+          ${movementNumber},
+          ${movementType},
+          ${options.paymentDate}::date,
+          ${options.accountingDate}::date,
+          ${sourceCashAccountId ?? null}::uuid,
+          ${sourceBankAccountId ?? null}::uuid,
+          null::uuid,
+          null::uuid,
+          ${new Decimal(row.amount).toFixed(2)}::numeric,
+          '0'::numeric,
+          ${row.paymentMethod},
+          ${row.referenceNumber?.trim() || null},
+          ${`General Expense payment ${options.paymentNumber}`},
+          'confirmed',
+          ${movementId},
+          ${`general_expense_payment:${options.paymentNumber}:${rowIndex + 1}`},
+          ${actorId}::uuid,
+          now(),
+          ${actorId}::uuid,
+          now()
+        )
+      `.execute(database);
+
+      // Create corresponding accounting event for the movement
+      // This triggers the operational source loader to generate GL journal entries
+      await this.eventWriter.enqueue(database, {
+        accountingDate: options.accountingDate,
+        actorId,
+        companyId,
+        correlationId: movementId,
+        description: `Expense payment ${options.paymentNumber} cash/bank movement`,
+        eventType: movementType === "cash_withdrawal" ? "cash_withdrawal_confirmed" : "bank_withdrawal_confirmed",
+        metadata: {
+          amount: new Decimal(row.amount).toFixed(2),
+          movementNumber,
+          paymentNumber: options.paymentNumber,
+        },
+        sourceEntityId: movementId,
+        sourceEntityType: "general_expense_payment",
+        sourceReference: movementNumber,
+      });
+    }
   }
 
   /**

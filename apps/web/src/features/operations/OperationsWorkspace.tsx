@@ -230,7 +230,6 @@ export function OperationsWorkspace({
       {createOrderOpen ? (
         <ModernCreateOrderDialog
           api={api}
-          drivers={drivers}
           permissions={permissions}
           onClose={() => {
             setCreateOrderOpen(false);

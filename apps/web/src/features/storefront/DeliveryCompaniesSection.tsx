@@ -96,6 +96,16 @@ export function DeliveryCompaniesSection({
     void apply(row.id, { enabledForStoreOrders: !row.enabledForStoreOrders });
   };
 
+  /**
+   * A relationship the Company later marked inactive/suspended/terminated is
+   * refused everywhere it would actually be USED -- the server rejects
+   * enabling it at all. Turning that ON is blocked here too, so the switch
+   * never invites a click that only fails with an explanation after the
+   * fact. Turning an already-enabled one OFF stays available regardless --
+   * that direction is always safe.
+   */
+  const canToggleOn = (row: DeliveryRelationship) => row.status === "active";
+
   return (
     <section className="accounting-form" data-testid="storefront-delivery-companies">
       <h2>{t("storefront.delivery.sectionTitle")}</h2>
@@ -118,16 +128,25 @@ export function DeliveryCompaniesSection({
               <label>
                 <input
                   checked={row.enabledForStoreOrders}
-                  disabled={!canManage || busy}
+                  disabled={
+                    !canManage || busy || (!row.enabledForStoreOrders && !canToggleOn(row))
+                  }
                   onChange={() => toggleEnabled(row)}
                   type="checkbox"
                 />
                 {row.companyName}
               </label>
+              <span className={`badge${row.status === "active" ? "" : " badge-muted"}`}>
+                {t(`storefront.delivery.status.${row.status}`, row.status)}
+              </span>
+              {!row.enabledForStoreOrders && !canToggleOn(row) ? (
+                <p className="form-hint">{t("storefront.delivery.ineligibleHint")}</p>
+              ) : null}
               {row.isDefaultForStoreOrders ? (
                 <span className="badge">{t("storefront.delivery.defaultBadge")}</span>
               ) : row.enabledForStoreOrders ? (
                 <button
+                  className="button button-secondary"
                   disabled={!canManage || busy}
                   onClick={() => void apply(row.id, { isDefaultForStoreOrders: true })}
                   type="button"
@@ -150,13 +169,19 @@ export function DeliveryCompaniesSection({
         <div className="alert alert-info" role="alertdialog">
           <p>{t("storefront.delivery.disableLastConfirm")}</p>
           <button
+            className="button button-danger"
             disabled={busy}
             onClick={() => void apply(confirmDisableId, { enabledForStoreOrders: false })}
             type="button"
           >
             {t("common.confirm")}
           </button>
-          <button disabled={busy} onClick={() => setConfirmDisableId(undefined)} type="button">
+          <button
+            className="button button-secondary"
+            disabled={busy}
+            onClick={() => setConfirmDisableId(undefined)}
+            type="button"
+          >
             {t("common.cancel")}
           </button>
         </div>

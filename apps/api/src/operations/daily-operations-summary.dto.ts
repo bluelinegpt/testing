@@ -1,4 +1,5 @@
-import { IsDateString, IsIn, IsOptional, IsUUID } from "class-validator";
+import { Transform } from "class-transformer";
+import { IsBoolean, IsDateString, IsIn, IsOptional, IsUUID } from "class-validator";
 
 /** Allowed values only; unknown strings are rejected by `@IsIn` rather than
  *  silently falling back to a mode nobody asked for. */
@@ -38,6 +39,21 @@ export class DailyOperationsSummaryQueryDto {
   @IsOptional()
   @IsIn(["employee", "outsourced"])
   public readonly driverType?: "employee" | "outsourced";
+
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === "true")
+  @IsBoolean()
+  public readonly includeTraderPayments?: boolean;
+
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === "true")
+  @IsBoolean()
+  public readonly includeTraderReceivables?: boolean;
+
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === "true")
+  @IsBoolean()
+  public readonly includeTraderPayables?: boolean;
 }
 
 export class DailyOperationsSummaryExportQueryDto extends DailyOperationsSummaryQueryDto {
@@ -77,3 +93,5 @@ export class DailyOperationsSummaryOrdersQueryDto {
   @IsUUID("4")
   public readonly driverId!: string;
 }
+
+

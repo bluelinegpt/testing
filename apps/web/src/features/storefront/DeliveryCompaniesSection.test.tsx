@@ -77,7 +77,7 @@ describe("DeliveryCompaniesSection", () => {
   it("shows a clean empty state when no Delivery Company is connected", async () => {
     setup([]);
     expect(await screen.findByTestId("storefront-delivery-empty")).toHaveTextContent(
-      "No Delivery Company is currently connected to this Store.",
+      "No delivery companies are connected yet. Your Store and Products remain available, but Store checkout cannot assign a delivery company.",
     );
     // No Company picker, no create control — this is not a discovery surface.
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
@@ -157,6 +157,35 @@ describe("DeliveryCompaniesSection", () => {
     // The relationship is still listed; only its enablement changed.
     expect(screen.getByText("Dana Delivery")).toBeInTheDocument();
     expect(screen.queryByText("Default")).not.toBeInTheDocument();
+  });
+
+  it("blocks enabling an inactive relationship, with a clear explanation, but still allows disabling it", async () => {
+    const suspended: DeliveryRelationship = {
+      companyId: "company-suspended",
+      companyName: "Suspended Co",
+      enabledForStoreOrders: false,
+      id: "rel-suspended",
+      isDefaultForStoreOrders: false,
+      status: "suspended",
+    };
+    setup([dana, suspended]);
+    await screen.findByText("Suspended Co");
+    expect(
+      screen.getByText("This relationship is not active and cannot be enabled for Store orders."),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Suspended")).toBeInTheDocument();
+    const checkboxes = screen.getAllByRole("checkbox");
+    // dana (active, enabled) stays clickable; the suspended one is blocked --
+    // the `disabled` attribute itself is what a real browser enforces; a
+    // disabled checkbox never fires `change` there regardless of what jsdom's
+    // synthetic `fireEvent.click` does on its own DOM node.
+    expect(checkboxes[0]).toBeEnabled();
+    expect(checkboxes[1]).toBeDisabled();
+  });
+
+  it("shows a status badge for every relationship, muted for anything not active", async () => {
+    setup([dana]);
+    expect(await screen.findByText("Active")).toBeInTheDocument();
   });
 
   it("does not offer any control to a read-only viewer", async () => {

@@ -13,7 +13,7 @@ import { usePlatformSession } from "../app/PlatformSession.js";
  * table is meant to grow without bound, so a client-side filter would
  * quietly describe one page of results as if it were everything.
  */
-const sourceApps = ["web", "api", "platform-web", "store", "mobile"] as const;
+const sourceApps = ["web", "api", "platform-web", "store", "mobile", "public-web"] as const;
 const severities = ["high", "medium", "low"] as const;
 const statuses = ["open", "resolved"] as const;
 
@@ -27,6 +27,8 @@ export function ErrorsPage(): ReactElement {
   const [sourceApp, setSourceApp] = useState("");
   const [severity, setSeverity] = useState("");
   const [status, setStatus] = useState("");
+  const [occurredFrom, setOccurredFrom] = useState("");
+  const [occurredTo, setOccurredTo] = useState("");
   const [page, setPage] = useState(1);
   const [data, setData] = useState<ErrorReportPage | undefined>(undefined);
   const [failed, setFailed] = useState(false);
@@ -38,7 +40,7 @@ export function ErrorsPage(): ReactElement {
     let cancelled = false;
     setFailed(false);
     void platformApi
-      .errors({ page, search, severity, sourceApp, status })
+      .errors({ occurredFrom, occurredTo, page, search, severity, sourceApp, status })
       .then((result) => {
         if (!cancelled) {
           setData(result);
@@ -51,7 +53,7 @@ export function ErrorsPage(): ReactElement {
     return () => {
       cancelled = true;
     };
-  }, [page, search, severity, sourceApp, status]);
+  }, [occurredFrom, occurredTo, page, search, severity, sourceApp, status]);
 
   useEffect(() => load(), [load]);
 
@@ -112,6 +114,30 @@ export function ErrorsPage(): ReactElement {
             value={search}
           />
         </label>
+        <label className="platform-field" htmlFor="error-occurred-from">
+          <span>Date from</span>
+          <input
+            id="error-occurred-from"
+            onChange={(event) => {
+              setPage(1);
+              setOccurredFrom(event.target.value);
+            }}
+            type="date"
+            value={occurredFrom}
+          />
+        </label>
+        <label className="platform-field" htmlFor="error-occurred-to">
+          <span>Date to</span>
+          <input
+            id="error-occurred-to"
+            onChange={(event) => {
+              setPage(1);
+              setOccurredTo(event.target.value);
+            }}
+            type="date"
+            value={occurredTo}
+          />
+        </label>
         <label className="platform-field" htmlFor="error-app">
           <span>Application</span>
           <select
@@ -166,6 +192,21 @@ export function ErrorsPage(): ReactElement {
             ))}
           </select>
         </label>
+        <button
+          className="platform-button platform-button--quiet"
+          onClick={() => {
+            setPage(1);
+            setSearch("");
+            setOccurredFrom("");
+            setOccurredTo("");
+            setSourceApp("");
+            setSeverity("");
+            setStatus("");
+          }}
+          type="button"
+        >
+          Clear filters
+        </button>
       </div>
 
       {canManage && data !== undefined ? (
@@ -212,6 +253,8 @@ export function ErrorsPage(): ReactElement {
                 <th scope="col">Criticality</th>
                 <th scope="col">Status</th>
                 <th scope="col">Message</th>
+                <th scope="col">Path</th>
+                <th scope="col">Reference</th>
                 <th scope="col">Occurred</th>
               </tr>
             </thead>
@@ -247,6 +290,8 @@ export function ErrorsPage(): ReactElement {
                     </span>
                   </td>
                   <td className="platform-truncate">{report.message}</td>
+                  <td className="platform-truncate">{report.path ?? <span className="platform-muted">-</span>}</td>
+                  <td className="platform-truncate">{report.correlationId ?? <span className="platform-muted">-</span>}</td>
                   <td>{new Date(report.occurredAt).toLocaleString()}</td>
                 </tr>
               ))}

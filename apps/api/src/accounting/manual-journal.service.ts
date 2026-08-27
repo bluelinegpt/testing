@@ -1139,6 +1139,7 @@ export class ManualJournalService {
     const result = await this.transactions.execute(async (transaction) =>
       sql<Record<string, unknown>>`
         select j.id, j.company_id as "companyId", j.journal_number as "journalNumber",
+               j.business_date::text as "businessDate",
                j.business_date::text as "journalDate", y.fiscal_year_code as "fiscalYear",
                p.period_code as "fiscalPeriod", j.journal_type as "journalType",
                j.source_type as "journalSource", j.description,

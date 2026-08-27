@@ -327,6 +327,151 @@ describe.skipIf(!runDatabaseTests)("Product Catalogue persistence", () => {
     });
   });
 
+  /* ---------------------------------------------------------------------
+     T3 -- Store Category management (rename, reorder, duplicate names).
+
+     Creation, cross-Storefront rejection, deactivation-blocked-by-active-
+     Products and the resulting audit trail are already covered above; these
+     three claims were the ones T3's browser acceptance actually depends on
+     and had no direct database coverage yet.
+     --------------------------------------------------------------------- */
+
+  it("renames a Category in place, keeping its id for Products that reference it", async () => {
+    await inRolledBackTransaction(async (transaction) => {
+      const fixture = await seed(transaction);
+      const service = buildService(transaction, fixture);
+      const { categoryId, product } = await draftProduct(service, fixture);
+      const category = await sql<{ version: string }>`
+        select version::text as version from trader_storefront_categories
+         where id = ${categoryId}::uuid`.execute(transaction);
+      const renamed = await service.updateCategory(
+        categoryId,
+        { expectedVersion: Number(category.rows[0]!.version), nameEn: "Premium Abayas" },
+        randomUUID(),
+      );
+      expect(renamed.nameEn).toBe("Premium Abayas");
+      expect(String(renamed.id)).toBe(categoryId);
+      // The Product's foreign key is the Category id, not its name -- a
+      // rename must not disturb the assignment.
+      const stored = await sql<{ categoryId: string }>`
+        select category_id as "categoryId" from trader_storefront_products
+         where id = ${String(product.id)}::uuid`.execute(transaction);
+      expect(stored.rows[0]!.categoryId).toBe(categoryId);
+    });
+  });
+
+  it("reorders Categories within a Storefront", async () => {
+    await inRolledBackTransaction(async (transaction) => {
+      const fixture = await seed(transaction);
+      const service = buildService(transaction, fixture);
+      const first = await service.createCategory(
+        fixture.storefrontId,
+        { nameEn: "New Arrivals" },
+        randomUUID(),
+      );
+      const second = await service.createCategory(
+        fixture.storefrontId,
+        { nameEn: "Eid Collection" },
+        randomUUID(),
+      );
+      await service.reorderCategories(
+        fixture.storefrontId,
+        {
+          entries: [
+            { displayOrder: 0, id: String(second.id) },
+            { displayOrder: 1, id: String(first.id) },
+          ],
+        },
+        randomUUID(),
+      );
+      const ordered = await service.listCategories(fixture.storefrontId);
+      expect(ordered.items.map((row) => String(row.id))).toEqual([
+        String(second.id),
+        String(first.id),
+      ]);
+    });
+  });
+
+  it("refuses reordering a Category that belongs to another Storefront", async () => {
+    await inRolledBackTransaction(async (transaction) => {
+      const fixture = await seed(transaction);
+      const neighbourCategory = await buildService(transaction, {
+        actorId: fixture.otherActorId,
+        companyId: fixture.otherCompanyId,
+      }).createCategory(fixture.otherStorefrontId, { nameEn: "Theirs" }, randomUUID());
+      const service = buildService(transaction, fixture);
+      // The reorder call is scoped by storefrontId, so a foreign category id
+      // slipped into the entries list simply has no row to update -- it must
+      // not silently succeed or touch anything.
+      await service.reorderCategories(
+        fixture.storefrontId,
+        { entries: [{ displayOrder: 0, id: String(neighbourCategory.id) }] },
+        randomUUID(),
+      );
+      const untouched = await sql<{ displayOrder: number }>`
+        select display_order as "displayOrder" from trader_storefront_categories
+         where id = ${String(neighbourCategory.id)}::uuid`.execute(transaction);
+      expect(untouched.rows[0]!.displayOrder).toBe(0);
+    });
+  });
+
+  it("rejects a duplicate Category name (case- and space-insensitively) within one Storefront", async () => {
+    await inRolledBackTransaction(async (transaction) => {
+      const fixture = await seed(transaction);
+      const service = buildService(transaction, fixture);
+      await service.createCategory(fixture.storefrontId, { nameEn: "New Arrivals" }, randomUUID());
+      // No explicit slug given, so both derive the same slug from the name --
+      // the uniqueness constraint that actually enforces this business rule.
+      await expect(
+        service.createCategory(fixture.storefrontId, { nameEn: " new arrivals " }, randomUUID()),
+      ).rejects.toMatchObject({ errorCode: "product_category_slug_taken" });
+    });
+  });
+
+  it("refuses every Category operation against a Storefront id the caller cannot reach", async () => {
+    await inRolledBackTransaction(async (transaction) => {
+      const fixture = await seed(transaction);
+      const service = buildService(transaction, fixture);
+      // A client-supplied foreign Storefront id, tried against every write
+      // this actor could reach for their OWN Storefront -- none of it may
+      // succeed just because the frontend would normally hide the id.
+      await expect(
+        service.createCategory(fixture.otherStorefrontId, { nameEn: "Attack" }, randomUUID()),
+      ).rejects.toMatchObject({ errorCode: "storefront_not_found" });
+      await expect(
+        service.listCategories(fixture.otherStorefrontId),
+      ).rejects.toMatchObject({ errorCode: "storefront_not_found" });
+      await expect(
+        service.reorderCategories(
+          fixture.otherStorefrontId,
+          { entries: [{ displayOrder: 0, id: randomUUID() }] },
+          randomUUID(),
+        ),
+      ).rejects.toMatchObject({ errorCode: "storefront_not_found" });
+    });
+  });
+
+  it("allows the same Category name to be reused by a different Storefront", async () => {
+    await inRolledBackTransaction(async (transaction) => {
+      const fixture = await seed(transaction);
+      await buildService(transaction, fixture).createCategory(
+        fixture.storefrontId,
+        { nameEn: "New Arrivals" },
+        randomUUID(),
+      );
+      const neighbour = buildService(transaction, {
+        actorId: fixture.otherActorId,
+        companyId: fixture.otherCompanyId,
+      });
+      const theirs = await neighbour.createCategory(
+        fixture.otherStorefrontId,
+        { nameEn: "New Arrivals" },
+        randomUUID(),
+      );
+      expect(theirs.nameEn).toBe("New Arrivals");
+    });
+  });
+
   // ------------------------------------------------------------- uniqueness
 
   it("enforces case-insensitive slug uniqueness within one Storefront", async () => {
@@ -424,6 +569,151 @@ describe.skipIf(!runDatabaseTests)("Product Catalogue persistence", () => {
           randomUUID(),
         ),
       ).rejects.toMatchObject({ errorCode: "product_slug_taken" });
+    });
+  });
+
+  /* ---------------------------------------------------------------------
+     T4 -- Product Code / SKU / Barcode: uniqueness and leading-zero safety.
+
+     Slug uniqueness is already covered above; Product Code and SKU share the
+     identical `uniqueGuard` mechanism but had no direct test, and leading-
+     zero preservation is the one property that silently breaks if a future
+     change ever routes these through a numeric type.
+     --------------------------------------------------------------------- */
+
+  it("enforces case-insensitive Product Code uniqueness within one Storefront", async () => {
+    await inRolledBackTransaction(async (transaction) => {
+      const fixture = await seed(transaction);
+      const service = buildService(transaction, fixture);
+      const { categoryId } = await draftProduct(service, fixture, { productCode: "ABA-001" });
+      await expect(
+        service.createProduct(
+          {
+            categoryId,
+            name: "Same code, different Product",
+            productCode: "aba-001",
+            sellingPrice: "10.00",
+            slug: "a-different-slug",
+            storefrontId: fixture.storefrontId,
+          },
+          randomUUID(),
+        ),
+      ).rejects.toMatchObject({ errorCode: "product_code_taken" });
+    });
+  });
+
+  it("allows the same Product Code to be reused by a different Storefront", async () => {
+    await inRolledBackTransaction(async (transaction) => {
+      const fixture = await seed(transaction);
+      await draftProduct(buildService(transaction, fixture), fixture, { productCode: "ABA-001" });
+      const neighbour = buildService(transaction, {
+        actorId: fixture.otherActorId,
+        companyId: fixture.otherCompanyId,
+      });
+      const theirCategory = await neighbour.createCategory(
+        fixture.otherStorefrontId,
+        { nameEn: "Theirs" },
+        randomUUID(),
+      );
+      const theirs = await neighbour.createProduct(
+        {
+          categoryId: String(theirCategory.id),
+          name: "Their own ABA-001",
+          productCode: "ABA-001",
+          sellingPrice: "10.00",
+          slug: "their-aba-001",
+          storefrontId: fixture.otherStorefrontId,
+        },
+        randomUUID(),
+      );
+      expect(theirs.productCode).toBe("ABA-001");
+    });
+  });
+
+  it("preserves a leading zero in SKU and barcode through save and reload", async () => {
+    await inRolledBackTransaction(async (transaction) => {
+      const fixture = await seed(transaction);
+      const service = buildService(transaction, fixture);
+      const { categoryId } = await draftProduct(service, fixture);
+      const created = await service.createProduct(
+        {
+          barcode: "0006291045678",
+          categoryId,
+          name: "Zero-padded identifiers",
+          productCode: "ZP-001",
+          sellingPrice: "10.00",
+          sku: "000145",
+          slug: "zero-padded-identifiers",
+          storefrontId: fixture.storefrontId,
+        },
+        randomUUID(),
+      );
+      // Not the create() response alone -- a fresh read, so a value that
+      // survived the INSERT but was mangled on the way back out would still
+      // be caught.
+      const reloaded = (await service.getProduct(String(created.id))) as unknown as {
+        readonly barcode: string;
+        readonly sku: string;
+      };
+      expect(reloaded.sku).toBe("000145");
+      expect(reloaded.barcode).toBe("0006291045678");
+    });
+  });
+
+  it("enforces case-insensitive SKU uniqueness within one Storefront, but not across Storefronts", async () => {
+    await inRolledBackTransaction(async (transaction) => {
+      const fixture = await seed(transaction);
+      const service = buildService(transaction, fixture);
+      const { categoryId } = await draftProduct(service, fixture, { productCode: "SKU-BASE-1" });
+      await service.createProduct(
+        {
+          categoryId,
+          name: "First SKU holder",
+          productCode: "SKU-HOLDER",
+          sellingPrice: "10.00",
+          sku: "000145",
+          slug: "sku-holder",
+          storefrontId: fixture.storefrontId,
+        },
+        randomUUID(),
+      );
+      await expect(
+        service.createProduct(
+          {
+            categoryId,
+            name: "Duplicate SKU",
+            productCode: "SKU-DUP",
+            sellingPrice: "10.00",
+            sku: "000145",
+            slug: "duplicate-sku",
+            storefrontId: fixture.storefrontId,
+          },
+          randomUUID(),
+        ),
+      ).rejects.toMatchObject({ errorCode: "product_sku_taken" });
+      // A different Storefront reusing the same SKU is not a collision.
+      const neighbour = buildService(transaction, {
+        actorId: fixture.otherActorId,
+        companyId: fixture.otherCompanyId,
+      });
+      const theirCategory = await neighbour.createCategory(
+        fixture.otherStorefrontId,
+        { nameEn: "Theirs" },
+        randomUUID(),
+      );
+      const theirs = await neighbour.createProduct(
+        {
+          categoryId: String(theirCategory.id),
+          name: "Their own SKU",
+          productCode: "THEIR-SKU",
+          sellingPrice: "10.00",
+          sku: "000145",
+          slug: "their-sku-000145",
+          storefrontId: fixture.otherStorefrontId,
+        },
+        randomUUID(),
+      );
+      expect(theirs.sku).toBe("000145");
     });
   });
 
@@ -734,6 +1024,122 @@ describe.skipIf(!runDatabaseTests)("Product Catalogue persistence", () => {
       await expect(
         service.removeMedia(String(image.id), randomUUID()),
       ).rejects.toMatchObject({ errorCode: "product_media_last_image" });
+    });
+  });
+
+  /* ---------------------------------------------------------------------
+     T5 -- removing the PRIMARY image while others remain.
+
+     Neither of the two safe outcomes T5 requires ("blocked" or "another
+     becomes primary") was implemented before this session: the old code set
+     `is_primary = false` on removal unconditionally, leaving a Product with
+     images but with NONE of them primary. This locks in the fix.
+     --------------------------------------------------------------------- */
+  it("promotes another image to primary when the primary image is removed", async () => {
+    await inRolledBackTransaction(async (transaction) => {
+      const fixture = await seed(transaction, "general");
+      const service = buildService(transaction, fixture);
+      const { product } = await draftProduct(service, fixture);
+      const first = await addImage(service, String(product.id), "https://cdn.example.test/a.jpg");
+      const second = await addImage(service, String(product.id), "https://cdn.example.test/b.jpg");
+      expect(first.isPrimary).toBe(true);
+      expect(second.isPrimary).toBe(false);
+
+      await service.removeMedia(String(first.id), randomUUID());
+
+      const detail = await service.getProduct(String(product.id));
+      const images = (detail.media as { id: unknown; isPrimary: boolean }[]).filter(
+        (entry) => String(entry.id) === String(second.id),
+      );
+      expect(images[0]?.isPrimary).toBe(true);
+    });
+  });
+
+  it("reorders Product media, renumbering deterministically even when rows start tied", async () => {
+    await inRolledBackTransaction(async (transaction) => {
+      const fixture = await seed(transaction, "general");
+      const service = buildService(transaction, fixture);
+      const { product } = await draftProduct(service, fixture);
+      // The primary image always leads regardless of display_order (a
+      // deliberate, pre-existing rule -- the gallery's hero image is not
+      // something a plain reorder should be able to displace), so this
+      // reorders among the two NON-primary images instead.
+      const primary = await addImage(service, String(product.id), "https://cdn.example.test/a.jpg");
+      const second = await addImage(service, String(product.id), "https://cdn.example.test/b.jpg");
+      const third = await addImage(service, String(product.id), "https://cdn.example.test/c.jpg");
+      await service.reorderMedia(
+        String(product.id),
+        {
+          entries: [
+            { displayOrder: 0, id: String(third.id) },
+            { displayOrder: 1, id: String(second.id) },
+          ],
+        },
+        randomUUID(),
+      );
+      const detail = await service.getProduct(String(product.id));
+      const ordered = (detail.media as { id: unknown }[]).map((entry) => String(entry.id));
+      expect(ordered).toEqual([String(primary.id), String(third.id), String(second.id)]);
+    });
+  });
+
+  it("refuses to reorder or remove media belonging to another Storefront", async () => {
+    await inRolledBackTransaction(async (transaction) => {
+      const fixture = await seed(transaction, "general");
+      const neighbour = buildService(transaction, {
+        actorId: fixture.otherActorId,
+        companyId: fixture.otherCompanyId,
+      });
+      const { product: theirProduct } = await draftProduct(neighbour, {
+        ...fixture,
+        actorId: fixture.otherActorId,
+        companyId: fixture.otherCompanyId,
+        storefrontId: fixture.otherStorefrontId,
+        traderId: fixture.otherTraderId,
+      });
+      const theirImage = await addImage(neighbour, String(theirProduct.id));
+
+      const service = buildService(transaction, fixture);
+      await expect(
+        service.removeMedia(String(theirImage.id), randomUUID()),
+      ).rejects.toMatchObject({ errorCode: "product_media_not_found" });
+      await expect(
+        service.reorderMedia(
+          String(theirProduct.id),
+          { entries: [{ displayOrder: 0, id: String(theirImage.id) }] },
+          randomUUID(),
+        ),
+      ).rejects.toMatchObject({ errorCode: "product_not_found" });
+    });
+  });
+
+  it("refuses to attach another Trader Commerce's file as Product media", async () => {
+    await inRolledBackTransaction(async (transaction) => {
+      const fixture = await seed(transaction, "general");
+      const service = buildService(transaction, fixture);
+      const { product } = await draftProduct(service, fixture);
+
+      const otherCommerce = await sql<{ traderCommerceId: string }>`
+        select trader_commerce_id as "traderCommerceId" from trader_storefronts
+         where id = ${fixture.otherStorefrontId}::uuid
+      `.execute(transaction);
+      const foreignFileId = await new FileOwnershipService(
+        transaction as unknown as Kysely<DatabaseSchema>,
+      ).createCommerceFile(transaction, otherCommerce.rows[0]!.traderCommerceId, {
+        mediaType: "image/png",
+        originalFilename: "foreign.png",
+        sizeBytes: 10,
+        storageKey: `test/${randomUUID()}.png`,
+        storageProvider: "local",
+      });
+
+      await expect(
+        service.addMedia(
+          String(product.id),
+          { fileId: foreignFileId, mediaType: "image" },
+          randomUUID(),
+        ),
+      ).rejects.toMatchObject({ errorCode: "file_not_found" });
     });
   });
 
@@ -1262,6 +1668,171 @@ describe.skipIf(!runDatabaseTests)("Product Catalogue persistence", () => {
       const detail = await service.getProduct(String(product.id));
       const values = (detail.options as { values: { value: string }[] }[])[0]!.values;
       expect(values.map((entry) => entry.value)).toEqual(["L", "S"]);
+    });
+  });
+
+  /* ---------------------------------------------------------------------
+     T5 -- option group/value display_order, reorder, rename, remove.
+
+     `addOptionGroup`/`addOptionValue` previously always defaulted a fresh
+     row's `display_order` to 0 -- the same tie class fixed for Store
+     Categories in T3 and for Product media (`addMedia` already defaulted to
+     the sibling count). This locks in the same fix here.
+     --------------------------------------------------------------------- */
+  it("defaults new option groups and values to sequential display order, not all zero", async () => {
+    await inRolledBackTransaction(async (transaction) => {
+      const fixture = await seed(transaction, "general");
+      const service = buildService(transaction, fixture);
+      const { product } = await draftProduct(service, fixture);
+      const size = await service.addOptionGroup(String(product.id), { name: "Size" }, randomUUID());
+      const color = await service.addOptionGroup(
+        String(product.id),
+        { name: "Color" },
+        randomUUID(),
+      );
+      expect(Number(size.displayOrder)).toBe(0);
+      expect(Number(color.displayOrder)).toBe(1);
+
+      const black = await service.addOptionValue(String(color.id), { value: "Black" }, randomUUID());
+      const navy = await service.addOptionValue(String(color.id), { value: "Navy" }, randomUUID());
+      expect(Number(black.displayOrder)).toBe(0);
+      expect(Number(navy.displayOrder)).toBe(1);
+    });
+  });
+
+  it("reorders option groups within a Product, renumbering deterministically", async () => {
+    await inRolledBackTransaction(async (transaction) => {
+      const fixture = await seed(transaction, "general");
+      const service = buildService(transaction, fixture);
+      const { product } = await draftProduct(service, fixture);
+      const size = await service.addOptionGroup(String(product.id), { name: "Size" }, randomUUID());
+      const color = await service.addOptionGroup(
+        String(product.id),
+        { name: "Color" },
+        randomUUID(),
+      );
+      await service.reorderOptionGroups(
+        String(product.id),
+        {
+          entries: [
+            { displayOrder: 0, id: String(color.id) },
+            { displayOrder: 1, id: String(size.id) },
+          ],
+        },
+        randomUUID(),
+      );
+      const detail = await service.getProduct(String(product.id));
+      const ordered = (detail.options as { name: string }[]).map((group) => group.name);
+      expect(ordered).toEqual(["Color", "Size"]);
+    });
+  });
+
+  it("renames an option value in place, keeping its id", async () => {
+    await inRolledBackTransaction(async (transaction) => {
+      const fixture = await seed(transaction, "general");
+      const service = buildService(transaction, fixture);
+      const { product } = await draftProduct(service, fixture);
+      const group = await service.addOptionGroup(
+        String(product.id),
+        { name: "Color" },
+        randomUUID(),
+      );
+      const navy = await service.addOptionValue(String(group.id), { value: "Navy" }, randomUUID());
+      const renamed = await service.updateOptionValue(
+        String(navy.id),
+        { value: "Dark Navy" },
+        randomUUID(),
+      );
+      expect(renamed.value).toBe("Dark Navy");
+      expect(String(renamed.id)).toBe(String(navy.id));
+    });
+  });
+
+  it("removes (deactivates) an option value: marked inactive for admin, gone from public", async () => {
+    await inRolledBackTransaction(async (transaction) => {
+      const fixture = await seed(transaction, "general");
+      const service = buildService(transaction, fixture);
+      const slug = `shop-a-${fixture.companyId.slice(0, 8)}`;
+      const { product } = await draftProduct(service, fixture);
+      const group = await service.addOptionGroup(
+        String(product.id),
+        { name: "Color" },
+        randomUUID(),
+      );
+      const beige = await service.addOptionValue(String(group.id), { value: "Beige" }, randomUUID());
+      await service.addOptionValue(String(group.id), { value: "Black" }, randomUUID());
+      await addImage(service, String(product.id));
+      await service.activate(String(product.id), { expectedVersion: 1 }, randomUUID());
+
+      await service.removeOptionValue(String(beige.id), randomUUID());
+
+      // Deactivated, never deleted -- same rule as media/Categories: the
+      // admin view still carries the row (isActive: false) rather than
+      // hiding it outright, so it can be told apart from one that never
+      // existed. The public view is the one that must filter it out.
+      const detail = await service.getProduct(String(product.id));
+      const adminValues = (
+        detail.options as { values: { isActive: boolean; value: string }[] }[]
+      )[0]!.values;
+      expect(adminValues.find((entry) => entry.value === "Beige")?.isActive).toBe(false);
+      const values = adminValues.filter((entry) => entry.isActive);
+      expect(values.map((entry) => entry.value)).toEqual(["Black"]);
+
+      const publicDetail = await service.publicProduct(slug, "embroidered-abaya");
+      const publicValues = (publicDetail.options as { values: { value: string }[] }[])[0]!.values;
+      expect(publicValues.map((entry) => entry.value)).toEqual(["Black"]);
+    });
+  });
+
+  it("refuses to rename, remove or reorder options belonging to another Storefront's Product", async () => {
+    await inRolledBackTransaction(async (transaction) => {
+      const fixture = await seed(transaction, "general");
+      const neighbour = buildService(transaction, {
+        actorId: fixture.otherActorId,
+        companyId: fixture.otherCompanyId,
+      });
+      const { product: theirProduct } = await draftProduct(neighbour, {
+        ...fixture,
+        actorId: fixture.otherActorId,
+        companyId: fixture.otherCompanyId,
+        storefrontId: fixture.otherStorefrontId,
+        traderId: fixture.otherTraderId,
+      });
+      const theirGroup = await neighbour.addOptionGroup(
+        String(theirProduct.id),
+        { name: "Size" },
+        randomUUID(),
+      );
+      const theirValue = await neighbour.addOptionValue(
+        String(theirGroup.id),
+        { value: "M" },
+        randomUUID(),
+      );
+
+      const service = buildService(transaction, fixture);
+      await expect(
+        service.updateOptionGroup(
+          String(theirGroup.id),
+          { name: "Hijacked" },
+          randomUUID(),
+        ),
+      ).rejects.toMatchObject({ errorCode: "product_option_group_not_found" });
+      await expect(
+        service.reorderOptionGroups(
+          String(theirProduct.id),
+          { entries: [{ displayOrder: 0, id: String(theirGroup.id) }] },
+          randomUUID(),
+        ),
+      ).rejects.toMatchObject({ errorCode: "product_not_found" });
+      await expect(
+        service.updateOptionValue(String(theirValue.id), { value: "Hijacked" }, randomUUID()),
+      ).rejects.toMatchObject({ errorCode: "product_option_value_not_found" });
+      await expect(
+        service.removeOptionValue(String(theirValue.id), randomUUID()),
+      ).rejects.toMatchObject({ errorCode: "product_option_value_not_found" });
+      await expect(
+        service.addOptionValue(String(theirGroup.id), { value: "Attack" }, randomUUID()),
+      ).rejects.toMatchObject({ errorCode: "product_option_group_not_found" });
     });
   });
 });

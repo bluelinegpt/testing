@@ -2127,6 +2127,23 @@ const exportOpenTraderReceivablePredicate = sql`
       identity.profileId,
     );
 
+    // Same cross-Company scope as `traderPortalOrdersPageAllCompanies` (Trader
+    // Acceptance Prompt T8, §45): a Trader Commerce identity linked to more
+    // than one Delivery Company saw ALL its Orders on the Orders list page but
+    // only the current session Company's Orders here -- two different counts
+    // for "how many Orders do I have" is not two views of the same truth, it
+    // is a wrong one. The caller's own session pair is still unioned in, so a
+    // Trader with no Trader Commerce identity yet (most Traders, until they
+    // touch My Store) keeps seeing its own Orders exactly as before.
+    const scopePairs = traderCommerceOrderScopePairs(trader.id);
+    const scopePredicate = sql`
+      (o.company_id, o.trader_id) in (
+        select "companyId", "traderId" from (${scopePairs}) scope
+        union
+        select ${identity.companyId}::uuid, ${trader.id}::uuid
+      )
+    `;
+
     const orderCounts = await sql<{
       active: string;
       cancelled: string;
@@ -2136,25 +2153,33 @@ const exportOpenTraderReceivablePredicate = sql`
       total: string;
     }>`
       select
-        count(*) filter (where delivery_status = 'new') as "newOrders",
+        count(*) filter (where o.delivery_status = 'new') as "newOrders",
         count(*) filter (
-          where delivery_status in ('in_branch', 'assigned_to_driver', 'out_for_delivery', 'hold')
+          where o.delivery_status in ('in_branch', 'assigned_to_driver', 'out_for_delivery', 'hold')
         ) as active,
-        count(*) filter (where delivery_status = 'delivered') as delivered,
-        count(*) filter (where delivery_status = 'cancelled') as cancelled,
+        -- T10: closed is a POST-delivery terminal state (see the comment in
+        -- order-workflow-guidance.ts), not a separate outcome from delivered
+        -- -- same Order, further along. Counting only delivered here silently
+        -- dropped every closed Order from the whole breakdown: Total kept
+        -- counting it, but no bucket did, so New+Active+Delivered+Cancelled+
+        -- Returned never summed to Total. Matches the existing
+        -- (delivered, closed, ...) grouping already used elsewhere in this
+        -- file (workflow-step queries above).
+        count(*) filter (where o.delivery_status in ('delivered', 'closed')) as delivered,
+        count(*) filter (where o.delivery_status = 'cancelled') as cancelled,
         count(*) filter (
-          where delivery_status in ('returned_to_branch', 'returned_to_trader')
+          where o.delivery_status in ('returned_to_branch', 'returned_to_trader')
         ) as returned,
         count(*) as total
-        from orders
-       where company_id = ${identity.companyId}::uuid and trader_id = ${trader.id}::uuid
+        from orders o
+       where ${scopePredicate}
     `.execute(this.database);
 
     const monthCod = await sql<{ total: string }>`
-      select coalesce(sum(cod_amount), 0)::text as total
-        from orders
-       where company_id = ${identity.companyId}::uuid and trader_id = ${trader.id}::uuid
-         and order_date >= date_trunc('month', now())
+      select coalesce(sum(o.cod_amount), 0)::text as total
+        from orders o
+       where ${scopePredicate}
+         and o.order_date >= date_trunc('month', now())
     `.execute(this.database);
 
     const recent = await sql<{
@@ -2170,7 +2195,7 @@ const exportOpenTraderReceivablePredicate = sql`
              o.customer_amount_due::text as "amountDue", c.name_en as "companyName"
         from orders o
         join companies c on c.id = o.company_id
-       where o.company_id = ${identity.companyId}::uuid and o.trader_id = ${trader.id}::uuid
+       where ${scopePredicate}
        order by o.order_date desc, o.created_at desc
        limit 5
     `.execute(this.database);

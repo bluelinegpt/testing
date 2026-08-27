@@ -59,7 +59,9 @@ export interface PublicStore extends PublicStoreSummary {
  * instead of a new type beside this one.
  */
 export interface StoreCategory {
-  readonly name: string;
+  readonly displayOrder: number;
+  readonly nameAr: string | null;
+  readonly nameEn: string;
   readonly slug: string;
 }
 
@@ -71,9 +73,19 @@ export interface PublicProductMedia {
 }
 
 export interface PublicProductOptionGroup {
+  /** The Trader's own ordering for this group -- already returned by the
+   * public API (`optionsFor`'s `publicOnly` projection), just not declared
+   * here before C1. This is what a stable Cart line identity sorts by
+   * (`buildCartLineKey`); no group/value database id is ever exposed
+   * publicly (see the API's own comment on why). */
+  readonly displayOrder: number;
   readonly isRequired: boolean;
   readonly name: string;
-  readonly values: readonly { readonly value: string }[];
+  readonly values: readonly {
+    readonly displayOrder: number;
+    readonly isActive: boolean;
+    readonly value: string;
+  }[];
 }
 
 export interface PublicProduct {

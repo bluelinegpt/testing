@@ -1,4 +1,4 @@
-import {
+﻿import {
   AlertTriangle,
   FilePlus2,
   Pencil,
@@ -557,6 +557,11 @@ function WorkforceForm({
         setSaving(false);
         return;
       }
+      if (isDriverRole && common.mobileNumber.trim() === "") {
+        showFormError(t("workforce.driverMobileRequired"));
+        setSaving(false);
+        return;
+      }
       const payload = {
         ...common,
         employeeRoleId: roleId,
@@ -626,7 +631,9 @@ function WorkforceForm({
         earningError ??
           (caught instanceof ApiError && caught.code === "employee_salary_effective_date_overlap"
             ? t("workforce.salaryEffectiveDateConflict")
-            : t("common.saveFailed")),
+            : caught instanceof ApiError && caught.code === "driver_employee_mobile_required"
+              ? t("workforce.driverMobileRequired")
+              : t("common.saveFailed")),
       );
     } finally {
       setSaving(false);
@@ -643,7 +650,7 @@ function WorkforceForm({
       {/* noValidate: this form already has its own validation (earningErrors,
           fieldErrors, showFormError) with visible messages. Without it, the
           browser's NATIVE constraint validation (e.g. the delivery amount's
-          min="0.01") silently blocks submission before `submit` ever runs —
+          min="0.01") silently blocks submission before `submit` ever runs â€”
           and its tooltip is invisible when the offending field is scrolled
           out of view in this tall modal, which read as "Save does nothing". */}
       <form noValidate onSubmit={(event) => void submit(event)}>
@@ -732,7 +739,7 @@ function WorkforceForm({
           <fieldset>
             <legend>{t("workforce.contact")}</legend>
             <label className="field">
-              <span>{t("workforce.mobile")}</span>
+              <span>{t("workforce.mobile")}{isDriverRole ? " *" : ""}</span>
               <input
                 autoComplete="tel"
                 defaultValue={String(detail?.mobile_number ?? "")}
@@ -783,7 +790,7 @@ function WorkforceForm({
             </fieldset>
           ) : null}
           {/* Shown in BOTH modes since 2026-08-15: creating a Driver used to
-              require save → reopen → edit just to enter the earning rates.
+              require save â†’ reopen â†’ edit just to enter the earning rates.
               The rules are posted right after the create call returns the new
               employee id. */}
           {isDriverRole ? (
@@ -1007,7 +1014,7 @@ function DriverVariableEarningsFields({
           <ul className="simple-list">
             {history.map((rule) => (
               <li key={rule.id}>
-                {rule.amount} AED · {rule.effectiveFrom} – {rule.effectiveTo ?? "—"}
+                {rule.amount} AED Â· {rule.effectiveFrom} â€“ {rule.effectiveTo ?? "â€”"}
               </li>
             ))}
           </ul>
@@ -1437,7 +1444,7 @@ function CurrentVariableEarnings({
   ];
   return (
     <DetailTable
-      title={`${t("workforce.driverVariableEarnings")} — ${t("workforce.currentRule")}`}
+      title={`${t("workforce.driverVariableEarnings")} â€” ${t("workforce.currentRule")}`}
       rows={rows}
       columns={["earning", "payment", "amount", "effectiveFrom", "effectiveTo"]}
     />
@@ -1717,3 +1724,6 @@ function money(value: string) {
   return `AED ${new Intl.NumberFormat("en-AE", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(value))}`;
 }
 const formatMoney = money;
+
+
+

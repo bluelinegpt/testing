@@ -252,6 +252,38 @@ describe.skipIf(!runDatabaseTests)("Trader portal Dashboard", () => {
     });
   });
 
+  /* -------------------------------------------------------------------------
+     T10 -- Final Trader Portal acceptance found that a 'closed' Order (the
+     POST-delivery terminal state -- see `order-workflow-guidance.ts`'s own
+     comment on this) was counted in `orders.total` but in NONE of the
+     breakdown buckets (new/active/delivered/cancelled/returned), so the
+     breakdown never summed to the total on a live Dashboard with any closed
+     Orders. Fixed by folding 'closed' into the same 'delivered' bucket the
+     rest of this file already treats it as (see the `('delivered', 'closed',
+     ...)` groupings elsewhere in `operations.service.ts`).
+     ------------------------------------------------------------------------- */
+  it("counts a closed Order as delivered, so the breakdown sums to the total", async () => {
+    await inRolledBackTransaction(async (transaction) => {
+      const fixture = await seedTrader(transaction);
+      // `seedTrader` already seeds one 'delivered' Order; add one 'closed'.
+      await sql`update orders set delivery_status = 'closed', closed_at = now()
+                 where trader_id = ${fixture.traderId}::uuid`.execute(transaction);
+      const service = buildService(transaction, fixture);
+
+      const dashboard = await service.traderPortalDashboard();
+
+      expect(dashboard.orders.total).toBe(1);
+      expect(dashboard.orders.delivered).toBe(1);
+      const breakdown =
+        dashboard.orders.newOrders +
+        dashboard.orders.active +
+        dashboard.orders.delivered +
+        dashboard.orders.cancelled +
+        dashboard.orders.returned;
+      expect(breakdown).toBe(dashboard.orders.total);
+    });
+  });
+
   it("updates only the permitted profile fields, leaving identity fields untouched", async () => {
     await inRolledBackTransaction(async (transaction) => {
       const fixture = await seedTrader(transaction);

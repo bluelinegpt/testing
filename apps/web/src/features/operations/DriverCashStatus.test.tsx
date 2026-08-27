@@ -46,7 +46,7 @@ describe("Driver Cash Status labels", () => {
   it("renders Arabic labels when the language is Arabic", async () => {
     await i18nInstance.changeLanguage("ar");
     render(<DriverCashStatusLabel value="reconciled" />);
-    expect(screen.getByText("تم استلام المبلغ من السائق")).toBeInTheDocument();
+    expect(screen.getByText("تم استلام المبلغ من المندوب")).toBeInTheDocument();
     await i18nInstance.changeLanguage("en");
   });
 });

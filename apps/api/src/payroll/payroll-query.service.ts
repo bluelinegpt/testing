@@ -249,17 +249,50 @@ export class PayrollQueryService {
                from payroll_commission_links link
               where link.company_id=l.company_id and link.payroll_entry_id=l.id),'[]'::jsonb)
                as "driverCommissionSources",
-             coalesce((select jsonb_agg(jsonb_build_object(
-               'earningId', eoe.id,
-               'orderId', eoe.order_id,
-               'orderNumber', eoe.order_number,
-               'deliveredAt', eoe.delivered_at,
-               'appliedAmount', eoe.applied_amount::text,
-               'ruleId', eoe.rule_id,
-               'allocatedAt', eoe.allocated_at
-             ) order by eoe.delivered_at, eoe.id)
-               from employee_order_earnings eoe
-              where eoe.company_id=l.company_id and eoe.payroll_entry_id=l.id),'[]'::jsonb)
+             coalesce((
+               select jsonb_agg(source order by source->'deliveredAt', source->'earningId')
+               from (
+                 -- Individual order earnings directly allocated to payroll line
+                 select jsonb_build_object(
+                   'earningId', eoe.id,
+                   'orderId', eoe.order_id,
+                   'orderNumber', eoe.order_number,
+                   'deliveredAt', eoe.delivered_at,
+                   'appliedAmount', eoe.applied_amount::text,
+                   'ruleId', eoe.rule_id,
+                   'allocatedAt', eoe.allocated_at,
+                   'sourceType', 'direct'::text
+                 ) as source
+                 from employee_order_earnings eoe
+                 where eoe.company_id=l.company_id and eoe.payroll_entry_id=l.id
+
+                 union all
+
+                 -- Delivery sources from locked earning periods allocated to payroll line
+                 select jsonb_build_object(
+                   'earningId', ds.employee_order_earning_id,
+                   'orderId', eoe.order_id,
+                   'orderNumber', o.order_number,
+                   'deliveredAt', (eoe.delivered_at at time zone coalesce(cs.timezone, 'Asia/Dubai'))::date::text,
+                   'appliedAmount', eoe.applied_amount::text,
+                   'ruleId', eoe.rule_id,
+                   'allocatedAt', eoe.allocated_at,
+                   'sourceType', 'earning_period'::text,
+                   'earningPeriodId', epa.period_id
+                 ) as source
+                 from employee_driver_earning_period_payroll_allocations epa
+                 join employee_driver_earning_periods ep on ep.id=epa.period_id
+                   and ep.company_id=epa.company_id
+                 join employee_driver_earning_period_delivery_sources ds on ds.company_id=ep.company_id
+                   and ds.period_id=ep.id
+                 join employee_order_earnings eoe on eoe.id=ds.employee_order_earning_id
+                   and eoe.company_id=ds.company_id
+                 join orders o on o.id=eoe.order_id and o.company_id=eoe.company_id
+                 left join company_settings cs on cs.company_id=eoe.company_id
+                 where epa.payroll_entry_id=l.id and epa.company_id=l.company_id
+                   and epa.reversed_at is null
+               ) combined
+             ),'[]'::jsonb)
                as "deliveredOrderEarningSources",
              coalesce((select jsonb_agg(jsonb_build_object(
                'code', a.allowance_code_snapshot, 'name', a.allowance_name_snapshot,

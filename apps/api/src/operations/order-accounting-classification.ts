@@ -16,7 +16,7 @@ import { sql } from "kysely";
  *
  * The rule, stated once:
  *
- *   accounting impact = |COD| + |Service Fee| + |Additional Fees| + |VAT|
+ *   accounting impact = |Customer amount due| + |Trader net payable|
  *   Accounting Required  <=>  that total is not zero
  *
  * `abs()` on each component, not on the sum, so a positive and a negative can
@@ -30,11 +30,9 @@ import { sql } from "kysely";
  * at `deliveryStatus` as well — see `orderAccountingStatus` below.
  */
 const impactTotalExpression = `(
-  abs(coalesce(o.cod_amount, 0))
-  + abs(coalesce(o.service_fee, 0))
-  + abs(coalesce(o.additional_fees, 0))
-  + abs(coalesce(o.vat_amount, 0))
-)`;
+  abs(coalesce(o.customer_amount_due, 0))
+  + abs(coalesce(o.trader_net_payable, 0))
+)`
 
 const impactExpression = `${impactTotalExpression} <> 0`;
 
@@ -127,3 +125,5 @@ export const orderAccountingStatus = (
   if (!accountingRequired) return "not_applicable";
   return deliveryStatus === "delivered" ? "expected" : "pending";
 };
+
+

@@ -11,9 +11,10 @@ import type { Request } from "express";
 import { ApplicationException } from "../presentation/errors/application.exception.js";
 import { RequestSecurityContextStore } from "../security/request-security-context.js";
 import { AuthenticationService } from "./authentication.service.js";
-import type { IdentityKind } from "../security/identity-context.js";
+import type { IdentityContext, IdentityKind } from "../security/identity-context.js";
 import {
   PUBLIC_ROUTE,
+  OPTIONAL_AUTHENTICATION_ROUTE,
   REQUIRED_IDENTITY_KINDS,
   REQUIRED_PERMISSIONS,
   REQUIRED_ANY_PERMISSIONS,
@@ -45,6 +46,25 @@ export class AuthenticationGuard implements CanActivate {
     }
 
     const request = context.switchToHttp().getRequest<Request>();
+
+    const isOptional = this.reflector.getAllAndOverride<boolean>(OPTIONAL_AUTHENTICATION_ROUTE, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+    if (isOptional === true) {
+      const identity = await this.tryAuthenticateOptional(request);
+      if (identity !== undefined) {
+        this.contextStore.enter({
+          identity,
+          tenant:
+            identity.companyId === null
+              ? undefined
+              : { companyId: identity.companyId, identityId: identity.identityId },
+        });
+      }
+      return true;
+    }
+
     const accessToken = this.readAccessToken(request);
     const identity = await this.authentication.authenticate(accessToken);
     const requiredKinds =
@@ -109,6 +129,32 @@ export class AuthenticationGuard implements CanActivate {
           : { companyId: identity.companyId, identityId: identity.identityId },
     });
     return true;
+  }
+
+  /**
+   * `@OptionalAuthentication()`'s soft-fail counterpart to
+   * `readAccessToken()` + `authenticate()`: the SAME token sources (bearer
+   * header, session cookie + CSRF header) and the SAME server-side session
+   * validation, but every failure mode -- no token at all, an invalid CSRF
+   * header on a cookie, an expired/revoked session -- returns `undefined`
+   * instead of throwing. A caller with no valid identity is simply a guest.
+   */
+  private async tryAuthenticateOptional(request: Request): Promise<IdentityContext | undefined> {
+    const header = /^Bearer ([A-Za-z0-9_-]{43})$/.exec(request.headers.authorization ?? "");
+    let token = header?.[1];
+    if (token === undefined) {
+      const cookieToken = readSessionCookie(request);
+      if (cookieToken === undefined) return undefined;
+      if (!isSafeMethod(request.method) && request.headers[sessionCsrfHeader] !== sessionCsrfValue) {
+        return undefined;
+      }
+      token = cookieToken;
+    }
+    try {
+      return await this.authentication.authenticate(token);
+    } catch {
+      return undefined;
+    }
   }
 
   /**

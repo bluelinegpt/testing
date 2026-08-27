@@ -24,10 +24,12 @@ const storefront: StorefrontConfiguration = {
   brandPrimaryColor: "#1f2937",
   businessHours: [],
   businessTemplate: "fashion",
+  coverUrl: null,
   customerSupport: null,
   deliveryInformation: "Next day",
   displayName: "Al Noor Fashion",
   id: "storefront-1",
+  logoUrl: null,
   publicEmail: null,
   publicMobile: "+971 50 000 0000",
   seoDescriptionAr: null,
@@ -56,11 +58,17 @@ function setup(
   handlers: {
     readonly patch?: (path: string, body: unknown) => Promise<unknown>;
     readonly post?: (path: string, body: unknown) => Promise<unknown>;
+    readonly postMultipart?: (path: string, body: FormData) => Promise<unknown>;
+    readonly remove?: (path: string) => Promise<unknown>;
     readonly slug?: () => Promise<unknown>;
   } = {},
 ) {
   const calls: { body?: unknown; path: string }[] = [];
   const api = {
+    delete: vi.fn((path: string) => {
+      calls.push({ path });
+      return handlers.remove?.(path) ?? Promise.resolve({ removed: true });
+    }),
     get: vi.fn((path: string) => {
       calls.push({ path });
       if (path.includes("slug-availability")) {
@@ -81,6 +89,10 @@ function setup(
         handlers.post?.(path, body) ??
         Promise.resolve({ ...storefront, ...overrides, status: "published" })
       );
+    }),
+    postMultipart: vi.fn((path: string, body: FormData) => {
+      calls.push({ body, path });
+      return handlers.postMultipart?.(path, body) ?? Promise.resolve({ fileId: "file-1" });
     }),
   };
   render(
@@ -358,5 +370,59 @@ describe("StorefrontConfigurationWorkspace", () => {
     fireEvent.click(screen.getByRole("button", { name: "Add hours" }));
     expect(await screen.findByText(/needs both days and hours/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+  });
+
+  /* -----------------------------------------------------------------------
+     Branding (T2): logo/cover upload and removal.
+
+     These are saved immediately through `postMultipart`/`delete`, separate
+     from the text-field Save button, so the claims worth locking down are
+     that a bad file is rejected client-side before any request is made, and
+     that a good one reaches the right endpoint and reloads the view.
+     ----------------------------------------------------------------------- */
+
+  it("rejects an oversized or wrong-type brand image before uploading", async () => {
+    const { api } = setup();
+    await screen.findByDisplayValue("Al Noor Fashion");
+    const [logoInput] = screen.getAllByLabelText(/Choose an image file/i);
+    const oversized = new File([new Uint8Array(6 * 1024 * 1024)], "logo.png", {
+      type: "image/png",
+    });
+    fireEvent.change(logoInput!, { target: { files: [oversized] } });
+    expect(screen.getByText("That image is too large. The limit is 5 MB.")).toBeInTheDocument();
+    expect(api.postMultipart).not.toHaveBeenCalled();
+  });
+
+  it("uploads a chosen logo and reloads the Storefront view", async () => {
+    const { api } = setup();
+    await screen.findByDisplayValue("Al Noor Fashion");
+    const [logoInput] = screen.getAllByLabelText(/Choose an image file/i);
+    const file = new File([new Uint8Array(10)], "logo.png", { type: "image/png" });
+    fireEvent.change(logoInput!, { target: { files: [file] } });
+    const getCallsBefore = api.get.mock.calls.length;
+    fireEvent.click(await screen.findByRole("button", { name: "Upload logo" }));
+    await waitFor(() => {
+      expect(api.postMultipart).toHaveBeenCalledWith(
+        "operations/trader-storefronts/storefront-1/media/logo",
+        expect.any(FormData),
+      );
+    });
+    // The Storefront is refetched afterwards, not patched locally, so a
+    // server-side side effect (e.g. the previous file being retired) is
+    // always reflected.
+    await waitFor(() => {
+      expect(api.get.mock.calls.length).toBeGreaterThan(getCallsBefore);
+    });
+  });
+
+  it("removes the current cover image", async () => {
+    const { api } = setup({ coverUrl: "https://example.test/cover.png" });
+    await screen.findByDisplayValue("Al Noor Fashion");
+    fireEvent.click(await screen.findByRole("button", { name: "Remove cover" }));
+    await waitFor(() => {
+      expect(api.delete).toHaveBeenCalledWith(
+        "operations/trader-storefronts/storefront-1/media/cover",
+      );
+    });
   });
 });

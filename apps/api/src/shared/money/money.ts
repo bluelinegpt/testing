@@ -25,6 +25,20 @@ export class Money {
     return Money.from(this.value.sub(other.value).toFixed(2));
   }
 
+  /** Multiplies by a whole-number quantity -- a line subtotal is always
+   * unit price times an integer count, never a fractional multiplier, so
+   * this deliberately takes `number` rather than another `Money`. */
+  public multiplyByInteger(quantity: number): Money {
+    if (!Number.isInteger(quantity) || quantity < 0) {
+      throw new Error("Money can only be multiplied by a non-negative integer quantity");
+    }
+    return Money.from(this.value.mul(quantity).toFixed(2));
+  }
+
+  public isZero(): boolean {
+    return this.value.isZero();
+  }
+
   public equals(other: Money): boolean {
     return this.value.equals(other.value);
   }

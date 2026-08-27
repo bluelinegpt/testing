@@ -1103,16 +1103,41 @@ export function LedgerPage({
   const { t } = useTranslation();
   const client = useClient(api);
   const [accountId, setAccountId] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [movementType, setMovementType] = useState("");
+  const [status, setStatus] = useState("");
+  const [search, setSearch] = useState("");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const accounts = useAccountingResource<readonly AccountingRecord[]>(
     accountingQueryKey(companyId, `${kind}-account-options`),
     (signal) => client.get(`cash-bank/${kind}-accounts`, { activeOnly: false }, signal),
   );
   const ledger = useAccountingResource<AccountingRecord>(
-    accountingQueryKey(companyId, `${kind}-ledger`, { accountId }),
+    accountingQueryKey(companyId, `${kind}-ledger`, {
+      accountId,
+      dateFrom,
+      dateTo,
+      movementType,
+      search,
+      sortDirection,
+      status,
+    }),
     (signal) =>
       accountId === ""
         ? Promise.resolve({ items: [] })
-        : client.get(`cash-bank/${kind}-accounts/${accountId}/ledger`, undefined, signal),
+        : client.get(
+            `cash-bank/${kind}-accounts/${accountId}/ledger`,
+            {
+              ...(dateFrom === "" ? {} : { dateFrom }),
+              ...(dateTo === "" ? {} : { dateTo }),
+              ...(movementType === "" ? {} : { movementType }),
+              ...(search === "" ? {} : { search }),
+              sortDirection,
+              ...(status === "" ? {} : { status }),
+            },
+            signal,
+          ),
   );
   const items = Array.isArray(ledger.data?.items) ? (ledger.data.items as AccountingRecord[]) : [];
   return (
@@ -1132,6 +1157,84 @@ export function LedgerPage({
           ))}
         </select>
       </label>
+      <div className="accounting-filters">
+        <label>
+          {t("accounting.fields.dateFrom")}
+          <input
+            type="date"
+            value={dateFrom}
+            onChange={(event) => setDateFrom(event.target.value)}
+          />
+        </label>
+        <label>
+          {t("accounting.fields.dateTo")}
+          <input type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} />
+        </label>
+        <label>
+          {t("common.search")}
+          <input
+            placeholder={t("accounting.movements.ledgerSearch")}
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+          />
+        </label>
+        <label>
+          {t("accounting.movements.movementType")}
+          <select value={movementType} onChange={(event) => setMovementType(event.target.value)}>
+            <option value="">{t("common.all")}</option>
+            {[
+              "cash_deposit",
+              "cash_withdrawal",
+              "bank_deposit",
+              "bank_withdrawal",
+              "cash_to_bank_transfer",
+              "bank_to_cash_transfer",
+              "bank_to_bank_transfer",
+              "cash_to_cash_transfer",
+              "opening_balance",
+            ].map((value) => (
+              <option key={value} value={value}>
+                {t(`accounting.movements.types.${value}`)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          {t("accounting.fields.status")}
+          <select value={status} onChange={(event) => setStatus(event.target.value)}>
+            <option value="">{t("common.all")}</option>
+            {["confirmed", "reversed"].map((value) => (
+              <option key={value} value={value}>
+                {t(`accounting.status.${value}`)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          {t("accounting.movements.dateOrder")}
+          <select
+            value={sortDirection}
+            onChange={(event) => setSortDirection(event.target.value as "asc" | "desc")}
+          >
+            <option value="desc">{t("accounting.movements.newestFirst")}</option>
+            <option value="asc">{t("accounting.movements.oldestFirst")}</option>
+          </select>
+        </label>
+        <button
+          className="button button-secondary"
+          onClick={() => {
+            setDateFrom("");
+            setDateTo("");
+            setMovementType("");
+            setStatus("");
+            setSearch("");
+            setSortDirection("desc");
+          }}
+          type="button"
+        >
+          {t("common.clear")}
+        </button>
+      </div>
       <LoadPanel error={ledger.error} loading={ledger.loading} onRefresh={ledger.refresh}>
         <SummaryCards
           items={[
@@ -1164,6 +1267,32 @@ export function LedgerPage({
   );
 }
 
+const reconciliationAreas = [
+  "orders",
+  "trader_receivables",
+  "trader_settlements",
+  "driver_collections",
+  "driver_expenses",
+  "employee_payroll",
+  "outsourced_driver_fees",
+  "general_expenses",
+  "cash_bank_management",
+] as const;
+
+const reconciliationResults = ["posted", "queued", "missing", "mismatch", "failed", "reversed"] as const;
+
+const emptyReconciliationFilters = {
+  area: "",
+  dateFrom: "",
+  dateTo: "",
+  eventType: "",
+  page: 1,
+  pageSize: 25,
+  result: "",
+  sortBy: "accountingDate",
+  sortDirection: "desc",
+};
+
 export function ReconciliationPage({
   api,
   companyId,
@@ -1176,6 +1305,7 @@ export function ReconciliationPage({
   const { t } = useTranslation();
   const client = useClient(api);
   const [dates, setDates] = useState({ dateFrom: "", dateTo: "" });
+  const [filters, setFilters] = useState(emptyReconciliationFilters);
   const [previewData, setPreviewData] = useState<AccountingRecord>();
   const [selectedReconciliation, setSelectedReconciliation] = useState<AccountingRecord>();
   const resource = useAccountingResource<AccountingRecord>(
@@ -1184,11 +1314,22 @@ export function ReconciliationPage({
       preview ? Promise.resolve({}) : client.get("reconciliation/summary", undefined, signal),
   );
   const reconciliationRows = useAccountingResource<AccountingPage>(
-    accountingQueryKey(companyId, "reconciliation-rows"),
+    accountingQueryKey(companyId, "reconciliation-rows", filters),
     (signal) =>
       preview
         ? Promise.resolve({ items: [] })
-        : client.get("reconciliation", { page: 1, pageSize: 100 }, signal),
+        : client.get(
+            "reconciliation",
+            {
+              ...filters,
+              area: filters.area || undefined,
+              dateFrom: filters.dateFrom || undefined,
+              dateTo: filters.dateTo || undefined,
+              eventType: filters.eventType || undefined,
+              result: filters.result || undefined,
+            },
+            signal,
+          ),
   );
   const reconciliationDetail = useAccountingResource<AccountingRecord>(
     accountingQueryKey(companyId, "reconciliation-detail", {
@@ -1286,11 +1427,128 @@ export function ReconciliationPage({
         ) : null}
       </LoadPanel>
       {!preview ? (
-        <LoadPanel
-          error={reconciliationRows.error}
-          loading={reconciliationRows.loading}
-          onRefresh={reconciliationRows.refresh}
-        >
+        <>
+          <div className="accounting-filter-bar">
+            <label>
+              {t("accounting.reconciliation.area")}
+              <select
+                value={filters.area}
+                onChange={(event) =>
+                  setFilters((current) => ({ ...current, area: event.target.value, page: 1 }))
+                }
+              >
+                <option value="">{t("accounting.reconciliation.allAreas")}</option>
+                {reconciliationAreas.map((area) => (
+                  <option key={area} value={area}>
+                    {t(`accounting.reconciliation.areas.${area}`)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              {t("accounting.fields.dateFrom")}
+              <input
+                type="date"
+                value={filters.dateFrom}
+                onChange={(event) =>
+                  setFilters((current) => ({
+                    ...current,
+                    dateFrom: event.target.value,
+                    page: 1,
+                  }))
+                }
+              />
+            </label>
+            <label>
+              {t("accounting.fields.dateTo")}
+              <input
+                type="date"
+                value={filters.dateTo}
+                onChange={(event) =>
+                  setFilters((current) => ({
+                    ...current,
+                    dateTo: event.target.value,
+                    page: 1,
+                  }))
+                }
+              />
+            </label>
+            <label>
+              {t("accounting.reconciliation.eventType")}
+              <input
+                placeholder={t("accounting.reconciliation.eventTypePlaceholder")}
+                value={filters.eventType}
+                onChange={(event) =>
+                  setFilters((current) => ({
+                    ...current,
+                    eventType: event.target.value,
+                    page: 1,
+                  }))
+                }
+              />
+            </label>
+            <label>
+              {t("accounting.reconciliation.result")}
+              <select
+                value={filters.result}
+                onChange={(event) =>
+                  setFilters((current) => ({ ...current, page: 1, result: event.target.value }))
+                }
+              >
+                <option value="">{t("accounting.reconciliation.allResults")}</option>
+                {reconciliationResults.map((result) => (
+                  <option key={result} value={result}>
+                    {t(`accounting.reconciliation.results.${result}`)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              {t("accounting.reconciliation.sortBy")}
+              <select
+                value={filters.sortBy}
+                onChange={(event) =>
+                  setFilters((current) => ({ ...current, page: 1, sortBy: event.target.value }))
+                }
+              >
+                <option value="accountingDate">{t("accounting.fields.accountingDate")}</option>
+                <option value="sourceReference">{t("accounting.reconciliation.source")}</option>
+                <option value="eventType">{t("accounting.reconciliation.eventType")}</option>
+                <option value="journalNumber">{t("accounting.fields.journalNumber")}</option>
+                <option value="status">{t("accounting.fields.status")}</option>
+              </select>
+            </label>
+            <label>
+              {t("accounting.reconciliation.sortDirection")}
+              <select
+                value={filters.sortDirection}
+                onChange={(event) =>
+                  setFilters((current) => ({
+                    ...current,
+                    page: 1,
+                    sortDirection: event.target.value,
+                  }))
+                }
+              >
+                <option value="desc">{t("accounting.reconciliation.descending")}</option>
+                <option value="asc">{t("accounting.reconciliation.ascending")}</option>
+              </select>
+            </label>
+            <button
+              className="button button-secondary"
+              type="button"
+              onClick={() =>
+                setFilters({ ...emptyReconciliationFilters, pageSize: filters.pageSize })
+              }
+            >
+              {t("accounting.reconciliation.clear")}
+            </button>
+          </div>
+          <LoadPanel
+            error={reconciliationRows.error}
+            loading={reconciliationRows.loading}
+            onRefresh={reconciliationRows.refresh}
+          >
           <AccountingTable
             columns={[
               { key: "area", label: t("accounting.reconciliation.area") },
@@ -1313,7 +1571,70 @@ export function ReconciliationPage({
             items={reconciliationRows.data?.items ?? []}
             onOpen={setSelectedReconciliation}
           />
-        </LoadPanel>
+            <nav
+              aria-label={t("accounting.reconciliation.pagination")}
+              className="accounting-pagination"
+            >
+              <span>
+                {t("accounting.reconciliation.pageOf", {
+                  page: filters.page,
+                  pages: Math.max(
+                    1,
+                    Math.ceil(Number(reconciliationRows.data?.total ?? 0) / filters.pageSize),
+                  ),
+                  total: Number(reconciliationRows.data?.total ?? 0),
+                })}
+              </span>
+              <label className="accounting-pagination-size">
+                <span>{t("accounting.reconciliation.pageSize")}</span>
+                <select
+                  value={filters.pageSize}
+                  onChange={(event) =>
+                    setFilters((current) => ({
+                      ...current,
+                      page: 1,
+                      pageSize: Number(event.target.value),
+                    }))
+                  }
+                >
+                  {[25, 50, 100, 200].map((pageSize) => (
+                    <option key={pageSize} value={pageSize}>
+                      {pageSize}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="accounting-pagination-buttons">
+                <button
+                  className="button button-secondary"
+                  disabled={filters.page <= 1}
+                  type="button"
+                  onClick={() =>
+                    setFilters((current) => ({ ...current, page: current.page - 1 }))
+                  }
+                >
+                  {t("accounting.reconciliation.previous")}
+                </button>
+                <button
+                  className="button button-secondary"
+                  disabled={
+                    filters.page >=
+                    Math.max(
+                      1,
+                      Math.ceil(Number(reconciliationRows.data?.total ?? 0) / filters.pageSize),
+                    )
+                  }
+                  type="button"
+                  onClick={() =>
+                    setFilters((current) => ({ ...current, page: current.page + 1 }))
+                  }
+                >
+                  {t("accounting.reconciliation.next")}
+                </button>
+              </div>
+            </nav>
+          </LoadPanel>
+        </>
       ) : null}
       {selectedReconciliation === undefined ? null : (
         <LoadPanel

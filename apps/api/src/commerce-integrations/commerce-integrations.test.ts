@@ -308,9 +308,9 @@ describe("WooCommerceCommerceProvider", () => {
     const secret = createHmac("sha256", "woocommerce-test-seed").update(`woocommerce:${reference}`).digest("hex");
     const signature = signWooCommerceWebhookPayload(rawBody, secret);
 
-    expect(provider.verifyWebhook({ body: {}, connectionReference: reference, rawBody, signature })).toBe(true);
-    expect(provider.verifyWebhook({ body: {}, connectionReference: reference, rawBody, signature: "bad-signature" })).toBe(false);
-    expect(provider.verifyWebhook({ body: {}, connectionReference: "CIN-OTHER", rawBody, signature })).toBe(false);
+    expect(provider.verifyWebhook({ connectionReference: reference, rawBody, signature })).toBe(true);
+    expect(provider.verifyWebhook({ connectionReference: reference, rawBody, signature: "bad-signature" })).toBe(false);
+    expect(provider.verifyWebhook({ connectionReference: "CIN-OTHER", rawBody, signature })).toBe(false);
   });
 
   it("normalizes WooCommerce COD orders into the generic commerce order shape", () => {

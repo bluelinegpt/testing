@@ -299,7 +299,7 @@
   color: inherit;
 }
 
-.sf-button-dark {
+.sf-button.sf-button-dark {
   background: var(--sf-chrome-bg);
   border-color: var(--sf-chrome-bg);
   color: var(--sf-chrome-text);

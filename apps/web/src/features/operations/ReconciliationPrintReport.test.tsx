@@ -166,7 +166,7 @@ describe("ReconciliationPrintDocument", () => {
       <ReconciliationPrintDocument companyName="Blueline Demo Company" detail={detail} />,
     );
     // Heading is translated.
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("تقرير مطابقة نقدية السائق");
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("تقرير مطابقة نقدية المندوب");
     // References, Order numbers and bank references are untouched.
     expect(value(container, "reference")).toBe("REC-000001");
     expect(container.textContent).toContain("ORD-000031");

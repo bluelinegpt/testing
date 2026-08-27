@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import { HttpStatus, Inject, Injectable } from "@nestjs/common";
 import { Decimal } from "decimal.js";
@@ -689,9 +689,21 @@ export class TraderSettlementService {
       // Resolved here rather than earlier so an account deactivated mid-flow
       // fails at the moment of the write. A throw rolls back the settlement,
       // its order rows and everything else this transaction has done.
+      let cashAccountId = input.cashAccountId;
+      if (payment.method === "cash" && !cashAccountId) {
+        // Auto-select default cash account (main_cash) if not provided
+        const defaultAccount = await sql<{ id: string }>`
+          select id from company_cash_accounts
+           where company_id=${companyId}::uuid and is_active
+             and cash_account_type='main_cash'
+           order by created_at asc
+           limit 1
+        `.execute(transaction);
+        cashAccountId = defaultAccount.rows[0]?.id;
+      }
       const cashAccount =
         payment.method === "cash"
-          ? await this.fundingAccounts.resolve(input.cashAccountId, "cash")
+          ? await this.fundingAccounts.resolve(cashAccountId, "cash")
           : null;
       // Balance control, on whichever account this settlement actually draws
       // on. Both methods move Company money out -- a bank transfer is not
@@ -750,6 +762,19 @@ export class TraderSettlementService {
           sourceType: "trader_settlement",
         });
       }
+
+      // Create cash/bank movements for trader settlement payment
+      // Records which cash/bank account funded the trader payment
+      await this.createSettlementMovement(transaction, {
+        companyId,
+        payment,
+        cashAccount,
+        settlementNumber,
+        paymentAmount: netPayable.toFixed(2),
+        paymentDate: input.paymentDate ?? new Date().toISOString().slice(0, 10),
+        actorId: identity.identityId,
+      });
+
       await sql`
         update trader_settlements
            set status = 'confirmed', confirmed_by_account_id = ${identity.identityId}::uuid,
@@ -2335,6 +2360,135 @@ export class TraderSettlementService {
     pageSize: number,
   ): Page<T> {
     return { items: rows, page, pageSize, total: rows[0]?.total ?? 0 };
+  }
+
+  /**
+   * Create and confirm cash/bank movement for trader settlement payment.
+   *
+   * When a Trader Settlement is confirmed, a corresponding movement is recorded
+   * to track which cash/bank account funded the payment.
+   *
+   * PHASE 2: Auto-generate cash/bank movements from confirmed Trader Settlements.
+   * This fixes the audit trail gap where settlements were recorded in accounting
+   * but no operational cash movements were recorded.
+   */
+  private async createSettlementMovement(
+    transaction: Kysely<DatabaseSchema>,
+    options: {
+      readonly companyId: string;
+      readonly payment: {
+        readonly bankAccountId: string | null;
+        readonly bankReference: string | null;
+        readonly method: "bank_transfer" | "cash";
+      };
+      readonly cashAccount: {
+        readonly accountId: string;
+        readonly linkedGlAccountId: string | null;
+      } | null;
+      readonly settlementNumber: string;
+      readonly paymentAmount: string;
+      readonly paymentDate: string;
+      readonly actorId: string;
+    },
+  ): Promise<void> {
+    const isCash = options.payment.method === "cash";
+    const isBank = options.payment.method === "bank_transfer";
+
+    if (!isCash && !isBank) return;
+
+    // Determine movement type and funding account
+    const movementType = isCash ? "cash_withdrawal" : "bank_withdrawal";
+    const sourceCashAccountId = isCash ? options.cashAccount?.accountId : null;
+    const sourceBankAccountId = isBank ? options.payment.bankAccountId : null;
+
+    // Generate unique movement number
+    const movementNumber = await this.history.nextReferenceNumber(
+      transaction,
+      options.companyId,
+      "cash_bank_movement",
+      "CBM",
+    );
+
+    const movementId = randomUUID();
+
+    // Create confirmed movement
+    const paymentMethodForMovement = options.payment.method === "cash" ? "cash" : "visa";
+    const idempotencyKey = `${options.settlementNumber}_${movementNumber}`;
+    await sql`
+      insert into cash_bank_movements (
+        id,
+        company_id,
+        movement_number,
+        movement_type,
+        movement_date,
+        accounting_date,
+        source_cash_account_id,
+        source_bank_account_id,
+        destination_cash_account_id,
+        destination_bank_account_id,
+        amount,
+        fee_amount,
+        payment_method,
+        status,
+        correlation_id,
+        idempotency_identity,
+        confirmed_by_account_id,
+        confirmed_at,
+        created_by_account_id,
+        created_at
+      ) values (
+        ${movementId}::uuid,
+        ${options.companyId}::uuid,
+        ${movementNumber},
+        ${movementType},
+        ${options.paymentDate}::date,
+        ${options.paymentDate}::date,
+        ${sourceCashAccountId ?? null}::uuid,
+        ${sourceBankAccountId ?? null}::uuid,
+        null::uuid,
+        null::uuid,
+        ${new Decimal(options.paymentAmount).toFixed(2)}::numeric,
+        '0'::numeric,
+        ${paymentMethodForMovement},
+        'confirmed',
+        ${randomUUID()},
+        ${idempotencyKey},
+        ${options.actorId}::uuid,
+        now(),
+        ${options.actorId}::uuid,
+        now()
+      )
+    `.execute(transaction);
+
+    // Enqueue accounting event for GL posting
+    const eventHash = createHash("sha256")
+      .update(
+        JSON.stringify({
+          companyId: options.companyId,
+          movementId,
+          movementNumber,
+          amount: options.paymentAmount,
+          paymentDate: options.paymentDate,
+        }),
+      )
+      .digest("hex");
+
+    await sql`
+      insert into accounting_events (
+        id, company_id, event_type, event_version, effective_accounting_date,
+        actor_id, actor_type, source_entity_type, source_entity_id, source_reference,
+        correlation_id, idempotency_key, event_hash, description, supplementary_metadata
+      ) values (
+        gen_random_uuid(), ${options.companyId}::uuid,
+        ${movementType === "cash_withdrawal" ? "trader_settlement_confirmed" : "trader_settlement_confirmed"},
+        1, ${options.paymentDate}::date,
+        ${options.actorId}::uuid, 'account', 'cash_bank_movement', ${movementId}::uuid,
+        ${movementNumber}, ${movementId}::uuid, ${idempotencyKey},
+        ${eventHash},
+        ${'Trader settlement ' + options.settlementNumber + ' movement'},
+        ${JSON.stringify({ source: 'trader_settlement', settlementNumber: options.settlementNumber })}
+      )
+    `.execute(transaction);
   }
 
   private assertAnyPermission(permission: string | readonly string[]): void {

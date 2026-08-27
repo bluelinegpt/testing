@@ -54,7 +54,8 @@ export type AnalyticsEventName =
   | "blog_article_view"
   | "blog_category_view"
   | "blog_internal_link_clicked"
-  | "blog_cta_clicked";
+  | "blog_cta_clicked"
+  | "contact_form_submitted";
 
 export type SafeMetadata = {
   page?: string | undefined;

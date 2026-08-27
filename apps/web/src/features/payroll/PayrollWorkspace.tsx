@@ -230,6 +230,8 @@ interface PayrollLineDetail {
     readonly orderId: string;
     readonly orderNumber: string;
     readonly ruleId: string;
+    readonly sourceType?: 'direct' | 'earning_period';
+    readonly earningPeriodId?: string;
   }[];
   readonly deliveredOrderEarnings: string;
   readonly collectionEarnings: string;

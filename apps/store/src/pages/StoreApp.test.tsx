@@ -1,9 +1,10 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { I18nextProvider } from "react-i18next";
 import { MemoryRouter } from "react-router-dom";
 
 import { App } from "../App.js";
 import { CustomerSessionProvider } from "../auth/customer-session-context.js";
+import { CartProvider } from "../cart/cart-context.js";
 import { storeI18n } from "../localization/i18n.js";
 import { orderedHomeSections } from "../config/home-sections.js";
 import { isReservedStoreSlug, reservedStoreSlugs } from "../routing/reserved-slugs.js";
@@ -23,7 +24,9 @@ function renderAt(path: string) {
     <I18nextProvider i18n={storeI18n}>
       <MemoryRouter initialEntries={[path]}>
         <CustomerSessionProvider>
-          <App />
+          <CartProvider>
+            <App />
+          </CartProvider>
         </CustomerSessionProvider>
       </MemoryRouter>
     </I18nextProvider>,
@@ -94,6 +97,13 @@ function mockApi(routes: Record<string, { body?: unknown; status?: number }>) {
   );
   return seen;
 }
+
+// Every test starts with an empty Cart -- the Cart lives in `localStorage`
+// (`cart-storage.ts`), which `jsdom` shares across tests in this file unless
+// explicitly cleared.
+beforeEach(() => {
+  window.localStorage.clear();
+});
 
 describe("Marketplace root", () => {
   beforeEach(async () => {
@@ -189,7 +199,11 @@ describe("Public Store route", () => {
     mockApi({
       "public/storefronts/dev-validation-store": { body: devStore },
       "public/storefronts/dev-validation-store/categories": {
-        body: { items: [{ name: "Dev Abayas", slug: "dev-abayas" }] },
+        body: {
+          items: [
+            { displayOrder: 0, nameAr: null, nameEn: "Dev Abayas", slug: "dev-abayas" },
+          ],
+        },
       },
       "products?pageSize=48": { body: { items: [abaya, kaftan] } },
     });
@@ -367,5 +381,156 @@ describe("Localization and isolation", () => {
     for (const leak of ["company-leak-8f2", "commerce-leak-4a1", "trader-leak-9c3", "6725.00"]) {
       expect(markup).not.toContain(leak);
     }
+  });
+});
+
+describe("Cart", () => {
+  beforeEach(async () => {
+    await storeI18n.changeLanguage("en");
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const abayaWithOptions = {
+    ...abaya,
+    fullDescription: null,
+    maximumQuantity: null,
+    media: [],
+    minimumQuantity: null,
+    options: [
+      {
+        displayOrder: 0,
+        isRequired: false,
+        name: "Colour",
+        values: [{ displayOrder: 0, isActive: true, value: "Black" }],
+      },
+      {
+        displayOrder: 1,
+        isRequired: true,
+        name: "Size",
+        values: [
+          { displayOrder: 0, isActive: true, value: "S" },
+          { displayOrder: 1, isActive: true, value: "M" },
+        ],
+      },
+    ],
+    shortDescription: null,
+    templateAttributes: {},
+  };
+
+  it("blocks Add to Cart when the required option is not selected, with a clear message", async () => {
+    mockApi({ "public/storefronts/dev-validation-store": { body: devStore }, "products/dev-embroidered-abaya": { body: abayaWithOptions } });
+    renderAt("/dev-validation-store/products/dev-embroidered-abaya");
+    await screen.findByRole("heading", { level: 1, name: "Dev Embroidered Abaya" });
+    fireEvent.click(screen.getByRole("button", { name: "Add to Cart" }));
+    expect(await screen.findByText("Select a Size to continue.")).toBeInTheDocument();
+    expect(screen.queryByText("Added to Cart")).not.toBeInTheDocument();
+  });
+
+  it("adds to Cart once the required option is selected; the optional option may stay unset", async () => {
+    mockApi({ "public/storefronts/dev-validation-store": { body: devStore }, "products/dev-embroidered-abaya": { body: abayaWithOptions } });
+    renderAt("/dev-validation-store/products/dev-embroidered-abaya");
+    await screen.findByRole("heading", { level: 1, name: "Dev Embroidered Abaya" });
+    fireEvent.click(screen.getByLabelText("M"));
+    fireEvent.click(screen.getByRole("button", { name: "Add to Cart" }));
+    expect(await screen.findByText("Added to Cart")).toBeInTheDocument();
+  });
+
+  it("adding the identical Product+option configuration again increments quantity, not a duplicate line", async () => {
+    mockApi({ "public/storefronts/dev-validation-store": { body: devStore }, "products/dev-embroidered-abaya": { body: abayaWithOptions } });
+    renderAt("/dev-validation-store/products/dev-embroidered-abaya");
+    await screen.findByRole("heading", { level: 1, name: "Dev Embroidered Abaya" });
+    fireEvent.click(screen.getByLabelText("M"));
+    fireEvent.click(screen.getByRole("button", { name: "Add to Cart" }));
+    await screen.findByText("Added to Cart");
+    fireEvent.click(screen.getByRole("button", { name: "Add to Cart" }));
+    await waitFor(() => {
+      expect(screen.getAllByText("Added to Cart")).toHaveLength(1);
+    });
+
+    cleanup();
+    mockApi({ "public/storefronts/dev-validation-store": { body: devStore }, "products/dev-embroidered-abaya": { body: abayaWithOptions } });
+    renderAt("/cart");
+    await screen.findByRole("heading", { level: 1, name: "Your Cart" });
+    expect(screen.getAllByText(/Dev Embroidered Abaya/)).toHaveLength(1);
+    expect(screen.getByRole("status", { name: "" })).toHaveTextContent("2");
+  });
+
+  it("shows the Cart badge count as the sum of line quantities", async () => {
+    mockApi({ "public/storefronts/dev-validation-store": { body: devStore }, "products/dev-embroidered-abaya": { body: abayaWithOptions } });
+    renderAt("/dev-validation-store/products/dev-embroidered-abaya");
+    await screen.findByRole("heading", { level: 1, name: "Dev Embroidered Abaya" });
+    fireEvent.click(screen.getByLabelText("M"));
+    fireEvent.click(screen.getByRole("button", { name: "Add to Cart" }));
+    await screen.findByText("Added to Cart");
+    await waitFor(() => {
+      expect(document.querySelector(".store-cartbadge")).toHaveTextContent("1");
+    });
+  });
+
+  it("renders an honest empty state when the Cart has nothing in it", async () => {
+    renderAt("/cart");
+    expect(await screen.findByText("Your Cart is empty.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Continue Shopping" })).toBeInTheDocument();
+  });
+
+  it("removes a line and shows the empty state again", async () => {
+    mockApi({ "public/storefronts/dev-validation-store": { body: devStore }, "products/dev-embroidered-abaya": { body: abayaWithOptions } });
+    renderAt("/dev-validation-store/products/dev-embroidered-abaya");
+    await screen.findByRole("heading", { level: 1, name: "Dev Embroidered Abaya" });
+    fireEvent.click(screen.getByLabelText("M"));
+    fireEvent.click(screen.getByRole("button", { name: "Add to Cart" }));
+    await screen.findByText("Added to Cart");
+
+    cleanup();
+    mockApi({ "public/storefronts/dev-validation-store": { body: devStore }, "products/dev-embroidered-abaya": { body: abayaWithOptions } });
+    renderAt("/cart");
+    await screen.findByRole("heading", { level: 1, name: "Your Cart" });
+    fireEvent.click(screen.getByRole("button", { name: /Remove Dev Embroidered Abaya from Cart/ }));
+    expect(await screen.findByText("Your Cart is empty.")).toBeInTheDocument();
+  });
+
+  it("deep-reloads /cart directly without a client-side 404, in English and Arabic", async () => {
+    renderAt("/en/cart");
+    expect(await screen.findByText("Your Cart is empty.")).toBeInTheDocument();
+  });
+
+  it("warns before replacing a Cart with a Product from a different Store, and Cancel keeps the original Cart", async () => {
+    mockApi({ "public/storefronts/dev-validation-store": { body: devStore }, "products/dev-embroidered-abaya": { body: abayaWithOptions } });
+    renderAt("/dev-validation-store/products/dev-embroidered-abaya");
+    await screen.findByRole("heading", { level: 1, name: "Dev Embroidered Abaya" });
+    fireEvent.click(screen.getByLabelText("M"));
+    fireEvent.click(screen.getByRole("button", { name: "Add to Cart" }));
+    await screen.findByText("Added to Cart");
+
+    mockApi({
+      "public/storefronts/other-store": {
+        body: { ...devStore, displayName: "Other Store", slug: "other-store" },
+      },
+      "products/dev-kaftan-classic": {
+        body: {
+          ...abayaWithOptions,
+          ...kaftan,
+          availabilityStatus: "available" as const,
+          options: [],
+        },
+      },
+    });
+    cleanup();
+    renderAt("/other-store/products/dev-kaftan-classic");
+    await screen.findByRole("heading", { level: 1, name: "Dev Kaftan Classic" });
+    fireEvent.click(screen.getByRole("button", { name: "Add to Cart" }));
+    expect(
+      await screen.findByText(/Your Cart contains items from Dev Validation Store/),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Keep My Cart" }));
+
+    cleanup();
+    mockApi({ "public/storefronts/dev-validation-store": { body: devStore }, "products/dev-embroidered-abaya": { body: abayaWithOptions } });
+    renderAt("/cart");
+    await screen.findByRole("heading", { level: 1, name: "Your Cart" });
+    expect(screen.getByText(/Dev Validation Store/)).toBeInTheDocument();
   });
 });

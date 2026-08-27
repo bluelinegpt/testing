@@ -25,6 +25,12 @@ describe.skipIf(!runServerTests)("Store production server", () => {
   let storePort: number;
   let baseUrl: string;
 
+  // Mutable per-test fixtures for the sitemap's `seoIndexable` gating test
+  // below -- everything else in this suite uses the static routes/empty
+  // lists inline in the handler.
+  let sitemapStores: { seoIndexable?: boolean; slug: string }[] = [];
+  const sitemapProductsByStore: Record<string, { seoIndexable?: boolean; slug: string }[]> = {};
+
   beforeAll(async () => {
     fakeApi = createServer((request, response) => {
       const url = new URL(request.url ?? "/", "http://localhost");
@@ -40,7 +46,15 @@ describe.skipIf(!runServerTests)("Store production server", () => {
       }
       if (url.pathname === "/api/v1/public/storefronts") {
         response.writeHead(200, { "Content-Type": "application/json" });
-        response.end(JSON.stringify({ items: [] }));
+        response.end(JSON.stringify({ items: sitemapStores }));
+        return;
+      }
+      const productsMatch = /^\/api\/v1\/public\/storefronts\/([^/]+)\/products$/.exec(
+        url.pathname,
+      );
+      if (productsMatch) {
+        response.writeHead(200, { "Content-Type": "application/json" });
+        response.end(JSON.stringify({ items: sitemapProductsByStore[productsMatch[1]!] ?? [] }));
         return;
       }
       if (url.pathname === "/api/v1/public/marketplace/categories") {
@@ -170,6 +184,32 @@ describe.skipIf(!runServerTests)("Store production server", () => {
     expect(sitemap.status).toBe(200);
     const sitemapBody = await sitemap.text();
     expect(sitemapBody).toContain("<urlset");
+  });
+
+  it("T6: excludes a noindex Store or Product from the sitemap, includes an indexable one", async () => {
+    // `seoIndexable: false` still resolves publicly (it's a search-engine
+    // opt-out, not an access control) -- so the resource is present in these
+    // list responses the way an unpublished Store or draft Product would not
+    // be. The sitemap must filter it out itself, or it tells a crawler
+    // "index this" on the exact page whose own <meta> tag says the opposite.
+    sitemapStores = [
+      { seoIndexable: true, slug: "visible-store" },
+      { seoIndexable: false, slug: "hidden-store" },
+    ];
+    sitemapProductsByStore["visible-store"] = [
+      { seoIndexable: true, slug: "visible-product" },
+      { seoIndexable: false, slug: "hidden-product" },
+    ];
+    try {
+      const sitemap = await fetch(`${baseUrl}/sitemap.xml`);
+      const body = await sitemap.text();
+      expect(body).toContain("visible-store");
+      expect(body).toContain("visible-store/products/visible-product");
+      expect(body).not.toContain("hidden-store");
+      expect(body).not.toContain("hidden-product");
+    } finally {
+      sitemapStores = [];
+    }
   });
 
   it("§65: the API proxy still forwards JSON with no-store and never mangles binary media", async () => {

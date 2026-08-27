@@ -4,7 +4,21 @@ import { useTranslation } from "react-i18next";
 
 import { ApiError, type ApiClient } from "../../api/api-client.js";
 
-export function PasswordChangeView({ api, onChanged }: { api: ApiClient; onChanged: () => void }) {
+export function PasswordChangeView({
+  api,
+  onChanged,
+  voluntary = false,
+}: {
+  api: ApiClient;
+  onChanged: () => void;
+  /**
+   * True when this form was reached by choice (the Trader/Company Portal's
+   * "Change Password" nav item), not because `forcePasswordChange` demanded
+   * it. The account's current password is not necessarily temporary at all
+   * in that case, so the title/help text must not claim it is (T10).
+   */
+  voluntary?: boolean;
+}) {
   const { t } = useTranslation();
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -33,8 +47,10 @@ export function PasswordChangeView({ api, onChanged }: { api: ApiClient; onChang
     <main className="password-change-page">
       <section className="password-change-panel" aria-labelledby="password-change-title">
         <KeyRound aria-hidden="true" size={30} />
-        <h1 id="password-change-title">{t("userAdmin.passwordChangeTitle")}</h1>
-        <p>{t("userAdmin.passwordChangeHelp")}</p>
+        <h1 id="password-change-title">
+          {t(voluntary ? "userAdmin.passwordChangeTitleVoluntary" : "userAdmin.passwordChangeTitle")}
+        </h1>
+        <p>{t(voluntary ? "userAdmin.passwordChangeHelpVoluntary" : "userAdmin.passwordChangeHelp")}</p>
         {error ? (
           <div className="alert alert-error" role="alert">
             {error}

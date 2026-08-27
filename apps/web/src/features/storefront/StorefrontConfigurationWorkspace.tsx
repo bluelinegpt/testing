@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { ApiError, type ApiClient } from "../../api/api-client.js";
@@ -38,10 +38,12 @@ export interface StorefrontConfiguration {
   readonly brandPrimaryColor: string | null;
   readonly businessHours: readonly BusinessHoursEntry[];
   readonly businessTemplate: string;
+  readonly coverUrl: string | null;
   readonly customerSupport: string | null;
   readonly deliveryInformation: string | null;
   readonly displayName: string;
   readonly id: string;
+  readonly logoUrl: string | null;
   readonly publicEmail: string | null;
   readonly publicMobile: string | null;
   readonly publicUrl: string;
@@ -193,6 +195,19 @@ export function StorefrontConfigurationWorkspace({
   const [newTemplate, setNewTemplate] = useState("general");
   const [newTheme, setNewTheme] = useState("clean_light");
 
+  // Branding (T2 acceptance, §7-9): Store logo/cover upload -- the same
+  // `postMultipart`/file-input pattern already used for the Company's own
+  // logo in `CompanyProfileWorkspace.tsx`, pointed at the Storefront's own
+  // `media/logo`/`media/cover` routes instead of `company-profile/logo`.
+  const [selectedLogoFile, setSelectedLogoFile] = useState<File>();
+  const [selectedCoverFile, setSelectedCoverFile] = useState<File>();
+  const [logoBusy, setLogoBusy] = useState(false);
+  const [coverBusy, setCoverBusy] = useState(false);
+  const [logoError, setLogoError] = useState<string>();
+  const [coverError, setCoverError] = useState<string>();
+  const logoInputRef = useRef<HTMLInputElement>(null);
+  const coverInputRef = useRef<HTMLInputElement>(null);
+
   const canManage = hasStorefrontPermission(permissions, "storefront.manage");
   const canPublish = hasStorefrontPermission(permissions, "storefront.publish");
   const canSuspend = hasStorefrontPermission(permissions, "storefront.suspend");
@@ -336,6 +351,87 @@ export function StorefrontConfigurationWorkspace({
       setBusy(false);
     }
   };
+
+  const ACCEPTED_BRAND_IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp"];
+  const MAX_BRAND_IMAGE_BYTES = 5 * 1024 * 1024;
+
+  function chooseBrandImage(
+    file: File | undefined,
+    setSelected: (file: File | undefined) => void,
+    setFileError: (error: string | undefined) => void,
+  ) {
+    setFileError(undefined);
+    if (file === undefined) {
+      setSelected(undefined);
+      return;
+    }
+    if (!ACCEPTED_BRAND_IMAGE_TYPES.includes(file.type)) {
+      setSelected(undefined);
+      setFileError("storefront.errors.brandImageType");
+      return;
+    }
+    if (file.size > MAX_BRAND_IMAGE_BYTES) {
+      setSelected(undefined);
+      setFileError("storefront.errors.brandImageSize");
+      return;
+    }
+    setSelected(file);
+  }
+
+  async function uploadBrandImage(purpose: "cover" | "logo") {
+    if (storefront === undefined) return;
+    const file = purpose === "logo" ? selectedLogoFile : selectedCoverFile;
+    if (file === undefined) return;
+    const setBusyFlag = purpose === "logo" ? setLogoBusy : setCoverBusy;
+    const setFileError = purpose === "logo" ? setLogoError : setCoverError;
+    const inputRef = purpose === "logo" ? logoInputRef : coverInputRef;
+    const clearSelected = purpose === "logo" ? setSelectedLogoFile : setSelectedCoverFile;
+    setBusyFlag(true);
+    setFileError(undefined);
+    try {
+      const body = new FormData();
+      body.append("file", file);
+      await api.postMultipart<{ fileId: string }>(
+        `operations/trader-storefronts/${storefront.id}/media/${purpose}`,
+        body,
+      );
+      clearSelected(undefined);
+      if (inputRef.current !== null) inputRef.current.value = "";
+      setReload((current) => current + 1);
+      setNotice(purpose === "logo" ? "storefront.logoUploaded" : "storefront.coverUploaded");
+    } catch (cause) {
+      setFileError(
+        cause instanceof ApiError
+          ? `storefront.errors.${cause.code}`
+          : "storefront.errors.storefront_save_failed",
+      );
+    } finally {
+      setBusyFlag(false);
+    }
+  }
+
+  async function removeBrandImage(purpose: "cover" | "logo") {
+    if (storefront === undefined) return;
+    const setBusyFlag = purpose === "logo" ? setLogoBusy : setCoverBusy;
+    const setFileError = purpose === "logo" ? setLogoError : setCoverError;
+    setBusyFlag(true);
+    setFileError(undefined);
+    try {
+      await api.delete<{ removed: boolean }>(
+        `operations/trader-storefronts/${storefront.id}/media/${purpose}`,
+      );
+      setReload((current) => current + 1);
+      setNotice(purpose === "logo" ? "storefront.logoRemoved" : "storefront.coverRemoved");
+    } catch (cause) {
+      setFileError(
+        cause instanceof ApiError
+          ? `storefront.errors.${cause.code}`
+          : "storefront.errors.storefront_save_failed",
+      );
+    } finally {
+      setBusyFlag(false);
+    }
+  }
 
   const actions = useMemo(
     () => (storefront === undefined ? [] : availableActions(storefront.status)),
@@ -693,6 +789,7 @@ export function StorefrontConfigurationWorkspace({
           />
         </label>
         <button
+          className="button button-secondary"
           onClick={() => {
             const suggestion = suggestSlug(value("displayName") ?? "");
             setDraft({ ...draft, slug: suggestion });
@@ -763,6 +860,135 @@ export function StorefrontConfigurationWorkspace({
             value={value("storeDescription") ?? ""}
           />
         </label>
+
+        {/* Branding (T2 acceptance): logo and cover upload, each saved
+            immediately on upload -- not batched with the text-field Save
+            button below, because a Trader who uploads a logo and then
+            navigates away without touching Save should not lose it. */}
+        <fieldset className="accounting-form-section">
+          <legend>{t("storefront.sections.branding")}</legend>
+          <div className="company-logo-manager">
+            <div className="company-logo-previews">
+              <figure className="company-logo-figure">
+                <figcaption>{t("storefront.branding.currentLogo")}</figcaption>
+                {storefront.logoUrl !== null ? (
+                  <img
+                    alt={t("storefront.branding.currentLogo")}
+                    className="company-logo-image"
+                    src={storefront.logoUrl}
+                  />
+                ) : (
+                  <span aria-hidden="true" className="company-logo-placeholder">
+                    {storefront.displayName.slice(0, 1).toUpperCase()}
+                  </span>
+                )}
+              </figure>
+            </div>
+            <div className="company-logo-controls">
+              <p className="muted">{t("storefront.branding.logoHint")}</p>
+              <input
+                accept="image/png,image/jpeg,image/webp"
+                aria-label={t("storefront.branding.chooseFile")}
+                disabled={!canManage || busy}
+                onChange={(event) =>
+                  chooseBrandImage(event.target.files?.[0], setSelectedLogoFile, setLogoError)
+                }
+                ref={logoInputRef}
+                type="file"
+              />
+              {logoError !== undefined ? (
+                <p className="field-error" role="alert">
+                  {t(logoError, t("common.operationFailed"))}
+                </p>
+              ) : null}
+              <div className="company-logo-actions">
+                <button
+                  className="button button-primary"
+                  disabled={selectedLogoFile === undefined || logoBusy || !canManage}
+                  onClick={() => void uploadBrandImage("logo")}
+                  type="button"
+                >
+                  {logoBusy
+                    ? t("common.working")
+                    : storefront.logoUrl !== null
+                      ? t("storefront.branding.replaceLogo")
+                      : t("storefront.branding.uploadLogo")}
+                </button>
+                {storefront.logoUrl !== null ? (
+                  <button
+                    className="button button-secondary"
+                    disabled={logoBusy || !canManage}
+                    onClick={() => void removeBrandImage("logo")}
+                    type="button"
+                  >
+                    {t("storefront.branding.removeLogo")}
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          </div>
+
+          <div className="company-logo-manager">
+            <div className="company-logo-previews">
+              <figure className="company-logo-figure">
+                <figcaption>{t("storefront.branding.currentCover")}</figcaption>
+                {storefront.coverUrl !== null ? (
+                  <img
+                    alt={t("storefront.branding.currentCover")}
+                    className="company-logo-image storefront-cover-image"
+                    src={storefront.coverUrl}
+                  />
+                ) : (
+                  <span aria-hidden="true" className="company-logo-placeholder">
+                    {t("storefront.branding.noCover")}
+                  </span>
+                )}
+              </figure>
+            </div>
+            <div className="company-logo-controls">
+              <p className="muted">{t("storefront.branding.coverHint")}</p>
+              <input
+                accept="image/png,image/jpeg,image/webp"
+                aria-label={t("storefront.branding.chooseFile")}
+                disabled={!canManage || busy}
+                onChange={(event) =>
+                  chooseBrandImage(event.target.files?.[0], setSelectedCoverFile, setCoverError)
+                }
+                ref={coverInputRef}
+                type="file"
+              />
+              {coverError !== undefined ? (
+                <p className="field-error" role="alert">
+                  {t(coverError, t("common.operationFailed"))}
+                </p>
+              ) : null}
+              <div className="company-logo-actions">
+                <button
+                  className="button button-primary"
+                  disabled={selectedCoverFile === undefined || coverBusy || !canManage}
+                  onClick={() => void uploadBrandImage("cover")}
+                  type="button"
+                >
+                  {coverBusy
+                    ? t("common.working")
+                    : storefront.coverUrl !== null
+                      ? t("storefront.branding.replaceCover")
+                      : t("storefront.branding.uploadCover")}
+                </button>
+                {storefront.coverUrl !== null ? (
+                  <button
+                    className="button button-secondary"
+                    disabled={coverBusy || !canManage}
+                    onClick={() => void removeBrandImage("cover")}
+                    type="button"
+                  >
+                    {t("storefront.branding.removeCover")}
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        </fieldset>
 
         {/* Search and social metadata.
             Every field is an OVERRIDE, not a requirement. The Store already
@@ -883,6 +1109,7 @@ export function StorefrontConfigurationWorkspace({
                 />
               </label>
               <button
+                className="button button-secondary"
                 onClick={() =>
                   setDraft({
                     ...draft,
@@ -903,6 +1130,7 @@ export function StorefrontConfigurationWorkspace({
             </p>
           )}
           <button
+            className="button button-secondary"
             disabled={(value("businessHours") ?? []).length >= 14}
             onClick={() =>
               setDraft({
@@ -969,6 +1197,7 @@ export function StorefrontConfigurationWorkspace({
         ) : (
           actions.map((action) => (
             <button
+              className="button button-secondary"
               disabled={!canPublish || busy || dirty}
               key={action}
               onClick={() => void runAction(action)}
@@ -983,6 +1212,7 @@ export function StorefrontConfigurationWorkspace({
         {canSuspend ? (
           suspended ? (
             <button
+              className="button button-secondary"
               disabled={busy}
               onClick={() => void runAction("remove-suspension")}
               type="button"
@@ -991,6 +1221,7 @@ export function StorefrontConfigurationWorkspace({
             </button>
           ) : (
             <button
+              className="button button-danger"
               disabled={busy}
               onClick={() => void runAction("suspend", { reason: t("storefront.defaultSuspendReason") })}
               type="button"

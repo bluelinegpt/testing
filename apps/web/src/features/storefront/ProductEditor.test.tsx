@@ -55,7 +55,11 @@ const categories = [{ id: "category-1", isActive: true, nameEn: "Abayas" }];
 function editor(
   overrides: Partial<ProductDetail> = {},
   template: ProductTemplate = "fashion",
-  handlers: { readonly patch?: () => Promise<unknown>; readonly post?: () => Promise<unknown> } = {},
+  handlers: {
+    readonly patch?: () => Promise<unknown>;
+    readonly post?: () => Promise<unknown>;
+    readonly postMultipart?: () => Promise<unknown>;
+  } = {},
 ) {
   const calls: { body?: unknown; path: string }[] = [];
   const api = {
@@ -67,6 +71,10 @@ function editor(
     post: vi.fn((path: string, body: unknown) => {
       calls.push({ body, path });
       return handlers.post?.() ?? Promise.resolve({});
+    }),
+    postMultipart: vi.fn((path: string, body: FormData) => {
+      calls.push({ body, path });
+      return handlers.postMultipart?.() ?? Promise.resolve({ fileId: "file-1" });
     }),
   };
   render(
@@ -155,6 +163,29 @@ describe("ProductEditor", () => {
     });
   });
 
+  it("sends edited price, description and brand -- not only the template attributes", async () => {
+    // Regression: a prior fix that kept the strict CREATE payload from
+    // carrying Marketplace/attribute fields once, over-applied that same
+    // allow-list to the EDIT path too, silently dropping ordinary field
+    // edits (price, description, brand) from the update PATCH.
+    const { calls } = editor({}, "fashion");
+    await screen.findByDisplayValue("Embroidered Abaya");
+    fireEvent.change(screen.getByLabelText(/Selling price/i), { target: { value: "179.00" } });
+    fireEvent.change(screen.getByLabelText(/Full description/i), {
+      target: { value: "Updated description" },
+    });
+    fireEvent.change(screen.getByLabelText(/Brand \(/i), { target: { value: "New Brand" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => {
+      const call = calls.find((entry) => entry.body !== undefined);
+      expect(call?.body).toMatchObject({
+        brand: "New Brand",
+        fullDescription: "Updated description",
+        sellingPrice: "179.00",
+      });
+    });
+  });
+
   it("treats an archived Product as read-only", async () => {
     editor({ lifecycleStatus: "archived" });
     await screen.findByDisplayValue("Embroidered Abaya");
@@ -177,7 +208,8 @@ describe("ProductEditor", () => {
     await screen.findByDisplayValue("Embroidered Abaya");
     expect(screen.getByText(/8 of 8 images/i)).toBeInTheDocument();
     expect(await screen.findByText(/at most eight images/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Add media" })).toBeDisabled();
+    expect(screen.getByLabelText(/Choose an image file/i)).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Upload image" })).toBeDisabled();
   });
 
   it("blocks a second video and says why", async () => {
@@ -200,10 +232,104 @@ describe("ProductEditor", () => {
     expect(await screen.findByText(/only one video/i)).toBeInTheDocument();
   });
 
-  it("labels media as a reference workflow rather than an upload", async () => {
+  it("offers a real file upload for images, and a URL field only for video", async () => {
     editor();
-    // No upload infrastructure exists; the screen must not imply otherwise.
-    expect(await screen.findByText(/No file is uploaded here/i)).toBeInTheDocument();
+    await screen.findByDisplayValue("Embroidered Abaya");
+    // Image is the default media type: a real file chooser, not a URL field.
+    expect(screen.getByLabelText(/Choose an image file/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/Video URL/i)).toBeNull();
+    fireEvent.change(screen.getByLabelText(/Media type/i), { target: { value: "video" } });
+    // Video still has no upload transport, so it keeps the URL workflow.
+    expect(screen.getByLabelText(/Video URL/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/Choose an image file/i)).toBeNull();
+  });
+
+  it("uploads a chosen image and attaches it via the real endpoints", async () => {
+    const { api, calls } = editor();
+    await screen.findByDisplayValue("Embroidered Abaya");
+    const file = new File([new Uint8Array(10)], "front.png", { type: "image/png" });
+    fireEvent.change(screen.getByLabelText(/Choose an image file/i), {
+      target: { files: [file] },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Upload image" }));
+    await waitFor(() => {
+      expect(api.postMultipart).toHaveBeenCalledWith(
+        "operations/trader-storefronts/products/product-1/media/image",
+        expect.any(FormData),
+      );
+    });
+    await waitFor(() => {
+      const attach = calls.find(
+        (entry) => entry.path === "operations/trader-storefront-products/product-1/media",
+      );
+      expect(attach?.body).toMatchObject({ fileId: "file-1", mediaType: "image" });
+    });
+  });
+
+  it("rejects an oversized or wrong-type Product image before uploading", async () => {
+    const { api } = editor();
+    await screen.findByDisplayValue("Embroidered Abaya");
+    const oversized = new File([new Uint8Array(6 * 1024 * 1024)], "big.png", {
+      type: "image/png",
+    });
+    fireEvent.change(screen.getByLabelText(/Choose an image file/i), {
+      target: { files: [oversized] },
+    });
+    expect(screen.getByText("That image is too large. The limit is 5 MB.")).toBeInTheDocument();
+    expect(api.postMultipart).not.toHaveBeenCalled();
+  });
+
+  it("renames an option value in place", async () => {
+    const { calls } = editor({
+      options: [
+        {
+          displayOrder: 0,
+          id: "g1",
+          isActive: true,
+          isRequired: false,
+          name: "Color",
+          values: [
+            { displayOrder: 0, id: "v1", isActive: true, value: "Navy" },
+          ],
+        },
+      ],
+    });
+    await screen.findByDisplayValue("Embroidered Abaya");
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    const input = screen.getByDisplayValue("Navy");
+    fireEvent.change(input, { target: { value: "Dark Navy" } });
+    // Two "Save" buttons exist: the Product form's own, and this inline
+    // rename control's -- the rename control renders later in the DOM.
+    const saveButtons = screen.getAllByRole("button", { name: "Save" });
+    fireEvent.click(saveButtons[saveButtons.length - 1]!);
+    await waitFor(() => {
+      const call = calls.find((entry) =>
+        entry.path.includes("option-values/v1") && !entry.path.includes("remove"),
+      );
+      expect(call?.body).toMatchObject({ value: "Dark Navy" });
+    });
+  });
+
+  it("removes an option value", async () => {
+    const { calls } = editor({
+      options: [
+        {
+          displayOrder: 0,
+          id: "g1",
+          isActive: true,
+          isRequired: false,
+          name: "Color",
+          values: [
+            { displayOrder: 0, id: "v1", isActive: true, value: "Beige" },
+          ],
+        },
+      ],
+    });
+    await screen.findByDisplayValue("Embroidered Abaya");
+    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    await waitFor(() => {
+      expect(calls.some((entry) => entry.path === "operations/trader-storefront-products/option-values/v1/remove")).toBe(true);
+    });
   });
 
   it("offers set-primary only on a non-primary image", async () => {
@@ -310,9 +436,12 @@ describe("ProductEditor", () => {
     });
     expect(screen.getByText("Media", { selector: "legend" })).toBeInTheDocument();
     expect(screen.getByText("Options", { selector: "legend" })).toBeInTheDocument();
-    // And the media controls now address the CREATED Product, not the prop.
-    fireEvent.change(screen.getByLabelText(/Media reference or URL/i), {
-      target: { value: "https://cdn.example.test/a.jpg" },
+    // And the media controls now address the CREATED Product, not the prop --
+    // exercised through the video/URL workflow (the image path is a real file
+    // upload, covered separately).
+    fireEvent.change(screen.getByLabelText(/Media type/i), { target: { value: "video" } });
+    fireEvent.change(screen.getByLabelText(/Video URL/i), {
+      target: { value: "https://cdn.example.test/a.mp4" },
     });
     const addMedia = screen.getByRole("button", { name: "Add media" });
     expect(addMedia).toBeEnabled();
@@ -320,6 +449,70 @@ describe("ProductEditor", () => {
     await waitFor(() => {
       expect(calls.some((entry) => entry.path.includes("product-created"))).toBe(true);
     });
+  });
+
+  it("applies Marketplace classification chosen before the first Save, not just after", async () => {
+    // `CreateProductDto` has no room for `marketplaceCategoryId` -- the global
+    // ValidationPipe runs `forbidNonWhitelisted`, so sending it there would be
+    // rejected. A Trader who classifies a Product before ever clicking Save
+    // once should not have that choice silently discarded because the create
+    // endpoint doesn't carry it.
+    const calls: { body?: unknown; path: string }[] = [];
+    const api = {
+      get: vi.fn((path: string) =>
+        path.includes("marketplace/taxonomy")
+          ? Promise.resolve({
+              items: [
+                {
+                  categoryId: "mkt-fashion",
+                  categoryNameAr: null,
+                  categoryNameEn: "Fashion",
+                  categorySlug: "fashion",
+                  displayOrder: 0,
+                  subcategories: [],
+                },
+              ],
+            })
+          : Promise.resolve(product),
+      ),
+      patch: vi.fn((path: string, body: unknown) => {
+        calls.push({ body, path });
+        return Promise.resolve({});
+      }),
+      post: vi.fn((path: string, body: unknown) => {
+        calls.push({ body, path });
+        return Promise.resolve({ ...product, id: "product-created", version: "1" });
+      }),
+    };
+    render(
+      <ProductEditor
+        api={api as unknown as ApiClient}
+        categories={categories}
+        onClose={() => undefined}
+        onSaved={() => undefined}
+        permissions={["storefront_products.manage"]}
+        storefrontId="storefront-1"
+        template="fashion"
+      />,
+    );
+    fireEvent.change(await screen.findByLabelText(/Product name/i), {
+      target: { value: "New Abaya" },
+    });
+    fireEvent.change(screen.getByLabelText(/Marketplace category/i), {
+      target: { value: "mkt-fashion" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      const classification = calls.find((entry) =>
+        entry.path.includes("classification"),
+      );
+      expect(classification).toBeDefined();
+      expect(classification?.body).toMatchObject({ marketplaceCategoryId: "mkt-fashion" });
+    });
+    // The create POST itself never carried the unknown property.
+    const create = calls.find((entry) => entry.path === "operations/trader-storefront-products");
+    expect((create?.body as Record<string, unknown>)["marketplaceCategoryId"]).toBeUndefined();
   });
 
   it("enables the editor for an administrator holding only users_roles.manage", async () => {
@@ -403,7 +596,7 @@ describe("CategoryManager", () => {
 
   it("shows an empty state when there are none", async () => {
     setup([]);
-    expect(await screen.findByText(/No category yet/i)).toBeInTheDocument();
+    expect(await screen.findByText(/No Store Categories yet/i)).toBeInTheDocument();
   });
 
   it("suggests a slug while typing a new name", async () => {
@@ -466,27 +659,37 @@ describe("CategoryManager", () => {
     expect(screen.getByText("Optional")).toBeInTheDocument();
   });
 
-  it("reorders an option group through the API", async () => {
+  it("reorders an option group through the API, renumbering the whole list", async () => {
+    // Regression: two freshly-created groups both default to `displayOrder:
+    // 0` server-side (same tie class as the T3 Category bug), so moving the
+    // SECOND group's raw value by -1 would still read 0 -- a no-op the
+    // Trader would see as "nothing happened". Moving within the currently
+    // displayed order and renumbering the whole list fixes that regardless
+    // of what the rows started with.
     const { calls } = editor({
       options: [
-        { displayOrder: 2, id: "g1", isActive: true, isRequired: false, name: "Size", values: [] },
+        { displayOrder: 0, id: "g1", isActive: true, isRequired: false, name: "Size", values: [] },
+        { displayOrder: 0, id: "g2", isActive: true, isRequired: false, name: "Color", values: [] },
       ],
     });
     await screen.findByDisplayValue("Embroidered Abaya");
-    fireEvent.click(screen.getByRole("button", { name: /Move Size earlier/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Move Color earlier/i }));
     await waitFor(() => {
       const call = calls.find((entry) => entry.path.includes("/option-groups/reorder"));
       const body = call?.body as { entries: { displayOrder: number; id: string }[] };
-      expect(body.entries[0]).toEqual({ displayOrder: 1, id: "g1" });
+      expect(body.entries).toEqual([
+        { displayOrder: 0, id: "g2" },
+        { displayOrder: 1, id: "g1" },
+      ]);
     });
   });
 
-  it("reorders media with keyboard-accessible buttons", async () => {
-    const { calls } = editor({
+  it("disables Move up/down at the ends of the group and media lists", async () => {
+    editor({
       media: [
         {
           altText: "Front",
-          displayOrder: 1,
+          displayOrder: 0,
           id: "m1",
           isActive: true,
           isPrimary: true,
@@ -495,14 +698,52 @@ describe("CategoryManager", () => {
           url: "https://cdn.example.test/1.jpg",
         },
       ],
+      options: [
+        { displayOrder: 0, id: "g1", isActive: true, isRequired: false, name: "Size", values: [] },
+      ],
+    });
+    await screen.findByDisplayValue("Embroidered Abaya");
+    expect(screen.getByRole("button", { name: /Move Front earlier/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Move Front later/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Move Size earlier/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Move Size later/i })).toBeDisabled();
+  });
+
+  it("reorders media with keyboard-accessible buttons, renumbering the whole list", async () => {
+    const { calls } = editor({
+      media: [
+        {
+          altText: "Front",
+          displayOrder: 0,
+          id: "m1",
+          isActive: true,
+          isPrimary: true,
+          mediaType: "image",
+          posterUrl: null,
+          url: "https://cdn.example.test/1.jpg",
+        },
+        {
+          altText: "Detail",
+          displayOrder: 1,
+          id: "m2",
+          isActive: true,
+          isPrimary: false,
+          mediaType: "image",
+          posterUrl: null,
+          url: "https://cdn.example.test/2.jpg",
+        },
+      ],
     });
     await screen.findByDisplayValue("Embroidered Abaya");
     // Ordinary buttons, so keyboard and screen-reader users are not excluded.
-    fireEvent.click(screen.getByRole("button", { name: /Move Front earlier/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Move Detail earlier/i }));
     await waitFor(() => {
       const call = calls.find((entry) => entry.path.includes("/media/reorder"));
       const body = call?.body as { entries: { displayOrder: number; id: string }[] };
-      expect(body.entries[0]).toEqual({ displayOrder: 0, id: "m1" });
+      expect(body.entries).toEqual([
+        { displayOrder: 0, id: "m2" },
+        { displayOrder: 1, id: "m1" },
+      ]);
     });
   });
 });

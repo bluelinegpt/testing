@@ -71,6 +71,7 @@ export class DailyCashActivityController {
       filters: {
         accountId: query.accountId,
         businessDate: query.businessDate,
+        dateBasis: query.dateBasis,
         partyId: query.partyId,
         partyType: query.partyType,
         paymentMethod: query.paymentMethod,

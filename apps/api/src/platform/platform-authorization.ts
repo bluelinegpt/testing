@@ -62,6 +62,7 @@ export const PLATFORM_TRADER_APPLICATIONS_MANAGE = "platform.trader_applications
 export const PLATFORM_CUSTOMER_QUOTES_READ = "platform.customer_quotes.read";
 export const PLATFORM_CUSTOMER_QUOTES_MANAGE = "platform.customer_quotes.manage";
 export const PLATFORM_CUSTOMER_MARKETPLACE_MANAGE = "platform.customer_marketplace.manage";
+export const PLATFORM_STORE_ORDER_CONVERSION_MANAGE = "platform.store_order_conversion.manage";
 export const PLATFORM_BLOG_READ = "platform.blog.read";
 export const PLATFORM_BLOG_CREATE = "platform.blog.create";
 export const PLATFORM_BLOG_EDIT = "platform.blog.edit";
@@ -117,6 +118,10 @@ export const PLATFORM_PERMISSIONS: readonly { code: string; description: string 
   { code: PLATFORM_CUSTOMER_QUOTES_READ, description: "View customer quote requests" },
   { code: PLATFORM_CUSTOMER_QUOTES_MANAGE, description: "Manage customer quote requests and offers" },
   { code: PLATFORM_CUSTOMER_MARKETPLACE_MANAGE, description: "Manage customer marketplace commission and expiry" },
+  {
+    code: PLATFORM_STORE_ORDER_CONVERSION_MANAGE,
+    description: "Convert a confirmed Customer Commerce Store Order into a Delivery Order",
+  },
   { code: PLATFORM_BLOG_READ, description: "View Website Content" },
   { code: PLATFORM_BLOG_CREATE, description: "Create Blog drafts" },
   { code: PLATFORM_BLOG_EDIT, description: "Edit Blog content" },

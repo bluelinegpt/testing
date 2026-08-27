@@ -1,6 +1,6 @@
 import { type FormEvent, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 
 import { type TrackingResult, trackStoreOrder } from "../api/customer-orders-client.js";
 import { CodeText, LabelledValue, Money, TraderText } from "../components/Bidi.js";
@@ -15,9 +15,15 @@ import { useLocalePath } from "../routing/locale-routing.js";
 export function TrackPage() {
   const { t } = useTranslation();
   const localePath = useLocalePath();
-  const [storeOrderNumber, setStoreOrderNumber] = useState("");
+  // §60: prefilled ONLY from ephemeral in-memory navigation state (set by
+  // `OrderConfirmationPage` right after Place Order) -- never from
+  // localStorage/query string, and lost on a reload, which is deliberate.
+  const navigationState = useLocation().state as
+    | { readonly storeOrderNumber?: string; readonly trackingToken?: string }
+    | null;
+  const [storeOrderNumber, setStoreOrderNumber] = useState(navigationState?.storeOrderNumber ?? "");
   const [mobile, setMobile] = useState("");
-  const [trackingToken, setTrackingToken] = useState("");
+  const [trackingToken, setTrackingToken] = useState(navigationState?.trackingToken ?? "");
   const [submitting, setSubmitting] = useState(false);
   const [invalid, setInvalid] = useState(false);
   const [result, setResult] = useState<TrackingResult>();

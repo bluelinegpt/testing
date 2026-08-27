@@ -297,6 +297,7 @@ export class StorefrontService {
           // that never showed a Trader's logo, while the Store page and the
           // Category listing both did.
           logoUrl: view.logoUrl,
+          seoIndexable: view.seoIndexable,
           slug: view.slug,
           status: view.status,
           storeDescription: view.storeDescription,

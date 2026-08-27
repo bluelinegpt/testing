@@ -207,6 +207,53 @@ async function insertTraderSettlement(
       ${fixture.actorId}::uuid,${confirmedAt}::timestamptz)`.execute(transaction);
 }
 
+async function insertPaidTraderSettlement(
+  transaction: Transaction<DatabaseSchema>,
+  fixture: Fixture,
+  amount: string,
+  businessDate: string,
+  paymentAt: string,
+): Promise<void> {
+  const settlementId = randomUUID();
+  const orderResult = await insertOrder(transaction, fixture, {
+    codAmount: amount,
+    companyRevenue: "0.00",
+    deliveredAt: `${businessDate}T10:00:00+04:00`,
+    deliveryStatus: "delivered",
+    serviceFee: "0.00",
+    traderNetPayable: amount,
+  });
+  const orderId = orderResult.rows[0]!.id;
+  await sql`update orders
+       set driver_reconciliation_status = 'not_applicable',
+           trader_settlement_status = 'unsettled',
+           trader_gross_payable = ${amount},
+           trader_paid_service_fee = 0,
+           trader_deductions = 0,
+           trader_charges = 0,
+           trader_adjustments = 0,
+           trader_net_payable = ${amount}
+     where id = ${orderId}::uuid and company_id = ${fixture.companyId}::uuid`.execute(transaction);
+  await sql`insert into trader_settlements(id,company_id,settlement_number,trader_id,business_date,
+      gross_payable,net_payable,status,created_by_account_id)
+    values(${settlementId}::uuid,${fixture.companyId}::uuid,${`SET-${randomUUID().slice(0, 8)}`},
+      ${fixture.traderId}::uuid,${businessDate}::date,${amount},${amount},'draft',
+      ${fixture.actorId}::uuid)`.execute(transaction);
+  await sql`insert into trader_settlement_orders(
+      company_id,settlement_id,order_id,gross_payable,deductions_and_charges,adjustments,
+      net_payable,allocated_amount
+    ) values(${fixture.companyId}::uuid,${settlementId}::uuid,${orderId}::uuid,
+      ${amount},0,0,${amount},${amount})`.execute(transaction);
+  await sql`insert into trader_settlement_payments(
+      company_id,settlement_id,payment_method,amount,created_by_account_id,payment_at
+    ) values(${fixture.companyId}::uuid,${settlementId}::uuid,'cash',${amount},
+      ${fixture.actorId}::uuid,${paymentAt}::timestamptz)`.execute(transaction);
+  await sql`update trader_settlements
+       set status='confirmed', confirmed_by_account_id=${fixture.actorId}::uuid,
+           confirmed_at=${paymentAt}::timestamptz
+     where id=${settlementId}::uuid and company_id=${fixture.companyId}::uuid`.execute(transaction);
+}
+
 async function insertDriverCollection(
   transaction: Transaction<DatabaseSchema>,
   fixture: Fixture,
@@ -719,6 +766,37 @@ describe.skipIf(!runDatabaseTests)("Daily Operations Summary — Date Mode", () 
       });
       expect(calendarEleventh.totalOrders).toBe(1);
       expect(calendarEleventh.totalDeliveryIncome).toBe("20.00");
+    });
+  });
+
+  it("shows confirmed Trader payments by settlement Business Date even when payment_at is midnight", async () => {
+    await inRolledBackTransaction(async (transaction) => {
+      const fixture = await seed(transaction, "DMT", "08:00:00");
+      const service = buildService(transaction, fixture.companyId, fixture.actorId);
+      await insertPaidTraderSettlement(
+        transaction,
+        fixture,
+        "275.00",
+        "2026-08-23",
+        "2026-08-23T00:00:00+04:00",
+      );
+
+      const business = await service.report({
+        dateFrom: "2026-08-23",
+        dateMode: "business_day",
+        dateTo: "2026-08-23",
+      });
+      expect(business.totalTraderPayments).toBe("275.00");
+      expect(business.traderPayments).toHaveLength(1);
+      expect(business.traderPayments[0]?.businessDate).toBe("2026-08-23");
+      expect(business.traderPayments[0]?.calendarDate).toBe("2026-08-23");
+
+      const previousBusinessDay = await service.report({
+        dateFrom: "2026-08-22",
+        dateMode: "business_day",
+        dateTo: "2026-08-22",
+      });
+      expect(previousBusinessDay.totalTraderPayments).toBe("0.00");
     });
   });
 

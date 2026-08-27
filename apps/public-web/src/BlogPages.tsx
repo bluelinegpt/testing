@@ -39,10 +39,25 @@ type Article = Record<string, unknown> & {
   social_description?: string;
   social_image_url?: string;
 };
+/**
+ * A request that never settles -- a dropped connection, a dev-server
+ * mid-restart, a proxy that swallows the response -- used to leave this
+ * page showing "Loading articles..." forever: `Promise.all` never resolves
+ * or rejects, so neither the success path nor `.catch` ever ran. A hard
+ * timeout guarantees the request always settles one way or the other, so
+ * the page can always fall back to the retry state instead of hanging.
+ */
+const requestTimeoutMs = 12_000;
 async function api<T>(path: string): Promise<T> {
-  const response = await fetch(apiUrl(`/public/blog${path}`));
-  if (!response.ok) throw new Error(response.status === 404 ? "not_found" : "load_failed");
-  return response.json();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), requestTimeoutMs);
+  try {
+    const response = await fetch(apiUrl(`/public/blog${path}`), { signal: controller.signal });
+    if (!response.ok) throw new Error(response.status === 404 ? "not_found" : "load_failed");
+    return await response.json();
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 const blogText = {
   en: {
@@ -54,6 +69,7 @@ const blogText = {
     all: "All",
     unavailableTitle: "Articles are temporarily unavailable",
     unavailableCopy: "Please try again shortly.",
+    retry: "Retry",
     loading: "Loading articles…",
     emptyTitle: "No published articles yet",
     emptyCopy: "Platform staff can prepare reviewed content in Website Content.",
@@ -85,6 +101,7 @@ const blogText = {
     all: "الكل",
     unavailableTitle: "المقالات غير متاحة مؤقتاً",
     unavailableCopy: "يرجى المحاولة مرة أخرى بعد قليل.",
+    retry: "إعادة المحاولة",
     loading: "جاري تحميل المقالات…",
     emptyTitle: "لا توجد مقالات منشورة بعد",
     emptyCopy: "يمكن لفريق المنصة تجهيز محتوى مراجع من إدارة محتوى الموقع.",
@@ -131,25 +148,29 @@ export function BlogListingPage() {
       Array<{ name: string; slug: string; description?: string }>
     >([]),
     [failed, setFailed] = useState(false),
+    [retryToken, setRetryToken] = useState(0),
     page = Math.max(1, Number(query.get("page")) || 1),
     locale = usePublicLocale();
   const text = blogText[locale];
   useEffect(() => {
+    let cancelled = false;
     setFailed(false);
     void Promise.all([
       api<any>(`?language=${locale}&page=${page}${categorySlug ? `&category=${categorySlug}` : ""}`),
       api<any[]>(`/categories?language=${locale}`),
     ])
       .then(([d, c]) => {
+        if (cancelled) return;
         setData(d);
         setCategories(c);
       })
-      .catch(() => setFailed(true));
+      .catch(() => { if (!cancelled) setFailed(true); });
     trackEvent(categorySlug ? "blog_category_view" : "blog_view", {
       category_slug: categorySlug,
       language: locale,
     });
-  }, [categorySlug, page, locale]);
+    return () => { cancelled = true; };
+  }, [categorySlug, page, locale, retryToken]);
   const title = categorySlug
     ? (categories.find((x) => x.slug === categorySlug)?.name ?? text.categoryTitle)
     : text.defaultTitle;
@@ -187,6 +208,7 @@ export function BlogListingPage() {
           <div className="empty-content">
             <h2>{text.unavailableTitle}</h2>
             <p>{text.unavailableCopy}</p>
+            <button className="button button-secondary" onClick={() => setRetryToken((n) => n + 1)} type="button">{text.retry}</button>
           </div>
         ) : !data ? (
           <p>{text.loading}</p>

@@ -180,6 +180,8 @@ export interface ErrorReportListFilters {
   readonly severity?: string;
   readonly status?: string;
   readonly search?: string;
+  readonly occurredFrom?: string;
+  readonly occurredTo?: string;
   readonly page?: number;
   readonly pageSize?: number;
 }
@@ -189,10 +191,10 @@ export type TraderApplicationStatus="pending_verification"|"reviewing"|"contacte
 export interface TraderApplication extends Record<string,unknown>{id:string;referenceNumber:string;storeName:string;contactPerson:string;mobileNumber:string;email:string;primaryCategory:string;pickupEmirate:string;monthlyOrderRange:string;hasExistingDeliveryCompany:boolean;requiresDeliveryCompany:boolean;status:TraderApplicationStatus;createdAt:string;assignedToUsername?:string;}
 export interface TraderApplicationPage{items:TraderApplication[];total:number;page:number;pageSize:number;}
 export interface TraderApplicationDetail extends TraderApplication{channels:Array<Record<string,unknown>>;history:Array<Record<string,unknown>>;internalNotes:Array<Record<string,unknown>>;deliveryEmirates:string[];}
-export interface DemoRequestSummary { readonly id:string;readonly referenceNumber:string;readonly companyName:string;readonly contactPerson:string;readonly mobileNumber:string;readonly email:string;readonly country:string;readonly emirate:string|null;readonly approximateDriverCount:number|null;readonly approximateMonthlyOrders:number|null;readonly approximateTraderCount:number|null;readonly preferredContactMethod:string;readonly status:DemoRequestStatus;readonly assignedToUsername:string|null;readonly agentConversationReference?:string|null;readonly createdAt:string; }
-export interface DemoRequestDetail extends DemoRequestSummary { readonly website:string|null;readonly currentSystem:string|null;readonly mainChallenges:string|null;readonly featuresOfInterest:readonly string[];readonly notes:string|null;readonly source:string;readonly landingPage:string;readonly referrer:string|null;readonly utmSource:string|null;readonly utmMedium:string|null;readonly utmCampaign:string|null;readonly utmTerm:string|null;readonly utmContent:string|null;readonly gclid:string|null;readonly convertedCompanyId:string|null;readonly convertedCompanyName:string|null;readonly agentConversationId?:string|null;readonly history:readonly Record<string,unknown>[];readonly internalNotes:readonly {id:string;noteText:string;authorUsername:string|null;createdAt:string}[]; }
+export interface DemoRequestSummary { readonly id:string;readonly referenceNumber:string;readonly companyName:string;readonly contactPerson:string;readonly mobileNumber:string;readonly email:string;readonly country:string;readonly emirate:string|null;readonly approximateDriverCount:number|null;readonly approximateMonthlyOrders:number|null;readonly approximateTraderCount:number|null;readonly preferredContactMethod:string;readonly source:string;readonly status:DemoRequestStatus;readonly assignedToUsername:string|null;readonly agentConversationReference?:string|null;readonly createdAt:string; }
+export interface DemoRequestDetail extends DemoRequestSummary { readonly website:string|null;readonly currentSystem:string|null;readonly mainChallenges:string|null;readonly featuresOfInterest:readonly string[];readonly notes:string|null;readonly landingPage:string;readonly referrer:string|null;readonly utmSource:string|null;readonly utmMedium:string|null;readonly utmCampaign:string|null;readonly utmTerm:string|null;readonly utmContent:string|null;readonly gclid:string|null;readonly convertedCompanyId:string|null;readonly convertedCompanyName:string|null;readonly agentConversationId?:string|null;readonly history:readonly Record<string,unknown>[];readonly internalNotes:readonly {id:string;noteText:string;authorUsername:string|null;createdAt:string}[]; }
 export interface DemoRequestPage { readonly items:readonly DemoRequestSummary[];readonly total:number;readonly page:number;readonly pageSize:number; }
-export interface DemoRequestFilters { readonly search?:string;readonly status?:string;readonly country?:string;readonly emirate?:string;readonly preferredContactMethod?:string;readonly createdFrom?:string;readonly createdTo?:string;readonly page?:number;readonly pageSize?:number;readonly sort?:"newest"|"oldest"; }
+export interface DemoRequestFilters { readonly search?:string;readonly status?:string;readonly country?:string;readonly emirate?:string;readonly preferredContactMethod?:string;readonly source?:string;readonly createdFrom?:string;readonly createdTo?:string;readonly page?:number;readonly pageSize?:number;readonly sort?:"newest"|"oldest"; }
 export interface WebsiteCmsBundle { readonly overview:Record<string,unknown>;readonly pages:any[];readonly pricing:any[];readonly features:any[];readonly faqs:any[];readonly helpCategories:any[];readonly helpArticles:any[];readonly media:any[];readonly navigation:any[];readonly contact:any;readonly revisions:any[]; }
 
 export interface UpdateErrorReportInput {
@@ -678,6 +680,12 @@ export const platformApi = {
     }
     if (filters.status !== undefined && filters.status !== "") query.set("status", filters.status);
     if (filters.search !== undefined && filters.search !== "") query.set("search", filters.search);
+    if (filters.occurredFrom !== undefined && filters.occurredFrom !== "") {
+      query.set("occurredFrom", filters.occurredFrom);
+    }
+    if (filters.occurredTo !== undefined && filters.occurredTo !== "") {
+      query.set("occurredTo", filters.occurredTo);
+    }
     if (filters.pageSize !== undefined) query.set("pageSize", String(filters.pageSize));
     query.set("page", String(filters.page ?? 1));
     const result = await request<ErrorReportPage>(`platform/errors?${query.toString()}`, {

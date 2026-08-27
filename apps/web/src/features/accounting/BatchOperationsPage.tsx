@@ -50,6 +50,34 @@ import { useListState } from "./use-list-state.js";
 
 type BatchType = "accounting_event_reprocess" | "operational_posting_retry";
 
+export function AccountingRecoveryNavigation({
+  active,
+}: {
+  readonly active: "batches" | "events" | "historical";
+}) {
+  const { t } = useTranslation();
+  const links = [
+    { id: "events", path: "/accounting/events" },
+    { id: "historical", path: "/accounting/historical-recovery" },
+    { id: "batches", path: "/accounting/batch-operations" },
+  ] as const;
+  return (
+    <nav aria-label={t("batches.recoveryNavigation.label")} className="accounting-filter-actions">
+      {links.map((link) =>
+        link.id === active ? (
+          <span className="button" key={link.id}>
+            {t(`batches.recoveryNavigation.${link.id}`)}
+          </span>
+        ) : (
+          <Link className="button button-secondary" key={link.id} to={link.path}>
+            {t(`batches.recoveryNavigation.${link.id}`)}
+          </Link>
+        ),
+      )}
+    </nav>
+  );
+}
+
 /** Types the GENERIC create dialog offers. Historical Recovery batches are
  *  created from the Historical Recovery preview with full per-item facts, so
  *  the type is deliberately absent here — the backend refuses it anyway. */
@@ -247,6 +275,7 @@ function BatchList({
   return (
     <section className="accounting-page">
       <PageHeader description={t("batches.intro")} title={t("batches.heading")} />
+      <AccountingRecoveryNavigation active="batches" />
 
       {/* Execution reuses the single-item service; worth saying where users
           plan the work. */}
@@ -706,6 +735,7 @@ function BatchDetailView({
   return (
     <section className="accounting-page">
       <PageHeader description={t("batches.intro")} title={t("batches.detailHeading")} />
+      <AccountingRecoveryNavigation active="batches" />
       <button
         className="link-button"
         onClick={() => onNavigate("/accounting/batch-operations")}

@@ -1,6 +1,5 @@
 User-agent: *
 Allow: /
 Disallow: /send-a-package/quote/
-Disallow: /traders/register/complete
 
 Sitemap: https://tawseelhub.com/sitemap.xml

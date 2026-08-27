@@ -6,6 +6,7 @@ import { NotificationsModule } from "../notifications/notifications.module.js";
 import { CustomerStoreOrderController } from "./store-order.controller.js";
 import { PublicStoreOrderTrackingController } from "./store-order-tracking.controller.js";
 import { StoreOrderService } from "./store-order.service.js";
+import { TraderStoreOrderController } from "./trader-store-order.controller.js";
 
 /**
  * Shared Commerce Foundation Prompts 3B/3C/3D: the Store Order domain.
@@ -26,7 +27,7 @@ import { StoreOrderService } from "./store-order.service.js";
  * still has no controller here -- that remains a later prompt.
  */
 @Module({
-  controllers: [CustomerStoreOrderController, PublicStoreOrderTrackingController],
+  controllers: [CustomerStoreOrderController, PublicStoreOrderTrackingController, TraderStoreOrderController],
   exports: [StoreOrderService],
   imports: [AuthenticationModule, NotificationsModule],
   providers: [StoreOrderService],

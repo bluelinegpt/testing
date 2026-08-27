@@ -8,7 +8,7 @@ describe('public website route foundation', () => {
     expect(new Set(paths).size).toBe(paths.length);
     expect(paths).toEqual([
       '/', '/delivery-companies', '/send-a-package', '/traders', '/traders/register', '/integrations',
-      '/resources', '/blog', '/pricing', '/about', '/contact', '/request-demo',
+      '/resources', '/blog', '/pricing', '/about', '/contact', '/privacy', '/terms', '/request-demo',
     ]);
   });
 

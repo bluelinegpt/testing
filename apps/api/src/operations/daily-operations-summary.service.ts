@@ -48,11 +48,10 @@ import { DriverCollectionPdfService } from "./driver-collection-pdf.service.js";
  * `company_revenue` column on Orders never migrated to it. COD and Trader
  * payable never enter this figure, in either Date Mode.
  *
- * "Successfully delivered" = `delivered_at is not null`, the same gate
- * `employee-delivery-earning.service.ts` uses and documents: the work was
- * done the moment delivery happened, and a LATER return does not undo that
- * for either earnings or income-recognition purposes. Close Order date is
- * never read anywhere in this file.
+ * "Operationally reportable" = delivered work whose cash responsibility is
+ * complete for the report date. Orders that require Driver cash use the
+ * confirmed Driver Collection timestamp; Orders with no Driver cash required
+ * use `delivered_at`. Trader settlement/payment is intentionally not a gate.
  *
  * ===========================================================================
  * DATE MODE
@@ -119,6 +118,54 @@ export interface OperatingExpenseRow {
     | "payroll";
 }
 
+export interface TraderPaymentRow {
+  readonly amount: string;
+  readonly businessDate: string;
+  readonly calendarDate: string;
+  readonly customerName: string;
+  readonly orderId: string;
+  readonly orderNumber: string;
+  readonly orderSerialNumber: string | null;
+  readonly originalAmountDue: string;
+  readonly paymentMethod: "bank_transfer" | "cash";
+  readonly previouslyPaid: string;
+  readonly reference: string;
+  readonly referenceNumber: string | null;
+  readonly settlementId: string;
+  readonly settlementNumber: string;
+  readonly traderName: string;
+}
+
+export interface TraderReceivableDueRow {
+  readonly amountCollected: string;
+  readonly businessDate: string;
+  readonly calendarDate: string;
+  readonly createdAt: string;
+  readonly orderSerialNumber: string | null;
+  readonly originalAmountDue: string;
+  readonly outstandingAmount: string;
+  readonly reason: string;
+  readonly receivableId: string;
+  readonly receivableNumber: string;
+  readonly sourceReference: string | null;
+  readonly traderName: string;
+}
+
+export interface TraderPayableDueRow {
+  readonly businessDate: string;
+  readonly calendarDate: string;
+  readonly customerName: string;
+  readonly deliveredAt: string;
+  readonly orderId: string;
+  readonly orderNumber: string;
+  readonly orderSerialNumber: string | null;
+  readonly originalAmountDue: string;
+  readonly outstandingAmount: string;
+  readonly previouslyPaid: string;
+  readonly referenceNumber: string | null;
+  readonly settlementStatus: string;
+  readonly traderName: string;
+}
 export interface DriverOrderRow {
   readonly customerName: string;
   readonly deliveredAt: string;
@@ -156,9 +203,18 @@ export interface DailyOperationsSummaryReport {
   };
   readonly netResult: string;
   readonly netStatus: "break_even" | "negative" | "positive";
+  readonly includeTraderPayments: boolean;
+  readonly includeTraderPayables: boolean;
+  readonly includeTraderReceivables: boolean;
   readonly totalDeliveryIncome: string;
   readonly totalExpenses: string;
   readonly totalOrders: number;
+  readonly totalTraderPayments: string;
+  readonly totalTraderPayables: string;
+  readonly totalTraderReceivables: string;
+  readonly traderPayables: readonly TraderPayableDueRow[];
+  readonly traderPayments: readonly TraderPaymentRow[];
+  readonly traderReceivables: readonly TraderReceivableDueRow[];
 }
 
 @Injectable()
@@ -236,8 +292,30 @@ export class DailyOperationsSummaryService {
     const driverId = query.driverId ?? null;
     const driverType = query.driverType ?? null;
 
-    const [driverRows, expenseRows] = await Promise.all([
+    const [driverRows, expenseRows, traderPaymentRows, traderReceivableRows, traderPayableRows] = await Promise.all([
       sql<DriverDeliverySummaryRow>`
+        with reportable_orders as (
+          select o.*, coalesce(cash.confirmed_at, o.delivered_at) as report_activity_at
+            from orders o
+            left join lateral (
+              select r.confirmed_at
+                from driver_reconciliation_orders line
+                join driver_reconciliations r
+                  on r.id = line.reconciliation_id and r.company_id = line.company_id
+               where line.company_id = o.company_id
+                 and line.order_id = o.id
+                 and r.status = 'confirmed'
+                 and r.confirmed_at is not null
+               order by r.confirmed_at desc
+               limit 1
+            ) cash on true
+           where o.company_id = ${companyId}::uuid
+             and o.delivered_at is not null
+             and (
+               (o.driver_reconciliation_status = 'reconciled' and cash.confirmed_at is not null)
+               or o.driver_reconciliation_status = 'not_applicable'
+             )
+        )
         select d.id as "driverId", d.code as "driverCode", d.name_en as "driverName",
                d.driver_type as "driverType",
                count(*)::int as "deliveredOrders",
@@ -246,12 +324,10 @@ export class DailyOperationsSummaryService {
                       else coalesce(o.service_fee_net_amount, 0) + coalesce(o.additional_fees, 0)
                  end
                ), 0)::text as "deliveryIncome"
-          from orders o
+          from reportable_orders o
           join drivers d on d.id = o.assigned_driver_id and d.company_id = o.company_id
-         where o.company_id = ${companyId}::uuid
-           and o.delivered_at is not null
-           and o.delivered_at >= ${window.startUtc}::timestamptz
-           and o.delivered_at < ${window.endUtc}::timestamptz
+         where o.report_activity_at >= ${window.startUtc}::timestamptz
+           and o.report_activity_at < ${window.endUtc}::timestamptz
            and (${driverId}::uuid is null or o.assigned_driver_id = ${driverId}::uuid)
            and (${driverType}::text is null or d.driver_type = ${driverType}::text)
          group by d.id, d.code, d.name_en, d.driver_type
@@ -339,6 +415,100 @@ export class DailyOperationsSummaryService {
           from expenses
          order by "confirmedAt" desc
       `.execute(this.database),
+      sql<
+        Omit<TraderPaymentRow, "businessDate" | "calendarDate"> & {
+          paymentAt: string;
+          settlementBusinessDate: string;
+        }
+      >`
+        select s.id as "settlementId", s.settlement_number as "settlementNumber",
+               t.name_en as "traderName", p.payment_method as "paymentMethod",
+               link.allocated_amount::text as amount, p.payment_at::text as "paymentAt",
+               s.business_date::text as "settlementBusinessDate",
+               coalesce(nullif(p.bank_reference, ''), s.settlement_number) as reference,
+               o.id as "orderId", o.order_number as "orderNumber",
+               o.serial_number as "orderSerialNumber", o.reference_number as "referenceNumber",
+               o.customer_name as "customerName",
+               o.trader_net_payable::text as "originalAmountDue",
+               greatest(coalesce(o.trader_paid_amount, 0) - link.allocated_amount, 0)::text as "previouslyPaid"
+          from trader_settlement_payments p
+          join trader_settlements s on s.id = p.settlement_id and s.company_id = p.company_id
+          join trader_settlement_orders link
+            on link.settlement_id = s.id and link.company_id = s.company_id
+          join orders o on o.id = link.order_id and o.company_id = link.company_id
+          join traders t on t.id = s.trader_id and t.company_id = s.company_id
+         where p.company_id = ${companyId}::uuid
+           and s.status = 'confirmed'
+           and (
+             (
+               ${dateMode}::text = 'business_day'
+               and s.business_date >= ${query.dateFrom}::date
+               and s.business_date <= ${query.dateTo}::date
+             )
+             or (
+               ${dateMode}::text = 'calendar_day'
+               and p.payment_at >= ${window.startUtc}::timestamptz
+               and p.payment_at < ${window.endUtc}::timestamptz
+             )
+           )
+         order by s.business_date desc, p.payment_at desc, s.settlement_number, o.serial_number nulls last, o.order_number
+      `.execute(this.database),
+      sql<TraderReceivableDueRow>`
+        select r.id as "receivableId", r.receivable_number as "receivableNumber",
+               t.name_en as "traderName", r.business_date::text as "businessDate",
+               r.source_reference as "sourceReference", o.serial_number as "orderSerialNumber",
+               r.reason, r.original_amount_due::text as "originalAmountDue",
+               r.amount_collected::text as "amountCollected",
+               r.outstanding_amount::text as "outstandingAmount",
+               r.created_at::text as "createdAt",
+               r.created_at::date::text as "calendarDate"
+          from trader_receivables r
+          join traders t on t.id = r.trader_id and t.company_id = r.company_id
+          left join orders o
+            on o.company_id = r.company_id
+           and r.source_type = 'service_charge'
+           and o.order_number = r.source_reference
+         where r.company_id = ${companyId}::uuid
+           and r.status in ('outstanding', 'partially_collected')
+           and r.outstanding_amount > 0
+           and (
+             (
+               ${dateMode}::text = 'business_day'
+               and r.business_date >= ${query.dateFrom}::date
+               and r.business_date <= ${query.dateTo}::date
+             )
+             or (
+               ${dateMode}::text = 'calendar_day'
+               and r.created_at >= ${window.startUtc}::timestamptz
+               and r.created_at < ${window.endUtc}::timestamptz
+             )
+           )
+         order by r.business_date desc, r.receivable_number
+      `.execute(this.database),
+      sql<
+        Omit<TraderPayableDueRow, "businessDate" | "calendarDate"> & {
+          deliveredAt: string;
+        }
+      >`
+        select o.id as "orderId", o.order_number as "orderNumber",
+               o.serial_number as "orderSerialNumber", o.reference_number as "referenceNumber",
+               t.name_en as "traderName", o.customer_name as "customerName",
+               o.delivered_at::text as "deliveredAt",
+               o.trader_net_payable::text as "originalAmountDue",
+               o.trader_paid_amount::text as "previouslyPaid",
+               o.trader_outstanding_balance::text as "outstandingAmount",
+               o.trader_settlement_status as "settlementStatus"
+          from orders o
+          join traders t on t.id = o.trader_id and t.company_id = o.company_id
+         where o.company_id = ${companyId}::uuid
+           and o.delivery_status = 'delivered'
+           and o.driver_reconciliation_status in ('reconciled', 'not_applicable')
+           and o.trader_settlement_status in ('unsettled', 'partially_settled')
+           and o.trader_outstanding_balance > 0
+           and o.delivered_at >= ${window.startUtc}::timestamptz
+           and o.delivered_at < ${window.endUtc}::timestamptz
+         order by o.delivered_at asc, o.serial_number nulls last, o.order_number
+      `.execute(this.database),
     ]);
 
     const driverSummary = driverRows.rows;
@@ -364,9 +534,49 @@ export class DailyOperationsSummaryService {
       sourceId: row.sourceId,
       type: row.type,
     }));
+    const traderPaymentTimestamps = traderPaymentRows.rows.map((row) => row.paymentAt);
+    const traderPaymentCalendarDates =
+      await this.businessDays.calendarDatesFor(traderPaymentTimestamps);
+    const traderPayments = traderPaymentRows.rows.map((row) => ({
+      amount: row.amount,
+      businessDate: row.settlementBusinessDate,
+      calendarDate: traderPaymentCalendarDates.get(row.paymentAt) ?? row.paymentAt.slice(0, 10),
+      customerName: row.customerName,
+      orderId: row.orderId,
+      orderNumber: row.orderNumber,
+      orderSerialNumber: row.orderSerialNumber,
+      originalAmountDue: row.originalAmountDue,
+      paymentMethod: row.paymentMethod,
+      previouslyPaid: row.previouslyPaid,
+      reference: row.reference,
+      referenceNumber: row.referenceNumber,
+      settlementId: row.settlementId,
+      settlementNumber: row.settlementNumber,
+      traderName: row.traderName,
+    }));
     const totalOrders = driverSummary.reduce((total, row) => total + row.deliveredOrders, 0);
     const totalDeliveryIncome = sumMoney(driverSummary.map((row) => row.deliveryIncome));
     const totalExpenses = sumMoney(expenses.map((row) => row.amount));
+    const traderReceivableCreatedAt = traderReceivableRows.rows.map((row) => row.createdAt);
+    const traderReceivableCalendarDates =
+      await this.businessDays.calendarDatesFor(traderReceivableCreatedAt);
+    const traderReceivables = traderReceivableRows.rows.map((row) => ({
+      ...row,
+      calendarDate: traderReceivableCalendarDates.get(row.createdAt) ?? row.createdAt.slice(0, 10),
+    }));
+    const traderPayableTimestamps = traderPayableRows.rows.map((row) => row.deliveredAt);
+    const [traderPayableBusinessDates, traderPayableCalendarDates] = await Promise.all([
+      this.businessDays.businessDatesFor(traderPayableTimestamps),
+      this.businessDays.calendarDatesFor(traderPayableTimestamps),
+    ]);
+    const traderPayables = traderPayableRows.rows.map((row) => ({
+      ...row,
+      businessDate: traderPayableBusinessDates.get(row.deliveredAt) ?? row.deliveredAt.slice(0, 10),
+      calendarDate: traderPayableCalendarDates.get(row.deliveredAt) ?? row.deliveredAt.slice(0, 10),
+    }));
+    const totalTraderPayments = sumMoney(traderPayments.map((row) => row.amount));
+    const totalTraderPayables = sumMoney(traderPayables.map((row) => row.outstandingAmount));
+    const totalTraderReceivables = sumMoney(traderReceivables.map((row) => row.outstandingAmount));
     const netResult = (Number(totalDeliveryIncome) - Number(totalExpenses)).toFixed(2);
     const netStatus =
       Number(netResult) > 0 ? "positive" : Number(netResult) < 0 ? "negative" : "break_even";
@@ -375,6 +585,9 @@ export class DailyOperationsSummaryService {
       dateMode,
       driverSummary,
       expenses,
+      includeTraderPayments: isTruthyQueryFlag(query.includeTraderPayments),
+      includeTraderPayables: isTruthyQueryFlag(query.includeTraderPayables),
+      includeTraderReceivables: isTruthyQueryFlag(query.includeTraderReceivables),
       metadata: {
         businessDayStart: window.businessDayStart,
         dateFrom: query.dateFrom,
@@ -390,6 +603,12 @@ export class DailyOperationsSummaryService {
       totalDeliveryIncome,
       totalExpenses,
       totalOrders,
+      totalTraderPayments,
+      totalTraderPayables,
+      totalTraderReceivables,
+      traderPayables,
+      traderPayments,
+      traderReceivables,
     };
   }
 
@@ -419,6 +638,28 @@ export class DailyOperationsSummaryService {
     const result = await sql<
       Omit<DriverOrderRow, "deliveryBusinessDate" | "deliveryCalendarDate">
     >`
+      with reportable_orders as (
+        select o.*, coalesce(cash.confirmed_at, o.delivered_at) as report_activity_at
+          from orders o
+          left join lateral (
+            select r.confirmed_at
+              from driver_reconciliation_orders line
+              join driver_reconciliations r
+                on r.id = line.reconciliation_id and r.company_id = line.company_id
+             where line.company_id = o.company_id
+               and line.order_id = o.id
+               and r.status = 'confirmed'
+               and r.confirmed_at is not null
+             order by r.confirmed_at desc
+             limit 1
+          ) cash on true
+         where o.company_id = ${companyId}::uuid
+           and o.delivered_at is not null
+           and (
+             (o.driver_reconciliation_status = 'reconciled' and cash.confirmed_at is not null)
+             or o.driver_reconciliation_status = 'not_applicable'
+           )
+      )
       select o.id, o.serial_number as "serialNumber", o.order_date::text as "orderDate",
              o.order_number as "orderNumber", o.reference_number as "referenceNumber",
              t.name_en as "traderName", o.customer_name as "customerName",
@@ -426,13 +667,11 @@ export class DailyOperationsSummaryService {
              (case when o.financial_model_version is null then o.company_revenue
                    else coalesce(o.service_fee_net_amount, 0) + coalesce(o.additional_fees, 0)
               end)::text as "deliveryIncome"
-        from orders o
+        from reportable_orders o
         join drivers d on d.id = o.assigned_driver_id and d.company_id = o.company_id
         join traders t on t.id = o.trader_id and t.company_id = o.company_id
-       where o.company_id = ${companyId}::uuid
-         and o.delivered_at is not null
-         and o.delivered_at >= ${window.startUtc}::timestamptz
-         and o.delivered_at < ${window.endUtc}::timestamptz
+       where o.report_activity_at >= ${window.startUtc}::timestamptz
+         and o.report_activity_at < ${window.endUtc}::timestamptz
          and o.assigned_driver_id = ${query.driverId}::uuid
        order by o.order_date, o.serial_number nulls last, o.order_number
     `.execute(this.database);
@@ -530,6 +769,16 @@ export class DailyOperationsSummaryService {
   }
 }
 
+function isTruthyQueryFlag(value: unknown): boolean {
+  return value === true || value === "true";
+}
+
 function sumMoney(values: readonly string[]): string {
   return values.reduce((total, value) => total + Number(value), 0).toFixed(2);
 }
+
+
+
+
+
+

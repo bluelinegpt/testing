@@ -2489,6 +2489,61 @@ td:last-child {
   color: #52616b;
 }
 
+/* Driver Earnings form layout: compact and responsive */
+.driver-earnings-form-card {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.driver-earnings-field-driver {
+  margin-bottom: 0;
+}
+
+.driver-earnings-dates-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  max-width: 600px;
+}
+
+.driver-earnings-dates-grid .field {
+  margin-bottom: 0;
+}
+
+.driver-earnings-dates-grid input[type="date"] {
+  width: 100%;
+}
+
+.driver-earnings-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-top: 4px;
+}
+
+@media (max-width: 600px) {
+  .driver-earnings-dates-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+    align-items: stretch;
+  }
+
+  .driver-earnings-dates-grid input[type="date"] {
+    width: 100%;
+  }
+
+  .driver-earnings-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .driver-earnings-actions button {
+    width: 100%;
+  }
+}
+
 .driver-monthly-heading {
   align-items: flex-start;
   display: flex;
@@ -6128,7 +6183,7 @@ tr.row-highlighted {
 }
 
 .driver-fee-actions {
-  justify-content: flex-end;
+  justify-content: flex-start;
 }
 
 .metric-card-warning,
@@ -9311,6 +9366,48 @@ tr.row-highlighted {
   font-size: 0.78rem;
   font-weight: 600;
   color: var(--acc-muted);
+}
+
+/* Shared filter layout for Accounting operational and report screens.
+   Without this, pages that only reuse the visual filter-card class fall back
+   to block layout and stretch every control across the full content width.
+   The Dashboard is excluded because it has a purpose-built named-area grid. */
+.accounting-workspace .accounting-page:not(.accounting-dashboard) > .accounting-filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
+  align-items: end;
+  gap: 0.75rem 1rem;
+  margin-bottom: 1.25rem;
+}
+
+.accounting-workspace .accounting-page:not(.accounting-dashboard) > .accounting-filters > label {
+  display: grid;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.accounting-workspace .accounting-page:not(.accounting-dashboard) > .accounting-filters input,
+.accounting-workspace .accounting-page:not(.accounting-dashboard) > .accounting-filters select {
+  width: 100%;
+  min-width: 0;
+}
+
+.accounting-workspace .accounting-page:not(.accounting-dashboard) > .accounting-filters > .button {
+  justify-self: start;
+}
+
+.accounting-workspace
+  .accounting-page:not(.accounting-dashboard)
+  > .accounting-filters
+  > .accounting-filter-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.accounting-workspace .accounting-page > .accounting-account-filter {
+  width: min(100%, 32rem);
 }
 
 /* =============================================== 4. CONTROLS + BUTTONS */

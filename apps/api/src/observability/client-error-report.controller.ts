@@ -1,5 +1,6 @@
 import { Body, Controller, Inject, Post } from "@nestjs/common";
 import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
+import { Throttle } from "@nestjs/throttler";
 
 import { Public, RequireIdentityKinds } from "../authentication/authentication.decorators.js";
 import { ClientErrorReportService } from "./client-error-report.service.js";
@@ -35,9 +36,17 @@ export class ClientErrorReportController {
     @Inject(ClientErrorReportService) private readonly reports: ClientErrorReportService,
   ) {}
 
+  // Throttled, not exempted from the global limiter: a looping frontend
+  // failure (a render error firing on every re-render, a retry storm) must
+  // not be able to flood `client_error_reports` just because it's honestly
+  // trying to report itself. One genuine crash reports once; a broken loop
+  // is exactly the case this protects the Platform inbox from (System-Wide
+  // Error Handler Audit prompt, §45). The public route gets the tighter
+  // limit -- it has no session to already be rate-limited by anything else.
   @ApiBearerAuth()
   @ApiOperation({ summary: "Report a frontend crash (authenticated apps)" })
   @RequireIdentityKinds("company_user", "trader", "driver", "platform_administrator", "customer")
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
   @Post()
   public report(@Body() input: ReportClientErrorDto): Promise<{ id: string }> {
     return this.reports.reportFromRequest(input);
@@ -45,6 +54,7 @@ export class ClientErrorReportController {
 
   @ApiOperation({ summary: "Report a frontend crash (anonymous — the public Store)" })
   @Public()
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Post("public")
   public reportAnonymous(@Body() input: ReportClientErrorDto): Promise<{ id: string }> {
     return this.reports.reportFromRequest(input);

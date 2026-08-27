@@ -3,6 +3,7 @@ import {
   ArrayMaxSize,
   ArrayUnique,
   IsArray,
+  IsDateString,
   IsIn,
   IsInt,
   IsOptional,
@@ -13,7 +14,7 @@ import {
   Min,
 } from "class-validator";
 
-const sourceApps = ["web", "api", "platform-web", "store", "mobile"] as const;
+const sourceApps = ["web", "api", "platform-web", "store", "mobile", "public-web"] as const;
 const severities = ["high", "medium", "low"] as const;
 const statuses = ["open", "resolved"] as const;
 
@@ -88,6 +89,14 @@ export class ListClientErrorReportsQueryDto {
   @IsString()
   @MaxLength(200)
   public readonly search?: string;
+
+  @IsOptional()
+  @IsDateString()
+  public readonly occurredFrom?: string;
+
+  @IsOptional()
+  @IsDateString()
+  public readonly occurredTo?: string;
 
   @IsOptional()
   @Type(() => Number)

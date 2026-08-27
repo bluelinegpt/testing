@@ -12,10 +12,12 @@ export type ReportLanguage = "en" | "ar";
 
 interface Labels {
   readonly amount: string;
+  readonly amountToPay: string;
   readonly breakEven: string;
   readonly businessDate: string;
   readonly businessDayMode: string;
   readonly calendarDate: string;
+  readonly customer: string;
   readonly calendarDayMode: string;
   readonly dateMode: string;
   readonly deliveredOrders: string;
@@ -28,8 +30,10 @@ interface Labels {
   readonly negative: string;
   readonly netResult: string;
   readonly payee: string;
+  readonly paymentMethod: string;
   readonly period: string;
   readonly positive: string;
+  readonly previouslyPaid: string;
   readonly reference: string;
   readonly status: string;
   readonly summaryTitle: string;
@@ -37,15 +41,30 @@ interface Labels {
   readonly totalDeliveryIncome: string;
   readonly totalExpenses: string;
   readonly totalOrders: string;
+  readonly totalTraderPayments: string;
+  readonly totalTraderPayables: string;
+  readonly totalTraderReceivables: string;
+  readonly trader: string;
+  readonly traderPayablesTitle: string;
+  readonly traderReceivablesTitle: string;
+  readonly sourceReference: string;
+  readonly order: string;
+  readonly originalAmount: string;
+  readonly previouslyCollected: string;
+  readonly outstanding: string;
+  readonly traderPaymentsTitle: string;
+  readonly settlement: string;
 }
 
 const LABELS: Readonly<Record<ReportLanguage, Labels>> = {
   en: {
     amount: "Amount",
+    amountToPay: "Amount to Pay",
     breakEven: "Break-even / Zero",
     businessDate: "Business Date",
     businessDayMode: "Business Day",
     calendarDate: "Calendar Date",
+    customer: "Customer",
     calendarDayMode: "Calendar Day",
     dateMode: "Date Mode",
     deliveredOrders: "Delivered Orders",
@@ -58,8 +77,10 @@ const LABELS: Readonly<Record<ReportLanguage, Labels>> = {
     negative: "Negative",
     netResult: "Net Result",
     payee: "Payee",
+    paymentMethod: "Payment Method",
     period: "Period",
     positive: "Positive",
+    previouslyPaid: "Previously Paid",
     reference: "Reference",
     status: "Status",
     summaryTitle: "Driver Delivery Summary",
@@ -67,13 +88,28 @@ const LABELS: Readonly<Record<ReportLanguage, Labels>> = {
     totalDeliveryIncome: "Total Delivery Income",
     totalExpenses: "Total Expenses",
     totalOrders: "Total Orders",
+    totalTraderPayments: "Total Trader Payments",
+    totalTraderPayables: "Total Money to Pay to Traders",
+    totalTraderReceivables: "Total Money to Collect from Traders",
+    trader: "Trader",
+    traderPayablesTitle: "Money to Pay to Traders",
+    traderReceivablesTitle: "Money to Collect from Traders",
+    sourceReference: "Source Reference",
+    order: "Order",
+    originalAmount: "Original Amount",
+    previouslyCollected: "Previously Collected",
+    outstanding: "Outstanding",
+    traderPaymentsTitle: "Trader Payments",
+    settlement: "Settlement",
   },
   ar: {
     amount: "المبلغ",
+    amountToPay: "المبلغ المطلوب دفعه",
     breakEven: "تعادل / صفر",
     businessDate: "تاريخ يوم العمل",
     businessDayMode: "يوم العمل",
     calendarDate: "التاريخ الميلادي",
+    customer: "العميل",
     calendarDayMode: "اليوم الميلادي",
     dateMode: "نوع التاريخ",
     deliveredOrders: "الطلبات المُسلَّمة",
@@ -86,8 +122,10 @@ const LABELS: Readonly<Record<ReportLanguage, Labels>> = {
     negative: "سلبي",
     netResult: "صافي النتيجة",
     payee: "المستفيد",
+    paymentMethod: "طريقة الدفع",
     period: "الفترة",
     positive: "إيجابي",
+    previouslyPaid: "مدفوع سابقاً",
     reference: "المرجع",
     status: "الحالة",
     summaryTitle: "ملخص تسليم السائقين",
@@ -95,6 +133,19 @@ const LABELS: Readonly<Record<ReportLanguage, Labels>> = {
     totalDeliveryIncome: "إجمالي إيرادات التوصيل",
     totalExpenses: "إجمالي المصروفات",
     totalOrders: "إجمالي الطلبات",
+    totalTraderPayments: "إجمالي مدفوعات التجار",
+    totalTraderPayables: "إجمالي المبالغ المطلوب دفعها للتجار",
+    totalTraderReceivables: "إجمالي المبالغ المطلوب تحصيلها من التجار",
+    trader: "التاجر",
+    traderPayablesTitle: "مبالغ مطلوب دفعها للتجار",
+    traderReceivablesTitle: "مبالغ مطلوبة من التجار",
+    sourceReference: "مرجع المصدر",
+    order: "الطلب",
+    originalAmount: "المبلغ الأصلي",
+    previouslyCollected: "تم تحصيله سابقاً",
+    outstanding: "المتبقي",
+    traderPaymentsTitle: "مدفوعات التجار",
+    settlement: "التسوية",
   },
 };
 
@@ -177,6 +228,111 @@ export function buildDailyOperationsSummaryHtml(
     `<td class="num">${money(report.totalExpenses)}</td></tr>` +
     `</tbody></table>`;
 
+  const traderPaymentRows = report.traderPayments
+    .map(
+      (row) =>
+        "<tr>" +
+        `<td>${escapeHtml(row.businessDate)}</td>` +
+        `<td>${escapeHtml(row.calendarDate)}</td>` +
+        `<td>${escapeHtml(row.traderName)}</td>` +
+        `<td class="mono">${escapeHtml(row.orderSerialNumber === null ? row.orderNumber : row.orderSerialNumber)}</td>` +
+        `<td class="mono">${row.referenceNumber === null ? "" : escapeHtml(row.referenceNumber)}</td>` +
+        `<td>${escapeHtml(row.customerName)}</td>` +
+        `<td class="num">${money(row.originalAmountDue)}</td>` +
+        `<td class="num">${money(row.previouslyPaid)}</td>` +
+        `<td class="num">${money(row.amount)}</td>` +
+        "</tr>",
+    )
+    .join("");
+  const traderPaymentTable =
+    `<table class="grid compact"><thead><tr>` +
+    [
+      labels.businessDate,
+      labels.calendarDate,
+      labels.trader,
+      labels.order,
+      labels.reference,
+      labels.customer,
+      labels.originalAmount,
+      labels.previouslyPaid,
+      labels.amount,
+    ]
+      .map((label) => `<th>${escapeHtml(label)}</th>`)
+      .join("") +
+    `</tr></thead><tbody>${traderPaymentRows}` +
+    `<tr class="total-row"><td colspan="8">${escapeHtml(labels.totalTraderPayments)}</td>` +
+    `<td class="num">${money(report.totalTraderPayments)}</td></tr>` +
+    `</tbody></table>`;
+  const traderReceivableRows = report.traderReceivables
+    .map(
+      (row) =>
+        "<tr>" +
+        `<td>${escapeHtml(row.businessDate)}</td>` +
+        `<td>${escapeHtml(row.calendarDate)}</td>` +
+        `<td>${escapeHtml(row.traderName)}</td>` +
+        `<td class="mono">${escapeHtml(row.receivableNumber)}</td>` +
+        `<td class="mono">${row.orderSerialNumber === null ? "" : escapeHtml(row.orderSerialNumber)}</td>` +
+        `<td class="mono">${row.sourceReference === null ? "" : escapeHtml(row.sourceReference)}</td>` +
+        `<td class="num">${money(row.originalAmountDue)}</td>` +
+        `<td class="num">${money(row.amountCollected)}</td>` +
+        `<td class="num">${money(row.outstandingAmount)}</td>` +
+        "</tr>",
+    )
+    .join("");
+  const traderReceivableTable =
+    `<table class="grid compact-grid"><thead><tr>` +
+    [
+      labels.businessDate,
+      labels.calendarDate,
+      labels.trader,
+      labels.reference,
+      labels.order,
+      labels.sourceReference,
+      labels.originalAmount,
+      labels.previouslyCollected,
+      labels.outstanding,
+    ]
+      .map((label) => `<th>${escapeHtml(label)}</th>`)
+      .join("") +
+    `</tr></thead><tbody>${traderReceivableRows}` +
+    `<tr class="total-row"><td colspan="8">${escapeHtml(labels.totalTraderReceivables)}</td>` +
+    `<td class="num">${money(report.totalTraderReceivables)}</td></tr>` +
+    `</tbody></table>`;
+  const traderPayableRows = report.traderPayables
+    .map(
+      (row) =>
+        "<tr>" +
+        `<td>${escapeHtml(row.businessDate)}</td>` +
+        `<td>${escapeHtml(row.calendarDate)}</td>` +
+        `<td>${escapeHtml(row.traderName)}</td>` +
+        `<td class="mono">${row.orderSerialNumber === null ? escapeHtml(row.orderNumber) : escapeHtml(row.orderSerialNumber)}</td>` +
+        `<td class="mono">${row.referenceNumber === null ? "" : escapeHtml(row.referenceNumber)}</td>` +
+        `<td>${escapeHtml(row.customerName)}</td>` +
+        `<td class="num">${money(row.originalAmountDue)}</td>` +
+        `<td class="num">${money(row.previouslyPaid)}</td>` +
+        `<td class="num">${money(row.outstandingAmount)}</td>` +
+        "</tr>",
+    )
+    .join("");
+  const traderPayableTable =
+    `<table class="grid compact-grid"><thead><tr>` +
+    [
+      labels.businessDate,
+      labels.calendarDate,
+      labels.trader,
+      labels.order,
+      labels.reference,
+      labels.customer,
+      labels.originalAmount,
+      labels.previouslyPaid,
+      labels.amountToPay,
+    ]
+      .map((label) => `<th>${escapeHtml(label)}</th>`)
+      .join("") +
+    `</tr></thead><tbody>${traderPayableRows}` +
+    `<tr class="total-row"><td colspan="8">${escapeHtml(labels.totalTraderPayables)}</td>` +
+    `<td class="num">${money(report.totalTraderPayables)}</td></tr>` +
+    `</tbody></table>`;
   const netLabel =
     report.netStatus === "positive"
       ? labels.positive
@@ -195,8 +351,10 @@ export function buildDailyOperationsSummaryHtml(
     .report-title { font-size: 18px; margin: 8px 0 6px; }
     .meta-line { font-size: 11px; color: #444; }
     .section-title { font-size: 13px; margin: 14px 0 6px; }
-    table.grid { width: 100%; border-collapse: collapse; font-size: 10px; margin-bottom: 10px; }
-    table.grid th, table.grid td { border: 1px solid #999; padding: 3px 5px; text-align: start; }
+    table.grid { width: 100%; border-collapse: collapse; font-size: 10px; margin-bottom: 10px; table-layout: fixed; }
+    table.grid th, table.grid td { border: 1px solid #999; padding: 3px 5px; text-align: start; overflow-wrap: anywhere; }
+    table.compact-grid { font-size: 8.5px; }
+    table.compact-grid th, table.compact-grid td { padding: 2px 3px; }
     table.grid thead th { background: #f0f0f0; }
     table.grid td.num, table.grid th.num { text-align: end; white-space: nowrap; }
     .mono { font-variant-numeric: tabular-nums; }
@@ -220,12 +378,20 @@ export function buildDailyOperationsSummaryHtml(
     `<div class="meta-line">${escapeHtml(generatedAt)}</div></div>` +
     `<div class="section-title">${escapeHtml(labels.summaryTitle)}</div>${driverTable}` +
     `<div class="section-title">${escapeHtml(labels.expensesTitle)}</div>${expenseTable}` +
+    (report.includeTraderReceivables ? `<div class="section-title">${escapeHtml(labels.traderReceivablesTitle)}</div>${traderReceivableTable}` : "") +
+    (report.includeTraderPayables ? `<div class="section-title">${escapeHtml(labels.traderPayablesTitle)}</div>${traderPayableTable}` : "") +
+    (report.includeTraderPayments ? `<div class="section-title">${escapeHtml(labels.traderPaymentsTitle)}</div>${traderPaymentTable}` : "") +
     `<div class="summary-section">` +
     `<div class="summary-line"><span>${escapeHtml(labels.totalOrders)}</span><span>${report.totalOrders}</span></div>` +
     `<div class="summary-line"><span>${escapeHtml(labels.totalDeliveryIncome)}</span><span>${money(report.totalDeliveryIncome)}</span></div>` +
     `<div class="summary-line"><span>${escapeHtml(labels.totalExpenses)}</span><span>${money(report.totalExpenses)}</span></div>` +
+    (report.includeTraderReceivables ? `<div class="summary-line"><span>${escapeHtml(labels.totalTraderReceivables)}</span><span>${money(report.totalTraderReceivables)}</span></div>` : "") +
+    (report.includeTraderPayables ? `<div class="summary-line"><span>${escapeHtml(labels.totalTraderPayables)}</span><span>${money(report.totalTraderPayables)}</span></div>` : "") +
+    (report.includeTraderPayments ? `<div class="summary-line"><span>${escapeHtml(labels.totalTraderPayments)}</span><span>${money(report.totalTraderPayments)}</span></div>` : "") +
     `<div class="summary-line ${netClass}"><span>${escapeHtml(labels.netResult)}</span><span>${netSign}${money(report.netResult)}</span></div>` +
     `<div class="summary-line ${netClass}"><span>${escapeHtml(labels.status)}</span><span>${escapeHtml(netLabel)}</span></div>` +
     `</div></body></html>`
   );
 }
+
+

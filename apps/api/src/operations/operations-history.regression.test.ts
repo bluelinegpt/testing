@@ -180,10 +180,12 @@ describe.skipIf(!runDatabaseTests)("OperationsHistoryWriter consumers", () => {
           options: {
             readonly amountCollected?: number;
             readonly deliveryStatus?: string;
+            readonly customerAmountDue?: number;
             readonly driverId?: string;
             readonly reconciliationStatus?: string;
             readonly serialNumber?: string;
             readonly settlementStatus?: string;
+            readonly traderNetPayable?: number;
           } = {},
         ): Promise<string> => {
           const orderId = randomUUID();
@@ -207,7 +209,8 @@ describe.skipIf(!runDatabaseTests)("OperationsHistoryWriter consumers", () => {
               ${company.accountId}::uuid,
               ${options.driverId ?? null}::uuid,
               'Customer', '971500000004', 'Address', 1, 'customer_pays_cod_and_fee',
-              ${options.amountCollected ?? 0}, 100, 0, 100, 0, 0, 0, 0, 100,
+              ${options.amountCollected ?? 0}, ${options.customerAmountDue ?? 100}, 0,
+              ${options.traderNetPayable ?? 100}, 0, 0, 0, 0, ${options.traderNetPayable ?? 100},
               ${options.deliveryStatus ?? "new"},
               ${options.reconciliationStatus ?? "not_applicable"},
               ${options.settlementStatus ?? "not_eligible"},
@@ -433,6 +436,35 @@ describe.skipIf(!runDatabaseTests)("OperationsHistoryWriter consumers", () => {
           ).rows[0]?.status,
         ).toBe("out_for_delivery");
 
+        const redispatchOrder = await makeOrder(companyA, {
+          deliveryStatus: "out_for_delivery",
+          driverId: companyA.driverId,
+        });
+        await workflow.bulkChangeStatus(
+          {
+            orderIds: [redispatchOrder],
+            reason: "Customer was unavailable",
+            selectionMode: "ids",
+            targetStatus: "in_branch",
+          },
+          randomUUID(),
+        );
+        const redispatched = await workflow.bulkChangeStatus(
+          {
+            orderIds: [redispatchOrder],
+            selectionMode: "ids",
+            targetStatus: "out_for_delivery",
+          },
+          randomUUID(),
+        );
+        expect(redispatched.processedCount).toBe(1);
+        expect(
+          (
+            await sql<{ status: string }>`
+              select delivery_status as status from orders where id = ${redispatchOrder}::uuid
+            `.execute(transaction)
+          ).rows[0]?.status,
+        ).toBe("out_for_delivery");
         const returnedOrder = await makeOrder(companyA);
         await workflow.bulkChangeStatus(
           {
@@ -479,6 +511,36 @@ describe.skipIf(!runDatabaseTests)("OperationsHistoryWriter consumers", () => {
           randomUUID(),
         );
         expect(closedAfterPayment.processedCount).toBe(1);
+
+        // A customer-paid fee Order can have AED 0 payable to the Trader. Once
+        // Driver Cash is reconciled, it should close directly and normalize the
+        // Trader settlement status instead of blocking on an impossible settlement.
+        const zeroTraderPayableOrder = await makeOrder(companyA, {
+          amountCollected: 15,
+          customerAmountDue: 15,
+          deliveryStatus: "delivered",
+          driverId: companyA.driverId,
+          reconciliationStatus: "reconciled",
+          settlementStatus: "unsettled",
+          traderNetPayable: 0,
+        });
+        const closedZeroPayable = await workflow.bulkChangeStatus(
+          {
+            orderIds: [zeroTraderPayableOrder],
+            selectionMode: "ids",
+            targetStatus: "closed",
+          },
+          randomUUID(),
+        );
+        expect(closedZeroPayable.processedCount).toBe(1);
+        expect(
+          (
+            await sql<{ settlementStatus: string; status: string }>`
+              select delivery_status as status, trader_settlement_status as "settlementStatus"
+              from orders where id = ${zeroTraderPayableOrder}::uuid
+            `.execute(transaction)
+          ).rows[0],
+        ).toEqual({ settlementStatus: "not_eligible", status: "closed" });
 
         // --- Hold reactivation: three rows, transactional rollback and history ---
         const heldOrders = await Promise.all([

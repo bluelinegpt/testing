@@ -124,12 +124,31 @@ export function CategoryManager({
       setEditing(undefined);
     });
 
-  const move = (category: ManagedCategory, delta: number) =>
+  /**
+   * Move a Category up or down.
+   *
+   * Newly-created Categories all share `displayOrder: 0` -- there is nothing
+   * to increment relative to, since every row starts tied. Swapping ONE row's
+   * raw value against that shared default was a no-op in exactly the case a
+   * Trader is most likely to hit it: right after creating a fresh set. Moving
+   * the row within the CURRENTLY DISPLAYED order and renumbering every row
+   * sequentially guarantees the move is visible regardless of the values the
+   * rows started with.
+   */
+  const move = (category: ManagedCategory, delta: number) => {
+    if (categories === undefined) return;
+    const from = categories.findIndex((entry) => entry.id === category.id);
+    const to = from + delta;
+    if (from === -1 || to < 0 || to >= categories.length) return;
+    const reordered = [...categories];
+    const [moved] = reordered.splice(from, 1);
+    reordered.splice(to, 0, moved!);
     void run(() =>
       api.post(`${base}/storefronts/${storefrontId}/categories/reorder`, {
-        entries: [{ displayOrder: Math.max(0, category.displayOrder + delta), id: category.id }],
+        entries: reordered.map((entry, index) => ({ displayOrder: index, id: entry.id })),
       }),
     );
+  };
 
   return (
     <section className="accounting-form category-manager" role="region">
@@ -186,6 +205,7 @@ export function CategoryManager({
         </button>
         {editing === undefined ? null : (
           <button
+            className="button button-secondary"
             onClick={() => {
               setEditing(undefined);
               setNameEn("");
@@ -217,7 +237,7 @@ export function CategoryManager({
               </tr>
             </thead>
             <tbody>
-              {categories.map((category) => (
+              {categories.map((category, index) => (
                 <tr key={category.id}>
                   <td>{category.nameEn}</td>
                   <td>
@@ -233,6 +253,7 @@ export function CategoryManager({
                   </td>
                   <td>
                     <button
+                      className="button button-secondary"
                       disabled={!canManage || busy}
                       onClick={() => {
                         setEditing(category);
@@ -246,6 +267,11 @@ export function CategoryManager({
                       {t("common.edit")}
                     </button>
                     <button
+                      className={
+                        category.isActive
+                          ? "button button-danger"
+                          : "button button-secondary"
+                      }
                       disabled={!canManage || busy}
                       onClick={() =>
                         void run(() =>
@@ -262,14 +288,16 @@ export function CategoryManager({
                         : t("productCatalogue.categories.activate")}
                     </button>
                     <button
-                      disabled={!canManage || busy}
+                      className="button button-secondary"
+                      disabled={!canManage || busy || index === 0}
                       onClick={() => move(category, -1)}
                       type="button"
                     >
                       {t("productCatalogue.categories.moveUp")}
                     </button>
                     <button
-                      disabled={!canManage || busy}
+                      className="button button-secondary"
+                      disabled={!canManage || busy || index === categories.length - 1}
                       onClick={() => move(category, 1)}
                       type="button"
                     >

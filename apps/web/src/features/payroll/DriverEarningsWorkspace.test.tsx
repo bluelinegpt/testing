@@ -288,7 +288,7 @@ describe("DriverEarningsWorkspace period confirmation", () => {
     const { container } = render(
       <DriverEarningsWorkspace api={{ get, post: vi.fn() } as never} canPay />,
     );
-    fireEvent.change(await screen.findByRole("combobox", { name: "السائق" }), {
+    fireEvent.change(await screen.findByRole("combobox", { name: "المندوب" }), {
       target: { value: "ahmad" },
     });
     expect(await screen.findByText("احسب الآن")).toBeInTheDocument();

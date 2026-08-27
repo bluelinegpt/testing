@@ -219,6 +219,13 @@ export class WorkforceConfigurationService {
           HttpStatus.BAD_REQUEST,
         );
       const isDriverRole = role.rows[0].isDriverRole;
+      if (isDriverRole && input.mobileNumber.trim() === "") {
+        throw new ApplicationException(
+          "driver_employee_mobile_required",
+          "Mobile number is required when the employee role is Driver.",
+          HttpStatus.BAD_REQUEST,
+        );
+      }
       // Outsourced only applies to driver roles; everyone else is salaried.
       const engagement =
         isDriverRole && input.engagement === "outsourced" ? "outsourced" : "employee";

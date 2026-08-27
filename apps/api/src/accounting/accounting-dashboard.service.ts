@@ -460,6 +460,14 @@ export class AccountingDashboardService {
                 m.accounting_event_id, null::uuid
            from cash_bank_movements m
           where m.company_id = ${companyId}::uuid
+            -- A linked operational-payment Movement is shown in the dedicated
+            -- Movements screen, but the source payment already appears in this
+            -- cross-source activity feed. Do not list the same cash event twice.
+            and not exists (
+              select 1 from accounting_events e
+               where e.id=m.accounting_event_id and e.company_id=m.company_id
+                 and e.source_entity_type<>'cash_bank_movement'
+            )
             and (${from}::date is null or m.accounting_date >= ${from}::date)
             and (${to}::date is null or m.accounting_date <= ${to}::date)
           order by m.created_at desc limit ${perSource})

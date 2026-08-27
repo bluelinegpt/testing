@@ -498,7 +498,7 @@ export function DriverEarningsWorkspace({ api, canPay }: { api: ApiClient; canPa
             ))}
           </select>
         </label>
-        <div className="form-grid">
+        <div className="driver-earnings-dates-grid">
           <label className="field">
             <span>{t("driverEarnings.dateFrom")}</span>
             <input
@@ -522,6 +522,7 @@ export function DriverEarningsWorkspace({ api, canPay }: { api: ApiClient; canPa
             />
           </label>
         </div>
+        <p className="muted">{t("driverEarnings.completedCalendarDaysOnly")}</p>
         {canPay ? (
           <div className="button-row">
             <button

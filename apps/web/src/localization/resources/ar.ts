@@ -30,15 +30,20 @@ export const arabicTranslations = {
     sections: {
       cashActivity: "النشاط النقدي",
       incomeStatement: "نشاط قائمة الدخل",
-      window: "نافذة يوم العمل",
+      window: "نافذة التاريخ المحدد",
       drillDown: "الحركات",
     },
     filters: {
-      businessDate: "تاريخ يوم العمل",
+      businessDate: "التاريخ",
+      dateBasis: "أساس التاريخ",
       account: "حساب النقد / البنك",
       paymentMethod: "طريقة الدفع",
       partyType: "نوع الطرف",
       party: "الطرف",
+    },
+    dateBasis: {
+      calendar: "اليوم التقويمي (00:00–00:00)",
+      business: "يوم العمل (وقت البدء المُعدّ)",
     },
     methods: { cash: "نقداً", bank: "بنك / فيزا" },
     directions: { in: "محصّل", out: "مدفوع" },
@@ -70,13 +75,14 @@ export const arabicTranslations = {
       netIncomeActivity: "صافي نشاط الدخل",
     },
     metadata: {
-      businessDate: "تاريخ يوم العمل",
+      businessDate: "التاريخ المحدد",
+      dateBasis: "أساس التاريخ",
       windowStart: "بداية النافذة",
       windowEnd: "نهاية النافذة",
       timezone: "المنطقة الزمنية",
-      businessDayStart: "بداية يوم العمل",
+      businessDayStart: "بداية اليوم",
       segments: "شرائح الإعداد المطبّقة",
-      segmentDates: "تواريخ يوم العمل",
+      segmentDates: "التواريخ المحددة",
       authoritativeTimestamps: "الطابع الزمني المعتمد لكل مصدر",
       table: "الجدول",
       column: "العمود",
@@ -110,7 +116,7 @@ export const arabicTranslations = {
       missingTimestamps:
         "يوجد {{count}} سجل مؤكّد بدون وقت تأكيد معتمد، وقد استُبعدت من النشاط النقدي. لم تُقدّر تقديرياً، لذا تغطي الإجماليات أعلاه السجلات ذات الوقت المرصود فقط.",
     },
-    empty: { rows: "لم تُؤكّد أي حركة نقدية ضمن نافذة يوم العمل هذه." },
+    empty: { rows: "لم تُؤكّد أي حركة نقدية ضمن نافذة التاريخ المحدد." },
     pagination: "صفحة {{page}} من {{pages}} — {{total}} حركة",
   },
   paymentPosition: {
@@ -264,6 +270,12 @@ export const arabicTranslations = {
   batches: {
     heading: "العمليات المحاسبية المجمّعة",
     detailHeading: "تفاصيل الدفعة",
+    recoveryNavigation: {
+      label: "مركز الاسترداد المحاسبي",
+      events: "الأحداث القائمة",
+      historical: "الأحداث المفقودة",
+      batches: "دفعات الاسترداد",
+    },
     intro:
       "تخطيط والتحقق وتنفيذ إجراءات محاسبية فردية قائمة عبر عدد كبير من السجلات. يُنفَّذ كل عنصر بواسطة الخدمة الفردية نفسها التي يستخدمها الشخص في شاشة الحدث؛ وتضيف الدفعة الاختيار والتسلسل والتدقيق، ولا تضيف منطق ترحيل خاصاً بها أبداً.",
     executionDelegation:
@@ -1553,10 +1565,8 @@ export const arabicTranslations = {
         "\u0645\u0639\u0627\u0644\u062c\u0629 \u0627\u0644\u0625\u0631\u062c\u0627\u0639.",
       awaiting_driver_collection:
         "\u062a\u062d\u0635\u064a\u0644 \u0627\u0644\u0645\u0628\u0644\u063a \u0645\u0646 \u0627\u0644\u0633\u0627\u0626\u0642.",
-      awaiting_trader_payment:
-        "دفع المبلغ للتاجر.",
-      awaiting_trader_receivable_collection:
-        "تحصيل رسوم الخدمة من التاجر.",
+      awaiting_trader_payment: "دفع المبلغ للتاجر.",
+      awaiting_trader_receivable_collection: "تحصيل رسوم الخدمة من التاجر.",
       awaiting_trader_receipt_confirmation:
         "\u062a\u0623\u0643\u064a\u062f \u0627\u0644\u062a\u0627\u062c\u0631 \u0627\u0633\u062a\u0644\u0627\u0645 \u0627\u0644\u0645\u0628\u0644\u063a.",
       awaiting_accounting_posting:
@@ -1579,8 +1589,7 @@ export const arabicTranslations = {
         "\u0627\u0644\u0637\u0631\u062f \u0641\u064a \u0637\u0631\u064a\u0642 \u0627\u0644\u0639\u0648\u062f\u0629 \u0648\u0644\u0645 \u062a\u0643\u062a\u0645\u0644 \u0627\u0644\u0645\u0639\u0627\u0644\u062c\u0629.",
       awaiting_driver_collection:
         "\u062a\u0645 \u0627\u0644\u062a\u0648\u0635\u064a\u0644 \u0644\u0643\u0646 \u0644\u0645 \u064a\u064f\u0624\u0643\u0651\u062f \u0627\u0633\u062a\u0644\u0627\u0645 \u0627\u0644\u0645\u0628\u0644\u063a \u0645\u0646 \u0627\u0644\u0633\u0627\u0626\u0642. \u0644\u0627 \u064a\u0645\u0643\u0646 \u062f\u0641\u0639 \u0627\u0644\u062a\u0627\u062c\u0631 \u0642\u0628\u0644 \u0630\u0644\u0643.",
-      awaiting_trader_payment:
-        "دفع المبلغ للتاجر.",
+      awaiting_trader_payment: "دفع المبلغ للتاجر.",
       awaiting_trader_receivable_collection:
         "العميل لا يدفع رسوم الخدمة لهذا الطلب. يجب تحصيل الرسوم من ذمم التاجر قبل إغلاق الطلب.",
       awaiting_trader_receipt_confirmation:
@@ -1614,8 +1623,7 @@ export const arabicTranslations = {
       assign_driver: "\u062a\u0639\u064a\u064a\u0646 \u0633\u0627\u0626\u0642",
       close_order: "\u0625\u063a\u0644\u0627\u0642 \u0627\u0644\u0637\u0644\u0628",
       open_order: "\u0641\u062a\u062d \u0627\u0644\u0637\u0644\u0628",
-      collect_from_driver:
-        "تحصيل المبلغ من المندوب",
+      collect_from_driver: "تحصيل المبلغ من المندوب",
       collect_trader_receivable: "تحصيل من التاجر",
       pay_trader: "\u062f\u0641\u0639 \u0644\u0644\u062a\u0627\u062c\u0631",
       confirm_trader_received:
@@ -3128,6 +3136,7 @@ export const arabicTranslations = {
       integrations: "التكاملات",
       myStore: "متجري",
       products: "المنتجات",
+      storeOrders: "طلبات المتجر",
     },
     deliveryCompanies: {
       noneShort: "لا توجد شركة توصيل مرتبطة.",
@@ -3137,7 +3146,38 @@ export const arabicTranslations = {
       allDeliveryCompanies: "جميع شركات التوصيل",
       deliveryCompany: "شركة التوصيل",
       deliveryCompanyDefault: "شركة التوصيل الخاصة بي (افتراضي)",
-      noDeliveryCompanyBlocked: "لا توجد شركة توصيل مرتبطة بهذا التاجر حتى الآن. يرجى ربط شركة توصيل نشطة قبل إنشاء الطلبات.",
+      noDeliveryCompanyBlocked:
+        "لا توجد شركة توصيل مرتبطة بهذا التاجر حتى الآن. يرجى ربط شركة توصيل نشطة قبل إنشاء الطلبات.",
+    },
+    storeOrders: {
+      accept: "قبول",
+      actionFailed: "تعذر إتمام هذا الإجراء. يرجى المحاولة مرة أخرى.",
+      cancel: "إلغاء",
+      codTotal: "الإجمالي (الدفع عند الاستلام)",
+      companyServiceFee: "رسوم خدمة شركة التوصيل",
+      completeExternal: "إتمام التوصيل خارجيًا",
+      confirmCancel: "هل تريد إلغاء هذا الطلب؟ سيتم إشعار العميل.",
+      deliveryAddress: "عنوان التوصيل",
+      empty: "لا توجد طلبات متجر مطابقة لهذا العرض.",
+      filterAll: "الكل",
+      productSubtotal: "إجمالي المنتجات",
+      itemCount_few: "{{count}} عناصر",
+      itemCount_many: "{{count}} عنصرًا",
+      itemCount_one: "عنصر واحد",
+      itemCount_other: "{{count}} عنصر",
+      itemCount_two: "عنصران",
+      itemCount_zero: "لا عناصر",
+      items: "العناصر",
+      number: "طلب المتجر",
+      searchPlaceholder: "ابحث برقم طلب المتجر أو اسم العميل أو رقم الجوال",
+      statusLabels: {
+        awaiting_trader_confirmation: "بانتظار تأكيدك",
+        cancelled: "ملغى",
+        completed_external: "التوصيل مرتب من المتجر",
+        confirmed: "مؤكد",
+        converted_to_delivery: "تم تسليمه لشركة التوصيل",
+      },
+      title: "طلبات المتجر",
     },
     profile: {
       accountInformation: "معلومات الحساب",
@@ -3729,7 +3769,11 @@ export const arabicTranslations = {
     orderStatusReversed: "معكوس",
   },
   driverEarnings: {
-    views: { monthly: "النظرة الشهرية", manage: "الاحتساب والدفع", report: "تقرير مدفوعات المندوب" },
+    views: {
+      monthly: "النظرة الشهرية",
+      manage: "الاحتساب والدفع",
+      report: "تقرير مدفوعات المندوب",
+    },
     month: "الشهر",
     allDrivers: "جميع المندوبين",
     filterByDriver: "تصفية حسب المندوب",
@@ -3765,6 +3809,8 @@ export const arabicTranslations = {
     confirmEarningsFailed: "تعذر تأكيد فترة الأرباح. لم يتم إنشاء أي دفعة.",
     dateFrom: "من تاريخ",
     dateTo: "إلى تاريخ",
+    completedCalendarDaysOnly:
+      "اختر الأيام التقويمية المكتملة فقط. لا يمكن احتساب اليوم الحالي حتى الغد.",
     collectedOrderCount: "عدد الطلبات المُحصلة",
     calculateNow: "احسب الآن",
     calculateFailed: "تعذر احتساب فترة الأرباح.",
@@ -4572,6 +4618,10 @@ export const arabicTranslations = {
       movementDetails: "تفاصيل الحركة",
       movementSummary: "ملخص الحركة",
       movementType: "نوع الحركة",
+      ledgerSearch: "رقم الحركة أو المرجع أو الوصف",
+      dateOrder: "ترتيب التاريخ",
+      newestFirst: "الأحدث أولاً",
+      oldestFirst: "الأقدم أولاً",
       movementDate: "تاريخ الحركة",
       referenceNumber: "الرقم المرجعي",
       description: "الوصف / ملاحظات",
@@ -4640,6 +4690,7 @@ export const arabicTranslations = {
         bank_to_cash_transfer: "تحويل من البنك إلى النقدية",
         bank_to_bank_transfer: "تحويل من بنك إلى بنك",
         cash_to_cash_transfer: "تحويل من نقدية إلى نقدية",
+        opening_balance: "رصيد افتتاحي",
       },
       classifications: {
         cash_bank_deposit_owner_contribution: "مساهمة المالك",
@@ -5508,6 +5559,7 @@ export const arabicTranslations = {
       confirm: "تأكيد",
       reprocess: "إعادة المعالجة",
       bulkReprocess: "إعادة معالجة المحدد ({{count}})",
+      createReprocessBatch: "إنشاء دفعة استرداد ({{count}})",
       editConfiguration: "تعديل الإعدادات",
       enableManualAccounting: "تفعيل المحاسبة اليدوية",
       enableAutomatic: "تفعيل الترحيل التلقائي",
@@ -5636,6 +5688,7 @@ export const arabicTranslations = {
       not_applicable: "غير منطبق",
     },
     confirmation: {
+      selectedEvents: "{{count}} من الأحداث المحاسبية المحددة",
       reference: "السجل:",
       financialImpact:
         "سيعيد الخادم التحقق من الصلاحيات والأرصدة وحالة الفترة والإصدار الحالي قبل تنفيذ هذا الإجراء المالي.",
@@ -5664,9 +5717,41 @@ export const arabicTranslations = {
     },
     reconciliation: {
       area: "المجال",
+      allAreas: "كل المجالات",
+      allResults: "كل النتائج",
+      ascending: "تصاعدي",
+      clear: "مسح عوامل التصفية",
+      descending: "تنازلي",
       source: "المصدر",
       eventType: "نوع الحدث",
+      eventTypePlaceholder: "نوع الحدث المطابق",
       result: "النتيجة",
+      sortBy: "ترتيب حسب",
+      sortDirection: "الاتجاه",
+      pageSize: "صفوف لكل صفحة",
+      pagination: "تنقل صفحات المطابقة",
+      pageOf: "صفحة {{page}} من {{pages}} — {{total}} سجل",
+      previous: "السابق",
+      next: "التالي",
+      areas: {
+        orders: "الطلبات",
+        trader_receivables: "ذمم التجار المدينة",
+        trader_settlements: "تسويات التجار",
+        driver_collections: "تحصيلات المندوبين",
+        driver_expenses: "مصروفات المندوبين",
+        employee_payroll: "رواتب الموظفين",
+        outsourced_driver_fees: "أتعاب المندوبين الخارجيين",
+        general_expenses: "المصروفات العامة",
+        cash_bank_management: "إدارة النقد والبنوك",
+      },
+      results: {
+        failed: "فشل",
+        mismatch: "غير متطابق",
+        missing: "مفقود",
+        posted: "مرحّل",
+        queued: "قيد الانتظار",
+        reversed: "معكوس",
+      },
       events: "الأحداث",
       exceptions: "الاستثناءات",
       missing: "السجلات التشغيلية المفقودة",
@@ -5858,8 +5943,3 @@ export const arabicTranslations = {
     navigation: "تنقل الإدارة",
   },
 } as const;
-
-
-
-
-

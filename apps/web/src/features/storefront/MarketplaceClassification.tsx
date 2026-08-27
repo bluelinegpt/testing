@@ -248,6 +248,7 @@ export function StoreMarketplaceClassification({
                     <span className="badge">{t("storefront.marketplace.primary")}</span>
                   ) : (
                     <button
+                      className="button button-secondary"
                       disabled={!canManage || busy}
                       onClick={() => setPrimary(entry.categoryId)}
                       type="button"
@@ -259,7 +260,12 @@ export function StoreMarketplaceClassification({
               </li>
             ))}
           </ul>
-          <button disabled={!canManage || busy} onClick={() => void save()} type="button">
+          <button
+            className="button button-primary"
+            disabled={!canManage || busy}
+            onClick={() => void save()}
+            type="button"
+          >
             {t("common.save")}
           </button>
         </>

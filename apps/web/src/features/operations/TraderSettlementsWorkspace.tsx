@@ -1421,6 +1421,7 @@ function NewSettlementDialog({
     useState<PagedResponse<TraderEligibleOrderRow>>();
   const [ordersError, setOrdersError] = useState<string>();
   const [orderFilters, setOrderFilters] = useState<EligibleOrderFilters>(emptyEligibleOrderFilters);
+  const [eligibleFiltersOpen, setEligibleFiltersOpen] = useState(() => initialOrderId === undefined);
   const [ordersPage, setOrdersPage] = useState(1);
   const eligibleOrders = eligibleOrdersPage?.items ?? [];
   const ordersTotal = eligibleOrdersPage?.total ?? 0;
@@ -1481,6 +1482,10 @@ function NewSettlementDialog({
     Readonly<Record<string, TraderEligibleOrderRow>>
   >({});
   const [overrideConfirmed, setOverrideConfirmed] = useState(false);
+  const [originatingOrderDefaultActive, setOriginatingOrderDefaultActive] = useState(
+    () => initialOrderId !== undefined,
+  );
+  const [originatingOrderRow, setOriginatingOrderRow] = useState<TraderEligibleOrderRow>();
 
   /* Totals for the eligible-Orders list.
      Computed over the rows actually LISTED, which is one page. Select-all works
@@ -1497,6 +1502,7 @@ function NewSettlementDialog({
 
   /** Ticks or clears every listed Order at once, one state change per list. */
   const toggleAllListedOrders = (checked: boolean) => {
+    setOriginatingOrderDefaultActive(false);
     setOverrideConfirmed(false);
     const listedIds = new Set(eligibleOrders.map((order) => order.id));
     if (checked) {
@@ -1560,16 +1566,13 @@ function NewSettlementDialog({
   }, [api, trader, orderFilters, ordersPage, t]);
 
   useEffect(() => loadOrders(), [loadOrders]);
-
   /* Select the originating Order once, from the eligible list the backend just
      returned.
 
-     The row itself is what goes into `selectedOrderRows`, so the amount used is
-     the row's own `outstandingBalance` -- the authoritative CURRENT figure, not
-     the original amount due. An Order with 175.00 due and 174.92 already paid
-     therefore contributes 0.08, exactly as if the user had ticked it by hand.
-     Nothing about allocation, oldest-first or override is bypassed: this only
-     performs the tick. */
+     Opening New Settlement from an Order is an explicit operator intent to pay
+     that Order. Default to that Order only instead of immediately asking the
+     server for oldest-first allocation, which would pull older outstanding
+     Orders into a simple one-Order payment and require an override checkbox. */
   const originatingApplied = useRef(false);
   useEffect(() => {
     if (initialOrderId === undefined || originatingApplied.current) return;
@@ -1582,7 +1585,14 @@ function NewSettlementDialog({
       onOriginatingOrderIneligible?.();
       return;
     }
-    setSelectedOrderRows((current) => ({ ...current, [row.id]: row }));
+    setOriginatingOrderRow(row);
+    setOriginatingOrderDefaultActive(true);
+    setSelectedOrderRows({ [row.id]: row });
+    setAllocations([{ amount: "0.00", orderId: row.id }]);
+    setAmount("");
+    setProposal(undefined);
+    setProposalError(undefined);
+    setOverrideConfirmed(false);
   }, [eligibleOrders, eligibleOrdersPage, initialOrderId, onOriginatingOrderIneligible]);
 
   const applyOrderFilter = (change: Partial<EligibleOrderFilters>) => {
@@ -1633,17 +1643,31 @@ function NewSettlementDialog({
     setAllocations([]);
     setSelectedOrderRows({});
     setOverrideConfirmed(false);
+    setOriginatingOrderDefaultActive(false);
+    setOriginatingOrderRow(undefined);
     setBankReference("");
     setOrderFilters(emptyEligibleOrderFilters);
     setOrdersPage(1);
     idempotency.reset();
   };
-
-  // Debounced oldest-first allocation proposal: fires whenever the Payment
-  // Amount (a valid positive number) changes, mirroring how partial payments
-  // must always originate from the server, never a client-side computation.
+  // Debounced oldest-first allocation proposal: the normal New Settlement path
+  // still uses the server allocator. When opened from one Order, the default is
+  // the clicked Order only; the operator can still switch back by changing the
+  // selection or pressing Apply Oldest-First.
   useEffect(() => {
     const parsed = parseMoneyInput(amount, { required: true });
+    const originatingOrder = initialOrderId === undefined ? undefined : originatingOrderRow;
+    if (originatingOrderDefaultActive && originatingOrder !== undefined) {
+      setProposal(undefined);
+      setProposalError(undefined);
+      if (amount.trim() === "" || !parsed.ok || !(parsed.value > 0)) return;
+      const outstanding = safeMoneyValue(originatingOrder.outstandingBalance);
+      setAllocations([
+        { amount: money(Math.min(parsed.value, outstanding)), orderId: originatingOrder.id },
+      ]);
+      setOverrideConfirmed(false);
+      return;
+    }
     if (trader === undefined || amount.trim() === "" || !parsed.ok || !(parsed.value > 0)) {
       setProposal(undefined);
       setAllocations([]);
@@ -1678,7 +1702,7 @@ function NewSettlementDialog({
       active = false;
       window.clearTimeout(timer);
     };
-  }, [api, amount, trader, t]);
+  }, [api, amount, initialOrderId, originatingOrderDefaultActive, originatingOrderRow, trader, t]);
 
   // Delivery date is display-only, for the allocation table's Delivery Date
   // column — the proposal/allocation endpoints don't return it. Looked up
@@ -2040,7 +2064,13 @@ function NewSettlementDialog({
                 {ordersError === undefined ? null : (
                   <div className="alert alert-error">{ordersError}</div>
                 )}
-                <div className="compact-filters">
+                <details
+                  className="filter-drawer"
+                  onToggle={(event) => setEligibleFiltersOpen(event.currentTarget.open)}
+                  open={eligibleFiltersOpen}
+                >
+                  <summary>{t("common.filter")}</summary>
+                  <div className="compact-filters">
                   <label className="field">
                     <span>{t("traderSettlements.filterOrderSerialNumber")}</span>
                     <input
@@ -2125,6 +2155,7 @@ function NewSettlementDialog({
                     </button>
                   </div>
                 </div>
+                </details>
                 <div className="table-scroll-x">
                   <table>
                     <thead>
@@ -2160,6 +2191,7 @@ function NewSettlementDialog({
                                 (allocation) => allocation.orderId === order.id,
                               )}
                               onChange={(event) => {
+                                setOriginatingOrderDefaultActive(false);
                                 setOverrideConfirmed(false);
                                 if (event.target.checked) {
                                   setSelectedOrderRows((current) => ({
@@ -2405,6 +2437,7 @@ function NewSettlementDialog({
                   <div className="heading-actions">
                     <button
                       onClick={() => {
+                        setOriginatingOrderDefaultActive(false);
                         setAllocations(
                           (proposal?.allocations ?? []).map((line) => ({
                             amount: line.allocatedAmount,
@@ -2420,6 +2453,7 @@ function NewSettlementDialog({
                     </button>
                     <button
                       onClick={() => {
+                        setOriginatingOrderDefaultActive(false);
                         setSelectedOrderRows((current) => ({
                           ...current,
                           ...Object.fromEntries(eligibleOrders.map((order) => [order.id, order])),
@@ -2438,6 +2472,7 @@ function NewSettlementDialog({
                     </button>
                     <button
                       onClick={() => {
+                        setOriginatingOrderDefaultActive(false);
                         setAllocations([]);
                         setSelectedOrderRows({});
                         setOverrideConfirmed(false);

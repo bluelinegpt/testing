@@ -11,6 +11,7 @@ import type {
 import { CodeText, Money, TraderText } from "../components/Bidi.js";
 import { ShareControl } from "../components/ShareControl.js";
 import { MessageState } from "../components/States.js";
+import { type AddToCartInput, useCart } from "../cart/cart-context.js";
 import { useLocalePath } from "../routing/locale-routing.js";
 import { isReservedStoreSlug } from "../routing/reserved-slugs.js";
 
@@ -50,6 +51,11 @@ export function ProductPage() {
   const [store, setStore] = useState<PublicStore>();
   const [failure, setFailure] = useState<CommerceFailure>();
   const [activeImage, setActiveImage] = useState(0);
+  const [selectedByGroup, setSelectedByGroup] = useState<Record<string, string>>({});
+  const [quantity, setQuantity] = useState(1);
+  const [missingGroup, setMissingGroup] = useState<string>();
+  const [addedFeedback, setAddedFeedback] = useState(false);
+  const { addToCart, cancelStoreReplacement, cart, confirmStoreReplacement, pendingAdd } = useCart();
 
   const reserved = isReservedStoreSlug(storeSlug);
 
@@ -66,14 +72,62 @@ export function ProductPage() {
       if (result.kind === "ok") {
         setProduct(result.value);
         // Reset when navigating between Products: keeping index 3 from the
-        // previous Product would open the next one on a blank frame.
+        // previous Product would open the next one on a blank frame -- the
+        // same reasoning applies to a stale option selection or quantity.
         setActiveImage(0);
+        setSelectedByGroup({});
+        setQuantity(1);
+        setMissingGroup(undefined);
       } else setFailure(result.reason);
     });
     return () => controller.abort();
   }, [productSlug, reserved, storeSlug]);
 
   useEffect(() => load(), [load]);
+
+  const handleAddToCart = () => {
+    if (product === undefined || store === undefined) return;
+    const missing = product.options.find(
+      (group) => group.isRequired && selectedByGroup[group.name] === undefined,
+    );
+    if (missing !== undefined) {
+      setMissingGroup(missing.name);
+      return;
+    }
+    setMissingGroup(undefined);
+    const selectedOptions: AddToCartInput["selectedOptions"] = product.options.flatMap((group) => {
+      const chosenValue = selectedByGroup[group.name];
+      if (chosenValue === undefined) return [];
+      const valueEntry = group.values.find((entry) => entry.value === chosenValue);
+      if (valueEntry === undefined) return [];
+      return [
+        {
+          groupDisplayOrder: group.displayOrder,
+          groupName: group.name,
+          value: chosenValue,
+          valueDisplayOrder: valueEntry.displayOrder,
+        },
+      ];
+    });
+    const result = addToCart({
+      currency: product.currency,
+      imageUrl: product.primaryImage?.url ?? null,
+      maximumQuantity: product.maximumQuantity,
+      minimumQuantity: product.minimumQuantity,
+      previousPrice: product.previousPrice,
+      productName: product.name,
+      productSlug: product.slug,
+      quantity,
+      selectedOptions,
+      storeDisplayName: store.displayName,
+      storeSlug,
+      unitPrice: product.sellingPrice,
+    });
+    if (result === "added") {
+      setAddedFeedback(true);
+      window.setTimeout(() => setAddedFeedback(false), 3000);
+    }
+  };
 
   if (reserved || failure === "not_found") {
     return (
@@ -239,40 +293,152 @@ export function ProductPage() {
 
           {product.options.length === 0 ? null : (
             <div className="store-options">
-              {product.options.map((group) => (
-                <fieldset className="store-optiongroup" key={group.name}>
-                  <legend className="store-optiongroup__legend">
-                    {/*
-                      The group NAME is Trader-entered ("Size"), so it is
-                      isolated and left as written. The "Required" marker is a
-                      system label and is translated — the previous
-                      `Size * مطلوب` was one of each jammed together with an
-                      asterisk doing the work of a word.
-                    */}
-                    <TraderText value={group.name} />
-                    {group.isRequired ? (
-                      <span className="store-optiongroup__required">
-                        {t("product.optionRequired")}
-                      </span>
-                    ) : null}
-                  </legend>
-                  <ul className="store-optionvalues">
-                    {group.values.map((value) => (
-                      <li key={value.value}>
-                        {/* Values like S/M/L stay Latin and stay isolated. Not
-                            selectable yet: selection belongs to the cart. */}
-                        <span className="store-optionvalue" dir="auto">
-                          {value.value}
+              {product.options.map((group) => {
+                const groupInvalid = missingGroup === group.name;
+                return (
+                  <fieldset className="store-optiongroup" key={group.name}>
+                    <legend className="store-optiongroup__legend">
+                      {/*
+                        The group NAME is Trader-entered ("Size"), so it is
+                        isolated and left as written. The "Required" marker is
+                        a system label and is translated — the previous
+                        `Size * مطلوب` was one of each jammed together with an
+                        asterisk doing the work of a word.
+                      */}
+                      <TraderText value={group.name} />
+                      {group.isRequired ? (
+                        <span className="store-optiongroup__required">
+                          {t("product.optionRequired")}
                         </span>
-                      </li>
-                    ))}
-                  </ul>
-                </fieldset>
-              ))}
+                      ) : null}
+                    </legend>
+                    <div className="store-optionvalues" role="radiogroup">
+                      {group.values.map((value) => {
+                        const inputId = `option-${group.name}-${value.value}`;
+                        const checked = selectedByGroup[group.name] === value.value;
+                        return (
+                          <label
+                            className={`store-optionvalue${checked ? " is-selected" : ""}`}
+                            htmlFor={inputId}
+                            key={value.value}
+                          >
+                            <input
+                              checked={checked}
+                              className="store-optionvalue__input"
+                              id={inputId}
+                              name={`option-${group.name}`}
+                              onChange={() => {
+                                setSelectedByGroup((current) => ({
+                                  ...current,
+                                  [group.name]: value.value,
+                                }));
+                                if (missingGroup === group.name) setMissingGroup(undefined);
+                              }}
+                              type="radio"
+                            />
+                            {/* Values like S/M/L stay Latin and stay isolated. */}
+                            <span dir="auto">{value.value}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                    {!group.isRequired && selectedByGroup[group.name] !== undefined ? (
+                      <button
+                        className="store-optiongroup__clear"
+                        onClick={() => {
+                          setSelectedByGroup((current) => {
+                            const next = { ...current };
+                            delete next[group.name];
+                            return next;
+                          });
+                        }}
+                        type="button"
+                      >
+                        {t("common.clearSelection")}
+                      </button>
+                    ) : null}
+                    {groupInvalid ? (
+                      <p className="store-optiongroup__error" role="alert">
+                        {t("product.selectOptionError", { group: group.name })}
+                      </p>
+                    ) : null}
+                  </fieldset>
+                );
+              })}
+            </div>
+          )}
+
+          <div className="store-productinfo__quantity">
+            <span className="store-productinfo__quantitylabel" id="quantity-label">
+              {t("product.quantity")}
+            </span>
+            <div className="store-quantity">
+              <button
+                aria-label={t("cart.decreaseQuantity")}
+                disabled={quantity <= (product.minimumQuantity ?? 1)}
+                onClick={() => setQuantity((current) => Math.max(product.minimumQuantity ?? 1, current - 1))}
+                type="button"
+              >
+                −
+              </button>
+              <span aria-labelledby="quantity-label" role="status">
+                {quantity}
+              </span>
+              <button
+                aria-label={t("cart.increaseQuantity")}
+                disabled={product.maximumQuantity !== null && quantity >= product.maximumQuantity}
+                onClick={() =>
+                  setQuantity((current) =>
+                    product.maximumQuantity === null
+                      ? current + 1
+                      : Math.min(product.maximumQuantity, current + 1),
+                  )
+                }
+                type="button"
+              >
+                +
+              </button>
+            </div>
+          </div>
+
+          {pendingAdd === null ? null : (
+            <div className="store-alert store-alert--warning" role="alertdialog">
+              <p>
+                {t("cart.storeReplaceWarning", { store: cart?.storeDisplayName ?? "" })}
+              </p>
+              <div className="store-alert__actions">
+                <button
+                  className="store-button store-button--quiet"
+                  onClick={cancelStoreReplacement}
+                  type="button"
+                >
+                  {t("cart.storeReplaceCancel")}
+                </button>
+                <button
+                  className="store-button"
+                  onClick={confirmStoreReplacement}
+                  type="button"
+                >
+                  {t("cart.storeReplaceConfirm")}
+                </button>
+              </div>
             </div>
           )}
 
           <div className="store-productinfo__actions">
+            <button
+              className="store-button store-addtocart"
+              disabled={unavailable}
+              onClick={handleAddToCart}
+              type="button"
+            >
+              {t("cart.addToCart")}
+            </button>
+            {addedFeedback ? (
+              <p className="store-addtocart__confirm" role="status">
+                {t("cart.addedToCart")}
+              </p>
+            ) : null}
             <ShareControl
               text={product.shortDescription ?? undefined}
               title={product.name}

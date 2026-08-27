@@ -79,12 +79,24 @@ export class PlatformAuthController {
     } catch (error) {
       // The attempted identifier is recorded; the submitted password never
       // reaches this method's audit path and is never stored.
+      //
+      // P1 corrective: `input.identifier` is whatever the client sent, not
+      // whatever `LoginDto` promises -- the same malformed-body gap that
+      // `AuthenticationService.assertLoginInputShape` now rejects with a
+      // clean 401 arrives here too, in this catch block, before that 401 is
+      // even thrown to the caller. `.slice()` on a non-string/undefined
+      // identifier is a second, unrelated `TypeError` from *inside* the
+      // failure-audit path itself, which turns a safe rejection into an
+      // uncaught 500. A failed-login audit record must never be able to
+      // crash the request it is merely trying to describe.
+      const safeIdentifier =
+        typeof input.identifier === "string" ? input.identifier.slice(0, 320) : null;
       await this.audit.recordBestEffort({
         action: "platform.authentication.failed",
         actorAccountId: null,
         subjectType: "account",
         subjectId: null,
-        after: { identifier: input.identifier.slice(0, 320) },
+        after: { identifier: safeIdentifier },
         result: "failure",
         // Deliberately generic. The service refuses unknown account, wrong
         // password, disabled account and suspended Company identically, and

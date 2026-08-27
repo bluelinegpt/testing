@@ -69,6 +69,10 @@ private-files/
 
 # Local database backups and baselines (never commit)
 .backups/
+backup/
+
+# Local QA screenshot/output dumps (regenerable, not source)
+test-artifacts/
 
 # Preserved test failure logs
 .test-failures/

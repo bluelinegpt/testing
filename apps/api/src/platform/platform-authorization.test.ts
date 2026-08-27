@@ -97,6 +97,7 @@ describe("Platform permission catalogue", () => {
       "platform.leads.manage",
       "platform.leads.read",
       "platform.public_site_settings.manage",
+      "platform.store_order_conversion.manage",
       "platform.trader_applications.manage",
       "platform.trader_applications.read",
       "platform.users.manage",
@@ -150,7 +151,9 @@ describe("Platform permission catalogue", () => {
     const blogMigration = readFileSync(resolve(process.cwd(), "../../database/migrations/20260827000000_platform_blog_and_tracking.ts"), "utf8");
     const agentMigration = readFileSync(resolve(process.cwd(), "../../database/migrations/20260828000000_tawseelhub_agent_core.ts"), "utf8");
     const websiteCmsMigration = readFileSync(resolve(process.cwd(), "../../database/migrations/20260905000000_controlled_website_cms.ts"), "utf8");
-    const migrations = foundationMigration + deletionMigration + errorReportsMigration + integrityMigration + resetMigration + leadsMigration + traderApplicationsMigration + customerQuotesMigration + blogMigration + agentMigration + websiteCmsMigration;
+    const storeOrderConversionMigration = readFileSync(resolve(process.cwd(), "../../database/migrations/20260936000000_store_order_conversion_permission.ts"), "utf8");
+    const agentWhatsappMigration = readFileSync(resolve(process.cwd(), "../../database/migrations/20260906000000_agent_whatsapp_channel_integration.ts"), "utf8");
+    const migrations = foundationMigration + deletionMigration + errorReportsMigration + integrityMigration + resetMigration + leadsMigration + traderApplicationsMigration + customerQuotesMigration + blogMigration + agentMigration + websiteCmsMigration + storeOrderConversionMigration + agentWhatsappMigration;
     for (const permission of PLATFORM_PERMISSIONS) expect(migrations).toContain(`'${permission.code}'`);
     expect(migrations).toContain(`'${PLATFORM_SUPER_ADMIN_ROLE_CODE}'`);
     // Idempotent on an environment that has already been migrated.

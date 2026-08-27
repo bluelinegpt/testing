@@ -4,6 +4,7 @@ import { MemoryRouter } from "react-router-dom";
 
 import { App } from "../App.js";
 import { CustomerSessionProvider } from "../auth/customer-session-context.js";
+import { CartProvider } from "../cart/cart-context.js";
 import { storeI18n } from "../localization/i18n.js";
 
 import { taxonomyLabel } from "./CategoryPages.js";
@@ -22,7 +23,9 @@ function renderAt(path: string) {
     <I18nextProvider i18n={storeI18n}>
       <MemoryRouter initialEntries={[path]}>
         <CustomerSessionProvider>
-          <App />
+          <CartProvider>
+            <App />
+          </CartProvider>
         </CustomerSessionProvider>
       </MemoryRouter>
     </I18nextProvider>,

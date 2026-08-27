@@ -52,6 +52,25 @@ const businessReport = {
   totalDeliveryIncome: "33.00",
   totalExpenses: "150.00",
   totalOrders: 2,
+  totalTraderPayments: "275.00",
+  traderPayments: [
+    {
+      amount: "275.00",
+      businessDate: "2026-08-10",
+      calendarDate: "2026-08-11",
+      customerName: "Acme Corp",
+      orderNumber: "ORD-000050",
+      orderSerialNumber: null,
+      originalAmountDue: "300.00",
+      paymentMethod: "cash" as const,
+      previouslyPaid: "25.00",
+      reference: "SET-000001",
+      referenceNumber: "SET-000001",
+      settlementId: "settlement-1",
+      settlementNumber: "SET-000001",
+      traderName: "Acme Trading",
+    },
+  ],
 };
 
 const calendarReport = { ...businessReport, dateMode: "calendar_day" as const };
@@ -215,6 +234,23 @@ describe("DailyOperationsSummaryReport", () => {
     await screen.findByText("Petrol / Fuel");
     expect(screen.getByText("2026-08-10")).toBeInTheDocument();
     expect(screen.getByText("2026-08-11")).toBeInTheDocument();
+  });
+
+  it("shows Trader payments only when the header option is enabled", async () => {
+    const { navigations } = setup();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Today" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Run Report" }));
+    await screen.findByText("Petrol / Fuel");
+
+    expect(screen.queryByText("Trader Payments")).toBeNull();
+    fireEvent.click(screen.getByLabelText("Show Trader payments"));
+
+    expect(await screen.findByText("Trader Payments")).toBeInTheDocument();
+    expect(screen.getByText("Acme Trading")).toBeInTheDocument();
+    expect(screen.getByText("Total Trader Payments")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "SET-000001" }));
+    expect(navigations).toContain("/trader-settlements/settlement-1");
   });
 
   it("opens a Driver row's contributing Orders, each routing to the exact Order by Order Number, with both dates shown", async () => {

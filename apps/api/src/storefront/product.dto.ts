@@ -448,6 +448,14 @@ export class OptionActiveDto {
   public isActive!: boolean;
 }
 
+export class OptionValueUpdateDto {
+  @ApiProperty({ example: "Dark Navy" })
+  @IsString()
+  @MinLength(1)
+  @MaxLength(60)
+  public value!: string;
+}
+
 export class OptionGroupUpdateDto {
   @ApiPropertyOptional()
   @IsOptional()

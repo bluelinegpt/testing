@@ -13,6 +13,7 @@ import type {
   ReportClientErrorDto,
   UpdateClientErrorReportDto,
 } from "./client-error-report.dto.js";
+import { redactSensitiveText } from "./error-report-redaction.js";
 
 export interface ClientErrorReportRow {
   readonly id: string;
@@ -132,13 +133,21 @@ export class ClientErrorReportService {
     readonly sourceApp: string;
     readonly stack: string | null;
   }): Promise<{ id: string }> {
+    // Redact before this ever reaches the database: `message`/`stack`/`path`
+    // all originate from whatever a caller (a frontend error boundary, or an
+    // unhandled exception's own text) happened to throw, and none of that is
+    // trustworthy input. See `error-report-redaction.ts` for what's targeted
+    // and why.
+    const message = redactSensitiveText(input.message) ?? input.message;
+    const stack = redactSensitiveText(input.stack);
+    const path = redactSensitiveText(input.path);
     const result = await sql<{ id: string }>`
       insert into client_error_reports
         (source_app, severity, message, stack, correlation_id, path,
          account_id, account_kind, company_id, app_commit)
       values
-        (${input.sourceApp}, ${input.severity}, ${input.message}, ${input.stack},
-         ${input.correlationId}, ${input.path}, ${input.accountId}::uuid,
+        (${input.sourceApp}, ${input.severity}, ${message}, ${stack},
+         ${input.correlationId}, ${path}, ${input.accountId}::uuid,
          ${input.accountKind}, ${input.companyId}::uuid, ${input.appCommit})
       returning id
     `.execute(this.database);
@@ -173,6 +182,8 @@ export class ClientErrorReportService {
          and (${search} = '' or r.message ilike ${`%${search}%`}
               or coalesce(r.correlation_id, '') ilike ${`%${search}%`}
               or coalesce(r.path, '') ilike ${`%${search}%`})
+         and (${query.occurredFrom ?? null}::date is null or r.occurred_at >= ${query.occurredFrom ?? null}::date)
+         and (${query.occurredTo ?? null}::date is null or r.occurred_at < (${query.occurredTo ?? null}::date + interval '1 day'))
        order by (r.status = 'open') desc, r.occurred_at desc
        limit ${pageSize} offset ${offset}
     `.execute(this.database);

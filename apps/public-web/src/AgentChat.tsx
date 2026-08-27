@@ -263,7 +263,7 @@ export function AgentChat() {
       ) : (
         <section className="agent-chat__panel clarity-mask" data-clarity-mask="true" aria-label={isRtl ? 'مساعد Tawseelhub' : 'Tawseelhub Assistant'} ref={panelRef}>
           <header className="agent-chat__header">
-            <img src="/tawseelhub-logo.png" alt="" />
+            <img src="/tawseelhub-logo-web.png" alt="" />
             <div>
               <strong>{isRtl ? 'مساعد Tawseelhub' : 'Tawseelhub Assistant'}</strong>
               <span>{isRtl ? 'لا تشارك معلومات حساسة غير مطلوبة' : 'Do not share unnecessary sensitive details'}</span>
@@ -273,8 +273,8 @@ export function AgentChat() {
               </em>
             </div>
             <button type="button" onClick={() => void changeLanguage()} aria-label={isRtl ? 'تغيير لغة المحادثة إلى الإنجليزية' : 'Change chat language to Arabic'}>{language === 'en' ? 'AR' : 'EN'}</button>
-            <button type="button" onClick={() => setOpen(false)} aria-label={isRtl ? 'تصغير المحادثة' : 'Minimize chat'}>_</button>
-            <button type="button" onClick={() => { setOpen(false); setMessages([]); setToken(null); }} aria-label={isRtl ? 'إغلاق المحادثة' : 'Close chat'}>x</button>
+            <button type="button" onClick={() => setOpen(false)} aria-label={isRtl ? 'تصغير المحادثة' : 'Minimize chat'}><span aria-hidden="true">−</span></button>
+            <button type="button" onClick={() => { setOpen(false); setMessages([]); setToken(null); }} aria-label={isRtl ? 'إغلاق المحادثة' : 'Close chat'}><span aria-hidden="true">×</span></button>
           </header>
           <div className="agent-chat__messages" role="log" aria-live="polite" aria-relevant="additions" ref={messagesRef}>
             {humanState !== 'ai_active' ? (
@@ -327,7 +327,7 @@ export function AgentChat() {
             />
             <button type="submit" disabled={busy || !input.trim()} aria-label={isRtl ? 'إرسال' : 'Send'}>{isRtl ? 'إرسال' : 'Send'}</button>
           </form>
-          <a className="agent-chat__privacy" href="/resources">{isRtl ? 'الخصوصية' : 'Privacy notice'}</a>
+          <a className="agent-chat__privacy" href="/privacy">{isRtl ? 'الخصوصية' : 'Privacy notice'}</a>
         </section>
       )}
     </div>

@@ -7,7 +7,7 @@ import { Pool } from "pg";
 
 import { configuration } from "../configuration/environment.js";
 import type { DatabaseSchema } from "../infrastructure/database/database.types.js";
-import type { KyselyTransactionManager } from "../infrastructure/database/transaction-manager.js";
+import { KyselyTransactionManager } from "../infrastructure/database/transaction-manager.js";
 import type { IdentityContext } from "../security/identity-context.js";
 import type { TenantContext } from "../tenancy/tenant-context.js";
 
@@ -154,6 +154,60 @@ function buildService(
   return new OperationsService(
     transaction as unknown as Kysely<DatabaseSchema>,
     transactions as unknown as KyselyTransactionManager,
+    tenants as never,
+    undefined as never,
+    undefined as never,
+    identities as never,
+    undefined as never,
+    undefined as never,
+    undefined as never,
+    undefined as never,
+  );
+}
+
+/**
+ * Same as `buildService`, except `transactions.execute` is the REAL
+ * `KyselyTransactionManager` (a genuine `transaction().execute()` -- Kysely
+ * nests this as a SAVEPOINT when `transaction` is already inside one, which
+ * it always is here, per `inRolledBackTransaction`). `buildService`'s own
+ * `transactions` fake is a bare passthrough with no transactional boundary
+ * of its own, which is fine for every test that only checks the FINAL rows
+ * written -- but it cannot prove that a mid-import failure rolls back rows
+ * already inserted earlier in the same batch, because there is no savepoint
+ * to roll back to. Use this helper specifically for that proof (T9 §32/33).
+ */
+function buildServiceWithRealTransactions(
+  transaction: Transaction<DatabaseSchema>,
+  input: { readonly accountId: string; readonly companyId: string; readonly traderId: string },
+): OperationsService {
+  let activeTenant: TenantContext = { companyId: input.companyId, identityId: input.accountId };
+  const tenants = {
+    current: (): TenantContext => activeTenant,
+    run: async <T>(context: TenantContext, work: () => Promise<T>): Promise<T> => {
+      const previous = activeTenant;
+      activeTenant = context;
+      try {
+        return await work();
+      } finally {
+        activeTenant = previous;
+      }
+    },
+  };
+  const identities = {
+    current: (): IdentityContext => ({
+      companyId: input.companyId,
+      forcePasswordChange: false,
+      identityId: input.accountId,
+      kind: "trader",
+      permissions: new Set<string>(),
+      profileId: input.traderId,
+      profileType: "trader",
+      sessionId: "test-session",
+    }),
+  };
+  return new OperationsService(
+    transaction as unknown as Kysely<DatabaseSchema>,
+    new KyselyTransactionManager(transaction as unknown as Kysely<DatabaseSchema>),
     tenants as never,
     undefined as never,
     undefined as never,
@@ -324,6 +378,50 @@ describe.skipIf(!runDatabaseTests)("Trader portal global Orders (all Delivery Co
     });
   });
 
+  /* -----------------------------------------------------------------------
+     T8 -- the Dashboard's Order counts previously used the current session
+     Company only, while this exact page (`traderPortalOrdersPageAllCompanies`)
+     already aggregated across every actively-linked Delivery Company for the
+     same Trader Commerce identity. Two different totals for "how many Orders
+     do I have" was a real inconsistency, fixed in `traderPortalDashboard`
+     (§45) to read the identical `traderCommerceOrderScopePairs` union this
+     page already used. This test proves the two now agree.
+     ----------------------------------------------------------------------- */
+  it("counts Orders from every actively-linked Delivery Company on the Dashboard, not just the session Company", async () => {
+    await inRolledBackTransaction(async (transaction) => {
+      const traderCommerceId = await seedTraderCommerceProfile(transaction);
+      const traderA = await seedTrader(transaction);
+      await seedOrder(transaction, traderA, "REF-DASH-A");
+      await seedCommerceLink(transaction, {
+        companyId: traderA.companyId,
+        traderCommerceId,
+        traderId: traderA.traderId,
+      });
+
+      const traderB = await seedTrader(transaction);
+      await seedOrder(transaction, traderB, "REF-DASH-B");
+      await seedCommerceLink(transaction, {
+        companyId: traderB.companyId,
+        traderCommerceId,
+        traderId: traderB.traderId,
+      });
+
+      const service = buildService(transaction, traderA);
+      const [dashboard, page] = await Promise.all([
+        service.traderPortalDashboard(),
+        service.traderPortalOrdersPageAllCompanies({ quickView: "all" }),
+      ]);
+
+      // The two views of "how many Orders does this Trader Commerce identity
+      // have" must report the SAME count -- that is the whole claim.
+      expect(dashboard.orders.total).toBe(page.items.length);
+      expect(dashboard.orders.total).toBe(2);
+      const recentReferences = dashboard.recentOrders.map((row) => row.orderNumber).sort();
+      const pageOrderNumbers = page.items.map((row) => row.orderNumber).sort();
+      expect(recentReferences).toEqual(pageOrderNumbers);
+    });
+  });
+
   it("does not aggregate a link whose status is inactive", async () => {
     await inRolledBackTransaction(async (transaction) => {
       const traderCommerceId = await seedTraderCommerceProfile(transaction);
@@ -464,6 +562,63 @@ describe.skipIf(!runDatabaseTests)("Trader portal Orders CSV import", () => {
       expect(created.rows[0]?.count).toBe("0");
     });
   });
+
+  /* -------------------------------------------------------------------------
+     T9 §32/33 -- a duplicate Reference Number, whether it duplicates another
+     row in the SAME file or an Order that already exists, hits
+     `orders_reference_number_normalized_unique` (a real per-Company unique
+     index). Because the whole import runs inside one transaction and a
+     mid-loop failure is re-thrown rather than swallowed (see `importOrdersCsv`
+     above), the constraint violation rolls back every row already inserted
+     this batch -- so a duplicate anywhere in the file is an all-or-nothing
+     rejection, never a silent partial import or a silently-created duplicate.
+     ------------------------------------------------------------------------- */
+  it("rejects the whole batch atomically when two rows share a Reference Number", async () => {
+    await inRolledBackTransaction(async (transaction) => {
+      const fixture = await seedTrader(transaction);
+      const service = buildServiceWithRealTransactions(transaction, fixture);
+
+      const duplicateCsv =
+        "serialNumber,referenceNumber,customerName,customerMobileNumber,customerAddress,codAmount," +
+        "serviceFee,packageCount\n" +
+        'SN-DUP-1,REF-DUP-SAME,Dev Customer,971509990000,"Deira, Dubai",100,10,1\n' +
+        'SN-DUP-2,REF-DUP-SAME,Dev Customer,971509990000,"Deira, Dubai",100,10,1\n';
+
+      await expect(
+        service.createTraderPortalOrdersImport({ csv: duplicateCsv } as never, randomUUID()),
+      ).rejects.toThrow();
+
+      const created = await sql<{ count: string }>`
+        select count(*)::text as count from orders
+         where company_id = ${fixture.companyId}::uuid and reference_number = 'REF-DUP-SAME'
+      `.execute(transaction);
+      expect(created.rows[0]?.count).toBe("0");
+    });
+  });
+
+  it("rejects a batch atomically when its Reference Number duplicates an Order that already exists", async () => {
+    await inRolledBackTransaction(async (transaction) => {
+      const fixture = await seedTrader(transaction);
+      await seedOrder(transaction, fixture, "REF-DUP-EXISTING");
+      const service = buildService(transaction, fixture);
+
+      const csv =
+        "serialNumber,referenceNumber,customerName,customerMobileNumber,customerAddress,codAmount," +
+        "serviceFee,packageCount\n" +
+        'SN-DUP-NEW,REF-DUP-EXISTING,Dev Customer,971509990000,"Deira, Dubai",100,10,1\n';
+
+      await expect(
+        service.createTraderPortalOrdersImport({ csv } as never, randomUUID()),
+      ).rejects.toThrow();
+
+      const created = await sql<{ count: string }>`
+        select count(*)::text as count from orders
+         where company_id = ${fixture.companyId}::uuid and reference_number = 'REF-DUP-EXISTING'
+      `.execute(transaction);
+      // Only the pre-seeded Order survives -- the import created nothing.
+      expect(created.rows[0]?.count).toBe("1");
+    });
+  });
 });
 
 /**
@@ -582,6 +737,55 @@ describe.skipIf(!runDatabaseTests)("Trader portal Order creation — Delivery Co
       `.execute(transaction);
       expect(stored.rows[0]?.companyId).toBe(traderA.companyId);
       expect(stored.rows[0]?.traderId).toBe(traderA.traderId);
+    });
+  });
+
+  /* -------------------------------------------------------------------------
+     T8 §29 -- "If two Trader records exist inside the same Company, ensure
+     the Order uses the Trader mapped to the authenticated Trader Commerce
+     identity. Do not choose by name. Do not choose first record." The closest
+     existing test above ("resolves to the caller's own Company Trader record
+     and pricing...") only covers two DIFFERENT Companies -- traderA and
+     traderB each get their own new Company via a bare seedTrader() call. This
+     test instead plants a decoy second Trader record inside the SAME Company
+     as the linked one, and proves the Order is written against the linked
+     Trader's id, never the decoy's, even though the decoy exists first in
+     insertion order and would sort first by name.
+     ------------------------------------------------------------------------- */
+  it("uses the commerce-linked Trader, not a decoy Trader record in the same Company", async () => {
+    await inRolledBackTransaction(async (transaction) => {
+      const traderCommerceId = await seedTraderCommerceProfile(transaction);
+      const linkedTrader = await seedTrader(transaction);
+      await seedTraderPrice(transaction, linkedTrader, 15);
+      await seedCommerceLink(transaction, {
+        companyId: linkedTrader.companyId,
+        traderCommerceId,
+        traderId: linkedTrader.traderId,
+      });
+
+      // Decoy: a second, unrelated Trader record inside the exact same
+      // Company, never linked to the Trader Commerce identity.
+      const decoyTrader = await seedTrader(transaction, {
+        company: { actorId: linkedTrader.actorId, companyId: linkedTrader.companyId },
+      });
+
+      const service = buildService(transaction, linkedTrader);
+      const order = await service.createTraderPortalOrder(
+        {
+          ...orderInput(linkedTrader.areaId, "REF-NOT-DECOY"),
+          deliveryCompanyId: linkedTrader.companyId,
+        } as never,
+        randomUUID(),
+        randomUUID(),
+      );
+
+      expect(order.serviceFee).toBe("15.00");
+      const stored = await sql<{ companyId: string; traderId: string }>`
+        select company_id as "companyId", trader_id as "traderId" from orders where id = ${order.id}::uuid
+      `.execute(transaction);
+      expect(stored.rows[0]?.companyId).toBe(linkedTrader.companyId);
+      expect(stored.rows[0]?.traderId).toBe(linkedTrader.traderId);
+      expect(stored.rows[0]?.traderId).not.toBe(decoyTrader.traderId);
     });
   });
 

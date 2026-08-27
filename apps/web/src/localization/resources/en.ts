@@ -30,15 +30,20 @@ export const englishTranslations = {
     sections: {
       cashActivity: "Cash Activity",
       incomeStatement: "Income Statement Activity",
-      window: "Business Day Window",
+      window: "Selected Date Window",
       drillDown: "Movements",
     },
     filters: {
-      businessDate: "Business Date",
+      businessDate: "Date",
+      dateBasis: "Date Basis",
       account: "Cash / Bank Account",
       paymentMethod: "Payment Method",
       partyType: "Party Type",
       party: "Party",
+    },
+    dateBasis: {
+      calendar: "Calendar Day (00:00–00:00)",
+      business: "Business Day (configured start time)",
     },
     methods: { cash: "Cash", bank: "Bank / Visa" },
     directions: { in: "Collected", out: "Paid" },
@@ -70,13 +75,14 @@ export const englishTranslations = {
       netIncomeActivity: "Net Income Activity",
     },
     metadata: {
-      businessDate: "Business Date",
+      businessDate: "Selected Date",
+      dateBasis: "Date Basis",
       windowStart: "Window Start",
       windowEnd: "Window End",
       timezone: "Timezone",
-      businessDayStart: "Business Day Start",
+      businessDayStart: "Day Start",
       segments: "Applied Configuration Segments",
-      segmentDates: "Business Dates",
+      segmentDates: "Selected Dates",
       authoritativeTimestamps: "Authoritative Timestamp per Source",
       table: "Table",
       column: "Column",
@@ -110,7 +116,7 @@ export const englishTranslations = {
       missingTimestamps:
         "{{count}} confirmed record(s) carry no authoritative confirmation time and are excluded from Cash Activity. They are not estimated, so the totals above cover only records with an observed time.",
     },
-    empty: { rows: "No cash movement was confirmed in this Business Day window." },
+    empty: { rows: "No cash movement was confirmed in the selected date window." },
     pagination: "Page {{page}} of {{pages}} — {{total}} movement(s)",
   },
   paymentPosition: {
@@ -265,6 +271,12 @@ export const englishTranslations = {
   batches: {
     heading: "Accounting Batch Operations",
     detailHeading: "Batch Detail",
+    recoveryNavigation: {
+      label: "Accounting Recovery Center",
+      events: "Existing Events",
+      historical: "Missing Events",
+      batches: "Recovery Batches",
+    },
     intro:
       "Plans, validates and executes existing single-item accounting actions across many records. Every item is executed by the same single-item service a person would use on the Event screen; the batch adds selection, sequencing and audit, never its own posting logic.",
     executionDelegation:
@@ -2574,7 +2586,8 @@ export const englishTranslations = {
       product_media_last_image: "An active Product must keep at least one image.",
       product_image_type: "Use a PNG, JPEG or WebP image.",
       product_image_size: "That image is too large. The limit is 5 MB.",
-      commerce_media_invalid: "That image could not be used. Try a different PNG, JPEG or WebP file.",
+      commerce_media_invalid:
+        "That image could not be used. Try a different PNG, JPEG or WebP file.",
       commerce_media_required: "Choose an image file first.",
       product_category_not_in_storefront: "That category does not belong to this Storefront.",
       product_category_has_active_products:
@@ -2677,7 +2690,8 @@ export const englishTranslations = {
     },
     branding: {
       chooseFile: "Choose an image file",
-      coverHint: "PNG, JPEG or WebP, up to 5 MB. Shown as a banner across the top of the public Store page.",
+      coverHint:
+        "PNG, JPEG or WebP, up to 5 MB. Shown as a banner across the top of the public Store page.",
       currentCover: "Current cover",
       currentLogo: "Current logo",
       logoHint: "PNG, JPEG or WebP, up to 5 MB.",
@@ -2757,7 +2771,8 @@ export const englishTranslations = {
     errors: {
       brandImageType: "Use a PNG, JPEG or WebP image.",
       brandImageSize: "That image is too large. The limit is 5 MB.",
-      commerce_media_invalid: "That image could not be used. Try a different PNG, JPEG or WebP file.",
+      commerce_media_invalid:
+        "That image could not be used. Try a different PNG, JPEG or WebP file.",
       storefront_hours_incomplete: "Every business-hours row needs both days and hours.",
       storefront_slug_required: "Enter a store URL.",
       storefront_slug_too_short: "The store URL is too short.",
@@ -2769,7 +2784,8 @@ export const englishTranslations = {
       storefront_not_found: "The Storefront was not found.",
       storefront_delivery_relationship_ineligible:
         "This Delivery Company relationship is not active and cannot be enabled for Store Orders.",
-      storefront_delivery_relationship_not_found: "That Delivery Company relationship was not found.",
+      storefront_delivery_relationship_not_found:
+        "That Delivery Company relationship was not found.",
       storefront_delivery_load_failed: "Delivery Companies could not be loaded.",
       storefront_delivery_save_failed: "The change could not be saved.",
       storefront_permission_denied: "You do not have permission for that action.",
@@ -3168,6 +3184,7 @@ export const englishTranslations = {
       integrations: "Integrations",
       myStore: "My Store",
       products: "Products",
+      storeOrders: "Store Orders",
     },
     deliveryCompanies: {
       noneShort: "No Delivery Company connected.",
@@ -3177,7 +3194,34 @@ export const englishTranslations = {
       allDeliveryCompanies: "All Delivery Companies",
       deliveryCompany: "Delivery Company",
       deliveryCompanyDefault: "My Delivery Company (default)",
-      noDeliveryCompanyBlocked: "No delivery company is assigned to this trader yet. Please assign an active delivery company before creating orders.",
+      noDeliveryCompanyBlocked:
+        "No delivery company is assigned to this trader yet. Please assign an active delivery company before creating orders.",
+    },
+    storeOrders: {
+      accept: "Accept",
+      actionFailed: "This action could not be completed. Please try again.",
+      cancel: "Cancel",
+      codTotal: "Total (Cash on Delivery)",
+      companyServiceFee: "Delivery Company Service Fee",
+      completeExternal: "Complete External Delivery",
+      confirmCancel: "Cancel this order? The customer will be notified.",
+      deliveryAddress: "Delivery Address",
+      empty: "No Store Orders match this view.",
+      filterAll: "All",
+      productSubtotal: "Product Subtotal",
+      itemCount_one: "{{count}} item",
+      itemCount_other: "{{count}} items",
+      items: "Items",
+      number: "Store Order",
+      searchPlaceholder: "Search by Store Order number, customer name or mobile",
+      statusLabels: {
+        awaiting_trader_confirmation: "Awaiting Your Confirmation",
+        cancelled: "Cancelled",
+        completed_external: "Delivery arranged by Store",
+        confirmed: "Confirmed",
+        converted_to_delivery: "Handed to Delivery Company",
+      },
+      title: "Store Orders",
     },
     profile: {
       accountInformation: "Account Information",
@@ -3815,6 +3859,8 @@ export const englishTranslations = {
     confirmEarningsFailed: "The earning period could not be confirmed. No payment was created.",
     dateFrom: "Date From",
     dateTo: "Date To",
+    completedCalendarDaysOnly:
+      "Select completed calendar days only. The current day cannot be calculated until tomorrow.",
     collectedOrderCount: "Number of Collected Orders",
     calculateNow: "Calculate Now",
     calculateFailed: "The earning period could not be calculated.",
@@ -4639,6 +4685,10 @@ export const englishTranslations = {
       movementDetails: "Movement Details",
       movementSummary: "Movement Summary",
       movementType: "Movement Type",
+      ledgerSearch: "Movement number, reference or description",
+      dateOrder: "Date Order",
+      newestFirst: "Newest first",
+      oldestFirst: "Oldest first",
       movementDate: "Movement Date",
       referenceNumber: "Reference Number",
       description: "Description / Notes",
@@ -4708,6 +4758,7 @@ export const englishTranslations = {
         bank_to_cash_transfer: "Bank to Cash Transfer",
         bank_to_bank_transfer: "Bank to Bank Transfer",
         cash_to_cash_transfer: "Cash to Cash Transfer",
+        opening_balance: "Opening Balance",
       },
       classifications: {
         cash_bank_deposit_owner_contribution: "Owner Contribution",
@@ -5657,6 +5708,7 @@ export const englishTranslations = {
       reprocess: "Reprocess",
       enableAutomatic: "Enable automatic posting",
       bulkReprocess: "Reprocess selected ({{count}})",
+      createReprocessBatch: "Create recovery batch ({{count}})",
       editConfiguration: "Edit configuration",
       enableManualAccounting: "Enable Manual Accounting",
       disableAutomatic: "Disable automatic posting",
@@ -5810,6 +5862,7 @@ export const englishTranslations = {
       not_applicable: "Not Applicable",
     },
     confirmation: {
+      selectedEvents: "{{count}} selected Accounting Event(s)",
       reference: "Record:",
       financialImpact:
         "The backend will revalidate permissions, balances, period status, and current version before applying this financial action.",
@@ -5840,9 +5893,41 @@ export const englishTranslations = {
     },
     reconciliation: {
       area: "Area",
+      allAreas: "All areas",
+      allResults: "All results",
+      ascending: "Ascending",
+      clear: "Clear filters",
+      descending: "Descending",
       source: "Source",
       eventType: "Event type",
+      eventTypePlaceholder: "Exact event type",
       result: "Result",
+      sortBy: "Sort by",
+      sortDirection: "Direction",
+      pageSize: "Rows per page",
+      pagination: "Reconciliation pagination",
+      pageOf: "Page {{page}} of {{pages}} — {{total}} record(s)",
+      previous: "Previous",
+      next: "Next",
+      areas: {
+        orders: "Orders",
+        trader_receivables: "Trader receivables",
+        trader_settlements: "Trader settlements",
+        driver_collections: "Driver collections",
+        driver_expenses: "Driver expenses",
+        employee_payroll: "Employee payroll",
+        outsourced_driver_fees: "Outsourced driver fees",
+        general_expenses: "General expenses",
+        cash_bank_management: "Cash and bank management",
+      },
+      results: {
+        failed: "Failed",
+        mismatch: "Mismatch",
+        missing: "Missing",
+        posted: "Posted",
+        queued: "Queued",
+        reversed: "Reversed",
+      },
       events: "Events",
       exceptions: "Exceptions",
       missing: "Missing operational records",
@@ -6048,7 +6133,3 @@ export const englishTranslations = {
     navigation: "Administration navigation",
   },
 } as const;
-
-
-
-

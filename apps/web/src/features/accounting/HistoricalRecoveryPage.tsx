@@ -17,6 +17,7 @@ import { recordRoute } from "./accounting-routes.js";
 import type { AccountingRecord } from "./accounting-types.js";
 import { useAccountingResource } from "./use-accounting-resource.js";
 import { useListState } from "./use-list-state.js";
+import { AccountingRecoveryNavigation } from "./BatchOperationsPage.js";
 
 /**
  * Historical Accounting Recovery — read-only preview.
@@ -177,6 +178,7 @@ export function HistoricalRecoveryPage({
         description={t("historicalRecovery.subtitle")}
         title={t("historicalRecovery.title")}
       />
+      <AccountingRecoveryNavigation active="historical" />
 
       {/* The three facts a user needs before asking where the run button is. */}
       <div className="alert alert-info" role="status">

@@ -200,8 +200,15 @@ describe("ProductCatalogueWorkspace", () => {
     });
   });
 
-  it("shows the empty state for a catalogue with no Products", async () => {
+  it("shows a Store-empty state when the catalogue has no Products at all", async () => {
     setup({}, undefined, {}, []);
+    expect(await screen.findByText(/No products yet/i)).toBeInTheDocument();
+  });
+
+  it("shows a filter-empty state when a search finds nothing, distinct from a truly empty Store", async () => {
+    setup({}, undefined, {}, []);
+    await screen.findByText(/No products yet/i);
+    fireEvent.change(screen.getByLabelText(/Search/i), { target: { value: "nonexistent" } });
     expect(await screen.findByText(/No Product matches these filters/i)).toBeInTheDocument();
   });
 

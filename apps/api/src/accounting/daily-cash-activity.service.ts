@@ -66,6 +66,8 @@ import { TenantContextAccessor } from "../tenancy/tenant-context.js";
  */
 
 /** Cash or Bank/Visa. Kept apart everywhere; never summed into one "money". */
+export type DailyCashDateBasis = "business" | "calendar";
+
 export type DailyCashMethod = "bank" | "cash";
 
 export type DailyCashDirection = "in" | "out";
@@ -75,6 +77,7 @@ export type DailyCashPartyType =
 
 export interface DailyCashActivityFilters {
   readonly businessDate: string;
+  readonly dateBasis?: DailyCashDateBasis;
   /** Cash or Bank account id. Sources that carry no account are excluded when set. */
   readonly accountId?: string;
   readonly limit?: number;
@@ -128,6 +131,7 @@ export interface DailyIncomeStatementSection {
 
 export interface DailyCashActivityMetadata {
   readonly accountingDateBasis: string;
+  readonly dateBasis: DailyCashDateBasis;
   readonly authoritativeTimestamps: readonly {
     readonly column: string;
     readonly historicalNulls: boolean;
@@ -223,7 +227,7 @@ export class DailyCashActivityService {
    */
   public async report(filters: DailyCashActivityFilters): Promise<DailyCashActivityReport> {
     const { companyId } = this.tenants.current();
-    const window = await this.businessDays.window(filters.businessDate, filters.businessDate);
+    const window = await this.activityWindow(filters);
 
     const [opening, movement, outstanding, income, excluded] = await Promise.all([
       this.balanceBefore(companyId, window.startUtc, filters),
@@ -259,9 +263,10 @@ export class DailyCashActivityService {
       incomeStatementActivity: income,
       metadata: {
         accountingDateBasis:
-          "Income Statement Activity uses journal_entries.business_date, the ACCOUNTING date. It is date-only and is not filtered by the Business Day window.",
+          "Income Statement Activity uses journal_entries.business_date, the ACCOUNTING date. It is date-only and is not filtered by the Cash Activity confirmation-time window.",
         authoritativeTimestamps: cashSourceDeclarations.map((source) => ({ ...source })),
         businessDate: filters.businessDate,
+        dateBasis: filters.dateBasis ?? "calendar",
         businessDayStart: window.businessDayStart,
         displayEnd: window.displayEnd,
         endUtc: window.endUtc,
@@ -272,6 +277,12 @@ export class DailyCashActivityService {
         timezone: window.timezone,
       },
     };
+  }
+
+  private activityWindow(filters: DailyCashActivityFilters): Promise<BusinessDayWindow> {
+    return filters.dateBasis === "business"
+      ? this.businessDays.window(filters.businessDate, filters.businessDate)
+      : this.businessDays.calendarWindow(filters.businessDate, filters.businessDate);
   }
 
   /**
@@ -291,7 +302,7 @@ export class DailyCashActivityService {
     readonly truncated: boolean;
   }> {
     const { companyId } = this.tenants.current();
-    const window = await this.businessDays.window(filters.businessDate, filters.businessDate);
+    const window = await this.activityWindow(filters);
     const predicate = this.filterPredicate(window, filters);
     const result = await sql<DailyCashActivityRow>`
       with movements as (${this.movements(companyId)})
@@ -320,10 +331,14 @@ export class DailyCashActivityService {
        limit ${exportRowLimit + 1}
     `.execute(this.database);
     const truncated = result.rows.length > exportRowLimit;
+    const rows = truncated ? result.rows.slice(0, exportRowLimit) : result.rows;
+    const businessDates = await this.businessDays.businessDatesFor(
+      rows.map((row) => row.confirmedAt),
+    );
     return {
-      items: (truncated ? result.rows.slice(0, exportRowLimit) : result.rows).map((row) => ({
+      items: rows.map((row) => ({
         ...row,
-        businessDate: filters.businessDate,
+        businessDate: businessDates.get(row.confirmedAt) ?? null,
       })),
       truncated,
     };
@@ -340,7 +355,7 @@ export class DailyCashActivityService {
     readonly total: number;
   }> {
     const { companyId } = this.tenants.current();
-    const window = await this.businessDays.window(filters.businessDate, filters.businessDate);
+    const window = await this.activityWindow(filters);
     const limit = Math.min(Math.max(filters.limit ?? 50, 1), 200);
     const offset = Math.max(filters.offset ?? 0, 0);
     const movements = this.movements(companyId);
@@ -381,13 +396,16 @@ export class DailyCashActivityService {
       `.execute(this.database),
     ]);
 
+    const businessDates = await this.businessDays.businessDatesFor(
+      items.rows.map((row) => row.confirmedAt),
+    );
     return {
       items: items.rows.map((row) => ({
         ...row,
-        // The Business Date of each row is the report's own Business Date: the
-        // row is in the result precisely because its instant fell inside that
-        // window. Re-deriving it per row would be an N+1 for a known answer.
-        businessDate: filters.businessDate,
+        // Calendar mode can contain two Business Dates around the configured
+        // cutoff. Resolve the page in one configuration read rather than
+        // copying the selected Calendar Date or issuing one query per row.
+        businessDate: businessDates.get(row.confirmedAt) ?? null,
       })),
       total: total.rows[0]?.total ?? 0,
     };
@@ -491,6 +509,14 @@ export class DailyCashActivityService {
         from cash_bank_movements m
        where m.company_id=${companyId}::uuid and m.status='confirmed'
          and m.confirmed_at is not null
+         -- Operational payments are already emitted by their authoritative
+         -- tables above. Their linked Movement is a discoverability mirror,
+         -- not a second movement of money.
+         and not exists (
+           select 1 from accounting_events e
+            where e.id=m.accounting_event_id and e.company_id=m.company_id
+              and e.source_entity_type<>'cash_bank_movement'
+         )
          and (m.source_cash_account_id is not null or m.source_bank_account_id is not null)
 
       union all
@@ -505,6 +531,11 @@ export class DailyCashActivityService {
         from cash_bank_movements m
        where m.company_id=${companyId}::uuid and m.status='confirmed'
          and m.confirmed_at is not null
+         and not exists (
+           select 1 from accounting_events e
+            where e.id=m.accounting_event_id and e.company_id=m.company_id
+              and e.source_entity_type<>'cash_bank_movement'
+         )
          and (m.destination_cash_account_id is not null
               or m.destination_bank_account_id is not null)
     `;

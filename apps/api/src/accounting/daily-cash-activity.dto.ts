@@ -2,8 +2,13 @@ import { ApiPropertyOptional } from "@nestjs/swagger";
 import { IsIn, IsInt, IsOptional, IsUUID, Matches, Max, Min } from "class-validator";
 import { Type } from "class-transformer";
 
-import type { DailyCashMethod, DailyCashPartyType } from "./daily-cash-activity.service.js";
+import type {
+  DailyCashDateBasis,
+  DailyCashMethod,
+  DailyCashPartyType,
+} from "./daily-cash-activity.service.js";
 
+export const dailyCashDateBases = ["calendar", "business"] as const;
 export const dailyCashPaymentMethods = ["bank", "cash"] as const;
 export const dailyCashPartyTypes = [
   "driver",
@@ -24,6 +29,11 @@ export const dailyCashPartyTypes = [
 export class DailyCashActivityQueryDto {
   @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: "businessDate must be YYYY-MM-DD" })
   public businessDate!: string;
+
+  @ApiPropertyOptional({ default: "calendar", enum: dailyCashDateBases })
+  @IsOptional()
+  @IsIn(dailyCashDateBases)
+  public dateBasis?: DailyCashDateBasis;
 
   /** Cash or Bank account id. Sources with no account are excluded when set. */
   @ApiPropertyOptional()

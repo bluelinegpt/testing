@@ -286,7 +286,7 @@ describe("TraderSettlementsWorkspace", () => {
     expect(
       await screen.findByText("You do not have permission to perform this action."),
     ).toBeInTheDocument();
-    expect(screen.queryByText("New Settlement")).not.toBeInTheDocument();
+    expect(screen.queryByText("Traders New Settlement")).not.toBeInTheDocument();
   });
 
   it("renders the six primary summary cards from server-authoritative totals", async () => {
@@ -334,9 +334,9 @@ describe("TraderSettlementsWorkspace", () => {
     expect(row?.textContent).toContain("2026-07-27");
   });
 
-  it("opens the New Settlement dialog and loads eligible Orders once a Trader is selected", async () => {
+  it("opens the Traders New Settlement dialog and loads eligible Orders once a Trader is selected", async () => {
     const { getCalls } = setup();
-    fireEvent.click(await screen.findByRole("button", { name: "New Settlement" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Traders New Settlement" }));
     fireEvent.click(await screen.findByRole("button", { name: /Test Trader/ }));
     await waitFor(() =>
       expect(
@@ -350,7 +350,7 @@ describe("TraderSettlementsWorkspace", () => {
 
   it("calls the oldest-first allocation proposal endpoint when a Payment Amount is entered", async () => {
     const { postCalls } = setup();
-    fireEvent.click(await screen.findByRole("button", { name: "New Settlement" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Traders New Settlement" }));
     fireEvent.click(await screen.findByRole("button", { name: /Test Trader/ }));
     await screen.findByText("SER-1");
     fireEvent.change(screen.getByLabelText("Payment Amount"), { target: { value: "100" } });
@@ -367,10 +367,10 @@ describe("TraderSettlementsWorkspace", () => {
 
   it("updates allocation totals when the proposed amount is manually edited", async () => {
     setup();
-    fireEvent.click(await screen.findByRole("button", { name: "New Settlement" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Traders New Settlement" }));
     const dialog = within(await screen.findByRole("dialog"));
     fireEvent.click(await dialog.findByRole("button", { name: /Test Trader/ }));
-    await dialog.findByText("SER-1");
+    await waitFor(() => expect(dialog.getAllByText("SER-1").length).toBeGreaterThan(0));
     fireEvent.change(dialog.getByLabelText("Payment Amount"), { target: { value: "100" } });
     await dialog.findByText("Outstanding Before");
     const allocationInput = (await dialog.findByDisplayValue("100.00")) as HTMLInputElement;
@@ -380,7 +380,7 @@ describe("TraderSettlementsWorkspace", () => {
 
   it("blocks proceeding to Review while the allocated total does not match the Payment Amount", async () => {
     setup();
-    fireEvent.click(await screen.findByRole("button", { name: "New Settlement" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Traders New Settlement" }));
     fireEvent.click(await screen.findByRole("button", { name: /Test Trader/ }));
     await screen.findByText("SER-1");
     fireEvent.change(screen.getByLabelText("Payment Amount"), { target: { value: "100" } });
@@ -397,10 +397,10 @@ describe("TraderSettlementsWorkspace", () => {
 
   it("masks the Trader beneficiary bank account number in the picker and excludes inactive accounts", async () => {
     setup();
-    fireEvent.click(await screen.findByRole("button", { name: "New Settlement" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Traders New Settlement" }));
     const dialog = within(await screen.findByRole("dialog"));
     fireEvent.click(await dialog.findByRole("button", { name: /Test Trader/ }));
-    await dialog.findByText("SER-1");
+    await waitFor(() => expect(dialog.getAllByText("SER-1").length).toBeGreaterThan(0));
     fireEvent.change(dialog.getByLabelText("Payment Amount"), { target: { value: "100" } });
     fireEvent.change(dialog.getByLabelText("Payment Method"), {
       target: { value: "bank_transfer" },
@@ -417,10 +417,10 @@ describe("TraderSettlementsWorkspace", () => {
 
   it("confirms a full payment and shows the success screen with the Settlement Number", async () => {
     const { api } = setup();
-    fireEvent.click(await screen.findByRole("button", { name: "New Settlement" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Traders New Settlement" }));
     const dialog = within(await screen.findByRole("dialog"));
     fireEvent.click(await dialog.findByRole("button", { name: /Test Trader/ }));
-    await dialog.findByText("SER-1");
+    await waitFor(() => expect(dialog.getAllByText("SER-1").length).toBeGreaterThan(0));
     fireEvent.change(dialog.getByLabelText("Payment Amount"), { target: { value: "100" } });
     await dialog.findByText("Outstanding Before");
     // A cash settlement must name the Cash account funding it.
@@ -446,10 +446,10 @@ describe("TraderSettlementsWorkspace", () => {
 
   it("shows a partially-settled Order with the correct remaining balance in the allocation table", async () => {
     setup();
-    fireEvent.click(await screen.findByRole("button", { name: "New Settlement" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Traders New Settlement" }));
     const dialog = within(await screen.findByRole("dialog"));
     fireEvent.click(await dialog.findByRole("button", { name: /Test Trader/ }));
-    await dialog.findByText("SER-1");
+    await waitFor(() => expect(dialog.getAllByText("SER-1").length).toBeGreaterThan(0));
     fireEvent.change(dialog.getByLabelText("Payment Amount"), { target: { value: "100" } });
     await dialog.findByText("Outstanding Before");
     const allocationInput = (await dialog.findByDisplayValue("100.00")) as HTMLInputElement;
@@ -490,7 +490,7 @@ describe("TraderSettlementsWorkspace", () => {
         permissions={["settlements.create"]}
       />,
     );
-    fireEvent.click(await screen.findByRole("button", { name: "New Settlement" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Traders New Settlement" }));
     fireEvent.click(await screen.findByRole("button", { name: /Test Trader/ }));
     await screen.findByText("SER-1");
 
@@ -538,7 +538,7 @@ describe("TraderSettlementsWorkspace", () => {
         permissions={["settlements.create"]}
       />,
     );
-    fireEvent.click(await screen.findByRole("button", { name: "New Settlement" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Traders New Settlement" }));
     fireEvent.click(await screen.findByRole("button", { name: /Test Trader/ }));
     await screen.findByText("SER-1");
     fireEvent.change(screen.getByLabelText("Payment Amount"), { target: { value: "100" } });
@@ -657,7 +657,7 @@ describe("TraderSettlementsWorkspace", () => {
       await screen.findByText("SET-000123");
       fireEvent.click(screen.getByRole("button", { name: "View" }));
       const dialog = within(await screen.findByRole("dialog"));
-      await dialog.findByText("SER-1");
+      await waitFor(() => expect(dialog.getAllByText("SER-1").length).toBeGreaterThan(0));
       expect(dialog.queryByText("settlement-1")).not.toBeInTheDocument();
       expect(dialog.queryByText("order-1")).not.toBeInTheDocument();
     });
@@ -738,9 +738,9 @@ describe("confirm_receipt deep link", () => {
 });
 
 /**
- * New Settlement Order preselection.
+ * Traders New Settlement Order preselection.
  *
- * The Orders list can ask this screen to open New Settlement with the Trader
+ * The Orders list can ask this screen to open Traders New Settlement with the Trader
  * AND the originating Order already ticked. The property that matters is that
  * the tick uses the eligible row's own CURRENT outstanding balance -- an Order
  * with 175.00 due and 174.92 already paid must contribute 0.08, not 175.00.
@@ -754,11 +754,13 @@ describe("new_settlement Order preselection", () => {
     globalThis.history.replaceState({}, "", "/trader-settlements");
   });
 
-  it("opens New Settlement with the Trader and originating Order selected", async () => {
+  it("opens Traders New Settlement with the Trader and originating Order selected", async () => {
     visit("?traderId=trader-1&orderId=order-1&orderNumber=ORD-1&openDialog=new_settlement&returnTo=%2Forders");
     const { postCalls } = setup();
 
     const dialog = await screen.findByRole("dialog");
+    await within(dialog).findByText("Eligible Orders");
+    expect(within(dialog).getByText("Filter").closest("details")).not.toHaveAttribute("open");
     await waitFor(() => {
       const checked = within(dialog)
         .getAllByRole("checkbox")
@@ -769,6 +771,45 @@ describe("new_settlement Order preselection", () => {
     expect(postCalls.filter((call) => call.path.includes("settlements"))).toHaveLength(0);
     // The instruction is consumed; a refresh cannot reopen the dialog.
     expect(globalThis.location.search).not.toContain("openDialog");
+  });
+
+  it("preselects an order-origin settlement but leaves the paid amount for operator entry", async () => {
+    visit("?traderId=trader-1&orderId=order-1&openDialog=new_settlement");
+    const olderOrder = {
+      ...eligibleOrder,
+      deliveryDate: "2026-07-10",
+      id: "older-order",
+      outstandingBalance: "25.00",
+      serialNumber: "SER-0",
+    };
+    const { postCalls } = setup({
+      getExtra: (path: string) =>
+        path.startsWith("operations/settlements/payments/eligible-orders")
+          ? {
+              items: [olderOrder, { ...eligibleOrder, outstandingBalance: "275.00" }],
+              page: 1,
+              pageSize: 200,
+              total: 2,
+            }
+          : undefined,
+    });
+
+    const dialog = within(await screen.findByRole("dialog"));
+    await dialog.findByText("SER-0");
+    await waitFor(() => expect(dialog.getAllByText("SER-1").length).toBeGreaterThan(0));
+
+    await waitFor(() =>
+      expect(dialog.getByLabelText("Payment Amount")).toHaveDisplayValue(""),
+    );
+    const ordersTable = dialog.getAllByRole("table")[0]!;
+    const rowCheckboxes = within(ordersTable)
+      .getAllByRole("checkbox")
+      .slice(1) as HTMLInputElement[];
+    expect(rowCheckboxes.map((box) => box.checked)).toEqual([false, true]);
+    expect(dialog.queryByText(/oldest-first allocation/i)).not.toBeInTheDocument();
+    expect(
+      postCalls.some((call) => call.path === "operations/settlements/payments/propose-allocation"),
+    ).toBe(false);
   });
 
   it("uses the CURRENT outstanding balance, not the original amount due", async () => {
