@@ -3,6 +3,8 @@ import { createServer, request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { extname, isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
 
+import { classifyCompanyAppHost, parseLegacyTenantRedirects } from "./tenant-host.mjs";
+
 const port = Number.parseInt(process.env.WEB_PORT ?? "8080", 10);
 const publicDirectory = resolve(process.env.WEB_ROOT ?? "dist");
 /**
@@ -13,13 +15,15 @@ const publicDirectory = resolve(process.env.WEB_ROOT ?? "dist");
  *   - Host is rewritten to the API's own name, because hosting routers
  *     direct requests by Host and would refuse the portal's.
  *   - `x-blueline-tenant-host` carries the ORIGINAL host, because that is
- *     how the API tells WHICH Company portal (`dana.tawseelhub.com`,
- *     `xyz.tawseelhub.com`, ...) a sign-in belongs to.
+ *     how the API tells WHICH Company portal (`danaapp.tawseelhub.com`,
+ *     `xyzapp.tawseelhub.com`, ...) a sign-in belongs to.
  * Set API_PROXY_TARGET to the API service origin and build the SPA with the
  * relative VITE_API_BASE_URL=/api/v1.
  */
 const apiProxyTarget = process.env.API_PROXY_TARGET;
 const proxyTargetUrl = apiProxyTarget === undefined ? undefined : new URL(apiProxyTarget);
+const tenantHostSuffix = process.env.WEB_TENANT_HOST_SUFFIX;
+const legacyTenantRedirects = parseLegacyTenantRedirects(process.env.WEB_LEGACY_TENANT_REDIRECTS);
 
 function proxyApi(request, response) {
   const makeRequest = proxyTargetUrl.protocol === "https:" ? httpsRequest : httpRequest;
@@ -93,6 +97,26 @@ function resolveAsset(requestUrl) {
 }
 
 const server = createServer((request, response) => {
+  const host = request.headers.host;
+  const legacyRedirect =
+    host === undefined ? undefined : legacyTenantRedirects.get(host.split(":")[0].toLowerCase());
+  if (legacyRedirect !== undefined) {
+    response.writeHead(307, {
+      "Cache-Control": "no-store",
+      Location: `${legacyRedirect}${request.url ?? "/"}`,
+    });
+    response.end();
+    return;
+  }
+  const hostOutcome = classifyCompanyAppHost(host, tenantHostSuffix);
+  if (hostOutcome === "rejected") {
+    addSecurityHeaders(response);
+    response.writeHead(404, { "Cache-Control": "no-store", "Content-Type": "application/json" });
+    response.end(
+      '{"error":{"code":"company_app_host_not_configured","message":"This hostname is not configured for the Delivery Company application."}}',
+    );
+    return;
+  }
   if (proxyTargetUrl !== undefined && (request.url ?? "").startsWith("/api/")) {
     proxyApi(request, response);
     return;

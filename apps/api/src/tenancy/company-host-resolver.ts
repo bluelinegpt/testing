@@ -11,7 +11,8 @@ import { isReservedCompanySubdomain } from "./reserved-subdomains.js";
  * identifier would let anyone aim a login at any tenant, and would keep the
  * public Company list alive as an enumeration surface. Instead:
  *
- *   1. production  - the tenant label of the host, e.g. `acme.bluelinegpt.com`
+ *   1. production  - the app tenant label of the host, e.g.
+ *      `acmeapp.tawseelhub.com` resolves to Company subdomain `acme`
  *   2. development - a configured fallback subdomain, for localhost and IPs
  *
  * When neither yields a Company the caller must fail with the same generic
@@ -31,11 +32,10 @@ import { isReservedCompanySubdomain } from "./reserved-subdomains.js";
  * reserved host returns `undefined` WITHOUT consulting the fallback.
  */
 type HostOutcome =
-  | { kind: "company"; subdomain: string }
-  | { kind: "reserved" }
-  | { kind: "unknown" };
+  { kind: "company"; subdomain: string } | { kind: "reserved" } | { kind: "unknown" };
 @Injectable()
 export class CompanyHostResolver {
+  private static readonly applicationLabelSuffix = "app";
   private readonly hostSuffix: string | undefined;
   private readonly developmentSubdomain: string | undefined;
 
@@ -78,9 +78,16 @@ export class CompanyHostResolver {
       // Only a single leading label identifies a tenant. `a.b.example.com` is
       // ambiguous and must not silently resolve to `a`.
       if (label.length === 0 || label.includes(".")) return { kind: "unknown" };
-      return isReservedCompanySubdomain(label)
+      if (!label.endsWith(CompanyHostResolver.applicationLabelSuffix)) {
+        return { kind: "unknown" };
+      }
+      const subdomain = label.slice(0, -CompanyHostResolver.applicationLabelSuffix.length);
+      if (subdomain.length === 0 || !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u.test(subdomain)) {
+        return { kind: "unknown" };
+      }
+      return isReservedCompanySubdomain(subdomain)
         ? { kind: "reserved" }
-        : { kind: "company", subdomain: label };
+        : { kind: "company", subdomain };
     }
 
     // No configured suffix, or a host that does not sit under it. A tenant can

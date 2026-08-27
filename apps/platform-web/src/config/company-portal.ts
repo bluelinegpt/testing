@@ -2,8 +2,8 @@
  * The public portal address for a Company subdomain, derived from where the
  * Platform itself is running rather than from configuration:
  *
- *   platform.tawseelhub.com                 ->  https://<subdomain>.tawseelhub.com
- *   bluelinegpt-platform-test.onrender.com  ->  https://<subdomain>.tawseelhub.com
+ *   platform.tawseelhub.com                 ->  https://<subdomain>app.tawseelhub.com
+ *   bluelinegpt-platform-test.onrender.com  ->  https://<subdomain>app.tawseelhub.com
  *   localhost:5176 (dev)                    ->  http://localhost:5177
  *
  * Deriving from the current host keeps the link correct on any future domain
@@ -13,10 +13,10 @@
 export function companyPortalUrl(subdomain: string): string {
   const { hostname, protocol } = globalThis.location;
   if (hostname.startsWith("platform.")) {
-    return `${protocol}//${subdomain}.${hostname.slice("platform.".length)}`;
+    return `${protocol}//${subdomain}app.${hostname.slice("platform.".length)}`;
   }
   if (hostname.endsWith(".onrender.com")) {
-    return `https://${subdomain}.tawseelhub.com`;
+    return `https://${subdomain}app.tawseelhub.com`;
   }
   return "http://localhost:5177";
 }

@@ -76,8 +76,8 @@ export interface AppConfiguration {
   };
   tenancy: {
     /**
-     * Host suffix the Company subdomain is taken from, e.g. "bluelinegpt.com"
-     * resolves `acme.bluelinegpt.com` to the Company subdomain `acme`.
+     * Host suffix the Company app label is taken from. For example,
+     * `acmeapp.tawseelhub.com` resolves to Company subdomain `acme`.
      */
     hostSuffix: string | undefined;
     /**
@@ -222,9 +222,7 @@ function parseFileStorageProvider(value: string | undefined): FileStorageProvide
 /** Required, all four, only when FILE_STORAGE_PROVIDER=r2 -- fails startup
  *  immediately rather than booting into a File Storage that will throw on
  *  every request. Undefined (not read) when the provider is "local". */
-function parseFileStorageR2(
-  provider: FileStorageProvider,
-): AppConfiguration["files"]["r2"] {
+function parseFileStorageR2(provider: FileStorageProvider): AppConfiguration["files"]["r2"] {
   if (provider !== "r2") return undefined;
   const required = (name: string, value: string | undefined): string => {
     const trimmed = value?.trim();
@@ -286,7 +284,8 @@ export function configuration(): AppConfiguration {
   return {
     companyDeletion: {
       backupRoot: parseFileStorageLocalRoot(
-        process.env.COMPANY_DELETION_BACKUP_ROOT ?? resolve(process.cwd(), ".backups/company-deletion"),
+        process.env.COMPANY_DELETION_BACKUP_ROOT ??
+          resolve(process.cwd(), ".backups/company-deletion"),
         environment,
       ),
       timeoutMs: parseInteger(
@@ -375,7 +374,8 @@ export function configuration(): AppConfiguration {
       appSecret: process.env.WHATSAPP_APP_SECRET?.trim() || undefined,
       phoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID?.trim() || undefined,
       verifyToken: process.env.WHATSAPP_VERIFY_TOKEN?.trim() || undefined,
-      graphApiBaseUrl: process.env.WHATSAPP_GRAPH_API_BASE_URL?.trim() || "https://graph.facebook.com/v20.0",
+      graphApiBaseUrl:
+        process.env.WHATSAPP_GRAPH_API_BASE_URL?.trim() || "https://graph.facebook.com/v20.0",
     },
   };
 }

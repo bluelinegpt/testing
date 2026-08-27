@@ -66,16 +66,16 @@ describe("reserved Company subdomains", () => {
 
 describe("Company host resolution", () => {
   it("resolves an ordinary tenant host to its Company subdomain", () => {
-    const resolver = resolverFor({ hostSuffix: "bluelinegpt.com" });
-    expect(resolver.resolve("acme.bluelinegpt.com")).toBe("acme");
-    expect(resolver.resolve("acme.bluelinegpt.com:443")).toBe("acme");
-    expect(resolver.resolve("ACME.BlueLineGPT.com")).toBe("acme");
+    const resolver = resolverFor({ hostSuffix: "tawseelhub.com" });
+    expect(resolver.resolve("acmeapp.tawseelhub.com")).toBe("acme");
+    expect(resolver.resolve("acmeapp.tawseelhub.com:443")).toBe("acme");
+    expect(resolver.resolve("ACMEAPP.Tawseelhub.com")).toBe("acme");
   });
 
   it("refuses to read the Platform host as a Company", () => {
-    const resolver = resolverFor({ hostSuffix: "bluelinegpt.com" });
-    expect(resolver.resolve("platform.bluelinegpt.com")).toBeUndefined();
-    expect(resolver.isReservedHost("platform.bluelinegpt.com")).toBe(true);
+    const resolver = resolverFor({ hostSuffix: "tawseelhub.com" });
+    expect(resolver.resolve("platformapp.tawseelhub.com")).toBeUndefined();
+    expect(resolver.isReservedHost("platformapp.tawseelhub.com")).toBe(true);
   });
 
   /**
@@ -86,12 +86,12 @@ describe("Company host resolution", () => {
    */
   it("does not fall back to the development Company on a reserved host", () => {
     const resolver = resolverFor({
-      hostSuffix: "bluelinegpt.com",
+      hostSuffix: "tawseelhub.com",
       developmentCompanySubdomain: "dev",
     });
-    expect(resolver.resolve("platform.bluelinegpt.com")).toBeUndefined();
-    expect(resolver.resolve("www.bluelinegpt.com")).toBeUndefined();
-    expect(resolver.resolve("acme.bluelinegpt.com")).toBe("acme");
+    expect(resolver.resolve("platformapp.tawseelhub.com")).toBeUndefined();
+    expect(resolver.resolve("wwwapp.tawseelhub.com")).toBeUndefined();
+    expect(resolver.resolve("acmeapp.tawseelhub.com")).toBe("acme");
     expect(resolver.resolve("localhost")).toBe("dev");
   });
 
@@ -103,18 +103,18 @@ describe("Company host resolution", () => {
   });
 
   it("still refuses an ambiguous multi-label host", () => {
-    const resolver = resolverFor({ hostSuffix: "bluelinegpt.com" });
-    expect(resolver.resolve("a.b.bluelinegpt.com")).toBeUndefined();
+    const resolver = resolverFor({ hostSuffix: "tawseelhub.com" });
+    expect(resolver.resolve("a.b.tawseelhub.com")).toBeUndefined();
   });
 
   it("still refuses a host outside the configured suffix", () => {
-    const resolver = resolverFor({ hostSuffix: "bluelinegpt.com" });
+    const resolver = resolverFor({ hostSuffix: "tawseelhub.com" });
     expect(resolver.resolve("acme.example.com")).toBeUndefined();
   });
 
   it("reports an ordinary tenant host as not reserved", () => {
-    const resolver = resolverFor({ hostSuffix: "bluelinegpt.com" });
-    expect(resolver.isReservedHost("acme.bluelinegpt.com")).toBe(false);
+    const resolver = resolverFor({ hostSuffix: "tawseelhub.com" });
+    expect(resolver.isReservedHost("acmeapp.tawseelhub.com")).toBe(false);
     expect(resolver.isReservedHost("localhost")).toBe(false);
   });
 });
