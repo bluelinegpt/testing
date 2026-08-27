@@ -11,7 +11,7 @@
       "localCommitDate": "2026-08-27",
       "lastChangeDescription": "feat: storefront checkout/cart, Driver Cash Reconciliation approved changes, error redaction, and accumulated fixes",
       "lastChangeBy": "human",
-      "confirmedLiveCommit": "88e4195",
+      "confirmedLiveCommit": "19b9e85",
       "confirmedLiveAt": "2026-08-27"
     },
     {
@@ -19,26 +19,26 @@
       "displayName": "Main app",
       "path": "apps/web",
       "renderService": "bluelinegpt-web-test",
-      "status": "pushed_awaiting_confirmation",
+      "status": "confirmed_live",
       "localCommit": "7659972",
       "localCommitDate": "2026-08-27",
       "lastChangeDescription": "feat: storefront checkout/cart, Driver Cash Reconciliation approved changes, error redaction, and accumulated fixes",
       "lastChangeBy": "human",
-      "confirmedLiveCommit": "27e356a",
-      "confirmedLiveAt": "2026-08-14"
+      "confirmedLiveCommit": "19b9e85",
+      "confirmedLiveAt": "2026-08-27"
     },
     {
       "id": "platform-web",
       "displayName": "Platform admin",
       "path": "apps/platform-web",
       "renderService": "bluelinegpt-platform-test",
-      "status": "pushed_awaiting_confirmation",
+      "status": "confirmed_live",
       "localCommit": "7659972",
       "localCommitDate": "2026-08-27",
       "lastChangeDescription": "feat: storefront checkout/cart, Driver Cash Reconciliation approved changes, error redaction, and accumulated fixes",
       "lastChangeBy": "human",
-      "confirmedLiveCommit": "27e356a",
-      "confirmedLiveAt": "2026-08-14"
+      "confirmedLiveCommit": "19b9e85",
+      "confirmedLiveAt": "2026-08-27"
     },
     {
       "id": "store",
