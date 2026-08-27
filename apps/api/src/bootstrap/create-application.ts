@@ -30,7 +30,22 @@ export async function createApplication(): Promise<BluelineApplication> {
   app.useLogger(logger);
   app.enableShutdownHooks();
   app.setGlobalPrefix("api/v1");
-  app.use(helmet());
+  app.use(
+    helmet({
+      // Helmet's default img-src ("'self' data:") blocks blob: URLs, which
+      // is exactly how the Company logo and other private assets are
+      // displayed: the frontend fetches the bytes through an authenticated
+      // endpoint (they're never a public URL) and renders them via
+      // URL.createObjectURL(blob), producing a blob: URL for the <img> tag.
+      // Every other directive stays at Helmet's default; only img-src widens.
+      contentSecurityPolicy: {
+        directives: {
+          ...helmet.contentSecurityPolicy.getDefaultDirectives(),
+          "img-src": ["'self'", "data:", "blob:"],
+        },
+      },
+    }),
+  );
   app.use(express.json({
     limit: `${config.get("app.requestBodyLimitMb", { infer: true })}mb`,
     verify: (request, _response, buffer) => {
