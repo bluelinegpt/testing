@@ -69,7 +69,11 @@ const contentTypes = new Map([
 function addSecurityHeaders(response) {
   response.setHeader(
     "Content-Security-Policy",
-    `default-src 'self'; connect-src ${connectSources}; img-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'`,
+    // img-src includes blob:, not just 'self' data:: private assets fetched
+    // through an authenticated endpoint are rendered via
+    // URL.createObjectURL(blob) -- see apps/web/serve.mjs's own comment on
+    // this same line for the full explanation (identical setup here).
+    `default-src 'self'; connect-src ${connectSources}; img-src 'self' data: blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'`,
   );
   response.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
   response.setHeader("X-Content-Type-Options", "nosniff");

@@ -65,7 +65,13 @@ const contentTypes = new Map([
 function addSecurityHeaders(response) {
   response.setHeader(
     "Content-Security-Policy",
-    `default-src 'self'; connect-src ${connectSources}; img-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'`,
+    // img-src includes blob:, not just 'self' data:: every private asset
+    // (Company logo, Trader Store product images, website media) is fetched
+    // through an authenticated endpoint and rendered via
+    // URL.createObjectURL(blob) -- there's no public URL for any of these by
+    // design. This is the CSP that actually governs those <img> renders (the
+    // document's own header, not the API's), so it must allow blob: too.
+    `default-src 'self'; connect-src ${connectSources}; img-src 'self' data: blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'`,
   );
   response.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
   response.setHeader("X-Content-Type-Options", "nosniff");
