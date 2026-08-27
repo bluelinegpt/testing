@@ -1,7 +1,9 @@
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
 import { randomUUID } from "node:crypto";
 import { sql, type Kysely } from "kysely";
 
+import type { AppConfiguration } from "../configuration/environment.js";
 import { FileStoragePort } from "../files/file-storage.port.js";
 import { DATABASE } from "../infrastructure/database/database.tokens.js";
 import type { DatabaseSchema } from "../infrastructure/database/database.types.js";
@@ -143,10 +145,15 @@ function isImage(bytes: Uint8Array, declared: string): { ok: true; mediaType: st
 
 @Injectable()
 export class WebsiteCmsService {
+  private readonly storageProvider: string;
+
   public constructor(
     @Inject(DATABASE) private readonly db: Kysely<DatabaseSchema>,
     @Inject(FileStoragePort) private readonly storage: FileStoragePort,
-  ) {}
+    @Inject(ConfigService) config: ConfigService<AppConfiguration, true>,
+  ) {
+    this.storageProvider = config.get("files.provider", { infer: true });
+  }
 
   public async publicBundle(locale = "en") {
     const safeLocale = locale === "ar" ? "ar" : "en";
@@ -464,7 +471,7 @@ export class WebsiteCmsService {
     const mediaToken = randomUUID();
     const key = `website/${mediaToken}.${validation.ext}`;
     await this.storage.storeWebsite(key, file.buffer);
-    const row = (await sql<any>`insert into platform_website_media(storage_provider,storage_key,public_url,original_filename,media_type,size_bytes,alt_text,caption,uploaded_by_account_id) values('local',${key},${`/api/v1/public/website/media/${mediaToken}`},${cleanText(file.originalname) ?? "upload"},${validation.mediaType},${file.size},${cleanText(body.altText)},${cleanText(body.caption)},${actor}::uuid) returning id,public_url as "publicUrl",original_filename as "originalFilename",media_type as "mediaType",size_bytes as "sizeBytes",alt_text as "altText",caption,created_at as "createdAt"`.execute(this.db)).rows[0];
+    const row = (await sql<any>`insert into platform_website_media(storage_provider,storage_key,public_url,original_filename,media_type,size_bytes,alt_text,caption,uploaded_by_account_id) values(${this.storageProvider},${key},${`/api/v1/public/website/media/${mediaToken}`},${cleanText(file.originalname) ?? "upload"},${validation.mediaType},${file.size},${cleanText(body.altText)},${cleanText(body.caption)},${actor}::uuid) returning id,public_url as "publicUrl",original_filename as "originalFilename",media_type as "mediaType",size_bytes as "sizeBytes",alt_text as "altText",caption,created_at as "createdAt"`.execute(this.db)).rows[0];
     await this.revision(actor, "media", row.id, null, "uploaded", { mediaType: validation.mediaType, sizeBytes: file.size });
     return row;
   }

@@ -3,11 +3,12 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
+import type { ConfigService } from "@nestjs/config";
 import { config as loadEnvironment } from "dotenv";
 import { Kysely, PostgresDialect, type Transaction, sql } from "kysely";
 import { Pool } from "pg";
 
-import { configuration } from "../configuration/environment.js";
+import { configuration, type AppConfiguration } from "../configuration/environment.js";
 import {
   commerceStorageKey,
   sanitiseOriginalFilename,
@@ -200,6 +201,9 @@ function buildService(
       ...(input.traderProfileId === undefined ? {} : { profileId: input.traderProfileId }),
     }),
   } as unknown as IdentityContextAccessor;
+  const config = {
+    get: () => "local",
+  } as unknown as ConfigService<AppConfiguration, true>;
   return new CommerceMediaService(
     transaction as unknown as Kysely<DatabaseSchema>,
     new SavepointTransactionManager(transaction) as unknown as KyselyTransactionManager,
@@ -207,6 +211,7 @@ function buildService(
     identities,
     new FileOwnershipService(transaction as unknown as Kysely<DatabaseSchema>),
     storage,
+    config,
   );
 }
 

@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
 
 import { HttpStatus, Inject, Injectable } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
 import { type Kysely, sql } from "kysely";
 
+import type { AppConfiguration } from "../configuration/environment.js";
 import {
   commerceStorageKey,
   extensionFor,
@@ -59,6 +61,8 @@ export interface UploadedBytes {
  */
 @Injectable()
 export class CommerceMediaService {
+  private readonly storageProvider: string;
+
   public constructor(
     @Inject(DATABASE) private readonly database: Kysely<DatabaseSchema>,
     @Inject(KyselyTransactionManager) private readonly transactions: KyselyTransactionManager,
@@ -66,7 +70,10 @@ export class CommerceMediaService {
     @Inject(IdentityContextAccessor) private readonly identities: IdentityContextAccessor,
     @Inject(FileOwnershipService) private readonly ownership: FileOwnershipService,
     @Inject(FileStoragePort) private readonly storage: FileStoragePort,
-  ) {}
+    @Inject(ConfigService) config: ConfigService<AppConfiguration, true>,
+  ) {
+    this.storageProvider = config.get("files.provider", { infer: true });
+  }
 
   /** Store logo or cover. Returns the new file id. */
   public async uploadStoreBranding(
@@ -222,7 +229,7 @@ export class CommerceMediaService {
         scanStatus: "clean" as const,
         sizeBytes: bytes.length,
         storageKey,
-        storageProvider: "local",
+        storageProvider: this.storageProvider,
         uploadedByAccountId: this.tenants.current().identityId,
       },
     };

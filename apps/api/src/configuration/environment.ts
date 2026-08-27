@@ -2,7 +2,7 @@ import { isAbsolute, resolve } from "node:path";
 
 const environments = ["development", "test", "production"] as const;
 type ApplicationEnvironment = (typeof environments)[number];
-const fileStorageProviders = ["local"] as const;
+const fileStorageProviders = ["local", "r2"] as const;
 type FileStorageProvider = (typeof fileStorageProviders)[number];
 const logLevels = ["fatal", "error", "warn", "info", "debug", "trace", "silent"] as const;
 
@@ -30,14 +30,30 @@ export interface AppConfiguration {
     url: string;
   };
   files: {
-    /** Storage provider for private file objects (currently only "local"). */
+    /** Storage provider for private file objects: "local" or "r2". */
     provider: FileStorageProvider;
     /**
      * Absolute directory that holds privately-stored file bytes. It must live
      * OUTSIDE any web root — nothing serves it statically; logos are streamed
-     * only through an authenticated, Company-scoped endpoint.
+     * only through an authenticated, Company-scoped endpoint. Only read when
+     * provider is "local".
      */
     localRoot: string;
+    /**
+     * Cloudflare R2 (S3-compatible) settings. Only read when provider is
+     * "r2" -- undefined otherwise, so a "local" deployment never needs these
+     * set. R2's own endpoint is derived from accountId
+     * (https://{accountId}.r2.cloudflarestorage.com); region is always
+     * "auto", R2's own convention, not a real AWS region.
+     */
+    r2:
+      | {
+          readonly accountId: string;
+          readonly accessKeyId: string;
+          readonly bucketName: string;
+          readonly secretAccessKey: string;
+        }
+      | undefined;
   };
   push: {
     /**
@@ -203,13 +219,43 @@ function parseFileStorageProvider(value: string | undefined): FileStorageProvide
   return normalized as FileStorageProvider;
 }
 
+/** Required, all four, only when FILE_STORAGE_PROVIDER=r2 -- fails startup
+ *  immediately rather than booting into a File Storage that will throw on
+ *  every request. Undefined (not read) when the provider is "local". */
+function parseFileStorageR2(
+  provider: FileStorageProvider,
+): AppConfiguration["files"]["r2"] {
+  if (provider !== "r2") return undefined;
+  const required = (name: string, value: string | undefined): string => {
+    const trimmed = value?.trim();
+    if (trimmed === undefined || trimmed.length === 0) {
+      throw new Error(`${name} is required when FILE_STORAGE_PROVIDER=r2`);
+    }
+    return trimmed;
+  };
+  return {
+    accountId: required("R2_ACCOUNT_ID", process.env.R2_ACCOUNT_ID),
+    accessKeyId: required("R2_ACCESS_KEY_ID", process.env.R2_ACCESS_KEY_ID),
+    bucketName: required("R2_BUCKET_NAME", process.env.R2_BUCKET_NAME),
+    secretAccessKey: required("R2_SECRET_ACCESS_KEY", process.env.R2_SECRET_ACCESS_KEY),
+  };
+}
+
 function parseFileStorageLocalRoot(
   value: string | undefined,
   environment: ApplicationEnvironment,
+  // Optional and defaulted to "local": the unrelated companyDeletion.backupRoot
+  // reuses this same path-resolution helper and has nothing to do with the
+  // file storage provider, so it always wants the strict production-required
+  // behavior below, same as before this parameter existed.
+  provider: FileStorageProvider = "local",
 ): string {
   const raw = value?.trim();
   if (raw === undefined || raw.length === 0) {
-    if (environment === "production") {
+    // Only required in production when it's actually the active provider --
+    // an r2 deployment has no local disk to fall back to, and shouldn't need
+    // to set an unused path just to satisfy this check.
+    if (environment === "production" && provider === "local") {
       throw new Error("FILE_STORAGE_LOCAL_ROOT is required in production");
     }
     return resolve(process.cwd(), ".file-storage");
@@ -306,10 +352,18 @@ export function configuration(): AppConfiguration {
       ),
       url: parseDatabaseUrl(process.env.DATABASE_URL, environment),
     },
-    files: {
-      localRoot: parseFileStorageLocalRoot(process.env.FILE_STORAGE_LOCAL_ROOT, environment),
-      provider: parseFileStorageProvider(process.env.FILE_STORAGE_PROVIDER),
-    },
+    files: (() => {
+      const provider = parseFileStorageProvider(process.env.FILE_STORAGE_PROVIDER);
+      return {
+        localRoot: parseFileStorageLocalRoot(
+          process.env.FILE_STORAGE_LOCAL_ROOT,
+          environment,
+          provider,
+        ),
+        provider,
+        r2: parseFileStorageR2(provider),
+      };
+    })(),
     push: {
       firebaseServiceAccountJson:
         process.env.FIREBASE_SERVICE_ACCOUNT_JSON?.trim() === ""
