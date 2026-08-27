@@ -145,6 +145,13 @@ export async function up(database: Kysely<MigrationDatabase>): Promise<void> {
            updated_at = now(),
            version = version + 1
      where trader_net_payable < 0;
+
+    -- The update above fires orders_assignment_consistency, a deferred
+    -- constraint trigger on orders (deferrable initially deferred). Kysely
+    -- runs every pending migration in one transaction, so without flushing
+    -- it here, the next migration's ALTER TABLE on orders fails with
+    -- "cannot ALTER TABLE because it has pending trigger events" (55006).
+    set constraints all immediate;
   `.execute(database);
 }
 
