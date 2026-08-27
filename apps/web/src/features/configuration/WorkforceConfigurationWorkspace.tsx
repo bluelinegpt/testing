@@ -683,6 +683,16 @@ function WorkforceForm({
               <span>{t("workforce.role")}</span>
               <select onChange={(event) => setRoleId(event.target.value)} required value={roleId}>
                 <option value="">{t("workforce.selectRole")}</option>
+                {/* An Employee already assigned a Role that has since been
+                    removed (deactivated) keeps that assignment -- roleId still
+                    holds it -- but the now-filtered `roles` list no longer
+                    offers it as an <option>, which would otherwise make the
+                    <select> render with nothing visibly matching `value`, even
+                    though the real selection is intact. Show it explicitly so
+                    the form never looks blank for a value it actually holds. */}
+                {roleId !== "" && !roles.some((role) => String(role.id) === roleId) ? (
+                  <option value={roleId}>{t("workforce.inactiveRoleFallback")}</option>
+                ) : null}
                 {roles.map((role) => (
                   <option key={String(role.id)} value={String(role.id)}>
                     {String(role.nameEn ?? role.name_en ?? role.name)}
@@ -898,12 +908,22 @@ function WorkforceForm({
         <AddRoleDialog
           api={api}
           onClose={() => setAddRoleOpen(false)}
+          onRoleRemoved={(removedId) => {
+            setRoles((current) => current.filter((role) => String(role.id) !== removedId));
+            // The role removed from THIS employee's own picker while its form
+            // is still open, if it was the one selected -- clearing it here
+            // (rather than leaving a now-invisible selection) makes the
+            // required-field validation on submit catch it, instead of
+            // silently resubmitting a role no longer offered.
+            if (roleId === removedId) setRoleId("");
+          }}
           onSaved={(role) => {
             setRoles((current) => [...current, role]);
             setRoleId(String(role.id));
             if (!role.isDriverRole) setEngagement("employee");
             setAddRoleOpen(false);
           }}
+          roles={roles}
         />
       ) : null}
     </Modal>
@@ -1070,21 +1090,49 @@ function EarningDate({
   );
 }
 
-/** Inline creation of a configurable Employee role from the Employee form. */
+/**
+ * Inline creation of a configurable Employee role from the Employee form,
+ * plus removal of an existing one. Removal is a soft deactivate
+ * (employee_roles.is_active), never a hard delete: it only drops the role
+ * from this list and the Employee form's picker going forward. Any Employee
+ * already on that role keeps their assignment untouched -- see
+ * setEmployeeRoleStatus's own comment for why.
+ */
 function AddRoleDialog({
   api,
   onClose,
+  onRoleRemoved,
   onSaved,
+  roles,
 }: {
   api: ApiClient;
   onClose: () => void;
+  onRoleRemoved: (roleId: string) => void;
   onSaved: (role: Detail & { id: string; isDriverRole?: boolean }) => void;
+  roles: readonly Detail[];
 }) {
   const { t } = useTranslation();
   const [name, setName] = useState("");
   const [isDriverRole, setIsDriverRole] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string>();
+  const [removingId, setRemovingId] = useState<string>();
+  const [removeError, setRemoveError] = useState<string>();
+  const removeRole = async (role: Detail) => {
+    const roleId = String(role.id);
+    const label = String(role.nameEn ?? role.name_en ?? role.name ?? "");
+    if (!window.confirm(t("workforce.removeRoleConfirm", { role: label }))) return;
+    setRemoveError(undefined);
+    setRemovingId(roleId);
+    try {
+      await api.patch(`configuration/employee-roles/${roleId}/status`, { isActive: false });
+      onRoleRemoved(roleId);
+    } catch {
+      setRemoveError(t("workforce.roleDeactivateFailed"));
+    } finally {
+      setRemovingId(undefined);
+    }
+  };
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setSaving(true);
@@ -1106,9 +1154,35 @@ function AddRoleDialog({
       className="modal-small"
       closeLabel={t("common.close")}
       onRequestClose={onClose}
-      title={t("workforce.addRole")}
+      title={t("workforce.manageRoles")}
       titleId="add-role-title"
     >
+      <section className="workforce-roles-list">
+        <h3>{t("workforce.existingRoles")}</h3>
+        {removeError === undefined ? null : <div className="alert alert-error">{removeError}</div>}
+        {roles.length === 0 ? (
+          <p className="field-hint">{t("workforce.noRolesYet")}</p>
+        ) : (
+          <ul className="workforce-roles-list__items">
+            {roles.map((role) => {
+              const roleId = String(role.id);
+              return (
+                <li key={roleId}>
+                  <span>{String(role.nameEn ?? role.name_en ?? role.name)}</span>
+                  <button
+                    className="button button-link"
+                    disabled={removingId === roleId}
+                    onClick={() => void removeRole(role)}
+                    type="button"
+                  >
+                    {removingId === roleId ? t("common.working") : t("workforce.removeRole")}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
       <form className="form-grid-single" onSubmit={(event) => void submit(event)}>
         {error === undefined ? null : <div className="alert alert-error">{error}</div>}
         <label className="field required-field">

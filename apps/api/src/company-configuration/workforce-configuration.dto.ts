@@ -183,6 +183,16 @@ export class CreateEmployeeRoleDto {
   public readonly isDriverRole?: boolean;
 }
 
+// A Role is a lookup/reference value, not a person -- unlike
+// ChangeWorkforceStatusDto (Employee/Driver), deactivating one needs no
+// reason. Deactivation only removes it from the picker for new assignments
+// (employeeRoles() filters is_active); any Employee already on this Role
+// keeps it, unaffected.
+export class ChangeEmployeeRoleStatusDto {
+  @IsBoolean()
+  public readonly isActive!: boolean;
+}
+
 /**
  * The unified Driver form. There is no separate Employee entity in the UI:
  *   driverType "employee"   -> salaried, with optional allowances (a backing

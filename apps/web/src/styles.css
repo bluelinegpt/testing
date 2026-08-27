@@ -5203,6 +5203,35 @@ tr.row-highlighted {
   width: min(1080px, calc(100vw - 32px));
 }
 
+.workforce-roles-list {
+  border-bottom: 1px solid var(--border-color, #e2e2e2);
+  margin-bottom: 16px;
+  padding-bottom: 16px;
+}
+
+.workforce-roles-list h3 {
+  font-size: 14px;
+  margin: 0 0 8px;
+}
+
+.workforce-roles-list__items {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  list-style: none;
+  margin: 0;
+  max-height: 200px;
+  overflow-y: auto;
+  padding: 0;
+}
+
+.workforce-roles-list__items li {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 0;
+}
+
 .trader-filters {
   grid-template-columns: minmax(240px, 2fr) repeat(2, minmax(160px, 1fr));
 }

@@ -669,6 +669,38 @@ export class WorkforceConfigurationService {
     }
   }
 
+  // Deactivating a Role only removes it from employeeRoles() -- the picker
+  // for new/changed assignments. It never touches any Employee already on
+  // this Role: their employee_role_id keeps pointing at the same row, which
+  // still exists, just excluded from is_active-filtered lists. Reversible by
+  // reactivating (isActive: true), unlike a hard delete.
+  public async setEmployeeRoleStatus(
+    roleId: string,
+    isActive: boolean,
+    correlationId: string,
+  ): Promise<void> {
+    const { companyId } = this.tenants.current();
+    const actorId = this.identities.current().identityId;
+    const result = await sql<{ id: string; nameEn: string }>`
+      update employee_roles
+         set is_active=${isActive}, updated_at=now(), version=version+1
+       where id=${roleId}::uuid and company_id=${companyId}::uuid
+      returning id, name_en as "nameEn"
+    `.execute(this.database);
+    const role = result.rows[0];
+    if (role === undefined)
+      throw new ApplicationException("role_not_found", "Role not found", HttpStatus.NOT_FOUND);
+    await this.audit(this.database, {
+      action: isActive ? "employee_role.reactivate" : "employee_role.deactivate",
+      actorId,
+      after: { isActive, name: role.nameEn },
+      companyId,
+      correlationId,
+      subjectId: role.id,
+      subjectType: "employee_role",
+    });
+  }
+
   public async createDriver(
     input: SaveDriverDto,
     correlationId: string,

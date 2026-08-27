@@ -3,6 +3,7 @@ import "reflect-metadata";
 import { validate } from "class-validator";
 
 import {
+  ChangeEmployeeRoleStatusDto,
   CreateCommissionRuleDto,
   EmployeeAllowanceDto,
   SaveCollectionEarningRuleDto,
@@ -11,6 +12,23 @@ import {
 } from "./workforce-configuration.dto.js";
 
 describe("workforce configuration DTOs", () => {
+  it("accepts a Role status change with isActive true or false", async () => {
+    for (const isActive of [true, false]) {
+      const input = Object.assign(new ChangeEmployeeRoleStatusDto(), { isActive });
+      await expect(validate(input)).resolves.toEqual([]);
+    }
+  });
+
+  it("rejects a Role status change missing isActive or given a non-boolean", async () => {
+    const missing = await validate(Object.assign(new ChangeEmployeeRoleStatusDto(), {}));
+    expect(missing.map((error) => error.property)).toEqual(["isActive"]);
+
+    const wrongType = await validate(
+      Object.assign(new ChangeEmployeeRoleStatusDto(), { isActive: "yes" }),
+    );
+    expect(wrongType.map((error) => error.property)).toEqual(["isActive"]);
+  });
+
   it("accepts an Employee with a role, salary and four allowances", async () => {
     const input = Object.assign(new SaveEmployeeDto(), {
       allowances: Array.from({ length: 4 }, (_, index) =>

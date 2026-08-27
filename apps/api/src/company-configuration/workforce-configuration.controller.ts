@@ -35,6 +35,7 @@ import { WorkforceConfigurationService } from "./workforce-configuration.service
 // Runtime classes are required by Nest validation metadata.
 // eslint-disable-next-line @typescript-eslint/consistent-type-imports
 import {
+  ChangeEmployeeRoleStatusDto,
   ChangeWorkforceStatusDto,
   ConfirmOutsourcedPaymentDto,
   CreateAllowanceTypeDto,
@@ -267,6 +268,15 @@ export class WorkforceConfigurationController {
     @Req() request: Request,
   ): Promise<Record<string, unknown>> {
     return this.workforce.createEmployeeRole(input, this.correlationId(request));
+  }
+
+  @Patch("employee-roles/:roleId/status")
+  public employeeRoleStatus(
+    @Param("roleId", new ParseUUIDPipe()) roleId: string,
+    @Body() input: ChangeEmployeeRoleStatusDto,
+    @Req() request: Request,
+  ): Promise<void> {
+    return this.workforce.setEmployeeRoleStatus(roleId, input.isActive, this.correlationId(request));
   }
 
   private correlationId(request: Request): string {
