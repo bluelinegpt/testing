@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { vi } from "vitest";
 
-import type { ApiClient } from "../../api/api-client.js";
+import { ApiError, type ApiClient } from "../../api/api-client.js";
 import { i18nInstance } from "../../localization/i18n.js";
 import { WorkforceConfigurationWorkspace } from "./WorkforceConfigurationWorkspace.js";
 
@@ -167,5 +167,46 @@ describe("WorkforceConfigurationWorkspace", () => {
     fireEvent.click(screen.getByLabelText("Edit"));
     await screen.findByDisplayValue("Aisha");
     expect(screen.queryByText("Driver Variable Earnings")).not.toBeInTheDocument();
+  });
+
+  it("shows the backend's own validation message instead of a generic failure banner", async () => {
+    const api = {
+      get: vi.fn(async (path: string) => {
+        if (path === "configuration/employee-roles")
+          return [{ id: "staff-role", isDriverRole: false, name: "Staff" }];
+        if (path === "configuration/allowance-types") return [];
+        return { items: [], page: 1, pageSize: 25, total: 0 };
+      }),
+      patch: vi.fn(),
+      post: vi.fn().mockRejectedValue(
+        new ApiError(
+          "Bad Request",
+          "validation_error",
+          400,
+          ["Enter a UAE mobile number, for example 0506468442 or 9715XXXXXXXX."],
+        ),
+      ),
+    };
+    render(
+      <WorkforceConfigurationWorkspace
+        api={api as unknown as ApiClient}
+        kind="employees"
+        onNavigate={vi.fn()}
+      />,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Create employee" }));
+    // The Role <select>'s options come from an async fetch (employee-roles);
+    // changing its value before that resolves leaves roleId unset, and the
+    // form shows its own "Select a role" error instead of ever reaching the
+    // mocked api.post this test is actually exercising.
+    await screen.findByRole("option", { name: "Staff" });
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Ahmed" } });
+    fireEvent.change(screen.getByLabelText("Role"), { target: { value: "staff-role" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(
+      await screen.findByText("Enter a UAE mobile number, for example 0506468442 or 9715XXXXXXXX."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("The changes could not be saved.")).not.toBeInTheDocument();
   });
 });

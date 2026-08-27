@@ -478,7 +478,7 @@ function WorkforceForm({
     // which made a rejected Save look like a Save that did nothing.
     const showFormError = (message: string) => {
       setError(message);
-      formElement.scrollIntoView({ behavior: "smooth", block: "start" });
+      formElement.scrollIntoView?.({ behavior: "smooth", block: "start" });
     };
     try {
       if (mode === "edit" && employeeStatusChanged) {
@@ -633,7 +633,19 @@ function WorkforceForm({
             ? t("workforce.salaryEffectiveDateConflict")
             : caught instanceof ApiError && caught.code === "driver_employee_mobile_required"
               ? t("workforce.driverMobileRequired")
-              : t("common.saveFailed")),
+              : // A plain missing/invalid required field (e.g. mobile number
+                // left empty) reaches here as validation_error, not one of the
+                // specific business-rule codes above. Its `details` array
+                // already carries the exact class-validator message (see each
+                // field's own @Matches/@IsString message in the DTO) -- far
+                // more useful than the generic fallback, so show it directly
+                // instead of a message that names no field at all.
+                caught instanceof ApiError &&
+                  caught.code === "validation_error" &&
+                  caught.details !== undefined &&
+                  caught.details.length > 0
+                ? caught.details.join(" ")
+                : t("common.saveFailed")),
       );
     } finally {
       setSaving(false);
