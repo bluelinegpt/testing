@@ -5,26 +5,30 @@ import { resolve } from "node:path";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vitest/config";
 
-// The short commit SHA of the last commit that actually touched THIS app's
-// own folder, baked in at build time so a screen can show it (see
-// VersionBadge) -- the one reliable way to tell "am I looking at local or the
-// Render deploy, and which commit is it actually running" without trusting a
-// deploy dashboard that can lag the real build.
+// The short commit SHA of HEAD, baked in at build time so a screen can show
+// it (see VersionBadge) -- the one reliable way to tell "am I looking at
+// local or the Render deploy, and which commit is it actually running"
+// without trusting a deploy dashboard that can lag the real build.
 //
-// Deliberately `git log -- .`, not `git rev-parse HEAD`: this is a monorepo,
-// so repo-wide HEAD is the same value for every app regardless of which app's
-// code actually changed -- a commit that only touched apps/api would still
-// make apps/web's badge change, which is exactly the discrepancy this fixes.
-// Must stay identical to Documentation/deployment-registry.json's own
-// per-app commit (see scripts/deployment-registry.mjs's currentCommitInfo),
-// or the badge and the Deployment Registry screen disagree on what "this
-// app's version" means.
+// Deliberately plain `git rev-parse`, not `git log -- .` scoped to this
+// app's folder: the scoped form depends on full git history being available
+// to walk backward through, which breaks under a shallow clone (Render's
+// build environment) -- it silently falls back to reporting raw HEAD there
+// regardless of the path filter, while a full local checkout correctly
+// narrows to this app's own last-touching commit. That mismatch is exactly
+// what made local and Render disagree. Plain HEAD has no history dependency,
+// so it reports the same value everywhere, unconditionally -- the trade-off
+// is every app's badge changes on every commit, even ones that never
+// touched this app's folder. Must stay identical to how
+// Documentation/deployment-registry.json's own commit is computed (see
+// scripts/deployment-registry.mjs's currentCommitInfo), or the badge and the
+// Deployment Registry screen disagree on what "this app's version" means.
 //
 // Falls back to "dev" outside a git checkout (e.g. a stripped Docker build
 // context) rather than failing the build over a cosmetic label.
 function commitSha(): string {
   try {
-    return execSync("git log -1 --format=%h -- .", { cwd: __dirname }).toString().trim() || "dev";
+    return execSync("git rev-parse --short HEAD", { cwd: __dirname }).toString().trim() || "dev";
   } catch {
     return "dev";
   }

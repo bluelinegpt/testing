@@ -5,15 +5,21 @@ import { resolve } from "node:path";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vitest/config";
 
-// The short commit SHA of the last commit that actually touched THIS app's
-// own folder -- not repo-wide HEAD. This is a monorepo: HEAD is the same
-// value for every app regardless of which app's code actually changed, which
-// would make this badge disagree with the Deployment Registry screen's own
-// per-app commit (Documentation/deployment-registry.json, kept by
-// scripts/deployment-registry.mjs). The two must stay computed the same way.
+// The short commit SHA of HEAD -- deliberately plain `git rev-parse`, not
+// `git log -- .` scoped to this app's own folder. The scoped form needs full
+// git history to walk backward through a path filter, which breaks under a
+// shallow clone (Render's build environment): it silently falls back to
+// reporting raw HEAD there regardless of the path filter, while a full local
+// checkout correctly narrows to this app's own last-touching commit -- that
+// mismatch is exactly what made local and Render disagree. Plain HEAD has no
+// history dependency, so it reports the same value everywhere,
+// unconditionally. Must stay computed the same way as
+// Documentation/deployment-registry.json's own per-app commit
+// (scripts/deployment-registry.mjs), or the badge and the Deployment
+// Registry screen disagree on what "this app's version" means.
 function commitSha(): string {
   try {
-    return execSync("git log -1 --format=%h -- .", { cwd: __dirname }).toString().trim() || "dev";
+    return execSync("git rev-parse --short HEAD", { cwd: __dirname }).toString().trim() || "dev";
   } catch {
     return "dev";
   }

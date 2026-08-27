@@ -41,13 +41,21 @@ function findApp(registry, appId) {
   return app;
 }
 
-// Reads the real, current state of an app's path -- never hand-typed, so it
-// can't silently drift from what actually changed.
+// Reads HEAD's own commit info -- never hand-typed, so it can't silently
+// drift from what actually changed. Deliberately plain HEAD, not scoped to
+// appPath: markNeedsDeploy only ever calls this for an app that touchedApps()
+// already confirmed was changed by the current commit, so HEAD's own
+// subject/body/date are already correct for that app in the normal
+// hook-driven flow -- and plain HEAD is the only form that also matches what
+// each app's own vite.config.ts bakes into its build-time version badge
+// (which cannot afford a path-scoped git log: that depends on full history,
+// which a shallow clone -- Render's build environment -- doesn't have).
 function currentCommitInfo(appPath) {
-  const sha = git(["log", "-1", "--format=%h", "--", appPath]);
-  const date = git(["log", "-1", "--format=%ad", "--date=short", "--", appPath]);
-  const subject = git(["log", "-1", "--format=%s", "--", appPath]);
-  const body = git(["log", "-1", "--format=%b", "--", appPath]);
+  void appPath;
+  const sha = git(["rev-parse", "--short", "HEAD"]);
+  const date = git(["log", "-1", "--format=%ad", "--date=short"]);
+  const subject = git(["log", "-1", "--format=%s"]);
+  const body = git(["log", "-1", "--format=%b"]);
   return { sha, date, subject, body };
 }
 
