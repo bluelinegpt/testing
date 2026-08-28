@@ -76,7 +76,8 @@ describe("permanent Company deletion manifest", () => {
     // 139 -> 149: the 2026-08-20 review classified Commerce Integration,
     // Customer Quote, Collect Order earning and Order Serial History tables
     // added after the previous manifest review.
-    expect(COMPANY_DELETION_DIRECT_TABLES.size).toBe(149);
+    // 151 -> 152: Prompt 6 added Company-scoped public website Agent conversations.
+    expect(COMPANY_DELETION_DIRECT_TABLES.size).toBe(153);
     expect(COMPANY_DELETION_MANIFEST_HASH).toMatch(/^[a-f0-9]{64}$/);
   });
 

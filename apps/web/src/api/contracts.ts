@@ -596,12 +596,9 @@ export interface OperationsTrackingLink {
 }
 
 export interface PublicOrderTracking {
-  readonly areaName: string;
-  readonly assignedDriverName: string | null;
-  readonly companyName: string;
-  readonly customerName: string;
   readonly deliveredAt: string | null;
   readonly deliveryStatus: string;
+  readonly deliveryStatusLabel: string;
   readonly lastUpdatedAt: string;
   readonly orderNumber: string;
 }

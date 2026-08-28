@@ -88,6 +88,7 @@ describe("Platform permission catalogue", () => {
       "platform.companies.manage",
       "platform.companies.read",
       "platform.companies.reset",
+      "platform.company_websites.manage",
       "platform.customer_marketplace.manage",
       "platform.customer_quotes.manage",
       "platform.customer_quotes.read",
@@ -153,7 +154,8 @@ describe("Platform permission catalogue", () => {
     const websiteCmsMigration = readFileSync(resolve(process.cwd(), "../../database/migrations/20260905000000_controlled_website_cms.ts"), "utf8");
     const storeOrderConversionMigration = readFileSync(resolve(process.cwd(), "../../database/migrations/20260936000000_store_order_conversion_permission.ts"), "utf8");
     const agentWhatsappMigration = readFileSync(resolve(process.cwd(), "../../database/migrations/20260906000000_agent_whatsapp_channel_integration.ts"), "utf8");
-    const migrations = foundationMigration + deletionMigration + errorReportsMigration + integrityMigration + resetMigration + leadsMigration + traderApplicationsMigration + customerQuotesMigration + blogMigration + agentMigration + websiteCmsMigration + storeOrderConversionMigration + agentWhatsappMigration;
+    const companyWebsiteMigration = readFileSync(resolve(process.cwd(), "../../database/migrations/20260938000000_company_website_foundation.ts"), "utf8");
+    const migrations = foundationMigration + deletionMigration + errorReportsMigration + integrityMigration + resetMigration + leadsMigration + traderApplicationsMigration + customerQuotesMigration + blogMigration + agentMigration + websiteCmsMigration + storeOrderConversionMigration + agentWhatsappMigration + companyWebsiteMigration;
     for (const permission of PLATFORM_PERMISSIONS) expect(migrations).toContain(`'${permission.code}'`);
     expect(migrations).toContain(`'${PLATFORM_SUPER_ADMIN_ROLE_CODE}'`);
     // Idempotent on an environment that has already been migrated.

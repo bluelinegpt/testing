@@ -5,7 +5,7 @@ const baseState = { slots: {}, audience: "unknown" as const };
 
 describe("Tawseelhub conversation frame", () => {
   it("keeps bare topics informational instead of starting workflows", () => {
-    for (const message of ["traders", "pricing", "driver management", "التجار", "إدارة السائقين", "السعر"]) {
+    for (const message of ["traders", "pricing", "driver management", "tracking", "track", "التجار", "إدارة السائقين", "السعر", "تتبع"]) {
       const frame = decideNextFrame({ message, state: baseState });
       expect(isBareInformationalTopic(message)).toBe(true);
       expect(frame.mode).toBe("conversation");
@@ -26,6 +26,28 @@ describe("Tawseelhub conversation frame", () => {
     expect(frame.decision).toBe("explicit_workflow_start");
     expect(frame.workflow).toBe("trader_registration");
     expect(agentIntentFromWorkflow(frame.workflow)).toBe("trader");
+  });
+
+  it("starts shipment tracking only on an explicit action, never on the bare topic", () => {
+    expect(isExplicitWorkflowStart("Track my shipment")).toBe("shipment_tracking");
+    expect(isExplicitWorkflowStart("track my order")).toBe("shipment_tracking");
+    expect(isExplicitWorkflowStart("Where is my package?")).toBe("shipment_tracking");
+    expect(isExplicitWorkflowStart("تتبع شحنتي")).toBe("shipment_tracking");
+    expect(isExplicitWorkflowStart("أريد أعرف حالة شحنتي")).toBe("shipment_tracking");
+    // Bare topic words never start it.
+    expect(isExplicitWorkflowStart("tracking")).toBeUndefined();
+    expect(isExplicitWorkflowStart("تتبع")).toBeUndefined();
+    // Distinct from a Trader requesting a brand-new delivery quote.
+    expect(isExplicitWorkflowStart("I want a delivery quote")).toBe("shipment_quote");
+
+    const frame = decideNextFrame({ message: "Track my shipment", state: baseState });
+    expect(frame.decision).toBe("explicit_workflow_start");
+    expect(frame.workflow).toBe("shipment_tracking");
+    expect(agentIntentFromWorkflow(frame.workflow)).toBe("shipment_tracking");
+
+    const bareTopic = decideNextFrame({ message: "tracking", state: baseState });
+    expect(bareTopic.decision).toBe("bare_topic_information");
+    expect(bareTopic.workflow).toBe("none");
   });
 
   it("does not let collected identity turn explanation into a workflow", () => {
@@ -65,6 +87,12 @@ describe("Tawseelhub conversation frame", () => {
     expect(frame.workflow).toBe("shipment_quote");
     expect(frame.workflowState).toBe("paused");
     expect(frame.mode).toBe("conversation");
+  });
+
+  it("blocks a request for the customer's own mobile number after tracking is verified", () => {
+    for (const message of ["what's the customer's mobile?", "give me the customer's phone number", "رقم هاتف العميل"]) {
+      expect(isPrivateInformationRequest(message)).toBe(true);
+    }
   });
 
   it("blocks private company, trader, customer, commission and secret requests", () => {

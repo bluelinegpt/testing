@@ -21,6 +21,7 @@ import type { DatabaseSchema } from "../infrastructure/database/database.types.j
 import { KyselyTransactionManager } from "../infrastructure/database/transaction-manager.js";
 import { ApplicationException } from "../presentation/errors/application.exception.js";
 import { normalizeReferenceTerm, unifiedOrderSearchPredicate } from "./order-search.js";
+import { mapPublicTrackingStatus } from "./public-tracking-status.js";
 import { traderCommerceOrderScopePairs } from "./trader-commerce-order-scope.js";
 import { mobileComparisonKey, normalizeUaeMobile } from "../shared/uae-mobile.js";
 import { PushOutboxWriter } from "../push/push-outbox-writer.service.js";
@@ -372,13 +373,17 @@ export interface OperationsTrackingLink {
   readonly url: string;
 }
 
+/**
+ * Privacy-limited by design -- no customer/receiver name, no Driver name, no
+ * Area, no raw internal status. Shares the same public status vocabulary as
+ * the central `/track` flow and the Yousef agent (`mapPublicTrackingStatus`)
+ * so this legacy per-order tracking-link endpoint cannot drift into a
+ * different, less-safe contract than the rest of public tracking.
+ */
 export interface PublicOrderTracking {
-  readonly areaName: string;
-  readonly assignedDriverName: string | null;
-  readonly companyName: string;
-  readonly customerName: string;
   readonly deliveredAt: string | null;
   readonly deliveryStatus: string;
+  readonly deliveryStatusLabel: string;
   readonly lastUpdatedAt: string;
   readonly orderNumber: string;
 }
@@ -1976,27 +1981,26 @@ const exportOpenTraderReceivablePredicate = sql`
       );
     }
     const tokenHash = createHash("sha256").update(token, "utf8").digest("hex");
-    const result = await sql<PublicOrderTracking & { readonly trackingTokenId: string }>`
+    const result = await sql<{
+      trackingTokenId: string;
+      orderNumber: string;
+      deliveryStatus: string;
+      deliveredAt: string | null;
+      lastUpdatedAt: string;
+    }>`
       select tt.id as "trackingTokenId",
-             c.name_en as "companyName",
              o.order_number as "orderNumber",
-             o.customer_name as "customerName",
-             coalesce(o.customer_area_name_ar_snapshot,a.name_ar,
-                      o.customer_area_name_snapshot,a.name_en) as "areaName",
-             d.name_en as "assignedDriverName",
              o.delivery_status as "deliveryStatus",
              o.delivered_at::text as "deliveredAt",
              greatest(o.updated_at, coalesce(max(h.occurred_at), o.updated_at))::text as "lastUpdatedAt"
       from tracking_tokens tt
       join orders o on o.id = tt.order_id and o.company_id = tt.company_id
       join companies c on c.id = tt.company_id and c.status = 'active'
-      left join areas a on a.id = o.area_id and a.company_id = o.company_id
-      left join drivers d on d.id = o.assigned_driver_id and d.company_id = o.company_id
       left join order_status_history h on h.order_id = o.id and h.company_id = o.company_id
       where tt.token_hash = ${tokenHash}
         and tt.revoked_at is null
         and (tt.expires_at is null or tt.expires_at > now())
-      group by tt.id, c.name_en, o.id, a.name_en, a.name_ar, d.name_en
+      group by tt.id, o.id
       limit 1
     `.execute(this.database);
     const tracking = result.rows[0];
@@ -2020,9 +2024,14 @@ const exportOpenTraderReceivablePredicate = sql`
          set last_accessed_at = now()
        where id = ${tracking.trackingTokenId}::uuid
     `.execute(this.database);
-    const { trackingTokenId: _trackingTokenId, ...publicTracking } = tracking;
-    void _trackingTokenId;
-    return publicTracking;
+    const status = mapPublicTrackingStatus(tracking.deliveryStatus);
+    return {
+      deliveredAt: tracking.deliveredAt,
+      deliveryStatus: status.status,
+      deliveryStatusLabel: status.statusLabel,
+      lastUpdatedAt: tracking.lastUpdatedAt,
+      orderNumber: tracking.orderNumber,
+    };
   }
 
   public async traderPortalProfile(): Promise<TraderPortalProfile> {

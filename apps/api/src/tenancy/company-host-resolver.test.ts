@@ -79,4 +79,18 @@ describe("CompanyHostResolver", () => {
     expect(resolver.resolve("-danaapp.tawseelhub.com")).toBeUndefined();
     expect(resolver.resolve("dana_app.tawseelhub.com")).toBeUndefined();
   });
+
+  it("classifies public websites and operational apps without confusing them", () => {
+    const resolver = createResolver({ hostSuffix: "tawseelhub.com" });
+    expect(resolver.classifyTawseelhubHost("dana.tawseelhub.com")).toEqual({
+      kind: "company_website",
+      slug: "dana",
+    });
+    expect(resolver.classifyTawseelhubHost("danaapp.tawseelhub.com")).toEqual({
+      kind: "company_app",
+      slug: "dana",
+    });
+    expect(resolver.classifyTawseelhubHost("unknown.example.com")).toEqual({ kind: "unknown" });
+    expect(resolver.classifyTawseelhubHost("a.b.tawseelhub.com")).toEqual({ kind: "unknown" });
+  });
 });

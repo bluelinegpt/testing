@@ -33,6 +33,11 @@ import { isReservedCompanySubdomain } from "./reserved-subdomains.js";
  */
 type HostOutcome =
   { kind: "company"; subdomain: string } | { kind: "reserved" } | { kind: "unknown" };
+export type TawseelhubHost =
+  | { kind: "company_app"; slug: string }
+  | { kind: "company_website"; slug: string }
+  | { kind: "reserved" }
+  | { kind: "unknown" };
 @Injectable()
 export class CompanyHostResolver {
   private static readonly applicationLabelSuffix = "app";
@@ -63,15 +68,40 @@ export class CompanyHostResolver {
     return this.classify(host).kind === "reserved";
   }
 
-  private classify(host: string | undefined): HostOutcome {
-    if (host === undefined) return { kind: "unknown" };
-    // Strip the port and any IPv6 brackets before matching.
+  /** Distinguishes public Company websites from authenticated Company apps. */
+  public classifyTawseelhubHost(host: string | undefined): TawseelhubHost {
+    const hostname = this.normalizedHostname(host);
+    if (hostname === undefined || this.hostSuffix === undefined) return { kind: "unknown" };
+    if (!hostname.endsWith(`.${this.hostSuffix}`)) return { kind: "unknown" };
+    const label = hostname.slice(0, -(this.hostSuffix.length + 1));
+    if (label.includes(".") || !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u.test(label)) {
+      return { kind: "unknown" };
+    }
+    if (label.endsWith(CompanyHostResolver.applicationLabelSuffix)) {
+      const slug = label.slice(0, -CompanyHostResolver.applicationLabelSuffix.length);
+      if (slug.length === 0) return { kind: "unknown" };
+      return isReservedCompanySubdomain(slug)
+        ? { kind: "reserved" }
+        : { kind: "company_app", slug };
+    }
+    return isReservedCompanySubdomain(label)
+      ? { kind: "reserved" }
+      : { kind: "company_website", slug: label };
+  }
+
+  private normalizedHostname(host: string | undefined): string | undefined {
+    if (host === undefined) return undefined;
     const hostname = host
       .trim()
       .toLowerCase()
       .replace(/^\[|\]$/g, "")
       .split(":")[0];
-    if (hostname === undefined || hostname.length === 0) return { kind: "unknown" };
+    return hostname === undefined || hostname.length === 0 ? undefined : hostname;
+  }
+
+  private classify(host: string | undefined): HostOutcome {
+    const hostname = this.normalizedHostname(host);
+    if (hostname === undefined) return { kind: "unknown" };
 
     if (this.hostSuffix !== undefined && hostname.endsWith(`.${this.hostSuffix}`)) {
       const label = hostname.slice(0, -(this.hostSuffix.length + 1));

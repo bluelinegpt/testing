@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Headers,
+  HttpCode,
   HttpStatus,
   Inject,
   Param,
@@ -14,6 +15,7 @@ import {
   Res,
 } from "@nestjs/common";
 import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
+import { Throttle } from "@nestjs/throttler";
 import type { Request, Response } from "express";
 
 import {
@@ -52,6 +54,12 @@ import {
   type OperationsTraderOption,
   type SearchPage,
 } from "./operations.service.js";
+import { LookupTrackingDto, VerifyTrackingDto } from "./public-tracking.dto.js";
+import {
+  type PublicTrackingLookupOutcome,
+  type PublicTrackingVerifyOutcome,
+  PublicTrackingService,
+} from "./public-tracking.service.js";
 import {
   DriverCashReconciliationService,
   type DriverCollectionReportData,
@@ -1027,13 +1035,39 @@ export class OperationsController {
 @ApiTags("public-tracking")
 @Controller("public/tracking")
 export class PublicTrackingController {
-  public constructor(@Inject(OperationsService) private readonly operations: OperationsService) {}
+  public constructor(
+    @Inject(OperationsService) private readonly operations: OperationsService,
+    @Inject(PublicTrackingService) private readonly publicTracking: PublicTrackingService,
+  ) {}
 
   @Public()
-  @ApiOperation({ summary: "Show customer-safe public order tracking" })
+  @ApiOperation({ summary: "Show customer-safe public order tracking for a shared tracking link" })
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
   @Get(":token")
   public tracking(@Param("token") token: string): Promise<PublicOrderTracking> {
     return this.operations.publicTracking(token);
+  }
+
+  // Central `tawseelhub.com/track` flow -- Airway Bill first, mobile
+  // verification only when the Airway Bill is ambiguous across Tawseelhub.
+  // POST (not GET) so neither the Airway Bill, the verification token, nor
+  // the mobile number ever end up in access logs or browser history.
+  @Public()
+  @ApiOperation({ summary: "Look up public shipment tracking by Airway Bill / Tracking Number" })
+  @Throttle({ default: { limit: 15, ttl: 60_000 } })
+  @HttpCode(HttpStatus.OK)
+  @Post("lookup")
+  public lookup(@Body() input: LookupTrackingDto): Promise<PublicTrackingLookupOutcome> {
+    return this.publicTracking.lookupByAirwayBill(input.airwayBill);
+  }
+
+  @Public()
+  @ApiOperation({ summary: "Verify an ambiguous Airway Bill match by customer mobile number" })
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @HttpCode(HttpStatus.OK)
+  @Post("verify")
+  public verify(@Body() input: VerifyTrackingDto): Promise<PublicTrackingVerifyOutcome> {
+    return this.publicTracking.verifyAmbiguousShipment(input.verificationToken, input.mobile);
   }
 }
 

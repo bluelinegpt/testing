@@ -8,6 +8,7 @@ export type AgentIntent =
   | "customer_quote"
   | "trader"
   | "delivery_company_demo"
+  | "shipment_tracking"
   | "general_question"
   | "product_feature_question"
   | "current_feature_status"
@@ -60,6 +61,8 @@ export interface AgentSlots {
   featuresOfInterest?: string[];
   contactName?: string;
   mobile?: string;
+  trackingAirwayBill?: string;
+  trackingMobileNumber?: string;
 }
 
 export interface AgentState {
@@ -85,6 +88,27 @@ export interface AgentState {
   };
   lastAskedSlot?: keyof AgentSlots;
   seenInboundMessageIds?: string[];
+  /**
+   * Temporary, self-expiring context for the shipment-tracking workflow
+   * only. Never persisted beyond the tracking flow itself: cleared on
+   * success, on a wrong-mobile failure, on timeout (see
+   * `TRACKING_CONTEXT_TTL_MS` in `agent.service.ts`), or when a different
+   * workflow starts. `verificationToken` is the same short-lived, opaque,
+   * HMAC-signed token `PublicTrackingService` issues -- not customer data,
+   * safe to hold in conversation state.
+   */
+  tracking?: {
+    verificationToken?: string;
+    result?: {
+      airwayBill: string;
+      status: string;
+      statusLabel: string;
+      lastUpdated: string;
+      deliveredAt: string | null;
+    };
+    failedMobileAttempts?: number;
+    startedAt?: string;
+  };
 }
 
 export type ConversationMode = "conversation" | "workflow" | "human_handoff";
@@ -106,6 +130,7 @@ export type ConversationTopic =
   | "integrations"
   | "stores"
   | "mobile"
+  | "tracking"
   | "support"
   | "privacy"
   | "other";
@@ -113,7 +138,14 @@ export type ConversationTopic =
 export interface ConversationFrame {
   mode: ConversationMode;
   topic: ConversationTopic;
-  workflow: "none" | "shipment_quote" | "trader_registration" | "demo_request" | "human_handoff" | string;
+  workflow:
+    | "none"
+    | "shipment_quote"
+    | "trader_registration"
+    | "demo_request"
+    | "shipment_tracking"
+    | "human_handoff"
+    | string;
   workflowState: WorkflowState;
   lastExplicitUserAction: UserAction;
   decision: string;

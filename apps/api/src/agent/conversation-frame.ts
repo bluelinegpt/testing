@@ -4,6 +4,7 @@ const workflowIntentToFrame: Partial<Record<AgentIntent, ConversationFrame["work
   customer_quote: "shipment_quote",
   delivery_company_demo: "demo_request",
   handoff: "human_handoff",
+  shipment_tracking: "shipment_tracking",
   trader: "trader_registration",
 };
 
@@ -11,6 +12,7 @@ const workflowToIntent: Partial<Record<ConversationFrame["workflow"], AgentInten
   demo_request: "delivery_company_demo",
   human_handoff: "handoff",
   shipment_quote: "customer_quote",
+  shipment_tracking: "shipment_tracking",
   trader_registration: "trader",
 };
 
@@ -26,22 +28,27 @@ const topicPatterns: Array<{ topic: ConversationTopic; pattern: RegExp }> = [
   { topic: "integrations", pattern: /integration|integrations|salla|shopify|woocommerce|تكامل|سلة|شوبيفاي|ووكومرس/i },
   { topic: "stores", pattern: /storefront|marketplace|create a store|build a store|متجر|متاجر/i },
   { topic: "mobile", pattern: /mobile app|driver app|app|تطبيق|موبايل/i },
+  { topic: "tracking", pattern: /\btrack(?:ing)?\b|where(?:'s| is) my (?:shipment|order|package|parcel)|shipment status|tracking number|تتبع|تعقب|رقم التتبع|حالة الشحنة|حالة شحنتي|أين شحنتي|وين شحنتي/i },
   { topic: "trader", pattern: /\btraders?\b|\bmerchant\b|\bseller\b|التاجر|التجار|تاجر|تجار/i },
   { topic: "delivery_company", pattern: /delivery company|delivery companies|courier company|شركة توصيل|شركات التوصيل/i },
   { topic: "send_package", pattern: /shipment|package|parcel|send a package|send shipment|شحنة|طرد|إرسال شحنة|ارسال شحنة/i },
   { topic: "support", pattern: /support|help|human|agent|call me|موظف|دعم|اتصل/i },
 ];
 
-const bareTopicPattern = /^(?:traders?|merchants?|sellers?|delivery compan(?:y|ies)|drivers?|driver management|pricing|price|accounting|payroll|shipment|package|mobile app|salla|shopify|woocommerce|التجار|التاجر|السائقين|إدارة السائقين|ادارة السائقين|السعر|الأسعار|المحاسبة|الرواتب|شركة توصيل|شركات التوصيل|الشحن|الشحنة|المتجر|المتاجر|سلة|شوبيفاي|ووكومرس)$/i;
+const bareTopicPattern = /^(?:traders?|merchants?|sellers?|delivery compan(?:y|ies)|drivers?|driver management|pricing|price|accounting|payroll|shipment|package|mobile app|salla|shopify|woocommerce|tracking|track|التجار|التاجر|السائقين|إدارة السائقين|ادارة السائقين|السعر|الأسعار|المحاسبة|الرواتب|شركة توصيل|شركات التوصيل|الشحن|الشحنة|المتجر|المتاجر|سلة|شوبيفاي|ووكومرس|تتبع|تعقب)$/i;
 const humanPattern = /human|person|agent|support team|customer support|call me|speak|complaint|dispute|موظف|انسان|إنسان|اتصل|دعم بشري/i;
 const cancelPattern = /^(?:cancel|stop|never mind|start over|reset|no request|no order|just explain|explain only|الغاء|إلغاء|وقف|خلاص|ابدأ من جديد|ابدا من جديد|لا يوجد طلب|لايوجد طلب|ما في طلب|اشرح فقط|فقط اشرح|انت فقط اشرح|أنت فقط اشرح)$/i;
 const pauseForExplanationPattern = /(?:actually|instead|just|only).*(?:explain|tell me|how|what)|(?:اشرح|وضح|فهمني|بس اشرح|فقط اشرح|كيف|ما هو|شو هو|ماهي|ما هي)/i;
 const clarificationPattern = /^(?:why|why\?|for what|what for|what do you mean|is it required|for pickup or delivery|pickup or delivery|ليش|لماذا|لشو|شو تقصد|هل هو مطلوب|استلام ولا توصيل)[؟?]?$/i;
 const explicitShipmentStartPattern = /(?:i want|need|start|create|get|request|send).*(?:package|parcel|shipment|quote|delivery quote)|(?:أريد|اريد|بدي|أحتاج|احتاج|ابدأ|ابدا|اعمل).*(?:إرسال شحنة|ارسال شحنة|شحنة|طرد|عرض سعر|سعر توصيل)/i;
+// Deliberately distinct verbs from `explicitShipmentStartPattern` ("track"/"check"/"where is",
+// not "send"/"get a quote") so a customer who already has an Airway Bill and a Trader
+// requesting a NEW delivery quote can never be confused for one another.
+const explicitTrackingStartPattern = /(?:track|check|find)\s+(?:my\s+)?(?:shipment|order|package|parcel)|where(?:'s| is)\s+my\s+(?:shipment|order|package|parcel)|track(?:ing)?\s+(?:my\s+)?(?:number|status)|(?:تتبع|تعقب|أعرف|اعرف).*(?:شحنتي|شحنة|طردي|طلبي)/i;
 const explicitTraderStartPattern = /(?:register|start|submit|apply).*(?:trader|store|merchant)|(?:أريد|اريد|سجل|سجّل|ابدأ|ابدا).*(?:التسجيل كتاجر|تسجيل تاجر|تسجيل متجري|متجري)/i;
 const explicitDemoStartPattern = /(?:book|request|schedule|start).*(?:demo|demonstration)|(?:أريد|اريد|احجز|اطلب).*(?:ديمو|عرض تجريبي)/i;
 const explicitContinuePattern = /^(?:continue|resume|go on|same request|continue my shipment|continue registration|تابع|كمل|اكمل|نفس الطلب)$/i;
-const privateInformationPattern = /delivery compan(?:y|ies) (?:names?|directory|list)|names? of delivery companies|which traders|traders .*using|another customer|customer'?s (?:information|conversation)|internal id|commission|company net|staff notes|secret|password|api key|أسماء شركات التوصيل|قائمة شركات التوصيل|شركات التوصيل المسجلة|أي تجار|معلومات عميل|محادثة عميل|عمولة|صافي الشركة|ملاحظات داخلية|كلمة السر|مفتاح/i;
+const privateInformationPattern = /delivery compan(?:y|ies) (?:names?|directory|list)|names? of delivery companies|which traders|traders .*using|another customer|customer'?s (?:information|conversation|mobile|phone|number|address|name)|receiver'?s (?:mobile|phone|number|address|name)|driver'?s (?:mobile|phone|number)|internal id|internal order|order id|commission|company net|staff notes|secret|password|api key|cod amount|service fee|أسماء شركات التوصيل|قائمة شركات التوصيل|شركات التوصيل المسجلة|أي تجار|معلومات عميل|محادثة عميل|رقم (?:هاتف|جوال|موبايل) (?:العميل|الزبون|المستلم|السائق)|عنوان العميل|اسم العميل|عمولة|صافي الشركة|ملاحظات داخلية|كلمة السر|مفتاح/i;
 
 export interface ConversationFrameInput {
   message: string;
@@ -70,6 +77,7 @@ export function isBareInformationalTopic(message: string): boolean {
 export function isExplicitWorkflowStart(message: string): ConversationFrame["workflow"] | undefined {
   if (explicitTraderStartPattern.test(message)) return "trader_registration";
   if (explicitDemoStartPattern.test(message)) return "demo_request";
+  if (explicitTrackingStartPattern.test(message)) return "shipment_tracking";
   if (explicitShipmentStartPattern.test(message)) return "shipment_quote";
   return undefined;
 }

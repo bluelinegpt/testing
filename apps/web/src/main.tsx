@@ -7,6 +7,11 @@ import "./localization/i18n.js";
 import { router } from "./app/router.js";
 import { installNumberInputWheelGuard } from "./utils/number-input-wheel-guard.js";
 import "./styles.css";
+import {
+  CompanyWebsiteErrorBoundary,
+  isPublicCompanyWebsiteHost,
+  PublicCompanyWebsite,
+} from "./features/company-website/PublicCompanyWebsite.js";
 
 const root = document.querySelector<HTMLDivElement>("#root");
 if (root === null) {
@@ -19,6 +24,12 @@ installNumberInputWheelGuard();
 
 createRoot(root).render(
   <StrictMode>
-    <RouterProvider router={router} />
+    {isPublicCompanyWebsiteHost() ? (
+      <CompanyWebsiteErrorBoundary>
+        <PublicCompanyWebsite />
+      </CompanyWebsiteErrorBoundary>
+    ) : (
+      <RouterProvider router={router} />
+    )}
   </StrictMode>,
 );

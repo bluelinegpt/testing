@@ -3,7 +3,11 @@ import { createServer, request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { extname, isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
 
-import { classifyCompanyAppHost, parseLegacyTenantRedirects } from "./tenant-host.mjs";
+import {
+  classifyCompanyAppHost,
+  isValidExternalWebsiteHost,
+  parseLegacyTenantRedirects,
+} from "./tenant-host.mjs";
 
 const port = Number.parseInt(process.env.WEB_PORT ?? "8080", 10);
 const publicDirectory = resolve(process.env.WEB_ROOT ?? "dist");
@@ -23,9 +27,10 @@ const publicDirectory = resolve(process.env.WEB_ROOT ?? "dist");
 const apiProxyTarget = process.env.API_PROXY_TARGET;
 const proxyTargetUrl = apiProxyTarget === undefined ? undefined : new URL(apiProxyTarget);
 const tenantHostSuffix = process.env.WEB_TENANT_HOST_SUFFIX;
+const allowCustomDomains = process.env.WEB_ALLOW_CUSTOM_DOMAINS === "true";
 const legacyTenantRedirects = parseLegacyTenantRedirects(process.env.WEB_LEGACY_TENANT_REDIRECTS);
 
-function proxyApi(request, response) {
+function proxyApi(request, response, upstreamPath = request.url) {
   const makeRequest = proxyTargetUrl.protocol === "https:" ? httpsRequest : httpRequest;
   const upstream = makeRequest(
     {
@@ -37,7 +42,7 @@ function proxyApi(request, response) {
       },
       hostname: proxyTargetUrl.hostname,
       method: request.method,
-      path: request.url,
+      path: upstreamPath,
       port: proxyTargetUrl.port === "" ? undefined : Number(proxyTargetUrl.port),
     },
     (upstreamResponse) => {
@@ -109,7 +114,10 @@ const server = createServer((request, response) => {
     return;
   }
   const hostOutcome = classifyCompanyAppHost(host, tenantHostSuffix);
-  if (hostOutcome === "rejected") {
+  if (
+    hostOutcome === "rejected" &&
+    !(allowCustomDomains && isValidExternalWebsiteHost(host, tenantHostSuffix))
+  ) {
     addSecurityHeaders(response);
     response.writeHead(404, { "Cache-Control": "no-store", "Content-Type": "application/json" });
     response.end(
@@ -119,6 +127,13 @@ const server = createServer((request, response) => {
   }
   if (proxyTargetUrl !== undefined && (request.url ?? "").startsWith("/api/")) {
     proxyApi(request, response);
+    return;
+  }
+  if (
+    proxyTargetUrl !== undefined &&
+    (request.url === "/sitemap.xml" || request.url?.startsWith("/sitemap.xml?"))
+  ) {
+    proxyApi(request, response, "/api/v1/public/company-website/sitemap.xml");
     return;
   }
   addSecurityHeaders(response);

@@ -1,8 +1,9 @@
 # Delivery Company application domains
 
 Operational Company portals use `companyslugapp.tawseelhub.com`. Public Company
-websites use `companyslug.tawseelhub.com` and must never be routed to the
-authenticated portal service.
+websites use `companyslug.tawseelhub.com`. The shared Company web service
+classifies the exact hostname and renders the authenticated portal or public
+website shell without sharing authentication or tenant context between them.
 
 For Dana, the operational portal is `https://danaapp.tawseelhub.com`. The
 previous operational address was `https://dana.tawseelhub.com`.
@@ -22,10 +23,8 @@ Company web service:
 - `WEB_TENANT_HOST_SUFFIX=tawseelhub.com`
 - `API_PROXY_TARGET` remains the existing API service origin.
 - Build with `VITE_API_BASE_URL=/api/v1`.
-- During the migration only, set
-  `WEB_LEGACY_TENANT_REDIRECTS=dana.tawseelhub.com=https://danaapp.tawseelhub.com`
-  if the old hostname still points at this service. Remove that mapping before
-  connecting `dana.tawseelhub.com` to the future public website.
+- Leave `WEB_LEGACY_TENANT_REDIRECTS` unset. Public Company hostnames now belong
+  to the Company website module and must never redirect into the operational app.
 
 Cloudflare needs a proxied DNS record for `danaapp.tawseelhub.com` targeting
 the existing Company web service's Render hostname. Render needs the same custom

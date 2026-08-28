@@ -47,6 +47,7 @@ import { DriverShipmentManifestService } from "./driver-shipment-manifest.servic
 import { OperationsHistoryWriter } from "./operations-history.writer.js";
 import { OperationsService } from "./operations.service.js";
 import { OrdersWorkflowService } from "./orders-workflow.service.js";
+import { PublicTrackingService } from "./public-tracking.service.js";
 import { TraderReceivableController } from "./trader-receivable.controller.js";
 import { TraderReceivableService } from "./trader-receivable.service.js";
 import { TraderAccountStatementService } from "./trader-account-statement.service.js";
@@ -88,6 +89,7 @@ import { TraderSettlementService } from "./trader-settlement.service.js";
     OperationsHistoryWriter,
     OperationsService,
     OrdersWorkflowService,
+    PublicTrackingService,
     EmployeeDeliveryEarningService,
     EmployeeCollectionEarningService,
     OutsourcedDriverFeeService,
@@ -114,6 +116,11 @@ import { TraderSettlementService } from "./trader-settlement.service.js";
   // than building a second Order-creation engine. No other provider here is
   // exported -- this module's internal composition (balance control, payroll,
   // DCR-adjacent services) stays exactly as private as it was.
-  exports: [OperationsService],
+  //
+  // `PublicTrackingService` is exported the same way, for the same reason:
+  // `AgentModule` imports this module to reuse the exact same central
+  // tracking lookup/verify logic Yousef calls, rather than a second tracking
+  // implementation living inside the Agent.
+  exports: [OperationsService, PublicTrackingService],
 })
 export class OperationsModule {}

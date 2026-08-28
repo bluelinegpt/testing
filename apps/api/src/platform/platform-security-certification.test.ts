@@ -403,6 +403,7 @@ describe("Destructive capability certification", () => {
   const deleteExempt = new Set([
     "platform-user-deletion.service.ts",
     "platform-company-deletion-execution.service.ts",
+    "company-website-domain.service.ts",
   ]);
 
   it("issues no destructive statement anywhere in the Platform module", () => {
@@ -417,6 +418,17 @@ describe("Destructive capability certification", () => {
       if ([...deleteExempt].some((name) => file.path.endsWith(name))) continue;
       expect(source.includes("delete from")).toBe(false);
     }
+  });
+
+  it("limits Website domain deletion to one Company-owned versioned mapping", () => {
+    const source = withoutComments(
+      readFileSync(resolve(platformDirectory, "company-website-domain.service.ts"), "utf8"),
+    ).toLowerCase();
+    const statements = source.match(/delete from company_website_domains[\s\S]*?`/g) ?? [];
+    expect(statements).toHaveLength(1);
+    expect(statements[0]).toContain("where id=${id}::uuid");
+    expect(statements[0]).toContain("company_id=${companyid}::uuid");
+    expect(statements[0]).toContain("version=${expectedversion}");
   });
 
   /**

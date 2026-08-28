@@ -97,6 +97,10 @@ const SHARED_PRESERVE = [
 
 /** Tables added after the reset manifest's last business-data review. */
 const NEW_DIRECT_TABLES = [
+  "company_website_agent_conversations",
+  "company_websites",
+  "company_website_delivery_requests",
+  "company_website_domains",
   "employee_collection_earning_rules",
   "employee_driver_collection_fact_orders",
   "employee_driver_collection_facts",

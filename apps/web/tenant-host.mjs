@@ -18,9 +18,29 @@ export function classifyCompanyAppHost(host, configuredSuffix) {
   if (!suffix) return "unrestricted";
   if (!hostname.endsWith(`.${suffix}`)) return "rejected";
   const label = hostname.slice(0, -(suffix.length + 1));
-  if (label.includes(".") || !label.endsWith("app")) return "rejected";
+  if (label.includes(".")) return "rejected";
+  if (!label.endsWith("app")) return dnsLabelPattern.test(label) ? "company-website" : "rejected";
   const companySlug = label.slice(0, -3);
   return dnsLabelPattern.test(companySlug) ? "company-app" : "rejected";
+}
+
+export function isValidExternalWebsiteHost(host, configuredSuffix) {
+  const hostname = hostnameOf(host);
+  const suffix = configuredSuffix?.trim().toLowerCase().replace(/^\.+/u, "");
+  if (
+    !hostname ||
+    hostname.length > 253 ||
+    hostname.includes("xn--") ||
+    hostname === suffix ||
+    hostname.endsWith(`.${suffix}`)
+  )
+    return false;
+  const labels = hostname.split(".");
+  return (
+    labels.length >= 2 &&
+    /^[a-z]{2,63}$/u.test(labels.at(-1)) &&
+    labels.every((label) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u.test(label))
+  );
 }
 
 export function parseLegacyTenantRedirects(value) {

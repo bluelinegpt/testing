@@ -6,6 +6,7 @@ import { runQuoteEngine, type QuoteRule } from "../customer-quotes/quote-engine.
 import { DemoRequestService } from "../demo-requests/demo-request.service.js";
 import { DATABASE } from "../infrastructure/database/database.tokens.js";
 import type { DatabaseSchema } from "../infrastructure/database/database.types.js";
+import { PublicTrackingService } from "../operations/public-tracking.service.js";
 import { TraderApplicationService } from "../trader-applications/trader-application.service.js";
 import type { AgentConversationReviewDto, AgentKnowledgeDto, AgentSettingsDto } from "./agent.dto.js";
 import type { AgentChannel, AgentIntent, AgentKnowledgeContext, AgentLanguage, AgentModelResult, AgentSlots, AgentState } from "./agent.types.js";
@@ -26,7 +27,12 @@ const mapRow = (row: Record<string, unknown>) => Object.fromEntries(Object.entri
 const compact = (value: Record<string, unknown>) => Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined && v !== null && v !== ""));
 const socialIntents = new Set<AgentIntent>(["greeting", "small_talk", "thanks", "goodbye"]);
 const businessInfoIntents = new Set<AgentIntent>(["general_question", "product_feature_question", "current_feature_status", "clarification", "unknown"]);
-const workflowIntents = new Set<AgentIntent>(["customer_quote", "trader", "delivery_company_demo", "handoff"]);
+const workflowIntents = new Set<AgentIntent>(["customer_quote", "trader", "delivery_company_demo", "shipment_tracking", "handoff"]);
+// Follow-up questions after a verified tracking result, answered from the
+// stored result itself -- never a fresh Order lookup. Deliberately narrow:
+// "what's the status" / "has it been delivered" / "when was it updated",
+// not an open door to ask about anything else on the shipment.
+const trackingFollowUpPattern = /\b(status|delivered|update|when)\b|حال(?:ة|تها)|تسليم|توصيل|متى|تحديث/i;
 const genericAnswerIntents = new Set<AgentIntent>(["general_question", "unknown"]);
 const privateDirectoryOrCustomerInfo = /delivery companies|company directory|which traders|traders .*use|traders .*using|another customer|customer'?s information|customer'?s conversation|أسماء شركات التوصيل|شركات التوصيل المسجلة|أي تجار|معلومات عميل|محادثة عميل/i;
 const quoteSlotOrder: Array<keyof AgentSlots> = ["requesterName", "requesterMobile", "pickupEmirate", "pickupArea", "deliveryEmirate", "deliveryArea", "packageType", "weightKg", "pickupDate", "deliveryAddress"];
@@ -286,6 +292,7 @@ export class AgentService {
     @Inject(TraderApplicationService) private readonly traders: TraderApplicationService,
     @Inject(DemoRequestService) private readonly demos: DemoRequestService,
     @Inject(AgentModelRouterProvider) private readonly model: AgentModelRouterProvider,
+    @Inject(PublicTrackingService) private readonly tracking: PublicTrackingService,
   ) {}
 
   private visitorIpHash(visitorIp?: string) {
@@ -529,9 +536,18 @@ export class AgentService {
       nextState = rest;
     }
     let response: { content: string; structured?: Record<string, unknown>; status?: string; intent?: AgentIntent };
-    const contextualGeneralFollowUp = contextualGeneralFollowUpResponse(input.text, model.language, state, nextState);
-    const interruption = contextualGeneralFollowUp ? undefined : await this.workflowInterruptionResponse(String(conversation.id), input.text, model.language, state, nextState);
-    if (contextualGeneralFollowUp) response = contextualGeneralFollowUp;
+    // Checked against `state` (pre-frame-scoping), since a verified tracking
+    // result naturally falls out of scope on the very next turn once the
+    // workflow completes (frame decision becomes "informational_topic",
+    // which clears `tracking` the same way it clears `pendingAction`) --
+    // this is what lets a genuine follow-up question still be answered from
+    // it for exactly one more turn (Section 33), without resurrecting it
+    // for an unrelated later message.
+    const trackingFollowUp = this.trackingFollowUpResponse(input.text, model.language, state, nextState);
+    const contextualGeneralFollowUp = trackingFollowUp ? undefined : contextualGeneralFollowUpResponse(input.text, model.language, state, nextState);
+    const interruption = trackingFollowUp || contextualGeneralFollowUp ? undefined : await this.workflowInterruptionResponse(String(conversation.id), input.text, model.language, state, nextState);
+    if (trackingFollowUp) response = trackingFollowUp;
+    else if (contextualGeneralFollowUp) response = contextualGeneralFollowUp;
     else if (interruption) response = interruption;
     else if (state.pendingAction && model.wantsConfirmation) response = await this.executePending(String(conversation.id), state.pendingAction.type, nextState);
     else response = await this.previousRequestQuestionResponse(String(conversation.id), input.text, model.language, nextState)
@@ -568,6 +584,7 @@ export class AgentService {
     if (intent === "customer_quote") return this.quoteStep(state, language);
     if (intent === "trader") return this.traderStep(state, language);
     if (intent === "delivery_company_demo") return this.demoStep(state, language);
+    if (intent === "shipment_tracking") return this.trackingStep(state, language);
     return this.answerGeneralQuestion(conversationId, state, language, intent);
   }
 
@@ -628,6 +645,186 @@ export class AgentService {
     const summary = compact({ company: slots.companyName, contact: slots.contactPerson, mobile: slots.mobileNumber, email: slots.email, emirate: slots.emirate, drivers: slots.approximateDriverCount });
     const content = language === "ar" ? `هل أرسل طلب العرض التجريبي بهذه التفاصيل؟\n${this.lines(summary)}` : `Should I submit the demo request with these details?\n${this.lines(summary)}`;
     return { content, intent: "delivery_company_demo" as const, status: "action_pending", structured: { state: { ...state, slots, pendingAction: { type: "submit_demo_request", summary } } } };
+  }
+
+  // Short expiry for the tracking verification context held in conversation
+  // state -- Section 34: "A new session/request may require verification
+  // again." Not a technical security boundary (the token itself already
+  // expires server-side) -- this is about not letting Yousef silently
+  // resume a stale tracking conversation after the customer moved on.
+  private static readonly TRACKING_CONTEXT_TTL_MS = 10 * 60 * 1000;
+  private static readonly TRACKING_MAX_FAILED_MOBILE_ATTEMPTS = 3;
+
+  private trackingContextExpired(state: AgentState): boolean {
+    const startedAt = state.tracking?.startedAt;
+    if (!startedAt) return false;
+    return Date.now() - new Date(startedAt).getTime() > AgentService.TRACKING_CONTEXT_TTL_MS;
+  }
+
+  /**
+   * Airway Bill first, mobile verification only when ambiguous -- calling
+   * the exact same `PublicTrackingService` the central `/track` website
+   * flow calls, never a second tracking implementation. Deterministic:
+   * whether mobile is required is decided entirely by
+   * `PublicTrackingService`'s own match count, never by model/LLM
+   * discretion (Section 31).
+   */
+  private async trackingStep(state: AgentState, language: AgentLanguage) {
+    const tracking = this.trackingContextExpired(state) ? undefined : state.tracking;
+    const slots = state.slots;
+
+    if (tracking?.verificationToken) {
+      const mobile = slots.trackingMobileNumber;
+      if (!mobile) {
+        return {
+          content: language === "ar"
+            ? "يلزم تحقق إضافي. الرجاء إدخال رقم هاتف العميل المرتبط بهذه الشحنة."
+            : "Additional verification required. Please enter the customer mobile number associated with this shipment.",
+          intent: "shipment_tracking" as const,
+          status: "waiting_for_user",
+          structured: { state: { ...state, tracking, lastAskedSlot: "trackingMobileNumber" as const } },
+        };
+      }
+      const outcome = await this.tracking.verifyAmbiguousShipment(tracking.verificationToken, mobile);
+      if (outcome.result === "verified") return this.trackingResultResponse(state, language, outcome.tracking);
+      if (outcome.result === "ambiguous") return this.trackingSupportResponse(state, language);
+      // Neutral failure either way -- never reveal whether the Airway Bill
+      // or the mobile number was the part that did not match (Section 5,
+      // Section 21: no distinguishable errors).
+      const failedAttempts = (tracking.failedMobileAttempts ?? 0) + 1;
+      if (failedAttempts >= AgentService.TRACKING_MAX_FAILED_MOBILE_ATTEMPTS) return this.trackingSupportResponse(state, language);
+      const { trackingMobileNumber: _trackingMobileNumber, ...remainingSlots } = slots;
+      return {
+        content: language === "ar"
+          ? "لم نتمكن من التحقق من شحنة بهذه البيانات. الرجاء إدخال رقم هاتف العميل المرتبط بهذه الشحنة مرة أخرى."
+          : "We couldn't verify a shipment with those details. Please enter the customer mobile number associated with this shipment again.",
+        intent: "shipment_tracking" as const,
+        status: "waiting_for_user",
+        structured: {
+          state: {
+            ...state,
+            slots: remainingSlots,
+            tracking: { ...tracking, failedMobileAttempts: failedAttempts },
+            lastAskedSlot: "trackingMobileNumber" as const,
+          },
+        },
+      };
+    }
+
+    const airwayBill = slots.trackingAirwayBill;
+    if (!airwayBill) {
+      return {
+        content: language === "ar" ? "الرجاء إدخال رقم بوليصة الشحن / رقم التتبع." : "Please enter your Airway Bill / Tracking Number.",
+        intent: "shipment_tracking" as const,
+        status: "waiting_for_user",
+        structured: { state: { ...state, lastAskedSlot: "trackingAirwayBill" as const } },
+      };
+    }
+    const outcome = await this.tracking.lookupByAirwayBill(airwayBill);
+    if (outcome.result === "verified") return this.trackingResultResponse(state, language, outcome.tracking);
+    if (outcome.result === "verification_required") {
+      return {
+        content: language === "ar"
+          ? "يلزم تحقق إضافي. الرجاء إدخال رقم هاتف العميل المرتبط بهذه الشحنة."
+          : "Additional verification required. Please enter the customer mobile number associated with this shipment.",
+        intent: "shipment_tracking" as const,
+        status: "waiting_for_user",
+        structured: {
+          state: {
+            ...state,
+            lastAskedSlot: "trackingMobileNumber" as const,
+            tracking: { verificationToken: outcome.verificationToken, startedAt: new Date().toISOString(), failedMobileAttempts: 0 },
+          },
+        },
+      };
+    }
+    // not_found -- neutral and retryable, no hint about why (Section 21:
+    // no distinguishable errors that would let someone enumerate Orders).
+    const { trackingAirwayBill: _trackingAirwayBill, ...remainingSlots } = slots;
+    return {
+      content: language === "ar"
+        ? "لم نعثر على شحنة بهذا الرقم. الرجاء التحقق من رقم بوليصة الشحن / رقم التتبع والمحاولة مرة أخرى."
+        : "We couldn't find a shipment with that Airway Bill. Please check the number and try again.",
+      intent: "shipment_tracking" as const,
+      status: "waiting_for_user",
+      structured: { state: { ...state, slots: remainingSlots, lastAskedSlot: "trackingAirwayBill" as const } },
+    };
+  }
+
+  private trackingResultResponse(
+    state: AgentState,
+    language: AgentLanguage,
+    tracking: { airwayBill: string; status: string; statusLabel: string; lastUpdated: string; deliveredAt: string | null },
+  ) {
+    const lines = language === "ar"
+      ? [
+          `رقم بوليصة الشحن: ${tracking.airwayBill}`,
+          `الحالة: ${tracking.statusLabel}`,
+          `آخر تحديث: ${this.formatDubaiDateTime(tracking.lastUpdated)}`,
+          ...(tracking.deliveredAt ? [`تم التسليم في: ${this.formatDubaiDateTime(tracking.deliveredAt)}`] : []),
+        ]
+      : [
+          `Airway Bill: ${tracking.airwayBill}`,
+          `Status: ${tracking.statusLabel}`,
+          `Last Updated: ${this.formatDubaiDateTime(tracking.lastUpdated)}`,
+          ...(tracking.deliveredAt ? [`Delivered At: ${this.formatDubaiDateTime(tracking.deliveredAt)}`] : []),
+        ];
+    const content = `${lines.join("\n")}\n${language === "ar" ? "هل لديك سؤال آخر، أو كيف يمكنني مساعدتك الآن؟" : "Do you have another question, or how can I help you now?"}`;
+    const { trackingAirwayBill: _trackingAirwayBill, trackingMobileNumber: _trackingMobileNumber, ...remainingSlots } = state.slots;
+    const { lastAskedSlot: _lastAskedSlot, ...baseState } = state;
+    return {
+      content,
+      intent: "shipment_tracking" as const,
+      status: "completed",
+      // Keep only the verified public result in `tracking` -- the
+      // verification token and failure count served their purpose and are
+      // cleared, but the result itself stays so a follow-up question
+      // ("has it been delivered?") can be answered without a fresh lookup
+      // (Section 33).
+      structured: { state: { ...baseState, slots: remainingSlots, tracking: { result: tracking, startedAt: new Date().toISOString() } } },
+    };
+  }
+
+  private trackingSupportResponse(state: AgentState, language: AgentLanguage) {
+    const { trackingAirwayBill: _trackingAirwayBill, trackingMobileNumber: _trackingMobileNumber, ...remainingSlots } = state.slots;
+    const { lastAskedSlot: _lastAskedSlot, tracking: _tracking, ...baseState } = state;
+    return {
+      content: language === "ar"
+        ? "تعذّر التحقق من هذه الشحنة بشكل فريد. الرجاء التواصل مع فريق Tawseelhub للمساعدة."
+        : "We couldn't uniquely verify this shipment. Please contact the Tawseelhub Team for assistance.",
+      intent: "shipment_tracking" as const,
+      status: "waiting_for_user",
+      structured: { state: { ...baseState, slots: remainingSlots } },
+    };
+  }
+
+  /**
+   * Answers a follow-up question about an already-verified shipment
+   * ("Has it been delivered?", "What's the status?") from the stored
+   * result itself -- never a fresh Order lookup, and never anything beyond
+   * the same privacy-limited public fields already shown (Section 33).
+   */
+  private trackingFollowUpResponse(text: string, language: AgentLanguage, previousState: AgentState, currentState: AgentState) {
+    const result = previousState.tracking?.result;
+    if (!result || !trackingFollowUpPattern.test(text.trim())) return undefined;
+    const lines = language === "ar"
+      ? [
+          `الحالة: ${result.statusLabel}`,
+          `آخر تحديث: ${this.formatDubaiDateTime(result.lastUpdated)}`,
+          ...(result.deliveredAt ? [`تم التسليم في: ${this.formatDubaiDateTime(result.deliveredAt)}`] : []),
+        ]
+      : [
+          `Status: ${result.statusLabel}`,
+          `Last Updated: ${this.formatDubaiDateTime(result.lastUpdated)}`,
+          ...(result.deliveredAt ? [`Delivered At: ${this.formatDubaiDateTime(result.deliveredAt)}`] : []),
+        ];
+    const content = `${lines.join("\n")}\n${language === "ar" ? "هل لديك سؤال آخر، أو كيف يمكنني مساعدتك الآن؟" : "Do you have another question, or how can I help you now?"}`;
+    return {
+      content,
+      intent: "shipment_tracking" as const,
+      status: "completed",
+      structured: { state: { ...currentState, tracking: { result, startedAt: previousState.tracking?.startedAt } } },
+    };
   }
 
   private async executePending(conversationId: string, type: NonNullable<AgentState["pendingAction"]>["type"], state: AgentState) {
@@ -1817,7 +2014,7 @@ export class AgentService {
 
   private applySequentialWorkflowAnswer(text: string, intent: AgentIntent, previousState: AgentState, slots: AgentSlots): AgentSlots {
     const answer = text.trim();
-    if (!["customer_quote", "trader", "delivery_company_demo", "handoff"].includes(intent) || !previousState.lastAskedSlot || !answer || answer.length > 120 || /[?؟]/.test(answer)) return slots;
+    if (!["customer_quote", "trader", "delivery_company_demo", "shipment_tracking", "handoff"].includes(intent) || !previousState.lastAskedSlot || !answer || answer.length > 120 || /[?؟]/.test(answer)) return slots;
     const previousMissing = previousState.lastAskedSlot;
     if (!previousMissing || slots[previousMissing] !== undefined && slots[previousMissing] !== "") return slots;
     if (previousMissing === "pickupEmirate" || previousMissing === "deliveryEmirate" || previousMissing === "emirate") {
@@ -1852,6 +2049,8 @@ export class AgentService {
     if (previousMissing === "mobileNumber") return { ...slots, mobileNumber: answer, requesterMobile: slots.requesterMobile ?? answer };
     if (previousMissing === "email") return { ...slots, email: answer, requesterEmail: slots.requesterEmail ?? answer };
     if (previousMissing === "pickupBusinessArea") return { ...slots, pickupBusinessArea: answer, pickupArea: slots.pickupArea ?? answer };
+    if (previousMissing === "trackingAirwayBill") return { ...slots, trackingAirwayBill: answer };
+    if (previousMissing === "trackingMobileNumber") return { ...slots, trackingMobileNumber: answer };
     return slots;
   }
 
@@ -1875,7 +2074,7 @@ export class AgentService {
     if (frame.decision === "privacy_blocked") return "general_question";
     if (frame.mode === "conversation" && frame.workflowState !== "active") {
       if (["drivers", "cod", "reconciliation", "settlement", "accounting", "payroll", "reports", "integrations", "stores", "mobile", "trader", "delivery_company"].includes(frame.topic)) return "product_feature_question";
-      if (frame.topic === "pricing") return "general_question";
+      if (frame.topic === "pricing" || frame.topic === "tracking") return "general_question";
       return socialIntents.has(classifiedIntent) ? classifiedIntent : "general_question";
     }
     return classifiedIntent;
@@ -1884,7 +2083,10 @@ export class AgentService {
   private stateScopedByConversationFrame(state: AgentState, frame: AgentState["conversationFrame"]): AgentState {
     if (!frame) return state;
     if (frame.decision === "bare_topic_information" || frame.decision === "workflow_paused_for_explanation" || frame.decision === "workflow_cancelled" || frame.decision === "informational_topic" || frame.decision === "privacy_blocked") {
-      const { pendingAction: _pendingAction, lastAskedSlot: _lastAskedSlot, pendingGeneralFollowUp: _pendingGeneralFollowUp, ...baseState } = state;
+      // Tracking's verification context is temporary by design (Section 34)
+      // -- it does not survive a topic switch, cancel or pause any more
+      // than `pendingAction` does for the other workflows.
+      const { pendingAction: _pendingAction, lastAskedSlot: _lastAskedSlot, pendingGeneralFollowUp: _pendingGeneralFollowUp, tracking: _tracking, ...baseState } = state;
       return {
         ...baseState,
         conversationFrame: frame,
@@ -1988,6 +2190,7 @@ export class AgentService {
       state.pendingAction = object.pendingAction as NonNullable<AgentState["pendingAction"]>;
     }
     if (object.conversationFrame !== undefined) state.conversationFrame = asObject(object.conversationFrame) as unknown as NonNullable<AgentState["conversationFrame"]>;
+    if (object.tracking !== undefined) state.tracking = asObject(object.tracking) as unknown as NonNullable<AgentState["tracking"]>;
     return state;
   }
 
@@ -2309,7 +2512,7 @@ export class AgentService {
   }
 
   private redactSlots(slots: AgentSlots) {
-    const { requesterMobile, recipientMobile, mobileNumber, mobile, email, requesterEmail, ...safe } = slots;
+    const { requesterMobile, recipientMobile, mobileNumber, mobile, email, requesterEmail, trackingMobileNumber, ...safe } = slots;
     return safe;
   }
 }

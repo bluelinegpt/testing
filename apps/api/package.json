@@ -22,6 +22,7 @@
     "test:integrity:database": "vitest run src/infrastructure/database/integrity.database.test.ts",
     "test:provisioning:database": "vitest run src/platform/company-defaults.database.test.ts src/platform/development-company-bootstrap.database.test.ts",
     "test:reconciliation:database": "vitest run src/operations/driver-cash-reconciliation.database.test.ts",
+    "test:public-tracking:database": "vitest run src/operations/public-tracking.database.test.ts",
     "test:operator-mobile:database": "vitest run src/operations/operator-mobile-workflow.http.database.test.ts",
     "test:driver-mobile:database": "vitest run src/operations/driver-mobile-workflow.http.database.test.ts",
     "test:push:database": "vitest run src/push/push.database.test.ts",

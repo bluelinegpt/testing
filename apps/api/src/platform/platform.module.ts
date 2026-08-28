@@ -45,6 +45,18 @@ import { PlatformDashboardController } from "./platform-dashboard.controller.js"
 import { PlatformDashboardService } from "./platform-dashboard.service.js";
 import { PlatformTargetCompanyGuard } from "./platform-target-company.guard.js";
 import { PlatformService } from "./platform.service.js";
+import {
+  PlatformCompanyWebsiteController,
+  PublicCompanyWebsiteController,
+} from "./company-website.controller.js";
+import { CompanyWebsiteService } from "./company-website.service.js";
+import { CompanyWebsiteDomainService } from "./company-website-domain.service.js";
+import {
+  CloudflareCompanyWebsiteDomainProvider,
+  CompanyWebsiteDomainProvider,
+} from "./company-website-domain.provider.js";
+import { CompanyWebsiteAgentService } from "./company-website-agent.service.js";
+import { CompanyWebsiteAgentProvider } from "./company-website-agent.provider.js";
 
 /**
  * The Platform Administration API.
@@ -76,9 +88,21 @@ import { PlatformService } from "./platform.service.js";
     PlatformAgentController,
     PlatformTargetCompanyController,
     PlatformCompanyUserController,
+    PlatformCompanyWebsiteController,
+    PublicCompanyWebsiteController,
   ],
   exports: [PlatformService, PlatformAuditService, PlatformCompanyService],
-  imports: [AuthenticationModule, DemoRequestsModule, TraderApplicationsModule, CustomerQuotesModule, BlogModule, WebsiteCmsModule, AgentModule, FilesModule, UserAdministrationModule],
+  imports: [
+    AuthenticationModule,
+    DemoRequestsModule,
+    TraderApplicationsModule,
+    CustomerQuotesModule,
+    BlogModule,
+    WebsiteCmsModule,
+    AgentModule,
+    FilesModule,
+    UserAdministrationModule,
+  ],
   providers: [
     PlatformService,
     PlatformAuditService,
@@ -95,6 +119,12 @@ import { PlatformService } from "./platform.service.js";
     PlatformUserDeletionService,
     AccountingTemplateImporter,
     PlatformTargetCompanyGuard,
+    CompanyWebsiteService,
+    CompanyWebsiteDomainService,
+    CloudflareCompanyWebsiteDomainProvider,
+    { provide: CompanyWebsiteDomainProvider, useExisting: CloudflareCompanyWebsiteDomainProvider },
+    CompanyWebsiteAgentService,
+    CompanyWebsiteAgentProvider,
   ],
 })
 export class PlatformModule {}

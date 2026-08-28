@@ -43,6 +43,7 @@ import {
 export const PLATFORM_ACCESS = "platform.access";
 export const PLATFORM_COMPANIES_READ = "platform.companies.read";
 export const PLATFORM_COMPANIES_MANAGE = "platform.companies.manage";
+export const PLATFORM_COMPANY_WEBSITES_MANAGE = "platform.company_websites.manage";
 export const PLATFORM_COMPANIES_DELETE = "platform.companies.delete";
 export const PLATFORM_USERS_READ = "platform.users.read";
 export const PLATFORM_USERS_MANAGE = "platform.users.manage";
@@ -98,7 +99,14 @@ export const PLATFORM_PERMISSIONS: readonly { code: string; description: string 
   { code: PLATFORM_ACCESS, description: "Sign in to the Platform Administration Portal" },
   { code: PLATFORM_COMPANIES_READ, description: "View Companies on the Platform" },
   { code: PLATFORM_COMPANIES_MANAGE, description: "Create and manage Companies on the Platform" },
-  { code: PLATFORM_COMPANIES_DELETE, description: "Preview and permanently delete eligible Companies" },
+  {
+    code: PLATFORM_COMPANY_WEBSITES_MANAGE,
+    description: "Configure, preview, publish, enable and disable Delivery Company websites",
+  },
+  {
+    code: PLATFORM_COMPANIES_DELETE,
+    description: "Preview and permanently delete eligible Companies",
+  },
   { code: PLATFORM_USERS_READ, description: "View the users of a Company from the Platform" },
   { code: PLATFORM_USERS_MANAGE, description: "Manage the users of a Company from the Platform" },
   { code: PLATFORM_AUDIT_READ, description: "View Platform and Company audit history" },
@@ -113,11 +121,23 @@ export const PLATFORM_PERMISSIONS: readonly { code: string; description: string 
   },
   { code: PLATFORM_LEADS_READ, description: "View public website demo requests" },
   { code: PLATFORM_LEADS_MANAGE, description: "Manage public website demo request workflow" },
-  { code: PLATFORM_TRADER_APPLICATIONS_READ, description: "View Trader self-registration applications" },
-  { code: PLATFORM_TRADER_APPLICATIONS_MANAGE, description: "Manage Trader self-registration applications" },
+  {
+    code: PLATFORM_TRADER_APPLICATIONS_READ,
+    description: "View Trader self-registration applications",
+  },
+  {
+    code: PLATFORM_TRADER_APPLICATIONS_MANAGE,
+    description: "Manage Trader self-registration applications",
+  },
   { code: PLATFORM_CUSTOMER_QUOTES_READ, description: "View customer quote requests" },
-  { code: PLATFORM_CUSTOMER_QUOTES_MANAGE, description: "Manage customer quote requests and offers" },
-  { code: PLATFORM_CUSTOMER_MARKETPLACE_MANAGE, description: "Manage customer marketplace commission and expiry" },
+  {
+    code: PLATFORM_CUSTOMER_QUOTES_MANAGE,
+    description: "Manage customer quote requests and offers",
+  },
+  {
+    code: PLATFORM_CUSTOMER_MARKETPLACE_MANAGE,
+    description: "Manage customer marketplace commission and expiry",
+  },
   {
     code: PLATFORM_STORE_ORDER_CONVERSION_MANAGE,
     description: "Convert a confirmed Customer Commerce Store Order into a Delivery Order",
@@ -127,7 +147,10 @@ export const PLATFORM_PERMISSIONS: readonly { code: string; description: string 
   { code: PLATFORM_BLOG_EDIT, description: "Edit Blog content" },
   { code: PLATFORM_BLOG_PUBLISH, description: "Publish and unpublish Blog content" },
   { code: PLATFORM_BLOG_CATEGORIES_MANAGE, description: "Manage Blog categories and authors" },
-  { code: PLATFORM_PUBLIC_SITE_SETTINGS_MANAGE, description: "Manage public SEO and tracking settings" },
+  {
+    code: PLATFORM_PUBLIC_SITE_SETTINGS_MANAGE,
+    description: "Manage public SEO and tracking settings",
+  },
   { code: PLATFORM_WEBSITE_READ, description: "View Website CMS" },
   { code: PLATFORM_WEBSITE_MANAGE, description: "Manage Website CMS drafts" },
   { code: PLATFORM_WEBSITE_PUBLISH, description: "Publish Website CMS content" },
@@ -135,10 +158,19 @@ export const PLATFORM_PERMISSIONS: readonly { code: string; description: string 
   { code: PLATFORM_WEBSITE_SEO_MANAGE, description: "Manage Website SEO" },
   { code: PLATFORM_AGENT_READ, description: "View Agent conversations, handoffs and knowledge" },
   { code: PLATFORM_AGENT_MANAGE, description: "Manage Agent settings, knowledge and handoffs" },
-  { code: PLATFORM_AGENT_WHATSAPP_READ, description: "View WhatsApp Agent integration status and conversations" },
+  {
+    code: PLATFORM_AGENT_WHATSAPP_READ,
+    description: "View WhatsApp Agent integration status and conversations",
+  },
   { code: PLATFORM_AGENT_WHATSAPP_REPLY, description: "Reply to WhatsApp customers from Platform" },
-  { code: PLATFORM_AGENT_WHATSAPP_TAKEOVER, description: "Take over or return WhatsApp conversations to Yousef" },
-  { code: PLATFORM_AGENT_WHATSAPP_MANAGE, description: "Manage WhatsApp Agent integration settings" },
+  {
+    code: PLATFORM_AGENT_WHATSAPP_TAKEOVER,
+    description: "Take over or return WhatsApp conversations to Yousef",
+  },
+  {
+    code: PLATFORM_AGENT_WHATSAPP_MANAGE,
+    description: "Manage WhatsApp Agent integration settings",
+  },
   {
     code: PLATFORM_COMPANIES_RESET,
     description: "Reset a development or demo Company's transactional data",

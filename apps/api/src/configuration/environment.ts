@@ -7,6 +7,12 @@ type FileStorageProvider = (typeof fileStorageProviders)[number];
 const logLevels = ["fatal", "error", "warn", "info", "debug", "trace", "silent"] as const;
 
 export interface AppConfiguration {
+  websiteDomains: {
+    provider: "disabled" | "cloudflare";
+    cloudflareApiToken: string | undefined;
+    cloudflareZoneId: string | undefined;
+    cnameTarget: string | undefined;
+  };
   companyDeletion: {
     backupRoot: string;
     timeoutMs: number;
@@ -282,6 +288,29 @@ export function configuration(): AppConfiguration {
   }
 
   return {
+    websiteDomains: (() => {
+      const provider =
+        process.env.COMPANY_WEBSITE_DOMAIN_PROVIDER?.trim().toLowerCase() || "disabled";
+      if (!(["disabled", "cloudflare"] as const).includes(provider as "disabled" | "cloudflare"))
+        throw new Error("COMPANY_WEBSITE_DOMAIN_PROVIDER must be disabled or cloudflare");
+      const cloudflareApiToken =
+        process.env.CLOUDFLARE_CUSTOM_HOSTNAMES_API_TOKEN?.trim() || undefined;
+      const cloudflareZoneId = process.env.CLOUDFLARE_CUSTOM_HOSTNAMES_ZONE_ID?.trim() || undefined;
+      const cnameTarget =
+        process.env.COMPANY_WEBSITE_CUSTOM_DOMAIN_CNAME_TARGET?.trim().toLowerCase() || undefined;
+      if (
+        environment === "production" &&
+        provider === "cloudflare" &&
+        (!cloudflareApiToken || !cloudflareZoneId || !cnameTarget)
+      )
+        throw new Error("Cloudflare custom-hostname configuration is incomplete");
+      return {
+        provider: provider as "disabled" | "cloudflare",
+        cloudflareApiToken,
+        cloudflareZoneId,
+        cnameTarget,
+      };
+    })(),
     companyDeletion: {
       backupRoot: parseFileStorageLocalRoot(
         process.env.COMPANY_DELETION_BACKUP_ROOT ??

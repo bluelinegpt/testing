@@ -52,10 +52,18 @@ const defaultTimeoutMs = 15_000;
 
 async function request<TResponse>(
   path: string,
-  init: { body?: unknown; headers?: Readonly<Record<string, string>>; method: string; timeoutMs?: number },
+  init: {
+    body?: unknown;
+    headers?: Readonly<Record<string, string>>;
+    method: string;
+    timeoutMs?: number;
+  },
 ): Promise<TResponse | undefined> {
   const controller = new AbortController();
-  const timeout = globalThis.setTimeout(() => controller.abort(), init.timeoutMs ?? defaultTimeoutMs);
+  const timeout = globalThis.setTimeout(
+    () => controller.abort(),
+    init.timeoutMs ?? defaultTimeoutMs,
+  );
   try {
     const response = await fetch(`${platformConfiguration.apiBaseUrl}/${path.replace(/^\//, "")}`, {
       ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
@@ -186,16 +194,129 @@ export interface ErrorReportListFilters {
   readonly pageSize?: number;
 }
 
-export type DemoRequestStatus = "new"|"reviewing"|"contacted"|"qualified"|"demo_scheduled"|"converted"|"not_interested"|"rejected"|"closed";
-export type TraderApplicationStatus="pending_verification"|"reviewing"|"contacted"|"information_required"|"verified"|"approved"|"rejected"|"withdrawn";
-export interface TraderApplication extends Record<string,unknown>{id:string;referenceNumber:string;storeName:string;contactPerson:string;mobileNumber:string;email:string;primaryCategory:string;pickupEmirate:string;monthlyOrderRange:string;hasExistingDeliveryCompany:boolean;requiresDeliveryCompany:boolean;status:TraderApplicationStatus;createdAt:string;assignedToUsername?:string;}
-export interface TraderApplicationPage{items:TraderApplication[];total:number;page:number;pageSize:number;}
-export interface TraderApplicationDetail extends TraderApplication{channels:Array<Record<string,unknown>>;history:Array<Record<string,unknown>>;internalNotes:Array<Record<string,unknown>>;deliveryEmirates:string[];}
-export interface DemoRequestSummary { readonly id:string;readonly referenceNumber:string;readonly companyName:string;readonly contactPerson:string;readonly mobileNumber:string;readonly email:string;readonly country:string;readonly emirate:string|null;readonly approximateDriverCount:number|null;readonly approximateMonthlyOrders:number|null;readonly approximateTraderCount:number|null;readonly preferredContactMethod:string;readonly source:string;readonly status:DemoRequestStatus;readonly assignedToUsername:string|null;readonly agentConversationReference?:string|null;readonly createdAt:string; }
-export interface DemoRequestDetail extends DemoRequestSummary { readonly website:string|null;readonly currentSystem:string|null;readonly mainChallenges:string|null;readonly featuresOfInterest:readonly string[];readonly notes:string|null;readonly landingPage:string;readonly referrer:string|null;readonly utmSource:string|null;readonly utmMedium:string|null;readonly utmCampaign:string|null;readonly utmTerm:string|null;readonly utmContent:string|null;readonly gclid:string|null;readonly convertedCompanyId:string|null;readonly convertedCompanyName:string|null;readonly agentConversationId?:string|null;readonly history:readonly Record<string,unknown>[];readonly internalNotes:readonly {id:string;noteText:string;authorUsername:string|null;createdAt:string}[]; }
-export interface DemoRequestPage { readonly items:readonly DemoRequestSummary[];readonly total:number;readonly page:number;readonly pageSize:number; }
-export interface DemoRequestFilters { readonly search?:string;readonly status?:string;readonly country?:string;readonly emirate?:string;readonly preferredContactMethod?:string;readonly source?:string;readonly createdFrom?:string;readonly createdTo?:string;readonly page?:number;readonly pageSize?:number;readonly sort?:"newest"|"oldest"; }
-export interface WebsiteCmsBundle { readonly overview:Record<string,unknown>;readonly pages:any[];readonly pricing:any[];readonly features:any[];readonly faqs:any[];readonly helpCategories:any[];readonly helpArticles:any[];readonly media:any[];readonly navigation:any[];readonly contact:any;readonly revisions:any[]; }
+export type DemoRequestStatus =
+  | "new"
+  | "reviewing"
+  | "contacted"
+  | "qualified"
+  | "demo_scheduled"
+  | "converted"
+  | "not_interested"
+  | "rejected"
+  | "closed";
+export type TraderApplicationStatus =
+  | "pending_verification"
+  | "reviewing"
+  | "contacted"
+  | "information_required"
+  | "verified"
+  | "approved"
+  | "rejected"
+  | "withdrawn";
+export interface TraderApplication extends Record<string, unknown> {
+  id: string;
+  referenceNumber: string;
+  storeName: string;
+  contactPerson: string;
+  mobileNumber: string;
+  email: string;
+  primaryCategory: string;
+  pickupEmirate: string;
+  monthlyOrderRange: string;
+  hasExistingDeliveryCompany: boolean;
+  requiresDeliveryCompany: boolean;
+  status: TraderApplicationStatus;
+  createdAt: string;
+  assignedToUsername?: string;
+}
+export interface TraderApplicationPage {
+  items: TraderApplication[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+export interface TraderApplicationDetail extends TraderApplication {
+  channels: Array<Record<string, unknown>>;
+  history: Array<Record<string, unknown>>;
+  internalNotes: Array<Record<string, unknown>>;
+  deliveryEmirates: string[];
+}
+export interface DemoRequestSummary {
+  readonly id: string;
+  readonly referenceNumber: string;
+  readonly companyName: string;
+  readonly contactPerson: string;
+  readonly mobileNumber: string;
+  readonly email: string;
+  readonly country: string;
+  readonly emirate: string | null;
+  readonly approximateDriverCount: number | null;
+  readonly approximateMonthlyOrders: number | null;
+  readonly approximateTraderCount: number | null;
+  readonly preferredContactMethod: string;
+  readonly source: string;
+  readonly status: DemoRequestStatus;
+  readonly assignedToUsername: string | null;
+  readonly agentConversationReference?: string | null;
+  readonly createdAt: string;
+}
+export interface DemoRequestDetail extends DemoRequestSummary {
+  readonly website: string | null;
+  readonly currentSystem: string | null;
+  readonly mainChallenges: string | null;
+  readonly featuresOfInterest: readonly string[];
+  readonly notes: string | null;
+  readonly landingPage: string;
+  readonly referrer: string | null;
+  readonly utmSource: string | null;
+  readonly utmMedium: string | null;
+  readonly utmCampaign: string | null;
+  readonly utmTerm: string | null;
+  readonly utmContent: string | null;
+  readonly gclid: string | null;
+  readonly convertedCompanyId: string | null;
+  readonly convertedCompanyName: string | null;
+  readonly agentConversationId?: string | null;
+  readonly history: readonly Record<string, unknown>[];
+  readonly internalNotes: readonly {
+    id: string;
+    noteText: string;
+    authorUsername: string | null;
+    createdAt: string;
+  }[];
+}
+export interface DemoRequestPage {
+  readonly items: readonly DemoRequestSummary[];
+  readonly total: number;
+  readonly page: number;
+  readonly pageSize: number;
+}
+export interface DemoRequestFilters {
+  readonly search?: string;
+  readonly status?: string;
+  readonly country?: string;
+  readonly emirate?: string;
+  readonly preferredContactMethod?: string;
+  readonly source?: string;
+  readonly createdFrom?: string;
+  readonly createdTo?: string;
+  readonly page?: number;
+  readonly pageSize?: number;
+  readonly sort?: "newest" | "oldest";
+}
+export interface WebsiteCmsBundle {
+  readonly overview: Record<string, unknown>;
+  readonly pages: any[];
+  readonly pricing: any[];
+  readonly features: any[];
+  readonly faqs: any[];
+  readonly helpCategories: any[];
+  readonly helpArticles: any[];
+  readonly media: any[];
+  readonly navigation: any[];
+  readonly contact: any;
+  readonly revisions: any[];
+}
 
 export interface UpdateErrorReportInput {
   readonly severity?: "high" | "medium" | "low";
@@ -245,6 +366,175 @@ export interface CompanyDetail {
   readonly createdAt: string;
   readonly statusChangeReason: string | null;
   readonly closedAt: string | null;
+}
+
+export interface CompanyWebsite {
+  readonly id?: string;
+  readonly companyId?: string;
+  readonly slug?: string;
+  readonly status: "not_configured" | "draft" | "published" | "disabled";
+  readonly enabled?: boolean;
+  readonly published?: boolean;
+  readonly templateKey?: CompanyWebsiteTemplateKey;
+  readonly publishedTemplateKey?: CompanyWebsiteTemplateKey | null;
+  readonly hasUnpublishedChanges?: boolean;
+  readonly primaryLanguage?: "en" | "ar";
+  readonly defaultLocale?: "en" | "ar";
+  readonly websiteUrl?: string;
+  readonly createdAt?: string;
+  readonly updatedAt?: string;
+  readonly publishedAt?: string | null;
+  readonly disabledAt?: string | null;
+  readonly lastPublishedBy?: string | null;
+  readonly lastUpdatedBy?: string | null;
+  readonly version?: number;
+  readonly settings?: CompanyWebsiteSettings;
+  readonly publishedSettings?: CompanyWebsiteSettings | null;
+}
+
+export type CompanyWebsiteTemplateKey = "corporate" | "modern" | "express" | "local" | "premium";
+
+export interface CompanyWebsiteSettings {
+  branding: { primaryColor?: string; secondaryColor?: string; accentColor?: string };
+  languages: { en: boolean; ar: boolean; defaultLocale: "en" | "ar" };
+  presentation: Record<string, { en?: string; ar?: string } | string | undefined>;
+  contact: {
+    phone?: string;
+    mobile?: string;
+    email?: string;
+    address?: { en?: string; ar?: string };
+    city?: { en?: string; ar?: string };
+    whatsappEnabled: boolean;
+    whatsappNumber?: string;
+    whatsappMessage?: { en?: string; ar?: string };
+    showPhone: boolean;
+    showEmail: boolean;
+    showWhatsapp: boolean;
+    showAddress: boolean;
+    showWorkingHours: boolean;
+    latitude?: number;
+    longitude?: number;
+    workingHours: Array<{ day: string; closed: boolean; opens?: string; closes?: string }>;
+  };
+  services: Array<{
+    id: string;
+    title: { en?: string; ar?: string };
+    description?: { en?: string; ar?: string };
+    icon?: string;
+    enabled: boolean;
+    order: number;
+  }>;
+  coverage: Array<{
+    id: string;
+    emirate: string;
+    area?: string;
+    group?: string;
+    enabled: boolean;
+    order: number;
+  }>;
+  benefits: Array<{
+    id: string;
+    title: { en?: string; ar?: string };
+    description?: { en?: string; ar?: string };
+    icon?: string;
+    enabled: boolean;
+    order: number;
+  }>;
+  socialLinks: Record<string, string | undefined>;
+  functions?: { trackingEnabled: boolean; requestDeliveryEnabled: boolean };
+  seo?: {
+    title?: { en?: string; ar?: string };
+    description?: { en?: string; ar?: string };
+    socialImageUrl?: string;
+    indexable: boolean;
+  };
+  sections: Array<{ key: string; enabled: boolean; order: number }>;
+  knowledge: {
+    description?: { en?: string; ar?: string };
+    audiences: Array<"ecommerce" | "smes" | "individuals" | "corporate">;
+    packageTypes: string[];
+    maximumWeightKg?: number;
+    sizeRestrictions?: { en?: string; ar?: string };
+    fragilePolicy?: { en?: string; ar?: string };
+    prohibitedItems?: { en?: string; ar?: string };
+    specialHandling?: { en?: string; ar?: string };
+    cod: { supported: boolean; limitations?: { en?: string; ar?: string } };
+    pricing: {
+      mode: "quote" | "request_confirmation" | "contact";
+      guidance?: { en?: string; ar?: string };
+    };
+    faqs: Array<{
+      id: string;
+      question: { en?: string; ar?: string };
+      answer: { en?: string; ar?: string };
+      enabled: boolean;
+      order: number;
+      websiteVisible: boolean;
+      agentAvailable: boolean;
+    }>;
+    instructions: Record<string, { en?: string; ar?: string } | undefined>;
+    tawseelhubAttribution: boolean;
+  };
+  agent: {
+    enabled: boolean;
+    displayName?: string;
+    welcomeMessage?: { en?: string; ar?: string };
+    handoffMessage?: { en?: string; ar?: string };
+    suggestedActions: Array<
+      "track" | "request_delivery" | "services" | "coverage" | "contact" | "whatsapp"
+    >;
+    tone: "professional" | "friendly_professional" | "concise" | "warm";
+    unknownBehavior: "whatsapp" | "contact" | "submit_request" | "safe_response";
+    capabilities: {
+      companyInformation: boolean;
+      tracking: boolean;
+      deliveryRequest: boolean;
+      quoteGuidance: boolean;
+      whatsappHandoff: boolean;
+      contactHandoff: boolean;
+      faqAnswers: boolean;
+      socialLinks: boolean;
+    };
+  };
+}
+
+export interface CompanyWebsitePreview {
+  readonly availability: "published";
+  readonly preview: boolean;
+  readonly slug: string;
+  readonly templateKey: CompanyWebsiteTemplateKey;
+  readonly defaultLocale: "en" | "ar";
+  readonly settings: CompanyWebsiteSettings;
+  readonly company: {
+    readonly nameEn: string;
+    readonly nameAr: string | null;
+    readonly subtitleEn: string | null;
+    readonly subtitleAr: string | null;
+    readonly telephone: string | null;
+    readonly email: string | null;
+    readonly addressEn: string | null;
+    readonly addressAr: string | null;
+    readonly hasLogo: boolean;
+  };
+}
+export interface CompanyWebsiteDomain {
+  id: string;
+  hostname: string;
+  status: "pending_verification" | "verified" | "pending_ssl" | "active" | "failed" | "disabled";
+  verificationStatus: "pending" | "verified" | "failed";
+  sslStatus: "pending" | "active" | "failed";
+  isPrimary: boolean;
+  verificationMethod: string;
+  verificationRecords: Array<{ type: string; name: string; value: string }>;
+  provider: string;
+  lastError: string | null;
+  version: number;
+}
+export interface CompanyWebsiteDomains {
+  fallbackHostname: string;
+  websiteVersion: number;
+  cnameTarget: string | null;
+  domains: CompanyWebsiteDomain[];
 }
 
 export interface CompanyDeletionEligibility {
@@ -509,7 +799,11 @@ export interface DashboardSummary {
   readonly customers: { readonly total: number; readonly new: number };
   readonly drivers: { readonly total: number; readonly new: number };
   readonly employees: { readonly total: number; readonly new: number };
-  readonly filters: { readonly companyId: string | null; readonly from: string; readonly to: string };
+  readonly filters: {
+    readonly companyId: string | null;
+    readonly from: string;
+    readonly to: string;
+  };
   readonly metadata: {
     readonly codBasis: string;
     readonly serviceFeeBasis: string;
@@ -587,7 +881,11 @@ export interface AttentionCategory {
   readonly label: string;
   readonly severity: "critical" | "warning" | "info";
   readonly count: number;
-  readonly companies: readonly { readonly id: string; readonly code: string; readonly name: string }[];
+  readonly companies: readonly {
+    readonly id: string;
+    readonly code: string;
+    readonly name: string;
+  }[];
 }
 
 export interface NeedsAttention {
@@ -597,7 +895,9 @@ export interface NeedsAttention {
 
 function toQuery(filters: object): string {
   const query = new URLSearchParams();
-  for (const [key, value] of Object.entries(filters as Record<string, string | number | undefined>)) {
+  for (const [key, value] of Object.entries(
+    filters as Record<string, string | number | undefined>,
+  )) {
     if (value === undefined || value === "") continue;
     query.set(key, String(value));
   }
@@ -702,28 +1002,169 @@ export const platformApi = {
     return result ?? { deletedCount: 0 };
   },
 
-  async demoRequests(filters:DemoRequestFilters={}):Promise<DemoRequestPage>{const query=new URLSearchParams();for(const [key,value] of Object.entries(filters)){if(value!==undefined&&value!=="")query.set(key,String(value));}const result=await request<DemoRequestPage>(`platform/demo-requests?${query.toString()}`,{method:"GET"});return result??{items:[],total:0,page:1,pageSize:25};},
-  async demoRequest(id:string):Promise<DemoRequestDetail>{const result=await request<DemoRequestDetail>(`platform/demo-requests/${id}`,{method:"GET"});if(result===undefined)throw new PlatformApiError("Empty demo request response","empty",500);return result;},
-  async updateDemoRequestStatus(id:string,input:{status:DemoRequestStatus;reason?:string;demoScheduledAt?:string;convertedCompanyId?:string}):Promise<DemoRequestDetail>{const result=await request<DemoRequestDetail>(`platform/demo-requests/${id}/status`,{method:"PATCH",body:input});if(result===undefined)throw new PlatformApiError("Empty demo request response","empty",500);return result;},
-  async addDemoRequestNote(id:string,text:string):Promise<void>{await request(`platform/demo-requests/${id}/notes`,{method:"POST",body:{text}});},
-  async deleteDemoRequests(ids:string[]):Promise<any>{return await request<any>("platform/demo-requests",{method:"DELETE",body:{ids}});},
-  async websiteCms():Promise<WebsiteCmsBundle>{const result=await request<WebsiteCmsBundle>("platform/website",{method:"GET"});return result??{overview:{},pages:[],pricing:[],features:[],faqs:[],helpCategories:[],helpArticles:[],media:[],navigation:[],contact:null,revisions:[]};},
-  async saveWebsitePage(pageKey:string,locale:string,input:any):Promise<any>{return await request<any>(`platform/website/pages/${pageKey}/${locale}/draft`,{method:"PATCH",body:input});},
-  async publishWebsitePage(pageKey:string,locale:string):Promise<any>{return await request<any>(`platform/website/pages/${pageKey}/${locale}/publish`,{method:"POST",body:{}});},
-  async saveWebsitePricing(planKey:string,locale:string,input:any):Promise<any>{return await request<any>(`platform/website/pricing/${planKey}/${locale}/draft`,{method:"PATCH",body:input});},
-  async publishWebsitePricing(planKey:string,locale:string):Promise<any>{return await request<any>(`platform/website/pricing/${planKey}/${locale}/publish`,{method:"POST",body:{}});},
-  async saveWebsiteFeature(slug:string,locale:string,input:any):Promise<any>{return await request<any>(`platform/website/features/${slug}/${locale}`,{method:"PATCH",body:input});},
-  async publishWebsiteFeature(slug:string,locale:string):Promise<any>{return await request<any>(`platform/website/features/${slug}/${locale}/publish`,{method:"POST",body:{}});},
-  async saveWebsiteFaq(faqKey:string,locale:string,input:any):Promise<any>{return await request<any>(`platform/website/faqs/${faqKey}/${locale}`,{method:"PATCH",body:input});},
-  async publishWebsiteFaq(faqKey:string,locale:string):Promise<any>{return await request<any>(`platform/website/faqs/${faqKey}/${locale}/publish`,{method:"POST",body:{}});},
-  async saveHelpCategory(slug:string,locale:string,input:any):Promise<any>{return await request<any>(`platform/website/help/categories/${slug}/${locale}`,{method:"PATCH",body:input});},
-  async saveHelpArticle(slug:string,locale:string,input:any):Promise<any>{return await request<any>(`platform/website/help/articles/${slug}/${locale}`,{method:"PATCH",body:input});},
-  async publishHelpArticle(slug:string,locale:string):Promise<any>{return await request<any>(`platform/website/help/articles/${slug}/${locale}/publish`,{method:"POST",body:{}});},
-  async archiveHelpArticle(slug:string,locale:string):Promise<any>{return await request<any>(`platform/website/help/articles/${slug}/${locale}/archive`,{method:"POST",body:{}});},
-  async saveWebsiteContact(input:any):Promise<any>{return await request<any>("platform/website/contact/draft",{method:"PATCH",body:input});},
-  async publishWebsiteContact():Promise<any>{return await request<any>("platform/website/contact/publish",{method:"POST",body:{}});},
-  async saveWebsiteNavigation(itemKey:string,locale:string,input:any):Promise<any>{return await request<any>(`platform/website/navigation/${itemKey}/${locale}`,{method:"PATCH",body:input});},
-  async uploadWebsiteMedia(file:File,input:{altText:string;caption?:string}):Promise<any>{const form=new FormData();form.append("file",file);form.append("altText",input.altText);if(input.caption)form.append("caption",input.caption);const response=await fetch(`${platformConfiguration.apiBaseUrl}/platform/website/media`,{method:"POST",credentials:"include",headers:{Accept:"application/json","X-Blueline-Session":"cookie"},body:form});if(!response.ok){throw new PlatformApiError("Featured image must be JPG, PNG, or WebP.","media_upload_failed",response.status)}return await response.json();},
+  async demoRequests(filters: DemoRequestFilters = {}): Promise<DemoRequestPage> {
+    const query = new URLSearchParams();
+    for (const [key, value] of Object.entries(filters)) {
+      if (value !== undefined && value !== "") query.set(key, String(value));
+    }
+    const result = await request<DemoRequestPage>(`platform/demo-requests?${query.toString()}`, {
+      method: "GET",
+    });
+    return result ?? { items: [], total: 0, page: 1, pageSize: 25 };
+  },
+  async demoRequest(id: string): Promise<DemoRequestDetail> {
+    const result = await request<DemoRequestDetail>(`platform/demo-requests/${id}`, {
+      method: "GET",
+    });
+    if (result === undefined)
+      throw new PlatformApiError("Empty demo request response", "empty", 500);
+    return result;
+  },
+  async updateDemoRequestStatus(
+    id: string,
+    input: {
+      status: DemoRequestStatus;
+      reason?: string;
+      demoScheduledAt?: string;
+      convertedCompanyId?: string;
+    },
+  ): Promise<DemoRequestDetail> {
+    const result = await request<DemoRequestDetail>(`platform/demo-requests/${id}/status`, {
+      method: "PATCH",
+      body: input,
+    });
+    if (result === undefined)
+      throw new PlatformApiError("Empty demo request response", "empty", 500);
+    return result;
+  },
+  async addDemoRequestNote(id: string, text: string): Promise<void> {
+    await request(`platform/demo-requests/${id}/notes`, { method: "POST", body: { text } });
+  },
+  async deleteDemoRequests(ids: string[]): Promise<any> {
+    return await request<any>("platform/demo-requests", { method: "DELETE", body: { ids } });
+  },
+  async websiteCms(): Promise<WebsiteCmsBundle> {
+    const result = await request<WebsiteCmsBundle>("platform/website", { method: "GET" });
+    return (
+      result ?? {
+        overview: {},
+        pages: [],
+        pricing: [],
+        features: [],
+        faqs: [],
+        helpCategories: [],
+        helpArticles: [],
+        media: [],
+        navigation: [],
+        contact: null,
+        revisions: [],
+      }
+    );
+  },
+  async saveWebsitePage(pageKey: string, locale: string, input: any): Promise<any> {
+    return await request<any>(`platform/website/pages/${pageKey}/${locale}/draft`, {
+      method: "PATCH",
+      body: input,
+    });
+  },
+  async publishWebsitePage(pageKey: string, locale: string): Promise<any> {
+    return await request<any>(`platform/website/pages/${pageKey}/${locale}/publish`, {
+      method: "POST",
+      body: {},
+    });
+  },
+  async saveWebsitePricing(planKey: string, locale: string, input: any): Promise<any> {
+    return await request<any>(`platform/website/pricing/${planKey}/${locale}/draft`, {
+      method: "PATCH",
+      body: input,
+    });
+  },
+  async publishWebsitePricing(planKey: string, locale: string): Promise<any> {
+    return await request<any>(`platform/website/pricing/${planKey}/${locale}/publish`, {
+      method: "POST",
+      body: {},
+    });
+  },
+  async saveWebsiteFeature(slug: string, locale: string, input: any): Promise<any> {
+    return await request<any>(`platform/website/features/${slug}/${locale}`, {
+      method: "PATCH",
+      body: input,
+    });
+  },
+  async publishWebsiteFeature(slug: string, locale: string): Promise<any> {
+    return await request<any>(`platform/website/features/${slug}/${locale}/publish`, {
+      method: "POST",
+      body: {},
+    });
+  },
+  async saveWebsiteFaq(faqKey: string, locale: string, input: any): Promise<any> {
+    return await request<any>(`platform/website/faqs/${faqKey}/${locale}`, {
+      method: "PATCH",
+      body: input,
+    });
+  },
+  async publishWebsiteFaq(faqKey: string, locale: string): Promise<any> {
+    return await request<any>(`platform/website/faqs/${faqKey}/${locale}/publish`, {
+      method: "POST",
+      body: {},
+    });
+  },
+  async saveHelpCategory(slug: string, locale: string, input: any): Promise<any> {
+    return await request<any>(`platform/website/help/categories/${slug}/${locale}`, {
+      method: "PATCH",
+      body: input,
+    });
+  },
+  async saveHelpArticle(slug: string, locale: string, input: any): Promise<any> {
+    return await request<any>(`platform/website/help/articles/${slug}/${locale}`, {
+      method: "PATCH",
+      body: input,
+    });
+  },
+  async publishHelpArticle(slug: string, locale: string): Promise<any> {
+    return await request<any>(`platform/website/help/articles/${slug}/${locale}/publish`, {
+      method: "POST",
+      body: {},
+    });
+  },
+  async archiveHelpArticle(slug: string, locale: string): Promise<any> {
+    return await request<any>(`platform/website/help/articles/${slug}/${locale}/archive`, {
+      method: "POST",
+      body: {},
+    });
+  },
+  async saveWebsiteContact(input: any): Promise<any> {
+    return await request<any>("platform/website/contact/draft", { method: "PATCH", body: input });
+  },
+  async publishWebsiteContact(): Promise<any> {
+    return await request<any>("platform/website/contact/publish", { method: "POST", body: {} });
+  },
+  async saveWebsiteNavigation(itemKey: string, locale: string, input: any): Promise<any> {
+    return await request<any>(`platform/website/navigation/${itemKey}/${locale}`, {
+      method: "PATCH",
+      body: input,
+    });
+  },
+  async uploadWebsiteMedia(file: File, input: { altText: string; caption?: string }): Promise<any> {
+    const form = new FormData();
+    form.append("file", file);
+    form.append("altText", input.altText);
+    if (input.caption) form.append("caption", input.caption);
+    const response = await fetch(`${platformConfiguration.apiBaseUrl}/platform/website/media`, {
+      method: "POST",
+      credentials: "include",
+      headers: { Accept: "application/json", "X-Blueline-Session": "cookie" },
+      body: form,
+    });
+    if (!response.ok) {
+      throw new PlatformApiError(
+        "Featured image must be JPG, PNG, or WebP.",
+        "media_upload_failed",
+        response.status,
+      );
+    }
+    return await response.json();
+  },
 
   async errorDetail(id: string): Promise<ErrorReport> {
     const result = await request<ErrorReport>(`platform/errors/${id}`, { method: "GET" });
@@ -775,6 +1216,141 @@ export const platformApi = {
     return result;
   },
 
+  async companyWebsite(companyId: string): Promise<CompanyWebsite> {
+    const result = await request<CompanyWebsite>(`platform/companies/${companyId}/website`, {
+      method: "GET",
+    });
+    return result ?? { status: "not_configured" };
+  },
+
+  async configureCompanyWebsite(
+    companyId: string,
+    payload: {
+      slug: string;
+      primaryLanguage: "en" | "ar";
+      defaultLocale: "en" | "ar";
+      templateKey: CompanyWebsiteTemplateKey;
+      expectedVersion: number;
+      settings?: CompanyWebsiteSettings;
+    },
+  ): Promise<CompanyWebsite> {
+    const current = await this.companyWebsite(companyId);
+    const result = await request<CompanyWebsite>(`platform/companies/${companyId}/website`, {
+      body: payload,
+      method: current.status === "not_configured" ? "POST" : "PATCH",
+    });
+    if (result === undefined) throw new PlatformApiError("Empty website response", "empty", 500);
+    return result;
+  },
+
+  async companyWebsiteAction(
+    companyId: string,
+    action: "publish" | "disable" | "enable",
+    expectedVersion: number,
+  ): Promise<CompanyWebsite> {
+    const result = await request<CompanyWebsite>(
+      `platform/companies/${companyId}/website/${action}`,
+      { body: { expectedVersion }, method: "POST" },
+    );
+    if (result === undefined) throw new PlatformApiError("Empty website response", "empty", 500);
+    return result;
+  },
+
+  async companyWebsitePreview(
+    companyId: string,
+    templateKey?: CompanyWebsiteTemplateKey,
+  ): Promise<CompanyWebsitePreview> {
+    const result = await request<CompanyWebsitePreview>(
+      `platform/companies/${companyId}/website/preview${templateKey ? `?templateKey=${encodeURIComponent(templateKey)}` : ""}`,
+      { method: "GET" },
+    );
+    if (result === undefined) throw new PlatformApiError("Empty website preview", "empty", 500);
+    return result;
+  },
+
+  async companyWebsiteDomains(companyId: string): Promise<CompanyWebsiteDomains> {
+    const result = await request<CompanyWebsiteDomains>(
+      `platform/companies/${companyId}/website/domains`,
+      { method: "GET" },
+    );
+    if (!result) throw new PlatformApiError("Empty domains response", "empty", 500);
+    return result;
+  },
+  async addCompanyWebsiteDomain(
+    companyId: string,
+    hostname: string,
+  ): Promise<CompanyWebsiteDomain> {
+    const result = await request<CompanyWebsiteDomain>(
+      `platform/companies/${companyId}/website/domains`,
+      { method: "POST", body: { hostname } },
+    );
+    if (!result) throw new PlatformApiError("Empty domain response", "empty", 500);
+    return result;
+  },
+  async companyWebsiteDomainAction(
+    companyId: string,
+    domainId: string,
+    action: "refresh" | "disable" | "remove",
+    expectedVersion: number,
+  ): Promise<CompanyWebsiteDomain | CompanyWebsiteDomains> {
+    const result = await request<CompanyWebsiteDomain | CompanyWebsiteDomains>(
+      `platform/companies/${companyId}/website/domains/${domainId}/${action}`,
+      { method: "POST", body: { expectedVersion } },
+    );
+    if (!result) throw new PlatformApiError("Empty domain response", "empty", 500);
+    return result;
+  },
+  async makeCompanyWebsiteDomainPrimary(
+    companyId: string,
+    domainId: string,
+    expectedVersion: number,
+    expectedWebsiteVersion: number,
+  ): Promise<CompanyWebsiteDomains> {
+    const result = await request<CompanyWebsiteDomains>(
+      `platform/companies/${companyId}/website/domains/${domainId}/make-primary`,
+      { method: "POST", body: { expectedVersion, expectedWebsiteVersion } },
+    );
+    if (!result) throw new PlatformApiError("Empty domain response", "empty", 500);
+    return result;
+  },
+
+  async companyWebsiteAgentPreview(
+    companyId: string,
+    message: string,
+    language: "en" | "ar",
+  ): Promise<{
+    preview: true;
+    noindex: true;
+    reply: string;
+    assistantName: string;
+    language: "en" | "ar";
+  }> {
+    const result = await request<{
+      preview: true;
+      noindex: true;
+      reply: string;
+      assistantName: string;
+      language: "en" | "ar";
+    }>(`platform/companies/${companyId}/website/preview-agent`, {
+      body: { message, language },
+      method: "POST",
+    });
+    if (!result) throw new PlatformApiError("Empty agent preview", "empty", 500);
+    return result;
+  },
+
+  async discardCompanyWebsiteDraft(
+    companyId: string,
+    expectedVersion: number,
+  ): Promise<CompanyWebsite> {
+    const result = await request<CompanyWebsite>(
+      `platform/companies/${companyId}/website/discard-draft`,
+      { body: { expectedVersion }, method: "POST" },
+    );
+    if (result === undefined) throw new PlatformApiError("Empty website response", "empty", 500);
+    return result;
+  },
+
   async accountingSetup(companyId: string): Promise<AccountingSetupSummary> {
     const result = await request<AccountingSetupSummary>(
       `platform/companies/${companyId}/accounting-setup`,
@@ -811,11 +1387,15 @@ export const platformApi = {
       `platform/companies/${companyId}/deletion-eligibility`,
       { method: "GET" },
     );
-    if (result === undefined) throw new PlatformApiError("Empty eligibility response", "empty", 500);
+    if (result === undefined)
+      throw new PlatformApiError("Empty eligibility response", "empty", 500);
     return result;
   },
 
-  async companyDeletionPreview(companyId: string, idempotencyKey: string): Promise<CompanyDeletionPreview> {
+  async companyDeletionPreview(
+    companyId: string,
+    idempotencyKey: string,
+  ): Promise<CompanyDeletionPreview> {
     const result = await request<CompanyDeletionPreview>(
       `platform/companies/${companyId}/deletion-preview`,
       {
@@ -827,7 +1407,10 @@ export const platformApi = {
     return result;
   },
 
-  async companyDeletionBackup(companyId: string, operationId: string): Promise<CompanyDeletionBackup> {
+  async companyDeletionBackup(
+    companyId: string,
+    operationId: string,
+  ): Promise<CompanyDeletionBackup> {
     const result = await request<CompanyDeletionBackup>(
       `platform/companies/${companyId}/deletion-backup`,
       { body: { operationId }, method: "POST", timeoutMs: 310_000 },
@@ -857,7 +1440,8 @@ export const platformApi = {
       `platform/companies/${companyId}/reset-preview`,
       { method: "GET" },
     );
-    if (result === undefined) throw new PlatformApiError("Empty reset preview response", "empty", 500);
+    if (result === undefined)
+      throw new PlatformApiError("Empty reset preview response", "empty", 500);
     return result;
   },
 
@@ -953,7 +1537,8 @@ export const platformApi = {
       `platform/companies/${companyId}/users/${accountId}/deletion-eligibility`,
       { method: "GET" },
     );
-    if (result === undefined) throw new PlatformApiError("Empty eligibility response", "empty", 500);
+    if (result === undefined)
+      throw new PlatformApiError("Empty eligibility response", "empty", 500);
     return result;
   },
 
@@ -997,24 +1582,34 @@ export const platformApi = {
   },
 
   async dashboardSummary(filters: DashboardFilters): Promise<DashboardSummary> {
-    const result = await request<DashboardSummary>(`platform/dashboard/summary?${toQuery(filters)}`, {
-      method: "GET",
-    });
-    if (result === undefined) throw new PlatformApiError("Empty Dashboard summary response", "empty", 500);
+    const result = await request<DashboardSummary>(
+      `platform/dashboard/summary?${toQuery(filters)}`,
+      {
+        method: "GET",
+      },
+    );
+    if (result === undefined)
+      throw new PlatformApiError("Empty Dashboard summary response", "empty", 500);
     return result;
   },
 
   async dashboardOrdersTrend(filters: DashboardFilters): Promise<OrdersTrend> {
-    const result = await request<OrdersTrend>(`platform/dashboard/orders-trend?${toQuery(filters)}`, {
-      method: "GET",
-    });
+    const result = await request<OrdersTrend>(
+      `platform/dashboard/orders-trend?${toQuery(filters)}`,
+      {
+        method: "GET",
+      },
+    );
     return result ?? { filters: { groupBy: "daily" }, series: [] };
   },
 
   async dashboardOrderStatus(filters: DashboardFilters): Promise<Distribution> {
-    const result = await request<Distribution>(`platform/dashboard/order-status?${toQuery(filters)}`, {
-      method: "GET",
-    });
+    const result = await request<Distribution>(
+      `platform/dashboard/order-status?${toQuery(filters)}`,
+      {
+        method: "GET",
+      },
+    );
     return result ?? { items: [], total: 0 };
   },
 
@@ -1069,64 +1664,295 @@ export const platformApi = {
   },
 
   async dashboardNeedsAttention(): Promise<NeedsAttention> {
-    const result = await request<NeedsAttention>("platform/dashboard/needs-attention", { method: "GET" });
+    const result = await request<NeedsAttention>("platform/dashboard/needs-attention", {
+      method: "GET",
+    });
     return result ?? { categories: [], generatedAt: new Date(0).toISOString() };
   },
-  async traderApplications(filters:Record<string,unknown>):Promise<TraderApplicationPage>{const result=await request<TraderApplicationPage>(`platform/trader-applications?${toQuery(filters)}`,{method:"GET"});return result??{items:[],total:0,page:1,pageSize:25};},
-  async customerQuotes():Promise<any[]>{return await request<any[]>("platform/customer-quotes",{method:"GET"})??[];},
-  async platformFeeReceivables():Promise<any[]>{return await request<any[]>("platform/customer-quotes/platform-fees",{method:"GET"})??[];},
-  async recordPlatformFeePayment(receivableId:string,input:any):Promise<any>{return await request<any>(`platform/customer-quotes/platform-fees/${receivableId}/payments`,{method:"POST",body:input});},
-  async deleteCustomerQuotes(ids:string[]):Promise<any>{return await request<any>("platform/customer-quotes",{method:"DELETE",body:{ids}});},
-  async blogArticles():Promise<any[]>{return await request<any[]>("platform/blog",{method:"GET"})??[];},
-  async blogArticle(id:string):Promise<any>{return await request<any>(`platform/blog/${id}`,{method:"GET"});},
-  async blogArticlePreview(id:string):Promise<any>{return await request<any>(`platform/blog/${id}/preview`,{method:"GET"});},
-  async blogReferences():Promise<any>{return await request<any>("platform/blog/references",{method:"GET"});},
-  async createBlogArticle(input:any):Promise<any>{return await request<any>("platform/blog",{method:"POST",body:input});},
-  async updateBlogArticle(id:string,input:any):Promise<any>{return await request<any>(`platform/blog/${id}`,{method:"PATCH",body:input});},
-  async updateBlogArticleStatus(id:string,input:any):Promise<any>{return await request<any>(`platform/blog/${id}/status`,{method:"PATCH",body:input});},
-  async publicSiteSettings():Promise<any>{return await request<any>("platform/blog/settings",{method:"GET"});},
-  async updatePublicSiteSettings(input:any):Promise<any>{return await request<any>("platform/blog/settings",{method:"PATCH",body:input});},
-  async agentConversations(filters?:Record<string,unknown>):Promise<any>{return await request<any>(`platform/agent/conversations${filters?`?${toQuery(filters)}`:""}`,{method:"GET"})??{items:[],total:0,page:1,pageSize:25,counters:{}};},
-  async agentConversation(id:string):Promise<any>{return await request<any>(`platform/agent/conversations/${id}`,{method:"GET"});},
-  async updateAgentConversationReview(id:string,input:any):Promise<any>{return await request<any>(`platform/agent/conversations/${id}/review`,{method:"PATCH",body:input});},
-  async replyAgentWhatsApp(id:string,message:string):Promise<any>{return await request<any>(`platform/agent/conversations/${id}/whatsapp/reply`,{method:"POST",body:{message}});},
-  async replyAgentWebsite(id:string,message:string):Promise<any>{return await request<any>(`platform/agent/conversations/${id}/website/reply`,{method:"POST",body:{message}});},
-  async setAgentConversationMode(id:string,mode:string,note?:string):Promise<any>{return await request<any>(`platform/agent/conversations/${id}/mode`,{method:"PATCH",body:{mode,...(note?{note}:{})}});},
-  async hideAgentConversation(id:string):Promise<any>{return await request<any>(`platform/agent/conversations/${id}/hide`,{method:"PATCH"});},
-  async unhideAgentConversation(id:string):Promise<any>{return await request<any>(`platform/agent/conversations/${id}/unhide`,{method:"PATCH"});},
-  async deleteAgentConversation(id:string):Promise<any>{return await request<any>(`platform/agent/conversations/${id}/delete`,{method:"PATCH"});},
-  async addAgentConversationComment(id:string,comment:string):Promise<any>{return await request<any>(`platform/agent/conversations/${id}/comments`,{method:"POST",body:{comment}});},
-  async agentAssignees():Promise<any[]>{return await request<any[]>("platform/agent/assignees",{method:"GET"})??[];},
-  async agentHandoffs():Promise<any[]>{return await request<any[]>("platform/agent/handoffs",{method:"GET"})??[];},
-  async updateAgentHandoffStatus(id:string,status:string,notes?:string):Promise<any>{return await request<any>(`platform/agent/handoffs/${id}/status`,{method:"PATCH",body:{status,...(notes?{notes}:{})}});},
-  async agentKnowledge():Promise<any[]>{return await request<any[]>("platform/agent/knowledge",{method:"GET"})??[];},
-  async createAgentKnowledge(input:any):Promise<any>{return await request<any>("platform/agent/knowledge",{method:"POST",body:input});},
-  async updateAgentKnowledge(id:string,input:any):Promise<any>{return await request<any>(`platform/agent/knowledge/${id}`,{method:"PATCH",body:input});},
-  async agentSettings():Promise<any>{return await request<any>("platform/agent/settings",{method:"GET"});},
-  async updateAgentSettings(input:any):Promise<any>{return await request<any>("platform/agent/settings",{method:"PATCH",body:input});},
-  async commerceProviders():Promise<any>{return await request<any>("platform/commerce-integrations/providers",{method:"GET"})??{items:[]};},
-  async commerceMockTargets():Promise<any>{return await request<any>("platform/commerce-integrations/mock-targets",{method:"GET"})??{items:[]};},
-  async commerceConnections(filters?:Record<string,unknown>):Promise<any>{return await request<any>(`platform/commerce-integrations/connections${filters?`?${toQuery(filters)}`:""}`,{method:"GET"})??{items:[],total:0,page:1,pageSize:25};},
-  async commerceConnection(id:string):Promise<any>{return await request<any>(`platform/commerce-integrations/connections/${id}`,{method:"GET"});},
-  async createMockCommerceConnection(input:any):Promise<any>{return await request<any>("platform/commerce-integrations/connections/mock",{method:"POST",body:input});},
-  async startSallaCommerceConnection(input:any):Promise<any>{return await request<any>("platform/commerce-integrations/connections/salla/start",{method:"POST",body:input});},
-  async startShopifyCommerceConnection(input:any):Promise<any>{return await request<any>("platform/commerce-integrations/connections/shopify/start",{method:"POST",body:input});},
-  async simulateCommerceEvent(id:string,input:any):Promise<any>{return await request<any>(`platform/commerce-integrations/connections/${id}/simulate`,{method:"POST",body:input});},
-  async testCommerceConnection(id:string,requestedState:string):Promise<any>{return await request<any>(`platform/commerce-integrations/connections/${id}/test`,{method:"POST",body:{requestedState}});},
-  async disconnectCommerceConnection(id:string,reason:string):Promise<any>{return await request<any>(`platform/commerce-integrations/connections/${id}/disconnect`,{method:"POST",body:{reason}});},
-  async reconnectCommerceConnection(id:string):Promise<any>{return await request<any>(`platform/commerce-integrations/connections/${id}/reconnect`,{method:"POST"});},
-  async commerceAreas(id:string,search?:string):Promise<any>{return await request<any>(`platform/commerce-integrations/connections/${id}/areas${search?`?${toQuery({search})}`:""}`,{method:"GET"})??{items:[]};},
-  async saveCommerceAreaMapping(id:string,input:any):Promise<any>{return await request<any>(`platform/commerce-integrations/connections/${id}/area-mappings`,{method:"POST",body:input});},
-  async retryCommerceEvent(id:string):Promise<any>{return await request<any>(`platform/commerce-integrations/events/${id}/retry`,{method:"POST"});},
-  async outboundCommerceDelivered(orderId:string):Promise<any>{return await request<any>(`platform/commerce-integrations/orders/${orderId}/outbound-delivered`,{method:"POST"});},
-  async customerQuote(id:string):Promise<any>{return await request<any>(`platform/customer-quotes/${id}`,{method:"GET"});},
-  async customerMarketplaceSettings():Promise<any>{return await request<any>("platform/customer-quotes/settings/current",{method:"GET"});},
-  async updateCustomerMarketplaceSettings(input:any):Promise<any>{return await request<any>("platform/customer-quotes/settings/current",{method:"PATCH",body:input});},
-  async createManualCustomerOffer(id:string,input:any):Promise<any>{return await request<any>(`platform/customer-quotes/${id}/offers`,{method:"POST",body:input});},
-  async convertCustomerQuoteToOrder(id:string,input:any):Promise<any>{return await request<any>(`platform/customer-quotes/${id}/convert-to-order`,{method:"POST",body:input});},
-  async traderApplication(id:string):Promise<TraderApplicationDetail>{const result=await request<TraderApplicationDetail>(`platform/trader-applications/${id}`,{method:"GET"});if(!result)throw new PlatformApiError("Empty Trader application response","empty",500);return result;},
-  async updateTraderApplicationStatus(id:string,status:TraderApplicationStatus,reason?:string):Promise<TraderApplicationDetail>{const result=await request<TraderApplicationDetail>(`platform/trader-applications/${id}/status`,{method:"PATCH",body:{status,...(reason?{reason}:{})}});if(!result)throw new PlatformApiError("Empty Trader application response","empty",500);return result;},
-  async addTraderApplicationNote(id:string,text:string):Promise<TraderApplicationDetail>{const result=await request<TraderApplicationDetail>(`platform/trader-applications/${id}/notes`,{method:"POST",body:{text}});if(!result)throw new PlatformApiError("Empty Trader application response","empty",500);return result;},
-  async resolveTraderApplicationCompany(id:string,resolution:string,companyId?:string):Promise<TraderApplicationDetail>{const result=await request<TraderApplicationDetail>(`platform/trader-applications/${id}/delivery-company-resolution`,{method:"PATCH",body:{resolution,...(companyId?{companyId}:{})}});if(!result)throw new PlatformApiError("Empty Trader application response","empty",500);return result;},
-  async deleteTraderApplications(ids:string[]):Promise<any>{return await request<any>("platform/trader-applications",{method:"DELETE",body:{ids}});},
+  async traderApplications(filters: Record<string, unknown>): Promise<TraderApplicationPage> {
+    const result = await request<TraderApplicationPage>(
+      `platform/trader-applications?${toQuery(filters)}`,
+      { method: "GET" },
+    );
+    return result ?? { items: [], total: 0, page: 1, pageSize: 25 };
+  },
+  async customerQuotes(): Promise<any[]> {
+    return (await request<any[]>("platform/customer-quotes", { method: "GET" })) ?? [];
+  },
+  async platformFeeReceivables(): Promise<any[]> {
+    return (
+      (await request<any[]>("platform/customer-quotes/platform-fees", { method: "GET" })) ?? []
+    );
+  },
+  async recordPlatformFeePayment(receivableId: string, input: any): Promise<any> {
+    return await request<any>(`platform/customer-quotes/platform-fees/${receivableId}/payments`, {
+      method: "POST",
+      body: input,
+    });
+  },
+  async deleteCustomerQuotes(ids: string[]): Promise<any> {
+    return await request<any>("platform/customer-quotes", { method: "DELETE", body: { ids } });
+  },
+  async blogArticles(): Promise<any[]> {
+    return (await request<any[]>("platform/blog", { method: "GET" })) ?? [];
+  },
+  async blogArticle(id: string): Promise<any> {
+    return await request<any>(`platform/blog/${id}`, { method: "GET" });
+  },
+  async blogArticlePreview(id: string): Promise<any> {
+    return await request<any>(`platform/blog/${id}/preview`, { method: "GET" });
+  },
+  async blogReferences(): Promise<any> {
+    return await request<any>("platform/blog/references", { method: "GET" });
+  },
+  async createBlogArticle(input: any): Promise<any> {
+    return await request<any>("platform/blog", { method: "POST", body: input });
+  },
+  async updateBlogArticle(id: string, input: any): Promise<any> {
+    return await request<any>(`platform/blog/${id}`, { method: "PATCH", body: input });
+  },
+  async updateBlogArticleStatus(id: string, input: any): Promise<any> {
+    return await request<any>(`platform/blog/${id}/status`, { method: "PATCH", body: input });
+  },
+  async publicSiteSettings(): Promise<any> {
+    return await request<any>("platform/blog/settings", { method: "GET" });
+  },
+  async updatePublicSiteSettings(input: any): Promise<any> {
+    return await request<any>("platform/blog/settings", { method: "PATCH", body: input });
+  },
+  async agentConversations(filters?: Record<string, unknown>): Promise<any> {
+    return (
+      (await request<any>(`platform/agent/conversations${filters ? `?${toQuery(filters)}` : ""}`, {
+        method: "GET",
+      })) ?? { items: [], total: 0, page: 1, pageSize: 25, counters: {} }
+    );
+  },
+  async agentConversation(id: string): Promise<any> {
+    return await request<any>(`platform/agent/conversations/${id}`, { method: "GET" });
+  },
+  async updateAgentConversationReview(id: string, input: any): Promise<any> {
+    return await request<any>(`platform/agent/conversations/${id}/review`, {
+      method: "PATCH",
+      body: input,
+    });
+  },
+  async replyAgentWhatsApp(id: string, message: string): Promise<any> {
+    return await request<any>(`platform/agent/conversations/${id}/whatsapp/reply`, {
+      method: "POST",
+      body: { message },
+    });
+  },
+  async replyAgentWebsite(id: string, message: string): Promise<any> {
+    return await request<any>(`platform/agent/conversations/${id}/website/reply`, {
+      method: "POST",
+      body: { message },
+    });
+  },
+  async setAgentConversationMode(id: string, mode: string, note?: string): Promise<any> {
+    return await request<any>(`platform/agent/conversations/${id}/mode`, {
+      method: "PATCH",
+      body: { mode, ...(note ? { note } : {}) },
+    });
+  },
+  async hideAgentConversation(id: string): Promise<any> {
+    return await request<any>(`platform/agent/conversations/${id}/hide`, { method: "PATCH" });
+  },
+  async unhideAgentConversation(id: string): Promise<any> {
+    return await request<any>(`platform/agent/conversations/${id}/unhide`, { method: "PATCH" });
+  },
+  async deleteAgentConversation(id: string): Promise<any> {
+    return await request<any>(`platform/agent/conversations/${id}/delete`, { method: "PATCH" });
+  },
+  async addAgentConversationComment(id: string, comment: string): Promise<any> {
+    return await request<any>(`platform/agent/conversations/${id}/comments`, {
+      method: "POST",
+      body: { comment },
+    });
+  },
+  async agentAssignees(): Promise<any[]> {
+    return (await request<any[]>("platform/agent/assignees", { method: "GET" })) ?? [];
+  },
+  async agentHandoffs(): Promise<any[]> {
+    return (await request<any[]>("platform/agent/handoffs", { method: "GET" })) ?? [];
+  },
+  async updateAgentHandoffStatus(id: string, status: string, notes?: string): Promise<any> {
+    return await request<any>(`platform/agent/handoffs/${id}/status`, {
+      method: "PATCH",
+      body: { status, ...(notes ? { notes } : {}) },
+    });
+  },
+  async agentKnowledge(): Promise<any[]> {
+    return (await request<any[]>("platform/agent/knowledge", { method: "GET" })) ?? [];
+  },
+  async createAgentKnowledge(input: any): Promise<any> {
+    return await request<any>("platform/agent/knowledge", { method: "POST", body: input });
+  },
+  async updateAgentKnowledge(id: string, input: any): Promise<any> {
+    return await request<any>(`platform/agent/knowledge/${id}`, { method: "PATCH", body: input });
+  },
+  async agentSettings(): Promise<any> {
+    return await request<any>("platform/agent/settings", { method: "GET" });
+  },
+  async updateAgentSettings(input: any): Promise<any> {
+    return await request<any>("platform/agent/settings", { method: "PATCH", body: input });
+  },
+  async commerceProviders(): Promise<any> {
+    return (
+      (await request<any>("platform/commerce-integrations/providers", { method: "GET" })) ?? {
+        items: [],
+      }
+    );
+  },
+  async commerceMockTargets(): Promise<any> {
+    return (
+      (await request<any>("platform/commerce-integrations/mock-targets", { method: "GET" })) ?? {
+        items: [],
+      }
+    );
+  },
+  async commerceConnections(filters?: Record<string, unknown>): Promise<any> {
+    return (
+      (await request<any>(
+        `platform/commerce-integrations/connections${filters ? `?${toQuery(filters)}` : ""}`,
+        { method: "GET" },
+      )) ?? { items: [], total: 0, page: 1, pageSize: 25 }
+    );
+  },
+  async commerceConnection(id: string): Promise<any> {
+    return await request<any>(`platform/commerce-integrations/connections/${id}`, {
+      method: "GET",
+    });
+  },
+  async createMockCommerceConnection(input: any): Promise<any> {
+    return await request<any>("platform/commerce-integrations/connections/mock", {
+      method: "POST",
+      body: input,
+    });
+  },
+  async startSallaCommerceConnection(input: any): Promise<any> {
+    return await request<any>("platform/commerce-integrations/connections/salla/start", {
+      method: "POST",
+      body: input,
+    });
+  },
+  async startShopifyCommerceConnection(input: any): Promise<any> {
+    return await request<any>("platform/commerce-integrations/connections/shopify/start", {
+      method: "POST",
+      body: input,
+    });
+  },
+  async simulateCommerceEvent(id: string, input: any): Promise<any> {
+    return await request<any>(`platform/commerce-integrations/connections/${id}/simulate`, {
+      method: "POST",
+      body: input,
+    });
+  },
+  async testCommerceConnection(id: string, requestedState: string): Promise<any> {
+    return await request<any>(`platform/commerce-integrations/connections/${id}/test`, {
+      method: "POST",
+      body: { requestedState },
+    });
+  },
+  async disconnectCommerceConnection(id: string, reason: string): Promise<any> {
+    return await request<any>(`platform/commerce-integrations/connections/${id}/disconnect`, {
+      method: "POST",
+      body: { reason },
+    });
+  },
+  async reconnectCommerceConnection(id: string): Promise<any> {
+    return await request<any>(`platform/commerce-integrations/connections/${id}/reconnect`, {
+      method: "POST",
+    });
+  },
+  async commerceAreas(id: string, search?: string): Promise<any> {
+    return (
+      (await request<any>(
+        `platform/commerce-integrations/connections/${id}/areas${search ? `?${toQuery({ search })}` : ""}`,
+        { method: "GET" },
+      )) ?? { items: [] }
+    );
+  },
+  async saveCommerceAreaMapping(id: string, input: any): Promise<any> {
+    return await request<any>(`platform/commerce-integrations/connections/${id}/area-mappings`, {
+      method: "POST",
+      body: input,
+    });
+  },
+  async retryCommerceEvent(id: string): Promise<any> {
+    return await request<any>(`platform/commerce-integrations/events/${id}/retry`, {
+      method: "POST",
+    });
+  },
+  async outboundCommerceDelivered(orderId: string): Promise<any> {
+    return await request<any>(
+      `platform/commerce-integrations/orders/${orderId}/outbound-delivered`,
+      { method: "POST" },
+    );
+  },
+  async customerQuote(id: string): Promise<any> {
+    return await request<any>(`platform/customer-quotes/${id}`, { method: "GET" });
+  },
+  async customerMarketplaceSettings(): Promise<any> {
+    return await request<any>("platform/customer-quotes/settings/current", { method: "GET" });
+  },
+  async updateCustomerMarketplaceSettings(input: any): Promise<any> {
+    return await request<any>("platform/customer-quotes/settings/current", {
+      method: "PATCH",
+      body: input,
+    });
+  },
+  async createManualCustomerOffer(id: string, input: any): Promise<any> {
+    return await request<any>(`platform/customer-quotes/${id}/offers`, {
+      method: "POST",
+      body: input,
+    });
+  },
+  async convertCustomerQuoteToOrder(id: string, input: any): Promise<any> {
+    return await request<any>(`platform/customer-quotes/${id}/convert-to-order`, {
+      method: "POST",
+      body: input,
+    });
+  },
+  async traderApplication(id: string): Promise<TraderApplicationDetail> {
+    const result = await request<TraderApplicationDetail>(`platform/trader-applications/${id}`, {
+      method: "GET",
+    });
+    if (!result) throw new PlatformApiError("Empty Trader application response", "empty", 500);
+    return result;
+  },
+  async updateTraderApplicationStatus(
+    id: string,
+    status: TraderApplicationStatus,
+    reason?: string,
+  ): Promise<TraderApplicationDetail> {
+    const result = await request<TraderApplicationDetail>(
+      `platform/trader-applications/${id}/status`,
+      { method: "PATCH", body: { status, ...(reason ? { reason } : {}) } },
+    );
+    if (!result) throw new PlatformApiError("Empty Trader application response", "empty", 500);
+    return result;
+  },
+  async addTraderApplicationNote(id: string, text: string): Promise<TraderApplicationDetail> {
+    const result = await request<TraderApplicationDetail>(
+      `platform/trader-applications/${id}/notes`,
+      { method: "POST", body: { text } },
+    );
+    if (!result) throw new PlatformApiError("Empty Trader application response", "empty", 500);
+    return result;
+  },
+  async resolveTraderApplicationCompany(
+    id: string,
+    resolution: string,
+    companyId?: string,
+  ): Promise<TraderApplicationDetail> {
+    const result = await request<TraderApplicationDetail>(
+      `platform/trader-applications/${id}/delivery-company-resolution`,
+      { method: "PATCH", body: { resolution, ...(companyId ? { companyId } : {}) } },
+    );
+    if (!result) throw new PlatformApiError("Empty Trader application response", "empty", 500);
+    return result;
+  },
+  async deleteTraderApplications(ids: string[]): Promise<any> {
+    return await request<any>("platform/trader-applications", { method: "DELETE", body: { ids } });
+  },
 };

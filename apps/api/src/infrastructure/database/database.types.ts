@@ -166,6 +166,10 @@ export interface DatabaseSchema {
   company_reference_counters: UntypedTable;
   company_settings: UntypedTable;
   company_users: CompanyUserTable;
+  company_websites: UntypedTable;
+  company_website_agent_conversations: UntypedTable;
+  company_website_delivery_requests: UntypedTable;
+  company_website_domains: UntypedTable;
   communication_notification_outbox: UntypedTable;
   conversation_participants: UntypedTable;
   conversations: UntypedTable;

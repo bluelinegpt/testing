@@ -18,6 +18,7 @@ import {
 import { usePlatformSession } from "../app/PlatformSession.js";
 import { companyPortalUrl } from "../config/company-portal.js";
 import { CompanyAdministrators } from "./CompanyAdministrators.js";
+import { CompanyWebsitePanel } from "./CompanyWebsitePanel.js";
 
 /**
  * One Company: overview, profile, accounting setup, readiness and lifecycle.
@@ -44,9 +45,15 @@ export function CompanyDetailPage(): ReactElement {
   const [failed, setFailed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
-  const [deletionEligibility, setDeletionEligibility] = useState<CompanyDeletionEligibility | undefined>(undefined);
-  const [deletionPreview, setDeletionPreview] = useState<CompanyDeletionPreview | undefined>(undefined);
-  const [deletionBackup, setDeletionBackup] = useState<CompanyDeletionBackup | undefined>(undefined);
+  const [deletionEligibility, setDeletionEligibility] = useState<
+    CompanyDeletionEligibility | undefined
+  >(undefined);
+  const [deletionPreview, setDeletionPreview] = useState<CompanyDeletionPreview | undefined>(
+    undefined,
+  );
+  const [deletionBackup, setDeletionBackup] = useState<CompanyDeletionBackup | undefined>(
+    undefined,
+  );
   const [deletionKey, setDeletionKey] = useState<string | undefined>(undefined);
   const [deleteConfirmation, setDeleteConfirmation] = useState("");
   const [deletionStatus, setDeletionStatus] = useState<string | undefined>(undefined);
@@ -221,7 +228,9 @@ export function CompanyDetailPage(): ReactElement {
     setError(undefined);
     setDeletionStatus("Creating and verifying full-database backup");
     try {
-      setDeletionBackup(await platformApi.companyDeletionBackup(companyId, deletionPreview.operationId));
+      setDeletionBackup(
+        await platformApi.companyDeletionBackup(companyId, deletionPreview.operationId),
+      );
       // The preview snapshot was taken before a backup existed, so its own
       // `readyForDelete` is stale the moment the backup completes -- the
       // button that creates the backup is only reachable when the preview
@@ -234,7 +243,9 @@ export function CompanyDetailPage(): ReactElement {
       );
       setDeletionStatus("Backup verified — ready for final confirmation");
     } catch (failure) {
-      setError(failure instanceof PlatformApiError ? failure.message : "Unable to create verified backup.");
+      setError(
+        failure instanceof PlatformApiError ? failure.message : "Unable to create verified backup.",
+      );
       setDeletionStatus("Backup failed");
     } finally {
       setBusy(false);
@@ -258,7 +269,11 @@ export function CompanyDetailPage(): ReactElement {
         state: { notice: `${company?.code ?? "Company"} was permanently deleted.` },
       });
     } catch (failure) {
-      setError(failure instanceof PlatformApiError ? failure.message : "Permanent deletion failed and was rolled back.");
+      setError(
+        failure instanceof PlatformApiError
+          ? failure.message
+          : "Permanent deletion failed and was rolled back.",
+      );
       setDeletionStatus("Failed / rolled back");
     } finally {
       setBusy(false);
@@ -475,10 +490,12 @@ export function CompanyDetailPage(): ReactElement {
         </dl>
       )}
       <p className="platform-muted">
-        Code and subdomain are fixed after creation. Environment moves only one way — to
-        production, via the Lifecycle section below — because it gates whether the Company&apos;s
-        data can ever be reset.
+        Code and subdomain are fixed after creation. Environment moves only one way — to production,
+        via the Lifecycle section below — because it gates whether the Company&apos;s data can ever
+        be reset.
       </p>
+
+      <CompanyWebsitePanel companyId={companyId} suggestedSlug={company.subdomain} />
 
       <h3>Technical information</h3>
       <dl className="platform-review">
@@ -491,7 +508,10 @@ export function CompanyDetailPage(): ReactElement {
       <h3>Configuration</h3>
       <dl className="platform-review">
         {[
-          ["Country", company.countryCode === "AE" ? "United Arab Emirates (AE)" : company.countryCode],
+          [
+            "Country",
+            company.countryCode === "AE" ? "United Arab Emirates (AE)" : company.countryCode,
+          ],
           ["Timezone", company.timezone ?? "\u2014"],
           ["Currency", company.baseCurrency ?? "\u2014"],
           ["Default language", company.defaultLanguage ?? "\u2014"],
@@ -749,12 +769,11 @@ export function CompanyDetailPage(): ReactElement {
             <section aria-labelledby="company-maintenance-heading">
               <h4 id="company-maintenance-heading">Training data &amp; environment</h4>
               <p className="platform-muted">
-                This Company is in <strong>{company.environment}</strong>. Its transactional data
-                — orders, settlements, reconciliations, accounting entries, payments, expenses,
-                customers, traders, drivers and employees — can be reset for training. The
-                Company profile, its users, chart of accounts and configuration are always
-                preserved. Once the Company moves to production, resetting becomes permanently
-                unavailable.
+                This Company is in <strong>{company.environment}</strong>. Its transactional data —
+                orders, settlements, reconciliations, accounting entries, payments, expenses,
+                customers, traders, drivers and employees — can be reset for training. The Company
+                profile, its users, chart of accounts and configuration are always preserved. Once
+                the Company moves to production, resetting becomes permanently unavailable.
               </p>
               {canReset ? (
                 <>
@@ -768,9 +787,7 @@ export function CompanyDetailPage(): ReactElement {
                   </button>
                   {resetPreview === undefined ? null : (
                     <div className="platform-review">
-                      <p role="status">
-                        READY FOR RESET: {resetPreview.eligible ? "YES" : "NO"}
-                      </p>
+                      <p role="status">READY FOR RESET: {resetPreview.eligible ? "YES" : "NO"}</p>
                       <p>
                         <strong>Rows to remove:</strong> {resetPreview.totalRows.toLocaleString()}
                         {" across "}
@@ -901,15 +918,33 @@ export function CompanyDetailPage(): ReactElement {
               )}
               {deletionPreview === undefined ? null : (
                 <div className="platform-review">
-                  <p role="status">READY FOR DELETE: {deletionPreview.readyForDelete ? "YES" : "NO"}</p>
-                  <p><strong>Manifest:</strong> {deletionPreview.manifestVersion ?? "pending"} ({deletionPreview.manifestHash?.slice(0, 12) ?? "pending"}…)</p>
-                  <p><strong>Total Company rows:</strong> {deletionPreview.totalCompanyRows ?? 0}</p>
-                  <p><strong>External objects:</strong> {deletionPreview.externalFiles?.fileObjects ?? 0}</p>
-                  <p><strong>Global/shared data:</strong> preserved</p>
+                  <p role="status">
+                    READY FOR DELETE: {deletionPreview.readyForDelete ? "YES" : "NO"}
+                  </p>
+                  <p>
+                    <strong>Manifest:</strong> {deletionPreview.manifestVersion ?? "pending"} (
+                    {deletionPreview.manifestHash?.slice(0, 12) ?? "pending"}…)
+                  </p>
+                  <p>
+                    <strong>Total Company rows:</strong> {deletionPreview.totalCompanyRows ?? 0}
+                  </p>
+                  <p>
+                    <strong>External objects:</strong>{" "}
+                    {deletionPreview.externalFiles?.fileObjects ?? 0}
+                  </p>
+                  <p>
+                    <strong>Global/shared data:</strong> preserved
+                  </p>
                   {Object.entries(deletionPreview.moduleCounts ?? {}).map(([module, count]) => (
-                    <p key={module}>{module}: {count}</p>
+                    <p key={module}>
+                      {module}: {count}
+                    </p>
                   ))}
-                  {(deletionPreview.blockers ?? []).map((blocker) => <p className="platform-warning" key={blocker}>{blocker}</p>)}
+                  {(deletionPreview.blockers ?? []).map((blocker) => (
+                    <p className="platform-warning" key={blocker}>
+                      {blocker}
+                    </p>
+                  ))}
                   {(deletionPreview.unknownReferences ?? []).map((reference) => (
                     <p className="platform-warning" key={reference}>
                       {reference}
@@ -917,22 +952,43 @@ export function CompanyDetailPage(): ReactElement {
                   ))}
                   <button
                     className="platform-button platform-button--quiet"
-                    disabled={busy || (deletionPreview.blockers ?? []).length > 0 || !deletionEligibility?.eligible}
+                    disabled={
+                      busy ||
+                      (deletionPreview.blockers ?? []).length > 0 ||
+                      !deletionEligibility?.eligible
+                    }
                     onClick={() => void createDeletionBackup()}
                     type="button"
-                  >Create Verified Backup</button>
+                  >
+                    Create Verified Backup
+                  </button>
                 </div>
               )}
               {deletionBackup === undefined ? null : (
                 <div className="platform-review">
-                  <p><strong>Backup:</strong> Verified full-database backup</p>
-                  <p><strong>Size:</strong> {deletionBackup.sizeBytes.toLocaleString()} bytes</p>
-                  <p><strong>Verified:</strong> {deletionBackup.verifiedAt}</p>
+                  <p>
+                    <strong>Backup:</strong> Verified full-database backup
+                  </p>
+                  <p>
+                    <strong>Size:</strong> {deletionBackup.sizeBytes.toLocaleString()} bytes
+                  </p>
+                  <p>
+                    <strong>Verified:</strong> {deletionBackup.verifiedAt}
+                  </p>
                   <label className="platform-field" htmlFor="permanent-delete-confirmation">
                     <span>Type DELETE {company.code}</span>
-                    <input id="permanent-delete-confirmation" onChange={(event) => setDeleteConfirmation(event.target.value)} value={deleteConfirmation} />
+                    <input
+                      id="permanent-delete-confirmation"
+                      onChange={(event) => setDeleteConfirmation(event.target.value)}
+                      value={deleteConfirmation}
+                    />
                   </label>
-                  <button className="platform-button" disabled={busy || deleteConfirmation !== `DELETE ${company.code}`} onClick={() => void permanentlyDelete()} type="button">
+                  <button
+                    className="platform-button"
+                    disabled={busy || deleteConfirmation !== `DELETE ${company.code}`}
+                    onClick={() => void permanentlyDelete()}
+                    type="button"
+                  >
                     Permanently Delete Company
                   </button>
                 </div>

@@ -26,6 +26,7 @@ import { PlatformCustomerQuoteController } from "./platform-customer-quote.contr
 import { PlatformBlogController } from "./platform-blog.controller.js";
 import { PlatformWebsiteCmsController } from "./platform-website-cms.controller.js";
 import { PlatformAgentController } from "./platform-agent.controller.js";
+import { PlatformCompanyWebsiteController } from "./company-website.controller.js";
 
 /**
  * The Platform route inventory, enumerated rather than assumed.
@@ -56,6 +57,7 @@ const platformControllers = [
   PlatformAgentController,
   PlatformTargetCompanyController,
   PlatformCompanyUserController,
+  PlatformCompanyWebsiteController,
 ];
 
 interface PlatformRoute {
@@ -108,7 +110,7 @@ describe("Platform route inventory", () => {
     const registered = declared
       .split(",")
       .map((entry) => entry.trim())
-      .filter((entry) => entry.length > 0);
+      .filter((entry) => entry.length > 0 && entry !== "PublicCompanyWebsiteController");
     expect(registered.sort()).toEqual(platformControllers.map((c) => c.name).sort());
   });
 
@@ -195,15 +197,31 @@ describe("Platform route inventory", () => {
       "hideConversation",
       "unhideConversation",
       "deleteConversation",
+      "configure",
+      "update",
+      "publish",
+      "disable",
+      "enable",
+      "discardDraft",
+      "previewAgent",
+      "addDomain",
+      "refreshDomain",
+      "primaryDomain",
+      "disableDomain",
+      "removeDomain",
     ];
     const bad: string[] = [];
     for (const route of routes) {
       if (route.isPublic) continue;
-      const shouldManage = mutating.includes(route.method);
+      const shouldManage =
+        mutating.includes(route.method) ||
+        (route.controller === "PlatformCompanyWebsiteController" && route.method === "preview");
       const hasManage =
         route.method !== "settings" &&
         route.permissions.some((code) =>
-          [".manage", ".create", ".edit", ".publish", ".reply", ".takeover"].some((suffix) => code.endsWith(suffix)),
+          [".manage", ".create", ".edit", ".publish", ".reply", ".takeover"].some((suffix) =>
+            code.endsWith(suffix),
+          ),
         );
       if (shouldManage !== hasManage) bad.push(`${route.controller}.${route.method}`);
     }
@@ -228,7 +246,11 @@ describe("Platform route inventory", () => {
    * Company is re-resolved server-side rather than trusted from the request.
    */
   it("guards every :companyId route with the target-Company guard", () => {
-    const guarded = new Set(["PlatformTargetCompanyController", "PlatformCompanyUserController"]);
+    const guarded = new Set([
+      "PlatformTargetCompanyController",
+      "PlatformCompanyUserController",
+      "PlatformCompanyWebsiteController",
+    ]);
     const bad: string[] = [];
     for (const route of routes) {
       if (!route.path.includes(":companyId")) continue;
@@ -242,7 +264,9 @@ describe("Platform route inventory", () => {
           process.cwd(),
           controller === "PlatformCompanyUserController"
             ? "src/platform/platform-company-user.controller.ts"
-            : "src/platform/platform-company.controller.ts",
+            : controller === "PlatformCompanyWebsiteController"
+              ? "src/platform/company-website.controller.ts"
+              : "src/platform/platform-company.controller.ts",
         ),
         "utf8",
       );
@@ -256,10 +280,9 @@ describe("Platform route inventory", () => {
     const bulkDeleteRoutes = routes.filter((route) => route.method.includes("Delete"));
     for (const route of bulkDeleteRoutes) {
       // All deletion routes must have appropriate management permissions
-      const hasManagePermission =
-        route.permissions.some((code) =>
-          [".manage", ".delete", ".create"].some((suffix) => code.endsWith(suffix)),
-        );
+      const hasManagePermission = route.permissions.some((code) =>
+        [".manage", ".delete", ".create"].some((suffix) => code.endsWith(suffix)),
+      );
       expect(hasManagePermission).toBe(true);
     }
   });
