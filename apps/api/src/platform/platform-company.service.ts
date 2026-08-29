@@ -13,6 +13,7 @@ import type { DatabaseSchema } from "../infrastructure/database/database.types.j
 import { ApplicationException } from "../presentation/errors/application.exception.js";
 import { isReservedCompanySubdomain } from "../tenancy/reserved-subdomains.js";
 import { PlatformAuditService, redactSensitive } from "./platform-audit.service.js";
+import { seedStandardEmployeeRoles } from "./company-defaults.js";
 import { STANDARD_COMPANY_ROLES } from "./standard-company-roles.js";
 
 /**
@@ -522,6 +523,11 @@ export class PlatformCompanyService {
           values (${companyId}::uuid, 'AED', ${input.defaultLanguage}, ${input.timezone})
         `.execute(transaction);
 
+        // Employee classifications are a different concern from RBAC roles.
+        // Seed the standard workforce list here so every newly-created
+        // Company has DRIVER available with is_driver_role=true immediately.
+        await seedStandardEmployeeRoles(transaction, companyId);
+
         // Standard starter roles (Driver Operations, Accountant) — see
         // standard-company-roles.ts for why these two and not more.
         // `is_system = false`: unlike the Company Administrator role created
@@ -617,6 +623,13 @@ export class PlatformCompanyService {
               : null,
             areasSeeded,
             standardRolesSeeded: STANDARD_COMPANY_ROLES.map((role) => role.code),
+            standardEmployeeRolesSeeded: [
+              "DRIVER",
+              "CUSTOMER_SERVICE",
+              "WAREHOUSE",
+              "OPERATIONS",
+              "ACCOUNTS",
+            ],
           },
           correlationId: actor.correlationId,
           ip: actor.ip,

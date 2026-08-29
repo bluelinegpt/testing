@@ -268,6 +268,15 @@ describe.skipIf(!runTests)("Platform Company onboarding", () => {
           expect(await counts("company_bank_accounts")).toBe(template.defaultBankAccounts.length);
           expect(await counts("company_balance_policies")).toBe(1);
           expect(await counts("accounting_configurations")).toBe(1);
+          expect(await counts("employee_roles")).toBe(5);
+          const driverEmployeeRole = (
+            await sql<{ code: string; isDriverRole: boolean }>`
+              select code, is_driver_role as "isDriverRole"
+                from employee_roles
+               where company_id=${companyId}::uuid and lower(code)='driver'
+            `.execute(transaction)
+          ).rows[0];
+          expect(driverEmployeeRole).toEqual({ code: "DRIVER", isDriverRole: true });
           expect(await counts("company_business_day_configurations")).toBe(1);
           const newGeography = await sql<{ code: string; count: number }>`
             select e.code,count(*)::int count from emirates e join areas a on a.emirate_id=e.id
