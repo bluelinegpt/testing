@@ -37,6 +37,41 @@ describe("App", () => {
     expect(localStorage.getItem(localeStorageKey)).toBe("ar");
   });
 
+  it("shows an actionable message, not a blank page, when a Platform Administrator session reaches the Company Portal", async () => {
+    // A Platform Administrator has no companyId and this app has no branch
+    // for that identity kind -- it used to fall straight through to `null`.
+    const json = (body: unknown, status = 200) =>
+      new Response(JSON.stringify(body), {
+        headers: { "content-type": "application/json" },
+        status,
+      });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation((url: string) => {
+        if (url.endsWith("/auth/me")) {
+          return Promise.resolve(
+            json({
+              companyId: null,
+              forcePasswordChange: false,
+              identityId: "40000000-0000-4000-8000-000000000001",
+              kind: "platform_administrator",
+              permissions: ["platform.access"],
+              sessionId: "50000000-0000-4000-8000-000000000001",
+            }),
+          );
+        }
+        return Promise.resolve(json({}, 404));
+      }),
+    );
+    renderApp();
+
+    expect(
+      await screen.findByRole("heading", { name: "Wrong portal for this account" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Platform Administrator accounts should use/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
+  });
+
   it("signs in, renders the shared shell, and navigates to a separate Orders route", async () => {
     const fetchMock = createFetchMock();
     vi.stubGlobal("fetch", fetchMock);

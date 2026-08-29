@@ -33,11 +33,16 @@ export interface CheckoutCartLine {
   readonly selectedOptions: readonly CheckoutSelectedOption[];
 }
 
+/**
+ * Pre-production fix: Emirate/Area are structured, server-validated
+ * selections -- `emirateId`/`areaId`, resolved from `fetchEmirates()`/
+ * `searchAreas()` below, never free text the customer typed.
+ */
 export interface CheckoutAddressInput {
   readonly address: string;
-  readonly area?: string;
+  readonly areaId: string;
   readonly deliveryInstructions?: string;
-  readonly emirate: string;
+  readonly emirateId: string;
   readonly locationLink?: string;
 }
 
@@ -104,7 +109,11 @@ export type CheckoutRequestResult<T> =
 export type CheckoutValidateResult = CheckoutRequestResult<CheckoutResult>;
 
 interface RawErrorBody {
-  readonly error?: { readonly code?: string; readonly correlationId?: string; readonly message?: string };
+  readonly error?: {
+    readonly code?: string;
+    readonly correlationId?: string;
+    readonly message?: string;
+  };
 }
 
 async function request<T>(path: string, input: unknown): Promise<CheckoutRequestResult<T>> {
@@ -135,7 +144,11 @@ async function request<T>(path: string, input: unknown): Promise<CheckoutRequest
     return { kind: "ok", value: payload };
   } catch {
     return {
-      error: { correlationId, errorCode: "network_error", message: "Could not reach the server. Please try again." },
+      error: {
+        correlationId,
+        errorCode: "network_error",
+        message: "Could not reach the server. Please try again.",
+      },
       kind: "error",
     };
   }
@@ -143,6 +156,67 @@ async function request<T>(path: string, input: unknown): Promise<CheckoutRequest
 
 export function validateCheckout(input: ValidateCheckoutInput): Promise<CheckoutValidateResult> {
   return request("commerce/checkout/validate", input);
+}
+
+// ------------------------------------------------------- Emirate / Area
+
+export interface Emirate {
+  readonly code: string;
+  readonly id: string;
+  readonly nameAr: string;
+  readonly nameEn: string;
+}
+
+export interface CheckoutArea {
+  readonly code: string;
+  readonly emirateId: string;
+  readonly id: string;
+  readonly nameAr: string | null;
+  readonly nameEn: string;
+}
+
+export interface AreaSearchResult {
+  readonly hasMore: boolean;
+  readonly items: readonly CheckoutArea[];
+}
+
+/**
+ * Pre-production fix: the read-only UAE Emirate master for the Checkout
+ * address form's Emirate dropdown. A plain `GET`, unlike `validateCheckout`
+ * -- there is no session/CSRF concern for a read-only public reference list.
+ */
+export async function fetchEmirates(): Promise<readonly Emirate[]> {
+  const response = await fetch(`${storeConfiguration.apiBaseUrl}/commerce/checkout/emirates`, {
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) return [];
+  return (await response.json().catch(() => [])) as readonly Emirate[];
+}
+
+/**
+ * Typeahead search for the Checkout's searchable Area combobox, scoped to
+ * this Store's own priceable Delivery Company server-side -- `storeSlug` is
+ * the only scoping input this function ever sends.
+ */
+export async function searchAreas(input: {
+  readonly storeSlug: string;
+  readonly emirateId?: string;
+  readonly search?: string;
+}): Promise<AreaSearchResult> {
+  const params = new URLSearchParams({ storeSlug: input.storeSlug });
+  if (input.emirateId !== undefined) params.set("emirateId", input.emirateId);
+  if (input.search !== undefined && input.search !== "") params.set("search", input.search);
+  const response = await fetch(
+    `${storeConfiguration.apiBaseUrl}/commerce/checkout/areas?${params.toString()}`,
+    {
+      headers: { Accept: "application/json" },
+    },
+  );
+  if (!response.ok) return { hasMore: false, items: [] };
+  const payload = (await response
+    .json()
+    .catch(() => ({ hasMore: false, items: [] }))) as AreaSearchResult;
+  return { hasMore: payload.hasMore ?? false, items: payload.items ?? [] };
 }
 
 /** Customer Commerce Prompt C3 -- "Place Order". A separate call to a

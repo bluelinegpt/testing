@@ -83,6 +83,8 @@ describe("Platform Company route protection", () => {
       const mutating = [
         "create",
         "update",
+        "updateShipmentPrefix",
+        "activateShipmentSerial",
         "activate",
         "suspend",
         "reactivate",
@@ -228,7 +230,7 @@ describe("Company lifecycle rules", () => {
 
   it("generates Company codes from a database sequence", () => {
     expect(source).toContain("nextval('platform_company_code_seq')");
-    expect(source).toContain("`CMP-${codeNumber.padStart(6, \"0\")}`");
+    expect(source).toContain('`CMP-${codeNumber.padStart(6, "0")}`');
   });
 
   it("normalizes safe subdomain suggestions and rejects empty Arabic-only output", () => {

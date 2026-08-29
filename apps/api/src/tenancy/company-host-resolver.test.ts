@@ -68,6 +68,18 @@ describe("CompanyHostResolver", () => {
     expect(resolver.resolve("acmeapp.tawseelhub.com")).toBe("acme");
   });
 
+  it("resolves distinct local Company app hosts without using the fallback", () => {
+    const resolver = createResolver({
+      developmentCompanySubdomain: "dev",
+      hostSuffix: "tawseelhub.com",
+    });
+
+    expect(resolver.resolve("danaapp.localhost:5177")).toBe("dana");
+    expect(resolver.resolve("speedapp.localhost:5177")).toBe("speed");
+    expect(resolver.resolve("dana.localhost:5177")).toBeUndefined();
+    expect(resolver.resolve("a.bapp.localhost:5177")).toBeUndefined();
+  });
+
   it("does not interpret the public Company website as the operational app", () => {
     const resolver = createResolver({ hostSuffix: "tawseelhub.com" });
     expect(resolver.resolve("dana.tawseelhub.com")).toBeUndefined();

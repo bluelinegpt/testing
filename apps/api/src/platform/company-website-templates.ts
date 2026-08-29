@@ -4,6 +4,21 @@ export const COMPANY_WEBSITE_TEMPLATE_KEYS = [
   "express",
   "local",
   "premium",
+  "skyline",
+  "minimal",
+  "bold",
+  "elegant",
+  "urban",
+  "swift",
+  "horizon",
+  "nexus",
+  "oasis",
+  "fleet",
+  "commerce",
+  "courier",
+  "executive",
+  "vibrant",
+  "classic",
 ] as const;
 
 export type CompanyWebsiteTemplateKey = (typeof COMPANY_WEBSITE_TEMPLATE_KEYS)[number];

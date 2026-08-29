@@ -4,7 +4,7 @@
  *
  *   platform.tawseelhub.com                 ->  https://<subdomain>app.tawseelhub.com
  *   bluelinegpt-platform-test.onrender.com  ->  https://<subdomain>app.tawseelhub.com
- *   localhost:5176 (dev)                    ->  http://localhost:5177
+ *   localhost:5176 (dev)                    ->  http://<subdomain>app.localhost:5177
  *
  * Deriving from the current host keeps the link correct on any future domain
  * with zero settings — the Platform always lives at `platform.<domain>` and
@@ -18,5 +18,5 @@ export function companyPortalUrl(subdomain: string): string {
   if (hostname.endsWith(".onrender.com")) {
     return `https://${subdomain}app.tawseelhub.com`;
   }
-  return "http://localhost:5177";
+  return `http://${subdomain}app.localhost:5177`;
 }

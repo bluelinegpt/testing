@@ -1058,7 +1058,7 @@ export class PublicTrackingController {
   @HttpCode(HttpStatus.OK)
   @Post("lookup")
   public lookup(@Body() input: LookupTrackingDto): Promise<PublicTrackingLookupOutcome> {
-    return this.publicTracking.lookupByAirwayBill(input.airwayBill);
+    return this.publicTracking.lookupByAirwayBill(input.airwayBill, input.language);
   }
 
   @Public()
@@ -1067,7 +1067,11 @@ export class PublicTrackingController {
   @HttpCode(HttpStatus.OK)
   @Post("verify")
   public verify(@Body() input: VerifyTrackingDto): Promise<PublicTrackingVerifyOutcome> {
-    return this.publicTracking.verifyAmbiguousShipment(input.verificationToken, input.mobile);
+    return this.publicTracking.verifyAmbiguousShipment(
+      input.verificationToken,
+      input.mobile,
+      input.language,
+    );
   }
 }
 

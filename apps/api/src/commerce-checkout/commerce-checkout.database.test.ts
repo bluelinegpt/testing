@@ -91,7 +91,9 @@ describe.skipIf(!runDatabaseTests)("CommerceCheckoutService (Customer Commerce P
         await sql`insert into trader_storefronts(
             id,company_id,trader_id,trader_commerce_id,display_name,slug,business_template,theme,status,published_at
           ) values(${ids.storefrontId}::uuid,${ids.companyId}::uuid,${ids.traderId}::uuid,${ids.commerceId}::uuid,
-            'Checkout Shop',${`checkout-shop-${short}`},'general','modern','published',now())`.execute(transaction);
+            'Checkout Shop',${`checkout-shop-${short}`},'general','modern','published',now())`.execute(
+          transaction,
+        );
         await sql`insert into trader_storefront_categories(id,company_id,storefront_id,name_en,slug)
           values(${ids.categoryId}::uuid,${ids.companyId}::uuid,${ids.storefrontId}::uuid,'General',${`general-${short}`})`.execute(
           transaction,
@@ -103,9 +105,13 @@ describe.skipIf(!runDatabaseTests)("CommerceCheckoutService (Customer Commerce P
             ${ids.categoryId}::uuid,'Checkout Product',${`checkout-product-${short}`},${`CP-${short}`},50.00,
             'active','available',1,5)`.execute(transaction);
         await sql`insert into trader_storefront_product_option_groups(id,storefront_id,product_id,name,display_order,is_required,is_active)
-          values(${ids.groupId}::uuid,${ids.storefrontId}::uuid,${ids.productId}::uuid,'Size',0,true,true)`.execute(transaction);
+          values(${ids.groupId}::uuid,${ids.storefrontId}::uuid,${ids.productId}::uuid,'Size',0,true,true)`.execute(
+          transaction,
+        );
         await sql`insert into trader_storefront_product_option_values(id,storefront_id,option_group_id,value,display_order,is_active)
-          values(${ids.valueId}::uuid,${ids.storefrontId}::uuid,${ids.groupId}::uuid,'Medium',0,true)`.execute(transaction);
+          values(${ids.valueId}::uuid,${ids.storefrontId}::uuid,${ids.groupId}::uuid,'Medium',0,true)`.execute(
+          transaction,
+        );
 
         // Delivery Company's own Area -- Area rows are Company-scoped
         // (`areas.company_id` NOT NULL), so this Area belongs to
@@ -160,7 +166,7 @@ describe.skipIf(!runDatabaseTests)("CommerceCheckoutService (Customer Commerce P
           ],
           customerMobile: "971503000010",
           customerName: "Checkout Customer",
-          newAddress: { address: "Street 9", area: "Al Barsha", emirate: "Dubai" },
+          newAddress: { address: "Street 9", areaId: ids.areaId, emirateId },
           paymentMethod: "cod" as const,
           storeSlug: `checkout-shop-${short}`,
         };
@@ -265,7 +271,10 @@ describe.skipIf(!runDatabaseTests)("CommerceCheckoutService (Customer Commerce P
               tenant: undefined,
             },
             () =>
-              service.validate({ ...baseInputWithoutAddress, savedAddressId: ids.otherCustomerAddressId }),
+              service.validate({
+                ...baseInputWithoutAddress,
+                savedAddressId: ids.otherCustomerAddressId,
+              }),
           ),
         ).rejects.toMatchObject({ status: 404 });
 
@@ -283,6 +292,35 @@ describe.skipIf(!runDatabaseTests)("CommerceCheckoutService (Customer Commerce P
         // itself IS exposed for selection, by design -- §76) ---
         const serialized = JSON.stringify(guestResult);
         expect(serialized).not.toContain(ids.relationshipTraderId);
+
+        // --- Pre-production fix: structured Area is validated, never
+        // guessed. A nonexistent areaId is a normal 400, not a crash and
+        // never a fabricated match. ---
+        await sql`update trader_delivery_company_relationships set enabled_for_store_orders = true, is_default_for_store_orders = true
+          where trader_commerce_id = ${ids.commerceId}::uuid`.execute(transaction);
+        await expect(
+          service.validate({
+            ...baseInput,
+            newAddress: { address: "Street 9", areaId: randomUUID(), emirateId },
+          }),
+        ).rejects.toMatchObject({ errorCode: "checkout_area_invalid", status: 400 });
+
+        // --- an Area id that exists but belongs to a DIFFERENT Emirate is
+        // rejected the same way -- never silently reassigned to the
+        // submitted Emirate. ---
+        const abuDhabi = await sql<{
+          id: string;
+        }>`select id from emirates where name_en = 'Abu Dhabi'`.execute(transaction);
+        await expect(
+          service.validate({
+            ...baseInput,
+            newAddress: {
+              address: "Street 9",
+              areaId: ids.areaId,
+              emirateId: abuDhabi.rows[0]!.id,
+            },
+          }),
+        ).rejects.toMatchObject({ errorCode: "checkout_area_invalid", status: 400 });
 
         throw rollbackMarker;
       });

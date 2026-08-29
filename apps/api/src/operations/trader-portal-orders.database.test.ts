@@ -94,7 +94,12 @@ async function seedTrader(
 
 async function seedOrder(
   transaction: Transaction<DatabaseSchema>,
-  fixture: { readonly actorId: string; readonly areaId: string; readonly companyId: string; readonly traderId: string },
+  fixture: {
+    readonly actorId: string;
+    readonly areaId: string;
+    readonly companyId: string;
+    readonly traderId: string;
+  },
   reference: string,
 ) {
   await sql`insert into orders(
@@ -491,6 +496,52 @@ describe.skipIf(!runDatabaseTests)("Trader portal Orders CSV import", () => {
     "serviceFee,packageCount\n" +
     `SN-${reference},${reference},Dev Customer,971509990000,"Deira, Dubai",100,10,1\n`;
 
+  async function activateGeneratedSerials(
+    transaction: Transaction<DatabaseSchema>,
+    companyId: string,
+    prefix: string,
+  ): Promise<void> {
+    await sql`update companies set shipment_prefix=${prefix} where id=${companyId}::uuid`.execute(
+      transaction,
+    );
+    await sql`update companies set shipment_serial_enabled_at=now() where id=${companyId}::uuid`.execute(
+      transaction,
+    );
+  }
+
+  it("rejects caller-supplied serials after activation", async () => {
+    await inRolledBackTransaction(async (transaction) => {
+      const fixture = await seedTrader(transaction);
+      await activateGeneratedSerials(transaction, fixture.companyId, "CSV");
+      const service = buildService(transaction, fixture);
+      const result = await service.createTraderPortalOrdersImport(
+        { csv: csvFor("REF-ACTIVE-REJECT") } as never,
+        randomUUID(),
+      );
+      expect(result.importedRows).toBe(0);
+      expect(result.errors[0]).toMatch(/generates it automatically|must not be supplied/i);
+    });
+  });
+
+  it("generates serial and normalized values together for activated imports", async () => {
+    await inRolledBackTransaction(async (transaction) => {
+      const fixture = await seedTrader(transaction);
+      await activateGeneratedSerials(transaction, fixture.companyId, "CSV");
+      const service = buildService(transaction, fixture);
+      const csv =
+        "referenceNumber,customerName,customerMobileNumber,customerAddress,codAmount,serviceFee,packageCount\n" +
+        'REF-ACTIVE-GENERATE,Dev Customer,971509990000,"Deira, Dubai",100,10,1\n';
+      const result = await service.createTraderPortalOrdersImport({ csv } as never, randomUUID());
+      expect(result.importedRows).toBe(1);
+      const created = await sql<{ normalized: string; serial: string }>`
+        select serial_number serial, serial_number_normalized normalized from orders
+        where company_id=${fixture.companyId}::uuid and reference_number='REF-ACTIVE-GENERATE'
+      `.execute(transaction);
+      expect(created.rows[0]?.serial).toBe("CSV0000001");
+      expect(created.rows[0]?.normalized).toBe("csv0000001");
+    });
+  });
+
   it("creates Orders owned by the authenticated Trader with no traderId column supplied", async () => {
     await inRolledBackTransaction(async (transaction) => {
       const fixture = await seedTrader(transaction);
@@ -547,7 +598,7 @@ describe.skipIf(!runDatabaseTests)("Trader portal Orders CSV import", () => {
 
       const invalidCsv =
         "serialNumber,referenceNumber,customerName,customerMobileNumber,customerAddress,codAmount,packageCount\n" +
-        "SN-BAD,REF-BAD,,971509990000,\"Deira, Dubai\",100,1\n"; // blank customerName
+        'SN-BAD,REF-BAD,,971509990000,"Deira, Dubai",100,1\n'; // blank customerName
 
       const result = await service.createTraderPortalOrdersImport(
         { csv: invalidCsv } as never,
@@ -628,119 +679,129 @@ describe.skipIf(!runDatabaseTests)("Trader portal Orders CSV import", () => {
  * Company. See `resolveTraderPortalDeliveryCompany` for the mechanism
  * (`tenants.run()`, no session/auth rewrite).
  */
-describe.skipIf(!runDatabaseTests)("Trader portal Order creation — Delivery Company selection", () => {
-  async function seedCommerceLink(
-    transaction: Transaction<DatabaseSchema>,
-    input: {
-      readonly companyId: string;
-      readonly status?: "active" | "inactive";
-      readonly traderCommerceId: string;
-      readonly traderId: string;
-    },
-  ) {
-    await sql`insert into trader_commerce_company_links(
+describe.skipIf(!runDatabaseTests)(
+  "Trader portal Order creation — Delivery Company selection",
+  () => {
+    async function seedCommerceLink(
+      transaction: Transaction<DatabaseSchema>,
+      input: {
+        readonly companyId: string;
+        readonly status?: "active" | "inactive";
+        readonly traderCommerceId: string;
+        readonly traderId: string;
+      },
+    ) {
+      await sql`insert into trader_commerce_company_links(
         id, trader_commerce_id, company_id, trader_id, link_source, status
       ) values (
         ${randomUUID()}::uuid, ${input.traderCommerceId}::uuid, ${input.companyId}::uuid,
         ${input.traderId}::uuid, 'manual_link', ${input.status ?? "active"}
       )`.execute(transaction);
-  }
+    }
 
-  async function seedTraderCommerceProfile(transaction: Transaction<DatabaseSchema>) {
-    const id = randomUUID();
-    await sql`insert into trader_commerce_profiles(id, public_name, registration_source)
+    async function seedTraderCommerceProfile(transaction: Transaction<DatabaseSchema>) {
+      const id = randomUUID();
+      await sql`insert into trader_commerce_profiles(id, public_name, registration_source)
       values(${id}::uuid, 'Global Orders Test Shop', 'platform_registered')`.execute(transaction);
-    return id;
-  }
+      return id;
+    }
 
-  async function seedTraderPrice(
-    transaction: Transaction<DatabaseSchema>,
-    fixture: { readonly actorId: string; readonly areaId: string; readonly companyId: string; readonly traderId: string },
-    fee: number,
-  ) {
-    const area = (
-      await sql<{ emirateId: string }>`
+    async function seedTraderPrice(
+      transaction: Transaction<DatabaseSchema>,
+      fixture: {
+        readonly actorId: string;
+        readonly areaId: string;
+        readonly companyId: string;
+        readonly traderId: string;
+      },
+      fee: number,
+    ) {
+      const area = (
+        await sql<{ emirateId: string }>`
         select emirate_id as "emirateId" from areas where id = ${fixture.areaId}::uuid
       `.execute(transaction)
-    ).rows[0]!;
-    await sql`insert into trader_service_prices(
+      ).rows[0]!;
+      await sql`insert into trader_service_prices(
         company_id, trader_id, emirate_id, area_id, service_fee, created_by_account_id
       ) values (
         ${fixture.companyId}::uuid, ${fixture.traderId}::uuid, ${area.emirateId}::uuid,
         ${fixture.areaId}::uuid, ${fee}, ${fixture.actorId}::uuid
       )`.execute(transaction);
-  }
+    }
 
-  const orderInput = (areaId: string, reference: string) => ({
-    areaId,
-    codAmount: 100,
-    customerAddress: "Deira, Dubai",
-    customerMobileNumber: "971509990000",
-    customerName: "Dev Customer",
-    inlineCustomer: { areaId, mobileNumber: "971509990000", name: "Dev Customer" },
-    packageCount: 1,
-    referenceNumber: reference,
-    serialNumber: `SN-${reference}`,
-  });
+    const orderInput = (areaId: string, reference: string) => ({
+      areaId,
+      codAmount: 100,
+      customerAddress: "Deira, Dubai",
+      customerMobileNumber: "971509990000",
+      customerName: "Dev Customer",
+      inlineCustomer: { areaId, mobileNumber: "971509990000", name: "Dev Customer" },
+      packageCount: 1,
+      referenceNumber: reference,
+      serialNumber: `SN-${reference}`,
+    });
 
-  it("auto-selects the single linked Company when no selection is sent", async () => {
-    await inRolledBackTransaction(async (transaction) => {
-      const fixture = await seedTrader(transaction);
-      await seedTraderPrice(transaction, fixture, 15);
-      const service = buildService(transaction, fixture);
+    it("auto-selects the single linked Company when no selection is sent", async () => {
+      await inRolledBackTransaction(async (transaction) => {
+        const fixture = await seedTrader(transaction);
+        await seedTraderPrice(transaction, fixture, 15);
+        const service = buildService(transaction, fixture);
 
-      const order = await service.createTraderPortalOrder(
-        orderInput(fixture.areaId, "REF-AUTO-SELECT") as never,
-        randomUUID(),
-        randomUUID(),
-      );
+        const order = await service.createTraderPortalOrder(
+          orderInput(fixture.areaId, "REF-AUTO-SELECT") as never,
+          randomUUID(),
+          randomUUID(),
+        );
 
-      expect(order.serviceFee).toBe("15.00");
-      const stored = await sql<{ companyId: string; traderId: string }>`
+        expect(order.serviceFee).toBe("15.00");
+        const stored = await sql<{ companyId: string; traderId: string }>`
         select company_id as "companyId", trader_id as "traderId" from orders where id = ${order.id}::uuid
       `.execute(transaction);
-      expect(stored.rows[0]?.companyId).toBe(fixture.companyId);
-      expect(stored.rows[0]?.traderId).toBe(fixture.traderId);
+        expect(stored.rows[0]?.companyId).toBe(fixture.companyId);
+        expect(stored.rows[0]?.traderId).toBe(fixture.traderId);
+      });
     });
-  });
 
-  it("resolves to the caller's own Company Trader record and pricing when it is explicitly selected", async () => {
-    await inRolledBackTransaction(async (transaction) => {
-      const traderCommerceId = await seedTraderCommerceProfile(transaction);
-      const traderA = await seedTrader(transaction);
-      await seedTraderPrice(transaction, traderA, 15);
-      await seedCommerceLink(transaction, {
-        companyId: traderA.companyId,
-        traderCommerceId,
-        traderId: traderA.traderId,
-      });
-      const traderB = await seedTrader(transaction);
-      await seedCommerceLink(transaction, {
-        companyId: traderB.companyId,
-        traderCommerceId,
-        traderId: traderB.traderId,
-      });
+    it("resolves to the caller's own Company Trader record and pricing when it is explicitly selected", async () => {
+      await inRolledBackTransaction(async (transaction) => {
+        const traderCommerceId = await seedTraderCommerceProfile(transaction);
+        const traderA = await seedTrader(transaction);
+        await seedTraderPrice(transaction, traderA, 15);
+        await seedCommerceLink(transaction, {
+          companyId: traderA.companyId,
+          traderCommerceId,
+          traderId: traderA.traderId,
+        });
+        const traderB = await seedTrader(transaction);
+        await seedCommerceLink(transaction, {
+          companyId: traderB.companyId,
+          traderCommerceId,
+          traderId: traderB.traderId,
+        });
 
-      const service = buildService(transaction, traderA);
-      // Explicitly selecting the caller's own Company (the multi-Company
-      // dropdown's default) exercises the field end-to-end without hitting
-      // the cross-Company case the next test proves.
-      const order = await service.createTraderPortalOrder(
-        { ...orderInput(traderA.areaId, "REF-OWN-SELECTED"), deliveryCompanyId: traderA.companyId } as never,
-        randomUUID(),
-        randomUUID(),
-      );
+        const service = buildService(transaction, traderA);
+        // Explicitly selecting the caller's own Company (the multi-Company
+        // dropdown's default) exercises the field end-to-end without hitting
+        // the cross-Company case the next test proves.
+        const order = await service.createTraderPortalOrder(
+          {
+            ...orderInput(traderA.areaId, "REF-OWN-SELECTED"),
+            deliveryCompanyId: traderA.companyId,
+          } as never,
+          randomUUID(),
+          randomUUID(),
+        );
 
-      expect(order.serviceFee).toBe("15.00");
-      const stored = await sql<{ companyId: string; traderId: string }>`
+        expect(order.serviceFee).toBe("15.00");
+        const stored = await sql<{ companyId: string; traderId: string }>`
         select company_id as "companyId", trader_id as "traderId" from orders where id = ${order.id}::uuid
       `.execute(transaction);
-      expect(stored.rows[0]?.companyId).toBe(traderA.companyId);
-      expect(stored.rows[0]?.traderId).toBe(traderA.traderId);
+        expect(stored.rows[0]?.companyId).toBe(traderA.companyId);
+        expect(stored.rows[0]?.traderId).toBe(traderA.traderId);
+      });
     });
-  });
 
-  /* -------------------------------------------------------------------------
+    /* -------------------------------------------------------------------------
      T8 §29 -- "If two Trader records exist inside the same Company, ensure
      the Order uses the Trader mapped to the authenticated Trader Commerce
      identity. Do not choose by name. Do not choose first record." The closest
@@ -752,389 +813,396 @@ describe.skipIf(!runDatabaseTests)("Trader portal Order creation — Delivery Co
      Trader's id, never the decoy's, even though the decoy exists first in
      insertion order and would sort first by name.
      ------------------------------------------------------------------------- */
-  it("uses the commerce-linked Trader, not a decoy Trader record in the same Company", async () => {
-    await inRolledBackTransaction(async (transaction) => {
-      const traderCommerceId = await seedTraderCommerceProfile(transaction);
-      const linkedTrader = await seedTrader(transaction);
-      await seedTraderPrice(transaction, linkedTrader, 15);
-      await seedCommerceLink(transaction, {
-        companyId: linkedTrader.companyId,
-        traderCommerceId,
-        traderId: linkedTrader.traderId,
-      });
+    it("uses the commerce-linked Trader, not a decoy Trader record in the same Company", async () => {
+      await inRolledBackTransaction(async (transaction) => {
+        const traderCommerceId = await seedTraderCommerceProfile(transaction);
+        const linkedTrader = await seedTrader(transaction);
+        await seedTraderPrice(transaction, linkedTrader, 15);
+        await seedCommerceLink(transaction, {
+          companyId: linkedTrader.companyId,
+          traderCommerceId,
+          traderId: linkedTrader.traderId,
+        });
 
-      // Decoy: a second, unrelated Trader record inside the exact same
-      // Company, never linked to the Trader Commerce identity.
-      const decoyTrader = await seedTrader(transaction, {
-        company: { actorId: linkedTrader.actorId, companyId: linkedTrader.companyId },
-      });
+        // Decoy: a second, unrelated Trader record inside the exact same
+        // Company, never linked to the Trader Commerce identity.
+        const decoyTrader = await seedTrader(transaction, {
+          company: { actorId: linkedTrader.actorId, companyId: linkedTrader.companyId },
+        });
 
-      const service = buildService(transaction, linkedTrader);
-      const order = await service.createTraderPortalOrder(
-        {
-          ...orderInput(linkedTrader.areaId, "REF-NOT-DECOY"),
-          deliveryCompanyId: linkedTrader.companyId,
-        } as never,
-        randomUUID(),
-        randomUUID(),
-      );
+        const service = buildService(transaction, linkedTrader);
+        const order = await service.createTraderPortalOrder(
+          {
+            ...orderInput(linkedTrader.areaId, "REF-NOT-DECOY"),
+            deliveryCompanyId: linkedTrader.companyId,
+          } as never,
+          randomUUID(),
+          randomUUID(),
+        );
 
-      expect(order.serviceFee).toBe("15.00");
-      const stored = await sql<{ companyId: string; traderId: string }>`
+        expect(order.serviceFee).toBe("15.00");
+        const stored = await sql<{ companyId: string; traderId: string }>`
         select company_id as "companyId", trader_id as "traderId" from orders where id = ${order.id}::uuid
       `.execute(transaction);
-      expect(stored.rows[0]?.companyId).toBe(linkedTrader.companyId);
-      expect(stored.rows[0]?.traderId).toBe(linkedTrader.traderId);
-      expect(stored.rows[0]?.traderId).not.toBe(decoyTrader.traderId);
+        expect(stored.rows[0]?.companyId).toBe(linkedTrader.companyId);
+        expect(stored.rows[0]?.traderId).toBe(linkedTrader.traderId);
+        expect(stored.rows[0]?.traderId).not.toBe(decoyTrader.traderId);
+      });
     });
-  });
 
-  /**
-   * The mandatory pricing-proof test gate (Trader Portal Prompt 3T-C FINAL,
-   * §12): same Trader Commerce identity, same Area, two different Companies
-   * each with their OWN Trader/Area price. One Order through each Company
-   * selection must land under that Company with THAT Company's fee, proving
-   * `resolveTraderPortalDeliveryCompany` + `tenants.run()` +
-   * `actingAccountIdOverride` genuinely redirect the write, not just resolve
-   * a target and silently keep pricing/ownership from the caller's own
-   * Company.
-   */
-  it("creates a real Order under a different linked Company, with that Company's own Trader resolution and pricing", async () => {
-    await inRolledBackTransaction(async (transaction) => {
-      const traderCommerceId = await seedTraderCommerceProfile(transaction);
-      const traderA = await seedTrader(transaction);
-      await seedTraderPrice(transaction, traderA, 15); // Fee A
-      await seedCommerceLink(transaction, {
-        companyId: traderA.companyId,
-        traderCommerceId,
-        traderId: traderA.traderId,
-      });
-      const traderB = await seedTrader(transaction);
-      await seedTraderPrice(transaction, traderB, 40); // Fee B — deliberately different
-      await seedCommerceLink(transaction, {
-        companyId: traderB.companyId,
-        traderCommerceId,
-        traderId: traderB.traderId,
-      });
+    /**
+     * The mandatory pricing-proof test gate (Trader Portal Prompt 3T-C FINAL,
+     * §12): same Trader Commerce identity, same Area, two different Companies
+     * each with their OWN Trader/Area price. One Order through each Company
+     * selection must land under that Company with THAT Company's fee, proving
+     * `resolveTraderPortalDeliveryCompany` + `tenants.run()` +
+     * `actingAccountIdOverride` genuinely redirect the write, not just resolve
+     * a target and silently keep pricing/ownership from the caller's own
+     * Company.
+     */
+    it("creates a real Order under a different linked Company, with that Company's own Trader resolution and pricing", async () => {
+      await inRolledBackTransaction(async (transaction) => {
+        const traderCommerceId = await seedTraderCommerceProfile(transaction);
+        const traderA = await seedTrader(transaction);
+        await seedTraderPrice(transaction, traderA, 15); // Fee A
+        await seedCommerceLink(transaction, {
+          companyId: traderA.companyId,
+          traderCommerceId,
+          traderId: traderA.traderId,
+        });
+        const traderB = await seedTrader(transaction);
+        await seedTraderPrice(transaction, traderB, 40); // Fee B — deliberately different
+        await seedCommerceLink(transaction, {
+          companyId: traderB.companyId,
+          traderCommerceId,
+          traderId: traderB.traderId,
+        });
 
-      const service = buildService(transaction, traderA);
+        const service = buildService(transaction, traderA);
 
-      const orderA = await service.createTraderPortalOrder(
-        orderInput(traderA.areaId, "REF-PRICE-PROOF-A") as never,
-        randomUUID(),
-        randomUUID(),
-      );
-      const orderB = await service.createTraderPortalOrder(
-        { ...orderInput(traderB.areaId, "REF-PRICE-PROOF-B"), deliveryCompanyId: traderB.companyId } as never,
-        randomUUID(),
-        randomUUID(),
-      );
+        const orderA = await service.createTraderPortalOrder(
+          orderInput(traderA.areaId, "REF-PRICE-PROOF-A") as never,
+          randomUUID(),
+          randomUUID(),
+        );
+        const orderB = await service.createTraderPortalOrder(
+          {
+            ...orderInput(traderB.areaId, "REF-PRICE-PROOF-B"),
+            deliveryCompanyId: traderB.companyId,
+          } as never,
+          randomUUID(),
+          randomUUID(),
+        );
 
-      expect(orderA.serviceFee).toBe("15.00");
-      expect(orderB.serviceFee).toBe("40.00");
+        expect(orderA.serviceFee).toBe("15.00");
+        expect(orderB.serviceFee).toBe("40.00");
 
-      const storedA = await sql<{ companyId: string; traderId: string }>`
+        const storedA = await sql<{ companyId: string; traderId: string }>`
         select company_id as "companyId", trader_id as "traderId" from orders where id = ${orderA.id}::uuid
       `.execute(transaction);
-      const storedB = await sql<{ companyId: string; traderId: string }>`
+        const storedB = await sql<{ companyId: string; traderId: string }>`
         select company_id as "companyId", trader_id as "traderId" from orders where id = ${orderB.id}::uuid
       `.execute(transaction);
-      expect(storedA.rows[0]?.companyId).toBe(traderA.companyId);
-      expect(storedA.rows[0]?.traderId).toBe(traderA.traderId);
-      expect(storedB.rows[0]?.companyId).toBe(traderB.companyId);
-      expect(storedB.rows[0]?.traderId).toBe(traderB.traderId);
+        expect(storedA.rows[0]?.companyId).toBe(traderA.companyId);
+        expect(storedA.rows[0]?.traderId).toBe(traderA.traderId);
+        expect(storedB.rows[0]?.companyId).toBe(traderB.companyId);
+        expect(storedB.rows[0]?.traderId).toBe(traderB.traderId);
+      });
     });
-  });
 
-  it("rejects a Delivery Company the Trader has no active relationship with", async () => {
-    await inRolledBackTransaction(async (transaction) => {
-      const fixture = await seedTrader(transaction);
-      const unrelatedCompanyId = randomUUID();
-      const service = buildService(transaction, fixture);
+    it("rejects a Delivery Company the Trader has no active relationship with", async () => {
+      await inRolledBackTransaction(async (transaction) => {
+        const fixture = await seedTrader(transaction);
+        const unrelatedCompanyId = randomUUID();
+        const service = buildService(transaction, fixture);
 
-      await expect(
-        service.createTraderPortalOrder(
-          {
-            ...orderInput(fixture.areaId, "REF-REJECTED"),
-            deliveryCompanyId: unrelatedCompanyId,
-          } as never,
-          randomUUID(),
-        ),
-      ).rejects.toMatchObject({ errorCode: "delivery_company_not_linked" });
+        await expect(
+          service.createTraderPortalOrder(
+            {
+              ...orderInput(fixture.areaId, "REF-REJECTED"),
+              deliveryCompanyId: unrelatedCompanyId,
+            } as never,
+            randomUUID(),
+          ),
+        ).rejects.toMatchObject({ errorCode: "delivery_company_not_linked" });
 
-      const created = await sql<{ count: string }>`
+        const created = await sql<{ count: string }>`
         select count(*)::text as count from orders where reference_number = 'REF-REJECTED'
       `.execute(transaction);
-      expect(created.rows[0]?.count).toBe("0");
+        expect(created.rows[0]?.count).toBe("0");
+      });
     });
-  });
 
-  it("rejects a Delivery Company whose link is inactive", async () => {
-    await inRolledBackTransaction(async (transaction) => {
-      const traderCommerceId = await seedTraderCommerceProfile(transaction);
-      const traderA = await seedTrader(transaction);
-      await seedCommerceLink(transaction, {
-        companyId: traderA.companyId,
-        traderCommerceId,
-        traderId: traderA.traderId,
+    it("rejects a Delivery Company whose link is inactive", async () => {
+      await inRolledBackTransaction(async (transaction) => {
+        const traderCommerceId = await seedTraderCommerceProfile(transaction);
+        const traderA = await seedTrader(transaction);
+        await seedCommerceLink(transaction, {
+          companyId: traderA.companyId,
+          traderCommerceId,
+          traderId: traderA.traderId,
+        });
+        const traderB = await seedTrader(transaction);
+        await seedCommerceLink(transaction, {
+          companyId: traderB.companyId,
+          status: "inactive",
+          traderCommerceId,
+          traderId: traderB.traderId,
+        });
+
+        const service = buildService(transaction, traderA);
+
+        await expect(
+          service.createTraderPortalOrder(
+            {
+              ...orderInput(traderB.areaId, "REF-INACTIVE-LINK-BLOCKED"),
+              deliveryCompanyId: traderB.companyId,
+            } as never,
+            randomUUID(),
+          ),
+        ).rejects.toMatchObject({ errorCode: "delivery_company_not_linked" });
       });
-      const traderB = await seedTrader(transaction);
-      await seedCommerceLink(transaction, {
-        companyId: traderB.companyId,
-        status: "inactive",
-        traderCommerceId,
-        traderId: traderB.traderId,
-      });
-
-      const service = buildService(transaction, traderA);
-
-      await expect(
-        service.createTraderPortalOrder(
-          {
-            ...orderInput(traderB.areaId, "REF-INACTIVE-LINK-BLOCKED"),
-            deliveryCompanyId: traderB.companyId,
-          } as never,
-          randomUUID(),
-        ),
-      ).rejects.toMatchObject({ errorCode: "delivery_company_not_linked" });
     });
-  });
 
-  /**
-   * Cross-Trader denial (§48): a Company that belongs to a DIFFERENT
-   * Trader Commerce identity entirely (not merely inactive) must be
-   * rejected exactly the same way as any other unrelated Company — Trader A
-   * gets no access to Trader B's Company Trader, pricing, or Order scope
-   * just because Trader B happens to exist.
-   */
-  it("rejects a Company belonging to a completely different Trader Commerce identity", async () => {
-    await inRolledBackTransaction(async (transaction) => {
-      const ownCommerceId = await seedTraderCommerceProfile(transaction);
-      const traderA = await seedTrader(transaction);
-      await seedCommerceLink(transaction, {
-        companyId: traderA.companyId,
-        traderCommerceId: ownCommerceId,
-        traderId: traderA.traderId,
-      });
+    /**
+     * Cross-Trader denial (§48): a Company that belongs to a DIFFERENT
+     * Trader Commerce identity entirely (not merely inactive) must be
+     * rejected exactly the same way as any other unrelated Company — Trader A
+     * gets no access to Trader B's Company Trader, pricing, or Order scope
+     * just because Trader B happens to exist.
+     */
+    it("rejects a Company belonging to a completely different Trader Commerce identity", async () => {
+      await inRolledBackTransaction(async (transaction) => {
+        const ownCommerceId = await seedTraderCommerceProfile(transaction);
+        const traderA = await seedTrader(transaction);
+        await seedCommerceLink(transaction, {
+          companyId: traderA.companyId,
+          traderCommerceId: ownCommerceId,
+          traderId: traderA.traderId,
+        });
 
-      const otherCommerceId = await seedTraderCommerceProfile(transaction);
-      const traderB = await seedTrader(transaction);
-      await seedCommerceLink(transaction, {
-        companyId: traderB.companyId,
-        traderCommerceId: otherCommerceId,
-        traderId: traderB.traderId,
-      });
+        const otherCommerceId = await seedTraderCommerceProfile(transaction);
+        const traderB = await seedTrader(transaction);
+        await seedCommerceLink(transaction, {
+          companyId: traderB.companyId,
+          traderCommerceId: otherCommerceId,
+          traderId: traderB.traderId,
+        });
 
-      const service = buildService(transaction, traderA);
+        const service = buildService(transaction, traderA);
 
-      await expect(
-        service.createTraderPortalOrder(
-          {
-            ...orderInput(traderB.areaId, "REF-CROSS-TRADER-DENIED"),
-            deliveryCompanyId: traderB.companyId,
-          } as never,
-          randomUUID(),
-          randomUUID(),
-        ),
-      ).rejects.toMatchObject({ errorCode: "delivery_company_not_linked" });
+        await expect(
+          service.createTraderPortalOrder(
+            {
+              ...orderInput(traderB.areaId, "REF-CROSS-TRADER-DENIED"),
+              deliveryCompanyId: traderB.companyId,
+            } as never,
+            randomUUID(),
+            randomUUID(),
+          ),
+        ).rejects.toMatchObject({ errorCode: "delivery_company_not_linked" });
 
-      const created = await sql<{ count: string }>`
+        const created = await sql<{ count: string }>`
         select count(*)::text as count from orders where reference_number = 'REF-CROSS-TRADER-DENIED'
       `.execute(transaction);
-      expect(created.rows[0]?.count).toBe("0");
+        expect(created.rows[0]?.count).toBe("0");
+      });
     });
-  });
 
-  it("bulk import resolves every row to the caller's own Company Trader record when explicitly selected", async () => {
-    await inRolledBackTransaction(async (transaction) => {
-      const traderCommerceId = await seedTraderCommerceProfile(transaction);
-      const traderA = await seedTrader(transaction);
-      await seedCommerceLink(transaction, {
-        companyId: traderA.companyId,
-        traderCommerceId,
-        traderId: traderA.traderId,
-      });
-      const traderB = await seedTrader(transaction);
-      await seedCommerceLink(transaction, {
-        companyId: traderB.companyId,
-        traderCommerceId,
-        traderId: traderB.traderId,
-      });
+    it("bulk import resolves every row to the caller's own Company Trader record when explicitly selected", async () => {
+      await inRolledBackTransaction(async (transaction) => {
+        const traderCommerceId = await seedTraderCommerceProfile(transaction);
+        const traderA = await seedTrader(transaction);
+        await seedCommerceLink(transaction, {
+          companyId: traderA.companyId,
+          traderCommerceId,
+          traderId: traderA.traderId,
+        });
+        const traderB = await seedTrader(transaction);
+        await seedCommerceLink(transaction, {
+          companyId: traderB.companyId,
+          traderCommerceId,
+          traderId: traderB.traderId,
+        });
 
-      const csv =
-        "serialNumber,referenceNumber,customerName,customerMobileNumber,customerAddress,codAmount," +
-        "serviceFee,packageCount\n" +
-        'SN-BULK-1,REF-BULK-1,Dev Customer,971509990000,"Deira, Dubai",100,10,1\n' +
-        'SN-BULK-2,REF-BULK-2,Dev Customer,971509990000,"Deira, Dubai",100,10,1\n';
+        const csv =
+          "serialNumber,referenceNumber,customerName,customerMobileNumber,customerAddress,codAmount," +
+          "serviceFee,packageCount\n" +
+          'SN-BULK-1,REF-BULK-1,Dev Customer,971509990000,"Deira, Dubai",100,10,1\n' +
+          'SN-BULK-2,REF-BULK-2,Dev Customer,971509990000,"Deira, Dubai",100,10,1\n';
 
-      const service = buildService(transaction, traderA);
-      // Explicitly selecting the caller's own Company (the one it is logged
-      // into) exercises the DTO field end-to-end without hitting the
-      // cross-Company boundary the next test documents.
-      const result = await service.createTraderPortalOrdersImport(
-        { csv, deliveryCompanyId: traderA.companyId } as never,
-        randomUUID(),
-      );
+        const service = buildService(transaction, traderA);
+        // Explicitly selecting the caller's own Company (the one it is logged
+        // into) exercises the DTO field end-to-end without hitting the
+        // cross-Company boundary the next test documents.
+        const result = await service.createTraderPortalOrdersImport(
+          { csv, deliveryCompanyId: traderA.companyId } as never,
+          randomUUID(),
+        );
 
-      expect(result.importedRows).toBe(2);
-      const created = await sql<{ companyId: string; traderId: string }>`
+        expect(result.importedRows).toBe(2);
+        const created = await sql<{ companyId: string; traderId: string }>`
         select company_id as "companyId", trader_id as "traderId" from orders
          where reference_number in ('REF-BULK-1', 'REF-BULK-2')
       `.execute(transaction);
-      expect(created.rows).toHaveLength(2);
-      for (const row of created.rows) {
-        expect(row.companyId).toBe(traderA.companyId);
-        expect(row.traderId).toBe(traderA.traderId);
-      }
+        expect(created.rows).toHaveLength(2);
+        for (const row of created.rows) {
+          expect(row.companyId).toBe(traderA.companyId);
+          expect(row.traderId).toBe(traderA.traderId);
+        }
+      });
     });
-  });
 
-  it("bulk import resolves every row to a DIFFERENT linked Company's own Trader record when that Company is selected", async () => {
-    await inRolledBackTransaction(async (transaction) => {
-      const traderCommerceId = await seedTraderCommerceProfile(transaction);
-      const traderA = await seedTrader(transaction);
-      await seedCommerceLink(transaction, {
-        companyId: traderA.companyId,
-        traderCommerceId,
-        traderId: traderA.traderId,
-      });
-      const traderB = await seedTrader(transaction);
-      await seedCommerceLink(transaction, {
-        companyId: traderB.companyId,
-        traderCommerceId,
-        traderId: traderB.traderId,
-      });
+    it("bulk import resolves every row to a DIFFERENT linked Company's own Trader record when that Company is selected", async () => {
+      await inRolledBackTransaction(async (transaction) => {
+        const traderCommerceId = await seedTraderCommerceProfile(transaction);
+        const traderA = await seedTrader(transaction);
+        await seedCommerceLink(transaction, {
+          companyId: traderA.companyId,
+          traderCommerceId,
+          traderId: traderA.traderId,
+        });
+        const traderB = await seedTrader(transaction);
+        await seedCommerceLink(transaction, {
+          companyId: traderB.companyId,
+          traderCommerceId,
+          traderId: traderB.traderId,
+        });
 
-      const csv =
-        "serialNumber,referenceNumber,customerName,customerMobileNumber,customerAddress,codAmount," +
-        "serviceFee,packageCount\n" +
-        'SN-BULK-1,REF-BULK-1,Dev Customer,971509990000,"Deira, Dubai",100,10,1\n' +
-        'SN-BULK-2,REF-BULK-2,Dev Customer,971509990000,"Deira, Dubai",100,10,1\n';
+        const csv =
+          "serialNumber,referenceNumber,customerName,customerMobileNumber,customerAddress,codAmount," +
+          "serviceFee,packageCount\n" +
+          'SN-BULK-1,REF-BULK-1,Dev Customer,971509990000,"Deira, Dubai",100,10,1\n' +
+          'SN-BULK-2,REF-BULK-2,Dev Customer,971509990000,"Deira, Dubai",100,10,1\n';
 
-      const service = buildService(transaction, traderA);
-      const result = await service.createTraderPortalOrdersImport(
-        { csv, deliveryCompanyId: traderB.companyId } as never,
-        randomUUID(),
-      );
+        const service = buildService(transaction, traderA);
+        const result = await service.createTraderPortalOrdersImport(
+          { csv, deliveryCompanyId: traderB.companyId } as never,
+          randomUUID(),
+        );
 
-      expect(result.importedRows).toBe(2);
-      const created = await sql<{ companyId: string; traderId: string }>`
+        expect(result.importedRows).toBe(2);
+        const created = await sql<{ companyId: string; traderId: string }>`
         select company_id as "companyId", trader_id as "traderId" from orders
          where reference_number in ('REF-BULK-1', 'REF-BULK-2')
       `.execute(transaction);
-      expect(created.rows).toHaveLength(2);
-      for (const row of created.rows) {
-        expect(row.companyId).toBe(traderB.companyId);
-        expect(row.traderId).toBe(traderB.traderId);
-      }
+        expect(created.rows).toHaveLength(2);
+        for (const row of created.rows) {
+          expect(row.companyId).toBe(traderB.companyId);
+          expect(row.traderId).toBe(traderB.traderId);
+        }
+      });
     });
-  });
 
-  /**
-   * The bulk pricing-proof test gate (§18): two batches, same Trader
-   * Commerce identity, same Area, different Companies with different
-   * configured prices, CSV rows that omit `serviceFee` so the price comes
-   * from `resolveServiceFee`'s Trader/Area lookup rather than the file.
-   */
-  it("prices two bulk batches from each selected Company's own Trader/Area table", async () => {
-    await inRolledBackTransaction(async (transaction) => {
-      const traderCommerceId = await seedTraderCommerceProfile(transaction);
-      const traderA = await seedTrader(transaction);
-      await seedTraderPrice(transaction, traderA, 12); // Fee A
-      await seedCommerceLink(transaction, {
-        companyId: traderA.companyId,
-        traderCommerceId,
-        traderId: traderA.traderId,
-      });
-      const traderB = await seedTrader(transaction);
-      await seedTraderPrice(transaction, traderB, 55); // Fee B
-      await seedCommerceLink(transaction, {
-        companyId: traderB.companyId,
-        traderCommerceId,
-        traderId: traderB.traderId,
-      });
+    /**
+     * The bulk pricing-proof test gate (§18): two batches, same Trader
+     * Commerce identity, same Area, different Companies with different
+     * configured prices, CSV rows that omit `serviceFee` so the price comes
+     * from `resolveServiceFee`'s Trader/Area lookup rather than the file.
+     */
+    it("prices two bulk batches from each selected Company's own Trader/Area table", async () => {
+      await inRolledBackTransaction(async (transaction) => {
+        const traderCommerceId = await seedTraderCommerceProfile(transaction);
+        const traderA = await seedTrader(transaction);
+        await seedTraderPrice(transaction, traderA, 12); // Fee A
+        await seedCommerceLink(transaction, {
+          companyId: traderA.companyId,
+          traderCommerceId,
+          traderId: traderA.traderId,
+        });
+        const traderB = await seedTrader(transaction);
+        await seedTraderPrice(transaction, traderB, 55); // Fee B
+        await seedCommerceLink(transaction, {
+          companyId: traderB.companyId,
+          traderCommerceId,
+          traderId: traderB.traderId,
+        });
 
-      const csvFor = (reference: string) =>
-        "serialNumber,referenceNumber,customerName,customerMobileNumber,customerAddress,codAmount,packageCount\n" +
-        `SN-${reference},${reference},Dev Customer,971509990000,"Deira, Dubai",100,1\n`;
+        const csvFor = (reference: string) =>
+          "serialNumber,referenceNumber,customerName,customerMobileNumber,customerAddress,codAmount,packageCount\n" +
+          `SN-${reference},${reference},Dev Customer,971509990000,"Deira, Dubai",100,1\n`;
 
-      const service = buildService(transaction, traderA);
-      const resultA = await service.createTraderPortalOrdersImport(
-        { csv: csvFor("REF-BULK-PRICE-A"), deliveryCompanyId: traderA.companyId } as never,
-        randomUUID(),
-      );
-      const resultB = await service.createTraderPortalOrdersImport(
-        { csv: csvFor("REF-BULK-PRICE-B"), deliveryCompanyId: traderB.companyId } as never,
-        randomUUID(),
-      );
+        const service = buildService(transaction, traderA);
+        const resultA = await service.createTraderPortalOrdersImport(
+          { csv: csvFor("REF-BULK-PRICE-A"), deliveryCompanyId: traderA.companyId } as never,
+          randomUUID(),
+        );
+        const resultB = await service.createTraderPortalOrdersImport(
+          { csv: csvFor("REF-BULK-PRICE-B"), deliveryCompanyId: traderB.companyId } as never,
+          randomUUID(),
+        );
 
-      expect(resultA.importedRows).toBe(1);
-      expect(resultB.importedRows).toBe(1);
-      const priced = await sql<{ referenceNumber: string; serviceFee: string }>`
+        expect(resultA.importedRows).toBe(1);
+        expect(resultB.importedRows).toBe(1);
+        const priced = await sql<{ referenceNumber: string; serviceFee: string }>`
         select reference_number as "referenceNumber", service_fee::text as "serviceFee" from orders
          where reference_number in ('REF-BULK-PRICE-A', 'REF-BULK-PRICE-B')
          order by reference_number
       `.execute(transaction);
-      expect(priced.rows).toEqual([
-        { referenceNumber: "REF-BULK-PRICE-A", serviceFee: "12.00" },
-        { referenceNumber: "REF-BULK-PRICE-B", serviceFee: "55.00" },
-      ]);
+        expect(priced.rows).toEqual([
+          { referenceNumber: "REF-BULK-PRICE-A", serviceFee: "12.00" },
+          { referenceNumber: "REF-BULK-PRICE-B", serviceFee: "55.00" },
+        ]);
+      });
     });
-  });
 
-  /**
-   * Historical freeze (§52 / Part A §8): once created, an Order's
-   * `company_id`/`trader_id` must never move even after the underlying
-   * relationship/default changes.
-   */
-  it("keeps an Order's Company/Trader unchanged after its relationship is later deactivated", async () => {
-    await inRolledBackTransaction(async (transaction) => {
-      const traderCommerceId = await seedTraderCommerceProfile(transaction);
-      const traderA = await seedTrader(transaction);
-      await seedCommerceLink(transaction, {
-        companyId: traderA.companyId,
-        traderCommerceId,
-        traderId: traderA.traderId,
-      });
-      const traderB = await seedTrader(transaction);
-      await seedTraderPrice(transaction, traderB, 20);
-      await seedCommerceLink(transaction, {
-        companyId: traderB.companyId,
-        traderCommerceId,
-        traderId: traderB.traderId,
-      });
+    /**
+     * Historical freeze (§52 / Part A §8): once created, an Order's
+     * `company_id`/`trader_id` must never move even after the underlying
+     * relationship/default changes.
+     */
+    it("keeps an Order's Company/Trader unchanged after its relationship is later deactivated", async () => {
+      await inRolledBackTransaction(async (transaction) => {
+        const traderCommerceId = await seedTraderCommerceProfile(transaction);
+        const traderA = await seedTrader(transaction);
+        await seedCommerceLink(transaction, {
+          companyId: traderA.companyId,
+          traderCommerceId,
+          traderId: traderA.traderId,
+        });
+        const traderB = await seedTrader(transaction);
+        await seedTraderPrice(transaction, traderB, 20);
+        await seedCommerceLink(transaction, {
+          companyId: traderB.companyId,
+          traderCommerceId,
+          traderId: traderB.traderId,
+        });
 
-      const service = buildService(transaction, traderA);
-      const order = await service.createTraderPortalOrder(
-        { ...orderInput(traderB.areaId, "REF-HISTORICAL-FREEZE"), deliveryCompanyId: traderB.companyId } as never,
-        randomUUID(),
-        randomUUID(),
-      );
-
-      // The relationship that made Company B reachable is deactivated AFTER
-      // the Order already exists.
-      await sql`
-        update trader_commerce_company_links set status = 'inactive'
-         where trader_commerce_id = ${traderCommerceId}::uuid and company_id = ${traderB.companyId}::uuid
-      `.execute(transaction);
-
-      const stored = await sql<{ companyId: string; traderId: string }>`
-        select company_id as "companyId", trader_id as "traderId" from orders where id = ${order.id}::uuid
-      `.execute(transaction);
-      expect(stored.rows[0]?.companyId).toBe(traderB.companyId);
-      expect(stored.rows[0]?.traderId).toBe(traderB.traderId);
-
-      // And the now-inactive Company can no longer be selected for a NEW Order.
-      await expect(
-        service.createTraderPortalOrder(
+        const service = buildService(transaction, traderA);
+        const order = await service.createTraderPortalOrder(
           {
-            ...orderInput(traderB.areaId, "REF-AFTER-DEACTIVATION"),
+            ...orderInput(traderB.areaId, "REF-HISTORICAL-FREEZE"),
             deliveryCompanyId: traderB.companyId,
           } as never,
           randomUUID(),
           randomUUID(),
-        ),
-      ).rejects.toMatchObject({ errorCode: "delivery_company_not_linked" });
+        );
+
+        // The relationship that made Company B reachable is deactivated AFTER
+        // the Order already exists.
+        await sql`
+        update trader_commerce_company_links set status = 'inactive'
+         where trader_commerce_id = ${traderCommerceId}::uuid and company_id = ${traderB.companyId}::uuid
+      `.execute(transaction);
+
+        const stored = await sql<{ companyId: string; traderId: string }>`
+        select company_id as "companyId", trader_id as "traderId" from orders where id = ${order.id}::uuid
+      `.execute(transaction);
+        expect(stored.rows[0]?.companyId).toBe(traderB.companyId);
+        expect(stored.rows[0]?.traderId).toBe(traderB.traderId);
+
+        // And the now-inactive Company can no longer be selected for a NEW Order.
+        await expect(
+          service.createTraderPortalOrder(
+            {
+              ...orderInput(traderB.areaId, "REF-AFTER-DEACTIVATION"),
+              deliveryCompanyId: traderB.companyId,
+            } as never,
+            randomUUID(),
+            randomUUID(),
+          ),
+        ).rejects.toMatchObject({ errorCode: "delivery_company_not_linked" });
+      });
     });
-  });
-});
+  },
+);

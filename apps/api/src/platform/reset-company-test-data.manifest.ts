@@ -180,6 +180,9 @@ export const PRESERVE_TABLES = new Set([
   "company_business_day_configurations",
   "company_cash_accounts",
   "company_reference_counters",
+  // Shipment numbering is identity infrastructure. A development data reset
+  // must never rewind it and make a previously issued public serial reusable.
+  "company_shipment_serial_counters",
   "company_settings",
   "company_users",
   "company_websites",
@@ -323,6 +326,8 @@ export const CONDITIONAL_TABLES = new Set<string>([]);
 /** Global tables that carry no Company column by design. */
 export const GLOBAL_TABLES = new Set([
   "companies",
+  // Permanent prefix tombstones survive Company deletion and reset.
+  "shipment_prefix_reservations",
   "emirates",
   "kysely_migration",
   "kysely_migration_lock",

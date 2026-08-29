@@ -80,6 +80,13 @@ export class CreateCompanyDto {
   @Length(2, 200)
   public name!: string;
 
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === "string" ? value.trim().toUpperCase() : value,
+  )
+  @IsString()
+  @Matches(/^[A-Z]{3}$/, { message: "shipmentPrefix must contain exactly three letters" })
+  public shipmentPrefix!: string;
+
   /**
    * Uppercased on the way in so `dev-acme` and `DEV-ACME` cannot both exist.
    * `companies_code_unique` indexes `lower(code)`, so the database would refuse
@@ -222,6 +229,32 @@ export class UpdateCompanyProfileDto {
   @IsString()
   @Length(0, 100)
   public taxRegistrationNumber?: string;
+}
+
+export class UpdateShipmentPrefixDto {
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === "string" ? value.trim().toUpperCase() : value,
+  )
+  @IsString()
+  @Matches(/^[A-Z]{3}$/, { message: "shipmentPrefix must contain exactly three letters" })
+  public shipmentPrefix!: string;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  public expectedVersion!: number;
+}
+
+export class ActivateShipmentSerialDto {
+  @Transform(trim)
+  @IsString()
+  @Length(3, 500)
+  public reason!: string;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  public expectedVersion!: number;
 }
 
 /** A reason is required for the transitions a person will later have to explain. */

@@ -920,6 +920,18 @@
   padding: 4px 12px;
 }
 
+/* Pre-production fix: shown on every page of this prototype, isolating it
+   from the real apps/store Checkout it is easily confused with. */
+.sf-prototype-banner {
+  background: #fdecc8;
+  border-bottom: 1px solid var(--sf-gold);
+  color: #6d5620;
+  font-size: 0.82rem;
+  font-weight: 600;
+  padding: 8px 16px;
+  text-align: center;
+}
+
 /* ---------- Footer ---------- */
 
 .sf-footer {
@@ -1032,7 +1044,6 @@
     }
   }
 }
-
 
 /* ---------- Template extras ---------- */
 

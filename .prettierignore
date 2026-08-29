@@ -1,4 +1,5 @@
 node_modules
+.sync-freeorder
 dist
 coverage
 pnpm-lock.yaml

@@ -62,6 +62,7 @@ export function CreateOrderDialog({
   );
   const [area, setArea] = useState<CompanyArea>();
   const [serialNumber, setSerialNumber] = useState("");
+  const [serialServerGenerated, setSerialServerGenerated] = useState(false);
   const [referenceNumber, setReferenceNumber] = useState("");
   const [customerName, setCustomerName] = useState("");
   const [mobile, setMobile] = useState("");
@@ -171,7 +172,7 @@ export function CreateOrderDialog({
   // button stays enabled and a full validation runs on submit, so the operator
   // always sees exactly what is missing or invalid.
   const validationErrors: Record<string, string> = {};
-  if (serialNumber.trim() === "")
+  if (!serialServerGenerated && serialNumber.trim() === "")
     validationErrors.serialNumber = t("operations.errors.serialRequired");
   else if (identifierError !== undefined) validationErrors.serialNumber = identifierError;
   if (trader === undefined) validationErrors.trader = t("operations.errors.traderRequired");
@@ -260,15 +261,9 @@ export function CreateOrderDialog({
   const dirty =
     trader !== undefined ||
     area !== undefined ||
-    [
-      serialNumber,
-      referenceNumber,
-      customerName,
-      mobile,
-      secondMobile,
-      address,
-      notes,
-    ].some(Boolean) ||
+    [serialNumber, referenceNumber, customerName, mobile, secondMobile, address, notes].some(
+      Boolean,
+    ) ||
     codAmount !== "0.00" ||
     additionalFees !== "0.00" ||
     packageCount !== "1";
@@ -354,7 +349,9 @@ export function CreateOrderDialog({
     if (edit === undefined) return;
     let active = true;
     void api
-      .get<OperationsOrderDetail>(`operations/order-details/${encodeURIComponent(edit.orderNumber)}`)
+      .get<OperationsOrderDetail>(
+        `operations/order-details/${encodeURIComponent(edit.orderNumber)}`,
+      )
       .then((loaded) => {
         if (!active) return;
         setEditDetail(loaded);
@@ -417,7 +414,11 @@ export function CreateOrderDialog({
             secondMobileNumber: null,
           });
         }
-        if (loaded.areaId !== undefined && loaded.emirateId !== undefined && loaded.emirateId !== null) {
+        if (
+          loaded.areaId !== undefined &&
+          loaded.emirateId !== undefined &&
+          loaded.emirateId !== null
+        ) {
           setArea({
             code: "",
             emirateCode: "",
@@ -449,9 +450,12 @@ export function CreateOrderDialog({
     if (isEdit) return;
     let active = true;
     void api
-      .get<{ serialNumber: string }>("operations/orders/next-serial-number")
+      .get<{ serialNumber: string; serverGenerated?: boolean }>(
+        "operations/orders/next-serial-number",
+      )
       .then((result) => {
         if (!active) return;
+        setSerialServerGenerated(result.serverGenerated === true);
         setSerialNumber((current) => (current.trim() === "" ? result.serialNumber : current));
       })
       .catch(() => undefined);
@@ -699,10 +703,7 @@ export function CreateOrderDialog({
         if (notes.trim() !== (editDetail.metadata.notes ?? "")) {
           payload.notes = notes.trim();
         }
-        if (
-          packageCountInput.ok &&
-          packageCountInput.value !== editDetail.metadata.packageCount
-        ) {
+        if (packageCountInput.ok && packageCountInput.value !== editDetail.metadata.packageCount) {
           payload.packageCount = packageCountInput.value;
         }
         if (!isFreeOrder) {
@@ -763,7 +764,7 @@ export function CreateOrderDialog({
           notes: notes.trim() || undefined,
           packageCount: packageCountInput.ok ? packageCountInput.value : 0,
           referenceNumber: referenceNumber.trim() || undefined,
-          serialNumber: serialNumber.trim(),
+          ...(serialServerGenerated ? {} : { serialNumber: serialNumber.trim() }),
           paymentCondition,
           serviceFee: enteredFee,
           serviceFeeOverrideReason: enteredReason,
@@ -910,15 +911,19 @@ export function CreateOrderDialog({
                         autoComplete="off"
                         // Immutable once created (orders_manual_identifiers_immutable):
                         // shown for context, never editable.
-                        disabled={isEdit}
+                        disabled={isEdit || serialServerGenerated}
                         id="order-serial"
                         maxLength={100}
                         onChange={(event) => {
                           setSerialNumber(event.target.value);
                           clearServerError("serialNumber");
                         }}
-                        required
-                        value={serialNumber}
+                        required={!serialServerGenerated}
+                        value={
+                          serialServerGenerated
+                            ? t("operations.serialNumberGenerated")
+                            : serialNumber
+                        }
                       />
                     </label>
                     <label className="field">
@@ -1235,8 +1240,7 @@ export function CreateOrderDialog({
                           onChange={(event) =>
                             setPaymentCondition(
                               event.target.value as
-                                | "customer_pays_cod_and_fee"
-                                | "customer_pays_cod_trader_pays_fee",
+                                "customer_pays_cod_and_fee" | "customer_pays_cod_trader_pays_fee",
                             )
                           }
                         >

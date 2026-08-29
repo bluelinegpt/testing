@@ -71,7 +71,9 @@ const contentTypes = new Map([
   [".webp", "image/webp"],
 ]);
 
-function addSecurityHeaders(response) {
+function addSecurityHeaders(response, requestUrl = "/") {
+  const isDraftPreview =
+    new URL(requestUrl, "http://localhost").searchParams.get("websiteDraftPreview") === "1";
   response.setHeader(
     "Content-Security-Policy",
     // img-src includes blob:, not just 'self' data:: every private asset
@@ -80,11 +82,11 @@ function addSecurityHeaders(response) {
     // URL.createObjectURL(blob) -- there's no public URL for any of these by
     // design. This is the CSP that actually governs those <img> renders (the
     // document's own header, not the API's), so it must allow blob: too.
-    `default-src 'self'; connect-src ${connectSources}; img-src 'self' data: blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'`,
+    `default-src 'self'; connect-src ${connectSources}; img-src 'self' data: blob:; object-src 'none'; base-uri 'self'; frame-ancestors ${isDraftPreview ? "'self' https://platform.tawseelhub.com http://127.0.0.1:5176 http://localhost:5176" : "'none'"}`,
   );
   response.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
   response.setHeader("X-Content-Type-Options", "nosniff");
-  response.setHeader("X-Frame-Options", "DENY");
+  if (!isDraftPreview) response.setHeader("X-Frame-Options", "DENY");
 }
 
 function resolveAsset(requestUrl) {
@@ -118,7 +120,7 @@ const server = createServer((request, response) => {
     hostOutcome === "rejected" &&
     !(allowCustomDomains && isValidExternalWebsiteHost(host, tenantHostSuffix))
   ) {
-    addSecurityHeaders(response);
+    addSecurityHeaders(response, request.url);
     response.writeHead(404, { "Cache-Control": "no-store", "Content-Type": "application/json" });
     response.end(
       '{"error":{"code":"company_app_host_not_configured","message":"This hostname is not configured for the Delivery Company application."}}',
@@ -136,7 +138,7 @@ const server = createServer((request, response) => {
     proxyApi(request, response, "/api/v1/public/company-website/sitemap.xml");
     return;
   }
-  addSecurityHeaders(response);
+  addSecurityHeaders(response, request.url);
   if (request.url === "/healthz") {
     response.writeHead(200, { "Cache-Control": "no-store", "Content-Type": "application/json" });
     response.end('{"status":"ok"}');

@@ -39,6 +39,7 @@ import {
 } from "./company-website-domain.dto.js";
 // eslint-disable-next-line @typescript-eslint/consistent-type-imports
 import {
+  CompanyWebsiteAgentContactDto,
   CompanyWebsiteAgentMessageDto,
   StartCompanyWebsiteAgentDto,
 } from "./company-website-agent.dto.js";
@@ -154,6 +155,16 @@ export class PlatformCompanyWebsiteController {
     @Body() input: CompanyWebsiteAgentMessageDto,
   ) {
     return this.websiteAgent.preview(companyId, input.message, input.language);
+  }
+
+  @RequirePlatformPermissions(PLATFORM_COMPANY_WEBSITES_MANAGE)
+  @Post("preview-track")
+  @HttpCode(200)
+  public previewTrack(
+    @Param("companyId") companyId: string,
+    @Body() input: PublicWebsiteTrackingDto,
+  ) {
+    return this.websites.trackPreview(companyId, input.trackingToken);
   }
 
   @RequirePlatformPermissions(PLATFORM_COMPANIES_READ)
@@ -284,6 +295,17 @@ export class PublicCompanyWebsiteController {
     @Body() input: CompanyWebsiteAgentMessageDto,
   ) {
     return this.websiteAgent.message(this.host(request), token, input.message, input.language);
+  }
+
+  @Patch("agent/conversations/:token/contact")
+  @HttpCode(200)
+  @Throttle({ default: { limit: 6, ttl: 60_000 } })
+  public saveAgentContact(
+    @Req() request: Request,
+    @Param("token") token: string,
+    @Body() input: CompanyWebsiteAgentContactDto,
+  ) {
+    return this.websiteAgent.saveContact(this.host(request), token, input.contactNumber);
   }
 
   @Get("logo")

@@ -616,12 +616,12 @@ export class PlatformCompanyUserService {
    * browser, so there is no redirect for a caller to point elsewhere.
    */
   private setupUrl(subdomain: string, token: string): string {
-    const suffix = process.env.BLUELINE_TENANT_HOST_SUFFIX?.trim();
-    const base =
-      suffix === undefined || suffix === ""
-        ? (process.env.BLUELINE_COMPANY_PORTAL_ORIGIN?.trim() ?? "http://localhost:5174")
-        : `https://${subdomain}.${suffix}`;
-    return `${base.replace(/\/$/, "")}/account-setup?token=${encodeURIComponent(token)}`;
+    return companyAccountSetupUrl({
+      companyPortalOrigin: process.env.BLUELINE_COMPANY_PORTAL_ORIGIN,
+      subdomain,
+      tenantHostSuffix: process.env.BLUELINE_TENANT_HOST_SUFFIX,
+      token,
+    });
   }
 
   // -------------------------------------------------------------------------
@@ -766,4 +766,22 @@ export class PlatformCompanyUserService {
   public actorAccountId(): string {
     return this.identities.current().identityId;
   }
+}
+export function companyAccountSetupUrl(input: {
+  companyPortalOrigin?: string | undefined;
+  subdomain: string;
+  tenantHostSuffix?: string | undefined;
+  token: string;
+}): string {
+  const suffix = input.tenantHostSuffix?.trim().toLowerCase().replace(/^\.+/u, "");
+  const configuredOrigin = input.companyPortalOrigin?.trim();
+  const base =
+    suffix === "localhost"
+      ? `http://${input.subdomain}app.localhost:5177`
+      : suffix
+        ? `https://${input.subdomain}.${suffix}`
+        : configuredOrigin && configuredOrigin !== ""
+          ? configuredOrigin
+          : `http://${input.subdomain}app.localhost:5177`;
+  return `${base.replace(/\/$/u, "")}/account-setup?token=${encodeURIComponent(input.token)}`;
 }

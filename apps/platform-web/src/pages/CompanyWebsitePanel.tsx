@@ -1,15 +1,13 @@
-import { useEffect, useState, type CSSProperties, type FormEvent, type ReactElement } from "react";
+import { useEffect, useState, type FormEvent, type ReactElement } from "react";
 
 import {
   PlatformApiError,
   platformApi,
   type CompanyWebsite,
-  type CompanyWebsitePreview,
   type CompanyWebsiteTemplateKey,
 } from "../api/platform-client.js";
 import { usePlatformSession } from "../app/PlatformSession.js";
 import { CompanyWebsiteEditor } from "./CompanyWebsiteEditor.js";
-import { CompanyWebsiteDomainsPanel } from "./CompanyWebsiteDomainsPanel.js";
 
 export function CompanyWebsitePanel({
   companyId,
@@ -21,9 +19,8 @@ export function CompanyWebsitePanel({
   const session = usePlatformSession();
   const canManage = session.can("platform.company_websites.manage");
   const [website, setWebsite] = useState<CompanyWebsite>();
-  const [preview, setPreview] = useState<CompanyWebsitePreview>();
   const [editing, setEditing] = useState(false);
-  const [editingWebsite, setEditingWebsite] = useState(false);
+  const [editingWebsite, setEditingWebsite] = useState(true);
   const [slug, setSlug] = useState(suggestedSlug);
   const [locale, setLocale] = useState<"en" | "ar">("en");
   const [busy, setBusy] = useState(false);
@@ -120,17 +117,20 @@ export function CompanyWebsitePanel({
   }
 
   async function showPreview(templateKey: CompanyWebsiteTemplateKey): Promise<void> {
-    setError(undefined);
-    try {
-      setPreview(await platformApi.companyWebsitePreview(companyId, templateKey));
-    } catch (failure) {
-      setError(failure instanceof PlatformApiError ? failure.message : "Preview failed.");
-    }
+    globalThis.open(
+      `/companies/${companyId}/website/preview/${templateKey}`,
+      "_blank",
+      "noopener,noreferrer",
+    );
   }
 
   const status = website?.status ?? "not_configured";
   return (
-    <section aria-labelledby="company-website-heading" className="company-website-panel">
+    <section
+      aria-labelledby="company-website-heading"
+      className="company-website-panel"
+      id="company-website-setup"
+    >
       <div className="platform-panel__header">
         <div>
           <h3 id="company-website-heading">Website</h3>
@@ -151,7 +151,7 @@ export function CompanyWebsitePanel({
                 onClick={() => setEditingWebsite((value) => !value)}
                 type="button"
               >
-                {editingWebsite ? "Close Editor" : "Edit Website"}
+                {editingWebsite ? "Hide Website Setup" : "Open Website Setup"}
               </button>
             ) : null}
           </div>
@@ -160,7 +160,19 @@ export function CompanyWebsitePanel({
       {website === undefined ? (
         <p>Loading website status…</p>
       ) : editing ? (
-        <form className="platform-form" onSubmit={(event) => void save(event)}>
+        <form
+          className="platform-form company-website-foundation-form"
+          onSubmit={(event) => void save(event)}
+        >
+          <div className="company-website-step-heading">
+            <span>Step 1</span>
+            <div>
+              <h4>Create Website foundation</h4>
+              <p className="platform-muted">
+                Confirm the public slug and default language. This does not publish the Website.
+              </p>
+            </div>
+          </div>
           <label className="platform-field">
             <span>Website slug</span>
             <input
@@ -189,7 +201,7 @@ export function CompanyWebsitePanel({
               Cancel
             </button>
             <button className="platform-button" disabled={busy} type="submit">
-              Save Website
+              Save and Continue
             </button>
           </div>
         </form>
@@ -361,12 +373,8 @@ export function CompanyWebsitePanel({
               }
               onSaved={(saved) => {
                 setWebsite(saved);
-                setPreview(undefined);
               }}
             />
-          ) : null}
-          {status !== "not_configured" ? (
-            <CompanyWebsiteDomainsPanel canManage={canManage} companyId={companyId} />
           ) : null}
           {canManage && website.settings?.agent?.enabled ? (
             <form
@@ -428,64 +436,14 @@ export function CompanyWebsitePanel({
         <div className="platform-login__error" role="alert">
           <p>{error}</p>
           {versionConflict ? (
-            <button className="platform-button" onClick={() => void reloadLatest(true)} type="button">
+            <button
+              className="platform-button"
+              onClick={() => void reloadLatest(true)}
+              type="button"
+            >
               Reload Latest
             </button>
           ) : null}
-        </div>
-      ) : null}
-      {preview ? (
-        <div
-          className="cms-preview website-live-preview"
-          role="region"
-          aria-label="Website preview"
-          style={
-            {
-              "--preview-primary": preview.settings.branding.primaryColor ?? "#123b5d",
-              "--preview-secondary": preview.settings.branding.secondaryColor ?? "#dcecf4",
-              "--preview-accent": preview.settings.branding.accentColor ?? "#e2a93b",
-            } as CSSProperties
-          }
-        >
-          <meta name="robots" content="noindex,nofollow" />
-          <span>Authenticated preview · Not indexable</span>
-          <strong>{templateName(preview.templateKey)} template</strong>
-          <h4>
-            {(preview.settings.presentation.heroHeadline as { en?: string } | undefined)?.en ??
-              (preview.settings.presentation.displayName as { en?: string } | undefined)?.en ??
-              preview.company.nameEn}
-          </h4>
-          <p>
-            {(preview.settings.presentation.heroSubheadline as { en?: string } | undefined)?.en ??
-              preview.company.subtitleEn}
-          </p>
-          {preview.settings.functions?.trackingEnabled !== false &&
-          preview.settings.sections.find((section) => section.key === "tracking")?.enabled !==
-            false ? (
-            <section aria-label="Real-Time Tracking preview">
-              <h4>Real-Time Tracking</h4>
-              <p>Enter your shipment reference to see its latest delivery status.</p>
-              <label className="platform-field">
-                <span>Shipment reference</span>
-                <input disabled placeholder="Preview only" />
-              </label>
-              <button className="platform-button" disabled type="button">
-                Track
-              </button>
-              <small>Preview shell only — no live shipment lookup.</small>
-            </section>
-          ) : null}
-          {preview.settings.services
-            .filter((item) => item.enabled)
-            .map((item) => (
-              <article key={item.id}>
-                <strong>{item.title.en}</strong>
-                <p>{item.description?.en}</p>
-              </article>
-            ))}
-          {preview.company.telephone ? <p>{preview.company.telephone}</p> : null}
-          {preview.company.email ? <p>{preview.company.email}</p> : null}
-          {preview.company.addressEn ? <p>{preview.company.addressEn}</p> : null}
         </div>
       ) : null}
     </section>
@@ -513,6 +471,73 @@ const TEMPLATES: ReadonlyArray<{
     key: "premium",
     name: "Premium",
     description: "Restrained, elegant presentation for specialist service.",
+  },
+  {
+    key: "skyline",
+    name: "Skyline",
+    description: "Architectural lines and confident metropolitan presentation.",
+  },
+  {
+    key: "minimal",
+    name: "Minimal",
+    description: "Quiet whitespace and exceptionally clear customer journeys.",
+  },
+  {
+    key: "bold",
+    name: "Bold",
+    description: "Oversized messaging and high-impact conversion actions.",
+  },
+  {
+    key: "elegant",
+    name: "Elegant",
+    description: "Refined typography and polished premium spacing.",
+  },
+  {
+    key: "urban",
+    name: "Urban",
+    description: "Strong grid styling designed for busy city delivery.",
+  },
+  { key: "swift", name: "Swift", description: "Dynamic angles and a fast service-led experience." },
+  {
+    key: "horizon",
+    name: "Horizon",
+    description: "Wide, open presentation for regional coverage.",
+  },
+  {
+    key: "nexus",
+    name: "Nexus",
+    description: "Connected digital styling for technology-led operations.",
+  },
+  {
+    key: "oasis",
+    name: "Oasis",
+    description: "Warm, approachable colors with calm visual rhythm.",
+  },
+  {
+    key: "fleet",
+    name: "Fleet",
+    description: "Operational, capable design for fleet-based delivery.",
+  },
+  {
+    key: "commerce",
+    name: "Commerce",
+    description: "Business-first layout for stores and merchants.",
+  },
+  {
+    key: "courier",
+    name: "Courier",
+    description: "Personal, direct presentation for courier services.",
+  },
+  {
+    key: "executive",
+    name: "Executive",
+    description: "Dark, authoritative styling for premium logistics.",
+  },
+  { key: "vibrant", name: "Vibrant", description: "Energetic color and friendly consumer appeal." },
+  {
+    key: "classic",
+    name: "Classic",
+    description: "Traditional typography and timeless trust cues.",
   },
 ];
 

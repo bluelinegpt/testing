@@ -15,13 +15,28 @@ import {
 } from "./company-website-templates.js";
 
 describe("Company website foundation rules", () => {
-  it("registers five stable templates and rejects unknown keys", () => {
+  it("registers twenty stable templates and rejects unknown keys", () => {
     expect(COMPANY_WEBSITE_TEMPLATE_KEYS).toEqual([
       "corporate",
       "modern",
       "express",
       "local",
       "premium",
+      "skyline",
+      "minimal",
+      "bold",
+      "elegant",
+      "urban",
+      "swift",
+      "horizon",
+      "nexus",
+      "oasis",
+      "fleet",
+      "commerce",
+      "courier",
+      "executive",
+      "vibrant",
+      "classic",
     ]);
     expect(isCompanyWebsiteTemplateKey("premium")).toBe(true);
     expect(isCompanyWebsiteTemplateKey("default")).toBe(false);
@@ -95,11 +110,27 @@ describe("Company website foundation rules", () => {
     expect(service).toContain('published_settings=${target === "published" ? sql`draft_settings`');
   });
   it("keeps public functions hostname-scoped and stores requests in the Company workflow", () => {
-    const service = readFileSync(resolve(process.cwd(), "src/platform/company-website.service.ts"), "utf8");
-    const controller = readFileSync(resolve(process.cwd(), "src/platform/company-website.controller.ts"), "utf8");
-    const migration = readFileSync(resolve(process.cwd(), "../../database/migrations/20260939000000_company_website_public_functions.ts"), "utf8");
+    const service = readFileSync(
+      resolve(process.cwd(), "src/platform/company-website.service.ts"),
+      "utf8",
+    );
+    const controller = readFileSync(
+      resolve(process.cwd(), "src/platform/company-website.controller.ts"),
+      "utf8",
+    );
+    const migration = readFileSync(
+      resolve(
+        process.cwd(),
+        "../../database/migrations/20260939000000_company_website_public_functions.ts",
+      ),
+      "utf8",
+    );
     expect(service).toContain("requirePublishedHost(host)");
     expect(service).toContain("tt.company_id=${row.companyId}::uuid");
+    expect(service).toContain(
+      "o.company_id=${row.companyId}::uuid and upper(o.order_number)=upper(${normalizedReference})",
+    );
+    expect(service).not.toContain("o.customer_mobile_number as");
     expect(service).not.toContain("customerName:");
     expect(service).not.toContain("assignedDriverName");
     expect(service).toContain('sourceChannel: "company_public_website"');

@@ -17,6 +17,8 @@ import { WorkforceConfigurationService } from "./workforce-configuration.service
 import { TraderConfigurationController } from "./trader-configuration.controller.js";
 import { TraderConfigurationService } from "./trader-configuration.service.js";
 import { DriverRoleProvisioningService } from "../users/driver-role-provisioning.service.js";
+import { CompanyWebsiteAgentInboxController } from "./company-website-agent-inbox.controller.js";
+import { CompanyWebsiteAgentInboxService } from "./company-website-agent-inbox.service.js";
 
 @Module({
   imports: [AuthenticationModule],
@@ -26,6 +28,7 @@ import { DriverRoleProvisioningService } from "../users/driver-role-provisioning
     WorkforceConfigurationController,
     TraderConfigurationController,
     CustomerConfigurationController,
+    CompanyWebsiteAgentInboxController,
   ],
   providers: [
     AreaConfigurationService,
@@ -48,7 +51,8 @@ import { DriverRoleProvisioningService } from "../users/driver-role-provisioning
     // in this codebase of re-providing a shared leaf service instead of a
     // cross-module import (see OperationsModule's own comment on this).
     DriverRoleProvisioningService,
+    CompanyWebsiteAgentInboxService,
   ],
-  exports: [BusinessDayService, ReportDateModeService],
+  exports: [AreaConfigurationService, BusinessDayService, ReportDateModeService],
 })
 export class CompanyConfigurationModule {}

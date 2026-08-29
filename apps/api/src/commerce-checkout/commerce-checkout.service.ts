@@ -137,7 +137,12 @@ export class CommerceCheckoutService {
       .filter((line) => line.valid)
       .reduce((total, line) => total.add(Money.from(line.lineSubtotal)), Money.from("0.00"));
 
-    const delivery = await this.resolveDelivery(store, address, input.selectedDeliveryCompanyId, warnings);
+    const delivery = await this.resolveDelivery(
+      store,
+      address,
+      input.selectedDeliveryCompanyId,
+      warnings,
+    );
 
     const codTotal = productSubtotal.add(Money.from(delivery.customerDeliveryFee));
     const canProceed = lines.every((line) => line.valid) && lines.length > 0;
@@ -152,7 +157,11 @@ export class CommerceCheckoutService {
       },
       canProceed,
       codTotal: codTotal.toString(),
-      customer: { isGuest: customer.commerceCustomerId === undefined, mobile: customer.mobile, name: customer.name },
+      customer: {
+        isGuest: customer.commerceCustomerId === undefined,
+        mobile: customer.mobile,
+        name: customer.name,
+      },
       customerDeliveryFee: delivery.customerDeliveryFee,
       deliveryCompanyServiceFee: delivery.customerDeliveryFee,
       deliveryOptions: delivery.deliveryOptions,
@@ -171,9 +180,12 @@ export class CommerceCheckoutService {
    * the Checkout preview and the actual Store Order submission agree on
    * exactly what "checkout-eligible" means, from one fresh database read
    * each time -- not from each other's cached result. */
-  public async resolveStore(
-    storeSlug: string,
-  ): Promise<{ readonly id: string; readonly displayName: string; readonly slug: string; readonly traderCommerceId: string }> {
+  public async resolveStore(storeSlug: string): Promise<{
+    readonly id: string;
+    readonly displayName: string;
+    readonly slug: string;
+    readonly traderCommerceId: string;
+  }> {
     const result = await sql<{
       id: string;
       displayName: string;
@@ -188,7 +200,11 @@ export class CommerceCheckoutService {
     `.execute(this.database);
     const row = result.rows[0];
     if (row === undefined) {
-      throw new ApplicationException("checkout_store_not_found", "This store could not be found.", HttpStatus.NOT_FOUND);
+      throw new ApplicationException(
+        "checkout_store_not_found",
+        "This store could not be found.",
+        HttpStatus.NOT_FOUND,
+      );
     }
     // A temporarily-closed Store still resolves publicly (T6), but cannot be
     // checked out against -- it is not accepting Orders right now. Only
@@ -203,13 +219,39 @@ export class CommerceCheckoutService {
     return row;
   }
 
+  /**
+   * Which Company's Areas the public Checkout Area picker should search for
+   * this Store. Reuses the exact same eligibility query `resolveDelivery`
+   * runs (`trader_delivery_company_relationships`, active + enabled), taking
+   * the Trader's own default eligible Company (or the first eligible one if
+   * none is marked default) -- the same "Trader Commerce → enabled Delivery
+   * Company relationships → Company-scoped Trader" precedence Part 3 of this
+   * fix describes. `null` when the Store has no eligible Delivery Company at
+   * all -- the picker then has nothing to search, matching the approved
+   * zero-Company path (never fabricates a Company to search against).
+   */
+  public async resolveAreaSearchCompanyId(storeSlug: string): Promise<string | null> {
+    const store = await this.resolveStore(storeSlug);
+    const relationships = await sql<{ companyId: string; isDefault: boolean }>`
+      select r.company_id as "companyId", r.is_default_for_store_orders as "isDefault"
+        from trader_delivery_company_relationships r
+       where r.trader_commerce_id = ${store.traderCommerceId}::uuid
+         and r.status = 'active' and r.enabled_for_store_orders and r.trader_id is not null
+       order by r.is_default_for_store_orders desc
+       limit 1
+    `.execute(this.database);
+    return relationships.rows[0]?.companyId ?? null;
+  }
+
   // ------------------------------------------------------------- Customer
 
   /** Public: reused by C3's Store Order submission for the identical
    * mobile-normalization + best-effort session read. */
-  public async resolveCustomer(
-    input: ValidateCheckoutDto,
-  ): Promise<{ readonly commerceCustomerId: string | undefined; readonly mobile: string; readonly name: string }> {
+  public async resolveCustomer(input: ValidateCheckoutDto): Promise<{
+    readonly commerceCustomerId: string | undefined;
+    readonly mobile: string;
+    readonly name: string;
+  }> {
     const mobile = normalizeUaeMobile(input.customerMobile);
     if (mobile === null) {
       throw new ApplicationException(
@@ -220,7 +262,11 @@ export class CommerceCheckoutService {
     }
     const name = input.customerName.trim();
     if (name === "") {
-      throw new ApplicationException("checkout_name_required", "Enter your name.", HttpStatus.BAD_REQUEST);
+      throw new ApplicationException(
+        "checkout_name_required",
+        "Enter your name.",
+        HttpStatus.BAD_REQUEST,
+      );
     }
     let commerceCustomerId: string | undefined;
     try {
@@ -245,8 +291,10 @@ export class CommerceCheckoutService {
   ): Promise<{
     readonly address: string;
     readonly area: string | null;
+    readonly areaId: string | null;
     readonly deliveryInstructions: string | null;
     readonly emirate: string;
+    readonly emirateId: string;
     readonly locationLink: string | null;
   }> {
     if (input.savedAddressId !== undefined) {
@@ -259,6 +307,14 @@ export class CommerceCheckoutService {
           HttpStatus.BAD_REQUEST,
         );
       }
+      // Saved addresses are a pre-existing, separate feature
+      // (`commerce_customer_addresses`) that still stores Emirate/Area as
+      // free text -- out of scope for this pass (no migration is permitted
+      // here, and this prompt is scoped to the Checkout's OWN new-address
+      // entry, not the saved-address model). Its emirate/area therefore
+      // still resolve to `null` ids -- `resolveDeliveryFee` falls back to
+      // its pre-existing name-matching path for exactly this case, unchanged
+      // from before this fix, and ONLY this case.
       const result = await sql<{
         address: string;
         area: string | null;
@@ -282,7 +338,10 @@ export class CommerceCheckoutService {
           HttpStatus.NOT_FOUND,
         );
       }
-      return row;
+      const emirateRow = await sql<{ id: string }>`
+        select id from emirates where lower(name_en) = lower(${row.emirate}) or lower(name_ar) = lower(${row.emirate})
+      `.execute(this.database);
+      return { ...row, areaId: null, emirateId: emirateRow.rows[0]?.id ?? "" };
     }
     if (input.newAddress === undefined) {
       throw new ApplicationException(
@@ -291,20 +350,54 @@ export class CommerceCheckoutService {
         HttpStatus.BAD_REQUEST,
       );
     }
-    const emirate = input.newAddress.emirate.trim();
     const address = input.newAddress.address.trim();
-    if (emirate === "" || address === "") {
+    if (address === "") {
       throw new ApplicationException(
         "checkout_address_required",
-        "Enter your Emirate and address.",
+        "Enter your delivery address.",
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    const emirateRow = await sql<{ id: string; nameEn: string; nameAr: string }>`
+      select id, name_en as "nameEn", name_ar as "nameAr"
+        from emirates where id = ${input.newAddress.emirateId}::uuid and is_active
+    `.execute(this.database);
+    const emirate = emirateRow.rows[0];
+    if (emirate === undefined) {
+      // Same generic message a customer sees for "no Emirate chosen" -- an
+      // id for a disabled/unknown Emirate carries no more information than
+      // that.
+      throw new ApplicationException(
+        "checkout_area_invalid",
+        "Select a valid Emirate.",
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    const areaRow = await sql<{ id: string; nameEn: string; nameAr: string | null }>`
+      select a.id, a.name_en as "nameEn", a.name_ar as "nameAr"
+        from areas a
+       where a.id = ${input.newAddress.areaId}::uuid
+         and a.emirate_id = ${input.newAddress.emirateId}::uuid
+         and a.is_active
+    `.execute(this.database);
+    const area = areaRow.rows[0];
+    if (area === undefined) {
+      // §4: typed-but-unselected text must never resolve to a guessed Area --
+      // an id that does not belong to this Emirate (or does not exist, or is
+      // disabled) is a normal validation failure, not a fabricated match.
+      throw new ApplicationException(
+        "checkout_area_invalid",
+        "Select a valid Area from the list.",
         HttpStatus.BAD_REQUEST,
       );
     }
     return {
       address,
-      area: input.newAddress.area?.trim() || null,
+      area: area.nameEn,
+      areaId: area.id,
       deliveryInstructions: input.newAddress.deliveryInstructions?.trim() || null,
-      emirate,
+      emirate: emirate.nameEn,
+      emirateId: emirate.id,
       locationLink: input.newAddress.locationLink?.trim() || null,
     };
   }
@@ -344,12 +437,24 @@ export class CommerceCheckoutService {
         continue;
       }
       if (productRow.lifecycleStatus !== "active") {
-        results.push(this.invalidLine(line, "product_inactive", "This product is no longer listed.", productRow.sellingPrice));
+        results.push(
+          this.invalidLine(
+            line,
+            "product_inactive",
+            "This product is no longer listed.",
+            productRow.sellingPrice,
+          ),
+        );
         continue;
       }
       if (productRow.availabilityStatus !== "available") {
         results.push(
-          this.invalidLine(line, "product_unavailable", "This product is currently unavailable.", productRow.sellingPrice),
+          this.invalidLine(
+            line,
+            "product_unavailable",
+            "This product is currently unavailable.",
+            productRow.sellingPrice,
+          ),
         );
         continue;
       }
@@ -357,14 +462,21 @@ export class CommerceCheckoutService {
       const max = productRow.maximumQuantity;
       if (line.quantity < min || (max !== null && line.quantity > max)) {
         results.push(
-          this.invalidLine(line, "invalid_quantity", "The quantity requested is not available for this product.", productRow.sellingPrice),
+          this.invalidLine(
+            line,
+            "invalid_quantity",
+            "The quantity requested is not available for this product.",
+            productRow.sellingPrice,
+          ),
         );
         continue;
       }
 
       const optionResult = await this.revalidateOptions(productRow.id, line);
       if (optionResult.issue !== null) {
-        results.push(this.invalidLine(line, "option_invalid", optionResult.issue, productRow.sellingPrice));
+        results.push(
+          this.invalidLine(line, "option_invalid", optionResult.issue, productRow.sellingPrice),
+        );
         continue;
       }
 
@@ -455,7 +567,12 @@ export class CommerceCheckoutService {
    */
   public async resolveDelivery(
     store: { readonly id: string; readonly traderCommerceId: string },
-    address: { readonly area: string | null; readonly emirate: string },
+    address: {
+      readonly area: string | null;
+      readonly areaId: string | null;
+      readonly emirate: string;
+      readonly emirateId: string;
+    },
     selectedDeliveryCompanyId: string | undefined,
     warnings: string[],
   ): Promise<{
@@ -485,7 +602,8 @@ export class CommerceCheckoutService {
       const fee = await this.resolveDeliveryFee(
         relationship.companyId,
         relationship.traderId,
-        address.emirate,
+        address.emirateId,
+        address.areaId,
         address.area,
       );
       if (fee === null) continue; // §43: no pricing rule -> ineligible for this destination, never guessed.
@@ -502,8 +620,7 @@ export class CommerceCheckoutService {
         customerDeliveryFee: "0.00",
         deliveryOptions: [],
         selectedDeliveryCompany: null,
-        zeroCompanyMessage:
-          "Delivery will be confirmed by the store after you place the order.",
+        zeroCompanyMessage: "Delivery will be confirmed by the store after you place the order.",
       };
     }
     if (priced.length === 1) {
@@ -537,7 +654,9 @@ export class CommerceCheckoutService {
         // this is intentionally NOT thrown; the caller still gets a usable
         // Checkout (first eligible option), and the inconsistency is
         // recorded as a warning for support to see (§34).
-        warnings.push("No default delivery company is configured; the first eligible option was used.");
+        warnings.push(
+          "No default delivery company is configured; the first eligible option was used.",
+        );
       }
     }
     return {
@@ -554,22 +673,35 @@ export class CommerceCheckoutService {
    * private and coupled to authenticated Trader-Portal Order semantics
    * (override/zero-fee-reason gating that does not apply to a Customer
    * Checkout preview). Returns `null` when no row resolves at all -- never a
-   * guessed fee (§43). Area matching is by NAME because `areas` rows are
-   * Company-scoped, not shared, and a Customer's address has no Area id. */
+   * guessed fee (§43).
+   *
+   * Pre-production fix: `areas` rows are Company-scoped, so a customer's ONE
+   * structured Area selection (resolved against whichever Company's Areas the
+   * public picker searched) does not necessarily share a row id with every
+   * OTHER eligible Company's own Area configuration for the same place. When
+   * this Company's own `areaId` is known directly (the common case -- the
+   * picker searched exactly this Company's Areas), pricing is a pure id
+   * lookup, never text. Only for a genuinely DIFFERENT eligible Company is a
+   * name match performed -- and even then against the canonical resolved
+   * Area name from the database (`resolveAddress`'s own lookup), never
+   * against anything the customer typed. The pre-existing saved-address path
+   * (no structured id at all, `resolvedAreaId === null`) uses the same name
+   * fallback, unchanged from before this fix. */
   private async resolveDeliveryFee(
     companyId: string,
     traderId: string,
-    emirateText: string,
+    emirateId: string,
+    resolvedAreaId: string | null,
     areaText: string | null,
   ): Promise<Money | null> {
-    const emirate = await sql<{ id: string }>`
-      select id from emirates where lower(name_en) = lower(${emirateText}) or lower(name_ar) = lower(${emirateText})
-    `.execute(this.database);
-    const emirateId = emirate.rows[0]?.id;
-    if (emirateId === undefined) return null;
-
     let areaId: string | null = null;
-    if (areaText !== null && areaText !== "") {
+    if (resolvedAreaId !== null) {
+      const owned = await sql<{ id: string }>`
+        select id from areas where id = ${resolvedAreaId}::uuid and company_id = ${companyId}::uuid
+      `.execute(this.database);
+      areaId = owned.rows[0]?.id ?? null;
+    }
+    if (areaId === null && areaText !== null && areaText !== "") {
       const area = await sql<{ id: string }>`
         select id from areas
          where company_id = ${companyId}::uuid and emirate_id = ${emirateId}::uuid

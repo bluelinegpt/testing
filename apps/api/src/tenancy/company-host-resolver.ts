@@ -13,7 +13,9 @@ import { isReservedCompanySubdomain } from "./reserved-subdomains.js";
  *
  *   1. production  - the app tenant label of the host, e.g.
  *      `acmeapp.tawseelhub.com` resolves to Company subdomain `acme`
- *   2. development - a configured fallback subdomain, for localhost and IPs
+ *   2. development - the same app-label convention below `.localhost`, e.g.
+ *      `acmeapp.localhost`, with a configured fallback only for bare localhost
+ *      and IP addresses
  *
  * When neither yields a Company the caller must fail with the same generic
  * invalid-credentials response used for a wrong password, so an unresolved host
@@ -102,6 +104,26 @@ export class CompanyHostResolver {
   private classify(host: string | undefined): HostOutcome {
     const hostname = this.normalizedHostname(host);
     if (hostname === undefined) return { kind: "unknown" };
+
+    // Browsers resolve names below `.localhost` to the local machine. Keeping
+    // the production `<subdomain>app` label here lets Platform-generated local
+    // links select a tenant through the request host, without accepting a
+    // browser-supplied Company ID or collapsing every Company onto the single
+    // development fallback. Any other `.localhost` shape is reserved so a
+    // malformed or public-site host cannot silently fall through to that
+    // fallback Company.
+    if (hostname.endsWith(".localhost")) {
+      const label = hostname.slice(0, -".localhost".length);
+      if (!label.includes(".") && label.endsWith(CompanyHostResolver.applicationLabelSuffix)) {
+        const subdomain = label.slice(0, -CompanyHostResolver.applicationLabelSuffix.length);
+        if (/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u.test(subdomain)) {
+          return isReservedCompanySubdomain(subdomain)
+            ? { kind: "reserved" }
+            : { kind: "company", subdomain };
+        }
+      }
+      return { kind: "reserved" };
+    }
 
     if (this.hostSuffix !== undefined && hostname.endsWith(`.${this.hostSuffix}`)) {
       const label = hostname.slice(0, -(this.hostSuffix.length + 1));

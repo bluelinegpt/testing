@@ -85,6 +85,7 @@ const routePermissions: Readonly<Record<string, readonly string[]>> = {
     "storefront_products.publish",
   ],
   "/configuration/general": [manage],
+  "/configuration/ai-agent": [manage],
   "/configuration/traders": [manage],
   "/configuration/customers": [manage],
   "/configuration/areas": [manage],

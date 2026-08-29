@@ -40,6 +40,8 @@ import {
   ResetCompanyDataDto,
   SuspendCompanyDto,
   UpdateCompanyProfileDto,
+  UpdateShipmentPrefixDto,
+  ActivateShipmentSerialDto,
 } from "./platform-company.dto.js";
 import { PlatformCompanyResetService } from "./platform-company-reset.service.js";
 import { PlatformCompanyService } from "./platform-company.service.js";
@@ -103,6 +105,7 @@ export class PlatformCompanyController {
     const created = await this.companies.create(
       {
         name: input.name,
+        shipmentPrefix: input.shipmentPrefix,
         subdomain: input.subdomain,
         environment: input.environment,
         countryCode: input.countryCode ?? "AE",
@@ -140,9 +143,12 @@ export class PlatformTargetCompanyController {
   public constructor(
     @Inject(PlatformCompanyService) private readonly companies: PlatformCompanyService,
     @Inject(PlatformCompanyResetService) private readonly reset: PlatformCompanyResetService,
-    @Inject(PlatformCompanyDeletionService) private readonly deletion: PlatformCompanyDeletionService,
-    @Inject(PlatformCompanyDeletionBackupService) private readonly deletionBackups: PlatformCompanyDeletionBackupService,
-    @Inject(PlatformCompanyDeletionExecutionService) private readonly deletionExecution: PlatformCompanyDeletionExecutionService,
+    @Inject(PlatformCompanyDeletionService)
+    private readonly deletion: PlatformCompanyDeletionService,
+    @Inject(PlatformCompanyDeletionBackupService)
+    private readonly deletionBackups: PlatformCompanyDeletionBackupService,
+    @Inject(PlatformCompanyDeletionExecutionService)
+    private readonly deletionExecution: PlatformCompanyDeletionExecutionService,
     @Inject(RequestSecurityContextStore) private readonly contextStore: RequestSecurityContextStore,
     @Inject(TenantContextAccessor) private readonly tenants: TenantContextAccessor,
     @Inject(IdentityContextAccessor) private readonly identities: IdentityContextAccessor,
@@ -232,6 +238,32 @@ export class PlatformTargetCompanyController {
       input as unknown as Record<string, string | null>,
       this.actor(request),
     );
+  }
+
+  @ApiBearerAuth()
+  @ApiOperation({ summary: "Correct an unused Company shipment prefix" })
+  @RequirePlatformPermissions(PLATFORM_COMPANIES_MANAGE)
+  @HttpCode(200)
+  @Patch("shipment-prefix")
+  public updateShipmentPrefix(
+    @Param("companyId") companyId: string,
+    @Body() input: UpdateShipmentPrefixDto,
+    @Req() request: Request,
+  ): Promise<object> {
+    return this.companies.updateShipmentPrefix(companyId, input, this.actor(request));
+  }
+
+  @ApiBearerAuth()
+  @ApiOperation({ summary: "Permanently activate generated shipment serials" })
+  @RequirePlatformPermissions(PLATFORM_COMPANIES_MANAGE)
+  @HttpCode(200)
+  @Post("shipment-serial/activate")
+  public activateShipmentSerial(
+    @Param("companyId") companyId: string,
+    @Body() input: ActivateShipmentSerialDto,
+    @Req() request: Request,
+  ): Promise<object> {
+    return this.companies.activateShipmentSerial(companyId, input, this.actor(request));
   }
 
   /**
@@ -396,7 +428,8 @@ export class PlatformTargetCompanyController {
 @Controller("platform/company-deletions")
 export class PlatformCompanyDeletionController {
   public constructor(
-    @Inject(PlatformCompanyDeletionExecutionService) private readonly deletionExecution: PlatformCompanyDeletionExecutionService,
+    @Inject(PlatformCompanyDeletionExecutionService)
+    private readonly deletionExecution: PlatformCompanyDeletionExecutionService,
   ) {}
 
   @ApiBearerAuth()

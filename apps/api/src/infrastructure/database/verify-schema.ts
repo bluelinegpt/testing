@@ -26,6 +26,7 @@ const expectedTables = [
   "company_bank_accounts",
   "company_cash_accounts",
   "company_reference_counters",
+  "company_shipment_serial_counters",
   "company_settings",
   "company_users",
   "customer_addresses",
@@ -91,6 +92,7 @@ const expectedTables = [
   "roles",
   "saas_usage_events",
   "support_cases",
+  "shipment_prefix_reservations",
   "third_party_delivery_companies",
   "tracking_access_events",
   "tracking_tokens",
@@ -104,6 +106,8 @@ const expectedTables = [
 ] as const;
 
 const expectedTriggers = [
+  "companies_shipment_numbering_guard",
+  "companies_shipment_prefix_reservation",
   "account_mappings_history_guard",
   "account_mappings_validation_guard",
   "account_mappings_general_expense_guard",
@@ -237,6 +241,9 @@ const expectedTriggers = [
 ] as const;
 
 const expectedFunctions = [
+  "allocate_company_shipment_serial",
+  "maintain_shipment_prefix_reservation",
+  "protect_company_shipment_numbering",
   "validate_user_business_link_entity",
   "validate_account_session_profile",
   "suspend_disabled_business_profile_access",
@@ -318,6 +325,11 @@ const expectedFunctions = [
 ] as const;
 
 const expectedConstraints = [
+  "companies_shipment_prefix_format_check",
+  "companies_shipment_prefix_reservation_fk",
+  "shipment_prefix_reservations_activation_order_check",
+  "company_shipment_serial_counters_series_check",
+  "company_shipment_serial_counters_value_check",
   "accounting_events_identity_unique",
   "accounting_events_attempts_check",
   "accounting_periods_code_unique",
@@ -391,6 +403,8 @@ const expectedConstraints = [
 ] as const;
 
 const expectedIndexes = [
+  "companies_shipment_prefix_unique",
+  "orders_generated_shipment_serial_unique",
   "account_mappings_effective_index",
   "accounting_events_source_index",
   "accounting_events_failure_index",
@@ -463,6 +477,8 @@ const expectedIndexes = [
 ] as const;
 
 const expectedColumns = [
+  "companies.shipment_prefix",
+  "companies.shipment_serial_enabled_at",
   "accounting_configurations.automatic_posting_enabled",
   "accounting_configurations.automatic_posting_areas",
   "accounting_configurations.manual_accounting_activation_date",

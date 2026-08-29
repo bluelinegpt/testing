@@ -2,7 +2,14 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate } from "react-router-dom";
 
-import { type CheckoutResult, placeStoreOrder, validateCheckout } from "../api/checkout-client.js";
+import {
+  type CheckoutArea,
+  type CheckoutResult,
+  type Emirate,
+  fetchEmirates,
+  placeStoreOrder,
+  validateCheckout,
+} from "../api/checkout-client.js";
 import {
   type CustomerAddress,
   fetchCustomerAddresses,
@@ -10,9 +17,14 @@ import {
 } from "../api/customer-auth-client.js";
 import { useCustomerSession } from "../auth/customer-session-context.js";
 import { useCart } from "../cart/cart-context.js";
+import { AreaCombobox } from "../components/AreaCombobox.js";
 import { Money, TraderText } from "../components/Bidi.js";
 import { MessageState } from "../components/States.js";
 import { useLocalePath } from "../routing/locale-routing.js";
+
+function emirateLabel(emirate: Emirate, language: string): string {
+  return language.startsWith("ar") ? emirate.nameAr : emirate.nameEn;
+}
 
 /**
  * `/checkout` — Customer Commerce Prompts C2 (Review) and C3 (Place Order).
@@ -26,7 +38,7 @@ import { useLocalePath } from "../routing/locale-routing.js";
  * Review, never on a failed submission (§56).
  */
 export function CheckoutPage() {
-  const { t } = useTranslation();
+  const { i18n, t } = useTranslation();
   const localePath = useLocalePath();
   const navigate = useNavigate();
   const { cart, clearCart } = useCart();
@@ -36,8 +48,10 @@ export function CheckoutPage() {
   const [mobile, setMobile] = useState("");
   const [addresses, setAddresses] = useState<readonly CustomerAddress[]>([]);
   const [savedAddressId, setSavedAddressId] = useState<string>("");
-  const [emirate, setEmirate] = useState("");
-  const [area, setArea] = useState("");
+  const [emirates, setEmirates] = useState<readonly Emirate[]>([]);
+  const [emirateId, setEmirateId] = useState("");
+  const [selectedArea, setSelectedArea] = useState<CheckoutArea | null>(null);
+  const [areaTouched, setAreaTouched] = useState(false);
   const [address, setAddress] = useState("");
   const [locationLink, setLocationLink] = useState("");
   const [deliveryInstructions, setDeliveryInstructions] = useState("");
@@ -57,6 +71,10 @@ export function CheckoutPage() {
   const [idempotencyKey, setIdempotencyKey] = useState<string>();
 
   useEffect(() => {
+    void fetchEmirates().then(setEmirates);
+  }, []);
+
+  useEffect(() => {
     if (session.status !== "authenticated") return;
     void fetchCustomerProfile().then((profileResult) => {
       if (profileResult.kind === "ok") {
@@ -67,7 +85,8 @@ export function CheckoutPage() {
     void fetchCustomerAddresses().then((addressResult) => {
       if (addressResult.kind !== "ok") return;
       setAddresses(addressResult.value);
-      const defaultAddress = addressResult.value.find((candidate) => candidate.isDefault) ?? addressResult.value[0];
+      const defaultAddress =
+        addressResult.value.find((candidate) => candidate.isDefault) ?? addressResult.value[0];
       if (defaultAddress !== undefined) setSavedAddressId(defaultAddress.id);
     });
   }, [session.status]);
@@ -102,8 +121,8 @@ export function CheckoutPage() {
       : {
           newAddress: {
             address,
-            emirate,
-            ...(area.trim() === "" ? {} : { area }),
+            areaId: selectedArea?.id ?? "",
+            emirateId,
             ...(locationLink.trim() === "" ? {} : { locationLink }),
             ...(deliveryInstructions.trim() === "" ? {} : { deliveryInstructions }),
           },
@@ -177,6 +196,12 @@ export function CheckoutPage() {
         className="store-form store-checkout__form"
         onSubmit={(event) => {
           event.preventDefault();
+          // §4: an Area typed but never actually selected must fail
+          // client-side before a network round trip, not silently submit.
+          if (!usingSavedAddress && selectedArea === null) {
+            setAreaTouched(true);
+            return;
+          }
           void runValidate();
         }}
       >
@@ -216,7 +241,8 @@ export function CheckoutPage() {
               >
                 {addresses.map((candidate) => (
                   <option key={candidate.id} value={candidate.id}>
-                    {candidate.label ?? candidate.recipientName} — {candidate.area ?? candidate.emirate}
+                    {candidate.label ?? candidate.recipientName} —{" "}
+                    {candidate.area ?? candidate.emirate}
                   </option>
                 ))}
                 <option value="">{t("checkout.address.useNewAddress")}</option>
@@ -227,17 +253,34 @@ export function CheckoutPage() {
             <>
               <div className="store-field">
                 <label htmlFor="checkout-emirate">{t("checkout.address.emirate")}</label>
-                <input
+                <select
                   id="checkout-emirate"
-                  onChange={(event) => setEmirate(event.target.value)}
+                  onChange={(event) => setEmirateId(event.target.value)}
                   required
-                  value={emirate}
-                />
+                  value={emirateId}
+                >
+                  <option value="">{t("checkout.address.chooseEmirate")}</option>
+                  {emirates.map((candidate) => (
+                    <option key={candidate.id} value={candidate.id}>
+                      {emirateLabel(candidate, i18n.language)}
+                    </option>
+                  ))}
+                </select>
               </div>
-              <div className="store-field">
-                <label htmlFor="checkout-area">{t("checkout.address.area")}</label>
-                <input id="checkout-area" onChange={(event) => setArea(event.target.value)} value={area} />
-              </div>
+              <AreaCombobox
+                emirateId={emirateId === "" ? undefined : emirateId}
+                error={
+                  areaTouched && selectedArea === null
+                    ? t("checkout.errors.checkout_area_invalid")
+                    : undefined
+                }
+                onChange={(nextArea) => {
+                  setSelectedArea(nextArea);
+                  if (nextArea !== null) setAreaTouched(false);
+                }}
+                storeSlug={cart.storeSlug}
+                value={selectedArea}
+              />
               <div className="store-field">
                 <label htmlFor="checkout-address">{t("checkout.address.address")}</label>
                 <input
@@ -319,7 +362,9 @@ function CheckoutReview({
             {line.selectedOptions.length === 0 ? null : (
               <span className="store-cart__lineoptions">
                 {" "}
-                {line.selectedOptions.map((option) => `${option.groupName}: ${option.value}`).join(" · ")}
+                {line.selectedOptions
+                  .map((option) => `${option.groupName}: ${option.value}`)
+                  .join(" · ")}
               </span>
             )}
             {line.valid ? (
@@ -372,7 +417,11 @@ function CheckoutReview({
 
       <div className="store-checkout__reviewrow store-checkout__reviewrow--total">
         <span>{t("checkout.review.codTotal")}</span>
-        <Money amount={result.codTotal} className="store-price store-price--lg" currency={currency} />
+        <Money
+          amount={result.codTotal}
+          className="store-price store-price--lg"
+          currency={currency}
+        />
       </div>
 
       {result.canProceed ? (

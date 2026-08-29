@@ -63,6 +63,9 @@ function detail(overrides: Record<string, unknown> = {}): object {
     accountingSetupAppliedAt: "2026-08-09T00:00:00.000Z",
     accountingSetupAppliedBy: "platform.admin",
     statusChangeReason: null,
+    version: 1,
+    shipmentPrefix: "TST",
+    shipmentSerialEnabledAt: null,
     ...overrides,
   };
 }
@@ -259,6 +262,7 @@ describe("Create Company", () => {
 
   const fill = (): void => {
     fireEvent.change(screen.getByLabelText("Company Name"), { target: { value: "Acme Delivery" } });
+    fireEvent.change(screen.getByLabelText("Shipment Prefix"), { target: { value: "ACM" } });
   };
 
   it("omits technical identifiers and suggests an editable subdomain", async () => {
@@ -345,6 +349,7 @@ describe("Create Company", () => {
       "defaultLanguage",
       "environment",
       "name",
+      "shipmentPrefix",
       "subdomain",
     ]);
     for (const forbidden of ["companyId", "code", "status", "createdBy", "id", "openingBalances"]) {
@@ -369,6 +374,7 @@ describe("Create Company", () => {
 
     fireEvent.change(screen.getByLabelText("Company Name"), { target: { value: "Bad" } });
     fireEvent.change(screen.getByLabelText("Subdomain"), { target: { value: "platform" } });
+    fireEvent.change(screen.getByLabelText("Shipment Prefix"), { target: { value: "BAD" } });
     fireEvent.click(screen.getByRole("button", { name: "Review" }));
     fireEvent.click(await screen.findByRole("button", { name: "Create Company" }));
 
@@ -379,11 +385,16 @@ describe("Create Company", () => {
 describe("Company detail", () => {
   afterEach(() => vi.restoreAllMocks());
 
+  async function selectCompanyTab(name: string): Promise<void> {
+    fireEvent.click(await screen.findByRole("tab", { name }));
+  }
+
   it("shows the Accounting setup summary from the server", async () => {
     vi.stubGlobal("fetch", stubFetch(baseRoutes()));
     renderAt(`/companies/${companyId}`);
 
     expect(await screen.findByRole("heading", { name: "Test Delivery" })).toBeInTheDocument();
+    await selectCompanyTab("Configuration & Accounting");
     const setupHeading = screen.getByRole("heading", { name: "Accounting Setup" });
     expect(setupHeading).toBeInTheDocument();
     expect(screen.getByText("UAE_DELIVERY_STANDARD v1")).toBeInTheDocument();
@@ -405,9 +416,53 @@ describe("Company detail", () => {
     expect(screen.queryByLabelText("Company ID")).toBeNull();
   });
 
+  it("organizes Company management into focused tabs", async () => {
+    vi.stubGlobal("fetch", stubFetch(baseRoutes()));
+    renderAt(`/companies/${companyId}`);
+
+    expect(await screen.findByRole("tab", { name: "Company Information" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(screen.queryByRole("heading", { name: "Accounting Setup" })).toBeNull();
+    await selectCompanyTab("Configuration & Accounting");
+    expect(screen.getByRole("heading", { name: "Accounting Setup" })).toBeInTheDocument();
+  });
+
+  it("explains that a closed Company cannot use suspended-Company reactivation", async () => {
+    const routes = baseRoutes();
+    routes[`GET platform/companies/${companyId}`] = {
+      body: detail({ status: "closed", closedAt: "2026-08-09T00:00:00.000Z" }),
+      status: 200,
+    };
+    routes[`GET platform/companies/${companyId}/deletion-eligibility`] = {
+      body: {
+        eligible: true,
+        status: "closed",
+        environment: "sandbox",
+        closedAt: "2026-08-09T00:00:00.000Z",
+        eligibleAt: "2026-08-09T00:00:00.000Z",
+        requiresWaitingPeriod: false,
+        waitingPeriodHours: 0,
+        remainingSeconds: 0,
+        blockers: [],
+        previewRequired: true,
+        backupRequired: true,
+      },
+      status: 200,
+    };
+    vi.stubGlobal("fetch", stubFetch(routes));
+    renderAt(`/companies/${companyId}`);
+
+    await selectCompanyTab("Lifecycle");
+    expect(screen.getByText(/Closed is currently a terminal state/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Reactivate" })).toBeNull();
+  });
+
   it("shows readiness with Company Administrator pending and opening balance optional", async () => {
     vi.stubGlobal("fetch", stubFetch(baseRoutes()));
     renderAt(`/companies/${companyId}`);
+    await selectCompanyTab("Configuration & Accounting");
     await screen.findByRole("heading", { name: "Onboarding readiness" });
 
     const adminRow = screen.getByText("Company Administrator").closest("tr");
@@ -424,6 +479,7 @@ describe("Company detail", () => {
   it("disables Activate while the server says the Company is not ready", async () => {
     vi.stubGlobal("fetch", stubFetch(baseRoutes()));
     renderAt(`/companies/${companyId}`);
+    await selectCompanyTab("Lifecycle");
     const activate = await screen.findByRole("button", { name: "Activate" });
     expect(activate).toBeDisabled();
     expect(activate).toHaveAttribute("title", "Blocked by: companyAdmin");
@@ -437,6 +493,7 @@ describe("Company detail", () => {
     };
     vi.stubGlobal("fetch", stubFetch(routes));
     renderAt(`/companies/${companyId}`);
+    await selectCompanyTab("Lifecycle");
     expect(await screen.findByRole("button", { name: "Activate" })).toBeEnabled();
   });
 
@@ -449,6 +506,7 @@ describe("Company detail", () => {
     vi.stubGlobal("fetch", stubFetch(routes));
     renderAt(`/companies/${companyId}`);
 
+    await selectCompanyTab("Lifecycle");
     await screen.findByRole("button", { name: "Suspend" });
     expect(screen.queryByRole("button", { name: "Activate" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Reactivate" })).toBeNull();
@@ -472,6 +530,7 @@ describe("Company detail", () => {
     );
     renderAt(`/companies/${companyId}`);
 
+    await selectCompanyTab("Lifecycle");
     fireEvent.click(await screen.findByRole("button", { name: "Suspend" }));
     await waitFor(() => expect(globalThis.prompt).toHaveBeenCalled());
     expect(suspended).toBe(false);
@@ -495,6 +554,7 @@ describe("Company detail", () => {
     );
     renderAt(`/companies/${companyId}`);
 
+    await selectCompanyTab("Lifecycle");
     fireEvent.click(await screen.findByRole("button", { name: "Suspend" }));
     await waitFor(() => expect(sentReason).toBe("non-payment"));
   });
@@ -513,6 +573,7 @@ describe("Company detail", () => {
     vi.stubGlobal("fetch", stubFetch(routes));
     renderAt(`/companies/${companyId}`);
 
+    await selectCompanyTab("Lifecycle");
     fireEvent.click(await screen.findByRole("button", { name: "Reactivate" }));
     await waitFor(() => expect(reactivated).toBe(true));
   });
@@ -521,13 +582,16 @@ describe("Company detail", () => {
     vi.stubGlobal("fetch", stubFetch(baseRoutes()));
     renderAt(`/companies/${companyId}`);
 
+    await selectCompanyTab("Lifecycle");
     fireEvent.click(await screen.findByRole("button", { name: "Close Company" }));
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByText("Test Delivery")).toBeInTheDocument();
     expect(within(dialog).getByText("TST-0001")).toBeInTheDocument();
     expect(within(dialog).getByText("sandbox")).toBeInTheDocument();
     expect(within(dialog).getByText("draft")).toBeInTheDocument();
-    expect(within(dialog).getByText("No Company data will be deleted by closing the Company.")).toBeInTheDocument();
+    expect(
+      within(dialog).getByText("No Company data will be deleted by closing the Company."),
+    ).toBeInTheDocument();
     expect(within(dialog).getByRole("button", { name: "Close Company" })).toBeDisabled();
   });
 
@@ -535,6 +599,7 @@ describe("Company detail", () => {
     vi.stubGlobal("fetch", stubFetch(baseRoutes()));
     renderAt(`/companies/${companyId}`);
 
+    await selectCompanyTab("Lifecycle");
     fireEvent.click(await screen.findByRole("button", { name: "Close Company" }));
     const dialog = await screen.findByRole("dialog");
     const confirmButton = within(dialog).getByRole("button", { name: "Close Company" });
@@ -583,6 +648,7 @@ describe("Company detail", () => {
     vi.stubGlobal("fetch", stubFetch(routes));
     renderAt(`/companies/${companyId}`);
 
+    await selectCompanyTab("Lifecycle");
     fireEvent.click(await screen.findByRole("button", { name: "Close Company" }));
     const dialog = await screen.findByRole("dialog");
     fireEvent.change(within(dialog).getByLabelText(/Reason for closing/), {
@@ -593,7 +659,9 @@ describe("Company detail", () => {
     });
     fireEvent.click(within(dialog).getByRole("button", { name: "Close Company" }));
 
-    await waitFor(() => expect(sent).toEqual({ reason: "final closure", confirmation: "CLOSE TST-0001" }));
+    await waitFor(() =>
+      expect(sent).toEqual({ reason: "final closure", confirmation: "CLOSE TST-0001" }),
+    );
     expect(await screen.findByText("closed", { selector: ".platform-badge" })).toBeInTheDocument();
     expect(screen.queryByRole("dialog")).toBeNull();
   });
@@ -601,12 +669,18 @@ describe("Company detail", () => {
   it("shows the server's rejection visibly when the confirmation is wrong, and leaves the Company unchanged", async () => {
     const routes = baseRoutes();
     routes[`POST platform/companies/${companyId}/close`] = () => ({
-      body: { error: { code: "company_close_confirmation_mismatch", message: "Type CLOSE TST-0001 exactly" } },
+      body: {
+        error: {
+          code: "company_close_confirmation_mismatch",
+          message: "Type CLOSE TST-0001 exactly",
+        },
+      },
       status: 409,
     });
     vi.stubGlobal("fetch", stubFetch(routes));
     renderAt(`/companies/${companyId}`);
 
+    await selectCompanyTab("Lifecycle");
     fireEvent.click(await screen.findByRole("button", { name: "Close Company" }));
     const dialog = await screen.findByRole("dialog");
     fireEvent.change(within(dialog).getByLabelText(/Reason for closing/), {
@@ -617,7 +691,9 @@ describe("Company detail", () => {
     });
     fireEvent.click(within(dialog).getByRole("button", { name: "Close Company" }));
 
-    expect(await within(dialog).findByRole("alert")).toHaveTextContent("Type CLOSE TST-0001 exactly");
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+      "Type CLOSE TST-0001 exactly",
+    );
     expect(dialog).toBeVisible();
     expect(within(dialog).getByText("draft")).toBeInTheDocument();
   });
@@ -632,6 +708,7 @@ describe("Company detail", () => {
     vi.stubGlobal("fetch", stubFetch(routes));
     renderAt(`/companies/${companyId}`);
 
+    await selectCompanyTab("Lifecycle");
     fireEvent.click(await screen.findByRole("button", { name: "Close Company" }));
     const dialog = await screen.findByRole("dialog");
     fireEvent.change(within(dialog).getByLabelText(/Reason for closing/), {
@@ -670,12 +747,16 @@ describe("Company detail", () => {
       status: 200,
     };
     routes[`POST platform/companies/${companyId}/deletion-preview`] = {
-      body: { readyForDelete: false, blockers: ["A verified deletion backup has not been attached"] },
+      body: {
+        readyForDelete: false,
+        blockers: ["A verified deletion backup has not been attached"],
+      },
       status: 200,
     };
     vi.stubGlobal("fetch", stubFetch(routes));
     renderAt(`/companies/${companyId}`);
 
+    await selectCompanyTab("Lifecycle");
     expect(await screen.findByText(/Eligible for deletion immediately/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Run Deletion Preview" }));
     expect(await screen.findByText("READY FOR DELETE: NO")).toBeInTheDocument();
@@ -721,6 +802,7 @@ describe("Company detail", () => {
     vi.stubGlobal("fetch", stubFetch(routes));
     renderAt(`/companies/${companyId}`);
 
+    await selectCompanyTab("Lifecycle");
     fireEvent.click(await screen.findByRole("button", { name: "Run Deletion Preview" }));
     expect(await screen.findByText("UNSAFE / UNKNOWN DEPENDENCY")).toBeInTheDocument();
     expect(screen.getByText("Unclassified Company table: store_orders")).toBeInTheDocument();
@@ -736,7 +818,8 @@ describe("Company detail", () => {
             body: {
               error: {
                 code: "company_deletion_preview_in_progress",
-                message: "Another deletion preview for this Company started at the same moment. Retry the preview.",
+                message:
+                  "Another deletion preview for this Company started at the same moment. Retry the preview.",
               },
             },
             status: 409,
@@ -746,13 +829,23 @@ describe("Company detail", () => {
     vi.stubGlobal("fetch", stubFetch(routes));
     renderAt(`/companies/${companyId}`);
 
+    await selectCompanyTab("Lifecycle");
     fireEvent.click(await screen.findByRole("button", { name: "Run Deletion Preview" }));
-    expect(await screen.findByText("Existing deletion operation must be refreshed")).toBeInTheDocument();
     expect(
-      screen.getByText("Another deletion preview for this Company started at the same moment. Retry the preview."),
+      await screen.findByText("Existing deletion operation must be refreshed"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Another deletion preview for this Company started at the same moment. Retry the preview.",
+      ),
     ).toBeInTheDocument();
     // Not the page-level banner.
-    expect(screen.queryByText("Another deletion preview for this Company started at the same moment. Retry the preview.", { selector: ".platform-login__error" })).toBeNull();
+    expect(
+      screen.queryByText(
+        "Another deletion preview for this Company started at the same moment. Retry the preview.",
+        { selector: ".platform-login__error" },
+      ),
+    ).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Retry Deletion Preview" }));
     await waitFor(() => expect(attempts).toBe(2));
@@ -763,12 +856,18 @@ describe("Company detail", () => {
   it("shows a permission-denied preview failure explicitly", async () => {
     const routes = closedEligibleRoutes();
     routes[`POST platform/companies/${companyId}/deletion-preview`] = {
-      body: { error: { code: "permission_denied", message: "The authenticated account does not have permission for this operation" } },
+      body: {
+        error: {
+          code: "permission_denied",
+          message: "The authenticated account does not have permission for this operation",
+        },
+      },
       status: 403,
     };
     vi.stubGlobal("fetch", stubFetch(routes));
     renderAt(`/companies/${companyId}`);
 
+    await selectCompanyTab("Lifecycle");
     fireEvent.click(await screen.findByRole("button", { name: "Run Deletion Preview" }));
     expect(await screen.findByText("Permission denied")).toBeInTheDocument();
   });
@@ -780,7 +879,12 @@ describe("Company detail", () => {
       attempts += 1;
       return attempts === 1
         ? {
-            body: { error: { code: "database_integrity_conflict", message: "The operation conflicts with current data integrity rules." } },
+            body: {
+              error: {
+                code: "database_integrity_conflict",
+                message: "The operation conflicts with current data integrity rules.",
+              },
+            },
             status: 409,
           }
         : { body: { readyForDelete: false, blockers: [], unknownReferences: [] }, status: 200 };
@@ -788,6 +892,7 @@ describe("Company detail", () => {
     vi.stubGlobal("fetch", stubFetch(routes));
     renderAt(`/companies/${companyId}`);
 
+    await selectCompanyTab("Lifecycle");
     fireEvent.click(await screen.findByRole("button", { name: "Run Deletion Preview" }));
     expect(await screen.findByText("Database integrity conflict")).toBeInTheDocument();
     expect(screen.queryByText(/at Object\.|node_modules|\.ts:\d+/)).toBeNull();
@@ -975,9 +1080,15 @@ describe("Company profile editing", () => {
 describe("Company configuration and audit sections", () => {
   afterEach(() => vi.restoreAllMocks());
 
+  async function selectCompanyTab(name: string): Promise<void> {
+    fireEvent.click(await screen.findByRole("tab", { name }));
+  }
+
   it("shows the Configuration section", async () => {
     vi.stubGlobal("fetch", stubFetch(baseRoutes()));
     renderAt(`/companies/${companyId}`);
+
+    await selectCompanyTab("Configuration & Accounting");
 
     expect(await screen.findByRole("heading", { name: "Configuration" })).toBeInTheDocument();
     expect(screen.getByText("AED")).toBeInTheDocument();
@@ -987,6 +1098,8 @@ describe("Company configuration and audit sections", () => {
   it("shows the Platform audit summary", async () => {
     vi.stubGlobal("fetch", stubFetch(baseRoutes()));
     renderAt(`/companies/${companyId}`);
+
+    await selectCompanyTab("Audit");
 
     expect(await screen.findByRole("heading", { name: "Audit summary" })).toBeInTheDocument();
     // Scoped to the audit row: the signed-in administrator's name also appears
@@ -1003,6 +1116,8 @@ describe("Company configuration and audit sections", () => {
     };
     vi.stubGlobal("fetch", stubFetch(routes));
     renderAt(`/companies/${companyId}`);
+
+    await selectCompanyTab("Audit");
 
     await screen.findByRole("heading", { name: "Audit summary" });
     expect(screen.getByText(/platform\.audit\.read/)).toBeInTheDocument();
@@ -1026,6 +1141,7 @@ describe("Create Company optional fields", () => {
     await screen.findByRole("button", { name: "Review" });
 
     fireEvent.change(screen.getByLabelText("Company Name"), { target: { value: "Acme" } });
+    fireEvent.change(screen.getByLabelText("Shipment Prefix"), { target: { value: "ACM" } });
     fireEvent.click(screen.getByRole("button", { name: "Review" }));
     expect(await screen.findByText("08:00")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Create Company" }));
@@ -1046,6 +1162,7 @@ describe("Create Company optional fields", () => {
     await screen.findByRole("button", { name: "Review" });
 
     fireEvent.change(screen.getByLabelText("Company Name"), { target: { value: "Acme" } });
+    fireEvent.change(screen.getByLabelText("Shipment Prefix"), { target: { value: "ACM" } });
     fireEvent.change(screen.getByLabelText("Business Day Start"), { target: { value: "07:30" } });
     fireEvent.change(screen.getByLabelText("Contact name"), { target: { value: "Ops Lead" } });
     fireEvent.click(screen.getByRole("button", { name: "Review" }));

@@ -352,23 +352,55 @@ export class CompanyWebsiteService {
   public async trackPublic(host: string | undefined, token: string): Promise<object> {
     const row = await this.requirePublishedHost(host);
     if (row.publishedSettings?.functions.trackingEnabled === false) throw this.publicNotFound();
-    if (!/^[A-Za-z0-9_-]{43}$/u.test(token)) throw this.trackingNotFound();
-    const tokenHash = createHash("sha256").update(token, "utf8").digest("hex");
-    const tracking = (
-      await sql<{
-        orderId: string;
-        orderNumber: string;
-        deliveryStatus: string;
-        deliveredAt: string | null;
-        lastUpdatedAt: string;
-      }>`select o.id as "orderId",o.order_number as "orderNumber",o.delivery_status as "deliveryStatus",
+    return this.trackForCompany(row, token);
+  }
+
+  /** Authenticated Platform Preview: draft visibility, same tenant-safe tracking lookup. */
+  public async trackPreview(companyId: string, token: string): Promise<object> {
+    const row = await this.publicRow("company", companyId);
+    if (!row || validateCompanyWebsiteSettings(row.settings).functions.trackingEnabled === false)
+      throw this.trackingNotFound();
+    return this.trackForCompany(row, token);
+  }
+
+  private async trackForCompany(row: PublicWebsiteRow, reference: string): Promise<object> {
+    const normalizedReference = reference.trim();
+    const secureToken = /^[A-Za-z0-9_-]{43}$/u.test(normalizedReference);
+    const orderReference = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/u.test(normalizedReference);
+    if (!secureToken && !orderReference) throw this.trackingNotFound();
+    const tokenHash = secureToken
+      ? createHash("sha256").update(normalizedReference, "utf8").digest("hex")
+      : null;
+    const tracking = secureToken
+      ? (
+          await sql<{
+            orderId: string;
+            orderNumber: string;
+            deliveryStatus: string;
+            deliveredAt: string | null;
+            lastUpdatedAt: string;
+          }>`select o.id as "orderId",o.order_number as "orderNumber",o.delivery_status as "deliveryStatus",
           o.delivered_at::text as "deliveredAt",greatest(o.updated_at,coalesce(max(h.occurred_at),o.updated_at))::text as "lastUpdatedAt"
         from tracking_tokens tt join orders o on o.id=tt.order_id and o.company_id=tt.company_id
         left join order_status_history h on h.order_id=o.id and h.company_id=o.company_id
         where tt.company_id=${row.companyId}::uuid and tt.token_hash=${tokenHash}
           and tt.revoked_at is null and (tt.expires_at is null or tt.expires_at>now())
         group by o.id limit 1`.execute(this.database)
-    ).rows[0];
+        ).rows[0]
+      : (
+          await sql<{
+            orderId: string;
+            orderNumber: string;
+            deliveryStatus: string;
+            deliveredAt: string | null;
+            lastUpdatedAt: string;
+          }>`select o.id as "orderId",o.order_number as "orderNumber",o.delivery_status as "deliveryStatus",
+          o.delivered_at::text as "deliveredAt",greatest(o.updated_at,coalesce(max(h.occurred_at),o.updated_at))::text as "lastUpdatedAt"
+        from orders o
+        left join order_status_history h on h.order_id=o.id and h.company_id=o.company_id
+        where o.company_id=${row.companyId}::uuid and upper(o.order_number)=upper(${normalizedReference})
+        group by o.id limit 1`.execute(this.database)
+        ).rows[0];
     if (!tracking) throw this.trackingNotFound();
     const timeline = (
       await sql<{

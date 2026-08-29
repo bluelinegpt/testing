@@ -1,4 +1,5 @@
-export type AgentChannel = "website" | "whatsapp" | "simulator" | "platform_staff" | "public_form" | "system";
+export type AgentChannel =
+  "website" | "whatsapp" | "simulator" | "platform_staff" | "public_form" | "system";
 export type AgentLanguage = "en" | "ar";
 export type AgentIntent =
   | "greeting"
@@ -81,9 +82,14 @@ export interface AgentState {
     status: string;
   };
   deliveryAddressSkipped?: boolean;
-  pendingGeneralFollowUp?: "public_explanation" | "feature_choice" | "trader_registration_explained";
+  pendingGeneralFollowUp?:
+    "public_explanation" | "feature_choice" | "trader_registration_explained";
   pendingAction?: {
-    type: "calculate_customer_quote" | "submit_trader_application" | "submit_demo_request" | "create_handoff";
+    type:
+      | "calculate_customer_quote"
+      | "submit_trader_application"
+      | "submit_demo_request"
+      | "create_handoff";
     summary: Record<string, unknown>;
   };
   lastAskedSlot?: keyof AgentSlots;
@@ -108,12 +114,29 @@ export interface AgentState {
     };
     failedMobileAttempts?: number;
     startedAt?: string;
+    /**
+     * Set once we've auto-tried the mobile number the customer already gave
+     * earlier in this same conversation (their own contact mobile) against
+     * an ambiguous shipment match, so we never ask them to repeat a number
+     * they already told us -- only if that attempt fails do we ask them to
+     * confirm or provide a different one.
+     */
+    autoMobileAttempted?: boolean;
   };
 }
 
 export type ConversationMode = "conversation" | "workflow" | "human_handoff";
 export type WorkflowState = "inactive" | "active" | "paused" | "cancelled" | "completed";
-export type UserAction = "explain" | "start" | "continue" | "cancel" | "pause" | "switch_topic" | "clarify" | "handoff" | "unknown";
+export type UserAction =
+  | "explain"
+  | "start"
+  | "continue"
+  | "cancel"
+  | "pause"
+  | "switch_topic"
+  | "clarify"
+  | "handoff"
+  | "unknown";
 export type ConversationTopic =
   | "general"
   | "delivery_company"

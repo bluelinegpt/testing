@@ -1,9 +1,18 @@
-import { useEffect, useState, type SyntheticEvent } from "react";
+import { useContext, useEffect, useState, type SyntheticEvent } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { apiUrl, publicAssetUrl } from "./api-base";
 import { trackEvent } from "./analytics";
 import { applyPageMetadata } from "./seo";
+import { getPreloaded, PreloadContext } from "./preload-context";
 import { usePublicLocale } from "./public-localization";
+/** Preload cache keys, exported so entry-server.tsx populates the exact
+    same keys these components read -- one source of truth for both sides. */
+export const blogListingPreloadKey = (locale: string, page: number, categorySlug?: string) =>
+  `blog-listing:${locale}:${page}:${categorySlug ?? ""}`;
+export const blogCategoriesPreloadKey = (locale: string) => `blog-categories:${locale}`;
+export const blogArticlePreloadKey = (slug: string, locale: string) =>
+  `blog-article:${slug}:${locale}`;
+
 type Card = {
   slug: string;
   title: string;
@@ -141,22 +150,27 @@ function useArticleImageFallback(event: SyntheticEvent<HTMLImageElement>, slug: 
 }
 
 export function BlogListingPage() {
+  const preloadMap = useContext(PreloadContext);
   const { categorySlug } = useParams(),
     [query, setQuery] = useSearchParams(),
-    [data, setData] = useState<{ items: Card[]; page: number; pageSize: number; total: number }>(),
+    page = Math.max(1, Number(query.get("page")) || 1),
+    locale = usePublicLocale(),
+    [data, setData] = useState<
+      { items: Card[]; page: number; pageSize: number; total: number } | undefined
+    >(() => getPreloaded(preloadMap, blogListingPreloadKey(locale, page, categorySlug))),
     [categories, setCategories] = useState<
       Array<{ name: string; slug: string; description?: string }>
-    >([]),
+    >(() => getPreloaded(preloadMap, blogCategoriesPreloadKey(locale)) ?? []),
     [failed, setFailed] = useState(false),
-    [retryToken, setRetryToken] = useState(0),
-    page = Math.max(1, Number(query.get("page")) || 1),
-    locale = usePublicLocale();
+    [retryToken, setRetryToken] = useState(0);
   const text = blogText[locale];
   useEffect(() => {
     let cancelled = false;
     setFailed(false);
     void Promise.all([
-      api<any>(`?language=${locale}&page=${page}${categorySlug ? `&category=${categorySlug}` : ""}`),
+      api<any>(
+        `?language=${locale}&page=${page}${categorySlug ? `&category=${categorySlug}` : ""}`,
+      ),
       api<any[]>(`/categories?language=${locale}`),
     ])
       .then(([d, c]) => {
@@ -164,12 +178,16 @@ export function BlogListingPage() {
         setData(d);
         setCategories(c);
       })
-      .catch(() => { if (!cancelled) setFailed(true); });
+      .catch(() => {
+        if (!cancelled) setFailed(true);
+      });
     trackEvent(categorySlug ? "blog_category_view" : "blog_view", {
       category_slug: categorySlug,
       language: locale,
     });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [categorySlug, page, locale, retryToken]);
   const title = categorySlug
     ? (categories.find((x) => x.slug === categorySlug)?.name ?? text.categoryTitle)
@@ -179,8 +197,12 @@ export function BlogListingPage() {
       applyPageMetadata(
         `${title} | Tawseelhub`,
         categorySlug
-          ? (locale === "ar" ? `مقالات Tawseelhub حول ${title}.` : `Tawseelhub articles about ${title}.`)
-          : (locale === "ar" ? "إرشادات عملية لشركات التوصيل والتجار وعمليات الميل الأخير الحديثة." : "Practical guidance for UAE delivery companies, Traders and modern last-mile operations."),
+          ? locale === "ar"
+            ? `مقالات Tawseelhub حول ${title}.`
+            : `Tawseelhub articles about ${title}.`
+          : locale === "ar"
+            ? "إرشادات عملية لشركات التوصيل والتجار وعمليات الميل الأخير الحديثة."
+            : "Practical guidance for UAE delivery companies, Traders and modern last-mile operations.",
         categorySlug ? `/blog/category/${categorySlug}` : "/blog",
       ),
     [categorySlug, title],
@@ -208,7 +230,13 @@ export function BlogListingPage() {
           <div className="empty-content">
             <h2>{text.unavailableTitle}</h2>
             <p>{text.unavailableCopy}</p>
-            <button className="button button-secondary" onClick={() => setRetryToken((n) => n + 1)} type="button">{text.retry}</button>
+            <button
+              className="button button-secondary"
+              onClick={() => setRetryToken((n) => n + 1)}
+              type="button"
+            >
+              {text.retry}
+            </button>
           </div>
         ) : !data ? (
           <p>{text.loading}</p>
@@ -229,9 +257,13 @@ export function BlogListingPage() {
             </div>
             <div className="blog-pagination">
               {page > 1 && (
-                <button onClick={() => setQuery({ page: String(page - 1) })}>{text.previous}</button>
+                <button onClick={() => setQuery({ page: String(page - 1) })}>
+                  {text.previous}
+                </button>
               )}
-              <span>{text.page} {page}</span>
+              <span>
+                {text.page} {page}
+              </span>
               {page * data.pageSize < data.total && (
                 <button onClick={() => setQuery({ page: String(page + 1) })}>{text.next}</button>
               )}
@@ -273,13 +305,17 @@ function CardView({ article, featured = false }: { article: Card; featured?: boo
   );
 }
 export function BlogArticlePage() {
+  const preloadMap = useContext(PreloadContext);
   const { slug = "" } = useParams(),
-    [data, setData] = useState<{
-      article: Article;
-      related: Array<{ slug: string; title: string; excerpt: string }>;
-    }>(),
-    [missing, setMissing] = useState(false),
-    locale = usePublicLocale();
+    locale = usePublicLocale(),
+    [data, setData] = useState<
+      | {
+          article: Article;
+          related: Array<{ slug: string; title: string; excerpt: string }>;
+        }
+      | undefined
+    >(() => getPreloaded(preloadMap, blogArticlePreloadKey(slug, locale))),
+    [missing, setMissing] = useState(false);
   const text = blogText[locale];
   useEffect(() => {
     void api<any>(`/articles/${slug}?language=${locale}`)
@@ -357,7 +393,8 @@ export function BlogArticlePage() {
         <h1>{a.title}</h1>
         <p>{a.excerpt}</p>
         <small>
-          {a.author} · {text.published} {new Date(a.published_at).toLocaleDateString(locale === "ar" ? "ar-AE" : "en-AE")}
+          {a.author} · {text.published}{" "}
+          {new Date(a.published_at).toLocaleDateString(locale === "ar" ? "ar-AE" : "en-AE")}
           {a.updated_content_at
             ? ` · ${text.updated} ${new Date(a.updated_content_at).toLocaleDateString(locale === "ar" ? "ar-AE" : "en-AE")}`
             : ""}

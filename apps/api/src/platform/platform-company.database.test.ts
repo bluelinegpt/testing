@@ -159,6 +159,7 @@ describe.skipIf(!runTests)("Platform Company onboarding", () => {
 
           const payload = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
             name: `Test Delivery ${suffix}`,
+            shipmentPrefix: "TST",
             subdomain: `tst${suffix}`,
             environment: "sandbox",
             countryCode: "AE",
@@ -180,10 +181,7 @@ describe.skipIf(!runTests)("Platform Company onboarding", () => {
           // ---------------------------------------------------------------
           // Permissions
           // ---------------------------------------------------------------
-          await create(
-            readCookie,
-            payload({ subdomain: `ro${suffix}` }),
-          ).expect(403);
+          await create(readCookie, payload({ subdomain: `ro${suffix}` })).expect(403);
           await request(server)
             .get("/api/v1/platform/companies")
             .set("Cookie", readCookie)
@@ -237,7 +235,7 @@ describe.skipIf(!runTests)("Platform Company onboarding", () => {
           expect(company?.accounting_template_code).toBe("UAE_DELIVERY_STANDARD");
           expect(company?.accounting_template_version).toBe(2);
           expect(company?.accounting_template_sha256).toBe(
-            "696ba5a2941dbb215904796e39b65ae0481e21a3fe9317d6ef75b94f6ef1d1c8",
+            "21f5b63bdd906bbbede52da55d563533025aef2876058b24ee8ee6197cc7a698",
           );
           expect(company?.contact_name).toBe("Ops Lead");
 
@@ -278,7 +276,9 @@ describe.skipIf(!runTests)("Platform Company onboarding", () => {
              group by e.code order by e.code
           `.execute(transaction);
           expect(newGeography.rows).toEqual([
-            { code: "EST", count: 1 }, { code: "OAA", count: 1 }, { code: "WST", count: 1 },
+            { code: "EST", count: 1 },
+            { code: "OAA", count: 1 },
+            { code: "WST", count: 1 },
           ]);
 
           // ---------------------------------------------------------------
@@ -406,8 +406,9 @@ describe.skipIf(!runTests)("Platform Company onboarding", () => {
           ).rows[0];
           expect(Number(staleCounters?.n)).toBe(0);
           const areaCounter = await sql<{ nextValue: string }>`select next_value::text "nextValue"
-            from company_reference_counters where company_id=${companyId}::uuid and reference_type='area'`
-            .execute(transaction);
+            from company_reference_counters where company_id=${companyId}::uuid and reference_type='area'`.execute(
+            transaction,
+          );
           expect(Number(areaCounter.rows[0]?.nextValue)).toBe((template.areas ?? []).length + 1);
 
           // Business day: exactly one active rule, from the template.
@@ -507,6 +508,7 @@ describe.skipIf(!runTests)("Platform Company onboarding", () => {
               subdomain: `ts2${suffix}`,
               name: `Second Delivery ${suffix}`,
               environment: "demo",
+              shipmentPrefix: "SND",
             }),
           ).expect(201);
           const secondId = second.body.companyId as string;

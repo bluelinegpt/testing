@@ -1,0 +1,115 @@
+.site-template--has-banner .site-template__hero {
+  height: clamp(300px, 48vw, 620px);
+  background-color: var(--site-secondary, #edf5f8);
+  display: block;
+  min-height: 0;
+  padding: 0;
+  position: relative;
+  overflow: hidden;
+}
+
+.site-template__banner,
+.site-template__banner > img {
+  height: 100%;
+  width: 100%;
+}
+
+.site-template__banner > img {
+  display: block;
+  object-fit: cover;
+}
+
+.site-template__banner--fade > img {
+  animation: website-banner-fade 600ms ease both;
+}
+.site-template__banner--slide > img {
+  animation: website-banner-slide 600ms ease both;
+}
+.site-template__banner--zoom > img {
+  animation: website-banner-zoom 800ms ease both;
+}
+
+.site-template__banner-controls {
+  align-items: center;
+  bottom: 1rem;
+  display: flex;
+  gap: 0.65rem;
+  justify-content: center;
+  left: 50%;
+  position: absolute;
+  transform: translateX(-50%);
+}
+.site-template__banner-controls > button {
+  align-items: center;
+  background: rgb(15 23 42 / 78%);
+  border: 1px solid rgb(255 255 255 / 80%);
+  border-radius: 50%;
+  color: #fff;
+  cursor: pointer;
+  display: flex;
+  font-size: 1.4rem;
+  height: 2.25rem;
+  justify-content: center;
+  width: 2.25rem;
+}
+.site-template__banner-controls > span {
+  display: flex;
+  gap: 0.45rem;
+}
+.site-template__banner-controls > span button {
+  background: rgb(255 255 255 / 65%);
+  border: 1px solid #fff;
+  border-radius: 999px;
+  cursor: pointer;
+  height: 0.7rem;
+  padding: 0;
+  width: 0.7rem;
+}
+.site-template__banner-controls > span button[aria-current="true"] {
+  background: var(--site-accent, #e2a93b);
+  width: 1.6rem;
+}
+
+@keyframes website-banner-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes website-banner-slide {
+  from {
+    opacity: 0.25;
+    transform: translateX(12%);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+@keyframes website-banner-zoom {
+  from {
+    opacity: 0.3;
+    transform: scale(1.08);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .site-template__banner > img {
+    animation: none;
+  }
+}
+
+@media (max-width: 680px) {
+  .site-template--has-banner .site-template__hero {
+    height: clamp(220px, 62vw, 360px);
+  }
+  .site-template__banner > img {
+    object-fit: cover;
+  }
+}

@@ -77,7 +77,11 @@ describe("permanent Company deletion manifest", () => {
     // Customer Quote, Collect Order earning and Order Serial History tables
     // added after the previous manifest review.
     // 151 -> 152: Prompt 6 added Company-scoped public website Agent conversations.
-    expect(COMPANY_DELETION_DIRECT_TABLES.size).toBe(153);
+    // 153 -> 154: Company shipment counters are deleted with the Company;
+    // the separate global prefix reservation remains permanently preserved.
+    // 154 -> 156: Platform fee receivables and payments both carry required
+    // Company ownership and are ordered safely through their foreign keys.
+    expect(COMPANY_DELETION_DIRECT_TABLES.size).toBe(156);
     expect(COMPANY_DELETION_MANIFEST_HASH).toMatch(/^[a-f0-9]{64}$/);
   });
 
@@ -92,6 +96,7 @@ describe("permanent Company deletion manifest", () => {
       "storefront_marketplace_categories",
       "store_orders",
       "store_order_items",
+      "store_order_idempotency_keys",
       "commerce_integration_credentials",
       "company_customer_quote_pricing_rules",
     ]);
@@ -100,6 +105,10 @@ describe("permanent Company deletion manifest", () => {
   it("preserves global commerce and Marketplace taxonomy", () => {
     expect(COMPANY_DELETION_GLOBAL_PRESERVE.has("trader_commerce_profiles")).toBe(true);
     expect(COMPANY_DELETION_GLOBAL_PRESERVE.has("marketplace_categories")).toBe(true);
+    expect(COMPANY_DELETION_GLOBAL_PRESERVE.has("shipment_prefix_reservations")).toBe(true);
+    expect(COMPANY_DELETION_GLOBAL_PRESERVE.has("store_order_idempotency_keys")).toBe(true);
+    expect(COMPANY_DELETION_DIRECT_TABLES.has("platform_fee_payments")).toBe(true);
+    expect(COMPANY_DELETION_DIRECT_TABLES.has("platform_fee_receivables")).toBe(true);
   });
 
   it("uses only the two reviewed cycle breaks and an exact guard allowlist", () => {

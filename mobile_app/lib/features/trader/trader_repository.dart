@@ -68,17 +68,10 @@ final class ApiTraderRepository implements TraderRepository {
     if (draft.validate().isNotEmpty || amount == null) {
       throw const ApiFailure(ApiFailureKind.validation);
     }
-    final serialData = (await api.get<Object?>(
-      'operations/orders/next-serial-number',
-    )).data;
-    if (serialData is! Map || serialData['serialNumber'] is! String) {
-      throw const ApiFailure(ApiFailureKind.invalidResponse);
-    }
     final response = await api.postWithHeaders<Object?>(
       'portal/trader/orders',
       headers: {'X-Idempotency-Key': idempotencyKey},
       data: {
-        'serialNumber': serialData['serialNumber'],
         if (draft.normalizedReference != null)
           'referenceNumber': draft.normalizedReference,
         'areaId': draft.areaId,

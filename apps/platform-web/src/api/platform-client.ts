@@ -366,6 +366,9 @@ export interface CompanyDetail {
   readonly createdAt: string;
   readonly statusChangeReason: string | null;
   readonly closedAt: string | null;
+  readonly version: number;
+  readonly shipmentPrefix: string | null;
+  readonly shipmentSerialEnabledAt: string | null;
 }
 
 export interface CompanyWebsite {
@@ -392,10 +395,40 @@ export interface CompanyWebsite {
   readonly publishedSettings?: CompanyWebsiteSettings | null;
 }
 
-export type CompanyWebsiteTemplateKey = "corporate" | "modern" | "express" | "local" | "premium";
+export type CompanyWebsiteTemplateKey =
+  | "corporate"
+  | "modern"
+  | "express"
+  | "local"
+  | "premium"
+  | "skyline"
+  | "minimal"
+  | "bold"
+  | "elegant"
+  | "urban"
+  | "swift"
+  | "horizon"
+  | "nexus"
+  | "oasis"
+  | "fleet"
+  | "commerce"
+  | "courier"
+  | "executive"
+  | "vibrant"
+  | "classic";
 
 export interface CompanyWebsiteSettings {
-  branding: { primaryColor?: string; secondaryColor?: string; accentColor?: string };
+  branding: {
+    primaryColor?: string;
+    secondaryColor?: string;
+    accentColor?: string;
+    logoDataUrl?: string;
+    bannerDataUrl?: string;
+    bannerDataUrls?: string[];
+    bannerDataUrlsAr?: string[];
+    bannerTransition?: "fade" | "slide" | "zoom";
+    bannerIntervalSeconds?: 4 | 6 | 8;
+  };
   languages: { en: boolean; ar: boolean; defaultLocale: "en" | "ar" };
   presentation: Record<string, { en?: string; ar?: string } | string | undefined>;
   contact: {
@@ -427,7 +460,9 @@ export interface CompanyWebsiteSettings {
   coverage: Array<{
     id: string;
     emirate: string;
+    emirateAr?: string;
     area?: string;
+    areaAr?: string;
     group?: string;
     enabled: boolean;
     order: number;
@@ -440,6 +475,36 @@ export interface CompanyWebsiteSettings {
     enabled: boolean;
     order: number;
   }>;
+  marketing: {
+    steps: Array<{
+      id: string;
+      title: { en?: string; ar?: string };
+      description?: { en?: string; ar?: string };
+      enabled: boolean;
+      order: number;
+    }>;
+    industries: Array<{
+      id: string;
+      title: { en?: string; ar?: string };
+      description?: { en?: string; ar?: string };
+      enabled: boolean;
+      order: number;
+    }>;
+    statistics: Array<{
+      id: string;
+      title: { en?: string; ar?: string };
+      description?: { en?: string; ar?: string };
+      enabled: boolean;
+      order: number;
+    }>;
+    testimonials: Array<{
+      id: string;
+      title: { en?: string; ar?: string };
+      description?: { en?: string; ar?: string };
+      enabled: boolean;
+      order: number;
+    }>;
+  };
   socialLinks: Record<string, string | undefined>;
   functions?: { trackingEnabled: boolean; requestDeliveryEnabled: boolean };
   seo?: {
@@ -743,6 +808,7 @@ export interface CreateAdministratorPayload {
 
 export interface CreateCompanyPayload {
   readonly name: string;
+  readonly shipmentPrefix: string;
   readonly subdomain?: string;
   readonly environment: string;
   readonly countryCode?: string;
@@ -1339,6 +1405,13 @@ export const platformApi = {
     return result;
   },
 
+  async companyWebsiteTrackingPreview(companyId: string, trackingToken: string): Promise<unknown> {
+    return await request<unknown>(`platform/companies/${companyId}/website/preview-track`, {
+      body: { trackingToken },
+      method: "POST",
+    });
+  },
+
   async discardCompanyWebsiteDraft(
     companyId: string,
     expectedVersion: number,
@@ -1371,6 +1444,28 @@ export const platformApi = {
   async lifecycle(companyId: string, action: string, reason?: string): Promise<void> {
     await request(`platform/companies/${companyId}/${action}`, {
       body: reason === undefined ? {} : { reason },
+      method: "POST",
+    });
+  },
+
+  async updateShipmentPrefix(
+    companyId: string,
+    shipmentPrefix: string,
+    expectedVersion: number,
+  ): Promise<void> {
+    await request(`platform/companies/${companyId}/shipment-prefix`, {
+      body: { shipmentPrefix, expectedVersion },
+      method: "PATCH",
+    });
+  },
+
+  async activateShipmentSerial(
+    companyId: string,
+    reason: string,
+    expectedVersion: number,
+  ): Promise<void> {
+    await request(`platform/companies/${companyId}/shipment-serial/activate`, {
+      body: { reason, expectedVersion },
       method: "POST",
     });
   },

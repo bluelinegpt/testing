@@ -1721,6 +1721,7 @@ function FastOrderEntryDialog({
   const [pasteText, setPasteText] = useState("");
   const [rowsToAdd, setRowsToAdd] = useState("5");
   const [busy, setBusy] = useState(false);
+  const [serialServerGenerated, setSerialServerGenerated] = useState(false);
   const [message, setMessage] = useState<string>();
   const tableScrollRef = useRef<HTMLDivElement>(null);
 
@@ -1735,9 +1736,12 @@ function FastOrderEntryDialog({
   useEffect(() => {
     let active = true;
     void api
-      .get<{ serialNumber: string }>("operations/orders/next-serial-number")
+      .get<{ serialNumber: string; serverGenerated?: boolean }>(
+        "operations/orders/next-serial-number",
+      )
       .then((result) => {
         if (!active) return;
+        setSerialServerGenerated(result.serverGenerated === true);
         setRows((current) =>
           current.map((row, index) => ({
             ...row,
@@ -1844,7 +1848,8 @@ function FastOrderEntryDialog({
             wholeNumber: true,
           });
 
-          if (serial === "") errors.push(t("operations.errors.serialRequired"));
+          if (!serialServerGenerated && serial === "")
+            errors.push(t("operations.errors.serialRequired"));
           if ((serialCounts.get(serial) ?? 0) > 1)
             errors.push(t("operations.fastEntryDuplicateSerial"));
           if (reference !== "" && (referenceCounts.get(reference) ?? 0) > 1)
@@ -2017,7 +2022,7 @@ function FastOrderEntryDialog({
               notes: row.notes.trim() || undefined,
               packageCount: packages.ok ? packages.value : 1,
               referenceNumber: row.referenceNumber.trim() || undefined,
-              serialNumber: row.serialNumber.trim(),
+              ...(serialServerGenerated ? {} : { serialNumber: row.serialNumber.trim() }),
               serviceFee,
               serviceFeeOverrideReason:
                 row.serviceFee.trim() === "" ? undefined : row.overrideReason.trim(),
@@ -2147,7 +2152,12 @@ function FastOrderEntryDialog({
                   <td>{index + 1}</td>
                   <td>
                     <input
-                      value={row.serialNumber}
+                      disabled={serialServerGenerated}
+                      value={
+                        serialServerGenerated
+                          ? t("operations.serialNumberGenerated")
+                          : row.serialNumber
+                      }
                       onChange={(event) => updateRow(row.id, { serialNumber: event.target.value })}
                     />
                   </td>
@@ -4055,7 +4065,9 @@ function availableActions(order: OperationsOrder): readonly RowAction[] {
           : ["markInBranch", "assignDriver", "hold", "cancel"];
       case "in_branch":
         return [
-          ...(order.assignedDriverId === null ? (["assignDriver"] as const) : (["markOutForDelivery"] as const)),
+          ...(order.assignedDriverId === null
+            ? (["assignDriver"] as const)
+            : (["markOutForDelivery"] as const)),
           "hold",
           "returnToTrader",
           "cancel",
@@ -4567,7 +4579,6 @@ function canEditOrder(deliveryStatus: string): boolean {
   return EDITABLE_STATUSES.includes(deliveryStatus);
 }
 
-
 function DetailSection({
   rows,
   title,
@@ -4789,7 +4800,9 @@ function platformQuoteFee(detail: OperationsOrderDetail): string | null {
   const additionalFees = Number(detail.additionalFees ?? 0);
   if (Number.isFinite(additionalFees) && additionalFees > 0) return additionalFees.toFixed(2);
   const inferredFee =
-    Number(detail.companyRevenue) - Number(detail.serviceFee) - Number(detail.serviceFeeVatAmount ?? 0);
+    Number(detail.companyRevenue) -
+    Number(detail.serviceFee) -
+    Number(detail.serviceFeeVatAmount ?? 0);
   return Number.isFinite(inferredFee) && inferredFee > 0 ? inferredFee.toFixed(2) : null;
 }
 function money(value: string, locale: "ar" | "en"): string {
@@ -4942,4 +4955,3 @@ const bulkTargetStatuses = [
   "cancelled",
   "closed",
 ] as const;
-

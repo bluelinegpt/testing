@@ -14,7 +14,7 @@ import {
   type CompanyWebsiteTemplateKey,
 } from "./CompanyWebsiteTemplates.js";
 
-interface PublicWebsitePayload {
+export interface PublicWebsitePayload {
   availability: "published" | "disabled";
   slug: string;
   defaultLocale?: "en" | "ar";
@@ -40,7 +40,17 @@ interface Localized {
   ar?: string;
 }
 interface WebsiteSettings {
-  branding: { primaryColor?: string; secondaryColor?: string; accentColor?: string };
+  branding: {
+    primaryColor?: string;
+    secondaryColor?: string;
+    accentColor?: string;
+    logoDataUrl?: string;
+    bannerDataUrl?: string;
+    bannerDataUrls?: string[];
+    bannerDataUrlsAr?: string[];
+    bannerTransition?: "fade" | "slide" | "zoom";
+    bannerIntervalSeconds?: 4 | 6 | 8;
+  };
   languages: { en: boolean; ar: boolean; defaultLocale: "en" | "ar" };
   presentation: Record<string, Localized | string | undefined>;
   contact: {
@@ -68,7 +78,15 @@ interface WebsiteSettings {
     enabled: boolean;
     order: number;
   }>;
-  coverage: Array<{ id: string; emirate: string; area?: string; enabled: boolean; order: number }>;
+  coverage: Array<{
+    id: string;
+    emirate: string;
+    emirateAr?: string;
+    area?: string;
+    areaAr?: string;
+    enabled: boolean;
+    order: number;
+  }>;
   benefits: Array<{
     id: string;
     title: Localized;
@@ -76,6 +94,36 @@ interface WebsiteSettings {
     enabled: boolean;
     order: number;
   }>;
+  marketing?: {
+    steps: Array<{
+      id: string;
+      title: Localized;
+      description?: Localized;
+      enabled: boolean;
+      order: number;
+    }>;
+    industries: Array<{
+      id: string;
+      title: Localized;
+      description?: Localized;
+      enabled: boolean;
+      order: number;
+    }>;
+    statistics: Array<{
+      id: string;
+      title: Localized;
+      description?: Localized;
+      enabled: boolean;
+      order: number;
+    }>;
+    testimonials: Array<{
+      id: string;
+      title: Localized;
+      description?: Localized;
+      enabled: boolean;
+      order: number;
+    }>;
+  };
   socialLinks: Record<string, string>;
   sections: Array<{ key: string; enabled: boolean; order: number }>;
   functions?: { trackingEnabled: boolean; requestDeliveryEnabled: boolean };
@@ -120,13 +168,62 @@ export function simulatedCompanyWebsiteHost(): string | undefined {
   );
 }
 
+function previewBridge<T>(type: string, payload: Record<string, unknown>): Promise<T> {
+  const requestId = crypto.randomUUID();
+  const parentOrigin = new URL(document.referrer).origin;
+  if (
+    !["http://127.0.0.1:5176", "http://localhost:5176", "https://platform.tawseelhub.com"].includes(
+      parentOrigin,
+    )
+  )
+    return Promise.reject(new Error("preview_parent_not_allowed"));
+  return new Promise<T>((resolve, reject) => {
+    const timeout = globalThis.setTimeout(() => {
+      globalThis.removeEventListener("message", receive);
+      reject(new Error("preview_timeout"));
+    }, 20_000);
+    const receive = (event: MessageEvent<unknown>) => {
+      if (
+        event.source !== globalThis.parent ||
+        event.origin !== parentOrigin ||
+        !event.data ||
+        typeof event.data !== "object"
+      )
+        return;
+      const response = event.data as {
+        type?: string;
+        requestId?: string;
+        result?: T;
+        error?: boolean;
+      };
+      if (response.type !== `${type}:result` || response.requestId !== requestId) return;
+      globalThis.clearTimeout(timeout);
+      globalThis.removeEventListener("message", receive);
+      if (response.error || response.result === undefined)
+        reject(new Error("preview_request_failed"));
+      else resolve(response.result);
+    };
+    globalThis.addEventListener("message", receive);
+    globalThis.parent.postMessage({ type, requestId, ...payload }, parentOrigin);
+  });
+}
+
 export function isPublicCompanyWebsiteHost(): boolean {
-  const host = simulatedCompanyWebsiteHost() ?? globalThis.location.hostname.toLowerCase();
+  const simulated = simulatedCompanyWebsiteHost();
+  const host = simulated ?? globalThis.location.hostname.toLowerCase();
+  // The bare local development origins always belong to the authenticated
+  // Company Portal. A public Company Website is simulated explicitly through
+  // `companyWebsiteHost`; treating 127.0.0.1 as a custom domain hides login.
+  if (
+    simulated === undefined &&
+    (host === "localhost" || host === "127.0.0.1" || host.endsWith(".localhost"))
+  )
+    return false;
   const suffix =
     (import.meta.env.VITE_TENANT_HOST_SUFFIX as string | undefined) ?? "tawseelhub.com";
   if (!host.endsWith(`.${suffix}`))
     return (
-      simulatedCompanyWebsiteHost() !== undefined ||
+      simulated !== undefined ||
       (/^[a-z0-9.-]+$/u.test(host) && host.includes(".") && !host.includes("xn--"))
     );
   const label = host.slice(0, -(suffix.length + 1));
@@ -149,11 +246,14 @@ export function isPublicCompanyWebsiteHost(): boolean {
   );
 }
 
-export function PublicCompanyWebsite(): ReactNode {
-  const [payload, setPayload] = useState<PublicWebsitePayload>();
+export function PublicCompanyWebsite({
+  previewPayload,
+}: { previewPayload?: PublicWebsitePayload } = {}): ReactNode {
+  const [payload, setPayload] = useState<PublicWebsitePayload | undefined>(previewPayload);
   const [missing, setMissing] = useState(false);
   const override = simulatedCompanyWebsiteHost();
   useEffect(() => {
+    if (previewPayload) return;
     void fetch(
       `${apiBase()}/public/company-website`,
       override ? { headers: { "x-blueline-tenant-host": override } } : {},
@@ -164,7 +264,7 @@ export function PublicCompanyWebsite(): ReactNode {
       })
       .then(setPayload)
       .catch(() => setMissing(true));
-  }, [override]);
+  }, [override, previewPayload]);
   useEffect(() => {
     if (payload?.redirectTo) {
       const target = new URL(payload.redirectTo);
@@ -179,7 +279,8 @@ export function PublicCompanyWebsite(): ReactNode {
       document.querySelector<HTMLMetaElement>('meta[name="robots"]') ??
       document.head.appendChild(document.createElement("meta"));
     robots.name = "robots";
-    const privatePage = globalThis.location.pathname.startsWith("/track");
+    const privatePage =
+      previewPayload !== undefined || globalThis.location.pathname.startsWith("/track");
     robots.content =
       payload?.availability === "published" &&
       payload.settings?.seo?.indexable !== false &&
@@ -245,7 +346,7 @@ export function PublicCompanyWebsite(): ReactNode {
           : {}),
       });
     }
-  }, [payload]);
+  }, [payload, previewPayload]);
   if (missing) return <Unavailable />;
   if (!payload) return <main className="company-site company-site--loading">Loading…</main>;
   if (payload.availability === "disabled" || !payload.company) return <Unavailable />;
@@ -260,6 +361,13 @@ export function PublicCompanyWebsite(): ReactNode {
   const company = payload.company;
   const localized = (value: Localized | undefined, fallback: string | null = null) =>
     value?.[locale] ?? value?.en ?? fallback;
+  const publicText = (value: string): string =>
+    value
+      .replace(/^#{1,6}\s*/gmu, "")
+      .replace(/\*\*(.*?)\*\*/gu, "$1")
+      .replace(/^\s*[*-]\s+/gmu, "• ")
+      .replace(/\n{3,}/gu, "\n\n")
+      .trim();
   const name =
     localized(
       settings?.presentation.displayName as Localized | undefined,
@@ -279,11 +387,11 @@ export function PublicCompanyWebsite(): ReactNode {
     ? (settings.contact.phone ?? settings.contact.mobile ?? null)
     : null;
   const email = settings?.contact.showEmail ? (settings.contact.email ?? null) : null;
+  const whatsappNumber =
+    settings?.contact.whatsappNumber ?? settings?.contact.mobile ?? settings?.contact.phone;
   const whatsappUrl =
-    settings?.contact.whatsappEnabled &&
-    settings.contact.showWhatsapp &&
-    settings.contact.whatsappNumber
-      ? `https://wa.me/${settings.contact.whatsappNumber.replace(/\D/gu, "")}${localized(settings.contact.whatsappMessage) ? `?text=${encodeURIComponent(localized(settings.contact.whatsappMessage)!)}` : ""}`
+    (settings?.contact.whatsappEnabled || settings?.contact.showWhatsapp) && whatsappNumber
+      ? `https://wa.me/${whatsappNumber.replace(/\D/gu, "")}${localized(settings.contact.whatsappMessage) ? `?text=${encodeURIComponent(localized(settings.contact.whatsappMessage)!)}` : ""}`
       : null;
   const ctaHref = (type: string | undefined): string =>
     type === "whatsapp" && whatsappUrl
@@ -297,9 +405,11 @@ export function PublicCompanyWebsite(): ReactNode {
             : type === "section"
               ? "#about"
               : "#contact";
-  const logoUrl = company.hasLogo
-    ? `${apiBase()}/public/company-website/logo${override ? `?host=${encodeURIComponent(override)}` : ""}`
-    : null;
+  const logoUrl =
+    settings?.branding.logoDataUrl ??
+    (company.hasLogo
+      ? `${apiBase()}/public/company-website/logo${override ? `?host=${encodeURIComponent(override)}` : ""}`
+      : null);
   return (
     <>
       {renderCompanyWebsiteTemplate(payload.templateKey ?? "corporate", {
@@ -308,14 +418,35 @@ export function PublicCompanyWebsite(): ReactNode {
           ? { headline: localized(settings?.presentation.heroHeadline as Localized | undefined)! }
           : {}),
         description: subtitle ?? null,
-        ...(localized((settings?.presentation.about ?? settings?.knowledge?.description) as Localized | undefined)
-          ? { about: localized((settings?.presentation.about ?? settings?.knowledge?.description) as Localized | undefined)! }
+        ...(localized(
+          (settings?.presentation.about ?? settings?.knowledge?.description) as
+            Localized | undefined,
+        )
+          ? {
+              about: publicText(
+                localized(
+                  (settings?.presentation.about ?? settings?.knowledge?.description) as
+                    Localized | undefined,
+                )!,
+              ),
+            }
           : {}),
         phone,
         email,
         address: address ?? null,
         logoUrl,
+        bannerUrls:
+          locale === "ar" && settings?.branding.bannerDataUrlsAr?.length
+            ? settings.branding.bannerDataUrlsAr
+            : settings?.branding.bannerDataUrls?.length
+              ? settings.branding.bannerDataUrls
+              : settings?.branding.bannerDataUrl
+                ? [settings.branding.bannerDataUrl]
+                : [],
+        bannerTransition: settings?.branding.bannerTransition ?? "fade",
+        bannerIntervalSeconds: settings?.branding.bannerIntervalSeconds ?? 6,
         direction: locale === "ar" ? "rtl" : "ltr",
+        language: locale,
         navigation:
           locale === "ar"
             ? {
@@ -353,7 +484,12 @@ export function PublicCompanyWebsite(): ReactNode {
           })),
         coverage: (settings?.coverage ?? [])
           .filter((item) => item.enabled)
-          .sort((a, b) => a.order - b.order),
+          .sort((a, b) => a.order - b.order)
+          .map((item) => ({
+            ...item,
+            emirate: locale === "ar" ? (item.emirateAr ?? item.emirate) : item.emirate,
+            ...(locale === "ar" && item.areaAr ? { area: item.areaAr } : {}),
+          })),
         benefits: (settings?.benefits ?? [])
           .filter((item) => item.enabled)
           .sort((a, b) => a.order - b.order)
@@ -362,6 +498,40 @@ export function PublicCompanyWebsite(): ReactNode {
             title: localized(item.title) ?? "",
             ...(localized(item.description) ? { description: localized(item.description)! } : {}),
           })),
+        marketing: {
+          steps: (settings?.marketing?.steps ?? [])
+            .filter((item) => item.enabled)
+            .sort((a, b) => a.order - b.order)
+            .map((item) => ({
+              id: item.id,
+              title: localized(item.title) ?? "",
+              ...(localized(item.description) ? { description: localized(item.description)! } : {}),
+            })),
+          industries: (settings?.marketing?.industries ?? [])
+            .filter((item) => item.enabled)
+            .sort((a, b) => a.order - b.order)
+            .map((item) => ({
+              id: item.id,
+              title: localized(item.title) ?? "",
+              ...(localized(item.description) ? { description: localized(item.description)! } : {}),
+            })),
+          statistics: (settings?.marketing?.statistics ?? [])
+            .filter((item) => item.enabled)
+            .sort((a, b) => a.order - b.order)
+            .map((item) => ({
+              id: item.id,
+              title: localized(item.title) ?? "",
+              ...(localized(item.description) ? { description: localized(item.description)! } : {}),
+            })),
+          testimonials: (settings?.marketing?.testimonials ?? [])
+            .filter((item) => item.enabled)
+            .sort((a, b) => a.order - b.order)
+            .map((item) => ({
+              id: item.id,
+              title: localized(item.title) ?? "",
+              ...(localized(item.description) ? { description: localized(item.description)! } : {}),
+            })),
+        },
         workingHours: settings?.contact.showWorkingHours ? settings.contact.workingHours : [],
         socialLinks: settings?.socialLinks ?? {},
         sections: settings?.sections ?? [],
@@ -398,7 +568,15 @@ export function PublicCompanyWebsite(): ReactNode {
           : {}),
         ...(settings?.functions?.trackingEnabled !== false &&
         settings?.sections.find((section) => section.key === "tracking")?.enabled !== false
-          ? { trackingSection: <TrackingSection locale={locale} override={override} /> }
+          ? {
+              trackingSection: (
+                <TrackingSection
+                  locale={locale}
+                  override={override}
+                  preview={previewPayload !== undefined}
+                />
+              ),
+            }
           : {}),
       })}
       <PublicFunctions
@@ -429,19 +607,108 @@ export function PublicCompanyWebsite(): ReactNode {
             agent={settings.agent}
             apiBase={apiBase()}
             language={locale}
+            preview={previewPayload !== undefined}
             {...(override ? { overrideHost: override } : {})}
           />
         </Suspense>
       ) : null}
+      {whatsappUrl ? (
+        <a
+          className="company-site__whatsapp"
+          href={whatsappUrl}
+          rel="noreferrer"
+          target="_blank"
+          aria-label={locale === "ar" ? "تواصل عبر واتساب" : "Chat on WhatsApp"}
+        >
+          <svg aria-hidden="true" viewBox="0 0 24 24">
+            <path d="M20.5 11.7a8.5 8.5 0 0 1-12.6 7.4L3.5 20.5l1.4-4.3a8.5 8.5 0 1 1 15.6-4.5Z" />
+            <path d="M8.2 7.7c.2-.4.4-.4.7-.4h.5c.2 0 .4.1.5.4l.8 2c.1.3 0 .5-.2.7l-.7.8c-.2.2-.1.4 0 .6.6 1.1 1.5 2 2.6 2.6.2.1.4.2.6 0l.9-1.1c.2-.2.4-.3.7-.2l2.1 1c.3.1.4.3.4.5 0 .3-.2 1.4-.9 2-.6.6-1.5.9-2.5.6-1.2-.3-2.8-1-4.6-2.6-1.5-1.4-2.5-3.1-2.8-4.3-.3-1 0-2 .4-2.6Z" />
+          </svg>
+          {locale === "ar" ? "واتساب" : "WhatsApp"}
+        </a>
+      ) : null}
+      <nav
+        aria-label={locale === "ar" ? "إجراءات سريعة" : "Quick actions"}
+        className="company-site__mobile-actions"
+      >
+        {settings?.functions?.trackingEnabled !== false ? (
+          <a href="#tracking">{locale === "ar" ? "تتبع" : "Track"}</a>
+        ) : null}
+        {settings?.functions?.requestDeliveryEnabled !== false ? (
+          <a href="#request-delivery">{locale === "ar" ? "اطلب توصيلاً" : "Request"}</a>
+        ) : null}
+        {whatsappUrl ? (
+          <a href={whatsappUrl} rel="noreferrer" target="_blank">
+            {locale === "ar" ? "واتساب" : "WhatsApp"}
+          </a>
+        ) : phone ? (
+          <a href={`tel:${phone.replace(/[^+\d]/gu, "")}`}>{locale === "ar" ? "اتصل" : "Call"}</a>
+        ) : null}
+      </nav>
       <span className="version-badge company-site__version">{__APP_VERSION__}</span>
     </>
+  );
+}
+
+export function CompanyWebsiteDraftPreviewReceiver(): ReactNode {
+  const [payload, setPayload] = useState<PublicWebsitePayload>();
+  const [, rerender] = useState(0);
+  useEffect(() => {
+    const receive = (event: MessageEvent<unknown>) => {
+      const localPlatform =
+        event.origin === "http://127.0.0.1:5176" || event.origin === "http://localhost:5176";
+      const productionPlatform = event.origin === "https://platform.tawseelhub.com";
+      if (!localPlatform && !productionPlatform) return;
+      if (!event.data || typeof event.data !== "object") return;
+      const envelope = event.data as { type?: string; payload?: PublicWebsitePayload };
+      if (envelope.type === "tawseelhub:company-website-draft-preview" && envelope.payload)
+        setPayload(envelope.payload);
+    };
+    globalThis.addEventListener("message", receive);
+    return () => globalThis.removeEventListener("message", receive);
+  }, []);
+  useEffect(() => {
+    const keepInsidePreview = (event: MouseEvent) => {
+      const target = event.target instanceof Element ? event.target.closest("a[href]") : null;
+      if (!(target instanceof HTMLAnchorElement)) return;
+      const href = target.getAttribute("href");
+      if (!href) return;
+      event.preventDefault();
+      const destination = new URL(href, globalThis.location.origin);
+      const language = destination.searchParams.get("lang");
+      if (language === "en" || language === "ar") {
+        const current = new URL(globalThis.location.href);
+        current.searchParams.set("websiteDraftPreview", "1");
+        current.searchParams.set("lang", language);
+        globalThis.history.replaceState({}, "", current);
+        rerender((value) => value + 1);
+      }
+      const sectionId =
+        destination.hash.slice(1) ||
+        (destination.pathname.startsWith("/track")
+          ? "tracking"
+          : destination.pathname.startsWith("/request-delivery")
+            ? "request-delivery"
+            : destination.pathname.startsWith("/contact")
+              ? "contact"
+              : "");
+      if (sectionId)
+        document.getElementById(sectionId)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    };
+    document.addEventListener("click", keepInsidePreview);
+    return () => document.removeEventListener("click", keepInsidePreview);
+  }, []);
+  return payload ? (
+    <PublicCompanyWebsite previewPayload={payload} />
+  ) : (
+    <main className="company-site company-site--loading">Preparing exact draft preview…</main>
   );
 }
 
 const copy = {
   en: {
     track: "Real-Time Tracking",
-    trackingHelp: "Enter your shipment reference to see its latest delivery status.",
+    trackingHelp: "Enter your secure tracking reference or Dana order number.",
     token: "Shipment reference",
     trackAction: "Track",
     trackingLoading: "Checking shipment status…",
@@ -473,7 +740,7 @@ const copy = {
   },
   ar: {
     track: "تتبع الشحنة مباشرة",
-    trackingHelp: "أدخل رقم تتبع الشحنة لمعرفة أحدث حالة للتوصيل.",
+    trackingHelp: "أدخل مرجع التتبع الآمن أو رقم طلب دانا.",
     token: "رقم تتبع الشحنة",
     trackAction: "تتبع",
     trackingLoading: "جارٍ التحقق من حالة الشحنة…",
@@ -526,9 +793,11 @@ interface PublicTrackingResult {
 function TrackingSection({
   locale,
   override,
+  preview,
 }: {
   locale: "en" | "ar";
   override: string | undefined;
+  preview: boolean;
 }): ReactNode {
   const t = copy[locale];
   const [tracking, setTracking] = useState<PublicTrackingResult | null>();
@@ -539,16 +808,25 @@ function TrackingSection({
     setTracking(undefined);
     const data = new FormData(event.currentTarget);
     try {
-      const response = await fetch(`${apiBase()}/public/company-website/track`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(override ? { "x-blueline-tenant-host": override } : {}),
-        },
-        body: JSON.stringify({ trackingToken: data.get("trackingToken") }),
-      });
-      if (!response.ok) throw new Error("tracking_not_found");
-      setTracking((await response.json()) as PublicTrackingResult);
+      const trackingToken = String(data.get("trackingToken") ?? "").trim();
+      if (preview) {
+        setTracking(
+          await previewBridge<PublicTrackingResult>("tawseelhub:preview-tracking-request", {
+            trackingToken,
+          }),
+        );
+      } else {
+        const response = await fetch(`${apiBase()}/public/company-website/track`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(override ? { "x-blueline-tenant-host": override } : {}),
+          },
+          body: JSON.stringify({ trackingToken }),
+        });
+        if (!response.ok) throw new Error("tracking_not_found");
+        setTracking((await response.json()) as PublicTrackingResult);
+      }
     } catch {
       setTracking(null);
     } finally {
@@ -575,17 +853,19 @@ function TrackingSection({
             aria-describedby="tracking-format"
             autoCapitalize="none"
             autoComplete="off"
+            maxLength={64}
             name="trackingToken"
-            pattern="[A-Za-z0-9_-]{43}"
             required
           />
         </label>
-        <span className="sr-only" id="tracking-format">
-          43 characters
-        </span>
         <button disabled={busy} type="submit">
           {busy ? t.trackingLoading : t.trackAction}
         </button>
+        <span className="company-site-tracking__hint" id="tracking-format">
+          {locale === "ar"
+            ? "يتم البحث داخل طلبات هذه الشركة فقط. لا نعرض أي بيانات شخصية."
+            : "Only this company's orders are searched. No personal details are displayed."}
+        </span>
       </form>
       <div aria-live="polite" aria-atomic="true">
         {busy ? (

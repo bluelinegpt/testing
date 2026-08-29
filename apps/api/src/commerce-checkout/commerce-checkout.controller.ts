@@ -1,25 +1,35 @@
-import { Body, Controller, HttpCode, HttpStatus, Inject, Post } from "@nestjs/common";
+import { Body, Controller, Get, HttpCode, HttpStatus, Inject, Post, Query } from "@nestjs/common";
 import { ApiOperation, ApiTags } from "@nestjs/swagger";
 import { Throttle } from "@nestjs/throttler";
 
+import { Public } from "../authentication/authentication.decorators.js";
 import { OptionalAuthentication } from "../authentication/authentication.decorators.js";
+import {
+  AreaConfigurationService,
+  type AreaSearchPage,
+  type Emirate,
+} from "../company-configuration/area-configuration.service.js";
 
 import type { CheckoutLineResult, CheckoutResult } from "./commerce-checkout.service.js";
 import { CommerceCheckoutService } from "./commerce-checkout.service.js";
-import { ValidateCheckoutDto } from "./commerce-checkout.dto.js";
+import { CheckoutAreaSearchQueryDto, ValidateCheckoutDto } from "./commerce-checkout.dto.js";
 
 /** The Customer-safe line shape -- drops `productId`/`selectedOptionValueIds`
  * (internal ids kept on `CheckoutLineResult` only so C3's Store Order
  * submission can reuse them; a Customer's browser has no business seeing an
  * internal Product row id). */
 type PublicCheckoutLine = Omit<CheckoutLineResult, "productId" | "selectedOptionValueIds">;
-type PublicCheckoutResult = Omit<CheckoutResult, "lines"> & { readonly lines: readonly PublicCheckoutLine[] };
+type PublicCheckoutResult = Omit<CheckoutResult, "lines"> & {
+  readonly lines: readonly PublicCheckoutLine[];
+};
 
 /** Drops the internal-only `deliveryCompanyServiceFee` field (§39/§42) and
  * every line's internal `productId`/`selectedOptionValueIds` -- none of
  * these are ever sent over HTTP, so nothing downstream comes to depend on
  * them leaking. */
-function toPublicResult(result: Awaited<ReturnType<CommerceCheckoutService["validate"]>>): PublicCheckoutResult {
+function toPublicResult(
+  result: Awaited<ReturnType<CommerceCheckoutService["validate"]>>,
+): PublicCheckoutResult {
   const { deliveryCompanyServiceFee: _internal, ...publicResult } = result;
   return {
     ...publicResult,
@@ -55,7 +65,10 @@ function toPublicResult(result: Awaited<ReturnType<CommerceCheckoutService["vali
 @ApiTags("commerce-checkout")
 @Controller("commerce/checkout")
 export class CommerceCheckoutController {
-  public constructor(@Inject(CommerceCheckoutService) private readonly checkout: CommerceCheckoutService) {}
+  public constructor(
+    @Inject(CommerceCheckoutService) private readonly checkout: CommerceCheckoutService,
+    @Inject(AreaConfigurationService) private readonly areas: AreaConfigurationService,
+  ) {}
 
   @OptionalAuthentication()
   @Throttle({ default: { limit: 30, ttl: 60_000 } })
@@ -64,5 +77,36 @@ export class CommerceCheckoutController {
   @Post("validate")
   public async validate(@Body() input: ValidateCheckoutDto): Promise<PublicCheckoutResult> {
     return toPublicResult(await this.checkout.validate(input));
+  }
+
+  /**
+   * Pre-production fix: the read-only UAE Emirate master, for the Checkout
+   * address form's Emirate dropdown. Not Company-scoped -- there is one
+   * shared Emirate list, unlike Areas.
+   */
+  @Public()
+  @Throttle({ default: { limit: 60, ttl: 60_000 } })
+  @ApiOperation({ summary: "List the UAE Emirate master for the Checkout address form" })
+  @Get("emirates")
+  public emirates(): Promise<readonly Emirate[]> {
+    return this.areas.emirates();
+  }
+
+  /**
+   * Pre-production fix: typeahead source for the Checkout's searchable Area
+   * combobox. Scoped to whichever Company's Areas are actually priceable for
+   * this Store (`resolveAreaSearchCompanyId` -- the Trader's own default
+   * eligible Delivery Company), never a caller-supplied Company id. An empty
+   * result (no eligible Company at all) is a normal, expected response --
+   * the frontend shows "no supported delivery area" rather than an error.
+   */
+  @Public()
+  @Throttle({ default: { limit: 60, ttl: 60_000 } })
+  @ApiOperation({ summary: "Search Areas for the Checkout's Emirate + Area selection" })
+  @Get("areas")
+  public async areasSearch(@Query() query: CheckoutAreaSearchQueryDto): Promise<AreaSearchPage> {
+    const companyId = await this.checkout.resolveAreaSearchCompanyId(query.storeSlug);
+    if (companyId === null) return { hasMore: false, items: [], total: 0 };
+    return this.areas.searchForCompany(companyId, query);
   }
 }

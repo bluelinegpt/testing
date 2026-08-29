@@ -1,5 +1,5 @@
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { act, fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   COMPANY_WEBSITE_TEMPLATES,
@@ -18,13 +18,28 @@ const content = {
 };
 
 describe("Company website template registry", () => {
-  it("registers exactly five stable templates", () => {
+  it("registers exactly twenty stable templates", () => {
     expect(Object.keys(COMPANY_WEBSITE_TEMPLATES)).toEqual([
       "corporate",
       "modern",
       "express",
       "local",
       "premium",
+      "skyline",
+      "minimal",
+      "bold",
+      "elegant",
+      "urban",
+      "swift",
+      "horizon",
+      "nexus",
+      "oasis",
+      "fleet",
+      "commerce",
+      "courier",
+      "executive",
+      "vibrant",
+      "classic",
     ]);
   });
 
@@ -104,11 +119,91 @@ describe("Company website template registry", () => {
           ...content,
           name: "دانا",
           direction: "rtl",
+          language: "ar",
+          coverage: [{ id: "uae", emirate: "الإمارات" }],
           alternateLanguage: { label: "EN", url: "?lang=en" },
         })}
       </>,
     );
     expect(container.querySelector('[dir="rtl"]')).not.toBeNull();
     expect(screen.getByRole("link", { name: "EN" })).toHaveAttribute("href", "?lang=en");
+    expect(screen.getByRole("heading", { name: "مناطق التغطية" })).toBeInTheDocument();
+  });
+
+  it("renders shared marketing sections with Arabic headings", () => {
+    render(
+      <>
+        {renderCompanyWebsiteTemplate("modern", {
+          ...content,
+          direction: "rtl",
+          language: "ar",
+          marketing: {
+            steps: [{ id: "collect", title: "نستلم الطلب" }],
+            industries: [{ id: "retail", title: "التجزئة" }],
+            statistics: [{ id: "daily", title: "+٤٠٠٠", description: "توصيل يومي" }],
+            testimonials: [{ id: "review", title: "عميل دانا", description: "خدمة موثوقة" }],
+          },
+          coverage: [{ id: "uae", emirate: "الإمارات" }],
+        })}
+      </>,
+    );
+    expect(screen.getByRole("heading", { name: "كيف تعمل الخدمة" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "القطاعات التي نخدمها" })).toBeInTheDocument();
+    expect(screen.getByText("خدمة موثوقة")).toBeInTheDocument();
+  });
+
+  it.each(Object.keys(COMPANY_WEBSITE_TEMPLATES) as CompanyWebsiteTemplateKey[])(
+    "renders the shared three-banner gallery in %s",
+    (key) => {
+      const { container, unmount } = render(
+        <>
+          {renderCompanyWebsiteTemplate(key, {
+            ...content,
+            bannerUrls: [
+              "data:image/png;base64,AA==",
+              "data:image/png;base64,AQ==",
+              "data:image/png;base64,Ag==",
+            ],
+            bannerTransition: "slide",
+            bannerIntervalSeconds: 4,
+          })}
+        </>,
+      );
+      expect(container.querySelector(".site-template__banner--slide img")).toHaveAttribute(
+        "src",
+        "data:image/png;base64,AA==",
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Next banner" }));
+      expect(container.querySelector(".site-template__banner--slide img")).toHaveAttribute(
+        "src",
+        "data:image/png;base64,AQ==",
+      );
+      expect(screen.getByRole("button", { name: "Show banner 2" })).toHaveAttribute(
+        "aria-current",
+        "true",
+      );
+      unmount();
+    },
+  );
+
+  it("rotates banners automatically at the configured interval", () => {
+    vi.useFakeTimers();
+    const { container, unmount } = render(
+      <>
+        {renderCompanyWebsiteTemplate("corporate", {
+          ...content,
+          bannerUrls: ["data:image/png;base64,AA==", "data:image/png;base64,AQ=="],
+          bannerTransition: "fade",
+          bannerIntervalSeconds: 4,
+        })}
+      </>,
+    );
+    act(() => vi.advanceTimersByTime(4_000));
+    expect(container.querySelector(".site-template__banner--fade img")).toHaveAttribute(
+      "src",
+      "data:image/png;base64,AQ==",
+    );
+    unmount();
+    vi.useRealTimers();
   });
 });

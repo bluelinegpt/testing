@@ -89,6 +89,20 @@ describe("Company website agent public boundary", () => {
     };
     expect(deterministicReply(value, "I need support")).toContain("help@dana.example");
   });
+  it("answers a contact-number request from the published mobile fallback", () => {
+    const value = context();
+    value.settings.contact = {
+      ...value.settings.contact,
+      showPhone: true,
+      mobile: "+971501040526",
+    };
+    expect(deterministicReply(value, "Give the contact number")).toBe(
+      "Dana's contact number is +971501040526.",
+    );
+    value.language = "ar";
+    expect(deterministicReply(value, "أعطني رقم التواصل")).toContain("+971501040526");
+    expect(publicKnowledge(value).contact.phone).toBe("+971501040526");
+  });
   it("prefers approved bilingual FAQs and Company social profiles", () => {
     const value = context();
     value.settings.knowledge.faqs = [
@@ -138,5 +152,39 @@ describe("Company website agent public boundary", () => {
     expect(workingHoursNow(value.settings, "Asia/Dubai", new Date("2026-08-28T20:00:00Z"))).toBe(
       false,
     );
+  });
+
+  it("answers ordinary small talk instead of the generic refusal, in EN and AR", () => {
+    const value = context();
+    expect(deterministicReply(value, "how are you")).toContain("doing well");
+    expect(deterministicReply(value, "how are you")).not.toContain("don't have confirmed");
+
+    value.language = "ar";
+    // Common Gulf/UAE colloquial spelling of "how are you" -- previously fell
+    // straight through every branch to the generic "no confirmed info" refusal.
+    expect(deterministicReply(value, "كيفك")).not.toContain("لا أملك معلومات مؤكدة");
+    expect(deterministicReply(value, "كيفك")).toMatch(/بخير/u);
+    expect(deterministicReply(value, "شلونك")).not.toContain("لا أملك معلومات مؤكدة");
+  });
+
+  it("recognizes 'من انت' (no hamza) the same as 'من أنت' -- informal spelling should not break the boundary answer", () => {
+    const value = context();
+    value.language = "ar";
+    value.settings.knowledge.description = { ar: "دانة شركة توصيل في الإمارات." };
+    expect(deterministicReply(value, "من انت")).toContain("دانة شركة توصيل");
+    expect(deterministicReply(value, "من أنت")).toContain("دانة شركة توصيل");
+  });
+
+  it("recognizes 'who is <CompanyName>' / 'من هي <الاسم>' as the same about-company question, tolerant of taa marbuta vs heh spelling", () => {
+    const value = context();
+    value.companyName = "دانة";
+    value.language = "ar";
+    value.settings.knowledge.description = { ar: "دانة شركة توصيل في الإمارات." };
+    // Visitor types "دانه" (heh) -- the Company's own name is "دانة" (taa marbuta).
+    expect(deterministicReply(value, "من هي دانه")).toContain("دانة شركة توصيل");
+
+    const english = context();
+    english.settings.knowledge.description = { en: "Dana delivers across the UAE." };
+    expect(deterministicReply(english, "who is Dana")).toContain("Dana delivers");
   });
 });

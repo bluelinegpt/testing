@@ -24,6 +24,16 @@ describe("Company website agent tenant isolation certification", () => {
       "public_token_hash=${hash(token)} and company_id=${row.companyId}::uuid and company_website_id=${row.websiteId}::uuid",
     );
   });
+  it("binds voluntary contact updates to the same token, Company and website", () => {
+    const contactBody = source.slice(
+      source.indexOf("public async saveContact"),
+      source.indexOf("public async preview"),
+    );
+    expect(contactBody).toContain("public_token_hash=${hash(token)}");
+    expect(contactBody).toContain("company_id=${row.companyId}::uuid");
+    expect(contactBody).toContain("company_website_id=${row.websiteId}::uuid");
+    expect(contactBody).not.toContain("companyId:");
+  });
   it("keeps draft preview private and separate from persisted public conversations", () => {
     expect(source).toContain("w.draft_settings as settings");
     const previewBody = source.slice(
@@ -32,8 +42,13 @@ describe("Company website agent tenant isolation certification", () => {
     );
     expect(previewBody).not.toContain("company_website_agent_conversations");
   });
+  it("retains the full bounded transcript while limiting provider context", () => {
+    expect(source).toContain("history: conversation.messages.slice(-16)");
+    expect(source).not.toContain("] .slice(-16)");
+    expect(source).toContain("messageCount >= 40");
+  });
   it("routes opaque tracking references through the existing public-safe Company flow", () => {
-    expect(source).toContain("this.websites.trackPublic(host, token)");
+    expect(source).toContain("this.websites.trackPublic(host, reference)");
     const trackingReply = source.slice(
       source.indexOf("private async trackingReply"),
       source.indexOf("private notFound"),
@@ -41,5 +56,11 @@ describe("Company website agent tenant isolation certification", () => {
     expect(trackingReply).not.toMatch(
       /customer|mobile|email|address|driver|trader|settlement|accounting/iu,
     );
+  });
+  it("routes Company order numbers through the same tenant-safe tracking flow in live and Preview", () => {
+    expect(source).toContain("ORD-[0-9]{6,}");
+    expect(source).toContain("this.websites.trackPublic(host, reference)");
+    expect(source).toContain("this.websites.trackPreview(companyId, reference)");
+    expect(source).not.toContain("from orders");
   });
 });

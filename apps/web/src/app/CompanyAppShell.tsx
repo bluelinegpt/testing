@@ -69,6 +69,7 @@ const routeTitles: Readonly<Record<string, string>> = {
   "/configuration/company-profile": "nav.companyProfile",
   "/configuration/storefront": "storefront.title",
   "/configuration/general": "nav.generalSettings",
+  "/configuration/ai-agent": "nav.websiteAgent",
   "/configuration/traders": "nav.tradersList",
   "/configuration/customers": "nav.customers",
   "/configuration/areas": "nav.areas",
@@ -159,9 +160,7 @@ export function CompanyAppShell({
             icon: Store,
             id: "traders",
             label: t("nav.traders"),
-            items: [
-              { label: t("nav.traderSettlements"), path: "/trader-settlements" },
-            ],
+            items: [{ label: t("nav.traderSettlements"), path: "/trader-settlements" }],
           },
           {
             icon: Truck,
@@ -211,6 +210,7 @@ export function CompanyAppShell({
               { label: t("nav.companyProfile"), path: "/configuration/company-profile" },
               { label: t("storefront.title"), path: "/configuration/storefront" },
               { label: t("nav.generalSettings"), path: "/configuration/general" },
+              { label: t("nav.websiteAgent"), path: "/configuration/ai-agent" },
               { label: t("nav.tradersList"), path: "/configuration/traders" },
               { label: t("nav.customers"), path: "/configuration/customers" },
               { label: t("nav.areas"), path: "/configuration/areas" },
@@ -519,7 +519,8 @@ function NavigationGroup({
 function groupForPath(pathname: string): MenuGroupId | undefined {
   if (pathname.startsWith("/orders")) return "orders";
   if (pathname === "/trader-settlements") return "traders";
-  if (pathname === "/trader-receivables" || pathname.startsWith("/trader-receivables/")) return "accounting";
+  if (pathname === "/trader-receivables" || pathname.startsWith("/trader-receivables/"))
+    return "accounting";
   if (pathname === "/drivers" || pathname === "/driver-cash-reconciliation") return "drivers";
   if (pathname === "/cash-management" || pathname === "/payroll") return "accounting";
   if (pathname.startsWith("/accounting")) return "accounting";

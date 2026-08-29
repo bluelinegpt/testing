@@ -112,6 +112,7 @@ describe("CompanyAppShell branding", () => {
     await screen.findAllByText("Acme Logistics");
     fireEvent.click(screen.getByRole("button", { name: "Configuration" }));
     expect(screen.getByRole("link", { name: "General settings" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "AI Agent" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Company profile" })).not.toBeInTheDocument();
   });
 

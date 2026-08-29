@@ -55,7 +55,11 @@ export type AnalyticsEventName =
   | "blog_category_view"
   | "blog_internal_link_clicked"
   | "blog_cta_clicked"
-  | "contact_form_submitted";
+  | "contact_form_submitted"
+  | "tracking_started"
+  | "tracking_verification_required"
+  | "tracking_success"
+  | "tracking_failed";
 
 export type SafeMetadata = {
   page?: string | undefined;
@@ -109,6 +113,15 @@ export type SafeMetadata = {
   utmTerm?: string | undefined;
   utmContent?: string | undefined;
   gclid?: string | undefined;
+  surface?: "homepage" | "track_page" | string | undefined;
+  outcome?:
+    | "verified"
+    | "verification_required"
+    | "not_found"
+    | "not_verified"
+    | "ambiguous"
+    | string
+    | undefined;
 };
 
 type AnalyticsPayload = Record<string, string | number | boolean | undefined>;
@@ -116,9 +129,17 @@ type AnalyticsPayload = Record<string, string | number | boolean | undefined>;
 const attributionKey = "tawseelhub.marketing_attribution";
 const dedupePrefix = "tawseelhub.analytics.sent.";
 const consentKey = "tawseelhub.analytics_consent";
-const piiPattern = /(email|mobile|phone|name|address|recipient|receiver|contactPerson|transcript|message|comment|challenge|notes|freeText)/i;
+const piiPattern =
+  /(email|mobile|phone|name|address|recipient|receiver|contactPerson|transcript|message|comment|challenge|notes|freeText)/i;
 const allowedReference = /^(DEMO|QTE|TRD-APP|HAND|AGT)-\d{6}$/;
-const campaignKeys = ["utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term", "gclid"] as const;
+const campaignKeys = [
+  "utm_source",
+  "utm_medium",
+  "utm_campaign",
+  "utm_content",
+  "utm_term",
+  "gclid",
+] as const;
 
 declare global {
   interface Window {
@@ -183,7 +204,7 @@ export function currentAttribution(search = window.location.search): SafeMetadat
   let parsed: Record<string, string> = {};
   try {
     const stored = window.sessionStorage.getItem(attributionKey);
-    parsed = stored ? JSON.parse(stored) as Record<string, string> : {};
+    parsed = stored ? (JSON.parse(stored) as Record<string, string>) : {};
   } catch {
     parsed = {};
   }
@@ -238,9 +259,12 @@ function normalizeMetadata(metadata: SafeMetadata): AnalyticsPayload {
 }
 
 function eventId(name: string, reference?: string): string {
-  const source = reference ? `${name}:${reference}` : `${name}:${Date.now()}:${Math.random().toString(36).slice(2)}`;
+  const source = reference
+    ? `${name}:${reference}`
+    : `${name}:${Date.now()}:${Math.random().toString(36).slice(2)}`;
   let hash = 0;
-  for (let index = 0; index < source.length; index += 1) hash = Math.imul(31, hash) + source.charCodeAt(index) | 0;
+  for (let index = 0; index < source.length; index += 1)
+    hash = (Math.imul(31, hash) + source.charCodeAt(index)) | 0;
   return `evt_${Math.abs(hash).toString(36)}`;
 }
 
@@ -256,7 +280,7 @@ function appendDebugEvent(event: Record<string, unknown>) {
   }
   let previous: unknown[] = [];
   try {
-    previous = element.textContent ? JSON.parse(element.textContent) as unknown[] : [];
+    previous = element.textContent ? (JSON.parse(element.textContent) as unknown[]) : [];
   } catch {
     previous = [];
   }
@@ -264,10 +288,29 @@ function appendDebugEvent(event: Record<string, unknown>) {
 }
 
 export function trackEvent(name: AnalyticsEventName, metadata: SafeMetadata = {}) {
-  const safe = normalizeMetadata({ page: window.location.pathname, locale: locale(), ...currentAttribution(), ...metadata });
-  const reference = String(safe.reference ?? safe.demo_reference ?? safe.quote_reference ?? safe.trader_application_reference ?? "");
-  const event = { event: name, event_id: eventId(name, reference || undefined), occurred_at: new Date().toISOString(), ...safe };
-  window.__TAWSEELHUB_ANALYTICS_EVENTS__ = [...(window.__TAWSEELHUB_ANALYTICS_EVENTS__ ?? []), event];
+  const safe = normalizeMetadata({
+    page: window.location.pathname,
+    locale: locale(),
+    ...currentAttribution(),
+    ...metadata,
+  });
+  const reference = String(
+    safe.reference ??
+      safe.demo_reference ??
+      safe.quote_reference ??
+      safe.trader_application_reference ??
+      "",
+  );
+  const event = {
+    event: name,
+    event_id: eventId(name, reference || undefined),
+    occurred_at: new Date().toISOString(),
+    ...safe,
+  };
+  window.__TAWSEELHUB_ANALYTICS_EVENTS__ = [
+    ...(window.__TAWSEELHUB_ANALYTICS_EVENTS__ ?? []),
+    event,
+  ];
   appendDebugEvent(event);
   window.dispatchEvent(new CustomEvent("tawseelhub:analytics", { detail: event }));
   try {
@@ -278,7 +321,11 @@ export function trackEvent(name: AnalyticsEventName, metadata: SafeMetadata = {}
   return event;
 }
 
-export function trackConversionOnce(name: AnalyticsEventName, reference: string, metadata: SafeMetadata = {}) {
+export function trackConversionOnce(
+  name: AnalyticsEventName,
+  reference: string,
+  metadata: SafeMetadata = {},
+) {
   if (!allowedReference.test(reference)) return undefined;
   const key = `${dedupePrefix}${name}.${reference}`;
   try {

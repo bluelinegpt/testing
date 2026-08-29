@@ -1,134 +1,1010 @@
-import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import {
+  BadRequestException,
+  ConflictException,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
 import { createHash, randomBytes } from "node:crypto";
 import { sql } from "kysely";
 import type { Kysely } from "kysely";
 import { DATABASE } from "../infrastructure/database/database.tokens.js";
 import type { DatabaseSchema } from "../infrastructure/database/database.types.js";
 import { calculateCommission, runQuoteEngine, type QuoteRule } from "./quote-engine.js";
-import type { ConvertCustomerQuoteToOrderDto, CreateCustomerQuoteDto, CreatePricingProfileDto, CreatePricingRuleDto, ManualOfferDto, MarketplaceSettingsDto, RecordPlatformFeePaymentDto, UpsertParticipationDto } from "./customer-quote.dto.js";
+import type {
+  ConvertCustomerQuoteToOrderDto,
+  CreateCustomerQuoteDto,
+  CreatePricingProfileDto,
+  CreatePricingRuleDto,
+  ManualOfferDto,
+  MarketplaceSettingsDto,
+  RecordPlatformFeePaymentDto,
+  UpsertParticipationDto,
+} from "./customer-quote.dto.js";
 
-const hash=(value:string)=>createHash("sha256").update(value).digest("hex");
-const offerCode=()=>`OFF-${randomBytes(9).toString("base64url").toUpperCase().slice(0,12)}`;
-const text=(v:unknown)=>v===undefined?null:v;
+const hash = (value: string) => createHash("sha256").update(value).digest("hex");
+const offerCode = () => `OFF-${randomBytes(9).toString("base64url").toUpperCase().slice(0, 12)}`;
+const text = (v: unknown) => (v === undefined ? null : v);
 const uae = "AE";
-const emirateOrInternational=(value:string|undefined,country:string)=>country===uae ? value ?? "" : "international";
-const locationArea=(area:string|undefined,district:string|undefined,city:string|undefined,country:string)=>country===uae ? area ?? "" : district || city || "International";
-const volumetricWeight=(length:number|undefined,width:number|undefined,height:number|undefined)=>length && width && height ? Number(((length*width*height)/5000).toFixed(3)) : 0;
-const dialingCodes: Record<string,string> = { AE:"971", SA:"966", OM:"968", QA:"974", KW:"965", BH:"973", JO:"962", EG:"20", GB:"44", US:"1", IN:"91", PK:"92", PH:"63", TR:"90", CN:"86", DE:"49", FR:"33" };
-const normalizePhoneValue=(value:string|undefined,country:string)=>{if(!value)return ""; const trimmed=value.trim(); if(trimmed.startsWith("+")) return `+${trimmed.slice(1).replace(/\D/g,"")}`; const digits=trimmed.replace(/\D/g,""); const code=dialingCodes[country]; return code && digits ? `+${code}${digits.replace(/^0+/,"")}` : trimmed;};
-const digitsOnly=(value:string|undefined)=>value?.replace(/\D/g,"") || null;
-const companyOrderMobile=(value:unknown)=>{const digits=String(value || "").replace(/\D/g,"");if(digits.startsWith("9715")&&digits.length===12)return digits;if(digits.startsWith("05")&&digits.length===10)return `971${digits.slice(1)}`;return digits || "971500000000";};
-const routeLabel=(countryName:string|undefined,countryCode:string,city:string|undefined,emirate:string,area:string)=>countryCode===uae ? `${emirate}${area ? `, ${area}` : ""}` : `${city || "International"}, ${countryName || countryCode}`;
+const emirateOrInternational = (value: string | undefined, country: string) =>
+  country === uae ? (value ?? "") : "international";
+const locationArea = (
+  area: string | undefined,
+  district: string | undefined,
+  city: string | undefined,
+  country: string,
+) => (country === uae ? (area ?? "") : district || city || "International");
+const volumetricWeight = (
+  length: number | undefined,
+  width: number | undefined,
+  height: number | undefined,
+) => (length && width && height ? Number(((length * width * height) / 5000).toFixed(3)) : 0);
+const dialingCodes: Record<string, string> = {
+  AE: "971",
+  SA: "966",
+  OM: "968",
+  QA: "974",
+  KW: "965",
+  BH: "973",
+  JO: "962",
+  EG: "20",
+  GB: "44",
+  US: "1",
+  IN: "91",
+  PK: "92",
+  PH: "63",
+  TR: "90",
+  CN: "86",
+  DE: "49",
+  FR: "33",
+};
+const normalizePhoneValue = (value: string | undefined, country: string) => {
+  if (!value) return "";
+  const trimmed = value.trim();
+  if (trimmed.startsWith("+")) return `+${trimmed.slice(1).replace(/\D/g, "")}`;
+  const digits = trimmed.replace(/\D/g, "");
+  const code = dialingCodes[country];
+  return code && digits ? `+${code}${digits.replace(/^0+/, "")}` : trimmed;
+};
+const digitsOnly = (value: string | undefined) => value?.replace(/\D/g, "") || null;
+const companyOrderMobile = (value: unknown) => {
+  const digits = String(value || "").replace(/\D/g, "");
+  if (digits.startsWith("9715") && digits.length === 12) return digits;
+  if (digits.startsWith("05") && digits.length === 10) return `971${digits.slice(1)}`;
+  return digits || "971500000000";
+};
+const routeLabel = (
+  countryName: string | undefined,
+  countryCode: string,
+  city: string | undefined,
+  emirate: string,
+  area: string,
+) =>
+  countryCode === uae
+    ? `${emirate}${area ? `, ${area}` : ""}`
+    : `${city || "International"}, ${countryName || countryCode}`;
 
 @Injectable()
 export class CustomerQuoteService {
-  public constructor(@Inject(DATABASE) private readonly db:Kysely<DatabaseSchema>){}
+  public constructor(@Inject(DATABASE) private readonly db: Kysely<DatabaseSchema>) {}
 
-  public async create(input:CreateCustomerQuoteDto){
-    if(!input.goodsConfirmation) throw new BadRequestException("goods_confirmation_required");
-    const pickupCountry=input.pickupCountryCode ?? uae, deliveryCountry=input.deliveryCountryCode ?? uae;
-    input.requesterMobile=normalizePhoneValue(input.requesterMobile,pickupCountry); input.pickupMobile=normalizePhoneValue(input.pickupMobile,pickupCountry); if(input.recipientMobile) input.recipientMobile=normalizePhoneValue(input.recipientMobile,deliveryCountry);
-    const domesticUae=pickupCountry===uae && deliveryCountry===uae;
-    if(domesticUae && (!input.pickupEmirate || !input.pickupArea || !input.deliveryEmirate || !input.deliveryArea)) throw new BadRequestException("uae_emirate_area_required");
-    if(pickupCountry!==uae && !input.pickupCity) throw new BadRequestException("pickup_city_required");
-    if(deliveryCountry!==uae && !input.deliveryCity) throw new BadRequestException("delivery_city_required");
-    if(!domesticUae && input.codRequired) throw new BadRequestException("cod_unavailable_for_route");
-    if(input.pickupDate < new Date().toISOString().slice(0,10)) throw new BadRequestException("pickup_date_in_past");
-    const volumeWeight=volumetricWeight(input.lengthCm,input.widthCm,input.heightCm), chargeableWeight=Math.max(Number(input.weightKg),volumeWeight);
-    const token=randomBytes(32).toString("base64url");
-    const pickupEmirate=emirateOrInternational(input.pickupEmirate,pickupCountry), deliveryEmirate=emirateOrInternational(input.deliveryEmirate,deliveryCountry);
-    const pickupArea=locationArea(input.pickupArea,input.pickupDistrict,input.pickupCity,pickupCountry), deliveryArea=locationArea(input.deliveryArea,input.deliveryDistrict,input.deliveryCity,deliveryCountry);
-    const fingerprint=hash(JSON.stringify([input.requesterMobile,pickupCountry,input.pickupCity,pickupEmirate,pickupArea,deliveryCountry,input.deliveryCity,deliveryEmirate,deliveryArea,input.packageType,input.weightKg,input.lengthCm,input.widthCm,input.heightCm,input.quantity,input.requestedServiceType,input.pickupDate]));
-    const duplicate=await sql<{reference_number:string}>`select reference_number from platform_customer_quote_requests where submission_fingerprint=${fingerprint} and created_at>now()-interval '2 minutes' order by created_at desc limit 1`.execute(this.db);
-    if(duplicate.rows[0]) throw new ConflictException({code:"duplicate_quote_submission",quoteReference:duplicate.rows[0].reference_number});
-    return this.db.transaction().execute(async tx=>{
-      const settings=(await sql<{enabled:boolean;commission_rate:string;quote_expiry_minutes:number}>`select enabled,commission_rate::text,quote_expiry_minutes from platform_customer_marketplace_settings where id=true`.execute(tx)).rows[0];
-      if(!settings?.enabled) throw new BadRequestException("customer_quotes_disabled");
-      const rules=domesticUae ? (await sql<QuoteRule>`select r.id,r.pricing_profile_id as "profileId",p.company_id as "companyId",cp.marketplace_priority as priority,p.service_type as "serviceType",r.pickup_emirate as "pickupEmirate",r.pickup_area as "pickupArea",r.delivery_emirate as "deliveryEmirate",r.delivery_area as "deliveryArea",r.base_price::text as "basePrice",r.included_weight_kg::text as "includedWeightKg",r.extra_weight_price::text as "extraWeightPrice",r.cod_surcharge::text as "codSurcharge",r.minimum_charge::text as "minimumCharge",r.maximum_standard_weight::text as "maximumStandardWeight",p.max_cod_amount::text as "maxCodAmount",p.max_weight_kg::text as "maxWeightKg",p.max_length_cm::text as "maxLengthCm",p.max_width_cm::text as "maxWidthCm",p.max_height_cm::text as "maxHeightCm",p.supported_package_types as "supportedPackageTypes"
+  public async create(input: CreateCustomerQuoteDto) {
+    if (!input.goodsConfirmation) throw new BadRequestException("goods_confirmation_required");
+    const pickupCountry = input.pickupCountryCode ?? uae,
+      deliveryCountry = input.deliveryCountryCode ?? uae;
+    input.requesterMobile = normalizePhoneValue(input.requesterMobile, pickupCountry);
+    input.pickupMobile = normalizePhoneValue(input.pickupMobile, pickupCountry);
+    if (input.recipientMobile)
+      input.recipientMobile = normalizePhoneValue(input.recipientMobile, deliveryCountry);
+    const domesticUae = pickupCountry === uae && deliveryCountry === uae;
+    if (
+      domesticUae &&
+      (!input.pickupEmirate || !input.pickupArea || !input.deliveryEmirate || !input.deliveryArea)
+    )
+      throw new BadRequestException("uae_emirate_area_required");
+    if (pickupCountry !== uae && !input.pickupCity)
+      throw new BadRequestException("pickup_city_required");
+    if (deliveryCountry !== uae && !input.deliveryCity)
+      throw new BadRequestException("delivery_city_required");
+    if (!domesticUae && input.codRequired)
+      throw new BadRequestException("cod_unavailable_for_route");
+    if (input.pickupDate < new Date().toISOString().slice(0, 10))
+      throw new BadRequestException("pickup_date_in_past");
+    const volumeWeight = volumetricWeight(input.lengthCm, input.widthCm, input.heightCm),
+      chargeableWeight = Math.max(Number(input.weightKg), volumeWeight);
+    const token = randomBytes(32).toString("base64url");
+    const pickupEmirate = emirateOrInternational(input.pickupEmirate, pickupCountry),
+      deliveryEmirate = emirateOrInternational(input.deliveryEmirate, deliveryCountry);
+    const pickupArea = locationArea(
+        input.pickupArea,
+        input.pickupDistrict,
+        input.pickupCity,
+        pickupCountry,
+      ),
+      deliveryArea = locationArea(
+        input.deliveryArea,
+        input.deliveryDistrict,
+        input.deliveryCity,
+        deliveryCountry,
+      );
+    const fingerprint = hash(
+      JSON.stringify([
+        input.requesterMobile,
+        pickupCountry,
+        input.pickupCity,
+        pickupEmirate,
+        pickupArea,
+        deliveryCountry,
+        input.deliveryCity,
+        deliveryEmirate,
+        deliveryArea,
+        input.packageType,
+        input.weightKg,
+        input.lengthCm,
+        input.widthCm,
+        input.heightCm,
+        input.quantity,
+        input.requestedServiceType,
+        input.pickupDate,
+      ]),
+    );
+    const duplicate = await sql<{
+      reference_number: string;
+    }>`select reference_number from platform_customer_quote_requests where submission_fingerprint=${fingerprint} and created_at>now()-interval '2 minutes' order by created_at desc limit 1`.execute(
+      this.db,
+    );
+    if (duplicate.rows[0])
+      throw new ConflictException({
+        code: "duplicate_quote_submission",
+        quoteReference: duplicate.rows[0].reference_number,
+      });
+    return this.db.transaction().execute(async (tx) => {
+      const settings = (
+        await sql<{
+          enabled: boolean;
+          commission_rate: string;
+          quote_expiry_minutes: number;
+        }>`select enabled,commission_rate::text,quote_expiry_minutes from platform_customer_marketplace_settings where id=true`.execute(
+          tx,
+        )
+      ).rows[0];
+      if (!settings?.enabled) throw new BadRequestException("customer_quotes_disabled");
+      const rules = domesticUae
+        ? (
+            await sql<QuoteRule>`select r.id,r.pricing_profile_id as "profileId",p.company_id as "companyId",cp.marketplace_priority as priority,p.service_type as "serviceType",r.pickup_emirate as "pickupEmirate",r.pickup_area as "pickupArea",r.delivery_emirate as "deliveryEmirate",r.delivery_area as "deliveryArea",r.base_price::text as "basePrice",r.included_weight_kg::text as "includedWeightKg",r.extra_weight_price::text as "extraWeightPrice",r.cod_surcharge::text as "codSurcharge",r.minimum_charge::text as "minimumCharge",r.maximum_standard_weight::text as "maximumStandardWeight",p.max_cod_amount::text as "maxCodAmount",p.max_weight_kg::text as "maxWeightKg",p.max_length_cm::text as "maxLengthCm",p.max_width_cm::text as "maxWidthCm",p.max_height_cm::text as "maxHeightCm",p.supported_package_types as "supportedPackageTypes"
         from company_customer_quote_pricing_rules r join company_customer_quote_pricing_profiles p on p.id=r.pricing_profile_id join company_customer_quote_participation cp on cp.company_id=p.company_id
-        where cp.participates and cp.accepts_instant and cp.active_from<=current_date and (cp.active_until is null or cp.active_until>=current_date) and p.status='active' and p.effective_from<=current_date and (p.effective_to is null or p.effective_to>=current_date) and r.active`.execute(tx)).rows : [];
-      const pickupAddress=input.pickupAddress?.trim() || pickupArea;
-      const deliveryAddress=input.deliveryAddress?.trim() || deliveryArea;
-      const description=input.description?.trim() || input.packageType.replace(/_/g," ");
-      const recipientName=input.recipientName?.trim() || "Not provided";
-      const recipientMobile=input.recipientMobile?.trim() || "Not provided";
-      const result=domesticUae ? runQuoteEngine({pickupEmirate,pickupArea,deliveryEmirate,deliveryArea,serviceType:input.requestedServiceType,packageType:input.packageType,weightKg:input.weightKg,...(input.lengthCm === undefined ? {} : {lengthCm:input.lengthCm}),...(input.widthCm === undefined ? {} : {widthCm:input.widthCm}),...(input.heightCm === undefined ? {} : {heightCm:input.heightCm}),quantity:input.quantity,codRequired:input.codRequired,codAmount:input.codAmount??0,specialHandlingFlags:input.specialHandlingFlags},rules,settings.commission_rate) : {offers:[],customReason:"international_manual_quote_required"};
-      const quoteType=result.offers.length?"instant":"custom_required", status=result.offers.length?"quoted":"custom_quote_required";
-      const reference=`QTE-${String((await sql<{n:string}>`select nextval('platform_customer_quote_reference_seq')::text n`.execute(tx)).rows[0]!.n).padStart(6,"0")}`;
-      const inserted=await sql<{id:string}>`insert into platform_customer_quote_requests(reference_number,public_access_token_hash,requester_name,requester_mobile,requester_email,pickup_country_code,pickup_country_name,pickup_city,pickup_district,pickup_emirate,pickup_area,pickup_address,pickup_contact_name,pickup_mobile,pickup_building,pickup_unit,pickup_landmark,pickup_maps_url,pickup_instructions,delivery_country_code,delivery_country_name,delivery_city,delivery_district,delivery_emirate,delivery_area,delivery_address,recipient_name,recipient_mobile,delivery_building,delivery_unit,delivery_landmark,delivery_maps_url,delivery_instructions,package_type,description,weight_kg,length_cm,width_cm,height_cm,dimension_unit,volumetric_weight_kg,chargeable_weight_kg,quantity,requested_service_type,pickup_date,pickup_time_window,cod_required,cod_amount,special_handling_flags,declared_value,declared_value_currency,quote_currency,goods_confirmation,quote_type,status,custom_quote_reason,landing_page,referrer,utm_source,utm_medium,utm_campaign,utm_term,utm_content,gclid,submission_fingerprint)
-        values(${reference},${hash(token)},${input.requesterName},${input.requesterMobile},${text(input.requesterEmail)},${pickupCountry},${input.pickupCountryName ?? "United Arab Emirates"},${text(input.pickupCity)},${text(input.pickupDistrict)},${pickupEmirate},${pickupArea},${pickupAddress},${input.pickupContactName},${input.pickupMobile},${text(input.pickupBuilding)},${text(input.pickupUnit)},${text(input.pickupLandmark)},${text(input.pickupMapsUrl)},${text(input.pickupInstructions)},${deliveryCountry},${input.deliveryCountryName ?? "United Arab Emirates"},${text(input.deliveryCity)},${text(input.deliveryDistrict)},${deliveryEmirate},${deliveryArea},${deliveryAddress},${recipientName},${recipientMobile},${text(input.deliveryBuilding)},${text(input.deliveryUnit)},${text(input.deliveryLandmark)},${text(input.deliveryMapsUrl)},${text(input.deliveryInstructions)},${input.packageType},${description},${input.weightKg},${text(input.lengthCm)},${text(input.widthCm)},${text(input.heightCm)},'cm',${volumeWeight},${chargeableWeight},${input.quantity},${input.requestedServiceType},${input.pickupDate}::date,${text(input.pickupTimeWindow)},${input.codRequired},${input.codRequired ? input.codAmount??0 : 0},${input.specialHandlingFlags},${text(input.declaredValue)},${text(input.declaredValueCurrency)},${input.quoteCurrency ?? "AED"},true,${quoteType},${status},${result.customReason??null},${input.landingPage??"/send-a-package"},${input.referrer??null},${input.utmSource??null},${input.utmMedium??null},${input.utmCampaign??null},${input.utmTerm??null},${input.utmContent??null},${input.gclid??null},${fingerprint}) returning id`.execute(tx);
-      const quoteId=inserted.rows[0]!.id, expiresAt=new Date(Date.now()+settings.quote_expiry_minutes*60000);
-      const publicOffers=[] as Array<{publicOfferId:string;serviceType:string;customerPrice:string;estimatedServiceLabel:string}>;
-      for(const offer of result.offers){const publicId=offerCode(); await sql`insert into platform_customer_quote_offers(public_offer_id,quote_request_id,company_id,pricing_profile_id,pricing_rule_id,service_type,gross_customer_price,commission_rate,commission_amount,company_net_amount,expires_at) values(${publicId},${quoteId}::uuid,${offer.companyId}::uuid,${offer.profileId}::uuid,${offer.ruleId}::uuid,${offer.serviceType},${offer.gross},${settings.commission_rate},${offer.commission},${offer.net},${expiresAt})`.execute(tx); publicOffers.push({publicOfferId:publicId,serviceType:offer.serviceType,customerPrice:offer.gross,estimatedServiceLabel:offer.serviceType==="standard"?"Next-day delivery where available":offer.serviceType==="same_day"?"Same-day delivery where available":"Priority delivery where available"});}
-      await sql`insert into platform_customer_quote_history(quote_request_id,event_type,new_status,detail) values(${quoteId}::uuid,'submitted',${status},${JSON.stringify({offerCount:publicOffers.length})}::jsonb)`.execute(tx);
-      await this.createPlatformConversationForQuote(tx,{quoteId,reference,input,pickupCountry,deliveryCountry,pickupEmirate,pickupArea,deliveryEmirate,deliveryArea,volumeWeight,chargeableWeight,quoteType,status,offerCount:publicOffers.length});
-      return {quoteReference:reference,accessToken:token,quoteType,status,expiresAt:result.offers.length?expiresAt.toISOString():null,offers:publicOffers,customQuoteReason:result.customReason??null};
+        where cp.participates and cp.accepts_instant and cp.active_from<=current_date and (cp.active_until is null or cp.active_until>=current_date) and p.status='active' and p.effective_from<=current_date and (p.effective_to is null or p.effective_to>=current_date) and r.active`.execute(
+              tx,
+            )
+          ).rows
+        : [];
+      const pickupAddress = input.pickupAddress?.trim() || pickupArea;
+      const deliveryAddress = input.deliveryAddress?.trim() || deliveryArea;
+      const description = input.description?.trim() || input.packageType.replace(/_/g, " ");
+      const recipientName = input.recipientName?.trim() || "Not provided";
+      const recipientMobile = input.recipientMobile?.trim() || "Not provided";
+      const result = domesticUae
+        ? runQuoteEngine(
+            {
+              pickupEmirate,
+              pickupArea,
+              deliveryEmirate,
+              deliveryArea,
+              serviceType: input.requestedServiceType,
+              packageType: input.packageType,
+              weightKg: input.weightKg,
+              ...(input.lengthCm === undefined ? {} : { lengthCm: input.lengthCm }),
+              ...(input.widthCm === undefined ? {} : { widthCm: input.widthCm }),
+              ...(input.heightCm === undefined ? {} : { heightCm: input.heightCm }),
+              quantity: input.quantity,
+              codRequired: input.codRequired,
+              codAmount: input.codAmount ?? 0,
+              specialHandlingFlags: input.specialHandlingFlags,
+            },
+            rules,
+            settings.commission_rate,
+          )
+        : { offers: [], customReason: "international_manual_quote_required" };
+      const quoteType = result.offers.length ? "instant" : "custom_required",
+        status = result.offers.length ? "quoted" : "custom_quote_required";
+      const reference = `QTE-${String((await sql<{ n: string }>`select nextval('platform_customer_quote_reference_seq')::text n`.execute(tx)).rows[0]!.n).padStart(6, "0")}`;
+      const inserted = await sql<{
+        id: string;
+      }>`insert into platform_customer_quote_requests(reference_number,public_access_token_hash,requester_name,requester_mobile,requester_email,pickup_country_code,pickup_country_name,pickup_city,pickup_district,pickup_emirate,pickup_area,pickup_address,pickup_contact_name,pickup_mobile,pickup_building,pickup_unit,pickup_landmark,pickup_maps_url,pickup_instructions,delivery_country_code,delivery_country_name,delivery_city,delivery_district,delivery_emirate,delivery_area,delivery_address,recipient_name,recipient_mobile,delivery_building,delivery_unit,delivery_landmark,delivery_maps_url,delivery_instructions,package_type,description,weight_kg,length_cm,width_cm,height_cm,dimension_unit,volumetric_weight_kg,chargeable_weight_kg,quantity,requested_service_type,pickup_date,pickup_time_window,cod_required,cod_amount,special_handling_flags,declared_value,declared_value_currency,quote_currency,goods_confirmation,quote_type,status,custom_quote_reason,landing_page,referrer,utm_source,utm_medium,utm_campaign,utm_term,utm_content,gclid,submission_fingerprint)
+        values(${reference},${hash(token)},${input.requesterName},${input.requesterMobile},${text(input.requesterEmail)},${pickupCountry},${input.pickupCountryName ?? "United Arab Emirates"},${text(input.pickupCity)},${text(input.pickupDistrict)},${pickupEmirate},${pickupArea},${pickupAddress},${input.pickupContactName},${input.pickupMobile},${text(input.pickupBuilding)},${text(input.pickupUnit)},${text(input.pickupLandmark)},${text(input.pickupMapsUrl)},${text(input.pickupInstructions)},${deliveryCountry},${input.deliveryCountryName ?? "United Arab Emirates"},${text(input.deliveryCity)},${text(input.deliveryDistrict)},${deliveryEmirate},${deliveryArea},${deliveryAddress},${recipientName},${recipientMobile},${text(input.deliveryBuilding)},${text(input.deliveryUnit)},${text(input.deliveryLandmark)},${text(input.deliveryMapsUrl)},${text(input.deliveryInstructions)},${input.packageType},${description},${input.weightKg},${text(input.lengthCm)},${text(input.widthCm)},${text(input.heightCm)},'cm',${volumeWeight},${chargeableWeight},${input.quantity},${input.requestedServiceType},${input.pickupDate}::date,${text(input.pickupTimeWindow)},${input.codRequired},${input.codRequired ? (input.codAmount ?? 0) : 0},${input.specialHandlingFlags},${text(input.declaredValue)},${text(input.declaredValueCurrency)},${input.quoteCurrency ?? "AED"},true,${quoteType},${status},${result.customReason ?? null},${input.landingPage ?? "/send-a-package"},${input.referrer ?? null},${input.utmSource ?? null},${input.utmMedium ?? null},${input.utmCampaign ?? null},${input.utmTerm ?? null},${input.utmContent ?? null},${input.gclid ?? null},${fingerprint}) returning id`.execute(
+        tx,
+      );
+      const quoteId = inserted.rows[0]!.id,
+        expiresAt = new Date(Date.now() + settings.quote_expiry_minutes * 60000);
+      const publicOffers = [] as Array<{
+        publicOfferId: string;
+        serviceType: string;
+        customerPrice: string;
+        estimatedServiceLabel: string;
+      }>;
+      for (const offer of result.offers) {
+        const publicId = offerCode();
+        await sql`insert into platform_customer_quote_offers(public_offer_id,quote_request_id,company_id,pricing_profile_id,pricing_rule_id,service_type,gross_customer_price,commission_rate,commission_amount,company_net_amount,expires_at) values(${publicId},${quoteId}::uuid,${offer.companyId}::uuid,${offer.profileId}::uuid,${offer.ruleId}::uuid,${offer.serviceType},${offer.gross},${settings.commission_rate},${offer.commission},${offer.net},${expiresAt})`.execute(
+          tx,
+        );
+        publicOffers.push({
+          publicOfferId: publicId,
+          serviceType: offer.serviceType,
+          customerPrice: offer.gross,
+          estimatedServiceLabel:
+            offer.serviceType === "standard"
+              ? "Next-day delivery where available"
+              : offer.serviceType === "same_day"
+                ? "Same-day delivery where available"
+                : "Priority delivery where available",
+        });
+      }
+      await sql`insert into platform_customer_quote_history(quote_request_id,event_type,new_status,detail) values(${quoteId}::uuid,'submitted',${status},${JSON.stringify({ offerCount: publicOffers.length })}::jsonb)`.execute(
+        tx,
+      );
+      await this.createPlatformConversationForQuote(tx, {
+        quoteId,
+        reference,
+        input,
+        pickupCountry,
+        deliveryCountry,
+        pickupEmirate,
+        pickupArea,
+        deliveryEmirate,
+        deliveryArea,
+        volumeWeight,
+        chargeableWeight,
+        quoteType,
+        status,
+        offerCount: publicOffers.length,
+      });
+      return {
+        quoteReference: reference,
+        accessToken: token,
+        quoteType,
+        status,
+        expiresAt: result.offers.length ? expiresAt.toISOString() : null,
+        offers: publicOffers,
+        customQuoteReason: result.customReason ?? null,
+      };
     });
   }
 
-  private async createPlatformConversationForQuote(tx:Kysely<DatabaseSchema>,data:{quoteId:string;reference:string;input:CreateCustomerQuoteDto;pickupCountry:string;deliveryCountry:string;pickupEmirate:string;pickupArea:string;deliveryEmirate:string;deliveryArea:string;volumeWeight:number;chargeableWeight:number;quoteType:string;status:string;offerCount:number;}){
-    const {quoteId,reference,input,pickupCountry,deliveryCountry,pickupEmirate,pickupArea,deliveryEmirate,deliveryArea,volumeWeight,chargeableWeight,quoteType,status,offerCount}=data;
-    const pickupLabel=routeLabel(input.pickupCountryName,pickupCountry,input.pickupCity,pickupEmirate,pickupArea);
-    const deliveryLabel=routeLabel(input.deliveryCountryName,deliveryCountry,input.deliveryCity,deliveryEmirate,deliveryArea);
-    const pickupAddress=input.pickupAddress?.trim() || pickupArea;
-    const deliveryAddress=input.deliveryAddress?.trim() || deliveryArea;
-    const description=input.description?.trim() || input.packageType.replace(/_/g," ");
-    const dimensions=[input.lengthCm,input.widthCm,input.heightCm].every((value)=>value !== undefined) ? `${input.lengthCm}×${input.widthCm}×${input.heightCm} cm` : "dimensions not provided";
-    const recipientName=input.recipientName?.trim() || "Not provided";
-    const recipientMobile=input.recipientMobile?.trim() || "Not provided";
-    const conversationReference=`AGT-${String((await sql<{n:string}>`select nextval('platform_agent_conversation_reference_seq')::text n`.execute(tx)).rows[0]!.n).padStart(6,"0")}`;
-    const requestSnapshot={source:"public_send_a_package_form",quoteReference:reference,route:{pickup:{countryCode:pickupCountry,countryName:input.pickupCountryName ?? "United Arab Emirates",city:input.pickupCity ?? null,district:input.pickupDistrict ?? null,emirate:pickupEmirate,area:pickupArea,address:pickupAddress},delivery:{countryCode:deliveryCountry,countryName:input.deliveryCountryName ?? "United Arab Emirates",city:input.deliveryCity ?? null,district:input.deliveryDistrict ?? null,emirate:deliveryEmirate,area:deliveryArea,address:deliveryAddress}},package:{type:input.packageType,description,weightKg:input.weightKg,lengthCm:input.lengthCm ?? null,widthCm:input.widthCm ?? null,heightCm:input.heightCm ?? null,volumetricWeightKg:volumeWeight,chargeableWeightKg:chargeableWeight,quantity:input.quantity},service:{requestedServiceType:input.requestedServiceType,pickupDate:input.pickupDate,pickupTimeWindow:input.pickupTimeWindow ?? null,codRequired:input.codRequired,codAmount:input.codRequired ? input.codAmount ?? 0 : 0,specialHandlingFlags:input.specialHandlingFlags},customer:{name:input.requesterName,mobile:input.requesterMobile,email:input.requesterEmail ?? null,pickupContactName:input.pickupContactName,pickupMobile:input.pickupMobile,recipientName,recipientMobile},quote:{quoteType,status,offerCount}};
-    const userSummary=`Quote request ${reference}: ${input.requesterName} (${input.requesterMobile}) wants to send ${input.quantity} ${input.packageType.replace(/_/g," ")} shipment from ${pickupLabel} to ${deliveryLabel} on ${input.pickupDate}. Package: ${description}, ${input.weightKg} kg, ${dimensions}. COD: ${input.codRequired ? "yes" : "no"}.`;
-    const assistantSummary=offerCount>0 ? `Your quote request has been received. Reference: ${reference}. I found ${offerCount} available quote option${offerCount===1 ? "" : "s"} for this shipment. Do you have another question, or how can I help you now?` : `Your quote request has been received. Reference: ${reference}. This shipment requires a custom quotation. Do you have another question, or how can I help you now?`;
-    const conversation=(await sql<{id:string}>`insert into platform_agent_conversations(reference_number,public_session_token_hash,channel,channel_subject_hash,language,current_intent,status,requester_type,state,linked_quote_request_id,customer_name,mobile_number,mobile_number_normalized,email,audience,last_message_at,operational_classification,review_status)
-      values(${conversationReference},${hash(`public_quote_form:${quoteId}:${reference}`)},'website',${hash(input.requesterMobile)},'en','customer_quote','completed','customer',${JSON.stringify(requestSnapshot)}::jsonb,${quoteId}::uuid,${input.requesterName},${input.requesterMobile},${digitsOnly(input.requesterMobile)},${input.requesterEmail ?? null},'customer',now(),'shipment_quote','new') returning id`.execute(tx)).rows[0]!;
+  private async createPlatformConversationForQuote(
+    tx: Kysely<DatabaseSchema>,
+    data: {
+      quoteId: string;
+      reference: string;
+      input: CreateCustomerQuoteDto;
+      pickupCountry: string;
+      deliveryCountry: string;
+      pickupEmirate: string;
+      pickupArea: string;
+      deliveryEmirate: string;
+      deliveryArea: string;
+      volumeWeight: number;
+      chargeableWeight: number;
+      quoteType: string;
+      status: string;
+      offerCount: number;
+    },
+  ) {
+    const {
+      quoteId,
+      reference,
+      input,
+      pickupCountry,
+      deliveryCountry,
+      pickupEmirate,
+      pickupArea,
+      deliveryEmirate,
+      deliveryArea,
+      volumeWeight,
+      chargeableWeight,
+      quoteType,
+      status,
+      offerCount,
+    } = data;
+    const pickupLabel = routeLabel(
+      input.pickupCountryName,
+      pickupCountry,
+      input.pickupCity,
+      pickupEmirate,
+      pickupArea,
+    );
+    const deliveryLabel = routeLabel(
+      input.deliveryCountryName,
+      deliveryCountry,
+      input.deliveryCity,
+      deliveryEmirate,
+      deliveryArea,
+    );
+    const pickupAddress = input.pickupAddress?.trim() || pickupArea;
+    const deliveryAddress = input.deliveryAddress?.trim() || deliveryArea;
+    const description = input.description?.trim() || input.packageType.replace(/_/g, " ");
+    const dimensions = [input.lengthCm, input.widthCm, input.heightCm].every(
+      (value) => value !== undefined,
+    )
+      ? `${input.lengthCm}×${input.widthCm}×${input.heightCm} cm`
+      : "dimensions not provided";
+    const recipientName = input.recipientName?.trim() || "Not provided";
+    const recipientMobile = input.recipientMobile?.trim() || "Not provided";
+    const conversationReference = `AGT-${String((await sql<{ n: string }>`select nextval('platform_agent_conversation_reference_seq')::text n`.execute(tx)).rows[0]!.n).padStart(6, "0")}`;
+    const requestSnapshot = {
+      source: "public_send_a_package_form",
+      quoteReference: reference,
+      route: {
+        pickup: {
+          countryCode: pickupCountry,
+          countryName: input.pickupCountryName ?? "United Arab Emirates",
+          city: input.pickupCity ?? null,
+          district: input.pickupDistrict ?? null,
+          emirate: pickupEmirate,
+          area: pickupArea,
+          address: pickupAddress,
+        },
+        delivery: {
+          countryCode: deliveryCountry,
+          countryName: input.deliveryCountryName ?? "United Arab Emirates",
+          city: input.deliveryCity ?? null,
+          district: input.deliveryDistrict ?? null,
+          emirate: deliveryEmirate,
+          area: deliveryArea,
+          address: deliveryAddress,
+        },
+      },
+      package: {
+        type: input.packageType,
+        description,
+        weightKg: input.weightKg,
+        lengthCm: input.lengthCm ?? null,
+        widthCm: input.widthCm ?? null,
+        heightCm: input.heightCm ?? null,
+        volumetricWeightKg: volumeWeight,
+        chargeableWeightKg: chargeableWeight,
+        quantity: input.quantity,
+      },
+      service: {
+        requestedServiceType: input.requestedServiceType,
+        pickupDate: input.pickupDate,
+        pickupTimeWindow: input.pickupTimeWindow ?? null,
+        codRequired: input.codRequired,
+        codAmount: input.codRequired ? (input.codAmount ?? 0) : 0,
+        specialHandlingFlags: input.specialHandlingFlags,
+      },
+      customer: {
+        name: input.requesterName,
+        mobile: input.requesterMobile,
+        email: input.requesterEmail ?? null,
+        pickupContactName: input.pickupContactName,
+        pickupMobile: input.pickupMobile,
+        recipientName,
+        recipientMobile,
+      },
+      quote: { quoteType, status, offerCount },
+    };
+    const userSummary = `Quote request ${reference}: ${input.requesterName} (${input.requesterMobile}) wants to send ${input.quantity} ${input.packageType.replace(/_/g, " ")} shipment from ${pickupLabel} to ${deliveryLabel} on ${input.pickupDate}. Package: ${description}, ${input.weightKg} kg, ${dimensions}. COD: ${input.codRequired ? "yes" : "no"}.`;
+    const assistantSummary =
+      offerCount > 0
+        ? `Your quote request has been received. Reference: ${reference}. I found ${offerCount} available quote option${offerCount === 1 ? "" : "s"} for this shipment. Do you have another question, or how can I help you now?`
+        : `Your quote request has been received. Reference: ${reference}. This shipment requires a custom quotation. Do you have another question, or how can I help you now?`;
+    const conversation = (
+      await sql<{
+        id: string;
+      }>`insert into platform_agent_conversations(reference_number,public_session_token_hash,channel,channel_subject_hash,language,current_intent,status,requester_type,state,linked_quote_request_id,customer_name,mobile_number,mobile_number_normalized,email,audience,last_message_at,operational_classification,review_status)
+      values(${conversationReference},${hash(`public_quote_form:${quoteId}:${reference}`)},'website',${hash(input.requesterMobile)},'en','customer_quote','completed','customer',${JSON.stringify(requestSnapshot)}::jsonb,${quoteId}::uuid,${input.requesterName},${input.requesterMobile},${digitsOnly(input.requesterMobile)},${input.requesterEmail ?? null},'customer',now(),'shipment_quote','new') returning id`.execute(
+        tx,
+      )
+    ).rows[0]!;
     await sql`insert into platform_agent_messages(conversation_id,sender_type,content,structured_payload) values
       (${conversation.id}::uuid,'user',${userSummary},${JSON.stringify(requestSnapshot)}::jsonb),
-      (${conversation.id}::uuid,'assistant',${assistantSummary},${JSON.stringify({quoteReference:reference,quoteType,status,offerCount})}::jsonb)`.execute(tx);
-    await sql`insert into platform_agent_actions(conversation_id,action_type,status,request_snapshot,response_snapshot) values(${conversation.id}::uuid,'customer_quote_request','completed',${JSON.stringify(requestSnapshot)}::jsonb,${JSON.stringify({quoteReference:reference,quoteType,status,offerCount})}::jsonb)`.execute(tx);
+      (${conversation.id}::uuid,'assistant',${assistantSummary},${JSON.stringify({ quoteReference: reference, quoteType, status, offerCount })}::jsonb)`.execute(
+      tx,
+    );
+    await sql`insert into platform_agent_actions(conversation_id,action_type,status,request_snapshot,response_snapshot) values(${conversation.id}::uuid,'customer_quote_request','completed',${JSON.stringify(requestSnapshot)}::jsonb,${JSON.stringify({ quoteReference: reference, quoteType, status, offerCount })}::jsonb)`.execute(
+      tx,
+    );
   }
 
-  public async publicResult(reference:string,token:string){const rows=await sql<Record<string,unknown>>`select q.reference_number as "quoteReference",q.quote_type as "quoteType",q.status,q.pickup_country_name as "pickupCountryName",q.pickup_emirate as "pickupEmirate",q.pickup_city as "pickupCity",q.pickup_area as "pickupArea",q.delivery_country_name as "deliveryCountryName",q.delivery_emirate as "deliveryEmirate",q.delivery_city as "deliveryCity",q.delivery_area as "deliveryArea",q.package_type as "packageType",q.description,q.weight_kg::text as "weightKg",q.length_cm::text as "lengthCm",q.width_cm::text as "widthCm",q.height_cm::text as "heightCm",q.quantity,q.quote_currency as "quoteCurrency",o.public_offer_id as "publicOfferId",o.service_type as "serviceType",o.gross_customer_price::text as "customerPrice",o.expires_at as "expiresAt" from platform_customer_quote_requests q left join platform_customer_quote_offers o on o.quote_request_id=q.id and o.status in('available','selected') where q.reference_number=${reference} and q.public_access_token_hash=${hash(token)} order by o.gross_customer_price`.execute(this.db); if(!rows.rows.length)throw new NotFoundException(); const first=rows.rows[0]!; return {quoteReference:first.quoteReference,quoteType:first.quoteType,status:first.status,pickup:{country:first.pickupCountryName,emirate:first.pickupEmirate,city:first.pickupCity,area:first.pickupArea},delivery:{country:first.deliveryCountryName,emirate:first.deliveryEmirate,city:first.deliveryCity,area:first.deliveryArea},package:{type:first.packageType,description:first.description,weightKg:first.weightKg,lengthCm:first.lengthCm,widthCm:first.widthCm,heightCm:first.heightCm,quantity:first.quantity},quoteCurrency:first.quoteCurrency,expiresAt:first.expiresAt??null,offers:rows.rows.filter(r=>r.publicOfferId).map(r=>({publicOfferId:r.publicOfferId,serviceType:r.serviceType,customerPrice:r.customerPrice,estimatedServiceLabel:r.serviceType==="standard"?"Standard delivery where available":r.serviceType==="same_day"?"Same-day delivery where available":"Express delivery where available"}))};}
-  public async select(reference:string,token:string,publicOfferId:string){return this.db.transaction().execute(async tx=>{const row=(await sql<{quote_id:string;offer_id:string;expires_at:Date}>`select q.id quote_id,o.id offer_id,o.expires_at from platform_customer_quote_requests q join platform_customer_quote_offers o on o.quote_request_id=q.id where q.reference_number=${reference} and q.public_access_token_hash=${hash(token)} and o.public_offer_id=${publicOfferId} and o.status='available' for update`.execute(tx)).rows[0]; if(!row)throw new NotFoundException(); if(row.expires_at.getTime()<=Date.now()){await sql`update platform_customer_quote_requests set status='expired',updated_at=now() where id=${row.quote_id}::uuid; update platform_customer_quote_offers set status='expired' where quote_request_id=${row.quote_id}::uuid and status='available'`.execute(tx);throw new ConflictException("quote_expired");} await sql`update platform_customer_quote_offers set status=case when id=${row.offer_id}::uuid then 'selected' else 'withdrawn' end where quote_request_id=${row.quote_id}::uuid; update platform_customer_quote_requests set selected_offer_id=${row.offer_id}::uuid,status='booking_pending',updated_at=now() where id=${row.quote_id}::uuid; insert into platform_customer_quote_history(quote_request_id,event_type,old_status,new_status) values(${row.quote_id}::uuid,'offer_selected','quoted','booking_pending')`.execute(tx);return {quoteReference:reference,status:"booking_pending"};});}
+  public async publicResult(reference: string, token: string) {
+    const rows = await sql<
+      Record<string, unknown>
+    >`select q.reference_number as "quoteReference",q.quote_type as "quoteType",q.status,q.pickup_country_name as "pickupCountryName",q.pickup_emirate as "pickupEmirate",q.pickup_city as "pickupCity",q.pickup_area as "pickupArea",q.delivery_country_name as "deliveryCountryName",q.delivery_emirate as "deliveryEmirate",q.delivery_city as "deliveryCity",q.delivery_area as "deliveryArea",q.package_type as "packageType",q.description,q.weight_kg::text as "weightKg",q.length_cm::text as "lengthCm",q.width_cm::text as "widthCm",q.height_cm::text as "heightCm",q.quantity,q.quote_currency as "quoteCurrency",o.public_offer_id as "publicOfferId",o.service_type as "serviceType",o.gross_customer_price::text as "customerPrice",o.expires_at as "expiresAt" from platform_customer_quote_requests q left join platform_customer_quote_offers o on o.quote_request_id=q.id and o.status in('available','selected') where q.reference_number=${reference} and q.public_access_token_hash=${hash(token)} order by o.gross_customer_price`.execute(
+      this.db,
+    );
+    if (!rows.rows.length) throw new NotFoundException();
+    const first = rows.rows[0]!;
+    return {
+      quoteReference: first.quoteReference,
+      quoteType: first.quoteType,
+      status: first.status,
+      pickup: {
+        country: first.pickupCountryName,
+        emirate: first.pickupEmirate,
+        city: first.pickupCity,
+        area: first.pickupArea,
+      },
+      delivery: {
+        country: first.deliveryCountryName,
+        emirate: first.deliveryEmirate,
+        city: first.deliveryCity,
+        area: first.deliveryArea,
+      },
+      package: {
+        type: first.packageType,
+        description: first.description,
+        weightKg: first.weightKg,
+        lengthCm: first.lengthCm,
+        widthCm: first.widthCm,
+        heightCm: first.heightCm,
+        quantity: first.quantity,
+      },
+      quoteCurrency: first.quoteCurrency,
+      expiresAt: first.expiresAt ?? null,
+      offers: rows.rows
+        .filter((r) => r.publicOfferId)
+        .map((r) => ({
+          publicOfferId: r.publicOfferId,
+          serviceType: r.serviceType,
+          customerPrice: r.customerPrice,
+          estimatedServiceLabel:
+            r.serviceType === "standard"
+              ? "Standard delivery where available"
+              : r.serviceType === "same_day"
+                ? "Same-day delivery where available"
+                : "Express delivery where available",
+        })),
+    };
+  }
+  public async select(reference: string, token: string, publicOfferId: string) {
+    return this.db.transaction().execute(async (tx) => {
+      const row = (
+        await sql<{
+          quote_id: string;
+          offer_id: string;
+          expires_at: Date;
+        }>`select q.id quote_id,o.id offer_id,o.expires_at from platform_customer_quote_requests q join platform_customer_quote_offers o on o.quote_request_id=q.id where q.reference_number=${reference} and q.public_access_token_hash=${hash(token)} and o.public_offer_id=${publicOfferId} and o.status='available' for update`.execute(
+          tx,
+        )
+      ).rows[0];
+      if (!row) throw new NotFoundException();
+      if (row.expires_at.getTime() <= Date.now()) {
+        await sql`update platform_customer_quote_requests set status='expired',updated_at=now() where id=${row.quote_id}::uuid; update platform_customer_quote_offers set status='expired' where quote_request_id=${row.quote_id}::uuid and status='available'`.execute(
+          tx,
+        );
+        throw new ConflictException("quote_expired");
+      }
+      await sql`update platform_customer_quote_offers set status=case when id=${row.offer_id}::uuid then 'selected' else 'withdrawn' end where quote_request_id=${row.quote_id}::uuid; update platform_customer_quote_requests set selected_offer_id=${row.offer_id}::uuid,status='booking_pending',updated_at=now() where id=${row.quote_id}::uuid; insert into platform_customer_quote_history(quote_request_id,event_type,old_status,new_status) values(${row.quote_id}::uuid,'offer_selected','quoted','booking_pending')`.execute(
+        tx,
+      );
+      return { quoteReference: reference, status: "booking_pending" };
+    });
+  }
 
-  public async companyOverview(companyId:string){const participation=(await sql`select participates,accepts_instant as "acceptsInstant",accepts_custom as "acceptsCustom",active_from as "activeFrom",active_until as "activeUntil" from company_customer_quote_participation where company_id=${companyId}::uuid`.execute(this.db)).rows[0]??{participates:false,acceptsInstant:false,acceptsCustom:false,activeFrom:new Date().toISOString().slice(0,10),activeUntil:null}; const profiles=(await sql`select p.*,coalesce(json_agg(r order by r.created_at) filter(where r.id is not null),'[]') rules from company_customer_quote_pricing_profiles p left join company_customer_quote_pricing_rules r on r.pricing_profile_id=p.id where p.company_id=${companyId}::uuid group by p.id order by p.created_at desc`.execute(this.db)).rows; return {participation,profiles};}
-  public async setParticipation(companyId:string,actorId:string,input:UpsertParticipationDto){await sql`insert into company_customer_quote_participation(company_id,participates,accepts_instant,accepts_custom,active_from,active_until,updated_by_account_id) values(${companyId}::uuid,${input.participates},${input.acceptsInstant},${input.acceptsCustom},${input.activeFrom}::date,${input.activeUntil??null}::date,${actorId}::uuid) on conflict(company_id) do update set participates=excluded.participates,accepts_instant=excluded.accepts_instant,accepts_custom=excluded.accepts_custom,active_from=excluded.active_from,active_until=excluded.active_until,updated_by_account_id=excluded.updated_by_account_id,updated_at=now()`.execute(this.db);return this.companyOverview(companyId);}
-  public async createProfile(companyId:string,actorId:string,input:CreatePricingProfileDto){const row=await sql`insert into company_customer_quote_pricing_profiles(company_id,name,service_type,effective_from,effective_to,max_cod_amount,max_weight_kg,max_length_cm,max_width_cm,max_height_cm,supported_package_types,created_by_account_id) values(${companyId}::uuid,${input.name},${input.serviceType},${input.effectiveFrom}::date,${input.effectiveTo??null}::date,${input.maxCodAmount??null},${input.maxWeightKg??null},${input.maxLengthCm??null},${input.maxWidthCm??null},${input.maxHeightCm??null},${input.supportedPackageTypes},${actorId}::uuid) returning *`.execute(this.db);return row.rows[0];}
-  public async createRule(companyId:string,profileId:string,input:CreatePricingRuleDto){const owner=(await sql`select id from company_customer_quote_pricing_profiles where id=${profileId}::uuid and company_id=${companyId}::uuid`.execute(this.db)).rows[0];if(!owner)throw new NotFoundException();try{const row=await sql`insert into company_customer_quote_pricing_rules(pricing_profile_id,pickup_emirate,pickup_area,delivery_emirate,delivery_area,base_price,included_weight_kg,extra_weight_price,cod_surcharge,minimum_charge,maximum_standard_weight) values(${profileId}::uuid,${input.pickupEmirate},${input.pickupArea??null},${input.deliveryEmirate},${input.deliveryArea??null},${input.basePrice},${input.includedWeightKg},${input.extraWeightPrice??null},${input.codSurcharge??0},${input.minimumCharge??null},${input.maximumStandardWeight??null}) returning *`.execute(this.db);return row.rows[0];}catch(e){if((e as {code?:string}).code==="23505")throw new ConflictException("overlapping_pricing_rule");throw e;}}
-  public async activateProfile(companyId:string,profileId:string){const row=await sql`update company_customer_quote_pricing_profiles set status='active',updated_at=now() where id=${profileId}::uuid and company_id=${companyId}::uuid returning *`.execute(this.db);if(!row.rows[0])throw new NotFoundException();return row.rows[0];}
-  public async companyOpportunities(companyId:string){return (await sql`select q.reference_number,q.pickup_emirate,q.pickup_area,q.delivery_emirate,q.delivery_area,q.package_type,q.weight_kg::text,q.requested_service_type,q.cod_required,q.cod_amount::text,o.gross_customer_price::text,o.commission_amount::text,o.company_net_amount::text,o.status,o.expires_at from platform_customer_quote_offers o join platform_customer_quote_requests q on q.id=o.quote_request_id where o.company_id=${companyId}::uuid order by o.created_at desc limit 100`.execute(this.db)).rows;}
-  public async platformList(){return (await sql`select q.id,q.reference_number,q.requester_name,q.requester_mobile,q.recipient_mobile,q.pickup_country_name,q.pickup_emirate,q.pickup_city,q.pickup_area,q.delivery_country_name,q.delivery_emirate,q.delivery_city,q.delivery_area,q.package_type,q.weight_kg::text,q.requested_service_type,q.cod_required,q.quote_type,q.status,min(o.gross_customer_price)::text best_price,q.created_at from platform_customer_quote_requests q left join platform_customer_quote_offers o on o.quote_request_id=q.id group by q.id order by q.created_at desc limit 200`.execute(this.db)).rows;}
-  private async quoteConversionColumnsReady(tx:Kysely<DatabaseSchema> = this.db){const row=(await sql<{ready:boolean}>`select count(*)=6 ready from information_schema.columns where table_schema='public' and table_name='platform_customer_quote_requests' and column_name in('assigned_company_id','converted_order_id','delivery_fee_amount','platform_fee_amount','converted_by_account_id','converted_at')`.execute(tx)).rows[0];return row?.ready===true;}
-  public async platformDetail(id:string){const conversionReady=await this.quoteConversionColumnsReady();const quote=conversionReady?(await sql`select q.*,c.name_en assigned_company_name,o.order_number converted_order_number from platform_customer_quote_requests q left join companies c on c.id=q.assigned_company_id left join orders o on o.id=q.converted_order_id where q.id=${id}::uuid`.execute(this.db)).rows[0]:(await sql`select q.*,null::text assigned_company_name,null::text converted_order_number,null::uuid assigned_company_id,null::uuid converted_order_id,null::numeric delivery_fee_amount,null::numeric platform_fee_amount,null::timestamptz converted_at from platform_customer_quote_requests q where q.id=${id}::uuid`.execute(this.db)).rows[0];if(!quote)throw new NotFoundException();const offers=(await sql`select o.*,c.name_en company_name,p.name profile_name from platform_customer_quote_offers o join companies c on c.id=o.company_id left join company_customer_quote_pricing_profiles p on p.id=o.pricing_profile_id where o.quote_request_id=${id}::uuid order by o.gross_customer_price`.execute(this.db)).rows;const platformFee=conversionReady?(await sql<{id:string}>`select r.*,c.name_en company_name,o.order_number,(r.amount-r.paid_amount)::text balance_amount from platform_fee_receivables r join companies c on c.id=r.company_id join orders o on o.id=r.order_id where r.quote_request_id=${id}::uuid limit 1`.execute(this.db)).rows[0]??null:null;const platformFeePayments=platformFee?(await sql`select p.*,a.username recorded_by_username from platform_fee_payments p left join accounts a on a.id=p.recorded_by_account_id where p.receivable_id=${platformFee.id}::uuid order by p.payment_date desc,p.created_at desc`.execute(this.db)).rows:[];return {quote,offers,conversionReady,platformFee,platformFeePayments};}
-  public async settings(){const row=(await sql<{enabled:boolean;commission_rate:string;quote_expiry_minutes:number}>`select enabled,commission_rate::text,quote_expiry_minutes from platform_customer_marketplace_settings where id=true`.execute(this.db)).rows[0]!;return {enabled:row.enabled,commissionRatePercent:new DecimalLike(row.commission_rate).times(100),quoteExpiryMinutes:row.quote_expiry_minutes};}
-  public async updateSettings(actorId:string,input:MarketplaceSettingsDto){await sql`update platform_customer_marketplace_settings set enabled=${input.enabled},commission_rate=${input.commissionRatePercent/100},quote_expiry_minutes=${input.quoteExpiryMinutes},updated_by_account_id=${actorId}::uuid,updated_at=now() where id=true`.execute(this.db);return this.settings();}
-  private async nextCompanyReference(tx:Kysely<DatabaseSchema>,companyId:string,referenceType:string,prefix:string){const result=await sql<{nextValue:string;prefix:string}>`insert into company_reference_counters(company_id,reference_type,next_value,prefix) values(${companyId}::uuid,${referenceType},2,${prefix}) on conflict(company_id,reference_type) do update set next_value=company_reference_counters.next_value+1,updated_at=now() returning prefix,(next_value-1)::text "nextValue"`.execute(tx);return `${result.rows[0]!.prefix}-${result.rows[0]!.nextValue.padStart(6,"0")}`;}
-  private async platformQuoteTrader(tx:Kysely<DatabaseSchema>,companyId:string){const existing=(await sql<{traderId:string;accountId:string}>`select t.id "traderId",t.account_id "accountId" from traders t where t.company_id=${companyId}::uuid and lower(t.code)='taw-public-quotes' limit 1`.execute(tx)).rows[0];if(existing)return existing;const account=(await sql<{accountId:string}>`insert into accounts(company_id,account_kind,username,normalized_username,password_hash,status,preferred_language) values(${companyId}::uuid,'trader','tawseelhub.public-quotes','tawseelhub.public-quotes','disabled-tawseelhub-public-quotes-system-actor','disabled','en') on conflict(company_id,normalized_username) where company_id is not null do update set updated_at=accounts.updated_at returning id "accountId"`.execute(tx)).rows[0]!;const trader=(await sql<{traderId:string}>`insert into traders(company_id,account_id,code,name_en,name_ar,contact_person,mobile_number,email,address_en,pickup_address,account_status,notes) values(${companyId}::uuid,${account.accountId}::uuid,'TAW-PUBLIC-QUOTES','Tawseelhub Public Quotes','طلبات توصيل هب العامة','Tawseelhub Platform','971506898604','support@tawseelhub.com','Platform customer quote orders','Platform customer quote orders','active','System Trader used only for Platform customer quote conversions.') on conflict(company_id,lower(code)) do update set account_status='active',updated_at=now() returning id "traderId"`.execute(tx)).rows[0]!;return {traderId:trader.traderId,accountId:account.accountId};}
-  private async platformQuoteArea(tx:Kysely<DatabaseSchema>,companyId:string,emirate:unknown,area:unknown){const selected=(await sql<{id:string;code:string;nameEn:string;nameAr:string|null;fallback:boolean}>`
+  public async companyOverview(companyId: string) {
+    const participation = (
+      await sql`select participates,accepts_instant as "acceptsInstant",accepts_custom as "acceptsCustom",active_from as "activeFrom",active_until as "activeUntil" from company_customer_quote_participation where company_id=${companyId}::uuid`.execute(
+        this.db,
+      )
+    ).rows[0] ?? {
+      participates: false,
+      acceptsInstant: false,
+      acceptsCustom: false,
+      activeFrom: new Date().toISOString().slice(0, 10),
+      activeUntil: null,
+    };
+    const profiles = (
+      await sql`select p.*,coalesce(json_agg(r order by r.created_at) filter(where r.id is not null),'[]') rules from company_customer_quote_pricing_profiles p left join company_customer_quote_pricing_rules r on r.pricing_profile_id=p.id where p.company_id=${companyId}::uuid group by p.id order by p.created_at desc`.execute(
+        this.db,
+      )
+    ).rows;
+    return { participation, profiles };
+  }
+  public async setParticipation(companyId: string, actorId: string, input: UpsertParticipationDto) {
+    await sql`insert into company_customer_quote_participation(company_id,participates,accepts_instant,accepts_custom,active_from,active_until,updated_by_account_id) values(${companyId}::uuid,${input.participates},${input.acceptsInstant},${input.acceptsCustom},${input.activeFrom}::date,${input.activeUntil ?? null}::date,${actorId}::uuid) on conflict(company_id) do update set participates=excluded.participates,accepts_instant=excluded.accepts_instant,accepts_custom=excluded.accepts_custom,active_from=excluded.active_from,active_until=excluded.active_until,updated_by_account_id=excluded.updated_by_account_id,updated_at=now()`.execute(
+      this.db,
+    );
+    return this.companyOverview(companyId);
+  }
+  public async createProfile(companyId: string, actorId: string, input: CreatePricingProfileDto) {
+    const row =
+      await sql`insert into company_customer_quote_pricing_profiles(company_id,name,service_type,effective_from,effective_to,max_cod_amount,max_weight_kg,max_length_cm,max_width_cm,max_height_cm,supported_package_types,created_by_account_id) values(${companyId}::uuid,${input.name},${input.serviceType},${input.effectiveFrom}::date,${input.effectiveTo ?? null}::date,${input.maxCodAmount ?? null},${input.maxWeightKg ?? null},${input.maxLengthCm ?? null},${input.maxWidthCm ?? null},${input.maxHeightCm ?? null},${input.supportedPackageTypes},${actorId}::uuid) returning *`.execute(
+        this.db,
+      );
+    return row.rows[0];
+  }
+  public async createRule(companyId: string, profileId: string, input: CreatePricingRuleDto) {
+    const owner = (
+      await sql`select id from company_customer_quote_pricing_profiles where id=${profileId}::uuid and company_id=${companyId}::uuid`.execute(
+        this.db,
+      )
+    ).rows[0];
+    if (!owner) throw new NotFoundException();
+    try {
+      const row =
+        await sql`insert into company_customer_quote_pricing_rules(pricing_profile_id,pickup_emirate,pickup_area,delivery_emirate,delivery_area,base_price,included_weight_kg,extra_weight_price,cod_surcharge,minimum_charge,maximum_standard_weight) values(${profileId}::uuid,${input.pickupEmirate},${input.pickupArea ?? null},${input.deliveryEmirate},${input.deliveryArea ?? null},${input.basePrice},${input.includedWeightKg},${input.extraWeightPrice ?? null},${input.codSurcharge ?? 0},${input.minimumCharge ?? null},${input.maximumStandardWeight ?? null}) returning *`.execute(
+          this.db,
+        );
+      return row.rows[0];
+    } catch (e) {
+      if ((e as { code?: string }).code === "23505")
+        throw new ConflictException("overlapping_pricing_rule");
+      throw e;
+    }
+  }
+  public async activateProfile(companyId: string, profileId: string) {
+    const row =
+      await sql`update company_customer_quote_pricing_profiles set status='active',updated_at=now() where id=${profileId}::uuid and company_id=${companyId}::uuid returning *`.execute(
+        this.db,
+      );
+    if (!row.rows[0]) throw new NotFoundException();
+    return row.rows[0];
+  }
+  public async companyOpportunities(companyId: string) {
+    return (
+      await sql`select q.reference_number,q.pickup_emirate,q.pickup_area,q.delivery_emirate,q.delivery_area,q.package_type,q.weight_kg::text,q.requested_service_type,q.cod_required,q.cod_amount::text,o.gross_customer_price::text,o.commission_amount::text,o.company_net_amount::text,o.status,o.expires_at from platform_customer_quote_offers o join platform_customer_quote_requests q on q.id=o.quote_request_id where o.company_id=${companyId}::uuid order by o.created_at desc limit 100`.execute(
+        this.db,
+      )
+    ).rows;
+  }
+  public async platformList() {
+    return (
+      await sql`select q.id,q.reference_number,q.requester_name,q.requester_mobile,q.recipient_mobile,q.pickup_country_name,q.pickup_emirate,q.pickup_city,q.pickup_area,q.delivery_country_name,q.delivery_emirate,q.delivery_city,q.delivery_area,q.package_type,q.weight_kg::text,q.requested_service_type,q.cod_required,q.quote_type,q.status,min(o.gross_customer_price)::text best_price,q.created_at from platform_customer_quote_requests q left join platform_customer_quote_offers o on o.quote_request_id=q.id group by q.id order by q.created_at desc limit 200`.execute(
+        this.db,
+      )
+    ).rows;
+  }
+  private async quoteConversionColumnsReady(tx: Kysely<DatabaseSchema> = this.db) {
+    const row = (
+      await sql<{
+        ready: boolean;
+      }>`select count(*)=6 ready from information_schema.columns where table_schema='public' and table_name='platform_customer_quote_requests' and column_name in('assigned_company_id','converted_order_id','delivery_fee_amount','platform_fee_amount','converted_by_account_id','converted_at')`.execute(
+        tx,
+      )
+    ).rows[0];
+    return row?.ready === true;
+  }
+  public async platformDetail(id: string) {
+    const conversionReady = await this.quoteConversionColumnsReady();
+    const quote = conversionReady
+      ? (
+          await sql`select q.*,c.name_en assigned_company_name,o.order_number converted_order_number from platform_customer_quote_requests q left join companies c on c.id=q.assigned_company_id left join orders o on o.id=q.converted_order_id where q.id=${id}::uuid`.execute(
+            this.db,
+          )
+        ).rows[0]
+      : (
+          await sql`select q.*,null::text assigned_company_name,null::text converted_order_number,null::uuid assigned_company_id,null::uuid converted_order_id,null::numeric delivery_fee_amount,null::numeric platform_fee_amount,null::timestamptz converted_at from platform_customer_quote_requests q where q.id=${id}::uuid`.execute(
+            this.db,
+          )
+        ).rows[0];
+    if (!quote) throw new NotFoundException();
+    const offers = (
+      await sql`select o.*,c.name_en company_name,p.name profile_name from platform_customer_quote_offers o join companies c on c.id=o.company_id left join company_customer_quote_pricing_profiles p on p.id=o.pricing_profile_id where o.quote_request_id=${id}::uuid order by o.gross_customer_price`.execute(
+        this.db,
+      )
+    ).rows;
+    const platformFee = conversionReady
+      ? ((
+          await sql<{
+            id: string;
+          }>`select r.*,c.name_en company_name,o.order_number,(r.amount-r.paid_amount)::text balance_amount from platform_fee_receivables r join companies c on c.id=r.company_id join orders o on o.id=r.order_id where r.quote_request_id=${id}::uuid limit 1`.execute(
+            this.db,
+          )
+        ).rows[0] ?? null)
+      : null;
+    const platformFeePayments = platformFee
+      ? (
+          await sql`select p.*,a.username recorded_by_username from platform_fee_payments p left join accounts a on a.id=p.recorded_by_account_id where p.receivable_id=${platformFee.id}::uuid order by p.payment_date desc,p.created_at desc`.execute(
+            this.db,
+          )
+        ).rows
+      : [];
+    return { quote, offers, conversionReady, platformFee, platformFeePayments };
+  }
+  public async settings() {
+    const row = (
+      await sql<{
+        enabled: boolean;
+        commission_rate: string;
+        quote_expiry_minutes: number;
+      }>`select enabled,commission_rate::text,quote_expiry_minutes from platform_customer_marketplace_settings where id=true`.execute(
+        this.db,
+      )
+    ).rows[0]!;
+    return {
+      enabled: row.enabled,
+      commissionRatePercent: new DecimalLike(row.commission_rate).times(100),
+      quoteExpiryMinutes: row.quote_expiry_minutes,
+    };
+  }
+  public async updateSettings(actorId: string, input: MarketplaceSettingsDto) {
+    await sql`update platform_customer_marketplace_settings set enabled=${input.enabled},commission_rate=${input.commissionRatePercent / 100},quote_expiry_minutes=${input.quoteExpiryMinutes},updated_by_account_id=${actorId}::uuid,updated_at=now() where id=true`.execute(
+      this.db,
+    );
+    return this.settings();
+  }
+  private async nextCompanyReference(
+    tx: Kysely<DatabaseSchema>,
+    companyId: string,
+    referenceType: string,
+    prefix: string,
+  ) {
+    const result = await sql<{
+      nextValue: string;
+      prefix: string;
+    }>`insert into company_reference_counters(company_id,reference_type,next_value,prefix) values(${companyId}::uuid,${referenceType},2,${prefix}) on conflict(company_id,reference_type) do update set next_value=company_reference_counters.next_value+1,updated_at=now() returning prefix,(next_value-1)::text "nextValue"`.execute(
+      tx,
+    );
+    return `${result.rows[0]!.prefix}-${result.rows[0]!.nextValue.padStart(6, "0")}`;
+  }
+  private async platformQuoteTrader(tx: Kysely<DatabaseSchema>, companyId: string) {
+    const existing = (
+      await sql<{
+        traderId: string;
+        accountId: string;
+      }>`select t.id "traderId",t.account_id "accountId" from traders t where t.company_id=${companyId}::uuid and lower(t.code)='taw-public-quotes' limit 1`.execute(
+        tx,
+      )
+    ).rows[0];
+    if (existing) return existing;
+    const account = (
+      await sql<{
+        accountId: string;
+      }>`insert into accounts(company_id,account_kind,username,normalized_username,password_hash,status,preferred_language) values(${companyId}::uuid,'trader','tawseelhub.public-quotes','tawseelhub.public-quotes','disabled-tawseelhub-public-quotes-system-actor','disabled','en') on conflict(company_id,normalized_username) where company_id is not null do update set updated_at=accounts.updated_at returning id "accountId"`.execute(
+        tx,
+      )
+    ).rows[0]!;
+    const trader = (
+      await sql<{
+        traderId: string;
+      }>`insert into traders(company_id,account_id,code,name_en,name_ar,contact_person,mobile_number,email,address_en,pickup_address,account_status,notes) values(${companyId}::uuid,${account.accountId}::uuid,'TAW-PUBLIC-QUOTES','Tawseelhub Public Quotes','طلبات توصيل هب العامة','Tawseelhub Platform','971506898604','support@tawseelhub.com','Platform customer quote orders','Platform customer quote orders','active','System Trader used only for Platform customer quote conversions.') on conflict(company_id,lower(code)) do update set account_status='active',updated_at=now() returning id "traderId"`.execute(
+        tx,
+      )
+    ).rows[0]!;
+    return { traderId: trader.traderId, accountId: account.accountId };
+  }
+  private async platformQuoteArea(
+    tx: Kysely<DatabaseSchema>,
+    companyId: string,
+    emirate: unknown,
+    area: unknown,
+  ) {
+    const selected =
+      (
+        await sql<{
+          id: string;
+          code: string;
+          nameEn: string;
+          nameAr: string | null;
+          fallback: boolean;
+        }>`
       select a.id,a.code,a.name_en "nameEn",a.name_ar "nameAr",
-        (lower(btrim(a.name_en))<>lower(btrim(${String(area||"")}))) "fallback"
+        (lower(btrim(a.name_en))<>lower(btrim(${String(area || "")}))) "fallback"
       from areas a
       left join emirates e on e.id=a.emirate_id
       where a.company_id=${companyId}::uuid and a.is_active
-        and (lower(e.name_en)=lower(${String(emirate||"")}) or lower(e.code)=lower(${String(emirate||"")}))
-      order by case when lower(btrim(a.name_en))=lower(btrim(${String(area||"")})) then 0 when lower(btrim(a.name_en))='all areas' then 1 else 2 end,a.name_en
-      limit 1`.execute(tx)).rows[0] ?? (await sql<{id:string;code:string;nameEn:string;nameAr:string|null;fallback:boolean}>`
-      select id,code,name_en "nameEn",name_ar "nameAr",true "fallback" from areas where company_id=${companyId}::uuid and is_active order by name_en limit 1`.execute(tx)).rows[0];if(!selected)throw new BadRequestException("delivery_company_area_not_configured");return selected;}
-  private async platformQuoteCustomer(tx:Kysely<DatabaseSchema>,companyId:string,actorId:string,area:{id:string;code:string;nameEn:string;nameAr:string|null},quote:Record<string,unknown>){const mobile=companyOrderMobile(quote.recipient_mobile||quote.requester_mobile);const name=String(quote.recipient_name||quote.requester_name||"Quote Customer");const address=String(quote.delivery_address||quote.delivery_area||"");const existing=(await sql<{id:string;code:string;customerReference:string|null;deliveryNotes:string|null}>`select id,code,customer_reference "customerReference",delivery_notes "deliveryNotes" from customers where company_id=${companyId}::uuid and mobile_number=${mobile} limit 1`.execute(tx)).rows[0];const customer=existing ?? (await sql<{id:string;code:string;customerReference:string|null;deliveryNotes:string|null}>`
+        and (lower(e.name_en)=lower(${String(emirate || "")}) or lower(e.code)=lower(${String(emirate || "")}))
+      order by case when lower(btrim(a.name_en))=lower(btrim(${String(area || "")})) then 0 when lower(btrim(a.name_en))='all areas' then 1 else 2 end,a.name_en
+      limit 1`.execute(tx)
+      ).rows[0] ??
+      (
+        await sql<{
+          id: string;
+          code: string;
+          nameEn: string;
+          nameAr: string | null;
+          fallback: boolean;
+        }>`
+      select id,code,name_en "nameEn",name_ar "nameAr",true "fallback" from areas where company_id=${companyId}::uuid and is_active order by name_en limit 1`.execute(
+          tx,
+        )
+      ).rows[0];
+    if (!selected) throw new BadRequestException("delivery_company_area_not_configured");
+    return selected;
+  }
+  private async platformQuoteCustomer(
+    tx: Kysely<DatabaseSchema>,
+    companyId: string,
+    actorId: string,
+    area: { id: string; code: string; nameEn: string; nameAr: string | null },
+    quote: Record<string, unknown>,
+  ) {
+    const mobile = companyOrderMobile(quote.recipient_mobile || quote.requester_mobile);
+    const name = String(quote.recipient_name || quote.requester_name || "Quote Customer");
+    const address = String(quote.delivery_address || quote.delivery_area || "");
+    const existing = (
+      await sql<{
+        id: string;
+        code: string;
+        customerReference: string | null;
+        deliveryNotes: string | null;
+      }>`select id,code,customer_reference "customerReference",delivery_notes "deliveryNotes" from customers where company_id=${companyId}::uuid and mobile_number=${mobile} limit 1`.execute(
+        tx,
+      )
+    ).rows[0];
+    const customer =
+      existing ??
+      (
+        await sql<{
+          id: string;
+          code: string;
+          customerReference: string | null;
+          deliveryNotes: string | null;
+        }>`
       insert into customers(company_id,code,name,mobile_number,email,customer_reference,delivery_notes,internal_notes,status,created_by_account_id)
-      values(${companyId}::uuid,${await this.nextCompanyReference(tx,companyId,"customer","CUS")},${name},${mobile},${quote.requester_email??null},${String(quote.reference_number)},null,${`Created from Platform customer quote ${quote.reference_number}`},'active',${actorId}::uuid)
-      returning id,code,customer_reference "customerReference",delivery_notes "deliveryNotes"`.execute(tx)).rows[0]!;const hasActiveDefault=existing?((await sql<{exists:boolean}>`select exists(select 1 from customer_addresses where company_id=${companyId}::uuid and customer_id=${customer.id}::uuid and is_active and is_default) "exists"`.execute(tx)).rows[0]?.exists===true):false;const makeDefault=!existing||!hasActiveDefault;const addr=(await sql<{id:string;locationLink:string|null;deliveryInstructions:string|null}>`
+      values(${companyId}::uuid,${await this.nextCompanyReference(tx, companyId, "customer", "CUS")},${name},${mobile},${quote.requester_email ?? null},${String(quote.reference_number)},null,${`Created from Platform customer quote ${quote.reference_number}`},'active',${actorId}::uuid)
+      returning id,code,customer_reference "customerReference",delivery_notes "deliveryNotes"`.execute(
+          tx,
+        )
+      ).rows[0]!;
+    const hasActiveDefault = existing
+      ? (
+          await sql<{
+            exists: boolean;
+          }>`select exists(select 1 from customer_addresses where company_id=${companyId}::uuid and customer_id=${customer.id}::uuid and is_active and is_default) "exists"`.execute(
+            tx,
+          )
+        ).rows[0]?.exists === true
+      : false;
+    const makeDefault = !existing || !hasActiveDefault;
+    const addr = (
+      await sql<{ id: string; locationLink: string | null; deliveryInstructions: string | null }>`
       insert into customer_addresses(company_id,customer_id,area_id,label,address,location_link,delivery_instructions,is_default,created_by_account_id)
       values(${companyId}::uuid,${customer.id}::uuid,${area.id}::uuid,${`Quote ${quote.reference_number}`},${address},null,null,${makeDefault},${actorId}::uuid)
-      returning id,location_link "locationLink",delivery_instructions "deliveryInstructions"`.execute(tx)).rows[0]!;return {addressId:addr.id,customer,address,locationLink:addr.locationLink,deliveryNotes:addr.deliveryInstructions,mobile,name};}
-  private async createPlatformFeeReceivable(tx:Kysely<DatabaseSchema>,input:{companyId:string;quoteId:string;orderId:string;amount:number;actorId:string}){if(input.amount<=0)return null;return (await sql<{id:string}>`insert into platform_fee_receivables(company_id,quote_request_id,order_id,amount,created_by_account_id) values(${input.companyId}::uuid,${input.quoteId}::uuid,${input.orderId}::uuid,${input.amount.toFixed(2)},${input.actorId}::uuid) on conflict(order_id) do update set amount=excluded.amount,updated_at=now() returning id`.execute(tx)).rows[0]??null;}
-  public async convertToCompanyOrder(quoteId:string,actorId:string,input:ConvertCustomerQuoteToOrderDto){return this.db.transaction().execute(async tx=>{if(!await this.quoteConversionColumnsReady(tx))throw new BadRequestException("customer_quote_order_conversion_migration_required");const quote=(await sql<Record<string,unknown>>`select * from platform_customer_quote_requests where id=${quoteId}::uuid for update`.execute(tx)).rows[0];if(!quote)throw new NotFoundException();if(quote.converted_order_id)throw new ConflictException({code:"quote_already_converted",orderId:quote.converted_order_id});if(["booked","closed","cancelled"].includes(String(quote.status)))throw new ConflictException("quote_not_convertible");const company=(await sql<{id:string;nameEn:string}>`select id,name_en "nameEn" from companies where id=${input.companyId}::uuid and status in('active','draft')`.execute(tx)).rows[0];if(!company)throw new BadRequestException("delivery_company_not_found");const system=await this.platformQuoteTrader(tx,input.companyId);const area=await this.platformQuoteArea(tx,input.companyId,quote.delivery_emirate,quote.delivery_area);const customer=await this.platformQuoteCustomer(tx,input.companyId,system.accountId,area,quote);const orderNumber=await this.nextCompanyReference(tx,input.companyId,"order","ORD");const serial=String(quote.reference_number);const normalized=serial.toLowerCase().replace(/[^a-z0-9]+/g,"").slice(0,80)||serial.toLowerCase();const cod=Number(quote.cod_required?quote.cod_amount:0);const deliveryFee=Number(input.deliveryFee.toFixed(2));const platformFee=Number(input.platformFee.toFixed(2));const customerAmountDue=cod+deliveryFee+platformFee;const companyRevenue=deliveryFee+platformFee;const packageCount=Math.max(1,Number(quote.quantity??1));const notes=[`Created from Platform quote ${quote.reference_number}.`,`Pickup: ${[quote.pickup_emirate,quote.pickup_area,quote.pickup_address].filter(Boolean).join(", ")||"Not provided"}.`,`Delivery: ${[quote.delivery_emirate,quote.delivery_area,quote.delivery_address].filter(Boolean).join(", ")||"Not provided"}.`,`Package: ${String(quote.package_type).replace(/_/g," ")}${quote.description?` — ${quote.description}`:""}.`,`Delivery fee: AED ${deliveryFee.toFixed(2)}. Platform fee: AED ${platformFee.toFixed(2)}.`,input.internalNotes?`Platform note: ${input.internalNotes}`:""].filter(Boolean).join("\n");const inserted=await sql<{id:string}>`
+      returning id,location_link "locationLink",delivery_instructions "deliveryInstructions"`.execute(
+        tx,
+      )
+    ).rows[0]!;
+    return {
+      addressId: addr.id,
+      customer,
+      address,
+      locationLink: addr.locationLink,
+      deliveryNotes: addr.deliveryInstructions,
+      mobile,
+      name,
+    };
+  }
+  private async createPlatformFeeReceivable(
+    tx: Kysely<DatabaseSchema>,
+    input: { companyId: string; quoteId: string; orderId: string; amount: number; actorId: string },
+  ) {
+    if (input.amount <= 0) return null;
+    return (
+      (
+        await sql<{
+          id: string;
+        }>`insert into platform_fee_receivables(company_id,quote_request_id,order_id,amount,created_by_account_id) values(${input.companyId}::uuid,${input.quoteId}::uuid,${input.orderId}::uuid,${input.amount.toFixed(2)},${input.actorId}::uuid) on conflict(order_id) do update set amount=excluded.amount,updated_at=now() returning id`.execute(
+          tx,
+        )
+      ).rows[0] ?? null
+    );
+  }
+  public async convertToCompanyOrder(
+    quoteId: string,
+    actorId: string,
+    input: ConvertCustomerQuoteToOrderDto,
+  ) {
+    return this.db.transaction().execute(async (tx) => {
+      if (!(await this.quoteConversionColumnsReady(tx)))
+        throw new BadRequestException("customer_quote_order_conversion_migration_required");
+      const quote = (
+        await sql<
+          Record<string, unknown>
+        >`select * from platform_customer_quote_requests where id=${quoteId}::uuid for update`.execute(
+          tx,
+        )
+      ).rows[0];
+      if (!quote) throw new NotFoundException();
+      if (quote.converted_order_id)
+        throw new ConflictException({
+          code: "quote_already_converted",
+          orderId: quote.converted_order_id,
+        });
+      if (["booked", "closed", "cancelled"].includes(String(quote.status)))
+        throw new ConflictException("quote_not_convertible");
+      const company = (
+        await sql<{
+          id: string;
+          nameEn: string;
+          serialEnabled: boolean;
+        }>`select id,name_en "nameEn",shipment_serial_enabled_at is not null "serialEnabled" from companies where id=${input.companyId}::uuid and status in('active','draft') for update`.execute(
+          tx,
+        )
+      ).rows[0];
+      if (!company) throw new BadRequestException("delivery_company_not_found");
+      const system = await this.platformQuoteTrader(tx, input.companyId);
+      const area = await this.platformQuoteArea(
+        tx,
+        input.companyId,
+        quote.delivery_emirate,
+        quote.delivery_area,
+      );
+      const customer = await this.platformQuoteCustomer(
+        tx,
+        input.companyId,
+        system.accountId,
+        area,
+        quote,
+      );
+      const orderNumber = await this.nextCompanyReference(tx, input.companyId, "order", "ORD");
+      const serial = company.serialEnabled
+        ? (
+            await sql<{
+              value: string;
+            }>`select allocate_company_shipment_serial(${input.companyId}::uuid) value`.execute(tx)
+          ).rows[0]!.value
+        : String(quote.reference_number);
+      const normalized =
+        serial
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "")
+          .slice(0, 80) || serial.toLowerCase();
+      const cod = Number(quote.cod_required ? quote.cod_amount : 0);
+      const deliveryFee = Number(input.deliveryFee.toFixed(2));
+      const platformFee = Number(input.platformFee.toFixed(2));
+      const customerAmountDue = cod + deliveryFee + platformFee;
+      const companyRevenue = deliveryFee + platformFee;
+      const packageCount = Math.max(1, Number(quote.quantity ?? 1));
+      const notes = [
+        `Created from Platform quote ${quote.reference_number}.`,
+        `Pickup: ${[quote.pickup_emirate, quote.pickup_area, quote.pickup_address].filter(Boolean).join(", ") || "Not provided"}.`,
+        `Delivery: ${[quote.delivery_emirate, quote.delivery_area, quote.delivery_address].filter(Boolean).join(", ") || "Not provided"}.`,
+        `Package: ${String(quote.package_type).replace(/_/g, " ")}${quote.description ? ` — ${quote.description}` : ""}.`,
+        `Delivery fee: AED ${deliveryFee.toFixed(2)}. Platform fee: AED ${platformFee.toFixed(2)}.`,
+        input.internalNotes ? `Platform note: ${input.internalNotes}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n");
+      const inserted = await sql<{ id: string }>`
         insert into orders(company_id,order_number,serial_number,serial_number_normalized,reference_number,reference_number_normalized,financial_model_version,order_date,trader_id,area_id,created_by_account_id,customer_id,customer_address_id,customer_name,customer_mobile_number,customer_address,customer_code_snapshot,customer_reference_snapshot,customer_area_code_snapshot,customer_area_name_snapshot,customer_area_name_ar_snapshot,customer_location_link_snapshot,customer_delivery_notes_snapshot,package_count,payment_condition,cod_amount,service_fee,service_fee_net_amount,service_fee_vat_amount,additional_fees,additional_fee_vat_amount,total_deductions,customer_amount_due,trader_gross_payable,trader_paid_service_fee,trader_deductions,trader_net_payable,driver_cost,vat_amount,vat_enabled_snapshot,vat_rate_snapshot,vat_price_mode_snapshot,company_revenue,order_profit,delivery_status,trader_settlement_status,pricing_provenance_status,configured_service_fee_snapshot,final_service_fee_snapshot,service_fee_override_reason,notes,order_type,customer_provenance_status,area_name_fallback_used)
-        values(${input.companyId}::uuid,${orderNumber},${serial},${normalized},${serial},${normalized},null,current_date,${system.traderId}::uuid,${area.id}::uuid,${system.accountId}::uuid,${customer.customer.id}::uuid,${customer.addressId}::uuid,${customer.name},${customer.mobile},${customer.address},${customer.customer.code},${customer.customer.customerReference},${area.code},${area.nameEn},${area.nameAr},${customer.locationLink},${customer.deliveryNotes},${packageCount},'customer_pays_cod_and_fee',${cod.toFixed(2)},${deliveryFee.toFixed(2)},${deliveryFee.toFixed(2)},0,${platformFee.toFixed(2)},0,0,${customerAmountDue.toFixed(2)},${cod.toFixed(2)},0,0,${cod.toFixed(2)},0,0,false,0,null,${companyRevenue.toFixed(2)},${companyRevenue.toFixed(2)},'new',${cod>0?"unsettled":"not_eligible"},'manual',${deliveryFee.toFixed(2)},${deliveryFee.toFixed(2)},${`Platform customer quote ${quote.reference_number}`},${notes},'delivery','resolved',${area.fallback})
-        returning id`.execute(tx);const orderId=inserted.rows[0]!.id;await sql`insert into order_status_history(company_id,order_id,status_dimension,to_status,changed_by_account_id) values(${input.companyId}::uuid,${orderId}::uuid,'delivery','new',${system.accountId}::uuid)`.execute(tx);await sql`insert into order_events(company_id,order_id,event_type,event_category,field_name,new_value,actor_account_id,actor_role,source,correlation_id) values(${input.companyId}::uuid,${orderId}::uuid,'order.created','system_action','delivery_status',to_jsonb('new'::text),${system.accountId}::uuid,'System','system',${quoteId})`.execute(tx);const receivable=await this.createPlatformFeeReceivable(tx,{companyId:input.companyId,quoteId,orderId,amount:platformFee,actorId});await sql`update platform_customer_quote_requests set assigned_company_id=${input.companyId}::uuid,converted_order_id=${orderId}::uuid,delivery_fee_amount=${deliveryFee.toFixed(2)},platform_fee_amount=${platformFee.toFixed(2)},converted_by_account_id=${actorId}::uuid,converted_at=now(),status='booked',updated_at=now() where id=${quoteId}::uuid`.execute(tx);await sql`insert into platform_customer_quote_history(quote_request_id,event_type,old_status,new_status,actor_account_id,detail) values(${quoteId}::uuid,'company_order_created',${String(quote.status)},'booked',${actorId}::uuid,${JSON.stringify({companyId:input.companyId,companyName:company.nameEn,orderId,orderNumber,deliveryFee:deliveryFee.toFixed(2),platformFee:platformFee.toFixed(2),platformFeeReceivableId:receivable?.id??null})}::jsonb)`.execute(tx);return {orderId,orderNumber,companyId:input.companyId,companyName:company.nameEn,status:"booked",deliveryFee:deliveryFee.toFixed(2),platformFee:platformFee.toFixed(2),platformFeeReceivableId:receivable?.id??null};});}
-  public async platformFeeReceivables(){return (await sql`select r.id,r.company_id,c.name_en company_name,r.quote_request_id,q.reference_number quote_reference,r.order_id,o.order_number,r.currency,r.amount::text amount,r.paid_amount::text paid_amount,(r.amount-r.paid_amount)::text balance_amount,r.status,r.created_at,r.updated_at from platform_fee_receivables r join companies c on c.id=r.company_id left join platform_customer_quote_requests q on q.id=r.quote_request_id join orders o on o.id=r.order_id order by case r.status when 'unpaid' then 0 when 'partially_paid' then 1 when 'paid' then 2 else 3 end,r.created_at desc limit 500`.execute(this.db)).rows;}
-  public async recordPlatformFeePayment(receivableId:string,actorId:string,input:RecordPlatformFeePaymentDto){return this.db.transaction().execute(async tx=>{const receivable=(await sql<{id:string;companyId:string;amount:string;paidAmount:string;status:string}>`select id,company_id "companyId",amount::text,paid_amount::text "paidAmount",status from platform_fee_receivables where id=${receivableId}::uuid for update`.execute(tx)).rows[0];if(!receivable)throw new NotFoundException();if(receivable.status==="cancelled")throw new BadRequestException("platform_fee_receivable_cancelled");const amount=Number(input.amount.toFixed(2));const balance=Number(receivable.amount)-Number(receivable.paidAmount);if(amount>balance+0.0001)throw new BadRequestException("platform_fee_payment_exceeds_balance");const payment=(await sql<{id:string}>`insert into platform_fee_payments(receivable_id,company_id,amount,payment_date,payment_method,reference_number,notes,recorded_by_account_id) values(${receivableId}::uuid,${receivable.companyId}::uuid,${amount.toFixed(2)},${input.paymentDate}::date,${input.paymentMethod??null},${input.referenceNumber??null},${input.notes??null},${actorId}::uuid) returning id`.execute(tx)).rows[0]!;const nextPaid=Number(receivable.paidAmount)+amount;const nextStatus=nextPaid>=Number(receivable.amount)-0.0001?"paid":"partially_paid";await sql`update platform_fee_receivables set paid_amount=${nextPaid.toFixed(2)},status=${nextStatus},updated_at=now() where id=${receivableId}::uuid`.execute(tx);return {paymentId:payment.id,receivableId,paidAmount:nextPaid.toFixed(2),balanceAmount:(Number(receivable.amount)-nextPaid).toFixed(2),status:nextStatus};});}
-  public async manualOffer(quoteId:string,input:ManualOfferDto){const settings=(await sql<{commission_rate:string}>`select commission_rate::text from platform_customer_marketplace_settings where id=true`.execute(this.db)).rows[0]!;const split=calculateCommission(input.customerPrice,settings.commission_rate),publicId=offerCode(),expires=new Date(Date.now()+input.validityMinutes*60000);await sql`insert into platform_customer_quote_offers(public_offer_id,quote_request_id,company_id,service_type,gross_customer_price,commission_rate,commission_amount,company_net_amount,expires_at,source,internal_notes) values(${publicId},${quoteId}::uuid,${input.companyId}::uuid,${input.serviceType},${split.gross},${settings.commission_rate},${split.commission},${split.net},${expires},'manual_custom',${input.internalNotes??null}); update platform_customer_quote_requests set quote_type='instant',status='quoted',custom_quote_reason=null,updated_at=now() where id=${quoteId}::uuid`.execute(this.db);return {publicOfferId:publicId,...split,expiresAt:expires.toISOString()};}
-  public async platformBulkDelete(ids:string[],_actorId:string){const uniqueIds=[...new Set(ids.filter(Boolean))];if(!uniqueIds.length)return{deletedCount:0};let deletedCount=0;await this.db.transaction().execute(async trx=>{await sql`update platform_agent_conversations set linked_quote_request_id=null where linked_quote_request_id = any(${uniqueIds}::uuid[])`.execute(trx);await sql`update platform_customer_quote_requests set selected_offer_id=null where id = any(${uniqueIds}::uuid[])`.execute(trx);await sql`alter table platform_customer_quote_notes disable trigger customer_quote_notes_append_only`.execute(trx);await sql`alter table platform_customer_quote_history disable trigger customer_quote_history_append_only`.execute(trx);await sql`delete from platform_customer_quote_notes where quote_request_id = any(${uniqueIds}::uuid[])`.execute(trx);await sql`delete from platform_customer_quote_history where quote_request_id = any(${uniqueIds}::uuid[])`.execute(trx);await sql`alter table platform_customer_quote_history enable trigger customer_quote_history_append_only`.execute(trx);await sql`alter table platform_customer_quote_notes enable trigger customer_quote_notes_append_only`.execute(trx);await sql`delete from platform_customer_quote_offers where quote_request_id = any(${uniqueIds}::uuid[])`.execute(trx);const deleted=await sql<{id:string}>`delete from platform_customer_quote_requests where id = any(${uniqueIds}::uuid[]) returning id`.execute(trx);deletedCount=deleted.rows.length;});return{deletedCount};}
+        values(${input.companyId}::uuid,${orderNumber},${serial},${normalized},${serial},${normalized},null,current_date,${system.traderId}::uuid,${area.id}::uuid,${system.accountId}::uuid,${customer.customer.id}::uuid,${customer.addressId}::uuid,${customer.name},${customer.mobile},${customer.address},${customer.customer.code},${customer.customer.customerReference},${area.code},${area.nameEn},${area.nameAr},${customer.locationLink},${customer.deliveryNotes},${packageCount},'customer_pays_cod_and_fee',${cod.toFixed(2)},${deliveryFee.toFixed(2)},${deliveryFee.toFixed(2)},0,${platformFee.toFixed(2)},0,0,${customerAmountDue.toFixed(2)},${cod.toFixed(2)},0,0,${cod.toFixed(2)},0,0,false,0,null,${companyRevenue.toFixed(2)},${companyRevenue.toFixed(2)},'new',${cod > 0 ? "unsettled" : "not_eligible"},'manual',${deliveryFee.toFixed(2)},${deliveryFee.toFixed(2)},${`Platform customer quote ${quote.reference_number}`},${notes},'delivery','resolved',${area.fallback})
+        returning id`.execute(tx);
+      const orderId = inserted.rows[0]!.id;
+      await sql`insert into order_status_history(company_id,order_id,status_dimension,to_status,changed_by_account_id) values(${input.companyId}::uuid,${orderId}::uuid,'delivery','new',${system.accountId}::uuid)`.execute(
+        tx,
+      );
+      await sql`insert into order_events(company_id,order_id,event_type,event_category,field_name,new_value,actor_account_id,actor_role,source,correlation_id) values(${input.companyId}::uuid,${orderId}::uuid,'order.created','system_action','delivery_status',to_jsonb('new'::text),${system.accountId}::uuid,'System','system',${quoteId})`.execute(
+        tx,
+      );
+      const receivable = await this.createPlatformFeeReceivable(tx, {
+        companyId: input.companyId,
+        quoteId,
+        orderId,
+        amount: platformFee,
+        actorId,
+      });
+      await sql`update platform_customer_quote_requests set assigned_company_id=${input.companyId}::uuid,converted_order_id=${orderId}::uuid,delivery_fee_amount=${deliveryFee.toFixed(2)},platform_fee_amount=${platformFee.toFixed(2)},converted_by_account_id=${actorId}::uuid,converted_at=now(),status='booked',updated_at=now() where id=${quoteId}::uuid`.execute(
+        tx,
+      );
+      await sql`insert into platform_customer_quote_history(quote_request_id,event_type,old_status,new_status,actor_account_id,detail) values(${quoteId}::uuid,'company_order_created',${String(quote.status)},'booked',${actorId}::uuid,${JSON.stringify({ companyId: input.companyId, companyName: company.nameEn, orderId, orderNumber, deliveryFee: deliveryFee.toFixed(2), platformFee: platformFee.toFixed(2), platformFeeReceivableId: receivable?.id ?? null })}::jsonb)`.execute(
+        tx,
+      );
+      return {
+        orderId,
+        orderNumber,
+        companyId: input.companyId,
+        companyName: company.nameEn,
+        status: "booked",
+        deliveryFee: deliveryFee.toFixed(2),
+        platformFee: platformFee.toFixed(2),
+        platformFeeReceivableId: receivable?.id ?? null,
+      };
+    });
+  }
+  public async platformFeeReceivables() {
+    return (
+      await sql`select r.id,r.company_id,c.name_en company_name,r.quote_request_id,q.reference_number quote_reference,r.order_id,o.order_number,r.currency,r.amount::text amount,r.paid_amount::text paid_amount,(r.amount-r.paid_amount)::text balance_amount,r.status,r.created_at,r.updated_at from platform_fee_receivables r join companies c on c.id=r.company_id left join platform_customer_quote_requests q on q.id=r.quote_request_id join orders o on o.id=r.order_id order by case r.status when 'unpaid' then 0 when 'partially_paid' then 1 when 'paid' then 2 else 3 end,r.created_at desc limit 500`.execute(
+        this.db,
+      )
+    ).rows;
+  }
+  public async recordPlatformFeePayment(
+    receivableId: string,
+    actorId: string,
+    input: RecordPlatformFeePaymentDto,
+  ) {
+    return this.db.transaction().execute(async (tx) => {
+      const receivable = (
+        await sql<{
+          id: string;
+          companyId: string;
+          amount: string;
+          paidAmount: string;
+          status: string;
+        }>`select id,company_id "companyId",amount::text,paid_amount::text "paidAmount",status from platform_fee_receivables where id=${receivableId}::uuid for update`.execute(
+          tx,
+        )
+      ).rows[0];
+      if (!receivable) throw new NotFoundException();
+      if (receivable.status === "cancelled")
+        throw new BadRequestException("platform_fee_receivable_cancelled");
+      const amount = Number(input.amount.toFixed(2));
+      const balance = Number(receivable.amount) - Number(receivable.paidAmount);
+      if (amount > balance + 0.0001)
+        throw new BadRequestException("platform_fee_payment_exceeds_balance");
+      const payment = (
+        await sql<{
+          id: string;
+        }>`insert into platform_fee_payments(receivable_id,company_id,amount,payment_date,payment_method,reference_number,notes,recorded_by_account_id) values(${receivableId}::uuid,${receivable.companyId}::uuid,${amount.toFixed(2)},${input.paymentDate}::date,${input.paymentMethod ?? null},${input.referenceNumber ?? null},${input.notes ?? null},${actorId}::uuid) returning id`.execute(
+          tx,
+        )
+      ).rows[0]!;
+      const nextPaid = Number(receivable.paidAmount) + amount;
+      const nextStatus = nextPaid >= Number(receivable.amount) - 0.0001 ? "paid" : "partially_paid";
+      await sql`update platform_fee_receivables set paid_amount=${nextPaid.toFixed(2)},status=${nextStatus},updated_at=now() where id=${receivableId}::uuid`.execute(
+        tx,
+      );
+      return {
+        paymentId: payment.id,
+        receivableId,
+        paidAmount: nextPaid.toFixed(2),
+        balanceAmount: (Number(receivable.amount) - nextPaid).toFixed(2),
+        status: nextStatus,
+      };
+    });
+  }
+  public async manualOffer(quoteId: string, input: ManualOfferDto) {
+    const settings = (
+      await sql<{
+        commission_rate: string;
+      }>`select commission_rate::text from platform_customer_marketplace_settings where id=true`.execute(
+        this.db,
+      )
+    ).rows[0]!;
+    const split = calculateCommission(input.customerPrice, settings.commission_rate),
+      publicId = offerCode(),
+      expires = new Date(Date.now() + input.validityMinutes * 60000);
+    await sql`insert into platform_customer_quote_offers(public_offer_id,quote_request_id,company_id,service_type,gross_customer_price,commission_rate,commission_amount,company_net_amount,expires_at,source,internal_notes) values(${publicId},${quoteId}::uuid,${input.companyId}::uuid,${input.serviceType},${split.gross},${settings.commission_rate},${split.commission},${split.net},${expires},'manual_custom',${input.internalNotes ?? null}); update platform_customer_quote_requests set quote_type='instant',status='quoted',custom_quote_reason=null,updated_at=now() where id=${quoteId}::uuid`.execute(
+      this.db,
+    );
+    return { publicOfferId: publicId, ...split, expiresAt: expires.toISOString() };
+  }
+  public async platformBulkDelete(ids: string[], _actorId: string) {
+    const uniqueIds = [...new Set(ids.filter(Boolean))];
+    if (!uniqueIds.length) return { deletedCount: 0 };
+    let deletedCount = 0;
+    await this.db.transaction().execute(async (trx) => {
+      await sql`update platform_agent_conversations set linked_quote_request_id=null where linked_quote_request_id = any(${uniqueIds}::uuid[])`.execute(
+        trx,
+      );
+      await sql`update platform_customer_quote_requests set selected_offer_id=null where id = any(${uniqueIds}::uuid[])`.execute(
+        trx,
+      );
+      await sql`alter table platform_customer_quote_notes disable trigger customer_quote_notes_append_only`.execute(
+        trx,
+      );
+      await sql`alter table platform_customer_quote_history disable trigger customer_quote_history_append_only`.execute(
+        trx,
+      );
+      await sql`delete from platform_customer_quote_notes where quote_request_id = any(${uniqueIds}::uuid[])`.execute(
+        trx,
+      );
+      await sql`delete from platform_customer_quote_history where quote_request_id = any(${uniqueIds}::uuid[])`.execute(
+        trx,
+      );
+      await sql`alter table platform_customer_quote_history enable trigger customer_quote_history_append_only`.execute(
+        trx,
+      );
+      await sql`alter table platform_customer_quote_notes enable trigger customer_quote_notes_append_only`.execute(
+        trx,
+      );
+      await sql`delete from platform_customer_quote_offers where quote_request_id = any(${uniqueIds}::uuid[])`.execute(
+        trx,
+      );
+      const deleted = await sql<{
+        id: string;
+      }>`delete from platform_customer_quote_requests where id = any(${uniqueIds}::uuid[]) returning id`.execute(
+        trx,
+      );
+      deletedCount = deleted.rows.length;
+    });
+    return { deletedCount };
+  }
 }
-class DecimalLike{constructor(private readonly value:string){}times(n:number){return Number(this.value)*n;}}
+class DecimalLike {
+  constructor(private readonly value: string) {}
+  times(n: number) {
+    return Number(this.value) * n;
+  }
+}

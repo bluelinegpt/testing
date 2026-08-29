@@ -1,6 +1,7 @@
 import { Module } from "@nestjs/common";
 
 import { AuthenticationModule } from "../authentication/authentication.module.js";
+import { CompanyConfigurationModule } from "../company-configuration/company-configuration.module.js";
 import { StoreOrderModule } from "../store-order/store-order.module.js";
 
 import { CommerceCheckoutController } from "./commerce-checkout.controller.js";
@@ -26,7 +27,7 @@ import { StoreOrderSubmissionService } from "./store-order-submission.service.js
 @Module({
   controllers: [CommerceCheckoutController, StoreOrderSubmissionController],
   exports: [CommerceCheckoutService],
-  imports: [AuthenticationModule, StoreOrderModule],
+  imports: [AuthenticationModule, CompanyConfigurationModule, StoreOrderModule],
   providers: [CommerceCheckoutService, StoreOrderSubmissionService],
 })
 export class CommerceCheckoutModule {}

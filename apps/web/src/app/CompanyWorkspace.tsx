@@ -11,6 +11,7 @@ import {
   UsersConfigurationWorkspace,
 } from "../features/administration/UserRoleConfigurationWorkspace.js";
 import { CompanyConfigurationWorkspace } from "../features/configuration/CompanyConfigurationWorkspace.js";
+import { WebsiteAgentConversationsWorkspace } from "../features/configuration/WebsiteAgentConversationsWorkspace.js";
 import { CompanyProfileWorkspace } from "../features/configuration/CompanyProfileWorkspace.js";
 import { ProductCatalogueWorkspace } from "../features/storefront/ProductCatalogueWorkspace.js";
 import { StorefrontConfigurationWorkspace } from "../features/storefront/StorefrontConfigurationWorkspace.js";
@@ -230,7 +231,9 @@ export function CompanyWorkspace({
       />
     );
   } else if (path === "/reports/daily-operations-summary") {
-    content = <DailyOperationsSummaryReport api={api} onNavigate={(target) => void navigate(target)} />;
+    content = (
+      <DailyOperationsSummaryReport api={api} onNavigate={(target) => void navigate(target)} />
+    );
   } else if (operationRoutes[path] !== undefined) {
     const route = operationRoutes[path];
     content = (
@@ -294,6 +297,8 @@ export function CompanyWorkspace({
         view="general"
       />
     );
+  } else if (path === "/configuration/ai-agent") {
+    content = <WebsiteAgentConversationsWorkspace api={api} />;
   } else if (path === "/configuration/areas") {
     content = (
       <CompanyConfigurationWorkspace

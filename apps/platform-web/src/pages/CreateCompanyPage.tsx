@@ -25,6 +25,7 @@ const environments = ["sandbox", "development", "demo", "trial", "production"] a
 interface FormState {
   name: string;
   subdomain: string;
+  shipmentPrefix: string;
   environment: string;
   defaultLanguage: string;
   contactName: string;
@@ -37,6 +38,7 @@ interface FormState {
 const initialState: FormState = {
   name: "",
   subdomain: "",
+  shipmentPrefix: "",
   // Not production. The safest default for a Company someone is creating by
   // hand is the one that is easiest to recover from; production is an explicit
   // choice.
@@ -96,6 +98,7 @@ export function CreateCompanyPage(): ReactElement {
     try {
       const created = await platformApi.createCompany({
         name: form.name,
+        shipmentPrefix: form.shipmentPrefix,
         ...(form.subdomain === "" ? {} : { subdomain: form.subdomain }),
         environment: form.environment,
         defaultLanguage: form.defaultLanguage,
@@ -136,15 +139,13 @@ export function CreateCompanyPage(): ReactElement {
             ["Name", form.name],
             ["Company Code", "Generated automatically"],
             ["Subdomain", form.subdomain],
+            ["Shipment prefix", form.shipmentPrefix],
             ["Environment", form.environment],
             ["Country", "United Arab Emirates"],
             ["Timezone", "Asia/Dubai"],
             ["Currency", "AED"],
             ["Default language", form.defaultLanguage],
-            [
-              "Business day",
-              form.businessDayStart === "" ? "08:00" : form.businessDayStart,
-            ],
+            ["Business day", form.businessDayStart === "" ? "08:00" : form.businessDayStart],
             ["Accounting template", form.template === "" ? "None" : form.template],
           ].map(([label, value]) => (
             <div key={label}>
@@ -212,6 +213,21 @@ export function CreateCompanyPage(): ReactElement {
           required
           value={form.subdomain}
         />
+        <Field
+          hint="Exactly three letters. It may be corrected before shipment numbering is activated."
+          id="shipment-prefix"
+          label="Shipment Prefix"
+          onChange={(value) =>
+            set("shipmentPrefix")(
+              value
+                .replace(/[^A-Za-z]/g, "")
+                .toUpperCase()
+                .slice(0, 3),
+            )
+          }
+          required
+          value={form.shipmentPrefix}
+        />
         <div className="platform-field-group">
           <label className="platform-field" htmlFor="environment">
             <span>Environment</span>
@@ -235,9 +251,18 @@ export function CreateCompanyPage(): ReactElement {
 
         <h3>Settings</h3>
         <dl className="platform-review">
-          <div><dt>Country</dt><dd>United Arab Emirates</dd></div>
-          <div><dt>Currency</dt><dd>AED</dd></div>
-          <div><dt>Timezone</dt><dd>Dubai (Asia/Dubai)</dd></div>
+          <div>
+            <dt>Country</dt>
+            <dd>United Arab Emirates</dd>
+          </div>
+          <div>
+            <dt>Currency</dt>
+            <dd>AED</dd>
+          </div>
+          <div>
+            <dt>Timezone</dt>
+            <dd>Dubai (Asia/Dubai)</dd>
+          </div>
         </dl>
         <label className="platform-field" htmlFor="defaultLanguage">
           <span>Default language</span>

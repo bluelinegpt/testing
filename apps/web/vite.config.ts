@@ -64,6 +64,15 @@ export default defineConfig({
     proxy: {
       "/api": {
         changeOrigin: false,
+        configure(proxy) {
+          proxy.on("proxyReq", (proxyRequest, request) => {
+            // Mirror serve.mjs/Render: the API origin needs its own Host for
+            // routing, while tenant selection uses the original Company Portal
+            // host. This is a hostname, not a browser-supplied Company ID, and
+            // it only scopes credential verification; it grants no access.
+            proxyRequest.setHeader("x-blueline-tenant-host", request.headers.host ?? "");
+          });
+        },
         target: "http://127.0.0.1:3000",
         ws: true,
       },

@@ -7,6 +7,10 @@ export const WEBSITE_SECTION_KEYS = [
   "services",
   "coverage",
   "benefits",
+  "how_it_works",
+  "industries",
+  "statistics",
+  "testimonials",
   "tracking",
   "request_delivery",
   "working_hours",
@@ -28,7 +32,9 @@ export interface WebsiteListItem {
 export interface WebsiteCoverageItem {
   id: string;
   emirate: string;
+  emirateAr?: string;
   area?: string;
+  areaAr?: string;
   group?: string;
   enabled: boolean;
   order: number;
@@ -40,7 +46,18 @@ export interface WebsiteDayHours {
   closes?: string;
 }
 export interface CompanyWebsiteSettings {
-  branding: { primaryColor?: string; secondaryColor?: string; accentColor?: string };
+  branding: {
+    primaryColor?: string;
+    secondaryColor?: string;
+    accentColor?: string;
+    logoDataUrl?: string;
+    /** @deprecated Read for backward compatibility with drafts saved before banner galleries. */
+    bannerDataUrl?: string;
+    bannerDataUrls?: string[];
+    bannerDataUrlsAr?: string[];
+    bannerTransition?: "fade" | "slide" | "zoom";
+    bannerIntervalSeconds?: 4 | 6 | 8;
+  };
   languages: { en: boolean; ar: boolean; defaultLocale: "en" | "ar" };
   presentation: {
     displayName?: LocalizedText;
@@ -74,6 +91,12 @@ export interface CompanyWebsiteSettings {
   services: WebsiteListItem[];
   coverage: WebsiteCoverageItem[];
   benefits: WebsiteListItem[];
+  marketing: {
+    steps: WebsiteListItem[];
+    industries: WebsiteListItem[];
+    statistics: WebsiteListItem[];
+    testimonials: WebsiteListItem[];
+  };
   socialLinks: Partial<
     Record<"instagram" | "facebook" | "tiktok" | "linkedin" | "x" | "youtube", string>
   >;
@@ -154,6 +177,7 @@ export const EMPTY_COMPANY_WEBSITE_SETTINGS: CompanyWebsiteSettings = {
   services: [],
   coverage: [],
   benefits: [],
+  marketing: { steps: [], industries: [], statistics: [], testimonials: [] },
   socialLinks: {},
   functions: { trackingEnabled: true, requestDeliveryEnabled: true },
   seo: { indexable: true },
@@ -201,6 +225,14 @@ const allowedIcons = new Set([
   "star",
 ]);
 const ctaTypes = new Set(["contact", "track", "request_delivery", "whatsapp", "call", "section"]);
+const bannerTransitions = new Set(["fade", "slide", "zoom"]);
+
+function validatedBanner(value: string): string {
+  if (!/^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/u.test(value))
+    invalid("Website banner must be a PNG, JPEG or WebP image");
+  if (value.length > 2_800_000) invalid("Each Website banner must be 2 MB or smaller");
+  return value;
+}
 
 export function validateCompanyWebsiteSettings(value: unknown): CompanyWebsiteSettings {
   if (!value || typeof value !== "object" || Array.isArray(value))
@@ -213,6 +245,38 @@ export function validateCompanyWebsiteSettings(value: unknown): CompanyWebsiteSe
       if (v !== undefined && !color.test(v)) invalid(`${key} must be a six-digit hex color`);
       if (v) result.branding[key] = v.toLowerCase();
     }
+  if (input.branding?.logoDataUrl) {
+    const logo = input.branding.logoDataUrl;
+    if (!/^data:image\/(?:png|jpeg);base64,[A-Za-z0-9+/]+={0,2}$/u.test(logo))
+      invalid("Website logo must be a PNG or JPEG image");
+    if (logo.length > 700_000) invalid("Website logo must be 500 KB or smaller");
+    result.branding.logoDataUrl = logo;
+  }
+  if (input.branding?.bannerDataUrls !== undefined) {
+    if (!Array.isArray(input.branding.bannerDataUrls) || input.branding.bannerDataUrls.length > 3)
+      invalid("A Website may have no more than 3 homepage banners");
+    result.branding.bannerDataUrls = input.branding.bannerDataUrls.map(validatedBanner);
+  } else if (input.branding?.bannerDataUrl) {
+    result.branding.bannerDataUrls = [validatedBanner(input.branding.bannerDataUrl)];
+  }
+  if (input.branding?.bannerDataUrlsAr !== undefined) {
+    if (
+      !Array.isArray(input.branding.bannerDataUrlsAr) ||
+      input.branding.bannerDataUrlsAr.length > 3
+    )
+      invalid("A Website may have no more than 3 Arabic homepage banners");
+    result.branding.bannerDataUrlsAr = input.branding.bannerDataUrlsAr.map(validatedBanner);
+  }
+  if (input.branding?.bannerTransition !== undefined) {
+    if (!bannerTransitions.has(input.branding.bannerTransition))
+      invalid("Banner transition must be fade, slide or zoom");
+    result.branding.bannerTransition = input.branding.bannerTransition;
+  }
+  if (input.branding?.bannerIntervalSeconds !== undefined) {
+    if (![4, 6, 8].includes(input.branding.bannerIntervalSeconds))
+      invalid("Banner rotation interval must be 4, 6 or 8 seconds");
+    result.branding.bannerIntervalSeconds = input.branding.bannerIntervalSeconds;
+  }
   if (input.languages) {
     result.languages = {
       en: input.languages.en === true,
@@ -231,6 +295,12 @@ export function validateCompanyWebsiteSettings(value: unknown): CompanyWebsiteSe
   result.contact = validateContact(input.contact ?? result.contact);
   result.services = validateList(input.services, "service");
   result.benefits = validateList(input.benefits, "benefit");
+  result.marketing = {
+    steps: validateList(input.marketing?.steps, "step"),
+    industries: validateList(input.marketing?.industries, "industry"),
+    statistics: validateList(input.marketing?.statistics, "statistic"),
+    testimonials: validateList(input.marketing?.testimonials, "testimonial"),
+  };
   result.coverage = validateCoverage(input.coverage);
   result.socialLinks = validateSocial(input.socialLinks);
   result.functions = {
@@ -455,6 +525,13 @@ function validateContact(
     if (v && !phone.test(v)) invalid(`${key} is invalid`);
     if (v) out[key] = v;
   }
+  const whatsappRequested = input.whatsappEnabled || input.showWhatsapp;
+  if (whatsappRequested && !out.whatsappNumber)
+    invalid("WhatsApp number is required when the Website WhatsApp button is enabled");
+  // Legacy drafts could set these two flags independently. They represent one
+  // public feature now, so normalize them atomically at the API boundary.
+  out.whatsappEnabled = whatsappRequested;
+  out.showWhatsapp = whatsappRequested;
   if (input.email && !email.test(input.email)) invalid("Public email is invalid");
   if (input.latitude !== undefined && (input.latitude < -90 || input.latitude > 90))
     invalid("Latitude is invalid");
@@ -514,13 +591,19 @@ function validateCoverage(items: WebsiteCoverageItem[] | undefined): WebsiteCove
     )
       invalid("Coverage entry is invalid");
     const area = item.area?.trim();
+    const emirateAr = item.emirateAr?.trim();
+    const areaAr = item.areaAr?.trim();
     const group = item.group?.trim();
+    if (emirateAr && emirateAr.length > 100) invalid("Coverage Arabic emirate is too long");
+    if (areaAr && areaAr.length > 200) invalid("Coverage Arabic area is too long");
     return {
       id: item.id,
       emirate: item.emirate.trim(),
+      ...(emirateAr ? { emirateAr } : {}),
       enabled: item.enabled === true,
       order: item.order,
       ...(area ? { area } : {}),
+      ...(areaAr ? { areaAr } : {}),
       ...(group ? { group } : {}),
     };
   });

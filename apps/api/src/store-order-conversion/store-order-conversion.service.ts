@@ -73,10 +73,14 @@ export class StoreOrderConversionService {
   public constructor(
     @Inject(DATABASE) private readonly database: Kysely<DatabaseSchema>,
     @Inject(OperationsService) private readonly operations: OperationsService,
-    @Inject(RequestSecurityContextStore) private readonly securityContext: RequestSecurityContextStore,
+    @Inject(RequestSecurityContextStore)
+    private readonly securityContext: RequestSecurityContextStore,
   ) {}
 
-  public async convertToDeliveryOrder(storeOrderNumber: string, correlationId: string): Promise<ConvertedStoreOrder> {
+  public async convertToDeliveryOrder(
+    storeOrderNumber: string,
+    correlationId: string,
+  ): Promise<ConvertedStoreOrder> {
     const storeOrder = await this.loadStoreOrder(storeOrderNumber);
 
     // §12/§39: an already-converted Store Order is a safe, idempotent
@@ -95,7 +99,10 @@ export class StoreOrderConversionService {
     }
 
     // §11/§69: zero-Company Store Orders are C5's concern, never converted here.
-    if (storeOrder.deliveryCompanyId === null || storeOrder.deliveryCompanyRelationshipId === null) {
+    if (
+      storeOrder.deliveryCompanyId === null ||
+      storeOrder.deliveryCompanyRelationshipId === null
+    ) {
       throw new ApplicationException(
         "store_order_not_ready_for_delivery_conversion",
         "This order has no Delivery Company assigned yet and cannot be converted.",
@@ -124,14 +131,21 @@ export class StoreOrderConversionService {
       // §8/§9: the ONLY source of Company/Trader ownership -- resolved from
       // the Store Order's own FROZEN relationship id, never from a current
       // default, never by name.
-      const relationship = await sql<{ accountId: string; companyId: string; traderId: string | null }>`
+      const relationship = await sql<{
+        accountId: string;
+        companyId: string;
+        traderId: string | null;
+      }>`
         select r.company_id as "companyId", r.trader_id as "traderId", t.account_id as "accountId"
           from trader_delivery_company_relationships r
           left join traders t on t.id = r.trader_id and t.company_id = r.company_id
          where r.id = ${storeOrder.deliveryCompanyRelationshipId}::uuid
       `.execute(this.database);
       const relationshipRow = relationship.rows[0];
-      if (relationshipRow === undefined || relationshipRow.companyId !== storeOrder.deliveryCompanyId) {
+      if (
+        relationshipRow === undefined ||
+        relationshipRow.companyId !== storeOrder.deliveryCompanyId
+      ) {
         // The frozen relationship no longer resolves, or points at a
         // different Company than the frozen `delivery_company_id` -- an
         // invariant the domain itself should never allow to break. Never
@@ -155,7 +169,11 @@ export class StoreOrderConversionService {
       // §23/§24: resolve the frozen destination text against THIS Company's
       // OWN current Area configuration -- never another Company's Area id,
       // never guessed if it no longer resolves.
-      const areaId = await this.resolveArea(target.companyId, storeOrder.deliveryEmirate, storeOrder.deliveryArea);
+      const areaId = await this.resolveArea(
+        target.companyId,
+        storeOrder.deliveryEmirate,
+        storeOrder.deliveryArea,
+      );
       if (areaId === null) {
         throw new ApplicationException(
           "store_order_delivery_area_unavailable",
@@ -186,7 +204,12 @@ export class StoreOrderConversionService {
       const tenant = { companyId: target.companyId, identityId: target.accountId };
 
       const created = await this.securityContext.run({ identity, tenant }, async () => {
-        const nextSerial = await this.operations.nextSerialNumber();
+        const serialEnabled =
+          (
+            await sql<{ enabled: boolean }>`select shipment_serial_enabled_at is not null enabled
+          from companies where id=${target.companyId}::uuid`.execute(this.database)
+          ).rows[0]?.enabled === true;
+        const legacySerial = serialEnabled ? {} : await this.operations.nextSerialNumber();
         return this.operations.createOrder(
           {
             areaId,
@@ -202,10 +225,11 @@ export class StoreOrderConversionService {
             customerName: storeOrder.customerName,
             packageCount: 1, // §35: conservative default -- Store Order carries Product quantities, not shipment/package counts.
             referenceNumber: storeOrder.storeOrderNumber, // §17: the Store Order number, preserved as the Trader-facing external reference.
-            serialNumber: nextSerial.serialNumber,
+            ...legacySerial,
             // §25-27: the Company's own FROZEN service fee, never re-priced.
             serviceFee: Number(storeOrder.deliveryCompanyServiceFee),
-            serviceFeeOverrideReason: "Customer Commerce Store Order conversion: fee frozen at Store Order creation.",
+            serviceFeeOverrideReason:
+              "Customer Commerce Store Order conversion: fee frozen at Store Order creation.",
             traderId: target.traderId,
           },
           correlationId,
@@ -317,7 +341,9 @@ export class StoreOrderConversionService {
     `.execute(this.database);
     const row = result.rows[0];
     if (row === undefined) {
-      throw new Error(`store_orders.delivery_order_id ${deliveryOrderId} does not resolve to an Order`);
+      throw new Error(
+        `store_orders.delivery_order_id ${deliveryOrderId} does not resolve to an Order`,
+      );
     }
     return row;
   }
@@ -330,7 +356,11 @@ export class StoreOrderConversionService {
    * real foreign key (§23 of the audit) -- there is no "global" Area row to
    * fall back to, so an unresolvable Area is a genuine conversion blocker,
    * not merely a missing price tier. */
-  private async resolveArea(companyId: string, emirateText: string, areaText: string): Promise<string | null> {
+  private async resolveArea(
+    companyId: string,
+    emirateText: string,
+    areaText: string,
+  ): Promise<string | null> {
     const result = await sql<{ id: string }>`
       select a.id from areas a
         join emirates e on e.id = a.emirate_id

@@ -1,5 +1,25 @@
-import { describe, expect, it } from "vitest";
-import { arabicGeneralFallback, contextualGeneralFollowUpResponse, generalKnowledgeContent, isAgentAnyPricingTopicText, isAgentConfusionText, isAgentDeductionQuestionText, isAgentExplainOnlyText, isAgentFeatureExplanationText, isAgentPlatformPricingQuestionText, isAgentPriceQuestionText, isAgentTraderExplanationChoiceText, isAgentTraderUsageQuestionText, isCorruptedArabicText, persistableAgentConversationIntent, privacyBoundaryResponse, publicAgentLabel, publicConversationIntroStep } from "./agent.service.js";
+import { describe, expect, it, vi } from "vitest";
+import {
+  AgentService,
+  arabicGeneralFallback,
+  contextualGeneralFollowUpResponse,
+  generalKnowledgeContent,
+  isAgentAnyPricingTopicText,
+  isAgentConfusionText,
+  isAgentDeductionQuestionText,
+  isAgentExplainOnlyText,
+  isAgentFeatureExplanationText,
+  isAgentPlatformPricingQuestionText,
+  isAgentPriceQuestionText,
+  isAgentTraderExplanationChoiceText,
+  isAgentTraderUsageQuestionText,
+  isCorruptedArabicText,
+  isMenuRequestText,
+  persistableAgentConversationIntent,
+  privacyBoundaryResponse,
+  publicAgentLabel,
+  publicConversationIntroStep,
+} from "./agent.service.js";
 
 describe("AgentService general knowledge content", () => {
   it("does not show corrupted question-mark Arabic seed data to visitors", () => {
@@ -35,27 +55,35 @@ describe("AgentService privacy boundary", () => {
 
 describe("AgentService public conversation intro", () => {
   it("asks for the visitor name before answering business questions", () => {
-    const response = publicConversationIntroStep("ما هو توصيل هب", "ar", { slots: {}, audience: "unknown" });
+    const response = publicConversationIntroStep("ما هو توصيل هب", "ar", {
+      slots: {},
+      audience: "unknown",
+    });
 
     expect(response?.content).toContain("ما اسمك");
     expect(response?.structured.state.lastAskedSlot).toBe("contactName");
   });
 
-  it("collects name, UAE mobile, company or store name, and email before opening the conversation", () => {
-    const afterName = publicConversationIntroStep("علي", "ar", { slots: {}, audience: "unknown", lastAskedSlot: "contactName" });
+  it("collects only name and UAE mobile -- never company/store name or email, regardless of context", () => {
+    const afterName = publicConversationIntroStep("علي", "ar", {
+      slots: {},
+      audience: "unknown",
+      lastAskedSlot: "contactName",
+    });
     expect(afterName?.content).toContain("الهاتف");
 
-    const afterMobile = publicConversationIntroStep("0506468441", "ar", afterName!.structured.state);
-    expect(afterMobile?.content).toContain("الشركة أو المتجر");
-
-    const afterCompany = publicConversationIntroStep("متجر ايمن", "ar", afterMobile!.structured.state);
-    expect(afterCompany?.content).toContain("البريد الإلكتروني");
-
-    const afterEmail = publicConversationIntroStep("aothman@hotmail.com", "ar", afterCompany!.structured.state);
-    expect(afterEmail?.content).toContain("كيف يمكنني مساعدتك");
-    expect(afterEmail?.structured.state.lastAskedSlot).toBeUndefined();
-    expect(afterEmail?.structured.state.slots.email).toBe("aothman@hotmail.com");
-    expect(afterEmail?.structured.state.slots.requesterMobile).toBe("0506468441");
+    const afterMobile = publicConversationIntroStep(
+      "0506468441",
+      "ar",
+      afterName!.structured.state,
+    );
+    // No pending workflow -- generic acknowledgement, not a company/email ask.
+    expect(afterMobile?.content).toContain("كيف يمكنني مساعدتك");
+    expect(afterMobile?.content).not.toContain("الشركة أو المتجر");
+    expect(afterMobile?.structured.state.lastAskedSlot).toBeUndefined();
+    expect(afterMobile?.structured.state.slots.requesterMobile).toBe("0506468441");
+    expect(afterMobile?.structured.state.slots.companyName).toBeUndefined();
+    expect(afterMobile?.structured.state.slots.email).toBeUndefined();
   });
 
   it("does not accept an invalid UAE mobile during the intro", () => {
@@ -68,16 +96,191 @@ describe("AgentService public conversation intro", () => {
     expect(response?.content).toContain("رقم الهاتف غير واضح");
     expect(response?.structured.state.lastAskedSlot).toBe("requesterMobile");
   });
+});
 
-  it("does not accept an invalid email during the intro", () => {
-    const response = publicConversationIntroStep("ما في", "ar", {
-      slots: { contactName: "علي", requesterMobile: "0506468441", companyName: "متجر ايمن" },
+describe("AgentService public conversation intro -- resuming a pending workflow", () => {
+  // Once name + mobile are collected, a pending workflow (tracking, trader
+  // registration, demo request, a package quote...) is resumed via
+  // `resumeIntent` -- the caller then calls that workflow's OWN next-question
+  // logic directly, so this only has to prove the correct workflow is named
+  // and the slots survive the handoff, not duplicate each workflow's copy.
+  it.each([
+    ["shipment_tracking", "shipment_tracking"],
+    ["trader", "trader"],
+    ["delivery_company_demo", "delivery_company_demo"],
+    ["customer_quote", "customer_quote"],
+  ] as const)(
+    "hands off to a pending %s workflow instead of asking for a company or email",
+    (pendingWorkflowIntent, expectedResumeIntent) => {
+      const afterName = publicConversationIntroStep(
+        "Ahmed",
+        "en",
+        { slots: {}, audience: "unknown", lastAskedSlot: "contactName" },
+        pendingWorkflowIntent,
+      );
+      expect(afterName?.content).toContain("mobile");
+      expect(afterName?.resumeIntent).toBeUndefined();
+
+      const afterMobile = publicConversationIntroStep(
+        "0501234567",
+        "en",
+        afterName!.structured.state,
+        pendingWorkflowIntent,
+      );
+      expect(afterMobile?.resumeIntent).toBe(expectedResumeIntent);
+      expect(afterMobile?.structured.state.lastBusinessIntent).toBe(expectedResumeIntent);
+      expect(afterMobile?.structured.state.lastAskedSlot).toBeUndefined();
+      expect(afterMobile?.structured.state.slots.requesterMobile).toBe("0501234567");
+      expect(afterMobile?.structured.state.slots.contactPerson).toBe("Ahmed");
+      expect(afterMobile?.structured.state.slots.mobileNumber).toBe("0501234567");
+      // Never collected here -- whichever workflow actually needs a company/
+      // store name or email (trader, demo) asks for it itself once resumed.
+      expect(afterMobile?.structured.state.slots.companyName).toBeUndefined();
+      expect(afterMobile?.structured.state.slots.storeName).toBeUndefined();
+      expect(afterMobile?.structured.state.slots.email).toBeUndefined();
+    },
+  );
+
+  it("does the same in Arabic", () => {
+    const afterName = publicConversationIntroStep(
+      "أحمد",
+      "ar",
+      { slots: {}, audience: "unknown", lastAskedSlot: "contactName" },
+      "shipment_tracking",
+    );
+    expect(afterName?.content).toContain("الهاتف");
+
+    const afterMobile = publicConversationIntroStep(
+      "0501234567",
+      "ar",
+      afterName!.structured.state,
+      "shipment_tracking",
+    );
+    expect(afterMobile?.resumeIntent).toBe("shipment_tracking");
+  });
+
+  it("gives the generic acknowledgement, not a resume, when no workflow is pending", () => {
+    const afterMobile = publicConversationIntroStep("0501234567", "en", {
+      slots: { contactName: "Ahmed" },
       audience: "unknown",
-      lastAskedSlot: "email",
+      lastAskedSlot: "requesterMobile",
     });
+    expect(afterMobile?.resumeIntent).toBeUndefined();
+    expect(afterMobile?.content).toContain("Thanks, I saved the contact details");
+  });
+});
 
-    expect(response?.content).toContain("غير واضح");
-    expect(response?.structured.state.lastAskedSlot).toBe("email");
+describe("AgentService menu request detection", () => {
+  it("recognizes 'menu' and its variants as a request to start over, in EN and AR", () => {
+    expect(isMenuRequestText("menu")).toBe(true);
+    expect(isMenuRequestText("Menu")).toBe(true);
+    expect(isMenuRequestText(" menu ")).toBe(true);
+    expect(isMenuRequestText("main menu")).toBe(true);
+    expect(isMenuRequestText("show menu")).toBe(true);
+    expect(isMenuRequestText("options")).toBe(true);
+    expect(isMenuRequestText("القائمة")).toBe(true);
+    expect(isMenuRequestText("قائمة")).toBe(true);
+  });
+
+  it("does not misfire on ordinary answers that merely mention the word", () => {
+    expect(isMenuRequestText("I saw your menu online")).toBe(false);
+    expect(isMenuRequestText("Ahmed")).toBe(false);
+    expect(isMenuRequestText("0501234567")).toBe(false);
+  });
+});
+
+describe("AgentService tracking mobile auto-verification", () => {
+  function trackingOnlyService(verifyAmbiguousShipment: ReturnType<typeof vi.fn>) {
+    // trackingStep never touches db/quotes/traders/demos/model -- only
+    // `this.tracking` -- so these can stay undefined for this test.
+    return new AgentService(
+      undefined as never,
+      undefined as never,
+      undefined as never,
+      undefined as never,
+      undefined as never,
+      { verifyAmbiguousShipment } as never,
+    );
+  }
+
+  it("tries the mobile the customer already gave as their contact number, automatically -- never asks them to repeat it", async () => {
+    const verifyAmbiguousShipment = vi.fn().mockResolvedValue({
+      result: "verified",
+      tracking: {
+        airwayBill: "ORD-000200",
+        status: "delivered",
+        statusLabel: "Delivered",
+        lastUpdated: "2026-08-28T08:00:00.000Z",
+        deliveredAt: null,
+        timeline: [],
+      },
+    });
+    const service = trackingOnlyService(verifyAmbiguousShipment);
+    const state = {
+      slots: { contactName: "Aiman", requesterMobile: "0506468441", trackingAirwayBill: "12" },
+      tracking: { verificationToken: "tok-123", startedAt: new Date().toISOString() },
+    };
+
+    const response = await (
+      service as unknown as {
+        trackingStep: (s: unknown, l: string) => Promise<{ content: string }>;
+      }
+    ).trackingStep(state, "en");
+
+    expect(verifyAmbiguousShipment).toHaveBeenCalledWith("tok-123", "0506468441", "en");
+    expect(response.content).not.toContain("Additional verification required");
+    expect(response.content).toContain("Delivered");
+  });
+
+  it("does not count the automatic attempt against the failed-attempt limit, and asks for a different number instead of looping on the same one", async () => {
+    const verifyAmbiguousShipment = vi.fn().mockResolvedValue({ result: "not_verified" });
+    const service = trackingOnlyService(verifyAmbiguousShipment);
+    const state = {
+      slots: { contactName: "Aiman", requesterMobile: "0506468441", trackingAirwayBill: "12" },
+      tracking: { verificationToken: "tok-123", startedAt: new Date().toISOString() },
+    };
+
+    const response = await (
+      service as unknown as {
+        trackingStep: (
+          s: unknown,
+          l: string,
+        ) => Promise<{
+          content: string;
+          structured: {
+            state: { tracking?: { failedMobileAttempts?: number; autoMobileAttempted?: boolean } };
+          };
+        }>;
+      }
+    ).trackingStep(state, "en");
+
+    expect(response.content).toContain("enter the customer mobile number");
+    expect(response.structured.state.tracking?.failedMobileAttempts ?? 0).toBe(0);
+    expect(response.structured.state.tracking?.autoMobileAttempted).toBe(true);
+  });
+
+  it("does not retry the auto-tried mobile a second time -- it asks for an explicit answer next", async () => {
+    const verifyAmbiguousShipment = vi.fn().mockResolvedValue({ result: "not_verified" });
+    const service = trackingOnlyService(verifyAmbiguousShipment);
+    const state = {
+      slots: { contactName: "Aiman", requesterMobile: "0506468441", trackingAirwayBill: "12" },
+      // autoMobileAttempted already true from a prior turn -- no known
+      // mobile should be auto-tried again.
+      tracking: {
+        verificationToken: "tok-123",
+        startedAt: new Date().toISOString(),
+        autoMobileAttempted: true,
+      },
+    };
+
+    const response = await (
+      service as unknown as {
+        trackingStep: (s: unknown, l: string) => Promise<{ content: string }>;
+      }
+    ).trackingStep(state, "en");
+
+    expect(verifyAmbiguousShipment).not.toHaveBeenCalled();
+    expect(response.content).toContain("Additional verification required");
   });
 });
 
@@ -159,8 +362,16 @@ describe("AgentService contextual Arabic follow-up helpers", () => {
     const response = contextualGeneralFollowUpResponse(
       "التسجيل كتاجر",
       "ar",
-      { slots: { storeName: "ايمن", mobileNumber: "0506468441" }, audience: "unknown", pendingGeneralFollowUp: "feature_choice" },
-      { slots: { storeName: "ايمن", mobileNumber: "0506468441" }, audience: "trader", lastBusinessIntent: "trader" },
+      {
+        slots: { storeName: "ايمن", mobileNumber: "0506468441" },
+        audience: "unknown",
+        pendingGeneralFollowUp: "feature_choice",
+      },
+      {
+        slots: { storeName: "ايمن", mobileNumber: "0506468441" },
+        audience: "trader",
+        lastBusinessIntent: "trader",
+      },
     );
 
     expect(response?.content).toContain("يعني");
@@ -173,7 +384,11 @@ describe("AgentService contextual Arabic follow-up helpers", () => {
     const response = contextualGeneralFollowUpResponse(
       "نعم",
       "ar",
-      { slots: { storeName: "قديم" }, audience: "trader", pendingGeneralFollowUp: "trader_registration_explained" },
+      {
+        slots: { storeName: "قديم" },
+        audience: "trader",
+        pendingGeneralFollowUp: "trader_registration_explained",
+      },
       { slots: { storeName: "قديم" }, audience: "trader", lastBusinessIntent: "trader" },
     );
 
@@ -188,8 +403,16 @@ describe("AgentService contextual Arabic follow-up helpers", () => {
     const response = contextualGeneralFollowUpResponse(
       "الكلام غير مفهوم",
       "ar",
-      { slots: {}, audience: "trader", pendingAction: { type: "submit_trader_application", summary: { store: "ايمن" } } },
-      { slots: {}, audience: "trader", pendingAction: { type: "submit_trader_application", summary: { store: "ايمن" } } },
+      {
+        slots: {},
+        audience: "trader",
+        pendingAction: { type: "submit_trader_application", summary: { store: "ايمن" } },
+      },
+      {
+        slots: {},
+        audience: "trader",
+        pendingAction: { type: "submit_trader_application", summary: { store: "ايمن" } },
+      },
     );
 
     expect(response?.content).toContain("لن أرسله");
@@ -220,8 +443,16 @@ describe("AgentService contextual Arabic follow-up helpers", () => {
     const response = contextualGeneralFollowUpResponse(
       "التجار",
       "ar",
-      { slots: { contactName: "ايمن", companyName: "فهد", email: "fahid@hotmail.com" }, audience: "unknown", pendingGeneralFollowUp: "public_explanation" },
-      { slots: { contactName: "ايمن", companyName: "فهد", email: "fahid@hotmail.com" }, audience: "trader", lastBusinessIntent: "trader" },
+      {
+        slots: { contactName: "ايمن", companyName: "فهد", email: "fahid@hotmail.com" },
+        audience: "unknown",
+        pendingGeneralFollowUp: "public_explanation",
+      },
+      {
+        slots: { contactName: "ايمن", companyName: "فهد", email: "fahid@hotmail.com" },
+        audience: "trader",
+        lastBusinessIntent: "trader",
+      },
     );
 
     expect(response?.content).toContain("بالنسبة للتاجر");
@@ -234,8 +465,18 @@ describe("AgentService contextual Arabic follow-up helpers", () => {
     const response = contextualGeneralFollowUpResponse(
       "انت فقط اشرح النظام",
       "ar",
-      { slots: { storeName: "ايمن" }, audience: "trader", lastBusinessIntent: "trader", lastAskedSlot: "pickupEmirate" },
-      { slots: { storeName: "ايمن" }, audience: "trader", lastBusinessIntent: "trader", lastAskedSlot: "pickupEmirate" },
+      {
+        slots: { storeName: "ايمن" },
+        audience: "trader",
+        lastBusinessIntent: "trader",
+        lastAskedSlot: "pickupEmirate",
+      },
+      {
+        slots: { storeName: "ايمن" },
+        audience: "trader",
+        lastBusinessIntent: "trader",
+        lastAskedSlot: "pickupEmirate",
+      },
     );
 
     expect(response?.content).toContain("أوقفت نموذج الطلب");
@@ -249,8 +490,16 @@ describe("AgentService contextual Arabic follow-up helpers", () => {
     const response = contextualGeneralFollowUpResponse(
       "اداره السائقين",
       "ar",
-      { slots: { contactName: "ايمن", companyName: "فهد", email: "fahid@hotmail.com" }, audience: "unknown", pendingGeneralFollowUp: "feature_choice" },
-      { slots: { contactName: "ايمن", companyName: "فهد", email: "fahid@hotmail.com" }, audience: "delivery_company", lastBusinessIntent: "delivery_company_demo" },
+      {
+        slots: { contactName: "ايمن", companyName: "فهد", email: "fahid@hotmail.com" },
+        audience: "unknown",
+        pendingGeneralFollowUp: "feature_choice",
+      },
+      {
+        slots: { contactName: "ايمن", companyName: "فهد", email: "fahid@hotmail.com" },
+        audience: "delivery_company",
+        lastBusinessIntent: "delivery_company_demo",
+      },
     );
 
     expect(response?.intent).toBe("product_feature_question");

@@ -13,6 +13,8 @@ export default tseslint.config(
       "**/.vite/**",
       "**/.dart_tool/**",
       "**/.tools/**",
+      // Independent Git worktree/submodule with its own TypeScript root.
+      ".sync-freeorder/**",
       "**/build/**",
       "Documentation/**",
     ],

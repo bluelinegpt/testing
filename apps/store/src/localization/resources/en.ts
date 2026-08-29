@@ -115,7 +115,8 @@ export const en = {
     lineUnavailable: {
       option_removed: "This option is no longer available. Remove this item to continue shopping.",
       product_inactive: "This product is no longer listed. Remove this item to continue shopping.",
-      product_unavailable: "This product is currently unavailable. Remove this item to continue shopping.",
+      product_unavailable:
+        "This product is currently unavailable. Remove this item to continue shopping.",
     },
     proceedToCheckout: "Proceed to Checkout",
     productSubtotal: "Product Subtotal",
@@ -131,12 +132,16 @@ export const en = {
   },
   checkout: {
     address: {
-      area: "Area (optional)",
+      area: "Area",
+      areaChooseEmirateFirst: "Choose an Emirate first",
+      chooseEmirate: "Choose an Emirate…",
       emirate: "Emirate",
       address: "Address",
       instructions: "Delivery instructions (optional)",
       locationLink: "Location link (optional)",
+      noAreaResults: "No matching areas",
       savedAddress: "Delivery address",
+      searchArea: "Search for your area…",
       title: "Delivery Address",
       useNewAddress: "Use a new address",
     },
@@ -150,7 +155,8 @@ export const en = {
     },
     confirmation: {
       lead: "Thank you — your order {{number}} has been placed.",
-      noStateBody: "We couldn't show your order details here, but it was placed successfully. Track it below.",
+      noStateBody:
+        "We couldn't show your order details here, but it was placed successfully. Track it below.",
       noStateTitle: "Order placed",
       storeWillConfirm: "The store will confirm delivery",
       title: "Order Confirmed",
@@ -166,14 +172,19 @@ export const en = {
     errors: {
       checkout_address_not_found: "That saved address could not be found.",
       checkout_address_required: "Enter your delivery address.",
-      checkout_changed: "Your order has changed since you last reviewed it. Please review your order again.",
-      checkout_delivery_company_invalid: "The selected delivery company is not available for this store.",
-      checkout_idempotency_conflict: "This order does not match an earlier attempt. Please review your order again.",
+      checkout_area_invalid: "Select a valid Area from the list.",
+      checkout_changed:
+        "Your order has changed since you last reviewed it. Please review your order again.",
+      checkout_delivery_company_invalid:
+        "The selected delivery company is not available for this store.",
+      checkout_idempotency_conflict:
+        "This order does not match an earlier attempt. Please review your order again.",
       checkout_invalid_mobile: "Enter a valid UAE mobile number.",
       checkout_name_required: "Enter your name.",
       checkout_store_not_found: "This store could not be found.",
       checkout_store_unavailable: "This store is not accepting orders right now.",
-      checkout_submission_in_progress: "Your order is already being submitted. Please wait a moment and try again.",
+      checkout_submission_in_progress:
+        "Your order is already being submitted. Please wait a moment and try again.",
       network_error: "Could not reach the server. Please try again.",
       unknown_error: "Something went wrong. Please try again.",
     },
@@ -277,7 +288,8 @@ export const en = {
     address: "Address",
     backToOrders: "Back to My Orders",
     browseStores: "Browse Stores",
-    cancelledNote: "This Order was cancelled. Cash on Delivery only — no online payment was ever taken.",
+    cancelledNote:
+      "This Order was cancelled. Cash on Delivery only — no online payment was ever taken.",
     codTotal: "Total (Cash on Delivery)",
     delivery: "Delivery",
     deliveredBy: "Delivered by {{company}}",

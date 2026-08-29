@@ -18,6 +18,7 @@ const PLATFORM_PRESERVE = [
 
 const SHARED_PRESERVE = [
   ...RESET_GLOBAL_TABLES,
+  "shipment_prefix_reservations",
   "storefront_marketplace_categories",
   "role_permissions",
   // 2026-08-12 review: `commerce_customers` / `commerce_customer_addresses`
@@ -43,6 +44,12 @@ const SHARED_PRESERVE = [
   // (confirmed against `pg_constraint`) -- the store-order equivalent of the
   // already-global numbering infrastructure, not per-Company data.
   "store_order_number_counters",
+  // This table has no `company_id`, so it is intentionally excluded from
+  // the generic direct-table loop. Completed reservations are owned through
+  // `store_order_id -> store_orders`; the execution service deletes only
+  // those belonging to the target Company's Store Orders. Pending rows have
+  // no Store Order yet and remain global checkout coordination state.
+  "store_order_idempotency_keys",
   // `store_orders` / `store_order_items` are NOT actually global -- see
   // `COMPANY_DELETION_INDIRECT` below for their real ownership and the
   // matching scoped delete in the execution service. They are listed here
@@ -97,6 +104,7 @@ const SHARED_PRESERVE = [
 
 /** Tables added after the reset manifest's last business-data review. */
 const NEW_DIRECT_TABLES = [
+  "company_shipment_serial_counters",
   "company_website_agent_conversations",
   "company_websites",
   "company_website_delivery_requests",
@@ -137,6 +145,12 @@ const NEW_DIRECT_TABLES = [
   "platform_customer_quote_offers",
   "employee_collect_order_earnings",
   "order_serial_history",
+  // Platform fees are still Company-owned financial rows: both tables carry
+  // a required `company_id`, and payments depend on receivables while
+  // receivables depend on Orders. The generic FK-derived deletion ordering
+  // therefore removes them safely before their parents.
+  "platform_fee_payments",
+  "platform_fee_receivables",
 ] as const;
 
 // Prompt 15 (push notifications) added two new Company-scoped tables —
@@ -254,6 +268,11 @@ export const COMPANY_DELETION_INDIRECT = [
   {
     table: "store_order_items",
     ownership: "store_order_items.store_order_id -> store_orders.id (on delete cascade)",
+  },
+  {
+    table: "store_order_idempotency_keys",
+    ownership:
+      "store_order_idempotency_keys.store_order_id -> store_orders.id where store_orders.delivery_company_id = target",
   },
   {
     table: "commerce_integration_credentials",

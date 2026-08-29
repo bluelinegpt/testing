@@ -70,6 +70,26 @@ describe("Edit order", () => {
     const api = {
       get: vi.fn().mockResolvedValue(detail),
       patch: vi.fn().mockResolvedValue({}),
+      post: vi.fn().mockResolvedValue({
+        additionalFees: "0.00",
+        additionalFeeVatAmount: "0.00",
+        codAmount: "100.00",
+        companyRevenue: "10.00",
+        configuredServiceFee: "10.00",
+        customerAmountDue: "110.00",
+        orderProfit: "10.00",
+        overrideApplied: false,
+        pricingProvenance: "resolved",
+        pricingRuleId: "pricing-rule-1",
+        serviceFee: "10.00",
+        serviceFeeVatAmount: "0.00",
+        totalDeductions: "10.00",
+        traderNetPayable: "90.00",
+        vatAmount: "0.00",
+        vatEnabled: false,
+        vatPriceMode: null,
+        vatRate: "0.00",
+      }),
     };
     render(
       <OrderDetailsWorkspace

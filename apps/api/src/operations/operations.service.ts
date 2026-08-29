@@ -128,7 +128,8 @@ export interface OperationsOrderFilters {
   readonly serialNumber?: string | undefined;
   readonly search?: string | undefined;
   readonly settlementStatus?: string | undefined;
-  readonly workflowStep?: "complete" | "collect_from_driver" | "collect_from_trader" | "settle_trader" | undefined;
+  readonly workflowStep?:
+    "complete" | "collect_from_driver" | "collect_from_trader" | "settle_trader" | undefined;
   readonly quickView?:
     "active" | "all" | "cancelled" | "closed" | "hold" | "accountant" | undefined;
   /**
@@ -695,8 +696,7 @@ interface ResolvedServiceFee {
   readonly servicePriceId: string | null;
 }
 
-interface InsertOrderInput
-  extends Omit<CreateOrderDto, "customerMobileNumber" | "customerName"> {
+interface InsertOrderInput extends Omit<CreateOrderDto, "customerMobileNumber" | "customerName"> {
   readonly correlationId: string;
   readonly createdByAccountId: string;
   readonly customerMobileNumber: string;
@@ -1493,7 +1493,7 @@ export class OperationsService {
     const emirateId = this.optionalUuidFilter(filters.emirateId);
     const dateFrom = this.optionalDate(filters.dateFrom);
     const dateTo = this.optionalDate(filters.dateTo);
-const exportOpenTraderReceivablePredicate = sql`
+    const exportOpenTraderReceivablePredicate = sql`
       exists (
         select 1
         from trader_receivables workflow_receivable
@@ -2439,9 +2439,9 @@ const exportOpenTraderReceivablePredicate = sql`
     // Own Company: no override needed, identical to today's behaviour except
     // for server-generated serial numbers.
     if (target.companyId === identity.companyId) {
-      const nextSerial = await this.nextSerialNumber();
+      const nextSerial = await this.legacySerialInputForAutomaticPath();
       return this.createOrder(
-        { ...pricedByCompany, serialNumber: nextSerial.serialNumber, traderId: target.traderId },
+        { ...pricedByCompany, ...nextSerial, traderId: target.traderId },
         correlationId,
         idempotencyKey,
       );
@@ -2454,15 +2454,18 @@ const exportOpenTraderReceivablePredicate = sql`
     // Trader account) satisfies every composite actor FK `createOrder`
     // writes through. See `resolveTraderPortalDeliveryCompany`'s doc
     // comment for the full reasoning.
-    return this.tenants.run({ companyId: target.companyId, identityId: identity.identityId }, async () => {
-      const nextSerial = await this.nextSerialNumber();
-      return this.createOrder(
-        { ...pricedByCompany, serialNumber: nextSerial.serialNumber, traderId: target.traderId },
-        correlationId,
-        idempotencyKey,
-        target.accountId,
-      );
-    });
+    return this.tenants.run(
+      { companyId: target.companyId, identityId: identity.identityId },
+      async () => {
+        const nextSerial = await this.legacySerialInputForAutomaticPath();
+        return this.createOrder(
+          { ...pricedByCompany, ...nextSerial, traderId: target.traderId },
+          correlationId,
+          idempotencyKey,
+          target.accountId,
+        );
+      },
+    );
   }
 
   public async updateTraderPortalOrder(
@@ -3532,9 +3535,8 @@ const exportOpenTraderReceivablePredicate = sql`
         HttpStatus.BAD_REQUEST,
       );
     }
-    const serialNumber = input.serialNumber.trim();
+    const suppliedSerialNumber = input.serialNumber?.trim() || null;
     const referenceNumber = input.referenceNumber?.trim() || null;
-    const serialNumberNormalized = this.normalizeOrderIdentifier(serialNumber);
     const referenceNumberNormalized =
       referenceNumber === null ? null : this.normalizeOrderIdentifier(referenceNumber);
     const collectOrder = input.orderType === "collect_order";
@@ -3608,7 +3610,7 @@ const exportOpenTraderReceivablePredicate = sql`
           notes,
           packageCount,
           referenceNumber,
-          serialNumber,
+          serialNumber: suppliedSerialNumber,
           serviceFee: input.serviceFee ?? null,
           serviceFeeOverrideReason: input.serviceFeeOverrideReason?.trim() || null,
           traderId: input.traderId,
@@ -3617,6 +3619,33 @@ const exportOpenTraderReceivablePredicate = sql`
       .digest("hex");
 
     return this.transactions.execute(async (transaction) => {
+      const numbering = (
+        await sql<{ enabled: boolean }>`
+        select shipment_serial_enabled_at is not null as enabled
+          from companies where id=${companyId}::uuid for share
+      `.execute(transaction)
+      ).rows[0];
+      if (numbering === undefined) {
+        throw new ApplicationException(
+          "company_not_found",
+          "Company was not found",
+          HttpStatus.NOT_FOUND,
+        );
+      }
+      if (numbering.enabled && suppliedSerialNumber !== null) {
+        throw new ApplicationException(
+          "shipment_serial_server_generated",
+          "Shipment Serial Number is generated automatically for this Delivery Company. Remove the supplied serial and use the appropriate external reference field.",
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      if (!numbering.enabled && suppliedSerialNumber === null) {
+        throw new ApplicationException(
+          "serial_number_required",
+          "Serial Number is required until Company shipment serial generation is activated",
+          HttpStatus.BAD_REQUEST,
+        );
+      }
       const reservation = await sql<{ id: string }>`
         insert into idempotency_records (
           company_id, operation, idempotency_key, request_hash, expires_at
@@ -3652,6 +3681,21 @@ const exportOpenTraderReceivablePredicate = sql`
           HttpStatus.CONFLICT,
         );
       }
+
+      // Allocation happens only after this idempotency key has won its
+      // reservation. It shares this transaction with both normalized value
+      // creation and the Order INSERT, so retries and rollbacks consume no
+      // shipment serial.
+      const serialNumber = numbering.enabled
+        ? (
+            await sql<{
+              value: string;
+            }>`select allocate_company_shipment_serial(${companyId}::uuid) as value`.execute(
+              transaction,
+            )
+          ).rows[0]!.value
+        : suppliedSerialNumber!;
+      const serialNumberNormalized = this.normalizeOrderIdentifier(serialNumber);
 
       await this.assertOrderIdentifiersAvailable(transaction, companyId, {
         referenceNumber,
@@ -4166,8 +4210,14 @@ const exportOpenTraderReceivablePredicate = sql`
     };
   }
 
-  public async nextSerialNumber(): Promise<{ serialNumber: string }> {
+  public async nextSerialNumber(): Promise<{ serialNumber: string; serverGenerated?: boolean }> {
     const { companyId } = this.tenants.current();
+    const enabled =
+      (
+        await sql<{ enabled: boolean }>`select shipment_serial_enabled_at is not null enabled
+      from companies where id=${companyId}::uuid`.execute(this.database)
+      ).rows[0]?.enabled === true;
+    if (enabled) return { serialNumber: "", serverGenerated: true };
     const result = await sql<{ serialNumber: string }>`
       select (coalesce(max(serial_number::bigint), 0) + 1)::text as "serialNumber"
         from orders
@@ -4177,6 +4227,16 @@ const exportOpenTraderReceivablePredicate = sql`
     `.execute(this.database);
 
     return { serialNumber: result.rows[0]?.serialNumber ?? "1" };
+  }
+
+  private async legacySerialInputForAutomaticPath(): Promise<{ serialNumber?: string }> {
+    const { companyId } = this.tenants.current();
+    const enabled =
+      (
+        await sql<{ enabled: boolean }>`select shipment_serial_enabled_at is not null enabled
+      from companies where id=${companyId}::uuid`.execute(this.database)
+      ).rows[0]?.enabled === true;
+    return enabled ? {} : this.nextSerialNumber();
   }
 
   public async importOrdersCsv(
@@ -4191,7 +4251,12 @@ const exportOpenTraderReceivablePredicate = sql`
     const identity = this.identities.current();
     const actingAccountId = actingAccountIdOverride ?? identity.identityId;
     const csv = String((input as { readonly csv?: unknown }).csv ?? "");
-    const parsed = this.parseOrdersCsv(csv);
+    const shipmentSerialEnabled =
+      (
+        await sql<{ enabled: boolean }>`select shipment_serial_enabled_at is not null enabled
+      from companies where id=${companyId}::uuid`.execute(this.database)
+      ).rows[0]?.enabled === true;
+    const parsed = this.parseOrdersCsv(csv, shipmentSerialEnabled);
     const errors = parsed.errors.slice();
     // Validation is all-or-nothing and runs BEFORE the transaction opens, which
     // is what makes this import atomic in the way it already promised: if any
@@ -4844,17 +4909,17 @@ const exportOpenTraderReceivablePredicate = sql`
       // Free Orders are never re-priced: their fee is zero by definition.
       const pricing =
         identityRepriced && !isFreeOrder
-        ? await this.resolveServiceFee(transaction, {
-            areaId,
-            companyId,
-            permissions: identity.permissions,
-            ...(input.serviceFee === undefined ? {} : { requestedFee: input.serviceFee }),
-            ...(input.serviceFeeReason === undefined
-              ? {}
-              : { requestedReason: input.serviceFeeReason }),
-            traderId,
-          })
-        : null;
+          ? await this.resolveServiceFee(transaction, {
+              areaId,
+              companyId,
+              permissions: identity.permissions,
+              ...(input.serviceFee === undefined ? {} : { requestedFee: input.serviceFee }),
+              ...(input.serviceFeeReason === undefined
+                ? {}
+                : { requestedReason: input.serviceFeeReason }),
+              traderId,
+            })
+          : null;
       const finalFee = pricing ? pricing.finalFee : manualFeeProvided ? manualFee : currentFee;
       const feeValueChanged = !this.money(finalFee).equals(this.money(currentFee));
 
@@ -4868,13 +4933,16 @@ const exportOpenTraderReceivablePredicate = sql`
         : await this.vatPolicy(transaction, companyId);
       const financials = this.calculateOrderFinancials({
         additionalFees: new Decimal(
-          isFreeOrder ? (current.additionalFees ?? 0) : (input.additionalFees ?? current.additionalFees ?? 0),
+          isFreeOrder
+            ? (current.additionalFees ?? 0)
+            : (input.additionalFees ?? current.additionalFees ?? 0),
         ),
         codAmount: nextCod,
         driverCost: new Decimal(current.driverCost),
         prospective: isProspective,
         serviceFee: finalFee,
-        paymentCondition: current.paymentCondition as "customer_pays_cod_and_fee" | "customer_pays_cod_trader_pays_fee",
+        paymentCondition: current.paymentCondition as
+          "customer_pays_cod_and_fee" | "customer_pays_cod_trader_pays_fee",
         vatPolicy: currentVatPolicy,
       });
 
@@ -5309,10 +5377,7 @@ const exportOpenTraderReceivablePredicate = sql`
           HttpStatus.CONFLICT,
         );
       }
-      if (
-        ["hold", "cancelled", "returned_to_trader"].includes(status) &&
-        reason === null
-      ) {
+      if (["hold", "cancelled", "returned_to_trader"].includes(status) && reason === null) {
         throw new ApplicationException(
           "order_status_reason_required",
           status === "hold"
@@ -5339,11 +5404,10 @@ const exportOpenTraderReceivablePredicate = sql`
         const cashComplete = ["reconciled", "not_applicable"].includes(
           order.driverReconciliationStatus,
         );
-        const settlementComplete = [
-          "money_sent_to_trader",
-          "money_received_by_trader",
-          "not_eligible",
-        ].includes(order.settlementStatus) || Number(order.traderNetPayable) <= 0;
+        const settlementComplete =
+          ["money_sent_to_trader", "money_received_by_trader", "not_eligible"].includes(
+            order.settlementStatus,
+          ) || Number(order.traderNetPayable) <= 0;
         const returnComplete =
           order.deliveryStatus !== "returned_to_trader" ||
           order.returnStatus === "returned_to_trader";
@@ -5388,8 +5452,7 @@ const exportOpenTraderReceivablePredicate = sql`
       const traderSettlementStatus =
         status === "hold"
           ? order.settlementStatus
-          : status === "cancelled" ||
-              status === "returned_to_trader"
+          : status === "cancelled" || status === "returned_to_trader"
             ? "not_eligible"
             : deliveredFreeNoValue || noTraderPaymentDue
               ? "not_eligible"
@@ -6582,7 +6645,33 @@ const exportOpenTraderReceivablePredicate = sql`
     // Optional, same as the primary create path: absent becomes '', which the
     // NOT NULL column accepts because it carries no non-empty check.
     const customerAddress = (input.customerAddress ?? "").trim();
-    const serialNumber = input.serialNumber.trim();
+    const suppliedSerialNumber = input.serialNumber?.trim() || null;
+    const numberingEnabled =
+      (
+        await sql<{ enabled: boolean }>`select shipment_serial_enabled_at is not null enabled
+      from companies where id=${companyId}::uuid for share`.execute(database)
+      ).rows[0]?.enabled === true;
+    if (numberingEnabled && suppliedSerialNumber !== null) {
+      throw new ApplicationException(
+        "shipment_serial_server_generated",
+        "Shipment Serial Number is generated automatically for this Delivery Company. Remove the supplied serial and use the appropriate external reference field.",
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    if (!numberingEnabled && suppliedSerialNumber === null) {
+      throw new ApplicationException(
+        "serial_number_required",
+        "Serial Number is required until Company shipment serial generation is activated",
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    const serialNumber = numberingEnabled
+      ? (
+          await sql<{
+            value: string;
+          }>`select allocate_company_shipment_serial(${companyId}::uuid) value`.execute(database)
+        ).rows[0]!.value
+      : suppliedSerialNumber!;
     const referenceNumber = input.referenceNumber?.trim() || null;
     const serialNumberNormalized = this.normalizeOrderIdentifier(serialNumber);
     const referenceNumberNormalized =
@@ -7109,9 +7198,10 @@ const exportOpenTraderReceivablePredicate = sql`
     const traderNetPayable = input.prospective
       ? Decimal.max(signedTraderPosition, 0)
       : Decimal.max(input.codAmount.minus(input.serviceFee), 0);
-    const traderReceivableDue = input.prospective && !customerPaysFee
-      ? Decimal.max(signedTraderPosition.negated(), 0)
-      : new Decimal(0);
+    const traderReceivableDue =
+      input.prospective && !customerPaysFee
+        ? Decimal.max(signedTraderPosition.negated(), 0)
+        : new Decimal(0);
     return {
       additionalFees: this.money(additionalFees),
       additionalFeeVatAmount: this.money(additionalFeeVatAmount),
@@ -7193,7 +7283,10 @@ const exportOpenTraderReceivablePredicate = sql`
     return amount.toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
   }
 
-  private parseOrdersCsv(csv: string): {
+  private parseOrdersCsv(
+    csv: string,
+    shipmentSerialEnabled = false,
+  ): {
     readonly errors: readonly string[];
     /** Rows that failed validation, already phrased for the importer. */
     readonly invalid: readonly OperationsOrderImportRow[];
@@ -7220,7 +7313,7 @@ const exportOpenTraderReceivablePredicate = sql`
     // and reason rules. Existing import files that carry the column are
     // therefore unaffected.
     const required = [
-      "serialNumber",
+      ...(shipmentSerialEnabled ? [] : ["serialNumber"]),
       "traderId",
       "customerName",
       "customerMobileNumber",
@@ -7259,6 +7352,11 @@ const exportOpenTraderReceivablePredicate = sql`
       const rowErrors: string[] = [];
       for (const column of required) {
         if (read(column).length === 0) rowErrors.push(`${column} is required`);
+      }
+      if (shipmentSerialEnabled && read("serialNumber").length > 0) {
+        rowErrors.push(
+          "serialNumber must be blank because this Company generates it automatically",
+        );
       }
       if (!Number.isFinite(codAmount)) {
         rowErrors.push("Invalid COD: enter a number, or 0 for a no-collection Order");
@@ -7321,9 +7419,11 @@ const exportOpenTraderReceivablePredicate = sql`
         customerMobileNumber: read("customerMobileNumber"),
         customerName: read("customerName"),
         packageCount,
-        serialNumber: read("serialNumber"),
         traderId: read("traderId"),
       } as CreateOrderDto;
+      if (!shipmentSerialEnabled) {
+        (parsedRow as { serialNumber: string }).serialNumber = read("serialNumber");
+      }
       // Omitted rather than sent as undefined: `insertOrder` spreads the fee in
       // only when the key is present, and a present-but-undefined key would
       // read as a requested fee of nothing.
@@ -7709,12 +7809,3 @@ const exportOpenTraderReceivablePredicate = sql`
     `.execute(database);
   }
 }
-
-
-
-
-
-
-
-
-

@@ -19,6 +19,7 @@ const settings: CompanyWebsiteSettings = {
   services: [],
   coverage: [],
   benefits: [],
+  marketing: { steps: [], industries: [], statistics: [], testimonials: [] },
   socialLinks: {},
   sections: [],
   knowledge: {
@@ -76,5 +77,32 @@ describe("CompanyWebsiteEditor", () => {
         }),
       ),
     );
+  });
+
+  it("shows a visible field-specific error and does not call the API for oversized About text", async () => {
+    const save = vi.spyOn(platformApi, "configureCompanyWebsite");
+    save.mockClear();
+    render(
+      <CompanyWebsiteEditor
+        companyId="company-a"
+        website={{
+          status: "draft",
+          slug: "dana",
+          templateKey: "modern",
+          version: 7,
+          settings: {
+            ...settings,
+            presentation: { about: { en: "x".repeat(2001) } },
+          },
+        }}
+        onFailure={vi.fn()}
+        onSaved={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "About the company (EN) exceeds 2000 characters",
+    );
+    expect(save).not.toHaveBeenCalled();
   });
 });

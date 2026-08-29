@@ -98,6 +98,7 @@ export interface CompanyListRow {
 
 export interface CreateCompanyInput {
   readonly name: string;
+  readonly shipmentPrefix: string;
   readonly subdomain?: string | undefined;
   readonly environment: CompanyEnvironment;
   readonly countryCode: string;
@@ -215,7 +216,9 @@ export class PlatformCompanyService {
     const company = (
       await sql<Record<string, unknown>>`
         select c.id, c.code, c.name_en as "nameEn", c.name_ar as "nameAr", c.subdomain,
-               c.mobile_code as "mobileCode",
+               c.mobile_code as "mobileCode", c.version,
+               c.shipment_prefix as "shipmentPrefix",
+               c.shipment_serial_enabled_at as "shipmentSerialEnabledAt",
                c.status, c.environment, c.country_code as "countryCode",
                c.contact_name as "contactName", c.telephone, c.email, c.address_en as "addressEn",
                c.trade_license_number as "tradeLicenseNumber",
@@ -491,9 +494,9 @@ export class PlatformCompanyService {
     try {
       return await this.transactions.execute(async (transaction) => {
         const codeNumber = (
-          await sql<{ value: string }>`select nextval('platform_company_code_seq')::text as value`.execute(
-            transaction,
-          )
+          await sql<{
+            value: string;
+          }>`select nextval('platform_company_code_seq')::text as value`.execute(transaction)
         ).rows[0]?.value;
         if (codeNumber === undefined) throw new Error("Company code generation failed");
         const code = `CMP-${codeNumber.padStart(6, "0")}`;
@@ -502,11 +505,11 @@ export class PlatformCompanyService {
           await sql<{ id: string }>`
             insert into companies (
               code, subdomain, name_en, contact_name, telephone, email, status, environment,
-              country_code, status_changed_at, status_changed_by_account_id
+              country_code, shipment_prefix, status_changed_at, status_changed_by_account_id
             ) values (
               ${code}, ${subdomain}, ${input.name.trim()}, ${input.contactName ?? null},
               ${input.telephone ?? null}, ${input.email ?? null}, 'draft', ${input.environment},
-              ${input.countryCode}, now(), ${actor.accountId}::uuid
+              ${input.countryCode}, ${input.shipmentPrefix}, now(), ${actor.accountId}::uuid
             )
             returning id
           `.execute(transaction)
@@ -605,6 +608,7 @@ export class PlatformCompanyService {
             companyId,
             code,
             subdomain,
+            shipmentPrefix: input.shipmentPrefix,
             name: input.name.trim(),
             environment: input.environment,
             status: "draft",
@@ -715,6 +719,107 @@ export class PlatformCompanyService {
       before: Object.fromEntries(Object.keys(changes).map((key) => [key, before[key] ?? null])),
       after: changes,
       correlationId: actor.correlationId,
+    });
+  }
+
+  public async updateShipmentPrefix(
+    companyId: string,
+    input: { shipmentPrefix: string; expectedVersion: number },
+    actor: { accountId: string; correlationId: string },
+  ): Promise<Record<string, unknown>> {
+    try {
+      return await this.transactions.execute(async (transaction) => {
+        const before = (
+          await sql<{ prefix: string | null; enabledAt: Date | null; version: string }>`
+          select shipment_prefix as prefix,shipment_serial_enabled_at as "enabledAt",version::text
+            from companies where id=${companyId}::uuid for update
+        `.execute(transaction)
+        ).rows[0];
+        if (before === undefined) throw this.notFound();
+        if (Number(before.version) !== input.expectedVersion) {
+          throw new ApplicationException(
+            "company_version_conflict",
+            "Company was changed by another user",
+            HttpStatus.CONFLICT,
+          );
+        }
+        if (before.enabledAt !== null) {
+          throw new ApplicationException(
+            "shipment_prefix_immutable",
+            "Shipment prefix is immutable after serial generation is activated",
+            HttpStatus.CONFLICT,
+          );
+        }
+        await sql`update companies set shipment_prefix=${input.shipmentPrefix},updated_at=now(),version=version+1
+          where id=${companyId}::uuid`.execute(transaction);
+        await this.auditInTransaction(transaction, {
+          action: "platform.company.shipment_prefix_updated",
+          companyId,
+          actorAccountId: actor.accountId,
+          before: { shipmentPrefix: before.prefix },
+          after: { shipmentPrefix: input.shipmentPrefix },
+          correlationId: actor.correlationId,
+        });
+        return {
+          shipmentPrefix: input.shipmentPrefix,
+          version: input.expectedVersion + 1,
+          activated: false,
+        };
+      });
+    } catch (error) {
+      throw this.translate(error);
+    }
+  }
+
+  public async activateShipmentSerial(
+    companyId: string,
+    input: { reason: string; expectedVersion: number },
+    actor: { accountId: string; correlationId: string },
+  ): Promise<Record<string, unknown>> {
+    return this.transactions.execute(async (transaction) => {
+      const before = (
+        await sql<{ prefix: string | null; enabledAt: Date | null; version: string }>`
+        select shipment_prefix as prefix,shipment_serial_enabled_at as "enabledAt",version::text
+          from companies where id=${companyId}::uuid for update
+      `.execute(transaction)
+      ).rows[0];
+      if (before === undefined) throw this.notFound();
+      if (Number(before.version) !== input.expectedVersion) {
+        throw new ApplicationException(
+          "company_version_conflict",
+          "Company was changed by another user",
+          HttpStatus.CONFLICT,
+        );
+      }
+      if (before.prefix === null) {
+        throw new ApplicationException(
+          "shipment_prefix_required",
+          "Assign a shipment prefix before activation",
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      if (before.enabledAt !== null)
+        return { shipmentPrefix: before.prefix, activated: true, version: input.expectedVersion };
+      const updated = (
+        await sql<{ enabledAt: Date; version: string }>`update companies
+        set shipment_serial_enabled_at=now(),updated_at=now(),version=version+1
+        where id=${companyId}::uuid returning shipment_serial_enabled_at as "enabledAt",version::text
+      `.execute(transaction)
+      ).rows[0]!;
+      await this.auditInTransaction(transaction, {
+        action: "platform.company.shipment_serial_activated",
+        companyId,
+        actorAccountId: actor.accountId,
+        before: { activated: false },
+        after: { activated: true, shipmentPrefix: before.prefix, reason: input.reason },
+        correlationId: actor.correlationId,
+      });
+      return {
+        shipmentPrefix: before.prefix,
+        activated: true,
+        activatedAt: updated.enabledAt,
+        version: Number(updated.version),
+      };
     });
   }
 

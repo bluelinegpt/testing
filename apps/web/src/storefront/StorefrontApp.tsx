@@ -83,7 +83,10 @@ function parseRoute(pathname: string): { route: StorefrontRoute; storeSlug: stri
   if (pathname === "/storefront-preview" || pathname.startsWith("/storefront-preview/")) {
     return { route: { kind: "preview" }, storeSlug: "" };
   }
-  const parts = pathname.replace(/^\/store\/?/, "").split("/").filter(Boolean);
+  const parts = pathname
+    .replace(/^\/store\/?/, "")
+    .split("/")
+    .filter(Boolean);
   const [slug = "", section, detail] = parts;
   // Whether a slug exists is the API's answer, not the router's. An empty slug
   // is the one case decidable here.
@@ -102,6 +105,23 @@ function parseRoute(pathname: string): { route: StorefrontRoute; storeSlug: stri
   return { route: { kind: "home" }, storeSlug: slug };
 }
 
+/**
+ * Pre-production fix: Store/Product/Cart pages here show a real, persisted
+ * Trader's actual data (see `StorefrontApp.test.tsx`'s own regression test
+ * guarding against exactly this shell calling a real Trader's shop a
+ * "design prototype with sample data" -- that would be false and damaging).
+ * What is NOT real is Checkout: it does not create a Store Order and prices
+ * delivery with a flat, hardcoded fee (unlike `apps/store`, the actual
+ * Commerce checkout). So this notice is scoped to ONLY the
+ * checkout/review/confirmation routes, and is honest about what it's
+ * flagging -- order creation, not the Store's identity or catalogue.
+ */
+const orderCreationNotice = (
+  <div className="sf-prototype-banner" role="status">
+    This checkout does not create a real order. Place a real order on the live Store instead.
+  </div>
+);
+
 export function StorefrontApp() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -114,7 +134,10 @@ export function StorefrontApp() {
   // The persisted Storefront behind this address. `undefined` while the answer
   // is still outstanding, so a customer never sees "not found" during a load.
   const [resolution, setResolution] = useState<
-    { readonly kind: "error" } | { readonly kind: "found"; readonly storefront: PublicStorefront } | { readonly kind: "not-found" } | undefined
+    | { readonly kind: "error" }
+    | { readonly kind: "found"; readonly storefront: PublicStorefront }
+    | { readonly kind: "not-found" }
+    | undefined
   >();
 
   // The real catalogue. `undefined` means "not answered yet"; an empty array
@@ -322,6 +345,9 @@ export function StorefrontApp() {
     <StoreContext.Provider value={store}>
       <div className="sf-root" dir="ltr" lang="en" style={themeStyle}>
         <StorefrontHeader cartCount={cartCount} />
+        {route.kind === "checkout" || route.kind === "review" || route.kind === "confirmation"
+          ? orderCreationNotice
+          : null}
         {closed ? (
           // A temporarily closed shop stays readable — customers should see
           // that it is closed, not that it is gone. Blocking cart actions

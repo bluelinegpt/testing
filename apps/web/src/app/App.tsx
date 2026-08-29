@@ -289,7 +289,20 @@ export function App() {
         <LoginView api={api} onAuthenticated={authenticate} />
       ) : session.identity.kind === "trader" || session.identity.kind === "driver" ? (
         <PortalWorkspace api={api} onLogout={logout} session={session} />
-      ) : null}
+      ) : (
+        // Every kind this app knows how to render is handled above. Anything
+        // else (e.g. a Platform Administrator session reaching this Company
+        // Portal, which has no companyId to scope operations to) previously
+        // fell through to a silent blank page -- render something actionable
+        // instead of nothing.
+        <main className="public-main">
+          <h1>{t("auth.unsupportedAccountTitle")}</h1>
+          <p>{t("auth.unsupportedAccountMessage")}</p>
+          <button onClick={() => void logout()} type="button">
+            {t("auth.logout")}
+          </button>
+        </main>
+      )}
     </div>
   );
 }

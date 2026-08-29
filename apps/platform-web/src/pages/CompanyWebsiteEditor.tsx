@@ -1,5 +1,6 @@
-import { useEffect, useState, type ReactElement } from "react";
+import { useEffect, useState, type CSSProperties, type ReactElement } from "react";
 import {
+  PlatformApiError,
   platformApi,
   type CompanyWebsite,
   type CompanyWebsiteSettings,
@@ -21,6 +22,7 @@ const empty: CompanyWebsiteSettings = {
   services: [],
   coverage: [],
   benefits: [],
+  marketing: { steps: [], industries: [], statistics: [], testimonials: [] },
   socialLinks: {},
   functions: { trackingEnabled: true, requestDeliveryEnabled: true },
   seo: { indexable: true },
@@ -73,6 +75,45 @@ const localizedFields = [
   "primaryCtaLabel",
   "secondaryCtaLabel",
 ] as const;
+const localizedLabels: Record<(typeof localizedFields)[number], string> = {
+  displayName: "Website display name",
+  tagline: "Short tagline",
+  about: "About the company",
+  heroHeadline: "Homepage headline",
+  heroSubheadline: "Homepage introduction",
+  primaryCtaLabel: "Primary button label",
+  secondaryCtaLabel: "Secondary button label",
+};
+const TEXT_LIMIT = 2000;
+
+function editorSettings(value: CompanyWebsiteSettings | undefined): CompanyWebsiteSettings {
+  const stored = structuredClone(value ?? empty);
+  const contact = { ...empty.contact, ...stored.contact };
+  // Older drafts could save the visibility and enabled flags independently.
+  // Present them as the single Website control used by the current editor.
+  if (contact.whatsappNumber?.trim() && (contact.whatsappEnabled || contact.showWhatsapp)) {
+    contact.whatsappEnabled = true;
+    contact.showWhatsapp = true;
+  }
+  return {
+    ...structuredClone(empty),
+    ...stored,
+    branding: { ...empty.branding, ...stored.branding },
+    languages: { ...empty.languages, ...stored.languages },
+    contact,
+    marketing: {
+      ...empty.marketing,
+      ...(stored.marketing ?? {}),
+    },
+  };
+}
+
+function localizedValue(
+  value: string | { en?: string; ar?: string } | undefined,
+  locale: "en" | "ar",
+): string {
+  return typeof value === "object" ? (value[locale] ?? "") : locale === "en" ? (value ?? "") : "";
+}
 
 export function CompanyWebsiteEditor({
   companyId,
@@ -86,22 +127,65 @@ export function CompanyWebsiteEditor({
   onFailure: (error: unknown) => void;
 }): ReactElement {
   const [settings, setSettings] = useState<CompanyWebsiteSettings>(() =>
-    structuredClone(website.settings ?? empty),
+    editorSettings(website.settings),
   );
   const [busy, setBusy] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<string>();
+  const [validationErrors, setValidationErrors] = useState<readonly string[]>([]);
+  const bannerUrls =
+    settings.branding.bannerDataUrls ??
+    (settings.branding.bannerDataUrl ? [settings.branding.bannerDataUrl] : []);
+  const arabicBannerUrls = settings.branding.bannerDataUrlsAr ?? [];
+  const completionItems = [
+    {
+      label: "Public company description",
+      complete: Boolean(settings.knowledge.description?.en?.trim()),
+    },
+    { label: "At least one service", complete: settings.services.some((item) => item.enabled) },
+    {
+      label: "At least one coverage area",
+      complete: settings.coverage.some((item) => item.enabled),
+    },
+    { label: "Working hours", complete: settings.contact.workingHours.length > 0 },
+    {
+      label: "At least one valid social link",
+      complete: Object.values(settings.socialLinks).some((value) =>
+        /^https?:\/\//iu.test(value ?? ""),
+      ),
+    },
+    {
+      label: "At least one public FAQ",
+      complete: settings.knowledge.faqs.some((faq) => faq.enabled && faq.websiteVisible),
+    },
+    ...(settings.languages.ar
+      ? [
+          {
+            label: "Arabic homepage content",
+            complete: Boolean(
+              localizedValue(settings.presentation.displayName, "ar").trim() &&
+              localizedValue(settings.presentation.heroHeadline, "ar").trim() &&
+              localizedValue(settings.presentation.heroSubheadline, "ar").trim(),
+            ),
+          },
+          {
+            label: "Arabic service and benefit content",
+            complete: [...settings.services, ...settings.benefits]
+              .filter((item) => item.enabled)
+              .every((item) => Boolean(item.title.ar?.trim() && item.description?.ar?.trim())),
+          },
+          {
+            label: "Arabic coverage names",
+            complete: settings.coverage
+              .filter((item) => item.enabled)
+              .every((item) => Boolean(item.emirateAr?.trim())),
+          },
+        ]
+      : []),
+  ];
   const completeness = Math.round(
-    ([
-      settings.knowledge.description?.en,
-      settings.services.length,
-      settings.coverage.length,
-      settings.contact.workingHours.length,
-      Object.keys(settings.socialLinks).length,
-      settings.knowledge.faqs.length,
-    ].filter((value) => (Array.isArray(value) ? value.length > 0 : Boolean(value))).length /
-      6) *
-      100,
+    (completionItems.filter((item) => item.complete).length / completionItems.length) * 100,
   );
-  useEffect(() => setSettings(structuredClone(website.settings ?? empty)), [website.version]);
+  useEffect(() => setSettings(editorSettings(website.settings)), [website.version]);
   const update = (recipe: (next: CompanyWebsiteSettings) => void) =>
     setSettings((current) => {
       const next = structuredClone(current);
@@ -110,19 +194,34 @@ export function CompanyWebsiteEditor({
     });
   async function save(): Promise<void> {
     if (!website.slug || !website.templateKey) return;
+    const errors = validateDraft(settings);
+    setValidationErrors(errors);
+    setSaveStatus(undefined);
+    if (errors.length > 0) {
+      globalThis.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
     setBusy(true);
     try {
-      onSaved(
-        await platformApi.configureCompanyWebsite(companyId, {
-          slug: website.slug,
-          primaryLanguage: settings.languages.defaultLocale,
-          defaultLocale: settings.languages.defaultLocale,
-          templateKey: website.templateKey,
-          expectedVersion: website.version ?? 0,
-          settings,
-        }),
+      const saved = await platformApi.configureCompanyWebsite(companyId, {
+        slug: website.slug,
+        primaryLanguage: settings.languages.defaultLocale,
+        defaultLocale: settings.languages.defaultLocale,
+        templateKey: website.templateKey,
+        expectedVersion: website.version ?? 0,
+        settings,
+      });
+      onSaved(saved);
+      setSaveStatus(
+        "All Website Setup fields were saved to the draft. The public website is unchanged until Publish.",
       );
     } catch (error) {
+      setValidationErrors([
+        error instanceof PlatformApiError
+          ? error.message
+          : "The Website draft could not be saved. Please try again.",
+      ]);
+      globalThis.scrollTo({ top: 0, behavior: "smooth" });
       onFailure(error);
     } finally {
       setBusy(false);
@@ -139,6 +238,24 @@ export function CompanyWebsiteEditor({
         title: { en: title },
         enabled: true,
         order: next[kind].length,
+      }),
+    );
+  }
+  function addMarketing(kind: keyof CompanyWebsiteSettings["marketing"]): void {
+    const labels = {
+      steps: "step",
+      industries: "industry",
+      statistics: "statistic",
+      testimonials: "testimonial",
+    } as const;
+    const title = globalThis.prompt(`Enter ${labels[kind]} title`)?.trim();
+    if (!title) return;
+    update((next) =>
+      next.marketing[kind].push({
+        id: `${labels[kind]}-${crypto.randomUUID().slice(0, 8)}`,
+        title: { en: title },
+        enabled: true,
+        order: next.marketing[kind].length,
       }),
     );
   }
@@ -161,6 +278,10 @@ export function CompanyWebsiteEditor({
           <p>
             <strong>Website Information: {completeness}% complete</strong>
           </p>
+          <p className="platform-muted">
+            Save Draft saves every section on this page: branding, bilingual content, services,
+            coverage, contact, WhatsApp, AI Agent, social links, SEO and section order.
+          </p>
         </div>
         <button
           className="platform-button"
@@ -171,8 +292,221 @@ export function CompanyWebsiteEditor({
           Save Draft
         </button>
       </div>
-      <details open>
+      {saveStatus ? (
+        <p className="website-editor__save-status" role="status">
+          {saveStatus}
+        </p>
+      ) : null}
+      {validationErrors.length ? (
+        <div className="platform-login__error website-editor__errors" role="alert">
+          <strong>Draft was not saved. Correct these items:</strong>
+          <ul>
+            {validationErrors.map((error) => (
+              <li key={error}>{error}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      <details className="website-editor__completion" open={completeness < 100}>
+        <summary>
+          Completion checklist — {completionItems.filter((item) => item.complete).length} of{" "}
+          {completionItems.length}
+        </summary>
+        <ul>
+          {completionItems.map((item) => (
+            <li className={item.complete ? "is-complete" : "is-missing"} key={item.label}>
+              {item.complete ? "✓" : "○"} {item.label}
+              {item.complete ? "" : " — missing"}
+            </li>
+          ))}
+        </ul>
+        <p className="platform-muted">
+          This score is guidance only. It does not control saving or publishing.
+        </p>
+      </details>
+      <p className="website-editor__limits">
+        <strong>Content limits:</strong> Website logo 500 KB · up to 3 Homepage banners, 2 MB each ·
+        Agent name 100 characters · all multi-line public text fields 2,000 characters. Current
+        counters appear below the main bilingual Website fields.
+      </p>
+      <nav aria-label="Website editor sections" className="website-editor__tabs">
+        <a href="#website-brand">Brand</a>
+        <a href="#website-homepage">Homepage</a>
+        <a href="#website-services">Services</a>
+        <a href="#website-trust">Trust</a>
+        <a href="#website-contact">Customer Actions</a>
+        <a href="#website-agent">AI Agent</a>
+        <a href="#website-seo">SEO</a>
+        <a href="#website-sections">Review order</a>
+      </nav>
+      <details id="website-brand" open>
         <summary>Branding</summary>
+        <div className="website-logo-editor">
+          <div className="website-logo-editor__preview">
+            {settings.branding.logoDataUrl ? (
+              <img alt="Website logo preview" src={settings.branding.logoDataUrl} />
+            ) : (
+              <span>No Website logo uploaded</span>
+            )}
+          </div>
+          <label className="platform-field">
+            <span>Website logo — separate from the Company Portal logo</span>
+            <input
+              accept="image/png,image/jpeg"
+              type="file"
+              onChange={(event) =>
+                void readWebsiteLogo(event.currentTarget.files?.[0], update, setValidationErrors)
+              }
+            />
+            <small>
+              PNG or JPEG · maximum 500 KB. Saved in the Website draft and becomes public only after
+              Publish.
+            </small>
+          </label>
+          {settings.branding.logoDataUrl ? (
+            <button
+              className="platform-button platform-button--quiet"
+              onClick={() =>
+                update((next) => {
+                  delete next.branding.logoDataUrl;
+                })
+              }
+              type="button"
+            >
+              Remove Website logo
+            </button>
+          ) : null}
+        </div>
+        <div className="website-banner-editor">
+          <div className="website-banner-editor__gallery">
+            {bannerUrls.length ? (
+              bannerUrls.map((url, index) => (
+                <div className="website-banner-editor__item" key={`${url.slice(-24)}-${index}`}>
+                  <div className="website-banner-editor__preview">
+                    <img alt={`Homepage banner ${index + 1} preview`} src={url} />
+                  </div>
+                  <button
+                    className="platform-button platform-button--quiet"
+                    onClick={() =>
+                      update((next) => {
+                        next.branding.bannerDataUrls = bannerUrls.filter(
+                          (_, itemIndex) => itemIndex !== index,
+                        );
+                        delete next.branding.bannerDataUrl;
+                      })
+                    }
+                    type="button"
+                  >
+                    Remove banner {index + 1}
+                  </button>
+                </div>
+              ))
+            ) : (
+              <div className="website-banner-editor__preview">
+                <span>No Homepage banners uploaded</span>
+              </div>
+            )}
+          </div>
+          <label className="platform-field">
+            <span>Add Homepage banners — {bannerUrls.length}/3 uploaded</span>
+            <input
+              accept="image/png,image/jpeg,image/webp"
+              disabled={bannerUrls.length >= 3}
+              multiple
+              type="file"
+              onChange={(event) =>
+                void readWebsiteBanners(
+                  event.currentTarget.files,
+                  bannerUrls,
+                  "bannerDataUrls",
+                  update,
+                  setValidationErrors,
+                )
+              }
+            />
+            <small>
+              Select one or more PNG, JPEG or WebP files · maximum 3 images total · 2 MB each ·
+              recommended 16:9, such as 1600 × 900. Images rotate only after the draft is published.
+            </small>
+          </label>
+          <div className="website-banner-editor__gallery">
+            {arabicBannerUrls.map((url, index) => (
+              <div className="website-banner-editor__item" key={`ar-${url.slice(-24)}-${index}`}>
+                <div className="website-banner-editor__preview">
+                  <img alt={`Arabic homepage banner ${index + 1} preview`} src={url} />
+                </div>
+                <button
+                  className="platform-button platform-button--quiet"
+                  onClick={() =>
+                    update((next) => {
+                      next.branding.bannerDataUrlsAr = arabicBannerUrls.filter(
+                        (_, itemIndex) => itemIndex !== index,
+                      );
+                    })
+                  }
+                  type="button"
+                >
+                  Remove Arabic banner {index + 1}
+                </button>
+              </div>
+            ))}
+          </div>
+          <label className="platform-field">
+            <span>Arabic Homepage banners — {arabicBannerUrls.length}/3 uploaded</span>
+            <input
+              accept="image/png,image/jpeg,image/webp"
+              disabled={arabicBannerUrls.length >= 3}
+              multiple
+              type="file"
+              onChange={(event) =>
+                void readWebsiteBanners(
+                  event.currentTarget.files,
+                  arabicBannerUrls,
+                  "bannerDataUrlsAr",
+                  update,
+                  setValidationErrors,
+                )
+              }
+            />
+            <small>
+              Optional Arabic versions of the banners. When absent, the English/default banners are
+              used.
+            </small>
+          </label>
+          <div className="website-banner-editor__options">
+            <label className="platform-field">
+              <span>Rotation effect</span>
+              <select
+                value={settings.branding.bannerTransition ?? "fade"}
+                onChange={(event) =>
+                  update((next) => {
+                    next.branding.bannerTransition = event.target.value as
+                      "fade" | "slide" | "zoom";
+                  })
+                }
+              >
+                <option value="fade">Fade</option>
+                <option value="slide">Slide</option>
+                <option value="zoom">Gentle zoom</option>
+              </select>
+            </label>
+            <label className="platform-field">
+              <span>Change image every</span>
+              <select
+                value={settings.branding.bannerIntervalSeconds ?? 6}
+                onChange={(event) =>
+                  update((next) => {
+                    next.branding.bannerIntervalSeconds = Number(event.target.value) as 4 | 6 | 8;
+                  })
+                }
+              >
+                <option value={4}>4 seconds</option>
+                <option value={6}>6 seconds</option>
+                <option value={8}>8 seconds</option>
+              </select>
+            </label>
+          </div>
+        </div>
         <div className="website-editor__grid">
           {(["primaryColor", "secondaryColor", "accentColor"] as const).map((key) => (
             <label className="platform-field" key={key}>
@@ -194,6 +528,27 @@ export function CompanyWebsiteEditor({
             </label>
           ))}
         </div>
+        <div
+          className="website-branding-preview"
+          style={
+            {
+              "--brand-primary": settings.branding.primaryColor ?? "#123b5d",
+              "--brand-secondary": settings.branding.secondaryColor ?? "#dcecf4",
+              "--brand-accent": settings.branding.accentColor ?? "#e2a93b",
+            } as CSSProperties
+          }
+        >
+          <div>
+            <strong>Live color preview</strong>
+            <span>Header and primary buttons</span>
+            <button type="button">Primary action</button>
+          </div>
+          <aside>
+            <strong>Secondary section</strong>
+            <span>Accent highlights and links</span>
+            <a>Example link</a>
+          </aside>
+        </div>
         <button
           className="platform-button platform-button--quiet"
           onClick={() =>
@@ -206,10 +561,11 @@ export function CompanyWebsiteEditor({
           Reset theme defaults
         </button>
         <p className="platform-muted">
-          The existing Company logo is used. No duplicate logo is stored.
+          If no Website logo is uploaded, Preview and the published Website fall back to the Company
+          Profile logo.
         </p>
       </details>
-      <details>
+      <details id="website-homepage">
         <summary>Languages & content</summary>
         <div className="website-editor__grid">
           <label>
@@ -256,8 +612,9 @@ export function CompanyWebsiteEditor({
         {localizedFields.map((field) => (
           <div className="website-editor__localized" key={field}>
             <label className="platform-field">
-              <span>{field} (EN)</span>
+              <span>{localizedLabels[field]} (English)</span>
               <textarea
+                maxLength={TEXT_LIMIT}
                 value={(settings.presentation[field] as { en?: string } | undefined)?.en ?? ""}
                 onChange={(e) =>
                   update((n) => {
@@ -268,11 +625,16 @@ export function CompanyWebsiteEditor({
                   })
                 }
               />
+              <small>
+                {localizedValue(settings.presentation[field], "en").length.toLocaleString()} /{" "}
+                {TEXT_LIMIT.toLocaleString()} characters
+              </small>
             </label>
             {settings.languages.ar ? (
               <label className="platform-field" dir="rtl">
-                <span>{field} (AR)</span>
+                <span>{localizedLabels[field]} (Arabic)</span>
                 <textarea
+                  maxLength={TEXT_LIMIT}
                   value={(settings.presentation[field] as { ar?: string } | undefined)?.ar ?? ""}
                   onChange={(e) =>
                     update((n) => {
@@ -283,6 +645,10 @@ export function CompanyWebsiteEditor({
                     })
                   }
                 />
+                <small>
+                  {localizedValue(settings.presentation[field], "ar").length.toLocaleString()} /{" "}
+                  {TEXT_LIMIT.toLocaleString()} characters
+                </small>
               </label>
             ) : null}
           </div>
@@ -311,7 +677,7 @@ export function CompanyWebsiteEditor({
           ))}
         </div>
       </details>
-      <details>
+      <details id="website-services">
         <summary>Services & Why Choose Us</summary>
         {(["services", "benefits"] as const).map((kind) => (
           <section key={kind}>
@@ -341,7 +707,35 @@ export function CompanyWebsiteEditor({
                   value={item.description?.en ?? ""}
                   onChange={(e) =>
                     update((n) => {
-                      n[kind][index]!.description = { en: e.target.value };
+                      n[kind][index]!.description = {
+                        ...n[kind][index]!.description,
+                        en: e.target.value,
+                      };
+                    })
+                  }
+                />
+                <input
+                  aria-label={`${kind} title Arabic`}
+                  dir="rtl"
+                  placeholder="العنوان بالعربية"
+                  value={item.title.ar ?? ""}
+                  onChange={(e) =>
+                    update((n) => {
+                      n[kind][index]!.title.ar = e.target.value;
+                    })
+                  }
+                />
+                <input
+                  aria-label={`${kind} description Arabic`}
+                  dir="rtl"
+                  placeholder="الوصف بالعربية"
+                  value={item.description?.ar ?? ""}
+                  onChange={(e) =>
+                    update((n) => {
+                      n[kind][index]!.description = {
+                        ...n[kind][index]!.description,
+                        ar: e.target.value,
+                      };
                     })
                   }
                 />
@@ -362,6 +756,118 @@ export function CompanyWebsiteEditor({
                     update((n) => {
                       n[kind].splice(index, 1);
                       n[kind].forEach((x, i) => (x.order = i));
+                    })
+                  }
+                  type="button"
+                >
+                  Remove
+                </button>
+              </div>
+            ))}
+          </section>
+        ))}
+      </details>
+      <details id="website-trust">
+        <summary>How It Works, Industries, Statistics &amp; Testimonials</summary>
+        {(["steps", "industries", "statistics", "testimonials"] as const).map((kind) => (
+          <section key={kind}>
+            <div className="platform-panel__header">
+              <h5>
+                {
+                  (
+                    {
+                      steps: "How It Works",
+                      industries: "Industries Served",
+                      statistics: "Trust Statistics",
+                      testimonials: "Testimonials",
+                    } as const
+                  )[kind]
+                }
+              </h5>
+              <button
+                className="platform-button platform-button--quiet"
+                onClick={() => addMarketing(kind)}
+                type="button"
+              >
+                Add
+              </button>
+            </div>
+            <p className="platform-muted">
+              {kind === "statistics"
+                ? "Use the title for the value (for example 4,000+) and the description for its label."
+                : kind === "testimonials"
+                  ? "Use the title for the customer/company and the description for the approved testimonial."
+                  : "Enter English and Arabic public content."}
+            </p>
+            {settings.marketing[kind].map((item, index) => (
+              <div className="website-editor__row website-editor__row--bilingual" key={item.id}>
+                <input
+                  aria-label={`${kind} title English`}
+                  placeholder="English title"
+                  value={item.title.en ?? ""}
+                  onChange={(event) =>
+                    update((next) => {
+                      next.marketing[kind][index]!.title.en = event.target.value;
+                    })
+                  }
+                />
+                <input
+                  aria-label={`${kind} description English`}
+                  placeholder="English description"
+                  value={item.description?.en ?? ""}
+                  onChange={(event) =>
+                    update((next) => {
+                      next.marketing[kind][index]!.description = {
+                        ...next.marketing[kind][index]!.description,
+                        en: event.target.value,
+                      };
+                    })
+                  }
+                />
+                <input
+                  aria-label={`${kind} title Arabic`}
+                  dir="rtl"
+                  placeholder="العنوان بالعربية"
+                  value={item.title.ar ?? ""}
+                  onChange={(event) =>
+                    update((next) => {
+                      next.marketing[kind][index]!.title.ar = event.target.value;
+                    })
+                  }
+                />
+                <input
+                  aria-label={`${kind} description Arabic`}
+                  dir="rtl"
+                  placeholder="الوصف بالعربية"
+                  value={item.description?.ar ?? ""}
+                  onChange={(event) =>
+                    update((next) => {
+                      next.marketing[kind][index]!.description = {
+                        ...next.marketing[kind][index]!.description,
+                        ar: event.target.value,
+                      };
+                    })
+                  }
+                />
+                <label>
+                  <input
+                    checked={item.enabled}
+                    onChange={(event) =>
+                      update((next) => {
+                        next.marketing[kind][index]!.enabled = event.target.checked;
+                      })
+                    }
+                    type="checkbox"
+                  />{" "}
+                  Show
+                </label>
+                <button
+                  onClick={() =>
+                    update((next) => {
+                      next.marketing[kind].splice(index, 1);
+                      next.marketing[kind].forEach((entry, order) => {
+                        entry.order = order;
+                      });
                     })
                   }
                   type="button"
@@ -414,6 +920,28 @@ export function CompanyWebsiteEditor({
                 })
               }
             />
+            <input
+              aria-label="Emirate Arabic"
+              dir="rtl"
+              placeholder="الإمارة بالعربية"
+              value={item.emirateAr ?? ""}
+              onChange={(e) =>
+                update((n) => {
+                  n.coverage[index]!.emirateAr = e.target.value;
+                })
+              }
+            />
+            <input
+              aria-label="Area Arabic"
+              dir="rtl"
+              placeholder="المنطقة بالعربية (اختياري)"
+              value={item.areaAr ?? ""}
+              onChange={(e) =>
+                update((n) => {
+                  n.coverage[index]!.areaAr = e.target.value;
+                })
+              }
+            />
             <label>
               <input
                 checked={item.enabled}
@@ -429,7 +957,7 @@ export function CompanyWebsiteEditor({
           </div>
         ))}
       </details>
-      <details>
+      <details id="website-contact" open>
         <summary>Contact, WhatsApp & location</summary>
         <div className="website-editor__grid">
           {(["phone", "mobile", "email", "whatsappNumber"] as const).map((key) => (
@@ -495,16 +1023,20 @@ export function CompanyWebsiteEditor({
           </label>
         </div>
         <div className="website-editor__toggles">
-          {(
-            [
-              "showPhone",
-              "showEmail",
-              "showWhatsapp",
-              "showAddress",
-              "showWorkingHours",
-              "whatsappEnabled",
-            ] as const
-          ).map((key) => (
+          <label>
+            <input
+              checked={settings.contact.whatsappEnabled && settings.contact.showWhatsapp}
+              onChange={(e) =>
+                update((n) => {
+                  n.contact.whatsappEnabled = e.target.checked;
+                  n.contact.showWhatsapp = e.target.checked;
+                })
+              }
+              type="checkbox"
+            />{" "}
+            Show WhatsApp button on Website
+          </label>
+          {(["showPhone", "showEmail", "showAddress", "showWorkingHours"] as const).map((key) => (
             <label key={key}>
               <input
                 checked={settings.contact[key]}
@@ -580,7 +1112,7 @@ export function CompanyWebsiteEditor({
           </div>
         ))}
       </details>
-      <details open>
+      <details id="website-agent" open>
         <summary>Company Knowledge &amp; Agent</summary>
         <h5>Company Facts</h5>
         <div className="website-editor__grid">
@@ -933,6 +1465,7 @@ export function CompanyWebsiteEditor({
                 })
               }
             />
+            <small>{(settings.agent.displayName ?? "").length} / 100 characters</small>
           </label>
           <label className="platform-field">
             <span>Tone</span>
@@ -1069,7 +1602,7 @@ export function CompanyWebsiteEditor({
           ))}
         </div>
       </details>
-      <details>
+      <details id="website-seo" open>
         <summary>Public functions &amp; SEO</summary>
         <div className="website-editor__toggles">
           <label>
@@ -1163,7 +1696,7 @@ export function CompanyWebsiteEditor({
           </label>
         </div>
       </details>
-      <details>
+      <details id="website-sections">
         <summary>Sections</summary>
         {[...settings.sections]
           .sort((a, b) => a.order - b.order)
@@ -1196,4 +1729,98 @@ export function CompanyWebsiteEditor({
       </details>
     </div>
   );
+}
+
+function validateDraft(settings: CompanyWebsiteSettings): string[] {
+  const errors: string[] = [];
+  for (const field of localizedFields) {
+    for (const locale of ["en", "ar"] as const) {
+      const value = localizedValue(settings.presentation[field], locale);
+      if (value.length > TEXT_LIMIT)
+        errors.push(
+          `${localizedLabels[field]} (${locale.toUpperCase()}) exceeds ${TEXT_LIMIT} characters.`,
+        );
+    }
+  }
+  for (const [network, value] of Object.entries(settings.socialLinks)) {
+    if (value && !/^https?:\/\/[^\s]+$/iu.test(value)) {
+      errors.push(`${network} must be a complete URL beginning with https://`);
+    }
+  }
+  if (settings.contact.whatsappEnabled && !settings.contact.whatsappNumber?.trim()) {
+    errors.push("WhatsApp is enabled but no WhatsApp number is entered.");
+  }
+  return errors;
+}
+
+async function readWebsiteLogo(
+  file: File | undefined,
+  update: (recipe: (next: CompanyWebsiteSettings) => void) => void,
+  showErrors: (errors: readonly string[]) => void,
+): Promise<void> {
+  if (!file) return;
+  if (!new Set(["image/png", "image/jpeg"]).has(file.type)) {
+    showErrors(["Website logo must be a PNG or JPEG image."]);
+    return;
+  }
+  if (file.size > 500_000) {
+    showErrors(["Website logo must be 500 KB or smaller."]);
+    return;
+  }
+  const dataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+  update((next) => {
+    next.branding.logoDataUrl = dataUrl;
+  });
+  showErrors([]);
+}
+
+async function readWebsiteBanners(
+  files: FileList | null,
+  existing: readonly string[],
+  field: "bannerDataUrls" | "bannerDataUrlsAr",
+  update: (recipe: (next: CompanyWebsiteSettings) => void) => void,
+  showErrors: (errors: readonly string[]) => void,
+): Promise<void> {
+  if (!files?.length) return;
+  const selected = Array.from(files);
+  if (existing.length + selected.length > 3) {
+    showErrors([
+      `You can upload a maximum of 3 Homepage banners. Remove ${existing.length + selected.length - 3} image(s) or select fewer files.`,
+    ]);
+    return;
+  }
+  const unsupported = selected.find(
+    (file) => !new Set(["image/png", "image/jpeg", "image/webp"]).has(file.type),
+  );
+  if (unsupported) {
+    showErrors([`${unsupported.name} must be a PNG, JPEG or WebP image.`]);
+    return;
+  }
+  const oversized = selected.find((file) => file.size > 2_000_000);
+  if (oversized) {
+    showErrors([`${oversized.name} must be 2 MB or smaller.`]);
+    return;
+  }
+  const dataUrls = await Promise.all(selected.map(readImageDataUrl));
+  update((next) => {
+    next.branding[field] = [...existing, ...dataUrls];
+    if (field === "bannerDataUrls") delete next.branding.bannerDataUrl;
+    next.branding.bannerTransition ??= "fade";
+    next.branding.bannerIntervalSeconds ??= 6;
+  });
+  showErrors([]);
+}
+
+function readImageDataUrl(file: File): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
 }

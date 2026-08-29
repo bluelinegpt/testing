@@ -1,8 +1,9 @@
-import { Type } from "class-transformer";
+import { Transform, Type } from "class-transformer";
 import {
   ArrayMaxSize,
   ArrayMinSize,
   IsArray,
+  IsBoolean,
   IsIn,
   IsInt,
   IsOptional,
@@ -50,15 +51,22 @@ export class CheckoutCartLineDto {
   public readonly selectedOptions!: readonly CheckoutSelectedOptionDto[];
 }
 
+/**
+ * Pre-production fix: Emirate and Area are structured, server-validated
+ * selections, not free text. `emirateId`/`areaId` are the ONLY pricing input
+ * -- `resolveAddress` looks up the canonical Emirate/Area master by these ids
+ * (never trusts a client-supplied name), and `resolveDeliveryFee` prices by
+ * `areaId`/`emirateId` directly, never by text matching. The old free-text
+ * `emirate`/`area` fields are gone entirely, not merely deprecated -- keeping
+ * them around "just in case" is exactly how a fuzzy-text pricing path
+ * survives after everyone thinks it was removed.
+ */
 export class CheckoutAddressDto {
-  @IsString()
-  @MaxLength(120)
-  public readonly emirate!: string;
+  @IsUUID()
+  public readonly emirateId!: string;
 
-  @IsOptional()
-  @IsString()
-  @MaxLength(120)
-  public readonly area?: string;
+  @IsUUID()
+  public readonly areaId!: string;
 
   @IsString()
   @MaxLength(500)
@@ -122,4 +130,45 @@ export class ValidateCheckoutDto {
 
   @IsIn(["cod"])
   public readonly paymentMethod!: "cod";
+}
+
+/**
+ * Pre-production fix: the public Checkout Area search query. `storeSlug`
+ * (not a Company id) is the only scoping input a customer's browser ever
+ * supplies -- `CommerceCheckoutController.areasSearch` resolves the actual
+ * priceable Company server-side (`resolveAreaSearchCompanyId`).
+ */
+export class CheckoutAreaSearchQueryDto {
+  @IsString()
+  @MaxLength(200)
+  public readonly storeSlug!: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(160)
+  public readonly search?: string;
+
+  @IsOptional()
+  @IsUUID()
+  public readonly emirateId?: string;
+
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) =>
+    value === "true" ? true : value === "false" ? false : value,
+  )
+  @IsBoolean()
+  public readonly activeOnly?: boolean;
+
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) => (value === undefined ? value : Number(value)))
+  @IsInt()
+  @Min(1)
+  @Max(50)
+  public readonly limit?: number;
+
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) => (value === undefined ? value : Number(value)))
+  @IsInt()
+  @Min(0)
+  public readonly offset?: number;
 }

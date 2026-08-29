@@ -95,7 +95,17 @@ async function seedCompany(
     values(${addressId}::uuid,${companyId}::uuid,${customerId}::uuid,${areaId}::uuid,
       'Some address',true,${actorId}::uuid)`.execute(transaction);
 
-  return { actorId, addressId, areaId, areaCode, areaName, companyId, customerCode, customerId, traderId };
+  return {
+    actorId,
+    addressId,
+    areaId,
+    areaCode,
+    areaName,
+    companyId,
+    customerCode,
+    customerId,
+    traderId,
+  };
 }
 
 /** A 'resolved' Order carrying the given Airway Bill (serial number) and customer mobile. */
@@ -106,6 +116,7 @@ async function insertOrder(
     readonly serialNumber: string;
     readonly customerMobileNumber?: string;
     readonly deliveryStatus?: string;
+    readonly orderNumber?: string;
   },
 ): Promise<string> {
   const orderId = randomUUID();
@@ -119,7 +130,7 @@ async function insertOrder(
       customer_area_code_snapshot,customer_area_name_snapshot,
       delivery_status,serial_number,serial_number_normalized
     ) values(
-      ${orderId}::uuid,${fixture.companyId}::uuid,${`ORD-${orderId.slice(0, 8)}`},
+      ${orderId}::uuid,${fixture.companyId}::uuid,${options.orderNumber ?? `ORD-${orderId.slice(0, 8)}`},
       current_date,${fixture.traderId}::uuid,${fixture.areaId}::uuid,${fixture.actorId}::uuid,
       'Customer',${options.customerMobileNumber ?? "0501234567"},'Some address',1,
       'customer_pays_cod_and_fee',0,25,25,25,
@@ -150,8 +161,11 @@ describe.skipIf(!runDatabaseTests)("PublicTrackingService", () => {
   it("returns the public tracking result immediately for a unique Airway Bill match", async () => {
     await inRolledBackTransaction(async (transaction) => {
       const company = await seedCompany(transaction, "PTA");
-      const awb = `X${randomUUID().slice(0, 8)}`;
-      await insertOrder(transaction, company, { serialNumber: awb, deliveryStatus: "out_for_delivery" });
+      const awb = "ABC0000001";
+      await insertOrder(transaction, company, {
+        serialNumber: awb,
+        deliveryStatus: "out_for_delivery",
+      });
       const service = new PublicTrackingService(transaction);
 
       const outcome = await service.lookupByAirwayBill(awb);
@@ -170,8 +184,14 @@ describe.skipIf(!runDatabaseTests)("PublicTrackingService", () => {
       const companyA = await seedCompany(transaction, "PTB");
       const companyB = await seedCompany(transaction, "PTC");
       const awb = `X${randomUUID().slice(0, 8)}`;
-      await insertOrder(transaction, companyA, { serialNumber: awb, customerMobileNumber: "0501111111" });
-      await insertOrder(transaction, companyB, { serialNumber: awb, customerMobileNumber: "0502222222" });
+      await insertOrder(transaction, companyA, {
+        serialNumber: awb,
+        customerMobileNumber: "0501111111",
+      });
+      await insertOrder(transaction, companyB, {
+        serialNumber: awb,
+        customerMobileNumber: "0502222222",
+      });
       const service = new PublicTrackingService(transaction);
 
       const outcome = await service.lookupByAirwayBill(awb);
@@ -193,7 +213,10 @@ describe.skipIf(!runDatabaseTests)("PublicTrackingService", () => {
       const companyA = await seedCompany(transaction, "PTD");
       const companyB = await seedCompany(transaction, "PTE");
       const awb = `X${randomUUID().slice(0, 8)}`;
-      await insertOrder(transaction, companyA, { serialNumber: awb, customerMobileNumber: "0501111111" });
+      await insertOrder(transaction, companyA, {
+        serialNumber: awb,
+        customerMobileNumber: "0501111111",
+      });
       await insertOrder(transaction, companyB, {
         serialNumber: awb,
         customerMobileNumber: "0502222222",
@@ -204,7 +227,10 @@ describe.skipIf(!runDatabaseTests)("PublicTrackingService", () => {
       expect(lookup.result).toBe("verification_required");
       if (lookup.result !== "verification_required") return;
 
-      const verified = await service.verifyAmbiguousShipment(lookup.verificationToken, "0502222222");
+      const verified = await service.verifyAmbiguousShipment(
+        lookup.verificationToken,
+        "0502222222",
+      );
 
       expect(verified.result).toBe("verified");
       if (verified.result === "verified") {
@@ -219,8 +245,14 @@ describe.skipIf(!runDatabaseTests)("PublicTrackingService", () => {
       const companyA = await seedCompany(transaction, "PTF");
       const companyB = await seedCompany(transaction, "PTG");
       const awb = `X${randomUUID().slice(0, 8)}`;
-      await insertOrder(transaction, companyA, { serialNumber: awb, customerMobileNumber: "0501111111" });
-      await insertOrder(transaction, companyB, { serialNumber: awb, customerMobileNumber: "0502222222" });
+      await insertOrder(transaction, companyA, {
+        serialNumber: awb,
+        customerMobileNumber: "0501111111",
+      });
+      await insertOrder(transaction, companyB, {
+        serialNumber: awb,
+        customerMobileNumber: "0502222222",
+      });
       const service = new PublicTrackingService(transaction);
       const lookup = await service.lookupByAirwayBill(awb);
       expect(lookup.result).toBe("verification_required");
@@ -251,14 +283,11 @@ describe.skipIf(!runDatabaseTests)("PublicTrackingService", () => {
     });
   });
 
-  // A per-Company "tracking disabled" exclusion (reusing the Company
-  // Website's own `functions.trackingEnabled` switch) is part of the
-  // approved design but is deliberately NOT yet wired into
-  // `eligibleCandidates()` -- that flag lives on `company_websites`, a table
-  // from an already-authored but not-yet-applied migration belonging to a
-  // separate, uncommitted workstream (see the comment in
-  // `public-tracking.service.ts`). No test exists for it until that
-  // migration lands and the join is restored.
+  // Central tracking eligibility is deliberately independent of the Company
+  // Website's own `functions.trackingEnabled` switch -- that flag governs
+  // only a Company's own Company-Website-hosted tracking page (out of scope
+  // for now), not the platform-level tawseelhub.com/track utility. See the
+  // comment on `eligibleCandidates()` in `public-tracking.service.ts`.
 
   it("still finds a match across two Companies with the daily-unique-only serial number scheme", async () => {
     await inRolledBackTransaction(async (transaction) => {
@@ -268,7 +297,10 @@ describe.skipIf(!runDatabaseTests)("PublicTrackingService", () => {
       // only "two different Companies".
       const company = await seedCompany(transaction, "PTP");
       const awb = `X${randomUUID().slice(0, 8)}`;
-      await insertOrder(transaction, company, { serialNumber: awb, customerMobileNumber: "0501111111" });
+      await insertOrder(transaction, company, {
+        serialNumber: awb,
+        customerMobileNumber: "0501111111",
+      });
       const secondOrderId = randomUUID();
       const serialNormalized = awb.trim().toLocaleLowerCase("en-US");
       await sql`insert into orders(
@@ -311,8 +343,20 @@ describe.skipIf(!runDatabaseTests)("PublicTrackingService", () => {
         serialNumber: awb,
         deliveryStatus: "delivered",
       });
-      await insertHistory(transaction, company, orderId, "assigned", "2026-01-01T08:00:00Z");
-      await insertHistory(transaction, company, orderId, "out_for_delivery", "2026-01-01T10:00:00Z");
+      await insertHistory(
+        transaction,
+        company,
+        orderId,
+        "assigned_to_driver",
+        "2026-01-01T08:00:00Z",
+      );
+      await insertHistory(
+        transaction,
+        company,
+        orderId,
+        "out_for_delivery",
+        "2026-01-01T10:00:00Z",
+      );
       await insertHistory(transaction, company, orderId, "delivered", "2026-01-01T12:00:00Z");
       const service = new PublicTrackingService(transaction);
 
@@ -330,8 +374,16 @@ describe.skipIf(!runDatabaseTests)("PublicTrackingService", () => {
           occurredAt: new Date(step.occurredAt).toISOString(),
         })),
       ).toEqual([
-        { status: "assigned", statusLabel: "Assigned for Delivery", occurredAt: "2026-01-01T08:00:00.000Z" },
-        { status: "out_for_delivery", statusLabel: "Out for Delivery", occurredAt: "2026-01-01T10:00:00.000Z" },
+        {
+          status: "assigned_to_driver",
+          statusLabel: "Assigned for Delivery",
+          occurredAt: "2026-01-01T08:00:00.000Z",
+        },
+        {
+          status: "out_for_delivery",
+          statusLabel: "Out for Delivery",
+          occurredAt: "2026-01-01T10:00:00.000Z",
+        },
         { status: "delivered", statusLabel: "Delivered", occurredAt: "2026-01-01T12:00:00.000Z" },
       ]);
     });
@@ -352,7 +404,15 @@ describe.skipIf(!runDatabaseTests)("PublicTrackingService", () => {
         ["airwayBill", "deliveredAt", "lastUpdated", "status", "statusLabel", "timeline"].sort(),
       );
       const serialized = JSON.stringify(outcome.tracking).toLowerCase();
-      for (const forbidden of ["customer", "mobile", "address", "cod", "trader", "driver", company.companyId]) {
+      for (const forbidden of [
+        "customer",
+        "mobile",
+        "address",
+        "cod",
+        "trader",
+        "driver",
+        company.companyId,
+      ]) {
         expect(serialized).not.toContain(forbidden.toLowerCase());
       }
     });
@@ -363,8 +423,14 @@ describe.skipIf(!runDatabaseTests)("PublicTrackingService", () => {
       const companyA = await seedCompany(transaction, "PTN");
       const companyB = await seedCompany(transaction, "PTO");
       const awb = `X${randomUUID().slice(0, 8)}`;
-      await insertOrder(transaction, companyA, { serialNumber: awb, customerMobileNumber: "0501111111" });
-      await insertOrder(transaction, companyB, { serialNumber: awb, customerMobileNumber: "0502222222" });
+      await insertOrder(transaction, companyA, {
+        serialNumber: awb,
+        customerMobileNumber: "0501111111",
+      });
+      await insertOrder(transaction, companyB, {
+        serialNumber: awb,
+        customerMobileNumber: "0502222222",
+      });
       const service = new PublicTrackingService(transaction);
       const lookup = await service.lookupByAirwayBill(awb);
       expect(lookup.result).toBe("verification_required");
@@ -373,8 +439,125 @@ describe.skipIf(!runDatabaseTests)("PublicTrackingService", () => {
       const tampered = `${lookup.verificationToken}x`;
       const garbage = "not-a-real-token";
 
-      expect(await service.verifyAmbiguousShipment(tampered, "0501111111")).toEqual({ result: "not_verified" });
-      expect(await service.verifyAmbiguousShipment(garbage, "0501111111")).toEqual({ result: "not_verified" });
+      expect(await service.verifyAmbiguousShipment(tampered, "0501111111")).toEqual({
+        result: "not_verified",
+      });
+      expect(await service.verifyAmbiguousShipment(garbage, "0501111111")).toEqual({
+        result: "not_verified",
+      });
+    });
+  });
+
+  // Random per test run -- never a hardcoded number like "ORD-000116" itself,
+  // which (per the reported defect) is a REAL Order Number already in this
+  // database. A fixed test value would risk colliding with real data exactly
+  // the way the original bug report did.
+  function randomOrderNumber(): string {
+    const digits = randomUUID()
+      .replace(/[^0-9]/g, "")
+      .padEnd(9, "1")
+      .slice(0, 9);
+    return `ORD-${digits}`;
+  }
+
+  describe("Tawseelhub Order Number lookup (ORD-000116 style)", () => {
+    it("returns the public tracking result immediately for a valid, unique Order Number", async () => {
+      await inRolledBackTransaction(async (transaction) => {
+        const company = await seedCompany(transaction, "PTQ");
+        const orderNumber = randomOrderNumber();
+        await insertOrder(transaction, company, {
+          serialNumber: `X${randomUUID().slice(0, 8)}`,
+          orderNumber,
+          deliveryStatus: "out_for_delivery",
+        });
+        const service = new PublicTrackingService(transaction);
+
+        // Also accepts lower-case / mixed-case input the same way a customer
+        // might type it -- "ord-..." still resolves.
+        const outcome = await service.lookupByAirwayBill(orderNumber.toLowerCase());
+
+        expect(outcome.result).toBe("verified");
+        if (outcome.result !== "verified") return;
+        expect(outcome.tracking.airwayBill).toBe(orderNumber);
+        expect(outcome.tracking.statusLabel).toBe("Out for Delivery");
+      });
+    });
+
+    it("does not require mobile verification for a unique Order Number", async () => {
+      await inRolledBackTransaction(async (transaction) => {
+        const company = await seedCompany(transaction, "PTR");
+        const orderNumber = randomOrderNumber();
+        await insertOrder(transaction, company, {
+          serialNumber: `X${randomUUID().slice(0, 8)}`,
+          orderNumber,
+        });
+        const service = new PublicTrackingService(transaction);
+
+        const outcome = await service.lookupByAirwayBill(orderNumber);
+
+        expect(outcome.result).toBe("verified");
+      });
+    });
+
+    it("returns a neutral not-found result for a nonexistent Order Number", async () => {
+      await inRolledBackTransaction(async (transaction) => {
+        const service = new PublicTrackingService(transaction);
+        const outcome = await service.lookupByAirwayBill(randomOrderNumber());
+        expect(outcome).toEqual({ result: "not_found" });
+      });
+    });
+
+    it("requires mobile verification when the same Order Number exists at two Companies", async () => {
+      await inRolledBackTransaction(async (transaction) => {
+        const companyA = await seedCompany(transaction, "PTS");
+        const companyB = await seedCompany(transaction, "PTT");
+        const orderNumber = randomOrderNumber();
+        await insertOrder(transaction, companyA, {
+          serialNumber: `X${randomUUID().slice(0, 8)}`,
+          orderNumber,
+          customerMobileNumber: "0521111111",
+        });
+        await insertOrder(transaction, companyB, {
+          serialNumber: `X${randomUUID().slice(0, 8)}`,
+          orderNumber,
+          customerMobileNumber: "0522222222",
+          deliveryStatus: "delivered",
+        });
+        const service = new PublicTrackingService(transaction);
+
+        const lookup = await service.lookupByAirwayBill(orderNumber);
+        expect(lookup.result).toBe("verification_required");
+        if (lookup.result !== "verification_required") return;
+
+        const wrongMobile = await service.verifyAmbiguousShipment(
+          lookup.verificationToken,
+          "0599999999",
+        );
+        expect(wrongMobile).toEqual({ result: "not_verified" });
+
+        const correctMobile = await service.verifyAmbiguousShipment(
+          lookup.verificationToken,
+          "0522222222",
+        );
+        expect(correctMobile.result).toBe("verified");
+        if (correctMobile.result === "verified")
+          expect(correctMobile.tracking.statusLabel).toBe("Delivered");
+      });
+    });
+
+    it("never matches an Order Number as a partial/prefix Airway Bill search", async () => {
+      await inRolledBackTransaction(async (transaction) => {
+        const company = await seedCompany(transaction, "PTU");
+        const orderNumber = randomOrderNumber();
+        // A Serial Number that happens to contain the digits of an unrelated
+        // Order Number must not be found by that Order Number's lookup.
+        await insertOrder(transaction, company, { serialNumber: `${orderNumber}-EXTRA` });
+        const service = new PublicTrackingService(transaction);
+
+        const outcome = await service.lookupByAirwayBill(orderNumber);
+
+        expect(outcome).toEqual({ result: "not_found" });
+      });
     });
   });
 });

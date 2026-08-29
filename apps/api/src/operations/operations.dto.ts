@@ -59,7 +59,12 @@ const deliveryStatuses = [
  */
 const allDeliveryStatuses = ["new", "assigned_to_driver", ...deliveryStatuses] as const;
 
-const orderWorkflowSteps = ["complete", "collect_from_driver", "collect_from_trader", "settle_trader"] as const;
+const orderWorkflowSteps = [
+  "complete",
+  "collect_from_driver",
+  "collect_from_trader",
+  "settle_trader",
+] as const;
 const paymentMethods = ["cash", "bank_transfer"] as const;
 const orderAttachmentTypes = ["delivery_photo", "expense", "waybill", "other"] as const;
 const orderIdentifierPattern = /^[\p{L}\p{N} _/-]+$/u;
@@ -97,6 +102,7 @@ export class FinancialPaymentDto {
   @IsUUID()
   public readonly traderBankAccountId?: string;
 
+  @IsOptional()
   @IsOptional()
   @IsString()
   @MaxLength(80)
@@ -168,7 +174,7 @@ export class OrderSelectionDto {
   @IsString()
   public readonly settlementStatus?: string;
 
-@IsOptional()
+  @IsOptional()
   @IsIn(orderWorkflowSteps)
   public readonly workflowStep?: (typeof orderWorkflowSteps)[number];
   @IsOptional()
@@ -487,7 +493,7 @@ export class CreateOrderDto {
   @MaxLength(160)
   @Matches(orderIdentifierPattern, orderIdentifierMessage)
   @TrimText()
-  public readonly serialNumber!: string;
+  public readonly serialNumber?: string;
 
   @IsOptional()
   @IsString()
@@ -512,7 +518,9 @@ export class CreateOrderDto {
   @IsUUID()
   public readonly traderId!: string;
 
-  @ValidateIf((dto: CreateOrderDto) => dto.orderType !== "collect_order" || dto.areaId !== undefined)
+  @ValidateIf(
+    (dto: CreateOrderDto) => dto.orderType !== "collect_order" || dto.areaId !== undefined,
+  )
   @IsUUID()
   public readonly areaId?: string;
 

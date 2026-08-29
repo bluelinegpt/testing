@@ -73,7 +73,9 @@ export class CompanyWebsiteAgentProvider {
 }
 
 function requiresDeterministicBoundary(message: string): boolean {
-  return /who are you|what is this company|tawseelhub|instagram|facebook|tiktok|linkedin|youtube|social|price|cost|fee|track|order|shipment|request delivery|send (?:a |my )?(?:package|parcel)|need a delivery|service|coverage|deliver to|hour|open|close|contact|support|human|whatsapp|cod|fragile|same.day|ignore (?:all|previous)|system prompt|api key|other compan|all orders|all drivers|switch tenant|internal|من أنت|توصيل هب|انستغرام|فيسبوك|سعر|تكلفة|تتبع|شحنة|طلب|إرسال (?:طرد|شحنة)|خدم|تغط|وقت|ساعات|دعم|موظف|واتساب|مفتاح|تجاهل التعليمات|كل الطلبات/iu.test(
+  // "من انت" (no hamza) is the common informal spelling of "من أنت" -- both
+  // must force the same safe, controlled answer as the English "who are you".
+  return /who are you|what is this company|tawseelhub|instagram|facebook|tiktok|linkedin|youtube|social|price|cost|fee|track|order|shipment|request delivery|send (?:a |my )?(?:package|parcel)|need a delivery|service|coverage|deliver to|hour|open|close|contact|support|human|whatsapp|cod|fragile|same.day|ignore (?:all|previous)|system prompt|api key|other compan|all orders|all drivers|switch tenant|internal|من أنت|من انت|توصيل هب|انستغرام|فيسبوك|سعر|تكلفة|تتبع|شحنة|طلب|إرسال (?:طرد|شحنة)|خدم|تغط|وقت|ساعات|دعم|موظف|واتساب|مفتاح|تجاهل التعليمات|كل الطلبات/iu.test(
     message,
   );
 }
@@ -88,7 +90,7 @@ export function publicKnowledge(context: CompanyWebsiteAgentContext) {
       .map((x) => ({ emirate: x.emirate, area: x.area })),
     workingHours: s.contact.showWorkingHours ? s.contact.workingHours : [],
     contact: {
-      phone: s.contact.showPhone ? s.contact.phone : null,
+      phone: s.contact.showPhone ? (s.contact.phone ?? s.contact.mobile) : null,
       email: s.contact.showEmail ? s.contact.email : null,
       address: s.contact.showAddress ? s.contact.address : null,
       whatsapp:
@@ -161,9 +163,15 @@ export function deterministicReply(context: CompanyWebsiteAgentContext, message:
     : undefined;
   if (faq) return local(faq.answer, language) ?? unknown(context, ar);
   if (
-    /who are you|what is this company|about (?:you|the company)|من أنت|ما هي هذه الشركة/u.test(
+    /who are you|what is this company|about (?:you|the company)|من أنت|من انت|ما هي هذه الشركة/u.test(
       lower,
-    )
+    ) ||
+    // "من هي دانة" / "who is Dana" -- asking about the assistant by the
+    // Company's own name, not just the generic "who are you". Loosely
+    // normalized so "دانه" (as a visitor commonly types it) still matches
+    // the Company's official name "دانة" (with taa marbuta).
+    (/من هي|من هو|who is/u.test(lower) &&
+      looseArabicKey(message).includes(looseArabicKey(context.companyName)))
   )
     return (
       local(s.knowledge.description, language) ??
@@ -217,6 +225,42 @@ export function deterministicReply(context: CompanyWebsiteAgentContext, message:
     return ar
       ? "يمكنني إرشادك إلى أداة تتبع الشحنة الآمنة. ستحتاج إلى مرجع التتبع والتحقق المطلوب."
       : "I can guide you to the secure Track Shipment tool. You'll need the tracking reference and any required verification.";
+  if (
+    /contact|phone|mobile|call|telephone|number|email|address|تواصل|اتصال|هاتف|جوال|رقم|بريد|عنوان/u.test(
+      lower,
+    )
+  ) {
+    if (!s.agent.capabilities.contactHandoff) return unknown(context, ar);
+    const publicNumber = s.contact.showPhone ? (s.contact.phone ?? s.contact.mobile) : undefined;
+    if (/email|بريد/u.test(lower) && s.contact.showEmail && s.contact.email)
+      return ar
+        ? `البريد الإلكتروني لـ ${context.companyName}: ${s.contact.email}.`
+        : `${context.companyName}'s email is ${s.contact.email}.`;
+    if (/address|location|عنوان|موقع/u.test(lower) && s.contact.showAddress) {
+      const address = local(s.contact.address, ar ? "ar" : "en");
+      const city = local(s.contact.city, ar ? "ar" : "en");
+      const location = [address, city].filter(Boolean).join(", ");
+      if (location)
+        return ar
+          ? `عنوان ${context.companyName}: ${location}.`
+          : `${context.companyName}'s address is ${location}.`;
+    }
+    if (publicNumber)
+      return ar
+        ? `رقم التواصل مع ${context.companyName}: ${publicNumber}.`
+        : `${context.companyName}'s contact number is ${publicNumber}.`;
+    if (s.contact.whatsappEnabled && s.contact.showWhatsapp && s.contact.whatsappNumber)
+      return ar
+        ? `رقم واتساب ${context.companyName}: ${s.contact.whatsappNumber}.`
+        : `${context.companyName}'s WhatsApp number is ${s.contact.whatsappNumber}.`;
+    if (s.contact.showEmail && s.contact.email)
+      return ar
+        ? `يمكنك التواصل عبر ${s.contact.email}.`
+        : `You can contact the team at ${s.contact.email}.`;
+    return ar
+      ? "لا يتوفر رقم تواصل عام منشور حالياً."
+      : "No public contact number is currently published.";
+  }
   if (/human|person|support(?!\s+cod)|whatsapp|موظف|دعم|واتساب/u.test(lower)) {
     if (s.contact.whatsappEnabled && s.contact.showWhatsapp && s.contact.whatsappNumber)
       return (
@@ -225,10 +269,10 @@ export function deterministicReply(context: CompanyWebsiteAgentContext, message:
           ? `يمكنني توصيلك بفريق ${context.companyName} عبر واتساب.`
           : `I can connect you with ${context.companyName} through WhatsApp.`)
       );
-    if (s.contact.showPhone && s.contact.phone)
+    if (s.contact.showPhone && (s.contact.phone || s.contact.mobile))
       return ar
-        ? `يمكنك التواصل على ${s.contact.phone}.`
-        : `You can contact the team on ${s.contact.phone}.`;
+        ? `يمكنك التواصل على ${s.contact.phone ?? s.contact.mobile}.`
+        : `You can contact the team on ${s.contact.phone ?? s.contact.mobile}.`;
     if (s.contact.showEmail && s.contact.email)
       return ar
         ? `يمكنك التواصل عبر ${s.contact.email}.`
@@ -297,6 +341,18 @@ export function deterministicReply(context: CompanyWebsiteAgentContext, message:
         ? "لا توجد ساعات عمل منشورة."
         : "No working hours are currently published.";
   }
+  // Common small talk -- "how are you", in its usual Gulf/UAE colloquial
+  // spellings as well as standard Arabic and English. Previously fell
+  // straight through to the generic "I don't have confirmed information"
+  // refusal, which reads as broken for the most ordinary greeting.
+  if (
+    /how are you|how're you|how are u|how('?s| is) it going|كيفك|كيف حالك|شلونك|شخبارك|اخبارك|أخبارك/u.test(
+      lower,
+    )
+  )
+    return ar
+      ? `بخير والحمد لله، شكراً لسؤالك! كيف يمكنني مساعدتك مع ${context.companyName}؟`
+      : `I'm doing well, thank you! How can I help you with ${context.companyName} today?`;
   if (/hello|hi|hey|مرحبا|السلام/u.test(lower))
     return (
       local(s.agent.welcomeMessage, ar ? "ar" : "en") ??
@@ -306,6 +362,16 @@ export function deterministicReply(context: CompanyWebsiteAgentContext, message:
     );
   if (/thank|شكرا|شكر/u.test(lower)) return ar ? "على الرحب والسعة." : "You're welcome.";
   return ar ? unknown(context, true) : unknown(context, false);
+}
+// Loose Arabic key for informal-spelling-tolerant substring matching (e.g.
+// company-name recognition): unifies hamza-alef forms, taa marbuta / heh,
+// and alef maksura / yaa, since visitors commonly type these interchangeably.
+function looseArabicKey(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[أإآٱ]/gu, "ا")
+    .replace(/[ةه]/gu, "ه")
+    .replace(/[ىي]/gu, "ي");
 }
 export function workingHoursNow(
   settings: CompanyWebsiteSettings,

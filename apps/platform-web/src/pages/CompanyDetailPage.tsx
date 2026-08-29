@@ -18,7 +18,9 @@ import {
 import { usePlatformSession } from "../app/PlatformSession.js";
 import { companyPortalUrl } from "../config/company-portal.js";
 import { CompanyAdministrators } from "./CompanyAdministrators.js";
-import { CompanyWebsitePanel } from "./CompanyWebsitePanel.js";
+
+type CompanyDetailTab =
+  "information" | "administrators" | "website" | "configuration" | "audit" | "lifecycle";
 
 /**
  * One Company: overview, profile, accounting setup, readiness and lifecycle.
@@ -70,6 +72,8 @@ export function CompanyDetailPage(): ReactElement {
   const [resetError, setResetError] = useState<string | undefined>(undefined);
   const [productionConfirmation, setProductionConfirmation] = useState("");
   const [productionError, setProductionError] = useState<string | undefined>(undefined);
+  const [shipmentPrefix, setShipmentPrefix] = useState("");
+  const [activeTab, setActiveTab] = useState<CompanyDetailTab>("information");
 
   const load = useCallback(async () => {
     setFailed(false);
@@ -136,6 +140,52 @@ export function CompanyDetailPage(): ReactElement {
         failure instanceof PlatformApiError
           ? failure.message
           : `The Company could not be ${action}d.`,
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveShipmentPrefix(): Promise<void> {
+    if (company === undefined || !/^[A-Z]{3}$/.test(shipmentPrefix)) return;
+    setBusy(true);
+    setError(undefined);
+    try {
+      await platformApi.updateShipmentPrefix(companyId, shipmentPrefix, company.version);
+      await load();
+    } catch (failure) {
+      setError(
+        failure instanceof PlatformApiError
+          ? failure.message
+          : "The shipment prefix could not be saved.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function activateGeneratedShipmentSerials(): Promise<void> {
+    if (company === undefined) return;
+    const reason = globalThis.prompt(
+      "Reason for permanently enabling server-generated shipment serials:",
+    );
+    if (reason === null || reason.trim().length < 3) return;
+    if (
+      !globalThis.confirm(
+        `Permanently activate ${company.shipmentPrefix ?? "this prefix"}? The prefix cannot be changed after activation.`,
+      )
+    )
+      return;
+    setBusy(true);
+    setError(undefined);
+    try {
+      await platformApi.activateShipmentSerial(companyId, reason.trim(), company.version);
+      await load();
+    } catch (failure) {
+      setError(
+        failure instanceof PlatformApiError
+          ? failure.message
+          : "Generated shipment serials could not be activated.",
       );
     } finally {
       setBusy(false);
@@ -396,174 +446,123 @@ export function CompanyDetailPage(): ReactElement {
         </p>
       )}
 
-      <div className="platform-panel__header">
-        <h3>Company Profile</h3>
-        {canManage && !editing ? (
+      <div aria-label="Company sections" className="company-detail-tabs" role="tablist">
+        {(
+          [
+            ["information", "Company Information"],
+            ["administrators", "Administrators & Passwords"],
+            ["website", "Website"],
+            ["configuration", "Configuration & Accounting"],
+            ["audit", "Audit"],
+            ["lifecycle", "Lifecycle"],
+          ] as const
+        ).map(([tab, label]) => (
           <button
-            className="platform-button platform-button--quiet"
-            onClick={() => {
-              setDraft({
-                name: company.nameEn,
-                nameAr: company.nameAr ?? "",
-                contactName: company.contactName ?? "",
-                telephone: company.telephone ?? "",
-                email: company.email ?? "",
-                addressEn: company.addressEn ?? "",
-                tradeLicenseNumber: company.tradeLicenseNumber ?? "",
-                taxRegistrationNumber: company.taxRegistrationNumber ?? "",
-              });
-              setEditing(true);
-            }}
+            aria-controls={`company-tab-${tab}`}
+            aria-selected={activeTab === tab}
+            className="company-detail-tabs__tab"
+            id={`company-tab-button-${tab}`}
+            key={tab}
+            onClick={() => setActiveTab(tab)}
+            role="tab"
             type="button"
           >
-            Edit profile
+            {label}
           </button>
-        ) : null}
+        ))}
       </div>
 
-      {editing ? (
-        <form className="platform-form" onSubmit={(event) => void saveProfile(event)}>
-          {/*
+      <section
+        aria-labelledby="company-tab-button-information"
+        hidden={activeTab !== "information"}
+        id="company-tab-information"
+        role="tabpanel"
+      >
+        <div className="platform-panel__header">
+          <h3>Company Profile</h3>
+          {canManage && !editing ? (
+            <button
+              className="platform-button platform-button--quiet"
+              onClick={() => {
+                setDraft({
+                  name: company.nameEn,
+                  nameAr: company.nameAr ?? "",
+                  contactName: company.contactName ?? "",
+                  telephone: company.telephone ?? "",
+                  email: company.email ?? "",
+                  addressEn: company.addressEn ?? "",
+                  tradeLicenseNumber: company.tradeLicenseNumber ?? "",
+                  taxRegistrationNumber: company.taxRegistrationNumber ?? "",
+                });
+                setEditing(true);
+              }}
+              type="button"
+            >
+              Edit profile
+            </button>
+          ) : null}
+        </div>
+
+        {editing ? (
+          <form className="platform-form" onSubmit={(event) => void saveProfile(event)}>
+            {/*
             Only the editable fields appear. Code, subdomain and environment are
             absent because the API has no field for them - the form mirrors the
             contract rather than offering inputs the server would reject.
           */}
-          {[
-            ["name", "Name"],
-            ["nameAr", "Name (Arabic)"],
-            ["contactName", "Contact name"],
-            ["telephone", "Telephone"],
-            ["email", "Email"],
-            ["addressEn", "Address"],
-            ["tradeLicenseNumber", "Trade licence number"],
-            ["taxRegistrationNumber", "Tax registration number"],
-          ].map(([field, label]) => (
-            <label className="platform-field" htmlFor={`edit-${field}`} key={field}>
-              <span>{label}</span>
-              <input
-                id={`edit-${field}`}
-                onChange={(event) =>
-                  setDraft((current) => ({ ...current, [field as string]: event.target.value }))
-                }
-                required={field === "name"}
-                type="text"
-                value={draft[field as string] ?? ""}
-              />
-            </label>
-          ))}
-          <div className="platform-actions">
-            <button
-              className="platform-button platform-button--quiet"
-              disabled={busy}
-              onClick={() => setEditing(false)}
-              type="button"
-            >
-              Cancel
-            </button>
-            <button className="platform-button" disabled={busy} type="submit">
-              {busy ? "Saving..." : "Save profile"}
-            </button>
-          </div>
-        </form>
-      ) : (
-        <dl className="platform-review">
-          {[
-            ["Name", company.nameEn],
-            ["Name (Arabic)", company.nameAr ?? "\u2014"],
-            ["Code", company.code],
-            ["Subdomain", company.subdomain],
-            ["Environment", company.environment],
-            ["Mobile app code", company.mobileCode],
-            ["Contact name", company.contactName ?? "\u2014"],
-            ["Telephone", company.telephone ?? "\u2014"],
-            ["Email", company.email ?? "\u2014"],
-            ["Address", company.addressEn ?? "\u2014"],
-            ["Trade licence number", company.tradeLicenseNumber ?? "\u2014"],
-            ["Tax registration number", company.taxRegistrationNumber ?? "\u2014"],
-            ["Created", new Date(company.createdAt).toISOString().slice(0, 10)],
-          ].map(([label, value]) => (
-            <div key={label}>
-              <dt>{label}</dt>
-              <dd>{value}</dd>
+            {[
+              ["name", "Name"],
+              ["nameAr", "Name (Arabic)"],
+              ["contactName", "Contact name"],
+              ["telephone", "Telephone"],
+              ["email", "Email"],
+              ["addressEn", "Address"],
+              ["tradeLicenseNumber", "Trade licence number"],
+              ["taxRegistrationNumber", "Tax registration number"],
+            ].map(([field, label]) => (
+              <label className="platform-field" htmlFor={`edit-${field}`} key={field}>
+                <span>{label}</span>
+                <input
+                  id={`edit-${field}`}
+                  onChange={(event) =>
+                    setDraft((current) => ({ ...current, [field as string]: event.target.value }))
+                  }
+                  required={field === "name"}
+                  type="text"
+                  value={draft[field as string] ?? ""}
+                />
+              </label>
+            ))}
+            <div className="platform-actions">
+              <button
+                className="platform-button platform-button--quiet"
+                disabled={busy}
+                onClick={() => setEditing(false)}
+                type="button"
+              >
+                Cancel
+              </button>
+              <button className="platform-button" disabled={busy} type="submit">
+                {busy ? "Saving..." : "Save profile"}
+              </button>
             </div>
-          ))}
-        </dl>
-      )}
-      <p className="platform-muted">
-        Code and subdomain are fixed after creation. Environment moves only one way — to production,
-        via the Lifecycle section below — because it gates whether the Company&apos;s data can ever
-        be reset.
-      </p>
-
-      <CompanyWebsitePanel companyId={companyId} suggestedSlug={company.subdomain} />
-
-      <h3>Technical information</h3>
-      <dl className="platform-review">
-        <div>
-          <dt>Company ID</dt>
-          <dd>{company.id}</dd>
-        </div>
-      </dl>
-
-      <h3>Configuration</h3>
-      <dl className="platform-review">
-        {[
-          [
-            "Country",
-            company.countryCode === "AE" ? "United Arab Emirates (AE)" : company.countryCode,
-          ],
-          ["Timezone", company.timezone ?? "\u2014"],
-          ["Currency", company.baseCurrency ?? "\u2014"],
-          ["Default language", company.defaultLanguage ?? "\u2014"],
-          [
-            "Business day",
-            setup.businessDay === null
-              ? "\u2014"
-              : `${setup.businessDay.startTime} ${setup.businessDay.timezone}`,
-          ],
-        ].map(([label, value]) => (
-          <div key={String(label)}>
-            <dt>{label}</dt>
-            <dd>{value}</dd>
-          </div>
-        ))}
-      </dl>
-      <p className="platform-muted">
-        Currency, timezone and language are set at creation. Changing them after a Company has
-        posted is an accounting decision rather than a profile edit, and is not offered here.
-      </p>
-
-      <h3>Accounting Setup</h3>
-      {setup.templateCode === null ? (
-        <p className="platform-muted">No Accounting template has been applied.</p>
-      ) : (
-        <>
+          </form>
+        ) : (
           <dl className="platform-review">
             {[
-              ["Status", setup.status.replace(/_/g, " ")],
-              ["Template", `${setup.templateCode} v${String(setup.templateVersion)}`],
-              ["Template hash", setup.templateSha256 ?? "—"],
-              [
-                "Applied",
-                setup.appliedAt === null
-                  ? "—"
-                  : new Date(setup.appliedAt).toISOString().slice(0, 19),
-              ],
-              ["Applied by", setup.appliedBy ?? "—"],
-              ["Chart of Accounts", String(setup.counts.accounts ?? 0)],
-              ["Account mappings", String(setup.counts.mappings ?? 0)],
-              ["Expense types", String(setup.counts.expenseTypes ?? 0)],
-              ["Expense categories", String(setup.counts.categories ?? 0)],
-              ["Allowance types", String(setup.counts.allowanceTypes ?? 0)],
-              ["Reference prefixes", String(setup.counts.referencePrefixes ?? 0)],
-              ["Cash accounts", String(setup.counts.cashAccounts ?? 0)],
-              ["Bank accounts", String(setup.counts.bankAccounts ?? 0)],
-              [
-                "Business day",
-                setup.businessDay === null
-                  ? "—"
-                  : `${setup.businessDay.startTime} ${setup.businessDay.timezone}`,
-              ],
+              ["Name", company.nameEn],
+              ["Name (Arabic)", company.nameAr ?? "\u2014"],
+              ["Code", company.code],
+              ["Subdomain", company.subdomain],
+              ["Environment", company.environment],
+              ["Mobile app code", company.mobileCode],
+              ["Contact name", company.contactName ?? "\u2014"],
+              ["Telephone", company.telephone ?? "\u2014"],
+              ["Email", company.email ?? "\u2014"],
+              ["Address", company.addressEn ?? "\u2014"],
+              ["Trade licence number", company.tradeLicenseNumber ?? "\u2014"],
+              ["Tax registration number", company.taxRegistrationNumber ?? "\u2014"],
+              ["Created", new Date(company.createdAt).toISOString().slice(0, 10)],
             ].map(([label, value]) => (
               <div key={label}>
                 <dt>{label}</dt>
@@ -571,442 +570,641 @@ export function CompanyDetailPage(): ReactElement {
               </div>
             ))}
           </dl>
-          {/* Shown because "did this tenant really start clean?" is the
-              question this panel exists to answer. */}
-          <p className="platform-muted">
-            Opening balances {setup.counts.openingBalanceBatches ?? 0} · Journals{" "}
-            {setup.counts.journals ?? 0} · Accounting events {setup.counts.accountingEvents ?? 0}
-          </p>
-        </>
-      )}
-
-      <h3>Onboarding readiness</h3>
-      <table className="platform-table">
-        <thead>
-          <tr>
-            <th scope="col">Item</th>
-            <th scope="col">Required</th>
-            <th scope="col">State</th>
-            <th scope="col">Note</th>
-          </tr>
-        </thead>
-        <tbody>
-          {readiness.items.map((item) => (
-            <tr key={item.key}>
-              <td>{item.label}</td>
-              <td>{item.required ? "Required" : "Optional"}</td>
-              <td>
-                <span className={`platform-badge platform-badge--${item.state}`}>{item.state}</span>
-              </td>
-              <td>{item.note ?? ""}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      {(readiness.warnings ?? []).map((warning) => (
-        // An operational note, not a readiness failure: an unopened accounting
-        // period blocks posting, not activation.
-        <p className="platform-warning" key={warning} role="status">
-          {warning}
-        </p>
-      ))}
-      <p className="platform-muted">Next step: {readiness.nextStep}</p>
-
-      <CompanyAdministrators companyId={companyId} onChanged={() => void load()} />
-
-      <h3>Audit summary</h3>
-      {audit === undefined ? (
+        )}
         <p className="platform-muted">
-          Platform audit requires the <code>platform.audit.read</code> permission.
+          Code and subdomain are fixed after creation. Environment moves only one way — to
+          production, via the Lifecycle section below — because it gates whether the Company&apos;s
+          data can ever be reset.
         </p>
-      ) : audit.length === 0 ? (
-        <p className="platform-muted">No Platform actions recorded for this Company yet.</p>
-      ) : (
+      </section>
+
+      <section
+        aria-labelledby="company-tab-button-website"
+        className="company-website-summary"
+        hidden={activeTab !== "website"}
+        id="company-tab-website"
+        role="tabpanel"
+      >
+        <div className="platform-panel__header">
+          <div>
+            <h3 id="company-website-summary-heading">Company Website</h3>
+            <p className="platform-muted">
+              Templates, content, publishing, AI settings and domains are managed on a separate
+              page.
+            </p>
+          </div>
+          <Link className="platform-button" to={`/companies/${companyId}/website`}>
+            Manage Website
+          </Link>
+        </div>
+      </section>
+
+      <section hidden={activeTab !== "information"}>
+        <h3>Technical information</h3>
+        <dl className="platform-review">
+          <div>
+            <dt>Company ID</dt>
+            <dd>{company.id}</dd>
+          </div>
+        </dl>
+      </section>
+
+      <section
+        aria-labelledby="company-tab-button-configuration"
+        hidden={activeTab !== "configuration"}
+        id="company-tab-configuration"
+        role="tabpanel"
+      >
+        <h3>Shipment serial numbering</h3>
+        <p className="platform-muted">
+          New Companies reserve a unique three-letter prefix. Legacy serial entry remains available
+          until generated numbering is explicitly activated. Activation is permanent.
+        </p>
+        <dl className="platform-review">
+          <div>
+            <dt>Shipment prefix</dt>
+            <dd>{company.shipmentPrefix ?? "Not assigned"}</dd>
+          </div>
+          <div>
+            <dt>Generated numbering</dt>
+            <dd>
+              {company.shipmentSerialEnabledAt
+                ? `Activated ${new Date(company.shipmentSerialEnabledAt).toISOString().slice(0, 19).replace("T", " ")}`
+                : "Not activated"}
+            </dd>
+          </div>
+        </dl>
+        {canManage && !company.shipmentSerialEnabledAt ? (
+          <div className="platform-actions">
+            <label className="platform-field" htmlFor="shipment-prefix">
+              <span>Correct unused prefix</span>
+              <input
+                id="shipment-prefix"
+                maxLength={3}
+                onChange={(event) =>
+                  setShipmentPrefix(
+                    event.target.value
+                      .replace(/[^A-Za-z]/g, "")
+                      .toUpperCase()
+                      .slice(0, 3),
+                  )
+                }
+                placeholder={company.shipmentPrefix ?? "ABC"}
+                value={shipmentPrefix}
+              />
+            </label>
+            <button
+              className="platform-button platform-button--quiet"
+              disabled={busy || !/^[A-Z]{3}$/.test(shipmentPrefix)}
+              onClick={() => void saveShipmentPrefix()}
+              type="button"
+            >
+              Save prefix
+            </button>
+            <button
+              className="platform-button"
+              disabled={busy || company.shipmentPrefix === null}
+              onClick={() => void activateGeneratedShipmentSerials()}
+              type="button"
+            >
+              Activate generated serials
+            </button>
+          </div>
+        ) : null}
+
+        <h3>Configuration</h3>
+        <dl className="platform-review">
+          {[
+            [
+              "Country",
+              company.countryCode === "AE" ? "United Arab Emirates (AE)" : company.countryCode,
+            ],
+            ["Timezone", company.timezone ?? "\u2014"],
+            ["Currency", company.baseCurrency ?? "\u2014"],
+            ["Default language", company.defaultLanguage ?? "\u2014"],
+            [
+              "Business day",
+              setup.businessDay === null
+                ? "\u2014"
+                : `${setup.businessDay.startTime} ${setup.businessDay.timezone}`,
+            ],
+          ].map(([label, value]) => (
+            <div key={String(label)}>
+              <dt>{label}</dt>
+              <dd>{value}</dd>
+            </div>
+          ))}
+        </dl>
+        <p className="platform-muted">
+          Currency, timezone and language are set at creation. Changing them after a Company has
+          posted is an accounting decision rather than a profile edit, and is not offered here.
+        </p>
+
+        <h3>Accounting Setup</h3>
+        {setup.templateCode === null ? (
+          <p className="platform-muted">No Accounting template has been applied.</p>
+        ) : (
+          <>
+            <dl className="platform-review">
+              {[
+                ["Status", setup.status.replace(/_/g, " ")],
+                ["Template", `${setup.templateCode} v${String(setup.templateVersion)}`],
+                ["Template hash", setup.templateSha256 ?? "—"],
+                [
+                  "Applied",
+                  setup.appliedAt === null
+                    ? "—"
+                    : new Date(setup.appliedAt).toISOString().slice(0, 19),
+                ],
+                ["Applied by", setup.appliedBy ?? "—"],
+                ["Chart of Accounts", String(setup.counts.accounts ?? 0)],
+                ["Account mappings", String(setup.counts.mappings ?? 0)],
+                ["Expense types", String(setup.counts.expenseTypes ?? 0)],
+                ["Expense categories", String(setup.counts.categories ?? 0)],
+                ["Allowance types", String(setup.counts.allowanceTypes ?? 0)],
+                ["Reference prefixes", String(setup.counts.referencePrefixes ?? 0)],
+                ["Cash accounts", String(setup.counts.cashAccounts ?? 0)],
+                ["Bank accounts", String(setup.counts.bankAccounts ?? 0)],
+                [
+                  "Business day",
+                  setup.businessDay === null
+                    ? "—"
+                    : `${setup.businessDay.startTime} ${setup.businessDay.timezone}`,
+                ],
+              ].map(([label, value]) => (
+                <div key={label}>
+                  <dt>{label}</dt>
+                  <dd>{value}</dd>
+                </div>
+              ))}
+            </dl>
+            {/* Shown because "did this tenant really start clean?" is the
+              question this panel exists to answer. */}
+            <p className="platform-muted">
+              Opening balances {setup.counts.openingBalanceBatches ?? 0} · Journals{" "}
+              {setup.counts.journals ?? 0} · Accounting events {setup.counts.accountingEvents ?? 0}
+            </p>
+          </>
+        )}
+
+        <h3>Onboarding readiness</h3>
         <table className="platform-table">
           <thead>
             <tr>
-              <th scope="col">When</th>
-              <th scope="col">Action</th>
-              <th scope="col">Actor</th>
-              <th scope="col">Reason</th>
+              <th scope="col">Item</th>
+              <th scope="col">Required</th>
+              <th scope="col">State</th>
+              <th scope="col">Note</th>
             </tr>
           </thead>
           <tbody>
-            {audit.map((entry, index) => (
-              <tr key={`${entry.occurredAt}-${entry.action}-${index}`}>
-                <td>{new Date(entry.occurredAt).toISOString().slice(0, 19).replace("T", " ")}</td>
-                <td>{entry.action.replace("platform.company.", "")}</td>
-                <td>{entry.actor ?? "\u2014"}</td>
-                <td>{entry.reason ?? "\u2014"}</td>
+            {readiness.items.map((item) => (
+              <tr key={item.key}>
+                <td>{item.label}</td>
+                <td>{item.required ? "Required" : "Optional"}</td>
+                <td>
+                  <span className={`platform-badge platform-badge--${item.state}`}>
+                    {item.state}
+                  </span>
+                </td>
+                <td>{item.note ?? ""}</td>
               </tr>
             ))}
           </tbody>
         </table>
-      )}
+        {(readiness.warnings ?? []).map((warning) => (
+          // An operational note, not a readiness failure: an unopened accounting
+          // period blocks posting, not activation.
+          <p className="platform-warning" key={warning} role="status">
+            {warning}
+          </p>
+        ))}
+        <p className="platform-muted">Next step: {readiness.nextStep}</p>
+      </section>
 
-      {canManage ? (
-        <>
-          <h3>Lifecycle</h3>
-          <div className="platform-actions">
-            {company.status === "draft" ? (
-              <button
-                className="platform-button"
-                disabled={busy || !readiness.canActivate}
-                onClick={() => void act("activate", false)}
-                title={
-                  readiness.canActivate
-                    ? undefined
-                    : `Blocked by: ${readiness.blockedBy.join(", ")}`
-                }
-                type="button"
-              >
-                Activate
-              </button>
-            ) : null}
-            {company.status === "active" ? (
-              <button
-                className="platform-button platform-button--quiet"
-                disabled={busy}
-                onClick={() => void act("suspend", true)}
-                type="button"
-              >
-                Suspend
-              </button>
-            ) : null}
-            {company.status === "suspended" ? (
-              <button
-                className="platform-button"
-                disabled={busy}
-                onClick={() => void act("reactivate", false)}
-                type="button"
-              >
-                Reactivate
-              </button>
-            ) : null}
-            {company.status !== "disabled" && company.status !== "closed" ? (
-              <button
-                className="platform-button platform-button--quiet"
-                disabled={busy}
-                onClick={openCloseDialog}
-                type="button"
-              >
-                Close Company
-              </button>
-            ) : null}
-          </div>
-          <dialog className="platform-dialog" ref={closeDialogRef}>
-            <form
-              className="platform-dialog__body"
-              method="dialog"
-              onSubmit={(event) => {
-                event.preventDefault();
-                void confirmClose();
-              }}
-            >
-              <h3>Close Company</h3>
-              <dl className="platform-dialog__facts">
-                <dt>Company Name</dt>
-                <dd>{company.nameEn}</dd>
-                <dt>Company Code</dt>
-                <dd>{company.code}</dd>
-                <dt>Environment</dt>
-                <dd>{company.environment}</dd>
-                <dt>Current Status</dt>
-                <dd>{company.status}</dd>
-              </dl>
-              <p className="platform-warning" role="status">
-                No Company data will be deleted by closing the Company.
-              </p>
-              <label className="platform-field" htmlFor="close-reason">
-                <span>Reason for closing this Company</span>
-                <input
-                  autoFocus
-                  id="close-reason"
-                  onChange={(event) => setCloseReason(event.target.value)}
-                  required
-                  type="text"
-                  value={closeReason}
-                />
-              </label>
-              <label className="platform-field" htmlFor="close-confirmation">
-                <span>Type CLOSE {company.code} to confirm</span>
-                <input
-                  autoComplete="off"
-                  id="close-confirmation"
-                  onChange={(event) => setCloseConfirmation(event.target.value)}
-                  value={closeConfirmation}
-                />
-              </label>
-              {closeError === undefined ? null : (
-                <p className="platform-login__error" role="alert">
-                  {closeError}
-                </p>
-              )}
-              <div className="platform-dialog__actions">
+      <section
+        aria-labelledby="company-tab-button-administrators"
+        hidden={activeTab !== "administrators"}
+        id="company-tab-administrators"
+        role="tabpanel"
+      >
+        <CompanyAdministrators companyId={companyId} onChanged={() => void load()} />
+      </section>
+
+      <section
+        aria-labelledby="company-tab-button-audit"
+        hidden={activeTab !== "audit"}
+        id="company-tab-audit"
+        role="tabpanel"
+      >
+        <h3>Audit summary</h3>
+        {audit === undefined ? (
+          <p className="platform-muted">
+            Platform audit requires the <code>platform.audit.read</code> permission.
+          </p>
+        ) : audit.length === 0 ? (
+          <p className="platform-muted">No Platform actions recorded for this Company yet.</p>
+        ) : (
+          <table className="platform-table">
+            <thead>
+              <tr>
+                <th scope="col">When</th>
+                <th scope="col">Action</th>
+                <th scope="col">Actor</th>
+                <th scope="col">Reason</th>
+              </tr>
+            </thead>
+            <tbody>
+              {audit.map((entry, index) => (
+                <tr key={`${entry.occurredAt}-${entry.action}-${index}`}>
+                  <td>{new Date(entry.occurredAt).toISOString().slice(0, 19).replace("T", " ")}</td>
+                  <td>{entry.action.replace("platform.company.", "")}</td>
+                  <td>{entry.actor ?? "\u2014"}</td>
+                  <td>{entry.reason ?? "\u2014"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
+
+      <section
+        aria-labelledby="company-tab-button-lifecycle"
+        hidden={activeTab !== "lifecycle"}
+        id="company-tab-lifecycle"
+        role="tabpanel"
+      >
+        {company.status === "closed" ? (
+          <p className="platform-warning" role="status">
+            This Company is closed. Closed is currently a terminal state, so Reactivate is not
+            available. Reactivation applies only to suspended Companies.
+          </p>
+        ) : null}
+        {canManage ? (
+          <>
+            <h3>Lifecycle</h3>
+            <div className="platform-actions">
+              {company.status === "draft" ? (
+                <button
+                  className="platform-button"
+                  disabled={busy || !readiness.canActivate}
+                  onClick={() => void act("activate", false)}
+                  title={
+                    readiness.canActivate
+                      ? undefined
+                      : `Blocked by: ${readiness.blockedBy.join(", ")}`
+                  }
+                  type="button"
+                >
+                  Activate
+                </button>
+              ) : null}
+              {company.status === "active" ? (
                 <button
                   className="platform-button platform-button--quiet"
                   disabled={busy}
-                  onClick={cancelClose}
+                  onClick={() => void act("suspend", true)}
                   type="button"
                 >
-                  Cancel
+                  Suspend
                 </button>
+              ) : null}
+              {company.status === "suspended" ? (
                 <button
                   className="platform-button"
-                  disabled={
-                    busy ||
-                    closeReason.trim().length < 3 ||
-                    closeConfirmation !== `CLOSE ${company.code}`
-                  }
-                  type="submit"
+                  disabled={busy}
+                  onClick={() => void act("reactivate", false)}
+                  type="button"
+                >
+                  Reactivate
+                </button>
+              ) : null}
+              {company.status !== "disabled" && company.status !== "closed" ? (
+                <button
+                  className="platform-button platform-button--quiet"
+                  disabled={busy}
+                  onClick={openCloseDialog}
+                  type="button"
                 >
                   Close Company
                 </button>
-              </div>
-            </form>
-          </dialog>
-          {company.environment !== "production" ? (
-            <section aria-labelledby="company-maintenance-heading">
-              <h4 id="company-maintenance-heading">Training data &amp; environment</h4>
-              <p className="platform-muted">
-                This Company is in <strong>{company.environment}</strong>. Its transactional data —
-                orders, settlements, reconciliations, accounting entries, payments, expenses,
-                customers, traders, drivers and employees — can be reset for training. The Company
-                profile, its users, chart of accounts and configuration are always preserved. Once
-                the Company moves to production, resetting becomes permanently unavailable.
-              </p>
-              {canReset ? (
-                <>
+              ) : null}
+            </div>
+            <dialog className="platform-dialog" ref={closeDialogRef}>
+              <form
+                className="platform-dialog__body"
+                method="dialog"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void confirmClose();
+                }}
+              >
+                <h3>Close Company</h3>
+                <dl className="platform-dialog__facts">
+                  <dt>Company Name</dt>
+                  <dd>{company.nameEn}</dd>
+                  <dt>Company Code</dt>
+                  <dd>{company.code}</dd>
+                  <dt>Environment</dt>
+                  <dd>{company.environment}</dd>
+                  <dt>Current Status</dt>
+                  <dd>{company.status}</dd>
+                </dl>
+                <p className="platform-warning" role="status">
+                  No Company data will be deleted by closing the Company.
+                </p>
+                <label className="platform-field" htmlFor="close-reason">
+                  <span>Reason for closing this Company</span>
+                  <input
+                    autoFocus
+                    id="close-reason"
+                    onChange={(event) => setCloseReason(event.target.value)}
+                    required
+                    type="text"
+                    value={closeReason}
+                  />
+                </label>
+                <label className="platform-field" htmlFor="close-confirmation">
+                  <span>Type CLOSE {company.code} to confirm</span>
+                  <input
+                    autoComplete="off"
+                    id="close-confirmation"
+                    onChange={(event) => setCloseConfirmation(event.target.value)}
+                    value={closeConfirmation}
+                  />
+                </label>
+                {closeError === undefined ? null : (
+                  <p className="platform-login__error" role="alert">
+                    {closeError}
+                  </p>
+                )}
+                <div className="platform-dialog__actions">
                   <button
                     className="platform-button platform-button--quiet"
                     disabled={busy}
-                    onClick={() => void runResetPreview()}
+                    onClick={cancelClose}
                     type="button"
                   >
-                    Preview Data Reset
+                    Cancel
                   </button>
-                  {resetPreview === undefined ? null : (
-                    <div className="platform-review">
-                      <p role="status">READY FOR RESET: {resetPreview.eligible ? "YES" : "NO"}</p>
-                      <p>
-                        <strong>Rows to remove:</strong> {resetPreview.totalRows.toLocaleString()}
-                        {" across "}
-                        {resetPreview.tables.length} table(s). A full-database backup is taken
-                        automatically before anything is removed.
-                      </p>
-                      {resetPreview.tables.map((entry) => (
-                        <p key={entry.table}>
-                          {entry.table}: {entry.rows.toLocaleString()}
-                        </p>
-                      ))}
-                      {resetPreview.blockers.map((blocker) => (
-                        <p className="platform-warning" key={blocker}>
-                          {blocker}
-                        </p>
-                      ))}
-                      {resetPreview.eligible ? (
-                        <>
-                          <label className="platform-field" htmlFor="reset-confirmation">
-                            <span>Type RESET {company.code} to confirm</span>
-                            <input
-                              autoComplete="off"
-                              id="reset-confirmation"
-                              onChange={(event) => setResetConfirmation(event.target.value)}
-                              value={resetConfirmation}
-                            />
-                          </label>
-                          <button
-                            className="platform-button"
-                            disabled={busy || resetConfirmation !== `RESET ${company.code}`}
-                            onClick={() => void executeReset()}
-                            type="button"
-                          >
-                            Reset Company Data
-                          </button>
-                        </>
-                      ) : null}
-                    </div>
-                  )}
-                  {resetResult === undefined ? null : (
-                    <div className="platform-review" role="status">
-                      <p>
-                        <strong>Reset complete.</strong> {resetResult.totalRemoved.toLocaleString()}
-                        {" row(s) removed across "}
-                        {resetResult.removed.length} table(s). {resetResult.preservedVerified}
-                        {" preserved table(s) verified unchanged."}
-                      </p>
-                      <p>
-                        <strong>Backup:</strong> {resetResult.backupFile}
-                      </p>
-                    </div>
-                  )}
-                  {resetError === undefined ? null : (
-                    <p className="platform-login__error" role="alert">
-                      {resetError}
-                    </p>
-                  )}
-                </>
-              ) : null}
-              <h4>Move to production</h4>
-              <p className="platform-warning">
-                Moving to production is one-way. After this, the Company&apos;s data can never be
-                reset or deleted by any tool, and there is no way back to {company.environment}.
-              </p>
-              <label className="platform-field" htmlFor="production-confirmation">
-                <span>Type PRODUCTION {company.code} to confirm</span>
-                <input
-                  autoComplete="off"
-                  id="production-confirmation"
-                  onChange={(event) => setProductionConfirmation(event.target.value)}
-                  value={productionConfirmation}
-                />
-              </label>
-              <button
-                className="platform-button"
-                disabled={busy || productionConfirmation !== `PRODUCTION ${company.code}`}
-                onClick={() => void confirmMoveToProduction()}
-                type="button"
-              >
-                Move to Production
-              </button>
-              {productionError === undefined ? null : (
-                <p className="platform-login__error" role="alert">
-                  {productionError}
+                  <button
+                    className="platform-button"
+                    disabled={
+                      busy ||
+                      closeReason.trim().length < 3 ||
+                      closeConfirmation !== `CLOSE ${company.code}`
+                    }
+                    type="submit"
+                  >
+                    Close Company
+                  </button>
+                </div>
+              </form>
+            </dialog>
+            {company.environment !== "production" ? (
+              <section aria-labelledby="company-maintenance-heading">
+                <h4 id="company-maintenance-heading">Training data &amp; environment</h4>
+                <p className="platform-muted">
+                  This Company is in <strong>{company.environment}</strong>. Its transactional data
+                  — orders, settlements, reconciliations, accounting entries, payments, expenses,
+                  customers, traders, drivers and employees — can be reset for training. The Company
+                  profile, its users, chart of accounts and configuration are always preserved. Once
+                  the Company moves to production, resetting becomes permanently unavailable.
                 </p>
-              )}
-            </section>
-          ) : null}
-          {company.status === "closed" ? (
-            <section aria-labelledby="deletion-foundation-heading">
-              <h4 id="deletion-foundation-heading">Permanent Company deletion</h4>
-              <p>Environment: {company.environment}</p>
-              <p>Closed at: {company.closedAt ?? "—"}</p>
-              <p>
-                {deletionEligibility?.eligible
-                  ? "Eligible for deletion immediately, subject to preview and backup readiness."
-                  : deletionEligibility?.eligibleAt === null || deletionEligibility === undefined
-                    ? "Deletion eligibility is unavailable."
-                    : `Deletion available after ${deletionEligibility.eligibleAt}. Remaining: ${deletionEligibility.remainingSeconds} seconds.`}
-              </p>
-              {canDelete ? (
-                <button
-                  className="platform-button platform-button--quiet"
-                  disabled={busy}
-                  onClick={() => void runDeletionPreview()}
-                  type="button"
-                >
-                  Run Deletion Preview
-                </button>
-              ) : null}
-              {deletionPreviewError === undefined ? null : (
-                <div className="platform-review" role="alert">
-                  <p>
-                    <strong>{deletionPreviewErrorLabel(deletionPreviewError.code)}</strong>
-                  </p>
-                  <p className="platform-warning">{deletionPreviewError.message}</p>
-                  {canDelete ? (
+                {canReset ? (
+                  <>
                     <button
                       className="platform-button platform-button--quiet"
                       disabled={busy}
-                      onClick={() => void runDeletionPreview()}
+                      onClick={() => void runResetPreview()}
                       type="button"
                     >
-                      Retry Deletion Preview
+                      Preview Data Reset
                     </button>
-                  ) : null}
-                </div>
-              )}
-              {deletionPreview === undefined ? null : (
-                <div className="platform-review">
-                  <p role="status">
-                    READY FOR DELETE: {deletionPreview.readyForDelete ? "YES" : "NO"}
+                    {resetPreview === undefined ? null : (
+                      <div className="platform-review">
+                        <p role="status">READY FOR RESET: {resetPreview.eligible ? "YES" : "NO"}</p>
+                        <p>
+                          <strong>Rows to remove:</strong> {resetPreview.totalRows.toLocaleString()}
+                          {" across "}
+                          {resetPreview.tables.length} table(s). A full-database backup is taken
+                          automatically before anything is removed.
+                        </p>
+                        {resetPreview.tables.map((entry) => (
+                          <p key={entry.table}>
+                            {entry.table}: {entry.rows.toLocaleString()}
+                          </p>
+                        ))}
+                        {resetPreview.blockers.map((blocker) => (
+                          <p className="platform-warning" key={blocker}>
+                            {blocker}
+                          </p>
+                        ))}
+                        {resetPreview.eligible ? (
+                          <>
+                            <label className="platform-field" htmlFor="reset-confirmation">
+                              <span>Type RESET {company.code} to confirm</span>
+                              <input
+                                autoComplete="off"
+                                id="reset-confirmation"
+                                onChange={(event) => setResetConfirmation(event.target.value)}
+                                value={resetConfirmation}
+                              />
+                            </label>
+                            <button
+                              className="platform-button"
+                              disabled={busy || resetConfirmation !== `RESET ${company.code}`}
+                              onClick={() => void executeReset()}
+                              type="button"
+                            >
+                              Reset Company Data
+                            </button>
+                          </>
+                        ) : null}
+                      </div>
+                    )}
+                    {resetResult === undefined ? null : (
+                      <div className="platform-review" role="status">
+                        <p>
+                          <strong>Reset complete.</strong>{" "}
+                          {resetResult.totalRemoved.toLocaleString()}
+                          {" row(s) removed across "}
+                          {resetResult.removed.length} table(s). {resetResult.preservedVerified}
+                          {" preserved table(s) verified unchanged."}
+                        </p>
+                        <p>
+                          <strong>Backup:</strong> {resetResult.backupFile}
+                        </p>
+                      </div>
+                    )}
+                    {resetError === undefined ? null : (
+                      <p className="platform-login__error" role="alert">
+                        {resetError}
+                      </p>
+                    )}
+                  </>
+                ) : null}
+                <h4>Move to production</h4>
+                <p className="platform-warning">
+                  Moving to production is one-way. After this, the Company&apos;s data can never be
+                  reset or deleted by any tool, and there is no way back to {company.environment}.
+                </p>
+                <label className="platform-field" htmlFor="production-confirmation">
+                  <span>Type PRODUCTION {company.code} to confirm</span>
+                  <input
+                    autoComplete="off"
+                    id="production-confirmation"
+                    onChange={(event) => setProductionConfirmation(event.target.value)}
+                    value={productionConfirmation}
+                  />
+                </label>
+                <button
+                  className="platform-button"
+                  disabled={busy || productionConfirmation !== `PRODUCTION ${company.code}`}
+                  onClick={() => void confirmMoveToProduction()}
+                  type="button"
+                >
+                  Move to Production
+                </button>
+                {productionError === undefined ? null : (
+                  <p className="platform-login__error" role="alert">
+                    {productionError}
                   </p>
-                  <p>
-                    <strong>Manifest:</strong> {deletionPreview.manifestVersion ?? "pending"} (
-                    {deletionPreview.manifestHash?.slice(0, 12) ?? "pending"}…)
-                  </p>
-                  <p>
-                    <strong>Total Company rows:</strong> {deletionPreview.totalCompanyRows ?? 0}
-                  </p>
-                  <p>
-                    <strong>External objects:</strong>{" "}
-                    {deletionPreview.externalFiles?.fileObjects ?? 0}
-                  </p>
-                  <p>
-                    <strong>Global/shared data:</strong> preserved
-                  </p>
-                  {Object.entries(deletionPreview.moduleCounts ?? {}).map(([module, count]) => (
-                    <p key={module}>
-                      {module}: {count}
-                    </p>
-                  ))}
-                  {(deletionPreview.blockers ?? []).map((blocker) => (
-                    <p className="platform-warning" key={blocker}>
-                      {blocker}
-                    </p>
-                  ))}
-                  {(deletionPreview.unknownReferences ?? []).map((reference) => (
-                    <p className="platform-warning" key={reference}>
-                      {reference}
-                    </p>
-                  ))}
+                )}
+              </section>
+            ) : null}
+            {company.status === "closed" ? (
+              <section aria-labelledby="deletion-foundation-heading">
+                <h4 id="deletion-foundation-heading">Permanent Company deletion</h4>
+                <p>Environment: {company.environment}</p>
+                <p>Closed at: {company.closedAt ?? "—"}</p>
+                <p>
+                  {deletionEligibility?.eligible
+                    ? "Eligible for deletion immediately, subject to preview and backup readiness."
+                    : deletionEligibility?.eligibleAt === null || deletionEligibility === undefined
+                      ? "Deletion eligibility is unavailable."
+                      : `Deletion available after ${deletionEligibility.eligibleAt}. Remaining: ${deletionEligibility.remainingSeconds} seconds.`}
+                </p>
+                {canDelete ? (
                   <button
                     className="platform-button platform-button--quiet"
-                    disabled={
-                      busy ||
-                      (deletionPreview.blockers ?? []).length > 0 ||
-                      !deletionEligibility?.eligible
-                    }
-                    onClick={() => void createDeletionBackup()}
+                    disabled={busy}
+                    onClick={() => void runDeletionPreview()}
                     type="button"
                   >
-                    Create Verified Backup
+                    Run Deletion Preview
                   </button>
-                </div>
-              )}
-              {deletionBackup === undefined ? null : (
-                <div className="platform-review">
-                  <p>
-                    <strong>Backup:</strong> Verified full-database backup
-                  </p>
-                  <p>
-                    <strong>Size:</strong> {deletionBackup.sizeBytes.toLocaleString()} bytes
-                  </p>
-                  <p>
-                    <strong>Verified:</strong> {deletionBackup.verifiedAt}
-                  </p>
-                  <label className="platform-field" htmlFor="permanent-delete-confirmation">
-                    <span>Type DELETE {company.code}</span>
-                    <input
-                      id="permanent-delete-confirmation"
-                      onChange={(event) => setDeleteConfirmation(event.target.value)}
-                      value={deleteConfirmation}
-                    />
-                  </label>
-                  <button
-                    className="platform-button"
-                    disabled={busy || deleteConfirmation !== `DELETE ${company.code}`}
-                    onClick={() => void permanentlyDelete()}
-                    type="button"
-                  >
-                    Permanently Delete Company
-                  </button>
-                </div>
-              )}
-              {deletionStatus === undefined ? null : <p role="status">{deletionStatus}</p>}
-            </section>
-          ) : null}
+                ) : null}
+                {deletionPreviewError === undefined ? null : (
+                  <div className="platform-review" role="alert">
+                    <p>
+                      <strong>{deletionPreviewErrorLabel(deletionPreviewError.code)}</strong>
+                    </p>
+                    <p className="platform-warning">{deletionPreviewError.message}</p>
+                    {canDelete ? (
+                      <button
+                        className="platform-button platform-button--quiet"
+                        disabled={busy}
+                        onClick={() => void runDeletionPreview()}
+                        type="button"
+                      >
+                        Retry Deletion Preview
+                      </button>
+                    ) : null}
+                  </div>
+                )}
+                {deletionPreview === undefined ? null : (
+                  <div className="platform-review">
+                    <p role="status">
+                      READY FOR DELETE: {deletionPreview.readyForDelete ? "YES" : "NO"}
+                    </p>
+                    <p>
+                      <strong>Manifest:</strong> {deletionPreview.manifestVersion ?? "pending"} (
+                      {deletionPreview.manifestHash?.slice(0, 12) ?? "pending"}…)
+                    </p>
+                    <p>
+                      <strong>Total Company rows:</strong> {deletionPreview.totalCompanyRows ?? 0}
+                    </p>
+                    <p>
+                      <strong>External objects:</strong>{" "}
+                      {deletionPreview.externalFiles?.fileObjects ?? 0}
+                    </p>
+                    <p>
+                      <strong>Global/shared data:</strong> preserved
+                    </p>
+                    {Object.entries(deletionPreview.moduleCounts ?? {}).map(([module, count]) => (
+                      <p key={module}>
+                        {module}: {count}
+                      </p>
+                    ))}
+                    {(deletionPreview.blockers ?? []).map((blocker) => (
+                      <p className="platform-warning" key={blocker}>
+                        {blocker}
+                      </p>
+                    ))}
+                    {(deletionPreview.unknownReferences ?? []).map((reference) => (
+                      <p className="platform-warning" key={reference}>
+                        {reference}
+                      </p>
+                    ))}
+                    <button
+                      className="platform-button platform-button--quiet"
+                      disabled={
+                        busy ||
+                        (deletionPreview.blockers ?? []).length > 0 ||
+                        !deletionEligibility?.eligible
+                      }
+                      onClick={() => void createDeletionBackup()}
+                      type="button"
+                    >
+                      Create Verified Backup
+                    </button>
+                  </div>
+                )}
+                {deletionBackup === undefined ? null : (
+                  <div className="platform-review">
+                    <p>
+                      <strong>Backup:</strong> Verified full-database backup
+                    </p>
+                    <p>
+                      <strong>Size:</strong> {deletionBackup.sizeBytes.toLocaleString()} bytes
+                    </p>
+                    <p>
+                      <strong>Verified:</strong> {deletionBackup.verifiedAt}
+                    </p>
+                    <label className="platform-field" htmlFor="permanent-delete-confirmation">
+                      <span>Type DELETE {company.code}</span>
+                      <input
+                        id="permanent-delete-confirmation"
+                        onChange={(event) => setDeleteConfirmation(event.target.value)}
+                        value={deleteConfirmation}
+                      />
+                    </label>
+                    <button
+                      className="platform-button"
+                      disabled={busy || deleteConfirmation !== `DELETE ${company.code}`}
+                      onClick={() => void permanentlyDelete()}
+                      type="button"
+                    >
+                      Permanently Delete Company
+                    </button>
+                  </div>
+                )}
+                {deletionStatus === undefined ? null : <p role="status">{deletionStatus}</p>}
+              </section>
+            ) : null}
+            <p className="platform-muted">
+              Suspension stops sign-in and ends existing sessions. No data is removed, and a
+              suspended Company can be reactivated without recreating anything.
+            </p>
+          </>
+        ) : (
           <p className="platform-muted">
-            Suspension stops sign-in and ends existing sessions. No data is removed, and
-            reactivation restores access without recreating anything.
+            You have read-only Platform access. Lifecycle actions require
+            <code> platform.companies.manage</code>.
           </p>
-        </>
-      ) : (
-        <p className="platform-muted">
-          You have read-only Platform access. Lifecycle actions require
-          <code> platform.companies.manage</code>.
-        </p>
-      )}
+        )}
+      </section>
     </section>
   );
 }

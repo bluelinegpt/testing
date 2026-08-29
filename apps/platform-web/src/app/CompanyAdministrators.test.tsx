@@ -177,6 +177,16 @@ function baseRoutes(
 }
 
 function renderDetail(): void {
+  const observer = new MutationObserver(() => {
+    const administratorsTab = screen.queryByRole("tab", {
+      name: "Administrators & Passwords",
+    });
+    if (administratorsTab !== null) {
+      fireEvent.click(administratorsTab);
+      observer.disconnect();
+    }
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
   render(
     <MemoryRouter initialEntries={[`/companies/${companyId}`]}>
       <PlatformSessionProvider>
@@ -510,8 +520,8 @@ describe("Company Administrators section", () => {
       const routes = baseRoutes(fullAccess, [user({ state: "disabled" })]);
       // Never resolves within the test: proves the loading state renders on
       // the click itself, not once the network call happens to finish.
-      routes[`GET platform/companies/${companyId}/users/${accountId}/deletion-eligibility`] =
-        () => new Promise<never>(() => undefined) as never;
+      routes[`GET platform/companies/${companyId}/users/${accountId}/deletion-eligibility`] = () =>
+        new Promise<never>(() => undefined) as never;
       vi.stubGlobal("fetch", stubFetch(routes));
       renderDetail();
 
@@ -540,7 +550,9 @@ describe("Company Administrators section", () => {
       await screen.findByText("This permanently deletes the user account.");
       // Scoped to the panel: "admin.acme" and "company_admin" also appear in
       // the table row behind it.
-      const panel = within(screen.getByRole("heading", { name: /^Delete user:/ }).closest("section")!);
+      const panel = within(
+        screen.getByRole("heading", { name: /^Delete user:/ }).closest("section")!,
+      );
       expect(panel.getByText("admin.acme")).toBeInTheDocument();
       expect(panel.getByText("Test Delivery")).toBeInTheDocument();
       expect(panel.getByText("company_admin")).toBeInTheDocument();
@@ -624,12 +636,13 @@ describe("Company Administrators section", () => {
     it("shows a visible, retryable error when the eligibility check itself fails", async () => {
       const routes = baseRoutes(fullAccess, [user({ state: "disabled" })]);
       let attempts = 0;
-      routes[`GET platform/companies/${companyId}/users/${accountId}/deletion-eligibility`] = () => {
-        attempts += 1;
-        return attempts === 1
-          ? { body: { error: { code: "internal", message: "boom" } }, status: 500 }
-          : { body: eligibility(), status: 200 };
-      };
+      routes[`GET platform/companies/${companyId}/users/${accountId}/deletion-eligibility`] =
+        () => {
+          attempts += 1;
+          return attempts === 1
+            ? { body: { error: { code: "internal", message: "boom" } }, status: 500 }
+            : { body: eligibility(), status: 200 };
+        };
       vi.stubGlobal("fetch", stubFetch(routes));
       renderDetail();
 
@@ -713,7 +726,9 @@ describe("Company Administrators section", () => {
         // The row is gone from the SERVER'S next answer -- this is what
         // "remove the row" actually depends on: the client re-fetches after
         // a successful delete rather than editing local state by guesswork.
-        return already ? { body: { items: [] }, status: 200 } : (originalUsersRoute as StubResponse);
+        return already
+          ? { body: { items: [] }, status: 200 }
+          : (originalUsersRoute as StubResponse);
       };
       vi.stubGlobal("fetch", stubFetch(routes));
       renderDetail();
@@ -778,7 +793,10 @@ describe("Company Administrators section", () => {
     it("never leaves a click with no visible reaction", async () => {
       const routes = baseRoutes(fullAccess, [user({ state: "disabled" })]);
       routes[`GET platform/companies/${companyId}/users/${accountId}/deletion-eligibility`] = {
-        body: eligibility({ eligible: false, reason: "This account is not eligible for permanent deletion." }),
+        body: eligibility({
+          eligible: false,
+          reason: "This account is not eligible for permanent deletion.",
+        }),
         status: 200,
       };
       vi.stubGlobal("fetch", stubFetch(routes));
@@ -801,6 +819,8 @@ describe("Readiness and activation with administrators", () => {
   it("keeps Activate disabled while the administrator is only invited", async () => {
     vi.stubGlobal("fetch", stubFetch(baseRoutes(fullAccess, [user()])));
     renderDetail();
+
+    fireEvent.click(await screen.findByRole("tab", { name: "Lifecycle" }));
 
     const activate = await screen.findByRole("button", { name: "Activate" });
     expect(activate).toBeDisabled();
@@ -838,6 +858,8 @@ describe("Readiness and activation with administrators", () => {
     });
     vi.stubGlobal("fetch", stubFetch(baseRoutes(fullAccess, [user({ state: "active" })], ready)));
     renderDetail();
+
+    fireEvent.click(await screen.findByRole("tab", { name: "Lifecycle" }));
 
     expect(await screen.findByRole("button", { name: "Activate" })).toBeEnabled();
     expect(screen.getByText("Next step: Activate Company")).toBeInTheDocument();

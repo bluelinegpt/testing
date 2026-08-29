@@ -13,6 +13,11 @@ import {
 import { AuditPage } from "./AuditPage.js";
 import { CompaniesPage } from "./CompaniesPage.js";
 import { CompanyDetailPage } from "./CompanyDetailPage.js";
+import {
+  CompanyWebsiteDomainsPage,
+  CompanyWebsitePage,
+  CompanyWebsitePreviewPage,
+} from "./CompanyWebsitePage.js";
 import { CreateCompanyPage } from "./CreateCompanyPage.js";
 import { DashboardPage } from "./DashboardPage.js";
 import { DeploymentRegistryPage } from "./DeploymentRegistryPage.js";
@@ -41,8 +46,16 @@ const navigation: readonly NavigationItem[] = [
   { label: "Dashboard", path: "/", permission: "platform.access" },
   { label: "Companies", path: "/companies", permission: "platform.companies.read" },
   { label: "Website Leads", path: "/demo-requests", permission: "platform.leads.read" },
-  { label: "Trader Applications", path: "/trader-applications", permission: "platform.trader_applications.read" },
-  { label: "Customer Quotes", path: "/customer-quotes", permission: "platform.customer_quotes.read" },
+  {
+    label: "Trader Applications",
+    path: "/trader-applications",
+    permission: "platform.trader_applications.read",
+  },
+  {
+    label: "Customer Quotes",
+    path: "/customer-quotes",
+    permission: "platform.customer_quotes.read",
+  },
   { label: "Website", path: "/website", permission: "platform.website.read" },
   { label: "Agent", path: "/agent", permission: "platform.agent.read" },
   { label: "Commerce Integrations", path: "/commerce-integrations", permission: "platform.access" },
@@ -158,22 +171,53 @@ export function PlatformShell(): ReactElement {
                   <Route element={<CreateCompanyPage />} path="/companies/new" />
                 ) : null}
                 <Route element={<CompanyDetailPage />} path="/companies/:companyId" />
+                <Route element={<CompanyWebsitePage />} path="/companies/:companyId/website" />
+                <Route
+                  element={<CompanyWebsiteDomainsPage />}
+                  path="/companies/:companyId/website/domains"
+                />
+                <Route
+                  element={<CompanyWebsitePreviewPage />}
+                  path="/companies/:companyId/website/preview/:templateKey"
+                />
               </>
             ) : null}
             {session.can("platform.audit.read") ? (
               <Route element={<AuditPage />} path="/audit" />
             ) : null}
             {session.can("platform.leads.read") ? (
-              <><Route element={<DemoRequestsPage />} path="/demo-requests" /><Route element={<DemoRequestsPage />} path="/demo-requests/:demoRequestId" /></>
+              <>
+                <Route element={<DemoRequestsPage />} path="/demo-requests" />
+                <Route element={<DemoRequestsPage />} path="/demo-requests/:demoRequestId" />
+              </>
             ) : null}
             {session.can("platform.trader_applications.read") ? (
-              <><Route element={<TraderApplicationsPage />} path="/trader-applications" /><Route element={<TraderApplicationsPage />} path="/trader-applications/:applicationId" /></>
+              <>
+                <Route element={<TraderApplicationsPage />} path="/trader-applications" />
+                <Route
+                  element={<TraderApplicationsPage />}
+                  path="/trader-applications/:applicationId"
+                />
+              </>
             ) : null}
             {session.can("platform.customer_quotes.read") ? (
-              <><Route element={<CustomerQuotesPage />} path="/customer-quotes" /><Route element={<CustomerQuotesPage />} path="/customer-quotes/:id" /></>
+              <>
+                <Route element={<CustomerQuotesPage />} path="/customer-quotes" />
+                <Route element={<CustomerQuotesPage />} path="/customer-quotes/:id" />
+              </>
             ) : null}
             {session.can("platform.website.read") ? (
-              <><Route element={<WebsiteContentPage />} path="/website" /><Route element={<WebsiteContentPage preview />} path="/website/:id/preview" /><Route element={<WebsiteContentPage />} path="/website/:id" /><Route element={<Navigate replace to="/website" />} path="/website-content" /><Route element={<WebsiteContentPage preview />} path="/website-content/:id/preview" /><Route element={<WebsiteContentPage />} path="/website-content/:id" /></>
+              <>
+                <Route element={<WebsiteContentPage />} path="/website" />
+                <Route element={<WebsiteContentPage preview />} path="/website/:id/preview" />
+                <Route element={<WebsiteContentPage />} path="/website/:id" />
+                <Route element={<Navigate replace to="/website" />} path="/website-content" />
+                <Route
+                  element={<WebsiteContentPage preview />}
+                  path="/website-content/:id/preview"
+                />
+                <Route element={<WebsiteContentPage />} path="/website-content/:id" />
+              </>
             ) : null}
             {session.can("platform.agent.read") ? (
               <Route element={<AgentAdminPage />} path="/agent" />

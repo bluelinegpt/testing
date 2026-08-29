@@ -25,7 +25,7 @@ describe("CompanyWebsitePanel", () => {
     render(<CompanyWebsitePanel companyId="company-a" suggestedSlug="dana" />);
     fireEvent.click(await screen.findByRole("button", { name: "Configure Website" }));
     expect(screen.getByDisplayValue("dana")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Save Website" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save and Continue" }));
     await waitFor(() =>
       expect(platformApi.configureCompanyWebsite).toHaveBeenCalledWith(
         "company-a",
@@ -49,7 +49,7 @@ describe("CompanyWebsitePanel", () => {
     expect(screen.getByRole("button", { name: "Publish" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Enable Website" })).not.toBeInTheDocument();
     expect(screen.getByText("Unpublished changes")).toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: "Preview" })).toHaveLength(5);
+    expect(screen.getAllByRole("button", { name: "Preview" })).toHaveLength(20);
   });
 
   it("shows a conflict and reloads instead of silently retrying", async () => {
@@ -89,74 +89,17 @@ describe("CompanyWebsitePanel", () => {
       slug: "dana",
       templateKey: "corporate",
     });
-    const preview = vi.spyOn(platformApi, "companyWebsitePreview").mockResolvedValue({
-      availability: "published",
-      preview: true,
-      slug: "dana",
-      templateKey: "premium",
-      defaultLocale: "en",
-      settings: {
-        branding: {},
-        languages: { en: true, ar: false, defaultLocale: "en" },
-        presentation: {},
-        contact: {
-          whatsappEnabled: false,
-          showPhone: false,
-          showEmail: false,
-          showWhatsapp: false,
-          showAddress: false,
-          showWorkingHours: false,
-          workingHours: [],
-        },
-        services: [],
-        coverage: [],
-        benefits: [],
-        socialLinks: {},
-        sections: [],
-        knowledge: {
-          audiences: [],
-          packageTypes: [],
-          cod: { supported: false },
-          pricing: { mode: "request_confirmation" },
-          faqs: [],
-          instructions: {},
-          tawseelhubAttribution: true,
-        },
-        agent: {
-          enabled: false,
-          suggestedActions: ["services", "coverage", "contact"],
-          capabilities: {
-            companyInformation: true,
-            tracking: true,
-            deliveryRequest: true,
-            quoteGuidance: true,
-            whatsappHandoff: true,
-            contactHandoff: true,
-            faqAnswers: true,
-            socialLinks: true,
-          },
-          tone: "friendly_professional",
-          unknownBehavior: "safe_response",
-        },
-      },
-      company: {
-        nameEn: "Dana",
-        nameAr: null,
-        subtitleEn: null,
-        subtitleAr: null,
-        telephone: null,
-        email: null,
-        addressEn: null,
-        addressAr: null,
-        hasLogo: false,
-      },
-    });
+    const open = vi.spyOn(globalThis, "open").mockImplementation(() => null);
     const configure = vi.spyOn(platformApi, "configureCompanyWebsite");
     const publish = vi.spyOn(platformApi, "companyWebsiteAction");
     render(<CompanyWebsitePanel companyId="company-a" suggestedSlug="dana" />);
     const buttons = await screen.findAllByRole("button", { name: "Preview" });
     fireEvent.click(buttons[4]!);
-    await waitFor(() => expect(preview).toHaveBeenCalledWith("company-a", "premium"));
+    expect(open).toHaveBeenCalledWith(
+      "/companies/company-a/website/preview/premium",
+      "_blank",
+      "noopener,noreferrer",
+    );
     expect(configure).not.toHaveBeenCalled();
     expect(publish).not.toHaveBeenCalled();
   });

@@ -171,6 +171,58 @@ export class AreaConfigurationService {
     };
   }
 
+  /**
+   * The same typeahead query as `search()`, for a caller with no authenticated
+   * tenant context -- the public Store Checkout Area picker (Tawseelhub
+   * pre-production fix: Checkout Emirate + searchable Area). `companyId` here
+   * is never client-supplied; the caller resolves it server-side from the
+   * Store slug (its eligible Delivery Company), never from a request field.
+   */
+  public async searchForCompany(
+    companyId: string,
+    query: AreaSearchQueryDto,
+  ): Promise<AreaSearchPage> {
+    const limit = Math.min(Math.max(Number(query.limit) || 20, 1), 50);
+    const offset = Math.max(Number(query.offset) || 0, 0);
+    const search = query.search?.trim() ?? "";
+    const emirateId = query.emirateId ?? null;
+    const activeOnly = query.activeOnly ?? true;
+
+    const result = await sql<ConfiguredArea & { total: string }>`
+      select a.id,
+             a.code,
+             a.name_en as "nameEn",
+             a.name_ar as "nameAr",
+             a.notes,
+             a.is_active as "isActive",
+             a.updated_at as "updatedAt",
+             e.id as "emirateId",
+             e.code as "emirateCode",
+             e.name_en as "emirateNameEn",
+             e.name_ar as "emirateNameAr",
+             count(*) over () as total
+        from areas a
+        join emirates e on e.id = a.emirate_id
+       where a.company_id = ${companyId}::uuid
+         and (${emirateId}::uuid is null or a.emirate_id = ${emirateId}::uuid)
+         and (not ${activeOnly}::boolean or a.is_active)
+         and (${search} = ''
+              or a.name_en ilike '%' || ${search} || '%'
+              or coalesce(a.name_ar, '') ilike '%' || ${search} || '%'
+              or a.code ilike '%' || ${search} || '%')
+       order by e.display_order, lower(btrim(a.name_en)), a.code
+       limit ${limit + 1} offset ${offset}
+    `.execute(this.database);
+
+    const hasMore = result.rows.length > limit;
+    const rows = hasMore ? result.rows.slice(0, limit) : result.rows;
+    return {
+      hasMore,
+      items: rows.map((row) => this.toArea(row)),
+      total: Number(result.rows[0]?.total ?? 0),
+    };
+  }
+
   public async get(areaId: string): Promise<ConfiguredArea> {
     const area = await this.findArea(this.database, areaId);
     if (area === undefined) throw this.notFound();

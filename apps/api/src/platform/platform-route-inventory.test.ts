@@ -150,6 +150,8 @@ describe("Platform route inventory", () => {
     const mutating = [
       "create",
       "update",
+      "updateShipmentPrefix",
+      "activateShipmentSerial",
       "activate",
       "suspend",
       "reactivate",
@@ -204,6 +206,7 @@ describe("Platform route inventory", () => {
       "enable",
       "discardDraft",
       "previewAgent",
+      "previewTrack",
       "addDomain",
       "refreshDomain",
       "primaryDomain",

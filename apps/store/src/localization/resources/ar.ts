@@ -86,7 +86,8 @@ export const ar = {
     registerLead: "أنشئ حسابك لتبدأ التسوق.",
     registerTitle: "إنشاء حسابك",
     resetLead: "اختر كلمة مرور جديدة لحسابك.",
-    resetLinkSent: "إذا كان هناك حساب بهذا الرقم أو البريد الإلكتروني، فقد تم إرسال رابط إعادة التعيين.",
+    resetLinkSent:
+      "إذا كان هناك حساب بهذا الرقم أو البريد الإلكتروني، فقد تم إرسال رابط إعادة التعيين.",
     resetSuccess: "تمت إعادة تعيين كلمة المرور. يمكنك الآن تسجيل الدخول.",
     resetToken: "رمز إعادة التعيين",
     submitReset: "إرسال رابط إعادة التعيين",
@@ -153,12 +154,16 @@ export const ar = {
   },
   checkout: {
     address: {
-      area: "المنطقة (اختياري)",
+      area: "المنطقة",
+      areaChooseEmirateFirst: "اختر الإمارة أولاً",
+      chooseEmirate: "اختر الإمارة…",
       emirate: "الإمارة",
       address: "العنوان",
       instructions: "تعليمات التوصيل (اختياري)",
       locationLink: "رابط الموقع (اختياري)",
+      noAreaResults: "لا توجد مناطق مطابقة",
       savedAddress: "عنوان التوصيل",
+      searchArea: "ابحث عن منطقتك…",
       title: "عنوان التوصيل",
       useNewAddress: "استخدام عنوان جديد",
     },
@@ -188,14 +193,17 @@ export const ar = {
     errors: {
       checkout_address_not_found: "تعذر العثور على هذا العنوان المحفوظ.",
       checkout_address_required: "أدخل عنوان التوصيل.",
+      checkout_area_invalid: "اختر منطقة صحيحة من القائمة.",
       checkout_changed: "تغير طلبك منذ آخر مراجعة. يرجى مراجعة طلبك مرة أخرى.",
       checkout_delivery_company_invalid: "شركة التوصيل المختارة غير متاحة لهذا المتجر.",
-      checkout_idempotency_conflict: "لا يتطابق هذا الطلب مع محاولة سابقة. يرجى مراجعة طلبك مرة أخرى.",
+      checkout_idempotency_conflict:
+        "لا يتطابق هذا الطلب مع محاولة سابقة. يرجى مراجعة طلبك مرة أخرى.",
       checkout_invalid_mobile: "أدخل رقم جوال إماراتي صحيح.",
       checkout_name_required: "أدخل اسمك.",
       checkout_store_not_found: "تعذر العثور على هذا المتجر.",
       checkout_store_unavailable: "هذا المتجر لا يستقبل طلبات حاليًا.",
-      checkout_submission_in_progress: "طلبك قيد التقديم بالفعل. يرجى الانتظار لحظة والمحاولة مرة أخرى.",
+      checkout_submission_in_progress:
+        "طلبك قيد التقديم بالفعل. يرجى الانتظار لحظة والمحاولة مرة أخرى.",
       network_error: "تعذر الوصول إلى الخادم. يرجى المحاولة مرة أخرى.",
       unknown_error: "حدث خطأ ما. يرجى المحاولة مرة أخرى.",
     },

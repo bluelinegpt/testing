@@ -71,8 +71,30 @@ describe("Company website editor settings", () => {
       }),
     ).toThrow(/unsafe instructions/u);
   });
-  it.each(["Our private API integration is secured.", "Ask support about the password policy.", "Confidential delivery is available."])("allows legitimate business wording: %s", (answer) => {
-    expect(() => validateCompanyWebsiteSettings({ ...EMPTY_COMPANY_WEBSITE_SETTINGS, knowledge: { ...EMPTY_COMPANY_WEBSITE_SETTINGS.knowledge, faqs: [{ id: "security", question: { en: "What is your security policy?" }, answer: { en: answer }, enabled: true, order: 0, websiteVisible: true, agentAvailable: true }] } })).not.toThrow();
+  it.each([
+    "Our private API integration is secured.",
+    "Ask support about the password policy.",
+    "Confidential delivery is available.",
+  ])("allows legitimate business wording: %s", (answer) => {
+    expect(() =>
+      validateCompanyWebsiteSettings({
+        ...EMPTY_COMPANY_WEBSITE_SETTINGS,
+        knowledge: {
+          ...EMPTY_COMPANY_WEBSITE_SETTINGS.knowledge,
+          faqs: [
+            {
+              id: "security",
+              question: { en: "What is your security policy?" },
+              answer: { en: answer },
+              enabled: true,
+              order: 0,
+              websiteVisible: true,
+              agentAvailable: true,
+            },
+          ],
+        },
+      }),
+    ).not.toThrow();
   });
   it("accepts safe branding and restores template defaults when colors are removed", () => {
     expect(
@@ -84,6 +106,53 @@ describe("Company website editor settings", () => {
     expect(
       validateCompanyWebsiteSettings({ ...EMPTY_COMPANY_WEBSITE_SETTINGS, branding: {} }).branding,
     ).toEqual({});
+  });
+  it("keeps a Website-specific PNG logo in the draft/published settings boundary", () => {
+    const logoDataUrl = "data:image/png;base64,iVBORw0KGgo=";
+    const draft = validateCompanyWebsiteSettings({
+      ...EMPTY_COMPANY_WEBSITE_SETTINGS,
+      branding: { logoDataUrl },
+    });
+    expect(draft.branding.logoDataUrl).toBe(logoDataUrl);
+    expect(settingsForWebsiteAudience(draft, null, true)?.branding.logoDataUrl).toBe(logoDataUrl);
+    expect(settingsForWebsiteAudience(draft, null, false)).toBeNull();
+    expect(() =>
+      validateCompanyWebsiteSettings({
+        ...EMPTY_COMPANY_WEBSITE_SETTINGS,
+        branding: { logoDataUrl: "data:image/svg+xml;base64,PHN2Zz4=" },
+      }),
+    ).toThrow(/PNG or JPEG/u);
+  });
+  it("accepts a safe Website banner and rejects script-capable image formats", () => {
+    const bannerDataUrl = "data:image/webp;base64,UklGRg==";
+    expect(
+      validateCompanyWebsiteSettings({
+        ...EMPTY_COMPANY_WEBSITE_SETTINGS,
+        branding: { bannerDataUrl },
+      }).branding.bannerDataUrls,
+    ).toEqual([bannerDataUrl]);
+    expect(() =>
+      validateCompanyWebsiteSettings({
+        ...EMPTY_COMPANY_WEBSITE_SETTINGS,
+        branding: { bannerDataUrl: "data:image/svg+xml;base64,PHN2Zz4=" },
+      }),
+    ).toThrow(/PNG, JPEG or WebP/u);
+  });
+  it("accepts up to three banners with a controlled rotation style and timing", () => {
+    const banners = ["AA==", "AQ==", "Ag=="].map((data) => `data:image/png;base64,${data}`);
+    const settings = validateCompanyWebsiteSettings({
+      ...EMPTY_COMPANY_WEBSITE_SETTINGS,
+      branding: { bannerDataUrls: banners, bannerTransition: "slide", bannerIntervalSeconds: 4 },
+    });
+    expect(settings.branding.bannerDataUrls).toEqual(banners);
+    expect(settings.branding.bannerTransition).toBe("slide");
+    expect(settings.branding.bannerIntervalSeconds).toBe(4);
+    expect(() =>
+      validateCompanyWebsiteSettings({
+        ...EMPTY_COMPANY_WEBSITE_SETTINGS,
+        branding: { bannerDataUrls: [...banners, banners[0]] },
+      }),
+    ).toThrow(/no more than 3/u);
   });
   it.each(["red", "#fff", "url(javascript:alert(1))"])("rejects unsafe color %s", (primaryColor) =>
     expect(() =>
@@ -133,6 +202,29 @@ describe("Company website editor settings", () => {
         socialLinks: { x: "javascript:alert(1)" },
       }),
     ).toThrow(/Social/u);
+  });
+  it("normalizes legacy WhatsApp visibility into one enabled Website feature", () => {
+    const settings = validateCompanyWebsiteSettings({
+      ...EMPTY_COMPANY_WEBSITE_SETTINGS,
+      contact: {
+        ...EMPTY_COMPANY_WEBSITE_SETTINGS.contact,
+        whatsappNumber: "+971 50 123 4567",
+        whatsappEnabled: false,
+        showWhatsapp: true,
+      },
+    });
+    expect(settings.contact.whatsappEnabled).toBe(true);
+    expect(settings.contact.showWhatsapp).toBe(true);
+    expect(() =>
+      validateCompanyWebsiteSettings({
+        ...EMPTY_COMPANY_WEBSITE_SETTINGS,
+        contact: {
+          ...EMPTY_COMPANY_WEBSITE_SETTINGS.contact,
+          whatsappEnabled: true,
+          showWhatsapp: true,
+        },
+      }),
+    ).toThrow(/WhatsApp number is required/u);
   });
   it("does not inject fake services, benefits or coverage", () => {
     const settings = validateCompanyWebsiteSettings(EMPTY_COMPANY_WEBSITE_SETTINGS);

@@ -1,5 +1,6 @@
 export const agentQuickActions = [
   "Send a Package",
+  "Track Shipment",
   "Register as Trader",
   "Delivery Company Demo",
   "Learn About Tawseelhub",
@@ -7,6 +8,7 @@ export const agentQuickActions = [
 
 export const agentQuickActionsArabic = [
   "إرسال شحنة",
+  "تتبع شحنة",
   "التسجيل كتاجر",
   "طلب عرض لنظام شركة توصيل",
   "معرفة المزيد عن Tawseelhub",

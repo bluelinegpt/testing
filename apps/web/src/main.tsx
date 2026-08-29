@@ -9,6 +9,7 @@ import { installNumberInputWheelGuard } from "./utils/number-input-wheel-guard.j
 import "./styles.css";
 import {
   CompanyWebsiteErrorBoundary,
+  CompanyWebsiteDraftPreviewReceiver,
   isPublicCompanyWebsiteHost,
   PublicCompanyWebsite,
 } from "./features/company-website/PublicCompanyWebsite.js";
@@ -24,7 +25,11 @@ installNumberInputWheelGuard();
 
 createRoot(root).render(
   <StrictMode>
-    {isPublicCompanyWebsiteHost() ? (
+    {new URLSearchParams(globalThis.location.search).get("websiteDraftPreview") === "1" ? (
+      <CompanyWebsiteErrorBoundary>
+        <CompanyWebsiteDraftPreviewReceiver />
+      </CompanyWebsiteErrorBoundary>
+    ) : isPublicCompanyWebsiteHost() ? (
       <CompanyWebsiteErrorBoundary>
         <PublicCompanyWebsite />
       </CompanyWebsiteErrorBoundary>

@@ -21,7 +21,13 @@ body {
   margin: 0;
   background: var(--store-page);
   color: var(--store-text);
-  font-family: "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+  font-family:
+    "Segoe UI",
+    system-ui,
+    -apple-system,
+    "Helvetica Neue",
+    Arial,
+    sans-serif;
   font-size: 15px;
   line-height: 1.5;
   /* The page itself must never scroll sideways; wide children scroll inside
@@ -178,9 +184,7 @@ a:hover {
  * else's shop would misrepresent the marketplace.
  */
 .store-hero {
-  background:
-    radial-gradient(120% 140% at 100% 0%, #1b2a55 0%, transparent 60%),
-    var(--store-navy);
+  background: radial-gradient(120% 140% at 100% 0%, #1b2a55 0%, transparent 60%), var(--store-navy);
   color: var(--store-on-navy);
   padding-block: var(--store-space-10);
 }
@@ -359,7 +363,9 @@ a:hover {
   background: var(--store-surface);
   color: var(--store-text);
   text-align: center;
-  transition: border-color 120ms ease, transform 120ms ease;
+  transition:
+    border-color 120ms ease,
+    transform 120ms ease;
 }
 
 .store-catcard:hover {
@@ -407,7 +413,10 @@ a:hover {
   border-radius: var(--store-radius-lg);
   box-shadow: var(--store-shadow-sm);
   overflow: hidden;
-  transition: border-color 120ms ease, box-shadow 120ms ease, transform 120ms ease;
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease,
+    transform 120ms ease;
 }
 
 .store-card:hover {
@@ -1439,6 +1448,50 @@ a:hover {
 .store-field-error {
   color: var(--store-danger);
   font-size: 13px;
+}
+
+/* Pre-production fix: the searchable Area combobox. */
+.store-combobox {
+  position: relative;
+}
+
+.store-combobox__listbox {
+  background: var(--store-surface, var(--store-page));
+  border: 1px solid var(--store-border);
+  border-radius: var(--store-radius-md);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  list-style: none;
+  margin: var(--store-space-1) 0 0;
+  max-height: min(280px, 60vh);
+  overflow-y: auto;
+  padding: var(--store-space-1) 0;
+  position: absolute;
+  top: 100%;
+  width: 100%;
+  z-index: 40;
+}
+
+.store-combobox__option {
+  color: var(--store-text);
+  cursor: pointer;
+  font-size: 15px;
+  min-height: 44px;
+  align-items: center;
+  display: flex;
+  padding-inline: var(--store-space-3);
+}
+
+.store-combobox__option--active {
+  background: var(--store-primary-subtle);
+}
+
+.store-combobox__status {
+  color: var(--store-muted, var(--store-text));
+  font-size: 14px;
+  min-height: 44px;
+  align-items: center;
+  display: flex;
+  padding-inline: var(--store-space-3);
 }
 
 .store-form-error {

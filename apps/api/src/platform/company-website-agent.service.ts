@@ -105,15 +105,17 @@ export class CompanyWebsiteAgentService {
         language: selected,
         timezone: row.timezone,
         settings,
-        history: conversation.messages,
+        // The Company inbox retains the complete bounded transcript, while the
+        // provider receives only recent context to keep prompt cost controlled.
+        history: conversation.messages.slice(-16),
       };
-      const trackingToken =
+      const trackingReference =
         settings.agent.capabilities.tracking && settings.functions.trackingEnabled
-          ? message.match(/(?:^|\s)([A-Za-z0-9_-]{43})(?:\s|$)/u)?.[1]
+          ? trackingReferenceFrom(message)
           : undefined;
-      const generated = trackingToken
+      const generated = trackingReference
         ? {
-            reply: await this.trackingReply(host, trackingToken, selected),
+            reply: await this.trackingReply(host, trackingReference, selected),
             provider: "secure-tracking",
             model: "public-tracking-v1",
           }
@@ -122,7 +124,7 @@ export class CompanyWebsiteAgentService {
         ...conversation.messages,
         { role: "user" as const, content: message },
         { role: "assistant" as const, content: generated.reply },
-      ].slice(-16);
+      ];
       await sql`update company_website_agent_conversations set language=${selected},messages=${JSON.stringify(messages)}::jsonb,message_count=message_count+1,updated_at=now() where id=${conversation.id}::uuid and company_id=${row.companyId}::uuid`.execute(
         trx,
       );
@@ -148,6 +150,31 @@ export class CompanyWebsiteAgentService {
     );
     return { ...result, provider: undefined, model: undefined };
   }
+  public async saveContact(host: string | undefined, token: string, contactNumber: string) {
+    if (!/^[A-Za-z0-9_-]{43}$/u.test(token)) throw this.notFound();
+    const row = await this.publicWebsite(host);
+    const settings = validateCompanyWebsiteSettings(row.settings);
+    this.assertEnabled(row, settings);
+    const normalized = contactNumber.trim().replace(/[ ()-]/gu, "");
+    if (!/^\+?[0-9]{5,31}$/u.test(normalized)) {
+      throw new ApplicationException(
+        "company_website_agent_contact_invalid",
+        "Enter a valid contact number",
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    const result = await sql`
+      update company_website_agent_conversations
+      set visitor_contact_number=${normalized}, updated_at=now()
+      where public_token_hash=${hash(token)}
+        and company_id=${row.companyId}::uuid
+        and company_website_id=${row.websiteId}::uuid
+        and expires_at>now()
+      returning id
+    `.execute(this.db);
+    if (result.rows.length === 0) throw this.notFound();
+    return { saved: true };
+  }
   public async preview(companyId: string, message: string, language: "en" | "ar" | undefined) {
     const row = (
       await sql<WebsiteAgentRow>`select w.id as "websiteId",w.company_id as "companyId",w.slug,w.status,w.enabled,c.name_en as "nameEn",c.name_ar as "nameAr",coalesce(cs.timezone,'Asia/Dubai') as timezone,w.draft_settings as settings from company_websites w join companies c on c.id=w.company_id left join company_settings cs on cs.company_id=w.company_id where w.company_id=${companyId}::uuid`.execute(
@@ -160,17 +187,27 @@ export class CompanyWebsiteAgentService {
     const agentName =
       settings.agent.displayName?.trim() ||
       `${selected === "ar" ? (row.nameAr ?? row.nameEn) : row.nameEn} Assistant`;
-    const generated = await this.provider.reply(
-      {
-        companyName: selected === "ar" ? (row.nameAr ?? row.nameEn) : row.nameEn,
-        agentName,
-        language: selected,
-        timezone: row.timezone,
-        settings,
-        history: [],
-      },
-      message,
-    );
+    const trackingReference =
+      settings.agent.capabilities.tracking && settings.functions.trackingEnabled
+        ? trackingReferenceFrom(message)
+        : undefined;
+    const generated = trackingReference
+      ? {
+          reply: await this.previewTrackingReply(companyId, trackingReference, selected),
+          provider: "secure-tracking-preview",
+          model: "public-tracking-v1",
+        }
+      : await this.provider.reply(
+          {
+            companyName: selected === "ar" ? (row.nameAr ?? row.nameEn) : row.nameEn,
+            agentName,
+            language: selected,
+            timezone: row.timezone,
+            settings,
+            history: [],
+          },
+          message,
+        );
     return {
       preview: true,
       noindex: true,
@@ -226,38 +263,56 @@ export class CompanyWebsiteAgentService {
   }
   private async trackingReply(
     host: string | undefined,
-    token: string,
+    reference: string,
     language: "en" | "ar",
   ): Promise<string> {
     try {
-      const result = (await this.websites.trackPublic(host, token)) as {
+      const result = (await this.websites.trackPublic(host, reference)) as {
         reference: string;
         status: string;
         timeline: Array<{ status: string; occurredAt: string }>;
       };
-      const labels: Record<string, { en: string; ar: string }> = {
-        order_received: { en: "Order Received", ar: "تم استلام الطلب" },
-        preparing: { en: "Preparing for Delivery", ar: "قيد التجهيز للتسليم" },
-        assigned: { en: "Assigned for Delivery", ar: "تم تعيين مندوب للتسليم" },
-        out_for_delivery: { en: "Out for Delivery", ar: "خرج للتسليم" },
-        delivered: { en: "Delivered", ar: "تم التسليم" },
-        returned: { en: "Returned", ar: "مرتجع" },
-        cancelled: { en: "Cancelled", ar: "ملغي" },
-      };
-      const timeline = result.timeline
-        .map(
-          (event) =>
-            `${labels[event.status]?.[language] ?? labels.preparing![language]} — ${new Date(event.occurredAt).toLocaleString(language === "ar" ? "ar-AE" : "en-AE")}`,
-        )
-        .join("\n");
-      return language === "ar"
-        ? `الشحنة ${result.reference}: ${labels[result.status]?.ar ?? labels.preparing!.ar}.\n${timeline}`
-        : `Shipment ${result.reference} is currently ${labels[result.status]?.en ?? labels.preparing!.en}.\n${timeline}`;
+      return this.formatTrackingReply(result, language);
     } catch {
-      return language === "ar"
-        ? "لم نتمكن من العثور على شحنة تطابق هذا المرجع."
-        : "We couldn't find a shipment matching that reference.";
+      return trackingNotFound(language);
     }
+  }
+  private async previewTrackingReply(
+    companyId: string,
+    reference: string,
+    language: "en" | "ar",
+  ): Promise<string> {
+    try {
+      return this.formatTrackingReply(
+        (await this.websites.trackPreview(companyId, reference)) as {
+          reference: string;
+          status: string;
+          timeline: Array<{ status: string; occurredAt: string }>;
+        },
+        language,
+      );
+    } catch {
+      return trackingNotFound(language);
+    }
+  }
+  private formatTrackingReply(
+    result: {
+      reference: string;
+      status: string;
+      timeline: Array<{ status: string; occurredAt: string }>;
+    },
+    language: "en" | "ar",
+  ): string {
+    const labels = trackingStatusLabels;
+    const timeline = result.timeline
+      .map(
+        (event) =>
+          `${labels[event.status]?.[language] ?? labels.preparing![language]} — ${new Date(event.occurredAt).toLocaleString(language === "ar" ? "ar-AE" : "en-AE")}`,
+      )
+      .join("\n");
+    return language === "ar"
+      ? `الشحنة ${result.reference}: ${labels[result.status]?.ar ?? labels.preparing!.ar}.${timeline ? `\n${timeline}` : ""}`
+      : `Shipment ${result.reference} is currently ${labels[result.status]?.en ?? labels.preparing!.en}.${timeline ? `\n${timeline}` : ""}`;
   }
   private notFound() {
     return new ApplicationException(
@@ -269,6 +324,26 @@ export class CompanyWebsiteAgentService {
 }
 function hash(value: string) {
   return createHash("sha256").update(value).digest("hex");
+}
+const trackingStatusLabels: Record<string, { en: string; ar: string }> = {
+  order_received: { en: "Order Received", ar: "تم استلام الطلب" },
+  preparing: { en: "Preparing for Delivery", ar: "قيد التجهيز للتسليم" },
+  assigned: { en: "Assigned for Delivery", ar: "تم تعيين مندوب للتسليم" },
+  out_for_delivery: { en: "Out for Delivery", ar: "خرج للتسليم" },
+  delivered: { en: "Delivered", ar: "تم التسليم" },
+  returned: { en: "Returned", ar: "مرتجع" },
+  cancelled: { en: "Cancelled", ar: "ملغي" },
+};
+function trackingReferenceFrom(message: string): string | undefined {
+  return (
+    message.match(/(?:^|\s)([A-Za-z0-9_-]{43})(?=\s|$)/u)?.[1] ??
+    message.match(/(?:^|\s)(ORD-[0-9]{6,})(?=\s|$)/iu)?.[1]?.toUpperCase()
+  );
+}
+function trackingNotFound(language: "en" | "ar"): string {
+  return language === "ar"
+    ? "لم نتمكن من العثور على شحنة تطابق هذا المرجع."
+    : "We couldn't find a shipment matching that reference.";
 }
 function hostnameOf(host: string | undefined) {
   return host?.trim().toLowerCase().split(":")[0] || undefined;
