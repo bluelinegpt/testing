@@ -6,7 +6,7 @@
       "displayName": "API",
       "path": "apps/api",
       "renderService": "bluelinegpt-api-test",
-      "status": "needs_deploy",
+      "status": "pushed_awaiting_confirmation",
       "localCommit": "2ad26fe",
       "localCommitDate": "2026-08-29",
       "lastChangeDescription": "New and existing Companies receive the standard Driver-flagged Employee role and workforce defaults.",
