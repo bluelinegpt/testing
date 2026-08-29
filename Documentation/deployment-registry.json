@@ -6,10 +6,10 @@
       "displayName": "API",
       "path": "apps/api",
       "renderService": "bluelinegpt-api-test",
-      "status": "pushed_awaiting_confirmation",
-      "localCommit": "22a6d95",
+      "status": "needs_deploy",
+      "localCommit": "2ad26fe",
       "localCommitDate": "2026-08-29",
-      "lastChangeDescription": "Expanded Company websites, local tenant routing, public tracking, checkout, and Platform lifecycle tools.",
+      "lastChangeDescription": "New and existing Companies receive the standard Driver-flagged Employee role and workforce defaults.",
       "lastChangeBy": "codex",
       "confirmedLiveCommit": "2db5a27",
       "confirmedLiveAt": "2026-08-28"
