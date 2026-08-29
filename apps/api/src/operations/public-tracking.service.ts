@@ -6,7 +6,7 @@ import { type Kysely, sql } from "kysely";
 import { DATABASE } from "../infrastructure/database/database.tokens.js";
 import type { DatabaseSchema } from "../infrastructure/database/database.types.js";
 import { ApplicationException } from "../presentation/errors/application.exception.js";
-import { normalizeUaeMobile } from "../shared/uae-mobile.js";
+import { mobileComparisonKey } from "../shared/uae-mobile.js";
 import { mapPublicTrackingStatus, type PublicTrackingLanguage } from "./public-tracking-status.js";
 import { normalizeReferenceTerm } from "./order-search.js";
 
@@ -198,8 +198,13 @@ export class PublicTrackingService {
   ): Promise<PublicTrackingVerifyOutcome> {
     const payload = readVerificationToken(verificationToken);
     if (payload === undefined) return { result: "not_verified" };
-    const normalizedMobile = normalizeUaeMobile(rawMobile);
-    if (normalizedMobile === undefined) return { result: "not_verified" };
+    // Operations may temporarily register the exact mobile value supplied by
+    // a Trader even when it is incomplete, then correct it on the Order later.
+    // Compare with the same deterministic digits-only key used by PostgreSQL
+    // for the stored value. This still folds equivalent valid UAE formats
+    // together, but never guesses, pads, or performs a partial match.
+    const normalizedMobile = mobileComparisonKey(rawMobile);
+    if (normalizedMobile.length === 0) return { result: "not_verified" };
     const candidates = await this.eligibleCandidates(payload.kind, payload.value);
     const matches = candidates.filter(
       (candidate) => candidate.customerMobileComparisonKey === normalizedMobile,

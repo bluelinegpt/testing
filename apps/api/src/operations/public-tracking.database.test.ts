@@ -545,6 +545,40 @@ describe.skipIf(!runDatabaseTests)("PublicTrackingService", () => {
       });
     });
 
+    it("matches the exact registered mobile even when Operations stored an incomplete number", async () => {
+      await inRolledBackTransaction(async (transaction) => {
+        const companyA = await seedCompany(transaction, "PTV");
+        const companyB = await seedCompany(transaction, "PTW");
+        const orderNumber = randomOrderNumber();
+        await insertOrder(transaction, companyA, {
+          serialNumber: `X${randomUUID().slice(0, 8)}`,
+          orderNumber,
+          customerMobileNumber: "050558841",
+          deliveryStatus: "delivered",
+        });
+        await insertOrder(transaction, companyB, {
+          serialNumber: `X${randomUUID().slice(0, 8)}`,
+          orderNumber,
+          customerMobileNumber: "0509999999",
+        });
+        const service = new PublicTrackingService(transaction);
+
+        const lookup = await service.lookupByAirwayBill(orderNumber);
+        expect(lookup.result).toBe("verification_required");
+        if (lookup.result !== "verification_required") return;
+
+        const verified = await service.verifyAmbiguousShipment(
+          lookup.verificationToken,
+          "050558841",
+        );
+
+        expect(verified.result).toBe("verified");
+        if (verified.result === "verified") {
+          expect(verified.tracking.statusLabel).toBe("Delivered");
+        }
+      });
+    });
+
     it("never matches an Order Number as a partial/prefix Airway Bill search", async () => {
       await inRolledBackTransaction(async (transaction) => {
         const company = await seedCompany(transaction, "PTU");
