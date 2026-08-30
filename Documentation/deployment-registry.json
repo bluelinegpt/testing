@@ -32,7 +32,7 @@
       "displayName": "Platform admin",
       "path": "apps/platform-web",
       "renderService": "bluelinegpt-platform-test",
-      "status": "needs_deploy",
+      "status": "pushed_awaiting_confirmation",
       "localCommit": "b9024c9",
       "localCommitDate": "2026-08-30",
       "lastChangeDescription": "Keep Publish visible and expose WhatsApp and AI Agent settings at the top",
