@@ -56,8 +56,6 @@ export const PLATFORM_ERRORS_MANAGE = "platform.errors.manage";
 // later, separate decision per the three-tier remediation policy agreed
 // 2026-08-04, not something to seed ahead of actually building it.
 export const PLATFORM_INTEGRITY_READ = "platform.integrity.read";
-export const PLATFORM_WORKFLOW_TESTS_READ = "platform.workflow_tests.read";
-export const PLATFORM_WORKFLOW_TESTS_MANAGE = "platform.workflow_tests.manage";
 export const PLATFORM_LEADS_READ = "platform.leads.read";
 export const PLATFORM_LEADS_MANAGE = "platform.leads.manage";
 export const PLATFORM_TRADER_APPLICATIONS_READ = "platform.trader_applications.read";
@@ -120,14 +118,6 @@ export const PLATFORM_PERMISSIONS: readonly { code: string; description: string 
   {
     code: PLATFORM_INTEGRITY_READ,
     description: "View cross-module data integrity findings on the Platform",
-  },
-  {
-    code: PLATFORM_WORKFLOW_TESTS_READ,
-    description: "View automated workflow tests and evidence",
-  },
-  {
-    code: PLATFORM_WORKFLOW_TESTS_MANAGE,
-    description: "Configure and control automated workflow tests",
   },
   { code: PLATFORM_LEADS_READ, description: "View public website demo requests" },
   { code: PLATFORM_LEADS_MANAGE, description: "Manage public website demo request workflow" },

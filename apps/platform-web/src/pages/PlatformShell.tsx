@@ -29,7 +29,6 @@ import { CustomerQuotesPage } from "./CustomerQuotesPage.js";
 import { WebsiteContentPage } from "./WebsiteContentPage.js";
 import { AgentAdminPage } from "./AgentAdminPage.js";
 import { CommerceIntegrationsPage } from "./CommerceIntegrationsPage.js";
-import { AutomatedWorkflowTestingPage } from "./AutomatedWorkflowTestingPage.js";
 
 interface NavigationItem {
   readonly label: string;
@@ -66,7 +65,6 @@ const navigation: readonly NavigationItem[] = [
   { label: "Deployment registry", path: "/deployment-registry", permission: "platform.access" },
   { label: "Error Handler", path: "/errors", permission: "platform.errors.read" },
   { label: "Integrity Checker", path: "/integrity", permission: "platform.integrity.read" },
-  { label: "Workflow Testing", path: "/workflow-testing", permission: "platform.workflow_tests.read" },
 ];
 
 const themeOptions: readonly { code: ThemePreference; label: string }[] = [
@@ -231,9 +229,6 @@ export function PlatformShell(): ReactElement {
             ) : null}
             {session.can("platform.integrity.read") ? (
               <Route element={<IntegrityCheckPage />} path="/integrity" />
-            ) : null}
-            {session.can("platform.workflow_tests.read") ? (
-              <Route element={<AutomatedWorkflowTestingPage />} path="/workflow-testing" />
             ) : null}
             <Route element={<Navigate replace to="/" />} path="*" />
           </Routes>
