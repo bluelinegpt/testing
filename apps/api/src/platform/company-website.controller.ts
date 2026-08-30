@@ -249,12 +249,12 @@ export class PublicCompanyWebsiteController {
   private host(request: Request): string | undefined {
     const actualHost = request.headers.host ?? request.hostname;
     const forwarded = request.headers["x-blueline-tenant-host"];
-    const localSimulation =
-      process.env.NODE_ENV !== "production" &&
-      /^(?:localhost|127\.0\.0\.1)(?::\d+)?$/iu.test(actualHost ?? "");
-    return localSimulation
-      ? ((Array.isArray(forwarded) ? forwarded[0] : forwarded) ?? actualHost)
-      : actualHost;
+    // The production Company Web server is a same-origin reverse proxy. It
+    // must rewrite Host to the Render API service so Render can route the
+    // upstream request, and carries the visitor-facing Website hostname in
+    // this header. The header selects public content only; it grants no
+    // identity or access, matching the established Company-login contract.
+    return (Array.isArray(forwarded) ? forwarded[0] : forwarded) ?? actualHost;
   }
 
   @Get()

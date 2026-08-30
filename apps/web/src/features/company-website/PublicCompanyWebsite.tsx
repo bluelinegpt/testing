@@ -13,6 +13,7 @@ import {
   renderCompanyWebsiteTemplate,
   type CompanyWebsiteTemplateKey,
 } from "./CompanyWebsiteTemplates.js";
+import { isAllowedCompanyWebsitePreviewParent } from "./preview-origin.js";
 
 export interface PublicWebsitePayload {
   availability: "published" | "disabled";
@@ -171,11 +172,7 @@ export function simulatedCompanyWebsiteHost(): string | undefined {
 function previewBridge<T>(type: string, payload: Record<string, unknown>): Promise<T> {
   const requestId = crypto.randomUUID();
   const parentOrigin = new URL(document.referrer).origin;
-  if (
-    !["http://127.0.0.1:5176", "http://localhost:5176", "https://platform.tawseelhub.com"].includes(
-      parentOrigin,
-    )
-  )
+  if (!isAllowedCompanyWebsitePreviewParent(parentOrigin))
     return Promise.reject(new Error("preview_parent_not_allowed"));
   return new Promise<T>((resolve, reject) => {
     const timeout = globalThis.setTimeout(() => {
@@ -655,10 +652,7 @@ export function CompanyWebsiteDraftPreviewReceiver(): ReactNode {
   const [, rerender] = useState(0);
   useEffect(() => {
     const receive = (event: MessageEvent<unknown>) => {
-      const localPlatform =
-        event.origin === "http://127.0.0.1:5176" || event.origin === "http://localhost:5176";
-      const productionPlatform = event.origin === "https://platform.tawseelhub.com";
-      if (!localPlatform && !productionPlatform) return;
+      if (!isAllowedCompanyWebsitePreviewParent(event.origin)) return;
       if (!event.data || typeof event.data !== "object") return;
       const envelope = event.data as { type?: string; payload?: PublicWebsitePayload };
       if (envelope.type === "tawseelhub:company-website-draft-preview" && envelope.payload)

@@ -29,7 +29,7 @@ export function CompanyWebsitePanel({
   const [agentPreviewReply, setAgentPreviewReply] = useState<string>();
 
   useEffect(() => {
-    void reloadLatest();
+    void reloadLatest(true);
   }, [companyId]);
 
   async function reloadLatest(showError = false): Promise<void> {
@@ -176,8 +176,9 @@ export function CompanyWebsitePanel({
           <label className="platform-field">
             <span>Website slug</span>
             <input
-              pattern="[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
+              pattern="[a-z0-9](?:[a-z0-9\\-]{0,61}[a-z0-9])?"
               required
+              title="Use lowercase letters, numbers, and hyphens only. Do not start or end with a hyphen."
               value={slug}
               onChange={(event) => setSlug(event.target.value)}
             />

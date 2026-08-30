@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactElement } from "react";
 import { createPortal } from "react-dom";
 
+import { isAllowedCompanyWebsitePreviewParent } from "./preview-origin.js";
+
 type Action = "track" | "request_delivery" | "services" | "coverage" | "contact" | "whatsapp";
 type Message = { role: "assistant" | "user"; content: string };
 
@@ -304,11 +306,7 @@ function previewAgentMessage(
 ): Promise<{ reply: string; assistantName: string; suggestedActions: Action[] }> {
   const requestId = crypto.randomUUID();
   const parentOrigin = new URL(document.referrer).origin;
-  if (
-    !["http://127.0.0.1:5176", "http://localhost:5176", "https://platform.tawseelhub.com"].includes(
-      parentOrigin,
-    )
-  )
+  if (!isAllowedCompanyWebsitePreviewParent(parentOrigin))
     return Promise.reject(new Error("preview_parent_not_allowed"));
   return new Promise((resolve, reject) => {
     const timeout = globalThis.setTimeout(() => {

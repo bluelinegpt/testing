@@ -48,6 +48,24 @@ interface ErrorPayload {
   };
 }
 
+export function platformApiErrorMessage(
+  status: number,
+  apiMessage: string | undefined,
+  correlationId?: string,
+): string {
+  if (status === 429) return "Too many requests were sent. Please wait one minute, then try again.";
+  if (status === 502)
+    return "The Platform could not reach the service. Your changes were not saved. Please try again shortly.";
+  if (status === 503)
+    return "The service is temporarily unavailable, usually during a deployment or restart. Your changes were not saved. Please try again shortly.";
+  if (status >= 500)
+    return (
+      "The server hit an unexpected error. The full details were recorded in the Error Handler screen" +
+      (correlationId === undefined ? "." : ` under reference ${correlationId}.`)
+    );
+  return apiMessage ?? "The request could not be completed.";
+}
+
 const defaultTimeoutMs = 15_000;
 
 async function request<TResponse>(
@@ -87,11 +105,11 @@ async function request<TResponse>(
       // message is captured server-side into the Error Handler. Showing that
       // generic sentence alone strands the reader; what they need is where
       // the details went and the reference to find them by.
-      const message =
-        response.status >= 500
-          ? "The server hit an unexpected error. The full details were recorded in the " +
-            `Error Handler screen${correlationId === undefined ? "" : ` under reference ${correlationId}`}.`
-          : (payload?.error?.message ?? "The request could not be completed");
+      const message = platformApiErrorMessage(
+        response.status,
+        payload?.error?.message,
+        correlationId,
+      );
       throw new PlatformApiError(
         message,
         payload?.error?.code ?? "request_failed",
@@ -101,6 +119,19 @@ async function request<TResponse>(
     }
     if (response.status === 204) return undefined;
     return (await response.json()) as TResponse;
+  } catch (failure) {
+    if (failure instanceof PlatformApiError) throw failure;
+    if (failure instanceof DOMException && failure.name === "AbortError")
+      throw new PlatformApiError(
+        "The request timed out before the service responded. Your changes were not saved. Please try again shortly.",
+        "request_timeout",
+        0,
+      );
+    throw new PlatformApiError(
+      "The Platform could not connect to the service. Your changes were not saved. Check your connection and try again.",
+      "network_unavailable",
+      0,
+    );
   } finally {
     globalThis.clearTimeout(timeout);
   }
@@ -569,6 +600,7 @@ export interface CompanyWebsitePreview {
   readonly slug: string;
   readonly templateKey: CompanyWebsiteTemplateKey;
   readonly defaultLocale: "en" | "ar";
+  readonly canonicalUrl?: string;
   readonly settings: CompanyWebsiteSettings;
   readonly company: {
     readonly nameEn: string;

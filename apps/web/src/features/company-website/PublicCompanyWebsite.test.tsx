@@ -23,7 +23,7 @@ describe("public Company website shell", () => {
 
     globalThis.dispatchEvent(
       new MessageEvent("message", {
-        origin: "http://127.0.0.1:5176",
+        origin: "https://bluelinegpt-platform-test.onrender.com",
         data: {
           type: "tawseelhub:company-website-draft-preview",
           payload: {

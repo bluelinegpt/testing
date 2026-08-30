@@ -153,7 +153,7 @@ export function CompanyWebsitePreviewPage(): ReactElement {
     globalThis.location.hostname === "localhost" || globalThis.location.hostname === "127.0.0.1"
       ? "http://127.0.0.1:5177"
       : preview
-        ? `https://${preview.slug}app.tawseelhub.com`
+        ? new URL(preview.canonicalUrl ?? `https://${preview.slug}.tawseelhub.com`).origin
         : "";
   useEffect(() => {
     const respond = async (event: MessageEvent<unknown>) => {
