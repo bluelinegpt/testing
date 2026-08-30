@@ -172,12 +172,14 @@ export function DailyCashActivityPage({ api }: { readonly api: ApiClient }) {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
+  const [errorMessage, setErrorMessage] = useState<string>();
   const [reloadToken, setReloadToken] = useState(0);
 
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true);
     setError(undefined);
+    setErrorMessage(undefined);
     // Both reads are issued together rather than in sequence: the summary and
     // the rows describe the same window and neither depends on the other.
     Promise.all([
@@ -202,6 +204,7 @@ export function DailyCashActivityPage({ api }: { readonly api: ApiClient }) {
       .catch((cause: unknown) => {
         if (controller.signal.aborted) return;
         setError(cause instanceof ApiError ? cause.code : "unknown");
+        setErrorMessage(cause instanceof ApiError ? cause.message : undefined);
         setLoading(false);
       });
     return () => controller.abort();
@@ -425,6 +428,7 @@ export function DailyCashActivityPage({ api }: { readonly api: ApiClient }) {
 
       <LoadPanel
         error={error}
+        errorMessage={errorMessage}
         loading={loading}
         onRefresh={() => setReloadToken((current) => current + 1)}
       >

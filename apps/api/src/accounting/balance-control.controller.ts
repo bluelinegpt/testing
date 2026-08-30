@@ -94,7 +94,12 @@ export class BalanceControlController {
 
   /** Active policy, any future scheduled ones, and the full history. */
   @Get()
-  @RequireAnyPermission("accounting.view", "accounting.manage", "company_profile.manage")
+  @RequireAnyPermission(
+    "accounting.view",
+    "accounting.manage",
+    "company_profile.manage",
+    "users_roles.manage",
+  )
   public policies() {
     return this.balances.policySchedule();
   }

@@ -142,11 +142,13 @@ export function StatusBadge({ value }: { readonly value: unknown }) {
 export function LoadPanel({
   children,
   error,
+  errorMessage,
   loading,
   onRefresh,
 }: {
   readonly children: ReactNode;
   readonly error?: string | undefined;
+  readonly errorMessage?: string | undefined;
   readonly loading: boolean;
   readonly onRefresh: () => void;
 }) {
@@ -164,7 +166,9 @@ export function LoadPanel({
         <div>
           <strong>{t("accounting.errors.load")}</strong>
           <p>
-            {t(`accounting.errors.codes.${error}`, { defaultValue: t("accounting.errors.safe") })}
+            {t(`accounting.errors.codes.${error}`, {
+              defaultValue: errorMessage || t("accounting.errors.safe"),
+            })}
           </p>
         </div>
         <button className="button button-secondary" onClick={onRefresh} type="button">
@@ -818,7 +822,9 @@ export function ActionDialog({
   // day it is performed, and an empty date here means the request never
   // resolves to a Fiscal Period at all -- a 409 the operator cannot self-serve
   // out of. Still fully editable for the rare backdated reversal.
-  const [date, setDate] = useState(() => (requireDate ? new Date().toISOString().slice(0, 10) : ""));
+  const [date, setDate] = useState(() =>
+    requireDate ? new Date().toISOString().slice(0, 10) : "",
+  );
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string>();
   const titleId = useId();

@@ -127,8 +127,11 @@ export class DriverEarningsService {
         );
       }
       await sql`update employee_collect_order_earnings set earning_period_id=${periodId}::uuid
-        where company_id=${companyId}::uuid and id in (${sql.join(calculation.collectionSources.length>0
-          ? calculation.collectionSources.map(source=>sql`${source.id}::uuid`):[sql`null::uuid`])})
+        where company_id=${companyId}::uuid and id in (${sql.join(
+          calculation.collectionSources.length > 0
+            ? calculation.collectionSources.map((source) => sql`${source.id}::uuid`)
+            : [sql`null::uuid`],
+        )})
           and earning_period_id is null`.execute(transaction);
       const result = { ...calculation, periodId, status: "locked" };
       await this.history.audit(transaction, {
@@ -314,9 +317,10 @@ export class DriverEarningsService {
       order by d.code,d.id
     `.execute(this.database);
     const items = result.rows;
-    const sum = (field: string) => items.reduce(
-      (total, item) => total.plus(String(item[field] ?? "0")), new Decimal(0),
-    ).toFixed(2);
+    const sum = (field: string) =>
+      items
+        .reduce((total, item) => total.plus(String(item[field] ?? "0")), new Decimal(0))
+        .toFixed(2);
     return {
       month,
       items,
@@ -433,7 +437,19 @@ export class DriverEarningsService {
         and not exists(select 1 from employee_driver_earning_period_delivery_sources s where s.company_id=e.company_id and s.employee_order_earning_id=e.id)
       order by e.delivered_at,e.id ${lock ? sql`for update of e` : sql``}`.execute(database);
     const deliveryAmount = delivery.rows.reduce((sum, row) => sum.plus(row.amount), new Decimal(0));
-    const collectionSources=await sql<{id:string;orderId:string;serialNumber:string|null;serialDate:string;orderNumber:string;referenceNumber:string|null;customer:string;area:string;closeDate:string;rate:string;amount:string}>`select x.id,o.id as "orderId",
+    const collectionSources = await sql<{
+      id: string;
+      orderId: string;
+      serialNumber: string | null;
+      serialDate: string;
+      orderNumber: string;
+      referenceNumber: string | null;
+      customer: string;
+      area: string;
+      closeDate: string;
+      rate: string;
+      amount: string;
+    }>`select x.id,o.id as "orderId",
       o.serial_number as "serialNumber",o.order_date::text as "serialDate",o.order_number as "orderNumber",
       o.reference_number as "referenceNumber",o.customer_name as customer,
       coalesce(a.name_en,'') as area,
@@ -448,8 +464,11 @@ export class DriverEarningsService {
         -- up with money a Calculate/Recalculate already picked up raw.
         and x.payroll_period_id is null
         and (x.closed_at at time zone coalesce(cs.timezone,'Asia/Dubai'))::date between ${input.dateFrom}::date and ${input.dateTo}::date
-      order by x.closed_at,x.id ${lock?sql`for update of x`:sql``}`.execute(database);
-    const collectionAmount=collectionSources.rows.reduce((sum,row)=>sum.plus(row.amount),new Decimal(0));
+      order by x.closed_at,x.id ${lock ? sql`for update of x` : sql``}`.execute(database);
+    const collectionAmount = collectionSources.rows.reduce(
+      (sum, row) => sum.plus(row.amount),
+      new Decimal(0),
+    );
     if (deliveryAmount.plus(collectionAmount).lte(0))
       throw new ApplicationException(
         "employee_driver_earning_period_empty",
@@ -845,6 +864,8 @@ export class DriverEarningsService {
           fundingAccountId: account.accountId,
           amount: requested.toFixed(2),
           paymentMethod: input.paymentMethod,
+          paymentId,
+          paymentKind: "variable",
           actorId,
         });
       }
@@ -1018,7 +1039,9 @@ export class DriverEarningsService {
         where company_id=${companyId}::uuid and employee_id=${input.employeeId}::uuid
           and status in('confirmed','partially_recovered')
         for update`.execute(transaction);
-      const existingAdvances = await sql<{ amount: string }>`select coalesce(sum(outstanding_amount),0)::text as amount
+      const existingAdvances = await sql<{
+        amount: string;
+      }>`select coalesce(sum(outstanding_amount),0)::text as amount
         from employee_salary_advances
         where company_id=${companyId}::uuid and employee_id=${input.employeeId}::uuid
           and status in('confirmed','partially_recovered')`.execute(transaction);
@@ -1074,6 +1097,8 @@ export class DriverEarningsService {
           fundingAccountId: account.accountId,
           amount: amount.toFixed(2),
           paymentMethod: input.paymentMethod,
+          paymentId: advanceId,
+          paymentKind: "salary_advance",
           actorId,
         });
       }
@@ -1134,9 +1159,10 @@ export class DriverEarningsService {
     const row = result.rows[0] ?? { basicSalary: "0", existingOutstanding: "0" };
     return {
       ...row,
-      available: Decimal.max(new Decimal(row.basicSalary).minus(row.existingOutstanding), 0).toFixed(
-        2,
-      ),
+      available: Decimal.max(
+        new Decimal(row.basicSalary).minus(row.existingOutstanding),
+        0,
+      ).toFixed(2),
     };
   }
 
@@ -1442,10 +1468,16 @@ export class DriverEarningsService {
       readonly fundingAccountId: string;
       readonly amount: string;
       readonly paymentMethod: string;
+      readonly paymentId: string;
+      readonly paymentKind: "salary_advance" | "variable";
       readonly actorId: string;
     },
   ): Promise<void> {
     const movementType = options.paymentMethod === "cash" ? "cash_withdrawal" : "bank_withdrawal";
+    // Cash/Bank Movement uses the legacy UI-method vocabulary: bank-funded
+    // payments are represented as `visa`, while the payroll DTO calls them
+    // `bank`. Keep the funding account classification separate from this label.
+    const movementPaymentMethod = options.paymentMethod === "cash" ? "cash" : "visa";
     const movementNumber = await this.history.nextReferenceNumber(
       transaction,
       options.companyId,
@@ -1454,39 +1486,46 @@ export class DriverEarningsService {
     );
     const movementId = randomUUID();
 
-    await sql`
+    const eventType =
+      options.paymentKind === "variable"
+        ? "employee_variable_earnings_interim_paid"
+        : "employee_salary_advance_paid";
+    const sourceEntityType =
+      options.paymentKind === "variable"
+        ? "employee_variable_earning_payment"
+        : "employee_salary_advance";
+    const movement = await sql<{ id: string }>`
       insert into cash_bank_movements (
         id, company_id, movement_number, movement_type, movement_date, accounting_date,
         source_cash_account_id, source_bank_account_id, destination_cash_account_id,
-        destination_bank_account_id, amount, fee_amount, status, confirmed_by_account_id,
-        confirmed_at, created_by_account_id, created_at
-      ) values (
+        destination_bank_account_id, amount, fee_amount, payment_method, reference_number,
+        description, status, correlation_id, idempotency_identity, accounting_event_id,
+        confirmed_by_account_id, confirmed_at, created_by_account_id, created_at
+      ) select
         ${movementId}::uuid, ${options.companyId}::uuid, ${movementNumber},
-        ${movementType}::cash_bank_movement_type, ${options.paymentDate}::date,
+        ${movementType}, ${options.paymentDate}::date,
         ${options.paymentDate}::date,
         ${options.paymentMethod === "cash" ? options.fundingAccountId : null}::uuid,
         ${options.paymentMethod === "bank" ? options.fundingAccountId : null}::uuid,
         null::uuid, null::uuid, ${new Decimal(options.amount).toFixed(2)}::numeric,
-        '0'::numeric, 'confirmed', ${options.actorId}::uuid, now(),
-        ${options.actorId}::uuid, now()
-      )
+        '0'::numeric, ${movementPaymentMethod}, ${options.paymentNumber},
+        ${`Employee payment ${options.paymentNumber}`}, 'confirmed', ${options.paymentId},
+        ${`employee_payment:${options.paymentId}`}, e.id,
+        ${options.actorId}::uuid, now(), ${options.actorId}::uuid, now()
+      from accounting_events e
+      where e.company_id=${options.companyId}::uuid
+        and e.event_type=${eventType}
+        and e.source_entity_type=${sourceEntityType}
+        and e.source_entity_id=${options.paymentId}::uuid
+      returning id
     `.execute(transaction);
-
-    await sql`
-      insert into accounting_events (
-        id, company_id, event_type, event_version, accounting_date, actor_id,
-        source_entity_type, source_entity_id, source_reference, correlation_id,
-        description, metadata, created_at
-      ) values (
-        gen_random_uuid(), ${options.companyId}::uuid,
-        ${movementType}::accounting_event_type, 1, ${options.paymentDate}::date,
-        ${options.actorId}::uuid, 'cash_bank_movement', ${movementId}::uuid,
-        ${movementNumber}, ${movementId}::uuid,
-        ${'Employee payment ' + options.paymentNumber + ' cash/bank movement'},
-        ${JSON.stringify({ source: 'employee_payment', paymentNumber: options.paymentNumber })},
-        now()
-      )
-    `.execute(transaction);
+    if (movement.rows[0] === undefined) {
+      throw new ApplicationException(
+        "employee_payment_cash_movement_not_created",
+        "The Employee payment Cash/Bank Movement could not be created",
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
   }
 
   private reasonRequired(): never {

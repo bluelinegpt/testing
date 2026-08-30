@@ -37,14 +37,14 @@ export class DailyCashActivityController {
 
   /** Cash Activity and Income Statement Activity, plus the window metadata. */
   @Get()
-  @RequireAnyPermission("accounting.view", "accounting.manage")
+  @RequireAnyPermission("accounting.view", "accounting.manage", "users_roles.manage")
   public report(@Query() query: DailyCashActivityQueryDto) {
     return this.reports.report(query);
   }
 
   /** The individual movements behind the Cash Activity totals. */
   @Get("rows")
-  @RequireAnyPermission("accounting.view", "accounting.manage")
+  @RequireAnyPermission("accounting.view", "accounting.manage", "users_roles.manage")
   public rows(@Query() query: DailyCashActivityRowsQueryDto) {
     return this.reports.rows(query);
   }
@@ -57,7 +57,7 @@ export class DailyCashActivityController {
    * never holds the full row set.
    */
   @Get("export")
-  @RequireAnyPermission("accounting.view", "accounting.manage")
+  @RequireAnyPermission("accounting.view", "accounting.manage", "users_roles.manage")
   public async export(
     @Query() query: DailyCashActivityExportQueryDto,
     @Res() response: Response,

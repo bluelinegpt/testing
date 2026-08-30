@@ -32,14 +32,14 @@ export class PaymentPositionController {
 
   /** One row per party and direction, with grand totals and metadata. */
   @Get()
-  @RequireAnyPermission("accounting.view", "accounting.manage")
+  @RequireAnyPermission("accounting.view", "accounting.manage", "users_roles.manage")
   public summary(@Query() query: PaymentPositionQueryDto) {
     return this.positions.summary(query);
   }
 
   /** The individual obligations behind those positions. */
   @Get("transactions")
-  @RequireAnyPermission("accounting.view", "accounting.manage")
+  @RequireAnyPermission("accounting.view", "accounting.manage", "users_roles.manage")
   public transactions(@Query() query: PaymentPositionQueryDto) {
     return this.positions.transactions(query);
   }
@@ -52,7 +52,7 @@ export class PaymentPositionController {
    * holds the full row set.
    */
   @Get("export")
-  @RequireAnyPermission("accounting.view", "accounting.manage")
+  @RequireAnyPermission("accounting.view", "accounting.manage", "users_roles.manage")
   public async export(
     @Query() query: PaymentPositionQueryDto,
     @Res() response: Response,

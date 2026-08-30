@@ -9,6 +9,7 @@ import { AccountingDashboardService } from "./accounting-dashboard.service.js";
 // Imported as a value, not a type: `emitDecoratorMetadata` can only record a
 // DTO class for the global ValidationPipe when the symbol survives to runtime,
 // so the query contract is actually validated rather than accepted unchecked.
+// eslint-disable-next-line @typescript-eslint/consistent-type-imports
 import { AccountingDashboardQueryDto } from "./accounting-dashboard.dto.js";
 
 /**
@@ -29,7 +30,7 @@ export class AccountingDashboardController {
 
   /** Five sections, the applied filters, the Company timezone and metadata. */
   @Get()
-  @RequireAnyPermission("accounting.view", "accounting.manage")
+  @RequireAnyPermission("accounting.view", "accounting.manage", "users_roles.manage")
   public summary(@Query() query: AccountingDashboardQueryDto) {
     return this.dashboard.summary(query);
   }

@@ -11,6 +11,7 @@ export interface AccountingPage<T = AccountingRecord> {
 export interface AccountingLoadState<T> {
   readonly data?: T | undefined;
   readonly error?: string | undefined;
+  readonly errorMessage?: string | undefined;
   readonly loading: boolean;
   readonly refreshedAt?: string | undefined;
 }

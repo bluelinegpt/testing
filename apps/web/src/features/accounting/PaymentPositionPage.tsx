@@ -129,6 +129,7 @@ export function PaymentPositionPage({ api }: { readonly api: ApiClient }) {
   const [rowTotal, setRowTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
+  const [errorMessage, setErrorMessage] = useState<string>();
   const [reloadToken, setReloadToken] = useState(0);
 
   const read = useCallback((key: string) => parameters.get(key) ?? "", [parameters]);
@@ -165,6 +166,7 @@ export function PaymentPositionPage({ api }: { readonly api: ApiClient }) {
     const controller = new AbortController();
     setLoading(true);
     setError(undefined);
+    setErrorMessage(undefined);
     Promise.all([
       api.get<SummaryResponse>(
         `operations/reports/payment-position?${queryString}`,
@@ -184,6 +186,7 @@ export function PaymentPositionPage({ api }: { readonly api: ApiClient }) {
       .catch((cause: unknown) => {
         if (controller.signal.aborted) return;
         setError(cause instanceof ApiError ? cause.code : "unknown");
+        setErrorMessage(cause instanceof ApiError ? cause.message : undefined);
         setLoading(false);
       });
     return () => controller.abort();
@@ -389,6 +392,7 @@ export function PaymentPositionPage({ api }: { readonly api: ApiClient }) {
 
       <LoadPanel
         error={error}
+        errorMessage={errorMessage}
         loading={loading}
         onRefresh={() => setReloadToken((current) => current + 1)}
       >

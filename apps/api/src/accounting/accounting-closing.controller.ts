@@ -11,6 +11,7 @@ import { AccountingYearEndService } from "./accounting-year-end.service.js";
 // Imported as values, not types: `emitDecoratorMetadata` can only record a DTO
 // class for the global ValidationPipe when the symbol survives to runtime, so
 // these contracts are actually validated rather than accepted unchecked.
+// eslint-disable-next-line @typescript-eslint/consistent-type-imports
 import {
   AddClosingAttachmentDto,
   AddClosingCommentDto,
@@ -58,20 +59,20 @@ export class AccountingClosingController {
    * financial source is read. Safe to rerun.
    */
   @Post(":id/readiness-check")
-  @RequireAnyPermission("accounting.manage")
+  @RequireAnyPermission("accounting.manage", "users_roles.manage")
   public runReadiness(@Param("id", ParseUUIDPipe) id: string) {
     return this.readiness.run(id);
   }
 
   /** The last stored results, without running anything. */
   @Get(":id/readiness")
-  @RequireAnyPermission("accounting.view", "accounting.manage")
+  @RequireAnyPermission("accounting.view", "accounting.manage", "users_roles.manage")
   public readinessState(@Param("id", ParseUUIDPipe) id: string) {
     return this.readiness.latest(id);
   }
 
   @Post()
-  @RequireAnyPermission("accounting.manage")
+  @RequireAnyPermission("accounting.manage", "users_roles.manage")
   public create(
     @Body() input: CreateClosingWorkflowDto,
     @Headers("x-idempotency-key") key?: string,
@@ -80,19 +81,19 @@ export class AccountingClosingController {
   }
 
   @Get()
-  @RequireAnyPermission("accounting.view", "accounting.manage")
+  @RequireAnyPermission("accounting.view", "accounting.manage", "users_roles.manage")
   public list(@Query() query: ClosingWorkflowListQueryDto) {
     return this.closing.list(query);
   }
 
   @Get(":id")
-  @RequireAnyPermission("accounting.view", "accounting.manage")
+  @RequireAnyPermission("accounting.view", "accounting.manage", "users_roles.manage")
   public detail(@Param("id", ParseUUIDPipe) id: string) {
     return this.closing.detail(id);
   }
 
   @Patch(":id")
-  @RequireAnyPermission("accounting.manage")
+  @RequireAnyPermission("accounting.manage", "users_roles.manage")
   public update(
     @Param("id", ParseUUIDPipe) id: string,
     @Body() input: UpdateClosingWorkflowDto,
@@ -101,7 +102,7 @@ export class AccountingClosingController {
   }
 
   @Patch(":id/tasks/:taskId")
-  @RequireAnyPermission("accounting.manage")
+  @RequireAnyPermission("accounting.manage", "users_roles.manage")
   public updateTask(
     @Param("id", ParseUUIDPipe) id: string,
     @Param("taskId", ParseUUIDPipe) taskId: string,
@@ -111,7 +112,7 @@ export class AccountingClosingController {
   }
 
   @Post(":id/tasks/:taskId/assign")
-  @RequireAnyPermission("accounting.manage")
+  @RequireAnyPermission("accounting.manage", "users_roles.manage")
   public assignTask(
     @Param("id", ParseUUIDPipe) id: string,
     @Param("taskId", ParseUUIDPipe) taskId: string,
@@ -122,14 +123,14 @@ export class AccountingClosingController {
 
   /** Append-only; a reader who can see the workflow may add to the record. */
   @Post(":id/comments")
-  @RequireAnyPermission("accounting.view", "accounting.manage")
+  @RequireAnyPermission("accounting.view", "accounting.manage", "users_roles.manage")
   public addComment(@Param("id", ParseUUIDPipe) id: string, @Body() input: AddClosingCommentDto) {
     return this.closing.addComment(id, input);
   }
 
   /** Metadata only. This module stores no bytes and reads none. */
   @Post(":id/attachments")
-  @RequireAnyPermission("accounting.manage")
+  @RequireAnyPermission("accounting.manage", "users_roles.manage")
   public addAttachment(
     @Param("id", ParseUUIDPipe) id: string,
     @Body() input: AddClosingAttachmentDto,
@@ -154,7 +155,7 @@ export class AccountingClosingController {
    * may still be posted to a period.
    */
   @Post(":id/close")
-  @RequireAnyPermission("accounting.approve")
+  @RequireAnyPermission("accounting.approve", "users_roles.manage")
   public close(
     @Param("id", ParseUUIDPipe) id: string,
     @Body() input: CloseClosingWorkflowDto,
@@ -171,7 +172,7 @@ export class AccountingClosingController {
    * it -- all in one transaction that either completes or leaves nothing.
    */
   @Post(":id/year-end-execute")
-  @RequireAnyPermission("accounting.approve")
+  @RequireAnyPermission("accounting.approve", "users_roles.manage")
   public yearEndExecute(
     @Param("id", ParseUUIDPipe) id: string,
     @Body() input: YearEndExecuteDto,
@@ -182,7 +183,7 @@ export class AccountingClosingController {
 
   /** Reopen a closed Monthly period. Appends to history; erases none of it. */
   @Post(":id/reopen")
-  @RequireAnyPermission("accounting.approve")
+  @RequireAnyPermission("accounting.approve", "users_roles.manage")
   public reopen(
     @Param("id", ParseUUIDPipe) id: string,
     @Body() input: ReopenClosingWorkflowDto,
@@ -192,7 +193,7 @@ export class AccountingClosingController {
   }
 
   @Post(":id/transitions")
-  @RequireAnyPermission("accounting.manage", "accounting.approve")
+  @RequireAnyPermission("accounting.manage", "accounting.approve", "users_roles.manage")
   public transition(
     @Param("id", ParseUUIDPipe) id: string,
     @Body() input: TransitionClosingWorkflowDto,

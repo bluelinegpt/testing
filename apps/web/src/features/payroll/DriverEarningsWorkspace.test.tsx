@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { ApiError } from "../../api/api-client.js";
 import { i18nInstance } from "../../localization/i18n.js";
 import { DriverEarningsWorkspace } from "./DriverEarningsWorkspace.js";
 
@@ -55,14 +56,32 @@ const locked = {
   deliverySources: sources.map(({ amount, ...source }) => ({ ...source, earned: amount })),
 };
 const monthlyItem = {
-  advanceOutstanding: "489.00", advancePaid: "500.00", advanceRecovery: "11.00",
-  allowances: "0.00", basicSalary: "3000.00", collectionEarnings: "5.00", deductions: [],
-  deliveryEarnings: "6.00", driverCode: "DRV-5", driverEarningPayments: [],
-  driverEarnings: "11.00", driverEarningsOutstanding: "0.00", driverEarningsPaid: "11.00",
-  driverId: "ahmad", driverName: "Ahmad", employeeId: "e1", grossEarned: "3011.00",
-  netSalary: "3000.00", otherDeductions: "0.00", otherEarnings: "0.00",
-  salaryAdvances: [], salaryOutstanding: "0.00", salaryPaid: "3000.00", salaryPayments: [],
-  totalCashPaid: "3511.00", totalDeductions: "11.00",
+  advanceOutstanding: "489.00",
+  advancePaid: "500.00",
+  advanceRecovery: "11.00",
+  allowances: "0.00",
+  basicSalary: "3000.00",
+  collectionEarnings: "5.00",
+  deductions: [],
+  deliveryEarnings: "6.00",
+  driverCode: "DRV-5",
+  driverEarningPayments: [],
+  driverEarnings: "11.00",
+  driverEarningsOutstanding: "0.00",
+  driverEarningsPaid: "11.00",
+  driverId: "ahmad",
+  driverName: "Ahmad",
+  employeeId: "e1",
+  grossEarned: "3011.00",
+  netSalary: "3000.00",
+  otherDeductions: "0.00",
+  otherEarnings: "0.00",
+  salaryAdvances: [],
+  salaryOutstanding: "0.00",
+  salaryPaid: "3000.00",
+  salaryPayments: [],
+  totalCashPaid: "3511.00",
+  totalDeductions: "11.00",
 };
 
 describe("DriverEarningsWorkspace period confirmation", () => {
@@ -70,9 +89,17 @@ describe("DriverEarningsWorkspace period confirmation", () => {
 
   it("shows the selected month's collapsed Driver payment overview and report", async () => {
     const get = vi.fn(async (path: string) => {
-      if (path.includes("monthly-payments")) return { items: [monthlyItem], month: "2026-08", totals: {
-        advancePaid: "500.00", driverEarningsPaid: "11.00", salaryPaid: "3000.00", totalCashPaid: "3511.00",
-      } };
+      if (path.includes("monthly-payments"))
+        return {
+          items: [monthlyItem],
+          month: "2026-08",
+          totals: {
+            advancePaid: "500.00",
+            driverEarningsPaid: "11.00",
+            salaryPaid: "3000.00",
+            totalCashPaid: "3511.00",
+          },
+        };
       if (path.includes("cash-accounts")) return [];
       if (path.includes("/periods?")) return { items: [], nextAvailableStart: null };
       return { items: [driver] };
@@ -221,12 +248,20 @@ describe("DriverEarningsWorkspace period confirmation", () => {
     for (const order of ["ORD-000028", "ORD-000029", "ORD-000034"])
       expect(screen.getByRole("link", { name: order })).toHaveAttribute("href", `/orders/${order}`);
     expect(screen.getByText("Collection Earning Detail")).toBeInTheDocument();
-    expect(screen.getByText((_, element) =>
-      element?.tagName === "P" && element.textContent?.replace(/\s+/g, " ") === "Number of Collected Orders: 5",
-    )).toBeInTheDocument();
-    expect(screen.getByText((_, element) =>
-      element?.tagName === "P" && /Collection Rate:.*AED\s*1\.00/.test(element.textContent ?? ""),
-    )).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        (_, element) =>
+          element?.tagName === "P" &&
+          element.textContent?.replace(/\s+/g, " ") === "Number of Collected Orders: 5",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        (_, element) =>
+          element?.tagName === "P" &&
+          /Collection Rate:.*AED\s*1\.00/.test(element.textContent ?? ""),
+      ),
+    ).toBeInTheDocument();
     expect(screen.getByText("COL-000001")).toBeInTheDocument();
     expect(screen.getAllByText(/AED\s*6\.00/).length).toBeGreaterThanOrEqual(2);
     expect(screen.queryByText(/driverEarnings\./)).not.toBeInTheDocument();
@@ -256,9 +291,7 @@ describe("DriverEarningsWorkspace period confirmation", () => {
     });
     fireEvent.change(screen.getByLabelText("Date To"), { target: { value: "2026-08-29" } });
     fireEvent.click(screen.getByRole("button", { name: "Calculate Now" }));
-    expect(
-      await screen.findByRole("button", { name: "Confirm & Lock Earnings" }),
-    ).toBeDisabled();
+    expect(await screen.findByRole("button", { name: "Confirm & Lock Earnings" })).toBeDisabled();
     expect(screen.getByText(/details do not match/)).toBeInTheDocument();
   });
 
@@ -309,6 +342,37 @@ describe("DriverEarningsWorkspace period confirmation", () => {
     await waitFor(() => expect(screen.getByText("Period History")).toBeInTheDocument());
     expect(screen.getByRole("button", { name: "Confirm payment" })).toBeEnabled();
     expect(screen.queryByText(/Delivery Earnings.*AED 6\.00/)).not.toBeInTheDocument();
+  });
+
+  it("shows the API conflict reason when an earnings payment is rejected", async () => {
+    const get = vi.fn(async (path: string) =>
+      path.includes("cash-accounts")
+        ? [{ id: "cash", name: "Main Cash" }]
+        : path.includes("/periods?")
+          ? { items: [locked], nextAvailableStart: "2026-08-13" }
+          : { items: [driver] },
+    );
+    const post = vi.fn(async () => {
+      throw new ApiError(
+        "This payment would take the account to -12.00. The balance cannot go below zero.",
+        "payment_balance_blocked",
+        409,
+      );
+    });
+    render(<DriverEarningsWorkspace api={{ get, post } as never} canPay />);
+
+    await screen.findByRole("button", { name: "Confirm payment" });
+    fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "11" } });
+    fireEvent.change(screen.getAllByLabelText("Cash account")[0]!, {
+      target: { value: "cash" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Confirm payment" }));
+
+    expect(
+      await screen.findByText(
+        "This payment would take the account to -12.00. The balance cannot go below zero.",
+      ),
+    ).toBeInTheDocument();
   });
 
   it("renders Arabic captions without raw keys", async () => {

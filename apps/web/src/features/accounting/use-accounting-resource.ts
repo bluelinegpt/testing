@@ -23,8 +23,9 @@ export function useAccountingResource<T>(
       },
       (error: unknown) => {
         if (!controller.signal.aborted) {
-          const message = error instanceof ApiError ? error.code : "request_failed";
-          setState({ error: message, loading: false });
+          const code = error instanceof ApiError ? error.code : "request_failed";
+          const errorMessage = error instanceof ApiError ? error.message : undefined;
+          setState({ error: code, errorMessage, loading: false });
         }
       },
     );

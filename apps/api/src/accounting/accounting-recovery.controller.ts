@@ -7,6 +7,9 @@ import {
 } from "../authentication/authentication.decorators.js";
 import { AccountingBatchService } from "./accounting-batch.service.js";
 import { AccountingRecoveryService } from "./accounting-recovery.service.js";
+// DTO classes must remain runtime values so Nest's global ValidationPipe can
+// read their decorator metadata.
+// eslint-disable-next-line @typescript-eslint/consistent-type-imports
 import { CreateRecoveryBatchDto, RecoveryPreviewQueryDto } from "./accounting-recovery.dto.js";
 
 /**
@@ -31,7 +34,7 @@ export class AccountingRecoveryController {
   ) {}
 
   @Get("preview")
-  @RequireAnyPermission("accounting.post", "accounting.manage")
+  @RequireAnyPermission("accounting.post", "accounting.manage", "users_roles.manage")
   public preview(@Query() query: RecoveryPreviewQueryDto) {
     return this.recovery.preview(query);
   }
@@ -44,7 +47,7 @@ export class AccountingRecoveryController {
    * and the batch cannot be executed — recovery execution does not exist yet.
    */
   @Post("batches")
-  @RequireAnyPermission("accounting.post", "accounting.manage")
+  @RequireAnyPermission("accounting.post", "accounting.manage", "users_roles.manage")
   public createBatch(
     @Body() input: CreateRecoveryBatchDto,
     @Headers("x-idempotency-key") idempotencyKey?: string,

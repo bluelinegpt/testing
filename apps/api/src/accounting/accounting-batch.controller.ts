@@ -6,6 +6,8 @@ import {
   RequireIdentityKinds,
 } from "../authentication/authentication.decorators.js";
 import { AccountingBatchService } from "./accounting-batch.service.js";
+// DTO classes must remain runtime values for Nest's global ValidationPipe.
+// eslint-disable-next-line @typescript-eslint/consistent-type-imports
 import {
   AccountingBatchItemQueryDto,
   AccountingBatchListQueryDto,
@@ -37,7 +39,7 @@ export class AccountingBatchController {
   ) {}
 
   @Post()
-  @RequireAnyPermission("accounting.post", "accounting.manage")
+  @RequireAnyPermission("accounting.post", "accounting.manage", "users_roles.manage")
   public create(
     @Body() input: CreateAccountingBatchDto,
     @Headers("x-idempotency-key") idempotencyKey?: string,
@@ -46,13 +48,13 @@ export class AccountingBatchController {
   }
 
   @Get()
-  @RequireAnyPermission("accounting.view", "accounting.manage")
+  @RequireAnyPermission("accounting.view", "accounting.manage", "users_roles.manage")
   public list(@Query() query: AccountingBatchListQueryDto) {
     return this.batches.list(query);
   }
 
   @Get(":batchId")
-  @RequireAnyPermission("accounting.view", "accounting.manage")
+  @RequireAnyPermission("accounting.view", "accounting.manage", "users_roles.manage")
   public detail(
     @Param("batchId", new ParseUUIDPipe()) batchId: string,
     @Query() query: AccountingBatchItemQueryDto,
@@ -61,7 +63,7 @@ export class AccountingBatchController {
   }
 
   @Post(":batchId/items")
-  @RequireAnyPermission("accounting.post", "accounting.manage")
+  @RequireAnyPermission("accounting.post", "accounting.manage", "users_roles.manage")
   public addItems(
     @Param("batchId", new ParseUUIDPipe()) batchId: string,
     @Body() input: AddAccountingBatchItemsDto,
@@ -72,7 +74,7 @@ export class AccountingBatchController {
 
   /** Read-only. Creates no Accounting Event, Journal or financial record. */
   @Post(":batchId/validate")
-  @RequireAnyPermission("accounting.post", "accounting.manage")
+  @RequireAnyPermission("accounting.post", "accounting.manage", "users_roles.manage")
   public validate(
     @Param("batchId", new ParseUUIDPipe()) batchId: string,
     @Headers("x-idempotency-key") idempotencyKey?: string,
@@ -86,7 +88,7 @@ export class AccountingBatchController {
    * service, never by SQL in the batch module.
    */
   @Post(":batchId/execute")
-  @RequireAnyPermission("accounting.post", "accounting.manage")
+  @RequireAnyPermission("accounting.post", "accounting.manage", "users_roles.manage")
   public execute(
     @Param("batchId", new ParseUUIDPipe()) batchId: string,
     @Body() input: ExecuteAccountingBatchDto,
@@ -97,12 +99,13 @@ export class AccountingBatchController {
 
   /**
    * Operator recovery for a batch stuck in `processing`. Elevated permission
-   * only — accounting.manage, no posting-user fallback — because releasing a
-   * stuck control record is an operator decision. Executes no accounting work;
-   * it reconciles the batch with its item rows and leaves it retryable.
+   * only — accounting.manage (or the established Company Administrator
+   * fallback), no posting-user fallback — because releasing a stuck control
+   * record is an operator decision. Executes no accounting work; it reconciles
+   * the batch with its item rows and leaves it retryable.
    */
   @Post(":batchId/recover-processing")
-  @RequireAnyPermission("accounting.manage")
+  @RequireAnyPermission("accounting.manage", "users_roles.manage")
   public recoverProcessing(
     @Param("batchId", new ParseUUIDPipe()) batchId: string,
     @Body() input: RecoverAccountingBatchDto,
@@ -112,7 +115,7 @@ export class AccountingBatchController {
   }
 
   @Post(":batchId/cancel")
-  @RequireAnyPermission("accounting.post", "accounting.manage")
+  @RequireAnyPermission("accounting.post", "accounting.manage", "users_roles.manage")
   public cancel(
     @Param("batchId", new ParseUUIDPipe()) batchId: string,
     @Body() input: CancelAccountingBatchDto,

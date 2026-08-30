@@ -263,7 +263,12 @@ export function HistoricalRecoveryPage({
           {t("historicalRecovery.errors.invalidRange")}
         </div>
       ) : (
-        <LoadPanel error={preview.error} loading={preview.loading} onRefresh={preview.refresh}>
+        <LoadPanel
+          error={preview.error}
+          errorMessage={preview.errorMessage}
+          loading={preview.loading}
+          onRefresh={preview.refresh}
+        >
           {data === undefined ? null : (
             <>
               {/* Whole-surface classification totals from the server; never a
