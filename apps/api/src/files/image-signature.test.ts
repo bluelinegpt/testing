@@ -18,6 +18,17 @@ describe("validateLogoImage", () => {
     expect(result).toEqual({ mediaType: "image/png", ok: true, type: "png" });
   });
 
+  it("accepts a real PNG whose compressed data happens to contain a markup-like substring", () => {
+    // Compressed image data is close to random bytes -- it's entirely
+    // possible for a genuine PNG to coincidentally decode (as latin1) to
+    // contain "<svg" or similar, purely by chance. The markup/script scan
+    // must only apply to files that are NOT already a real image by
+    // signature, or this rejects legitimate uploads as if they were
+    // malicious.
+    const collision = Buffer.concat([PNG_HEADER, Buffer.from("<svg-like-bytes>", "latin1")]);
+    expect(validateLogoImage(collision, "image/png")).toMatchObject({ ok: true, type: "png" });
+  });
+
   it("accepts a real JPEG and tolerates image/jpg declaration", () => {
     expect(validateLogoImage(jpeg(), "image/jpeg")).toMatchObject({ ok: true, type: "jpeg" });
     expect(validateLogoImage(jpeg(), "image/jpg")).toMatchObject({ ok: true, type: "jpeg" });

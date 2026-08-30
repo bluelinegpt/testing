@@ -60,9 +60,6 @@ export function validateLogoImage(
   if (bytes.length > MAX_LOGO_BYTES) {
     return { ok: false, reason: "file_too_large" };
   }
-  if (looksLikeMarkupOrScript(bytes)) {
-    return { ok: false, reason: "markup_or_script_rejected" };
-  }
 
   let detected: LogoValidationSuccess | undefined;
   if (startsWith(bytes, PNG_SIGNATURE)) {
@@ -72,6 +69,16 @@ export function validateLogoImage(
   }
 
   if (detected === undefined) {
+    // The markup/script text-scan only applies here, to files that are NOT
+    // already a genuine PNG/JPEG by signature. A file starting with real
+    // PNG/JPEG magic bytes can never be parsed as SVG/HTML/script by
+    // anything, no matter what its compressed data contains later --
+    // running this scan unconditionally on every upload produced false
+    // positives, rejecting real photos/logos whose compressed byte stream
+    // happened to decode (as latin1) to contain one of these substrings.
+    if (looksLikeMarkupOrScript(bytes)) {
+      return { ok: false, reason: "markup_or_script_rejected" };
+    }
     return { ok: false, reason: "unsupported_image_signature" };
   }
 

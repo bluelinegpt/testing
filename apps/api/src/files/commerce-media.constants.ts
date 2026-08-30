@@ -94,7 +94,6 @@ export function validateCommerceImage(
 ): CommerceMediaResult {
   if (bytes.length === 0) return { ok: false, reason: "empty_file" };
   if (bytes.length > limitFor(purpose)) return { ok: false, reason: "file_too_large" };
-  if (looksLikeMarkupOrScript(bytes)) return { ok: false, reason: "markup_or_script_rejected" };
 
   let detected: CommerceMediaSuccess | undefined;
   if (startsWith(bytes, PNG_SIGNATURE)) {
@@ -105,7 +104,16 @@ export function validateCommerceImage(
     // WebP is a RIFF container: "RIFF" then a 4-byte length then "WEBP".
     detected = { mediaType: "image/webp", ok: true, type: "webp" };
   }
-  if (detected === undefined) return { ok: false, reason: "unsupported_image_signature" };
+  if (detected === undefined) {
+    // Only checked here, for files that are NOT already a genuine
+    // PNG/JPEG/WebP by signature -- a file starting with real binary image
+    // magic bytes can never be parsed as SVG/HTML/script by anything, so
+    // running this scan unconditionally produced false positives on real
+    // images whose compressed data happened to decode (as latin1) to
+    // contain one of these substrings.
+    if (looksLikeMarkupOrScript(bytes)) return { ok: false, reason: "markup_or_script_rejected" };
+    return { ok: false, reason: "unsupported_image_signature" };
+  }
 
   if (declaredMediaType !== undefined) {
     const normalised = declaredMediaType.trim().toLowerCase();

@@ -93,6 +93,26 @@ describe("Company website branding media", () => {
     ).rejects.toMatchObject({ errorCode: "website_media_r2_not_configured" });
   });
 
+  it("accepts a real PNG whose compressed data happens to contain a markup-like substring", async () => {
+    // Compressed image data is close to random bytes -- a genuine PNG can
+    // coincidentally decode (as latin1) to contain "<svg" or similar,
+    // purely by chance. This is exactly what rejected a real Website banner
+    // upload with "markup_or_script_rejected" in production: isImage()'s
+    // markup/script scan ran on every file unconditionally, before checking
+    // whether it was already a real image by signature.
+    const websites = service(new InMemoryWebsiteStorage() as unknown as FileStoragePort);
+    const collision = Buffer.concat([PNG, Buffer.from("<svg-like-bytes>", "latin1")]);
+    await expect(
+      websites.uploadMedia("11111111-1111-1111-1111-111111111111", {
+        buffer: collision,
+        mimetype: "image/png",
+        size: collision.length,
+      }),
+    ).resolves.toMatchObject({
+      url: expect.stringMatching(/\.png$/u),
+    });
+  });
+
   it("rejects a file that isn't actually an image", async () => {
     const websites = service(new InMemoryWebsiteStorage() as unknown as FileStoragePort);
     await expect(

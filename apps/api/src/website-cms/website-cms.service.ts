@@ -131,13 +131,23 @@ function planPayload(input: PricingPlanDto) {
 export function isImage(bytes: Uint8Array, declared: string): { ok: true; mediaType: string; ext: string } | { ok: false; reason: string } {
   if (bytes.length === 0) return { ok: false, reason: "empty_file" };
   if (bytes.length > 5 * 1024 * 1024) return { ok: false, reason: "file_too_large" };
-  const prefix = Buffer.from(bytes.subarray(0, Math.min(bytes.length, 1024))).toString("latin1").toLowerCase();
-  if (prefix.includes("<script") || prefix.includes("<svg") || prefix.includes("<html") || prefix.includes("<?xml")) return { ok: false, reason: "markup_or_script_rejected" };
   const png = bytes.length > 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47;
   const jpg = bytes.length > 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
   const webp = bytes.length > 12 && Buffer.from(bytes.subarray(0, 4)).toString("ascii") === "RIFF" && Buffer.from(bytes.subarray(8, 12)).toString("ascii") === "WEBP";
   const detected = png ? { mediaType: "image/png", ext: "png" } : jpg ? { mediaType: "image/jpeg", ext: "jpg" } : webp ? { mediaType: "image/webp", ext: "webp" } : null;
-  if (!detected) return { ok: false, reason: "unsupported_image_signature" };
+  if (!detected) {
+    // The markup/script text-scan only runs here, for files that are NOT
+    // already a genuine PNG/JPEG/WebP by magic bytes. A file that starts
+    // with real binary image signature bytes can never be parsed as
+    // SVG/HTML/script by anything, regardless of what its compressed data
+    // contains later -- checking every upload's raw bytes for these
+    // substrings unconditionally produced false positives: a legitimate
+    // PNG's compressed byte stream can coincidentally decode (as latin1)
+    // to contain "<svg" or similar, rejecting a real image as malicious.
+    const prefix = Buffer.from(bytes.subarray(0, Math.min(bytes.length, 1024))).toString("latin1").toLowerCase();
+    if (prefix.includes("<script") || prefix.includes("<svg") || prefix.includes("<html") || prefix.includes("<?xml")) return { ok: false, reason: "markup_or_script_rejected" };
+    return { ok: false, reason: "unsupported_image_signature" };
+  }
   const normalized = declared.toLowerCase();
   if (normalized && normalized !== detected.mediaType && !(detected.mediaType === "image/jpeg" && normalized === "image/jpg")) return { ok: false, reason: "declared_media_type_mismatch" };
   return { ok: true, ...detected };
