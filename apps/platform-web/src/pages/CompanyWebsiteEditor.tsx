@@ -355,7 +355,12 @@ export function CompanyWebsiteEditor({
               accept="image/png,image/jpeg"
               type="file"
               onChange={(event) =>
-                void readWebsiteLogo(event.currentTarget.files?.[0], update, setValidationErrors)
+                void readWebsiteLogo(
+                  companyId,
+                  event.currentTarget.files?.[0],
+                  update,
+                  setValidationErrors,
+                )
               }
             />
             <small>
@@ -416,6 +421,7 @@ export function CompanyWebsiteEditor({
               type="file"
               onChange={(event) =>
                 void readWebsiteBanners(
+                  companyId,
                   event.currentTarget.files,
                   bannerUrls,
                   "bannerDataUrls",
@@ -460,6 +466,7 @@ export function CompanyWebsiteEditor({
               type="file"
               onChange={(event) =>
                 void readWebsiteBanners(
+                  companyId,
                   event.currentTarget.files,
                   arabicBannerUrls,
                   "bannerDataUrlsAr",
@@ -1753,7 +1760,15 @@ function validateDraft(settings: CompanyWebsiteSettings): string[] {
   return errors;
 }
 
+// Uploads to Cloudflare R2 via platformApi.uploadCompanyWebsiteMedia and
+// saves the returned URL, rather than reading the file into a base64 data
+// URL and storing it inline in the Website settings. The public Website
+// payload embeds these branding fields verbatim (see
+// `settingsForWebsiteAudience`), so an inline banner used to mean every
+// visitor's page load re-transmitted the full image bytes as JSON; a URL is
+// a few dozen bytes and the browser loads the image itself, once, cached.
 async function readWebsiteLogo(
+  companyId: string,
   file: File | undefined,
   update: (recipe: (next: CompanyWebsiteSettings) => void) => void,
   showErrors: (errors: readonly string[]) => void,
@@ -1767,19 +1782,23 @@ async function readWebsiteLogo(
     showErrors(["Website logo must be 500 KB or smaller."]);
     return;
   }
-  const dataUrl = await new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(file);
-  });
-  update((next) => {
-    next.branding.logoDataUrl = dataUrl;
-  });
-  showErrors([]);
+  try {
+    const { url } = await platformApi.uploadCompanyWebsiteMedia(companyId, file);
+    update((next) => {
+      next.branding.logoDataUrl = url;
+    });
+    showErrors([]);
+  } catch (error) {
+    showErrors([
+      error instanceof PlatformApiError
+        ? error.message
+        : "The Website logo could not be uploaded.",
+    ]);
+  }
 }
 
 async function readWebsiteBanners(
+  companyId: string,
   files: FileList | null,
   existing: readonly string[],
   field: "bannerDataUrls" | "bannerDataUrlsAr",
@@ -1806,21 +1825,22 @@ async function readWebsiteBanners(
     showErrors([`${oversized.name} must be 2 MB or smaller.`]);
     return;
   }
-  const dataUrls = await Promise.all(selected.map(readImageDataUrl));
-  update((next) => {
-    next.branding[field] = [...existing, ...dataUrls];
-    if (field === "bannerDataUrls") delete next.branding.bannerDataUrl;
-    next.branding.bannerTransition ??= "fade";
-    next.branding.bannerIntervalSeconds ??= 6;
-  });
-  showErrors([]);
-}
-
-function readImageDataUrl(file: File): Promise<string> {
-  return new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(file);
-  });
+  try {
+    const uploaded = await Promise.all(
+      selected.map((file) => platformApi.uploadCompanyWebsiteMedia(companyId, file)),
+    );
+    update((next) => {
+      next.branding[field] = [...existing, ...uploaded.map((result) => result.url)];
+      if (field === "bannerDataUrls") delete next.branding.bannerDataUrl;
+      next.branding.bannerTransition ??= "fade";
+      next.branding.bannerIntervalSeconds ??= 6;
+    });
+    showErrors([]);
+  } catch (error) {
+    showErrors([
+      error instanceof PlatformApiError
+        ? error.message
+        : "The Homepage banner could not be uploaded.",
+    ]);
+  }
 }

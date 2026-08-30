@@ -1263,6 +1263,35 @@ export const platformApi = {
     }
     return await response.json();
   },
+  // Uploads a Company Website branding image (logo override or homepage
+  // banner) to Cloudflare R2 and returns its public URL, instead of the
+  // editor encoding the file to a base64 data URL and saving it inline in
+  // the Website settings. Inline base64 previously made the public Website
+  // payload multi-megabyte, since it's re-sent on every page load.
+  async uploadCompanyWebsiteMedia(companyId: string, file: File): Promise<{ url: string }> {
+    const form = new FormData();
+    form.append("file", file);
+    const response = await fetch(
+      `${platformConfiguration.apiBaseUrl}/platform/companies/${companyId}/website/media`,
+      {
+        method: "POST",
+        credentials: "include",
+        headers: { Accept: "application/json", "X-Blueline-Session": "cookie" },
+        body: form,
+      },
+    );
+    if (!response.ok) {
+      let message = "The image could not be uploaded.";
+      try {
+        const body = await response.json();
+        if (typeof body?.error?.message === "string") message = body.error.message;
+      } catch {
+        // Ignore a non-JSON error body and fall back to the generic message.
+      }
+      throw new PlatformApiError(message, "website_media_upload_failed", response.status);
+    }
+    return await response.json();
+  },
 
   async errorDetail(id: string): Promise<ErrorReport> {
     const result = await request<ErrorReport>(`platform/errors/${id}`, { method: "GET" });

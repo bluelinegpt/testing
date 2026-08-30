@@ -79,6 +79,57 @@ describe("CompanyWebsiteEditor", () => {
     );
   });
 
+  it("uploads the Website logo to Cloudflare instead of embedding it as base64", async () => {
+    const upload = vi.spyOn(platformApi, "uploadCompanyWebsiteMedia").mockResolvedValue({
+      url: "/api/v1/public/company-website/media/company-a/11111111-1111-1111-1111-111111111111.png",
+    });
+    render(
+      <CompanyWebsiteEditor
+        companyId="company-a"
+        website={{ status: "published", slug: "dana", templateKey: "modern", version: 7, settings }}
+        onFailure={vi.fn()}
+        onSaved={vi.fn()}
+      />,
+    );
+    const file = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], "logo.png", {
+      type: "image/png",
+    });
+    fireEvent.change(
+      screen.getByLabelText(/Website logo — separate from the Company Portal logo/u),
+      { target: { files: [file] } },
+    );
+    await waitFor(() => expect(upload).toHaveBeenCalledWith("company-a", file));
+    expect(await screen.findByAltText("Website logo preview")).toHaveAttribute(
+      "src",
+      "/api/v1/public/company-website/media/company-a/11111111-1111-1111-1111-111111111111.png",
+    );
+  });
+
+  it("uploads a Homepage banner to Cloudflare instead of embedding it as base64", async () => {
+    const upload = vi.spyOn(platformApi, "uploadCompanyWebsiteMedia").mockResolvedValue({
+      url: "/api/v1/public/company-website/media/company-a/22222222-2222-2222-2222-222222222222.webp",
+    });
+    render(
+      <CompanyWebsiteEditor
+        companyId="company-a"
+        website={{ status: "published", slug: "dana", templateKey: "modern", version: 7, settings }}
+        onFailure={vi.fn()}
+        onSaved={vi.fn()}
+      />,
+    );
+    const file = new File([new Uint8Array([0x52, 0x49, 0x46, 0x46])], "banner.webp", {
+      type: "image/webp",
+    });
+    fireEvent.change(screen.getByLabelText(/Add Homepage banners — 0\/3 uploaded/u), {
+      target: { files: [file] },
+    });
+    await waitFor(() => expect(upload).toHaveBeenCalledWith("company-a", file));
+    expect(await screen.findByAltText("Homepage banner 1 preview")).toHaveAttribute(
+      "src",
+      "/api/v1/public/company-website/media/company-a/22222222-2222-2222-2222-222222222222.webp",
+    );
+  });
+
   it("shows a visible field-specific error and does not call the API for oversized About text", async () => {
     const save = vi.spyOn(platformApi, "configureCompanyWebsite");
     save.mockClear();

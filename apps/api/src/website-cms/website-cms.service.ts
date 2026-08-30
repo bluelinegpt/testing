@@ -128,7 +128,7 @@ function planPayload(input: PricingPlanDto) {
   };
 }
 
-function isImage(bytes: Uint8Array, declared: string): { ok: true; mediaType: string; ext: string } | { ok: false; reason: string } {
+export function isImage(bytes: Uint8Array, declared: string): { ok: true; mediaType: string; ext: string } | { ok: false; reason: string } {
   if (bytes.length === 0) return { ok: false, reason: "empty_file" };
   if (bytes.length > 5 * 1024 * 1024) return { ok: false, reason: "file_too_large" };
   const prefix = Buffer.from(bytes.subarray(0, Math.min(bytes.length, 1024))).toString("latin1").toLowerCase();

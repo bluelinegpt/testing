@@ -227,7 +227,18 @@ const allowedIcons = new Set([
 const ctaTypes = new Set(["contact", "track", "request_delivery", "whatsapp", "call", "section"]);
 const bannerTransitions = new Set(["fade", "slide", "zoom"]);
 
+// A logo/banner uploaded through the Website editor is now stored as a real
+// file in Cloudflare R2 (via FileStoragePort.storeWebsite), not embedded as
+// base64 -- see PlatformCompanyWebsiteController's "media" route. This
+// matches the exact path the public read side already serves at
+// (PublicCompanyWebsiteController). Base64 data URLs are still accepted
+// below for backward compatibility with Websites saved before this change;
+// new uploads always produce a URL of this shape.
+const websiteMediaUrl =
+  /^\/api\/v1\/public\/company-website\/media\/[0-9a-f-]{36}\/[0-9a-f-]{36}\.(?:png|jpe?g|webp)$/u;
+
 function validatedBanner(value: string): string {
+  if (websiteMediaUrl.test(value)) return value;
   if (!/^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/u.test(value))
     invalid("Website banner must be a PNG, JPEG or WebP image");
   if (value.length > 2_800_000) invalid("Each Website banner must be 2 MB or smaller");
@@ -247,9 +258,11 @@ export function validateCompanyWebsiteSettings(value: unknown): CompanyWebsiteSe
     }
   if (input.branding?.logoDataUrl) {
     const logo = input.branding.logoDataUrl;
-    if (!/^data:image\/(?:png|jpeg);base64,[A-Za-z0-9+/]+={0,2}$/u.test(logo))
-      invalid("Website logo must be a PNG or JPEG image");
-    if (logo.length > 700_000) invalid("Website logo must be 500 KB or smaller");
+    if (!websiteMediaUrl.test(logo)) {
+      if (!/^data:image\/(?:png|jpeg);base64,[A-Za-z0-9+/]+={0,2}$/u.test(logo))
+        invalid("Website logo must be a PNG or JPEG image");
+      if (logo.length > 700_000) invalid("Website logo must be 500 KB or smaller");
+    }
     result.branding.logoDataUrl = logo;
   }
   if (input.branding?.bannerDataUrls !== undefined) {

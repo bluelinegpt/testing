@@ -10,11 +10,21 @@ import {
   Query,
   Req,
   Res,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from "@nestjs/common";
-import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
+import { FileInterceptor } from "@nestjs/platform-express";
+import { ApiBearerAuth, ApiConsumes, ApiOperation, ApiTags } from "@nestjs/swagger";
 import { Throttle } from "@nestjs/throttler";
 import type { Request, Response } from "express";
+
+type MulterFile = {
+  readonly buffer: Buffer;
+  readonly mimetype: string;
+  readonly originalname: string;
+  readonly size: number;
+};
 
 import { Public } from "../authentication/authentication.decorators.js";
 import { IdentityContextAccessor } from "../security/identity-context.js";
@@ -145,6 +155,18 @@ export class PlatformCompanyWebsiteController {
     @Query("templateKey") templateKey?: string,
   ) {
     return this.websites.preview(companyId, templateKey);
+  }
+
+  @RequirePlatformPermissions(PLATFORM_COMPANY_WEBSITES_MANAGE)
+  @HttpCode(201)
+  @Post("media")
+  @ApiConsumes("multipart/form-data")
+  @UseInterceptors(FileInterceptor("file", { limits: { fileSize: 5 * 1024 * 1024, files: 1 } }))
+  public uploadMedia(
+    @Param("companyId") companyId: string,
+    @UploadedFile() file: MulterFile | undefined,
+  ) {
+    return this.websites.uploadMedia(companyId, file);
   }
 
   @RequirePlatformPermissions(PLATFORM_COMPANY_WEBSITES_MANAGE)
@@ -306,6 +328,22 @@ export class PublicCompanyWebsiteController {
     @Body() input: CompanyWebsiteAgentContactDto,
   ) {
     return this.websiteAgent.saveContact(this.host(request), token, input.contactNumber);
+  }
+
+  @Get("media/:companyId/:filename")
+  public async media(
+    @Param("companyId") companyId: string,
+    @Param("filename") filename: string,
+    @Res() response: Response,
+  ): Promise<void> {
+    const media = await this.websites.readMedia(companyId, filename);
+    response.setHeader("Content-Type", media.mediaType);
+    // The filename is a fresh randomUUID per upload -- a saved settings
+    // object always points at the current banner/logo, it never reuses a
+    // stale name for new content -- so this can be cached indefinitely.
+    response.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+    response.setHeader("X-Content-Type-Options", "nosniff");
+    response.send(media.bytes);
   }
 
   @Get("logo")

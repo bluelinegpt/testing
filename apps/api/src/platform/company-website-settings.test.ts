@@ -138,6 +138,18 @@ describe("Company website editor settings", () => {
       }),
     ).toThrow(/PNG, JPEG or WebP/u);
   });
+  it("accepts an R2-uploaded logo/banner URL instead of requiring a base64 data URL", () => {
+    const logoUrl =
+      "/api/v1/public/company-website/media/11111111-1111-1111-1111-111111111111/22222222-2222-2222-2222-222222222222.png";
+    const bannerUrl =
+      "/api/v1/public/company-website/media/11111111-1111-1111-1111-111111111111/33333333-3333-3333-3333-333333333333.webp";
+    const settings = validateCompanyWebsiteSettings({
+      ...EMPTY_COMPANY_WEBSITE_SETTINGS,
+      branding: { bannerDataUrls: [bannerUrl], logoDataUrl: logoUrl },
+    });
+    expect(settings.branding.logoDataUrl).toBe(logoUrl);
+    expect(settings.branding.bannerDataUrls).toEqual([bannerUrl]);
+  });
   it("accepts up to three banners with a controlled rotation style and timing", () => {
     const banners = ["AA==", "AQ==", "Ag=="].map((data) => `data:image/png;base64,${data}`);
     const settings = validateCompanyWebsiteSettings({

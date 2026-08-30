@@ -7,10 +7,10 @@
       "path": "apps/api",
       "renderService": "bluelinegpt-api-test",
       "status": "pushed_awaiting_confirmation",
-      "localCommit": "9df622b",
+      "localCommit": "1bd4623",
       "localCommitDate": "2026-08-30",
-      "lastChangeDescription": "resolve public Company Websites through their forwarded production hostname",
-      "lastChangeBy": "codex",
+      "lastChangeDescription": "fix(api): add gzip/br response compression to prevent OOM crashes",
+      "lastChangeBy": "human",
       "confirmedLiveCommit": "2db5a27",
       "confirmedLiveAt": "2026-08-28"
     },

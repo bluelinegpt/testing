@@ -1,7 +1,7 @@
 import { HttpStatus, Inject, Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { type Kysely, sql } from "kysely";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import type { AppConfiguration } from "../configuration/environment.js";
 import { FileStoragePort } from "../files/file-storage.port.js";
@@ -10,6 +10,7 @@ import type { DatabaseSchema } from "../infrastructure/database/database.types.j
 import { KyselyTransactionManager } from "../infrastructure/database/transaction-manager.js";
 import { ApplicationException } from "../presentation/errors/application.exception.js";
 import { CompanyHostResolver } from "../tenancy/company-host-resolver.js";
+import { isImage } from "../website-cms/website-cms.service.js";
 import {
   EMPTY_COMPANY_WEBSITE_SETTINGS,
   settingsForWebsiteAudience,
@@ -587,6 +588,57 @@ export class CompanyWebsiteService {
       bytes: Buffer.from(await this.storage.readPrivate(row.companyId, row.storageKey)),
       mediaType: row.mediaType,
     };
+  }
+
+  /**
+   * Uploads a Website branding image (logo override or homepage banner) to
+   * R2 and returns the public URL to save into `branding.logoDataUrl` /
+   * `branding.bannerDataUrls` instead of a base64 data URL. Storing the file
+   * itself -- rather than embedding it in the settings JSONB -- is what keeps
+   * the public `/public/company-website` payload small: that endpoint is
+   * polled repeatedly by every visitor's browser, and a handful of inline
+   * banner images previously inflated it to several megabytes per request.
+   */
+  public async uploadMedia(
+    companyId: string,
+    file: { buffer: Buffer; mimetype: string; size: number } | undefined,
+  ): Promise<{ url: string }> {
+    if (!file)
+      throw new ApplicationException(
+        "website_media_required",
+        "Select an image to upload",
+        HttpStatus.BAD_REQUEST,
+      );
+    const validation = isImage(file.buffer, file.mimetype);
+    if (!validation.ok)
+      throw new ApplicationException(
+        "website_media_invalid",
+        `The uploaded image was rejected (${validation.reason})`,
+        HttpStatus.BAD_REQUEST,
+      );
+    const filename = `${randomUUID()}.${validation.ext}`;
+    await this.storage.storeWebsite(`website/company/${companyId}/${filename}`, file.buffer);
+    return { url: `/api/v1/public/company-website/media/${companyId}/${filename}` };
+  }
+
+  /** Serves bytes previously stored by {@link uploadMedia}. `filename` is
+   *  restricted to the exact `<uuid>.<ext>` shape that method generates --
+   *  never a client-supplied path -- before it is used to build a storage
+   *  key, so this can't be used to read any other object in the bucket. */
+  public async readMedia(
+    companyId: string,
+    filename: string,
+  ): Promise<{ bytes: Buffer; mediaType: string }> {
+    const match = /^[0-9a-f-]{36}\.(png|jpe?g|webp)$/u.exec(filename);
+    if (!match) throw this.publicNotFound();
+    const ext = match[1];
+    const mediaType = ext === "webp" ? "image/webp" : ext === "png" ? "image/png" : "image/jpeg";
+    try {
+      const bytes = await this.storage.readWebsite(`website/company/${companyId}/${filename}`);
+      return { bytes: Buffer.from(bytes), mediaType };
+    } catch {
+      throw this.publicNotFound();
+    }
   }
 
   private async transition(
