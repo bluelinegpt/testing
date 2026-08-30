@@ -19,10 +19,10 @@
       "displayName": "Main app",
       "path": "apps/web",
       "renderService": "bluelinegpt-web-test",
-      "status": "pushed_awaiting_confirmation",
-      "localCommit": "9df622b",
+      "status": "needs_deploy",
+      "localCommit": "00a572b",
       "localCommitDate": "2026-08-30",
-      "lastChangeDescription": "load Company Website previews from authorized Platform origins",
+      "lastChangeDescription": "Keep the complete published website on the same isolated theme as its preview",
       "lastChangeBy": "codex",
       "confirmedLiveCommit": "0abeb24",
       "confirmedLiveAt": "2026-08-28"
