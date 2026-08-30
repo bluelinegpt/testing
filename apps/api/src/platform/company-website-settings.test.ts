@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   EMPTY_COMPANY_WEBSITE_SETTINGS,
+  hasInlineBrandingMedia,
   settingsForWebsiteAudience,
   validateCompanyWebsiteSettings,
+  withoutInlineBrandingMedia,
 } from "./company-website-settings.js";
 
 describe("Company website editor settings", () => {
@@ -138,6 +140,36 @@ describe("Company website editor settings", () => {
       }),
     ).toThrow(/PNG, JPEG or WebP/u);
   });
+  it("hides legacy base64 branding images from the Platform editor without touching a valid R2 URL", () => {
+    const r2Url =
+      "/api/v1/public/company-website/media/11111111-1111-1111-1111-111111111111/22222222-2222-2222-2222-222222222222.png";
+    const withLegacyLogo = {
+      ...EMPTY_COMPANY_WEBSITE_SETTINGS,
+      branding: { logoDataUrl: "data:image/png;base64,iVBORw0KGgo=" },
+    };
+    expect(hasInlineBrandingMedia(withLegacyLogo)).toBe(true);
+    expect(withoutInlineBrandingMedia(withLegacyLogo).branding.logoDataUrl).toBeUndefined();
+
+    const withLegacyBanners = {
+      ...EMPTY_COMPANY_WEBSITE_SETTINGS,
+      branding: {
+        bannerDataUrls: ["data:image/webp;base64,UklGRg=="],
+        bannerDataUrlsAr: ["data:image/webp;base64,UklGRg=="],
+      },
+    };
+    expect(hasInlineBrandingMedia(withLegacyBanners)).toBe(true);
+    const stripped = withoutInlineBrandingMedia(withLegacyBanners);
+    expect(stripped.branding.bannerDataUrls).toEqual([]);
+    expect(stripped.branding.bannerDataUrlsAr).toEqual([]);
+
+    const withR2Media = {
+      ...EMPTY_COMPANY_WEBSITE_SETTINGS,
+      branding: { bannerDataUrls: [r2Url], logoDataUrl: r2Url },
+    };
+    expect(hasInlineBrandingMedia(withR2Media)).toBe(false);
+    expect(withoutInlineBrandingMedia(withR2Media)).toBe(withR2Media);
+  });
+
   it("accepts an R2-uploaded logo/banner URL instead of requiring a base64 data URL", () => {
     const logoUrl =
       "/api/v1/public/company-website/media/11111111-1111-1111-1111-111111111111/22222222-2222-2222-2222-222222222222.png";

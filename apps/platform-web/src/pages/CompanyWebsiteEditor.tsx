@@ -329,6 +329,14 @@ export function CompanyWebsiteEditor({
         Agent name 100 characters · all multi-line public text fields 2,000 characters. Current
         counters appear below the main bilingual Website fields.
       </p>
+      {website.hasHiddenLegacyMedia ? (
+        <div className="website-editor__legacy-media-notice" role="status">
+          This Website has an existing logo or banner saved in an old format that is too large to
+          preview here, so it is hidden below — it has not been deleted. Upload a new logo/banner
+          to replace it. If you Save Draft without uploading a replacement for a hidden image, that
+          image is cleared.
+        </div>
+      ) : null}
       <nav aria-label="Website editor sections" className="website-editor__tabs">
         <a href="#website-brand">Brand</a>
         <a href="#website-homepage">Homepage</a>

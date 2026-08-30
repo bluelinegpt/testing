@@ -13,8 +13,10 @@ import { CompanyHostResolver } from "../tenancy/company-host-resolver.js";
 import { isImage } from "../website-cms/website-cms.service.js";
 import {
   EMPTY_COMPANY_WEBSITE_SETTINGS,
+  hasInlineBrandingMedia,
   settingsForWebsiteAudience,
   validateCompanyWebsiteSettings,
+  withoutInlineBrandingMedia,
   type CompanyWebsiteSettings,
 } from "./company-website-settings.js";
 import {
@@ -158,9 +160,23 @@ export class CompanyWebsiteService {
     this.hostSuffix = config.get("tenancy.hostSuffix", { infer: true }) ?? "tawseelhub.com";
   }
 
-  public async get(companyId: string): Promise<{ status: "not_configured" } | CompanyWebsiteView> {
+  public async get(
+    companyId: string,
+  ): Promise<{ status: "not_configured" } | (CompanyWebsiteView & { hasHiddenLegacyMedia: boolean })> {
     const row = await this.row(this.database, companyId);
-    return row === undefined ? { status: "not_configured" } : this.view(row);
+    if (row === undefined) return { status: "not_configured" };
+    const hasHiddenLegacyMedia =
+      hasInlineBrandingMedia(row.settings) ||
+      (row.publishedSettings !== null && hasInlineBrandingMedia(row.publishedSettings));
+    return {
+      ...this.view({
+        ...row,
+        settings: withoutInlineBrandingMedia(row.settings),
+        publishedSettings:
+          row.publishedSettings === null ? null : withoutInlineBrandingMedia(row.publishedSettings),
+      }),
+      hasHiddenLegacyMedia,
+    };
   }
 
   public async configure(

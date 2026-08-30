@@ -2210,6 +2210,14 @@ button.agent-live-indicator {
 .website-editor__errors {
   margin: 0 1rem 1rem;
 }
+.website-editor__legacy-media-notice {
+  background: #fffbeb;
+  border: 1px solid #fcd34d;
+  border-radius: 10px;
+  color: #92400e;
+  margin: 0 1rem 1rem;
+  padding: 0.8rem 1rem;
+}
 .website-editor__errors ul {
   margin-bottom: 0;
 }

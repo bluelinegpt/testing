@@ -424,6 +424,12 @@ export interface CompanyWebsite {
   readonly version?: number;
   readonly settings?: CompanyWebsiteSettings;
   readonly publishedSettings?: CompanyWebsiteSettings | null;
+  /** True if this Website's saved logo/banner is still an old inline base64
+   *  image (uploaded before Website media moved to R2) too large to send
+   *  back here -- it's hidden from this response, not deleted. Uploading a
+   *  new logo/banner replaces it; saving without uploading a replacement
+   *  clears it. */
+  readonly hasHiddenLegacyMedia?: boolean;
 }
 
 export type CompanyWebsiteTemplateKey =

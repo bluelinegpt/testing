@@ -487,6 +487,43 @@ export function settingsForWebsiteAudience(
   return preview ? draft : published;
 }
 
+function isInlineImage(value: string | undefined): boolean {
+  return typeof value === "string" && value.startsWith("data:");
+}
+
+/** True if any branding image in `settings` is still a legacy base64 data
+ *  URL rather than an R2 URL -- see {@link withoutInlineBrandingMedia}. */
+export function hasInlineBrandingMedia(settings: CompanyWebsiteSettings): boolean {
+  return (
+    isInlineImage(settings.branding.logoDataUrl) ||
+    isInlineImage(settings.branding.bannerDataUrl) ||
+    (settings.branding.bannerDataUrls?.some(isInlineImage) ?? false) ||
+    (settings.branding.bannerDataUrlsAr?.some(isInlineImage) ?? false)
+  );
+}
+
+/**
+ * Strips any branding image still saved as an inline base64 data URL
+ * (uploaded before Website media moved to R2) before settings are sent to
+ * the Platform editor. Some Websites still carry several megabytes of
+ * inline image data from before that change; re-transmitting it just to
+ * populate the edit form is exactly the kind of oversized response that
+ * contributed to the API's memory crashes. Stripping it here lets the
+ * editor load normally -- the admin then uploads a replacement, which is
+ * always a small R2 URL. This does not touch the database: the field
+ * really is cleared only if the admin saves without uploading a
+ * replacement for it.
+ */
+export function withoutInlineBrandingMedia(settings: CompanyWebsiteSettings): CompanyWebsiteSettings {
+  if (!hasInlineBrandingMedia(settings)) return settings;
+  const branding = { ...settings.branding };
+  if (isInlineImage(branding.logoDataUrl)) delete branding.logoDataUrl;
+  if (isInlineImage(branding.bannerDataUrl)) delete branding.bannerDataUrl;
+  if (branding.bannerDataUrls) branding.bannerDataUrls = branding.bannerDataUrls.filter((url) => !isInlineImage(url));
+  if (branding.bannerDataUrlsAr) branding.bannerDataUrlsAr = branding.bannerDataUrlsAr.filter((url) => !isInlineImage(url));
+  return { ...settings, branding };
+}
+
 function validatePresentation(
   input: CompanyWebsiteSettings["presentation"],
 ): CompanyWebsiteSettings["presentation"] {
