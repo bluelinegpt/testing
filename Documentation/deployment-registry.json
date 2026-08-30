@@ -19,7 +19,7 @@
       "displayName": "Main app",
       "path": "apps/web",
       "renderService": "bluelinegpt-web-test",
-      "status": "needs_deploy",
+      "status": "pushed_awaiting_confirmation",
       "localCommit": "f2300e5",
       "localCommitDate": "2026-08-30",
       "lastChangeDescription": "fix order reports to follow interface language",
