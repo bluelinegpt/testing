@@ -808,9 +808,9 @@ export interface CreateAdministratorPayload {
 
 export interface CreateCompanyPayload {
   readonly name: string;
-  readonly shipmentPrefix: string;
   readonly subdomain?: string;
   readonly environment: string;
+  readonly baseCurrency?: string;
   readonly countryCode?: string;
   readonly timezone?: string;
   readonly defaultLanguage?: string;
@@ -969,6 +969,9 @@ function toQuery(filters: object): string {
   }
   return query.toString();
 }
+
+export interface WorkflowTestCompany { readonly id:string; readonly code:string; readonly name:string; readonly environment:string; readonly enabled:boolean }
+export interface WorkflowTestRun { readonly id:string; readonly company_id:string; readonly companyName:string; readonly companyCode:string; readonly mode:"full"|"smoke"; readonly status:string; readonly orders_per_day:number; readonly duration_days:number; readonly planned_orders:number; readonly concurrency:number; readonly side_effects_suppressed:boolean; readonly progress:Record<string,number>; readonly failureReasons:readonly string[]; readonly version:number }
 
 export const platformApi = {
   async login(identifier: string, password: string): Promise<PlatformIdentity> {
@@ -1463,9 +1466,10 @@ export const platformApi = {
     companyId: string,
     reason: string,
     expectedVersion: number,
+    confirmedPrefix: string,
   ): Promise<void> {
     await request(`platform/companies/${companyId}/shipment-serial/activate`, {
-      body: { reason, expectedVersion },
+      body: { confirmedPrefix, reason, expectedVersion },
       method: "POST",
     });
   },
@@ -2050,4 +2054,10 @@ export const platformApi = {
   async deleteTraderApplications(ids: string[]): Promise<any> {
     return await request<any>("platform/trader-applications", { method: "DELETE", body: { ids } });
   },
+  async workflowTestCompanies():Promise<readonly WorkflowTestCompany[]>{return (await request<readonly WorkflowTestCompany[]>("platform/workflow-tests/companies",{method:"GET"}))??[];},
+  async workflowTestRuns():Promise<readonly WorkflowTestRun[]>{return (await request<readonly WorkflowTestRun[]>("platform/workflow-tests",{method:"GET"}))??[];},
+  async enableWorkflowTestingCompany(id:string,confirmation:string):Promise<any>{return request<any>(`platform/workflow-tests/companies/${id}/enable`,{method:"POST",body:{confirmation}});},
+  async createWorkflowTestRun(input:{companyId:string;mode:"full"|"smoke";ordersPerDay:number;durationDays:number;concurrency:number;sideEffectsSuppressed:boolean;configuration:Record<string,unknown>}):Promise<any>{return request<any>("platform/workflow-tests",{method:"POST",body:input});},
+  async connectRecentWorkflowTestOrders(id:string,expectedVersion:number):Promise<any>{return request<any>(`platform/workflow-tests/${id}/connect-recent-orders`,{method:"POST",body:{expectedVersion,reason:"Connect recent test orders"}});},
+  async mutateWorkflowTestRun(id:string,action:"start"|"pause"|"resume"|"stop"|"cancel",expectedVersion:number):Promise<any>{return request<any>(`platform/workflow-tests/${id}/${action}`,{method:"POST",body:{expectedVersion,reason:`Platform ${action}`}});},
 };

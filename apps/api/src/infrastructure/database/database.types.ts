@@ -3,6 +3,21 @@ import type { ColumnType, Generated } from "kysely";
 type UntypedTable = Record<string, unknown>;
 type MoneyColumn = ColumnType<string, string | number, string | number>;
 type TimestampColumn = ColumnType<Date, Date | string, Date | string>;
+type OrderTable = UntypedTable & {
+  psystem_serial: string | null;
+  psystem_serial_normalized: string | null;
+  serial_number: string | null;
+  serial_number_normalized: string | null;
+};
+type CompanyTable = UntypedTable & {
+  shipment_prefix: string | null;
+  shipment_serial_enabled_at: TimestampColumn | null;
+};
+type ShipmentPrefixReservationTable = UntypedTable & {
+  prefix: string;
+  original_company_id: string;
+  current_company_id: string | null;
+};
 
 interface AccountTable {
   id: Generated<string>;
@@ -160,7 +175,7 @@ export interface DatabaseSchema {
   areas: UntypedTable;
   audit_events: UntypedTable;
   chart_of_accounts: UntypedTable;
-  companies: UntypedTable;
+  companies: CompanyTable;
   company_bank_accounts: UntypedTable;
   company_cash_accounts: UntypedTable;
   company_reference_counters: UntypedTable;
@@ -218,7 +233,7 @@ export interface DatabaseSchema {
   order_events: UntypedTable;
   order_items: UntypedTable;
   order_status_history: UntypedTable;
-  orders: UntypedTable;
+  orders: OrderTable;
   outsourced_driver_payments: UntypedTable;
   outsourced_driver_fee_accruals: UntypedTable;
   outsourced_driver_fee_payment_allocations: UntypedTable;
@@ -272,6 +287,7 @@ export interface DatabaseSchema {
   role_permissions: UntypedTable;
   roles: RoleTable;
   saas_usage_events: UntypedTable;
+  shipment_prefix_reservations: ShipmentPrefixReservationTable;
   support_cases: UntypedTable;
   third_party_delivery_companies: UntypedTable;
   tracking_access_events: UntypedTable;

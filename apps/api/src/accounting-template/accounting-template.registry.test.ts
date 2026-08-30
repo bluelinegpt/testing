@@ -24,6 +24,11 @@ describe("approved template registry", () => {
         templateVersion: 2,
         displayName: "UAE Delivery Standard",
       },
+      {
+        templateCode: "UAE_DELIVERY_STANDARD",
+        templateVersion: 3,
+        displayName: "UAE Delivery Standard",
+      },
     ]);
     // A file name in the browser-facing catalogue would be the first step
     // towards a caller choosing its own file.
@@ -79,8 +84,8 @@ describe("approved template registry", () => {
   });
 
   it("refuses an unapproved version of an approved code", () => {
-    expect(() => loadApprovedTemplate("UAE_DELIVERY_STANDARD", 3)).toThrow(
-      /version 3 is not an approved template/,
+    expect(() => loadApprovedTemplate("UAE_DELIVERY_STANDARD", 4)).toThrow(
+      /version 4 is not an approved template/,
     );
   });
 
@@ -90,7 +95,17 @@ describe("approved template registry", () => {
    * that was visible until someone tried to use one.
    */
   it("points new Companies at the latest version", () => {
-    expect(latestTemplateVersion.UAE_DELIVERY_STANDARD).toBe(2);
+    expect(latestTemplateVersion.UAE_DELIVERY_STANDARD).toBe(3);
+  });
+
+  it("loads v3 with the required Employee Payroll support accounts and mappings", () => {
+    const template = loadApprovedTemplate("UAE_DELIVERY_STANDARD", 3).template;
+    const controls = new Set(template.accounts.map((account) => account.controlAccountType));
+    const mappings = new Set(template.accountMappings.map((mapping) => mapping.mappingKey));
+    expect(controls).toContain("employee_interim_payroll_clearing");
+    expect(controls).toContain("employee_advances");
+    expect(mappings).toContain("employee_interim_payroll_clearing");
+    expect(mappings).toContain("employee_advances");
   });
 
   /**

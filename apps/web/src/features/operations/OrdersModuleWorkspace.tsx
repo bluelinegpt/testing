@@ -726,7 +726,7 @@ export function OrdersModuleWorkspace({
                 />
               ) : null}
             </td>
-            <td colSpan={13}>
+            <td colSpan={14}>
               {hasChildren ? (
                 <button
                   aria-expanded={expanded}
@@ -803,6 +803,7 @@ export function OrdersModuleWorkspace({
           </button>
           <span className="cell-secondary">{formatDate(order.orderDate, locale)}</span>
         </td>
+        <td className="mono">{order.psystemSerial ?? "—"}</td>
         <td>{order.referenceNumber ?? t("operations.notProvided")}</td>
         <td>
           {order.traderName}
@@ -1383,6 +1384,7 @@ export function OrdersModuleWorkspace({
                     )}
                   </th>
                   <th>{t("operations.serialNumber")}</th>
+                  <th>{t("operations.psystemSerial")}</th>
                   <th>{t("operations.referenceNumber")}</th>
                   <th>{t("operations.trader")}</th>
                   <th>{t("operations.customer")}</th>
@@ -1403,7 +1405,7 @@ export function OrdersModuleWorkspace({
                 {grouping === "" ? orderItems.map(renderOrderRow) : renderGroupsRecursive(groups)}
                 {!loading && orderItems.length === 0 ? (
                   <tr>
-                    <td className="empty-state" colSpan={14}>
+                    <td className="empty-state" colSpan={15}>
                       {t("operations.noOrders")}
                     </td>
                   </tr>
@@ -1721,7 +1723,6 @@ function FastOrderEntryDialog({
   const [pasteText, setPasteText] = useState("");
   const [rowsToAdd, setRowsToAdd] = useState("5");
   const [busy, setBusy] = useState(false);
-  const [serialServerGenerated, setSerialServerGenerated] = useState(false);
   const [message, setMessage] = useState<string>();
   const tableScrollRef = useRef<HTMLDivElement>(null);
 
@@ -1741,7 +1742,6 @@ function FastOrderEntryDialog({
       )
       .then((result) => {
         if (!active) return;
-        setSerialServerGenerated(result.serverGenerated === true);
         setRows((current) =>
           current.map((row, index) => ({
             ...row,
@@ -1848,7 +1848,7 @@ function FastOrderEntryDialog({
             wholeNumber: true,
           });
 
-          if (!serialServerGenerated && serial === "")
+          if (serial === "")
             errors.push(t("operations.errors.serialRequired"));
           if ((serialCounts.get(serial) ?? 0) > 1)
             errors.push(t("operations.fastEntryDuplicateSerial"));
@@ -2022,7 +2022,7 @@ function FastOrderEntryDialog({
               notes: row.notes.trim() || undefined,
               packageCount: packages.ok ? packages.value : 1,
               referenceNumber: row.referenceNumber.trim() || undefined,
-              ...(serialServerGenerated ? {} : { serialNumber: row.serialNumber.trim() }),
+              serialNumber: row.serialNumber.trim(),
               serviceFee,
               serviceFeeOverrideReason:
                 row.serviceFee.trim() === "" ? undefined : row.overrideReason.trim(),
@@ -2152,12 +2152,7 @@ function FastOrderEntryDialog({
                   <td>{index + 1}</td>
                   <td>
                     <input
-                      disabled={serialServerGenerated}
-                      value={
-                        serialServerGenerated
-                          ? t("operations.serialNumberGenerated")
-                          : row.serialNumber
-                      }
+                      value={row.serialNumber}
                       onChange={(event) => updateRow(row.id, { serialNumber: event.target.value })}
                     />
                   </td>
@@ -2634,7 +2629,9 @@ export function OrderDetailsWorkspace({
                 barcode: t("operations.barcode"),
                 customer: t("operations.customer"),
                 order: t("operations.order"),
+                psystemSerial: t("operations.psystemSerial"),
                 printTitle: t("operations.waybill"),
+                serialNumber: t("operations.serialNumber"),
                 serviceFee: t("operations.serviceFee"),
                 trader: t("operations.trader"),
               })
@@ -2674,6 +2671,7 @@ export function OrderDetailsWorkspace({
           title={t("operations.orderOverview")}
           rows={[
             [t("operations.serialNumber"), detail.serialNumber ?? t("operations.legacyIdentifier")],
+            [t("operations.psystemSerial"), detail.psystemSerial ?? t("operations.notProvided")],
             [
               t("operations.referenceNumber"),
               detail.referenceNumber ?? t("operations.notProvided"),
@@ -4185,6 +4183,7 @@ function OrderRowActions({
   const [editOpen, setEditOpen] = useState(false);
   const [statusOpen, setStatusOpen] = useState(false);
   const [suggestedStatus, setSuggestedStatus] = useState<string>();
+  const statusOpenTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [viewCollectionId, setViewCollectionId] = useState<string>();
   const [viewCollectionBusy, setViewCollectionBusy] = useState(false);
   /** The request object already acted on, so a re-render cannot replay it. */
@@ -4219,6 +4218,27 @@ function OrderRowActions({
   });
   const detailsPath = `/orders/${encodeURIComponent(order.orderNumber)}`;
   const workflowReturnPath = "/orders";
+
+  useEffect(
+    () => () => {
+      if (statusOpenTimerRef.current !== undefined) clearTimeout(statusOpenTimerRef.current);
+    },
+    [],
+  );
+
+  const openStatusAfterActionsClose = (target: string) => {
+    setOpen(false);
+    setSuggestedStatus(target);
+    if (statusOpenTimerRef.current !== undefined) clearTimeout(statusOpenTimerRef.current);
+    // Do not close one native top-layer dialog and open another in the same
+    // React commit. On Chromium that can intermittently leave statusOpen=true
+    // without the replacement dialog being promoted, making subsequent clicks
+    // appear dead until a reload resets the row state.
+    statusOpenTimerRef.current = setTimeout(() => {
+      statusOpenTimerRef.current = undefined;
+      setStatusOpen(true);
+    }, 0);
+  };
 
   const traderSettlementPath = () => {
     const guidance = order.workflowGuidance;
@@ -4378,9 +4398,7 @@ function OrderRowActions({
       /* Confirm rather than write. These transitions used to PATCH straight
          from the menu, which left a smart next action nothing to open and no
          safe way to suggest a status. */
-      setOpen(false);
-      setSuggestedStatus(target);
-      setStatusOpen(true);
+      openStatusAfterActionsClose(target);
     }
   };
 

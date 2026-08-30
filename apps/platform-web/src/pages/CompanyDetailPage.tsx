@@ -170,16 +170,33 @@ export function CompanyDetailPage(): ReactElement {
       "Reason for permanently enabling server-generated shipment serials:",
     );
     if (reason === null || reason.trim().length < 3) return;
+    // Prefix saves and other Platform actions increment the Company's
+    // optimistic-lock version. Read it again immediately before this
+    // irreversible action so activation never submits a version captured by
+    // the page before the prefix was saved.
+    let latestCompany: CompanyDetail;
+    try {
+      latestCompany = await platformApi.company(companyId);
+      setCompany(latestCompany);
+    } catch {
+      setError("The latest Company state could not be loaded. Refresh and try again.");
+      return;
+    }
     if (
       !globalThis.confirm(
-        `Permanently activate ${company.shipmentPrefix ?? "this prefix"}? The prefix cannot be changed after activation.`,
+        `Permanently activate ${latestCompany.shipmentPrefix ?? "this prefix"}? The prefix cannot be changed after activation.`,
       )
     )
       return;
     setBusy(true);
     setError(undefined);
     try {
-      await platformApi.activateShipmentSerial(companyId, reason.trim(), company.version);
+      await platformApi.activateShipmentSerial(
+        companyId,
+        reason.trim(),
+        latestCompany.version,
+        latestCompany.shipmentPrefix ?? "",
+      );
       await load();
     } catch (failure) {
       setError(
@@ -615,10 +632,10 @@ export function CompanyDetailPage(): ReactElement {
         id="company-tab-configuration"
         role="tabpanel"
       >
-        <h3>Shipment serial numbering</h3>
+        <h3>PSystem Serial numbering</h3>
         <p className="platform-muted">
-          New Companies reserve a unique three-letter prefix. Legacy serial entry remains available
-          until generated numbering is explicitly activated. Activation is permanent.
+          New Companies receive and activate a permanent name-based prefix automatically. The
+          controls below appear only for existing legacy Companies that have not been activated.
         </p>
         <dl className="platform-review">
           <div>
@@ -626,7 +643,7 @@ export function CompanyDetailPage(): ReactElement {
             <dd>{company.shipmentPrefix ?? "Not assigned"}</dd>
           </div>
           <div>
-            <dt>Generated numbering</dt>
+            <dt>PSystem Serial generation</dt>
             <dd>
               {company.shipmentSerialEnabledAt
                 ? `Activated ${new Date(company.shipmentSerialEnabledAt).toISOString().slice(0, 19).replace("T", " ")}`
@@ -667,7 +684,7 @@ export function CompanyDetailPage(): ReactElement {
               onClick={() => void activateGeneratedShipmentSerials()}
               type="button"
             >
-              Activate generated serials
+              Activate PSystem Serials
             </button>
           </div>
         ) : null}

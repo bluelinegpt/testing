@@ -97,6 +97,14 @@ interface EarningsSummary {
   payments: readonly Record<string, unknown>[];
 }
 
+interface DailyEarningAvailability {
+  amount: string;
+  collectedOrders: number;
+  date: string;
+  deliveredOrders: number;
+  status: "available" | "in_progress" | "no_earnings";
+}
+
 interface MonthlyPaymentItem {
   advanceOutstanding: string;
   advancePaid: string;
@@ -165,6 +173,7 @@ export function DriverEarningsWorkspace({ api, canPay }: { api: ApiClient; canPa
     deliverySources: readonly (Omit<DeliverySource, "earned"> & { amount: string })[];
     totalEarnings: string;
   }>();
+  const [dailyAvailability, setDailyAvailability] = useState<readonly DailyEarningAvailability[]>([]);
   const previewSources: readonly DeliverySource[] = (periodPreview?.deliverySources ?? []).map(
     ({ amount, ...source }) => ({ ...source, earned: amount }),
   );
@@ -208,8 +217,19 @@ export function DriverEarningsWorkspace({ api, canPay }: { api: ApiClient; canPa
   const [success, setSuccess] = useState<string>();
   const calculate = async () => {
     if (!driverId) return;
+    const today = new Date().toISOString().slice(0, 10);
+    let calculationDateTo = dateTo;
+    if (dateTo >= today) {
+      calculationDateTo = previousIsoDate(today);
+      if (dateFrom > calculationDateTo) {
+        setPeriodPreview(undefined);
+        return setError(t("driverEarnings.todayStillInProgress"));
+      }
+      setDateTo(calculationDateTo);
+      setSuccess(t("driverEarnings.todayExcluded", { dateTo: calculationDateTo }));
+    }
     const overlappingPeriod = periods.find(
-      (period) => dateFrom <= period.dateTo && dateTo >= period.dateFrom,
+      (period) => dateFrom <= period.dateTo && calculationDateTo >= period.dateFrom,
     );
     if (overlappingPeriod) {
       setPeriodPreview(undefined);
@@ -234,7 +254,7 @@ export function DriverEarningsWorkspace({ api, canPay }: { api: ApiClient; canPa
         totalEarnings: string;
       }>("operations/payroll/driver-earnings/periods/preview", {
         dateFrom,
-        dateTo,
+        dateTo: calculationDateTo,
         driverId,
       });
       if (Number(result.totalEarnings) <= 0) {
@@ -352,6 +372,57 @@ export function DriverEarningsWorkspace({ api, canPay }: { api: ApiClient; canPa
     }
     void loadPeriods().catch(() => setError(t("driverEarnings.loadFailed")));
   }, [api, dateFrom, dateTo, driverId, t]);
+  useEffect(() => {
+    if (!driverId || !dateFrom || !dateTo || dateTo < dateFrom) {
+      setDailyAvailability([]);
+      return;
+    }
+    const parameters = new URLSearchParams({ dateFrom, dateTo, driverId });
+    void api
+      .get<EarningsSummary>(`operations/payroll/driver-earnings?${parameters.toString()}`)
+      .then((result) => {
+        const sources = Array.isArray(result.sources) ? result.sources : [];
+        const byDate = new Map<
+          string,
+          { amount: number; collectedOrders: number; deliveredOrders: number }
+        >();
+        for (const source of sources) {
+          const current = byDate.get(source.date) ?? {
+            amount: 0,
+            collectedOrders: 0,
+            deliveredOrders: 0,
+          };
+          current.amount += Number(source.gross || 0);
+          if (source.sourceType === "collection")
+            current.collectedOrders += source.collectedOrderCount;
+          else current.deliveredOrders += 1;
+          byDate.set(source.date, current);
+        }
+        const today = new Date().toISOString().slice(0, 10);
+        setDailyAvailability(
+          enumerateIsoDates(dateFrom, dateTo).map((date) => {
+            const value = byDate.get(date) ?? {
+              amount: 0,
+              collectedOrders: 0,
+              deliveredOrders: 0,
+            };
+            return {
+              amount: value.amount.toFixed(2),
+              collectedOrders: value.collectedOrders,
+              date,
+              deliveredOrders: value.deliveredOrders,
+              status:
+                date >= today
+                  ? "in_progress"
+                  : value.amount > 0
+                    ? "available"
+                    : "no_earnings",
+            };
+          }),
+        );
+      })
+      .catch(() => setDailyAvailability([]));
+  }, [api, dateFrom, dateTo, driverId]);
   useEffect(() => {
     const employeeId = drivers.find((driver) => driver.driverId === driverId)?.employeeId;
     if (!employeeId) return setAdvanceAvailability(undefined);
@@ -523,6 +594,29 @@ export function DriverEarningsWorkspace({ api, canPay }: { api: ApiClient; canPa
           </label>
         </div>
         <p className="muted">{t("driverEarnings.completedCalendarDaysOnly")}</p>
+        {dailyAvailability.length > 0 ? (
+          <div className="table-shell">
+            <h3>{t("driverEarnings.dailyAvailability")}</h3>
+            <table>
+              <thead><tr>
+                <th>{t("driverEarnings.date")}</th>
+                <th>{t("driverEarnings.deliveredOrders")}</th>
+                <th>{t("driverEarnings.collectedOrders")}</th>
+                <th>{t("driverEarnings.availableEarnings")}</th>
+                <th>{t("driverEarnings.periodStatus")}</th>
+              </tr></thead>
+              <tbody>{dailyAvailability.map((day) => (
+                <tr key={day.date}>
+                  <td>{dateLabel(day.date)}</td>
+                  <td>{count(day.deliveredOrders)}</td>
+                  <td>{count(day.collectedOrders)}</td>
+                  <td>{money(day.amount)}</td>
+                  <td>{t(`driverEarnings.availability.${day.status}`)}</td>
+                </tr>
+              ))}</tbody>
+            </table>
+          </div>
+        ) : null}
         {canPay ? (
           <div className="button-row">
             <button
@@ -782,6 +876,23 @@ export function DriverEarningsWorkspace({ api, canPay }: { api: ApiClient; canPa
       </> : null}
     </section>
   );
+}
+
+function enumerateIsoDates(dateFrom: string, dateTo: string): string[] {
+  const dates: string[] = [];
+  const cursor = new Date(`${dateFrom}T12:00:00Z`);
+  const end = new Date(`${dateTo}T12:00:00Z`);
+  while (cursor <= end && dates.length < 370) {
+    dates.push(cursor.toISOString().slice(0, 10));
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return dates;
+}
+
+function previousIsoDate(value: string): string {
+  const date = new Date(`${value}T12:00:00Z`);
+  date.setUTCDate(date.getUTCDate() - 1);
+  return date.toISOString().slice(0, 10);
 }
 
 function MonthlyDriverOverview({ data, expandedDriverId, money, onToggle }: {

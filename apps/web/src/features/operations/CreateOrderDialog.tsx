@@ -62,7 +62,6 @@ export function CreateOrderDialog({
   );
   const [area, setArea] = useState<CompanyArea>();
   const [serialNumber, setSerialNumber] = useState("");
-  const [serialServerGenerated, setSerialServerGenerated] = useState(false);
   const [referenceNumber, setReferenceNumber] = useState("");
   const [customerName, setCustomerName] = useState("");
   const [mobile, setMobile] = useState("");
@@ -172,7 +171,7 @@ export function CreateOrderDialog({
   // button stays enabled and a full validation runs on submit, so the operator
   // always sees exactly what is missing or invalid.
   const validationErrors: Record<string, string> = {};
-  if (!serialServerGenerated && serialNumber.trim() === "")
+  if (serialNumber.trim() === "")
     validationErrors.serialNumber = t("operations.errors.serialRequired");
   else if (identifierError !== undefined) validationErrors.serialNumber = identifierError;
   if (trader === undefined) validationErrors.trader = t("operations.errors.traderRequired");
@@ -455,7 +454,6 @@ export function CreateOrderDialog({
       )
       .then((result) => {
         if (!active) return;
-        setSerialServerGenerated(result.serverGenerated === true);
         setSerialNumber((current) => (current.trim() === "" ? result.serialNumber : current));
       })
       .catch(() => undefined);
@@ -764,7 +762,7 @@ export function CreateOrderDialog({
           notes: notes.trim() || undefined,
           packageCount: packageCountInput.ok ? packageCountInput.value : 0,
           referenceNumber: referenceNumber.trim() || undefined,
-          ...(serialServerGenerated ? {} : { serialNumber: serialNumber.trim() }),
+          serialNumber: serialNumber.trim(),
           paymentCondition,
           serviceFee: enteredFee,
           serviceFeeOverrideReason: enteredReason,
@@ -911,19 +909,15 @@ export function CreateOrderDialog({
                         autoComplete="off"
                         // Immutable once created (orders_manual_identifiers_immutable):
                         // shown for context, never editable.
-                        disabled={isEdit || serialServerGenerated}
+                        disabled={isEdit}
                         id="order-serial"
                         maxLength={100}
                         onChange={(event) => {
                           setSerialNumber(event.target.value);
                           clearServerError("serialNumber");
                         }}
-                        required={!serialServerGenerated}
-                        value={
-                          serialServerGenerated
-                            ? t("operations.serialNumberGenerated")
-                            : serialNumber
-                        }
+                        required
+                        value={serialNumber}
                       />
                     </label>
                     <label className="field">
@@ -935,6 +929,10 @@ export function CreateOrderDialog({
                         onChange={(event) => setReferenceNumber(event.target.value)}
                         value={referenceNumber}
                       />
+                    </label>
+                    <label className="field">
+                      <span>{t("operations.psystemSerial")}</span>
+                      <input readOnly value={t("operations.psystemSerialGenerated")} />
                     </label>
                   </div>
                   {errorFor("serialNumber") === undefined ? null : (
@@ -1721,6 +1719,9 @@ export function CreateOrderDialog({
             <h3>{t("operations.orderCreated")}</h3>
             <small>
               {t("operations.serialNumber")}: {createdOrder.serialNumber}
+            </small>
+            <small>
+              {t("operations.psystemSerial")}: {createdOrder.psystemSerial ?? "—"}
             </small>
             <button autoFocus className="button button-primary" onClick={onClose} type="button">
               {t("common.done")}

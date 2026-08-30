@@ -67,6 +67,13 @@ export const approvedTemplates: readonly ApprovedTemplate[] = [
     fileName: "uae-delivery-standard-v2.json",
     sha256: "21f5b63bdd906bbbede52da55d563533025aef2876058b24ee8ee6197cc7a698",
   },
+  {
+    templateCode: "UAE_DELIVERY_STANDARD",
+    templateVersion: 3,
+    displayName: "UAE Delivery Standard",
+    fileName: "uae-delivery-standard-v3.json",
+    sha256: "1b322710a3e7ce41afaefa99a5faf33742100535ada1e66aef450ba0f8d1de7c",
+  },
 ];
 
 /**
@@ -76,12 +83,12 @@ export const approvedTemplates: readonly ApprovedTemplate[] = [
  * v1 is kept in the catalogue and stays fully importable -- Companies already
  * initialised from it must not have their provenance record start pointing at
  * a template they were never actually given. It is simply no longer the
- * default a NEW Company receives, because v2 is the same Chart of Accounts,
- * mappings and policy plus the one thing v1 silently left every new tenant
- * without: a working set of delivery Areas.
+ * default a NEW Company receives. v2 added the complete delivery Areas; v3
+ * additionally supplies the two dedicated Employee Payroll asset/control
+ * accounts and mappings required by payroll readiness.
  */
 export const latestTemplateVersion: Readonly<Record<string, number>> = {
-  UAE_DELIVERY_STANDARD: 2,
+  UAE_DELIVERY_STANDARD: 3,
 };
 
 export class TemplateNotApprovedError extends Error {

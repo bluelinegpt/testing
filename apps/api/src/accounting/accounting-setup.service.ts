@@ -18,6 +18,7 @@ import type {
   AccountingActivationPreviewDto,
   AccountingAreaChangeDto,
   AccountingMappingDecisionDto,
+  AccountingPayrollSupportRepairDto,
   AccountingZeroOpeningDto,
 } from "./accounting-setup.dto.js";
 import { AutomaticPostingService } from "./automatic-posting.service.js";
@@ -604,6 +605,117 @@ export class AccountingSetupService {
       return this.recordDecision(suggestionId, input, { mapping }, idempotencyKey);
     }
     return this.recordDecision(suggestionId, input, {}, idempotencyKey);
+  }
+
+  public async repairPayrollSupport(
+    input: AccountingPayrollSupportRepairDto,
+    idempotencyKey?: string,
+  ) {
+    this.support.assertPermission("accounting.configuration.manage");
+    this.validateDate(input.effectiveFrom);
+    if (!input.confirmation) this.conflict("accounting_setup_payroll_repair_confirmation_required");
+    return this.transactions.execute(async (transaction) => {
+      const { actorId, companyId } = this.support.context();
+      const reservation = await this.support.reserveIdempotency<Record<string, unknown>>(
+        transaction,
+        {
+          idempotencyKey,
+          operation: "accounting.setup.payroll-support.repair",
+          payload: input,
+        },
+      );
+      if (reservation.replayResponse !== undefined) return reservation.replayResponse;
+      await sql`select pg_advisory_xact_lock(hashtextextended(
+        'accounting_account_configuration:'||${companyId}::text,0))`.execute(transaction);
+
+      const definitions = [
+        {
+          code: "1130",
+          controlType: "employee_interim_payroll_clearing",
+          mappingKey: "employee_interim_payroll_clearing",
+          nameEn: "Employee Interim Payroll Clearing",
+          nameAr: "تسوية الرواتب المؤقتة للموظفين",
+        },
+        {
+          code: "1140",
+          controlType: "employee_advances",
+          mappingKey: "employee_advances",
+          nameEn: "Employee Advances",
+          nameAr: "سلف الموظفين",
+        },
+      ] as const;
+      const repaired: Record<string, unknown>[] = [];
+      for (const definition of definitions) {
+        let account = await sql<{ id: string; code: string }>`
+          select id,code from chart_of_accounts
+           where company_id=${companyId}::uuid
+             and control_account_type=${definition.controlType}
+             and is_active and is_posting_account
+           order by created_at limit 1
+        `.execute(transaction);
+        if (account.rows[0] === undefined) {
+          const codeUsed = await sql<{ used: boolean }>`select exists(
+            select 1 from chart_of_accounts where company_id=${companyId}::uuid
+              and code=${definition.code}
+          ) as used`.execute(transaction);
+          if (codeUsed.rows[0]?.used) {
+            this.conflict(
+              "accounting_setup_payroll_repair_code_conflict",
+              `Account code ${definition.code} is already used; review the Chart of Accounts`,
+            );
+          }
+          account = await sql<{ id: string; code: string }>`
+            insert into chart_of_accounts(
+              id,company_id,code,name_en,name_ar,account_type,account_class,
+              is_posting_account,is_active,normal_balance,is_control_account,
+              control_account_type,currency,effective_from,created_by_account_id,
+              updated_by_account_id
+            ) values(
+              ${randomUUID()}::uuid,${companyId}::uuid,${definition.code},${definition.nameEn},
+              ${definition.nameAr},'asset','prepaid_expense',true,true,'debit',true,
+              ${definition.controlType},'AED',${input.effectiveFrom}::date,
+              ${actorId}::uuid,${actorId}::uuid
+            ) returning id,code
+          `.execute(transaction);
+        }
+        const accountRow = account.rows[0]!;
+        const mapping = await sql<{ id: string }>`select id from account_mappings
+          where company_id=${companyId}::uuid and mapping_key=${definition.mappingKey}
+            and is_active and effective_from<=${input.effectiveFrom}::date
+            and (effective_to is null or effective_to>=${input.effectiveFrom}::date)
+          order by created_at limit 1`.execute(transaction);
+        if (mapping.rows[0] === undefined) {
+          await sql`insert into account_mappings(
+            company_id,mapping_key,debit_account_id,effective_from,
+            created_by_account_id,updated_by_account_id
+          ) values(
+            ${companyId}::uuid,${definition.mappingKey},${accountRow.id}::uuid,
+            ${input.effectiveFrom}::date,${actorId}::uuid,${actorId}::uuid
+          )`.execute(transaction);
+        }
+        repaired.push({
+          accountCode: accountRow.code,
+          accountId: accountRow.id,
+          mappingKey: definition.mappingKey,
+        });
+      }
+      const response = { effectiveFrom: input.effectiveFrom, repaired };
+      await this.support.audit(transaction, {
+        action: "accounting.setup.payroll_support.repaired",
+        after: { ...response, reason: input.reason },
+        correlationId: idempotencyKey ?? randomUUID(),
+        subjectId: companyId,
+        subjectType: "accounting_setup",
+      });
+      await this.support.completeIdempotency(transaction, {
+        idempotencyKey: idempotencyKey!,
+        operation: "accounting.setup.payroll-support.repair",
+        resourceId: companyId,
+        resourceType: "accounting_setup",
+        responseBody: response,
+      });
+      return response;
+    });
   }
 
   private async recordDecision(

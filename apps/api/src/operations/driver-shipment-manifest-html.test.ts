@@ -60,12 +60,14 @@ describe("buildDriverShipmentManifestHtml", () => {
     expect(html).toContain("Driver Shipment Manifest");
     expect(html).not.toContain("<span class=\"meta-label\">Manifest Number</span>");
     expect(html).toContain("SER-9");
+    expect(html).not.toContain("PSystem Serial");
     expect(html).toContain("REF-9");
     expect(html).not.toContain("ORD-9");
     expect(html).toContain("Test Customer");
     expect(html).toContain("971500000002");
     expect(html).toContain("Deira");
-    expect(html).toContain("AED 150.00");
+    expect(html).toContain("150.00");
+    expect(html).not.toContain("AED 150.00");
     expect(html).not.toContain("AED 20.00");
     expect(html).toContain("Fragile");
     expect(html).toContain("Test Company");
@@ -105,7 +107,8 @@ describe("buildDriverShipmentManifestHtml", () => {
     // User-entered Serial, references and amounts are never translated.
     expect(html).toContain("SER-9");
     expect(html).toContain("REF-9");
-    expect(html).toContain("AED 150.00");
+    expect(html).toContain("150.00");
+    expect(html).not.toContain("AED 150.00");
   });
 
   it("is a strictly separate document from the Driver Collection Report", () => {
@@ -155,7 +158,8 @@ describe("buildDriverShipmentManifestHtml", () => {
     const html = buildDriverShipmentManifestHtml(sample, "en", "now");
     expect(html).toContain("Total Orders");
     expect(html).toContain("Total COD");
-    expect(html).toContain("AED 150.00");
+    expect(html).toContain("150.00");
+    expect(html).not.toContain("AED 150.00");
     /* Matched as the rendered summary label rather than as loose text: the word
        "Returned" still belongs on the page, in the "Returned/Received By"
        signature line, and a bare substring check would forbid that too. */

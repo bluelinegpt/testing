@@ -14,7 +14,9 @@ import { ApplicationException } from "../presentation/errors/application.excepti
 import { isReservedCompanySubdomain } from "../tenancy/reserved-subdomains.js";
 import { PlatformAuditService, redactSensitive } from "./platform-audit.service.js";
 import { seedStandardEmployeeRoles } from "./company-defaults.js";
+import { companyShipmentPrefixCandidates } from "./company-shipment-prefix.js";
 import { STANDARD_COMPANY_ROLES } from "./standard-company-roles.js";
+import type { CompanyCurrency } from "./company-currencies.js";
 
 /**
  * Company lifecycle and onboarding for the Platform Portal.
@@ -99,9 +101,9 @@ export interface CompanyListRow {
 
 export interface CreateCompanyInput {
   readonly name: string;
-  readonly shipmentPrefix: string;
   readonly subdomain?: string | undefined;
   readonly environment: CompanyEnvironment;
+  readonly baseCurrency: CompanyCurrency;
   readonly countryCode: string;
   readonly timezone: string;
   readonly defaultLanguage: "en" | "ar";
@@ -502,15 +504,17 @@ export class PlatformCompanyService {
         if (codeNumber === undefined) throw new Error("Company code generation failed");
         const code = `CMP-${codeNumber.padStart(6, "0")}`;
         const subdomain = await this.resolveSubdomain(transaction, input.name, input.subdomain);
+        const shipmentPrefix = await this.allocateShipmentPrefix(transaction, input.name);
         const companyId = (
           await sql<{ id: string }>`
             insert into companies (
               code, subdomain, name_en, contact_name, telephone, email, status, environment,
-              country_code, shipment_prefix, status_changed_at, status_changed_by_account_id
+              country_code, shipment_prefix, shipment_serial_enabled_at,
+              status_changed_at, status_changed_by_account_id
             ) values (
               ${code}, ${subdomain}, ${input.name.trim()}, ${input.contactName ?? null},
               ${input.telephone ?? null}, ${input.email ?? null}, 'draft', ${input.environment},
-              ${input.countryCode}, ${input.shipmentPrefix}, now(), ${actor.accountId}::uuid
+              ${input.countryCode}, ${shipmentPrefix}, now(), now(), ${actor.accountId}::uuid
             )
             returning id
           `.execute(transaction)
@@ -520,7 +524,7 @@ export class PlatformCompanyService {
 
         await sql`
           insert into company_settings (company_id, base_currency, default_language, timezone)
-          values (${companyId}::uuid, 'AED', ${input.defaultLanguage}, ${input.timezone})
+          values (${companyId}::uuid, ${input.baseCurrency}, ${input.defaultLanguage}, ${input.timezone})
         `.execute(transaction);
 
         // Employee classifications are a different concern from RBAC roles.
@@ -569,6 +573,7 @@ export class PlatformCompanyService {
             // The NEW Company's own adoption date. The source Company's dates
             // are not in the template and are never consulted.
             effectiveFrom: new Date().toISOString().slice(0, 10),
+            baseCurrency: input.baseCurrency,
             businessDayStart: input.businessDayStart,
           });
           summary = { ...applied };
@@ -614,8 +619,9 @@ export class PlatformCompanyService {
             companyId,
             code,
             subdomain,
-            shipmentPrefix: input.shipmentPrefix,
+            shipmentPrefix,
             name: input.name.trim(),
+            baseCurrency: input.baseCurrency,
             environment: input.environment,
             status: "draft",
             accountingTemplate: applyTemplate
@@ -786,7 +792,7 @@ export class PlatformCompanyService {
 
   public async activateShipmentSerial(
     companyId: string,
-    input: { reason: string; expectedVersion: number },
+    input: { confirmedPrefix: string; reason: string; expectedVersion: number },
     actor: { accountId: string; correlationId: string },
   ): Promise<Record<string, unknown>> {
     return this.transactions.execute(async (transaction) => {
@@ -797,18 +803,18 @@ export class PlatformCompanyService {
       `.execute(transaction)
       ).rows[0];
       if (before === undefined) throw this.notFound();
-      if (Number(before.version) !== input.expectedVersion) {
-        throw new ApplicationException(
-          "company_version_conflict",
-          "Company was changed by another user",
-          HttpStatus.CONFLICT,
-        );
-      }
       if (before.prefix === null) {
         throw new ApplicationException(
           "shipment_prefix_required",
           "Assign a shipment prefix before activation",
           HttpStatus.BAD_REQUEST,
+        );
+      }
+      if (before.prefix !== input.confirmedPrefix) {
+        throw new ApplicationException(
+          "shipment_prefix_confirmation_conflict",
+          "The shipment prefix changed before activation. Review and confirm the current prefix.",
+          HttpStatus.CONFLICT,
         );
       }
       if (before.enabledAt !== null)
@@ -999,6 +1005,39 @@ export class PlatformCompanyService {
   // -------------------------------------------------------------------------
   // Helpers
   // -------------------------------------------------------------------------
+
+  private async allocateShipmentPrefix(
+    database: Kysely<DatabaseSchema>,
+    companyName: string,
+  ): Promise<string> {
+    const candidates = companyShipmentPrefixCandidates(companyName);
+    if (candidates.length === 0) {
+      throw new ApplicationException(
+        "shipment_prefix_name_insufficient",
+        "The Company English name must contain at least three English letters to allocate its PSystem prefix",
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    // One short transaction-level lock serializes the read/choose/Company
+    // insert sequence. The permanent ledger's primary key remains the final
+    // database enforcement; this lock lets a collision choose the next
+    // deterministic name-based candidate instead of aborting the transaction.
+    await sql`select pg_advisory_xact_lock(hashtext('psystem-prefix-allocation'))`.execute(database);
+    const reserved = new Set(
+      (
+        await sql<{ prefix: string }>`
+          select upper(prefix) prefix from shipment_prefix_reservations
+        `.execute(database)
+      ).rows.map((row) => row.prefix.toUpperCase()),
+    );
+    const selected = candidates.find((candidate) => !reserved.has(candidate));
+    if (selected !== undefined) return selected;
+    throw new ApplicationException(
+      "shipment_prefix_name_candidates_exhausted",
+      "All three-letter PSystem prefixes derived from this Company English name are permanently reserved. Adjust the English name and try again.",
+      HttpStatus.CONFLICT,
+    );
+  }
 
   private async resolveSubdomain(
     database: Kysely<DatabaseSchema>,

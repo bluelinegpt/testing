@@ -111,6 +111,18 @@ export class EmployeeVariableEarningService {
         HttpStatus.BAD_REQUEST,
       );
     }
+    const corrected = await this.correctCurrentRule(
+      employeeId,
+      input.effectiveFrom,
+      input.effectiveTo,
+      correlationId,
+      {
+        audit: "employee.delivery_earning_rule.corrected",
+        table: "employee_delivery_earning_rules",
+        valuePredicate: sql`amount_per_order=${input.amountPerOrder}`,
+      },
+    );
+    if (corrected) return corrected;
     return this.replaceRule(employeeId, input.effectiveFrom, input.effectiveTo, correlationId, {
       audit: "employee.delivery_earning_rule.set",
       insert: (database, companyId, actorId) =>
@@ -165,6 +177,18 @@ export class EmployeeVariableEarningService {
         HttpStatus.BAD_REQUEST,
       );
     }
+    const corrected = await this.correctCurrentRule(
+      employeeId,
+      input.effectiveFrom,
+      input.effectiveTo,
+      correlationId,
+      {
+        audit: "employee.collection_earning_rule.corrected",
+        table: "employee_collection_earning_rules",
+        valuePredicate: sql`collection_payment_type=${input.collectionPaymentType} and amount=${input.amount}`,
+      },
+    );
+    if (corrected) return corrected;
     return this.replaceRule(employeeId, input.effectiveFrom, input.effectiveTo, correlationId, {
       audit: "employee.collection_earning_rule.set",
       insert: (database, companyId, actorId) =>
@@ -184,6 +208,90 @@ export class EmployeeVariableEarningService {
       `.execute(database),
       table: "employee_collection_earning_rules",
     });
+  }
+
+  /**
+   * A profile edit that changes only the dates is a correction of the rule
+   * already shown in the form, not a new rate. Update that one row and retain
+   * the before/after values in the audit trail. The exclusion constraint still
+   * prevents the corrected dates from colliding with any other history.
+   */
+  private async correctCurrentRule(
+    employeeId: string,
+    effectiveFrom: string,
+    effectiveTo: string | undefined,
+    correlationId: string,
+    rule: { audit: string; table: string; valuePredicate: ReturnType<typeof sql> },
+  ): Promise<VariableEarningRule | undefined> {
+    if (effectiveTo !== undefined && effectiveTo <= effectiveFrom) return undefined;
+    const { companyId } = this.tenants.current();
+    const actorId = this.identities.current().identityId;
+    try {
+      return await this.transactions.execute(async (transaction) => {
+        await this.assertEmployee(transaction, companyId, employeeId);
+        const current = await sql<VariableEarningRule>`
+          select id,
+                 ${sql.raw(rule.table === "employee_delivery_earning_rules" ? "amount_per_order" : "amount")}::text as amount,
+                 effective_from::text as "effectiveFrom", effective_to::text as "effectiveTo",
+                 is_active as "isActive", created_at as "createdAt"
+            from ${sql.raw(rule.table)}
+           where company_id=${companyId}::uuid and employee_id=${employeeId}::uuid
+             and is_active and effective_from <= current_date
+             and (effective_to is null or current_date < effective_to)
+             and ${rule.valuePredicate}
+           order by effective_from desc, created_at desc
+           limit 1
+        `.execute(transaction);
+        const before = current.rows[0];
+        if (!before) return undefined;
+        if (
+          before.effectiveFrom === effectiveFrom &&
+          (before.effectiveTo ?? undefined) === effectiveTo
+        ) {
+          return before;
+        }
+        const updated = await sql<VariableEarningRule>`
+          update ${sql.raw(rule.table)}
+             set effective_from=${effectiveFrom}::date,
+                 effective_to=${effectiveTo ?? null}::date,
+                 updated_at=now(), version=version+1
+           where company_id=${companyId}::uuid and employee_id=${employeeId}::uuid
+             and id=${before.id}::uuid
+           returning id,
+             ${sql.raw(rule.table === "employee_delivery_earning_rules" ? "amount_per_order" : "amount")}::text as amount,
+             effective_from::text as "effectiveFrom", effective_to::text as "effectiveTo",
+             is_active as "isActive", created_at as "createdAt", true as "isCurrent"
+        `.execute(transaction);
+        const after = updated.rows[0]!;
+        await this.history.audit(transaction, {
+          action: rule.audit,
+          actorId,
+          after: { ...after, correctedFrom: before, employeeId },
+          companyId,
+          correlationId,
+          subjectId: employeeId,
+          subjectType: "employee",
+        });
+        return after;
+      });
+    } catch (error) {
+      this.rethrowOverlap(error);
+    }
+  }
+
+  private rethrowOverlap(error: unknown): never {
+    const code =
+      typeof error === "object" && error !== null && "code" in error
+        ? String(error.code)
+        : "";
+    if (code === "23P01") {
+      throw new ApplicationException(
+        "employee_earning_period_overlap",
+        "The selected effective period overlaps an existing earning rule",
+        HttpStatus.CONFLICT,
+      );
+    }
+    throw error;
   }
 
   /**
@@ -219,37 +327,52 @@ export class EmployeeVariableEarningService {
     }
     const { companyId } = this.tenants.current();
     const actorId = this.identities.current().identityId;
-    return this.transactions.execute(async (transaction) => {
-      await this.assertEmployee(transaction, companyId, employeeId);
-      const previous = await sql<{ effectiveFrom: string; id: string }>`
-        update ${sql.raw(rule.table)}
-           set effective_to=${effectiveFrom}::date, updated_at=now(), version=version+1
-         where company_id=${companyId}::uuid and employee_id=${employeeId}::uuid
-           and is_active and effective_to is null and effective_from < ${effectiveFrom}::date
-         returning id, effective_from::text as "effectiveFrom"
-      `.execute(transaction);
-      const inserted = await rule.insert(transaction, companyId, actorId);
-      const created = inserted.rows[0]!;
+    try {
+      return await this.transactions.execute(async (transaction) => {
+        await this.assertEmployee(transaction, companyId, employeeId);
+        const previous = await sql<{ effectiveFrom: string; id: string }>`
+          update ${sql.raw(rule.table)}
+             set effective_to=${effectiveFrom}::date, updated_at=now(), version=version+1
+           where company_id=${companyId}::uuid and employee_id=${employeeId}::uuid
+             and is_active and effective_to is null and effective_from < ${effectiveFrom}::date
+           returning id, effective_from::text as "effectiveFrom"
+        `.execute(transaction);
+        const inserted = await rule.insert(transaction, companyId, actorId);
+        const created = inserted.rows[0]!;
       /* The superseded rule travels inside `after` because the shared writer
          persists `after_data` only — every caller in the module does the same.
          Recording it matters: "rate became 3 on 1 September, replacing the 2
          that had run since 1 January" is the auditable fact, and the new row
          alone does not say what it displaced. */
-      await this.history.audit(transaction, {
-        action: rule.audit,
-        actorId,
-        after: {
-          ...created,
-          employeeId,
-          supersededRule: previous.rows[0] ?? null,
-        },
-        companyId,
-        correlationId,
-        subjectId: employeeId,
-        subjectType: "employee",
+        await this.history.audit(transaction, {
+          action: rule.audit,
+          actorId,
+          after: {
+            ...created,
+            employeeId,
+            supersededRule: previous.rows[0] ?? null,
+          },
+          companyId,
+          correlationId,
+          subjectId: employeeId,
+          subjectType: "employee",
+        });
+        return created;
       });
-      return created;
-    });
+    } catch (error) {
+      const code =
+        typeof error === "object" && error !== null && "code" in error
+          ? String(error.code)
+          : "";
+      if (code === "23P01") {
+        throw new ApplicationException(
+          "employee_earning_period_overlap",
+          "The selected effective period overlaps an existing earning rule",
+          HttpStatus.CONFLICT,
+        );
+      }
+      throw error;
+    }
   }
 
   /** Company-scoped existence check; a neighbour's Employee is simply not found. */

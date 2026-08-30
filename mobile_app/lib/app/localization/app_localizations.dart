@@ -1148,6 +1148,12 @@ abstract class AppLocalizations {
   /// **'Serial No.'**
   String get serialNumber;
 
+  /// No description provided for @psystemSerial.
+  ///
+  /// In en, this message translates to:
+  /// **'PSystem Serial'**
+  String get psystemSerial;
+
   /// No description provided for @location.
   ///
   /// In en, this message translates to:

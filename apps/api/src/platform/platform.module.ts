@@ -57,6 +57,9 @@ import {
 } from "./company-website-domain.provider.js";
 import { CompanyWebsiteAgentService } from "./company-website-agent.service.js";
 import { CompanyWebsiteAgentProvider } from "./company-website-agent.provider.js";
+import { PlatformWorkflowTestingController } from "./platform-workflow-testing.controller.js";
+import { PlatformWorkflowTestingService } from "./platform-workflow-testing.service.js";
+import { PlatformWorkflowBrowserWorker } from "./platform-workflow-browser.worker.js";
 
 /**
  * The Platform Administration API.
@@ -90,6 +93,7 @@ import { CompanyWebsiteAgentProvider } from "./company-website-agent.provider.js
     PlatformCompanyUserController,
     PlatformCompanyWebsiteController,
     PublicCompanyWebsiteController,
+    PlatformWorkflowTestingController,
   ],
   exports: [PlatformService, PlatformAuditService, PlatformCompanyService],
   imports: [
@@ -125,6 +129,8 @@ import { CompanyWebsiteAgentProvider } from "./company-website-agent.provider.js
     { provide: CompanyWebsiteDomainProvider, useExisting: CloudflareCompanyWebsiteDomainProvider },
     CompanyWebsiteAgentService,
     CompanyWebsiteAgentProvider,
+    PlatformWorkflowTestingService,
+    PlatformWorkflowBrowserWorker,
   ],
 })
 export class PlatformModule {}

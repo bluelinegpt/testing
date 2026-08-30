@@ -21,7 +21,7 @@ describe("public Company homepage tracking security", () => {
     expect(tracking).not.toMatch(/companyId:\s*input|order_number\s*=\s*\$\{/u);
   });
   it("returns only the approved DTO and excludes all identity/operational fields", () => {
-    expect(tracking).toContain("reference: tracking.orderNumber");
+    expect(tracking).toContain("reference: resolvedTracking.orderNumber");
     expect(tracking).toContain("timeline,");
     expect(tracking).not.toMatch(
       /customerName|customerMobile|customerEmail|customerAddress|deliveryAddress|driverName|driverMobile|settlement|accounting|codReconciliation|payroll/iu,

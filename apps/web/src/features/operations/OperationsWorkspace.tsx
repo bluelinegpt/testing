@@ -840,7 +840,9 @@ function OrderDetail({
                 barcode: t("operations.barcode"),
                 customer: t("operations.customer"),
                 order: t("operations.order"),
+                psystemSerial: t("operations.psystemSerial"),
                 printTitle: t("operations.waybill"),
+                serialNumber: t("operations.serialNumber"),
                 serviceFee: t("operations.serviceFee"),
                 trader: t("operations.trader"),
               })
@@ -1139,11 +1141,14 @@ export function openOrderWaybill(
     readonly barcode: string;
     readonly customer: string;
     readonly order: string;
+    readonly psystemSerial: string;
     readonly printTitle: string;
+    readonly serialNumber: string;
     readonly serviceFee: string;
     readonly trader: string;
   },
 ) {
+  const publicTrackingIdentifier = detail.psystemSerial ?? detail.orderNumber;
   const printWindow = window.open("", "_blank", "width=880,height=720");
   if (printWindow === null) {
     return;
@@ -1182,16 +1187,18 @@ export function openOrderWaybill(
       </div>
       <div class="number">${escapeHtml(detail.orderNumber)}</div>
     </section>
-    ${barcodeSvg(detail.orderNumber)}
-    <div class="barcode-text">${escapeHtml(detail.orderNumber)}</div>
+    ${barcodeSvg(publicTrackingIdentifier)}
+    <div class="barcode-text">${escapeHtml(publicTrackingIdentifier)}</div>
     <section class="grid">
       <div class="field"><span>${escapeHtml(labels.order)}</span><strong>${escapeHtml(detail.orderNumber)}</strong></div>
+      <div class="field"><span>${escapeHtml(labels.serialNumber)}</span><strong>${escapeHtml(detail.serialNumber ?? "-")}</strong></div>
+      <div class="field"><span>${escapeHtml(labels.psystemSerial)}</span><strong>${escapeHtml(detail.psystemSerial ?? "-")}</strong></div>
       <div class="field"><span>${escapeHtml(labels.trader)}</span><strong>${escapeHtml(detail.traderName)}</strong></div>
       <div class="field"><span>${escapeHtml(labels.customer)}</span><strong>${escapeHtml(detail.customerName)}<br>${escapeHtml(detail.customerMobileNumber)}</strong></div>
       <div class="field"><span>${escapeHtml(labels.amountDue)}</span><strong>${escapeHtml(formatMoney(detail.customerAmountDue))}</strong></div>
       <div class="field wide"><span>${escapeHtml(labels.address)}</span><strong>${escapeHtml(detail.customerAddress)}</strong></div>
       <div class="field"><span>${escapeHtml(labels.serviceFee)}</span><strong>${escapeHtml(formatMoney(detail.serviceFee))}</strong></div>
-      <div class="field"><span>${escapeHtml(labels.barcode)}</span><strong>${escapeHtml(detail.orderNumber)}</strong></div>
+      <div class="field"><span>${escapeHtml(labels.barcode)}</span><strong>${escapeHtml(publicTrackingIdentifier)}</strong></div>
     </section>
   </main>
 </body>

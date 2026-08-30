@@ -41,7 +41,7 @@ export type PublicTrackingVerifyOutcome =
  * immutable, `nextReferenceNumber(..., "order", "ORD")`); `serial_number` is
  * the Company's own Airway Bill / label serial number.
  */
-type LookupKind = "order_number" | "serial_number";
+type LookupKind = "order_number" | "psystem_serial" | "serial_number";
 
 interface EligibleCandidate {
   readonly orderId: string;
@@ -120,7 +120,9 @@ function readVerificationToken(token: string): VerificationTokenPayload | undefi
       Buffer.from(body, "base64url").toString("utf8"),
     ) as Partial<VerificationTokenPayload>;
     if (
-      (payload.kind !== "order_number" && payload.kind !== "serial_number") ||
+      (payload.kind !== "order_number" &&
+        payload.kind !== "psystem_serial" &&
+        payload.kind !== "serial_number") ||
       typeof payload.value !== "string" ||
       payload.value.length === 0 ||
       typeof payload.exp !== "number"
@@ -161,13 +163,21 @@ export class PublicTrackingService {
   ): Promise<PublicTrackingLookupOutcome> {
     const trimmed = rawInput.trim();
     if (trimmed.length === 0) return { result: "not_found" };
+    const normalized = normalizeReferenceTerm(trimmed);
+    const psystemCandidates = await this.eligibleCandidates("psystem_serial", normalized);
+    if (psystemCandidates.length === 1) {
+      return {
+        result: "verified",
+        tracking: await this.resultForOrder(psystemCandidates[0]!, language, "psystem_serial"),
+      };
+    }
     // Order Number is checked first -- it has an unambiguous, narrow shape
     // (`ORD-######+`) that a genuine Airway Bill essentially never collides
     // with. Anything else is treated as a Company Airway Bill / Serial
     // Number, exactly the existing behaviour.
     const isOrderNumber = orderNumberPattern.test(trimmed);
     const kind: LookupKind = isOrderNumber ? "order_number" : "serial_number";
-    const value = isOrderNumber ? trimmed.toUpperCase() : normalizeReferenceTerm(trimmed);
+    const value = isOrderNumber ? trimmed.toUpperCase() : normalized;
     if (value.length === 0) return { result: "not_found" };
     const candidates = await this.eligibleCandidates(kind, value);
     if (candidates.length === 0) return { result: "not_found" };
@@ -229,12 +239,14 @@ export class PublicTrackingService {
     const row = (
       await sql<{
         serialNumber: string;
+        psystemSerial: string | null;
         orderNumber: string;
         deliveryStatus: string;
         deliveredAt: string | null;
         lastUpdatedAt: string;
       }>`
         select o.serial_number as "serialNumber",
+               o.psystem_serial as "psystemSerial",
                o.order_number as "orderNumber",
                o.delivery_status as "deliveryStatus",
                o.delivered_at::text as "deliveredAt",
@@ -268,7 +280,12 @@ export class PublicTrackingService {
       // with -- the Order Number for an Order Number lookup, the Airway
       // Bill/Serial Number otherwise -- rather than always showing one
       // field regardless of what was typed.
-      airwayBill: kind === "order_number" ? row.orderNumber : row.serialNumber,
+      airwayBill:
+        kind === "order_number"
+          ? row.orderNumber
+          : kind === "psystem_serial"
+            ? (row.psystemSerial ?? row.orderNumber)
+            : row.serialNumber,
       status: current.status,
       statusLabel: current.statusLabel,
       lastUpdated: row.lastUpdatedAt,
@@ -307,7 +324,17 @@ export class PublicTrackingService {
             join companies c on c.id = o.company_id and c.status = 'active'
            where o.order_number = ${value}
         `.execute(this.database)
-        : await sql<EligibleCandidate>`
+        : kind === "psystem_serial"
+          ? await sql<EligibleCandidate>`
+          select o.id as "orderId",
+                 o.company_id as "companyId",
+                 customer_mobile_comparison_key(o.customer_mobile_number) as "customerMobileComparisonKey"
+            from orders o
+            join companies c on c.id = o.company_id and c.status = 'active'
+           where o.psystem_serial_normalized = ${value}
+             and o.psystem_serial_normalized is not null
+        `.execute(this.database)
+          : await sql<EligibleCandidate>`
           select o.id as "orderId",
                  o.company_id as "companyId",
                  customer_mobile_comparison_key(o.customer_mobile_number) as "customerMobileComparisonKey"

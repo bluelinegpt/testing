@@ -64,6 +64,24 @@ const operationalAreas = [
   "cash_bank_management",
 ] as const;
 
+/**
+ * Only suggestions with one strong, compatible answer are eligible for the
+ * guided repair action. Medium/low confidence choices remain manual because
+ * choosing a GL account is a financial decision, not a UI convenience.
+ */
+export function safeMappingRepairs(
+  rows: readonly AccountingRecord[],
+): readonly AccountingRecord[] {
+  return rows.filter(
+    (row) =>
+      row.status !== "already_configured" &&
+      row.confidence === "high" &&
+      row.compatibilityStatus === "compatible" &&
+      row.suggestedAccount !== null &&
+      typeof row.suggestedAccount === "object",
+  );
+}
+
 export function AccountingSetupWizard({
   api,
   companyId,
@@ -84,7 +102,7 @@ export function AccountingSetupWizard({
   const [busy, setBusy] = useState<string>();
   const [operationError, setOperationError] = useState<string>();
   const [decisionReason, setDecisionReason] = useState("");
-  const [mappingFilter, setMappingFilter] = useState("all");
+  const [mappingFilter, setMappingFilter] = useState("issues");
   const [mappingAreaFilter, setMappingAreaFilter] = useState("all");
   const [zeroReason, setZeroReason] = useState("");
   const [zeroAcknowledged, setZeroAcknowledged] = useState(false);
@@ -97,7 +115,7 @@ export function AccountingSetupWizard({
     setActivationResult(undefined);
     setOperationError(undefined);
     setDecisionReason("");
-    setMappingFilter("all");
+    setMappingFilter("issues");
     setMappingAreaFilter("all");
     setZeroReason("");
     setZeroAcknowledged(false);
@@ -178,13 +196,23 @@ export function AccountingSetupWizard({
   );
   const blockers = records(completeness.data?.blockers);
   const mappingRows = records(suggestions.data?.items);
+  const safeRepairs = safeMappingRepairs(mappingRows);
   const issueRows = records(issues.data?.items);
+  const issueMappingKeys = new Set(
+    issueRows.filter((issue) => issue.activationBlocker === true).map((issue) => issue.mappingKey),
+  );
+  const payrollSupportMissing = [
+    "employee_interim_payroll_clearing",
+    "employee_advances",
+  ].every((key) => issueMappingKeys.has(key));
   const filteredMappingRows = mappingRows.filter((row) => {
     const areaMatches =
       mappingAreaFilter === "all" || String(row.operationalArea) === mappingAreaFilter;
     if (!areaMatches) return false;
     const mappingIssuesForRow = issueRows.filter((issue) => issue.mappingKey === row.mappingKey);
     switch (mappingFilter) {
+      case "issues":
+        return issueMappingKeys.has(row.mappingKey);
       case "mandatory":
         return row.mandatoryStatus === "mandatory";
       case "missing":
@@ -350,6 +378,41 @@ export function AccountingSetupWizard({
     }
   };
 
+  const applySafeMappingRepairs = async () => {
+    if (safeRepairs.length === 0) return;
+    if (
+      !globalThis.confirm(
+        t("accounting.setup.confirmSafeRepair", {
+          count: safeRepairs.length,
+          defaultValue:
+            "Apply {{count}} high-confidence compatible account mappings? No opening balances or posting settings will be changed.",
+        }),
+      )
+    )
+      return;
+    setBusy("safe-mapping-repair");
+    setOperationError(undefined);
+    try {
+      // Deliberately sequential: each request revalidates its deterministic
+      // suggestion server-side and receives its own idempotency key.
+      for (const row of safeRepairs) {
+        await client.post(`setup/mapping-suggestions/${String(row.suggestionId)}/decision`, {
+          decision: "accept",
+          effectiveFrom: String(row.effectiveFromProposal ?? effectiveOn),
+          reason: t("accounting.setup.safeRepairReason", {
+            defaultValue: "Applied by the guided accounting setup repair",
+          }),
+        });
+      }
+      refreshAll();
+    } catch (issue) {
+      setOperationError(issue instanceof ApiError ? issue.code : "request_failed");
+      refreshAll();
+    } finally {
+      setBusy(undefined);
+    }
+  };
+
   const decide = (
     row: AccountingRecord,
     decision: "accept" | "change" | "reject" | "unresolved" | "not_applicable",
@@ -405,6 +468,136 @@ export function AccountingSetupWizard({
             {t("accounting.setup.continue")}
           </button>
         </section>
+        {activationBlockers.length === 0 ? null : (
+          <section className="accounting-guided-repair" aria-labelledby="guided-repair-title">
+            <div>
+              <h2 id="guided-repair-title">
+                {t("accounting.setup.guidedRepair", {
+                  defaultValue: "Fix accounting setup",
+                })}
+              </h2>
+              <p>
+                {t("accounting.setup.guidedRepairHelp", {
+                  defaultValue:
+                    "Complete the safe configuration here. Financial decisions still require your confirmation.",
+                })}
+              </p>
+            </div>
+            {activationBlockers.includes("mandatory_mappings_incomplete") ? (
+              <div className="accounting-guided-repair-row">
+                <div>
+                  <strong>
+                    {t("accounting.setup.blockerCodes.mandatory_mappings_incomplete", {
+                      defaultValue: "Mandatory account mappings are incomplete",
+                    })}
+                  </strong>
+                  <small>
+                    {safeRepairs.length > 0
+                      ? t("accounting.setup.safeRepairsAvailable", {
+                          count: safeRepairs.length,
+                          defaultValue:
+                            "{{count}} deterministic high-confidence mappings can be applied safely.",
+                        })
+                      : t("accounting.setup.manualMappingReviewRequired", {
+                          defaultValue:
+                            "No unambiguous automatic repair is available. Review the suggested mappings.",
+                        })}
+                  </small>
+                </div>
+                <button
+                  className="button button-primary"
+                  disabled={
+                    !rights.configure ||
+                    busy !== undefined ||
+                    (safeRepairs.length === 0 && !payrollSupportMissing)
+                  }
+                  onClick={() => {
+                    if (payrollSupportMissing && safeRepairs.length === 0) {
+                      if (
+                        !globalThis.confirm(
+                          t("accounting.setup.confirmPayrollSupportRepair", {
+                            defaultValue:
+                              "Create and map the two required Employee Payroll support accounts?",
+                          }),
+                        )
+                      )
+                        return;
+                      void operation("payroll-support-repair", () =>
+                        client.post("setup/payroll-support/repair", {
+                          confirmation: true,
+                          effectiveFrom: effectiveOn,
+                          reason: t("accounting.setup.payrollSupportRepairReason", {
+                            defaultValue: "Repair missing standard Employee Payroll accounts",
+                          }),
+                        }),
+                      );
+                      return;
+                    }
+                    void applySafeMappingRepairs();
+                  }}
+                  type="button"
+                >
+                  {payrollSupportMissing && safeRepairs.length === 0
+                    ? t("accounting.setup.createPayrollSupportAccounts", {
+                        defaultValue: "Create missing payroll accounts",
+                      })
+                    : t("accounting.setup.applySafeMappings", {
+                        defaultValue: "Apply safe mappings",
+                      })}
+                </button>
+                <button
+                  className="button button-secondary"
+                  onClick={() => {
+                    setMappingFilter("issues");
+                    document
+                      .querySelector("#accounting-setup-mappings")
+                      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                  }}
+                  type="button"
+                >
+                  {t("accounting.setup.reviewMappings", { defaultValue: "Review mappings" })}
+                </button>
+              </div>
+            ) : null}
+            {activationBlockers.includes("opening_balance_decision_missing") ? (
+              <div className="accounting-guided-repair-row">
+                <div>
+                  <strong>
+                    {t("accounting.setup.blockerCodes.opening_balance_decision_missing", {
+                      defaultValue: "Opening balance decision is missing",
+                    })}
+                  </strong>
+                  <small>
+                    {t("accounting.setup.openingDecisionSafety", {
+                      defaultValue:
+                        "Choose whether to enter real opening balances or explicitly confirm that they are zero. This cannot be guessed automatically.",
+                    })}
+                  </small>
+                </div>
+                <button
+                  className="button button-primary"
+                  onClick={() =>
+                    document
+                      .querySelector("#accounting-setup-opening")
+                      ?.scrollIntoView({ behavior: "smooth", block: "start" })
+                  }
+                  type="button"
+                >
+                  {t("accounting.setup.recordOpeningDecision", {
+                    defaultValue: "Record opening balance decision",
+                  })}
+                </button>
+              </div>
+            ) : null}
+            {operationError === undefined ? null : (
+              <div className="alert alert-error" role="alert">
+                {t(`accounting.errors.codes.${operationError}`, {
+                  defaultValue: t("accounting.errors.safe"),
+                })}
+              </div>
+            )}
+          </section>
+        )}
         <label className="field">
           <span>{t("accounting.setup.effectiveAccountingDate")}</span>
           <input
@@ -486,6 +679,9 @@ export function AccountingSetupWizard({
                 value={mappingAreaFilter}
               >
                 <option value="all">{t("common.all")}</option>
+                <option value="issues">
+                  {t("accounting.setup.issuesOnly", { defaultValue: "Issues only" })}
+                </option>
                 {mappingAreas.map((area) => (
                   <option key={area} value={area}>
                     {area}
@@ -513,6 +709,13 @@ export function AccountingSetupWizard({
               </select>
             </label>
           </div>
+          {mappingFilter === "issues" && filteredMappingRows.length === 0 ? (
+            <p className="accounting-empty">
+              {t("accounting.setup.noMappingIssues", {
+                defaultValue: "No unresolved mapping issues remain.",
+              })}
+            </p>
+          ) : null}
           <div className="table-shell accounting-table-shell">
             <table className="data-table accounting-table">
               <thead>
@@ -685,7 +888,7 @@ export function AccountingSetupWizard({
           </p>
         </section>
 
-        <section className="accounting-activation-preview">
+        <section className="accounting-activation-preview" id="accounting-setup-opening">
           <h2>{t("accounting.setup.openingBalanceStatus")}</h2>
           <StatusBadge value={zeroOpening.data?.status} />
           <p>{t("accounting.setup.zeroOpeningWarning")}</p>

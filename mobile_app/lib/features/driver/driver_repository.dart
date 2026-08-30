@@ -89,6 +89,7 @@ final class ApiDriverRepository implements DriverRepository {
     id: _required(value, 'id'),
     orderNumber: _required(value, 'orderNumber'),
     serialNumber: _required(value, 'serialNumber'),
+    psystemSerial: value['psystemSerial'] as String?,
     orderDate: _required(value, 'orderDate'),
     areaId: _required(value, 'areaId'),
     areaName: _required(value, 'areaName'),

@@ -182,6 +182,8 @@ export const PRESERVE_TABLES = new Set([
   "company_reference_counters",
   // Shipment numbering is identity infrastructure. A development data reset
   // must never rewind it and make a previously issued public serial reusable.
+  // Company-owned PSystem counters reset with disposable Company data;
+  // the permanent prefix ledger below never does.
   "company_shipment_serial_counters",
   "company_settings",
   "company_users",
@@ -326,7 +328,7 @@ export const CONDITIONAL_TABLES = new Set<string>([]);
 /** Global tables that carry no Company column by design. */
 export const GLOBAL_TABLES = new Set([
   "companies",
-  // Permanent prefix tombstones survive Company deletion and reset.
+  // Permanent PSystem prefix tombstones survive Company deletion and reset.
   "shipment_prefix_reservations",
   "emirates",
   "kysely_migration",

@@ -11,6 +11,7 @@ import {
   Max,
   Min,
 } from "class-validator";
+import { companyCurrencies } from "./company-currencies.js";
 
 /**
  * Company request contracts.
@@ -80,13 +81,6 @@ export class CreateCompanyDto {
   @Length(2, 200)
   public name!: string;
 
-  @Transform(({ value }: { value: unknown }) =>
-    typeof value === "string" ? value.trim().toUpperCase() : value,
-  )
-  @IsString()
-  @Matches(/^[A-Z]{3}$/, { message: "shipmentPrefix must contain exactly three letters" })
-  public shipmentPrefix!: string;
-
   /**
    * Uppercased on the way in so `dev-acme` and `DEV-ACME` cannot both exist.
    * `companies_code_unique` indexes `lower(code)`, so the database would refuse
@@ -106,6 +100,13 @@ export class CreateCompanyDto {
 
   @IsIn(environments)
   public environment!: (typeof environments)[number];
+
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === "string" ? value.trim().toUpperCase() : value,
+  )
+  @IsIn(companyCurrencies)
+  public baseCurrency?: (typeof companyCurrencies)[number];
 
   @IsOptional()
   @Transform(({ value }: { value: unknown }) =>
@@ -250,6 +251,13 @@ export class ActivateShipmentSerialDto {
   @IsString()
   @Length(3, 500)
   public reason!: string;
+
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === "string" ? value.trim().toUpperCase() : value,
+  )
+  @IsString()
+  @Matches(/^[A-Z]{3}$/, { message: "confirmedPrefix must contain exactly three letters" })
+  public confirmedPrefix!: string;
 
   @Type(() => Number)
   @IsInt()

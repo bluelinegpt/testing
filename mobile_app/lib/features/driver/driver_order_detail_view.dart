@@ -16,6 +16,7 @@ import 'package:intl/intl.dart' as intl;
 final class DriverStyleOrderData {
   const DriverStyleOrderData({
     required this.serialNumber,
+    this.psystemSerial,
     required this.orderDate,
     required this.customerName,
     required this.customerMobile,
@@ -37,7 +38,7 @@ final class DriverStyleOrderData {
       cod,
       status,
       traderName;
-  final String? reference, notes, emirateName;
+  final String? psystemSerial, reference, notes, emirateName;
 }
 
 /// One grouped Material card in the redesigned Driver Order Detail layout —
@@ -151,6 +152,8 @@ final class DriverStyleOrderFields extends StatelessWidget {
               ),
             ),
             _FieldRow(label: l10n.serialNumber, value: order.serialNumber),
+            if (order.psystemSerial case final value?)
+              _FieldRow(label: l10n.psystemSerial, value: value),
           ],
         ),
         const SizedBox(height: AppSpacing.sm),

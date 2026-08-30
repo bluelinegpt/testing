@@ -1954,7 +1954,8 @@ export const arabicTranslations = {
     accountantPay: "الدفع للتاجر",
     duplicateSerialInBatch: "الرقم التسلسلي {{serial}} مستخدم بالفعل في دفعة إعادة التفعيل هذه.",
     serialNumber: "الرقم التسلسلي",
-    serialNumberGenerated: "يتم إنشاؤه تلقائياً عند الحفظ",
+    psystemSerial: "رقم PSystem التسلسلي",
+    psystemSerialGenerated: "يتم إنشاؤه بعد الحفظ ويُستخدم للتتبع العام",
     referenceNumber: "الرقم المرجعي",
 
     searchByReferenceNumber: "البحث برقم المرجع",
@@ -3887,6 +3888,17 @@ export const arabicTranslations = {
     dateTo: "إلى تاريخ",
     completedCalendarDaysOnly:
       "اختر الأيام التقويمية المكتملة فقط. لا يمكن احتساب اليوم الحالي حتى الغد.",
+    todayStillInProgress:
+      "لا يمكن احتساب أرباح اليوم لأن اليوم لا يزال قيد التنفيذ. اختر يوم أمس أو يوماً مكتملاً أقدم. إذا ظهرت الأيام السابقة بدون أرباح، فلا توجد أرباح متاحة للاحتساب بعد.",
+    todayExcluded:
+      "أرباح اليوم لا تزال قيد التنفيذ. تم تعديل الاحتساب حتى {{dateTo}} لتأكيد ودفع الأرباح المكتملة الآن.",
+    dailyAvailability: "توفر الأرباح اليومي",
+    availableEarnings: "الأرباح المتاحة",
+    availability: {
+      available: "متاح",
+      in_progress: "قيد التنفيذ — متاح غداً",
+      no_earnings: "لا توجد أرباح",
+    },
     collectedOrderCount: "عدد الطلبات المُحصلة",
     calculateNow: "احسب الآن",
     calculateFailed: "تعذر احتساب فترة الأرباح.",
@@ -5300,6 +5312,28 @@ export const arabicTranslations = {
       reviewActivation: "مراجعة التفعيل المنضبط",
       effectiveAccountingDate: "تاريخ سريان المحاسبة",
       mappingReview: "مراجعة ربط الحسابات",
+      issuesOnly: "المشكلات فقط",
+      noMappingIssues: "لا توجد مشكلات ربط غير محلولة.",
+      guidedRepair: "إصلاح إعداد المحاسبة",
+      guidedRepairHelp: "أكمل الإعداد الآمن هنا. تظل القرارات المالية بحاجة إلى تأكيدك.",
+      safeRepairsAvailable: "يمكن تطبيق {{count}} من الروابط الحتمية عالية الثقة بأمان.",
+      manualMappingReviewRequired:
+        "لا يوجد إصلاح تلقائي واضح وآمن. راجع الروابط غير المحلولة فقط أدناه.",
+      applySafeMappings: "تطبيق الروابط الآمنة",
+      createPayrollSupportAccounts: "إنشاء حسابات الرواتب الناقصة",
+      confirmPayrollSupportRepair: "هل تريد إنشاء وربط حسابي دعم رواتب الموظفين المطلوبين؟",
+      payrollSupportRepairReason: "إصلاح حسابات رواتب الموظفين القياسية الناقصة",
+      reviewMappings: "مراجعة الروابط",
+      confirmSafeRepair:
+        "هل تريد تطبيق {{count}} من روابط الحسابات المتوافقة عالية الثقة؟ لن تتغير الأرصدة الافتتاحية أو إعدادات الترحيل.",
+      safeRepairReason: "طُبق بواسطة إصلاح إعداد المحاسبة الموجّه",
+      openingDecisionSafety:
+        "اختر إدخال الأرصدة الافتتاحية الفعلية أو أكّد صراحةً أنها صفرية. لا يمكن افتراض ذلك تلقائياً.",
+      recordOpeningDecision: "تسجيل قرار الرصيد الافتتاحي",
+      blockerCodes: {
+        mandatory_mappings_incomplete: "روابط الحسابات الإلزامية غير مكتملة",
+        opening_balance_decision_missing: "قرار الرصيد الافتتاحي غير مسجل",
+      },
       deterministicNotice: "الاقتراحات حتمية وإرشادية، ويتطلب كل ربط تأكيداً صريحاً.",
       decisionReason: "سبب قرار الربط",
       defaultDecisionReason: "تمت المراجعة ضمن إعداد المحاسبة المنضبط",

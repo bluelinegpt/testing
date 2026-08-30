@@ -127,9 +127,8 @@ describe("Company website foundation rules", () => {
     );
     expect(service).toContain("requirePublishedHost(host)");
     expect(service).toContain("tt.company_id=${row.companyId}::uuid");
-    expect(service).toContain(
-      "o.company_id=${row.companyId}::uuid and upper(o.order_number)=upper(${normalizedReference})",
-    );
+    expect(service).toContain("o.psystem_serial_normalized=${normalizedReference.toLocaleLowerCase");
+    expect(service).toContain("upper(o.order_number)=upper(${normalizedReference})");
     expect(service).not.toContain("o.customer_mobile_number as");
     expect(service).not.toContain("customerName:");
     expect(service).not.toContain("assignedDriverName");

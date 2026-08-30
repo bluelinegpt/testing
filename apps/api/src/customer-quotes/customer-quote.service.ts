@@ -807,8 +807,7 @@ export class CustomerQuoteService {
         await sql<{
           id: string;
           nameEn: string;
-          serialEnabled: boolean;
-        }>`select id,name_en "nameEn",shipment_serial_enabled_at is not null "serialEnabled" from companies where id=${input.companyId}::uuid and status in('active','draft') for update`.execute(
+        }>`select id,name_en "nameEn" from companies where id=${input.companyId}::uuid and status in('active','draft') for update`.execute(
           tx,
         )
       ).rows[0];
@@ -828,18 +827,17 @@ export class CustomerQuoteService {
         quote,
       );
       const orderNumber = await this.nextCompanyReference(tx, input.companyId, "order", "ORD");
-      const serial = company.serialEnabled
-        ? (
-            await sql<{
-              value: string;
-            }>`select allocate_company_shipment_serial(${input.companyId}::uuid) value`.execute(tx)
-          ).rows[0]!.value
-        : String(quote.reference_number);
+      const serial = String(quote.reference_number);
       const normalized =
         serial
           .toLowerCase()
           .replace(/[^a-z0-9]+/g, "")
           .slice(0, 80) || serial.toLowerCase();
+      const psystemSerial = (
+        await sql<{ value: string | null }>`
+          select allocate_company_psystem_serial(${input.companyId}::uuid) value
+        `.execute(tx)
+      ).rows[0]?.value ?? null;
       const cod = Number(quote.cod_required ? quote.cod_amount : 0);
       const deliveryFee = Number(input.deliveryFee.toFixed(2));
       const platformFee = Number(input.platformFee.toFixed(2));
@@ -857,8 +855,8 @@ export class CustomerQuoteService {
         .filter(Boolean)
         .join("\n");
       const inserted = await sql<{ id: string }>`
-        insert into orders(company_id,order_number,serial_number,serial_number_normalized,reference_number,reference_number_normalized,financial_model_version,order_date,trader_id,area_id,created_by_account_id,customer_id,customer_address_id,customer_name,customer_mobile_number,customer_address,customer_code_snapshot,customer_reference_snapshot,customer_area_code_snapshot,customer_area_name_snapshot,customer_area_name_ar_snapshot,customer_location_link_snapshot,customer_delivery_notes_snapshot,package_count,payment_condition,cod_amount,service_fee,service_fee_net_amount,service_fee_vat_amount,additional_fees,additional_fee_vat_amount,total_deductions,customer_amount_due,trader_gross_payable,trader_paid_service_fee,trader_deductions,trader_net_payable,driver_cost,vat_amount,vat_enabled_snapshot,vat_rate_snapshot,vat_price_mode_snapshot,company_revenue,order_profit,delivery_status,trader_settlement_status,pricing_provenance_status,configured_service_fee_snapshot,final_service_fee_snapshot,service_fee_override_reason,notes,order_type,customer_provenance_status,area_name_fallback_used)
-        values(${input.companyId}::uuid,${orderNumber},${serial},${normalized},${serial},${normalized},null,current_date,${system.traderId}::uuid,${area.id}::uuid,${system.accountId}::uuid,${customer.customer.id}::uuid,${customer.addressId}::uuid,${customer.name},${customer.mobile},${customer.address},${customer.customer.code},${customer.customer.customerReference},${area.code},${area.nameEn},${area.nameAr},${customer.locationLink},${customer.deliveryNotes},${packageCount},'customer_pays_cod_and_fee',${cod.toFixed(2)},${deliveryFee.toFixed(2)},${deliveryFee.toFixed(2)},0,${platformFee.toFixed(2)},0,0,${customerAmountDue.toFixed(2)},${cod.toFixed(2)},0,0,${cod.toFixed(2)},0,0,false,0,null,${companyRevenue.toFixed(2)},${companyRevenue.toFixed(2)},'new',${cod > 0 ? "unsettled" : "not_eligible"},'manual',${deliveryFee.toFixed(2)},${deliveryFee.toFixed(2)},${`Platform customer quote ${quote.reference_number}`},${notes},'delivery','resolved',${area.fallback})
+        insert into orders(company_id,order_number,serial_number,serial_number_normalized,psystem_serial,psystem_serial_normalized,reference_number,reference_number_normalized,financial_model_version,order_date,trader_id,area_id,created_by_account_id,customer_id,customer_address_id,customer_name,customer_mobile_number,customer_address,customer_code_snapshot,customer_reference_snapshot,customer_area_code_snapshot,customer_area_name_snapshot,customer_area_name_ar_snapshot,customer_location_link_snapshot,customer_delivery_notes_snapshot,package_count,payment_condition,cod_amount,service_fee,service_fee_net_amount,service_fee_vat_amount,additional_fees,additional_fee_vat_amount,total_deductions,customer_amount_due,trader_gross_payable,trader_paid_service_fee,trader_deductions,trader_net_payable,driver_cost,vat_amount,vat_enabled_snapshot,vat_rate_snapshot,vat_price_mode_snapshot,company_revenue,order_profit,delivery_status,trader_settlement_status,pricing_provenance_status,configured_service_fee_snapshot,final_service_fee_snapshot,service_fee_override_reason,notes,order_type,customer_provenance_status,area_name_fallback_used)
+        values(${input.companyId}::uuid,${orderNumber},${serial},${normalized},${psystemSerial},${psystemSerial?.toLowerCase() ?? null},${serial},${normalized},null,current_date,${system.traderId}::uuid,${area.id}::uuid,${system.accountId}::uuid,${customer.customer.id}::uuid,${customer.addressId}::uuid,${customer.name},${customer.mobile},${customer.address},${customer.customer.code},${customer.customer.customerReference},${area.code},${area.nameEn},${area.nameAr},${customer.locationLink},${customer.deliveryNotes},${packageCount},'customer_pays_cod_and_fee',${cod.toFixed(2)},${deliveryFee.toFixed(2)},${deliveryFee.toFixed(2)},0,${platformFee.toFixed(2)},0,0,${customerAmountDue.toFixed(2)},${cod.toFixed(2)},0,0,${cod.toFixed(2)},0,0,false,0,null,${companyRevenue.toFixed(2)},${companyRevenue.toFixed(2)},'new',${cod > 0 ? "unsettled" : "not_eligible"},'manual',${deliveryFee.toFixed(2)},${deliveryFee.toFixed(2)},${`Platform customer quote ${quote.reference_number}`},${notes},'delivery','resolved',${area.fallback})
         returning id`.execute(tx);
       const orderId = inserted.rows[0]!.id;
       await sql`insert into order_status_history(company_id,order_id,status_dimension,to_status,changed_by_account_id) values(${input.companyId}::uuid,${orderId}::uuid,'delivery','new',${system.accountId}::uuid)`.execute(

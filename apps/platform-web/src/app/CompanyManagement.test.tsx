@@ -181,6 +181,11 @@ const baseRoutes = (permissions: readonly string[] = fullAccess): Record<string,
           templateVersion: 2,
           displayName: "UAE Delivery Standard",
         },
+        {
+          templateCode: "UAE_DELIVERY_STANDARD",
+          templateVersion: 3,
+          displayName: "UAE Delivery Standard",
+        },
       ],
     },
     status: 200,
@@ -262,7 +267,6 @@ describe("Create Company", () => {
 
   const fill = (): void => {
     fireEvent.change(screen.getByLabelText("Company Name"), { target: { value: "Acme Delivery" } });
-    fireEvent.change(screen.getByLabelText("Shipment Prefix"), { target: { value: "ACM" } });
   };
 
   it("omits technical identifiers and suggests an editable subdomain", async () => {
@@ -305,9 +309,9 @@ describe("Create Company", () => {
     expect(await screen.findByRole("heading", { name: "Review" })).toBeInTheDocument();
     expect(screen.getByText("Generated automatically")).toBeInTheDocument();
     expect(screen.getByText("acme-delivery")).toBeInTheDocument();
-    // v2 is the default the form pre-selects, not v1: v1 left every new
-    // Company without a working set of delivery Areas.
-    expect(screen.getByText("UAE_DELIVERY_STANDARD@2")).toBeInTheDocument();
+    // v3 is the default: it includes Areas and the complete payroll support
+    // account/mapping set required by Accounting readiness.
+    expect(screen.getByText("UAE_DELIVERY_STANDARD@3")).toBeInTheDocument();
     // Nothing has been created yet.
     const calls = (fetchStub as unknown as { mock: { calls: [string, RequestInit][] } }).mock.calls;
     expect(calls.some(([, init]) => init.method === "POST")).toBe(false);
@@ -346,12 +350,13 @@ describe("Create Company", () => {
     expect(Object.keys(sent).sort()).toEqual([
       "accountingTemplateCode",
       "accountingTemplateVersion",
+      "baseCurrency",
       "defaultLanguage",
       "environment",
       "name",
-      "shipmentPrefix",
       "subdomain",
     ]);
+    expect(sent.baseCurrency).toBe("AED");
     for (const forbidden of ["companyId", "code", "status", "createdBy", "id", "openingBalances"]) {
       expect(sent).not.toHaveProperty(forbidden);
     }
@@ -374,7 +379,6 @@ describe("Create Company", () => {
 
     fireEvent.change(screen.getByLabelText("Company Name"), { target: { value: "Bad" } });
     fireEvent.change(screen.getByLabelText("Subdomain"), { target: { value: "platform" } });
-    fireEvent.change(screen.getByLabelText("Shipment Prefix"), { target: { value: "BAD" } });
     fireEvent.click(screen.getByRole("button", { name: "Review" }));
     fireEvent.click(await screen.findByRole("button", { name: "Create Company" }));
 
@@ -1141,7 +1145,6 @@ describe("Create Company optional fields", () => {
     await screen.findByRole("button", { name: "Review" });
 
     fireEvent.change(screen.getByLabelText("Company Name"), { target: { value: "Acme" } });
-    fireEvent.change(screen.getByLabelText("Shipment Prefix"), { target: { value: "ACM" } });
     fireEvent.click(screen.getByRole("button", { name: "Review" }));
     expect(await screen.findByText("08:00")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Create Company" }));
@@ -1162,7 +1165,6 @@ describe("Create Company optional fields", () => {
     await screen.findByRole("button", { name: "Review" });
 
     fireEvent.change(screen.getByLabelText("Company Name"), { target: { value: "Acme" } });
-    fireEvent.change(screen.getByLabelText("Shipment Prefix"), { target: { value: "ACM" } });
     fireEvent.change(screen.getByLabelText("Business Day Start"), { target: { value: "07:30" } });
     fireEvent.change(screen.getByLabelText("Contact name"), { target: { value: "Ops Lead" } });
     fireEvent.click(screen.getByRole("button", { name: "Review" }));

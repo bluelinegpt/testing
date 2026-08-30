@@ -14,6 +14,7 @@ import {
   AccountingActivationPreviewDto,
   AccountingAreaChangeDto,
   AccountingMappingDecisionDto,
+  AccountingPayrollSupportRepairDto,
   AccountingSetupDateQueryDto,
   AccountingZeroOpeningDto,
 } from "./accounting-setup.dto.js";
@@ -53,6 +54,15 @@ export class AccountingSetupController {
     @Headers("x-idempotency-key") key?: string,
   ) {
     return this.setup.decideSuggestion(suggestionId, input, key);
+  }
+
+  @Post("setup/payroll-support/repair")
+  @RequireAnyPermission("accounting.configuration.manage", "users_roles.manage")
+  public repairPayrollSupport(
+    @Body() input: AccountingPayrollSupportRepairDto,
+    @Headers("x-idempotency-key") key?: string,
+  ) {
+    return this.setup.repairPayrollSupport(input, key);
   }
 
   @Get("setup/zero-opening")

@@ -581,9 +581,10 @@ function WorkforceForm({
       const deliveryChanged =
         deliveryEnabled &&
         (currentDelivery === undefined ||
-          Number(currentDelivery.amount) !== (deliveryAmount.ok ? deliveryAmount.value : 0) ||
-          currentDelivery.effectiveFrom !== deliveryFrom ||
-          (currentDelivery.effectiveTo ?? "") !== (deliveryTo ?? ""));
+          Number.parseFloat(String(currentDelivery.amount)) !==
+            (deliveryAmount.ok ? deliveryAmount.value : 0) ||
+          normalizeDateValue(currentDelivery.effectiveFrom) !== normalizeDateValue(deliveryFrom) ||
+          normalizeDateValue(currentDelivery.effectiveTo) !== normalizeDateValue(deliveryTo));
       if (isDriverRole && engagement === "employee" && deliveryChanged) {
         await api.post(`configuration/employees/${employeeId}/variable-earnings/delivery`, {
           amountPerOrder: deliveryAmount.ok ? deliveryAmount.value : 0,
@@ -595,11 +596,13 @@ function WorkforceForm({
       const collectionChanged =
         currentCollection === undefined
           ? collectionType !== "none"
-          : currentCollection.paymentType !== collectionType ||
-            Number(currentCollection.amount) !==
+          : String(currentCollection.paymentType ?? "none").trim() !== collectionType.trim() ||
+            Number.parseFloat(String(currentCollection.amount)) !==
               (collectionType === "none" ? 0 : collectionAmount.ok ? collectionAmount.value : 0) ||
-            currentCollection.effectiveFrom !== collectionFrom ||
-            (currentCollection.effectiveTo ?? "") !== (collectionTo ?? "");
+            normalizeDateValue(currentCollection.effectiveFrom) !==
+              normalizeDateValue(collectionFrom) ||
+            normalizeDateValue(currentCollection.effectiveTo) !==
+              normalizeDateValue(collectionTo);
       if (isDriverRole && collectionChanged) {
         await api.post(`configuration/employees/${employeeId}/variable-earnings/collection`, {
           amount: collectionType === "none" ? 0 : collectionAmount.ok ? collectionAmount.value : 0,
@@ -1073,6 +1076,7 @@ function EarningInput({
       <input
         aria-invalid={Boolean(error)}
         defaultValue={value}
+        key={`${name}-${value}`}
         min="0.01"
         name={name}
         step="0.01"
@@ -1096,10 +1100,20 @@ function EarningDate({
   return (
     <label className="field">
       <span>{label}</span>
-      <input aria-invalid={Boolean(error)} defaultValue={value} name={name} type="date" />
+      <input
+        aria-invalid={Boolean(error)}
+        defaultValue={value}
+        key={`${name}-${value}`}
+        name={name}
+        type="date"
+      />
       {error ? <span className="field-error">{error}</span> : null}
     </label>
   );
+}
+
+function normalizeDateValue(value: string | null | undefined): string {
+  return String(value ?? "").trim().slice(0, 10);
 }
 
 /**

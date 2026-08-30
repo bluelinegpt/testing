@@ -111,6 +111,8 @@ export interface ImportInput {
   readonly actorAccountId: string | null;
   /** The Company's own adoption date — never the source Company's. */
   readonly effectiveFrom: string;
+  /** Company base currency selected during onboarding; no FX conversion. */
+  readonly baseCurrency: string;
   /**
    * Company-chosen business-day start (HH:MM). Falls back to the template
    * default when the Platform Administrator does not override it.
@@ -221,7 +223,7 @@ export class AccountingTemplateImporter {
           ${account.accountClass}, ${account.normalBalance}, ${account.isPostingAccount},
           ${account.isActive}, ${account.isContraAccount}, ${account.isControlAccount},
           ${account.controlAccountType}, ${account.isSystemAccount}, ${account.systemPurpose},
-          ${account.currency}, ${account.description},
+          ${input.baseCurrency}, ${account.description},
           ${input.effectiveFrom}::date, ${platformCreator}
         )
       `.execute(transaction);
@@ -344,7 +346,7 @@ export class AccountingTemplateImporter {
         automatic_posting_areas, created_by_account_id${extraColumns}
       ) values (
         ${input.companyId}::uuid, ${defaults.accountingEnabled}, false,
-        ${defaults.baseCurrency}, ${defaults.fiscalYearStartMonth},
+        ${input.baseCurrency}, ${defaults.fiscalYearStartMonth},
         ${defaults.defaultAccountingMethod}, ${defaults.segregationPolicy},
         ${[...defaults.automaticPostingAreas]}::text[], ${platformCreator}${extraValues}
       )
@@ -398,7 +400,7 @@ export class AccountingTemplateImporter {
         ) values (
           ${randomUUID()}::uuid, ${input.companyId}::uuid, ${cash.code}, ${cash.name},
           ${cash.nameAr}, ${cash.cashAccountType},
-          ${this.resolve(idByKey, cash.glAccountKey)}::uuid, ${cash.currency},
+          ${this.resolve(idByKey, cash.glAccountKey)}::uuid, ${input.baseCurrency},
           ${input.effectiveFrom}::date, ${cash.isActive},
           'Created from the approved Accounting Template', ${platformCreator}
         )
@@ -414,7 +416,7 @@ export class AccountingTemplateImporter {
         ) values (
           ${randomUUID()}::uuid, ${input.companyId}::uuid, ${bank.code}, ${bank.name},
           ${bank.name}, ${bank.accountType},
-          ${this.resolve(idByKey, bank.glAccountKey)}::uuid, ${bank.currency},
+          ${this.resolve(idByKey, bank.glAccountKey)}::uuid, ${input.baseCurrency},
           ${input.effectiveFrom}::date, ${bank.isActive},
           'Placeholder created from the approved Accounting Template. Enter the Company bank details.',
           ${platformCreator}

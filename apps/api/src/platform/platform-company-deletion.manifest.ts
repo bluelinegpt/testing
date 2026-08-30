@@ -18,6 +18,7 @@ const PLATFORM_PRESERVE = [
 
 const SHARED_PRESERVE = [
   ...RESET_GLOBAL_TABLES,
+  // PSystem prefixes are permanent and must never be recycled.
   "shipment_prefix_reservations",
   "storefront_marketplace_categories",
   "role_permissions",
@@ -104,6 +105,7 @@ const SHARED_PRESERVE = [
 
 /** Tables added after the reset manifest's last business-data review. */
 const NEW_DIRECT_TABLES = [
+  // The counter is Company-owned; only the prefix tombstone above survives.
   "company_shipment_serial_counters",
   "company_website_agent_conversations",
   "company_websites",

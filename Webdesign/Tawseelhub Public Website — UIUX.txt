@@ -1,0 +1,994 @@
+# Tawseelhub Public Website — UI/UX Design Prompt
+
+I want you to design a **new public marketing website for Tawseelhub**.
+
+Domain:
+
+**tawseelhub.com**
+
+This is **not the internal application UI** and it is **not yet the future marketplace/storefront**.
+
+The immediate purpose of this website is to represent Tawseelhub as a professional SaaS platform for delivery companies, explain the product clearly, show its major capabilities, communicate pricing, and convert visitors into Free users or Demo requests.
+
+---
+
+# 1. Product Positioning
+
+Tawseelhub is much more than basic courier tracking software.
+
+The core positioning should be:
+
+## The Operating System for Delivery Companies
+
+Tawseelhub connects the full business workflow of a delivery company:
+
+**Trader → Order → Driver → Delivery → COD Collection → Driver Reconciliation → Expenses → Trader Settlement → Accounting → Payroll → Reports**
+
+The major difference from many delivery-management competitors is that Tawseelhub covers both:
+
+### Operations
+
+* Orders
+* Traders
+* Customers
+* Drivers
+* Assignments
+* Delivery statuses
+* Returns
+* Collections
+* Expenses
+* Mobile operations
+
+### Finance & Administration
+
+* Driver reconciliation
+* Trader settlements
+* COD management
+* Accounting
+* Driver commissions
+* Employee payroll
+* Financial reports
+* Operational reports
+* Audit/history
+
+The website must communicate that Tawseelhub is:
+
+**More complete, easier to use, and designed around how delivery companies actually operate every day.**
+
+Do NOT position Tawseelhub mainly around generic claims such as:
+
+* AI-powered logistics
+* revolutionary technology
+* intelligent innovation
+* smart transformation
+
+unless the specific capability actually exists.
+
+We want the product to look practical, complete and easy to use.
+
+---
+
+# 2. Main Brand
+
+Use:
+
+# Tawseelhub
+
+Domain:
+
+**tawseelhub.com**
+
+The brand should feel:
+
+* Modern
+* SaaS
+* Professional
+* Trustworthy
+* Simple
+* UAE/MENA appropriate
+* Suitable for Arabic and English
+* Capable of growing internationally
+
+Do not make the identity look like a traditional courier company.
+
+Tawseelhub is a **technology platform for delivery companies**.
+
+---
+
+# 3. Design Direction
+
+Create a clean modern SaaS website.
+
+Preferred visual direction:
+
+* White / very light background
+* Strong blue/navy primary identity
+* Modern typography
+* Plenty of whitespace
+* Soft shadows
+* Rounded but professional cards
+* Clean icons
+* Very limited gradients
+* Avoid excessive decorative illustrations
+* Avoid generic stock photos of smiling couriers
+* Avoid visual clutter
+
+The design should look closer to a modern B2B SaaS company than a traditional logistics website.
+
+It must feel simple even though the application itself contains many powerful features.
+
+---
+
+# 4. Very Important — Do NOT Overload the Homepage
+
+The previous concept became too congested.
+
+Do NOT place the entire application on the homepage.
+
+Do NOT create a huge fake dashboard containing:
+
+* multiple charts
+* recent activity
+* top traders
+* top drivers
+* COD cards
+* maps
+* many widgets
+
+Tawseelhub does NOT need a separate special marketing dashboard fabricated just for the website.
+
+Instead:
+
+Use **one small clean product screenshot/mockup** in the hero.
+
+Preferably show a real or realistic Tawseelhub application screen such as:
+
+* Main dashboard
+* Orders list
+* Order management screen
+
+The screenshot should demonstrate that the product exists without dominating the whole page.
+
+Later sections can show individual screens separately.
+
+---
+
+# 5. Header / Navigation
+
+Create a clean sticky header.
+
+Suggested navigation:
+
+**Tawseelhub Logo**
+
+Product
+Features
+Solutions
+Pricing
+Resources
+About
+Contact
+
+Right side:
+
+**EN / AR**
+
+**Login**
+
+Primary button:
+
+**Start Free**
+
+Do not overcrowd navigation.
+
+---
+
+# 6. Hero Section
+
+The Hero must communicate the value in a few seconds.
+
+Preferred headline direction:
+
+# Run Your Entire Delivery Business From One Platform
+
+Alternative:
+
+# The Operating System for Delivery Companies
+
+Supporting message:
+
+> Manage orders, Traders, Drivers, COD, expenses, settlements, accounting and payroll from one simple connected platform.
+
+Primary CTA:
+
+### Start Free
+
+Supporting text:
+
+**Up to 100 orders per month**
+
+Secondary CTA:
+
+### Book a Demo
+
+Under the CTA buttons show small trust/value points such as:
+
+* 100 Orders Free Every Month
+* No Credit Card Required
+* Arabic & English
+* Built for UAE Delivery Operations
+
+Do not claim customer counts such as “100+ Delivery Companies” unless actual verified customer data exists.
+
+---
+
+# 7. Hero Product Visual
+
+Do NOT use the large congested dashboard concept.
+
+Instead create:
+
+* Laptop/browser frame
+* One Tawseelhub screen
+* Maybe one smaller mobile device beside it
+
+Keep it elegant and simple.
+
+If showing mobile:
+
+Show a driver Order screen rather than a fake advanced navigation/map feature that Tawseelhub does not currently support.
+
+Do not visually promise features that are not available.
+
+---
+
+# 8. Key Product Areas
+
+Do not show 15–20 cards.
+
+Use approximately **6 clear capabilities**.
+
+Suggested sections:
+
+### Orders
+
+Create, import, assign and manage orders through their complete delivery lifecycle.
+
+### Traders
+
+Manage Traders, pricing, customers, statements and settlements.
+
+### Drivers
+
+Assignments, deliveries, collections, reconciliation, expenses and commissions.
+
+### Finance
+
+COD reconciliation, expenses, Trader settlements and accounting.
+
+### Payroll
+
+Driver earnings, commissions and employee payroll.
+
+### Reports
+
+Operational and financial reporting with complete business visibility.
+
+Mobile can either be part of this area or receive a separate section.
+
+---
+
+# 9. Explain the Connected Workflow
+
+This is one of the most important differentiators.
+
+Create a clean horizontal or responsive workflow visualization:
+
+**Trader**
+
+↓
+
+**Order**
+
+↓
+
+**Assign Driver**
+
+↓
+
+**Delivery**
+
+↓
+
+**COD Collection**
+
+↓
+
+**Driver Reconciliation**
+
+↓
+
+**Trader Settlement**
+
+↓
+
+**Accounting / Payroll**
+
+↓
+
+**Reports**
+
+Use simple icons and minimal text.
+
+Supporting heading:
+
+# From Order to Settlement. All Connected.
+
+Supporting text:
+
+> Tawseelhub keeps operations and finance connected throughout the complete delivery lifecycle.
+
+This should visually communicate the difference between Tawseelhub and simple order-tracking software.
+
+---
+
+# 10. Product Screens / Feature Storytelling
+
+Instead of putting everything in the Hero, use separate product sections further down.
+
+For example:
+
+## Manage Every Order From One Place
+
+Screenshot of Orders page.
+
+Supporting points:
+
+* Single order creation
+* Bulk Excel import
+* Trader selection
+* Driver assignment
+* Status management
+* Search and filtering
+* Returns and cancellations
+* Bulk operations
+
+---
+
+## Know Where Every Dirham Goes
+
+Show finance/reconciliation UI.
+
+Supporting points:
+
+* COD collection
+* Driver cash reconciliation
+* Driver expenses
+* Trader settlements
+* Accounting
+* Financial audit history
+
+---
+
+## Drivers and Payroll Connected
+
+Show driver/payroll screen.
+
+Supporting points:
+
+* Driver delivery activity
+* Collections
+* Driver commissions
+* Collection commissions
+* Payroll calculation
+* Employee payments
+
+The website should show **actual business workflows**, not only abstract marketing statements.
+
+---
+
+# 11. Mobile Apps
+
+Tawseelhub includes mobile application capability.
+
+Include a dedicated section:
+
+# Keep Your Operation Moving
+
+Show:
+
+### Driver App
+
+* Assigned orders
+* Delivery status updates
+* Customer/order information
+* Proof of delivery
+* Collections
+* Real-time communication foundation
+
+### Trader App
+
+* Order management
+* Customer/order creation
+* Order visibility
+* Communication
+
+Do NOT claim GPS route optimization if this is not implemented.
+
+---
+
+# 12. Ease of Use
+
+This is an important competitive advantage.
+
+Create a section around:
+
+# Powerful Without Being Complicated
+
+Possible copy:
+
+> Delivery software should simplify your operation, not create another complicated system your team avoids using.
+
+Then communicate:
+
+* Simple navigation
+* Clear workflows
+* Bulk processing
+* Arabic & English
+* Role-based screens
+* One connected system
+* No duplicated Excel processes
+
+This should be a major brand message.
+
+---
+
+# 13. Pricing
+
+Pricing is based mainly on monthly order volume.
+
+We want simple transparent pricing.
+
+Do NOT make the pricing section congested.
+
+Do NOT show the previous AED 1,830 / 10,000-order Scale card.
+
+On the homepage show only four primary packages.
+
+## Free
+
+**AED 0**
+
+Up to **100 orders/month**
+
+Suggested:
+
+* Core Order Management
+* 2 Users
+* 2 Drivers
+* Basic Reports
+
+CTA:
+
+**Start Free**
+
+---
+
+## Starter
+
+Up to **1,000 orders/month**
+
+Approximate target:
+
+**$99/month**
+
+or display UAE equivalent if we decide to use AED.
+
+Suggested features:
+
+* Core platform
+* Trader management
+* Driver management
+* Excel import
+* Driver reconciliation
+* Basic reports
+* Email support
+
+CTA:
+
+**Get Started**
+
+---
+
+## Growth
+
+Up to **3,000 orders/month**
+
+**$199/month**
+
+Mark this package:
+
+### Most Popular
+
+Possible capabilities:
+
+* Everything in Starter
+* Full accounting
+* Driver commissions
+* Payroll
+* Advanced reports
+* Higher user/driver limits
+* Priority support
+
+CTA:
+
+**Get Started**
+
+---
+
+## Business
+
+Up to **5,000 orders/month**
+
+**$349/month**
+
+Possible capabilities:
+
+* Everything in Growth
+* Higher limits
+* Audit logs
+* API access
+* Advanced reporting
+* Priority support
+
+CTA:
+
+**Get Started**
+
+---
+
+## Enterprise
+
+Do NOT make Enterprise another large equal pricing card if it makes the section crowded.
+
+Instead below or beside pricing add:
+
+### Need more than 5,000 orders per month?
+
+**Enterprise plans available for high-volume delivery companies.**
+
+Includes:
+
+* Higher/custom volume
+* Advanced integrations
+* Dedicated onboarding
+* Custom limits
+* SLA options
+* White Label options
+
+Button:
+
+**Contact Sales**
+
+Do NOT advertise **AED 1,830**.
+
+Do NOT publish a fixed Enterprise price at this stage.
+
+---
+
+# 14. Pricing Philosophy
+
+Keep pricing easy to understand.
+
+Avoid unnecessary charges such as:
+
+* price per user
+* price per driver
+* price per Trader
+
+as the main marketing message.
+
+The primary commercial concept should be:
+
+# Pricing That Grows With Your Deliveries
+
+Supporting message:
+
+> Choose your plan based on the number of orders you process each month.
+
+We can still impose reasonable user/driver limits internally by package, but the website should not feel complicated.
+
+---
+
+# 15. White Label
+
+White Label exists as an important higher-level capability.
+
+Do NOT include White Label in cheap packages.
+
+Position it under Enterprise.
+
+Possible White Label capabilities:
+
+* Company branding
+* Logo and colors
+* Branded portal
+* Custom domain
+* Branded mobile application
+* Custom application icon/name
+* Dedicated deployment options
+
+Show it as:
+
+### White Label Available
+
+or:
+
+### Make Tawseelhub Your Own
+
+But keep this as a secondary section, not the main homepage message.
+
+---
+
+# 16. UAE / Regional Positioning
+
+Tawseelhub should initially feel particularly relevant to UAE delivery companies.
+
+Use messaging such as:
+
+**Built for UAE Delivery Operations**
+
+Benefits include:
+
+* AED-based business
+* Arabic & English
+* UAE Emirates/areas
+* COD-focused operations
+* Local delivery workflows
+
+Do not overuse UAE flags or make it look government-oriented.
+
+It should remain suitable for future regional/international expansion.
+
+---
+
+# 17. Future Commerce / Marketplace
+
+A public marketplace/store will come later.
+
+It is NOT ready now.
+
+Do NOT design the current homepage as an ecommerce marketplace.
+
+However, near the lower section of the homepage we can have a small teaser:
+
+# Commerce is Coming
+
+Supporting text:
+
+> Give your Traders their own digital storefront and connect online orders directly with your delivery operation.
+
+Label:
+
+**Coming Soon**
+
+This should be subtle.
+
+Do not make the future Store the current core product.
+
+---
+
+# 18. About the Name
+
+Use the brand consistently as:
+
+# Tawseelhub
+
+Domain:
+
+**tawseelhub.com**
+
+Logo ideas may combine:
+
+* Connection
+* Movement
+* Delivery
+* Hub/network
+
+But do not use an overly obvious truck logo.
+
+We want something that still works when Tawseelhub expands beyond basic delivery.
+
+---
+
+# 19. CTA Near Bottom
+
+Create a strong final conversion section.
+
+Example:
+
+# Ready to Simplify Your Delivery Operations?
+
+Supporting text:
+
+> Start with up to 100 orders every month — free.
+
+Buttons:
+
+**Start Free**
+
+**Book a Demo**
+
+Small supporting message:
+
+**No credit card required.**
+
+---
+
+# 20. Footer
+
+Footer should be professional and relatively compact.
+
+Suggested sections:
+
+### Product
+
+Features
+Pricing
+Mobile
+Integrations
+
+### Solutions
+
+Delivery Companies
+Courier Operations
+E-commerce Delivery
+3PL
+
+### Resources
+
+Help Center
+Documentation
+API
+Blog
+
+### Company
+
+About
+Contact
+Privacy
+Terms
+
+Contact details can remain placeholders until confirmed.
+
+Do NOT invent phone numbers, physical addresses or customer statistics.
+
+---
+
+# 21. Responsive Design
+
+Create full responsive behavior for:
+
+* Desktop
+* Tablet
+* Mobile
+
+On mobile:
+
+* Keep Hero simple
+* Stack product visual below copy
+* Convert workflow into vertical steps
+* Pricing cards scroll/stack cleanly
+* Avoid tiny text
+* Keep CTA highly visible
+
+---
+
+# 22. Arabic / RTL
+
+The architecture must support Arabic later.
+
+Design components so they can work correctly in:
+
+**LTR English**
+
+and
+
+**RTL Arabic**
+
+Do not hard-code layouts that break when direction changes.
+
+---
+
+# 23. Accessibility & UX
+
+Use:
+
+* Good contrast
+* Proper button hierarchy
+* Large readable fonts
+* Semantic hierarchy
+* Keyboard-accessible navigation
+* Proper focus states
+* Clear CTA buttons
+* No very light gray text
+* Avoid tiny feature descriptions
+
+---
+
+# 24. SEO Structure
+
+Prepare page headings and structure for SEO.
+
+Core themes:
+
+* Delivery Management Software UAE
+* Courier Management Software
+* Delivery Company Software
+* COD Management
+* Driver Management
+* Delivery Accounting
+* Delivery Company Payroll
+* Last Mile Delivery Management
+
+Do not keyword-stuff the UI.
+
+---
+
+# 25. Pages to Design
+
+Initially prepare:
+
+1. **Homepage**
+2. **Features**
+3. **Pricing**
+4. **About**
+5. **Contact**
+
+Also include:
+
+6. **Login link**
+
+Do NOT build the Store yet.
+
+---
+
+# 26. Homepage Structure
+
+Preferred homepage sequence:
+
+1. Header
+2. Hero
+3. Small trust/value strip
+4. Key capabilities
+5. Connected workflow
+6. Orders product section
+7. Finance/reconciliation product section
+8. Driver/payroll product section
+9. Mobile apps
+10. Ease-of-use section
+11. Pricing
+12. Enterprise / White Label
+13. Commerce Coming Soon
+14. Final CTA
+15. Footer
+
+Do not force every section to be large.
+
+Use strong visual rhythm and whitespace.
+
+---
+
+# 27. Create Three Different Design Concepts
+
+Before finalizing one design, prepare **three genuinely different homepage concepts**.
+
+Do NOT simply change the colors.
+
+## Concept A — Minimal SaaS
+
+* White and blue
+* Very clean
+* Large typography
+* Lots of whitespace
+* Small actual product screenshot
+* Minimal cards
+* Premium SaaS look
+
+This is likely my preferred direction.
+
+---
+
+## Concept B — Product-Led
+
+* Real Tawseelhub screenshots dominate
+* Alternating text/screenshots
+* Show actual workflows
+* Less marketing illustration
+* Strong emphasis on application usability
+
+---
+
+## Concept C — Corporate Premium
+
+* More serious B2B appearance
+* Navy / white
+* Strong typography
+* More suitable for medium/large delivery companies
+* Less playful
+* Focus on control, finance, reliability and scale
+
+Each concept must have a noticeably different layout and visual approach.
+
+---
+
+# 28. Important Restrictions
+
+Do NOT:
+
+* Create a fake complex marketing dashboard
+* Show features that do not exist
+* Claim live GPS route optimization
+* Claim AI routing
+* Claim customer numbers that we cannot prove
+* Invent testimonials
+* Invent company logos
+* Invent contact details
+* Overcrowd the homepage
+* Create six equal pricing cards
+* Show the AED 1,830 plan
+* Make Tawseelhub appear only as a delivery tracking application
+* Make Tawseelhub appear as the future marketplace
+* Use excessive animations
+* Use excessive gradients
+* Use generic logistics stock photography everywhere
+
+---
+
+# 29. What I Need From You
+
+First, do NOT start implementing immediately.
+
+### Step 1
+
+Review these requirements and propose:
+
+* Visual identity direction
+* Homepage information architecture
+* Typography approach
+* Color approach
+* Component system
+* Three homepage design concepts
+
+### Step 2
+
+Create visual/wireframe mockups for all three concepts.
+
+### Step 3
+
+Compare the three concepts and explain:
+
+* Strengths
+* Weaknesses
+* Which audience each suits
+* Which one you recommend for Tawseelhub
+
+### Step 4
+
+After the design direction is approved, prepare the production-ready frontend implementation.
+
+The final result should make a delivery-company owner understand within **30 seconds**:
+
+1. What Tawseelhub is
+2. What business problems it solves
+3. Why it is more complete than basic delivery software
+4. That it is easy to use
+5. How much it costs
+6. That they can start free
+7. How to book a demo
+
+The key message throughout the website should remain:
+
+# Run Your Entire Delivery Business From One Platform.
+
+**Orders. Traders. Drivers. COD. Settlements. Accounting. Payroll. All Connected.**

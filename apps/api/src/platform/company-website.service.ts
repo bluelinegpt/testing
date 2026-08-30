@@ -366,13 +366,21 @@ export class CompanyWebsiteService {
   private async trackForCompany(row: PublicWebsiteRow, reference: string): Promise<object> {
     const normalizedReference = reference.trim();
     const secureToken = /^[A-Za-z0-9_-]{43}$/u.test(normalizedReference);
-    const orderReference = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/u.test(normalizedReference);
+    const orderReference = /^[A-Za-z0-9][A-Za-z0-9_/-]{0,159}$/u.test(normalizedReference);
     if (!secureToken && !orderReference) throw this.trackingNotFound();
     const tokenHash = secureToken
       ? createHash("sha256").update(normalizedReference, "utf8").digest("hex")
       : null;
-    const tracking = secureToken
-      ? (
+    type TrackingRow = {
+      orderId: string;
+      orderNumber: string;
+      deliveryStatus: string;
+      deliveredAt: string | null;
+      lastUpdatedAt: string;
+    };
+    let tracking: TrackingRow[];
+    if (secureToken) {
+      tracking = (
           await sql<{
             orderId: string;
             orderNumber: string;
@@ -386,8 +394,18 @@ export class CompanyWebsiteService {
         where tt.company_id=${row.companyId}::uuid and tt.token_hash=${tokenHash}
           and tt.revoked_at is null and (tt.expires_at is null or tt.expires_at>now())
         group by o.id limit 1`.execute(this.database)
-        ).rows[0]
-      : (
+        ).rows;
+    } else {
+      const psystemTracking = (
+        await sql<TrackingRow>`select o.id as "orderId",o.psystem_serial as "orderNumber",o.delivery_status as "deliveryStatus",
+          o.delivered_at::text as "deliveredAt",greatest(o.updated_at,coalesce(max(h.occurred_at),o.updated_at))::text as "lastUpdatedAt"
+        from orders o
+        left join order_status_history h on h.order_id=o.id and h.company_id=o.company_id
+        where o.company_id=${row.companyId}::uuid
+          and o.psystem_serial_normalized=${normalizedReference.toLocaleLowerCase("en-US")}
+        group by o.id limit 1`.execute(this.database)
+      ).rows;
+      tracking = psystemTracking.length === 1 ? psystemTracking : (
           await sql<{
             orderId: string;
             orderNumber: string;
@@ -398,17 +416,29 @@ export class CompanyWebsiteService {
           o.delivered_at::text as "deliveredAt",greatest(o.updated_at,coalesce(max(h.occurred_at),o.updated_at))::text as "lastUpdatedAt"
         from orders o
         left join order_status_history h on h.order_id=o.id and h.company_id=o.company_id
-        where o.company_id=${row.companyId}::uuid and upper(o.order_number)=upper(${normalizedReference})
-        group by o.id limit 1`.execute(this.database)
-        ).rows[0];
-    if (!tracking) throw this.trackingNotFound();
+        where o.company_id=${row.companyId}::uuid and (
+          upper(o.order_number)=upper(${normalizedReference})
+          or o.serial_number_normalized=${normalizedReference
+            .normalize("NFKC")
+            .trim()
+            .replace(/\s+/gu, " ")
+            .toLocaleLowerCase("en-US")}
+        )
+        group by o.id
+        order by case when upper(o.order_number)=upper(${normalizedReference}) then 0 else 1 end
+        limit 2`.execute(this.database)
+        ).rows;
+    }
+    if (tracking.length !== 1) throw this.trackingNotFound();
+    const resolvedTracking = tracking[0];
+    if (!resolvedTracking) throw this.trackingNotFound();
     const timeline = (
       await sql<{
         status: string;
         occurredAt: string;
       }>`select to_status as status,occurred_at::text as "occurredAt"
         from order_status_history
-        where company_id=${row.companyId}::uuid and order_id=${tracking.orderId}::uuid
+        where company_id=${row.companyId}::uuid and order_id=${resolvedTracking.orderId}::uuid
           and status_dimension='delivery'
           and to_status in ('new','preparing','assigned','out_for_delivery','delivered','returned','cancelled')
         order by occurred_at asc`.execute(this.database)
@@ -417,10 +447,10 @@ export class CompanyWebsiteService {
       occurredAt: event.occurredAt,
     }));
     return {
-      reference: tracking.orderNumber,
-      status: this.publicStatus(tracking.deliveryStatus),
-      deliveredAt: tracking.deliveredAt,
-      lastUpdatedAt: tracking.lastUpdatedAt,
+      reference: resolvedTracking.orderNumber,
+      status: this.publicStatus(resolvedTracking.deliveryStatus),
+      deliveredAt: resolvedTracking.deliveredAt,
+      lastUpdatedAt: resolvedTracking.lastUpdatedAt,
       company: { nameEn: row.nameEn, nameAr: row.nameAr },
       timeline,
     };

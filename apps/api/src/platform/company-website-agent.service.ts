@@ -337,6 +337,7 @@ const trackingStatusLabels: Record<string, { en: string; ar: string }> = {
 function trackingReferenceFrom(message: string): string | undefined {
   return (
     message.match(/(?:^|\s)([A-Za-z0-9_-]{43})(?=\s|$)/u)?.[1] ??
+    message.match(/(?:^|\s)([A-Z]{3}[0-9]{7,})(?=\s|$)/iu)?.[1]?.toUpperCase() ??
     message.match(/(?:^|\s)(ORD-[0-9]{6,})(?=\s|$)/iu)?.[1]?.toUpperCase()
   );
 }

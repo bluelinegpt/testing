@@ -6,6 +6,7 @@ final class DriverOrder {
     required this.id,
     required this.orderNumber,
     required this.serialNumber,
+    this.psystemSerial,
     required this.orderDate,
     required this.areaId,
     required this.areaName,
@@ -34,7 +35,7 @@ final class DriverOrder {
       amountCollected,
       status,
       traderName;
-  final String? reference, notes, emirateNameEn, emirateNameAr;
+  final String? psystemSerial, reference, notes, emirateNameEn, emirateNameAr;
 }
 
 final class DriverOrderHistoryEvent {

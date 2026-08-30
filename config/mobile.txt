@@ -1,0 +1,9 @@
+
+& "C:\flutter\bin\flutter.bat" devices
+
+& "C:\Users\LENOVO\AppData\Local\Android\Sdk\platform-tools\adb.exe" devices
+
+
+& "C:\flutter\bin\flutter.bat" install --flavor staging --debug -d emulator-5554
+
+& "C:\flutter\bin\flutter.bat" run --flavor staging --dart-define=ENVIRONMENT_NAME=staging --dart-define=API_BASE_URL=https://bluelinegpt-api-test.onrender.com/api/v1 --dart-define=REALTIME_URL=wss://bluelinegpt-api-test.onrender.com/realtime

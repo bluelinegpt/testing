@@ -551,6 +551,9 @@ class AppLocalizationsAr extends AppLocalizations {
   String get serialNumber => 'الرقم التسلسلي';
 
   @override
+  String get psystemSerial => 'الرقم التسلسلي PSystem';
+
+  @override
   String get location => 'الموقع';
 
   @override

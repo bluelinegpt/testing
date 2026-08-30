@@ -1957,7 +1957,8 @@ export const englishTranslations = {
     accountantPay: "Pay to Trader",
     duplicateSerialInBatch: "Serial Number {{serial}} is already used in this reactivation batch.",
     serialNumber: "Serial Number",
-    serialNumberGenerated: "Generated automatically when saved",
+    psystemSerial: "PSystem Serial",
+    psystemSerialGenerated: "Generated after saving and used for public tracking",
     referenceNumber: "Reference Number",
 
     searchByReferenceNumber: "Search by Reference Number",
@@ -3940,6 +3941,17 @@ export const englishTranslations = {
     dateTo: "Date To",
     completedCalendarDaysOnly:
       "Select completed calendar days only. The current day cannot be calculated until tomorrow.",
+    todayStillInProgress:
+      "Cannot calculate today's earnings because the day is still in progress. Select yesterday or an earlier completed day. If previous days show No earnings, there is nothing available to calculate yet.",
+    todayExcluded:
+      "Today's earnings remain in progress. The calculation was adjusted through {{dateTo}} so completed earnings can be confirmed and paid now.",
+    dailyAvailability: "Daily Earning Availability",
+    availableEarnings: "Available Earnings",
+    availability: {
+      available: "Available",
+      in_progress: "In progress — available tomorrow",
+      no_earnings: "No earnings",
+    },
     collectedOrderCount: "Number of Collected Orders",
     calculateNow: "Calculate Now",
     calculateFailed: "The earning period could not be calculated.",
@@ -5390,6 +5402,31 @@ export const englishTranslations = {
       reviewActivation: "Review controlled activation",
       effectiveAccountingDate: "Effective Accounting Date",
       mappingReview: "Mapping Review",
+      issuesOnly: "Issues only",
+      noMappingIssues: "No unresolved mapping issues remain.",
+      guidedRepair: "Fix accounting setup",
+      guidedRepairHelp:
+        "Complete the safe configuration here. Financial decisions still require your confirmation.",
+      safeRepairsAvailable:
+        "{{count}} deterministic high-confidence mappings can be applied safely.",
+      manualMappingReviewRequired:
+        "No unambiguous automatic repair is available. Review only the unresolved mappings below.",
+      applySafeMappings: "Apply safe mappings",
+      createPayrollSupportAccounts: "Create missing payroll accounts",
+      confirmPayrollSupportRepair:
+        "Create and map the two required Employee Payroll support accounts?",
+      payrollSupportRepairReason: "Repair missing standard Employee Payroll accounts",
+      reviewMappings: "Review mappings",
+      confirmSafeRepair:
+        "Apply {{count}} high-confidence compatible account mappings? No opening balances or posting settings will be changed.",
+      safeRepairReason: "Applied by the guided accounting setup repair",
+      openingDecisionSafety:
+        "Choose whether to enter real opening balances or explicitly confirm that they are zero. This cannot be guessed automatically.",
+      recordOpeningDecision: "Record opening balance decision",
+      blockerCodes: {
+        mandatory_mappings_incomplete: "Mandatory account mappings are incomplete",
+        opening_balance_decision_missing: "Opening balance decision is missing",
+      },
       deterministicNotice:
         "Suggestions are deterministic and advisory. Every mapping requires explicit confirmation.",
       decisionReason: "Mapping decision reason",

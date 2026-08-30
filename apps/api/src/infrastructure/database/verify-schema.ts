@@ -106,6 +106,7 @@ const expectedTables = [
 ] as const;
 
 const expectedTriggers = [
+  "orders_psystem_serial_immutable",
   "companies_shipment_numbering_guard",
   "companies_shipment_prefix_reservation",
   "account_mappings_history_guard",
@@ -241,9 +242,11 @@ const expectedTriggers = [
 ] as const;
 
 const expectedFunctions = [
+  "allocate_company_psystem_serial",
   "allocate_company_shipment_serial",
   "maintain_shipment_prefix_reservation",
   "protect_company_shipment_numbering",
+  "protect_order_psystem_serial",
   "validate_user_business_link_entity",
   "validate_account_session_profile",
   "suspend_disabled_business_profile_access",
@@ -404,7 +407,7 @@ const expectedConstraints = [
 
 const expectedIndexes = [
   "companies_shipment_prefix_unique",
-  "orders_generated_shipment_serial_unique",
+  "orders_psystem_serial_normalized_unique",
   "account_mappings_effective_index",
   "accounting_events_source_index",
   "accounting_events_failure_index",
@@ -512,6 +515,8 @@ const expectedColumns = [
   "orders.customer_provenance_status",
   "orders.serial_number",
   "orders.serial_number_normalized",
+  "orders.psystem_serial",
+  "orders.psystem_serial_normalized",
   "orders.reference_number",
   "orders.reference_number_normalized",
   "orders.financial_model_version",

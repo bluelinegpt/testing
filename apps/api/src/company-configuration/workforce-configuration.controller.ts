@@ -109,9 +109,9 @@ export class WorkforceConfigurationController {
   }
 
   /*
-   * Employee Driver variable earnings. Read the timeline, or start a new dated
-   * rate; there is deliberately no update or delete route, because a rate is
-   * history and correcting it means superseding it, not rewriting it.
+   * Employee Driver variable earnings. A changed amount starts a new dated
+   * rate. Changing only the dates corrects the current matching rule and writes
+   * its prior values into the audit event.
    */
   @Get("employees/:employeeId/variable-earnings")
   @ApiOperation({ summary: "Delivery and collection earning rules for one Employee" })

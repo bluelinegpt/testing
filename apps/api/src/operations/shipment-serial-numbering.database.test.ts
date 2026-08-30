@@ -8,7 +8,7 @@ loadEnvironment({ path: "../../.env" });
 
 const runDatabaseTests = process.env.RUN_SHIPMENT_SERIAL_DATABASE === "true";
 
-describe.skipIf(!runDatabaseTests)("Company shipment serial allocation", () => {
+describe.skipIf(!runDatabaseTests)("PSystem Serial allocation", () => {
   const pool = new Pool({ connectionString: process.env.DATABASE_URL });
   const companyId = randomUUID();
   const suffix = companyId.replaceAll("-", "").slice(0, 8);
@@ -38,11 +38,11 @@ describe.skipIf(!runDatabaseTests)("Company shipment serial allocation", () => {
       companyId,
     ]);
     const first = await pool.query<{ serial: string }>(
-      "select allocate_company_shipment_serial($1::uuid) serial",
+      "select allocate_company_psystem_serial($1::uuid) serial",
       [companyId],
     );
     const second = await pool.query<{ serial: string }>(
-      "select allocate_company_shipment_serial($1::uuid) serial",
+      "select allocate_company_psystem_serial($1::uuid) serial",
       [companyId],
     );
     expect(first.rows[0]!.serial).toBe("ABC0000001");
@@ -54,7 +54,7 @@ describe.skipIf(!runDatabaseTests)("Company shipment serial allocation", () => {
     try {
       await client.query("begin");
       const rolledBack = await client.query<{ serial: string }>(
-        "select allocate_company_shipment_serial($1::uuid) serial",
+        "select allocate_company_psystem_serial($1::uuid) serial",
         [companyId],
       );
       expect(rolledBack.rows[0]!.serial).toBe("ABC0000003");
@@ -64,7 +64,7 @@ describe.skipIf(!runDatabaseTests)("Company shipment serial allocation", () => {
     }
 
     const committed = await pool.query<{ serial: string }>(
-      "select allocate_company_shipment_serial($1::uuid) serial",
+      "select allocate_company_psystem_serial($1::uuid) serial",
       [companyId],
     );
     expect(committed.rows[0]!.serial).toBe("ABC0000003");
@@ -74,7 +74,7 @@ describe.skipIf(!runDatabaseTests)("Company shipment serial allocation", () => {
     const values = await Promise.all(
       Array.from({ length: 40 }, async () => {
         const result = await pool.query<{ serial: string }>(
-          "select allocate_company_shipment_serial($1::uuid) serial",
+          "select allocate_company_psystem_serial($1::uuid) serial",
           [companyId],
         );
         return result.rows[0]!.serial;

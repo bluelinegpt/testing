@@ -75,6 +75,8 @@ export function unifiedOrderSearchPredicate(term: string | null | undefined): Ra
 
   const reference = normalizeReferenceTerm(trimmed);
   const branches: RawBuilder<boolean>[] = [
+    // PSystem Serial: globally unique and always tried first.
+    sql<boolean>`o.psystem_serial_normalized = ${reference}`,
     // Order Number: exact first, then prefix, in both the typed and upper form.
     sql<boolean>`o.order_number = ${trimmed}`,
     sql<boolean>`o.order_number like ${trimmed + "%"}`,

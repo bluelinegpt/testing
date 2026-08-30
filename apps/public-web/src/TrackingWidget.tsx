@@ -237,6 +237,7 @@ function formatTrackingDate(value: string, locale: "en" | "ar"): string {
   return new Intl.DateTimeFormat(locale === "ar" ? "ar-AE" : "en-AE", {
     dateStyle: "medium",
     timeStyle: "short",
+    timeZone: "Asia/Dubai",
   }).format(date);
 }
 

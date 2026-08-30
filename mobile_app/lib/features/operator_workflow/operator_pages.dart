@@ -593,6 +593,7 @@ final class _OperatorOrderDetailsPageState
         DriverStyleOrderFields(
           order: DriverStyleOrderData(
             serialNumber: order.serialNumber,
+            psystemSerial: order.psystemSerial,
             orderDate: order.orderDate,
             customerName: order.customerName,
             customerMobile: order.customerMobile,

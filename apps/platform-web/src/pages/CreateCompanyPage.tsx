@@ -21,12 +21,17 @@ import {
  * new Company begins with no balances at all.
  */
 const environments = ["sandbox", "development", "demo", "trial", "production"] as const;
+const currencies = [
+  "AED", "SAR", "QAR", "USD", "EUR", "GBP", "KWD", "BHD", "OMR", "JOD",
+  "EGP", "SYP", "LBP", "IQD", "YER", "MAD", "DZD", "TND", "LYD", "SDG",
+  "SOS", "DJF", "KMF", "MRU",
+] as const;
 
 interface FormState {
   name: string;
   subdomain: string;
-  shipmentPrefix: string;
   environment: string;
+  baseCurrency: string;
   defaultLanguage: string;
   contactName: string;
   telephone: string;
@@ -38,11 +43,11 @@ interface FormState {
 const initialState: FormState = {
   name: "",
   subdomain: "",
-  shipmentPrefix: "",
   // Not production. The safest default for a Company someone is creating by
   // hand is the one that is easiest to recover from; production is an explicit
   // choice.
   environment: "sandbox",
+  baseCurrency: "AED",
   defaultLanguage: "en",
   contactName: "",
   telephone: "",
@@ -50,12 +55,10 @@ const initialState: FormState = {
   // Blank means "use the approved template's default", which is the whole
   // point of a template default. It is not silently substituted here.
   businessDayStart: "",
-  // The latest approved version, not hardcoded to "always @1": v2 is the same
-  // Chart of Accounts, mappings and policy as v1 plus the one thing v1 left
-  // every new Company without -- a working set of delivery Areas. v1 stays
-  // selectable below for a Company that genuinely needs it, and stays valid
-  // forever for Companies already initialised from it.
-  template: "UAE_DELIVERY_STANDARD@2",
+  // The latest approved version. Older immutable versions remain selectable
+  // for provenance, while v3 includes Areas plus the two payroll support
+  // accounts and mappings required by Accounting readiness.
+  template: "UAE_DELIVERY_STANDARD@3",
 };
 
 export function CreateCompanyPage(): ReactElement {
@@ -98,9 +101,9 @@ export function CreateCompanyPage(): ReactElement {
     try {
       const created = await platformApi.createCompany({
         name: form.name,
-        shipmentPrefix: form.shipmentPrefix,
         ...(form.subdomain === "" ? {} : { subdomain: form.subdomain }),
         environment: form.environment,
+        baseCurrency: form.baseCurrency,
         defaultLanguage: form.defaultLanguage,
         ...(form.contactName === "" ? {} : { contactName: form.contactName }),
         ...(form.telephone === "" ? {} : { telephone: form.telephone }),
@@ -139,11 +142,11 @@ export function CreateCompanyPage(): ReactElement {
             ["Name", form.name],
             ["Company Code", "Generated automatically"],
             ["Subdomain", form.subdomain],
-            ["Shipment prefix", form.shipmentPrefix],
+            ["PSystem prefix", "Selected automatically from the Company English name"],
             ["Environment", form.environment],
             ["Country", "United Arab Emirates"],
             ["Timezone", "Asia/Dubai"],
-            ["Currency", "AED"],
+            ["Currency", form.baseCurrency],
             ["Default language", form.defaultLanguage],
             ["Business day", form.businessDayStart === "" ? "08:00" : form.businessDayStart],
             ["Accounting template", form.template === "" ? "None" : form.template],
@@ -213,21 +216,10 @@ export function CreateCompanyPage(): ReactElement {
           required
           value={form.subdomain}
         />
-        <Field
-          hint="Exactly three letters. It may be corrected before shipment numbering is activated."
-          id="shipment-prefix"
-          label="Shipment Prefix"
-          onChange={(value) =>
-            set("shipmentPrefix")(
-              value
-                .replace(/[^A-Za-z]/g, "")
-                .toUpperCase()
-                .slice(0, 3),
-            )
-          }
-          required
-          value={form.shipmentPrefix}
-        />
+        <p className="platform-muted">
+          The three-letter PSystem prefix is selected automatically from the Company English name
+          and activated when the Company is created.
+        </p>
         <div className="platform-field-group">
           <label className="platform-field" htmlFor="environment">
             <span>Environment</span>
@@ -257,13 +249,28 @@ export function CreateCompanyPage(): ReactElement {
           </div>
           <div>
             <dt>Currency</dt>
-            <dd>AED</dd>
+            <dd>{form.baseCurrency}</dd>
           </div>
           <div>
             <dt>Timezone</dt>
             <dd>Dubai (Asia/Dubai)</dd>
           </div>
         </dl>
+        <label className="platform-field" htmlFor="baseCurrency">
+          <span>Base currency</span>
+          <select
+            id="baseCurrency"
+            onChange={(event) => set("baseCurrency")(event.target.value)}
+            value={form.baseCurrency}
+          >
+            {currencies.map((currency) => (
+              <option key={currency} value={currency}>{currency}</option>
+            ))}
+          </select>
+          <small>
+            Used throughout this Company. Amounts retain the system's existing two-decimal precision.
+          </small>
+        </label>
         <label className="platform-field" htmlFor="defaultLanguage">
           <span>Default language</span>
           <select

@@ -105,9 +105,9 @@ export class PlatformCompanyController {
     const created = await this.companies.create(
       {
         name: input.name,
-        shipmentPrefix: input.shipmentPrefix,
         subdomain: input.subdomain,
         environment: input.environment,
+        baseCurrency: input.baseCurrency ?? "AED",
         countryCode: input.countryCode ?? "AE",
         timezone: input.timezone ?? "Asia/Dubai",
         defaultLanguage: input.defaultLanguage ?? "en",
@@ -254,7 +254,7 @@ export class PlatformTargetCompanyController {
   }
 
   @ApiBearerAuth()
-  @ApiOperation({ summary: "Permanently activate generated shipment serials" })
+  @ApiOperation({ summary: "Permanently activate PSystem Serials for a legacy Company" })
   @RequirePlatformPermissions(PLATFORM_COMPANIES_MANAGE)
   @HttpCode(200)
   @Post("shipment-serial/activate")

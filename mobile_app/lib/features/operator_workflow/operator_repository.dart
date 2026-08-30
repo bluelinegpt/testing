@@ -127,6 +127,7 @@ final class ApiOperatorRepository implements OperatorRepository {
     id: _required(value, 'id'),
     orderNumber: _required(value, 'orderNumber'),
     serialNumber: _required(value, 'serialNumber'),
+    psystemSerial: value['psystemSerial'] as String?,
     orderDate: _required(value, 'orderDate'),
     traderName: _required(value, 'traderName'),
     customerName: _required(value, 'customerName'),

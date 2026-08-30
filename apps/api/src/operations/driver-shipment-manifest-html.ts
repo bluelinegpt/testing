@@ -187,7 +187,7 @@ function escapeHtml(value: string): string {
 }
 
 function money(value: string): string {
-  return `AED ${escapeHtml(value)}`;
+  return escapeHtml(value);
 }
 
 /**

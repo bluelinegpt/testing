@@ -956,26 +956,16 @@ export class CommerceIntegrationService {
       String(connection.trader_id),
     );
     const orderId = await this.db.transaction().execute(async (transaction) => {
-      const serialEnabled =
-        (
-          await sql<{ enabled: boolean }>`select shipment_serial_enabled_at is not null enabled
-        from companies where id=${String(connection.company_id)}::uuid for share`.execute(
-            transaction,
-          )
-        ).rows[0]?.enabled === true;
-      const serial = serialEnabled
-        ? (
-            await sql<{
-              value: string;
-            }>`select allocate_company_shipment_serial(${String(connection.company_id)}::uuid) value`.execute(
-              transaction,
-            )
-          ).rows[0]!.value
-        : order.externalOrderNumber;
+      const serial = order.externalOrderNumber;
       const normalized = normalizeIdentifier(serial);
+      const psystemSerial = (
+        await sql<{ value: string | null }>`
+          select allocate_company_psystem_serial(${String(connection.company_id)}::uuid) value
+        `.execute(transaction)
+      ).rows[0]?.value ?? null;
       const inserted = await sql<{ id: string }>`
-      insert into orders(company_id,order_number,serial_number,serial_number_normalized,reference_number,reference_number_normalized,financial_model_version,order_date,trader_id,area_id,created_by_account_id,customer_name,customer_mobile_number,customer_address,package_count,payment_condition,cod_amount,service_fee,service_fee_net_amount,service_fee_vat_amount,additional_fees,additional_fee_vat_amount,total_deductions,customer_amount_due,trader_gross_payable,trader_paid_service_fee,trader_deductions,trader_net_payable,driver_cost,vat_amount,vat_enabled_snapshot,vat_rate_snapshot,vat_price_mode_snapshot,company_revenue,order_profit,delivery_status,trader_settlement_status,pricing_provenance_status,configured_service_fee_snapshot,final_service_fee_snapshot,service_fee_override_reason,notes,order_type,customer_provenance_status)
-      values(${String(connection.company_id)}::uuid,${orderNumber},${serial},${normalized},${order.externalOrderNumber},${normalizeIdentifier(order.externalOrderNumber)},'trader_deduction_v1',current_date,${String(connection.trader_id)}::uuid,${String(area.id)}::uuid,${actor}::uuid,${order.customerName},${mobile},${order.address},${packageCount},'customer_pays_cod_trader_pays_fee',${cod.toFixed(2)},0,0,0,0,0,0,${cod.toFixed(2)},${cod.toFixed(2)},0,0,${cod.toFixed(2)},0,0,false,0,null,0,0,'new',${cod > 0 ? "unsettled" : "not_eligible"},'manual',0,0,'Commerce integration import — service fee handled by Tawseelhub pricing review',${order.notes ?? "Imported from commerce integration"},'delivery','not_applicable')
+      insert into orders(company_id,order_number,serial_number,serial_number_normalized,psystem_serial,psystem_serial_normalized,reference_number,reference_number_normalized,financial_model_version,order_date,trader_id,area_id,created_by_account_id,customer_name,customer_mobile_number,customer_address,package_count,payment_condition,cod_amount,service_fee,service_fee_net_amount,service_fee_vat_amount,additional_fees,additional_fee_vat_amount,total_deductions,customer_amount_due,trader_gross_payable,trader_paid_service_fee,trader_deductions,trader_net_payable,driver_cost,vat_amount,vat_enabled_snapshot,vat_rate_snapshot,vat_price_mode_snapshot,company_revenue,order_profit,delivery_status,trader_settlement_status,pricing_provenance_status,configured_service_fee_snapshot,final_service_fee_snapshot,service_fee_override_reason,notes,order_type,customer_provenance_status)
+      values(${String(connection.company_id)}::uuid,${orderNumber},${serial},${normalized},${psystemSerial},${psystemSerial?.toLowerCase() ?? null},${order.externalOrderNumber},${normalizeIdentifier(order.externalOrderNumber)},'trader_deduction_v1',current_date,${String(connection.trader_id)}::uuid,${String(area.id)}::uuid,${actor}::uuid,${order.customerName},${mobile},${order.address},${packageCount},'customer_pays_cod_trader_pays_fee',${cod.toFixed(2)},0,0,0,0,0,0,${cod.toFixed(2)},${cod.toFixed(2)},0,0,${cod.toFixed(2)},0,0,false,0,null,0,0,'new',${cod > 0 ? "unsettled" : "not_eligible"},'manual',0,0,'Commerce integration import — service fee handled by Tawseelhub pricing review',${order.notes ?? "Imported from commerce integration"},'delivery','not_applicable')
       returning id
       `.execute(transaction);
       const createdOrderId = inserted.rows[0]!.id;

@@ -73,6 +73,16 @@ describe("Order DTO validation", () => {
     expect(errors.some((error) => error.property === "serialNumber")).toBe(false);
   });
 
+  it("rejects caller-supplied PSystem Serial while accepting the user Serial Number", async () => {
+    const input = plainToInstance(CreateOrderDto, {
+      ...validCreateOrder,
+      psystemSerial: "TST0000001",
+    });
+    const errors = await validate(input);
+    expect(errors.some((error) => error.property === "serialNumber")).toBe(false);
+    expect(errors.some((error) => error.property === "psystemSerial")).toBe(true);
+  });
+
   it("converts a whitespace-only Reference Number to an omitted value", async () => {
     const input = plainToInstance(CreateOrderDto, {
       areaId: "10000000-0000-4000-8000-000000000001",

@@ -176,6 +176,7 @@
   "assignedToMe": "مسندة لي",
   "orderDate": "تاريخ الطلب",
   "serialNumber": "الرقم التسلسلي",
+  "psystemSerial": "الرقم التسلسلي PSystem",
   "location": "الموقع",
   "reference": "المرجع",
   "emptyValuePlaceholder": "—",

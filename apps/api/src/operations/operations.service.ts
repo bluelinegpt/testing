@@ -286,6 +286,7 @@ export interface OperationsOrder {
   readonly outsourcedDriverFeeStatus: string;
   readonly returnStatus: string;
   readonly referenceNumber: string | null;
+  readonly psystemSerial: string | null;
   readonly serialNumber: string | null;
   readonly serviceFee: string;
   /** Why the fee is zero or differs from the configured price. */
@@ -405,6 +406,7 @@ export interface PortalOrder {
   readonly orderNumber: string;
   readonly packageCount: number;
   readonly referenceNumber: string | null;
+  readonly psystemSerial: string | null;
   readonly serialNumber: string;
   readonly serviceFee: string;
   readonly traderName: string;
@@ -1139,6 +1141,7 @@ export class OperationsService {
       select o.id,
              o.order_number as "orderNumber",
              o.serial_number as "serialNumber",
+             o.psystem_serial as "psystemSerial",
              o.reference_number as "referenceNumber",
              o.order_date::text as "orderDate",
              t.name_en as "traderName",
@@ -1556,6 +1559,7 @@ export class OperationsService {
       select o.id,
              o.order_number as "orderNumber",
              o.serial_number as "serialNumber",
+             o.psystem_serial as "psystemSerial",
              o.reference_number as "referenceNumber",
              o.order_date::text as "orderDate",
              t.name_en as "traderName",
@@ -1614,6 +1618,7 @@ export class OperationsService {
     const content = this.toCsv([
       [
         "serial_number",
+        "psystem_serial",
         "reference_number",
         "order_number",
         "order_date",
@@ -1639,6 +1644,7 @@ export class OperationsService {
       ],
       ...result.rows.map((order) => [
         order.serialNumber ?? "",
+        order.psystemSerial ?? "",
         order.referenceNumber ?? "",
         order.orderNumber,
         order.orderDate,
@@ -2519,6 +2525,7 @@ export class OperationsService {
              o.order_number as "orderNumber",
              o.order_date::text as "orderDate",
              o.serial_number as "serialNumber",
+             o.psystem_serial as "psystemSerial",
              o.reference_number as "referenceNumber",
              o.area_id as "areaId",
              o.package_count as "packageCount",
@@ -2930,6 +2937,7 @@ export class OperationsService {
              o.order_number as "orderNumber",
              o.order_date::text as "orderDate",
              o.serial_number as "serialNumber",
+             o.psystem_serial as "psystemSerial",
              o.reference_number as "referenceNumber",
              o.area_id as "areaId",
              o.package_count as "packageCount",
@@ -2990,6 +2998,7 @@ export class OperationsService {
              o.order_number as "orderNumber",
              o.order_date::text as "orderDate",
              o.serial_number as "serialNumber",
+             o.psystem_serial as "psystemSerial",
              o.reference_number as "referenceNumber",
              o.area_id as "areaId",
              o.package_count as "packageCount",
@@ -3619,30 +3628,10 @@ export class OperationsService {
       .digest("hex");
 
     return this.transactions.execute(async (transaction) => {
-      const numbering = (
-        await sql<{ enabled: boolean }>`
-        select shipment_serial_enabled_at is not null as enabled
-          from companies where id=${companyId}::uuid for share
-      `.execute(transaction)
-      ).rows[0];
-      if (numbering === undefined) {
-        throw new ApplicationException(
-          "company_not_found",
-          "Company was not found",
-          HttpStatus.NOT_FOUND,
-        );
-      }
-      if (numbering.enabled && suppliedSerialNumber !== null) {
-        throw new ApplicationException(
-          "shipment_serial_server_generated",
-          "Shipment Serial Number is generated automatically for this Delivery Company. Remove the supplied serial and use the appropriate external reference field.",
-          HttpStatus.BAD_REQUEST,
-        );
-      }
-      if (!numbering.enabled && suppliedSerialNumber === null) {
+      if (suppliedSerialNumber === null) {
         throw new ApplicationException(
           "serial_number_required",
-          "Serial Number is required until Company shipment serial generation is activated",
+          "Serial Number is required",
           HttpStatus.BAD_REQUEST,
         );
       }
@@ -3682,19 +3671,16 @@ export class OperationsService {
         );
       }
 
-      // Allocation happens only after this idempotency key has won its
-      // reservation. It shares this transaction with both normalized value
-      // creation and the Order INSERT, so retries and rollbacks consume no
-      // shipment serial.
-      const serialNumber = numbering.enabled
-        ? (
-            await sql<{
-              value: string;
-            }>`select allocate_company_shipment_serial(${companyId}::uuid) as value`.execute(
-              transaction,
-            )
-          ).rows[0]!.value
-        : suppliedSerialNumber!;
+      // PSystem allocation happens only after this idempotency key has won its
+      // reservation. It shares the Order transaction, so a rollback consumes
+      // no number. Legacy Companies that are not enabled receive NULL.
+      const psystemSerial = (
+        await sql<{ value: string | null }>`
+          select allocate_company_psystem_serial(${companyId}::uuid) as value
+        `.execute(transaction)
+      ).rows[0]?.value ?? null;
+      const psystemSerialNormalized = psystemSerial?.toLowerCase() ?? null;
+      const serialNumber = suppliedSerialNumber;
       const serialNumberNormalized = this.normalizeOrderIdentifier(serialNumber);
 
       await this.assertOrderIdentifiersAvailable(transaction, companyId, {
@@ -3857,6 +3843,7 @@ export class OperationsService {
       const inserted = await sql<{ id: string }>`
         insert into orders (
           company_id, order_number, serial_number, serial_number_normalized,
+          psystem_serial, psystem_serial_normalized,
           reference_number, reference_number_normalized, financial_model_version,
           order_date, trader_id, area_id, created_by_account_id,
           assigned_driver_id, customer_id, customer_address_id,customer_name, customer_mobile_number,
@@ -3875,6 +3862,7 @@ export class OperationsService {
           service_fee_override_reason, is_free_order, free_order_reason, order_type
         ) values (
           ${companyId}::uuid, ${orderNumber}, ${serialNumber}, ${serialNumberNormalized},
+          ${psystemSerial}, ${psystemSerialNormalized},
           ${referenceNumber}, ${referenceNumberNormalized}, 'trader_deduction_v1',
           current_date, ${traderRow.id}::uuid,
           ${area?.id ?? null}::uuid, ${actingAccountId}::uuid,
@@ -4089,6 +4077,7 @@ export class OperationsService {
           driverRow?.outsourcedFee == null ? "not_required" : "pending_delivery",
         referenceNumber,
         returnStatus: "not_applicable",
+        psystemSerial,
         serialNumber,
         serviceFee: financials.serviceFee.toFixed(2),
         serviceFeeOverrideReason: pricing.overrideReason,
@@ -4210,14 +4199,8 @@ export class OperationsService {
     };
   }
 
-  public async nextSerialNumber(): Promise<{ serialNumber: string; serverGenerated?: boolean }> {
+  public async nextSerialNumber(): Promise<{ serialNumber: string }> {
     const { companyId } = this.tenants.current();
-    const enabled =
-      (
-        await sql<{ enabled: boolean }>`select shipment_serial_enabled_at is not null enabled
-      from companies where id=${companyId}::uuid`.execute(this.database)
-      ).rows[0]?.enabled === true;
-    if (enabled) return { serialNumber: "", serverGenerated: true };
     const result = await sql<{ serialNumber: string }>`
       select (coalesce(max(serial_number::bigint), 0) + 1)::text as "serialNumber"
         from orders
@@ -4230,13 +4213,7 @@ export class OperationsService {
   }
 
   private async legacySerialInputForAutomaticPath(): Promise<{ serialNumber?: string }> {
-    const { companyId } = this.tenants.current();
-    const enabled =
-      (
-        await sql<{ enabled: boolean }>`select shipment_serial_enabled_at is not null enabled
-      from companies where id=${companyId}::uuid`.execute(this.database)
-      ).rows[0]?.enabled === true;
-    return enabled ? {} : this.nextSerialNumber();
+    return this.nextSerialNumber();
   }
 
   public async importOrdersCsv(
@@ -4251,12 +4228,7 @@ export class OperationsService {
     const identity = this.identities.current();
     const actingAccountId = actingAccountIdOverride ?? identity.identityId;
     const csv = String((input as { readonly csv?: unknown }).csv ?? "");
-    const shipmentSerialEnabled =
-      (
-        await sql<{ enabled: boolean }>`select shipment_serial_enabled_at is not null enabled
-      from companies where id=${companyId}::uuid`.execute(this.database)
-      ).rows[0]?.enabled === true;
-    const parsed = this.parseOrdersCsv(csv, shipmentSerialEnabled);
+    const parsed = this.parseOrdersCsv(csv);
     const errors = parsed.errors.slice();
     // Validation is all-or-nothing and runs BEFORE the transaction opens, which
     // is what makes this import atomic in the way it already promised: if any
@@ -4492,6 +4464,7 @@ export class OperationsService {
                  o.pricing_provenance_status as "pricingProvenance",
                  o.reference_number as "referenceNumber",
                  o.serial_number as "serialNumber",
+                 o.psystem_serial as "psystemSerial",
                  o.service_fee::text as "serviceFee",
                  o.trader_id as "traderId",
                  t.name_en as "traderName",
@@ -6068,6 +6041,7 @@ export class OperationsService {
              o.area_id as "areaId",
              o.order_number as "orderNumber",
              o.serial_number as "serialNumber",
+             o.psystem_serial as "psystemSerial",
              o.reference_number as "referenceNumber",
              o.order_date::text as "orderDate",
              /* Identifier-only additions mirroring the list response, so the
@@ -6646,32 +6620,20 @@ export class OperationsService {
     // NOT NULL column accepts because it carries no non-empty check.
     const customerAddress = (input.customerAddress ?? "").trim();
     const suppliedSerialNumber = input.serialNumber?.trim() || null;
-    const numberingEnabled =
-      (
-        await sql<{ enabled: boolean }>`select shipment_serial_enabled_at is not null enabled
-      from companies where id=${companyId}::uuid for share`.execute(database)
-      ).rows[0]?.enabled === true;
-    if (numberingEnabled && suppliedSerialNumber !== null) {
-      throw new ApplicationException(
-        "shipment_serial_server_generated",
-        "Shipment Serial Number is generated automatically for this Delivery Company. Remove the supplied serial and use the appropriate external reference field.",
-        HttpStatus.BAD_REQUEST,
-      );
-    }
-    if (!numberingEnabled && suppliedSerialNumber === null) {
+    if (suppliedSerialNumber === null) {
       throw new ApplicationException(
         "serial_number_required",
-        "Serial Number is required until Company shipment serial generation is activated",
+        "Serial Number is required",
         HttpStatus.BAD_REQUEST,
       );
     }
-    const serialNumber = numberingEnabled
-      ? (
-          await sql<{
-            value: string;
-          }>`select allocate_company_shipment_serial(${companyId}::uuid) value`.execute(database)
-        ).rows[0]!.value
-      : suppliedSerialNumber!;
+    const serialNumber = suppliedSerialNumber;
+    const psystemSerial = (
+      await sql<{ value: string | null }>`
+        select allocate_company_psystem_serial(${companyId}::uuid) value
+      `.execute(database)
+    ).rows[0]?.value ?? null;
+    const psystemSerialNormalized = psystemSerial?.toLowerCase() ?? null;
     const referenceNumber = input.referenceNumber?.trim() || null;
     const serialNumberNormalized = this.normalizeOrderIdentifier(serialNumber);
     const referenceNumberNormalized =
@@ -6765,6 +6727,7 @@ export class OperationsService {
     const inserted = await sql<{ id: string }>`
       insert into orders (
         company_id, order_number, serial_number, serial_number_normalized,
+        psystem_serial, psystem_serial_normalized,
         reference_number, reference_number_normalized, financial_model_version,
         order_date, trader_id, area_id, created_by_account_id,
         import_batch_id, assigned_driver_id,customer_id,customer_address_id,
@@ -6783,6 +6746,7 @@ export class OperationsService {
         service_fee_override_reason
       ) values (
         ${companyId}::uuid, ${orderNumber}, ${serialNumber}, ${serialNumberNormalized},
+        ${psystemSerial}, ${psystemSerialNormalized},
         ${referenceNumber}, ${referenceNumberNormalized}, 'trader_deduction_v1',
         current_date, ${traderRow.id}::uuid,
         ${area.id}::uuid, ${input.createdByAccountId}::uuid,
@@ -6892,6 +6856,7 @@ export class OperationsService {
         driverRow?.outsourcedFee == null ? "not_required" : "pending_delivery",
       referenceNumber,
       returnStatus: "not_applicable",
+      psystemSerial,
       serialNumber,
       serviceFee: financials.serviceFee.toFixed(2),
       serviceFeeOverrideReason: pricing.overrideReason,
@@ -7078,6 +7043,7 @@ export class OperationsService {
       select o.id,
              o.order_number as "orderNumber",
              o.serial_number as "serialNumber",
+             o.psystem_serial as "psystemSerial",
              o.reference_number as "referenceNumber",
              o.order_date::text as "orderDate",
              t.name_en as "traderName",
@@ -7283,10 +7249,7 @@ export class OperationsService {
     return amount.toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
   }
 
-  private parseOrdersCsv(
-    csv: string,
-    shipmentSerialEnabled = false,
-  ): {
+  private parseOrdersCsv(csv: string): {
     readonly errors: readonly string[];
     /** Rows that failed validation, already phrased for the importer. */
     readonly invalid: readonly OperationsOrderImportRow[];
@@ -7300,6 +7263,14 @@ export class OperationsService {
     }
     const header = lines[0]?.map((cell) => cell.trim()) ?? [];
     const index = new Map(header.map((name, position) => [name, position]));
+    if (index.has("psystemSerial") || index.has("psystem_serial")) {
+      return {
+        errors: ["PSystem Serial is generated by Tawseelhub and must not be supplied in imports"],
+        invalid: [],
+        rows: [],
+        totalRows: Math.max(lines.length - 1, 0),
+      };
+    }
     // `serviceFee` is deliberately NOT required.
     //
     // Leaving the column out — or leaving a cell blank — means "price this from
@@ -7313,7 +7284,7 @@ export class OperationsService {
     // and reason rules. Existing import files that carry the column are
     // therefore unaffected.
     const required = [
-      ...(shipmentSerialEnabled ? [] : ["serialNumber"]),
+      "serialNumber",
       "traderId",
       "customerName",
       "customerMobileNumber",
@@ -7352,11 +7323,6 @@ export class OperationsService {
       const rowErrors: string[] = [];
       for (const column of required) {
         if (read(column).length === 0) rowErrors.push(`${column} is required`);
-      }
-      if (shipmentSerialEnabled && read("serialNumber").length > 0) {
-        rowErrors.push(
-          "serialNumber must be blank because this Company generates it automatically",
-        );
       }
       if (!Number.isFinite(codAmount)) {
         rowErrors.push("Invalid COD: enter a number, or 0 for a no-collection Order");
@@ -7421,9 +7387,7 @@ export class OperationsService {
         packageCount,
         traderId: read("traderId"),
       } as CreateOrderDto;
-      if (!shipmentSerialEnabled) {
-        (parsedRow as { serialNumber: string }).serialNumber = read("serialNumber");
-      }
+      (parsedRow as { serialNumber: string }).serialNumber = read("serialNumber");
       // Omitted rather than sent as undefined: `insertOrder` spreads the fee in
       // only when the key is present, and a present-but-undefined key would
       // read as a requested fee of nothing.

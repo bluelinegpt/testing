@@ -28,7 +28,7 @@ final class DriverOfflineDatabase implements OfflineStore {
   Database? _database;
 
   static const _fileName = 'driver_offline.db';
-  static const _schemaVersion = 1;
+  static const _schemaVersion = 2;
 
   Future<Database> get database async => _database ??= await _open();
 
@@ -49,6 +49,7 @@ final class DriverOfflineDatabase implements OfflineStore {
               driver_account_id TEXT NOT NULL,
               order_number TEXT NOT NULL,
               serial_number TEXT NOT NULL,
+              psystem_serial TEXT,
               reference TEXT,
               order_date TEXT NOT NULL,
               customer_name TEXT NOT NULL,
@@ -116,10 +117,13 @@ final class DriverOfflineDatabase implements OfflineStore {
             )
           ''');
         },
-        // No prior schema versions yet — reserved for future migrations,
-        // matching the migration-style onCreate/onUpgrade shape requested by
-        // Prompt 16 §B even though there is nothing to upgrade from yet.
-        onUpgrade: (db, oldVersion, newVersion) async {},
+        onUpgrade: (db, oldVersion, newVersion) async {
+          if (oldVersion < 2) {
+            await db.execute(
+              'ALTER TABLE driver_orders_cache ADD COLUMN psystem_serial TEXT',
+            );
+          }
+        },
       ),
     );
   }

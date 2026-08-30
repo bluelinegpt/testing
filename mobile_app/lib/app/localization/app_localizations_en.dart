@@ -557,6 +557,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get serialNumber => 'Serial No.';
 
   @override
+  String get psystemSerial => 'PSystem Serial';
+
+  @override
   String get location => 'Location';
 
   @override

@@ -488,6 +488,7 @@ export interface OperationsOrder {
   readonly serviceFeeOverrideReason?: string | null;
   readonly serviceFeeVatAmount?: string | null;
   readonly serialNumber?: string | null;
+  readonly psystemSerial?: string | null;
   readonly totalDeductions?: string | null;
   readonly traderNetPayable: string;
   readonly traderReceivableId?: string | null;

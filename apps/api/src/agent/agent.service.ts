@@ -1833,17 +1833,17 @@ export class AgentService {
         ? [
             `رقم بوليصة الشحن / رقم الطلب: ${tracking.airwayBill}`,
             `الحالة: ${tracking.statusLabel}`,
-            `آخر تحديث: ${this.formatDubaiDateTime(tracking.lastUpdated)}`,
+            `آخر تحديث: ${this.formatDubaiDateTime(tracking.lastUpdated, language)}`,
             ...(tracking.deliveredAt
-              ? [`تم التسليم في: ${this.formatDubaiDateTime(tracking.deliveredAt)}`]
+              ? [`تم التسليم في: ${this.formatDubaiDateTime(tracking.deliveredAt, language)}`]
               : []),
           ]
         : [
             `Airway Bill / Order Number: ${tracking.airwayBill}`,
             `Status: ${tracking.statusLabel}`,
-            `Last Updated: ${this.formatDubaiDateTime(tracking.lastUpdated)}`,
+            `Last Updated: ${this.formatDubaiDateTime(tracking.lastUpdated, language)}`,
             ...(tracking.deliveredAt
-              ? [`Delivered At: ${this.formatDubaiDateTime(tracking.deliveredAt)}`]
+              ? [`Delivered At: ${this.formatDubaiDateTime(tracking.deliveredAt, language)}`]
               : []),
           ];
     const content = `${lines.join("\n")}\n${language === "ar" ? "هل لديك سؤال آخر، أو كيف يمكنني مساعدتك الآن؟" : "Do you have another question, or how can I help you now?"}`;
@@ -1908,16 +1908,16 @@ export class AgentService {
       language === "ar"
         ? [
             `الحالة: ${result.statusLabel}`,
-            `آخر تحديث: ${this.formatDubaiDateTime(result.lastUpdated)}`,
+            `آخر تحديث: ${this.formatDubaiDateTime(result.lastUpdated, language)}`,
             ...(result.deliveredAt
-              ? [`تم التسليم في: ${this.formatDubaiDateTime(result.deliveredAt)}`]
+              ? [`تم التسليم في: ${this.formatDubaiDateTime(result.deliveredAt, language)}`]
               : []),
           ]
         : [
             `Status: ${result.statusLabel}`,
-            `Last Updated: ${this.formatDubaiDateTime(result.lastUpdated)}`,
+            `Last Updated: ${this.formatDubaiDateTime(result.lastUpdated, language)}`,
             ...(result.deliveredAt
-              ? [`Delivered At: ${this.formatDubaiDateTime(result.deliveredAt)}`]
+              ? [`Delivered At: ${this.formatDubaiDateTime(result.deliveredAt, language)}`]
               : []),
           ];
     const content = `${lines.join("\n")}\n${language === "ar" ? "هل لديك سؤال آخر، أو كيف يمكنني مساعدتك الآن؟" : "Do you have another question, or how can I help you now?"}`;
@@ -2035,7 +2035,7 @@ export class AgentService {
       ? result.offers.map((offer) => `${offer.serviceType}: AED ${offer.customerPrice}`).join("\n")
       : "This shipment requires a custom quotation.";
     return {
-      content: `Your quote request has been received. Reference: ${result.quoteReference}\n${offerText}${result.expiresAt ? `\nValid until: ${this.formatDubaiDateTime(result.expiresAt)}` : ""}\nDo you have another question, or how can I help you now?`,
+      content: `Your quote request has been received. Reference: ${result.quoteReference}\n${offerText}${result.expiresAt ? `\nValid until: ${this.formatDubaiDateTime(result.expiresAt, "en")}` : ""}\nDo you have another question, or how can I help you now?`,
       intent: "customer_quote" as const,
       status: "completed",
       structured: { state: this.completedWorkflowState(state) },
@@ -3692,16 +3692,11 @@ export class AgentService {
     return normalized?.startsWith("971") ? `+${normalized}` : value;
   }
 
-  private formatDubaiDateTime(value: string): string {
-    return new Intl.DateTimeFormat("en-GB", {
-      day: "2-digit",
-      hour: "2-digit",
-      hour12: false,
-      minute: "2-digit",
-      month: "short",
+  private formatDubaiDateTime(value: string, language: AgentLanguage): string {
+    return new Intl.DateTimeFormat(language === "ar" ? "ar-AE" : "en-AE", {
+      dateStyle: "medium",
+      timeStyle: "short",
       timeZone: "Asia/Dubai",
-      timeZoneName: "short",
-      year: "numeric",
     }).format(new Date(value));
   }
 

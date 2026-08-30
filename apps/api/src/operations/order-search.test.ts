@@ -77,6 +77,12 @@ describe("unified order search predicate", () => {
     expect(values).toContain("sn-0000123%");
   });
 
+  it("probes PSystem Serial by its exact global normalized value", () => {
+    const sqlText = compiled("LAH0000001");
+    expect(sqlText).toContain("o.psystem_serial_normalized = ");
+    expect(parameters("LAH0000001")).toContain("lah0000001");
+  });
+
   it("preserves leading zeros in a Serial Number", () => {
     const values = parameters("sn-000123");
     expect(values).toContain("sn-000123");

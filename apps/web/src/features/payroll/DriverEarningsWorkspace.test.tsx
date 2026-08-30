@@ -173,6 +173,7 @@ describe("DriverEarningsWorkspace period confirmation", () => {
       target: { value: "ahmad" },
     });
     expect(screen.queryByLabelText("Number of Collected Orders")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Date To"), { target: { value: "2026-08-29" } });
     fireEvent.click(screen.getByRole("button", { name: "Calculate Now" }));
     fireEvent.click(await screen.findByRole("button", { name: "Confirm & Lock Earnings" }));
     expect(await screen.findByText("Earning Period Confirmed")).toBeInTheDocument();
@@ -214,6 +215,7 @@ describe("DriverEarningsWorkspace period confirmation", () => {
       target: { value: "ahmad" },
     });
     expect(screen.queryByLabelText("Number of Collected Orders")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Date To"), { target: { value: "2026-08-29" } });
     fireEvent.click(screen.getByRole("button", { name: "Calculate Now" }));
     expect(await screen.findByText("Delivery Transactions to Include")).toBeInTheDocument();
     for (const order of ["ORD-000028", "ORD-000029", "ORD-000034"])
@@ -252,11 +254,44 @@ describe("DriverEarningsWorkspace period confirmation", () => {
     fireEvent.change(await screen.findByRole("combobox", { name: "Driver" }), {
       target: { value: "ahmad" },
     });
+    fireEvent.change(screen.getByLabelText("Date To"), { target: { value: "2026-08-29" } });
     fireEvent.click(screen.getByRole("button", { name: "Calculate Now" }));
     expect(
       await screen.findByRole("button", { name: "Confirm & Lock Earnings" }),
     ).toBeDisabled();
     expect(screen.getByText(/details do not match/)).toBeInTheDocument();
+  });
+
+  it("shows today as in progress and calculates completed earnings through yesterday", async () => {
+    const post = vi.fn(async () => ({
+      collectedOrders: 0,
+      collectionEarnings: "0.00",
+      collectionRate: "1.00",
+      collectionSources: [],
+      deliveredOrders: 6,
+      deliveryEarnings: "12.00",
+      deliverySources: sources,
+      totalEarnings: "12.00",
+    }));
+    const get = vi.fn(async (path: string) =>
+      path.includes("cash-accounts")
+        ? []
+        : path.includes("/periods?")
+          ? { items: [], nextAvailableStart: null }
+          : { items: [driver] },
+    );
+    render(<DriverEarningsWorkspace api={{ get, post } as never} canPay />);
+    await screen.findByRole("combobox", { name: "Driver" });
+    expect(
+      await screen.findByRole("columnheader", { name: "Collected Orders" }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Calculate Now" }));
+    expect(await screen.findByText(/adjusted through 2026-08-29/i)).toBeInTheDocument();
+    expect(post).toHaveBeenCalledWith("operations/payroll/driver-earnings/periods/preview", {
+      dateFrom: "2026-08-01",
+      dateTo: "2026-08-29",
+      driverId: "ahmad",
+    });
   });
 
   it("loads a persisted locked period after selecting the Driver", async () => {

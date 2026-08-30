@@ -176,6 +176,7 @@
   "assignedToMe": "Assigned to Me",
   "orderDate": "Order Date",
   "serialNumber": "Serial No.",
+  "psystemSerial": "PSystem Serial",
   "location": "Location",
   "reference": "Reference",
   "emptyValuePlaceholder": "—",

@@ -82,5 +82,8 @@ test-artifacts/
 Dana/*.xlsx
 outputs/
 
+# Local administrator recovery scripts may contain one-time credentials
+apps/api/reset-*.local.ts
+
 # Store server bundle
 apps/store/dist-server/

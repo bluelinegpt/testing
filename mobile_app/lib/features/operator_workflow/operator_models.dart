@@ -6,6 +6,7 @@ final class OperatorOrder {
     required this.id,
     required this.orderNumber,
     required this.serialNumber,
+    this.psystemSerial,
     required this.orderDate,
     required this.traderName,
     required this.customerName,
@@ -33,7 +34,7 @@ final class OperatorOrder {
       areaName,
       cod,
       status;
-  final String? reference, driverId, driverName, notes;
+  final String? psystemSerial, reference, driverId, driverName, notes;
   final List<OperatorOrderEvent> history;
 
   /// Present only on the single-Order detail fetch — mirrors the backend's

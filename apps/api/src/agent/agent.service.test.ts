@@ -230,6 +230,8 @@ describe("AgentService tracking mobile auto-verification", () => {
     expect(verifyAmbiguousShipment).toHaveBeenCalledWith("tok-123", "0506468441", "en");
     expect(response.content).not.toContain("Additional verification required");
     expect(response.content).toContain("Delivered");
+    expect(response.content).toContain("28 Aug 2026, 12:00 PM");
+    expect(response.content).not.toContain("GST");
   });
 
   it("does not count the automatic attempt against the failed-attempt limit, and asks for a different number instead of looping on the same one", async () => {

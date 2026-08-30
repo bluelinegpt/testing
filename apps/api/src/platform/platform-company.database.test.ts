@@ -159,7 +159,6 @@ describe.skipIf(!runTests)("Platform Company onboarding", () => {
 
           const payload = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
             name: `Test Delivery ${suffix}`,
-            shipmentPrefix: "TST",
             subdomain: `tst${suffix}`,
             environment: "sandbox",
             countryCode: "AE",
@@ -517,7 +516,6 @@ describe.skipIf(!runTests)("Platform Company onboarding", () => {
               subdomain: `ts2${suffix}`,
               name: `Second Delivery ${suffix}`,
               environment: "demo",
-              shipmentPrefix: "SND",
             }),
           ).expect(201);
           const secondId = second.body.companyId as string;

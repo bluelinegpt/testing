@@ -19,11 +19,23 @@ export function Modal({
   title: string;
   titleId: string;
 }) {
+  const hostRef = useRef<HTMLDialogElement>(null);
   const dialogRef = useRef<HTMLElement>(null);
   const closeRef = useRef(onRequestClose);
   closeRef.current = onRequestClose;
 
   useEffect(() => {
+    const host = hostRef.current;
+    if (host !== null) {
+      // Native modal dialogs are promoted into the browser's top layer. This
+      // is stronger than any z-index and prevents floating assistants,
+      // portalled menus, or transformed ancestors from covering the dialog.
+      // jsdom and older embedded browsers may not implement showModal; the
+      // open attribute keeps the existing fixed-backdrop behaviour as a safe
+      // fallback there.
+      if (typeof host.showModal === "function") host.showModal();
+      else host.setAttribute("open", "");
+    }
     const previousOverflow = document.body.style.overflow;
     const previouslyFocused = document.activeElement as HTMLElement | null;
     document.body.style.overflow = "hidden";
@@ -64,41 +76,50 @@ export function Modal({
     return () => {
       document.removeEventListener("keydown", onKeyDown);
       document.body.style.overflow = previousOverflow;
+      if (host?.open && typeof host.close === "function") host.close();
       previouslyFocused?.focus();
     };
   }, []);
 
   return createPortal(
-    <div
-      className="modal-backdrop"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onRequestClose();
+    <dialog
+      aria-labelledby={titleId}
+      aria-modal="true"
+      className="modal-host"
+      onCancel={(event) => {
+        event.preventDefault();
+        onRequestClose();
       }}
+      ref={hostRef}
     >
-      <section
-        aria-labelledby={titleId}
-        aria-modal="true"
-        className={`modal ${className}`.trim()}
-        ref={dialogRef}
-        role="dialog"
+      <div
+        className="modal-backdrop"
+        onMouseDown={(event) => {
+          if (event.target === event.currentTarget) onRequestClose();
+        }}
       >
-        <header className="modal-heading">
-          <div className="modal-heading-title">
-            <h2 id={titleId}>{title}</h2>
-            <VersionBadge inline />
-          </div>
-          <button
-            aria-label={closeLabel}
-            className="close-button"
-            onClick={onRequestClose}
-            type="button"
-          >
-            <X aria-hidden="true" size={18} strokeWidth={2} />
-          </button>
-        </header>
-        {children}
-      </section>
-    </div>,
+        <section
+          className={`modal ${className}`.trim()}
+          ref={dialogRef}
+        >
+          <header className="modal-heading">
+            <div className="modal-heading-title">
+              <h2 id={titleId}>{title}</h2>
+              <VersionBadge inline />
+            </div>
+            <button
+              aria-label={closeLabel}
+              className="close-button"
+              onClick={onRequestClose}
+              type="button"
+            >
+              <X aria-hidden="true" size={18} strokeWidth={2} />
+            </button>
+          </header>
+          {children}
+        </section>
+      </div>
+    </dialog>,
     document.body,
   );
 }

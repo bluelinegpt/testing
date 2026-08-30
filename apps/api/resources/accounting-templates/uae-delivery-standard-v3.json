@@ -1,0 +1,3381 @@
+{
+  "accountMappings": [
+    {
+      "creditAccountKey": "REVENUE_ADDITIONAL_FEE",
+      "debitAccountKey": null,
+      "expenseAccountKey": null,
+      "feeAccountKey": null,
+      "isActive": true,
+      "mappingKey": "additional_fee_revenue",
+      "payableAccountKey": null,
+      "vatAccountKey": null
+    },
+    {
+      "creditAccountKey": null,
+      "debitAccountKey": null,
+      "expenseAccountKey": "EXPENSE_BANK_CHARGE",
+      "feeAccountKey": null,
+      "isActive": true,
+      "mappingKey": "bank_charge",
+      "payableAccountKey": null,
+      "vatAccountKey": null
+    },
+    {
+      "creditAccountKey": null,
+      "debitAccountKey": "ASSET_BANK",
+      "expenseAccountKey": null,
+      "feeAccountKey": null,
+      "isActive": true,
+      "mappingKey": "bank_transfer",
+      "payableAccountKey": null,
+      "vatAccountKey": null
+    },
+    {
+      "creditAccountKey": "LIABILITY_OTHER",
+      "debitAccountKey": null,
+      "expenseAccountKey": null,
+      "feeAccountKey": null,
+      "isActive": true,
+      "mappingKey": "cash_bank_deposit_loan",
+      "payableAccountKey": null,
+      "vatAccountKey": null
+    },
+    {
+      "creditAccountKey": "EQUITY_OWNER",
+      "debitAccountKey": null,
+      "expenseAccountKey": null,
+      "feeAccountKey": null,
+      "isActive": true,
+      "mappingKey": "cash_bank_deposit_owner_contribution",
+      "payableAccountKey": null,
+      "vatAccountKey": null
+    },
+    {
+      "creditAccountKey": "EXPENSE_GENERAL",
+      "debitAccountKey": null,
+      "expenseAccountKey": null,
+      "feeAccountKey": null,
+      "isActive": true,
+      "mappingKey": "cash_bank_deposit_refund",
+      "payableAccountKey": null,
+      "vatAccountKey": null
+    },
+    {
+      "creditAccountKey": null,
+      "debitAccountKey": "LIABILITY_OTHER",
+      "expenseAccountKey": null,
+      "feeAccountKey": null,
+      "isActive": true,
+      "mappingKey": "cash_bank_withdrawal_loan_repayment",
+      "payableAccountKey": null,
+      "vatAccountKey": null
+    },
+    {
+      "creditAccountKey": null,
+      "debitAccountKey": "EQUITY_OWNER",
+      "expenseAccountKey": null,
+      "feeAccountKey": null,
+      "isActive": true,
+      "mappingKey": "cash_bank_withdrawal_owner",
+      "payableAccountKey": null,
+      "vatAccountKey": null
+    },
+    {
+      "creditAccountKey": null,
+      "debitAccountKey": "LIABILITY_ACCOUNTS_PAYABLE",
+      "expenseAccountKey": null,
+      "feeAccountKey": null,
+      "isActive": true,
+      "mappingKey": "cash_bank_withdrawal_refund",
+      "payableAccountKey": null,
+      "vatAccountKey": null
+    },
+    {
+      "creditAccountKey": null,
+      "debitAccountKey": "ASSET_CASH",
+      "expenseAccountKey": null,
+      "feeAccountKey": null,
+      "isActive": true,
+      "mappingKey": "cash_transfer",
+      "payableAccountKey": null,
+      "vatAccountKey": null
+    },
+    {
+      "creditAccountKey": "REVENUE_DELIVERY",
+      "debitAccountKey": null,
+      "expenseAccountKey": null,
+      "feeAccountKey": null,
+      "isActive": true,
+      "mappingKey": "delivery_revenue",
+      "payableAccountKey": null,
+      "vatAccountKey": null
+    },
+    {
+      "creditAccountKey": null,
+      "debitAccountKey": "ASSET_CASH",
+      "expenseAccountKey": null,
+      "feeAccountKey": null,
+      "isActive": true,
+      "mappingKey": "driver_collection_cash",
+      "payableAccountKey": null,
+      "vatAccountKey": null
+    },
+    {
+      "creditAccountKey": null,
+      "debitAccountKey": null,
+      "expenseAccountKey": null,
+      "feeAccountKey": null,
+      "isActive": true,
+      "mappingKey": "driver_collection_fee_offset",
+      "payableAccountKey": "LIABILITY_DRIVER_PAYABLE",
+      "vatAccountKey": null
+    },
+    {
+      "creditAccountKey": null,
+      "debitAccountKey": null,
+      "expenseAccountKey": "EXPENSE_DRIVER",
+      "feeAccountKey": null,
+      "isActive": true,
+      "mappingKey": "driver_expense",
+      "payableAccountKey": null,
+      "vatAccountKey": null
+    },
+    {
+      "creditAccountKey": null,
+      "debitAccountKey": "ASSET_PREPAID_EXPENSE_1140",
+      "expenseAccountKey": null,
+      "feeAccountKey": null,
+      "isActive": true,
+      "mappingKey": "employee_advances",
+      "payableAccountKey": null,
+      "vatAccountKey": null
+    },
+    {
+      "creditAccountKey": null,
+      "debitAccountKey": "ASSET_PREPAID_EXPENSE_1130",
+      "expenseAccountKey": null,
+      "feeAccountKey": null,
+      "isActive": true,
+      "mappingKey": "employee_interim_payroll_clearing",
+      "payableAccountKey": null,
+      "vatAccountKey": null
+    },
+    {
+      "creditAccountKey": "ASSET_CASH",
+      "debitAccountKey": null,
+      "expenseAccountKey": null,
+      "feeAccountKey": null,
+      "isActive": true,
+      "mappingKey": "employee_payroll_cash_payment",
+      "payableAccountKey": null,
+      "vatAccountKey": null
+    },
+    {
+      "creditAccountKey": null,
+      "debitAccountKey": null,
+      "expenseAccountKey": "EXPENSE_PAYROLL",
+      "feeAccountKey": null,
+      "isActive": true,
+      "mappingKey": "employee_payroll_expense",
+      "payableAccountKey": null,
+      "vatAccountKey": null
+    },
+    {
+      "creditAccountKey": null,
+      "debitAccountKey": null,
+      "expenseAccountKey": null,
+      "feeAccountKey": null,
+      "isActive": true,
+      "mappingKey": "employee_payroll_payable",
+      "payableAccountKey": "LIABILITY_PAYROLL_PAYABLE",
+      "vatAccountKey": null
+    },
+    {
+      "creditAccountKey": null,
+      "debitAccountKey": null,
+      "expenseAccountKey": "EXPENSE_GENERAL",
+      "feeAccountKey": null,
+      "isActive": true,
+      "mappingKey": "general_expense",
+      "payableAccountKey": null,
+      "vatAccountKey": null
+    },
+    {
+      "creditAccountKey": "ASSET_BANK",
+      "debitAccountKey": null,
+      "expenseAccountKey": null,
+      "feeAccountKey": null,
+      "isActive": true,
+      "mappingKey": "general_expense_bank_payment",
+      "payableAccountKey": null,
+      "vatAccountKey": null
+    },
+    {
+      "creditAccountKey": "ASSET_CASH",
+      "debitAccountKey": null,
+      "expenseAccountKey": null,
+      "feeAccountKey": null,
+      "isActive": true,
+      "mappingKey": "general_expense_cash_payment",
+      "payableAccountKey": null,
+      "vatAccountKey": null
+    },
+    {
+      "creditAccountKey": null,
+      "debitAccountKey": null,
+      "expenseAccountKey": null,
+      "feeAccountKey": null,
+      "isActive": true,
+      "mappingKey": "general_expense_payable",
+      "payableAccountKey": "LIABILITY_ACCOUNTS_PAYABLE",
+      "vatAccountKey": null
+    },
+    {
+      "creditAccountKey": null,
+      "debitAccountKey": null,
+      "expenseAccountKey": null,
+      "feeAccountKey": null,
+      "isActive": true,
+      "mappingKey": "input_vat",
+      "payableAccountKey": null,
+      "vatAccountKey": "ASSET_OTHER_RECEIVABLE_1110"
+    },
+    {
+      "creditAccountKey": null,
+      "debitAccountKey": "ASSET_ACCOUNTS_RECEIVABLE",
+      "expenseAccountKey": null,
+      "feeAccountKey": null,
+      "isActive": true,
+      "mappingKey": "order_cod_receivable",
+      "payableAccountKey": null,
+      "vatAccountKey": null
+    },
+    {
+      "creditAccountKey": null,
+      "debitAccountKey": null,
+      "expenseAccountKey": null,
+      "feeAccountKey": null,
+      "isActive": true,
+      "mappingKey": "output_vat",
+      "payableAccountKey": null,
+      "vatAccountKey": "LIABILITY_VAT_PAYABLE"
+    },
+    {
+      "creditAccountKey": "ASSET_CASH",
+      "debitAccountKey": null,
+      "expenseAccountKey": null,
+      "feeAccountKey": null,
+      "isActive": true,
+      "mappingKey": "outsourced_driver_cash_payment",
+      "payableAccountKey": null,
+      "vatAccountKey": null
+    },
+    {
+      "creditAccountKey": null,
+      "debitAccountKey": null,
+      "expenseAccountKey": "EXPENSE_OUTSOURCED_DRIVER_FEE",
+      "feeAccountKey": null,
+      "isActive": true,
+      "mappingKey": "outsourced_driver_fee_expense",
+      "payableAccountKey": null,
+      "vatAccountKey": null
+    },
+    {
+      "creditAccountKey": null,
+      "debitAccountKey": null,
+      "expenseAccountKey": null,
+      "feeAccountKey": null,
+      "isActive": true,
+      "mappingKey": "outsourced_driver_payable",
+      "payableAccountKey": "LIABILITY_DRIVER_PAYABLE",
+      "vatAccountKey": null
+    },
+    {
+      "creditAccountKey": "REVENUE_SERVICE_FEE",
+      "debitAccountKey": null,
+      "expenseAccountKey": null,
+      "feeAccountKey": null,
+      "isActive": true,
+      "mappingKey": "service_fee_revenue",
+      "payableAccountKey": null,
+      "vatAccountKey": null
+    },
+    {
+      "creditAccountKey": null,
+      "debitAccountKey": null,
+      "expenseAccountKey": null,
+      "feeAccountKey": null,
+      "isActive": true,
+      "mappingKey": "trader_payable",
+      "payableAccountKey": "LIABILITY_TRADER_PAYABLE",
+      "vatAccountKey": null
+    },
+    {
+      "creditAccountKey": "ASSET_BANK",
+      "debitAccountKey": null,
+      "expenseAccountKey": null,
+      "feeAccountKey": null,
+      "isActive": true,
+      "mappingKey": "trader_settlement_bank",
+      "payableAccountKey": null,
+      "vatAccountKey": null
+    },
+    {
+      "creditAccountKey": "ASSET_CASH",
+      "debitAccountKey": null,
+      "expenseAccountKey": null,
+      "feeAccountKey": null,
+      "isActive": true,
+      "mappingKey": "trader_settlement_cash",
+      "payableAccountKey": null,
+      "vatAccountKey": null
+    }
+  ],
+  "accountingConfiguration": {
+    "companyDecisions": [
+      "manualAccountingActivationDate",
+      "fiscalYearStartDate",
+      "vatRegistrationAndRate"
+    ],
+    "defaultAccountKeys": {
+      "accountsPayable": "LIABILITY_ACCOUNTS_PAYABLE",
+      "accountsReceivable": "ASSET_ACCOUNTS_RECEIVABLE",
+      "bank": "ASSET_BANK",
+      "cash": "ASSET_CASH",
+      "currentYearEarnings": "EQUITY_CURRENT_YEAR_EARNINGS",
+      "deliveryRevenue": "REVENUE_DELIVERY",
+      "outsourcedDriverPayable": "LIABILITY_DRIVER_PAYABLE",
+      "payrollPayable": "LIABILITY_PAYROLL_PAYABLE",
+      "retainedEarnings": "EQUITY_RETAINED_EARNINGS",
+      "rounding": "EXPENSE_OTHER",
+      "serviceFeeRevenue": "REVENUE_SERVICE_FEE",
+      "suspense": null,
+      "traderPayable": "LIABILITY_TRADER_PAYABLE",
+      "vatInput": "ASSET_OTHER_RECEIVABLE_1110",
+      "vatOutput": "LIABILITY_VAT_PAYABLE"
+    },
+    "standardDefaults": {
+      "accountingEnabled": true,
+      "automaticPostingAreas": [
+        "cash_bank_management",
+        "driver_collections",
+        "employee_payroll",
+        "general_expenses",
+        "orders",
+        "outsourced_driver_fees",
+        "trader_receivables",
+        "trader_settlements"
+      ],
+      "automaticPostingEnabled": true,
+      "baseCurrency": "AED",
+      "defaultAccountingMethod": "accrual",
+      "fiscalYearStartMonth": 1,
+      "segregationPolicy": "single_user"
+    }
+  },
+  "accounts": [
+    {
+      "accountClass": "cash",
+      "accountType": "asset",
+      "code": "1000",
+      "controlAccountType": null,
+      "currency": "AED",
+      "description": null,
+      "isActive": true,
+      "isContraAccount": false,
+      "isControlAccount": false,
+      "isPostingAccount": true,
+      "isSystemAccount": false,
+      "key": "ASSET_CASH",
+      "nameAr": "الصندوق الرئيسي",
+      "nameEn": "Main Cash",
+      "normalBalance": "debit",
+      "parentAccountKey": null,
+      "systemPurpose": null
+    },
+    {
+      "accountClass": "bank",
+      "accountType": "asset",
+      "code": "1010",
+      "controlAccountType": null,
+      "currency": "AED",
+      "description": null,
+      "isActive": true,
+      "isContraAccount": false,
+      "isControlAccount": false,
+      "isPostingAccount": true,
+      "isSystemAccount": false,
+      "key": "ASSET_BANK",
+      "nameAr": "الحساب البنكي الرئيسي",
+      "nameEn": "Main Bank",
+      "normalBalance": "debit",
+      "parentAccountKey": null,
+      "systemPurpose": null
+    },
+    {
+      "accountClass": "accounts_receivable",
+      "accountType": "asset",
+      "code": "1100",
+      "controlAccountType": "accounts_receivable",
+      "currency": "AED",
+      "description": null,
+      "isActive": true,
+      "isContraAccount": false,
+      "isControlAccount": true,
+      "isPostingAccount": true,
+      "isSystemAccount": false,
+      "key": "ASSET_ACCOUNTS_RECEIVABLE",
+      "nameAr": "الحسابات المدينة",
+      "nameEn": "Accounts Receivable",
+      "normalBalance": "debit",
+      "parentAccountKey": null,
+      "systemPurpose": null
+    },
+    {
+      "accountClass": "other_receivable",
+      "accountType": "asset",
+      "code": "1110",
+      "controlAccountType": null,
+      "currency": "AED",
+      "description": null,
+      "isActive": true,
+      "isContraAccount": false,
+      "isControlAccount": false,
+      "isPostingAccount": true,
+      "isSystemAccount": false,
+      "key": "ASSET_OTHER_RECEIVABLE_1110",
+      "nameAr": "ضريبة القيمة المضافة المدخلة المستحقة",
+      "nameEn": "Input VAT Receivable",
+      "normalBalance": "debit",
+      "parentAccountKey": null,
+      "systemPurpose": null
+    },
+    {
+      "accountClass": "other_receivable",
+      "accountType": "asset",
+      "code": "1120",
+      "controlAccountType": null,
+      "currency": "AED",
+      "description": null,
+      "isActive": true,
+      "isContraAccount": false,
+      "isControlAccount": false,
+      "isPostingAccount": true,
+      "isSystemAccount": false,
+      "key": "ASSET_OTHER_RECEIVABLE_1120",
+      "nameAr": "ذمم مدينة أخرى",
+      "nameEn": "Other Receivable",
+      "normalBalance": "debit",
+      "parentAccountKey": null,
+      "systemPurpose": null
+    },
+    {
+      "accountClass": "prepaid_expense",
+      "accountType": "asset",
+      "code": "1130",
+      "controlAccountType": "employee_interim_payroll_clearing",
+      "currency": "AED",
+      "description": null,
+      "isActive": true,
+      "isContraAccount": false,
+      "isControlAccount": true,
+      "isPostingAccount": true,
+      "isSystemAccount": false,
+      "key": "ASSET_PREPAID_EXPENSE_1130",
+      "nameAr": "تسوية الرواتب المؤقتة للموظفين",
+      "nameEn": "Employee Interim Payroll Clearing",
+      "normalBalance": "debit",
+      "parentAccountKey": null,
+      "systemPurpose": null
+    },
+    {
+      "accountClass": "prepaid_expense",
+      "accountType": "asset",
+      "code": "1140",
+      "controlAccountType": "employee_advances",
+      "currency": "AED",
+      "description": null,
+      "isActive": true,
+      "isContraAccount": false,
+      "isControlAccount": true,
+      "isPostingAccount": true,
+      "isSystemAccount": false,
+      "key": "ASSET_PREPAID_EXPENSE_1140",
+      "nameAr": "سلف الموظفين",
+      "nameEn": "Employee Advances",
+      "normalBalance": "debit",
+      "parentAccountKey": null,
+      "systemPurpose": null
+    },
+    {
+      "accountClass": "other_asset",
+      "accountType": "asset",
+      "code": "1190",
+      "controlAccountType": null,
+      "currency": "AED",
+      "description": null,
+      "isActive": true,
+      "isContraAccount": false,
+      "isControlAccount": false,
+      "isPostingAccount": true,
+      "isSystemAccount": false,
+      "key": "ASSET_OTHER",
+      "nameAr": "حساب معلق",
+      "nameEn": "Suspense Account",
+      "normalBalance": "debit",
+      "parentAccountKey": null,
+      "systemPurpose": null
+    },
+    {
+      "accountClass": "trader_payable",
+      "accountType": "liability",
+      "code": "2000",
+      "controlAccountType": "trader_payable",
+      "currency": "AED",
+      "description": null,
+      "isActive": true,
+      "isContraAccount": false,
+      "isControlAccount": true,
+      "isPostingAccount": true,
+      "isSystemAccount": false,
+      "key": "LIABILITY_TRADER_PAYABLE",
+      "nameAr": "مستحقات التجار",
+      "nameEn": "Trader Payable",
+      "normalBalance": "credit",
+      "parentAccountKey": null,
+      "systemPurpose": null
+    },
+    {
+      "accountClass": "driver_payable",
+      "accountType": "liability",
+      "code": "2010",
+      "controlAccountType": "driver_payable",
+      "currency": "AED",
+      "description": null,
+      "isActive": true,
+      "isContraAccount": false,
+      "isControlAccount": true,
+      "isPostingAccount": true,
+      "isSystemAccount": false,
+      "key": "LIABILITY_DRIVER_PAYABLE",
+      "nameAr": "مستحقات السائقين الخارجيين",
+      "nameEn": "Outsourced Driver Payable",
+      "normalBalance": "credit",
+      "parentAccountKey": null,
+      "systemPurpose": null
+    },
+    {
+      "accountClass": "payroll_payable",
+      "accountType": "liability",
+      "code": "2020",
+      "controlAccountType": "payroll_payable",
+      "currency": "AED",
+      "description": null,
+      "isActive": true,
+      "isContraAccount": false,
+      "isControlAccount": true,
+      "isPostingAccount": true,
+      "isSystemAccount": false,
+      "key": "LIABILITY_PAYROLL_PAYABLE",
+      "nameAr": "الرواتب المستحقة",
+      "nameEn": "Payroll Payable",
+      "normalBalance": "credit",
+      "parentAccountKey": null,
+      "systemPurpose": null
+    },
+    {
+      "accountClass": "accounts_payable",
+      "accountType": "liability",
+      "code": "2030",
+      "controlAccountType": "accounts_payable",
+      "currency": "AED",
+      "description": null,
+      "isActive": true,
+      "isContraAccount": false,
+      "isControlAccount": true,
+      "isPostingAccount": true,
+      "isSystemAccount": false,
+      "key": "LIABILITY_ACCOUNTS_PAYABLE",
+      "nameAr": "الحسابات الدائنة",
+      "nameEn": "Accounts Payable",
+      "normalBalance": "credit",
+      "parentAccountKey": null,
+      "systemPurpose": null
+    },
+    {
+      "accountClass": "vat_payable",
+      "accountType": "liability",
+      "code": "2040",
+      "controlAccountType": null,
+      "currency": "AED",
+      "description": null,
+      "isActive": true,
+      "isContraAccount": false,
+      "isControlAccount": false,
+      "isPostingAccount": true,
+      "isSystemAccount": false,
+      "key": "LIABILITY_VAT_PAYABLE",
+      "nameAr": "ضريبة القيمة المضافة المستحقة",
+      "nameEn": "Output VAT Payable",
+      "normalBalance": "credit",
+      "parentAccountKey": null,
+      "systemPurpose": null
+    },
+    {
+      "accountClass": "other_liability",
+      "accountType": "liability",
+      "code": "2050",
+      "controlAccountType": null,
+      "currency": "AED",
+      "description": null,
+      "isActive": true,
+      "isContraAccount": false,
+      "isControlAccount": false,
+      "isPostingAccount": true,
+      "isSystemAccount": false,
+      "key": "LIABILITY_OTHER",
+      "nameAr": "القروض المستحقة",
+      "nameEn": "Loan Payable",
+      "normalBalance": "credit",
+      "parentAccountKey": null,
+      "systemPurpose": null
+    },
+    {
+      "accountClass": "retained_earnings",
+      "accountType": "equity",
+      "code": "3000",
+      "controlAccountType": null,
+      "currency": "AED",
+      "description": null,
+      "isActive": true,
+      "isContraAccount": false,
+      "isControlAccount": false,
+      "isPostingAccount": true,
+      "isSystemAccount": false,
+      "key": "EQUITY_RETAINED_EARNINGS",
+      "nameAr": "الأرباح المحتجزة",
+      "nameEn": "Retained Earnings",
+      "normalBalance": "credit",
+      "parentAccountKey": null,
+      "systemPurpose": null
+    },
+    {
+      "accountClass": "current_year_earnings",
+      "accountType": "equity",
+      "code": "3010",
+      "controlAccountType": null,
+      "currency": "AED",
+      "description": null,
+      "isActive": true,
+      "isContraAccount": false,
+      "isControlAccount": false,
+      "isPostingAccount": true,
+      "isSystemAccount": false,
+      "key": "EQUITY_CURRENT_YEAR_EARNINGS",
+      "nameAr": "أرباح السنة الحالية",
+      "nameEn": "Current Year Earnings",
+      "normalBalance": "credit",
+      "parentAccountKey": null,
+      "systemPurpose": null
+    },
+    {
+      "accountClass": "owner_equity",
+      "accountType": "equity",
+      "code": "3020",
+      "controlAccountType": null,
+      "currency": "AED",
+      "description": null,
+      "isActive": true,
+      "isContraAccount": false,
+      "isControlAccount": false,
+      "isPostingAccount": true,
+      "isSystemAccount": false,
+      "key": "EQUITY_OWNER",
+      "nameAr": "حقوق المالك",
+      "nameEn": "Owner Equity",
+      "normalBalance": "credit",
+      "parentAccountKey": null,
+      "systemPurpose": null
+    },
+    {
+      "accountClass": "delivery_revenue",
+      "accountType": "revenue",
+      "code": "4000",
+      "controlAccountType": null,
+      "currency": "AED",
+      "description": null,
+      "isActive": true,
+      "isContraAccount": false,
+      "isControlAccount": false,
+      "isPostingAccount": true,
+      "isSystemAccount": false,
+      "key": "REVENUE_DELIVERY",
+      "nameAr": "إيرادات التوصيل",
+      "nameEn": "Delivery Revenue",
+      "normalBalance": "credit",
+      "parentAccountKey": null,
+      "systemPurpose": null
+    },
+    {
+      "accountClass": "service_fee_revenue",
+      "accountType": "revenue",
+      "code": "4010",
+      "controlAccountType": null,
+      "currency": "AED",
+      "description": null,
+      "isActive": true,
+      "isContraAccount": false,
+      "isControlAccount": false,
+      "isPostingAccount": true,
+      "isSystemAccount": false,
+      "key": "REVENUE_SERVICE_FEE",
+      "nameAr": "إيرادات رسوم الخدمة",
+      "nameEn": "Service Fee Revenue",
+      "normalBalance": "credit",
+      "parentAccountKey": null,
+      "systemPurpose": null
+    },
+    {
+      "accountClass": "additional_fee_revenue",
+      "accountType": "revenue",
+      "code": "4020",
+      "controlAccountType": null,
+      "currency": "AED",
+      "description": null,
+      "isActive": true,
+      "isContraAccount": false,
+      "isControlAccount": false,
+      "isPostingAccount": true,
+      "isSystemAccount": false,
+      "key": "REVENUE_ADDITIONAL_FEE",
+      "nameAr": "إيرادات الرسوم الإضافية",
+      "nameEn": "Additional Fee Revenue",
+      "normalBalance": "credit",
+      "parentAccountKey": null,
+      "systemPurpose": null
+    },
+    {
+      "accountClass": "other_operating_revenue",
+      "accountType": "revenue",
+      "code": "4030",
+      "controlAccountType": null,
+      "currency": "AED",
+      "description": null,
+      "isActive": true,
+      "isContraAccount": false,
+      "isControlAccount": false,
+      "isPostingAccount": true,
+      "isSystemAccount": false,
+      "key": "REVENUE_OTHER_OPERATING",
+      "nameAr": "إيرادات تشغيلية أخرى",
+      "nameEn": "Other Operating Revenue",
+      "normalBalance": "credit",
+      "parentAccountKey": null,
+      "systemPurpose": null
+    },
+    {
+      "accountClass": "driver_expense",
+      "accountType": "expense",
+      "code": "5000",
+      "controlAccountType": null,
+      "currency": "AED",
+      "description": null,
+      "isActive": true,
+      "isContraAccount": false,
+      "isControlAccount": false,
+      "isPostingAccount": true,
+      "isSystemAccount": false,
+      "key": "EXPENSE_DRIVER",
+      "nameAr": "مصروفات السائقين",
+      "nameEn": "Driver Expense",
+      "normalBalance": "debit",
+      "parentAccountKey": null,
+      "systemPurpose": null
+    },
+    {
+      "accountClass": "outsourced_driver_fee_expense",
+      "accountType": "expense",
+      "code": "5010",
+      "controlAccountType": null,
+      "currency": "AED",
+      "description": null,
+      "isActive": true,
+      "isContraAccount": false,
+      "isControlAccount": false,
+      "isPostingAccount": true,
+      "isSystemAccount": false,
+      "key": "EXPENSE_OUTSOURCED_DRIVER_FEE",
+      "nameAr": "مصروف رسوم السائقين الخارجيين",
+      "nameEn": "Outsourced Driver Fee Expense",
+      "normalBalance": "debit",
+      "parentAccountKey": null,
+      "systemPurpose": null
+    },
+    {
+      "accountClass": "payroll_expense",
+      "accountType": "expense",
+      "code": "5020",
+      "controlAccountType": null,
+      "currency": "AED",
+      "description": null,
+      "isActive": true,
+      "isContraAccount": false,
+      "isControlAccount": false,
+      "isPostingAccount": true,
+      "isSystemAccount": false,
+      "key": "EXPENSE_PAYROLL",
+      "nameAr": "مصروف الرواتب",
+      "nameEn": "Payroll Expense",
+      "normalBalance": "debit",
+      "parentAccountKey": null,
+      "systemPurpose": null
+    },
+    {
+      "accountClass": "general_expense",
+      "accountType": "expense",
+      "code": "5030",
+      "controlAccountType": null,
+      "currency": "AED",
+      "description": null,
+      "isActive": true,
+      "isContraAccount": false,
+      "isControlAccount": false,
+      "isPostingAccount": true,
+      "isSystemAccount": false,
+      "key": "EXPENSE_GENERAL",
+      "nameAr": "المصروفات العامة",
+      "nameEn": "General Expense",
+      "normalBalance": "debit",
+      "parentAccountKey": null,
+      "systemPurpose": null
+    },
+    {
+      "accountClass": "administrative_expense",
+      "accountType": "expense",
+      "code": "5040",
+      "controlAccountType": null,
+      "currency": "AED",
+      "description": null,
+      "isActive": true,
+      "isContraAccount": false,
+      "isControlAccount": false,
+      "isPostingAccount": true,
+      "isSystemAccount": false,
+      "key": "EXPENSE_ADMINISTRATIVE",
+      "nameAr": "المصروفات الإدارية",
+      "nameEn": "Administrative Expense",
+      "normalBalance": "debit",
+      "parentAccountKey": null,
+      "systemPurpose": null
+    },
+    {
+      "accountClass": "bank_charge",
+      "accountType": "expense",
+      "code": "5050",
+      "controlAccountType": null,
+      "currency": "AED",
+      "description": null,
+      "isActive": true,
+      "isContraAccount": false,
+      "isControlAccount": false,
+      "isPostingAccount": true,
+      "isSystemAccount": false,
+      "key": "EXPENSE_BANK_CHARGE",
+      "nameAr": "الرسوم البنكية",
+      "nameEn": "Bank Charges",
+      "normalBalance": "debit",
+      "parentAccountKey": null,
+      "systemPurpose": null
+    },
+    {
+      "accountClass": "vat_expense",
+      "accountType": "expense",
+      "code": "5060",
+      "controlAccountType": null,
+      "currency": "AED",
+      "description": null,
+      "isActive": true,
+      "isContraAccount": false,
+      "isControlAccount": false,
+      "isPostingAccount": true,
+      "isSystemAccount": false,
+      "key": "EXPENSE_VAT",
+      "nameAr": "مصروف ضريبة القيمة المضافة",
+      "nameEn": "VAT Expense",
+      "normalBalance": "debit",
+      "parentAccountKey": null,
+      "systemPurpose": null
+    },
+    {
+      "accountClass": "other_expense",
+      "accountType": "expense",
+      "code": "5090",
+      "controlAccountType": null,
+      "currency": "AED",
+      "description": null,
+      "isActive": true,
+      "isContraAccount": false,
+      "isControlAccount": false,
+      "isPostingAccount": true,
+      "isSystemAccount": false,
+      "key": "EXPENSE_OTHER",
+      "nameAr": "فروقات التقريب ومصروفات أخرى",
+      "nameEn": "Rounding and Other Expense",
+      "normalBalance": "debit",
+      "parentAccountKey": null,
+      "systemPurpose": null
+    }
+  ],
+  "allowanceTypes": [
+    {
+      "code": "HM001",
+      "isActive": true,
+      "key": "ALLOWANCE_HM001",
+      "name": "Home",
+      "nameAr": null
+    },
+    {
+      "code": "TR001",
+      "isActive": true,
+      "key": "ALLOWANCE_TR001",
+      "name": "Transportation",
+      "nameAr": null
+    }
+  ],
+  "areas": [
+    {
+      "emirateCode": "AAN",
+      "nameAr": "جميع المناطق",
+      "nameEn": "All Areas"
+    },
+    {
+      "emirateCode": "AJM",
+      "nameAr": "وسط مدينة عجمان",
+      "nameEn": "Ajman City Centre"
+    },
+    {
+      "emirateCode": "AJM",
+      "nameAr": "العالية",
+      "nameEn": "Al Alia"
+    },
+    {
+      "emirateCode": "AJM",
+      "nameAr": "الأميرة",
+      "nameEn": "Al Ameera"
+    },
+    {
+      "emirateCode": "AJM",
+      "nameAr": "الباهية",
+      "nameEn": "Al Bahia"
+    },
+    {
+      "emirateCode": "AJM",
+      "nameAr": "البستان",
+      "nameEn": "Al Bustan"
+    },
+    {
+      "emirateCode": "AJM",
+      "nameAr": "الحميدية 1",
+      "nameEn": "Al Hamidiyah 1"
+    },
+    {
+      "emirateCode": "AJM",
+      "nameAr": "الحميدية 2",
+      "nameEn": "Al Hamidiyah 2"
+    },
+    {
+      "emirateCode": "AJM",
+      "nameAr": "الحليو 1",
+      "nameEn": "Al Helio 1"
+    },
+    {
+      "emirateCode": "AJM",
+      "nameAr": "الحليو 2",
+      "nameEn": "Al Helio 2"
+    },
+    {
+      "emirateCode": "AJM",
+      "nameAr": "الجرف 1",
+      "nameEn": "Al Jurf 1"
+    },
+    {
+      "emirateCode": "AJM",
+      "nameAr": "الجرف 2",
+      "nameEn": "Al Jurf 2"
+    },
+    {
+      "emirateCode": "AJM",
+      "nameAr": "الجرف 3",
+      "nameEn": "Al Jurf 3"
+    },
+    {
+      "emirateCode": "AJM",
+      "nameAr": "المويهات 1",
+      "nameEn": "Al Mowaihat 1"
+    },
+    {
+      "emirateCode": "AJM",
+      "nameAr": "المويهات 2",
+      "nameEn": "Al Mowaihat 2"
+    },
+    {
+      "emirateCode": "AJM",
+      "nameAr": "المويهات 3",
+      "nameEn": "Al Mowaihat 3"
+    },
+    {
+      "emirateCode": "AJM",
+      "nameAr": "النخيل 1",
+      "nameEn": "Al Nakhil 1"
+    },
+    {
+      "emirateCode": "AJM",
+      "nameAr": "النخيل 2",
+      "nameEn": "Al Nakhil 2"
+    },
+    {
+      "emirateCode": "AJM",
+      "nameAr": "النعيمية 1",
+      "nameEn": "Al Nuaimiya 1"
+    },
+    {
+      "emirateCode": "AJM",
+      "nameAr": "النعيمية 2",
+      "nameEn": "Al Nuaimiya 2"
+    },
+    {
+      "emirateCode": "AJM",
+      "nameAr": "النعيمية 3",
+      "nameEn": "Al Nuaimiya 3"
+    },
+    {
+      "emirateCode": "AJM",
+      "nameAr": "الروان",
+      "nameEn": "Al Owan"
+    },
+    {
+      "emirateCode": "AJM",
+      "nameAr": "الراشدية 1",
+      "nameEn": "Al Rashidiya 1"
+    },
+    {
+      "emirateCode": "AJM",
+      "nameAr": "الراشدية 2",
+      "nameEn": "Al Rashidiya 2"
+    },
+    {
+      "emirateCode": "AJM",
+      "nameAr": "الراشدية 3",
+      "nameEn": "Al Rashidiya 3"
+    },
+    {
+      "emirateCode": "AJM",
+      "nameAr": "الروضة 1",
+      "nameEn": "Al Rawda 1"
+    },
+    {
+      "emirateCode": "AJM",
+      "nameAr": "الروضة 2",
+      "nameEn": "Al Rawda 2"
+    },
+    {
+      "emirateCode": "AJM",
+      "nameAr": "الروضة 3",
+      "nameEn": "Al Rawda 3"
+    },
+    {
+      "emirateCode": "AJM",
+      "nameAr": "الرميلة 1",
+      "nameEn": "Al Rumaila 1"
+    },
+    {
+      "emirateCode": "AJM",
+      "nameAr": "الرميلة 2",
+      "nameEn": "Al Rumaila 2"
+    },
+    {
+      "emirateCode": "AJM",
+      "nameAr": "الرميلة 3",
+      "nameEn": "Al Rumaila 3"
+    },
+    {
+      "emirateCode": "AJM",
+      "nameAr": "التلة 1",
+      "nameEn": "Al Tallah 1"
+    },
+    {
+      "emirateCode": "AJM",
+      "nameAr": "التلة 2",
+      "nameEn": "Al Tallah 2"
+    },
+    {
+      "emirateCode": "AJM",
+      "nameAr": "الياسمين",
+      "nameEn": "Al Yasmeen"
+    },
+    {
+      "emirateCode": "AJM",
+      "nameAr": "مدينة الإمارات",
+      "nameEn": "Emirates City"
+    },
+    {
+      "emirateCode": "AJM",
+      "nameAr": "جاردن سيتي",
+      "nameEn": "Garden City"
+    },
+    {
+      "emirateCode": "AJM",
+      "nameAr": "المنامة",
+      "nameEn": "Manama"
+    },
+    {
+      "emirateCode": "AJM",
+      "nameAr": "مصفوت",
+      "nameEn": "Masfout"
+    },
+    {
+      "emirateCode": "AJM",
+      "nameAr": "مشيرف",
+      "nameEn": "Mushairif"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "جزيرة أبو الهبل",
+      "nameEn": "Abu Al Habl Island"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "مدينة أبوظبي",
+      "nameEn": "Abu Dhabi City"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "العدلة",
+      "nameEn": "Al Adla"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "العين",
+      "nameEn": "Al Ain"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "الأمان",
+      "nameEn": "Al Aman"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "الباهية",
+      "nameEn": "Al Bahyah"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "البندر",
+      "nameEn": "Al Bandar"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "البطين",
+      "nameEn": "Al Bateen"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "البطين - العين",
+      "nameEn": "Al Bateen Al Ain"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "الدانة",
+      "nameEn": "Al Danah"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "الظفرة",
+      "nameEn": "Al Dhafra"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "الفلاح",
+      "nameEn": "Al Falah"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "الفوعة",
+      "nameEn": "Al Foah"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "قرية الفرسان",
+      "nameEn": "Al Forsan Village"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "الغدير",
+      "nameEn": "Al Ghadeer"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "الهيلي",
+      "nameEn": "Al Hili"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "جزيرة الحديريات",
+      "nameEn": "Al Hudayriat Island"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "الجيمي",
+      "nameEn": "Al Jimi"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "الكرامة",
+      "nameEn": "Al Karamah"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "الخبيصي",
+      "nameEn": "Al Khabisi"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "الخالدية",
+      "nameEn": "Al Khalidiyah"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "الخزنة",
+      "nameEn": "Al Khaznah"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "المناصير",
+      "nameEn": "Al Manaseer"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "المنهل",
+      "nameEn": "Al Manhal"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "المقام",
+      "nameEn": "Al Maqam"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "المقطع",
+      "nameEn": "Al Maqtaa"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "المركزية",
+      "nameEn": "Al Markaziyah"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "جزيرة المارية",
+      "nameEn": "Al Maryah Island"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "المطار",
+      "nameEn": "Al Matar"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "الميناء",
+      "nameEn": "Al Mina"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "المنيرة",
+      "nameEn": "Al Muneera"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "المشرف",
+      "nameEn": "Al Mushrif"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "المطارد",
+      "nameEn": "Al Mutarad"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "المويجعي",
+      "nameEn": "Al Muwaiji"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "الناهل",
+      "nameEn": "Al Nahil"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "آل نهيان",
+      "nameEn": "Al Nahyan"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "شاطئ الراحة",
+      "nameEn": "Al Raha Beach"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "الراحة",
+      "nameEn": "Al Rahah"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "الرحبة",
+      "nameEn": "Al Rahba"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "الرأس الأخضر",
+      "nameEn": "Al Ras Al Akhdar"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "الروضة",
+      "nameEn": "Al Rawdah"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "الريف",
+      "nameEn": "Al Reef"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "جزيرة الريم",
+      "nameEn": "Al Reem Island"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "الروضة",
+      "nameEn": "Al Rowdah"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "السمحة",
+      "nameEn": "Al Samha"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "الصاروج",
+      "nameEn": "Al Sarooj"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "الشامخة",
+      "nameEn": "Al Shamkha"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "الشوامخ",
+      "nameEn": "Al Shawamekh"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "الطوية",
+      "nameEn": "Al Towayya"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "الوثبة",
+      "nameEn": "Al Wathba"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "اليحر",
+      "nameEn": "Al Yahar"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "الزعاب",
+      "nameEn": "Al Zaab"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "الزاهية",
+      "nameEn": "Al Zahiyah"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "الزينة",
+      "nameEn": "Al Zeina"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "بني ياس",
+      "nameEn": "Bani Yas"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "منطقة مطار البطين",
+      "nameEn": "Bateen Airport Area"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "كاسر الأمواج",
+      "nameEn": "Breakwater"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "منطقة الكورنيش",
+      "nameEn": "Corniche Area"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "القرم الشرقي",
+      "nameEn": "Eastern Mangroves"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "فلج هزاع",
+      "nameEn": "Falaj Hazza"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "غنتوت",
+      "nameEn": "Ghantoot"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "هضبة الزعفران",
+      "nameEn": "Hadbat Al Zaafran"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "مدينة خليفة",
+      "nameEn": "Khalifa City"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "منطقة خليفة الصناعية",
+      "nameEn": "Khalifa Industrial Zone"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "مدينة زايد",
+      "nameEn": "Madinat Zayed"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "مدينة مصدر",
+      "nameEn": "Masdar City"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "مدينة محمد بن زايد",
+      "nameEn": "Mohamed Bin Zayed City"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "مصفح",
+      "nameEn": "Mussafah"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "منطقة مصفح الصناعية",
+      "nameEn": "Mussafah Industrial Area"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "ربدان",
+      "nameEn": "Rabdan"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "جزيرة السعديات",
+      "nameEn": "Saadiyat Island"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "مدينة شخبوط",
+      "nameEn": "Shakhbout City"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "منطقة النادي السياحي",
+      "nameEn": "Tourist Club Area"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "جزيرة ياس",
+      "nameEn": "Yas Island"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "زاخر",
+      "nameEn": "Zakher"
+    },
+    {
+      "emirateCode": "AUH",
+      "nameAr": "مدينة زايد",
+      "nameEn": "Zayed City"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "أبو هيل",
+      "nameEn": "Abu Hail"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "المدينة الأكاديمية",
+      "nameEn": "Academic City"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "العوير",
+      "nameEn": "Al Awir"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "البدع",
+      "nameEn": "Al Bada"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "البراحة",
+      "nameEn": "Al Baraha"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "البراري",
+      "nameEn": "Al Barari"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "البرشاء 1",
+      "nameEn": "Al Barsha 1"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "البرشاء 2",
+      "nameEn": "Al Barsha 2"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "البرشاء 3",
+      "nameEn": "Al Barsha 3"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "البرشاء جنوب",
+      "nameEn": "Al Barsha South"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "البطين",
+      "nameEn": "Al Buteen"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "الفرجان",
+      "nameEn": "Al Furjan"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "القرهود",
+      "nameEn": "Al Garhoud"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "الحمرية",
+      "nameEn": "Al Hamriya"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "الحضيبة",
+      "nameEn": "Al Hudaiba"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "الجداف",
+      "nameEn": "Al Jaddaf"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "الجافلية",
+      "nameEn": "Al Jafiliya"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "الكرامة",
+      "nameEn": "Al Karama"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "الخوانيج 1",
+      "nameEn": "Al Khawaneej 1"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "الخوانيج 2",
+      "nameEn": "Al Khawaneej 2"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "الكفاف",
+      "nameEn": "Al Kifaf"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "الممزر",
+      "nameEn": "Al Mamzar"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "المنارة",
+      "nameEn": "Al Manara"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "المنخول",
+      "nameEn": "Al Mankhool"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "المزهر 1",
+      "nameEn": "Al Mizhar 1"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "المزهر 2",
+      "nameEn": "Al Mizhar 2"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "المرقبات",
+      "nameEn": "Al Muraqqabat"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "المرر",
+      "nameEn": "Al Murar"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "النهدة 1",
+      "nameEn": "Al Nahda 1"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "النهدة 2",
+      "nameEn": "Al Nahda 2"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "القوز 1",
+      "nameEn": "Al Quoz 1"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "القوز 2",
+      "nameEn": "Al Quoz 2"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "القوز 3",
+      "nameEn": "Al Quoz 3"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "القوز 4",
+      "nameEn": "Al Quoz 4"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "منطقة القوز الصناعية 1",
+      "nameEn": "Al Quoz Industrial Area 1"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "منطقة القوز الصناعية 2",
+      "nameEn": "Al Quoz Industrial Area 2"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "منطقة القوز الصناعية 3",
+      "nameEn": "Al Quoz Industrial Area 3"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "منطقة القوز الصناعية 4",
+      "nameEn": "Al Quoz Industrial Area 4"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "القصيص 1",
+      "nameEn": "Al Qusais 1"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "القصيص 2",
+      "nameEn": "Al Qusais 2"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "القصيص 3",
+      "nameEn": "Al Qusais 3"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "منطقة القصيص الصناعية 1",
+      "nameEn": "Al Qusais Industrial Area 1"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "منطقة القصيص الصناعية 2",
+      "nameEn": "Al Qusais Industrial Area 2"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "منطقة القصيص الصناعية 3",
+      "nameEn": "Al Qusais Industrial Area 3"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "الرفاعة",
+      "nameEn": "Al Raffa"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "الراس",
+      "nameEn": "Al Ras"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "الراشدية",
+      "nameEn": "Al Rashidiya"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "الرقة",
+      "nameEn": "Al Rigga"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "الصفا 1",
+      "nameEn": "Al Safa 1"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "الصفا 2",
+      "nameEn": "Al Safa 2"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "السطوة",
+      "nameEn": "Al Satwa"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "الشندغة",
+      "nameEn": "Al Shindagha"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "الصفوح 1",
+      "nameEn": "Al Sufouh 1"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "الصفوح 2",
+      "nameEn": "Al Sufouh 2"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "الطوار 1",
+      "nameEn": "Al Twar 1"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "الطوار 2",
+      "nameEn": "Al Twar 2"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "الطوار 3",
+      "nameEn": "Al Twar 3"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "الورقاء 1",
+      "nameEn": "Al Warqa 1"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "الورقاء 2",
+      "nameEn": "Al Warqa 2"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "الورقاء 3",
+      "nameEn": "Al Warqa 3"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "الورقاء 4",
+      "nameEn": "Al Warqa 4"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "الورقاء 5",
+      "nameEn": "Al Warqa 5"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "الوصل",
+      "nameEn": "Al Wasl"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "المرابع العربية",
+      "nameEn": "Arabian Ranches"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "المرابع العربية 2",
+      "nameEn": "Arabian Ranches 2"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "المرابع العربية 3",
+      "nameEn": "Arabian Ranches 3"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "أرجان",
+      "nameEn": "Arjan"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "برشا هايتس",
+      "nameEn": "Barsha Heights"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "جزيرة بلوواترز",
+      "nameEn": "Bluewaters Island"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "بر دبي",
+      "nameEn": "Bur Dubai"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "الخليج التجاري",
+      "nameEn": "Business Bay"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "سيتي ووك",
+      "nameEn": "City Walk"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "قرية الثقافة",
+      "nameEn": "Culture Village"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "داماك هيلز",
+      "nameEn": "Damac Hills"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "داماك هيلز 2",
+      "nameEn": "Damac Hills 2"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "ديرة",
+      "nameEn": "Deira"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "ديسكفري جاردنز",
+      "nameEn": "Discovery Gardens"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "وسط مدينة دبي",
+      "nameEn": "Downtown Dubai"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "دبي فستيفال سيتي",
+      "nameEn": "Dubai Festival City"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "دبي هاربور",
+      "nameEn": "Dubai Harbour"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "مدينة دبي الطبية",
+      "nameEn": "Dubai Healthcare City"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "دبي هيلز استيت",
+      "nameEn": "Dubai Hills Estate"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "مدينة دبي الصناعية",
+      "nameEn": "Dubai Industrial City"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "مدينة دبي للإنترنت",
+      "nameEn": "Dubai Internet City"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "مجمع دبي للاستثمار 1",
+      "nameEn": "Dubai Investment Park 1"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "مجمع دبي للاستثمار 2",
+      "nameEn": "Dubai Investment Park 2"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "دبي مارينا",
+      "nameEn": "Dubai Marina"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "مدينة دبي للإعلام",
+      "nameEn": "Dubai Media City"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "مدينة دبي للإنتاج",
+      "nameEn": "Dubai Production City"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "مجمع دبي للعلوم",
+      "nameEn": "Dubai Science Park"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "واحة دبي للسيليكون",
+      "nameEn": "Dubai Silicon Oasis"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "دبي الجنوب",
+      "nameEn": "Dubai South"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "مدينة دبي الرياضية",
+      "nameEn": "Dubai Sports City"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "تلال الإمارات",
+      "nameEn": "Emirates Hills"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "فالكون سيتي أوف وندرز",
+      "nameEn": "Falcon City of Wonders"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "جرين كوميونيتي",
+      "nameEn": "Green Community"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "هور العنز",
+      "nameEn": "Hor Al Anz"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "هور العنز شرق",
+      "nameEn": "Hor Al Anz East"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "المدينة العالمية",
+      "nameEn": "International City"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "جبل علي",
+      "nameEn": "Jebel Ali"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "المنطقة الحرة لجبل علي",
+      "nameEn": "Jebel Ali Free Zone"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "جميرا 1",
+      "nameEn": "Jumeirah 1"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "جميرا 2",
+      "nameEn": "Jumeirah 2"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "جميرا 3",
+      "nameEn": "Jumeirah 3"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "مساكن شاطئ جميرا",
+      "nameEn": "Jumeirah Beach Residence"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "عقارات جميرا للجولف",
+      "nameEn": "Jumeirah Golf Estates"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "جزر جميرا",
+      "nameEn": "Jumeirah Islands"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "أبراج بحيرات جميرا",
+      "nameEn": "Jumeirah Lake Towers"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "جميرا بارك",
+      "nameEn": "Jumeirah Park"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "قرية جميرا الدائرية",
+      "nameEn": "Jumeirah Village Circle"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "مثلث قرية جميرا",
+      "nameEn": "Jumeirah Village Triangle"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "ليوان",
+      "nameEn": "Liwan"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "مدينة جميرا",
+      "nameEn": "Madinat Jumeirah"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "ذا ميدوز",
+      "nameEn": "Meadows"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "ميدان",
+      "nameEn": "Meydan"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "مردف",
+      "nameEn": "Mirdif"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "موتور سيتي",
+      "nameEn": "Motor City"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "مدن",
+      "nameEn": "Mudon"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "محيصنة 1",
+      "nameEn": "Muhaisnah 1"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "محيصنة 2",
+      "nameEn": "Muhaisnah 2"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "محيصنة 3",
+      "nameEn": "Muhaisnah 3"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "محيصنة 4",
+      "nameEn": "Muhaisnah 4"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "ند الحمر",
+      "nameEn": "Nad Al Hamar"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "ند الشبا 1",
+      "nameEn": "Nad Al Sheba 1"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "ند الشبا 2",
+      "nameEn": "Nad Al Sheba 2"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "ند الشبا 3",
+      "nameEn": "Nad Al Sheba 3"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "ند الشبا 4",
+      "nameEn": "Nad Al Sheba 4"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "ند شما",
+      "nameEn": "Nad Shamma"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "نايف",
+      "nameEn": "Naif"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "عود المطينة",
+      "nameEn": "Oud Al Muteena"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "نخلة جبل علي",
+      "nameEn": "Palm Jebel Ali"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "نخلة جميرا",
+      "nameEn": "Palm Jumeirah"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "ميناء راشد",
+      "nameEn": "Port Rashid"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "رأس الخور",
+      "nameEn": "Ras Al Khor"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "منطقة رأس الخور الصناعية",
+      "nameEn": "Ras Al Khor Industrial Area"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "رمرام",
+      "nameEn": "Remraam"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "الينابيع",
+      "nameEn": "Springs"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "ذا جاردنز",
+      "nameEn": "The Gardens"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "ذا جرينز",
+      "nameEn": "The Greens"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "ذا ليكس",
+      "nameEn": "The Lakes"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "المدينة المستدامة",
+      "nameEn": "The Sustainable City"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "ذا فالي",
+      "nameEn": "The Valley"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "ذا فيلا",
+      "nameEn": "The Villa"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "تلال الغاف",
+      "nameEn": "Tilal Al Ghaf"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "تاون سكوير",
+      "nameEn": "Town Square"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "المركز التجاري 1",
+      "nameEn": "Trade Centre 1"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "المركز التجاري 2",
+      "nameEn": "Trade Centre 2"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "أم الشيف",
+      "nameEn": "Umm Al Sheif"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "أم هرير 1",
+      "nameEn": "Umm Hurair 1"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "أم هرير 2",
+      "nameEn": "Umm Hurair 2"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "أم رمول",
+      "nameEn": "Umm Ramool"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "أم سقيم 1",
+      "nameEn": "Umm Suqeim 1"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "أم سقيم 2",
+      "nameEn": "Umm Suqeim 2"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "أم سقيم 3",
+      "nameEn": "Umm Suqeim 3"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "ورسان 1",
+      "nameEn": "Warsan 1"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "ورسان 2",
+      "nameEn": "Warsan 2"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "ورسان 3",
+      "nameEn": "Warsan 3"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "ورسان 4",
+      "nameEn": "Warsan 4"
+    },
+    {
+      "emirateCode": "DXB",
+      "nameAr": "مركز دبي التجاري العالمي",
+      "nameEn": "World Trade Centre"
+    },
+    {
+      "emirateCode": "EST",
+      "nameAr": "جميع المناطق",
+      "nameEn": "All Areas"
+    },
+    {
+      "emirateCode": "FUJ",
+      "nameAr": "العقة",
+      "nameEn": "Al Aqah"
+    },
+    {
+      "emirateCode": "FUJ",
+      "nameAr": "البدية",
+      "nameEn": "Al Badiyah"
+    },
+    {
+      "emirateCode": "FUJ",
+      "nameAr": "الفصيل",
+      "nameEn": "Al Faseel"
+    },
+    {
+      "emirateCode": "FUJ",
+      "nameAr": "الفرفار",
+      "nameEn": "Al Furfara"
+    },
+    {
+      "emirateCode": "FUJ",
+      "nameAr": "الغرفة",
+      "nameEn": "Al Gurfa"
+    },
+    {
+      "emirateCode": "FUJ",
+      "nameAr": "الحيل",
+      "nameEn": "Al Hail"
+    },
+    {
+      "emirateCode": "FUJ",
+      "nameAr": "منطقة الحيل الصناعية",
+      "nameEn": "Al Hayl Industrial Area"
+    },
+    {
+      "emirateCode": "FUJ",
+      "nameAr": "المضب",
+      "nameEn": "Al Madhab"
+    },
+    {
+      "emirateCode": "FUJ",
+      "nameAr": "المحطة",
+      "nameEn": "Al Mahatta"
+    },
+    {
+      "emirateCode": "FUJ",
+      "nameAr": "العويد",
+      "nameEn": "Al Owaid"
+    },
+    {
+      "emirateCode": "FUJ",
+      "nameAr": "الطويين",
+      "nameEn": "Al Taween"
+    },
+    {
+      "emirateCode": "FUJ",
+      "nameAr": "دبا الفجيرة",
+      "nameEn": "Dibba Al Fujairah"
+    },
+    {
+      "emirateCode": "FUJ",
+      "nameAr": "مدينة الفجيرة",
+      "nameEn": "Fujairah City"
+    },
+    {
+      "emirateCode": "FUJ",
+      "nameAr": "المنطقة الحرة بالفجيرة",
+      "nameEn": "Fujairah Free Zone"
+    },
+    {
+      "emirateCode": "FUJ",
+      "nameAr": "ميناء الفجيرة",
+      "nameEn": "Fujairah Port"
+    },
+    {
+      "emirateCode": "FUJ",
+      "nameAr": "الغوب",
+      "nameEn": "Ghub"
+    },
+    {
+      "emirateCode": "FUJ",
+      "nameAr": "مضب",
+      "nameEn": "Madhab"
+    },
+    {
+      "emirateCode": "FUJ",
+      "nameAr": "مربح",
+      "nameEn": "Mirbah"
+    },
+    {
+      "emirateCode": "FUJ",
+      "nameAr": "قدفع",
+      "nameEn": "Qidfa"
+    },
+    {
+      "emirateCode": "FUJ",
+      "nameAr": "سكمكم",
+      "nameEn": "Sakamkam"
+    },
+    {
+      "emirateCode": "FUJ",
+      "nameAr": "سيح الحضيبة",
+      "nameEn": "Seih Al Hudaibah"
+    },
+    {
+      "emirateCode": "FUJ",
+      "nameAr": "ثوبان",
+      "nameEn": "Thoban"
+    },
+    {
+      "emirateCode": "FUJ",
+      "nameAr": "وادي الوريعة",
+      "nameEn": "Wadi Al Wurayah"
+    },
+    {
+      "emirateCode": "OAA",
+      "nameAr": "جميع المناطق",
+      "nameEn": "All Areas"
+    },
+    {
+      "emirateCode": "RAK",
+      "nameAr": "الظيت الشمالي",
+      "nameEn": "Al Dhait North"
+    },
+    {
+      "emirateCode": "RAK",
+      "nameAr": "الظيت الجنوبي",
+      "nameEn": "Al Dhait South"
+    },
+    {
+      "emirateCode": "RAK",
+      "nameAr": "منطقة الحمراء الصناعية",
+      "nameEn": "Al Hamra Industrial Zone"
+    },
+    {
+      "emirateCode": "RAK",
+      "nameAr": "قرية الحمراء",
+      "nameEn": "Al Hamra Village"
+    },
+    {
+      "emirateCode": "RAK",
+      "nameAr": "الجزيرة الحمراء",
+      "nameEn": "Al Jazeera Al Hamra"
+    },
+    {
+      "emirateCode": "RAK",
+      "nameAr": "الجويّس",
+      "nameEn": "Al Juwais"
+    },
+    {
+      "emirateCode": "RAK",
+      "nameAr": "الخران",
+      "nameEn": "Al Kharran"
+    },
+    {
+      "emirateCode": "RAK",
+      "nameAr": "المعيريض",
+      "nameEn": "Al Mairid"
+    },
+    {
+      "emirateCode": "RAK",
+      "nameAr": "المعمورة",
+      "nameEn": "Al Mamourah"
+    },
+    {
+      "emirateCode": "RAK",
+      "nameAr": "جزيرة المرجان",
+      "nameEn": "Al Marjan Island"
+    },
+    {
+      "emirateCode": "RAK",
+      "nameAr": "المطاف",
+      "nameEn": "Al Mataf"
+    },
+    {
+      "emirateCode": "RAK",
+      "nameAr": "النخيل",
+      "nameEn": "Al Nakheel"
+    },
+    {
+      "emirateCode": "RAK",
+      "nameAr": "القصيدات",
+      "nameEn": "Al Qusaidat"
+    },
+    {
+      "emirateCode": "RAK",
+      "nameAr": "الرمس",
+      "nameEn": "Al Rams"
+    },
+    {
+      "emirateCode": "RAK",
+      "nameAr": "السير",
+      "nameEn": "Al Seer"
+    },
+    {
+      "emirateCode": "RAK",
+      "nameAr": "العريبي",
+      "nameEn": "Al Uraibi"
+    },
+    {
+      "emirateCode": "RAK",
+      "nameAr": "دفن الخور",
+      "nameEn": "Dafan Al Khor"
+    },
+    {
+      "emirateCode": "RAK",
+      "nameAr": "دفن النخيل",
+      "nameEn": "Dafan Al Nakheel"
+    },
+    {
+      "emirateCode": "RAK",
+      "nameAr": "الدقداقة",
+      "nameEn": "Digdaga"
+    },
+    {
+      "emirateCode": "RAK",
+      "nameAr": "غليلة",
+      "nameEn": "Ghalilah"
+    },
+    {
+      "emirateCode": "RAK",
+      "nameAr": "جلفار",
+      "nameEn": "Julphar"
+    },
+    {
+      "emirateCode": "RAK",
+      "nameAr": "خت",
+      "nameEn": "Khatt"
+    },
+    {
+      "emirateCode": "RAK",
+      "nameAr": "خزام",
+      "nameEn": "Khuzam"
+    },
+    {
+      "emirateCode": "RAK",
+      "nameAr": "ميناء العرب",
+      "nameEn": "Mina Al Arab"
+    },
+    {
+      "emirateCode": "RAK",
+      "nameAr": "النخيل",
+      "nameEn": "Nakheel"
+    },
+    {
+      "emirateCode": "RAK",
+      "nameAr": "مدينة رأس الخيمة",
+      "nameEn": "Ras Al Khaimah City"
+    },
+    {
+      "emirateCode": "RAK",
+      "nameAr": "منطقة رأس الخيمة الصناعية",
+      "nameEn": "Ras Al Khaimah Industrial Area"
+    },
+    {
+      "emirateCode": "RAK",
+      "nameAr": "شمل",
+      "nameEn": "Shamal"
+    },
+    {
+      "emirateCode": "RAK",
+      "nameAr": "وادي عمار",
+      "nameEn": "Wadi Ammar"
+    },
+    {
+      "emirateCode": "RAK",
+      "nameAr": "وادي شعم",
+      "nameEn": "Wadi Shaam"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "أبو شغارة",
+      "nameEn": "Abu Shagara"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "العبار",
+      "nameEn": "Al Abar"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "العزرة",
+      "nameEn": "Al Azra"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "أبو دانيق",
+      "nameEn": "Al Bu Daniq"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "البوطينة",
+      "nameEn": "Al Butina"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "الدراري",
+      "nameEn": "Al Darari"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "الذيد",
+      "nameEn": "Al Dhaid"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "الفلج",
+      "nameEn": "Al Falaj"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "الفيحاء",
+      "nameEn": "Al Fayha"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "الفشت",
+      "nameEn": "Al Fisht"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "القراين 1",
+      "nameEn": "Al Gharayen 1"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "القراين 2",
+      "nameEn": "Al Gharayen 2"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "القراين 3",
+      "nameEn": "Al Gharayen 3"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "الغبيبة",
+      "nameEn": "Al Ghubaiba"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "القوز",
+      "nameEn": "Al Goaz"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "الحزانة",
+      "nameEn": "Al Hazana"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "الجزات",
+      "nameEn": "Al Jazzat"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "الجرينة 1",
+      "nameEn": "Al Juraina 1"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "الجرينة 2",
+      "nameEn": "Al Juraina 2"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "الجرينة 3",
+      "nameEn": "Al Juraina 3"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "الجرينة 4",
+      "nameEn": "Al Juraina 4"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "الخالدية",
+      "nameEn": "Al Khaledia"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "الخان",
+      "nameEn": "Al Khan"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "اللية",
+      "nameEn": "Al Layyah"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "المجاز 1",
+      "nameEn": "Al Majaz 1"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "المجاز 2",
+      "nameEn": "Al Majaz 2"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "المجاز 3",
+      "nameEn": "Al Majaz 3"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "الممزر",
+      "nameEn": "Al Mamzar"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "المناخ",
+      "nameEn": "Al Manakh"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "المجرة",
+      "nameEn": "Al Mujarrah"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "المصلى",
+      "nameEn": "Al Musalla"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "النباعة",
+      "nameEn": "Al Nabba"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "النهدة",
+      "nameEn": "Al Nahda"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "النخيلات",
+      "nameEn": "Al Nekhailat"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "النوف 1",
+      "nameEn": "Al Noaf 1"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "النوف 2",
+      "nameEn": "Al Noaf 2"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "النوف 3",
+      "nameEn": "Al Noaf 3"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "النوف 4",
+      "nameEn": "Al Noaf 4"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "القادسية",
+      "nameEn": "Al Qadisiya"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "القراين",
+      "nameEn": "Al Qarayen"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "القاسمية",
+      "nameEn": "Al Qasimia"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "الرحمانية 1",
+      "nameEn": "Al Rahmaniya 1"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "الرحمانية 2",
+      "nameEn": "Al Rahmaniya 2"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "الرحمانية 3",
+      "nameEn": "Al Rahmaniya 3"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "الرحمانية 4",
+      "nameEn": "Al Rahmaniya 4"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "الرماقية",
+      "nameEn": "Al Ramaqia"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "الرملة",
+      "nameEn": "Al Ramla"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "الرمثاء",
+      "nameEn": "Al Ramtha"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "الرفاع",
+      "nameEn": "Al Rifah"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "الرقة",
+      "nameEn": "Al Riqqa"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "الصبخة",
+      "nameEn": "Al Sabkha"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "الصجعة الصناعية",
+      "nameEn": "Al Sajaa Industrial"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "الشهباء",
+      "nameEn": "Al Shahba"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "الشرق",
+      "nameEn": "Al Sharq"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "السور",
+      "nameEn": "Al Soor"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "السويحات",
+      "nameEn": "Al Sweihat"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "التعاون",
+      "nameEn": "Al Taawun"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "اليرموك",
+      "nameEn": "Al Yarmook"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "دبا الحصن",
+      "nameEn": "Dibba Al Hisn"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "حلوان",
+      "nameEn": "Halwan"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "المنطقة الصناعية 1",
+      "nameEn": "Industrial Area 1"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "المنطقة الصناعية 10",
+      "nameEn": "Industrial Area 10"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "المنطقة الصناعية 11",
+      "nameEn": "Industrial Area 11"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "المنطقة الصناعية 12",
+      "nameEn": "Industrial Area 12"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "المنطقة الصناعية 13",
+      "nameEn": "Industrial Area 13"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "المنطقة الصناعية 15",
+      "nameEn": "Industrial Area 15"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "المنطقة الصناعية 17",
+      "nameEn": "Industrial Area 17"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "المنطقة الصناعية 18",
+      "nameEn": "Industrial Area 18"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "المنطقة الصناعية 2",
+      "nameEn": "Industrial Area 2"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "المنطقة الصناعية 3",
+      "nameEn": "Industrial Area 3"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "المنطقة الصناعية 4",
+      "nameEn": "Industrial Area 4"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "المنطقة الصناعية 5",
+      "nameEn": "Industrial Area 5"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "المنطقة الصناعية 6",
+      "nameEn": "Industrial Area 6"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "المنطقة الصناعية 7",
+      "nameEn": "Industrial Area 7"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "المنطقة الصناعية 8",
+      "nameEn": "Industrial Area 8"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "المنطقة الصناعية 9",
+      "nameEn": "Industrial Area 9"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "كلباء",
+      "nameEn": "Kalba"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "خورفكان",
+      "nameEn": "Khor Fakkan"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "ميسلون",
+      "nameEn": "Maysaloon"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "مليحة",
+      "nameEn": "Mleiha"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "مويلح",
+      "nameEn": "Muwaileh"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "مويلح التجارية",
+      "nameEn": "Muwaileh Commercial"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "الرولة",
+      "nameEn": "Rolla"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "المدينة الجامعية",
+      "nameEn": "University City"
+    },
+    {
+      "emirateCode": "SHJ",
+      "nameAr": "واسط",
+      "nameEn": "Wasit"
+    },
+    {
+      "emirateCode": "UAQ",
+      "nameAr": "الأحد",
+      "nameEn": "Al Aahad"
+    },
+    {
+      "emirateCode": "UAQ",
+      "nameAr": "الأبرق",
+      "nameEn": "Al Abraq"
+    },
+    {
+      "emirateCode": "UAQ",
+      "nameAr": "الدار البيضاء",
+      "nameEn": "Al Dar Al Baida"
+    },
+    {
+      "emirateCode": "UAQ",
+      "nameAr": "الحديثة",
+      "nameEn": "Al Haditha"
+    },
+    {
+      "emirateCode": "UAQ",
+      "nameAr": "الحمراء",
+      "nameEn": "Al Hamra"
+    },
+    {
+      "emirateCode": "UAQ",
+      "nameAr": "الحُمرة",
+      "nameEn": "Al Humrah"
+    },
+    {
+      "emirateCode": "UAQ",
+      "nameAr": "الخور",
+      "nameEn": "Al Khor"
+    },
+    {
+      "emirateCode": "UAQ",
+      "nameAr": "الميدان",
+      "nameEn": "Al Maidan"
+    },
+    {
+      "emirateCode": "UAQ",
+      "nameAr": "الرأس 1",
+      "nameEn": "Al Raas 1"
+    },
+    {
+      "emirateCode": "UAQ",
+      "nameAr": "الرأس 2",
+      "nameEn": "Al Raas 2"
+    },
+    {
+      "emirateCode": "UAQ",
+      "nameAr": "الرأس 3",
+      "nameEn": "Al Raas 3"
+    },
+    {
+      "emirateCode": "UAQ",
+      "nameAr": "الرملة",
+      "nameEn": "Al Ramlah"
+    },
+    {
+      "emirateCode": "UAQ",
+      "nameAr": "السلامة 1",
+      "nameEn": "Al Salamah 1"
+    },
+    {
+      "emirateCode": "UAQ",
+      "nameAr": "السلامة 2",
+      "nameEn": "Al Salamah 2"
+    },
+    {
+      "emirateCode": "UAQ",
+      "nameAr": "السلامة 3",
+      "nameEn": "Al Salamah 3"
+    },
+    {
+      "emirateCode": "UAQ",
+      "nameAr": "السرة",
+      "nameEn": "Al Serra"
+    },
+    {
+      "emirateCode": "UAQ",
+      "nameAr": "الشويب",
+      "nameEn": "Al Shuwaib"
+    },
+    {
+      "emirateCode": "UAQ",
+      "nameAr": "السرة",
+      "nameEn": "Al Surrah"
+    },
+    {
+      "emirateCode": "UAQ",
+      "nameAr": "منطقة الإمارات الصناعية الحديثة",
+      "nameEn": "Emirates Modern Industrial Area"
+    },
+    {
+      "emirateCode": "UAQ",
+      "nameAr": "فلج المعلا",
+      "nameEn": "Falaj Al Mualla"
+    },
+    {
+      "emirateCode": "UAQ",
+      "nameAr": "منطقة المدينة القديمة",
+      "nameEn": "Old Town Area"
+    },
+    {
+      "emirateCode": "UAQ",
+      "nameAr": "مرسى أم القيوين",
+      "nameEn": "Umm Al Quwain Marina"
+    },
+    {
+      "emirateCode": "WST",
+      "nameAr": "جميع المناطق",
+      "nameEn": "All Areas"
+    }
+  ],
+  "balancePolicy": {
+    "bankOverdraftLimit": "0.00",
+    "bankPolicy": "allow_within_overdraft",
+    "cashPolicy": "block",
+    "overridePermission": "accounting.manage"
+  },
+  "businessDay": {
+    "companyMayOverride": true,
+    "isDefault": true,
+    "startTime": "08:00",
+    "timezone": "Asia/Dubai"
+  },
+  "countryCode": "AE",
+  "currency": "AED",
+  "defaultBankAccounts": [
+    {
+      "accountType": "current",
+      "code": "BANK-0001",
+      "currency": "AED",
+      "glAccountKey": "ASSET_BANK",
+      "isActive": true,
+      "key": "BANK_BANK_0001",
+      "name": "Main Bank",
+      "requiresCompanyInput": [
+        "bankName",
+        "accountName",
+        "accountNumber",
+        "iban",
+        "swiftCode"
+      ]
+    }
+  ],
+  "defaultCashAccounts": [
+    {
+      "cashAccountType": "main_cash",
+      "code": "CASH-0001",
+      "currency": "AED",
+      "glAccountKey": "ASSET_CASH",
+      "isActive": true,
+      "key": "CASH_CASH_0001",
+      "name": "Main Cash",
+      "nameAr": "الصندوق الرئيسي",
+      "requiresCompanyInput": [
+        "locationOrCustodian"
+      ]
+    }
+  ],
+  "excludedFromTemplate": [
+    {
+      "item": "opening_balance_batches, opening_balance_lines",
+      "reason": "Financial history. A template must carry no balance; the new Company establishes its own opening balances after initialisation."
+    },
+    {
+      "item": "fiscal_years, accounting_periods (dated rows)",
+      "reason": "Dated to the source Company's calendar. A Company created later would inherit periods it cannot post into; only the fiscal policy is reusable."
+    },
+    {
+      "item": "company_reference_counters.next_value",
+      "reason": "A transactional watermark counting the source Company's documents. Only the prefixes are reusable; every new sequence starts at 1."
+    },
+    {
+      "item": "company_bank_accounts identity fields (bank name, account name, number, IBAN, SWIFT)",
+      "reason": "Commercially sensitive and specific to one Company. Seeding them into another Company would be a real disclosure, not a convenience."
+    },
+    {
+      "item": "company_cash_accounts.location_or_custodian",
+      "reason": "Names a physical office and custodian of the source Company."
+    },
+    {
+      "item": "chart_of_accounts / account_mappings effective_from dates",
+      "reason": "Adoption dates of the source Company. The importer sets these from the new Company's own start date."
+    },
+    {
+      "item": "accounting_configurations.manual_accounting_activation_date and change-reason/actor columns",
+      "reason": "Records when one Company switched Accounting on, and who did it."
+    },
+    {
+      "item": "accounting_configuration_history",
+      "reason": "An audit trail of the source Company's configuration changes."
+    },
+    {
+      "item": "payment methods",
+      "reason": "Not Company configuration. They are code-level enumerations enforced by CHECK constraints (for example cash/visa on driver collections), so there is nothing per-Company to carry."
+    },
+    {
+      "item": "areas, emirates",
+      "reason": "Operational geography rather than Accounting setup. Emirates are global reference data and Areas are imported by their own tool."
+    },
+    {
+      "item": "audit_events, accounts, roles, permissions, sessions",
+      "reason": "Identity, security and audit data — never part of an Accounting template."
+    },
+    {
+      "item": "all transactional tables",
+      "reason": "Orders, customers, traders, drivers, employees, journals, accounting events, settlements, collections, reconciliations, payroll, expenses, cash/bank movements, batch and recovery execution history."
+    }
+  ],
+  "expenseTypes": [
+    {
+      "code": "OTHER",
+      "displayName": "Other",
+      "isActive": true,
+      "key": "EXPENSE_TYPE_OTHER",
+      "nameAr": null,
+      "nameEn": "Other"
+    },
+    {
+      "code": "PARKING",
+      "displayName": "Parking",
+      "isActive": true,
+      "key": "EXPENSE_TYPE_PARKING",
+      "nameAr": null,
+      "nameEn": "Parking"
+    },
+    {
+      "code": "PETROL",
+      "displayName": "Petrol",
+      "isActive": true,
+      "key": "EXPENSE_TYPE_PETROL",
+      "nameAr": null,
+      "nameEn": "Petrol"
+    },
+    {
+      "code": "VEHICLE",
+      "displayName": "Vehicle-related",
+      "isActive": true,
+      "key": "EXPENSE_TYPE_VEHICLE",
+      "nameAr": null,
+      "nameEn": "Vehicle-related"
+    },
+    {
+      "code": "WATER",
+      "displayName": "Water",
+      "isActive": true,
+      "key": "EXPENSE_TYPE_WATER",
+      "nameAr": null,
+      "nameEn": "Water"
+    }
+  ],
+  "fiscalPolicy": {
+    "fiscalYearStartMonth": 1,
+    "generatedOnCompanyCreation": true,
+    "periodModel": "calendar_month",
+    "periodsPerYear": 12,
+    "timezone": "Asia/Dubai"
+  },
+  "generalExpenseCategories": [
+    {
+      "code": "EXP-OFFICE",
+      "defaultExpenseMappingKey": "general_expense",
+      "defaultVatTreatment": "out_of_scope",
+      "description": "Office supplies and stationery expenses",
+      "isActive": true,
+      "key": "EXPENSE_CATEGORY_EXP_OFFICE",
+      "nameAr": "مستلزمات مكتبية",
+      "nameEn": "Office Supplies"
+    }
+  ],
+  "name": "UAE Delivery Standard",
+  "openingBalances": [],
+  "referenceNumberPrefixes": [
+    {
+      "prefix": "OB",
+      "referenceType": "accounting_opening_balance"
+    },
+    {
+      "prefix": "AREA",
+      "referenceType": "area"
+    },
+    {
+      "prefix": "CBM",
+      "referenceType": "cash_bank_movement"
+    },
+    {
+      "prefix": "CUS",
+      "referenceType": "customer"
+    },
+    {
+      "prefix": "DRV",
+      "referenceType": "driver"
+    },
+    {
+      "prefix": "EMP",
+      "referenceType": "employee"
+    },
+    {
+      "prefix": "EXP",
+      "referenceType": "general_expense"
+    },
+    {
+      "prefix": "EXPPAY",
+      "referenceType": "general_expense_payment"
+    },
+    {
+      "prefix": "JRN",
+      "referenceType": "journal"
+    },
+    {
+      "prefix": "ORD",
+      "referenceType": "order"
+    },
+    {
+      "prefix": "DFPAY",
+      "referenceType": "outsourced_driver_fee_payment"
+    },
+    {
+      "prefix": "PAYPMT",
+      "referenceType": "payroll_payment"
+    },
+    {
+      "prefix": "REC",
+      "referenceType": "reconciliation"
+    },
+    {
+      "prefix": "SET",
+      "referenceType": "settlement"
+    },
+    {
+      "prefix": "TRD",
+      "referenceType": "trader"
+    },
+    {
+      "prefix": "COL",
+      "referenceType": "trader_collection"
+    },
+    {
+      "prefix": "RCV",
+      "referenceType": "trader_receivable"
+    }
+  ],
+  "requiredCompanyInputs": [
+    "bankAccountDetails.bankName",
+    "bankAccountDetails.accountName",
+    "bankAccountDetails.accountNumber",
+    "bankAccountDetails.iban",
+    "bankAccountDetails.swiftCode",
+    "cashAccount.locationOrCustodian",
+    "fiscalYear.startDate",
+    "accounting.manualActivationDate",
+    "vat.registrationAndRate",
+    "openingBalances"
+  ],
+  "schemaVersion": 1,
+  "source": {
+    "companyName": "Lahza",
+    "type": "company_export"
+  },
+  "templateCode": "UAE_DELIVERY_STANDARD",
+  "templateVersion": 3
+}

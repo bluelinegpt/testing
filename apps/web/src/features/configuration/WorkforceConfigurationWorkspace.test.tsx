@@ -126,6 +126,7 @@ describe("WorkforceConfigurationWorkspace", () => {
     expect(await screen.findByText("Driver Variable Earnings")).toBeInTheDocument();
     expect(await screen.findByDisplayValue("2.00")).toBeInTheDocument();
     expect(screen.getByDisplayValue("1.00")).toBeInTheDocument();
+    expect(screen.getAllByDisplayValue("2026-08-08")).toHaveLength(2);
     expect(screen.getByText("Eligible for Delivery Earnings")).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "None" })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "Per Collected Order" })).toBeInTheDocument();
