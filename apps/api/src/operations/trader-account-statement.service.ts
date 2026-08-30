@@ -175,6 +175,10 @@ export class TraderAccountStatementService {
            -- -- producing a phantom negative Closing Balance for a Trader who
            -- in fact owes nothing.
            and o.delivery_status in ('delivered', 'closed')
+           -- A delivered parcel is still provisional until its Driver cash is
+           -- reconciled. Do not present that provisional amount as money owed
+           -- by the Company; it may still enter a return workflow.
+           and o.driver_reconciliation_status in ('reconciled', 'not_applicable')
            and (o.delivered_at at time zone 'Asia/Dubai')::date between ${from}::date and ${to}::date
         union all
         select s.id, 'payment'::text, s.business_date::text, s.created_at::text, 2,
@@ -229,6 +233,7 @@ export class TraderAccountStatementService {
            -- Same reason as the source query above: 'closed' is a delivered
            -- Order's own terminal state, not a different lifecycle.
            and o.delivery_status in ('delivered', 'closed')
+           and o.driver_reconciliation_status in ('reconciled', 'not_applicable')
            and (o.delivered_at at time zone 'Asia/Dubai')::date between ${from}::date and ${to}::date
       `.execute(this.database)
     ).rows[0];
@@ -477,6 +482,7 @@ export class TraderAccountStatementService {
               -- Same reason as statement()'s own source query: a Closed
               -- Order still owes/owed its Trader payable history.
               and o.delivery_status in ('delivered', 'closed')
+              and o.driver_reconciliation_status in ('reconciled', 'not_applicable')
               and (o.delivered_at at time zone 'Asia/Dubai')::date < ${from}::date), 0)
           - coalesce((select sum(p.amount) from trader_settlements s
               join trader_settlement_payments p on p.settlement_id = s.id and p.company_id = s.company_id

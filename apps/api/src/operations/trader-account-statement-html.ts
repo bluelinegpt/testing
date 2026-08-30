@@ -82,12 +82,12 @@ table{width:100%;border-collapse:collapse;table-layout:fixed}thead{display:table
   <section class="cards">
     <div class="card">${ar ? "غير المدفوع للتاجر" : "Unpaid to Trader"}<strong>AED ${escapeHtml(data.summary.outstandingAmount)}</strong></div>
     <div class="card">${ar ? "المدفوع للتاجر" : "Paid to Trader"}<strong>AED ${escapeHtml(data.summary.netPayments)}</strong></div>
-    <div class="card">${ar ? "مستحقات جديدة من الطلبات المسلّمة" : "New Payable from Delivered Orders"}<strong>AED ${escapeHtml(data.summary.totalPayable)}</strong></div>
+    <div class="card">${ar ? "المستحق المؤكد من الطلبات المحصّلة" : "Confirmed Payable from Collected Orders"}<strong>AED ${escapeHtml(data.summary.totalPayable)}</strong></div>
   </section>
   <section class="cards">
     <div class="card">${labels.opening}<strong>AED ${escapeHtml(data.summary.openingBalance)}</strong></div>
-    <div class="card">${ar ? "قيمة الدفع عند الاستلام للطلبات المسلّمة" : "COD on Delivered Orders"}<strong>AED ${escapeHtml(data.summary.codCollected)}</strong><span class="muted">${ar ? "ليست تأكيداً على تحصيل النقد" : "Not confirmation of cash collection"}</span></div>
-    <div class="card">${ar ? "رسوم الخدمة المخصومة من مستحق التاجر" : "Service Fees Deducted from Trader Payable"}<strong>AED ${escapeHtml(data.summary.serviceFeesDeducted)}</strong><span class="muted">${ar ? "قيمة محسوبة وليست تأكيداً على تحصيل النقد" : "Calculated fee, not cash-collection confirmation"}</span></div>
+    <div class="card">${ar ? "قيمة الدفع عند الاستلام للطلبات المؤكد تحصيلها" : "COD from Collection-Confirmed Orders"}<strong>AED ${escapeHtml(data.summary.codCollected)}</strong><span class="muted">${ar ? "لا يشمل الطلبات بانتظار التحصيل من المندوب" : "Excludes orders awaiting Driver Collection"}</span></div>
+    <div class="card">${ar ? "رسوم الخدمة المخصومة من مستحق التاجر" : "Service Fees Deducted from Trader Payable"}<strong>AED ${escapeHtml(data.summary.serviceFeesDeducted)}</strong><span class="muted">${ar ? "رسوم الطلبات المؤكد تحصيلها فقط" : "Collection-confirmed orders only"}</span></div>
   </section>
   <table><thead><tr><th>#</th><th>${labels.date}</th><th>${labels.transaction}</th><th>${labels.description}</th><th>${labels.debit}</th><th>${labels.credit}</th><th>${labels.balance}</th></tr></thead>
   <tbody>${rows}</tbody></table>
