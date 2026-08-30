@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@aws-sdk/client-s3':
+        specifier: ^3.1118.0
+        version: 3.1118.0
       kysely:
         specifier: ^0.29.3
         version: 0.29.3
