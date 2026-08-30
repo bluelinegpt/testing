@@ -55,6 +55,13 @@ const connectSources = process.env.WEB_CONNECT_SRC ?? "'self' https:";
 if (/[;\r\n]/.test(connectSources)) {
   throw new Error("WEB_CONNECT_SRC contains invalid CSP characters");
 }
+// Company Website draft previews are rendered by the Company Web app on its
+// tenant hostname. Keep this separate from connect-src: it grants framing of
+// that renderer, not network access from the Platform document.
+const frameSources = process.env.WEB_FRAME_SRC ?? "'self' https://*.tawseelhub.com";
+if (/[;\r\n]/.test(frameSources)) {
+  throw new Error("WEB_FRAME_SRC contains invalid CSP characters");
+}
 const contentTypes = new Map([
   [".css", "text/css; charset=utf-8"],
   [".html", "text/html; charset=utf-8"],
@@ -73,7 +80,7 @@ function addSecurityHeaders(response) {
     // through an authenticated endpoint are rendered via
     // URL.createObjectURL(blob) -- see apps/web/serve.mjs's own comment on
     // this same line for the full explanation (identical setup here).
-    `default-src 'self'; connect-src ${connectSources}; img-src 'self' data: blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'`,
+    `default-src 'self'; connect-src ${connectSources}; img-src 'self' data: blob:; frame-src ${frameSources}; object-src 'none'; base-uri 'self'; frame-ancestors 'none'`,
   );
   response.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
   response.setHeader("X-Content-Type-Options", "nosniff");

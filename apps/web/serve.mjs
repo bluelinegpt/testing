@@ -60,6 +60,16 @@ const connectSources = process.env.WEB_CONNECT_SRC ?? "'self' https:";
 if (/[;\r\n]/.test(connectSources)) {
   throw new Error("WEB_CONNECT_SRC contains invalid CSP characters");
 }
+// Only authenticated Platform origins may embed the Company Web renderer,
+// and only when the explicit draft-preview query flag is present. The Render
+// test origin is included because it is the deployed Platform Administration
+// host used to review drafts before production publication.
+const draftPreviewAncestors =
+  process.env.WEB_DRAFT_PREVIEW_ANCESTORS ??
+  "'self' https://platform.tawseelhub.com https://bluelinegpt-platform-test.onrender.com http://127.0.0.1:5176 http://localhost:5176";
+if (/[;\r\n]/.test(draftPreviewAncestors)) {
+  throw new Error("WEB_DRAFT_PREVIEW_ANCESTORS contains invalid CSP characters");
+}
 const contentTypes = new Map([
   [".css", "text/css; charset=utf-8"],
   [".html", "text/html; charset=utf-8"],
@@ -82,7 +92,7 @@ function addSecurityHeaders(response, requestUrl = "/") {
     // URL.createObjectURL(blob) -- there's no public URL for any of these by
     // design. This is the CSP that actually governs those <img> renders (the
     // document's own header, not the API's), so it must allow blob: too.
-    `default-src 'self'; connect-src ${connectSources}; img-src 'self' data: blob:; object-src 'none'; base-uri 'self'; frame-ancestors ${isDraftPreview ? "'self' https://platform.tawseelhub.com http://127.0.0.1:5176 http://localhost:5176" : "'none'"}`,
+    `default-src 'self'; connect-src ${connectSources}; img-src 'self' data: blob:; object-src 'none'; base-uri 'self'; frame-ancestors ${isDraftPreview ? draftPreviewAncestors : "'none'"}`,
   );
   response.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
   response.setHeader("X-Content-Type-Options", "nosniff");
