@@ -1092,32 +1092,33 @@ function TraderAccountStatementDialog({
         <>
           <div className="summary-primary">
             <article className="kpi-card">
-              <span>{t("traderSettlements.statementOpeningBalance")}</span>
-              <strong>{money(statement.summary.openingBalance)}</strong>
+              <span>{t("traderSettlements.statementOutstanding")}</span>
+              <strong>{money(statement.summary.outstandingAmount)}</strong>
+              <small>{t("traderSettlements.statementOutstandingHint")}</small>
+            </article>
+            <article className="kpi-card">
+              <span>{t("traderSettlements.statementPaidToTrader")}</span>
+              <strong>{money(statement.summary.netPayments)}</strong>
+              <small>{t("traderSettlements.statementPaidToTraderHint")}</small>
             </article>
             <article className="kpi-card">
               <span>{t("traderSettlements.statementTotalPayable")}</span>
               <strong>{money(statement.summary.totalPayable)}</strong>
+              <small>{t("traderSettlements.statementTotalPayableHint")}</small>
             </article>
             <article className="kpi-card">
-              <span>{t("traderSettlements.statementNetPayments")}</span>
-              <strong>{money(statement.summary.netPayments)}</strong>
-            </article>
-            <article className="kpi-card">
-              <span>{t("traderSettlements.statementClosingBalance")}</span>
-              <strong>{money(statement.summary.closingBalance)}</strong>
+              <span>{t("traderSettlements.statementOpeningBalance")}</span>
+              <strong>{money(statement.summary.openingBalance)}</strong>
             </article>
             <article className="kpi-card">
               <span>{t("traderSettlements.statementCodCollected")}</span>
               <strong>{money(statement.summary.codCollected)}</strong>
+              <small>{t("traderSettlements.statementCodHint")}</small>
             </article>
             <article className="kpi-card">
               <span>{t("traderSettlements.statementServiceFees")}</span>
               <strong>{money(statement.summary.serviceFeesDeducted)}</strong>
-            </article>
-            <article className="kpi-card">
-              <span>{t("traderSettlements.statementOutstanding")}</span>
-              <strong>{money(statement.summary.outstandingAmount)}</strong>
+              <small>{t("traderSettlements.statementServiceFeesHint")}</small>
             </article>
             <article className="kpi-card">
               <span>{t("traderSettlements.statementDeliveredOrders")}</span>

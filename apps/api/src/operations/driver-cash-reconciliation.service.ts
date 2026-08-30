@@ -266,6 +266,7 @@ export interface DriverCollectionReportData {
     readonly collectionPaymentMethod: "cash" | "visa" | null;
     readonly company: {
       readonly hasLogo: boolean;
+      readonly logoDataUri?: string | null;
       readonly nameAr: string | null;
       readonly nameEn: string;
       readonly subtitleAr: string | null;
@@ -2271,6 +2272,19 @@ export class DriverCashReconciliationService {
     const { companyId } = this.tenants.current();
     const identity = this.identities.current();
     const data = await this.reportData(reconciliationId);
+    const logoDataUri = data.header.company.hasLogo
+      ? await this.companyProfile
+          .logoContent()
+          .then((logo) => `data:${logo.mediaType};base64,${logo.bytes.toString("base64")}`)
+          .catch(() => null)
+      : null;
+    const pdfData: DriverCollectionReportData = {
+      ...data,
+      header: {
+        ...data.header,
+        company: { ...data.header.company, logoDataUri },
+      },
+    };
     const generatedAt = new Intl.DateTimeFormat("en-GB", {
       day: "2-digit",
       hour: "2-digit",
@@ -2279,7 +2293,7 @@ export class DriverCashReconciliationService {
       timeZone: "Asia/Dubai",
       year: "numeric",
     }).format(new Date());
-    const html = buildDriverCollectionReportHtml(data, language, `${generatedAt} (UAE)`);
+    const html = buildDriverCollectionReportHtml(pdfData, language, `${generatedAt} (UAE)`);
     const footerTemplate =
       language === "ar"
         ? `<div style="font-size:9px;width:100%;text-align:center;color:#666;direction:rtl;">الصفحة <span class="pageNumber"></span> من <span class="totalPages"></span></div>`

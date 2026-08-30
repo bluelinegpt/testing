@@ -314,7 +314,9 @@ export function buildDriverCollectionReportHtml(
   const header =
     `<header class="report-header">` +
     `<div class="company-block">` +
-    (data.header.company.hasLogo ? `<div class="logo-placeholder"></div>` : "") +
+    (data.header.company.logoDataUri == null
+      ? ""
+      : `<img class="company-logo" alt="" src="${escapeHtml(data.header.company.logoDataUri)}">`) +
     `<div class="company-identity">` +
     `<div class="company-name">${escapeHtml(data.header.company.nameEn)}` +
     (data.header.company.nameAr === null ? "" : ` / ${escapeHtml(data.header.company.nameAr)}`) +
@@ -385,7 +387,7 @@ export function buildDriverCollectionReportHtml(
     body { font-family: "Segoe UI", Tahoma, Arial, sans-serif; color: #111; margin: 0; font-size: 11px; }
     .report-header { border-bottom: 2px solid #333; margin-bottom: 10px; padding-bottom: 8px; }
     .company-block { display: flex; align-items: center; gap: 10px; }
-    .logo-placeholder { width: 40px; height: 40px; border: 1px solid #ccc; border-radius: 4px; }
+    .company-logo { width: 48px; height: 48px; object-fit: contain; }
     .company-name { font-size: 16px; font-weight: 800; }
     .company-subtitle, .company-telephone { font-size: 11px; color: #444; }
     .report-title { font-size: 18px; margin: 8px 0 6px; }

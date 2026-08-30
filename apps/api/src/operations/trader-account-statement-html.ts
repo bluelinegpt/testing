@@ -50,7 +50,7 @@ export function buildTraderAccountStatementHtml(
         <td>${line.lineNumber}</td>
         <td>${escapeHtml(line.date)}</td>
         <td>${escapeHtml(line.reference)}</td>
-        <td>${escapeHtml(line.description)}</td>
+        <td>${escapeHtml(ar ? (line.type === "order" ? "طلب مسلّم" : line.type === "payment" ? "دفعة للتاجر" : "عكس دفعة للتاجر") : line.description)}</td>
         <td class="money">${escapeHtml(line.debit)}</td>
         <td class="money">${escapeHtml(line.credit)}</td>
         <td class="money">${escapeHtml(line.runningBalance)}</td>
@@ -80,14 +80,14 @@ table{width:100%;border-collapse:collapse;table-layout:fixed}thead{display:table
   <section class="header"><div class="brand">${data.company.logoDataUri === null ? "" : `<img class="logo" alt="" src="${escapeHtml(data.company.logoDataUri)}">`}<div><h1>${labels.title}</h1><div>${escapeHtml(data.trader.number)} · ${escapeHtml(ar ? data.trader.nameAr || data.trader.nameEn : data.trader.nameEn)}</div></div></div>
   <div><strong>${escapeHtml(ar ? data.company.nameAr || data.company.nameEn : data.company.nameEn)}</strong><br>${labels.from}: ${escapeHtml(data.period.from)}<br>${labels.to}: ${escapeHtml(data.period.to)}</div></section>
   <section class="cards">
-    <div class="card">${labels.opening}<strong>AED ${escapeHtml(data.summary.openingBalance)}</strong></div>
-    <div class="card">${labels.debit}<strong>AED ${escapeHtml(data.summary.totalPayable)}</strong></div>
-    <div class="card">${labels.credit}<strong>AED ${escapeHtml(data.summary.netPayments)}</strong></div>
+    <div class="card">${ar ? "غير المدفوع للتاجر" : "Unpaid to Trader"}<strong>AED ${escapeHtml(data.summary.outstandingAmount)}</strong></div>
+    <div class="card">${ar ? "المدفوع للتاجر" : "Paid to Trader"}<strong>AED ${escapeHtml(data.summary.netPayments)}</strong></div>
+    <div class="card">${ar ? "مستحقات جديدة من الطلبات المسلّمة" : "New Payable from Delivered Orders"}<strong>AED ${escapeHtml(data.summary.totalPayable)}</strong></div>
   </section>
   <section class="cards">
-    <div class="card">${ar ? "الدفع عند الاستلام" : "COD collected"}<strong>AED ${escapeHtml(data.summary.codCollected)}</strong></div>
-    <div class="card">${ar ? "رسوم الخدمة" : "Service fees"}<strong>AED ${escapeHtml(data.summary.serviceFeesDeducted)}</strong></div>
-    <div class="card">${ar ? "المبلغ المستحق" : "Outstanding"}<strong>AED ${escapeHtml(data.summary.outstandingAmount)}</strong></div>
+    <div class="card">${labels.opening}<strong>AED ${escapeHtml(data.summary.openingBalance)}</strong></div>
+    <div class="card">${ar ? "قيمة الدفع عند الاستلام للطلبات المسلّمة" : "COD on Delivered Orders"}<strong>AED ${escapeHtml(data.summary.codCollected)}</strong><span class="muted">${ar ? "ليست تأكيداً على تحصيل النقد" : "Not confirmation of cash collection"}</span></div>
+    <div class="card">${ar ? "رسوم الخدمة المخصومة من مستحق التاجر" : "Service Fees Deducted from Trader Payable"}<strong>AED ${escapeHtml(data.summary.serviceFeesDeducted)}</strong><span class="muted">${ar ? "قيمة محسوبة وليست تأكيداً على تحصيل النقد" : "Calculated fee, not cash-collection confirmation"}</span></div>
   </section>
   <table><thead><tr><th>#</th><th>${labels.date}</th><th>${labels.transaction}</th><th>${labels.description}</th><th>${labels.debit}</th><th>${labels.credit}</th><th>${labels.balance}</th></tr></thead>
   <tbody>${rows}</tbody></table>
