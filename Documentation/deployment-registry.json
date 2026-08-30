@@ -6,10 +6,10 @@
       "displayName": "API",
       "path": "apps/api",
       "renderService": "bluelinegpt-api-test",
-      "status": "pushed_awaiting_confirmation",
-      "localCommit": "0484d32",
+      "status": "needs_deploy",
+      "localCommit": "ebb38aa",
       "localCommitDate": "2026-08-31",
-      "lastChangeDescription": "Uploads Website branding to R2 before AI setup and shows clear upload/generator errors.",
+      "lastChangeDescription": "Shows specific safe OpenAI and R2 operational errors instead of a generic failure.",
       "lastChangeBy": "codex",
       "confirmedLiveCommit": "2db5a27",
       "confirmedLiveAt": "2026-08-28"
