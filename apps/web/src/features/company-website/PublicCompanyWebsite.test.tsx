@@ -143,6 +143,9 @@ describe("public Company website shell", () => {
     );
     render(<PublicCompanyWebsite />);
     expect(await screen.findByRole("heading", { name: "Dana Delivery" })).toBeInTheDocument();
+    const themeBoundary = screen.getByTestId("company-site-theme-boundary");
+    expect(themeBoundary).toContainElement(screen.getByRole("heading", { name: "Request delivery" }));
+    expect(themeBoundary.style.getPropertyValue("--site-primary")).toBe("#aa0000");
     expect(screen.getByText("hello@dana.test")).toBeInTheDocument();
     expect(screen.queryByText(/phone/i)).not.toBeInTheDocument();
   });

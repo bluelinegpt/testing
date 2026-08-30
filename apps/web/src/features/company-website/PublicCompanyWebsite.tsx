@@ -5,6 +5,7 @@ import {
   useEffect,
   useRef,
   useState,
+  type CSSProperties,
   type ErrorInfo,
   type FormEvent,
   type ReactNode,
@@ -407,8 +408,19 @@ export function PublicCompanyWebsite({
     (company.hasLogo
       ? `${apiBase()}/public/company-website/logo${override ? `?host=${encodeURIComponent(override)}` : ""}`
       : null);
+  const websiteTheme = {
+    ...(settings?.branding.primaryColor ? { "--site-primary": settings.branding.primaryColor } : {}),
+    ...(settings?.branding.secondaryColor
+      ? { "--site-secondary": settings.branding.secondaryColor }
+      : {}),
+    ...(settings?.branding.accentColor ? { "--site-accent": settings.branding.accentColor } : {}),
+  } as CSSProperties;
   return (
-    <>
+    <div
+      className="company-site company-site-public-page"
+      data-testid="company-site-theme-boundary"
+      style={websiteTheme}
+    >
       {renderCompanyWebsiteTemplate(payload.templateKey ?? "corporate", {
         name,
         ...(localized(settings?.presentation.heroHeadline as Localized | undefined)
@@ -643,7 +655,7 @@ export function PublicCompanyWebsite({
         ) : null}
       </nav>
       <span className="version-badge company-site__version">{__APP_VERSION__}</span>
-    </>
+    </div>
   );
 }
 

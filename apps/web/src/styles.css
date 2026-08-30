@@ -10691,7 +10691,12 @@ tr.row-highlighted {
   min-height: 100vh;
   background: #f7f8fb;
   color: #152338;
+  color-scheme: light;
   font-family: Inter, system-ui, sans-serif;
+}
+.company-site-public-page {
+  background: var(--site-background, #f5f7f8);
+  color: var(--site-text, #152331);
 }
 .company-site__header {
   align-items: center;
@@ -11374,6 +11379,8 @@ tr.row-highlighted {
   color: #17212b;
 }
 .company-site-function {
+  background: var(--site-surface, #fff);
+  color: var(--site-text, #152331);
   border: 1px solid #dce4ea;
   border-radius: 18px;
   padding: clamp(1.25rem, 3vw, 2.5rem);
@@ -11394,6 +11401,8 @@ tr.row-highlighted {
 }
 .company-site-function input,
 .company-site-function textarea {
+  background: #fff;
+  color: #17212b;
   box-sizing: border-box;
   width: 100%;
   border: 1px solid #9babb8;
