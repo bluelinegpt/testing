@@ -32,10 +32,10 @@
       "displayName": "Platform admin",
       "path": "apps/platform-web",
       "renderService": "bluelinegpt-platform-test",
-      "status": "pushed_awaiting_confirmation",
-      "localCommit": "9df622b",
+      "status": "needs_deploy",
+      "localCommit": "b9024c9",
       "localCommitDate": "2026-08-30",
-      "lastChangeDescription": "show actionable service errors and load exact Company Website previews",
+      "lastChangeDescription": "Keep Publish visible and expose WhatsApp and AI Agent settings at the top",
       "lastChangeBy": "codex",
       "confirmedLiveCommit": "19b9e85",
       "confirmedLiveAt": "2026-08-27"
