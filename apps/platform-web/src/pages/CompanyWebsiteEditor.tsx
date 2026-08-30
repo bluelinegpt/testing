@@ -334,7 +334,7 @@ export function CompanyWebsiteEditor({
         <a href="#website-homepage">Homepage</a>
         <a href="#website-services">Services</a>
         <a href="#website-trust">Trust</a>
-        <a href="#website-contact">Customer Actions</a>
+        <a href="#website-contact">WhatsApp &amp; Contact</a>
         <a href="#website-agent">AI Agent</a>
         <a href="#website-seo">SEO</a>
         <a href="#website-sections">Review order</a>
@@ -1113,7 +1113,7 @@ export function CompanyWebsiteEditor({
         ))}
       </details>
       <details id="website-agent" open>
-        <summary>Company Knowledge &amp; Agent</summary>
+        <summary>AI Agent &amp; Company Knowledge</summary>
         <h5>Company Facts</h5>
         <div className="website-editor__grid">
           <label className="platform-field">

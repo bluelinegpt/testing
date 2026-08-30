@@ -50,6 +50,30 @@ describe("CompanyWebsitePanel", () => {
     expect(screen.queryByRole("button", { name: "Enable Website" })).not.toBeInTheDocument();
     expect(screen.getByText("Unpublished changes")).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "Preview" })).toHaveLength(20);
+    expect(screen.getByRole("link", { name: "WhatsApp settings" })).toHaveAttribute(
+      "href",
+      "#website-contact",
+    );
+    expect(screen.getByRole("link", { name: "AI Agent settings" })).toHaveAttribute(
+      "href",
+      "#website-agent",
+    );
+  });
+
+  it("keeps Publish visible when the published Website is up to date", async () => {
+    vi.spyOn(platformApi, "companyWebsite").mockResolvedValue({
+      status: "published",
+      slug: "dana",
+      enabled: true,
+      published: true,
+      templateKey: "corporate",
+      publishedTemplateKey: "corporate",
+      hasUnpublishedChanges: false,
+      version: 5,
+    });
+    render(<CompanyWebsitePanel companyId="company-a" suggestedSlug="dana" />);
+    expect(await screen.findByRole("button", { name: "Publish" })).toBeInTheDocument();
+    expect(screen.getByText("Up to date")).toBeInTheDocument();
   });
 
   it("shows a conflict and reloads instead of silently retrying", async () => {

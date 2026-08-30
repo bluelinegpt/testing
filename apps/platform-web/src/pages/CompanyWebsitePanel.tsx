@@ -154,6 +154,16 @@ export function CompanyWebsitePanel({
                 {editingWebsite ? "Hide Website Setup" : "Open Website Setup"}
               </button>
             ) : null}
+            {status !== "not_configured" && editingWebsite ? (
+              <>
+                <a className="platform-button platform-button--quiet" href="#website-contact">
+                  WhatsApp settings
+                </a>
+                <a className="platform-button platform-button--quiet" href="#website-agent">
+                  AI Agent settings
+                </a>
+              </>
+            ) : null}
           </div>
         ) : null}
       </div>
@@ -276,7 +286,7 @@ export function CompanyWebsitePanel({
           </dl>
           {canManage && status !== "not_configured" ? (
             <div className="platform-actions">
-              {status === "draft" || website.hasUnpublishedChanges ? (
+              {status === "draft" || status === "published" ? (
                 <button
                   className="platform-button"
                   disabled={busy}
