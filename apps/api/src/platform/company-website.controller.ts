@@ -37,9 +37,14 @@ import {
 import { PlatformTargetCompanyGuard } from "./platform-target-company.guard.js";
 // Runtime DTO imports are required so Nest can emit validation metadata.
 // eslint-disable-next-line @typescript-eslint/consistent-type-imports
-import { ConfigureCompanyWebsiteDto, MutateCompanyWebsiteDto } from "./company-website.dto.js";
+import {
+  ConfigureCompanyWebsiteDto,
+  GenerateCompanyWebsiteAiSetupDto,
+  MutateCompanyWebsiteDto,
+} from "./company-website.dto.js";
 import { CompanyWebsiteService } from "./company-website.service.js";
 import { CompanyWebsiteAgentService } from "./company-website-agent.service.js";
+import { CompanyWebsiteAiSetupProvider } from "./company-website-ai-setup.provider.js";
 import { CompanyWebsiteDomainService } from "./company-website-domain.service.js";
 // eslint-disable-next-line @typescript-eslint/consistent-type-imports
 import {
@@ -67,9 +72,17 @@ export class PlatformCompanyWebsiteController {
   public constructor(
     @Inject(CompanyWebsiteService) private readonly websites: CompanyWebsiteService,
     @Inject(CompanyWebsiteAgentService) private readonly websiteAgent: CompanyWebsiteAgentService,
+    @Inject(CompanyWebsiteAiSetupProvider) private readonly aiSetup: CompanyWebsiteAiSetupProvider,
     @Inject(CompanyWebsiteDomainService) private readonly domains: CompanyWebsiteDomainService,
     @Inject(IdentityContextAccessor) private readonly identities: IdentityContextAccessor,
   ) {}
+
+  @RequirePlatformPermissions(PLATFORM_COMPANY_WEBSITES_MANAGE)
+  @Post("ai-setup/propose")
+  @HttpCode(200)
+  public proposeAiSetup(@Body() input: GenerateCompanyWebsiteAiSetupDto) {
+    return this.aiSetup.generate(input);
+  }
   private actor(request: Request) {
     return {
       accountId: this.identities.current().identityId,

@@ -3,6 +3,7 @@ import {
   PlatformApiError,
   platformApi,
   type CompanyWebsite,
+  type CompanyWebsiteAiProposal,
   type CompanyWebsiteSettings,
 } from "../api/platform-client.js";
 
@@ -115,6 +116,129 @@ function localizedValue(
   return typeof value === "object" ? (value[locale] ?? "") : locale === "en" ? (value ?? "") : "";
 }
 
+const UAE_COVERAGE = [
+  ["Abu Dhabi", "أبوظبي"],
+  ["Dubai", "دبي"],
+  ["Sharjah", "الشارقة"],
+  ["Ajman", "عجمان"],
+  ["Umm Al Quwain", "أم القيوين"],
+  ["Ras Al Khaimah", "رأس الخيمة"],
+  ["Fujairah", "الفجيرة"],
+] as const;
+
+function missing(value: string | undefined): boolean {
+  return !value?.trim();
+}
+
+export function applyCompanyWebsiteAiProposal(
+  current: CompanyWebsiteSettings,
+  proposal: CompanyWebsiteAiProposal,
+  phoneWhatsapp: string,
+): CompanyWebsiteSettings {
+  const next = structuredClone(current);
+  next.languages.en = true;
+  next.languages.ar = true;
+  const localizedKeys = [
+    "displayName",
+    "tagline",
+    "about",
+    "heroHeadline",
+    "heroSubheadline",
+    "primaryCtaLabel",
+  ] as const;
+  for (const key of localizedKeys) {
+    const existingEn = localizedValue(next.presentation[key], "en");
+    const existingAr = localizedValue(next.presentation[key], "ar");
+    const generated = proposal[key];
+    next.presentation[key] = {
+      en: missing(existingEn) ? generated.en : existingEn,
+      ar: missing(existingAr) ? generated.ar : existingAr,
+    };
+  }
+  if (missing(next.branding.primaryColor)) next.branding.primaryColor = proposal.colors.primary;
+  if (missing(next.branding.secondaryColor))
+    next.branding.secondaryColor = proposal.colors.secondary;
+  if (missing(next.branding.accentColor)) next.branding.accentColor = proposal.colors.accent;
+  if (missing(next.contact.phone)) next.contact.phone = phoneWhatsapp;
+  if (missing(next.contact.mobile)) next.contact.mobile = phoneWhatsapp;
+  if (missing(next.contact.whatsappNumber)) next.contact.whatsappNumber = phoneWhatsapp;
+  next.contact.whatsappEnabled = true;
+  next.contact.showWhatsapp = true;
+  next.contact.showPhone = true;
+  if (!next.contact.workingHours.length) {
+    next.contact.workingHours = [
+      "monday",
+      "tuesday",
+      "wednesday",
+      "thursday",
+      "friday",
+      "saturday",
+      "sunday",
+    ].map((day) => ({ day, closed: false, opens: "08:00", closes: "23:59" }));
+    next.contact.showWorkingHours = true;
+  }
+  if (!next.services.length)
+    next.services = proposal.services.map((item, order) => ({
+      id: `ai-service-${order + 1}`,
+      ...item,
+      enabled: true,
+      order,
+    }));
+  if (!next.benefits.length)
+    next.benefits = proposal.benefits.map((item, order) => ({
+      id: `ai-benefit-${order + 1}`,
+      ...item,
+      enabled: true,
+      order,
+    }));
+  if (!next.coverage.length)
+    next.coverage = UAE_COVERAGE.map(([emirate, emirateAr], order) => ({
+      id: `uae-${order + 1}`,
+      emirate,
+      emirateAr,
+      enabled: true,
+      order,
+    }));
+  const description = next.knowledge.description ?? {};
+  next.knowledge.description = {
+    en: missing(description.en) ? proposal.about.en : (description.en ?? ""),
+    ar: missing(description.ar) ? proposal.about.ar : (description.ar ?? ""),
+  };
+  if (!next.knowledge.audiences.length) next.knowledge.audiences = ["individuals", "smes"];
+  if (!next.knowledge.faqs.length)
+    next.knowledge.faqs = proposal.faqs.map((item, order) => ({
+      id: `ai-faq-${order + 1}`,
+      ...item,
+      enabled: true,
+      websiteVisible: true,
+      agentAvailable: true,
+      order,
+    }));
+  next.seo ??= { indexable: true };
+  const seoTitle = next.seo.title ?? {};
+  const seoDescription = next.seo.description ?? {};
+  next.seo.title = {
+    en: missing(seoTitle.en) ? proposal.seo.title.en : (seoTitle.en ?? ""),
+    ar: missing(seoTitle.ar) ? proposal.seo.title.ar : (seoTitle.ar ?? ""),
+  };
+  next.seo.description = {
+    en: missing(seoDescription.en) ? proposal.seo.description.en : (seoDescription.en ?? ""),
+    ar: missing(seoDescription.ar) ? proposal.seo.description.ar : (seoDescription.ar ?? ""),
+  };
+  if (missing(next.agent.displayName)) next.agent.displayName = proposal.agent.displayName;
+  const welcome = next.agent.welcomeMessage ?? {};
+  next.agent.welcomeMessage = {
+    en: missing(welcome.en) ? proposal.agent.welcomeMessage.en : (welcome.en ?? ""),
+    ar: missing(welcome.ar) ? proposal.agent.welcomeMessage.ar : (welcome.ar ?? ""),
+  };
+  const handoff = next.agent.handoffMessage ?? {};
+  next.agent.handoffMessage = {
+    en: missing(handoff.en) ? proposal.agent.handoffMessage.en : (handoff.en ?? ""),
+    ar: missing(handoff.ar) ? proposal.agent.handoffMessage.ar : (handoff.ar ?? ""),
+  };
+  return next;
+}
+
 export function CompanyWebsiteEditor({
   companyId,
   website,
@@ -132,6 +256,13 @@ export function CompanyWebsiteEditor({
   const [busy, setBusy] = useState(false);
   const [saveStatus, setSaveStatus] = useState<string>();
   const [validationErrors, setValidationErrors] = useState<readonly string[]>([]);
+  const [aiCompanyName, setAiCompanyName] = useState("");
+  const [aiPhone, setAiPhone] = useState("");
+  const [aiDetails, setAiDetails] = useState("");
+  const [aiLogoDataUrl, setAiLogoDataUrl] = useState<string>();
+  const [aiProposal, setAiProposal] = useState<CompanyWebsiteAiProposal>();
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiError, setAiError] = useState<string>();
   const bannerUrls =
     settings.branding.bannerDataUrls ??
     (settings.branding.bannerDataUrl ? [settings.branding.bannerDataUrl] : []);
@@ -192,6 +323,32 @@ export function CompanyWebsiteEditor({
       recipe(next);
       return next;
     });
+  async function generateAiProposal(): Promise<void> {
+    setAiError(undefined);
+    setAiProposal(undefined);
+    if (!aiCompanyName.trim() || !aiPhone.trim()) {
+      setAiError("Company name and Phone / WhatsApp are required.");
+      return;
+    }
+    setAiBusy(true);
+    try {
+      const result = await platformApi.proposeCompanyWebsiteAiSetup(companyId, {
+        companyName: aiCompanyName.trim(),
+        phoneWhatsapp: aiPhone.trim(),
+        ...(aiDetails.trim() ? { additionalDetails: aiDetails.trim() } : {}),
+        ...(aiLogoDataUrl ? { logoDataUrl: aiLogoDataUrl } : {}),
+      });
+      setAiProposal(result.proposal);
+    } catch (error) {
+      setAiError(
+        error instanceof PlatformApiError
+          ? error.message
+          : "OpenAI could not prepare the Website proposal.",
+      );
+    } finally {
+      setAiBusy(false);
+    }
+  }
   async function save(): Promise<void> {
     if (!website.slug || !website.templateKey) return;
     const errors = validateDraft(settings);
@@ -307,6 +464,254 @@ export function CompanyWebsiteEditor({
           </ul>
         </div>
       ) : null}
+      <details className="website-editor__completion website-ai-setup" open>
+        <summary>AI Website Setup — generate a bilingual proposal</summary>
+        <p className="platform-muted">
+          OpenAI prepares English and Arabic content for review. It does not save or publish.
+          Existing populated fields and uploaded banners are preserved.
+        </p>
+        <div className="website-editor__grid">
+          <label className="platform-field">
+            <span>Company name</span>
+            <input
+              maxLength={160}
+              onChange={(event) => setAiCompanyName(event.target.value)}
+              required
+              value={aiCompanyName}
+            />
+          </label>
+          <label className="platform-field">
+            <span>Phone / WhatsApp</span>
+            <input
+              maxLength={40}
+              onChange={(event) => setAiPhone(event.target.value)}
+              required
+              value={aiPhone}
+            />
+          </label>
+          <label className="platform-field website-ai-setup__wide">
+            <span>Additional confirmed details (optional)</span>
+            <textarea
+              maxLength={2000}
+              onChange={(event) => setAiDetails(event.target.value)}
+              value={aiDetails}
+            />
+          </label>
+          <label className="platform-field website-ai-setup__wide">
+            <span>Logo for Website Setup</span>
+            <input
+              accept="image/png,image/jpeg"
+              type="file"
+              onChange={(event) => {
+                const file = event.currentTarget.files?.[0];
+                if (!file) return;
+                void readImageDataUrl(file)
+                  .then(setAiLogoDataUrl)
+                  .catch(() => setAiError("The logo could not be read for OpenAI."));
+                void readWebsiteLogo(companyId, file, update, setValidationErrors);
+              }}
+            />
+            <small>
+              PNG or JPEG, maximum 500 KB. The logo is sent with the supplied details to OpenAI for
+              brand-color guidance only.
+            </small>
+          </label>
+        </div>
+        <p>
+          Confirmed defaults: UAE coverage · individuals and normal business customers · every day
+          08:00–24:00 · modern friendly-professional tone.
+        </p>
+        {aiError ? <p role="alert">{aiError}</p> : null}
+        <button
+          className="platform-button"
+          disabled={aiBusy}
+          onClick={() => void generateAiProposal()}
+          type="button"
+        >
+          {aiBusy ? "Preparing proposal…" : "Generate with OpenAI"}
+        </button>
+        {aiProposal ? (
+          <section className="website-ai-review" aria-labelledby="website-ai-review-heading">
+            <h5 id="website-ai-review-heading">Review proposed content</h5>
+            <dl>
+              <div>
+                <dt>Website name</dt>
+                <dd>{aiProposal.displayName.en}</dd>
+              </div>
+              <div dir="rtl">
+                <dt>اسم الموقع</dt>
+                <dd>{aiProposal.displayName.ar}</dd>
+              </div>
+              <div>
+                <dt>English tagline</dt>
+                <dd>{aiProposal.tagline.en}</dd>
+              </div>
+              <div dir="rtl">
+                <dt>الشعار النصي العربي</dt>
+                <dd>{aiProposal.tagline.ar}</dd>
+              </div>
+              <div>
+                <dt>English headline</dt>
+                <dd>{aiProposal.heroHeadline.en}</dd>
+              </div>
+              <div dir="rtl">
+                <dt>العنوان العربي</dt>
+                <dd>{aiProposal.heroHeadline.ar}</dd>
+              </div>
+              <div>
+                <dt>English introduction</dt>
+                <dd>{aiProposal.heroSubheadline.en}</dd>
+              </div>
+              <div dir="rtl">
+                <dt>المقدمة العربية</dt>
+                <dd>{aiProposal.heroSubheadline.ar}</dd>
+              </div>
+              <div>
+                <dt>English company description</dt>
+                <dd>{aiProposal.about.en}</dd>
+              </div>
+              <div dir="rtl">
+                <dt>وصف الشركة بالعربية</dt>
+                <dd>{aiProposal.about.ar}</dd>
+              </div>
+              <div>
+                <dt>Primary action</dt>
+                <dd>{aiProposal.primaryCtaLabel.en}</dd>
+              </div>
+              <div dir="rtl">
+                <dt>الإجراء الأساسي</dt>
+                <dd>{aiProposal.primaryCtaLabel.ar}</dd>
+              </div>
+              <div>
+                <dt>Services</dt>
+                <dd>
+                  {aiProposal.services.map((item) => (
+                    <p key={item.title.en}>
+                      <strong>{item.title.en}:</strong> {item.description.en}
+                    </p>
+                  ))}
+                </dd>
+              </div>
+              <div dir="rtl">
+                <dt>الخدمات</dt>
+                <dd>
+                  {aiProposal.services.map((item) => (
+                    <p key={item.title.ar}>
+                      <strong>{item.title.ar}:</strong> {item.description.ar}
+                    </p>
+                  ))}
+                </dd>
+              </div>
+              <div>
+                <dt>Benefits</dt>
+                <dd>
+                  {aiProposal.benefits.map((item) => (
+                    <p key={item.title.en}>
+                      <strong>{item.title.en}:</strong> {item.description.en}
+                    </p>
+                  ))}
+                </dd>
+              </div>
+              <div dir="rtl">
+                <dt>المزايا</dt>
+                <dd>
+                  {aiProposal.benefits.map((item) => (
+                    <p key={item.title.ar}>
+                      <strong>{item.title.ar}:</strong> {item.description.ar}
+                    </p>
+                  ))}
+                </dd>
+              </div>
+              <div>
+                <dt>FAQs (English)</dt>
+                <dd>
+                  {aiProposal.faqs.map((item) => (
+                    <p key={item.question.en}>
+                      <strong>{item.question.en}</strong>
+                      <br />
+                      {item.answer.en}
+                    </p>
+                  ))}
+                </dd>
+              </div>
+              <div dir="rtl">
+                <dt>الأسئلة الشائعة</dt>
+                <dd>
+                  {aiProposal.faqs.map((item) => (
+                    <p key={item.question.ar}>
+                      <strong>{item.question.ar}</strong>
+                      <br />
+                      {item.answer.ar}
+                    </p>
+                  ))}
+                </dd>
+              </div>
+              <div>
+                <dt>SEO</dt>
+                <dd>
+                  <strong>{aiProposal.seo.title.en}</strong>
+                  <br />
+                  {aiProposal.seo.description.en}
+                </dd>
+              </div>
+              <div dir="rtl">
+                <dt>تهيئة محركات البحث</dt>
+                <dd>
+                  <strong>{aiProposal.seo.title.ar}</strong>
+                  <br />
+                  {aiProposal.seo.description.ar}
+                </dd>
+              </div>
+              <div>
+                <dt>AI agent wording</dt>
+                <dd>
+                  <strong>{aiProposal.agent.displayName}</strong>
+                  <br />
+                  {aiProposal.agent.welcomeMessage.en}
+                  <br />
+                  {aiProposal.agent.handoffMessage.en}
+                </dd>
+              </div>
+              <div dir="rtl">
+                <dt>نص وكيل الذكاء الاصطناعي</dt>
+                <dd>
+                  {aiProposal.agent.welcomeMessage.ar}
+                  <br />
+                  {aiProposal.agent.handoffMessage.ar}
+                </dd>
+              </div>
+              <div>
+                <dt>Brand colors</dt>
+                <dd>
+                  {aiProposal.colors.primary} · {aiProposal.colors.secondary} ·{" "}
+                  {aiProposal.colors.accent}
+                </dd>
+              </div>
+              <div>
+                <dt>Confirmed operational details</dt>
+                <dd>All UAE · Individuals and SMEs · Daily 08:00–24:00 · {aiPhone.trim()}</dd>
+              </div>
+            </dl>
+            <p className="platform-muted">
+              Applying fills empty fields in this browser only. Review the full editor, then use
+              Save Draft. Publishing remains a separate action.
+            </p>
+            <button
+              className="platform-button"
+              onClick={() => {
+                setSettings((current) =>
+                  applyCompanyWebsiteAiProposal(current, aiProposal, aiPhone.trim()),
+                );
+                setSaveStatus("AI proposal applied locally. Review it, then choose Save Draft.");
+                setAiProposal(undefined);
+              }}
+              type="button"
+            >
+              Apply to empty fields
+            </button>
+          </section>
+        ) : null}
+      </details>
       <details className="website-editor__completion" open={completeness < 100}>
         <summary>
           Completion checklist — {completionItems.filter((item) => item.complete).length} of{" "}
@@ -332,8 +737,8 @@ export function CompanyWebsiteEditor({
       {website.hasHiddenLegacyMedia ? (
         <div className="website-editor__legacy-media-notice" role="status">
           This Website has an existing logo or banner saved in an old format that is too large to
-          preview here, so it is hidden below — it has not been deleted. Upload a new logo/banner
-          to replace it. If you Save Draft without uploading a replacement for a hidden image, that
+          preview here, so it is hidden below — it has not been deleted. Upload a new logo/banner to
+          replace it. If you Save Draft without uploading a replacement for a hidden image, that
           image is cleared.
         </div>
       ) : null}
@@ -1798,11 +2203,22 @@ async function readWebsiteLogo(
     showErrors([]);
   } catch (error) {
     showErrors([
-      error instanceof PlatformApiError
-        ? error.message
-        : "The Website logo could not be uploaded.",
+      error instanceof PlatformApiError ? error.message : "The Website logo could not be uploaded.",
     ]);
   }
+}
+
+function readImageDataUrl(file: File): Promise<string> {
+  if (!new Set(["image/png", "image/jpeg"]).has(file.type) || file.size > 500_000)
+    return Promise.reject(new Error("invalid_logo"));
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener("load", () =>
+      typeof reader.result === "string" ? resolve(reader.result) : reject(new Error("read_failed")),
+    );
+    reader.addEventListener("error", () => reject(reader.error ?? new Error("read_failed")));
+    reader.readAsDataURL(file);
+  });
 }
 
 async function readWebsiteBanners(

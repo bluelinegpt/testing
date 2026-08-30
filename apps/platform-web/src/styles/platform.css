@@ -2741,3 +2741,34 @@ button.agent-live-indicator {
   border-color: var(--platform-primary, #2563eb);
   color: #fff;
 }
+.website-ai-setup {
+  border-inline-start: 4px solid #4f62e8;
+}
+
+.website-ai-setup__wide {
+  grid-column: 1 / -1;
+}
+
+.website-ai-review {
+  background: var(--platform-surface, #fff);
+  border: 1px solid var(--platform-border, #d7dfef);
+  border-radius: 12px;
+  margin-top: 1rem;
+  padding: 1rem;
+}
+
+.website-ai-review dl {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.website-ai-review dl > div {
+  background: var(--platform-page, #f6f8fc);
+  border-radius: 8px;
+  padding: 0.75rem;
+}
+
+.website-ai-review dd {
+  margin: 0.35rem 0 0;
+}

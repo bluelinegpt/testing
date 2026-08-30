@@ -57,6 +57,7 @@ import {
 } from "./company-website-domain.provider.js";
 import { CompanyWebsiteAgentService } from "./company-website-agent.service.js";
 import { CompanyWebsiteAgentProvider } from "./company-website-agent.provider.js";
+import { CompanyWebsiteAiSetupProvider } from "./company-website-ai-setup.provider.js";
 
 /**
  * The Platform Administration API.
@@ -125,6 +126,7 @@ import { CompanyWebsiteAgentProvider } from "./company-website-agent.provider.js
     { provide: CompanyWebsiteDomainProvider, useExisting: CloudflareCompanyWebsiteDomainProvider },
     CompanyWebsiteAgentService,
     CompanyWebsiteAgentProvider,
+    CompanyWebsiteAiSetupProvider,
   ],
 })
 export class PlatformModule {}

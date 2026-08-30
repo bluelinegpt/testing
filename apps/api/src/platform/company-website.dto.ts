@@ -1,4 +1,13 @@
-import { IsIn, IsInt, IsObject, IsOptional, IsString, Matches, Min } from "class-validator";
+import {
+  IsIn,
+  IsInt,
+  IsObject,
+  IsOptional,
+  IsString,
+  Matches,
+  MaxLength,
+  Min,
+} from "class-validator";
 import type { CompanyWebsiteSettings } from "./company-website-settings.js";
 
 import {
@@ -36,4 +45,25 @@ export class MutateCompanyWebsiteDto {
   @IsInt()
   @Min(1)
   public expectedVersion!: number;
+}
+
+export class GenerateCompanyWebsiteAiSetupDto {
+  @IsString()
+  @MaxLength(160)
+  public companyName!: string;
+
+  @IsString()
+  @MaxLength(40)
+  public phoneWhatsapp!: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  public additionalDetails?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(700_000)
+  @Matches(/^data:image\/(?:png|jpeg);base64,[A-Za-z0-9+/=]+$/)
+  public logoDataUrl?: string;
 }

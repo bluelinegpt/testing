@@ -432,6 +432,25 @@ export interface CompanyWebsite {
   readonly hasHiddenLegacyMedia?: boolean;
 }
 
+export interface CompanyWebsiteAiProposal {
+  displayName: { en: string; ar: string };
+  tagline: { en: string; ar: string };
+  about: { en: string; ar: string };
+  heroHeadline: { en: string; ar: string };
+  heroSubheadline: { en: string; ar: string };
+  primaryCtaLabel: { en: string; ar: string };
+  services: Array<{ title: { en: string; ar: string }; description: { en: string; ar: string } }>;
+  benefits: Array<{ title: { en: string; ar: string }; description: { en: string; ar: string } }>;
+  faqs: Array<{ question: { en: string; ar: string }; answer: { en: string; ar: string } }>;
+  seo: { title: { en: string; ar: string }; description: { en: string; ar: string } };
+  agent: {
+    displayName: string;
+    welcomeMessage: { en: string; ar: string };
+    handoffMessage: { en: string; ar: string };
+  };
+  colors: { primary: string; secondary: string; accent: string };
+}
+
 export type CompanyWebsiteTemplateKey =
   | "corporate"
   | "modern"
@@ -1373,6 +1392,27 @@ export const platformApi = {
       method: current.status === "not_configured" ? "POST" : "PATCH",
     });
     if (result === undefined) throw new PlatformApiError("Empty website response", "empty", 500);
+    return result;
+  },
+
+  async proposeCompanyWebsiteAiSetup(
+    companyId: string,
+    payload: {
+      companyName: string;
+      phoneWhatsapp: string;
+      additionalDetails?: string;
+      logoDataUrl?: string;
+    },
+  ): Promise<{ proposal: CompanyWebsiteAiProposal; provider: "openai"; model: string }> {
+    const result = await request<{
+      proposal: CompanyWebsiteAiProposal;
+      provider: "openai";
+      model: string;
+    }>(`platform/companies/${companyId}/website/ai-setup/propose`, {
+      body: payload,
+      method: "POST",
+    });
+    if (!result) throw new PlatformApiError("Empty AI Website Setup response", "empty", 500);
     return result;
   },
 

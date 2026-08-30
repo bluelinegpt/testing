@@ -206,6 +206,7 @@ describe("Platform route inventory", () => {
       "enable",
       "discardDraft",
       "previewAgent",
+      "proposeAiSetup",
       "previewTrack",
       "addDomain",
       "refreshDomain",
