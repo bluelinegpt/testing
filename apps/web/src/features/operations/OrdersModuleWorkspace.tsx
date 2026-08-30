@@ -2366,8 +2366,10 @@ export function OrderDetailsWorkspace({
 }) {
   const { i18n, t } = useTranslation();
   const locale = normalizeLocale(i18n.resolvedLanguage);
-  const branding = useContext(CompanyBrandingContext);
-  const reportLanguage = branding?.textLanguage === "ar" ? "ar" : "en";
+  // A report launched from an Arabic screen must be Arabic too. The former
+  // Text Language preference could leave the dialog Arabic while silently
+  // requesting an English PDF.
+  const reportLanguage = locale;
   const cashStatusLabel = useDriverCashStatusLabel();
   const [detail, setDetail] = useState<OperationsOrderDetail>();
   const [historyFilter, setHistoryFilter] = useState("all");
@@ -3360,8 +3362,7 @@ function DriverShipmentManifestDialog({
 }) {
   const { i18n, t } = useTranslation();
   const locale = normalizeLocale(i18n.resolvedLanguage);
-  const branding = useContext(CompanyBrandingContext);
-  const reportLanguage = branding?.textLanguage === "ar" ? "ar" : "en";
+  const reportLanguage = locale;
   const [preview, setPreview] = useState<{
     header: { driverMobile: string; driverName: string; orderCount: number };
     summary: { totalCod: string; totalOrders: number };
