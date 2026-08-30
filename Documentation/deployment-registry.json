@@ -19,10 +19,10 @@
       "displayName": "Main app",
       "path": "apps/web",
       "renderService": "bluelinegpt-web-test",
-      "status": "pushed_awaiting_confirmation",
-      "localCommit": "5e78a36",
+      "status": "needs_deploy",
+      "localCommit": "f2300e5",
       "localCommitDate": "2026-08-30",
-      "lastChangeDescription": "fix Arabic order location labels",
+      "lastChangeDescription": "fix order reports to follow interface language",
       "lastChangeBy": "codex",
       "confirmedLiveCommit": "0abeb24",
       "confirmedLiveAt": "2026-08-28"
