@@ -55,9 +55,15 @@ export function platformApiErrorMessage(
 ): string {
   if (status === 429) return "Too many requests were sent. Please wait one minute, then try again.";
   if (status === 502)
-    return "The Platform could not reach the service. Your changes were not saved. Please try again shortly.";
+    return (
+      apiMessage ??
+      "The Platform could not reach the service. Your changes were not saved. Please try again shortly."
+    );
   if (status === 503)
-    return "The service is temporarily unavailable, usually during a deployment or restart. Your changes were not saved. Please try again shortly.";
+    return (
+      apiMessage ??
+      "The service is temporarily unavailable, usually during a deployment or restart. Your changes were not saved. Please try again shortly."
+    );
   if (status >= 500)
     return (
       "The server hit an unexpected error. The full details were recorded in the Error Handler screen" +
@@ -1401,7 +1407,7 @@ export const platformApi = {
       companyName: string;
       phoneWhatsapp: string;
       additionalDetails?: string;
-      logoDataUrl?: string;
+      logoUrl?: string;
     },
   ): Promise<{ proposal: CompanyWebsiteAiProposal; provider: "openai"; model: string }> {
     const result = await request<{
@@ -1411,6 +1417,7 @@ export const platformApi = {
     }>(`platform/companies/${companyId}/website/ai-setup/propose`, {
       body: payload,
       method: "POST",
+      timeoutMs: 60_000,
     });
     if (!result) throw new PlatformApiError("Empty AI Website Setup response", "empty", 500);
     return result;

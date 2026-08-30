@@ -80,8 +80,19 @@ export class PlatformCompanyWebsiteController {
   @RequirePlatformPermissions(PLATFORM_COMPANY_WEBSITES_MANAGE)
   @Post("ai-setup/propose")
   @HttpCode(200)
-  public proposeAiSetup(@Body() input: GenerateCompanyWebsiteAiSetupDto) {
-    return this.aiSetup.generate(input);
+  public async proposeAiSetup(
+    @Param("companyId") companyId: string,
+    @Body() input: GenerateCompanyWebsiteAiSetupDto,
+  ) {
+    const logoDataUrl = input.logoUrl
+      ? await this.websites.readUploadedMediaDataUrl(companyId, input.logoUrl)
+      : undefined;
+    return this.aiSetup.generate({
+      companyName: input.companyName,
+      phoneWhatsapp: input.phoneWhatsapp,
+      ...(input.additionalDetails ? { additionalDetails: input.additionalDetails } : {}),
+      ...(logoDataUrl ? { logoDataUrl } : {}),
+    });
   }
   private actor(request: Request) {
     return {

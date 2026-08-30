@@ -149,6 +149,7 @@ export function assertCompanyWebsiteExpectedVersion(
 @Injectable()
 export class CompanyWebsiteService {
   private readonly hostSuffix: string;
+  private readonly websiteMediaProvider: AppConfiguration["files"]["provider"];
 
   public constructor(
     @Inject(DATABASE) private readonly database: Kysely<DatabaseSchema>,
@@ -158,6 +159,7 @@ export class CompanyWebsiteService {
     @Inject(ConfigService) config: ConfigService<AppConfiguration, true>,
   ) {
     this.hostSuffix = config.get("tenancy.hostSuffix", { infer: true }) ?? "tawseelhub.com";
+    this.websiteMediaProvider = config.get("files.provider", { infer: true }) ?? "local";
   }
 
   public async get(
@@ -619,6 +621,12 @@ export class CompanyWebsiteService {
     companyId: string,
     file: { buffer: Buffer; mimetype: string; size: number } | undefined,
   ): Promise<{ url: string }> {
+    if (this.websiteMediaProvider !== "r2")
+      throw new ApplicationException(
+        "website_media_r2_not_configured",
+        "Website images require Cloudflare R2. Configure FILE_STORAGE_PROVIDER=r2 on the API service.",
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
     if (!file)
       throw new ApplicationException(
         "website_media_required",
@@ -655,6 +663,20 @@ export class CompanyWebsiteService {
     } catch {
       throw this.publicNotFound();
     }
+  }
+
+  /** Resolves only a URL previously returned by uploadMedia and reads its
+   * bytes from Website storage. This lets server-side integrations use an
+   * uploaded logo without accepting inline image data from the browser. */
+  public async readUploadedMediaDataUrl(companyId: string, url: string): Promise<string> {
+    const escapedCompanyId = companyId.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+    const match = new RegExp(
+      `^/api/v1/public/company-website/media/${escapedCompanyId}/([0-9a-f-]{36}\\.(?:png|jpe?g|webp))$`,
+      "u",
+    ).exec(url);
+    if (!match?.[1]) throw this.publicNotFound();
+    const media = await this.readMedia(companyId, match[1]);
+    return `data:${media.mediaType};base64,${media.bytes.toString("base64")}`;
   }
 
   private async transition(

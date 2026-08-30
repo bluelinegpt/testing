@@ -259,10 +259,12 @@ export function CompanyWebsiteEditor({
   const [aiCompanyName, setAiCompanyName] = useState("");
   const [aiPhone, setAiPhone] = useState("");
   const [aiDetails, setAiDetails] = useState("");
-  const [aiLogoDataUrl, setAiLogoDataUrl] = useState<string>();
+  const [aiLogoUrl, setAiLogoUrl] = useState<string>();
   const [aiProposal, setAiProposal] = useState<CompanyWebsiteAiProposal>();
   const [aiBusy, setAiBusy] = useState(false);
   const [aiError, setAiError] = useState<string>();
+  const [mediaBusy, setMediaBusy] = useState(false);
+  const [mediaStatus, setMediaStatus] = useState<string>();
   const bannerUrls =
     settings.branding.bannerDataUrls ??
     (settings.branding.bannerDataUrl ? [settings.branding.bannerDataUrl] : []);
@@ -336,7 +338,7 @@ export function CompanyWebsiteEditor({
         companyName: aiCompanyName.trim(),
         phoneWhatsapp: aiPhone.trim(),
         ...(aiDetails.trim() ? { additionalDetails: aiDetails.trim() } : {}),
-        ...(aiLogoDataUrl ? { logoDataUrl: aiLogoDataUrl } : {}),
+        ...(aiLogoUrl ? { logoUrl: aiLogoUrl } : {}),
       });
       setAiProposal(result.proposal);
     } catch (error) {
@@ -347,6 +349,48 @@ export function CompanyWebsiteEditor({
       );
     } finally {
       setAiBusy(false);
+    }
+  }
+  async function uploadLogo(file: File | undefined, forAiSetup = false): Promise<void> {
+    if (!file) return;
+    setMediaBusy(true);
+    setMediaStatus("Uploading logo to R2…");
+    try {
+      const url = await readWebsiteLogo(companyId, file, update, setValidationErrors);
+      if (!url) {
+        setMediaStatus(undefined);
+        return;
+      }
+      if (forAiSetup) setAiLogoUrl(url);
+      setMediaStatus("Logo uploaded to R2. Save Draft when the Website changes are ready.");
+    } finally {
+      setMediaBusy(false);
+    }
+  }
+  async function uploadBanners(
+    files: FileList | null,
+    existing: readonly string[],
+    field: "bannerDataUrls" | "bannerDataUrlsAr",
+  ): Promise<void> {
+    if (!files?.length) return;
+    setMediaBusy(true);
+    setMediaStatus("Uploading banner images to R2…");
+    try {
+      const count = await readWebsiteBanners(
+        companyId,
+        files,
+        existing,
+        field,
+        update,
+        setValidationErrors,
+      );
+      setMediaStatus(
+        count > 0
+          ? `${count} banner image${count === 1 ? "" : "s"} uploaded to R2. Save Draft when ready.`
+          : undefined,
+      );
+    } finally {
+      setMediaBusy(false);
     }
   }
   async function save(): Promise<void> {
@@ -442,7 +486,7 @@ export function CompanyWebsiteEditor({
         </div>
         <button
           className="platform-button"
-          disabled={busy}
+          disabled={busy || mediaBusy}
           onClick={() => void save()}
           type="button"
         >
@@ -452,6 +496,11 @@ export function CompanyWebsiteEditor({
       {saveStatus ? (
         <p className="website-editor__save-status" role="status">
           {saveStatus}
+        </p>
+      ) : null}
+      {mediaStatus ? (
+        <p className="website-editor__save-status" role="status">
+          {mediaStatus}
         </p>
       ) : null}
       {validationErrors.length ? (
@@ -501,14 +550,12 @@ export function CompanyWebsiteEditor({
             <span>Logo for Website Setup</span>
             <input
               accept="image/png,image/jpeg"
+              disabled={mediaBusy}
               type="file"
               onChange={(event) => {
                 const file = event.currentTarget.files?.[0];
                 if (!file) return;
-                void readImageDataUrl(file)
-                  .then(setAiLogoDataUrl)
-                  .catch(() => setAiError("The logo could not be read for OpenAI."));
-                void readWebsiteLogo(companyId, file, update, setValidationErrors);
+                void uploadLogo(file, true);
               }}
             />
             <small>
@@ -524,7 +571,7 @@ export function CompanyWebsiteEditor({
         {aiError ? <p role="alert">{aiError}</p> : null}
         <button
           className="platform-button"
-          disabled={aiBusy}
+          disabled={aiBusy || mediaBusy}
           onClick={() => void generateAiProposal()}
           type="button"
         >
@@ -766,15 +813,9 @@ export function CompanyWebsiteEditor({
             <span>Website logo — separate from the Company Portal logo</span>
             <input
               accept="image/png,image/jpeg"
+              disabled={mediaBusy}
               type="file"
-              onChange={(event) =>
-                void readWebsiteLogo(
-                  companyId,
-                  event.currentTarget.files?.[0],
-                  update,
-                  setValidationErrors,
-                )
-              }
+              onChange={(event) => void uploadLogo(event.currentTarget.files?.[0])}
             />
             <small>
               PNG or JPEG · maximum 500 KB. Saved in the Website draft and becomes public only after
@@ -829,18 +870,11 @@ export function CompanyWebsiteEditor({
             <span>Add Homepage banners — {bannerUrls.length}/3 uploaded</span>
             <input
               accept="image/png,image/jpeg,image/webp"
-              disabled={bannerUrls.length >= 3}
+              disabled={bannerUrls.length >= 3 || mediaBusy}
               multiple
               type="file"
               onChange={(event) =>
-                void readWebsiteBanners(
-                  companyId,
-                  event.currentTarget.files,
-                  bannerUrls,
-                  "bannerDataUrls",
-                  update,
-                  setValidationErrors,
-                )
+                void uploadBanners(event.currentTarget.files, bannerUrls, "bannerDataUrls")
               }
             />
             <small>
@@ -874,18 +908,11 @@ export function CompanyWebsiteEditor({
             <span>Arabic Homepage banners — {arabicBannerUrls.length}/3 uploaded</span>
             <input
               accept="image/png,image/jpeg,image/webp"
-              disabled={arabicBannerUrls.length >= 3}
+              disabled={arabicBannerUrls.length >= 3 || mediaBusy}
               multiple
               type="file"
               onChange={(event) =>
-                void readWebsiteBanners(
-                  companyId,
-                  event.currentTarget.files,
-                  arabicBannerUrls,
-                  "bannerDataUrlsAr",
-                  update,
-                  setValidationErrors,
-                )
+                void uploadBanners(event.currentTarget.files, arabicBannerUrls, "bannerDataUrlsAr")
               }
             />
             <small>
@@ -2185,15 +2212,15 @@ async function readWebsiteLogo(
   file: File | undefined,
   update: (recipe: (next: CompanyWebsiteSettings) => void) => void,
   showErrors: (errors: readonly string[]) => void,
-): Promise<void> {
-  if (!file) return;
+): Promise<string | undefined> {
+  if (!file) return undefined;
   if (!new Set(["image/png", "image/jpeg"]).has(file.type)) {
     showErrors(["Website logo must be a PNG or JPEG image."]);
-    return;
+    return undefined;
   }
   if (file.size > 500_000) {
     showErrors(["Website logo must be 500 KB or smaller."]);
-    return;
+    return undefined;
   }
   try {
     const { url } = await platformApi.uploadCompanyWebsiteMedia(companyId, file);
@@ -2201,24 +2228,13 @@ async function readWebsiteLogo(
       next.branding.logoDataUrl = url;
     });
     showErrors([]);
+    return url;
   } catch (error) {
     showErrors([
       error instanceof PlatformApiError ? error.message : "The Website logo could not be uploaded.",
     ]);
+    return undefined;
   }
-}
-
-function readImageDataUrl(file: File): Promise<string> {
-  if (!new Set(["image/png", "image/jpeg"]).has(file.type) || file.size > 500_000)
-    return Promise.reject(new Error("invalid_logo"));
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.addEventListener("load", () =>
-      typeof reader.result === "string" ? resolve(reader.result) : reject(new Error("read_failed")),
-    );
-    reader.addEventListener("error", () => reject(reader.error ?? new Error("read_failed")));
-    reader.readAsDataURL(file);
-  });
 }
 
 async function readWebsiteBanners(
@@ -2228,26 +2244,26 @@ async function readWebsiteBanners(
   field: "bannerDataUrls" | "bannerDataUrlsAr",
   update: (recipe: (next: CompanyWebsiteSettings) => void) => void,
   showErrors: (errors: readonly string[]) => void,
-): Promise<void> {
-  if (!files?.length) return;
+): Promise<number> {
+  if (!files?.length) return 0;
   const selected = Array.from(files);
   if (existing.length + selected.length > 3) {
     showErrors([
       `You can upload a maximum of 3 Homepage banners. Remove ${existing.length + selected.length - 3} image(s) or select fewer files.`,
     ]);
-    return;
+    return 0;
   }
   const unsupported = selected.find(
     (file) => !new Set(["image/png", "image/jpeg", "image/webp"]).has(file.type),
   );
   if (unsupported) {
     showErrors([`${unsupported.name} must be a PNG, JPEG or WebP image.`]);
-    return;
+    return 0;
   }
   const oversized = selected.find((file) => file.size > 2_000_000);
   if (oversized) {
     showErrors([`${oversized.name} must be 2 MB or smaller.`]);
-    return;
+    return 0;
   }
   try {
     const uploaded = await Promise.all(
@@ -2260,11 +2276,13 @@ async function readWebsiteBanners(
       next.branding.bannerIntervalSeconds ??= 6;
     });
     showErrors([]);
+    return uploaded.length;
   } catch (error) {
     showErrors([
       error instanceof PlatformApiError
         ? error.message
         : "The Homepage banner could not be uploaded.",
     ]);
+    return 0;
   }
 }

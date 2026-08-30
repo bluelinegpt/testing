@@ -39,8 +39,10 @@ class InMemoryWebsiteStorage implements Pick<FileStoragePort, "storeWebsite" | "
   }
 }
 
-function service(storage: FileStoragePort): CompanyWebsiteService {
-  const config = { get: () => undefined } as unknown as ConfigService<AppConfiguration, true>;
+function service(storage: FileStoragePort, provider: "r2" | "local" = "r2"): CompanyWebsiteService {
+  const config = {
+    get: (key: string) => (key === "files.provider" ? provider : undefined),
+  } as unknown as ConfigService<AppConfiguration, true>;
   return new CompanyWebsiteService(
     undefined as never,
     undefined as never,
@@ -75,6 +77,20 @@ describe("Company website branding media", () => {
     const media = await websites.readMedia(companyId, filename);
     expect(Buffer.from(media.bytes).equals(PNG)).toBe(true);
     expect(media.mediaType).toBe("image/png");
+    await expect(websites.readUploadedMediaDataUrl(companyId, url)).resolves.toBe(
+      `data:image/png;base64,${PNG.toString("base64")}`,
+    );
+  });
+
+  it("refuses Website uploads unless the configured storage provider is R2", async () => {
+    const websites = service(new InMemoryWebsiteStorage() as unknown as FileStoragePort, "local");
+    await expect(
+      websites.uploadMedia("11111111-1111-1111-1111-111111111111", {
+        buffer: PNG,
+        mimetype: "image/png",
+        size: PNG.length,
+      }),
+    ).rejects.toMatchObject({ errorCode: "website_media_r2_not_configured" });
   });
 
   it("rejects a file that isn't actually an image", async () => {

@@ -63,7 +63,9 @@ export class GenerateCompanyWebsiteAiSetupDto {
 
   @IsOptional()
   @IsString()
-  @MaxLength(700_000)
-  @Matches(/^data:image\/(?:png|jpeg);base64,[A-Za-z0-9+/=]+$/)
-  public logoDataUrl?: string;
+  @MaxLength(300)
+  @Matches(
+    /^\/api\/v1\/public\/company-website\/media\/[0-9a-f-]{36}\/[0-9a-f-]{36}\.(?:png|jpe?g|webp)$/,
+  )
+  public logoUrl?: string;
 }
