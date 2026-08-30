@@ -1,4 +1,4 @@
-import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { useSessionAccess } from "../../app/SessionAccessContext.js";
@@ -13,7 +13,6 @@ import {
 
 import { ApiError, type ApiClient } from "../../api/api-client.js";
 import type { PagedResponse, ReconciliationPageSize } from "../../api/contracts.js";
-import { CompanyBrandingContext } from "../../app/CompanyBrandingContext.js";
 import { Modal } from "../../components/Modal.js";
 import { useRouteDetail } from "../../app/use-route-detail.js";
 import { OperationalReference, partyDisplayLabel } from "./OperationalReference.js";
@@ -266,7 +265,6 @@ export function DriverCollectionsWorkspace({
 }) {
   const { i18n, t } = useTranslation();
   const locale = normalizeLocale(i18n.language);
-  const branding = useContext(CompanyBrandingContext);
   const [summary, setSummary] = useState<CollectionsSummary>();
   // The URL is the authoritative list state. No parallel local or session copy
   // of these fields exists to drift out of step with it.
@@ -366,13 +364,12 @@ export function DriverCollectionsWorkspace({
   const total = collectionsPage?.total ?? 0;
   const pageCount = total === 0 ? 1 : Math.ceil(total / pageSize);
 
-  // Quick row-level Preview/Download actions (§3): the report language
-  // defaults from the Company's text-language preference — the Detail view
-  // still offers an explicit language picker for the less common case.
+  // Quick row-level Preview/Download actions follow the active interface.
+  // The Detail view still offers an explicit language picker.
   const openRowPdf = async (row: CollectionRow, mode: "download" | "preview") => {
     setPdfBusy({ id: row.id, mode });
     setPdfError(undefined);
-    const language = branding?.textLanguage === "ar" ? "ar" : "en";
+    const language = locale;
     try {
       const blob = await api.getBinary(
         `operations/cash/reconciliations/${row.id}/pdf?language=${language}`,
@@ -993,7 +990,7 @@ function CreateDriverCollectionDialog({
    *  operator selected them) -- never blocks the remaining eligible ones. */
   onOrdersSkipped?: ((count: number) => void) | undefined;
 }) {
-  const { t } = useTranslation();
+  const { i18n, t } = useTranslation();
 
   // Step 1 — Driver.
   const [driverSearch, setDriverSearch] = useState("");
@@ -1073,8 +1070,7 @@ function CreateDriverCollectionDialog({
     remainingDriverFeeOutstanding: string;
   }>();
   const idempotency = useIdempotencyKey();
-  const branding = useContext(CompanyBrandingContext);
-  const reportLanguage = branding?.textLanguage === "ar" ? "ar" : "en";
+  const reportLanguage = normalizeLocale(i18n.resolvedLanguage);
   const pdf = useReconciliationPdfActions(api);
   const [pdfError, setPdfError] = useState<string>();
 
@@ -1901,17 +1897,16 @@ export function DriverCollectionDetailDialog({
   onReversed: () => void;
   reconciliationId: string;
 }) {
-  const { t } = useTranslation();
-  const branding = useContext(CompanyBrandingContext);
+  const { i18n, t } = useTranslation();
   const [data, setData] = useState<ReportData>();
   const [error, setError] = useState<string>();
   const [reverseOpen, setReverseOpen] = useState(false);
   const [linkedPayment, setLinkedPayment] = useState<Record<string, unknown>>();
   const [linkedPaymentOpen, setLinkedPaymentOpen] = useState(false);
-  // Explicit report-language selection (§15), defaulted from the Company's
-  // Search-and-Display Text preference but always changeable by the User.
+  // Explicit report-language selection (§15), defaulted from the active UI
+  // language but always changeable by the User.
   const [reportLanguage, setReportLanguage] = useState<"ar" | "en">(
-    branding?.textLanguage === "ar" ? "ar" : "en",
+    normalizeLocale(i18n.resolvedLanguage),
   );
   const pdf = useReconciliationPdfActions(api);
 

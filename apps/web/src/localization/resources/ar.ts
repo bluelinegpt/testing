@@ -1894,6 +1894,10 @@ export const arabicTranslations = {
       areaMismatch: "المنطقة المحددة لا تنتمي إلى الإمارة المختارة.",
       areaNotFound: "اختر منطقة صالحة ونشطة.",
       areaRequired: "اختر منطقة صالحة.",
+      bulkStatusIneligible: "يتعذر نقل طلب واحد أو أكثر من الطلبات المحددة إلى الحالة المطلوبة.",
+      bulkStatusOrderIneligible: "{{orderNumber}}: هذا الطلب غير مؤهل لتغيير الحالة المطلوب.",
+      bulkStatusTransitionDetail:
+        "{{orderNumber}}: حالة الطلب الحالية «{{from}}» ولا يمكن نقلها إلى «{{to}}».",
       freeOrderReasonRequired: "أدخل سبب الطلب المجاني.",
       codInvalid: "أدخل مبلغ الدفع عند الاستلام صفراً أو أكثر.",
       customerDuplicate:

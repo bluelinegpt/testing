@@ -82,10 +82,13 @@ export class DailyOperationsSummaryController {
   @ApiOperation({ summary: "Daily Operations Summary — downloadable Excel workbook" })
   @Get("excel")
   public async excel(
-    @Query() query: DailyOperationsSummaryQueryDto,
+    @Query() query: DailyOperationsSummaryExportQueryDto,
     @Res() response: Response,
   ): Promise<void> {
-    const { bytes, filename } = await this.summary.excel(query);
+    const { bytes, filename } = await this.summary.excel(
+      query,
+      query.language === "ar" ? "ar" : "en",
+    );
     response.setHeader(
       "Content-Type",
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

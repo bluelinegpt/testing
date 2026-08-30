@@ -678,9 +678,13 @@ export class OperationsController {
   @Post("cash/driver-shipment-manifest/xlsx")
   public async driverShipmentManifestExcel(
     @Body() input: GenerateShipmentManifestDto,
+    @Query("language") requestedLanguage: string | undefined,
     @Res() response: Response,
   ): Promise<void> {
-    const report = await this.manifest.manifestExcel(input);
+    const report = await this.manifest.manifestExcel(
+      input,
+      requestedLanguage === "ar" ? "ar" : "en",
+    );
     response.setHeader(
       "Content-Type",
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

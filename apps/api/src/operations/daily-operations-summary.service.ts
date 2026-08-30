@@ -739,31 +739,42 @@ export class DailyOperationsSummaryService {
    */
   public async excel(
     query: DailyOperationsSummaryQueryDto,
+    language: ReportLanguage = "en",
   ): Promise<{ readonly bytes: Buffer; readonly filename: string }> {
     const report = await this.report(query);
-    const columns = ["driverName", "driverCode", "deliveredOrders", "deliveryIncome"];
+    const columns =
+      language === "ar"
+        ? ["المندوب", "رمز المندوب", "الطلبات المسلمة", "دخل التوصيل"]
+        : ["Driver", "Driver Code", "Delivered Orders", "Delivery Income"];
     const rows: Readonly<Record<string, unknown>>[] = [
-      ...report.driverSummary.map((row) => ({
-        deliveredOrders: row.deliveredOrders,
-        deliveryIncome: Number(row.deliveryIncome),
-        driverCode: row.driverCode,
-        driverName: row.driverName,
-      })),
-      {
-        deliveredOrders: report.totalOrders,
-        deliveryIncome: Number(report.totalDeliveryIncome),
-        driverCode: "",
-        driverName: "GRAND TOTAL",
-      },
+      ...report.driverSummary.map((row) =>
+        Object.fromEntries([
+          [columns[0]!, row.driverName],
+          [columns[1]!, row.driverCode],
+          [columns[2]!, row.deliveredOrders],
+          [columns[3]!, Number(row.deliveryIncome)],
+        ]),
+      ),
+      Object.fromEntries([
+        [columns[0]!, language === "ar" ? "الإجمالي الكلي" : "GRAND TOTAL"],
+        [columns[1]!, ""],
+        [columns[2]!, report.totalOrders],
+        [columns[3]!, Number(report.totalDeliveryIncome)],
+      ]),
     ];
     const bytes = accountingXlsx(columns, rows, [
-      ["Report", "Daily Operations Summary"],
-      ["Date Mode", report.dateMode === "calendar_day" ? "Calendar Day" : "Business Day"],
-      ["Period", `${query.dateFrom} to ${query.dateTo}`],
-      ["Total Delivery Income", Number(report.totalDeliveryIncome)],
-      ["Total Expenses", Number(report.totalExpenses)],
-      ["Net Result", Number(report.netResult)],
-      ["Status", report.netStatus],
+      [language === "ar" ? "التقرير" : "Report", language === "ar" ? "ملخص العمليات اليومية" : "Daily Operations Summary"],
+      [language === "ar" ? "نمط التاريخ" : "Date Mode", report.dateMode === "calendar_day" ? (language === "ar" ? "يوم تقويمي" : "Calendar Day") : (language === "ar" ? "يوم عمل" : "Business Day")],
+      [language === "ar" ? "الفترة" : "Period", `${query.dateFrom} ${language === "ar" ? "إلى" : "to"} ${query.dateTo}`],
+      [language === "ar" ? "إجمالي دخل التوصيل" : "Total Delivery Income", Number(report.totalDeliveryIncome)],
+      [language === "ar" ? "إجمالي المصروفات" : "Total Expenses", Number(report.totalExpenses)],
+      [language === "ar" ? "صافي النتيجة" : "Net Result", Number(report.netResult)],
+      [
+        language === "ar" ? "الحالة" : "Status",
+        language === "ar"
+          ? { break_even: "تعادل", negative: "سلبي", positive: "إيجابي" }[report.netStatus]
+          : report.netStatus,
+      ],
     ]);
     return { bytes, filename: `Daily-Operations-Summary-${query.dateFrom}-to-${query.dateTo}.xlsx` };
   }

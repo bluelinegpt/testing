@@ -259,7 +259,7 @@ function ReportPage({
       const path =
         format === "pdf" || format === "print"
           ? reportPath(`${kind}/pdf`, { ...filters, language })
-          : reportPath(`${kind}/export`, { ...filters, format });
+          : reportPath(`${kind}/export`, { ...filters, format, language });
       const blob = await api.getBinary(path);
       if (format === "pdf") previewBlob(blob);
       else if (format === "print") previewBlob(blob, true);

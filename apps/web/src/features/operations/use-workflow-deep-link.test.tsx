@@ -91,6 +91,25 @@ describe("useWorkflowDeepLink", () => {
     expect(result.current.link).not.toBeNull();
   });
 
+  it("consumes an identical action again after the URL has been normalized", () => {
+    const request =
+      "/orders?orderId=order-1&suggestedStatus=closed&openDialog=change_status";
+    globalThis.history.replaceState({}, "", request);
+    const rendered = renderDeepLinkAt(request, ["change_status"]);
+    const { result } = rendered;
+
+    expect(result.current.link?.suggestedStatus).toBe("closed");
+    const firstLink = result.current.link;
+    expect(globalThis.location.search).not.toContain("openDialog");
+
+    globalThis.history.replaceState({}, "", request);
+    rendered.go(request);
+
+    expect(globalThis.location.search).not.toContain("openDialog");
+    expect(result.current.link?.suggestedStatus).toBe("closed");
+    expect(result.current.link).not.toBe(firstLink);
+  });
+
   it("ignores a dialog this screen does not own, and still clears it", () => {
     globalThis.history.replaceState({}, "", "/trader-settlements?driverId=driver-1&openDialog=collect_money");
     const { result } = renderDeepLinkAt("/trader-settlements?driverId=driver-1&openDialog=collect_money", ["new_settlement"]);

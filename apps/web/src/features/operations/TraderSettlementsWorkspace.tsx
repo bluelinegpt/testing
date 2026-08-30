@@ -1,4 +1,4 @@
-import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { useSessionAccess } from "../../app/SessionAccessContext.js";
@@ -13,7 +13,6 @@ import {
 
 import { ApiError, type ApiClient } from "../../api/api-client.js";
 import type { CompanyBankAccount, OperationsTrader, PagedResponse } from "../../api/contracts.js";
-import { CompanyBrandingContext } from "../../app/CompanyBrandingContext.js";
 import { useRouteDetail } from "../../app/use-route-detail.js";
 import { OperationalReference } from "./OperationalReference.js";
 import { AccountingRelatedPanel } from "../accounting/AccountingRelatedPanel.js";
@@ -336,8 +335,7 @@ export function TraderSettlementsWorkspace({
 }) {
   const { i18n, t } = useTranslation();
   const locale = normalizeLocale(i18n.language);
-  const branding = useContext(CompanyBrandingContext);
-  const reportLanguage = branding?.textLanguage === "ar" ? "ar" : "en";
+  const reportLanguage = locale;
   const isAdministrator = permissions.includes("users_roles.manage");
   const canManage = isAdministrator || permissions.includes("settlements.create");
   const canReverse = isAdministrator || permissions.includes("settlements.reverse");

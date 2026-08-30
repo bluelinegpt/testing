@@ -1,4 +1,4 @@
-import { useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { useSessionAccess } from "../../app/SessionAccessContext.js";
@@ -13,7 +13,6 @@ import {
 
 import { ApiError, type ApiClient } from "../../api/api-client.js";
 import type { CompanyBankAccount, OperationsTrader, PagedResponse } from "../../api/contracts.js";
-import { CompanyBrandingContext } from "../../app/CompanyBrandingContext.js";
 import { Modal } from "../../components/Modal.js";
 import { useRouteDetail } from "../../app/use-route-detail.js";
 import { OperationalReference, partyDisplayLabel } from "./OperationalReference.js";
@@ -351,8 +350,7 @@ export function TraderReceivablesWorkspace({
 }) {
   const { i18n, t } = useTranslation();
   const locale = normalizeLocale(i18n.language);
-  const branding = useContext(CompanyBrandingContext);
-  const reportLanguage = branding?.textLanguage === "ar" ? "ar" : "en";
+  const reportLanguage = locale;
   const isAdministrator = permissions.includes("users_roles.manage");
   const canManage = isAdministrator || permissions.includes("trader_receivables.create");
   const canReverse = isAdministrator || permissions.includes("trader_receivables.reverse");
@@ -1609,7 +1607,7 @@ function ReceivableDetailDialog({
   receivableId: string;
 }) {
   const { i18n, t } = useTranslation();
-  const reportLanguage = i18n.resolvedLanguage ?? "en";
+  const reportLanguage = normalizeLocale(i18n.resolvedLanguage);
   const [detail, setDetail] = useState<TraderReceivableDetail>();
   const [error, setError] = useState<string>();
   const [cancelOpen, setCancelOpen] = useState(false);

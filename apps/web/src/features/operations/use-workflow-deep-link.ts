@@ -151,6 +151,11 @@ export function useWorkflowDeepLink(accepted: readonly WorkflowDialog[]): {
     /* Identity of THIS request. Two clicks differing only by Order, or by the
        action taken on one Order, are different requests and must both fire. */
     const key = [
+      /* React Router gives every navigation a new key, including a second
+         click whose path and parameters are identical to the first. Keeping
+         it in the request identity prevents Strict Mode duplicate effects but
+         never mistakes a genuine repeated click for the already-consumed one. */
+      location.key,
       globalThis.location.pathname,
       requested,
       readParameter(parameters, "orderId"),

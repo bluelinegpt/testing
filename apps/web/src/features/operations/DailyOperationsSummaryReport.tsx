@@ -325,10 +325,11 @@ export function DailyOperationsSummaryReport({
     setBusy(format);
     setError(undefined);
     try {
+      const language = i18n.resolvedLanguage === "ar" ? "ar" : "en";
       const path =
         format === "xlsx"
-          ? `operations/reports/daily-operations-summary/excel?${query()}`
-          : `operations/reports/daily-operations-summary/pdf?${query()}&language=${i18n.resolvedLanguage === "ar" ? "ar" : "en"}`;
+          ? `operations/reports/daily-operations-summary/excel?${query()}&language=${language}`
+          : `operations/reports/daily-operations-summary/pdf?${query()}&language=${language}`;
       const blob = await api.getBinary(path);
       if (format === "xlsx") saveBlob(blob, `Daily-Operations-Summary-${dateFrom}-to-${dateTo}.xlsx`);
       else previewBlob(blob, format === "print");

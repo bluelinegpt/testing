@@ -2522,7 +2522,7 @@ export function OrderDetailsWorkspace({
     if (collectionSummary === undefined) return;
     setPdfError(undefined);
     const requestError = await pdf.run(
-      `operations/cash/reconciliations/${collectionSummary.reconciliationId}/pdf?language=en`,
+      `operations/cash/reconciliations/${collectionSummary.reconciliationId}/pdf?language=${reportLanguage}`,
       `Driver-Collection-${collectionSummary.reconciliationNumber}.pdf`,
       mode,
     );
@@ -3295,7 +3295,7 @@ function BulkStatusDialog({
       });
       await onComplete();
     } catch (requestError) {
-      setError(message(requestError, t("operations.bulkActionFailed")));
+      setError(bulkStatusError(requestError, t));
     } finally {
       setSaving(false);
     }
@@ -3416,7 +3416,10 @@ function DriverShipmentManifestDialog({
   const exportExcel = async () => {
     setError(undefined);
     try {
-      const blob = await api.postBinary("operations/cash/driver-shipment-manifest/xlsx", selection);
+      const blob = await api.postBinary(
+        `operations/cash/driver-shipment-manifest/xlsx?language=${reportLanguage}`,
+        selection,
+      );
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = url;
@@ -4845,6 +4848,37 @@ function message(error: unknown, fallback: string): string {
       : `${error.message}\n${error.details.join("\n")}`;
   }
   return error instanceof Error ? error.message : fallback;
+}
+
+function bulkStatusError(error: unknown, t: Translate): string {
+  if (!(error instanceof ApiError) || error.code !== "bulk_status_ineligible") {
+    return message(error, t("operations.bulkActionFailed"));
+  }
+  const heading = t("operations.errors.bulkStatusIneligible");
+  const details = (error.details ?? []).map((detail) => {
+    const separator = detail.indexOf(":");
+    const orderNumber = separator < 0 ? detail : detail.slice(0, separator).trim();
+    const reason = separator < 0 ? "" : detail.slice(separator + 1).trim();
+    const transition = /^Order is (\S+) and cannot move to (\S+)$/.exec(reason);
+    if (transition !== null) {
+      return t("operations.errors.bulkStatusTransitionDetail", {
+        from: t(`statuses.${transition[1]}`),
+        orderNumber,
+        to: t(`statuses.${transition[2]}`),
+      });
+    }
+    if (reason === "A Driver must be assigned before this Order can be delivered.") {
+      return `${orderNumber}: ${t("operations.driverRequiredForDelivery")}`;
+    }
+    if (reason === "A Driver must be assigned before this Order can be moved Out for Delivery.") {
+      return `${orderNumber}: ${t("operations.driverRequiredForDispatch")}`;
+    }
+    // Never leak a server-authored English sentence into Arabic UI. The code
+    // and Order number remain enough for the operator to identify the row;
+    // known reasons above retain the more specific explanation.
+    return t("operations.errors.bulkStatusOrderIneligible", { orderNumber });
+  });
+  return details.length === 0 ? heading : `${heading}\n${details.join("\n")}`;
 }
 type AuditEvent = OperationsOrderDetail["events"][number];
 type Translate = TFunction;

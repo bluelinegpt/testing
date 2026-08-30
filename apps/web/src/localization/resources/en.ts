@@ -1895,6 +1895,10 @@ export const englishTranslations = {
       areaMismatch: "The selected Area does not belong to the chosen Emirate.",
       areaNotFound: "Select a valid, active Area.",
       areaRequired: "Select a valid Area.",
+      bulkStatusIneligible: "One or more selected orders cannot move to the requested status.",
+      bulkStatusOrderIneligible: "{{orderNumber}}: This order is not eligible for this status change.",
+      bulkStatusTransitionDetail:
+        "{{orderNumber}}: The order is {{from}} and cannot move to {{to}}.",
       freeOrderReasonRequired: "Enter a reason for the Free Order.",
       codInvalid: "Enter a COD Amount of zero or more.",
       customerDuplicate:

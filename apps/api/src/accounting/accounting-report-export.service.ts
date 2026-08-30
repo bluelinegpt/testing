@@ -81,6 +81,19 @@ const arWarnings: Readonly<Record<string, string>> = {
     "هذا أساس لتقرير الضريبة فقط، وليس إقراراً أو تقديماً للهيئة الاتحادية للضرائب ولا استشارة ضريبية.",
 };
 
+const exportLabel = (label: string, language: "en" | "ar"): string => {
+  if (language !== "ar") return label;
+  return (
+    {
+      Currency: "العملة",
+      "Data Source": "مصدر البيانات",
+      Report: "التقرير",
+      Snapshot: "وقت إنشاء التقرير",
+      Warning: "تنبيه",
+    }[label] ?? arColumns[label] ?? label
+  );
+};
+
 function localizedTable(report: AccountingReportEnvelope, language: "en" | "ar") {
   if (language === "en") {
     return {
@@ -118,20 +131,21 @@ export class AccountingReportExportService {
     format: "csv" | "xlsx",
   ) {
     const report = await this.reports.report(kind, query, "export");
-    const table = localizedTable(report, query.language ?? "en");
+    const language = query.language ?? "en";
+    const table = localizedTable(report, language);
     await this.reports.auditGeneration(kind, format, report.filters);
     if (format === "xlsx") {
       return {
         body: accountingXlsx(table.columns, table.rows, [
-          [query.language === "ar" ? "التقرير" : "Report", table.title],
-          ["Currency", report.currency],
-          ["Snapshot", report.snapshotAt],
-          ["Data Source", report.dataSource],
-          ...Object.entries(report.filters).filter(
-            (entry): entry is [string, string] => entry[1] !== undefined,
-          ),
+          [exportLabel("Report", language), table.title],
+          [exportLabel("Currency", language), report.currency],
+          [exportLabel("Snapshot", language), report.snapshotAt],
+          [exportLabel("Data Source", language), report.dataSource],
+          ...Object.entries(report.filters)
+            .filter((entry): entry is [string, string] => entry[1] !== undefined)
+            .map(([key, value]) => [exportLabel(key, language), value] as const),
           ...table.warnings.map(
-            (warning) => [query.language === "ar" ? "تنبيه" : "Warning", warning] as const,
+            (warning) => [exportLabel("Warning", language), warning] as const,
           ),
         ]),
         contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -140,16 +154,18 @@ export class AccountingReportExportService {
       };
     }
     const metadata = [
-      [query.language === "ar" ? "التقرير" : "Report", table.title],
-      ["Currency", report.currency],
-      ["Snapshot", report.snapshotAt],
-      ["Data Source", report.dataSource],
-      ...Object.entries(report.filters).filter(([, value]) => value !== undefined),
+      [exportLabel("Report", language), table.title],
+      [exportLabel("Currency", language), report.currency],
+      [exportLabel("Snapshot", language), report.snapshotAt],
+      [exportLabel("Data Source", language), report.dataSource],
+      ...Object.entries(report.filters)
+        .filter(([, value]) => value !== undefined)
+        .map(([key, value]) => [exportLabel(key, language), value]),
     ];
     const rows = [
       ...metadata.map((row) => row.map(csvCell).join(",")),
       ...table.warnings.map((warning) =>
-        [csvCell(query.language === "ar" ? "تنبيه" : "Warning"), csvCell(warning)].join(","),
+        [csvCell(exportLabel("Warning", language)), csvCell(warning)].join(","),
       ),
       "",
       table.columns.map(csvCell).join(","),

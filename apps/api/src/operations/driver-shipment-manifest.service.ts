@@ -349,6 +349,7 @@ export class DriverShipmentManifestService {
 
   public async manifestExcel(
     input: GenerateShipmentManifestDto,
+    language: ReportLanguage = "en",
   ): Promise<{ bytes: Buffer; filename: string }> {
     const { companyId } = this.tenants.current();
     const data = await this.buildManifestData(companyId, input);
@@ -360,30 +361,28 @@ export class DriverShipmentManifestService {
       timeZone: "Asia/Dubai",
       year: "numeric",
     }).format(new Date());
-    const columns = [
-      "serialNumber",
-      "referenceNumber",
-      "traderName",
-      "customerName",
-      "customerMobileNumber",
-      "areaName",
-      "codAmount",
-      "notes",
-    ];
-    const rows = data.orders.map((row) => ({
-      serialNumber: row.serialNumber,
-      referenceNumber: row.referenceNumber ?? "",
-      traderName: row.traderName,
-      customerName: row.customerName,
-      customerMobileNumber: row.customerMobileNumber,
-      areaName: row.areaName,
-      codAmount: row.codAmount,
-      notes: row.notes ?? "",
-    }));
+    const columns =
+      language === "ar"
+        ? ["الرقم", "الرقم المرجعي الخارجي", "التاجر", "العميل", "هاتف العميل", "المنطقة", "مبلغ التحصيل", "ملاحظات"]
+        : ["No", "External Reference Number", "Trader", "Customer", "Customer Mobile", "Area", "COD Amount", "Notes"];
+    const rows = data.orders.map((row) =>
+      Object.fromEntries(
+        [
+          row.serialNumber,
+          row.referenceNumber ?? "",
+          row.traderName,
+          row.customerName,
+          row.customerMobileNumber,
+          row.areaName,
+          row.codAmount,
+          row.notes ?? "",
+        ].map((value, index) => [columns[index]!, value]),
+      ),
+    );
     const bytes = accountingXlsx(columns, rows, [
-      ["Manifest Date and Time", `${generatedAt} (UAE)`],
-      ["Driver", data.header.driverName],
-      ["Orders", data.header.orderCount],
+      [language === "ar" ? "تاريخ ووقت الكشف" : "Manifest Date and Time", `${generatedAt} (UAE)`],
+      [language === "ar" ? "المندوب" : "Driver", data.header.driverName],
+      [language === "ar" ? "عدد الطلبات" : "Orders", data.header.orderCount],
     ]);
     const safe = data.header.driverName.replaceAll(/[^A-Za-z0-9]+/g, "-");
     const date = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Dubai" }).format(new Date());
