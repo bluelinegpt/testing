@@ -109,9 +109,7 @@ export function AreaSelector({
           <option value="">{loading ? t("common.loading") : t("areas.selectEmirate")}</option>
           {emirates.map((emirate) => (
             <option key={emirate.id} value={emirate.id}>
-              {/* Emirate follows the Text Language; the `arabicFirst` override
-                  applies only to the Area label, matching prior behavior. */}
-              {localizeName(textLanguage, { ar: emirate.nameAr, en: emirate.nameEn })}
+              {localizeName(displayLanguage, { ar: emirate.nameAr, en: emirate.nameEn })}
             </option>
           ))}
         </select>

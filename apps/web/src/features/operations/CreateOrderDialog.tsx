@@ -1149,6 +1149,7 @@ export function CreateOrderDialog({
                     <AreaSelector
                       allowCreate={canCreateArea && customer === undefined}
                       api={api}
+                      arabicFirst={locale === "ar"}
                       disabled={customer !== undefined}
                       onChange={(selected) => {
                         setArea(selected);

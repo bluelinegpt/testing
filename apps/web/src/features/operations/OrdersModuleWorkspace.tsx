@@ -637,7 +637,10 @@ export function OrdersModuleWorkspace({
     // Build emirate code to name lookup
     const emirateCodeToName = new Map<string, string>();
     for (const emirate of emirates) {
-      emirateCodeToName.set(emirate.code.toUpperCase(), emirate.nameEn);
+      emirateCodeToName.set(
+        emirate.code.toUpperCase(),
+        localizeName(locale, { ar: emirate.nameAr, en: emirate.nameEn }),
+      );
     }
 
     // Map all areas to their emirates
@@ -669,11 +672,11 @@ export function OrdersModuleWorkspace({
     });
 
     return map;
-  }, [areas, emirates]);
+  }, [areas, emirates, locale]);
 
   const groups = useMemo(
-    () => groupVisibleOrders(orderItems, grouping, t, areaEmirateMap),
-    [orderItems, grouping, t, areaEmirateMap],
+    () => groupVisibleOrders(orderItems, grouping, t, locale, areaEmirateMap),
+    [orderItems, grouping, t, locale, areaEmirateMap],
   );
   const changeGrouping = (next: OrderGrouping) => {
     if (allMatching) {
@@ -1211,7 +1214,7 @@ export function OrdersModuleWorkspace({
                     checked={Array.isArray(grouping) && grouping.includes("area")}
                     onChange={() => toggleGroupingDimension("area")}
                   />
-                  Area
+                  {t("operations.groupingArea")}
                 </label>
                 <label className="grouping-checkbox">
                   <input
@@ -1219,7 +1222,7 @@ export function OrdersModuleWorkspace({
                     checked={Array.isArray(grouping) && grouping.includes("trader")}
                     onChange={() => toggleGroupingDimension("trader")}
                   />
-                  Trader
+                  {t("operations.groupingTrader")}
                 </label>
                 <label className="grouping-checkbox">
                   <input
@@ -1227,7 +1230,7 @@ export function OrdersModuleWorkspace({
                     checked={Array.isArray(grouping) && grouping.includes("driver")}
                     onChange={() => toggleGroupingDimension("driver")}
                   />
-                  Driver
+                  {t("operations.groupingDriver")}
                 </label>
                 <label className="grouping-checkbox">
                   <input
@@ -1235,7 +1238,7 @@ export function OrdersModuleWorkspace({
                     checked={Array.isArray(grouping) && grouping.includes("status")}
                     onChange={() => toggleGroupingDimension("status")}
                   />
-                  Status
+                  {t("operations.groupingStatus")}
                 </label>
                 {grouping !== "" && (
                   <>
@@ -4686,6 +4689,7 @@ function groupVisibleOrders(
   orders: readonly OperationsOrder[],
   grouping: OrderGrouping,
   t: TFunction,
+  locale: "ar" | "en",
   areaEmirateMap?: Map<string, { code: string; name: string }>,
 ): readonly VisibleOrderGroup[] {
   if (grouping === "" || grouping.length === 0) return [];
@@ -4697,25 +4701,32 @@ function groupVisibleOrders(
   const getGroupLabel = (dimension: string, order: OperationsOrder): string => {
     switch (dimension) {
       case "area": {
-        const areaName = order.areaName ?? t("operations.unknown");
-        // Try emirateNameEn first, then fall back to areaEmirateMap lookup
+        const areaName = localizeName(locale, {
+          ar: order.areaNameAr,
+          en: order.areaNameEn ?? order.areaName,
+        });
+        const localizedAreaName = areaName || t("operations.unknown");
         let emirateInfo: { code: string; name: string } | undefined;
 
-        if (order.emirateNameEn) {
+        const emirateName = localizeName(locale, {
+          ar: order.emirateNameAr,
+          en: order.emirateNameEn,
+        });
+        if (emirateName !== "") {
           emirateInfo = {
-            code: order.emirateNameEn.substring(0, 3).toUpperCase(),
-            name: order.emirateNameEn,
+            code: emirateName.substring(0, 3).toUpperCase(),
+            name: emirateName,
           };
         } else if (areaEmirateMap) {
-          // Try to find emirate by matching area name exactly (works for Arabic and English)
-          emirateInfo = areaEmirateMap.get(areaName);
+          emirateInfo =
+            areaEmirateMap.get(localizedAreaName) ?? areaEmirateMap.get(order.areaName);
         }
 
         // If we found emirate info, use the full format; otherwise just show area
         if (emirateInfo) {
-          return `${emirateInfo.name} - ${areaName}`;
+          return `${emirateInfo.name} - ${localizedAreaName}`;
         }
-        return areaName;
+        return localizedAreaName;
       }
       case "trader":
         return order.traderName ?? t("operations.unknown");
@@ -4731,7 +4742,7 @@ function groupVisibleOrders(
   const getGroupKey = (dimension: string, order: OperationsOrder): string => {
     switch (dimension) {
       case "area":
-        return `area:${order.areaName ?? "unknown"}`;
+        return `area:${order.areaId ?? order.areaName ?? "unknown"}`;
       case "trader":
         return `trader:${order.traderName ?? "unknown"}`;
       case "driver":
