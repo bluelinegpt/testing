@@ -1,9 +1,10 @@
-import { BadRequestException } from "@nestjs/common";
+import { BadRequestException, HttpStatus } from "@nestjs/common";
 import type { ArgumentsHost } from "@nestjs/common";
 import type { Logger } from "nestjs-pino";
 import { describe, expect, it, vi } from "vitest";
 
 import { ApiExceptionFilter } from "./api-exception.filter.js";
+import { ApplicationException } from "./application.exception.js";
 import type { ClientErrorReportService } from "../../observability/client-error-report.service.js";
 import type { RequestSecurityContextStore } from "../../security/request-security-context.js";
 
@@ -44,7 +45,9 @@ describe("ApiExceptionFilter", () => {
      all, so none of these behaviours were exercised anywhere before now.
      --------------------------------------------------------------------- */
 
-  function buildHost(overrides: Partial<{ headers: Record<string, string>; id: string; path: string }> = {}) {
+  function buildHost(
+    overrides: Partial<{ headers: Record<string, string>; id: string; path: string }> = {},
+  ) {
     const json = vi.fn();
     const status = vi.fn(() => ({ json }));
     const host = {
@@ -66,7 +69,9 @@ describe("ApiExceptionFilter", () => {
     const reportServerError = vi.fn().mockResolvedValue(undefined);
     const errorReports = { reportServerError } as unknown as ClientErrorReportService;
     const securityContext = {
-      current: () => ({ identity: { companyId: "company-1", identityId: "account-1", kind: "trader" } }),
+      current: () => ({
+        identity: { companyId: "company-1", identityId: "account-1", kind: "trader" },
+      }),
     } as unknown as RequestSecurityContextStore;
     const { host, json, status } = buildHost();
 
@@ -111,6 +116,29 @@ describe("ApiExceptionFilter", () => {
     expect(logger.error).not.toHaveBeenCalled();
   });
 
+  it("returns the intentional safe message and code for an operational 503", () => {
+    const logger = { error: vi.fn(), warn: vi.fn() } as unknown as Logger;
+    const { host, json, status } = buildHost({ path: "/website/ai-setup/propose" });
+
+    new ApiExceptionFilter(logger).catch(
+      new ApplicationException(
+        "openai_not_configured",
+        "OpenAI is not configured for Website Setup",
+        HttpStatus.SERVICE_UNAVAILABLE,
+      ),
+      host,
+    );
+
+    expect(status).toHaveBeenCalledWith(503);
+    expect(json).toHaveBeenCalledWith({
+      error: {
+        code: "openai_not_configured",
+        correlationId: "correlation-1",
+        message: "OpenAI is not configured for Website Setup",
+      },
+    });
+  });
+
   it("resolves the correlation id from the x-correlation-id header when request.id is absent", async () => {
     const logger = { error: vi.fn(), warn: vi.fn() } as unknown as Logger;
     const reportServerError = vi.fn().mockResolvedValue(undefined);
@@ -133,7 +161,9 @@ describe("ApiExceptionFilter", () => {
     await Promise.resolve();
 
     expect(json).toHaveBeenCalledWith(
-      expect.objectContaining({ error: expect.objectContaining({ correlationId: "header-correlation-id" }) }),
+      expect.objectContaining({
+        error: expect.objectContaining({ correlationId: "header-correlation-id" }),
+      }),
     );
     expect(reportServerError.mock.calls[0]![0].correlationId).toBe("header-correlation-id");
   });

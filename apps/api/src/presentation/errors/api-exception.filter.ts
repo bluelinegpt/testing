@@ -49,9 +49,11 @@ export class ApiExceptionFilter implements ExceptionFilter {
           : 500;
     const safeMessage = databaseIntegrityError
       ? "The operation conflicts with current data integrity rules."
-      : status >= 500
-        ? "An unexpected error occurred."
-        : this.message(exception);
+      : exception instanceof ApplicationException
+        ? this.message(exception)
+        : status >= 500
+          ? "An unexpected error occurred."
+          : this.message(exception);
     const details = this.validationDetails(exception);
     const code =
       exception instanceof ApplicationException
