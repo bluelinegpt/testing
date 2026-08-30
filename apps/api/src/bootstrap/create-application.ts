@@ -2,6 +2,7 @@ import { ValidationPipe } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { NestFactory } from "@nestjs/core";
 import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
+import compression from "compression";
 import express from "express";
 import helmet from "helmet";
 import { Logger } from "nestjs-pino";
@@ -46,6 +47,16 @@ export async function createApplication(): Promise<BluelineApplication> {
       },
     }),
   );
+  // No response was ever compressed before this: every request already
+  // sends `accept-encoding: gzip, br` (confirmed in production logs), but
+  // nothing here ever set Content-Encoding. JSON compresses 70-90%+ typically,
+  // and the public company-website endpoint alone was observed sending an
+  // ~10MB uncompressed response, repeatedly polled every 15-60s -- directly
+  // implicated in an out-of-memory instance crash on the 512MB free-tier
+  // instance. `compression()`'s default filter already skips content types
+  // that are already compressed (images, etc.), so this is safe to apply
+  // globally rather than scoping it per-route.
+  app.use(compression());
   app.use(express.json({
     limit: `${config.get("app.requestBodyLimitMb", { infer: true })}mb`,
     verify: (request, _response, buffer) => {
