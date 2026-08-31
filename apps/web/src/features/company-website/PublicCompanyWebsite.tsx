@@ -288,6 +288,14 @@ export function PublicCompanyWebsite({
         : "noindex,nofollow";
     if (payload?.company) {
       const locale = new URLSearchParams(location.search).get("lang") === "ar" ? "ar" : "en";
+      // The app shell boots the document as ltr/en-AE. A Company Website in
+      // Arabic must flip the DOCUMENT, not just the template wrapper --
+      // fixed elements outside the template (WhatsApp button, agent bubble,
+      // mobile actions bar) anchor with inset-inline-*, which resolves
+      // against the root direction, and the browser's own UI (scrollbars,
+      // text controls) follows it too.
+      document.documentElement.setAttribute("dir", locale === "ar" ? "rtl" : "ltr");
+      document.documentElement.setAttribute("lang", locale === "ar" ? "ar-AE" : "en-AE");
       const page = location.pathname.startsWith("/track")
         ? locale === "ar"
           ? "تتبع الشحنة"
@@ -649,7 +657,19 @@ export function PublicCompanyWebsite({
           <a href="#request-delivery">{locale === "ar" ? "اطلب توصيلاً" : "Request"}</a>
         ) : null}
         {whatsappUrl ? (
-          <a href={whatsappUrl} rel="noreferrer" target="_blank">
+          <a
+            className="company-site__mobile-whatsapp"
+            href={whatsappUrl}
+            rel="noreferrer"
+            target="_blank"
+          >
+            {/* Same mark as the floating desktop button, which is hidden on
+                mobile in favour of this bar -- without it the WhatsApp entry
+                here was text-only and easy to miss. */}
+            <svg aria-hidden="true" viewBox="0 0 24 24">
+              <path d="M20.5 11.7a8.5 8.5 0 0 1-12.6 7.4L3.5 20.5l1.4-4.3a8.5 8.5 0 1 1 15.6-4.5Z" />
+              <path d="M8.2 7.7c.2-.4.4-.4.7-.4h.5c.2 0 .4.1.5.4l.8 2c.1.3 0 .5-.2.7l-.7.8c-.2.2-.1.4 0 .6.6 1.1 1.5 2 2.6 2.6.2.1.4.2.6 0l.9-1.1c.2-.2.4-.3.7-.2l2.1 1c.3.1.4.3.4.5 0 .3-.2 1.4-.9 2-.6.6-1.5.9-2.5.6-1.2-.3-2.8-1-4.6-2.6-1.5-1.4-2.5-3.1-2.8-4.3-.3-1 0-2 .4-2.6Z" />
+            </svg>
             {locale === "ar" ? "واتساب" : "WhatsApp"}
           </a>
         ) : phone ? (

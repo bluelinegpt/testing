@@ -284,10 +284,16 @@ function Header({ content, label }: { content: CompanyWebsiteContent; label: str
           <a href={`/request-delivery${nav.suffix}`}>{nav.request}</a>
         ) : null}
         <a href={`/contact${nav.suffix}`}>{nav.contact}</a>
-        {content.alternateLanguage ? (
-          <a href={content.alternateLanguage.url}>{content.alternateLanguage.label}</a>
-        ) : null}
       </nav>
+      {content.alternateLanguage ? (
+        // Outside the nav on purpose: on mobile the nav is a horizontal
+        // scroll strip and its last links sit beyond the fold -- which made
+        // the language switch effectively invisible there. As a standalone
+        // pill it stays pinned in the header's top row at every size.
+        <a className="site-template__lang" href={content.alternateLanguage.url}>
+          {content.alternateLanguage.label}
+        </a>
+      ) : null}
       <span>{label}</span>
     </header>
   );
@@ -317,7 +323,13 @@ function Actions({
         </a>
       ) : content.phone ? (
         <a className="site-template__primary" href={`tel:${content.phone.replace(/[^+\d]/gu, "")}`}>
-          {express ? text.book : `${text.call} ${content.phone}`}
+          {express ? (
+            text.book
+          ) : (
+            <>
+              {text.call} <bdi dir="ltr">{content.phone}</bdi>
+            </>
+          )}
         </a>
       ) : null}
       {content.secondaryCta ? (
@@ -472,7 +484,11 @@ function Contact({ content }: { content: CompanyWebsiteContent }): ReactNode {
           <h2>{text.connect}</h2>
           {content.address ? <address>{content.address}</address> : null}
           {content.phone ? (
-            <a href={`tel:${content.phone.replace(/[^+\d]/gu, "")}`}>{content.phone}</a>
+            // bdi/dir: a "+971..." number inside an RTL page renders with the
+            // plus sign flipped to the wrong end without an LTR island.
+            <a dir="ltr" href={`tel:${content.phone.replace(/[^+\d]/gu, "")}`}>
+              <bdi dir="ltr">{content.phone}</bdi>
+            </a>
           ) : null}
           {content.email ? <a href={`mailto:${content.email}`}>{content.email}</a> : null}
         </section>

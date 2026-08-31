@@ -10797,6 +10797,17 @@ tr.row-highlighted {
   color: inherit;
   text-decoration: none;
 }
+/* The language switch lives outside the nav so it can never scroll out of
+   reach on mobile (the nav is a horizontal scroll strip there). */
+.site-template__lang {
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  flex: 0 0 auto;
+  font-size: 0.8rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  padding: 0.3rem 0.75rem;
+}
 .site-template__header > span,
 .site-template__kicker {
   font-size: 0.72rem;
@@ -11964,11 +11975,21 @@ tr.row-highlighted {
     display: flex;
     font-size: 0.82rem;
     font-weight: 800;
+    gap: 0.35rem;
     justify-content: center;
     min-height: 42px;
     padding: 0.35rem;
     text-align: center;
     text-decoration: none;
+  }
+  .company-site__mobile-whatsapp svg {
+    fill: none;
+    height: 1.15rem;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 1.7;
+    width: 1.15rem;
   }
   .company-agent {
     bottom: calc(4.75rem + env(safe-area-inset-bottom)) !important;
