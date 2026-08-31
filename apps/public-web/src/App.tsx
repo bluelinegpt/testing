@@ -21,6 +21,7 @@ import {
   pricingProductAreas,
   pricingWebsiteAddOnNote,
 } from "./pricing";
+import { homeFaqs } from "./home-faq";
 import { TrackingPage, TrackingWidget } from "./TrackingWidget";
 import { trackEvent } from "./analytics";
 import {
@@ -352,7 +353,8 @@ function HomePage() {
           name: "Tawseelhub",
           applicationCategory: "BusinessApplication",
           operatingSystem: "Web",
-          description: "Delivery Operating System for UAE delivery companies.",
+          description:
+            "Delivery management software for UAE delivery companies — courier management, last mile delivery, COD reconciliation, driver management, trader settlements, accounting and payroll in one delivery operating system.",
         },
       ],
     });
@@ -400,8 +402,64 @@ function HomePage() {
       <SendPackageSection />
       <IntegrationsSection />
       <ResourcesSection />
+      <HomeFaqSection />
       <FinalCta />
     </>
+  );
+}
+
+function HomeFaqSection() {
+  const { locale } = useCms();
+  const copy =
+    locale === "ar"
+      ? {
+          eyebrow: "الأسئلة الشائعة",
+          title: "أسئلة شائعة عن Tawseelhub",
+          intro:
+            "كل ما تحتاج معرفته عن برنامج إدارة التوصيل في الإمارات — من إدارة السائقين ومطابقة الدفع عند الاستلام إلى تسويات التجار والرواتب.",
+        }
+      : {
+          eyebrow: "FAQs",
+          title: "Frequently Asked Questions",
+          intro:
+            "Everything you need to know about Tawseelhub — delivery management software for the UAE, from courier management and last mile delivery software in Dubai to COD reconciliation software and a delivery driver management app for your fleet.",
+        };
+  useEffect(() => {
+    // FAQPage structured data so these answers are eligible for rich results.
+    const script = document.createElement("script");
+    script.type = "application/ld+json";
+    script.dataset.homeFaqSchema = "true";
+    script.text = JSON.stringify({
+      "@context": "https://schema.org",
+      "@type": "FAQPage",
+      mainEntity: homeFaqs.map((faq) => ({
+        "@type": "Question",
+        name: faq.q.en,
+        acceptedAnswer: { "@type": "Answer", text: faq.a.en },
+      })),
+    });
+    document.head.append(script);
+    return () => script.remove();
+  }, []);
+  return (
+    <section className="section home-faq-section">
+      <div className="section-heading">
+        <p className="eyebrow">
+          <span />
+          {copy.eyebrow}
+        </p>
+        <h2>{copy.title}</h2>
+        <p>{copy.intro}</p>
+      </div>
+      <div className="home-faq-list">
+        {homeFaqs.map((faq) => (
+          <details key={faq.q.en}>
+            <summary>{faq.q[locale]}</summary>
+            <p>{faq.a[locale]}</p>
+          </details>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -683,8 +741,8 @@ function GrowthSection() {
       locale === "ar"
         ? {
             eyebrow: "العمليات + الفرص",
-            title: "شغّل شركة التوصيل ونمِّها أيضاً.",
-            body: "صُمم Tawseelhub لتحسين العملية التي لديك اليوم وفتح مسارات أوضح للأعمال التي تريدها غداً.",
+            title: "أدر شركة التوصيل بالكامل من منصة واحدة",
+            body: "أدر الطلبات والسائقين وتحصيل الدفع عند الاستلام وتسويات التجار والمحاسبة والرواتب من خلال نظام تشغيل توصيل واحد متصل، صُمم لتبسيط العمليات ودعم نمو أعمالك.",
             cta: "اطلب عرضاً",
             items: [
               ["فرص التجار", "استقبل فرصاً منظمة من أعمال تبحث عن دعم توصيل."],
@@ -695,8 +753,8 @@ function GrowthSection() {
           }
         : {
             eyebrow: "Operations + opportunity",
-            title: "Run Your Delivery Business. Grow It Too.",
-            body: "Tawseelhub is designed to improve the operation you have today and create cleaner paths to the business you want tomorrow.",
+            title: "Run Your Entire Delivery Business from One Platform",
+            body: "Manage orders, drivers, COD collections, trader settlements, accounting and payroll with one connected delivery operating system designed to simplify operations and support business growth.",
             cta: "Request a Demo",
             items: [
               [
