@@ -6,7 +6,7 @@
       "displayName": "API",
       "path": "apps/api",
       "renderService": "bluelinegpt-api-test",
-      "status": "needs_deploy",
+      "status": "pushed_awaiting_confirmation",
       "localCommit": "dddab0b",
       "localCommitDate": "2026-08-31",
       "lastChangeDescription": "feat(api): provision restricted Platform SEO users",
