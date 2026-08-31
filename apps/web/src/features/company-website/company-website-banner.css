@@ -9,7 +9,7 @@
      instead of this compact height. min-height/height combine (the browser
      uses whichever is larger), so min-height must be reset here too, not
      just height. */
-  height: clamp(150px, 13vw, 220px) !important;
+  height: clamp(300px, 26vw, 440px) !important;
   min-height: 0 !important;
   padding: 0 !important;
   background-color: var(--site-secondary, #edf5f8);
@@ -125,7 +125,7 @@
 
 @media (max-width: 680px) {
   .site-template--has-banner .site-template__hero {
-    height: clamp(120px, 38vw, 200px) !important;
+    height: clamp(240px, 76vw, 400px) !important;
   }
   .site-template__banner > img {
     object-fit: contain;
