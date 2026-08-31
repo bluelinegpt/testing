@@ -60,7 +60,7 @@
     "test:commerce-upload:database": "vitest run src/storefront/commerce-media-upload.database.test.ts",
     "test:marketplace:database": "vitest run src/marketplace/marketplace-taxonomy.database.test.ts",
     "test:commerce-media:database": "vitest run src/storefront/commerce-media-ownership.database.test.ts",
-    "test:whatsapp:database": "vitest run src/whatsapp/whatsapp.database.test.ts"
+    "test:whatsapp:database": "vitest run src/whatsapp/whatsapp.database.test.ts src/whatsapp/whatsapp-connectivity.database.test.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1118.0",
@@ -70,6 +70,7 @@
     "@nestjs/platform-express": "^11.1.28",
     "@nestjs/swagger": "^11.4.5",
     "@nestjs/throttler": "^6.5.0",
+    "@whiskeysockets/baileys": "7.0.0-rc14",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.15.1",
     "compression": "^1.8.1",

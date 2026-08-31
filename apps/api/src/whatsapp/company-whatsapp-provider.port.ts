@@ -42,6 +42,8 @@ export interface WhatsAppGroup {
    *  address for a group. The visible name is display data, never identity. */
   readonly providerGroupId: string;
   readonly name: string;
+  /** Member count only — participant identities never cross this boundary. */
+  readonly participantCount?: number;
 }
 
 export interface SendWhatsAppMessageInput {
@@ -51,7 +53,9 @@ export interface SendWhatsAppMessageInput {
 }
 
 export type WhatsAppSendResult =
-  | { readonly outcome: "sent"; readonly providerMessageId: string | null }
+  /** "sent" means the provider accepted the message — never a delivered or
+   *  read claim; no provider at this layer gives that evidence. */
+  | { readonly outcome: "sent"; readonly providerMessageId: string | null; readonly sentAt?: Date }
   | { readonly outcome: "transient_failure"; readonly failureCode: string }
   | { readonly outcome: "permanent_failure"; readonly failureCode: string };
 

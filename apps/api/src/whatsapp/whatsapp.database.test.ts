@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+﻿import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 
 import { config as loadEnvironment } from "dotenv";
@@ -20,6 +20,7 @@ import type { DatabaseSchema } from "../infrastructure/database/database.types.j
 import type { KyselyTransactionManager } from "../infrastructure/database/transaction-manager.js";
 import type { IdentityContext } from "../security/identity-context.js";
 import { ApplicationException } from "../presentation/errors/application.exception.js";
+import type { WhatsAppConnectionRuntime } from "./providers/whatsapp-connection-runtime.service.js";
 import { TraderWhatsAppSettingsService } from "./trader-whatsapp-settings.service.js";
 import { WhatsAppConnectionService } from "./whatsapp-connection.service.js";
 import { WhatsAppNotificationHistoryService } from "./whatsapp-notification-history.service.js";
@@ -54,6 +55,10 @@ describe.skipIf(!enabled)("whatsapp trader-group foundation", () => {
   afterAll(async () => {
     await database.destroy();
   });
+
+  // These foundation tests exercise persisted state only — no live socket
+  // exists, exactly the situation after a process restart.
+  const stubRuntime = { getLiveState: () => undefined } as unknown as WhatsAppConnectionRuntime;
 
   function stubTransactions(transaction: Transaction<DatabaseSchema>): KyselyTransactionManager {
     return {
@@ -184,6 +189,7 @@ describe.skipIf(!enabled)("whatsapp trader-group foundation", () => {
       const connections = new WhatsAppConnectionService(
         transaction as unknown as Kysely<DatabaseSchema>,
         accessor,
+        stubRuntime,
       );
       const settings = settingsService(transaction, accessor);
       const history = new WhatsAppNotificationHistoryService(
@@ -619,6 +625,7 @@ describe.skipIf(!enabled)("whatsapp trader-group foundation", () => {
       const connections = new WhatsAppConnectionService(
         transaction as unknown as Kysely<DatabaseSchema>,
         accessor,
+        stubRuntime,
       );
       const view = await connections.getConnection();
       expect(view.status).toBe("connected");

@@ -2,7 +2,10 @@ packages:
   - "apps/*"
 
 allowBuilds:
-  '@firebase/util': true
+  "@firebase/util": true
   "@scarf/scarf": false
+  # Baileys' only lifecycle script is `preinstall: node engine-requirements.js`
+  # (a Node>=20 check); the package ships prebuilt lib/, so nothing needs to run.
+  "@whiskeysockets/baileys": false
   esbuild: true
   protobufjs: true

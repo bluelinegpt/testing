@@ -40,6 +40,12 @@ export class UpdateTraderWhatsAppSettingsDto {
  * `encrypted_session_state` and `provider_account_reference` — session and
  * provider account material is credential-grade and never leaves the backend
  * through any API response.
+ *
+ * `qr` is the ONLY pairing artifact that ever reaches the frontend: the
+ * current QR payload string, present exclusively while the status is
+ * `waiting_for_qr_scan`, tenant-scoped, held in server memory only, and
+ * rotating on the provider's own schedule (the frontend just re-polls this
+ * endpoint and re-renders). It must never be written to browser storage.
  */
 export interface CompanyWhatsAppConnectionView {
   readonly status: string;
@@ -50,6 +56,17 @@ export interface CompanyWhatsAppConnectionView {
   readonly lastDisconnectedAt: Date | null;
   readonly disconnectReason: string | null;
   readonly lastHealthCheckAt: Date | null;
+  readonly requiresQrScan: boolean;
+  readonly qrAvailable: boolean;
+  readonly qr: string | null;
+}
+
+export interface WhatsAppGroupView {
+  /** The provider's internal group id (e.g. `1203...@g.us`) — the group's
+   *  authoritative identity. The name is display data only. */
+  readonly id: string;
+  readonly name: string;
+  readonly participantCount?: number;
 }
 
 export interface TraderWhatsAppSettingsView {

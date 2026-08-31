@@ -1,10 +1,11 @@
 import { Module } from "@nestjs/common";
 
 import { AuthenticationModule } from "../authentication/authentication.module.js";
-import {
-  CompanyWhatsAppProvider,
-  UnimplementedCompanyWhatsAppProvider,
-} from "./company-whatsapp-provider.port.js";
+import { CompanyWhatsAppProvider } from "./company-whatsapp-provider.port.js";
+import { BaileysCompanyWhatsAppProvider } from "./providers/baileys-company-whatsapp.provider.js";
+import { BaileysSessionStore } from "./providers/baileys-session-store.js";
+import { BaileysSocketFactory, RealBaileysSocketFactory } from "./providers/baileys-client.js";
+import { WhatsAppConnectionRuntime } from "./providers/whatsapp-connection-runtime.service.js";
 import { TraderWhatsAppSettingsService } from "./trader-whatsapp-settings.service.js";
 import { WhatsAppConnectionService } from "./whatsapp-connection.service.js";
 import { WhatsAppController } from "./whatsapp.controller.js";
@@ -12,9 +13,10 @@ import { WhatsAppNotificationHistoryService } from "./whatsapp-notification-hist
 import { WhatsAppOutboxWriter } from "./whatsapp-outbox-writer.service.js";
 import { WhatsAppSessionCipher } from "./whatsapp-session-cipher.js";
 
-// Prompt 2 replaces `UnimplementedCompanyWhatsAppProvider` with the real
-// per-Company provider on this one line — the `PushProvider`/`PushModule`
-// pattern. Everything else in the application depends only on the port.
+// The real Baileys provider (Prompt 2) is bound here — the
+// `PushProvider`/`PushModule` pattern. Everything outside this module still
+// depends only on the `CompanyWhatsAppProvider` port; `BaileysSocketFactory`
+// is the inner seam tests replace with a fake socket.
 @Module({
   imports: [AuthenticationModule],
   controllers: [WhatsAppController],
@@ -24,7 +26,10 @@ import { WhatsAppSessionCipher } from "./whatsapp-session-cipher.js";
     WhatsAppNotificationHistoryService,
     WhatsAppOutboxWriter,
     WhatsAppSessionCipher,
-    { provide: CompanyWhatsAppProvider, useClass: UnimplementedCompanyWhatsAppProvider },
+    BaileysSessionStore,
+    WhatsAppConnectionRuntime,
+    { provide: BaileysSocketFactory, useClass: RealBaileysSocketFactory },
+    { provide: CompanyWhatsAppProvider, useClass: BaileysCompanyWhatsAppProvider },
   ],
   // `WhatsAppOutboxWriter` is the only surface business modules will ever
   // import (Prompt 4's order-status hook) — they produce durable outbox rows
