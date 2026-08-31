@@ -161,7 +161,6 @@ export function deriveOrderWorkflowGuidance(input: OrderWorkflowInput): OrderWor
   const {
     accountingRequired,
     accountingEventId = null,
-    confirmableSettlementCount = 0,
     confirmableSettlementId = null,
     accountingJournalId = null,
     accountingState = null,
@@ -440,24 +439,10 @@ export function deriveOrderWorkflowGuidance(input: OrderWorkflowInput): OrderWor
   if (settlementSent.has(traderSettlementStatus)) {
     return {
       isFinanciallyComplete: false,
-      /* Direct confirmation is offered ONLY against an authoritative, unique
-         settlement. With several candidates the target is genuinely ambiguous,
-         and guessing one would confirm receipt of a payment the user never
-         chose -- so the action degrades to reviewing the filtered workspace
-         and says so. No paymentId is ever emitted: confirmation is
-         settlement-level and a payment id would name nothing the action
-         accepts. */
-      ...(confirmableSettlementCount > 1
-        ? {
-            nextActionCode: "review_settlement" as const,
-            /* `openDialog` WITHOUT a `settlementId` is a deliberate signal the
-               destination already understands: the Trader Settlements screen
-               shows its "more than one settlement awaits confirmation — pick
-               one" notice instead of opening a dialog, so the user who arrives
-               is told WHY nothing opened rather than landing on a bare list. */
-            nextActionParams: { ...orderParams, ...traderParams, openDialog: "confirm_receipt" },
-          }
-        : confirmableSettlementId === null
+      /* The Orders query resolves the oldest unconfirmed settlement when more
+         than one is eligible. Confirmation remains settlement-level and the
+         existing dialog still requires the operator's explicit confirmation. */
+      ...(confirmableSettlementId === null
           ? {
               // Nothing lawfully confirmable yet: review rather than invent a
               // direct-confirm action against no target.
@@ -473,8 +458,7 @@ export function deriveOrderWorkflowGuidance(input: OrderWorkflowInput): OrderWor
                 settlementId: confirmableSettlementId,
               },
             }),
-      completionBlockerCode:
-        confirmableSettlementCount > 1 ? ("multiple_confirmable_settlements" as const) : null,
+      completionBlockerCode: null,
       nextActionRoute: "/trader-settlements",
       waitingFor: "awaiting_trader_receipt_confirmation",
       workflowState: "awaiting_trader_receipt_confirmation",

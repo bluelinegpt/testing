@@ -1205,9 +1205,7 @@ export class OperationsService {
                 NO paymentId here -- one settlement carries many payment rows and
                 none of them is a confirmation target. */
              coalesce(receipt.confirmable_count, 0) as "confirmableSettlementCount",
-             case
-               when receipt.confirmable_count = 1 then receipt.settlement_id
-             end as "confirmableSettlementId",
+             receipt.settlement_id as "confirmableSettlementId",
              coalesce(acct.state, 'accounting_event_missing') as "accountingState",
              acct.event_id as "accountingEventId",
              acct.journal_id as "accountingJournalId"
@@ -1244,12 +1242,17 @@ export class OperationsService {
          settlement forever -- the chip then reports ambiguity when exactly
          one real target remains.
 
-         The minimum id is read ONLY when the count is exactly one, so it never
-         picks a winner among several -- ambiguity is reported, not resolved. */
+         When several settlements are awaiting receipt, the oldest payment is
+         the deterministic next target. This lets the Orders action open the
+         existing confirmation dialog instead of abandoning the operator on
+         the settlement list. */
       left join lateral (
         select
           count(*)::int as confirmable_count,
-          min(s.id::text) as settlement_id
+          (array_agg(
+            s.id::text
+            order by s.business_date asc, s.created_at asc, s.id asc
+          ))[1] as settlement_id
         from trader_settlement_orders tso
         join trader_settlements s
           on s.id = tso.settlement_id and s.company_id = tso.company_id

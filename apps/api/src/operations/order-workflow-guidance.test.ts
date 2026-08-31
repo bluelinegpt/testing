@@ -806,9 +806,9 @@ describe("smart next action", () => {
  * Receipt-confirmation target resolution.
  *
  * Confirmation is SETTLEMENT-level -- `confirmMoneyReceived(settlementId)` --
- * so a settlement id is the only authoritative target. The expensive mistake
- * would be picking one settlement when several are confirmable: that confirms
- * receipt of a payment the user never chose.
+ * so a settlement id is the only authoritative target. When several are
+ * confirmable, the Orders query supplies the oldest unconfirmed settlement;
+ * the dialog still requires the operator's explicit confirmation.
  */
 describe("receipt confirmation target", () => {
   const sent = {
@@ -831,20 +831,18 @@ describe("receipt confirmation target", () => {
     expect(g.completionBlockerCode).toBeNull();
   });
 
-  it("refuses to guess when several settlements are confirmable", () => {
-    // Observed live on ORD-000027, which is allocated across two.
+  it("opens the oldest unconfirmed settlement when several are confirmable", () => {
     const g = derive({
       ...sent,
       confirmableSettlementCount: 2,
-      confirmableSettlementId: null,
+      confirmableSettlementId: "oldest-settlement",
     });
-    expect(g.nextActionCode).toBe("review_settlement");
-    expect(g.nextActionCode).not.toBe("confirm_trader_received");
-    expect(g.nextActionParams.settlementId).toBeUndefined();
-    // The dialog request WITHOUT an id is what makes the destination explain
-    // the ambiguity instead of silently showing a bare list.
-    expect(g.nextActionParams.openDialog).toBe("confirm_receipt");
-    expect(g.completionBlockerCode).toBe("multiple_confirmable_settlements");
+    expect(g.nextActionCode).toBe("confirm_trader_received");
+    expect(g.nextActionParams).toMatchObject({
+      openDialog: "confirm_receipt",
+      settlementId: "oldest-settlement",
+    });
+    expect(g.completionBlockerCode).toBeNull();
   });
 
   it("reviews rather than inventing a target when none is confirmable", () => {
@@ -855,15 +853,14 @@ describe("receipt confirmation target", () => {
     expect(g.nextActionParams.openDialog).toBeUndefined();
   });
 
-  it("ignores a stale id when the count says the target is ambiguous", () => {
-    // The count is authoritative; an id alongside count>1 must never win.
+  it("uses the resolved oldest target when several settlements are pending", () => {
     const g = derive({
       ...sent,
       confirmableSettlementCount: 3,
       confirmableSettlementId: "settlement-9",
     });
-    expect(g.nextActionCode).toBe("review_settlement");
-    expect(g.nextActionParams.settlementId).toBeUndefined();
+    expect(g.nextActionCode).toBe("confirm_trader_received");
+    expect(g.nextActionParams.settlementId).toBe("settlement-9");
   });
 
   it("never emits a paymentId on any path", () => {
@@ -871,7 +868,7 @@ describe("receipt confirmation target", () => {
     // target, so a paymentId would name something the action cannot accept.
     for (const overrides of [
       { ...sent, confirmableSettlementCount: 1, confirmableSettlementId: "settlement-1" },
-      { ...sent, confirmableSettlementCount: 2, confirmableSettlementId: null },
+      { ...sent, confirmableSettlementCount: 2, confirmableSettlementId: "settlement-2" },
       { ...sent, confirmableSettlementCount: 0, confirmableSettlementId: null },
       { driverReconciliationStatus: "reconciled", traderSettlementStatus: "unsettled" },
       { driverReconciliationStatus: "pending" },
