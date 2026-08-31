@@ -121,9 +121,18 @@ export function AgentChat() {
 
   useEffect(() => {
     const id = window.setTimeout(() => setMounted(true), 700);
-    void getWhatsAppSettings().then(setWhatsapp);
-    void getAgentAvailability().then(setAvailability);
-    return () => window.clearTimeout(id);
+    // Deferred past the LCP window (Lighthouse network-dependency finding):
+    // the whatsapp/settings and agent/availability requests were firing at
+    // hydration and sat in the critical loading chain, yet neither is
+    // needed until the launcher is visible and interactive.
+    const fetchId = window.setTimeout(() => {
+      void getWhatsAppSettings().then(setWhatsapp);
+      void getAgentAvailability().then(setAvailability);
+    }, 2500);
+    return () => {
+      window.clearTimeout(id);
+      window.clearTimeout(fetchId);
+    };
   }, []);
 
   useEffect(() => {

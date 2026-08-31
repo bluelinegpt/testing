@@ -4,6 +4,13 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#ffffff" />
+    <!-- Warm the API connection while the JS bundle downloads (Lighthouse
+         network-dependency finding: no origins were preconnected). Vite
+         substitutes the deploy's API base URL at build time; the browser
+         uses only its origin. -->
+    <link rel="preconnect" href="%VITE_API_BASE_URL%" crossorigin />
+    <link rel="dns-prefetch" href="%VITE_API_BASE_URL%" />
+    <link rel="preconnect" href="https://www.googletagmanager.com" />
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
     <link rel="icon" type="image/png" sizes="160x160" href="/favicon.png" />
     <link rel="apple-touch-icon" sizes="160x160" href="/apple-touch-icon.png" />

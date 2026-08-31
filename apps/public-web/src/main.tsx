@@ -9,7 +9,16 @@ import './quote.css';
 import './blog.css';
 
 installCrashReporting();
-void installTracking();
+// Deferred out of the critical rendering path (Lighthouse network-dependency
+// finding): analytics configuration is not needed for first paint, and its
+// /public/blog/settings request was part of the LCP-blocking chain. Idle
+// callback with a timeout floor so it still always runs.
+const startTracking = () => void installTracking();
+if ("requestIdleCallback" in window) {
+  requestIdleCallback(startTracking, { timeout: 4000 });
+} else {
+  setTimeout(startTracking, 2500);
+}
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
