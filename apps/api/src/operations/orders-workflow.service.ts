@@ -11,6 +11,7 @@ import { ApplicationException } from "../presentation/errors/application.excepti
 import { IdentityContextAccessor } from "../security/identity-context.js";
 import { TenantContextAccessor } from "../tenancy/tenant-context.js";
 import { PushOutboxWriter } from "../push/push-outbox-writer.service.js";
+import { EmployeeDeliveryEarningService } from "../payroll/employee-delivery-earning.service.js";
 import { OutsourcedDriverFeeService } from "../payroll/outsourced-driver-fee.service.js";
 import { OperationsHistoryWriter } from "./operations-history.writer.js";
 import type {
@@ -59,6 +60,8 @@ export class OrdersWorkflowService {
     @Inject(OperationsHistoryWriter) private readonly history: OperationsHistoryWriter,
     @Inject(OutsourcedDriverFeeService)
     private readonly outsourcedDriverFees: OutsourcedDriverFeeService,
+    @Inject(EmployeeDeliveryEarningService)
+    private readonly employeeDeliveryEarnings: EmployeeDeliveryEarningService,
     @Inject(PushOutboxWriter) private readonly pushOutbox: PushOutboxWriter,
   ) {}
 
@@ -571,6 +574,15 @@ export class OrdersWorkflowService {
         input.actorId,
         input.correlationId,
       );
+      // Employee Drivers accrue their per-delivery earning HERE, in the same
+      // transaction as the status change -- mirroring the driver
+      // self-service path (operations.service). Before this call, orders
+      // marked Delivered from the office web portal silently created no
+      // employee_order_earnings row, so Driver Earnings calculations found
+      // "no payable earnings" for genuinely delivered orders. Idempotent;
+      // returns null for outsourced Drivers or Employees with no rule --
+      // ordinary outcomes, so the result is deliberately not inspected.
+      await this.employeeDeliveryEarnings.accrueForDelivery(database, order.id);
     }
   }
 

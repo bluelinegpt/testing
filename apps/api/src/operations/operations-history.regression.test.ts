@@ -104,6 +104,10 @@ describe.skipIf(!runDatabaseTests)("OperationsHistoryWriter consumers", () => {
           identities as unknown as IdentityContextAccessor,
           history,
           undefined as never,
+          // Employee delivery-earning accrual: not exercised by this history
+          // regression (its orders use rule-less drivers), a null return is
+          // the ordinary outcome anyway.
+          { accrueForDelivery: async () => null } as never,
           new PushOutboxWriter(),
         );
 
