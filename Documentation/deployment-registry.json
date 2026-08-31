@@ -19,7 +19,7 @@
       "displayName": "Main app",
       "path": "apps/web",
       "renderService": "bluelinegpt-web-test",
-      "status": "needs_deploy",
+      "status": "pushed_awaiting_confirmation",
       "localCommit": "b570385",
       "localCommitDate": "2026-08-31",
       "lastChangeDescription": "Makes the Main Company Website banner compact on desktop and mobile.",
