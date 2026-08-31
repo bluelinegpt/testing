@@ -450,7 +450,12 @@ export function deriveOrderWorkflowGuidance(input: OrderWorkflowInput): OrderWor
       ...(confirmableSettlementCount > 1
         ? {
             nextActionCode: "review_settlement" as const,
-            nextActionParams: { ...orderParams, ...traderParams },
+            /* `openDialog` WITHOUT a `settlementId` is a deliberate signal the
+               destination already understands: the Trader Settlements screen
+               shows its "more than one settlement awaits confirmation — pick
+               one" notice instead of opening a dialog, so the user who arrives
+               is told WHY nothing opened rather than landing on a bare list. */
+            nextActionParams: { ...orderParams, ...traderParams, openDialog: "confirm_receipt" },
           }
         : confirmableSettlementId === null
           ? {

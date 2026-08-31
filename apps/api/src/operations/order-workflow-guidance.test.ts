@@ -841,6 +841,9 @@ describe("receipt confirmation target", () => {
     expect(g.nextActionCode).toBe("review_settlement");
     expect(g.nextActionCode).not.toBe("confirm_trader_received");
     expect(g.nextActionParams.settlementId).toBeUndefined();
+    // The dialog request WITHOUT an id is what makes the destination explain
+    // the ambiguity instead of silently showing a bare list.
+    expect(g.nextActionParams.openDialog).toBe("confirm_receipt");
     expect(g.completionBlockerCode).toBe("multiple_confirmable_settlements");
   });
 
@@ -848,6 +851,8 @@ describe("receipt confirmation target", () => {
     const g = derive({ ...sent, confirmableSettlementCount: 0, confirmableSettlementId: null });
     expect(g.nextActionCode).toBe("review_settlement");
     expect(g.nextActionParams.settlementId).toBeUndefined();
+    // No confirmable settlement exists, so an ambiguity notice would be false.
+    expect(g.nextActionParams.openDialog).toBeUndefined();
   });
 
   it("ignores a stale id when the count says the target is ambiguous", () => {

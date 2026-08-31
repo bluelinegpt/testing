@@ -1647,6 +1647,8 @@ export const englishTranslations = {
         "An account mapping is missing, so the entry cannot post. Review the Account Mappings.",
       accounting_duplicate_posting:
         "A duplicate posting was detected for this Order. Review the Event before retrying.",
+      multiple_confirmable_settlements:
+        "This Order was paid across more than one settlement awaiting receipt confirmation. Confirm each settlement from its own row in the list.",
     },
     action: {
       assign_driver: "Assign Driver",
