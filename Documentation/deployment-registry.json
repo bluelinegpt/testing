@@ -6,10 +6,10 @@
       "displayName": "API",
       "path": "apps/api",
       "renderService": "bluelinegpt-api-test",
-      "status": "pushed_awaiting_confirmation",
-      "localCommit": "ba60554",
+      "status": "needs_deploy",
+      "localCommit": "fa794db",
       "localCommitDate": "2026-08-31",
-      "lastChangeDescription": "fix(operations): accrue employee delivery earnings on web-portal status changes",
+      "lastChangeDescription": "feat(whatsapp): real Baileys connectivity - QR pairing, lifecycle, groups (Prompt 2)",
       "lastChangeBy": "claude",
       "confirmedLiveCommit": "aee8bb0",
       "confirmedLiveAt": "2026-08-31"
