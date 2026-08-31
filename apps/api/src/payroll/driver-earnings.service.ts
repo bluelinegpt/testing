@@ -75,30 +75,14 @@ export class DriverEarningsService {
     this.support.assertPermission("payroll.pay");
     const { actorId, companyId } = this.support.context();
     return this.transactions.execute(async (transaction) => {
-      const existing = await sql<{
-        collectedOrders: number;
-        collectionEarnings: string;
-        collectionRate: string;
-        deliveredOrders: number;
-        deliveryEarnings: string;
-        employeeId: string;
-        periodId: string;
-        totalEarnings: string;
-      }>`select id as "periodId",employee_id as "employeeId",
-        delivered_order_count as "deliveredOrders",collected_order_count as "collectedOrders",
-        delivery_earnings::text as "deliveryEarnings",collection_rate_snapshot::text as "collectionRate",
-        collection_earnings::text as "collectionEarnings",total_earnings::text as "totalEarnings"
-        from employee_driver_earning_periods
-        where company_id=${companyId}::uuid and driver_id=${input.driverId}::uuid
-          and date_from=${input.dateFrom}::date and date_to=${input.dateTo}::date and status<>'reversed'
-        for update`.execute(transaction);
-      if (existing.rows[0]) {
-        throw new ApplicationException(
-          "employee_driver_earning_period_locked",
-          "This earning period is already confirmed and cannot be calculated or confirmed again",
-          HttpStatus.CONFLICT,
-        );
-      }
+      // No same-range or overlap guard here (approved product decision,
+      // 2026-08-31): periods are incremental order-level captures, so a
+      // second period over the same dates is legitimate -- it picks up only
+      // orders no prior period claimed. Double-confirm protection comes from
+      // the source rows themselves: the FOR UPDATE row locks inside
+      // periodCalculation serialize concurrent confirms, the loser re-reads
+      // the claimed orders as excluded, and an all-claimed calculation fails
+      // with employee_driver_earning_period_empty below.
       const candidateOrders = await sql<{ id: string }>`select o.id from orders o
         join drivers d on d.id=o.assigned_driver_id and d.company_id=o.company_id
         where o.company_id=${companyId}::uuid and d.id=${input.driverId}::uuid
@@ -353,14 +337,21 @@ export class DriverEarningsService {
         HttpStatus.BAD_REQUEST,
       );
 
-    // Earning periods can only be locked for completed days (up to yesterday).
-    // Today's deliveries are still ongoing and should not be locked yet.
-    const isoString = new Date().toISOString();
-    const today = isoString.substring(0, 10); // YYYY-MM-DD format
-    if (input.dateTo >= today)
+    // Same-day calculation is allowed (approved product decision,
+    // 2026-08-31): each confirmed period claims its orders individually, so
+    // deliveries that land after a confirmation are simply picked up by the
+    // next calculation. Only genuinely future dates are rejected, measured
+    // in the Company's own timezone -- not UTC, which flips to the next day
+    // at 4 AM Gulf time.
+    const todayRow = await sql<{ today: string }>`select (now() at time zone
+      coalesce((select timezone from company_settings where company_id=${companyId}::uuid),'Asia/Dubai'))::date::text as today`.execute(
+      database,
+    );
+    const today = todayRow.rows[0]!.today;
+    if (input.dateTo > today)
       throw new ApplicationException(
         "driver_earning_period_future_date",
-        `Earning periods can only be calculated for completed days. Date To must be before today (${today}).`,
+        `Earning periods cannot include future dates. Date To must be on or before today (${today}).`,
         HttpStatus.BAD_REQUEST,
       );
     const driver = await sql<{ employeeId: string }>`select d.employee_id as "employeeId"
@@ -369,21 +360,11 @@ export class DriverEarningsService {
         and d.driver_type='employee' and e.payroll_eligible`.execute(database);
     const employeeId = driver.rows[0]?.employeeId;
     if (!employeeId) this.notFound();
-    const overlap = await sql<{
-      dateFrom: string;
-      dateTo: string;
-      nextStart: string;
-    }>`select date_from::text as "dateFrom",date_to::text as "dateTo"
-        ,(date_to+1)::text as "nextStart"
-      from employee_driver_earning_periods where company_id=${companyId}::uuid and employee_id=${employeeId}::uuid
-        and status<>'reversed' and daterange(date_from,date_to,'[]') && daterange(${input.dateFrom}::date,${input.dateTo}::date,'[]')
-      order by date_from limit 1 ${lock ? sql`for update` : sql``}`.execute(database);
-    if (overlap.rows[0])
-      throw new ApplicationException(
-        "employee_driver_earning_period_overlap",
-        `This period overlaps the confirmed earning period ${overlap.rows[0].dateFrom} - ${overlap.rows[0].dateTo}. The next available start date is ${overlap.rows[0].nextStart}.`,
-        HttpStatus.CONFLICT,
-      );
+    // Overlapping date ranges are allowed by design: a period claims ORDERS
+    // (delivery-source links / earning_period_id stamps), not dates, and the
+    // queries below exclude every already-claimed order. The matching DB
+    // exclusion constraint is dropped by migration
+    // 20260955000000_allow_same_day_driver_earning_periods.
     const collectionRules = await sql<{
       amount: string;
       effectiveFrom: string;

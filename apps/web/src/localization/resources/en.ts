@@ -3956,7 +3956,7 @@ export const englishTranslations = {
     dateFrom: "Date From",
     dateTo: "Date To",
     completedCalendarDaysOnly:
-      "Select completed calendar days only. The current day cannot be calculated until tomorrow.",
+      "Today can be included. Orders already captured by a confirmed calculation are excluded automatically, so you can calculate again later for new deliveries.",
     todayStillInProgress:
       "Cannot calculate today's earnings because the day is still in progress. Select yesterday or an earlier completed day. If previous days show No earnings, there is nothing available to calculate yet.",
     todayExcluded:

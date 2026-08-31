@@ -128,8 +128,21 @@ describe("DriverEarningsWorkspace period confirmation", () => {
     expect(screen.getByRole("button", { name: "Calculate Now" })).toBeEnabled();
   });
 
-  it("does not calculate a date range that overlaps a confirmed period", async () => {
-    const post = vi.fn();
+  it("calculates a date range that overlaps a confirmed period (per-order capture makes overlap safe)", async () => {
+    // Approved product decision (2026-08-31): periods claim ORDERS, not
+    // dates -- a recalculation over already-confirmed dates picks up only
+    // orders no earlier period included, so the client no longer blocks
+    // overlapping ranges.
+    const post = vi.fn(async () => ({
+      collectedOrders: 0,
+      collectionEarnings: "0.00",
+      collectionRate: "1.00",
+      collectionSources: [],
+      deliveredOrders: 6,
+      deliveryEarnings: "12.00",
+      deliverySources: sources,
+      totalEarnings: "12.00",
+    }));
     const get = vi.fn(async (path: string) =>
       path.includes("cash-accounts")
         ? []
@@ -145,11 +158,12 @@ describe("DriverEarningsWorkspace period confirmation", () => {
     fireEvent.change(screen.getByLabelText("Date To"), { target: { value: "2026-08-15" } });
     fireEvent.click(screen.getByRole("button", { name: "Calculate Now" }));
 
-    expect(await screen.findByText(/overlaps the confirmed earning period/)).toBeInTheDocument();
-    expect(post).not.toHaveBeenCalledWith(
-      expect.stringContaining("periods/preview"),
-      expect.anything(),
-    );
+    await screen.findByRole("button", { name: "Confirm & Lock Earnings" });
+    expect(post).toHaveBeenCalledWith("operations/payroll/driver-earnings/periods/preview", {
+      dateFrom: "2026-08-10",
+      dateTo: "2026-08-15",
+      driverId: "ahmad",
+    });
   });
 
   it("keeps payment hidden before earnings are confirmed", async () => {
@@ -295,7 +309,11 @@ describe("DriverEarningsWorkspace period confirmation", () => {
     expect(screen.getByText(/details do not match/)).toBeInTheDocument();
   });
 
-  it("shows today as in progress and calculates completed earnings through yesterday", async () => {
+  it("includes today in the calculation without clamping to yesterday", async () => {
+    // Approved product decision (2026-08-31): same-day calculation is
+    // allowed -- orders already captured by a confirmed period are excluded
+    // per order, so nothing is double-paid and today needs no special
+    // treatment. The old behavior silently clamped Date To to yesterday.
     const post = vi.fn(async () => ({
       collectedOrders: 0,
       collectionEarnings: "0.00",
@@ -319,12 +337,15 @@ describe("DriverEarningsWorkspace period confirmation", () => {
       await screen.findByRole("columnheader", { name: "Collected Orders" }),
     ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Calculate Now" }));
-    expect(await screen.findByText(/adjusted through 2026-08-29/i)).toBeInTheDocument();
+    await screen.findByRole("button", { name: "Confirm & Lock Earnings" });
+    // Default Date To is today; the request must carry it through unchanged.
+    const today = new Date().toISOString().slice(0, 10);
     expect(post).toHaveBeenCalledWith("operations/payroll/driver-earnings/periods/preview", {
-      dateFrom: "2026-08-01",
-      dateTo: "2026-08-29",
+      dateFrom: expect.any(String),
+      dateTo: today,
       driverId: "ahmad",
     });
+    expect(screen.queryByText(/adjusted through/i)).not.toBeInTheDocument();
   });
 
   it("loads a persisted locked period after selecting the Driver", async () => {

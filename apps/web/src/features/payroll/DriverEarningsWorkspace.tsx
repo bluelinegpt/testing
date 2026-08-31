@@ -219,29 +219,12 @@ export function DriverEarningsWorkspace({ api, canPay }: { api: ApiClient; canPa
   const [success, setSuccess] = useState<string>();
   const calculate = async () => {
     if (!driverId) return;
-    const today = new Date().toISOString().slice(0, 10);
-    let calculationDateTo = dateTo;
-    if (dateTo >= today) {
-      calculationDateTo = previousIsoDate(today);
-      if (dateFrom > calculationDateTo) {
-        setPeriodPreview(undefined);
-        return setError(t("driverEarnings.todayStillInProgress"));
-      }
-      setDateTo(calculationDateTo);
-      setSuccess(t("driverEarnings.todayExcluded", { dateTo: calculationDateTo }));
-    }
-    const overlappingPeriod = periods.find(
-      (period) => dateFrom <= period.dateTo && calculationDateTo >= period.dateFrom,
-    );
-    if (overlappingPeriod) {
-      setPeriodPreview(undefined);
-      return setError(
-        t("driverEarnings.periodAlreadyConfirmed", {
-          dateFrom: overlappingPeriod.dateFrom,
-          dateTo: overlappingPeriod.dateTo,
-        }),
-      );
-    }
+    // Same-day, incremental calculation (approved product decision): today is
+    // allowed, and ranges may overlap already-confirmed periods -- each
+    // confirmed period claims its orders individually, so a recalculation
+    // picks up only orders no earlier period included. The backend enforces
+    // both rules; no client-side date clamping or overlap blocking remains.
+    const calculationDateTo = dateTo;
     setBusy(true);
     setError(undefined);
     try {
@@ -420,7 +403,7 @@ export function DriverEarningsWorkspace({ api, canPay }: { api: ApiClient; canPa
               date,
               deliveredOrders: value.deliveredOrders,
               status:
-                date >= today ? "in_progress" : value.amount > 0 ? "available" : "no_earnings",
+                date > today ? "in_progress" : value.amount > 0 ? "available" : "no_earnings",
             };
           }),
         );
@@ -976,12 +959,6 @@ function enumerateIsoDates(dateFrom: string, dateTo: string): string[] {
     cursor.setUTCDate(cursor.getUTCDate() + 1);
   }
   return dates;
-}
-
-function previousIsoDate(value: string): string {
-  const date = new Date(`${value}T12:00:00Z`);
-  date.setUTCDate(date.getUTCDate() - 1);
-  return date.toISOString().slice(0, 10);
 }
 
 function apiErrorMessage(error: unknown, fallback: string): string {
