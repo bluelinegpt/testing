@@ -19,10 +19,10 @@
       "displayName": "Main app",
       "path": "apps/web",
       "renderService": "bluelinegpt-web-test",
-      "status": "pushed_awaiting_confirmation",
-      "localCommit": "397f8d8",
+      "status": "needs_deploy",
+      "localCommit": "ede722f",
       "localCommitDate": "2026-08-31",
-      "lastChangeDescription": "fix(website): stop premium/other templates overriding compact banner sizing",
+      "lastChangeDescription": "fix(website): double Company Website banner height per acceptance feedback",
       "lastChangeBy": "claude",
       "confirmedLiveCommit": "0abeb24",
       "confirmedLiveAt": "2026-08-28"
