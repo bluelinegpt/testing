@@ -702,6 +702,60 @@ describe("confirm_receipt deep link", () => {
     expect(globalThis.location.search).toContain("settlementId=settlement-1");
   });
 
+  it("does not replay the deep link when confirming a different settlement", async () => {
+    // Reported live with an Order paid across two settlements: the user
+    // closed the deep-linked dialog, confirmed the OTHER settlement from its
+    // row, and the list refresh replayed the deep link -- reopening "the
+    // first one" on top of the work they had just finished.
+    visit("?traderId=trader-1&settlementId=settlement-1&openDialog=confirm_receipt");
+    const secondRow = {
+      ...settlementRow,
+      settlementId: "settlement-2",
+      settlementNumber: "SET-000124",
+    };
+    const { api } = setup({
+      getExtra: (path) =>
+        path.startsWith("operations/settlements/payments/list")
+          ? { items: [settlementRow, secondRow], page: 1, pageSize: 25, total: 2 }
+          : undefined,
+    });
+
+    // The deep-linked dialog opens for settlement-1; the user dismisses it.
+    const first = await screen.findByRole("dialog");
+    expect(within(first).getByText("SET-000123")).toBeInTheDocument();
+    fireEvent.click(within(first).getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+
+    // They confirm the OTHER settlement from its own row instead.
+    fireEvent.click(
+      screen.getAllByRole("button", { name: "Confirm Money Received by Trader" })[1]!,
+    );
+    const second = within(await screen.findByRole("dialog"));
+    expect(second.getByText("SET-000124")).toBeInTheDocument();
+    fireEvent.click(second.getByRole("button", { name: "Confirm Money Received by Trader" }));
+    await waitFor(() =>
+      expect(api.post).toHaveBeenCalledWith(
+        "operations/settlements/payments/settlement-2/confirm-receipt",
+        expect.any(Object),
+        expect.objectContaining({ "X-Idempotency-Key": expect.any(String) }),
+      ),
+    );
+
+    // The confirmation refreshes the list (the mock still reports settlement-1
+    // unconfirmed, which is what made the replay reopen it). The open dialog
+    // must remain settlement-2's -- never flip back to the deep-linked one.
+    await waitFor(() =>
+      expect(
+        api.get.mock.calls.filter((call: unknown[]) =>
+          String(call[0]).startsWith("operations/settlements/payments/list"),
+        ).length,
+      ).toBeGreaterThan(1),
+    );
+    const after = within(await screen.findByRole("dialog"));
+    expect(after.getByText("SET-000124")).toBeInTheDocument();
+    expect(after.queryByText("SET-000123")).toBeNull();
+  });
+
   it("refuses to guess when the backend reported an ambiguous target", async () => {
     // No settlementId: the backend found several confirmable settlements.
     visit("?traderId=trader-1&openDialog=confirm_receipt");

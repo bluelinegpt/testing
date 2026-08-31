@@ -1231,13 +1231,18 @@ export class OperationsService {
          each one sends the operator to a different screen. */
       /* ONE set-based lateral, evaluated as part of this single page query.
 
-         The eligibility test mirrors the service's own guard in
+         The eligibility test mirrors the service's own guards in
          confirmMoneyReceived (trader-settlement.service.ts): a settlement can
          receive a Money Received confirmation only when it is NOT itself a
-         reversal record, its status is 'confirmed' (money sent), and no
-         reversal of it exists. Those three conditions are restated here rather
-         than reinvented, so the count can never disagree with what the action
-         would accept.
+         reversal record, its status is 'confirmed' (money sent), no reversal
+         of it exists, and its receipt has not ALREADY been confirmed (the
+         audit_events marker the service itself checks). All four conditions
+         are restated here rather than reinvented, so the count can never
+         disagree with what the action would accept. Without the fourth, an
+         Order paid across two settlements whose first receipt was confirmed
+         while the Order was still partially settled keeps counting that
+         settlement forever -- the chip then reports ambiguity when exactly
+         one real target remains.
 
          The minimum id is read ONLY when the count is exactly one, so it never
          picks a winner among several -- ambiguity is reported, not resolved. */
@@ -1258,6 +1263,14 @@ export class OperationsService {
             select 1
             from trader_settlements r
             where r.company_id = s.company_id and r.reversal_of_id = s.id
+          )
+          and not exists (
+            select 1
+            from audit_events ae
+            where ae.company_id = s.company_id
+              and ae.subject_type = 'trader_settlement'
+              and ae.subject_id = s.id::text
+              and ae.action = 'trader_settlement.receipt_confirmed'
           )
       ) receipt on true
       left join lateral (

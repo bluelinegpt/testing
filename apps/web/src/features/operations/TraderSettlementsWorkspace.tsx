@@ -393,26 +393,39 @@ export function TraderSettlementsWorkspace({
   /* Shown when a receipt deep link cannot lawfully open the dialog: the target
      is ambiguous, gone, already confirmed, or not visible to this Company. */
   const [receiptNotice, setReceiptNotice] = useState<string>();
+  /* Each receipt deep link is RESOLVED exactly once. Without this, the effect
+     below re-fires on every listPage refresh (a dependency it genuinely needs
+     while waiting for the page), so confirming a DIFFERENT settlement -- which
+     refreshes the list -- re-opened the deep-linked settlement's dialog on top
+     of the work the user had just finished. */
+  const resolvedReceiptLink = useRef<object | null>(null);
   const [statementOpen, setStatementOpen] = useState(initialStatementOpen);
   const [statementTraderId, setStatementTraderId] = useState(presetTraderId);
 
   useEffect(() => {
     const link = deepLink.link;
     if (link === null || link.dialog !== "confirm_receipt") return;
+    // Already resolved (dialog opened or notice shown): a list refresh must
+    // not replay the instruction.
+    if (resolvedReceiptLink.current === link) return;
 
     /* Ambiguous: the backend found more than one confirmable settlement and
        deliberately emitted no id. Guessing one would confirm receipt of a
        payment the user never chose. */
     if (link.settlementId === null) {
+      resolvedReceiptLink.current = link;
       setReceiptNotice(t("traderSettlements.receiptAmbiguous"));
       return;
     }
     if (!canManage) {
+      resolvedReceiptLink.current = link;
       setReceiptNotice(t("traderSettlements.receiptNoPermission"));
       return;
     }
-    // Wait for the page; the row is the resolution, not the URL.
+    // Wait for the page; the row is the resolution, not the URL. NOT marked
+    // resolved: the effect must run again when the page arrives.
     if (listPage === undefined) return;
+    resolvedReceiptLink.current = link;
 
     /* Resolved through the Company-scoped list API. A settlement belonging to
        another Company is simply not in these rows, so it can never be opened
