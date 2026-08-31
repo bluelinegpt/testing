@@ -8,8 +8,20 @@
      exactly what let Dana's uploaded banner render at ~68vh in production
      instead of this compact height. min-height/height combine (the browser
      uses whichever is larger), so min-height must be reset here too, not
-     just height. */
-  height: clamp(300px, 26vw, 440px) !important;
+     just height.
+
+     Sizing is driven by WIDTH, not a fixed height: a Company's uploaded
+     banner is a wide marketing graphic, and forcing a fixed frame height
+     fights its aspect ratio -- either cropping into it (`cover`) or, once
+     the frame is taller than the image's own proportions call for
+     (`contain`), leaving empty gutters down the sides instead of filling
+     the same width as the rest of the page's content (e.g. the Real-Time
+     Tracking card below it). Letting height be intrinsic to a full-width
+     image fills that width exactly, whatever the image's own proportions
+     are. `max-height` remains only as a safety net against an unusually
+     tall upload. */
+  height: auto !important;
+  max-height: clamp(300px, 26vw, 440px) !important;
   min-height: 0 !important;
   padding: 0 !important;
   background-color: var(--site-secondary, #edf5f8);
@@ -18,21 +30,18 @@
   overflow: hidden;
 }
 
-.site-template__banner,
-.site-template__banner > img {
-  height: 100%;
+.site-template__banner {
   width: 100%;
 }
 
 .site-template__banner > img {
   display: block;
-  /* A Company's uploaded banner is a single graphic with its own heading
-     baked in (see the Hero component: no separate HTML text is rendered
-     once a banner image exists) -- `cover` was cropping into that heading
-     the moment the frame got shorter than the image's own aspect ratio.
-     `contain` scales the whole graphic down to fit instead, so nothing is
-     ever cut off; the frame's background shows as letterboxing if the
-     aspect ratios don't match exactly. */
+  width: 100%;
+  height: auto;
+  /* Safety net matching the frame's own cap: if an unusually tall image
+     would otherwise exceed it, crop rather than distort. Ordinary wide
+     banners never hit this. */
+  max-height: clamp(300px, 26vw, 440px);
   object-fit: contain;
   object-position: center;
 }
@@ -125,9 +134,10 @@
 
 @media (max-width: 680px) {
   .site-template--has-banner .site-template__hero {
-    height: clamp(240px, 76vw, 400px) !important;
+    max-height: clamp(240px, 76vw, 400px) !important;
   }
   .site-template__banner > img {
+    max-height: clamp(240px, 76vw, 400px);
     object-fit: contain;
   }
 }
