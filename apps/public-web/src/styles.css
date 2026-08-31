@@ -664,10 +664,32 @@ a {
   grid-template-columns: 0.9fr 1.1fr;
   gap: 110px;
   max-width: 1380px;
-  margin: 24px auto;
+  margin: 0 auto;
   padding: 64px max(6vw, 54px);
   border-radius: 30px;
   background: #10243e;
+}
+.split-section + .section {
+  padding-top: 24px;
+}
+.home-seo-summary {
+  padding-block: 28px;
+  border-block: 1px solid #e1ebe8;
+}
+.home-seo-summary h2 {
+  max-width: 900px;
+  margin: 0;
+  color: #10243e;
+  font-size: clamp(30px, 3vw, 46px);
+  line-height: 1.08;
+  letter-spacing: -0.035em;
+}
+.home-seo-summary > p:not(.eyebrow) {
+  max-width: 980px;
+  margin: 16px 0 0;
+  color: #53667b;
+  font-size: 16px;
+  line-height: 1.7;
 }
 /* `.split-section .section-heading h2` (not just `.split-section h2`) so this
    beats the sitewide `.section-heading h2 { color: #000 }` accessibility rule
@@ -682,6 +704,9 @@ a {
 }
 .split-section .section-heading > p {
   color: #9db0c3;
+}
+.split-section .section-heading > p:last-child {
+  color: #d6e2ee;
 }
 .split-section .button {
   margin-top: 18px;
@@ -945,6 +970,9 @@ a {
 }
 .inner-hero .hero-actions {
   justify-content: center;
+}
+.send-package-hero {
+  padding-bottom: 24px;
 }
 .compact-grid {
   grid-template-columns: repeat(5, 1fr);
@@ -1843,11 +1871,16 @@ footer {
   }
 }
 .trader-hero {
+  background: linear-gradient(120deg, #fff 55%, #e8faf5);
+}
+.trader-hero-inner {
   display: grid;
   grid-template-columns: 1.2fr 0.8fr;
   gap: 4rem;
-  padding: 7rem 5%;
-  background: linear-gradient(120deg, #fff 55%, #e8faf5);
+  width: 100%;
+  max-width: 1300px;
+  margin: 0 auto;
+  padding: 7rem 38px;
 }
 .trader-hero h1 {
   font-size: clamp(3rem, 6vw, 6rem);
@@ -2008,7 +2041,7 @@ footer {
   padding-bottom: 3rem;
 }
 @media (max-width: 760px) {
-  .trader-hero {
+  .trader-hero-inner {
     grid-template-columns: 1fr;
     padding: 4rem 1.25rem;
   }
@@ -2165,6 +2198,7 @@ body,
 }
 .pricing-preview {
   background: #fff;
+  padding-bottom: 24px;
 }
 .pricing-mini-grid {
   display: grid;
@@ -2217,9 +2251,12 @@ body,
 .pricing-card {
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 22px;
   padding: 28px;
+}
+.pricing-card > .button {
+  margin-top: auto;
 }
 .pricing-card--featured {
   border-color: #0fa979;
@@ -2233,7 +2270,7 @@ body,
 .pricing-card strong {
   display: block;
   color: #000;
-  font-size: 34px;
+  font-size: 42px;
   letter-spacing: -0.05em;
 }
 .pricing-card p,
@@ -2241,9 +2278,10 @@ body,
   display: block;
   margin: 4px 0;
   color: #000;
+  font-size: 15px;
 }
 .pricing-card b {
-  font-size: 13px;
+  font-size: 15px;
 }
 .pricing-card ul {
   display: grid;
@@ -2267,12 +2305,12 @@ body,
   max-width: 760px;
   margin: 28px auto 0;
   padding: 14px 18px;
-  border: 1px solid #f3db9a;
+  border: 1px solid #b9dfd1;
   border-radius: 14px;
-  color: #000;
-  background: #fff7dc;
+  color: #075f49;
+  background: #eef8f4;
   text-align: center;
-  font-size: 13px;
+  font-size: 15px;
   line-height: 1.6;
 }
 .footer-brand a {
@@ -2769,7 +2807,7 @@ body,
 .pricing-card-note {
   margin: 10px 0 0;
   color: #5f7083;
-  font-size: 12px;
+  font-size: 15px;
   line-height: 1.6;
 }
 .pricing-capabilities {
@@ -2779,10 +2817,11 @@ body,
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 16px;
-  margin-top: 48px;
+  align-items: start;
+  margin-top: 32px;
 }
 .pricing-capabilities-grid article {
-  padding: 26px 24px;
+  padding: 22px;
   border: 1px solid #dde9e5;
   border-radius: 18px;
   background: #fff;
@@ -2802,7 +2841,7 @@ body,
 }
 .pricing-capabilities-grid li {
   color: #647489;
-  font-size: 13px;
+  font-size: 15px;
   line-height: 1.5;
 }
 .pricing-capabilities-grid li:before {
@@ -2813,9 +2852,9 @@ body,
 }
 .pricing-capabilities-note {
   max-width: 820px;
-  margin: 26px auto 0;
+  margin: 18px auto 0;
   color: #5f7083;
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1.7;
   text-align: center;
 }
@@ -2824,7 +2863,7 @@ body,
   justify-items: center;
   gap: 14px;
   max-width: 760px;
-  margin: 48px auto 0;
+  margin: 32px auto 0;
   text-align: center;
 }
 .pricing-hierarchy .hierarchy-root {

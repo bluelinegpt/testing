@@ -398,6 +398,7 @@ function HomePage() {
       <TrackingHomepageSection />
       <ProofStrip />
       <CapabilitiesSection />
+      <HomeSeoSummary />
       <PricingPreview />
       <GrowthSection />
       <TraderSection />
@@ -407,6 +408,26 @@ function HomePage() {
       <HomeFaqSection />
       <FinalCta />
     </>
+  );
+}
+
+function HomeSeoSummary() {
+  const { locale } = useCms();
+  if (locale === "ar") return null;
+  return (
+    <section className="section home-seo-summary" aria-labelledby="home-uae-software-title">
+      <p className="eyebrow"><span />Built for UAE delivery operations</p>
+      <h2 id="home-uae-software-title">Delivery management software UAE teams can run every day.</h2>
+      <p>
+        Tawseelhub is a delivery management system Dubai and UAE delivery companies can use. It
+        combines courier management software UAE-wide operations need, last mile delivery software
+        UAE teams can coordinate, and COD reconciliation software in one connected platform.
+      </p>
+      <p>
+        Through the delivery driver management app UAE field teams receive assigned orders, status
+        updates, and the operational context they need while moving.
+      </p>
+    </section>
   );
 }
 
@@ -1258,15 +1279,17 @@ function InnerHero({
   title,
   copy,
   action,
+  className,
 }: {
   eyebrow: string;
   title: string;
   copy: string | string[];
   action?: React.ReactNode;
+  className?: string;
 }) {
   const lines = Array.isArray(copy) ? copy : [copy];
   return (
-    <section className="inner-hero">
+    <section className={`inner-hero${className ? ` ${className}` : ""}`}>
       <p className="eyebrow">
         <span />
         {eyebrow}
@@ -1317,7 +1340,12 @@ function SendPackagePage() {
           };
   return (
     <>
-      <InnerHero eyebrow={copy.eyebrow} title={copy.title} copy={copy.body} />
+      <InnerHero
+        eyebrow={copy.eyebrow}
+        title={copy.title}
+        copy={copy.body}
+        className="send-package-hero"
+      />
       <CustomerQuoteFlow />
       <section className="section simple-benefits">
         <SectionHeading
@@ -1755,12 +1783,12 @@ function FaqSection() {
             : "FAQ content is published only from the Tawseelhub Platform."
         }
       />
-      <div className="faq-list">
+      <div className="home-faq-list">
         {faqs.map((faq) => (
-          <article key={faq.faqKey}>
-            <h3>{faq.data.question}</h3>
+          <details key={faq.faqKey}>
+            <summary>{faq.data.question}</summary>
             <p>{faq.data.answer}</p>
-          </article>
+          </details>
         ))}
       </div>
     </section>
