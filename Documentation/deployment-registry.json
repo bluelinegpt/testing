@@ -19,7 +19,7 @@
       "displayName": "Main app",
       "path": "apps/web",
       "renderService": "bluelinegpt-web-test",
-      "status": "needs_deploy",
+      "status": "pushed_awaiting_confirmation",
       "localCommit": "11dab50",
       "localCommitDate": "2026-08-31",
       "lastChangeDescription": "fix(website): Arabic RTL layout, mobile language switch, mobile WhatsApp icon",
