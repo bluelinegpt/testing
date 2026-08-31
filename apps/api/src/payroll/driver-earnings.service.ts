@@ -1295,6 +1295,29 @@ export class DriverEarningsService {
         where f.company_id=${companyId}::uuid and f.employee_id=${employeeId}::uuid
           and f.counts_for_collection_earning
           and (${onlyUnallocated}::boolean=false or f.payroll_period_id is null)
+        union all
+        -- Collect-order earnings (per closed collect_order, stamped with a
+        -- rate snapshot at close). These are what the earning-period preview
+        -- counts, yet were invisible here -- the Daily Earning Availability
+        -- table showed 0 collected orders for a day the period preview
+        -- correctly priced. REPORT PATH ONLY: when onlyUnallocated=true this
+        -- list sizes the direct variable-earning payment, and these rows are
+        -- paid exclusively through their earning period -- including them
+        -- there would let the same earning be paid twice. Their payment
+        -- state lives on the period, so paymentStatus below reads 'unpaid'
+        -- until payroll consumes the period.
+        select x.id,'collection',
+          (x.closed_at at time zone coalesce(cs.timezone,'Asia/Dubai'))::date,
+          x.earned_amount,o.order_number,x.order_id,
+          o.order_number,o.reference_number,o.serial_number,o.order_date::text,
+          o.customer_name,t.name_en,x.rate_snapshot,
+          1::int,'[]'::jsonb,null::uuid
+        from employee_collect_order_earnings x
+        left join company_settings cs on cs.company_id=x.company_id
+        join orders o on o.id=x.order_id and o.company_id=x.company_id
+        left join traders t on t.id=o.trader_id and t.company_id=o.company_id
+        where ${onlyUnallocated}::boolean=false
+          and x.company_id=${companyId}::uuid and x.employee_id=${employeeId}::uuid
       ), paid as(
         select source_type,coalesce(employee_order_earning_id,employee_collection_fact_id) source_id,
           sum(allocated_amount) filter(where reversed_at is null) amount
