@@ -39,7 +39,10 @@ export interface AgentAvailability {
   readonly status: "available" | "unavailable";
 }
 
-const fallbackWhatsAppSettings: WhatsAppPublicSettings = {
+// Exported so the chat widget can render its WhatsApp CTA instantly from
+// this, keeping the settings request out of the page-load network chain --
+// the live settings are fetched on first user interaction instead.
+export const fallbackWhatsAppSettings: WhatsAppPublicSettings = {
   enabled: true,
   label: "Chat on WhatsApp",
   number: "971506898604",

@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   buildWhatsAppMessageUrl,
   createAgentConversation,
+  fallbackWhatsAppSettings,
   getAgentAvailability,
   getAgentConversation,
   getWhatsAppSettings,
@@ -75,7 +76,10 @@ export function AgentChat() {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [whatsapp, setWhatsapp] = useState<WhatsAppPublicSettings | null>(null);
+  // Starts from the built-in fallback so the WhatsApp CTA renders with zero
+  // network requests at page load; live settings replace it on the visitor's
+  // first interaction (see the effect below).
+  const [whatsapp, setWhatsapp] = useState<WhatsAppPublicSettings | null>(fallbackWhatsAppSettings);
   const [availability, setAvailability] = useState<AgentAvailability>({
     assistantAvailable: false,
     humanAvailable: false,
@@ -89,6 +93,7 @@ export function AgentChat() {
   const messagesRef = useRef<HTMLDivElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const widgetDataLoaderRef = useRef<(() => void) | null>(null);
   const isRtl = language === "ar";
   const launcherLabel = isRtl ? "اسأل Tawseelhub" : "Ask Tawseelhub";
   const humanAvailable = availability.humanAvailable;
@@ -121,21 +126,47 @@ export function AgentChat() {
 
   useEffect(() => {
     const id = window.setTimeout(() => setMounted(true), 700);
-    // Deferred past the LCP window (Lighthouse network-dependency finding):
-    // the whatsapp/settings and agent/availability requests were firing at
-    // hydration and sat in the critical loading chain, yet neither is
-    // needed until the launcher is visible and interactive.
-    const fetchId = window.setTimeout(() => {
-      void getWhatsAppSettings().then(setWhatsapp);
-      void getAgentAvailability().then(setAvailability);
-    }, 2500);
+    return () => window.clearTimeout(id);
+  }, []);
+
+  useEffect(() => {
+    // Zero widget requests during page load (Lighthouse network-dependency
+    // finding): the WhatsApp CTA renders from the built-in fallback, and the
+    // live settings + availability load on the visitor's FIRST interaction
+    // (scroll/pointer/key/touch -- every real visitor produces one within
+    // moments, lab page-load traces never do). Opening the chat also
+    // triggers it, so the panel always shows live availability.
+    let cancelled = false;
+    let loaded = false;
+    const loadWidgetData = () => {
+      if (loaded || cancelled) return;
+      loaded = true;
+      remove();
+      void getWhatsAppSettings().then((next) => {
+        if (!cancelled) setWhatsapp(next);
+      });
+      void getAgentAvailability().then((next) => {
+        if (!cancelled) setAvailability(next);
+      });
+    };
+    const events = ["pointerdown", "keydown", "scroll", "touchstart"] as const;
+    const remove = () =>
+      events.forEach((name) => window.removeEventListener(name, loadWidgetData));
+    events.forEach((name) =>
+      window.addEventListener(name, loadWidgetData, { once: true, passive: true }),
+    );
+    widgetDataLoaderRef.current = loadWidgetData;
     return () => {
-      window.clearTimeout(id);
-      window.clearTimeout(fetchId);
+      cancelled = true;
+      remove();
+      widgetDataLoaderRef.current = null;
     };
   }, []);
 
   useEffect(() => {
+    // Availability polling only while the panel is open -- a closed widget
+    // has no reason to keep hitting the API every 30 seconds.
+    if (!open) return;
     let cancelled = false;
     const refreshAvailability = async () => {
       const nextAvailability = await getAgentAvailability();
@@ -146,7 +177,7 @@ export function AgentChat() {
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, []);
+  }, [open]);
 
   useEffect(() => {
     const syncLanguage = () => setLanguage(getStoredPublicLocale());
@@ -251,6 +282,7 @@ export function AgentChat() {
 
   async function openChat() {
     setOpen(true);
+    widgetDataLoaderRef.current?.();
     trackEvent("agent_opened", { channel: "website", language, page: window.location.pathname });
     try {
       setBusy(true);
