@@ -525,7 +525,8 @@ a {
 .assistant-preview p {
   margin: 5px 0 0;
   color: #657488;
-  font-size: 12px;
+  font-size: 15px;
+  line-height: 1.5;
 }
 .assistant-preview b {
   color: #30465e;
@@ -563,7 +564,7 @@ a {
 .section {
   max-width: 1300px;
   margin: 0 auto;
-  padding: 112px 38px;
+  padding: 72px 38px;
 }
 .section-heading {
   max-width: 720px;
@@ -667,7 +668,13 @@ a {
   border-radius: 30px;
   background: #10243e;
 }
-.split-section h2,
+/* `.split-section .section-heading h2` (not just `.split-section h2`) so this
+   beats the sitewide `.section-heading h2 { color: #000 }` accessibility rule
+   further down this file on specificity, not source order -- that rule is
+   correct for the light-background sections that also use `.section-heading`,
+   but this heading sits on the dark navy `.split-section` background and was
+   rendering unreadable black-on-navy without the extra specificity here. */
+.split-section .section-heading h2,
 .package-banner h2,
 .final-cta h2 {
   color: #fff;
@@ -1275,7 +1282,7 @@ footer {
     padding: 0 20px 70px;
   }
   .section {
-    padding: 78px 20px;
+    padding: 52px 20px;
   }
   .section-heading h2,
   .split-section h2,
