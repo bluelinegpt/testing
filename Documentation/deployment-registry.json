@@ -20,9 +20,9 @@
       "path": "apps/web",
       "renderService": "bluelinegpt-web-test",
       "status": "pushed_awaiting_confirmation",
-      "localCommit": "3bbcb13",
+      "localCommit": "09ad2db",
       "localCommitDate": "2026-08-31",
-      "lastChangeDescription": "feat(payroll): same-day incremental Driver Earning calculations",
+      "lastChangeDescription": "fix(payroll): stop forcing dates forward and select the just-confirmed period",
       "lastChangeBy": "claude",
       "confirmedLiveCommit": "11dab50",
       "confirmedLiveAt": "2026-08-31"
