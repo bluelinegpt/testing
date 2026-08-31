@@ -1,7 +1,7 @@
 .site-template--has-banner .site-template__hero {
   /* Shared by every Company Website template. Keep the banner prominent
      without letting it consume the full first viewport on wide screens. */
-  height: clamp(240px, 28vw, 420px);
+  height: clamp(200px, 18vw, 300px);
   background-color: var(--site-secondary, #edf5f8);
   display: block;
   min-height: 0;
@@ -19,6 +19,7 @@
 .site-template__banner > img {
   display: block;
   object-fit: cover;
+  object-position: center;
 }
 
 .site-template__banner--fade > img {
@@ -109,7 +110,7 @@
 
 @media (max-width: 680px) {
   .site-template--has-banner .site-template__hero {
-    height: clamp(180px, 48vw, 280px);
+    height: clamp(150px, 38vw, 220px);
   }
   .site-template__banner > img {
     object-fit: cover;
