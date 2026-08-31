@@ -19,7 +19,7 @@
       "displayName": "Main app",
       "path": "apps/web",
       "renderService": "bluelinegpt-web-test",
-      "status": "needs_deploy",
+      "status": "pushed_awaiting_confirmation",
       "localCommit": "899fd06",
       "localCommitDate": "2026-08-31",
       "lastChangeDescription": "Reduces homepage banner height across all Company Websites on desktop and mobile.",
