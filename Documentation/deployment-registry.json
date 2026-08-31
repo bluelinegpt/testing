@@ -7,9 +7,9 @@
       "path": "apps/api",
       "renderService": "bluelinegpt-api-test",
       "status": "pushed_awaiting_confirmation",
-      "localCommit": "e68962b",
+      "localCommit": "9874521",
       "localCommitDate": "2026-08-31",
-      "lastChangeDescription": "feat(agent): train Yousef on all 15 published homepage FAQs",
+      "lastChangeDescription": "fix: apply product-owner FAQ correction and standard copyright line",
       "lastChangeBy": "claude",
       "confirmedLiveCommit": "aee8bb0",
       "confirmedLiveAt": "2026-08-31"
