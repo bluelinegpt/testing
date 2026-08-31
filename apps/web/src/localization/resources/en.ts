@@ -3684,7 +3684,7 @@ export const englishTranslations = {
   traderSettlements: {
     originatingOrderIneligible: "This Order is no longer eligible for Trader settlement.",
     receiptAmbiguous:
-      "This Order is linked to more than one settlement awaiting receipt confirmation. Select the settlement to confirm.",
+      "This Order is linked to more than one settlement awaiting receipt confirmation. The list below is filtered to them — press \"Confirm Money Received by Trader\" on each row.",
     receiptUnavailable:
       "That settlement is no longer available for receipt confirmation. Select a settlement from the list.",
     receiptAlreadyConfirmed: "Receipt for that settlement has already been confirmed.",

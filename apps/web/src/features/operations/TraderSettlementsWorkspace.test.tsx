@@ -759,9 +759,23 @@ describe("confirm_receipt deep link", () => {
   it("refuses to guess when the backend reported an ambiguous target", async () => {
     // No settlementId: the backend found several confirmable settlements.
     visit("?traderId=trader-1&openDialog=confirm_receipt");
-    setup();
+    const { api } = setup();
     expect(await screen.findByText(/more than one settlement awaiting/i)).toBeInTheDocument();
     expect(screen.queryByRole("dialog")).toBeNull();
+    // The list narrows to the settlements still awaiting receipt, so the rows
+    // on screen ARE the choices the notice talks about. (The Trader filter
+    // rides in from the real URL, which this MemoryRouter test cannot see.)
+    await waitFor(() =>
+      expect(
+        api.get.mock.calls.some((call: unknown[]) => {
+          const path = String(call[0]);
+          return (
+            path.startsWith("operations/settlements/payments/list") &&
+            path.includes("moneyReceivedStatus=not_received")
+          );
+        }),
+      ).toBe(true),
+    );
   });
 
   it("does not open a dialog for a settlement this Company cannot see", async () => {

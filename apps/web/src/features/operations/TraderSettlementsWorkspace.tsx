@@ -402,6 +402,18 @@ export function TraderSettlementsWorkspace({
   const [statementOpen, setStatementOpen] = useState(initialStatementOpen);
   const [statementTraderId, setStatementTraderId] = useState(presetTraderId);
 
+  // One write, not one per key: switching Date Mode changes several filters
+  // together, and separate writes would each start from stale state. The hook
+  // resets the page to 1 itself. Declared before the receipt deep-link effect
+  // below, which narrows the list when the target is ambiguous.
+  const applyFilter = (change: Partial<Filters>) => {
+    const patch: Record<string, string> = {};
+    for (const [key, value] of Object.entries(change)) {
+      patch[key] = typeof value === "boolean" ? (value ? "true" : "") : (value ?? "");
+    }
+    list.setFilters(patch);
+  };
+
   useEffect(() => {
     const link = deepLink.link;
     if (link === null || link.dialog !== "confirm_receipt") return;
@@ -411,9 +423,13 @@ export function TraderSettlementsWorkspace({
 
     /* Ambiguous: the backend found more than one confirmable settlement and
        deliberately emitted no id. Guessing one would confirm receipt of a
-       payment the user never chose. */
+       payment the user never chose. Instead the list is narrowed to the
+       settlements still awaiting receipt (the Trader filter is already
+       applied from the URL), so the rows on screen ARE the choices and each
+       carries its own Confirm Money Received button. */
     if (link.settlementId === null) {
       resolvedReceiptLink.current = link;
+      applyFilter({ moneyReceivedStatus: "not_received" });
       setReceiptNotice(t("traderSettlements.receiptAmbiguous"));
       return;
     }
@@ -471,16 +487,6 @@ export function TraderSettlementsWorkspace({
   const [pdfError, setPdfError] = useState<string>();
   const [pdfBusyId, setPdfBusyId] = useState<string>();
 
-  // One write, not one per key: switching Date Mode changes several filters
-  // together, and separate writes would each start from stale state. The hook
-  // resets the page to 1 itself.
-  const applyFilter = (change: Partial<Filters>) => {
-    const patch: Record<string, string> = {};
-    for (const [key, value] of Object.entries(change)) {
-      patch[key] = typeof value === "boolean" ? (value ? "true" : "") : (value ?? "");
-    }
-    list.setFilters(patch);
-  };
   const clearFilters = () => list.clearFilters();
 
   const refresh = useCallback(() => {
@@ -597,6 +603,14 @@ export function TraderSettlementsWorkspace({
       {pdfError === undefined ? null : (
         <div className="alert alert-error" role="alert">
           {pdfError}
+        </div>
+      )}
+      {/* First thing on the page when a receipt deep link could not open a
+          dialog: the user just clicked "Confirm receipt" on an Order and must
+          immediately see why nothing opened and what to do instead. */}
+      {receiptNotice === undefined ? null : (
+        <div className="alert alert-info" role="status">
+          {receiptNotice}
         </div>
       )}
 
@@ -815,12 +829,6 @@ export function TraderSettlementsWorkspace({
           reportLanguage={reportLanguage}
           settlementId={detailId}
         />
-      )}
-
-      {receiptNotice === undefined ? null : (
-        <div className="alert alert-info" role="status">
-          {receiptNotice}
-        </div>
       )}
 
       {receiptTarget === undefined ? null : (
