@@ -352,3 +352,17 @@
     width: 100vw;
   }
 }
+
+/* Per the SEO/UX report: the WhatsApp contact floats on its own at the
+   bottom-LEFT, separated from the assistant launcher (bottom-right).
+   Mirrored under RTL. position: fixed pulls it out of the launcher's flex
+   group without restructuring the markup. */
+.agent-chat__floating-whatsapp {
+  bottom: 18px;
+  left: 18px;
+  position: fixed;
+}
+.agent-chat--rtl .agent-chat__floating-whatsapp {
+  left: auto;
+  right: 18px;
+}

@@ -300,9 +300,10 @@ function AppLayout() {
         </main>
         <Footer />
         <AgentChat />
-        <div className="version-badge" aria-label={`Build ${__APP_VERSION__}`}>
-          v{__APP_VERSION__}
-        </div>
+        {/* No visible version badge on the public marketing site (removed on
+            product-owner instruction; the CLAUDE.md badge requirement covers
+            apps/web and apps/platform-web, not this app). The build version
+            still reaches crash reports via error-reporting.ts. */}
       </div>
     </CmsContext.Provider>
   );
