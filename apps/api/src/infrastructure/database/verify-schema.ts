@@ -103,6 +103,10 @@ const expectedTables = [
   "trader_settlements",
   "traders",
   "vehicles",
+  "company_whatsapp_connections",
+  "trader_whatsapp_settings",
+  "whatsapp_message_outbox",
+  "whatsapp_message_attempts",
 ] as const;
 
 const expectedTriggers = [
@@ -239,6 +243,7 @@ const expectedTriggers = [
   "roles_no_delete",
   "accounts_login_identifier_normalizer",
   "accounts_company_user_identifier_sync",
+  "whatsapp_message_outbox_update_guard",
 ] as const;
 
 const expectedFunctions = [
@@ -325,6 +330,7 @@ const expectedFunctions = [
   "normalize_account_login_identifiers",
   "sync_account_login_identifiers_to_company_user",
   "enforce_single_active_reconciliation_link",
+  "reject_whatsapp_outbox_unsafe_update",
 ] as const;
 
 const expectedConstraints = [

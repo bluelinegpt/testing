@@ -33,6 +33,7 @@ import { StoreOrderModule } from "./store-order/store-order.module.js";
 import { StoreOrderConversionModule } from "./store-order-conversion/store-order-conversion.module.js";
 import { SupportModule } from "./support/support.module.js";
 import { UserAdministrationModule } from "./users/user-administration.module.js";
+import { WhatsAppModule } from "./whatsapp/whatsapp.module.js";
 
 @Module({
   imports: [
@@ -76,6 +77,7 @@ import { UserAdministrationModule } from "./users/user-administration.module.js"
     MarketplaceModule,
     SupportModule,
     UserAdministrationModule,
+    WhatsAppModule,
     HealthModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],

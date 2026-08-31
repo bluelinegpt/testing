@@ -287,6 +287,10 @@ export interface DatabaseSchema {
   role_permissions: UntypedTable;
   roles: RoleTable;
   saas_usage_events: UntypedTable;
+  company_whatsapp_connections: UntypedTable;
+  trader_whatsapp_settings: UntypedTable;
+  whatsapp_message_outbox: UntypedTable;
+  whatsapp_message_attempts: UntypedTable;
   shipment_prefix_reservations: ShipmentPrefixReservationTable;
   support_cases: UntypedTable;
   third_party_delivery_companies: UntypedTable;

@@ -99,6 +99,19 @@ export const PURGE_TABLES = new Set([
   // Push notifications (Prompt 15)
   "notification_outbox_events",
   "device_registrations",
+  // WhatsApp Trader-group notifications (Prompt 1 foundation, 2026-08-31).
+  // All four are directly Company-scoped operational records: the Company's
+  // own connection row (including its encrypted session state — credential
+  // material that must never outlive the Company), per-Trader group mappings
+  // referencing Traders removed by this same reset, and the message
+  // outbox/attempt audit referencing Orders and order_status_history rows
+  // also purged here. Attempts must go before the outbox (FK restrict), the
+  // outbox before settings/connection/orders — the FK-derived ordering
+  // handles that.
+  "whatsapp_message_attempts",
+  "whatsapp_message_outbox",
+  "trader_whatsapp_settings",
+  "company_whatsapp_connections",
   "idempotency_records",
   "messages",
   "realtime_event_log",

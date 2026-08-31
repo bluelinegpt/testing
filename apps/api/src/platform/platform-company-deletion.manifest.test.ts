@@ -81,7 +81,13 @@ describe("permanent Company deletion manifest", () => {
     // the separate global prefix reservation remains permanently preserved.
     // 154 -> 156: Platform fee receivables and payments both carry required
     // Company ownership and are ordered safely through their foreign keys.
-    expect(COMPANY_DELETION_DIRECT_TABLES.size).toBe(156);
+    // 156 -> 160: the 2026-08-31 review classified the four WhatsApp
+    // Trader-group foundation tables (`company_whatsapp_connections`,
+    // `trader_whatsapp_settings`, `whatsapp_message_outbox`,
+    // `whatsapp_message_attempts`) — all direct `company_id restrict`, FK DAG
+    // with no cycles, no DELETE-firing triggers; see the comment block in
+    // `platform-company-deletion.manifest.ts`.
+    expect(COMPANY_DELETION_DIRECT_TABLES.size).toBe(160);
     expect(COMPANY_DELETION_MANIFEST_HASH).toMatch(/^[a-f0-9]{64}$/);
   });
 

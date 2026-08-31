@@ -79,6 +79,15 @@ export interface AppConfiguration {
     phoneNumberId: string | undefined;
     verifyToken: string | undefined;
     graphApiBaseUrl: string;
+    /**
+     * Base64 of exactly 32 random bytes, used by `WhatsAppSessionCipher`
+     * (AES-256-GCM) to encrypt per-Company WhatsApp provider session state
+     * at rest. Lives only in the environment — never in the database, never
+     * committed. Optional until the real provider ships (Prompt 2): absent
+     * means session encryption is "not configured" and encryption refuses to
+     * run, rather than falling back to plaintext.
+     */
+    sessionEncryptionKey: string | undefined;
   };
   tenancy: {
     /**
@@ -185,6 +194,18 @@ function parseLogLevel(value: string | undefined): string {
 }
 
 const subdomainPattern = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+
+/** Validated at startup so a malformed key fails loudly at boot, not at the
+ *  first encryption attempt deep inside a connection flow. */
+function parseWhatsAppSessionEncryptionKey(value: string | undefined): string | undefined {
+  const encoded = value?.trim();
+  if (encoded === undefined || encoded.length === 0) return undefined;
+  const decoded = Buffer.from(encoded, "base64");
+  if (decoded.length !== 32) {
+    throw new Error("WHATSAPP_SESSION_ENCRYPTION_KEY must be base64 of exactly 32 bytes");
+  }
+  return encoded;
+}
 
 function parseOptionalHostSuffix(value: string | undefined): string | undefined {
   const suffix = value?.trim().toLowerCase().replace(/^\.+/, "");
@@ -405,6 +426,9 @@ export function configuration(): AppConfiguration {
       verifyToken: process.env.WHATSAPP_VERIFY_TOKEN?.trim() || undefined,
       graphApiBaseUrl:
         process.env.WHATSAPP_GRAPH_API_BASE_URL?.trim() || "https://graph.facebook.com/v20.0",
+      sessionEncryptionKey: parseWhatsAppSessionEncryptionKey(
+        process.env.WHATSAPP_SESSION_ENCRYPTION_KEY,
+      ),
     },
   };
 }

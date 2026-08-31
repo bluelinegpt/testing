@@ -155,6 +155,24 @@ const NEW_DIRECT_TABLES = [
   "platform_fee_receivables",
 ] as const;
 
+// 2026-08-31 review: WhatsApp Trader-group foundation
+// (`20260956000000_whatsapp_trader_group_foundation`) added four
+// Company-scoped tables — `company_whatsapp_connections`,
+// `trader_whatsapp_settings`, `whatsapp_message_outbox`,
+// `whatsapp_message_attempts` — all registered in
+// `reset-company-test-data.manifest.ts`'s `PURGE_TABLES`, so they flow into
+// `COMPANY_DELETION_DIRECT_TABLES` via the spread below. All four carry a
+// literal `company_id uuid not null references companies(id) on delete
+// restrict`; every other FK among them is composite `(x_id, company_id)` and
+// `on delete restrict`, forming a strict DAG (attempts -> outbox ->
+// {connection, settings' Trader, orders, order_status_history}) that the
+// generic FK-derived `dependencyOrder()` sorts correctly with no cycle
+// breaks. One BEFORE UPDATE trigger only
+// (`whatsapp_message_outbox_update_guard`) — it never fires on DELETE, so no
+// `COMPANY_DELETION_APPROVED_GUARDS` entry is needed. This comment is the
+// reviewed acknowledgment the pinned count test forces; bumped 156 -> 160 in
+// `platform-company-deletion.manifest.test.ts`.
+//
 // Prompt 15 (push notifications) added two new Company-scoped tables —
 // `device_registrations` and `notification_outbox_events` — both already
 // registered in `reset-company-test-data.manifest.ts`'s `PURGE_TABLES` (they
