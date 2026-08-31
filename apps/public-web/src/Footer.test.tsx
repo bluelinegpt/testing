@@ -20,9 +20,12 @@ describe('site footer legal links', () => {
     expect(screen.getByRole('link', { name: 'Terms of Service' })).toHaveAttribute('href', '/terms');
   });
 
-  it('keeps Guides and FAQs pointed at the existing Help Center rather than a duplicate route', () => {
+  it('points Guides at the Help Center and FAQs at the dedicated FAQ page', () => {
+    // FAQs used to fall back to /resources; per the approved SEO plan a
+    // real /faq page now exists (with FAQPage structured data), so the
+    // footer links straight to it.
     render(<MemoryRouter><Footer /></MemoryRouter>);
     expect(screen.getByRole('link', { name: 'Guides' })).toHaveAttribute('href', '/resources');
-    expect(screen.getByRole('link', { name: 'FAQs' })).toHaveAttribute('href', '/resources');
+    expect(screen.getByRole('link', { name: 'FAQs' })).toHaveAttribute('href', '/faq');
   });
 });

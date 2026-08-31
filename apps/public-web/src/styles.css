@@ -2877,3 +2877,58 @@ body,
     align-items: center;
   }
 }
+
+/* Readability pass (SEO report): body copy, menu and form text across the
+   inner pages (Pricing, Request Demo, Integrations, Send a Package,
+   Traders) measured 12-14px -- raised site-wide so no reading text sits
+   below ~15px. Kept as one late block so the individual component rules
+   above stay untouched and easy to trace. */
+.desktop-nav {
+  font-size: 15px;
+}
+.language {
+  font-size: 14px;
+}
+.button {
+  font-size: 15px;
+}
+.hero-lede,
+.section-heading > p:last-child,
+.inner-hero > p,
+.capability-grid p,
+.scenario-grid p,
+.integration-grid p,
+.article-grid p,
+.contact-panels p,
+.how-grid p,
+.dc-points li,
+.dc-group-grid p,
+.dc-group-grid li,
+.quote-heading p,
+.form-section-title p,
+.faq-list p,
+.home-faq-list details > p,
+.demo-success > p:not(.eyebrow),
+.dc-hero > div > p:not(.eyebrow),
+.trader-hero > div > p:not(.eyebrow),
+.growth-list p,
+.pricing-card li {
+  font-size: 16.5px;
+  line-height: 1.7;
+}
+.quote-form label,
+.demo-form-section label,
+.registration-shell label {
+  font-size: 15px;
+}
+.footer-group a,
+.footer-brand p {
+  font-size: 15px;
+}
+@media (max-width: 760px) {
+  .hero-lede,
+  .section-heading > p:last-child,
+  .inner-hero > p {
+    font-size: 15.5px;
+  }
+}

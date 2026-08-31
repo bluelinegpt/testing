@@ -17,6 +17,7 @@ describe("public website route foundation", () => {
       "/blog",
       "/pricing",
       "/about",
+      "/faq",
       "/contact",
       "/privacy",
       "/terms",

@@ -289,6 +289,7 @@ function AppLayout() {
             <Route path="/blog" element={<BlogListingPage />} />
             <Route path="/blog/category/:categorySlug" element={<BlogListingPage />} />
             <Route path="/blog/:slug" element={<BlogArticlePage />} />
+            <Route path="/faq" element={<FaqPage />} />
             <Route path="/about" element={<AboutPage />} />
             <Route path="/contact" element={<ContactPage />} />
             <Route path="/privacy" element={<PrivacyPolicyPage />} />
@@ -1761,6 +1762,39 @@ function FaqSection() {
     </section>
   );
 }
+function FaqPage() {
+  const { locale } = useCms();
+  const isAr = locale === "ar";
+  return (
+    <>
+      <InnerHero
+        eyebrow={isAr ? "الأسئلة الشائعة" : "FAQs"}
+        title={isAr ? "أسئلة شائعة عن Tawseelhub" : "Frequently Asked Questions"}
+        copy={
+          isAr
+            ? "كل ما تحتاج معرفته عن برنامج إدارة التوصيل في الإمارات — من إدارة السائقين ومطابقة الدفع عند الاستلام إلى تسويات التجار والرواتب."
+            : "Everything you need to know about Tawseelhub — delivery management software for the UAE, from courier management and COD reconciliation to trader settlements, driver payroll and pricing."
+        }
+        action={
+          <Link className="button button-primary" to="/request-demo">
+            {publicUi[locale].requestDemo}
+          </Link>
+        }
+      />
+      <section className="section">
+        <div className="home-faq-list">
+          {homeFaqs.map((faq) => (
+            <details key={faq.q.en}>
+              <summary>{faq.q[locale]}</summary>
+              <p>{faq.a[locale]}</p>
+            </details>
+          ))}
+        </div>
+      </section>
+      <FinalCta />
+    </>
+  );
+}
 function AboutPage() {
   const { locale } = useCms();
   const isAr = locale === "ar";
@@ -1896,6 +1930,20 @@ function ContactPage() {
       </section>
       <ContactForm />
       <section className="section contact-location">
+        <h2>{locale === "ar" ? "موقعنا" : "Our location"}</h2>
+        <p>
+          {locale === "ar"
+            ? "محل رقم 9، فريج أفينيو، الحميدية، عجمان، الإمارات العربية المتحدة"
+            : "Shop No. 9, Freej Avenue, Al Hamidiya, Ajman, United Arab Emirates"}
+        </p>
+        <a
+          className="button button-secondary"
+          href="https://www.google.com/maps/search/?api=1&query=Freej+Avenue+Al+Hamidiya+Ajman+UAE"
+          rel="noreferrer"
+          target="_blank"
+        >
+          {locale === "ar" ? "افتح في خرائط جوجل" : "Open in Google Maps"}
+        </a>
         <p>
           {locale === "ar"
             ? "نخدم حالياً شركات وتجار وعمليات التوصيل داخل الإمارات العربية المتحدة."
@@ -2178,7 +2226,7 @@ export function Footer() {
             [
               ["المدونة", "/blog"],
               ["الأدلة", "/resources"],
-              ["الأسئلة الشائعة", "/resources"],
+              ["الأسئلة الشائعة", "/faq"],
             ],
           ],
           [
@@ -2221,7 +2269,7 @@ export function Footer() {
             [
               ["Blog", "/blog"],
               ["Guides", "/resources"],
-              ["FAQs", "/resources"],
+              ["FAQs", "/faq"],
             ],
           ],
           [

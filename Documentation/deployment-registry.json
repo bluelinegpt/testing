@@ -6,10 +6,10 @@
       "displayName": "API",
       "path": "apps/api",
       "renderService": "bluelinegpt-api-test",
-      "status": "confirmed_live",
-      "localCommit": "aee8bb0",
+      "status": "pushed_awaiting_confirmation",
+      "localCommit": "e68962b",
       "localCommitDate": "2026-08-31",
-      "lastChangeDescription": "feat(website): Company-configurable banner size in Website settings",
+      "lastChangeDescription": "feat(agent): train Yousef on all 15 published homepage FAQs",
       "lastChangeBy": "claude",
       "confirmedLiveCommit": "aee8bb0",
       "confirmedLiveAt": "2026-08-31"

@@ -86,6 +86,11 @@ export const routeMetadata: Record<
       description:
         "Learn why Tawseelhub is building a connected delivery operating system for delivery businesses in the UAE.",
     },
+    "/faq": {
+      title: "Frequently Asked Questions | Tawseelhub",
+      description:
+        "Answers about Tawseelhub delivery management software for the UAE — COD reconciliation, driver management, trader settlements, accounting, payroll and pricing.",
+    },
     "/contact": {
       title: "Contact Tawseelhub",
       description:
@@ -158,6 +163,11 @@ export const routeMetadata: Record<
       title: "عن Tawseelhub",
       description:
         "تعرف على سبب بناء Tawseelhub لنظام تشغيل توصيل مترابط لشركات التوصيل في الإمارات.",
+    },
+    "/faq": {
+      title: "الأسئلة الشائعة | Tawseelhub",
+      description:
+        "إجابات عن برنامج إدارة التوصيل من Tawseelhub في الإمارات — مطابقة الدفع عند الاستلام، إدارة السائقين، تسويات التجار، المحاسبة والرواتب والأسعار.",
     },
     "/contact": {
       title: "تواصل مع Tawseelhub",
