@@ -6,39 +6,39 @@
       "displayName": "API",
       "path": "apps/api",
       "renderService": "bluelinegpt-api-test",
-      "status": "pushed_awaiting_confirmation",
+      "status": "confirmed_live",
       "localCommit": "aee8bb0",
       "localCommitDate": "2026-08-31",
       "lastChangeDescription": "feat(website): Company-configurable banner size in Website settings",
       "lastChangeBy": "claude",
-      "confirmedLiveCommit": "2db5a27",
-      "confirmedLiveAt": "2026-08-28"
+      "confirmedLiveCommit": "aee8bb0",
+      "confirmedLiveAt": "2026-08-31"
     },
     {
       "id": "web",
       "displayName": "Main app",
       "path": "apps/web",
       "renderService": "bluelinegpt-web-test",
-      "status": "pushed_awaiting_confirmation",
+      "status": "confirmed_live",
       "localCommit": "11dab50",
       "localCommitDate": "2026-08-31",
       "lastChangeDescription": "fix(website): Arabic RTL layout, mobile language switch, mobile WhatsApp icon",
       "lastChangeBy": "claude",
-      "confirmedLiveCommit": "0abeb24",
-      "confirmedLiveAt": "2026-08-28"
+      "confirmedLiveCommit": "11dab50",
+      "confirmedLiveAt": "2026-08-31"
     },
     {
       "id": "platform-web",
       "displayName": "Platform admin",
       "path": "apps/platform-web",
       "renderService": "bluelinegpt-platform-test",
-      "status": "pushed_awaiting_confirmation",
+      "status": "confirmed_live",
       "localCommit": "aee8bb0",
       "localCommitDate": "2026-08-31",
       "lastChangeDescription": "feat(website): Company-configurable banner size in Website settings",
       "lastChangeBy": "claude",
-      "confirmedLiveCommit": "19b9e85",
-      "confirmedLiveAt": "2026-08-27"
+      "confirmedLiveCommit": "aee8bb0",
+      "confirmedLiveAt": "2026-08-31"
     },
     {
       "id": "store",
