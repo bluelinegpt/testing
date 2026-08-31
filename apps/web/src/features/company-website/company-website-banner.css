@@ -15,15 +15,19 @@
      fights its aspect ratio -- either cropping into it (`cover`) or, once
      the frame is taller than the image's own proportions call for
      (`contain`), leaving empty gutters down the sides instead of filling
-     the same width as the rest of the page's content (e.g. the Real-Time
-     Tracking card below it). Letting height be intrinsic to a full-width
-     image fills that width exactly, whatever the image's own proportions
-     are. `max-height` remains only as a safety net against an unusually
-     tall upload. */
+     the same width as the rest of the page's content. Per acceptance
+     feedback the banner must line up with the Real-Time Tracking card
+     below it, so the frame uses the exact same centered column as
+     `.company-site-functions` (max-width 1180px + the same inline
+     padding), and height simply follows the image's own aspect ratio --
+     no height cap at all, because any cap re-introduces the side gutters
+     via `contain` the moment the image is proportionally taller than it. */
   height: auto !important;
-  max-height: clamp(300px, 26vw, 440px) !important;
   min-height: 0 !important;
-  padding: 0 !important;
+  /* Inline padding mirrors the WINNING `.company-site-functions` rule
+     (the later one in styles.css: fixed 1rem inline), so the banner
+     column below lines up with the tracking card to the pixel. */
+  padding: clamp(1rem, 2vw, 2rem) 1rem !important;
   background-color: var(--site-secondary, #edf5f8);
   display: block;
   position: relative;
@@ -31,19 +35,17 @@
 }
 
 .site-template__banner {
+  margin: 0 auto;
+  max-width: calc(1180px - 2rem);
+  position: relative;
   width: 100%;
 }
 
 .site-template__banner > img {
+  border-radius: 18px;
   display: block;
-  width: 100%;
   height: auto;
-  /* Safety net matching the frame's own cap: if an unusually tall image
-     would otherwise exceed it, crop rather than distort. Ordinary wide
-     banners never hit this. */
-  max-height: clamp(300px, 26vw, 440px);
-  object-fit: contain;
-  object-position: center;
+  width: 100%;
 }
 
 .site-template__banner--fade > img {
@@ -134,10 +136,9 @@
 
 @media (max-width: 680px) {
   .site-template--has-banner .site-template__hero {
-    max-height: clamp(240px, 76vw, 400px) !important;
+    padding: 0.75rem 1rem !important;
   }
   .site-template__banner > img {
-    max-height: clamp(240px, 76vw, 400px);
-    object-fit: contain;
+    border-radius: 12px;
   }
 }
