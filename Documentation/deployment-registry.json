@@ -19,10 +19,10 @@
       "displayName": "Main app",
       "path": "apps/web",
       "renderService": "bluelinegpt-web-test",
-      "status": "pushed_awaiting_confirmation",
-      "localCommit": "f335c8e",
+      "status": "needs_deploy",
+      "localCommit": "647adfb",
       "localCommitDate": "2026-08-31",
-      "lastChangeDescription": "fix(website): drive Company Website banner sizing from width, not a fixed height",
+      "lastChangeDescription": "fix(website): align Company Website banner column with the tracking card, height from image ratio",
       "lastChangeBy": "claude",
       "confirmedLiveCommit": "0abeb24",
       "confirmedLiveAt": "2026-08-28"
