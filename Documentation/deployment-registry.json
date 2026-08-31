@@ -19,7 +19,7 @@
       "displayName": "Main app",
       "path": "apps/web",
       "renderService": "bluelinegpt-web-test",
-      "status": "needs_deploy",
+      "status": "pushed_awaiting_confirmation",
       "localCommit": "ede722f",
       "localCommitDate": "2026-08-31",
       "lastChangeDescription": "fix(website): double Company Website banner height per acceptance feedback",
