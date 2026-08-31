@@ -7,9 +7,9 @@
       "path": "apps/api",
       "renderService": "bluelinegpt-api-test",
       "status": "pushed_awaiting_confirmation",
-      "localCommit": "d6362d7",
+      "localCommit": "ba60554",
       "localCommitDate": "2026-08-31",
-      "lastChangeDescription": "fix(payroll): show collect-order earnings in the driver earnings summary",
+      "lastChangeDescription": "fix(operations): accrue employee delivery earnings on web-portal status changes",
       "lastChangeBy": "claude",
       "confirmedLiveCommit": "aee8bb0",
       "confirmedLiveAt": "2026-08-31"
