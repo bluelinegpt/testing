@@ -19,7 +19,7 @@
       "displayName": "Main app",
       "path": "apps/web",
       "renderService": "bluelinegpt-web-test",
-      "status": "needs_deploy",
+      "status": "pushed_awaiting_confirmation",
       "localCommit": "f335c8e",
       "localCommitDate": "2026-08-31",
       "lastChangeDescription": "fix(website): drive Company Website banner sizing from width, not a fixed height",
