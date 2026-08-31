@@ -311,7 +311,8 @@ describe("AgentService quote workflow helpers", () => {
 
     expect(response?.content).toContain("https://tawseelhub.com/pricing");
     expect(response?.content).toContain("Tawseelhub");
-    expect(response?.content).toContain("أسعار استخدام نظام");
+    // Aligned with the published FAQ cost answer: free up to 100 orders/month.
+    expect(response?.content).toContain("مجاناً حتى 100 طلب");
     expect(response?.content).not.toContain("توصيلهَب");
     expect(response?.content).not.toContain("رقم الاتصال");
     expect(response?.content).not.toContain("شحنة");

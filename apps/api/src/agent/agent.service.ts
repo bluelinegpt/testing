@@ -29,6 +29,7 @@ import type {
   AgentSlots,
   AgentState,
 } from "./agent.types.js";
+import { agentFaqAnswer } from "./agent-faq.js";
 import { AgentModelRouterProvider } from "./agent-model-router.provider.js";
 import { agentIntentFromWorkflow, decideNextFrame, stateWithFrame } from "./conversation-frame.js";
 import {
@@ -474,10 +475,12 @@ function featureExplanationText(text: string, language: AgentLanguage): string {
     ? "هذه ميزة داخل نظام Tawseelhub لإدارة عمليات التوصيل. أشرحها لك بدون بدء أي طلب. أي جزء تريد تفاصيل أكثر عنه؟"
     : "This is a Tawseelhub delivery operations feature. I can explain it without starting any request. Which part would you like more detail on?";
 }
+// Aligned with the published homepage FAQ answer (agent-faq.ts "cost") so
+// pricing questions get the same approved answer whichever path fields them.
 function platformPricingResponse(language: AgentLanguage): string {
   return language === "ar"
-    ? "أسعار استخدام نظام Tawseelhub موجودة هنا: https://tawseelhub.com/pricing"
-    : "Tawseelhub system pricing is available here: https://tawseelhub.com/pricing";
+    ? "يبدأ Tawseelhub مجاناً حتى 100 طلب شهرياً، مع خطط شهرية بالدرهم الإماراتي مع نمو حجم التوصيل. التفاصيل الكاملة: https://tawseelhub.com/pricing"
+    : "Tawseelhub starts free for up to 100 orders per month, with monthly AED plans as your delivery volume grows. Full details: https://tawseelhub.com/pricing";
 }
 /**
  * Only name + mobile are ever asked here, for every context -- not just
@@ -2795,6 +2798,18 @@ export class AgentService {
     currentTurnIntent: AgentIntent,
   ) {
     const latest = await this.latestUserMessage(conversationId);
+    // Approved homepage FAQs answer deterministically, before any knowledge
+    // retrieval or model call -- these 15 answers are guaranteed verbatim.
+    const faqAnswer = agentFaqAnswer(latest, language);
+    if (faqAnswer) {
+      const { pendingGeneralFollowUp: _pendingGeneralFollowUp, ...faqBaseState } = state;
+      return {
+        content: faqAnswer,
+        intent: currentTurnIntent,
+        status: "waiting_for_user",
+        structured: { state: faqBaseState },
+      };
+    }
     const knowledge = await this.retrieveKnowledge(latest, language, state);
     const fallback = () => this.safeBusinessFallback(latest, language, state, knowledge);
     const generated =
