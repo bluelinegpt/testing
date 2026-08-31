@@ -19,10 +19,10 @@
       "displayName": "Main app",
       "path": "apps/web",
       "renderService": "bluelinegpt-web-test",
-      "status": "pushed_awaiting_confirmation",
-      "localCommit": "aee8bb0",
+      "status": "needs_deploy",
+      "localCommit": "11dab50",
       "localCommitDate": "2026-08-31",
-      "lastChangeDescription": "feat(website): Company-configurable banner size in Website settings",
+      "lastChangeDescription": "fix(website): Arabic RTL layout, mobile language switch, mobile WhatsApp icon",
       "lastChangeBy": "claude",
       "confirmedLiveCommit": "0abeb24",
       "confirmedLiveAt": "2026-08-28"
