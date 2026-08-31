@@ -248,8 +248,12 @@ export function DriverEarningsWorkspace({ api, canPay }: { api: ApiClient; canPa
         return;
       }
       setPeriodPreview(result);
-    } catch {
-      setError(t("driverEarnings.calculateFailed"));
+    } catch (issue) {
+      // Surface the API's own reason -- most commonly "No payable Driver
+      // earnings exist for this period", which under incremental capture
+      // simply means every delivered order is already claimed by a
+      // confirmed period (e.g. new orders exist but are not delivered yet).
+      setError(apiErrorMessage(issue, t("driverEarnings.calculateFailed")));
     } finally {
       setBusy(false);
     }
@@ -293,8 +297,8 @@ export function DriverEarningsWorkspace({ api, canPay }: { api: ApiClient; canPa
       // otherwise a stale selection keeps pointing at an older (often fully
       // paid) period and the pay form shows Outstanding 0.00 for it.
       if (confirmed?.periodId) setSelectedPeriodId(confirmed.periodId);
-    } catch {
-      setError(t("driverEarnings.confirmEarningsFailed"));
+    } catch (issue) {
+      setError(apiErrorMessage(issue, t("driverEarnings.confirmEarningsFailed")));
     } finally {
       setBusy(false);
     }
