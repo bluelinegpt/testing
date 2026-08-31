@@ -52,6 +52,7 @@ interface WebsiteSettings {
     bannerDataUrlsAr?: string[];
     bannerTransition?: "fade" | "slide" | "zoom";
     bannerIntervalSeconds?: 4 | 6 | 8;
+    bannerSize?: "compact" | "standard" | "full";
   };
   languages: { en: boolean; ar: boolean; defaultLocale: "en" | "ar" };
   presentation: Record<string, Localized | string | undefined>;
@@ -454,6 +455,7 @@ export function PublicCompanyWebsite({
                 : [],
         bannerTransition: settings?.branding.bannerTransition ?? "fade",
         bannerIntervalSeconds: settings?.branding.bannerIntervalSeconds ?? 6,
+        bannerSize: settings?.branding.bannerSize ?? "standard",
         direction: locale === "ar" ? "rtl" : "ltr",
         language: locale,
         navigation:

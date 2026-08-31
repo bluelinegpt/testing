@@ -48,6 +48,24 @@
   width: 100%;
 }
 
+/* Company-chosen banner size (branding.bannerSize in Website settings).
+   `standard` is the default above: the content column, height from the
+   image's own aspect ratio. */
+.site-template--banner-compact .site-template__banner > img {
+  max-height: clamp(220px, 22vw, 320px);
+  object-fit: contain;
+  object-position: center;
+}
+.site-template--banner-full .site-template__hero {
+  padding: 0 !important;
+}
+.site-template--banner-full .site-template__banner {
+  max-width: none;
+}
+.site-template--banner-full .site-template__banner > img {
+  border-radius: 0;
+}
+
 .site-template__banner--fade > img {
   animation: website-banner-fade 600ms ease both;
 }
@@ -140,5 +158,13 @@
   }
   .site-template__banner > img {
     border-radius: 12px;
+  }
+  /* After the has-banner rule above so full-bleed stays edge-to-edge on
+     mobile too (same specificity, later source order wins). */
+  .site-template--banner-full .site-template__hero {
+    padding: 0 !important;
+  }
+  .site-template--banner-full .site-template__banner > img {
+    border-radius: 0;
   }
 }

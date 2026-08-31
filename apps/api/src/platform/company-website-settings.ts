@@ -57,6 +57,14 @@ export interface CompanyWebsiteSettings {
     bannerDataUrlsAr?: string[];
     bannerTransition?: "fade" | "slide" | "zoom";
     bannerIntervalSeconds?: 4 | 6 | 8;
+    /**
+     * How the homepage banner is framed. `standard` (default) sits in the
+     * same centered content column as the rest of the page with height
+     * following the image's own aspect ratio; `compact` caps the height
+     * (letterboxing a proportionally taller image); `full` bleeds
+     * edge-to-edge.
+     */
+    bannerSize?: "compact" | "standard" | "full";
   };
   languages: { en: boolean; ar: boolean; defaultLocale: "en" | "ar" };
   presentation: {
@@ -226,6 +234,7 @@ const allowedIcons = new Set([
 ]);
 const ctaTypes = new Set(["contact", "track", "request_delivery", "whatsapp", "call", "section"]);
 const bannerTransitions = new Set(["fade", "slide", "zoom"]);
+const bannerSizes = new Set(["compact", "standard", "full"]);
 
 // A logo/banner uploaded through the Website editor is now stored as a real
 // file in Cloudflare R2 (via FileStoragePort.storeWebsite), not embedded as
@@ -289,6 +298,11 @@ export function validateCompanyWebsiteSettings(value: unknown): CompanyWebsiteSe
     if (![4, 6, 8].includes(input.branding.bannerIntervalSeconds))
       invalid("Banner rotation interval must be 4, 6 or 8 seconds");
     result.branding.bannerIntervalSeconds = input.branding.bannerIntervalSeconds;
+  }
+  if (input.branding?.bannerSize !== undefined) {
+    if (!bannerSizes.has(input.branding.bannerSize))
+      invalid("Banner size must be compact, standard or full");
+    result.branding.bannerSize = input.branding.bannerSize;
   }
   if (input.languages) {
     result.languages = {

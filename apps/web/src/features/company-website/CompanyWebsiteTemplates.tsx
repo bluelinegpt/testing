@@ -35,6 +35,7 @@ export interface CompanyWebsiteContent {
   readonly bannerUrls?: readonly string[];
   readonly bannerTransition?: "fade" | "slide" | "zoom";
   readonly bannerIntervalSeconds?: 4 | 6 | 8;
+  readonly bannerSize?: "compact" | "standard" | "full";
   readonly direction: "ltr" | "rtl";
   readonly language?: "en" | "ar";
   readonly theme?: { primary?: string; secondary?: string; accent?: string };
@@ -698,7 +699,7 @@ function TemplateFrame({
     .join(" ");
   return (
     <div
-      className={`company-site site-template site-template--${keyName} ${content.bannerUrls?.length ? "site-template--has-banner" : ""} ${hidden}`}
+      className={`company-site site-template site-template--${keyName} ${content.bannerUrls?.length ? `site-template--has-banner site-template--banner-${content.bannerSize ?? "standard"}` : ""} ${hidden}`}
       data-template={keyName}
       dir={content.direction}
       style={

@@ -198,6 +198,24 @@ describe("Company website editor settings", () => {
       }),
     ).toThrow(/no more than 3/u);
   });
+  it("accepts only the approved banner sizes and leaves the default unset", () => {
+    const settings = validateCompanyWebsiteSettings({
+      ...EMPTY_COMPANY_WEBSITE_SETTINGS,
+      branding: { bannerSize: "full" },
+    });
+    expect(settings.branding.bannerSize).toBe("full");
+    // Absent stays absent -- the frontend applies its own "standard" default.
+    expect(
+      validateCompanyWebsiteSettings({ ...EMPTY_COMPANY_WEBSITE_SETTINGS, branding: {} }).branding
+        .bannerSize,
+    ).toBeUndefined();
+    expect(() =>
+      validateCompanyWebsiteSettings({
+        ...EMPTY_COMPANY_WEBSITE_SETTINGS,
+        branding: { bannerSize: "huge" as never },
+      }),
+    ).toThrow(/compact, standard or full/u);
+  });
   it.each(["red", "#fff", "url(javascript:alert(1))"])("rejects unsafe color %s", (primaryColor) =>
     expect(() =>
       validateCompanyWebsiteSettings({

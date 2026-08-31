@@ -88,9 +88,28 @@ describe("Company website template registry", () => {
       expect(hero).not.toBeNull();
       expect(hero?.className).toContain("site-template--has-banner");
       expect(hero?.className).toContain(`site-template--${key}`);
+      // Company-chosen size rides alongside, defaulting to standard.
+      expect(hero?.className).toContain("site-template--banner-standard");
       unmount();
     },
   );
+
+  it("applies the Company-chosen banner size as a modifier class, only when a banner exists", () => {
+    const { container, unmount } = render(
+      <>{renderCompanyWebsiteTemplate("premium", { ...content, bannerUrls: ["data:image/png;base64,AA=="], bannerSize: "full" })}</>,
+    );
+    expect(container.querySelector('[data-template="premium"]')?.className).toContain(
+      "site-template--banner-full",
+    );
+    unmount();
+    const noBanner = render(
+      <>{renderCompanyWebsiteTemplate("premium", { ...content, bannerSize: "full" })}</>,
+    );
+    expect(noBanner.container.querySelector('[data-template="premium"]')?.className).not.toContain(
+      "site-template--banner",
+    );
+    noBanner.unmount();
+  });
 
   it("hides missing contact fields instead of inventing them", () => {
     render(

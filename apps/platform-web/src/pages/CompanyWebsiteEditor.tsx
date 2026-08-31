@@ -952,6 +952,26 @@ export function CompanyWebsiteEditor({
                 <option value={8}>8 seconds</option>
               </select>
             </label>
+            <label className="platform-field">
+              <span>Banner size</span>
+              <select
+                value={settings.branding.bannerSize ?? "standard"}
+                onChange={(event) =>
+                  update((next) => {
+                    next.branding.bannerSize = event.target.value as
+                      "compact" | "standard" | "full";
+                  })
+                }
+              >
+                <option value="compact">Compact — capped height</option>
+                <option value="standard">Standard — matches page content width</option>
+                <option value="full">Full width — edge to edge</option>
+              </select>
+              <small>
+                Standard shows the whole image at the same width as the page content, with height
+                following the image itself.
+              </small>
+            </label>
           </div>
         </div>
         <div className="website-editor__grid">
@@ -2274,6 +2294,7 @@ async function readWebsiteBanners(
       if (field === "bannerDataUrls") delete next.branding.bannerDataUrl;
       next.branding.bannerTransition ??= "fade";
       next.branding.bannerIntervalSeconds ??= 6;
+      next.branding.bannerSize ??= "standard";
     });
     showErrors([]);
     return uploaded.length;

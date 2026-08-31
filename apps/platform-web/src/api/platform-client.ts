@@ -490,6 +490,7 @@ export interface CompanyWebsiteSettings {
     bannerDataUrlsAr?: string[];
     bannerTransition?: "fade" | "slide" | "zoom";
     bannerIntervalSeconds?: 4 | 6 | 8;
+    bannerSize?: "compact" | "standard" | "full";
   };
   languages: { en: boolean; ar: boolean; defaultLocale: "en" | "ar" };
   presentation: Record<string, { en?: string; ar?: string } | string | undefined>;
