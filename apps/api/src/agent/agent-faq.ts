@@ -119,8 +119,8 @@ const entries: readonly AgentFaqEntry[] = [
     id: "cost",
     pattern:
       /how much (?:does|is|will).*(?:cost|tawseelhub)|(?:price|pricing|cost) of tawseelhub|tawseelhub (?:price|pricing|cost)|subscription (?:price|cost|fee)|كم (?:تكلفة|سعر|يكلف)|تكلفة (?:النظام|المنصة|الاشتراك)|سعر الاشتراك/iu,
-    en: "Tawseelhub starts free for up to 100 orders per month, with monthly AED plans as your delivery volume grows. Full details: https://tawseelhub.com/pricing",
-    ar: "يبدأ Tawseelhub مجاناً حتى 100 طلب شهرياً، مع خطط شهرية بالدرهم الإماراتي مع نمو حجم التوصيل. التفاصيل الكاملة: https://tawseelhub.com/pricing",
+    en: "Tawseelhub starts free for up to 100 orders per month. Full details: https://tawseelhub.com/pricing",
+    ar: "يبدأ Tawseelhub مجاناً حتى 100 طلب شهرياً. التفاصيل الكاملة: https://tawseelhub.com/pricing",
   },
 ];
 

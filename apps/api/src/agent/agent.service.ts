@@ -479,8 +479,8 @@ function featureExplanationText(text: string, language: AgentLanguage): string {
 // pricing questions get the same approved answer whichever path fields them.
 function platformPricingResponse(language: AgentLanguage): string {
   return language === "ar"
-    ? "يبدأ Tawseelhub مجاناً حتى 100 طلب شهرياً، مع خطط شهرية بالدرهم الإماراتي مع نمو حجم التوصيل. التفاصيل الكاملة: https://tawseelhub.com/pricing"
-    : "Tawseelhub starts free for up to 100 orders per month, with monthly AED plans as your delivery volume grows. Full details: https://tawseelhub.com/pricing";
+    ? "يبدأ Tawseelhub مجاناً حتى 100 طلب شهرياً. التفاصيل الكاملة: https://tawseelhub.com/pricing"
+    : "Tawseelhub starts free for up to 100 orders per month. Full details: https://tawseelhub.com/pricing";
 }
 /**
  * Only name + mobile are ever asked here, for every context -- not just

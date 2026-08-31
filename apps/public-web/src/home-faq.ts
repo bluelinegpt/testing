@@ -135,8 +135,8 @@ export const homeFaqs: readonly HomeFaq[] = [
   {
     q: { en: "How much does Tawseelhub cost?", ar: "كم تبلغ تكلفة Tawseelhub؟" },
     a: {
-      en: "Tawseelhub starts free for up to 100 orders per month, with monthly AED plans as your delivery volume grows — see the pricing page for full details.",
-      ar: "يبدأ Tawseelhub مجاناً حتى 100 طلب شهرياً، مع خطط شهرية بالدرهم الإماراتي مع نمو حجم التوصيل — راجع صفحة الأسعار للتفاصيل الكاملة.",
+      en: "Tawseelhub starts free for up to 100 orders per month — see the pricing page for full details.",
+      ar: "يبدأ Tawseelhub مجاناً حتى 100 طلب شهرياً — راجع صفحة الأسعار للتفاصيل الكاملة.",
     },
   },
 ];

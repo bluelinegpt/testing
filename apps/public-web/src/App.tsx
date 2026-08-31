@@ -2315,7 +2315,10 @@ export function Footer() {
         ))}
       </div>
       <div className="footer-bottom">
-        <span>© {new Date().getFullYear()} Tawseelhub</span>
+        <span>
+          © {new Date().getFullYear()} Tawseelhub.{" "}
+          {locale === "ar" ? "جميع الحقوق محفوظة." : "All rights reserved."}
+        </span>
         <span>{copy.footerReady}</span>
       </div>
     </footer>
