@@ -225,7 +225,14 @@ describe("DriverEarningsWorkspace period confirmation", () => {
     });
     expect(screen.getByText("Period History")).toBeInTheDocument();
     expect(screen.getByText(/Period Outstanding/)).toHaveTextContent(/AED\s*11\.00/);
-    expect(screen.getByLabelText("Date From")).toHaveValue("2026-08-13");
+    // The date pickers are no longer forced to nextAvailableStart after a
+    // confirmation (that forcing pushed Date From to a FUTURE date after a
+    // same-day confirm) -- they keep whatever the user chose.
+    const monthStart = new Date();
+    monthStart.setDate(1);
+    expect(screen.getByLabelText("Date From")).toHaveValue(
+      monthStart.toISOString().slice(0, 10),
+    );
     expect(post).not.toHaveBeenCalledWith(
       expect.stringContaining("employee/payments"),
       expect.anything(),

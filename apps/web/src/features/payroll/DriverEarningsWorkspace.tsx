@@ -265,12 +265,10 @@ export function DriverEarningsWorkspace({ api, canPay }: { api: ApiClient; canPa
     setSelectedPeriodId((current) =>
       current && items.some((period) => period.id === current) ? current : items[0]?.id,
     );
-    if (result.nextAvailableStart) {
-      setDateFrom(result.nextAvailableStart);
-      setDateTo((current) =>
-        current < result.nextAvailableStart! ? result.nextAvailableStart! : current,
-      );
-    }
+    // Deliberately NOT forcing the date pickers to nextAvailableStart any
+    // more: with incremental per-order capture, any date range -- including
+    // one overlapping confirmed periods -- is valid, and the old forcing
+    // pushed Date From to a FUTURE date right after a same-day confirmation.
   };
   const confirmPeriod = async () => {
     if (
@@ -280,14 +278,21 @@ export function DriverEarningsWorkspace({ api, canPay }: { api: ApiClient; canPa
       return;
     setBusy(true);
     try {
-      await api.post("operations/payroll/driver-earnings/periods", {
-        dateFrom,
-        dateTo,
-        driverId,
-      });
+      const confirmed = await api.post<{ periodId?: string }>(
+        "operations/payroll/driver-earnings/periods",
+        {
+          dateFrom,
+          dateTo,
+          driverId,
+        },
+      );
       setPeriodPreview(undefined);
       setSuccess(t("driverEarnings.earningPeriodConfirmed"));
       await loadPeriods();
+      // Focus the payment panel on the period that was JUST confirmed --
+      // otherwise a stale selection keeps pointing at an older (often fully
+      // paid) period and the pay form shows Outstanding 0.00 for it.
+      if (confirmed?.periodId) setSelectedPeriodId(confirmed.periodId);
     } catch {
       setError(t("driverEarnings.confirmEarningsFailed"));
     } finally {
@@ -743,9 +748,6 @@ export function DriverEarningsWorkspace({ api, canPay }: { api: ApiClient; canPa
                   <p>
                     {t("driverEarnings.lastEarningPeriod")}: {periods[0]!.dateFrom} –{" "}
                     {periods[0]!.dateTo}
-                  </p>
-                  <p>
-                    {t("driverEarnings.nextAvailableStartDate")}: {dateFrom}
                   </p>
                   <table>
                     <thead>
