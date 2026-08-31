@@ -598,7 +598,10 @@ function QuoteModule({ compact = false }: { compact?: boolean }) {
       <div className="quote-heading">
         <div>
           <span>{copy.eyebrow}</span>
-          <strong id="quote-title">{copy.title}</strong>
+          {/* Real h2, not a styled strong: the h3 inside quote-cta-card was
+              failing the heading-order audit because the section's own
+              heading wasn't a heading element at all. */}
+          <h2 id="quote-title">{copy.title}</h2>
         </div>
         <p>{copy.intro}</p>
       </div>

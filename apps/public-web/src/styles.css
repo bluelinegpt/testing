@@ -131,7 +131,7 @@ a {
 }
 .button-primary {
   color: #fff;
-  background: #079a6e;
+  background: #067a57;
   box-shadow: 0 10px 24px rgba(7, 154, 110, 0.2);
 }
 .button-primary:hover {
@@ -448,13 +448,14 @@ a {
   gap: 6px;
 }
 .quote-heading span {
-  color: #0b9d72;
+  color: #077a56;
   font-size: 13px;
   font-weight: 850;
   text-transform: uppercase;
   letter-spacing: 0.1em;
 }
-.quote-heading strong {
+.quote-heading h2 {
+  margin: 0;
   color: #17314d;
   font-size: 20px;
 }
@@ -558,7 +559,7 @@ a {
   border-radius: 0 16px 16px 0;
 }
 .proof-strip span {
-  color: #0fa979;
+  color: #077a56;
   font-size: 13px;
 }
 .section {
@@ -615,7 +616,7 @@ a {
 }
 .capability-grid article > span,
 .scenario-grid article > span {
-  color: #0fa979;
+  color: #077a56;
   font-size: 13px;
   font-weight: 850;
 }
@@ -2054,7 +2055,7 @@ body,
 .section-heading h2,
 .demo-form-section h2,
 .form-section-title h2,
-.quote-heading strong,
+.quote-heading h2,
 .capability-grid h3,
 .scenario-grid h3,
 .integration-grid h3,
