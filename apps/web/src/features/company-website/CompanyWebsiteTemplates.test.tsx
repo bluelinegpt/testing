@@ -70,6 +70,28 @@ describe("Company website template registry", () => {
     },
   );
 
+  it.each(Object.keys(COMPANY_WEBSITE_TEMPLATES) as CompanyWebsiteTemplateKey[])(
+    "carries site-template--has-banner alongside the %s template class when a banner image is set, for every template -- not just the ones without their own hero sizing",
+    (key) => {
+      // Several named templates style `.site-template__hero` for the
+      // text-only, no-banner case (e.g. `--premium`'s large `min-height`) at
+      // the SAME selector specificity as the shared banner-compaction rule
+      // in company-website-banner.css. Both classes landing on the same
+      // element is what lets that shared rule's `!important` win regardless
+      // of which template a Company picked -- this locks in that contract
+      // so a future template can't silently drop the class and reintroduce
+      // an oversized, cropped banner.
+      const { container, unmount } = render(
+        <>{renderCompanyWebsiteTemplate(key, { ...content, bannerUrls: ["data:image/png;base64,AA=="] })}</>,
+      );
+      const hero = container.querySelector(`[data-template="${key}"]`);
+      expect(hero).not.toBeNull();
+      expect(hero?.className).toContain("site-template--has-banner");
+      expect(hero?.className).toContain(`site-template--${key}`);
+      unmount();
+    },
+  );
+
   it("hides missing contact fields instead of inventing them", () => {
     render(
       <>

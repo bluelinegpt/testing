@@ -1,11 +1,19 @@
 .site-template--has-banner .site-template__hero {
   /* Shared by every Company Website template. Keep the banner prominent
-     without letting it consume the full first viewport on wide screens. */
-  height: clamp(200px, 18vw, 300px);
+     without letting it consume the full first viewport on wide screens.
+     `!important` on the sizing properties is deliberate: several named
+     templates (e.g. `--premium`'s `min-height: 68vh`) style `.site-template__hero`
+     for the text-only, no-banner case at equal selector specificity, and a
+     plain declaration here loses that tie by source order alone -- which is
+     exactly what let Dana's uploaded banner render at ~68vh in production
+     instead of this compact height. min-height/height combine (the browser
+     uses whichever is larger), so min-height must be reset here too, not
+     just height. */
+  height: clamp(150px, 13vw, 220px) !important;
+  min-height: 0 !important;
+  padding: 0 !important;
   background-color: var(--site-secondary, #edf5f8);
   display: block;
-  min-height: 0;
-  padding: 0;
   position: relative;
   overflow: hidden;
 }
@@ -18,7 +26,14 @@
 
 .site-template__banner > img {
   display: block;
-  object-fit: cover;
+  /* A Company's uploaded banner is a single graphic with its own heading
+     baked in (see the Hero component: no separate HTML text is rendered
+     once a banner image exists) -- `cover` was cropping into that heading
+     the moment the frame got shorter than the image's own aspect ratio.
+     `contain` scales the whole graphic down to fit instead, so nothing is
+     ever cut off; the frame's background shows as letterboxing if the
+     aspect ratios don't match exactly. */
+  object-fit: contain;
   object-position: center;
 }
 
@@ -110,9 +125,9 @@
 
 @media (max-width: 680px) {
   .site-template--has-banner .site-template__hero {
-    height: clamp(150px, 38vw, 220px);
+    height: clamp(120px, 38vw, 200px) !important;
   }
   .site-template__banner > img {
-    object-fit: cover;
+    object-fit: contain;
   }
 }
