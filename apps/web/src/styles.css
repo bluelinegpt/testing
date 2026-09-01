@@ -1787,6 +1787,9 @@ textarea:focus-visible {
    for text controls — a radio styled that way becomes a full-width empty box
    visually detached from its label. Each option here is one flex row: the
    radio, then the group name beside it. */
+.whatsapp-enabled-toggle {
+  margin-bottom: 18px;
+}
 .whatsapp-group-picker {
   display: grid;
   gap: 4px;
@@ -2199,7 +2202,12 @@ td:last-child {
   justify-content: flex-end;
   gap: 5px;
 }
-.row-actions button {
+/* Bare buttons in a row-actions strip render as text links (table row
+   actions). A button that explicitly carries the `.button` class keeps its
+   real button framing — without the exemption this link styling out-ranks
+   `.button-primary` at rest but loses to it on hover, leaving e.g. a Save
+   button invisible until the pointer passes over it. */
+.row-actions button:not(.button) {
   padding: 5px 7px;
   border: 0;
   color: #08727e;
@@ -2207,7 +2215,7 @@ td:last-child {
   font-size: 13px;
   font-weight: 700;
 }
-.row-actions button:hover {
+.row-actions button:not(.button):hover {
   text-decoration: underline;
 }
 .row-actions-inline {
@@ -3291,7 +3299,7 @@ body {
   background: #fff1f2;
   border-color: #fecdd3;
 }
-.row-actions button {
+.row-actions button:not(.button) {
   color: var(--color-primary);
 }
 .table-toolbar {

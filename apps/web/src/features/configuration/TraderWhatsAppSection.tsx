@@ -261,20 +261,18 @@ export function TraderWhatsAppSection({
         <p className="alert alert-warning">{t("whatsapp.mappedGroupMissing")}</p>
       ) : null}
 
-      <div className="field">
-        <label>
-          <input
-            checked={enabledDraft}
-            disabled={!canManage}
-            onChange={(event) => {
-              setEnabledDraft(event.target.checked);
-              setValidation(undefined);
-            }}
-            type="checkbox"
-          />{" "}
-          {t("whatsapp.notificationsEnabled")}
-        </label>
-      </div>
+      <label className="toggle-row whatsapp-enabled-toggle">
+        <input
+          checked={enabledDraft}
+          disabled={!canManage}
+          onChange={(event) => {
+            setEnabledDraft(event.target.checked);
+            setValidation(undefined);
+          }}
+          type="checkbox"
+        />
+        <span>{t("whatsapp.notificationsEnabled")}</span>
+      </label>
 
       <div className="detail-line">
         <span>{t("whatsapp.destination")}</span>
