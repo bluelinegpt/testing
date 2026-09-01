@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { vi } from "vitest";
 
 import type { ApiClient } from "../../api/api-client.js";
@@ -28,6 +28,9 @@ function makeApi(handlers: {
   connection?: () => unknown;
   groups?: () => unknown;
   summary?: () => unknown;
+  messages?: () => unknown;
+  messageDetail?: () => unknown;
+  groupHealth?: () => unknown;
 }) {
   const get = vi.fn((path: string) => {
     if (path === "whatsapp/connection") {
@@ -38,7 +41,39 @@ function makeApi(handlers: {
     }
     if (path === "whatsapp/messages/summary") {
       return Promise.resolve(
-        handlers.summary?.() ?? { failed: 0, pending: 0, requiresReview: 0, sentToday: 0 },
+        handlers.summary?.() ?? {
+          failed: 0,
+          lastSuccessfulSendAt: null,
+          oldestPendingAt: null,
+          pending: 0,
+          processing: 0,
+          requiresReview: 0,
+          sentLast24h: 0,
+          sentToday: 0,
+        },
+      );
+    }
+    if (path.startsWith("whatsapp/messages?")) {
+      return Promise.resolve(
+        handlers.messages?.() ?? { items: [], page: 1, pageSize: 25, total: 0 },
+      );
+    }
+    if (path.startsWith("whatsapp/messages/")) {
+      return Promise.resolve(handlers.messageDetail?.() ?? {});
+    }
+    if (path === "whatsapp/dispatcher/health") {
+      return Promise.resolve({ lastSendAt: null, lastTickAt: null, running: true });
+    }
+    if (path === "whatsapp/trader-groups/health") {
+      return Promise.resolve(
+        handlers.groupHealth?.() ?? {
+          availableCount: 0,
+          checkedAt: null,
+          configured: 0,
+          connected: true,
+          needsAttention: 0,
+          rows: [],
+        },
       );
     }
     return Promise.reject(new Error(`unexpected get ${path}`));
@@ -193,14 +228,168 @@ describe("WhatsAppConfigurationWorkspace", () => {
 
   it("shows the message-delivery pipeline counts", async () => {
     const { api } = makeApi({
-      summary: () => ({ failed: 2, pending: 3, requiresReview: 1, sentToday: 7 }),
+      summary: () => ({
+        failed: 2,
+        lastSuccessfulSendAt: "2026-09-01T07:00:00Z",
+        oldestPendingAt: null,
+        pending: 3,
+        processing: 0,
+        requiresReview: 1,
+        sentLast24h: 9,
+        sentToday: 7,
+      }),
     });
     render(<WhatsAppConfigurationWorkspace api={api} permissions={MANAGE} />);
-    await screen.findByText("Message Delivery");
-    expect(screen.getByText("Pending").nextElementSibling?.textContent).toBe("3");
-    expect(screen.getByText("Failed").nextElementSibling?.textContent).toBe("2");
-    expect(screen.getByText("Requires Review").nextElementSibling?.textContent).toBe("1");
-    expect(screen.getByText("Sent Today").nextElementSibling?.textContent).toBe("7");
+    const heading = await screen.findByText("Message Delivery");
+    const panel = within(heading.closest("section") as HTMLElement);
+    expect(panel.getByText("Pending").nextElementSibling?.textContent).toBe("3");
+    expect(panel.getByText("Failed").nextElementSibling?.textContent).toBe("2");
+    expect(panel.getByText("Requires Review").nextElementSibling?.textContent).toBe("1");
+    expect(panel.getByText("Sent Today").nextElementSibling?.textContent).toBe("7");
+    expect(panel.getByText("Sent Last 24 Hours").nextElementSibling?.textContent).toBe("9");
+  });
+
+  it("lists message operations with a safe failure category and filters by status", async () => {
+    const { api, get } = makeApi({
+      messages: () => ({
+        items: [
+          {
+            attemptCount: 2,
+            createdAt: "2026-09-01T08:40:00Z",
+            failureCode: "provider_timeout",
+            groupNameSnapshot: "Dana vs NoorStore",
+            id: "11111111-1111-4111-8111-111111111111",
+            messageLanguage: "both",
+            messageType: "order_status",
+            nextAttemptAt: null,
+            orderNumber: "DAN-000123",
+            orderStatus: "out_for_delivery",
+            sentAt: null,
+            status: "requires_review",
+            traderName: "Noor Store",
+          },
+        ],
+        page: 1,
+        pageSize: 25,
+        total: 1,
+      }),
+    });
+    render(
+      <WhatsAppConfigurationWorkspace
+        api={api}
+        permissions={["whatsapp.connection.manage", "whatsapp.messages.manage"]}
+      />,
+    );
+    await screen.findByText("DAN-000123");
+    expect(screen.getByText("Noor Store")).toBeInTheDocument();
+    // The uncertain state is explained honestly, never as "not delivered".
+    expect(
+      screen.getByText(/could not confirm whether WhatsApp accepted this message/),
+    ).toBeInTheDocument();
+
+    fireEvent.change(screen.getByDisplayValue("All statuses"), {
+      target: { value: "failed" },
+    });
+    await waitFor(() =>
+      expect(get).toHaveBeenLastCalledWith(expect.stringContaining("status=failed")),
+    );
+  });
+
+  it("guards Retry Anyway behind the duplicate-risk warning and posts the confirmation", async () => {
+    const detail = {
+      attemptCount: 1,
+      attempts: [
+        {
+          attemptNumber: 1,
+          completedAt: "2026-09-01T08:41:00Z",
+          failureClassification: "unknown",
+          providerResponseSummary: "outcome_uncertain",
+          result: "failed",
+          startedAt: "2026-09-01T08:40:00Z",
+        },
+      ],
+      createdAt: "2026-09-01T08:40:00Z",
+      failureCode: "provider_timeout",
+      failureReason: "provider_outcome_uncertain",
+      groupNameSnapshot: "Dana vs NoorStore",
+      id: "11111111-1111-4111-8111-111111111111",
+      messageBody: "body",
+      messageLanguage: "both",
+      messageType: "test",
+      nextAttemptAt: null,
+      orderNumber: null,
+      orderStatus: null,
+      providerGroupId: "120363000000000001@g.us",
+      providerMessageId: null,
+      queuedAt: "2026-09-01T08:40:00Z",
+      sentAt: null,
+      status: "requires_review",
+      traderName: "Noor Store",
+    };
+    const { api, post } = makeApi({
+      messageDetail: () => detail,
+      messages: () => ({ items: [detail], page: 1, pageSize: 25, total: 1 }),
+    });
+    render(
+      <WhatsAppConfigurationWorkspace
+        api={api}
+        permissions={["whatsapp.connection.manage", "whatsapp.messages.manage"]}
+      />,
+    );
+    await screen.findByText("Dana vs NoorStore");
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+    await screen.findByText("Message Details");
+    fireEvent.click(screen.getByRole("button", { name: "Retry Anyway" }));
+    await screen.findByText("Retry this WhatsApp message?");
+    expect(post).not.toHaveBeenCalled();
+    const confirmButtons = screen.getAllByRole("button", { name: "Retry Anyway" });
+    fireEvent.click(confirmButtons[confirmButtons.length - 1] as HTMLElement);
+    await waitFor(() =>
+      expect(post).toHaveBeenCalledWith(
+        "whatsapp/messages/11111111-1111-4111-8111-111111111111/retry",
+        { confirmDuplicateRisk: true },
+      ),
+    );
+  });
+
+  it("surfaces Trader group mappings that discovery no longer returns", async () => {
+    const { api } = makeApi({
+      connection: () =>
+        connectionView({
+          connectedPhoneNumber: "+971501234567",
+          lastConnectedAt: "2026-08-31T18:00:00Z",
+          status: "connected",
+        }),
+      groupHealth: () => ({
+        availableCount: 1,
+        checkedAt: "2026-09-01T09:00:00Z",
+        configured: 2,
+        connected: true,
+        needsAttention: 1,
+        rows: [
+          {
+            available: true,
+            groupNameSnapshot: "Healthy Group",
+            providerGroupId: "111@g.us",
+            traderId: "t1",
+            traderName: "Healthy Trader",
+          },
+          {
+            available: false,
+            groupNameSnapshot: "Missing Group",
+            providerGroupId: "222@g.us",
+            traderId: "t2",
+            traderName: "Broken Trader",
+          },
+        ],
+      }),
+    });
+    render(<WhatsAppConfigurationWorkspace api={api} permissions={MANAGE} />);
+    await screen.findByText("Trader Group Configuration Health");
+    expect(screen.getByText(/2 configured/)).toBeInTheDocument();
+    expect(screen.getByText(/1 need attention/)).toBeInTheDocument();
+    expect(screen.getByText("Broken Trader")).toBeInTheDocument();
+    expect(screen.queryByText("Healthy Trader")).not.toBeInTheDocument();
   });
 
   it("renders in Arabic", async () => {

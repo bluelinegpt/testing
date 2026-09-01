@@ -585,6 +585,28 @@ describe.skipIf(!enabled)("whatsapp real-connectivity lifecycle", () => {
     });
   });
 
+  it("shuts down gracefully: sockets close, nothing logs out, auth survives for restart", async () => {
+    await withRolledBackCommunicationFixtures(database, async (transaction, runId) => {
+      const company = await createFixtureCompany(transaction, runId, "wa-shutdown");
+      const office = await createFixtureOfficeUser(transaction, company.companyId, "wa-shutdown", [
+        "whatsapp.connection.manage",
+      ]);
+      const { factory, runtime } = buildRuntime(transaction);
+      const socket = await connectToOpen(runtime, factory, company.companyId, office.accountId);
+
+      // A deploy restart is NOT a user Disconnect: the runtime closes the
+      // socket but never logs the linked device out and never clears the
+      // encrypted auth state — the next process restores without a QR.
+      runtime.onModuleDestroy();
+      expect(socket.ended).toBe(true);
+      expect(socket.loggedOut).toBe(false);
+      const row = await readRow(transaction, company.companyId);
+      expect(row?.status).toBe("connected");
+      expect(row?.encryptedSessionState).not.toBeNull();
+      expect(runtime.getLiveState(company.companyId)).toBeUndefined();
+    });
+  });
+
   it("refuses to connect when session encryption is not configured", async () => {
     await withRolledBackCommunicationFixtures(database, async (transaction, runId) => {
       const company = await createFixtureCompany(transaction, runId, "wa-nokey");

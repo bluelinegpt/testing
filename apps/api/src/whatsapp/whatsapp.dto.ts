@@ -1,4 +1,13 @@
-import { IsBoolean, IsIn, IsOptional, IsString, Length, MaxLength } from "class-validator";
+import {
+  IsBoolean,
+  IsIn,
+  IsNumberString,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Length,
+  MaxLength,
+} from "class-validator";
 
 export const whatsappMessageLanguages = ["both", "ar", "en"] as const;
 export type WhatsAppMessageLanguage = (typeof whatsappMessageLanguages)[number];
@@ -100,13 +109,144 @@ export interface WhatsAppTestMessageResult {
   readonly duplicate?: boolean;
 }
 
+export const whatsappMessageStatuses = [
+  "pending",
+  "processing",
+  "sent",
+  "failed",
+  "requires_review",
+  "cancelled",
+] as const;
+
+export class ListWhatsAppMessagesDto {
+  @IsOptional()
+  @IsIn(whatsappMessageStatuses)
+  public readonly status?: (typeof whatsappMessageStatuses)[number];
+
+  @IsOptional()
+  @IsIn(["order_status", "test"])
+  public readonly messageType?: "order_status" | "test";
+
+  @IsOptional()
+  @IsUUID()
+  public readonly traderId?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  public readonly orderNumber?: string;
+
+  /** ISO dates; validated loosely here, parsed defensively in the service. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(32)
+  public readonly dateFrom?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(32)
+  public readonly dateTo?: string;
+
+  @IsOptional()
+  @IsNumberString()
+  public readonly page?: string;
+
+  @IsOptional()
+  @IsNumberString()
+  public readonly pageSize?: string;
+}
+
+export class RetryWhatsAppMessageDto {
+  /** Required (true) for `requires_review` rows: the caller explicitly
+   *  accepts that the Trader group may receive a duplicate message. */
+  @IsOptional()
+  @IsBoolean()
+  public readonly confirmDuplicateRisk?: boolean;
+}
+
+export class ResolveWhatsAppMessageDto {
+  @IsIn(["mark_resolved", "cancel"])
+  public readonly action!: "mark_resolved" | "cancel";
+}
+
+export interface WhatsAppMessageListItemView {
+  readonly id: string;
+  readonly createdAt: Date;
+  readonly traderId: string;
+  readonly traderName: string | null;
+  readonly orderId: string | null;
+  readonly orderNumber: string | null;
+  readonly orderStatus: string | null;
+  readonly groupNameSnapshot: string | null;
+  readonly messageType: string;
+  readonly messageLanguage: string;
+  readonly status: string;
+  readonly attemptCount: number;
+  readonly failureCode: string | null;
+  readonly nextAttemptAt: Date | null;
+  readonly sentAt: Date | null;
+}
+
+export interface WhatsAppMessageAttemptView {
+  readonly attemptNumber: number;
+  readonly startedAt: Date;
+  readonly completedAt: Date | null;
+  readonly result: string | null;
+  readonly failureClassification: string | null;
+  readonly providerResponseSummary: string | null;
+}
+
+export interface WhatsAppMessageDetailView extends WhatsAppMessageListItemView {
+  readonly orderStatusHistoryId: string | null;
+  readonly statusEventOccurredAt: Date | null;
+  readonly providerGroupId: string;
+  readonly messageBody: string;
+  readonly providerMessageId: string | null;
+  readonly queuedAt: Date;
+  readonly processingAt: Date | null;
+  readonly failedAt: Date | null;
+  readonly failureReason: string | null;
+  readonly attempts: readonly WhatsAppMessageAttemptView[];
+}
+
+export interface WhatsAppMessagePage {
+  readonly items: readonly WhatsAppMessageListItemView[];
+  readonly page: number;
+  readonly pageSize: number;
+  readonly total: number;
+}
+
+export interface TraderGroupHealthRow {
+  readonly traderId: string;
+  readonly traderName: string;
+  readonly groupNameSnapshot: string | null;
+  readonly providerGroupId: string;
+  readonly notificationsEnabled: boolean;
+  /** true/false when live discovery ran; null when WhatsApp is not connected
+   *  and availability is unknowable right now. */
+  readonly available: boolean | null;
+}
+
+export interface TraderGroupHealthView {
+  readonly connected: boolean;
+  readonly checkedAt: Date | null;
+  readonly configured: number;
+  readonly availableCount: number;
+  readonly needsAttention: number;
+  readonly rows: readonly TraderGroupHealthRow[];
+}
+
 /** Company-level operational counts for the Configuration → WhatsApp page:
  *  is the Trader notification pipeline healthy? */
 export interface WhatsAppMessageSummaryView {
   readonly pending: number;
+  readonly processing: number;
   readonly failed: number;
   readonly requiresReview: number;
   readonly sentToday: number;
+  readonly sentLast24h: number;
+  readonly oldestPendingAt: Date | null;
+  readonly lastSuccessfulSendAt: Date | null;
 }
 
 export interface WhatsAppNotificationView {

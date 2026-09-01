@@ -9,6 +9,7 @@ import { WhatsAppConnectionRuntime } from "./providers/whatsapp-connection-runti
 import { TraderWhatsAppSettingsService } from "./trader-whatsapp-settings.service.js";
 import { WhatsAppConnectionService } from "./whatsapp-connection.service.js";
 import { WhatsAppController } from "./whatsapp.controller.js";
+import { WhatsAppMessageOperationsService } from "./whatsapp-message-operations.service.js";
 import { WhatsAppNotificationHistoryService } from "./whatsapp-notification-history.service.js";
 import { WhatsAppOutboxDispatcher } from "./whatsapp-outbox-dispatcher.service.js";
 import { WhatsAppOutboxWriter } from "./whatsapp-outbox-writer.service.js";
@@ -25,6 +26,7 @@ import { WhatsAppSessionCipher } from "./whatsapp-session-cipher.js";
   providers: [
     TraderWhatsAppSettingsService,
     WhatsAppConnectionService,
+    WhatsAppMessageOperationsService,
     WhatsAppNotificationHistoryService,
     WhatsAppOutboxDispatcher,
     WhatsAppOutboxWriter,

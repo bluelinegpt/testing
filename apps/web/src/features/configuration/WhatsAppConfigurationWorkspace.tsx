@@ -8,6 +8,7 @@ import { Modal } from "../../components/Modal.js";
 import { PageHeader } from "../../components/PageHeader.js";
 import { formatDateTime } from "../../localization/formatters.js";
 import { normalizeLocale } from "../../localization/locale.js";
+import { WhatsAppMessageOperations } from "./WhatsAppMessageOperations.js";
 
 /** Mirrors the API's `CompanyWhatsAppConnectionView` — timestamps arrive as
  *  ISO strings over JSON. The `qr` payload is transient pairing data: it
@@ -34,9 +35,34 @@ export interface WhatsAppGroupView {
 
 interface WhatsAppMessageSummaryView {
   readonly pending: number;
+  readonly processing: number;
   readonly failed: number;
   readonly requiresReview: number;
   readonly sentToday: number;
+  readonly sentLast24h: number;
+  readonly oldestPendingAt: string | null;
+  readonly lastSuccessfulSendAt: string | null;
+}
+
+interface DispatcherHealthView {
+  readonly running: boolean;
+  readonly lastTickAt: string | null;
+  readonly lastSendAt: string | null;
+}
+
+interface TraderGroupHealthView {
+  readonly connected: boolean;
+  readonly checkedAt: string | null;
+  readonly configured: number;
+  readonly availableCount: number;
+  readonly needsAttention: number;
+  readonly rows: readonly {
+    readonly traderId: string;
+    readonly traderName: string;
+    readonly groupNameSnapshot: string | null;
+    readonly providerGroupId: string;
+    readonly available: boolean | null;
+  }[];
 }
 
 const POLL_INTERVAL_MS = 3000;
@@ -62,6 +88,8 @@ export function WhatsAppConfigurationWorkspace({
   const canManage =
     permissions.includes("whatsapp.connection.manage") ||
     permissions.includes("users_roles.manage");
+  const canManageMessages =
+    permissions.includes("whatsapp.messages.manage") || permissions.includes("users_roles.manage");
   const [connection, setConnection] = useState<WhatsAppConnectionView>();
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
@@ -92,6 +120,30 @@ export function WhatsAppConfigurationWorkspace({
   }, [api]);
   useEffect(() => void loadSummary(), [loadSummary]);
 
+  const [dispatcherHealth, setDispatcherHealth] = useState<DispatcherHealthView>();
+  useEffect(() => {
+    if (!canManage) return;
+    let active = true;
+    api
+      .get<DispatcherHealthView>("whatsapp/dispatcher/health")
+      .then((health) => {
+        if (active) setDispatcherHealth(health);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [api, canManage]);
+
+  const [groupHealth, setGroupHealth] = useState<TraderGroupHealthView>();
+  const loadGroupHealth = useCallback(async () => {
+    try {
+      setGroupHealth(await api.get<TraderGroupHealthView>("whatsapp/trader-groups/health"));
+    } catch {
+      // Advisory panel only.
+    }
+  }, [api]);
+
   // Pairing is asynchronous on the backend: poll the one status endpoint
   // while a connection attempt is in flight, and stop on any settled state.
   const status = connection?.status ?? "not_connected";
@@ -100,6 +152,10 @@ export function WhatsAppConfigurationWorkspace({
     const timer = globalThis.setInterval(() => void loadConnection(), POLL_INTERVAL_MS);
     return () => globalThis.clearInterval(timer);
   }, [loadConnection, status]);
+
+  useEffect(() => {
+    if (status === "connected") void loadGroupHealth();
+  }, [loadGroupHealth, status]);
 
   // Render whatever QR the latest poll returned; a rotated QR simply
   // replaces the image. jsdom/canvas failures degrade to instructions only.
@@ -309,6 +365,10 @@ export function WhatsAppConfigurationWorkspace({
               <dd>{summary.pending}</dd>
             </div>
             <div className="detail-line">
+              <dt>{t("whatsapp.pipelineProcessing")}</dt>
+              <dd>{summary.processing}</dd>
+            </div>
+            <div className="detail-line">
               <dt>{t("whatsapp.pipelineFailed")}</dt>
               <dd>{summary.failed}</dd>
             </div>
@@ -320,9 +380,97 @@ export function WhatsAppConfigurationWorkspace({
               <dt>{t("whatsapp.pipelineSentToday")}</dt>
               <dd>{summary.sentToday}</dd>
             </div>
+            <div className="detail-line">
+              <dt>{t("whatsapp.pipelineSent24h")}</dt>
+              <dd>{summary.sentLast24h}</dd>
+            </div>
+            <div className="detail-line">
+              <dt>{t("whatsapp.pipelineOldestPending")}</dt>
+              <dd>
+                {summary.oldestPendingAt === null
+                  ? "—"
+                  : formatDateTime(summary.oldestPendingAt, locale)}
+              </dd>
+            </div>
+            <div className="detail-line">
+              <dt>{t("whatsapp.pipelineLastSend")}</dt>
+              <dd>
+                {summary.lastSuccessfulSendAt === null
+                  ? "—"
+                  : formatDateTime(summary.lastSuccessfulSendAt, locale)}
+              </dd>
+            </div>
           </dl>
+          {dispatcherHealth === undefined ? null : (
+            <p className="form-hint">
+              {t("whatsapp.dispatcherTitle")}:{" "}
+              {dispatcherHealth.running
+                ? t("whatsapp.dispatcherRunning")
+                : t("whatsapp.dispatcherStopped")}
+              {dispatcherHealth.lastTickAt
+                ? ` · ${t("whatsapp.dispatcherLastTick", {
+                    time: formatDateTime(dispatcherHealth.lastTickAt, locale),
+                  })}`
+                : ""}
+            </p>
+          )}
         </section>
       )}
+
+      {status === "connected" && groupHealth !== undefined ? (
+        <section className="detail-panel">
+          <h2>{t("whatsapp.groupHealthTitle")}</h2>
+          <p>
+            {t("whatsapp.groupHealthConfigured", { value: groupHealth.configured })}
+            {" · "}
+            {t("whatsapp.groupHealthAvailable", { value: groupHealth.availableCount })}
+            {" · "}
+            {t("whatsapp.groupHealthAttention", { value: groupHealth.needsAttention })}
+          </p>
+          {groupHealth.checkedAt ? (
+            <p className="form-hint">
+              {t("whatsapp.groupHealthLastChecked", {
+                time: formatDateTime(groupHealth.checkedAt, locale),
+              })}
+            </p>
+          ) : null}
+          {groupHealth.needsAttention > 0 ? (
+            <div className="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th scope="col">{t("operations.trader", { defaultValue: "Trader" })}</th>
+                    <th scope="col">{t("whatsapp.historyGroup")}</th>
+                    <th scope="col">{t("common.status")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {groupHealth.rows
+                    .filter((row) => row.available === false)
+                    .map((row) => (
+                      <tr key={row.traderId}>
+                        <td>{row.traderName}</td>
+                        <td>
+                          {row.groupNameSnapshot ?? "—"}{" "}
+                          <span className="mono" dir="ltr">
+                            {shortGroupId(row.providerGroupId)}
+                          </span>
+                        </td>
+                        <td>
+                          <span className="status-badge status-failed">
+                            {t("whatsapp.mappedGroupMissing")}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
+        </section>
+      ) : null}
+
+      <WhatsAppMessageOperations api={api} canManage={canManageMessages} />
 
       {status === "connected" ? (
         <section className="detail-panel">

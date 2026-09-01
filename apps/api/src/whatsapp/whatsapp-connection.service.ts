@@ -5,7 +5,11 @@ import { DATABASE } from "../infrastructure/database/database.tokens.js";
 import type { DatabaseSchema } from "../infrastructure/database/database.types.js";
 import { IdentityContextAccessor } from "../security/identity-context.js";
 import { WhatsAppConnectionRuntime } from "./providers/whatsapp-connection-runtime.service.js";
-import type { CompanyWhatsAppConnectionView, WhatsAppGroupView } from "./whatsapp.dto.js";
+import type {
+  CompanyWhatsAppConnectionView,
+  TraderGroupHealthView,
+  WhatsAppGroupView,
+} from "./whatsapp.dto.js";
 
 /**
  * The Company WhatsApp connection surface: status reads plus the
@@ -62,6 +66,58 @@ export class WhatsAppConnectionService {
       name: group.name,
       ...(group.participantCount === undefined ? {} : { participantCount: group.participantCount }),
     }));
+  }
+
+  /**
+   * Mapping health (Prompt 5 §11): every configured Trader group compared
+   * against ONE on-demand live discovery — no per-Trader polling. When
+   * WhatsApp is not connected, availability is honestly `null` (unknowable
+   * right now), never guessed. Nothing here mutates or removes mappings.
+   */
+  public async traderGroupHealth(): Promise<TraderGroupHealthView> {
+    const companyId = this.requireCompanyId();
+    const configured = (
+      await sql<{
+        traderId: string;
+        traderName: string;
+        groupNameSnapshot: string | null;
+        providerGroupId: string;
+        notificationsEnabled: boolean;
+      }>`
+        select s.trader_id as "traderId", t.name_en as "traderName",
+               s.group_name_snapshot as "groupNameSnapshot",
+               s.provider_group_id as "providerGroupId",
+               s.notifications_enabled as "notificationsEnabled"
+          from trader_whatsapp_settings s
+          join traders t on t.id = s.trader_id and t.company_id = s.company_id
+         where s.company_id = ${companyId}::uuid and s.provider_group_id is not null
+         order by t.name_en
+      `.execute(this.database)
+    ).rows;
+
+    let liveGroupIds: Set<string> | null = null;
+    try {
+      const groups = await this.runtime.listGroups(companyId);
+      liveGroupIds = new Set(groups.map((group) => group.providerGroupId));
+    } catch {
+      // Not connected (or discovery temporarily unavailable): availability is
+      // unknown — report that honestly rather than flagging every mapping.
+      liveGroupIds = null;
+    }
+
+    const rows = configured.map((mapping) => ({
+      ...mapping,
+      available: liveGroupIds === null ? null : liveGroupIds.has(mapping.providerGroupId),
+    }));
+    const availableCount = rows.filter((row) => row.available === true).length;
+    return {
+      availableCount,
+      checkedAt: liveGroupIds === null ? null : new Date(),
+      configured: rows.length,
+      connected: liveGroupIds !== null,
+      needsAttention: liveGroupIds === null ? 0 : rows.length - availableCount,
+      rows,
+    };
   }
 
   private async view(companyId: string): Promise<CompanyWhatsAppConnectionView> {

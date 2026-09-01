@@ -8,6 +8,7 @@ import {
   ParseUUIDPipe,
   Post,
   Put,
+  Query,
   Req,
 } from "@nestjs/common";
 import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
@@ -19,12 +20,20 @@ import {
 } from "../authentication/authentication.decorators.js";
 import { TraderWhatsAppSettingsService } from "./trader-whatsapp-settings.service.js";
 import { WhatsAppConnectionService } from "./whatsapp-connection.service.js";
+import { WhatsAppMessageOperationsService } from "./whatsapp-message-operations.service.js";
 import { WhatsAppNotificationHistoryService } from "./whatsapp-notification-history.service.js";
+import {
+  WhatsAppOutboxDispatcher,
+  type DispatcherHealthSnapshot,
+} from "./whatsapp-outbox-dispatcher.service.js";
 import { WhatsAppTestMessageService } from "./whatsapp-test-message.service.js";
 import type {
   CompanyWhatsAppConnectionView,
+  TraderGroupHealthView,
   TraderWhatsAppSettingsView,
   WhatsAppGroupView,
+  WhatsAppMessageDetailView,
+  WhatsAppMessagePage,
   WhatsAppMessageSummaryView,
   WhatsAppNotificationView,
   WhatsAppTestMessageResult,
@@ -32,7 +41,13 @@ import type {
 // NOT `import type`: the DTO classes must exist at runtime for ValidationPipe's
 // decorator metadata — a type-only import silently breaks body validation.
 // eslint-disable-next-line @typescript-eslint/consistent-type-imports
-import { SendTestMessageDto, UpdateTraderWhatsAppSettingsDto } from "./whatsapp.dto.js";
+import {
+  ListWhatsAppMessagesDto,
+  ResolveWhatsAppMessageDto,
+  RetryWhatsAppMessageDto,
+  SendTestMessageDto,
+  UpdateTraderWhatsAppSettingsDto,
+} from "./whatsapp.dto.js";
 
 /**
  * Company-scoped WhatsApp configuration, connectivity and history: the
@@ -60,6 +75,10 @@ export class WhatsAppController {
     private readonly history: WhatsAppNotificationHistoryService,
     @Inject(WhatsAppTestMessageService)
     private readonly testMessages: WhatsAppTestMessageService,
+    @Inject(WhatsAppMessageOperationsService)
+    private readonly messageOperations: WhatsAppMessageOperationsService,
+    @Inject(WhatsAppOutboxDispatcher)
+    private readonly dispatcher: WhatsAppOutboxDispatcher,
   ) {}
 
   @ApiOperation({
@@ -164,6 +183,69 @@ export class WhatsAppController {
   @Get("messages/summary")
   public messageSummary(): Promise<WhatsAppMessageSummaryView> {
     return this.history.summary();
+  }
+
+  @ApiOperation({ summary: "Filterable, paginated Company WhatsApp message operations table" })
+  @RequireAnyPermission("whatsapp.history.view", "whatsapp.connection.manage", "users_roles.manage")
+  @Get("messages")
+  public listMessages(@Query() filters: ListWhatsAppMessagesDto): Promise<WhatsAppMessagePage> {
+    return this.messageOperations.list(filters);
+  }
+
+  @ApiOperation({ summary: "One WhatsApp message with its full attempt history" })
+  @RequireAnyPermission("whatsapp.history.view", "whatsapp.connection.manage", "users_roles.manage")
+  @Get("messages/:messageId")
+  public messageDetail(
+    @Param("messageId", new ParseUUIDPipe()) messageId: string,
+  ): Promise<WhatsAppMessageDetailView> {
+    return this.messageOperations.detail(messageId);
+  }
+
+  @ApiOperation({
+    summary:
+      "Retry a failed message; requires an explicit duplicate-risk confirmation for requires_review",
+  })
+  @RequireAnyPermission("whatsapp.messages.manage", "users_roles.manage")
+  @Post("messages/:messageId/retry")
+  public retryMessage(
+    @Param("messageId", new ParseUUIDPipe()) messageId: string,
+    @Body() input: RetryWhatsAppMessageDto,
+    @Req() request: Request,
+  ): Promise<WhatsAppMessageDetailView> {
+    return this.messageOperations.retry(
+      messageId,
+      input.confirmDuplicateRisk === true,
+      this.correlationId(request),
+    );
+  }
+
+  @ApiOperation({ summary: "Resolve (no resend) or cancel a stuck WhatsApp message" })
+  @RequireAnyPermission("whatsapp.messages.manage", "users_roles.manage")
+  @Post("messages/:messageId/resolve")
+  public resolveMessage(
+    @Param("messageId", new ParseUUIDPipe()) messageId: string,
+    @Body() input: ResolveWhatsAppMessageDto,
+    @Req() request: Request,
+  ): Promise<WhatsAppMessageDetailView> {
+    return this.messageOperations.resolve(messageId, input.action, this.correlationId(request));
+  }
+
+  @ApiOperation({ summary: "Configured Trader group mappings vs live discoverability" })
+  @RequireAnyPermission(
+    "whatsapp.trader_settings.manage",
+    "whatsapp.connection.manage",
+    "users_roles.manage",
+  )
+  @Get("trader-groups/health")
+  public traderGroupHealth(): Promise<TraderGroupHealthView> {
+    return this.connections.traderGroupHealth();
+  }
+
+  @ApiOperation({ summary: "Process-local WhatsApp dispatcher health snapshot" })
+  @RequireAnyPermission("whatsapp.connection.manage", "users_roles.manage")
+  @Get("dispatcher/health")
+  public dispatcherHealth(): DispatcherHealthSnapshot {
+    return this.dispatcher.healthSnapshot();
   }
 
   @ApiOperation({ summary: "List WhatsApp notification history for one Order" })

@@ -87,6 +87,15 @@ export class WhatsAppConnectionRuntime implements OnApplicationBootstrap, OnModu
    *  and one broken Company session must never fail the process. */
   public onApplicationBootstrap(): void {
     if (process.env.NODE_ENV === "test") return;
+    // Single-owner guard: only ONE process may own Company WhatsApp sockets.
+    // On any instance that must not own them (a future multi-instance
+    // topology), WHATSAPP_RUNTIME_ENABLED=false disables restoration here
+    // and the dispatcher alongside it. Horizontal scaling of the owning
+    // service is prohibited — see Documentation/whatsapp-operations.md.
+    if (process.env.WHATSAPP_RUNTIME_ENABLED === "false") {
+      this.logger.warn("whatsapp_runtime_disabled_by_configuration");
+      return;
+    }
     if (!this.sessions.isEncryptionConfigured()) return;
     const timer = setTimeout(() => {
       this.restoreOnStartup().catch((error: unknown) => {

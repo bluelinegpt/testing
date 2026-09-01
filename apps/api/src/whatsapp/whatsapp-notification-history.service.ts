@@ -38,25 +38,39 @@ export class WhatsAppNotificationHistoryService {
     const row = (
       await sql<{
         pending: string;
+        processing: string;
         failed: string;
         requiresReview: string;
         sentToday: string;
+        sentLast24h: string;
+        oldestPendingAt: Date | null;
+        lastSuccessfulSendAt: Date | null;
       }>`
-        select count(*) filter (where status in ('pending', 'processing'))::text as "pending",
+        select count(*) filter (where status = 'pending')::text as "pending",
+               count(*) filter (where status = 'processing')::text as "processing",
                count(*) filter (where status = 'failed')::text as "failed",
                count(*) filter (where status = 'requires_review')::text as "requiresReview",
                count(*) filter (
                  where status = 'sent'
                    and (sent_at at time zone 'Asia/Dubai')::date = (now() at time zone 'Asia/Dubai')::date
-               )::text as "sentToday"
+               )::text as "sentToday",
+               count(*) filter (
+                 where status = 'sent' and sent_at >= now() - interval '24 hours'
+               )::text as "sentLast24h",
+               min(created_at) filter (where status = 'pending') as "oldestPendingAt",
+               max(sent_at) as "lastSuccessfulSendAt"
           from whatsapp_message_outbox
          where company_id = ${companyId}::uuid
       `.execute(this.database)
     ).rows[0];
     return {
       failed: Number(row?.failed ?? 0),
+      lastSuccessfulSendAt: row?.lastSuccessfulSendAt ?? null,
+      oldestPendingAt: row?.oldestPendingAt ?? null,
       pending: Number(row?.pending ?? 0),
+      processing: Number(row?.processing ?? 0),
       requiresReview: Number(row?.requiresReview ?? 0),
+      sentLast24h: Number(row?.sentLast24h ?? 0),
       sentToday: Number(row?.sentToday ?? 0),
     };
   }

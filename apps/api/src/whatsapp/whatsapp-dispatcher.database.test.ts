@@ -8,6 +8,8 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   assertGuardedCommunicationDatabase,
   createFixtureCompany,
+  createFixtureOfficeUser,
+  createFixtureOrder,
   createFixtureTrader,
   withRolledBackCommunicationFixtures,
 } from "../communication/communication.database-test-helpers.js";
@@ -99,21 +101,35 @@ describe.skipIf(!enabled)("whatsapp outbox dispatcher", () => {
       readonly attemptCount?: number;
       readonly processingAgeMinutes?: number;
       readonly createdAgeHours?: number;
+      readonly createdAgeMinutes?: number;
       readonly group?: string;
+      readonly orderId?: string;
+      readonly historyId?: string;
     } = {},
   ): Promise<string> {
+    const isOrder = overrides.orderId !== undefined && overrides.historyId !== undefined;
+    const createdAt =
+      overrides.createdAgeHours !== undefined
+        ? sql`now() - make_interval(hours => ${overrides.createdAgeHours})`
+        : overrides.createdAgeMinutes !== undefined
+          ? sql`now() - make_interval(mins => ${overrides.createdAgeMinutes})`
+          : sql`now()`;
     const row = (
       await sql<{ id: string }>`
         insert into whatsapp_message_outbox (
-          company_id, trader_id, connection_id, message_type, destination_type,
+          company_id, trader_id, order_id, order_status_history_id, connection_id,
+          message_type, destination_type,
           provider_group_id, group_name_snapshot, message_language, message_body,
           status, attempt_count, processing_at, created_at, idempotency_key
         ) values (
-          ${world.companyId}::uuid, ${world.traderId}::uuid, ${world.connectionId}::uuid,
-          'test', 'group', ${overrides.group ?? "dispatch-target@g.us"}, 'Dispatch Group', 'both',
+          ${world.companyId}::uuid, ${world.traderId}::uuid,
+          ${overrides.orderId ?? null}::uuid, ${overrides.historyId ?? null}::uuid,
+          ${world.connectionId}::uuid,
+          ${isOrder ? "order_status" : "test"}, 'group',
+          ${overrides.group ?? "dispatch-target@g.us"}, 'Dispatch Group', 'both',
           'dispatch body', ${overrides.status ?? "pending"}, ${overrides.attemptCount ?? 0},
           ${overrides.processingAgeMinutes === undefined ? null : sql`now() - make_interval(mins => ${overrides.processingAgeMinutes})`},
-          ${overrides.createdAgeHours === undefined ? sql`now()` : sql`now() - make_interval(hours => ${overrides.createdAgeHours})`},
+          ${createdAt},
           ${`dispatch-${Math.random().toString(36).slice(2)}`}
         )
         returning id
@@ -299,6 +315,106 @@ describe.skipIf(!enabled)("whatsapp outbox dispatcher", () => {
       // The fresh row is unaffected by housekeeping and sends normally.
       expect((await readMessage(transaction, fresh))?.status).toBe("sent");
       expect(provider.sends).toHaveLength(1);
+    });
+  });
+
+  it("cancels stale superseded order-status messages but delivers fresh sequences in order", async () => {
+    await withRolledBackCommunicationFixtures(database, async (transaction, runId) => {
+      const world = await createWorld(transaction, runId);
+      const office = await createFixtureOfficeUser(transaction, world.companyId, "wa-disp-o", []);
+      const order = await createFixtureOrder(transaction, world.companyId, office.accountId, {
+        traderId: world.traderId,
+      });
+      async function insertEvent(toStatus: string, minutesAgo: number): Promise<string> {
+        return (
+          await sql<{ id: string }>`
+            insert into order_status_history (
+              company_id, order_id, status_dimension, to_status, changed_by_account_id, occurred_at
+            ) values (
+              ${world.companyId}::uuid, ${order.orderId}::uuid, 'delivery', ${toStatus},
+              ${office.accountId}::uuid, now() - make_interval(mins => ${minutesAgo})
+            ) returning id
+          `.execute(transaction)
+        ).rows[0]!.id;
+      }
+      const olderEvent = await insertEvent("out_for_delivery", 60);
+      const newerEvent = await insertEvent("delivered", 40);
+
+      const { dispatcher, provider } = buildDispatcher(transaction);
+
+      // A stale message (older than the grace period) for the superseded
+      // event is cancelled, never sent.
+      const stale = await insertPending(transaction, world, {
+        createdAgeMinutes: 60,
+        historyId: olderEvent,
+        orderId: order.orderId,
+      });
+      // A message for the LATEST event — even if old — is not superseded.
+      const latest = await insertPending(transaction, world, {
+        createdAgeMinutes: 40,
+        historyId: newerEvent,
+        orderId: order.orderId,
+      });
+      await dispatcher.tick();
+
+      const staleRow = await readMessage(transaction, stale);
+      expect(staleRow?.status).toBe("cancelled");
+      expect(staleRow?.failureCode).toBe("superseded_by_newer_status");
+      expect((await readMessage(transaction, latest))?.status).toBe("sent");
+      // Only the non-superseded message reached the provider.
+      expect(provider.sends).toHaveLength(1);
+
+      // A FRESH message for an already-superseded event (short outage,
+      // within the grace period) still sends — the normal in-order sequence.
+      const fresh = await insertPending(transaction, world, {
+        historyId: olderEvent,
+        orderId: order.orderId,
+        group: "fresh-target@g.us",
+      });
+      await dispatcher.tick();
+      expect((await readMessage(transaction, fresh))?.status).toBe("sent");
+    });
+  });
+
+  it("bounds per-Company claims so a noisy tenant cannot starve others", async () => {
+    await withRolledBackCommunicationFixtures(database, async (transaction, runId) => {
+      const noisy = await createWorld(transaction, runId);
+      const quiet = await createWorld(transaction, runId);
+      const { dispatcher, provider } = buildDispatcher(transaction);
+
+      const noisyIds: string[] = [];
+      for (let index = 0; index < 12; index += 1) {
+        noisyIds.push(await insertPending(transaction, noisy, { createdAgeMinutes: 12 - index }));
+      }
+      const quietIds = [
+        await insertPending(transaction, quiet, { group: "quiet-1@g.us" }),
+        await insertPending(transaction, quiet, { group: "quiet-2@g.us" }),
+      ];
+
+      // One tick: the noisy Company is capped at the per-Company limit (5),
+      // leaving room for BOTH of the quiet Company's messages despite the
+      // noisy backlog being strictly older.
+      const claimed = await dispatcher.tick();
+      expect(claimed).toBe(7);
+      const noisySends = provider.sends.filter((send) => send.companyId === noisy.companyId);
+      const quietSends = provider.sends.filter((send) => send.companyId === quiet.companyId);
+      expect(noisySends).toHaveLength(5);
+      expect(quietSends).toHaveLength(2);
+      for (const id of quietIds) {
+        expect((await readMessage(transaction, id))?.status).toBe("sent");
+      }
+
+      // The rest of the noisy backlog drains steadily on later ticks.
+      await dispatcher.tick();
+      await dispatcher.tick();
+      const remaining = (
+        await sql<{ count: string }>`
+          select count(*)::text as count from whatsapp_message_outbox
+           where company_id = ${noisy.companyId}::uuid and status = 'pending'
+        `.execute(transaction)
+      ).rows[0];
+      expect(remaining?.count).toBe("0");
+      expect(noisyIds).toHaveLength(12);
     });
   });
 
