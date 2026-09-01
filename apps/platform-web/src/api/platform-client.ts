@@ -1034,6 +1034,47 @@ function toQuery(filters: object): string {
   return query.toString();
 }
 
+export interface CompanyWhatsAppTemplate {
+  status: string;
+  bodyAr: string;
+  bodyEn: string;
+  isCustom: boolean;
+  updatedAt: string | null;
+}
+
+export interface CompanyWhatsAppOverview {
+  enabled: boolean;
+  disabledReason: string | null;
+  connection: {
+    status: string;
+    connectedPhoneNumber: string | null;
+    lastConnectedAt: string | null;
+    lastDisconnectedAt: string | null;
+  } | null;
+  placeholders: readonly string[];
+  templates: CompanyWhatsAppTemplate[];
+}
+
+export interface CompanyWhatsAppMessage {
+  id: string;
+  createdAt: string;
+  messageType: string;
+  status: string;
+  failureCode: string | null;
+  messageLanguage: string;
+  groupNameSnapshot: string | null;
+  traderName: string | null;
+  orderNumber: string | null;
+  messageBody: string;
+}
+
+export interface CompanyWhatsAppMessagesPage {
+  items: CompanyWhatsAppMessage[];
+  page: number;
+  pageSize: number;
+  totals: { total: number; pending: number; sent: number; failed: number };
+}
+
 export const platformApi = {
   async login(identifier: string, password: string): Promise<PlatformIdentity> {
     const result = await request<{ identity: PlatformIdentity }>("platform/auth/login", {
@@ -1421,6 +1462,71 @@ export const platformApi = {
       timeoutMs: 60_000,
     });
     if (!result) throw new PlatformApiError("Empty AI Website Setup response", "empty", 500);
+    return result;
+  },
+
+  async companyWhatsApp(companyId: string): Promise<CompanyWhatsAppOverview> {
+    const result = await request<CompanyWhatsAppOverview>(
+      `platform/companies/${companyId}/whatsapp`,
+      { method: "GET" },
+    );
+    if (result === undefined) throw new PlatformApiError("Empty WhatsApp response", "empty", 500);
+    return result;
+  },
+
+  async setCompanyWhatsAppEnabled(
+    companyId: string,
+    enabled: boolean,
+    reason?: string,
+  ): Promise<CompanyWhatsAppOverview> {
+    const result = await request<CompanyWhatsAppOverview>(
+      `platform/companies/${companyId}/whatsapp/enabled`,
+      { body: { enabled, ...(reason === undefined ? {} : { reason }) }, method: "PUT" },
+    );
+    if (result === undefined) throw new PlatformApiError("Empty WhatsApp response", "empty", 500);
+    return result;
+  },
+
+  async updateCompanyWhatsAppTemplate(
+    companyId: string,
+    status: string,
+    payload: { bodyAr: string; bodyEn: string },
+  ): Promise<CompanyWhatsAppOverview> {
+    const result = await request<CompanyWhatsAppOverview>(
+      `platform/companies/${companyId}/whatsapp/templates/${encodeURIComponent(status)}`,
+      { body: payload, method: "PUT" },
+    );
+    if (result === undefined) throw new PlatformApiError("Empty WhatsApp response", "empty", 500);
+    return result;
+  },
+
+  async resetCompanyWhatsAppTemplate(
+    companyId: string,
+    status: string,
+  ): Promise<CompanyWhatsAppOverview> {
+    const result = await request<CompanyWhatsAppOverview>(
+      `platform/companies/${companyId}/whatsapp/templates/${encodeURIComponent(status)}`,
+      { method: "DELETE" },
+    );
+    if (result === undefined) throw new PlatformApiError("Empty WhatsApp response", "empty", 500);
+    return result;
+  },
+
+  async companyWhatsAppMessages(
+    companyId: string,
+    filters: { from?: string; to?: string; page?: number; pageSize?: number } = {},
+  ): Promise<CompanyWhatsAppMessagesPage> {
+    const query = new URLSearchParams();
+    if (filters.from) query.set("from", filters.from);
+    if (filters.to) query.set("to", filters.to);
+    if (filters.page !== undefined) query.set("page", String(filters.page));
+    if (filters.pageSize !== undefined) query.set("pageSize", String(filters.pageSize));
+    const suffix = query.toString() ? `?${query.toString()}` : "";
+    const result = await request<CompanyWhatsAppMessagesPage>(
+      `platform/companies/${companyId}/whatsapp/messages${suffix}`,
+      { method: "GET" },
+    );
+    if (result === undefined) throw new PlatformApiError("Empty WhatsApp response", "empty", 500);
     return result;
   },
 

@@ -5,6 +5,10 @@ import { DATABASE } from "../infrastructure/database/database.tokens.js";
 import type { DatabaseSchema } from "../infrastructure/database/database.types.js";
 import { IdentityContextAccessor } from "../security/identity-context.js";
 import { WhatsAppConnectionRuntime } from "./providers/whatsapp-connection-runtime.service.js";
+import {
+  assertWhatsAppEnabledByPlatform,
+  isWhatsAppDisabledByPlatform,
+} from "./whatsapp-platform-controls.js";
 import type {
   CompanyWhatsAppConnectionView,
   TraderGroupHealthView,
@@ -37,6 +41,7 @@ export class WhatsAppConnectionService {
   public async connect(correlationId: string): Promise<CompanyWhatsAppConnectionView> {
     const identity = this.identities.current();
     const companyId = this.requireCompanyId();
+    await assertWhatsAppEnabledByPlatform(this.database, companyId);
     await this.runtime.connect(companyId, identity.identityId, correlationId);
     return this.view(companyId);
   }
@@ -51,6 +56,7 @@ export class WhatsAppConnectionService {
   public async reconnect(correlationId: string): Promise<CompanyWhatsAppConnectionView> {
     const identity = this.identities.current();
     const companyId = this.requireCompanyId();
+    await assertWhatsAppEnabledByPlatform(this.database, companyId);
     await this.runtime.reconnect(companyId, identity.identityId, correlationId);
     return this.view(companyId);
   }
@@ -157,8 +163,10 @@ export class WhatsAppConnectionService {
     const live = this.runtime.getLiveState(companyId);
     const status = live?.status ?? row.status;
     const qr = live?.qr ?? null;
+    const platformDisabled = await isWhatsAppDisabledByPlatform(this.database, companyId);
     return {
       ...row,
+      platformDisabled,
       qr,
       qrAvailable: qr !== null,
       requiresQrScan: status === "waiting_for_qr_scan",

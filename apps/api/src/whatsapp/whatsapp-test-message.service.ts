@@ -8,6 +8,7 @@ import type { DatabaseSchema } from "../infrastructure/database/database.types.j
 import { ApplicationException } from "../presentation/errors/application.exception.js";
 import { IdentityContextAccessor } from "../security/identity-context.js";
 import { CompanyWhatsAppProvider } from "./company-whatsapp-provider.port.js";
+import { assertWhatsAppEnabledByPlatform } from "./whatsapp-platform-controls.js";
 import type { WhatsAppTestMessageResult } from "./whatsapp.dto.js";
 
 /**
@@ -41,6 +42,7 @@ export class WhatsAppTestMessageService {
       throw new Error("whatsapp_test_message_requires_company_identity");
     }
     const companyId = identity.companyId;
+    await assertWhatsAppEnabledByPlatform(this.database, companyId);
 
     const trader = (
       await sql<{ id: string; nameEn: string; nameAr: string | null }>`

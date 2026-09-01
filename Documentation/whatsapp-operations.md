@@ -181,3 +181,34 @@ QR from a running instance, which the automated environment cannot do.
 Everything up to the physical scan is covered by the guarded test suites.
 Record evidence per §49 (ids, timestamps, provider message ids — never QR or
 session content) when it is performed.
+
+## Platform Administration controls (per Company)
+
+Platform Administration > Company > WhatsApp tab (permission
+`platform.company_whatsapp.manage`, granted to the Platform Super
+Administrator role):
+
+- **Enable / Disable** — the per-Company kill switch
+  (`company_whatsapp_platform_settings`; absence of a row means ENABLED).
+  Disabling is a full stop: no new outbox intents are written, the dispatcher
+  never claims the Company's parked pending rows, test messages and
+  connect/QR are refused (`whatsapp_disabled_by_platform`), and the Company
+  portal shows a "disabled by Platform Administration" banner. The paired
+  session, Trader mappings and history are KEPT, so re-enabling restores
+  service without re-scanning a QR code. An optional reason is shown to the
+  Company while disabled.
+- **Message templates** — per-status overrides
+  (`company_whatsapp_message_templates`) of the built-in bilingual
+  order-status wording. Placeholders: `{{orderNumber}}`,
+  `{{referenceNumber}}`, `{{status}}`, `{{date}}`, `{{companyName}}`.
+  A status with no override renders the built-in default. Outbox bodies are
+  snapshots: edits shape FUTURE messages only, history is never rewritten.
+  "Reset to default" deletes only that one Company+status override row (see
+  the reviewed exemption in `platform-security-certification.test.ts`).
+- **Message history** — the Company's full outbox (order-status and test
+  messages) with totals (sent/pending/failed), an inclusive from/to date
+  filter evaluated on Asia/Dubai dates, and the rendered body per message.
+
+Every control writes an `audit_events` row
+(`platform.company_whatsapp.enabled_changed` / `template_updated` /
+`template_reset`).

@@ -89,6 +89,7 @@ describe("Platform permission catalogue", () => {
       "platform.companies.read",
       "platform.companies.reset",
       "platform.company_websites.manage",
+      "platform.company_whatsapp.manage",
       "platform.customer_marketplace.manage",
       "platform.customer_quotes.manage",
       "platform.customer_quotes.read",
@@ -131,7 +132,10 @@ describe("Platform permission catalogue", () => {
       "utf8",
     );
     const deletionMigration = readFileSync(
-      resolve(process.cwd(), "../../database/migrations/20260812000000_company_deletion_foundation.ts"),
+      resolve(
+        process.cwd(),
+        "../../database/migrations/20260812000000_company_deletion_foundation.ts",
+      ),
       "utf8",
     );
     const errorReportsMigration = readFileSync(
@@ -145,18 +149,92 @@ describe("Platform permission catalogue", () => {
       ),
       "utf8",
     );
-    const resetMigration = readFileSync(resolve(process.cwd(), "../../database/migrations/20260822000000_company_reset_permission.ts"), "utf8");
-    const leadsMigration = readFileSync(resolve(process.cwd(), "../../database/migrations/20260824000000_platform_demo_requests.ts"), "utf8");
-    const traderApplicationsMigration = readFileSync(resolve(process.cwd(), "../../database/migrations/20260825000000_platform_trader_applications.ts"), "utf8");
-    const customerQuotesMigration = readFileSync(resolve(process.cwd(), "../../database/migrations/20260826000000_customer_quote_marketplace.ts"), "utf8");
-    const blogMigration = readFileSync(resolve(process.cwd(), "../../database/migrations/20260827000000_platform_blog_and_tracking.ts"), "utf8");
-    const agentMigration = readFileSync(resolve(process.cwd(), "../../database/migrations/20260828000000_tawseelhub_agent_core.ts"), "utf8");
-    const websiteCmsMigration = readFileSync(resolve(process.cwd(), "../../database/migrations/20260905000000_controlled_website_cms.ts"), "utf8");
-    const storeOrderConversionMigration = readFileSync(resolve(process.cwd(), "../../database/migrations/20260936000000_store_order_conversion_permission.ts"), "utf8");
-    const agentWhatsappMigration = readFileSync(resolve(process.cwd(), "../../database/migrations/20260906000000_agent_whatsapp_channel_integration.ts"), "utf8");
-    const companyWebsiteMigration = readFileSync(resolve(process.cwd(), "../../database/migrations/20260938000000_company_website_foundation.ts"), "utf8");
-    const migrations = foundationMigration + deletionMigration + errorReportsMigration + integrityMigration + resetMigration + leadsMigration + traderApplicationsMigration + customerQuotesMigration + blogMigration + agentMigration + websiteCmsMigration + storeOrderConversionMigration + agentWhatsappMigration + companyWebsiteMigration;
-    for (const permission of PLATFORM_PERMISSIONS) expect(migrations).toContain(`'${permission.code}'`);
+    const resetMigration = readFileSync(
+      resolve(
+        process.cwd(),
+        "../../database/migrations/20260822000000_company_reset_permission.ts",
+      ),
+      "utf8",
+    );
+    const leadsMigration = readFileSync(
+      resolve(process.cwd(), "../../database/migrations/20260824000000_platform_demo_requests.ts"),
+      "utf8",
+    );
+    const traderApplicationsMigration = readFileSync(
+      resolve(
+        process.cwd(),
+        "../../database/migrations/20260825000000_platform_trader_applications.ts",
+      ),
+      "utf8",
+    );
+    const customerQuotesMigration = readFileSync(
+      resolve(
+        process.cwd(),
+        "../../database/migrations/20260826000000_customer_quote_marketplace.ts",
+      ),
+      "utf8",
+    );
+    const blogMigration = readFileSync(
+      resolve(
+        process.cwd(),
+        "../../database/migrations/20260827000000_platform_blog_and_tracking.ts",
+      ),
+      "utf8",
+    );
+    const agentMigration = readFileSync(
+      resolve(process.cwd(), "../../database/migrations/20260828000000_tawseelhub_agent_core.ts"),
+      "utf8",
+    );
+    const websiteCmsMigration = readFileSync(
+      resolve(process.cwd(), "../../database/migrations/20260905000000_controlled_website_cms.ts"),
+      "utf8",
+    );
+    const storeOrderConversionMigration = readFileSync(
+      resolve(
+        process.cwd(),
+        "../../database/migrations/20260936000000_store_order_conversion_permission.ts",
+      ),
+      "utf8",
+    );
+    const agentWhatsappMigration = readFileSync(
+      resolve(
+        process.cwd(),
+        "../../database/migrations/20260906000000_agent_whatsapp_channel_integration.ts",
+      ),
+      "utf8",
+    );
+    const companyWebsiteMigration = readFileSync(
+      resolve(
+        process.cwd(),
+        "../../database/migrations/20260938000000_company_website_foundation.ts",
+      ),
+      "utf8",
+    );
+    const companyWhatsappMigration = readFileSync(
+      resolve(
+        process.cwd(),
+        "../../database/migrations/20260960000000_platform_whatsapp_controls.ts",
+      ),
+      "utf8",
+    );
+    const migrations =
+      foundationMigration +
+      deletionMigration +
+      errorReportsMigration +
+      integrityMigration +
+      resetMigration +
+      leadsMigration +
+      traderApplicationsMigration +
+      customerQuotesMigration +
+      blogMigration +
+      agentMigration +
+      websiteCmsMigration +
+      storeOrderConversionMigration +
+      agentWhatsappMigration +
+      companyWebsiteMigration +
+      companyWhatsappMigration;
+    for (const permission of PLATFORM_PERMISSIONS)
+      expect(migrations).toContain(`'${permission.code}'`);
     expect(migrations).toContain(`'${PLATFORM_SUPER_ADMIN_ROLE_CODE}'`);
     // Idempotent on an environment that has already been migrated.
     expect(foundationMigration).toContain("on conflict (code) do nothing");

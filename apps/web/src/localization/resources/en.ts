@@ -1291,6 +1291,8 @@ export const englishTranslations = {
     attemptEnded: "The QR connection attempt ended.",
     reconnectRequiredAlert: "WhatsApp needs to be reconnected.",
     notConnectedAlert: "WhatsApp is not connected. Reconnect before selecting or testing a group.",
+    platformDisabledAlert:
+      "WhatsApp is disabled for this company by Platform Administration. Contact the platform team to re-enable it.",
     providerUnavailable: "The WhatsApp service is not available right now. Try again shortly.",
     disconnectTitle: "Disconnect WhatsApp?",
     disconnectBody:

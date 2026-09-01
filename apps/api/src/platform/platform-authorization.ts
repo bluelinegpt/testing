@@ -86,6 +86,11 @@ export const PLATFORM_AGENT_WHATSAPP_MANAGE = "platform.agent.whatsapp.manage";
 // own environment is 'production' — the permission grants the button, the
 // environment decides whether the button can ever fire.
 export const PLATFORM_COMPANIES_RESET = "platform.companies.reset";
+// Per-Company WhatsApp controls: the enable/disable switch, per-status
+// message template overrides, and the Company's message history. One code
+// for the whole surface — viewing a Company's messages is part of managing
+// its WhatsApp, not a separate audience.
+export const PLATFORM_COMPANY_WHATSAPP_MANAGE = "platform.company_whatsapp.manage";
 
 /**
  * The Phase 1 permission set, in the order the seed migration writes them.
@@ -174,6 +179,11 @@ export const PLATFORM_PERMISSIONS: readonly { code: string; description: string 
   {
     code: PLATFORM_COMPANIES_RESET,
     description: "Reset a development or demo Company's transactional data",
+  },
+  {
+    code: PLATFORM_COMPANY_WHATSAPP_MANAGE,
+    description:
+      "Enable/disable Company WhatsApp, edit its message templates and view its messages",
   },
 ];
 

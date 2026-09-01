@@ -256,6 +256,9 @@ export function TraderWhatsAppSection({
       </h2>
       {error ? <p className="alert alert-error">{error}</p> : null}
       {notice ? <p className="alert alert-info">{notice}</p> : null}
+      {connection?.platformDisabled === true ? (
+        <p className="alert alert-warning">{t("whatsapp.platformDisabledAlert")}</p>
+      ) : null}
       {!connected ? <p className="alert alert-warning">{t("whatsapp.notConnectedAlert")}</p> : null}
       {mappedGroupMissing ? (
         <p className="alert alert-warning">{t("whatsapp.mappedGroupMissing")}</p>

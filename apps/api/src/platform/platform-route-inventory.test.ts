@@ -27,6 +27,7 @@ import { PlatformBlogController } from "./platform-blog.controller.js";
 import { PlatformWebsiteCmsController } from "./platform-website-cms.controller.js";
 import { PlatformAgentController } from "./platform-agent.controller.js";
 import { PlatformCompanyWebsiteController } from "./company-website.controller.js";
+import { PlatformCompanyWhatsAppController } from "./platform-company-whatsapp.controller.js";
 
 /**
  * The Platform route inventory, enumerated rather than assumed.
@@ -58,6 +59,7 @@ const platformControllers = [
   PlatformTargetCompanyController,
   PlatformCompanyUserController,
   PlatformCompanyWebsiteController,
+  PlatformCompanyWhatsAppController,
 ];
 
 interface PlatformRoute {
@@ -219,7 +221,12 @@ describe("Platform route inventory", () => {
       if (route.isPublic) continue;
       const shouldManage =
         mutating.includes(route.method) ||
-        (route.controller === "PlatformCompanyWebsiteController" && route.method === "preview");
+        (route.controller === "PlatformCompanyWebsiteController" && route.method === "preview") ||
+        // Company WhatsApp is a single-permission surface by design (approved
+        // 2026-09-01): viewing a Company's message history is part of managing
+        // its WhatsApp, so the read routes deliberately carry the same
+        // `platform.company_whatsapp.manage` code as the mutations.
+        route.controller === "PlatformCompanyWhatsAppController";
       const hasManage =
         route.method !== "settings" &&
         route.permissions.some((code) =>
@@ -254,6 +261,7 @@ describe("Platform route inventory", () => {
       "PlatformTargetCompanyController",
       "PlatformCompanyUserController",
       "PlatformCompanyWebsiteController",
+      "PlatformCompanyWhatsAppController",
     ]);
     const bad: string[] = [];
     for (const route of routes) {
@@ -270,7 +278,9 @@ describe("Platform route inventory", () => {
             ? "src/platform/platform-company-user.controller.ts"
             : controller === "PlatformCompanyWebsiteController"
               ? "src/platform/company-website.controller.ts"
-              : "src/platform/platform-company.controller.ts",
+              : controller === "PlatformCompanyWhatsAppController"
+                ? "src/platform/platform-company-whatsapp.controller.ts"
+                : "src/platform/platform-company.controller.ts",
         ),
         "utf8",
       );

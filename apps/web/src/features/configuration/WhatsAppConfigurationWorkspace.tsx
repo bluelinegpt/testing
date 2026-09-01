@@ -15,6 +15,9 @@ import { WhatsAppMessageOperations } from "./WhatsAppMessageOperations.js";
  *  lives only in component state, never in any browser storage. */
 export interface WhatsAppConnectionView {
   readonly status: string;
+  /** True when Platform Administration has switched WhatsApp off for this
+   *  company — a banner explains it and lifecycle actions are hidden. */
+  readonly platformDisabled?: boolean;
   readonly providerType: string;
   readonly connectedPhoneNumber: string | null;
   readonly connectedAt: string | null;
@@ -147,6 +150,9 @@ export function WhatsAppConfigurationWorkspace({
   // Pairing is asynchronous on the backend: poll the one status endpoint
   // while a connection attempt is in flight, and stop on any settled state.
   const status = connection?.status ?? "not_connected";
+  // Platform Administration's kill switch: every lifecycle action is hidden
+  // (the API refuses them anyway) and the banner above explains why.
+  const platformDisabled = connection?.platformDisabled === true;
   useEffect(() => {
     if (!transitionalStatuses.has(status)) return;
     const timer = globalThis.setInterval(() => void loadConnection(), POLL_INTERVAL_MS);
@@ -252,6 +258,9 @@ export function WhatsAppConfigurationWorkspace({
         }
       />
       {error ? <p className="alert alert-error">{error}</p> : null}
+      {connection?.platformDisabled === true ? (
+        <p className="alert alert-warning">{t("whatsapp.platformDisabledAlert")}</p>
+      ) : null}
 
       <section className="detail-panel">
         <h2>
@@ -282,7 +291,7 @@ export function WhatsAppConfigurationWorkspace({
           ) : null}
         </dl>
 
-        {status === "not_connected" && canManage ? (
+        {status === "not_connected" && canManage && !platformDisabled ? (
           <>
             <p>{t("whatsapp.connectExplainer1")}</p>
             <p>{t("whatsapp.connectExplainer2")}</p>
@@ -313,7 +322,7 @@ export function WhatsAppConfigurationWorkspace({
           </div>
         ) : null}
 
-        {reconnectStatuses.has(status) && canManage ? (
+        {reconnectStatuses.has(status) && canManage && !platformDisabled ? (
           <>
             {status === "disconnected" ? (
               <p className="form-hint">{t("whatsapp.attemptEnded")}</p>

@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  DEFAULT_TEMPLATE_BODY_AR,
+  DEFAULT_TEMPLATE_BODY_EN,
   isTraderNotifiableDeliveryStatus,
   renderOrderStatusMessage,
+  renderOrderStatusMessageFromTemplate,
+  TEMPLATE_PLACEHOLDERS,
   TRADER_NOTIFIABLE_DELIVERY_STATUSES,
   traderStatusLabel,
 } from "./whatsapp-message-templates.js";
@@ -95,6 +99,64 @@ describe("renderOrderStatusMessage", () => {
     for (const status of TRADER_NOTIFIABLE_DELIVERY_STATUSES) {
       const body = renderOrderStatusMessage({ ...base, language: "both", status });
       expect(body).not.toContain(status);
+    }
+  });
+});
+
+describe("per-Company template overrides", () => {
+  const input = {
+    companyName: "Dana Delivery",
+    language: "en" as const,
+    occurredAt,
+    orderNumber: "LAH0000021",
+    referenceNumber: "AWB-77",
+    status: "delivered",
+  };
+  const template = {
+    bodyAr: "تم تسليم {{orderNumber}} ({{status}}) — {{companyName}}",
+    bodyEn: "Delivered: {{orderNumber}} ref {{referenceNumber}} at {{date}} — {{companyName}}",
+  };
+
+  it("substitutes every placeholder per language", () => {
+    const english = renderOrderStatusMessageFromTemplate(template, input);
+    expect(english).toContain("Delivered: LAH0000021 ref AWB-77 at ");
+    expect(english).toContain("Dana Delivery");
+    expect(english).not.toContain("{{");
+
+    const arabic = renderOrderStatusMessageFromTemplate(template, { ...input, language: "ar" });
+    expect(arabic).toContain("LAH0000021");
+    expect(arabic).toContain("تم التسليم"); // {{status}} localizes per body language
+    expect(arabic).not.toContain("{{");
+  });
+
+  it("assembles `both` as ONE bilingual message, Arabic first", () => {
+    const bilingual = renderOrderStatusMessageFromTemplate(template, {
+      ...input,
+      language: "both",
+    });
+    const arabicIndex = bilingual.indexOf("تم تسليم");
+    const englishIndex = bilingual.indexOf("Delivered:");
+    expect(arabicIndex).toBeGreaterThanOrEqual(0);
+    expect(englishIndex).toBeGreaterThan(arabicIndex);
+  });
+
+  it("renders a missing reference as empty and leaves unknown placeholders literal", () => {
+    const body = renderOrderStatusMessageFromTemplate(
+      { ...template, bodyEn: "Ref [{{referenceNumber}}] {{surprise}}" },
+      { ...input, referenceNumber: null },
+    );
+    expect(body).toContain("Ref []");
+    // A typo'd placeholder stays visible instead of silently vanishing.
+    expect(body).toContain("{{surprise}}");
+  });
+
+  it("the published default template bodies use only documented placeholders", () => {
+    for (const body of [DEFAULT_TEMPLATE_BODY_AR, DEFAULT_TEMPLATE_BODY_EN]) {
+      const used = [...body.matchAll(/\{\{\s*(\w+)\s*\}\}/g)].map((match) => match[1]);
+      expect(used.length).toBeGreaterThan(0);
+      for (const name of used) {
+        expect(TEMPLATE_PLACEHOLDERS).toContain(name);
+      }
     }
   });
 });

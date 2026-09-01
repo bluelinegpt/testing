@@ -58,6 +58,9 @@ export class UpdateTraderWhatsAppSettingsDto {
  */
 export interface CompanyWhatsAppConnectionView {
   readonly status: string;
+  /** True when Platform Administration has switched WhatsApp off for this
+   *  Company — the UI shows why every WhatsApp action is unavailable. */
+  readonly platformDisabled: boolean;
   readonly providerType: string;
   readonly connectedPhoneNumber: string | null;
   readonly connectedAt: Date | null;

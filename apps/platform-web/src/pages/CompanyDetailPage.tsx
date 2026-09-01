@@ -18,9 +18,16 @@ import {
 import { usePlatformSession } from "../app/PlatformSession.js";
 import { companyPortalUrl } from "../config/company-portal.js";
 import { CompanyAdministrators } from "./CompanyAdministrators.js";
+import { CompanyWhatsAppPanel } from "./CompanyWhatsAppPanel.js";
 
 type CompanyDetailTab =
-  "information" | "administrators" | "website" | "configuration" | "audit" | "lifecycle";
+  | "information"
+  | "administrators"
+  | "website"
+  | "whatsapp"
+  | "configuration"
+  | "audit"
+  | "lifecycle";
 
 /**
  * One Company: overview, profile, accounting setup, readiness and lifecycle.
@@ -469,6 +476,7 @@ export function CompanyDetailPage(): ReactElement {
             ["information", "Company Information"],
             ["administrators", "Administrators & Passwords"],
             ["website", "Website"],
+            ["whatsapp", "WhatsApp"],
             ["configuration", "Configuration & Accounting"],
             ["audit", "Audit"],
             ["lifecycle", "Lifecycle"],
@@ -614,6 +622,17 @@ export function CompanyDetailPage(): ReactElement {
             Manage Website
           </Link>
         </div>
+      </section>
+
+      <section
+        aria-labelledby="company-tab-button-whatsapp"
+        hidden={activeTab !== "whatsapp"}
+        id="company-tab-whatsapp"
+        role="tabpanel"
+      >
+        {activeTab === "whatsapp" && companyId ? (
+          <CompanyWhatsAppPanel companyId={companyId} />
+        ) : null}
       </section>
 
       <section hidden={activeTab !== "information"}>

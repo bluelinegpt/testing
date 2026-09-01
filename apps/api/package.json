@@ -60,7 +60,7 @@
     "test:commerce-upload:database": "vitest run src/storefront/commerce-media-upload.database.test.ts",
     "test:marketplace:database": "vitest run src/marketplace/marketplace-taxonomy.database.test.ts",
     "test:commerce-media:database": "vitest run src/storefront/commerce-media-ownership.database.test.ts",
-    "test:whatsapp:database": "vitest run src/whatsapp/whatsapp.database.test.ts src/whatsapp/whatsapp-connectivity.database.test.ts src/whatsapp/whatsapp-test-message.database.test.ts src/whatsapp/whatsapp-order-notifications.database.test.ts src/whatsapp/whatsapp-dispatcher.database.test.ts src/whatsapp/whatsapp-operations.database.test.ts"
+    "test:whatsapp:database": "vitest run src/whatsapp/whatsapp.database.test.ts src/whatsapp/whatsapp-connectivity.database.test.ts src/whatsapp/whatsapp-test-message.database.test.ts src/whatsapp/whatsapp-order-notifications.database.test.ts src/whatsapp/whatsapp-dispatcher.database.test.ts src/whatsapp/whatsapp-operations.database.test.ts src/whatsapp/whatsapp-platform-controls.database.test.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1118.0",

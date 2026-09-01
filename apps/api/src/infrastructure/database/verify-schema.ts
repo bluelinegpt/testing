@@ -107,6 +107,8 @@ const expectedTables = [
   "trader_whatsapp_settings",
   "whatsapp_message_outbox",
   "whatsapp_message_attempts",
+  "company_whatsapp_platform_settings",
+  "company_whatsapp_message_templates",
 ] as const;
 
 const expectedTriggers = [
@@ -411,6 +413,9 @@ const expectedConstraints = [
   "journal_lines_cash_bank_movement_fk",
   "whatsapp_message_outbox_message_type_check",
   "whatsapp_message_outbox_type_shape_check",
+  "company_whatsapp_platform_settings_reason_shape_check",
+  "company_whatsapp_message_templates_status_check",
+  "company_whatsapp_message_templates_body_check",
 ] as const;
 
 const expectedIndexes = [

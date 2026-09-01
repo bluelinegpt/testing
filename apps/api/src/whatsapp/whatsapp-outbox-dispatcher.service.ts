@@ -234,9 +234,18 @@ export class WhatsAppOutboxDispatcher implements OnModuleInit, OnModuleDestroy {
                   select id from (
                     select id, created_at,
                            row_number() over (partition by company_id order by created_at) as company_rank
-                      from whatsapp_message_outbox
+                      from whatsapp_message_outbox candidate
                      where status = 'pending'
                        and (next_attempt_at is null or next_attempt_at <= now())
+                       -- Platform kill switch: a Company disabled by Platform
+                       -- Administration keeps its pending rows parked (never
+                       -- claimed, never expired into failures by this claim)
+                       -- until re-enabled.
+                       and not exists (
+                         select 1 from company_whatsapp_platform_settings p
+                          where p.company_id = candidate.company_id
+                            and p.whatsapp_enabled = false
+                       )
                   ) ranked
                   where company_rank <= ${WHATSAPP_DISPATCH_POLICY.perCompanyClaimLimit}
                   order by created_at
@@ -244,6 +253,11 @@ export class WhatsAppOutboxDispatcher implements OnModuleInit, OnModuleDestroy {
                 )
             and status = 'pending'
             and (next_attempt_at is null or next_attempt_at <= now())
+            and not exists (
+              select 1 from company_whatsapp_platform_settings p
+               where p.company_id = whatsapp_message_outbox.company_id
+                 and p.whatsapp_enabled = false
+            )
           for update skip locked
        )
        returning id, company_id as "companyId", provider_group_id as "providerGroupId",

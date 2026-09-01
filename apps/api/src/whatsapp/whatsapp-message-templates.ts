@@ -81,6 +81,87 @@ export interface OrderStatusMessageInput {
   readonly companyName: string;
 }
 
+/** A Platform-authored per-Company override of one status's message wording
+ *  (`company_whatsapp_message_templates`). Both language bodies always exist
+ *  together so `both` can assemble a bilingual message. */
+export interface OrderStatusTemplateOverride {
+  readonly bodyAr: string;
+  readonly bodyEn: string;
+}
+
+/** The placeholder names a template override may use. Documented on the
+ *  Platform's template editor; anything else stays literal text. */
+export const TEMPLATE_PLACEHOLDERS = [
+  "orderNumber",
+  "referenceNumber",
+  "status",
+  "date",
+  "companyName",
+] as const;
+
+/** The built-in wording expressed as placeholder templates — what the
+ *  Platform's template editor shows as the starting point for a Company that
+ *  has no override yet. The actual default RENDER path stays
+ *  `renderOrderStatusMessage` below (it additionally omits the reference line
+ *  when the Order has none); these strings exist for editing, not sending. */
+export const DEFAULT_TEMPLATE_BODY_AR = [
+  "تحديث حالة الطلب",
+  "",
+  "رقم الطلب: {{orderNumber}}",
+  "الرقم المرجعي: {{referenceNumber}}",
+  "الحالة: {{status}}",
+  "وقت التحديث: {{date}}",
+  "",
+  "{{companyName}}",
+].join("\n");
+
+export const DEFAULT_TEMPLATE_BODY_EN = [
+  "Order Status Update",
+  "",
+  "Order: {{orderNumber}}",
+  "Reference: {{referenceNumber}}",
+  "Status: {{status}}",
+  "Updated: {{date}}",
+  "",
+  "{{companyName}}",
+].join("\n");
+
+function substitutePlaceholders(
+  template: string,
+  input: OrderStatusMessageInput,
+  language: "en" | "ar",
+): string {
+  const values: Record<string, string> = {
+    companyName: input.companyName,
+    date: formatTimestamp(input.occurredAt, language),
+    orderNumber: input.orderNumber,
+    referenceNumber: input.referenceNumber ?? "",
+    status: traderStatusLabel(input.status, language),
+  };
+  return template.replaceAll(/\{\{\s*(\w+)\s*\}\}/g, (whole, name: string) => {
+    const value = values[name];
+    // An unknown placeholder stays literal so a typo is visible in the
+    // Platform's preview instead of silently vanishing from messages.
+    return value === undefined ? whole : value;
+  });
+}
+
+/** Renders a Platform-authored override for the Trader's language setting.
+ *  `both` is ONE bilingual message — Arabic body, blank line, English body —
+ *  mirroring the default template's single-send rule. */
+export function renderOrderStatusMessageFromTemplate(
+  template: OrderStatusTemplateOverride,
+  input: OrderStatusMessageInput,
+): string {
+  if (input.language === "ar") return substitutePlaceholders(template.bodyAr, input, "ar");
+  if (input.language === "en") return substitutePlaceholders(template.bodyEn, input, "en");
+  return [
+    substitutePlaceholders(template.bodyAr, input, "ar"),
+    "",
+    substitutePlaceholders(template.bodyEn, input, "en"),
+  ].join("\n");
+}
+
 export function renderOrderStatusMessage(input: OrderStatusMessageInput): string {
   const arabicLines = [
     "تحديث حالة الطلب",

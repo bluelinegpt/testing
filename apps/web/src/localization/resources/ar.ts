@@ -1268,6 +1268,8 @@ export const arabicTranslations = {
     attemptEnded: "انتهت محاولة الربط برمز الاستجابة السريعة.",
     reconnectRequiredAlert: "يحتاج واتساب إلى إعادة ربط.",
     notConnectedAlert: "واتساب غير متصل. أعد الربط قبل اختيار مجموعة أو إرسال رسالة تجريبية.",
+    platformDisabledAlert:
+      "تم تعطيل واتساب لهذه الشركة من قبل إدارة المنصة. تواصل مع فريق المنصة لإعادة تفعيله.",
     providerUnavailable: "خدمة واتساب غير متاحة حالياً. حاول مرة أخرى بعد قليل.",
     disconnectTitle: "قطع اتصال واتساب؟",
     disconnectBody:

@@ -47,10 +47,7 @@ function withoutComments(source: string): string {
 // ---------------------------------------------------------------------------
 
 describe("Session transport certification", () => {
-  const cookieSource = readFileSync(
-    resolve(apiRoot, "authentication/session-cookie.ts"),
-    "utf8",
-  );
+  const cookieSource = readFileSync(resolve(apiRoot, "authentication/session-cookie.ts"), "utf8");
 
   it("marks the session cookie HttpOnly, SameSite=Lax and scoped to the API path", () => {
     expect(cookieSource).toContain("httpOnly: true");
@@ -63,7 +60,10 @@ describe("Session transport certification", () => {
    * insecure cookie to production; hard-coding true breaks local http.
    */
   it("derives the Secure flag from the environment rather than fixing it", () => {
-    const controller = readFileSync(resolve(platformDirectory, "platform-auth.controller.ts"), "utf8");
+    const controller = readFileSync(
+      resolve(platformDirectory, "platform-auth.controller.ts"),
+      "utf8",
+    );
     expect(controller).toContain('this.config.get("app.environment"');
     expect(controller).toContain('=== "production"');
     expect(withoutComments(controller)).not.toContain("secure: true,");
@@ -79,13 +79,18 @@ describe("Session transport certification", () => {
     const controller = withoutComments(
       readFileSync(resolve(platformDirectory, "platform-auth.controller.ts"), "utf8"),
     );
-    const body = controller.slice(controller.indexOf("return {", controller.indexOf("setSessionCookie")));
+    const body = controller.slice(
+      controller.indexOf("return {", controller.indexOf("setSessionCookie")),
+    );
     expect(body).not.toContain("accessToken");
     expect(body).not.toContain("token:");
   });
 
   it("clears the cookie on sign-out", () => {
-    const controller = readFileSync(resolve(platformDirectory, "platform-auth.controller.ts"), "utf8");
+    const controller = readFileSync(
+      resolve(platformDirectory, "platform-auth.controller.ts"),
+      "utf8",
+    );
     const logout = controller.slice(controller.indexOf("public async logout"));
     expect(logout).toContain("clearSessionCookie");
   });
@@ -192,7 +197,7 @@ describe("Browser storage certification", () => {
 
     // A value read back out of storage is validated before it is used, so a
     // hand-edited key cannot put arbitrary text on the document element.
-    expect(source).toContain("isThemePreference(value) ? value : \"system\"");
+    expect(source).toContain('isThemePreference(value) ? value : "system"');
   });
 
   /**
@@ -206,7 +211,9 @@ describe("Browser storage certification", () => {
   });
 
   it("keeps no token field on the Platform API client", () => {
-    const client = withoutComments(readFileSync(resolve(webRoot, "api/platform-client.ts"), "utf8"));
+    const client = withoutComments(
+      readFileSync(resolve(webRoot, "api/platform-client.ts"), "utf8"),
+    );
     expect(client).not.toContain("setAccessToken");
     expect(client).not.toMatch(/\btoken\s*[:=]/);
     expect(client).not.toContain("Authorization");
@@ -264,7 +271,10 @@ describe("Secret handling certification", () => {
 
 describe("Enumeration resistance certification", () => {
   it("returns one generic failure for every rejected sign-in", () => {
-    const service = readFileSync(resolve(apiRoot, "authentication/authentication.service.ts"), "utf8");
+    const service = readFileSync(
+      resolve(apiRoot, "authentication/authentication.service.ts"),
+      "utf8",
+    );
     // Unknown account, wrong password, disabled account and disabled Company
     // must be indistinguishable to the caller.
     expect(service).toContain("invalidCredentials()");
@@ -273,7 +283,10 @@ describe("Enumeration resistance certification", () => {
   });
 
   it("refuses a suspended Company's users without saying why", () => {
-    const service = readFileSync(resolve(apiRoot, "authentication/authentication.service.ts"), "utf8");
+    const service = readFileSync(
+      resolve(apiRoot, "authentication/authentication.service.ts"),
+      "utf8",
+    );
     expect(service).toContain('account.companyStatus !== "active"');
     // Same rejection path as bad credentials.
     const block = service.slice(service.indexOf('account.companyStatus !== "active"'));
@@ -281,7 +294,10 @@ describe("Enumeration resistance certification", () => {
   });
 
   it("answers an unknown and a malformed Company identifier identically", () => {
-    const guard = readFileSync(resolve(platformDirectory, "platform-target-company.guard.ts"), "utf8");
+    const guard = readFileSync(
+      resolve(platformDirectory, "platform-target-company.guard.ts"),
+      "utf8",
+    );
     // Both paths throw the SAME constructed error, not two that happen to share
     // a status code today.
     expect(guard).toContain("throw this.notFound();");
@@ -302,7 +318,10 @@ describe("Enumeration resistance certification", () => {
 
 describe("Redirect certification", () => {
   it("builds every Platform-issued URL server-side from configuration", () => {
-    const service = readFileSync(resolve(platformDirectory, "platform-company-user.service.ts"), "utf8");
+    const service = readFileSync(
+      resolve(platformDirectory, "platform-company-user.service.ts"),
+      "utf8",
+    );
     expect(service).toContain("BLUELINE_TENANT_HOST_SUFFIX");
     // No caller-supplied destination reaches a link.
     expect(service).not.toMatch(/redirect(Uri|Url)/i);
@@ -349,7 +368,12 @@ describe("Tenant isolation certification", () => {
       readFileSync(resolve(platformDirectory, "platform-target-company.guard.ts"), "utf8"),
     );
     expect(guard).toContain("request.params");
-    for (const source of ["request.body", "request.query", 'headers["x-company', "x-target-company"]) {
+    for (const source of [
+      "request.body",
+      "request.query",
+      'headers["x-company',
+      "x-target-company",
+    ]) {
       expect(guard).not.toContain(source);
     }
   });
@@ -417,6 +441,14 @@ describe("Destructive capability certification", () => {
     // pinned by "limits SEO Consultant provisioning deletion" below, so any
     // broader delete added to this file fails certification again.
     "platform-user-provisioning.ts",
+    // 2026-09-01 review (per-Company WhatsApp controls): ONE
+    // `delete from company_whatsapp_message_templates` scoped to a single
+    // (company_id, status) pair — removing a Platform-authored wording
+    // OVERRIDE so the built-in default template applies again. The row is
+    // Platform configuration, never a Company business record, and sent
+    // messages keep their snapshotted bodies regardless. The statement shape
+    // is pinned by "limits WhatsApp template deletion" below.
+    "platform-company-whatsapp.service.ts",
   ]);
 
   it("issues no destructive statement anywhere in the Platform module", () => {
@@ -458,6 +490,20 @@ describe("Destructive capability certification", () => {
     expect(statements[0]).toContain("where id=${id}::uuid");
     expect(statements[0]).toContain("company_id=${companyid}::uuid");
     expect(statements[0]).toContain("version=${expectedversion}");
+  });
+
+  it("limits WhatsApp template deletion to one Company's single status override", () => {
+    const source = withoutComments(
+      readFileSync(resolve(platformDirectory, "platform-company-whatsapp.service.ts"), "utf8"),
+    ).toLowerCase();
+    // Exactly ONE delete statement in the whole file …
+    const statements = source.match(/delete from[\s\S]*?`/g) ?? [];
+    expect(statements).toHaveLength(1);
+    // … targeting only the wording-override table, scoped to one Company AND
+    // one status — never unscoped, never another table.
+    expect(statements[0]).toContain("delete from company_whatsapp_message_templates");
+    expect(statements[0]).toContain("company_id = ${companyid}::uuid");
+    expect(statements[0]).toContain("status = ${status}");
   });
 
   /**

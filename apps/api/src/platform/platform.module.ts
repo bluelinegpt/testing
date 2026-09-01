@@ -50,6 +50,8 @@ import {
   PublicCompanyWebsiteController,
 } from "./company-website.controller.js";
 import { CompanyWebsiteService } from "./company-website.service.js";
+import { PlatformCompanyWhatsAppController } from "./platform-company-whatsapp.controller.js";
+import { PlatformCompanyWhatsAppService } from "./platform-company-whatsapp.service.js";
 import { CompanyWebsiteDomainService } from "./company-website-domain.service.js";
 import {
   CloudflareCompanyWebsiteDomainProvider,
@@ -90,6 +92,7 @@ import { CompanyWebsiteAiSetupProvider } from "./company-website-ai-setup.provid
     PlatformTargetCompanyController,
     PlatformCompanyUserController,
     PlatformCompanyWebsiteController,
+    PlatformCompanyWhatsAppController,
     PublicCompanyWebsiteController,
   ],
   exports: [PlatformService, PlatformAuditService, PlatformCompanyService],
@@ -121,6 +124,7 @@ import { CompanyWebsiteAiSetupProvider } from "./company-website-ai-setup.provid
     AccountingTemplateImporter,
     PlatformTargetCompanyGuard,
     CompanyWebsiteService,
+    PlatformCompanyWhatsAppService,
     CompanyWebsiteDomainService,
     CloudflareCompanyWebsiteDomainProvider,
     { provide: CompanyWebsiteDomainProvider, useExisting: CloudflareCompanyWebsiteDomainProvider },

@@ -6,6 +6,7 @@ import { ApplicationException } from "../presentation/errors/application.excepti
 import {
   isTraderNotifiableDeliveryStatus,
   renderOrderStatusMessage,
+  renderOrderStatusMessageFromTemplate,
 } from "./whatsapp-message-templates.js";
 
 type ExecuteContext = Kysely<DatabaseSchema> | Transaction<DatabaseSchema>;
@@ -91,6 +92,8 @@ export class WhatsAppOutboxWriter {
         orderNumber: string;
         referenceNumber: string | null;
         companyName: string;
+        templateBodyAr: string | null;
+        templateBodyEn: string | null;
       }>`
         select s.provider_group_id as "providerGroupId",
                s.group_name_snapshot as "groupNameSnapshot",
@@ -99,26 +102,44 @@ export class WhatsAppOutboxWriter {
                o.trader_id as "traderId",
                o.order_number as "orderNumber",
                o.serial_number as "referenceNumber",
-               co.name_en as "companyName"
+               co.name_en as "companyName",
+               tpl.body_ar as "templateBodyAr",
+               tpl.body_en as "templateBodyEn"
           from orders o
           join trader_whatsapp_settings s
             on s.trader_id = o.trader_id and s.company_id = o.company_id
           join company_whatsapp_connections c on c.company_id = o.company_id
           join companies co on co.id = o.company_id
+          left join company_whatsapp_message_templates tpl
+            on tpl.company_id = o.company_id and tpl.status = ${input.toStatus}
          where o.id = ${input.orderId}::uuid and o.company_id = ${input.companyId}::uuid
            and s.notifications_enabled = true and s.provider_group_id is not null
+           -- Platform kill switch: absence of a row means enabled. A disabled
+           -- Company records nothing here — deliberately quiet, like every
+           -- other not-configured case in this hook.
+           and not exists (
+             select 1 from company_whatsapp_platform_settings p
+              where p.company_id = o.company_id and p.whatsapp_enabled = false
+           )
       `.execute(execute)
     ).rows[0];
     if (context === undefined) return;
 
-    const body = renderOrderStatusMessage({
+    const messageInput = {
       companyName: context.companyName,
       language: context.messageLanguage,
       occurredAt: input.occurredAt,
       orderNumber: context.orderNumber,
       referenceNumber: context.referenceNumber,
       status: input.toStatus,
-    });
+    };
+    const body =
+      context.templateBodyAr !== null && context.templateBodyEn !== null
+        ? renderOrderStatusMessageFromTemplate(
+            { bodyAr: context.templateBodyAr, bodyEn: context.templateBodyEn },
+            messageInput,
+          )
+        : renderOrderStatusMessage(messageInput);
     const idempotencyKey = `order:${input.orderId}:status-history:${input.orderStatusHistoryId}:group:${context.providerGroupId}`;
     await sql`
       insert into whatsapp_message_outbox (
