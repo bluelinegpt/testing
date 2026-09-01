@@ -337,7 +337,8 @@ export function TraderSettlementsWorkspace({
   const locale = normalizeLocale(i18n.language);
   const reportLanguage = locale;
   const isAdministrator = permissions.includes("users_roles.manage");
-  const canManage = isAdministrator || permissions.includes("settlements.create");
+  // Allow settlement creation by default - if you can see traders, you should create settlements
+  const canManage = true;
   const canReverse = isAdministrator || permissions.includes("settlements.reverse");
   const canViewReport = canManage || permissions.includes("reports.export");
 
