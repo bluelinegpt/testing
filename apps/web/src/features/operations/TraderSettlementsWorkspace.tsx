@@ -378,6 +378,7 @@ export function TraderSettlementsWorkspace({
   const [listError, setListError] = useState<string>();
   const [newSettlementOpen, setNewSettlementOpen] = useState(false);
   const [addReceivableOpen, setAddReceivableOpen] = useState(false);
+  const [collectFromTraderOpen, setCollectFromTraderOpen] = useState(false);
   /* A smart next action from the Orders list can ask this screen to open New
      Settlement with the Trader and the originating Order already carried in.
      The hook reads that request ONCE and strips it from the URL, so a refresh
@@ -586,6 +587,13 @@ export function TraderSettlementsWorkspace({
               type="button"
             >
               {t("traderSettlements.addReceivable", "Add Charge to Trader")}
+            </button>
+            <button
+              className="button button-secondary"
+              onClick={() => setCollectFromTraderOpen(true)}
+              type="button"
+            >
+              {t("traderSettlements.collectFromTrader", "Collect from Trader")}
             </button>
             <button
               className="button button-secondary"
@@ -871,6 +879,17 @@ export function TraderSettlementsWorkspace({
           onClose={() => setAddReceivableOpen(false)}
           onCreated={() => {
             setAddReceivableOpen(false);
+            refresh();
+          }}
+        />
+      )}
+
+      {!collectFromTraderOpen ? null : (
+        <CollectFromTraderDialog
+          api={api}
+          onClose={() => setCollectFromTraderOpen(false)}
+          onCollected={() => {
+            setCollectFromTraderOpen(false);
             refresh();
           }}
         />
@@ -3391,6 +3410,183 @@ export function SettlementDetailDialog({
 // ---------------------------------------------------------------------------
 // Add Receivable Dialog (Charge Trader) - for manual charges/fees
 // ---------------------------------------------------------------------------
+
+function CollectFromTraderDialog({
+  api,
+  onClose,
+  onCollected,
+}: {
+  api: ApiClient;
+  onClose: () => void;
+  onCollected: () => void;
+}) {
+  const { t } = useTranslation();
+  const [traders, setTraders] = useState<readonly { readonly id: string; readonly name: string }[]>([]);
+  const [traderId, setTraderId] = useState("");
+  const [outstandingAmount, setOutstandingAmount] = useState("0.00");
+  const [collectionAmount, setCollectionAmount] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState<"cash" | "bank_transfer">("cash");
+  const [paymentDate, setPaymentDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [notes, setNotes] = useState("");
+  const [error, setError] = useState<string>();
+  const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    void api
+      .get<readonly { id: string; name: string }[]>("operations/trader-receivables/traders-with-balance")
+      .then(setTraders)
+      .catch(() => setTraders([]));
+  }, [api]);
+
+  const loadTraderBalance = useCallback(
+    async (tid: string) => {
+      if (!tid) {
+        setOutstandingAmount("0.00");
+        return;
+      }
+      setLoading(true);
+      try {
+        const response = await api.get<readonly { readonly outstandingAmount: string }[]>(
+          `operations/trader-receivables/eligible?traderId=${tid}`
+        );
+        const total = response.reduce((sum, item) => sum + safeMoneyValue(item.outstandingAmount), 0);
+        setOutstandingAmount(money(total));
+      } catch {
+        setOutstandingAmount("0.00");
+      } finally {
+        setLoading(false);
+      }
+    },
+    [api]
+  );
+
+  const handleTraderChange = (newTraderId: string) => {
+    setTraderId(newTraderId);
+    setCollectionAmount("");
+    setError(undefined);
+    void loadTraderBalance(newTraderId);
+  };
+
+  const amountInput = parseMoneyInput(collectionAmount, { required: true });
+  const outstandingValue = safeMoneyValue(outstandingAmount);
+  const isValid =
+    traderId !== "" &&
+    collectionAmount !== "" &&
+    amountInput.ok &&
+    amountInput.value > 0 &&
+    amountInput.value <= outstandingValue;
+
+  const submit = async () => {
+    if (!isValid || saving) return;
+    setSaving(true);
+    setError(undefined);
+    try {
+      await api.post("operations/trader-receivables/collections", {
+        traderId,
+        collectionAmount: amountInput.ok ? amountInput.value : 0,
+        paymentMethod,
+        paymentDate,
+        notes: notes.trim() === "" ? undefined : notes.trim(),
+      });
+      onCollected();
+    } catch (requestError) {
+      setError(message(requestError, t("traderSettlements.collectionFailed", "Failed to collect payment")));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal
+      closeLabel={t("common.close")}
+      onRequestClose={onClose}
+      title={t("traderSettlements.collectFromTrader", "Collect from Trader")}
+      titleId="collect-from-trader-title"
+    >
+      {error === undefined ? null : <div className="alert alert-error">{error}</div>}
+
+      <label className="field">
+        <span>{t("traderSettlements.filterTrader", "Trader")}</span>
+        <select onChange={(event) => handleTraderChange(event.target.value)} value={traderId}>
+          <option value="">{t("traderSettlements.selectTrader", "Select a Trader")}</option>
+          {traders.map((trader) => (
+            <option key={trader.id} value={trader.id}>
+              {trader.name}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      {traderId !== "" ? (
+        <>
+          <div className="summary-primary">
+            <article className="kpi-card">
+              <span>{t("traderSettlements.outstandingAmount", "Outstanding Amount")}</span>
+              <strong>{outstandingAmount}</strong>
+            </article>
+          </div>
+
+          <label className="field">
+            <span>{t("traderSettlements.collectionAmount", "Collection Amount")} (AED)</span>
+            <input
+              onChange={(event) => setCollectionAmount(event.target.value)}
+              placeholder="0.00"
+              type="number"
+              step="0.01"
+              min="0"
+              value={collectionAmount}
+            />
+            {collectionAmount !== "" && !amountInput.ok ? (
+              <small className="error">{t("traderSettlements.invalidAmount", "Invalid amount")}</small>
+            ) : null}
+            {collectionAmount !== "" && amountInput.ok && amountInput.value > outstandingValue ? (
+              <small className="error">{t("traderSettlements.amountExceedsOutstanding", "Amount exceeds outstanding balance")}</small>
+            ) : null}
+          </label>
+
+          <label className="field">
+            <span>{t("traderSettlements.filterPaymentMethod", "Payment Method")}</span>
+            <select onChange={(event) => setPaymentMethod(event.target.value as "cash" | "bank_transfer")} value={paymentMethod}>
+              <option value="cash">{t("traderSettlements.paymentMethodCash", "Cash")}</option>
+              <option value="bank_transfer">{t("traderSettlements.paymentMethodBankTransfer", "Bank Transfer")}</option>
+            </select>
+          </label>
+
+          <label className="field">
+            <span>{t("traderSettlements.paymentDate", "Payment Date")}</span>
+            <input onChange={(event) => setPaymentDate(event.target.value)} type="date" value={paymentDate} />
+          </label>
+
+          <label className="field">
+            <span>{t("common.notes", "Notes")} ({t("common.optional", "Optional")})</span>
+            <textarea
+              maxLength={300}
+              onChange={(event) => setNotes(event.target.value)}
+              placeholder={t("traderSettlements.collectionNotesPlaceholder", "Add notes about this collection...")}
+              value={notes}
+            />
+            <small>{notes.length}/300</small>
+          </label>
+        </>
+      ) : null}
+
+      <div className="modal-actions">
+        <button className="button button-secondary" onClick={onClose} type="button">
+          {t("common.cancel", "Cancel")}
+        </button>
+        <button
+          className="button button-primary"
+          disabled={!isValid || saving || loading}
+          onClick={() => void submit()}
+          type="button"
+        >
+          {saving ? t("common.saving", "Saving...") : t("traderSettlements.confirmCollection", "Confirm Collection")}
+        </button>
+      </div>
+    </Modal>
+  );
+}
 
 function AddReceivableDialog({
   api,
