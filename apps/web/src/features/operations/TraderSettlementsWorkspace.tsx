@@ -3431,6 +3431,7 @@ function CollectFromTraderDialog({
   const [error, setError] = useState<string>();
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(false);
+  const idempotency = useIdempotencyKey();
 
   useEffect(() => {
     void api
@@ -3481,6 +3482,15 @@ function CollectFromTraderDialog({
     if (!isValid || saving) return;
     setSaving(true);
     setError(undefined);
+
+    const fingerprint = JSON.stringify({
+      traderId,
+      collectionAmount: amountInput.ok ? amountInput.value : 0,
+      paymentMethod,
+      paymentDate,
+      notes: notes.trim() === "" ? undefined : notes.trim(),
+    });
+
     try {
       await api.post("operations/trader-receivables/collections", {
         traderId,
@@ -3488,7 +3498,8 @@ function CollectFromTraderDialog({
         paymentMethod,
         paymentDate,
         notes: notes.trim() === "" ? undefined : notes.trim(),
-      });
+      }, { "X-Idempotency-Key": idempotency.keyFor(fingerprint) });
+      idempotency.reset();
       onCollected();
     } catch (requestError) {
       setError(message(requestError, t("traderSettlements.collectionFailed", "Failed to collect payment")));
@@ -3606,6 +3617,7 @@ function AddReceivableDialog({
   const [amountDue, setAmountDue] = useState("");
   const [error, setError] = useState<string>();
   const [saving, setSaving] = useState(false);
+  const idempotency = useIdempotencyKey();
 
   const sourceTypes = [
     { value: "manual_adjustment", label: t("traderReceivable.sourceType.manualAdjustment", "Manual Adjustment") },
@@ -3631,6 +3643,15 @@ function AddReceivableDialog({
     if (!isValid || saving) return;
     setSaving(true);
     setError(undefined);
+
+    const fingerprint = JSON.stringify({
+      traderId,
+      sourceType,
+      sourceReference: sourceReference.trim() === "" ? undefined : sourceReference.trim(),
+      businessDate,
+      amountDue: amountInput.ok ? amountInput.value : 0,
+    });
+
     try {
       await api.post("operations/trader-receivables/receivables", {
         traderId,
@@ -3638,7 +3659,8 @@ function AddReceivableDialog({
         sourceReference: sourceReference.trim() === "" ? undefined : sourceReference.trim(),
         businessDate,
         amountDue: amountInput.ok ? amountInput.value : 0,
-      });
+      }, { "X-Idempotency-Key": idempotency.keyFor(fingerprint) });
+      idempotency.reset();
       onCreated();
     } catch (requestError) {
       setError(message(requestError, t("traderSettlements.receivableCreationFailed", "Failed to add charge")));

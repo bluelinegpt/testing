@@ -20,9 +20,9 @@
       "path": "apps/web",
       "renderService": "bluelinegpt-web-test",
       "status": "pushed_awaiting_confirmation",
-      "localCommit": "5474f8e",
+      "localCommit": "93174cf",
       "localCommitDate": "2026-09-01",
-      "lastChangeDescription": "feat(trader-settlements): add Charge to Trader feature (Add Receivable dialog)",
+      "lastChangeDescription": "feat(trader-settlements): add Collect from Trader feature to receive payments",
       "lastChangeBy": "human",
       "confirmedLiveCommit": "9666706",
       "confirmedLiveAt": "2026-09-01"
