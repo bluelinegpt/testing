@@ -15,7 +15,10 @@ Everything runs inside the existing API process (`apps/api`):
   never waits for it; one broken Company session never affects others.
 - **Outbox dispatcher** (`WhatsAppOutboxDispatcher`) — drains
   `whatsapp_message_outbox` every 5s with `FOR UPDATE SKIP LOCKED` claiming,
-  a per-Company claim cap (fairness), bounded backoff (1m/5m/15m/1h, max 5
+  a per-Company claim cap of ONE plus a 10-second minimum gap between a
+  Company's consecutive sends (anti-burst pacing, approved 2026-09-01: a bulk
+  status change drains ~6 messages/minute per WhatsApp account instead of a
+  burst; other Companies flow independently), bounded backoff (1m/5m/15m/1h, max 5
   attempts), a 10-minute processing lease, a 24h pending-age cutoff, and a
   supersession check (a stale order-status message whose Order already has a
   newer eligible status event is cancelled, not sent).
@@ -118,7 +121,7 @@ Before deploy:
 - [ ] All WhatsApp commits pushed (`0d2431d`, `fa794db`, `d50a593`, `579b999`, Prompt 5).
 - [ ] **Migration state audited**: every locally-applied migration is
       committed. Known risk on this branch: `20260952000000_link_generated_
-    cash_movements_to_owner_events.ts` (unrelated work) has been applied to
+cash_movements_to_owner_events.ts` (unrelated work) has been applied to
       the local DB but was untracked — it MUST be committed by its owner
       before any Render deploy, or the deploy fails on missing-migration.
 - [ ] `pnpm migrations:validate` green; `pnpm --filter @blueline/api db:verify` green.

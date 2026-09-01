@@ -20,7 +20,10 @@ import type {
   SendWhatsAppMessageInput,
   WhatsAppSendResult,
 } from "./company-whatsapp-provider.port.js";
-import { WhatsAppOutboxDispatcher } from "./whatsapp-outbox-dispatcher.service.js";
+import {
+  WHATSAPP_DISPATCH_POLICY,
+  WhatsAppOutboxDispatcher,
+} from "./whatsapp-outbox-dispatcher.service.js";
 
 const enabled = process.env.RUN_WHATSAPP_DATABASE === "true";
 
@@ -64,6 +67,11 @@ describe.skipIf(!enabled)("whatsapp outbox dispatcher", () => {
       transaction as unknown as Kysely<DatabaseSchema>,
       provider as unknown as CompanyWhatsAppProvider,
     );
+    // Inside this rolled-back transaction `now()` is frozen, so the real
+    // pacing window could never elapse and every drain-shaped case below
+    // would deadlock after its first send. The window itself is proven by
+    // the dedicated pacing test, which restores the real policy value.
+    dispatcher.minSecondsBetweenCompanySends = 0;
     return { dispatcher, provider };
   }
 
@@ -355,6 +363,9 @@ describe.skipIf(!enabled)("whatsapp outbox dispatcher", () => {
         historyId: newerEvent,
         orderId: order.orderId,
       });
+      // Two ticks: the pacing cap claims one row per Company per tick, so the
+      // stale row (oldest) is judged first, then the latest one.
+      await dispatcher.tick();
       await dispatcher.tick();
 
       const staleRow = await readMessage(transaction, stale);
@@ -391,22 +402,19 @@ describe.skipIf(!enabled)("whatsapp outbox dispatcher", () => {
         await insertPending(transaction, quiet, { group: "quiet-2@g.us" }),
       ];
 
-      // One tick: the noisy Company is capped at the per-Company limit (5),
-      // leaving room for BOTH of the quiet Company's messages despite the
-      // noisy backlog being strictly older.
+      // One tick: EVERY Company is capped at one claim (the anti-burst
+      // pacing cap), so the quiet Company's first message rides the same
+      // tick despite the noisy backlog being strictly older.
       const claimed = await dispatcher.tick();
-      expect(claimed).toBe(7);
-      const noisySends = provider.sends.filter((send) => send.companyId === noisy.companyId);
-      const quietSends = provider.sends.filter((send) => send.companyId === quiet.companyId);
-      expect(noisySends).toHaveLength(5);
-      expect(quietSends).toHaveLength(2);
+      expect(claimed).toBe(2);
+      expect(provider.sends.filter((send) => send.companyId === noisy.companyId)).toHaveLength(1);
+      expect(provider.sends.filter((send) => send.companyId === quiet.companyId)).toHaveLength(1);
+
+      // The backlogs drain steadily, one message per Company per tick.
+      for (let tick = 0; tick < 11; tick += 1) await dispatcher.tick();
       for (const id of quietIds) {
         expect((await readMessage(transaction, id))?.status).toBe("sent");
       }
-
-      // The rest of the noisy backlog drains steadily on later ticks.
-      await dispatcher.tick();
-      await dispatcher.tick();
       const remaining = (
         await sql<{ count: string }>`
           select count(*)::text as count from whatsapp_message_outbox
@@ -415,6 +423,48 @@ describe.skipIf(!enabled)("whatsapp outbox dispatcher", () => {
       ).rows[0];
       expect(remaining?.count).toBe("0");
       expect(noisyIds).toHaveLength(12);
+    });
+  });
+
+  it("paces one message per Company per window; the next releases only after the gap", async () => {
+    await withRolledBackCommunicationFixtures(database, async (transaction, runId) => {
+      const world = await createWorld(transaction, runId);
+      const other = await createWorld(transaction, runId);
+      const { dispatcher, provider } = buildDispatcher(transaction);
+      // The real policy window (10s): inside this frozen-clock transaction a
+      // just-sent message is always "within the window", which is exactly
+      // what lets the gate be observed deterministically.
+      dispatcher.minSecondsBetweenCompanySends =
+        WHATSAPP_DISPATCH_POLICY.minSecondsBetweenCompanySends;
+
+      const first = await insertPending(transaction, world, { createdAgeMinutes: 2 });
+      const second = await insertPending(transaction, world, { createdAgeMinutes: 1 });
+      const otherFirst = await insertPending(transaction, other, { group: "other-1@g.us" });
+
+      // Tick 1: one message per Company — the second same-Company message
+      // stays queued even though capacity remained.
+      expect(await dispatcher.tick()).toBe(2);
+      expect((await readMessage(transaction, first))?.status).toBe("sent");
+      expect((await readMessage(transaction, second))?.status).toBe("pending");
+      expect((await readMessage(transaction, otherFirst))?.status).toBe("sent");
+
+      // Tick 2: still inside the pacing window (the previous send is more
+      // recent than the gap) — nothing is claimed for this Company.
+      expect(await dispatcher.tick()).toBe(0);
+      expect((await readMessage(transaction, second))?.status).toBe("pending");
+
+      // Once the previous send is older than the window, the next message
+      // releases — the queue keeps it, the gap merely delays it.
+      await sql`
+        update whatsapp_message_outbox
+           set sent_at = now() - make_interval(secs => ${
+             WHATSAPP_DISPATCH_POLICY.minSecondsBetweenCompanySends + 1
+           })
+         where id = ${first}::uuid
+      `.execute(transaction);
+      expect(await dispatcher.tick()).toBe(1);
+      expect((await readMessage(transaction, second))?.status).toBe("sent");
+      expect(provider.sends).toHaveLength(3);
     });
   });
 

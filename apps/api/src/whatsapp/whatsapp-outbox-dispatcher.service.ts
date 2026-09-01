@@ -15,9 +15,19 @@ import { TRADER_NOTIFIABLE_DELIVERY_STATUSES } from "./whatsapp-message-template
 /** Central retry/lifecycle policy — one place, per Prompt 4 §28 / Prompt 5 §34. */
 export const WHATSAPP_DISPATCH_POLICY = {
   batchSize: 10,
-  /** Fairness: one Company may take at most this many of a batch, so a noisy
-   *  tenant with a huge backlog cannot starve the others (Prompt 5 §35). */
-  perCompanyClaimLimit: 5,
+  /** Fairness AND pacing: one Company may take at most this many of a batch.
+   *  Set to 1 (was 5) so a bulk status change never bursts one WhatsApp
+   *  account — combined with `minSecondsBetweenCompanySends` below, each
+   *  Company sends at most one message per pacing window while other
+   *  Companies (separate WhatsApp accounts) flow independently. */
+  perCompanyClaimLimit: 1,
+  /** Anti-burst pacing (approved 2026-09-01): a Company's next message is
+   *  only claimed once at least this many seconds have passed since that
+   *  Company's previous message was SENT (and never while one is still in
+   *  flight). Enforced in the claim query itself, so it is exact across
+   *  restarts and concurrent workers — the queue keeps the messages, the
+   *  claim releases them one per window. */
+  minSecondsBetweenCompanySends: 10,
   /** 1m, 5m, 15m, then 1h between automatic retries of safe failures. */
   retryDelaysSeconds: [60, 300, 900, 3600],
   maxSendAttempts: 5,
@@ -119,6 +129,12 @@ export class WhatsAppOutboxDispatcher implements OnModuleInit, OnModuleDestroy {
     superseded: 0,
     transientFailures: 0,
   };
+  /** Per-Company pacing window, an instance field rather than a direct policy
+   *  read for ONE reason: inside a rolled-back test transaction `now()` is
+   *  frozen, so the gap can never elapse — drain-shaped tests set this to 0
+   *  and a dedicated pacing test proves the gate with the real value. */
+  public minSecondsBetweenCompanySends: number =
+    WHATSAPP_DISPATCH_POLICY.minSecondsBetweenCompanySends;
 
   public constructor(
     @Inject(DATABASE) private readonly database: Kysely<DatabaseSchema>,
@@ -245,6 +261,21 @@ export class WhatsAppOutboxDispatcher implements OnModuleInit, OnModuleDestroy {
                          select 1 from company_whatsapp_platform_settings p
                           where p.company_id = candidate.company_id
                             and p.whatsapp_enabled = false
+                       )
+                       -- Anti-burst pacing: never claim for a Company that
+                       -- still has a message in flight, or whose previous
+                       -- message was sent within the pacing window — a bulk
+                       -- status change drains one message per window instead
+                       -- of a burst from one WhatsApp account.
+                       and not exists (
+                         select 1 from whatsapp_message_outbox recent
+                          where recent.company_id = candidate.company_id
+                            and (
+                              recent.status = 'processing'
+                              or (recent.sent_at is not null
+                                  and recent.sent_at > now()
+                                    - make_interval(secs => ${this.minSecondsBetweenCompanySends}))
+                            )
                        )
                   ) ranked
                   where company_rank <= ${WHATSAPP_DISPATCH_POLICY.perCompanyClaimLimit}
