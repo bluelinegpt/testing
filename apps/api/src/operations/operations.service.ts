@@ -25,6 +25,7 @@ import { mapPublicTrackingStatus } from "./public-tracking-status.js";
 import { traderCommerceOrderScopePairs } from "./trader-commerce-order-scope.js";
 import { mobileComparisonKey, normalizeUaeMobile } from "../shared/uae-mobile.js";
 import { PushOutboxWriter } from "../push/push-outbox-writer.service.js";
+import { OperationsHistoryWriter } from "./operations-history.writer.js";
 import { IdentityContextAccessor } from "../security/identity-context.js";
 import { TenantContextAccessor } from "../tenancy/tenant-context.js";
 import { EmployeeDeliveryEarningService } from "../payroll/employee-delivery-earning.service.js";
@@ -722,6 +723,10 @@ export class OperationsService {
     @Inject(EmployeeDeliveryEarningService)
     private readonly employeeDeliveryEarnings: EmployeeDeliveryEarningService,
     @Inject(PushOutboxWriter) private readonly pushOutbox: PushOutboxWriter,
+    // The shared canonical status-history writer. Delivery-dimension events
+    // MUST go through it (not raw inserts) so the Trader WhatsApp
+    // notification hook fires once for every legitimate path.
+    @Inject(OperationsHistoryWriter) private readonly history: OperationsHistoryWriter,
   ) {}
 
   public async overview(filters: OperationsOverviewFilters = {}): Promise<OperationsOverview> {
@@ -3932,14 +3937,13 @@ export class OperationsService {
         `.execute(transaction);
       }
 
-      await sql`
-        insert into order_status_history (
-          company_id, order_id, status_dimension, to_status, changed_by_account_id
-        ) values (
-          ${companyId}::uuid, ${orderId}::uuid, 'delivery', ${deliveryStatus},
-          ${actingAccountId}::uuid
-        )
-      `.execute(transaction);
+      await this.history.statusHistory(transaction, {
+        actorId: actingAccountId,
+        companyId,
+        from: null,
+        orderId,
+        to: deliveryStatus,
+      });
       await sql`
         insert into order_events (
           company_id, order_id, event_type, event_category, field_name,
@@ -5465,16 +5469,14 @@ export class OperationsService {
                version = version + 1
          where id = ${orderId}::uuid and company_id = ${companyId}::uuid
       `.execute(transaction);
-      await sql`
-        insert into order_status_history (
-          company_id, order_id, status_dimension, from_status, to_status,
-          reason, changed_by_account_id
-        ) values (
-          ${companyId}::uuid, ${orderId}::uuid, 'delivery',
-          ${order.deliveryStatus}, ${status}, ${reason},
-          ${identity.identityId}::uuid
-        )
-      `.execute(transaction);
+      await this.history.statusHistory(transaction, {
+        actorId: identity.identityId,
+        companyId,
+        from: order.deliveryStatus,
+        orderId,
+        reason,
+        to: status,
+      });
       const role = await sql<{ name: string }>`
         select coalesce(string_agg(distinct r.name, ', ' order by r.name), a.account_kind) as name
         from accounts a
@@ -6813,14 +6815,13 @@ export class OperationsService {
       `.execute(database);
     }
 
-    await sql`
-      insert into order_status_history (
-        company_id, order_id, status_dimension, to_status, changed_by_account_id
-      ) values (
-        ${companyId}::uuid, ${orderId}::uuid, 'delivery', ${deliveryStatus},
-        ${input.createdByAccountId}::uuid
-      )
-    `.execute(database);
+    await this.history.statusHistory(database, {
+      actorId: input.createdByAccountId,
+      companyId,
+      from: null,
+      orderId,
+      to: deliveryStatus,
+    });
     await sql`
       insert into order_events (
         company_id, order_id, event_type, event_category, field_name,

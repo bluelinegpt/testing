@@ -45,6 +45,7 @@ import { DriverCashReconciliationService } from "./driver-cash-reconciliation.se
 import { DriverCollectionPdfService } from "./driver-collection-pdf.service.js";
 import { DriverShipmentManifestService } from "./driver-shipment-manifest.service.js";
 import { OperationsHistoryWriter } from "./operations-history.writer.js";
+import { WhatsAppOutboxWriter } from "../whatsapp/whatsapp-outbox-writer.service.js";
 import { OperationsService } from "./operations.service.js";
 import { OrdersWorkflowService } from "./orders-workflow.service.js";
 import { PublicTrackingService } from "./public-tracking.service.js";
@@ -87,6 +88,7 @@ import { TraderSettlementService } from "./trader-settlement.service.js";
     DriverCollectionPdfService,
     DriverShipmentManifestService,
     OperationsHistoryWriter,
+    WhatsAppOutboxWriter,
     OperationsService,
     OrdersWorkflowService,
     PublicTrackingService,

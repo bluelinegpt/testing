@@ -25,6 +25,7 @@ import type {
   CompanyWhatsAppConnectionView,
   TraderWhatsAppSettingsView,
   WhatsAppGroupView,
+  WhatsAppMessageSummaryView,
   WhatsAppNotificationView,
   WhatsAppTestMessageResult,
 } from "./whatsapp.dto.js";
@@ -156,6 +157,13 @@ export class WhatsAppController {
     @Req() request: Request,
   ): Promise<WhatsAppTestMessageResult> {
     return this.testMessages.send(traderId, this.correlationId(request), input.clientRequestId);
+  }
+
+  @ApiOperation({ summary: "Company-level WhatsApp message pipeline counts" })
+  @RequireAnyPermission("whatsapp.connection.manage", "whatsapp.history.view", "users_roles.manage")
+  @Get("messages/summary")
+  public messageSummary(): Promise<WhatsAppMessageSummaryView> {
+    return this.history.summary();
   }
 
   @ApiOperation({ summary: "List WhatsApp notification history for one Order" })

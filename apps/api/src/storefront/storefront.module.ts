@@ -3,6 +3,7 @@ import { Module } from "@nestjs/common";
 import { AuthenticationModule } from "../authentication/authentication.module.js";
 import { FilesModule } from "../files/files.module.js";
 import { OperationsHistoryWriter } from "../operations/operations-history.writer.js";
+import { WhatsAppOutboxWriter } from "../whatsapp/whatsapp-outbox-writer.service.js";
 
 import {
   PublicStorefrontProductController,
@@ -48,6 +49,7 @@ import { StorefrontService } from "./storefront.service.js";
     StorefrontDeliveryService,
     CommerceMediaService,
     OperationsHistoryWriter,
+    WhatsAppOutboxWriter,
   ],
 })
 export class StorefrontModule {}

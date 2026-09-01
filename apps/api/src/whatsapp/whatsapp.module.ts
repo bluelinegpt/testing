@@ -10,6 +10,7 @@ import { TraderWhatsAppSettingsService } from "./trader-whatsapp-settings.servic
 import { WhatsAppConnectionService } from "./whatsapp-connection.service.js";
 import { WhatsAppController } from "./whatsapp.controller.js";
 import { WhatsAppNotificationHistoryService } from "./whatsapp-notification-history.service.js";
+import { WhatsAppOutboxDispatcher } from "./whatsapp-outbox-dispatcher.service.js";
 import { WhatsAppOutboxWriter } from "./whatsapp-outbox-writer.service.js";
 import { WhatsAppTestMessageService } from "./whatsapp-test-message.service.js";
 import { WhatsAppSessionCipher } from "./whatsapp-session-cipher.js";
@@ -25,6 +26,7 @@ import { WhatsAppSessionCipher } from "./whatsapp-session-cipher.js";
     TraderWhatsAppSettingsService,
     WhatsAppConnectionService,
     WhatsAppNotificationHistoryService,
+    WhatsAppOutboxDispatcher,
     WhatsAppOutboxWriter,
     WhatsAppTestMessageService,
     WhatsAppSessionCipher,

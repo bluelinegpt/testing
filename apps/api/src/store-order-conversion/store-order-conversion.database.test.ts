@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { OperationsHistoryWriter } from "../operations/operations-history.writer.js";
+import { WhatsAppOutboxWriter } from "../whatsapp/whatsapp-outbox-writer.service.js";
 import { resolve } from "node:path";
 
 import { config as loadEnvironment } from "dotenv";
@@ -75,6 +77,7 @@ describe.skipIf(!runDatabaseTests)("StoreOrderConversionService (Customer Commer
           undefined as never,
           undefined as never,
           undefined as never,
+          new OperationsHistoryWriter(new WhatsAppOutboxWriter()),
         );
         const conversion = new StoreOrderConversionService(transaction, operations, securityContext);
 

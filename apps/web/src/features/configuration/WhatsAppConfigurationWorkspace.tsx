@@ -32,6 +32,13 @@ export interface WhatsAppGroupView {
   readonly participantCount?: number;
 }
 
+interface WhatsAppMessageSummaryView {
+  readonly pending: number;
+  readonly failed: number;
+  readonly requiresReview: number;
+  readonly sentToday: number;
+}
+
 const POLL_INTERVAL_MS = 3000;
 const transitionalStatuses = new Set(["connecting", "waiting_for_qr_scan"]);
 const reconnectStatuses = new Set(["disconnected", "authentication_failed", "requires_reconnect"]);
@@ -64,6 +71,8 @@ export function WhatsAppConfigurationWorkspace({
   const [groupsRefreshedAt, setGroupsRefreshedAt] = useState<Date>();
   const [groupSearch, setGroupSearch] = useState("");
 
+  const [summary, setSummary] = useState<WhatsAppMessageSummaryView>();
+
   const loadConnection = useCallback(async () => {
     try {
       setConnection(await api.get<WhatsAppConnectionView>("whatsapp/connection"));
@@ -73,6 +82,15 @@ export function WhatsAppConfigurationWorkspace({
     }
   }, [api, t]);
   useEffect(() => void loadConnection(), [loadConnection]);
+
+  const loadSummary = useCallback(async () => {
+    try {
+      setSummary(await api.get<WhatsAppMessageSummaryView>("whatsapp/messages/summary"));
+    } catch {
+      // Counts are advisory; the page stays useful without them.
+    }
+  }, [api]);
+  useEffect(() => void loadSummary(), [loadSummary]);
 
   // Pairing is asynchronous on the backend: poll the one status endpoint
   // while a connection attempt is in flight, and stop on any settled state.
@@ -281,6 +299,30 @@ export function WhatsAppConfigurationWorkspace({
           </div>
         ) : null}
       </section>
+
+      {summary === undefined ? null : (
+        <section className="detail-panel">
+          <h2>{t("whatsapp.pipelineTitle")}</h2>
+          <dl>
+            <div className="detail-line">
+              <dt>{t("whatsapp.pipelinePending")}</dt>
+              <dd>{summary.pending}</dd>
+            </div>
+            <div className="detail-line">
+              <dt>{t("whatsapp.pipelineFailed")}</dt>
+              <dd>{summary.failed}</dd>
+            </div>
+            <div className="detail-line">
+              <dt>{t("whatsapp.pipelineReview")}</dt>
+              <dd>{summary.requiresReview}</dd>
+            </div>
+            <div className="detail-line">
+              <dt>{t("whatsapp.pipelineSentToday")}</dt>
+              <dd>{summary.sentToday}</dd>
+            </div>
+          </dl>
+        </section>
+      )}
 
       {status === "connected" ? (
         <section className="detail-panel">

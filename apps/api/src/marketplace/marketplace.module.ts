@@ -2,6 +2,7 @@ import { Module } from "@nestjs/common";
 
 import { AuthenticationModule } from "../authentication/authentication.module.js";
 import { OperationsHistoryWriter } from "../operations/operations-history.writer.js";
+import { WhatsAppOutboxWriter } from "../whatsapp/whatsapp-outbox-writer.service.js";
 
 import { MarketplaceMappingService } from "./marketplace-mapping.service.js";
 import { MarketplaceTaxonomyService } from "./marketplace-taxonomy.service.js";
@@ -22,6 +23,11 @@ import {
   controllers: [PublicMarketplaceController, MarketplaceClassificationController],
   exports: [MarketplaceTaxonomyService, MarketplaceMappingService],
   imports: [AuthenticationModule],
-  providers: [MarketplaceTaxonomyService, MarketplaceMappingService, OperationsHistoryWriter],
+  providers: [
+    MarketplaceTaxonomyService,
+    MarketplaceMappingService,
+    OperationsHistoryWriter,
+    WhatsAppOutboxWriter,
+  ],
 })
 export class MarketplaceModule {}

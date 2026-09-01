@@ -56,6 +56,7 @@ import { PageHeader } from "../../components/PageHeader.js";
 import { FilterCombobox } from "../../components/FilterCombobox.js";
 import { SearchCombobox } from "../../components/SearchCombobox.js";
 import { AreaSelector } from "../configuration/AreaSelector.js";
+import { OrderWhatsAppHistory } from "../configuration/OrderWhatsAppHistory.js";
 import { isUaeMobile, normalizeUaeMobile } from "../../domain/uae-mobile.js";
 import { formatCurrency, formatDate, formatDateTime } from "../../localization/formatters.js";
 import { normalizeLocale } from "../../localization/locale.js";
@@ -2826,6 +2827,7 @@ export function OrderDetailsWorkspace({
                 ]),
           ]}
         />
+        <OrderWhatsAppHistory api={api} orderId={String(detail.id)} />
         {collectionSummary === undefined ? null : (
           <section className="order-detail-section">
             <h2>{t("operations.collectionDetail")}</h2>

@@ -3,6 +3,10 @@ import { type Kysely, sql, type Transaction } from "kysely";
 
 import type { DatabaseSchema } from "../infrastructure/database/database.types.js";
 import { ApplicationException } from "../presentation/errors/application.exception.js";
+import {
+  isTraderNotifiableDeliveryStatus,
+  renderOrderStatusMessage,
+} from "./whatsapp-message-templates.js";
 
 type ExecuteContext = Kysely<DatabaseSchema> | Transaction<DatabaseSchema>;
 
@@ -46,6 +50,91 @@ export type CreateTraderWhatsAppNotificationResult =
  */
 @Injectable()
 export class WhatsAppOutboxWriter {
+  /**
+   * The automatic Order-status hook (Prompt 4), called from
+   * `OperationsHistoryWriter.statusHistory` INSIDE the same business
+   * transaction that persists the Order update and its status-history row —
+   * so the notification intent commits and rolls back atomically with the
+   * Order change, and the API response never waits on WhatsApp (a dispatcher
+   * sends later).
+   *
+   * Deliberately quiet: an ineligible status, a Trader without an enabled
+   * group mapping, or a Company that never configured WhatsApp simply
+   * produces no row — an Order status change must never fail or complain
+   * because notifications aren't set up. A Company whose WhatsApp is merely
+   * DISCONNECTED still gets a durable pending row (its connection row
+   * exists), so nothing is lost during an outage.
+   *
+   * Everything the message needs is SNAPSHOTTED here, at event time: group
+   * id + name, language, and the fully rendered body. Later changes to the
+   * Trader's mapping/language, group renames, or disabling notifications
+   * never rewrite or reroute this event — history stays immutable.
+   */
+  public async writeOrderStatusChanged(
+    execute: ExecuteContext,
+    input: {
+      readonly companyId: string;
+      readonly orderId: string;
+      readonly orderStatusHistoryId: string;
+      readonly toStatus: string;
+      readonly occurredAt: Date;
+    },
+  ): Promise<void> {
+    if (!isTraderNotifiableDeliveryStatus(input.toStatus)) return;
+    const context = (
+      await sql<{
+        providerGroupId: string;
+        groupNameSnapshot: string | null;
+        messageLanguage: "both" | "ar" | "en";
+        connectionId: string;
+        traderId: string;
+        orderNumber: string;
+        referenceNumber: string | null;
+        companyName: string;
+      }>`
+        select s.provider_group_id as "providerGroupId",
+               s.group_name_snapshot as "groupNameSnapshot",
+               s.message_language as "messageLanguage",
+               c.id as "connectionId",
+               o.trader_id as "traderId",
+               o.order_number as "orderNumber",
+               o.serial_number as "referenceNumber",
+               co.name_en as "companyName"
+          from orders o
+          join trader_whatsapp_settings s
+            on s.trader_id = o.trader_id and s.company_id = o.company_id
+          join company_whatsapp_connections c on c.company_id = o.company_id
+          join companies co on co.id = o.company_id
+         where o.id = ${input.orderId}::uuid and o.company_id = ${input.companyId}::uuid
+           and s.notifications_enabled = true and s.provider_group_id is not null
+      `.execute(execute)
+    ).rows[0];
+    if (context === undefined) return;
+
+    const body = renderOrderStatusMessage({
+      companyName: context.companyName,
+      language: context.messageLanguage,
+      occurredAt: input.occurredAt,
+      orderNumber: context.orderNumber,
+      referenceNumber: context.referenceNumber,
+      status: input.toStatus,
+    });
+    const idempotencyKey = `order:${input.orderId}:status-history:${input.orderStatusHistoryId}:group:${context.providerGroupId}`;
+    await sql`
+      insert into whatsapp_message_outbox (
+        company_id, trader_id, order_id, order_status_history_id, connection_id,
+        message_type, destination_type, provider_group_id, group_name_snapshot,
+        message_language, message_body, status, idempotency_key
+      ) values (
+        ${input.companyId}::uuid, ${context.traderId}::uuid, ${input.orderId}::uuid,
+        ${input.orderStatusHistoryId}::uuid, ${context.connectionId}::uuid,
+        'order_status', 'group', ${context.providerGroupId}, ${context.groupNameSnapshot},
+        ${context.messageLanguage}, ${body}, 'pending', ${idempotencyKey}
+      )
+      on conflict (company_id, idempotency_key) do nothing
+    `.execute(execute);
+  }
+
   public async createTraderWhatsAppNotification(
     execute: ExecuteContext,
     input: CreateTraderWhatsAppNotificationInput,

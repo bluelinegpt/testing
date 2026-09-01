@@ -6,6 +6,7 @@ import { CompanyProfileModule } from "../company-profile/company-profile.module.
 import { FilesModule } from "../files/files.module.js";
 import { DriverCollectionPdfService } from "../operations/driver-collection-pdf.service.js";
 import { OperationsHistoryWriter } from "../operations/operations-history.writer.js";
+import { WhatsAppOutboxWriter } from "../whatsapp/whatsapp-outbox-writer.service.js";
 import { AccountingController } from "./accounting.controller.js";
 import { AccountMappingResolver } from "./account-mapping.resolver.js";
 import { AccountingEventProcessor } from "./accounting-event.processor.js";
@@ -131,6 +132,7 @@ import { AccountingSetupService } from "./accounting-setup.service.js";
     OperationalJournalPostingService,
     OperationalSourceLoader,
     OperationsHistoryWriter,
+    WhatsAppOutboxWriter,
     GeneralExpenseAccountingEventWriter,
     GeneralExpensePaymentService,
     GeneralExpenseQueryService,

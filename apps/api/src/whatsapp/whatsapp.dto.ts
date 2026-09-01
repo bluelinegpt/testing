@@ -100,6 +100,15 @@ export interface WhatsAppTestMessageResult {
   readonly duplicate?: boolean;
 }
 
+/** Company-level operational counts for the Configuration → WhatsApp page:
+ *  is the Trader notification pipeline healthy? */
+export interface WhatsAppMessageSummaryView {
+  readonly pending: number;
+  readonly failed: number;
+  readonly requiresReview: number;
+  readonly sentToday: number;
+}
+
 export interface WhatsAppNotificationView {
   readonly id: string;
   readonly traderId: string;

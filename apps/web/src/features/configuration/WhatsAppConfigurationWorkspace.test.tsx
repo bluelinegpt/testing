@@ -24,13 +24,22 @@ function connectionView(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function makeApi(handlers: { connection?: () => unknown; groups?: () => unknown }) {
+function makeApi(handlers: {
+  connection?: () => unknown;
+  groups?: () => unknown;
+  summary?: () => unknown;
+}) {
   const get = vi.fn((path: string) => {
     if (path === "whatsapp/connection") {
       return Promise.resolve(handlers.connection?.() ?? connectionView());
     }
     if (path === "whatsapp/groups") {
       return Promise.resolve(handlers.groups?.() ?? []);
+    }
+    if (path === "whatsapp/messages/summary") {
+      return Promise.resolve(
+        handlers.summary?.() ?? { failed: 0, pending: 0, requiresReview: 0, sentToday: 0 },
+      );
     }
     return Promise.reject(new Error(`unexpected get ${path}`));
   });
@@ -180,6 +189,18 @@ describe("WhatsAppConfigurationWorkspace", () => {
     await screen.findByText("WhatsApp needs to be reconnected.");
     fireEvent.click(screen.getByRole("button", { name: /Reconnect WhatsApp/ }));
     await waitFor(() => expect(post).toHaveBeenCalledWith("whatsapp/connection/reconnect"));
+  });
+
+  it("shows the message-delivery pipeline counts", async () => {
+    const { api } = makeApi({
+      summary: () => ({ failed: 2, pending: 3, requiresReview: 1, sentToday: 7 }),
+    });
+    render(<WhatsAppConfigurationWorkspace api={api} permissions={MANAGE} />);
+    await screen.findByText("Message Delivery");
+    expect(screen.getByText("Pending").nextElementSibling?.textContent).toBe("3");
+    expect(screen.getByText("Failed").nextElementSibling?.textContent).toBe("2");
+    expect(screen.getByText("Requires Review").nextElementSibling?.textContent).toBe("1");
+    expect(screen.getByText("Sent Today").nextElementSibling?.textContent).toBe("7");
   });
 
   it("renders in Arabic", async () => {

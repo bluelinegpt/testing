@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { OperationsHistoryWriter } from "./operations-history.writer.js";
+import { WhatsAppOutboxWriter } from "../whatsapp/whatsapp-outbox-writer.service.js";
 import { resolve } from "node:path";
 
 import { config as loadEnvironment } from "dotenv";
@@ -167,6 +169,7 @@ function buildService(
     undefined as never,
     undefined as never,
     undefined as never,
+    new OperationsHistoryWriter(new WhatsAppOutboxWriter()),
   );
 }
 
@@ -221,6 +224,7 @@ function buildServiceWithRealTransactions(
     undefined as never,
     undefined as never,
     undefined as never,
+    new OperationsHistoryWriter(new WhatsAppOutboxWriter()),
   );
 }
 

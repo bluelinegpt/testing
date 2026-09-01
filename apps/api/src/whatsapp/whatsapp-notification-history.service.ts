@@ -5,7 +5,7 @@ import { DATABASE } from "../infrastructure/database/database.tokens.js";
 import type { DatabaseSchema } from "../infrastructure/database/database.types.js";
 import { ApplicationException } from "../presentation/errors/application.exception.js";
 import { IdentityContextAccessor } from "../security/identity-context.js";
-import type { WhatsAppNotificationView } from "./whatsapp.dto.js";
+import type { WhatsAppMessageSummaryView, WhatsAppNotificationView } from "./whatsapp.dto.js";
 
 /**
  * Read-only WhatsApp notification history, per Order or per Trader. Both
@@ -29,6 +29,36 @@ export class WhatsAppNotificationHistoryService {
       throw new ApplicationException("order_not_found", "Order not found", HttpStatus.NOT_FOUND);
     }
     return this.page(companyId, sql`and w.order_id = ${orderId}::uuid`);
+  }
+
+  /** Operational counts for this Company's message pipeline. "Today" is the
+   *  UAE business day, matching every other date surface in Tawseelhub. */
+  public async summary(): Promise<WhatsAppMessageSummaryView> {
+    const companyId = this.requireCompanyId();
+    const row = (
+      await sql<{
+        pending: string;
+        failed: string;
+        requiresReview: string;
+        sentToday: string;
+      }>`
+        select count(*) filter (where status in ('pending', 'processing'))::text as "pending",
+               count(*) filter (where status = 'failed')::text as "failed",
+               count(*) filter (where status = 'requires_review')::text as "requiresReview",
+               count(*) filter (
+                 where status = 'sent'
+                   and (sent_at at time zone 'Asia/Dubai')::date = (now() at time zone 'Asia/Dubai')::date
+               )::text as "sentToday"
+          from whatsapp_message_outbox
+         where company_id = ${companyId}::uuid
+      `.execute(this.database)
+    ).rows[0];
+    return {
+      failed: Number(row?.failed ?? 0),
+      pending: Number(row?.pending ?? 0),
+      requiresReview: Number(row?.requiresReview ?? 0),
+      sentToday: Number(row?.sentToday ?? 0),
+    };
   }
 
   public async listForTrader(traderId: string): Promise<readonly WhatsAppNotificationView[]> {

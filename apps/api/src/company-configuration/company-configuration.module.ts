@@ -12,6 +12,7 @@ import { CustomerConfigurationController } from "./customer-configuration.contro
 import { CustomerConfigurationService } from "./customer-configuration.service.js";
 import { WorkforceConfigurationController } from "./workforce-configuration.controller.js";
 import { OperationsHistoryWriter } from "../operations/operations-history.writer.js";
+import { WhatsAppOutboxWriter } from "../whatsapp/whatsapp-outbox-writer.service.js";
 import { EmployeeVariableEarningService } from "./employee-variable-earning.service.js";
 import { WorkforceConfigurationService } from "./workforce-configuration.service.js";
 import { TraderConfigurationController } from "./trader-configuration.controller.js";
@@ -40,6 +41,7 @@ import { CompanyWebsiteAgentInboxService } from "./company-website-agent-inbox.s
     // writer is dependency-free, so providing it here is enough -- without it
     // Nest cannot construct the module and the whole API fails to boot.
     OperationsHistoryWriter,
+    WhatsAppOutboxWriter,
     WorkforceConfigurationService,
     TraderConfigurationService,
     CustomerConfigurationService,

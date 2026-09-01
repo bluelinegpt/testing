@@ -57,6 +57,7 @@ const service = new OperationsService(
   undefined as never,
   undefined as never,
   undefined as never,
+  undefined as never,
 ) as unknown as FinancialCalculator;
 
 describe("prospective Order financial model", () => {
