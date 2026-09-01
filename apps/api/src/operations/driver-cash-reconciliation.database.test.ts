@@ -144,6 +144,7 @@ describe.skipIf(!runDatabaseTests)("driver cash reconciliation confirm()", () =>
                 totalOutstanding: "0.00",
               }),
             confirmCollectionOffset: () => Promise.resolve(null),
+            createForConfirmedCollection: () => Promise.resolve(null),
             reverseCollectionOffset: () => Promise.resolve(null),
           } as never,
           // Collection-fact capture. The real service, not a stub: these suites
@@ -151,7 +152,11 @@ describe.skipIf(!runDatabaseTests)("driver cash reconciliation confirm()", () =>
           new EmployeeCollectionEarningService(tenants as unknown as TenantContextAccessor),
         );
 
-        const createCompany = async (label: string): Promise<CompanyFixture> => {
+        const createCompany = async (
+          label: string,
+          options: { readonly accountingEnabled?: boolean } = {},
+        ): Promise<CompanyFixture> => {
+          const accountingEnabled = options.accountingEnabled ?? true;
           const companyId = randomUUID();
           const accountId = randomUUID();
           const roleId = randomUUID();
@@ -167,6 +172,16 @@ describe.skipIf(!runDatabaseTests)("driver cash reconciliation confirm()", () =>
                ${`rec-${label.toLowerCase()}-${suffix}`},
                ${`Reconciliation ${label}`}, 'active', now())
           `.execute(transaction);
+          // Companies here run with Accounting enabled so that confirming a
+          // Collection captures its owning Accounting Event (the trigger's
+          // durable gate records nothing for disabled companies) — except the
+          // scenario that proves disabled companies still confirm cleanly.
+          if (accountingEnabled) {
+            await sql`
+              insert into accounting_configurations (company_id, accounting_enabled)
+              values (${companyId}::uuid, true)
+            `.execute(transaction);
+          }
           await sql`
             insert into accounts (id, company_id, account_kind, username, password_hash) values
               (${accountId}::uuid, ${companyId}::uuid, 'company_user', ${`rec.actor.${suffix}`}, 'test-only'),
@@ -198,6 +213,26 @@ describe.skipIf(!runDatabaseTests)("driver cash reconciliation confirm()", () =>
           await sql`
             insert into company_bank_accounts (id, company_id, bank_account_code, bank_name, account_name) values
               (${bankAccountId}::uuid, ${companyId}::uuid, ${`REC-BANK-${suffix}`}, 'Reconciliation Bank', 'Main Account')
+          `.execute(transaction);
+          // A main Cash account: cash collection payments are deposited into
+          // it, and the generated cash_deposit Movement's structure CHECK
+          // requires a destination cash account on a confirmed row.
+          const cashGlId = randomUUID();
+          await sql`
+            insert into chart_of_accounts (
+              id, company_id, code, name_en, account_type, account_class,
+              normal_balance, is_posting_account, is_active
+            ) values
+              (${cashGlId}::uuid, ${companyId}::uuid, '1010', 'Cash on hand',
+               'asset', 'cash', 'debit', true, true)
+          `.execute(transaction);
+          await sql`
+            insert into company_cash_accounts (
+              id, company_id, cash_account_code, cash_account_name, cash_account_type,
+              linked_gl_account_id, effective_from, created_by_account_id
+            ) values
+              (${randomUUID()}::uuid, ${companyId}::uuid, ${`REC-CASH-${suffix}`},
+               'Main Cash', 'main_cash', ${cashGlId}::uuid, current_date, ${accountId}::uuid)
           `.execute(transaction);
           await sql`
             insert into expense_types (company_id, code, name_en, display_name)
@@ -382,6 +417,29 @@ describe.skipIf(!runDatabaseTests)("driver cash reconciliation confirm()", () =>
         expect(afterSingle.settlementStatus).toBe("unsettled");
         const singleCounts = await countsFor(single);
         expect(singleCounts).toEqual({ events: 1, history: 1, links: 1 });
+        const singleMovementAccounting = await sql<{
+          duplicateEvents: number;
+          eventSourceType: string | null;
+          linkedEventId: string | null;
+        }>`
+          select m.accounting_event_id as "linkedEventId",
+                 e.source_entity_type as "eventSourceType",
+                 (select count(*)::int from accounting_events duplicate
+                   where duplicate.company_id=m.company_id
+                     and duplicate.source_entity_type='cash_bank_movement'
+                     and duplicate.source_entity_id=m.id
+                     and duplicate.event_type='driver_collection_confirmed') as "duplicateEvents"
+            from cash_bank_movements m
+            left join accounting_events e
+              on e.id=m.accounting_event_id and e.company_id=m.company_id
+           where m.company_id=${companyA.companyId}::uuid
+             and m.reference_number=${singleResult.reconciliationNumber}
+        `.execute(transaction);
+        expect(singleMovementAccounting.rows[0]).toMatchObject({
+          duplicateEvents: 0,
+          eventSourceType: "driver_reconciliation",
+        });
+        expect(singleMovementAccounting.rows[0]?.linkedEventId).not.toBeNull();
         // Driver cost was 7.50 and must have been ignored entirely.
         const deduction = await sql<{ headerDeduction: string; linkDeduction: string }>`
           select r.driver_payable_deduction::text as "headerDeduction",
@@ -392,6 +450,46 @@ describe.skipIf(!runDatabaseTests)("driver cash reconciliation confirm()", () =>
         `.execute(transaction);
         expect(deduction.rows[0]?.headerDeduction).toBe("0.00");
         expect(deduction.rows[0]?.linkDeduction).toBe("0.00");
+
+        // --- 1b. Accounting disabled: confirmation succeeds, Movement carries
+        // no Accounting link and the Company records no Accounting Events at
+        // all ("a Company that has not activated Accounting should still
+        // record nothing" — the durable-gate contract).
+        const companyNoAccounting = await createCompany("NOACCT", {
+          accountingEnabled: false,
+        });
+        useCompany(companyNoAccounting);
+        const noAccountingOrder = await createOrder(companyNoAccounting, { collected: 50 });
+        const noAccountingResult = await service.confirm(
+          selection([noAccountingOrder], {
+            payments: [{ amount: 50, paymentMethod: "cash" }],
+          }),
+          randomUUID(),
+          `key-noacct-${randomUUID()}`,
+        );
+        expect(noAccountingResult.orderCount).toBe(1);
+        const noAccountingFacts = await sql<{
+          events: number;
+          movements: number;
+          unlinkedMovements: number;
+        }>`
+          select
+            (select count(*)::int from cash_bank_movements m
+              where m.company_id=${companyNoAccounting.companyId}::uuid
+                and m.reference_number=${noAccountingResult.reconciliationNumber}) as movements,
+            (select count(*)::int from cash_bank_movements m
+              where m.company_id=${companyNoAccounting.companyId}::uuid
+                and m.reference_number=${noAccountingResult.reconciliationNumber}
+                and m.accounting_event_id is null) as "unlinkedMovements",
+            (select count(*)::int from accounting_events e
+              where e.company_id=${companyNoAccounting.companyId}::uuid) as events
+        `.execute(transaction);
+        expect(noAccountingFacts.rows[0]).toEqual({
+          events: 0,
+          movements: 1,
+          unlinkedMovements: 1,
+        });
+        useCompany(companyA);
 
         // --- 2. Multiple Orders, same Driver, exact decimal arithmetic --------
         const multiA = await createOrder(companyA, { collected: 33.33 });
@@ -687,23 +785,23 @@ describe.skipIf(!runDatabaseTests)("driver cash reconciliation confirm()", () =>
             ),
           "reconciliation_payment_difference",
         );
-        await expectRejection(
-          () =>
-            service.confirm(
-              selection([paymentFailureOrder], {
-                payments: [
-                  {
-                    amount: 50,
-                    bankAccountId: companyA.bankAccountId,
-                    paymentMethod: "bank_transfer",
-                  },
-                ],
-              }),
-              randomUUID(),
-              `key-noref-${randomUUID()}`,
-            ),
-          "bank_payment_details_required",
+        // The bank reference is OPTIONAL for a Bank Transfer (only the Bank
+        // Account is mandatory), so omitting it confirms successfully.
+        const noReferenceOrder = await createOrder(companyA, { collected: 50 });
+        const noReferenceResult = await service.confirm(
+          selection([noReferenceOrder], {
+            payments: [
+              {
+                amount: 50,
+                bankAccountId: companyA.bankAccountId,
+                paymentMethod: "bank_transfer",
+              },
+            ],
+          }),
+          randomUUID(),
+          `key-noref-${randomUUID()}`,
         );
+        expect(noReferenceResult.paymentTotal).toBe("50.00");
         await expectRejection(
           () =>
             service.confirm(

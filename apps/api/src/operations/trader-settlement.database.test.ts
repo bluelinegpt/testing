@@ -124,7 +124,9 @@ describe.skipIf(!runDatabaseTests)("trader settlement", () => {
           tenants as unknown as TenantContextAccessor,
           {
             resolve: async (accountId: string) => ({
-              accountId, kind: "cash", name: "Harness Cash Account",
+              accountId,
+              kind: "cash",
+              name: "Harness Cash Account",
             }),
           } as unknown as PaymentFundingAccountService,
           createCalendarDateReportModeServiceStub(),
@@ -139,7 +141,11 @@ describe.skipIf(!runDatabaseTests)("trader settlement", () => {
           permissiveBalanceEnforcement(),
         );
 
-        const createCompany = async (label: string): Promise<CompanyFixture> => {
+        const createCompany = async (
+          label: string,
+          options: { readonly accountingEnabled?: boolean } = {},
+        ): Promise<CompanyFixture> => {
+          const accountingEnabled = options.accountingEnabled ?? true;
           const companyId = randomUUID();
           const accountId = randomUUID();
           const roleId = randomUUID();
@@ -155,6 +161,16 @@ describe.skipIf(!runDatabaseTests)("trader settlement", () => {
                ${`set-${label.toLowerCase()}-${suffix}`},
                ${`Settlement ${label}`}, 'active', now())
           `.execute(transaction);
+          // Companies here run with Accounting enabled so that confirming a
+          // Settlement captures its owning Accounting Event (the trigger's
+          // durable gate records nothing for disabled companies) — except the
+          // scenario that proves disabled companies still confirm cleanly.
+          if (accountingEnabled) {
+            await sql`
+              insert into accounting_configurations (company_id, accounting_enabled)
+              values (${companyId}::uuid, true)
+            `.execute(transaction);
+          }
           await sql`
             insert into accounts (id, company_id, account_kind, username, password_hash) values
               (${accountId}::uuid, ${companyId}::uuid, 'company_user', ${`set.actor.${suffix}`}, 'test-only'),
@@ -182,6 +198,26 @@ describe.skipIf(!runDatabaseTests)("trader settlement", () => {
             insert into company_bank_accounts (id, company_id, bank_account_code, bank_name, account_name, iban) values
               (${companyBankAccountId}::uuid, ${companyId}::uuid, ${`SET-BANK-${suffix}`}, 'Settlement Bank', 'Main Account',
                ${`AE${suffix}COMPANY0001`})
+          `.execute(transaction);
+          // A main Cash account: cash settlement payments draw on it, and the
+          // generated cash_withdrawal Movement's structure CHECK requires a
+          // source cash account on a confirmed row.
+          const cashGlId = randomUUID();
+          await sql`
+            insert into chart_of_accounts (
+              id, company_id, code, name_en, account_type, account_class,
+              normal_balance, is_posting_account, is_active
+            ) values
+              (${cashGlId}::uuid, ${companyId}::uuid, '1010', 'Cash on hand',
+               'asset', 'cash', 'debit', true, true)
+          `.execute(transaction);
+          await sql`
+            insert into company_cash_accounts (
+              id, company_id, cash_account_code, cash_account_name, cash_account_type,
+              linked_gl_account_id, effective_from, created_by_account_id
+            ) values
+              (${randomUUID()}::uuid, ${companyId}::uuid, ${`SET-CASH-${suffix}`},
+               'Main Cash', 'main_cash', ${cashGlId}::uuid, current_date, ${accountId}::uuid)
           `.execute(transaction);
           await sql`
             insert into trader_bank_accounts (
@@ -470,6 +506,67 @@ describe.skipIf(!runDatabaseTests)("trader settlement", () => {
         expect((await statusOf(orderOld.id)).outstanding).toBe("0.00");
         expect((await statusOf(orderMid.id)).status).toBe("partially_settled");
         expect((await statusOf(orderMid.id)).outstanding).toBe("15.00");
+        const settlementMovementAccounting = await sql<{
+          duplicateEvents: number;
+          eventSourceType: string | null;
+          linkedEventId: string | null;
+        }>`
+          select m.accounting_event_id as "linkedEventId",
+                 e.source_entity_type as "eventSourceType",
+                 (select count(*)::int from accounting_events duplicate
+                   where duplicate.company_id=m.company_id
+                     and duplicate.source_entity_type='cash_bank_movement'
+                     and duplicate.source_entity_id=m.id
+                     and duplicate.event_type='trader_settlement_confirmed') as "duplicateEvents"
+            from cash_bank_movements m
+            left join accounting_events e
+              on e.id=m.accounting_event_id and e.company_id=m.company_id
+           where m.company_id=${companyA.companyId}::uuid
+             and m.reference_number=${oldestFirstResult.settlementNumber}
+        `.execute(transaction);
+        expect(settlementMovementAccounting.rows[0]).toMatchObject({
+          duplicateEvents: 0,
+          eventSourceType: "trader_settlement",
+        });
+        expect(settlementMovementAccounting.rows[0]?.linkedEventId).not.toBeNull();
+
+        // Accounting disabled: confirmation succeeds, the Movement carries no
+        // Accounting link and the Company records no Accounting Events at all
+        // ("a Company that has not activated Accounting should still record
+        // nothing" — the durable-gate contract).
+        const companyNoAccounting = await createCompany("NOACCT", {
+          accountingEnabled: false,
+        });
+        useCompany(companyNoAccounting);
+        const disabledOrder = await createOrder(companyNoAccounting, { netPayable: 30 });
+        const disabledResult = await service.createPayment(
+          basePayment(companyNoAccounting.traderId, [{ amount: 30, orderId: disabledOrder.id }]),
+          randomUUID(),
+          `key-noacct-${randomUUID()}`,
+        );
+        expect(disabledResult.amount).toBe("30.00");
+        const disabledFacts = await sql<{
+          events: number;
+          movements: number;
+          unlinkedMovements: number;
+        }>`
+          select
+            (select count(*)::int from cash_bank_movements m
+              where m.company_id=${companyNoAccounting.companyId}::uuid
+                and m.reference_number=${disabledResult.settlementNumber}) as movements,
+            (select count(*)::int from cash_bank_movements m
+              where m.company_id=${companyNoAccounting.companyId}::uuid
+                and m.reference_number=${disabledResult.settlementNumber}
+                and m.accounting_event_id is null) as "unlinkedMovements",
+            (select count(*)::int from accounting_events e
+              where e.company_id=${companyNoAccounting.companyId}::uuid) as events
+        `.execute(transaction);
+        expect(disabledFacts.rows[0]).toEqual({
+          events: 0,
+          movements: 1,
+          unlinkedMovements: 1,
+        });
+        useCompany(companyA);
 
         // Manual adjustment: pay orderNew a smaller, hand-picked amount instead
         // of following the proposal.
@@ -955,51 +1052,34 @@ describe.skipIf(!runDatabaseTests)("trader settlement", () => {
         );
         useCompany(companyA);
 
-        // Signed Trader positions offset before any cash payment is proposed.
+        // Trader debts live in Trader Receivables now (20260916000000): an
+        // Order can no longer carry a negative net payable, so a "signed
+        // negative" settlement row is rejected by the schema itself instead of
+        // being netted against payable Orders here.
         const companyC = await createCompany("SIGNED-POSITIVE");
         useCompany(companyC);
-        const traderReceivable = await createOrder(companyC, {
-          grossPayable: 0, netPayable: -20, paidServiceFee: 20,
-        });
-        const traderPayable = await createOrder(companyC, {
-          grossPayable: 100, netPayable: 80, paidServiceFee: 20,
-        });
-        const signedProposal = await service.proposeAllocation({
-          amount: 80,
+        await sql`savepoint negative_order_model`.execute(transaction);
+        let negativeOrderRejection: unknown = null;
+        try {
+          await createOrder(companyC, {
+            grossPayable: 0,
+            netPayable: -20,
+            paidServiceFee: 20,
+          });
+        } catch (error) {
+          negativeOrderRejection = error;
+          await sql`rollback to savepoint negative_order_model`.execute(transaction);
+        }
+        expect(String(negativeOrderRejection)).toContain("orders_nonnegative_amounts");
+        // A Trader with no payable Orders gets an empty proposal — the debt
+        // side is Trader Receivables' job, never a negative allocation.
+        const emptyProposal = await service.proposeAllocation({
+          amount: 1,
           traderId: companyC.traderId,
         });
-        expect(signedProposal.totalAllocated).toBe("60.00");
-        expect(signedProposal.unallocatedAmount).toBe("20.00");
-        expect(signedProposal.allocations).toEqual([
-          expect.objectContaining({ allocatedAmount: "60.00", orderId: traderPayable.id }),
-        ]);
-        await expectRejection(
-          () => service.createPayment(
-            basePayment(companyC.traderId, [{ amount: 80, orderId: traderPayable.id }]),
-            randomUUID(),
-            `key-signed-overpay-${randomUUID()}`,
-          ),
-          "settlement_exceeds_trader_net_position",
-        );
-        await service.createPayment(
-          basePayment(companyC.traderId, [{ amount: 60, orderId: traderPayable.id }]),
-          randomUUID(),
-          `key-signed-net-${randomUUID()}`,
-        );
-        expect((await statusOf(traderReceivable.id)).outstanding).toBe("-20.00");
-        expect((await statusOf(traderPayable.id)).outstanding).toBe("20.00");
-
-        const companyD = await createCompany("SIGNED-NEGATIVE");
-        useCompany(companyD);
-        await createOrder(companyD, { grossPayable: 0, netPayable: -20, paidServiceFee: 20 });
-        await createOrder(companyD, { grossPayable: 10, netPayable: -10, paidServiceFee: 20 });
-        const negativeProposal = await service.proposeAllocation({
-          amount: 1,
-          traderId: companyD.traderId,
-        });
-        expect(negativeProposal.totalAllocated).toBe("0.00");
-        expect(negativeProposal.unallocatedAmount).toBe("1.00");
-        expect(negativeProposal.allocations).toEqual([]);
+        expect(emptyProposal.totalAllocated).toBe("0.00");
+        expect(emptyProposal.unallocatedAmount).toBe("1.00");
+        expect(emptyProposal.allocations).toEqual([]);
         useCompany(companyA);
 
         // --- Permissions -----------------------------------------------------------

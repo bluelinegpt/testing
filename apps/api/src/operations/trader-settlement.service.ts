@@ -763,24 +763,27 @@ export class TraderSettlementService {
         });
       }
 
-      // Create cash/bank movements for trader settlement payment
-      // Records which cash/bank account funded the trader payment
-      await this.createSettlementMovement(transaction, {
-        companyId,
-        payment,
-        cashAccount,
-        settlementNumber,
-        paymentAmount: netPayable.toFixed(2),
-        paymentDate: input.paymentDate ?? new Date().toISOString().slice(0, 10),
-        actorId: identity.identityId,
-      });
-
       await sql`
         update trader_settlements
            set status = 'confirmed', confirmed_by_account_id = ${identity.identityId}::uuid,
                confirmed_at = now(), updated_at = now()
          where id = ${settlementId}::uuid and company_id = ${companyId}::uuid
       `.execute(transaction);
+
+      // The status transition above synchronously captures the authoritative
+      // Trader Settlement Accounting Event. The operational Cash/Bank Movement
+      // points to that Event instead of enqueueing a second copy of the same
+      // accounting fact.
+      await this.createSettlementMovement(transaction, {
+        companyId,
+        payment,
+        cashAccount,
+        settlementId,
+        settlementNumber,
+        paymentAmount: netPayable.toFixed(2),
+        paymentDate: input.paymentDate ?? new Date().toISOString().slice(0, 10),
+        actorId: identity.identityId,
+      });
 
       const actorRole = await this.history.actorRole(transaction, companyId, identity.identityId);
       for (const order of orders) {
@@ -2385,6 +2388,7 @@ export class TraderSettlementService {
         readonly accountId: string;
         readonly linkedGlAccountId: string | null;
       } | null;
+      readonly settlementId: string;
       readonly settlementNumber: string;
       readonly paymentAmount: string;
       readonly paymentDate: string;
@@ -2395,6 +2399,39 @@ export class TraderSettlementService {
     const isBank = options.payment.method === "bank_transfer";
 
     if (!isCash && !isBank) return;
+
+    // Resolve the owning Accounting Event exactly once for this confirmation.
+    // The event is captured synchronously by the trader_settlements status
+    // trigger, keyed uniquely on (company, event_type, source type, source id,
+    // version) — so this lookup is deterministic: at most one row can exist.
+    // Companies without accounting_enabled deliberately record no Accounting
+    // Events at all, so for them the movement's accounting_event_id stays null.
+    const ownership = await sql<{
+      eventId: string | null;
+      accountingEnabled: boolean;
+    }>`
+      select
+        (
+          select e.id from accounting_events e
+          where e.company_id = ${options.companyId}::uuid
+            and e.source_entity_type = 'trader_settlement'
+            and e.source_entity_id = ${options.settlementId}::uuid
+            and e.event_type = 'trader_settlement_confirmed'
+        ) as "eventId",
+        exists (
+          select 1 from accounting_configurations c
+          where c.company_id = ${options.companyId}::uuid
+            and c.accounting_enabled
+        ) as "accountingEnabled"
+    `.execute(transaction);
+    const ownerEventId = ownership.rows[0]?.eventId ?? null;
+    if (ownerEventId === null && ownership.rows[0]?.accountingEnabled === true) {
+      throw new ApplicationException(
+        "trader_settlement_cash_movement_not_created",
+        "The Trader Settlement Cash/Bank Movement could not be linked to Accounting",
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
 
     // Determine movement type and funding account
     const movementType = isCash ? "cash_withdrawal" : "bank_withdrawal";
@@ -2409,9 +2446,9 @@ export class TraderSettlementService {
       "CBM",
     );
 
-    const movementId = randomUUID();
-
-    // Create confirmed movement
+    // Create the confirmed Movement and link it to the Accounting Event already
+    // produced by the settlement status trigger. That Event owns the Journal;
+    // the Movement is the operational cash trail and must not post it again.
     const paymentMethodForMovement = options.payment.method === "cash" ? "cash" : "visa";
     const idempotencyKey = `${options.settlementNumber}_${movementNumber}`;
     await sql`
@@ -2429,15 +2466,18 @@ export class TraderSettlementService {
         amount,
         fee_amount,
         payment_method,
+        reference_number,
+        description,
         status,
         correlation_id,
         idempotency_identity,
+        accounting_event_id,
         confirmed_by_account_id,
         confirmed_at,
         created_by_account_id,
         created_at
       ) values (
-        ${movementId}::uuid,
+        ${randomUUID()}::uuid,
         ${options.companyId}::uuid,
         ${movementNumber},
         ${movementType},
@@ -2450,43 +2490,16 @@ export class TraderSettlementService {
         ${new Decimal(options.paymentAmount).toFixed(2)}::numeric,
         '0'::numeric,
         ${paymentMethodForMovement},
+        ${options.settlementNumber},
+        ${"Trader settlement " + options.settlementNumber},
         'confirmed',
-        ${randomUUID()},
+        ${options.settlementId},
         ${idempotencyKey},
+        ${ownerEventId}::uuid,
         ${options.actorId}::uuid,
         now(),
         ${options.actorId}::uuid,
         now()
-      )
-    `.execute(transaction);
-
-    // Enqueue accounting event for GL posting
-    const eventHash = createHash("sha256")
-      .update(
-        JSON.stringify({
-          companyId: options.companyId,
-          movementId,
-          movementNumber,
-          amount: options.paymentAmount,
-          paymentDate: options.paymentDate,
-        }),
-      )
-      .digest("hex");
-
-    await sql`
-      insert into accounting_events (
-        id, company_id, event_type, event_version, effective_accounting_date,
-        actor_id, actor_type, source_entity_type, source_entity_id, source_reference,
-        correlation_id, idempotency_key, event_hash, description, supplementary_metadata
-      ) values (
-        gen_random_uuid(), ${options.companyId}::uuid,
-        ${movementType === "cash_withdrawal" ? "trader_settlement_confirmed" : "trader_settlement_confirmed"},
-        1, ${options.paymentDate}::date,
-        ${options.actorId}::uuid, 'account', 'cash_bank_movement', ${movementId}::uuid,
-        ${movementNumber}, ${movementId}::uuid, ${idempotencyKey},
-        ${eventHash},
-        ${'Trader settlement ' + options.settlementNumber + ' movement'},
-        ${JSON.stringify({ source: 'trader_settlement', settlementNumber: options.settlementNumber })}
       )
     `.execute(transaction);
   }

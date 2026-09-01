@@ -790,8 +790,8 @@ export class DriverCashReconciliationService {
             company_cash_account_id, company_bank_account_id, bank_reference, created_by_account_id, payment_at
           ) values (
             ${companyId}::uuid, ${reconciliationId}::uuid, ${payment.paymentMethod},
-            ${new Decimal(payment.amount).toFixed(2)}, ${payment.paymentMethod === "cash" ? payment.cashAccountId ?? null : null}::uuid,
-            ${payment.paymentMethod === "bank_transfer" ? payment.bankAccountId ?? null : null}::uuid,
+            ${new Decimal(payment.amount).toFixed(2)}, ${payment.paymentMethod === "cash" ? (payment.cashAccountId ?? null) : null}::uuid,
+            ${payment.paymentMethod === "bank_transfer" ? (payment.bankAccountId ?? null) : null}::uuid,
             ${payment.bankReference?.trim() || null}, ${identity.identityId}::uuid,
             coalesce(${payment.paymentDate ?? null}::date::timestamptz, now())
           ) returning id
@@ -813,9 +813,15 @@ export class DriverCashReconciliationService {
         reconciliationId,
         safeCollectionAmount: gross.minus(expenseTotal),
       });
-      // Create cash/bank movements for driver collection payments
-      // Records which cash/bank account received the collections
-      // Auto-populate payment accounts based on payment method
+      await sql`
+        update driver_reconciliations
+           set status = 'confirmed', confirmed_by_account_id = ${identity.identityId}::uuid,
+               confirmed_at = now(), updated_at = now()
+         where id = ${reconciliationId}::uuid and company_id = ${companyId}::uuid
+      `.execute(transaction);
+      // The status transition above synchronously captures the authoritative
+      // Driver Collection Accounting Event. Each operational Cash/Bank
+      // Movement points to that Event instead of enqueueing duplicate facts.
       const paymentsWithAccounts = await this.populatePaymentAccounts(
         transaction,
         companyId,
@@ -824,17 +830,11 @@ export class DriverCashReconciliationService {
       await this.createCollectionMovements(transaction, {
         companyId,
         payments: paymentsWithAccounts,
+        reconciliationId,
         reconciliationNumber,
         businessDate: header.rows[0]!.businessDate,
         actorId: identity.identityId,
       });
-
-      await sql`
-        update driver_reconciliations
-           set status = 'confirmed', confirmed_by_account_id = ${identity.identityId}::uuid,
-               confirmed_at = now(), updated_at = now()
-         where id = ${reconciliationId}::uuid and company_id = ${companyId}::uuid
-      `.execute(transaction);
       // Only the Driver Cash Status changes. Delivery Status, Return Status,
       // Trader Settlement Status, pricing and customer snapshots are untouched.
       await sql`
@@ -894,8 +894,7 @@ export class DriverCashReconciliationService {
           businessDate: header.rows[0]!.businessDate,
           countsForCollectionEarning: input.countsForCollectionEarning === true,
           driverId,
-          orderCount:
-            orders.length > 0 ? orders.length : (input.manualCollectedOrderCount ?? 0),
+          orderCount: orders.length > 0 ? orders.length : (input.manualCollectedOrderCount ?? 0),
           reconciliationId,
         },
         identity.identityId,
@@ -2786,15 +2785,47 @@ export class DriverCashReconciliationService {
     options: {
       readonly companyId: string;
       readonly payments: readonly FinancialPaymentDto[];
+      readonly reconciliationId: string;
       readonly reconciliationNumber: string;
       readonly businessDate: string;
       readonly actorId: string;
     },
   ): Promise<void> {
+    // Resolve the owning Accounting Event exactly once for this confirmation.
+    // The event is captured synchronously by the driver_reconciliations status
+    // trigger, keyed uniquely on (company, event_type, source type, source id,
+    // version) — so this lookup is deterministic: at most one row can exist.
+    // Companies without accounting_enabled deliberately record no Accounting
+    // Events at all, so for them the movement's accounting_event_id stays null.
+    const ownership = await sql<{
+      eventId: string | null;
+      accountingEnabled: boolean;
+    }>`
+      select
+        (
+          select e.id from accounting_events e
+          where e.company_id = ${options.companyId}::uuid
+            and e.source_entity_type = 'driver_reconciliation'
+            and e.source_entity_id = ${options.reconciliationId}::uuid
+            and e.event_type = 'driver_collection_confirmed'
+        ) as "eventId",
+        exists (
+          select 1 from accounting_configurations c
+          where c.company_id = ${options.companyId}::uuid
+            and c.accounting_enabled
+        ) as "accountingEnabled"
+    `.execute(transaction);
+    const ownerEventId = ownership.rows[0]?.eventId ?? null;
+    if (ownerEventId === null && ownership.rows[0]?.accountingEnabled === true) {
+      throw new ApplicationException(
+        "driver_collection_cash_movement_not_created",
+        "The Driver Collection Cash/Bank Movement could not be linked to Accounting",
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+
     for (const payment of options.payments) {
       if (!payment.paymentMethod) continue;
-
-      console.log("DEBUG: payment.paymentMethod =", payment.paymentMethod); // DEBUG
 
       const isCash = payment.paymentMethod === "cash";
       const isBank = payment.paymentMethod === "bank_transfer";
@@ -2820,8 +2851,6 @@ export class DriverCashReconciliationService {
         "CBM",
       );
 
-      const movementId = randomUUID();
-
       // Create confirmed movement
       // Note: driver_reconciliation_payments uses "bank_transfer", but cash_bank_movements uses "visa"
       const paymentMethodForMovement = isCash ? "cash" : "visa";
@@ -2841,15 +2870,18 @@ export class DriverCashReconciliationService {
           amount,
           fee_amount,
           payment_method,
+          reference_number,
+          description,
           status,
           correlation_id,
           idempotency_identity,
+          accounting_event_id,
           confirmed_by_account_id,
           confirmed_at,
           created_by_account_id,
           created_at
         ) values (
-          ${movementId}::uuid,
+          ${randomUUID()}::uuid,
           ${options.companyId}::uuid,
           ${movementNumber},
           ${movementType},
@@ -2862,44 +2894,16 @@ export class DriverCashReconciliationService {
           ${new Decimal(payment.amount ?? 0).toFixed(2)}::numeric,
           '0'::numeric,
           ${paymentMethodForMovement},
+          ${options.reconciliationNumber},
+          ${"Driver collection " + options.reconciliationNumber},
           'confirmed',
-          ${randomUUID()},
+          ${options.reconciliationId},
           ${idempotencyKey},
+          ${ownerEventId}::uuid,
           ${options.actorId}::uuid,
           now(),
           ${options.actorId}::uuid,
           now()
-        )
-      `.execute(transaction);
-
-      // Enqueue accounting event for GL posting
-      // The event will be picked up by OperationalSourceLoader to create GL entries
-      const eventHash = createHash("sha256")
-        .update(
-          JSON.stringify({
-            companyId: options.companyId,
-            movementId,
-            movementNumber,
-            amount: payment.amount,
-            businessDate: options.businessDate,
-          }),
-        )
-        .digest("hex");
-
-      await sql`
-        insert into accounting_events (
-          id, company_id, event_type, event_version, effective_accounting_date,
-          actor_id, actor_type, source_entity_type, source_entity_id, source_reference,
-          correlation_id, idempotency_key, event_hash, description, supplementary_metadata
-        ) values (
-          gen_random_uuid(), ${options.companyId}::uuid,
-          ${movementType === "cash_deposit" ? "driver_collection_confirmed" : "driver_collection_confirmed"},
-          1, ${options.businessDate}::date,
-          ${options.actorId}::uuid, 'account', 'cash_bank_movement', ${movementId}::uuid,
-          ${movementNumber}, ${movementId}::uuid, ${idempotencyKey},
-          ${eventHash},
-          ${'Driver collection ' + options.reconciliationNumber + ' movement'},
-          ${JSON.stringify({ source: 'driver_collection', reconciliationNumber: options.reconciliationNumber })}
         )
       `.execute(transaction);
     }
@@ -2920,4 +2924,3 @@ export class DriverCashReconciliationService {
     }
   }
 }
-
