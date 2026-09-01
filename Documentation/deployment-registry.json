@@ -20,9 +20,9 @@
       "path": "apps/web",
       "renderService": "bluelinegpt-web-test",
       "status": "pushed_awaiting_confirmation",
-      "localCommit": "93174cf",
+      "localCommit": "9cbcc12",
       "localCommitDate": "2026-09-01",
-      "lastChangeDescription": "feat(trader-settlements): add Collect from Trader feature to receive payments",
+      "lastChangeDescription": "fix(trader-receivables): add idempotency keys to API requests",
       "lastChangeBy": "human",
       "confirmedLiveCommit": "9666706",
       "confirmedLiveAt": "2026-09-01"

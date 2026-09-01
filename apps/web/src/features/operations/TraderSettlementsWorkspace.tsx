@@ -3613,6 +3613,7 @@ function AddReceivableDialog({
   const [traderId, setTraderId] = useState("");
   const [sourceType, setSourceType] = useState("manual_adjustment");
   const [sourceReference, setSourceReference] = useState("");
+  const [reason, setReason] = useState("");
   const [businessDate, setBusinessDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [amountDue, setAmountDue] = useState("");
   const [error, setError] = useState<string>();
@@ -3637,7 +3638,7 @@ function AddReceivableDialog({
   }, [api]);
 
   const amountInput = parseMoneyInput(amountDue, { required: true });
-  const isValid = traderId !== "" && businessDate !== "" && amountInput.ok && amountInput.value > 0;
+  const isValid = traderId !== "" && reason.trim() !== "" && businessDate !== "" && amountInput.ok && amountInput.value > 0;
 
   const submit = async () => {
     if (!isValid || saving) return;
@@ -3648,6 +3649,7 @@ function AddReceivableDialog({
       traderId,
       sourceType,
       sourceReference: sourceReference.trim() === "" ? undefined : sourceReference.trim(),
+      reason: reason.trim(),
       businessDate,
       amountDue: amountInput.ok ? amountInput.value : 0,
     });
@@ -3657,6 +3659,7 @@ function AddReceivableDialog({
         traderId,
         sourceType,
         sourceReference: sourceReference.trim() === "" ? undefined : sourceReference.trim(),
+        reason: reason.trim(),
         businessDate,
         amountDue: amountInput.ok ? amountInput.value : 0,
       }, { "X-Idempotency-Key": idempotency.keyFor(fingerprint) });
@@ -3710,6 +3713,17 @@ function AddReceivableDialog({
           value={sourceReference}
         />
         <small>{sourceReference.length}/160</small>
+      </label>
+
+      <label className="field required-field">
+        <span>{t("common.reason", "Reason")}</span>
+        <textarea
+          maxLength={500}
+          onChange={(event) => setReason(event.target.value)}
+          placeholder={t("traderReceivable.reasonPlaceholder", "Explain why this charge is being applied...")}
+          value={reason}
+        />
+        <small>{reason.length}/500</small>
       </label>
 
       <label className="field">
