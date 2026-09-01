@@ -428,7 +428,11 @@ export function TraderWhatsAppSection({
           {groups !== undefined && pickerGroups.length === 0 ? (
             <p className="empty-state">{t("whatsapp.groupsEmpty")}</p>
           ) : null}
-          <div className="field" role="radiogroup" aria-label={t("whatsapp.selectGroup")}>
+          <div
+            className="whatsapp-group-picker"
+            role="radiogroup"
+            aria-label={t("whatsapp.selectGroup")}
+          >
             {pickerGroups.map((group) => (
               <label key={group.id}>
                 <input
@@ -436,20 +440,22 @@ export function TraderWhatsAppSection({
                   name="whatsapp-group-choice"
                   onChange={() => setPickerChoice({ id: group.id, name: group.name })}
                   type="radio"
-                />{" "}
-                {group.name}
-                {(pickerNameCounts.get(group.name) ?? 0) > 1 ? (
-                  <span className="mono" dir="ltr">
-                    {" "}
-                    {shortGroupId(group.id)}
-                  </span>
-                ) : null}
-                {group.participantCount !== undefined ? (
-                  <span className="form-hint">
-                    {" "}
-                    {t("whatsapp.membersCount", { count: group.participantCount })}
-                  </span>
-                ) : null}
+                />
+                <span>
+                  {group.name}
+                  {(pickerNameCounts.get(group.name) ?? 0) > 1 ? (
+                    <span className="mono" dir="ltr">
+                      {" "}
+                      {shortGroupId(group.id)}
+                    </span>
+                  ) : null}
+                  {group.participantCount !== undefined ? (
+                    <span className="form-hint">
+                      {" "}
+                      {t("whatsapp.membersCount", { count: group.participantCount })}
+                    </span>
+                  ) : null}
+                </span>
               </label>
             ))}
           </div>
