@@ -79,6 +79,7 @@ const routeTitles: Readonly<Record<string, string>> = {
   "/configuration/drivers": "workforce.drivers",
   "/configuration/users": "nav.users",
   "/configuration/roles": "nav.roles",
+  "/configuration/whatsapp": "nav.whatsapp",
   "/support": "nav.supportCases",
   "/communication": "nav.communicationCenter",
   "/no-access": "shell.noAccessTitle",
@@ -219,6 +220,7 @@ export function CompanyAppShell({
               { label: t("workforce.employees"), path: "/configuration/employees" },
               { label: t("nav.users"), path: "/configuration/users" },
               { label: t("nav.roles"), path: "/configuration/roles" },
+              { label: t("nav.whatsapp"), path: "/configuration/whatsapp" },
             ],
           },
           {

@@ -19,6 +19,7 @@ import { normalizeUaeMobile } from "../../domain/uae-mobile.js";
 import { Modal } from "../../components/Modal.js";
 import { AreaSelector } from "./AreaSelector.js";
 import { PageHeader } from "../../components/PageHeader.js";
+import { TraderWhatsAppSection } from "./TraderWhatsAppSection.js";
 
 type Detail = {
   audit: readonly Record<string, unknown>[];
@@ -330,7 +331,16 @@ export function TraderDetailWorkspace({
         </p>
       </>
     );
-  const tabs = ["overview", "portalUsers", "pricing", "banks", "orders", "settlements", "audit"];
+  const tabs = [
+    "overview",
+    "portalUsers",
+    "pricing",
+    "banks",
+    "whatsapp",
+    "orders",
+    "settlements",
+    "audit",
+  ];
   return (
     <>
       <PageHeader
@@ -434,6 +444,9 @@ export function TraderDetailWorkspace({
           kind="trader"
           onNavigate={(path) => globalThis.location.assign(path)}
         />
+      ) : null}
+      {tab === "whatsapp" ? (
+        <TraderWhatsAppSection api={api} traderId={String(detail.id)} traderName={detail.name} />
       ) : null}
       {tab === "banks" ? (
         <BankSection
@@ -621,7 +634,10 @@ export function TraderForm({
     const mobile = mobileRaw === "" ? undefined : normalizeUaeMobile(mobileRaw);
     const secondRaw = String(f.get("secondMobileNumber") ?? "").trim();
     const secondMobile = secondRaw === "" ? undefined : normalizeUaeMobile(secondRaw);
-    if ((mobileRaw !== "" && mobile === undefined) || (secondRaw !== "" && secondMobile === undefined)) {
+    if (
+      (mobileRaw !== "" && mobile === undefined) ||
+      (secondRaw !== "" && secondMobile === undefined)
+    ) {
       setMobileError(t("traderConfig.mobileError"));
       setSaving(false);
       /* Move the caret to the field that stopped the save. A short line of red
@@ -629,7 +645,8 @@ export function TraderForm({
          symptom was "nothing happens and there is no error" when the message
          was in fact on screen the whole time. Focusing scrolls it into view and
          announces it, since the input owns `aria-describedby`. */
-      const invalid = mobileRaw !== "" && mobile === undefined ? "mobileNumber" : "secondMobileNumber";
+      const invalid =
+        mobileRaw !== "" && mobile === undefined ? "mobileNumber" : "secondMobileNumber";
       const field = formElement.elements.namedItem(invalid);
       if (field instanceof HTMLInputElement) field.focus();
       return;

@@ -95,6 +95,7 @@ const routePermissions: Readonly<Record<string, readonly string[]>> = {
   "/configuration/drivers": [manage],
   "/configuration/users": [manage],
   "/configuration/roles": [manage],
+  "/configuration/whatsapp": [manage, "whatsapp.connection.manage"],
   "/support": [manage],
   "/communication": [manage, "communication.operator.read"],
   // Repo/deploy state, not Company business data -- gated the same as

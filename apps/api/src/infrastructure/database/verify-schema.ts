@@ -409,6 +409,8 @@ const expectedConstraints = [
   "password_reset_tokens_source_check",
   "password_reset_tokens_version_positive",
   "journal_lines_cash_bank_movement_fk",
+  "whatsapp_message_outbox_message_type_check",
+  "whatsapp_message_outbox_type_shape_check",
 ] as const;
 
 const expectedIndexes = [

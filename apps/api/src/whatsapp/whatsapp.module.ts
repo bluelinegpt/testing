@@ -11,6 +11,7 @@ import { WhatsAppConnectionService } from "./whatsapp-connection.service.js";
 import { WhatsAppController } from "./whatsapp.controller.js";
 import { WhatsAppNotificationHistoryService } from "./whatsapp-notification-history.service.js";
 import { WhatsAppOutboxWriter } from "./whatsapp-outbox-writer.service.js";
+import { WhatsAppTestMessageService } from "./whatsapp-test-message.service.js";
 import { WhatsAppSessionCipher } from "./whatsapp-session-cipher.js";
 
 // The real Baileys provider (Prompt 2) is bound here — the
@@ -25,6 +26,7 @@ import { WhatsAppSessionCipher } from "./whatsapp-session-cipher.js";
     WhatsAppConnectionService,
     WhatsAppNotificationHistoryService,
     WhatsAppOutboxWriter,
+    WhatsAppTestMessageService,
     WhatsAppSessionCipher,
     BaileysSessionStore,
     WhatsAppConnectionRuntime,

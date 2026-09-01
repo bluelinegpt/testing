@@ -20,16 +20,18 @@ import {
 import { TraderWhatsAppSettingsService } from "./trader-whatsapp-settings.service.js";
 import { WhatsAppConnectionService } from "./whatsapp-connection.service.js";
 import { WhatsAppNotificationHistoryService } from "./whatsapp-notification-history.service.js";
+import { WhatsAppTestMessageService } from "./whatsapp-test-message.service.js";
 import type {
   CompanyWhatsAppConnectionView,
   TraderWhatsAppSettingsView,
   WhatsAppGroupView,
   WhatsAppNotificationView,
+  WhatsAppTestMessageResult,
 } from "./whatsapp.dto.js";
-// NOT `import type`: the DTO class must exist at runtime for ValidationPipe's
+// NOT `import type`: the DTO classes must exist at runtime for ValidationPipe's
 // decorator metadata — a type-only import silently breaks body validation.
 // eslint-disable-next-line @typescript-eslint/consistent-type-imports
-import { UpdateTraderWhatsAppSettingsDto } from "./whatsapp.dto.js";
+import { SendTestMessageDto, UpdateTraderWhatsAppSettingsDto } from "./whatsapp.dto.js";
 
 /**
  * Company-scoped WhatsApp configuration, connectivity and history: the
@@ -55,13 +57,22 @@ export class WhatsAppController {
     private readonly settings: TraderWhatsAppSettingsService,
     @Inject(WhatsAppNotificationHistoryService)
     private readonly history: WhatsAppNotificationHistoryService,
+    @Inject(WhatsAppTestMessageService)
+    private readonly testMessages: WhatsAppTestMessageService,
   ) {}
 
   @ApiOperation({
     summary:
       "Read this Company's WhatsApp connection status (includes the current QR while pairing)",
   })
-  @RequireAnyPermission("whatsapp.connection.manage", "users_roles.manage")
+  // Read-only status is also visible to Trader-settings managers: the Trader
+  // WhatsApp section must honestly show "not connected" before offering a
+  // test message. Mutations below stay connection-manage only.
+  @RequireAnyPermission(
+    "whatsapp.connection.manage",
+    "whatsapp.trader_settings.manage",
+    "users_roles.manage",
+  )
   @Get("connection")
   public connection(): Promise<CompanyWhatsAppConnectionView> {
     return this.connections.getConnection();
@@ -132,6 +143,19 @@ export class WhatsAppController {
     @Req() request: Request,
   ): Promise<TraderWhatsAppSettingsView> {
     return this.settings.removeGroupMapping(traderId, this.correlationId(request));
+  }
+
+  @ApiOperation({
+    summary: "Send one explicit test message to the Trader's configured WhatsApp group",
+  })
+  @RequireAnyPermission("whatsapp.trader_settings.manage", "users_roles.manage")
+  @Post("traders/:traderId/test-message")
+  public sendTestMessage(
+    @Param("traderId", new ParseUUIDPipe()) traderId: string,
+    @Body() input: SendTestMessageDto,
+    @Req() request: Request,
+  ): Promise<WhatsAppTestMessageResult> {
+    return this.testMessages.send(traderId, this.correlationId(request), input.clientRequestId);
   }
 
   @ApiOperation({ summary: "List WhatsApp notification history for one Order" })

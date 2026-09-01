@@ -28,7 +28,7 @@ export class WhatsAppNotificationHistoryService {
     if (order.rows[0] === undefined) {
       throw new ApplicationException("order_not_found", "Order not found", HttpStatus.NOT_FOUND);
     }
-    return this.page(companyId, sql`and order_id = ${orderId}::uuid`);
+    return this.page(companyId, sql`and w.order_id = ${orderId}::uuid`);
   }
 
   public async listForTrader(traderId: string): Promise<readonly WhatsAppNotificationView[]> {
@@ -39,7 +39,7 @@ export class WhatsAppNotificationHistoryService {
     if (trader.rows[0] === undefined) {
       throw new ApplicationException("trader_not_found", "Trader not found", HttpStatus.NOT_FOUND);
     }
-    return this.page(companyId, sql`and trader_id = ${traderId}::uuid`);
+    return this.page(companyId, sql`and w.trader_id = ${traderId}::uuid`);
   }
 
   private async page(
@@ -47,27 +47,33 @@ export class WhatsAppNotificationHistoryService {
     anchorFilter: ReturnType<typeof sql>,
   ): Promise<readonly WhatsAppNotificationView[]> {
     const result = await sql<WhatsAppNotificationView>`
-      select id,
-             trader_id as "traderId",
-             order_id as "orderId",
-             order_status_history_id as "orderStatusHistoryId",
-             destination_type as "destinationType",
-             provider_group_id as "providerGroupId",
-             group_name_snapshot as "groupNameSnapshot",
-             message_language as "messageLanguage",
-             message_body as "messageBody",
-             status,
-             provider_message_id as "providerMessageId",
-             queued_at as "queuedAt",
-             sent_at as "sentAt",
-             failed_at as "failedAt",
-             failure_code as "failureCode",
-             failure_reason as "failureReason",
-             attempt_count as "attemptCount",
-             created_at as "createdAt"
-        from whatsapp_message_outbox
-       where company_id = ${companyId}::uuid ${anchorFilter}
-       order by created_at desc
+      select w.id,
+             w.trader_id as "traderId",
+             w.message_type as "messageType",
+             w.order_id as "orderId",
+             w.order_status_history_id as "orderStatusHistoryId",
+             o.order_number as "orderNumber",
+             h.to_status as "orderStatus",
+             w.destination_type as "destinationType",
+             w.provider_group_id as "providerGroupId",
+             w.group_name_snapshot as "groupNameSnapshot",
+             w.message_language as "messageLanguage",
+             w.message_body as "messageBody",
+             w.status,
+             w.provider_message_id as "providerMessageId",
+             w.queued_at as "queuedAt",
+             w.sent_at as "sentAt",
+             w.failed_at as "failedAt",
+             w.failure_code as "failureCode",
+             w.failure_reason as "failureReason",
+             w.attempt_count as "attemptCount",
+             w.created_at as "createdAt"
+        from whatsapp_message_outbox w
+        left join orders o on o.id = w.order_id and o.company_id = w.company_id
+        left join order_status_history h
+          on h.id = w.order_status_history_id and h.company_id = w.company_id
+       where w.company_id = ${companyId}::uuid ${anchorFilter}
+       order by w.created_at desc
        limit 100
     `.execute(this.database);
     return result.rows;
