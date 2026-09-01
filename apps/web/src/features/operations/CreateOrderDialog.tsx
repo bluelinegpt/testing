@@ -674,7 +674,9 @@ export function CreateOrderDialog({
         if (trader !== undefined && trader.id !== editDetail.traderId) {
           payload.traderId = trader.id;
         }
-        if (customer !== undefined) {
+        // Only include customer IDs if they have valid values. Empty UUIDs should
+        // never be sent to the API — omit them entirely instead.
+        if (customer !== undefined && customer.id && customer.addressId) {
           payload.customerId = customer.id;
           payload.customerAddressId = customer.addressId;
         }
