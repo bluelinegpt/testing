@@ -404,6 +404,19 @@ describe("Destructive capability certification", () => {
     "platform-user-deletion.service.ts",
     "platform-company-deletion-execution.service.ts",
     "company-website-domain.service.ts",
+    // 2026-09-01 review (SEO Consultant provisioning, commit dddab0b): ONE
+    // `delete from role_permissions where role_id=<the platform SEO role>` —
+    // a permission-drift reset of the single PLATFORM-scoped system role
+    // (`platform_seo_consultant`, resolved via an upsert constrained to
+    // `company_id is null`), immediately re-inserted from the hard-coded
+    // catalog inside the same advisory-locked transaction. It can never touch
+    // a Company's roles, users, or any historical business record — it only
+    // narrows a system role back to its intended least-privilege set.
+    // Invoked solely by the operator-run CLI (`run-platform-user-
+    // provisioning.ts`); there is no HTTP route. The exact statement shape is
+    // pinned by "limits SEO Consultant provisioning deletion" below, so any
+    // broader delete added to this file fails certification again.
+    "platform-user-provisioning.ts",
   ]);
 
   it("issues no destructive statement anywhere in the Platform module", () => {
@@ -418,6 +431,22 @@ describe("Destructive capability certification", () => {
       if ([...deleteExempt].some((name) => file.path.endsWith(name))) continue;
       expect(source.includes("delete from")).toBe(false);
     }
+  });
+
+  it("limits SEO Consultant provisioning deletion to that one platform role's permission reset", () => {
+    const source = withoutComments(
+      readFileSync(resolve(platformDirectory, "platform-user-provisioning.ts"), "utf8"),
+    );
+    // Exactly ONE delete statement in the whole file …
+    const statements = source.toLowerCase().match(/delete from[\s\S]*?`/g) ?? [];
+    expect(statements).toHaveLength(1);
+    // … and it is the role_permissions reset for a single role id, nothing
+    // broader (no other table, no missing WHERE, no company-scoped rows).
+    expect(statements[0]).toContain("delete from role_permissions where role_id=${roleid}::uuid");
+    // The role id it resets provably comes from the PLATFORM-scoped upsert —
+    // the partial unique target pins company_id is null, so a Company role
+    // can never be resolved here.
+    expect(source).toContain("on conflict (lower(code)) where company_id is null");
   });
 
   it("limits Website domain deletion to one Company-owned versioned mapping", () => {
