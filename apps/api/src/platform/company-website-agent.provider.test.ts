@@ -126,6 +126,46 @@ describe("Company website agent public boundary", () => {
       "With prior confirmation.",
     );
   });
+  it("does not answer refusal-policy questions with the welcome message", () => {
+    // Regression: /hello|hi|hey/ without word boundaries matched the letters
+    // "hi" inside "anything", so complaints got the welcome greeting.
+    const value = context();
+    value.settings.agent.welcomeMessage = { en: "Welcome", ar: "اهلا" };
+    const refused = deterministicReply(
+      value,
+      "My customer refused the package. What happens now and do I have to pay anything?",
+    );
+    expect(refused).not.toBe("Welcome");
+    const dispute = deterministicReply(
+      value,
+      "The driver says delivered, but my customer says they never received anything.",
+    );
+    expect(dispute).not.toBe("Welcome");
+    // A real greeting still greets.
+    expect(deterministicReply(value, "Hi")).toBe("Welcome");
+  });
+
+  it("answers 'Do you support Cash on Delivery?' from the COD fact, not the handoff", () => {
+    // Regression: the word "support" routed spelled-out COD questions to the
+    // human-handoff branch before the COD branch could answer.
+    const value = context();
+    value.settings.agent.handoffMessage = { en: "Let me connect you." };
+    value.settings.knowledge.cod = { supported: true };
+    expect(
+      deterministicReply(value, "Do you support Cash on Delivery? My customer pays on arrival."),
+    ).toBe("Cash on delivery is supported.");
+  });
+
+  it("treats 'how much would you charge' as a pricing question, never a coverage list", () => {
+    const value = context();
+    const reply = deterministicReply(
+      value,
+      "How much would you charge me to deliver one package from Dubai to Abu Dhabi?",
+    );
+    expect(reply).toContain("price");
+    expect(reply).not.toContain("coverage");
+  });
+
   it("describes Dana, respects COD/pricing facts, and never becomes a Tawseelhub sales bot", () => {
     const value = context();
     value.settings.knowledge.description = { en: "Dana specializes in UAE e-commerce delivery." };
