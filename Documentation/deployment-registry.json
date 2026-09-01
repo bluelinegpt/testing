@@ -20,11 +20,11 @@
       "path": "apps/web",
       "renderService": "bluelinegpt-web-test",
       "status": "confirmed_live",
-      "localCommit": "f2f18ca",
+      "localCommit": "9666706",
       "localCommitDate": "2026-09-01",
-      "lastChangeDescription": "fix(accounting): recovery batch modal interpolation and add event filtering",
-      "lastChangeBy": "claude",
-      "confirmedLiveCommit": "f2f18ca",
+      "lastChangeDescription": "fix(operations): prevent empty UUID fields in order edit requests",
+      "lastChangeBy": "human",
+      "confirmedLiveCommit": "9666706",
       "confirmedLiveAt": "2026-09-01"
     },
     {
