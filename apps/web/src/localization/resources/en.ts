@@ -248,7 +248,7 @@ export const englishTranslations = {
       selectRow: "Select {{reference}} for recovery",
     },
     create: {
-      heading: "Create Historical Recovery Batch",
+      heading: "Create Historical Recovery Batch ({{count}} row(s))",
       explanation:
         "{{count}} eligible row(s) will be submitted. The server re-checks every row before accepting it; rows that changed since this preview are rejected with their current classification.",
       noExecutionReminder:

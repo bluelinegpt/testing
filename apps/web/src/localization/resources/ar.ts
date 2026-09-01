@@ -248,7 +248,7 @@ export const arabicTranslations = {
       selectRow: "تحديد {{reference}} للاسترداد",
     },
     create: {
-      heading: "إنشاء دفعة استرداد تاريخي",
+      heading: "إنشاء دفعة استرداد تاريخي ({{count}} صف)",
       explanation:
         "سيُرسل {{count}} صف مؤهل. يعيد الخادم فحص كل صف قبل قبوله؛ والصفوف التي تغيّرت منذ هذه المعاينة تُرفض مع تصنيفها الحالي.",
       noExecutionReminder:

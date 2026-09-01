@@ -3195,7 +3195,15 @@ const scalableLists: Readonly<
 > = {
   events: {
     defaultSortBy: "createdAt",
-    filterKeys: ["area", "dateFrom", "dateTo", "eventType", "sourceReference", "status"],
+    filterKeys: [
+      "area",
+      "dateFrom",
+      "dateTo",
+      "eventType",
+      "failureCategory",
+      "sourceReference",
+      "status",
+    ],
     searchKey: "sourceReference",
     sortKeys: {
       accountingDate: "accountingDate",

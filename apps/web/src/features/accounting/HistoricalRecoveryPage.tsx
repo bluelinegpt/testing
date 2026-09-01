@@ -637,7 +637,7 @@ function CreateRecoveryBatchDialog({
       className="accounting-action-dialog"
       closeLabel={t("common.close")}
       onRequestClose={onClose}
-      title={t("historicalRecovery.create.heading")}
+      title={t("historicalRecovery.create.heading", { count: rows.length })}
       titleId={titleId}
     >
       <div className="modal-body">

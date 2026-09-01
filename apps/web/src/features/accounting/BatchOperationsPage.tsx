@@ -116,7 +116,14 @@ const validationStatuses = [
 ] as const;
 
 const listFilterKeys = ["status", "batchType", "reference", "dateFrom", "dateTo"];
-const itemFilterKeys = ["validationStatus"];
+const itemFilterKeys = [
+  "validationStatus",
+  "validationReasons",
+  "sourceReference",
+  "accountingDateFrom",
+  "accountingDateTo",
+  "area",
+];
 
 interface BatchPage {
   readonly items: readonly AccountingRecord[];
@@ -1003,21 +1010,73 @@ function BatchDetailView({
             </div>
 
             <h3>{t("batches.sections.items")}</h3>
-            <label className="accounting-filter-field">
-              {t("batches.filters.validationStatus")}
-              <select
-                onChange={(event) => state.setFilter("validationStatus", event.currentTarget.value)}
-                value={state.filters.validationStatus ?? ""}
-              >
-                <option value="">{t("common.all")}</option>
-                <option value="pending">{t("batches.classifications.pending")}</option>
-                {validationStatuses.map((value) => (
-                  <option key={value} value={value}>
-                    {t(`batches.classifications.${value}`)}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <form className="accounting-filters">
+              <label className="accounting-filter-field">
+                {t("batches.filters.validationStatus")}
+                <select
+                  onChange={(event) => state.setFilter("validationStatus", event.currentTarget.value)}
+                  value={state.filters.validationStatus ?? ""}
+                >
+                  <option value="">{t("common.all")}</option>
+                  <option value="pending">{t("batches.classifications.pending")}</option>
+                  {validationStatuses.map((value) => (
+                    <option key={value} value={value}>
+                      {t(`batches.classifications.${value}`)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="accounting-filter-field">
+                {t("batches.filters.validationReasons")}
+                <input
+                  onChange={(event) => state.setFilter("validationReasons", event.currentTarget.value)}
+                  type="search"
+                  value={state.filters.validationReasons ?? ""}
+                  placeholder={t("common.search")}
+                />
+              </label>
+              <label className="accounting-filter-field">
+                {t("batches.columns.sourceReference")}
+                <input
+                  onChange={(event) => state.setFilter("sourceReference", event.currentTarget.value)}
+                  type="search"
+                  value={state.filters.sourceReference ?? ""}
+                  placeholder={t("common.search")}
+                />
+              </label>
+              <label className="accounting-filter-field">
+                {t("historicalRecovery.filters.dateFrom")}
+                <input
+                  dir="ltr"
+                  onChange={(event) => state.setFilter("accountingDateFrom", event.currentTarget.value)}
+                  type="date"
+                  value={state.filters.accountingDateFrom ?? ""}
+                />
+              </label>
+              <label className="accounting-filter-field">
+                {t("historicalRecovery.filters.dateTo")}
+                <input
+                  dir="ltr"
+                  onChange={(event) => state.setFilter("accountingDateTo", event.currentTarget.value)}
+                  type="date"
+                  value={state.filters.accountingDateTo ?? ""}
+                />
+              </label>
+              <label className="accounting-filter-field">
+                {t("common.area")}
+                <input
+                  onChange={(event) => state.setFilter("area", event.currentTarget.value)}
+                  type="search"
+                  value={state.filters.area ?? ""}
+                  placeholder={t("common.search")}
+                />
+              </label>
+              <div className="accounting-filter-actions">
+                <button className="button button-secondary" onClick={state.clearFilters} type="button">
+                  {t("common.clear")}
+                </button>
+              </div>
+            </form>
             <div className="table-scroll-x">
               <table className="data-table accounting-table">
                 <thead>
