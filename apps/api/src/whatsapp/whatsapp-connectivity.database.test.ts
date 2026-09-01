@@ -536,6 +536,38 @@ describe.skipIf(!enabled)("whatsapp real-connectivity lifecycle", () => {
     });
   });
 
+  it("treats a group JID as an address, never an authorization token", async () => {
+    await withRolledBackCommunicationFixtures(database, async (transaction, runId) => {
+      const companyA = await createFixtureCompany(transaction, runId, "wa-jid-a");
+      const companyB = await createFixtureCompany(transaction, runId, "wa-jid-b");
+      const officeA = await createFixtureOfficeUser(transaction, companyA.companyId, "wa-jid-a", [
+        "whatsapp.connection.manage",
+      ]);
+      const officeB = await createFixtureOfficeUser(transaction, companyB.companyId, "wa-jid-b", [
+        "whatsapp.connection.manage",
+      ]);
+      const { factory, runtime } = buildRuntime(transaction);
+      const socketA = await connectToOpen(runtime, factory, companyA.companyId, officeA.accountId);
+      const socketB = await connectToOpen(
+        runtime,
+        factory,
+        companyB.companyId,
+        officeB.accountId,
+        "971509999999@s.whatsapp.net",
+      );
+      // Company B's "private" group id, known to A somehow.
+      const companyBGroupJid = "b-private-group@g.us";
+
+      // Sending under Company A's context with B's JID resolves to A's OWN
+      // runtime socket — A's WhatsApp account, not B's. The JID never selects
+      // a socket; only the company id does. (Whether A's account can post to
+      // that group is then WhatsApp's own membership rule, outside Tawseelhub.)
+      await runtime.sendGroupMessage(companyA.companyId, companyBGroupJid, "cross-jid attempt");
+      expect(socketA.sent).toEqual([{ jid: companyBGroupJid, text: "cross-jid attempt" }]);
+      expect(socketB.sent).toHaveLength(0);
+    });
+  });
+
   it("restores eligible sessions on startup, isolating corrupt ones and resetting stale rows", async () => {
     await withRolledBackCommunicationFixtures(database, async (transaction, runId) => {
       const healthy = await createFixtureCompany(transaction, runId, "wa-boot-a");
