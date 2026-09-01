@@ -3483,20 +3483,29 @@ function CollectFromTraderDialog({
     setSaving(true);
     setError(undefined);
 
+    const amount = amountInput.ok ? amountInput.value : 0;
+
     const fingerprint = JSON.stringify({
       traderId,
-      collectionAmount: amountInput.ok ? amountInput.value : 0,
+      amountReceived: amount,
       paymentMethod,
       paymentDate,
       notes: notes.trim() === "" ? undefined : notes.trim(),
     });
 
     try {
+      // Get allocation proposal from the server
+      const proposal = await api.post<{ readonly allocations: readonly { receivableId: string; amount: number }[] }>(
+        "operations/trader-receivables/allocation-proposal",
+        { traderId, amount }
+      );
+
       await api.post("operations/trader-receivables/collections", {
         traderId,
-        collectionAmount: amountInput.ok ? amountInput.value : 0,
-        paymentMethod,
-        paymentDate,
+        amountReceived: amount,
+        allocations: proposal.allocations,
+        paymentMethod: paymentMethod || undefined,
+        paymentDate: paymentDate || undefined,
         notes: notes.trim() === "" ? undefined : notes.trim(),
       }, { "X-Idempotency-Key": idempotency.keyFor(fingerprint) });
       idempotency.reset();
@@ -3702,6 +3711,17 @@ function AddReceivableDialog({
             </option>
           ))}
         </select>
+      </label>
+
+      <label className="field required-field">
+        <span>{t("common.reason", "Reason")}</span>
+        <textarea
+          maxLength={500}
+          onChange={(event) => setReason(event.target.value)}
+          placeholder={t("traderReceivable.reasonPlaceholder", "Explain why this charge is being applied...")}
+          value={reason}
+        />
+        <small>{reason.length}/500</small>
       </label>
 
       <label className="field">

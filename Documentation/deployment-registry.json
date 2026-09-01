@@ -19,10 +19,10 @@
       "displayName": "Main app",
       "path": "apps/web",
       "renderService": "bluelinegpt-web-test",
-      "status": "pushed_awaiting_confirmation",
-      "localCommit": "9cbcc12",
+      "status": "needs_deploy",
+      "localCommit": "defab48",
       "localCommitDate": "2026-09-01",
-      "lastChangeDescription": "fix(trader-receivables): add idempotency keys to API requests",
+      "lastChangeDescription": "fix(trader-receivables): add required reason field to receivable creation form",
       "lastChangeBy": "human",
       "confirmedLiveCommit": "9666706",
       "confirmedLiveAt": "2026-09-01"
