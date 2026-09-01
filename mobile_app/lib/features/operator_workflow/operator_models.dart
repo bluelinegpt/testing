@@ -84,6 +84,14 @@ const operatorOrderPermissions = {
   'orders.edit_before_processing',
   'orders.assign_driver',
   'orders.update_delivery_status',
+  // A Driver User's own permission (the standard Driver role grants exactly
+  // this and nothing else). The backend Order list/detail endpoints accept
+  // it and independently narrow visibility to the Driver's own assigned
+  // Orders — this entry only lets the screen open, mirroring the web app's
+  // /orders route gate. Without it, a correctly-provisioned Driver User was
+  // blocked client-side with "no permission to view operational Orders"
+  // even though every API call would have succeeded.
+  'orders.driver_self_service',
   'reconciliations.create',
   'reconciliations.reverse',
   'settlements.create',

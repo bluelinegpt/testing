@@ -9,6 +9,12 @@ void main() {
     expect(hasOperatorOrderAccess({'mobile.operator.access'}), isFalse);
     expect(hasOperatorOrderAccess({}), isFalse);
   });
+  test(
+      'A Driver User holding only orders.driver_self_service (the standard '
+      'Driver role) can open the Orders surface — the backend scopes it to '
+      'their own assigned Orders', () {
+    expect(hasOperatorOrderAccess({'orders.driver_self_service'}), isTrue);
+  });
   test('pagination uses server totals', () {
     const first = OperatorOrderPage(
       items: [],
