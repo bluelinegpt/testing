@@ -377,6 +377,7 @@ export function TraderSettlementsWorkspace({
      makes, so a Trader from another Company simply returns nothing here. */
   const [listError, setListError] = useState<string>();
   const [newSettlementOpen, setNewSettlementOpen] = useState(false);
+  const [addReceivableOpen, setAddReceivableOpen] = useState(false);
   /* A smart next action from the Orders list can ask this screen to open New
      Settlement with the Trader and the originating Order already carried in.
      The hook reads that request ONCE and strips it from the URL, so a refresh
@@ -578,6 +579,13 @@ export function TraderSettlementsWorkspace({
               type="button"
             >
               {t("traderSettlements.newSettlement")}
+            </button>
+            <button
+              className="button button-secondary"
+              onClick={() => setAddReceivableOpen(true)}
+              type="button"
+            >
+              {t("traderSettlements.addReceivable", "Add Charge to Trader")}
             </button>
             <button
               className="button button-secondary"
@@ -854,6 +862,17 @@ export function TraderSettlementsWorkspace({
           onClose={() => setReverseTarget(undefined)}
           onReversed={refresh}
           settlement={reverseTarget}
+        />
+      )}
+
+      {!addReceivableOpen ? null : (
+        <AddReceivableDialog
+          api={api}
+          onClose={() => setAddReceivableOpen(false)}
+          onCreated={() => {
+            setAddReceivableOpen(false);
+            refresh();
+          }}
         />
       )}
     </>
@@ -3365,6 +3384,149 @@ export function SettlementDetailDialog({
           }}
         />
       )}
+    </Modal>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Add Receivable Dialog (Charge Trader) - for manual charges/fees
+// ---------------------------------------------------------------------------
+
+function AddReceivableDialog({
+  api,
+  onClose,
+  onCreated,
+}: {
+  api: ApiClient;
+  onClose: () => void;
+  onCreated: () => void;
+}) {
+  const { t } = useTranslation();
+  const [traders, setTraders] = useState<readonly OperationsTrader[]>([]);
+  const [traderId, setTraderId] = useState("");
+  const [sourceType, setSourceType] = useState("manual_adjustment");
+  const [sourceReference, setSourceReference] = useState("");
+  const [businessDate, setBusinessDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [amountDue, setAmountDue] = useState("");
+  const [error, setError] = useState<string>();
+  const [saving, setSaving] = useState(false);
+
+  const sourceTypes = [
+    { value: "manual_adjustment", label: t("traderReceivable.sourceType.manualAdjustment", "Manual Adjustment") },
+    { value: "trader_penalty", label: t("traderReceivable.sourceType.traderPenalty", "Trader Penalty") },
+    { value: "overpayment_recovery", label: t("traderReceivable.sourceType.overpaymentRecovery", "Overpayment Recovery") },
+    { value: "refund_due", label: t("traderReceivable.sourceType.refundDue", "Refund Due") },
+    { value: "service_charge", label: t("traderReceivable.sourceType.serviceCharge", "Service Charge") },
+    { value: "damaged_or_lost_shipment_recovery", label: t("traderReceivable.sourceType.damagedShipment", "Damaged/Lost Shipment") },
+    { value: "other", label: t("common.other", "Other") },
+  ];
+
+  useEffect(() => {
+    void api
+      .get<readonly OperationsTrader[]>("operations/traders")
+      .then((rows) => setTraders(rows.filter((row) => row.status === "active")))
+      .catch(() => setTraders([]));
+  }, [api]);
+
+  const amountInput = parseMoneyInput(amountDue, { required: true });
+  const isValid = traderId !== "" && businessDate !== "" && amountInput.ok && amountInput.value > 0;
+
+  const submit = async () => {
+    if (!isValid || saving) return;
+    setSaving(true);
+    setError(undefined);
+    try {
+      await api.post("operations/trader-receivables/receivables", {
+        traderId,
+        sourceType,
+        sourceReference: sourceReference.trim() === "" ? undefined : sourceReference.trim(),
+        businessDate,
+        amountDue: amountInput.ok ? amountInput.value : 0,
+      });
+      onCreated();
+    } catch (requestError) {
+      setError(message(requestError, t("traderSettlements.receivableCreationFailed", "Failed to add charge")));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal
+      closeLabel={t("common.close")}
+      onRequestClose={onClose}
+      title={t("traderSettlements.addReceivable", "Add Charge to Trader")}
+      titleId="add-receivable-title"
+    >
+      {error === undefined ? null : <div className="alert alert-error">{error}</div>}
+
+      <label className="field">
+        <span>{t("traderSettlements.filterTrader", "Trader")}</span>
+        <select onChange={(event) => setTraderId(event.target.value)} value={traderId}>
+          <option value="">{t("traderSettlements.selectTrader", "Select a Trader")}</option>
+          {traders.map((trader) => (
+            <option key={trader.id} value={trader.id}>
+              {trader.name}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <label className="field">
+        <span>{t("traderReceivable.sourceType", "Charge Type")}</span>
+        <select onChange={(event) => setSourceType(event.target.value)} value={sourceType}>
+          {sourceTypes.map((type) => (
+            <option key={type.value} value={type.value}>
+              {type.label}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <label className="field">
+        <span>{t("traderReceivable.sourceReference", "Reference / Details")}</span>
+        <textarea
+          maxLength={160}
+          onChange={(event) => setSourceReference(event.target.value)}
+          placeholder={t("traderReceivable.sourceReferencePlaceholder", "Enter details about this charge...")}
+          value={sourceReference}
+        />
+        <small>{sourceReference.length}/160</small>
+      </label>
+
+      <label className="field">
+        <span>{t("configuration.businessDay.businessDate", "Business Date")}</span>
+        <input onChange={(event) => setBusinessDate(event.target.value)} type="date" value={businessDate} />
+      </label>
+
+      <label className="field">
+        <span>{t("traderReceivable.amountDue", "Amount Due")} (AED)</span>
+        <input
+          onChange={(event) => setAmountDue(event.target.value)}
+          placeholder="0.00"
+          type="number"
+          step="0.01"
+          min="0"
+          value={amountDue}
+        />
+        {!amountInput.ok && amountDue !== "" ? (
+          <small className="error">{t("traderSettlements.invalidAmount", "Invalid amount")}</small>
+        ) : null}
+      </label>
+
+      <div className="modal-actions">
+        <button className="button button-secondary" onClick={onClose} type="button">
+          {t("common.cancel", "Cancel")}
+        </button>
+        <button
+          className="button button-primary"
+          disabled={!isValid || saving}
+          onClick={() => void submit()}
+          type="button"
+        >
+          {saving ? t("common.saving", "Saving...") : t("traderSettlements.addCharge", "Add Charge")}
+        </button>
+      </div>
     </Modal>
   );
 }
