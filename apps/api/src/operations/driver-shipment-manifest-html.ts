@@ -299,8 +299,8 @@ export function buildDriverShipmentManifestHtml(
     .company-subtitle, .company-telephone { font-size: 9px; color: #444; }
     .report-title { font-size: 16px; margin: 6px 0 5px; }
     .header-meta { margin-top: 4px; }
-    .meta-date { font-size: 10px; color: #333; text-align: end; margin-bottom: 3px; }
-    .meta-driver { font-size: 15px; font-weight: 800; text-align: end; }
+    .meta-date { font-size: 10px; color: #333; text-align: right; margin-bottom: 3px; }
+    .meta-driver { font-size: 15px; font-weight: 800; text-align: right; }
     .section-title { font-size: 13px; margin: 14px 0 6px; }
     table.grid { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 12px; margin-bottom: 8px; }
     table.grid th, table.grid td { border: 1px solid #999; padding: 4px; text-align: start; overflow-wrap: anywhere; line-height: 1.25; }
