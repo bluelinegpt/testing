@@ -114,12 +114,19 @@ export class WhatsAppOutboxWriter {
             on tpl.company_id = o.company_id and tpl.status = ${input.toStatus}
          where o.id = ${input.orderId}::uuid and o.company_id = ${input.companyId}::uuid
            and s.notifications_enabled = true and s.provider_group_id is not null
-           -- Platform kill switch: absence of a row means enabled. A disabled
-           -- Company records nothing here — deliberately quiet, like every
-           -- other not-configured case in this hook.
+           -- Platform kill switch AND status selection: absence of a row (or
+           -- a NULL enabled_statuses) means every notifiable status sends. A
+           -- disabled Company — or a status outside the Company's allowlist —
+           -- records nothing here, deliberately quiet like every other
+           -- not-configured case in this hook.
            and not exists (
              select 1 from company_whatsapp_platform_settings p
-              where p.company_id = o.company_id and p.whatsapp_enabled = false
+              where p.company_id = o.company_id
+                and (
+                  p.whatsapp_enabled = false
+                  or (p.enabled_statuses is not null
+                      and not (${input.toStatus} = any(p.enabled_statuses)))
+                )
            )
       `.execute(execute)
     ).rows[0];

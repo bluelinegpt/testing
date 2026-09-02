@@ -46,8 +46,13 @@ export class PlatformCompanyWhatsAppService {
 
   public async overview(companyId: string) {
     const settings = (
-      await sql<{ whatsappEnabled: boolean; disabledReason: string | null }>`
-        select whatsapp_enabled as "whatsappEnabled", disabled_reason as "disabledReason"
+      await sql<{
+        whatsappEnabled: boolean;
+        disabledReason: string | null;
+        enabledStatuses: string[] | null;
+      }>`
+        select whatsapp_enabled as "whatsappEnabled", disabled_reason as "disabledReason",
+               enabled_statuses as "enabledStatuses"
           from company_whatsapp_platform_settings
          where company_id = ${companyId}::uuid
       `.execute(this.database)
@@ -78,6 +83,11 @@ export class PlatformCompanyWhatsAppService {
     ).rows;
     const overrideByStatus = new Map(overrides.map((row) => [row.status, row]));
 
+    // NULL allowlist means every notifiable status sends (the default).
+    const enabledStatuses =
+      settings?.enabledStatuses === undefined || settings.enabledStatuses === null
+        ? null
+        : new Set(settings.enabledStatuses);
     return {
       connection: connection ?? null,
       disabledReason: settings?.disabledReason ?? null,
@@ -88,12 +98,62 @@ export class PlatformCompanyWhatsAppService {
         return {
           bodyAr: override?.bodyAr ?? DEFAULT_TEMPLATE_BODY_AR,
           bodyEn: override?.bodyEn ?? DEFAULT_TEMPLATE_BODY_EN,
+          enabled: enabledStatuses === null || enabledStatuses.has(status),
           isCustom: override !== undefined,
           status,
           updatedAt: override?.updatedAt ?? null,
         };
       }),
     };
+  }
+
+  /**
+   * Replaces the Company's status allowlist with the given set (idempotent —
+   * the client always sends the COMPLETE list of statuses that should send).
+   * All six statuses are stored as NULL, keeping "unrestricted" the natural
+   * default and auto-enabling any status added to the catalogue later.
+   */
+  public async setEnabledStatuses(
+    companyId: string,
+    statuses: readonly string[],
+    actor: PlatformActor,
+  ) {
+    const unknown = statuses.filter((status) => !notifiableStatuses.has(status));
+    if (unknown.length > 0) {
+      throw new ApplicationException(
+        "whatsapp_template_status_unknown",
+        "This status has no WhatsApp notification template",
+        HttpStatus.NOT_FOUND,
+        unknown,
+      );
+    }
+    const unique = [...new Set(statuses)];
+    const stored =
+      unique.length === TRADER_NOTIFIABLE_DELIVERY_STATUSES.length ? null : unique.sort();
+    const before = (
+      await sql<{ enabledStatuses: string[] | null }>`
+        select enabled_statuses as "enabledStatuses"
+          from company_whatsapp_platform_settings
+         where company_id = ${companyId}::uuid
+      `.execute(this.database)
+    ).rows[0];
+    await sql`
+      insert into company_whatsapp_platform_settings (
+        company_id, whatsapp_enabled, enabled_statuses, updated_by_account_id
+      ) values (
+        ${companyId}::uuid, true, ${stored}::text[], ${actor.accountId}::uuid
+      )
+      on conflict (company_id) do update
+        set enabled_statuses = excluded.enabled_statuses,
+            updated_by_account_id = excluded.updated_by_account_id,
+            updated_at = now(),
+            version = company_whatsapp_platform_settings.version + 1
+    `.execute(this.database);
+    await this.audit(companyId, actor, "platform.company_whatsapp.statuses_changed", companyId, {
+      before: { enabledStatuses: before?.enabledStatuses ?? null },
+      after: { enabledStatuses: stored },
+    });
+    return this.overview(companyId);
   }
 
   public async setEnabled(

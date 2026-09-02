@@ -142,6 +142,81 @@ describe.skipIf(!enabled)("platform WhatsApp controls", () => {
     });
   });
 
+  it("sends only the statuses on the Company's allowlist; unrestricted stays all", async () => {
+    await withRolledBackCommunicationFixtures(database, async (transaction, runId) => {
+      const world = await createWorld(transaction, runId, "wa-sel");
+      const service = new PlatformCompanyWhatsAppService(
+        transaction as unknown as Kysely<DatabaseSchema>,
+      );
+      const actor = { accountId: world.accountId, correlationId: "corr-sel-1" };
+
+      // "Delivered only" — the customer request this feature exists for.
+      const restricted = await service.setEnabledStatuses(world.companyId, ["delivered"], actor);
+      expect(
+        restricted.templates.map((template) => [template.status, template.enabled]),
+      ).toContainEqual(["delivered", true]);
+      expect(
+        restricted.templates.filter((template) => template.enabled).map((t) => t.status),
+      ).toEqual(["delivered"]);
+
+      const writer = history();
+      await writer.statusHistory(transaction, {
+        actorId: world.accountId,
+        companyId: world.companyId,
+        from: "assigned_to_driver",
+        orderId: world.orderId,
+        to: "out_for_delivery",
+      });
+      expect(await outboxBodies(transaction, world.companyId)).toHaveLength(0);
+      await writer.statusHistory(transaction, {
+        actorId: world.accountId,
+        companyId: world.companyId,
+        from: "out_for_delivery",
+        orderId: world.orderId,
+        to: "delivered",
+      });
+      expect(await outboxBodies(transaction, world.companyId)).toHaveLength(1);
+
+      // Selecting every status is stored as NULL — back to unrestricted.
+      const unrestricted = await service.setEnabledStatuses(
+        world.companyId,
+        [
+          "assigned_to_driver",
+          "out_for_delivery",
+          "delivered",
+          "returned_to_branch",
+          "returned_to_trader",
+          "cancelled",
+        ],
+        actor,
+      );
+      expect(unrestricted.templates.every((template) => template.enabled)).toBe(true);
+      const stored = (
+        await sql<{ enabledStatuses: string[] | null }>`
+          select enabled_statuses as "enabledStatuses"
+            from company_whatsapp_platform_settings
+           where company_id = ${world.companyId}::uuid
+        `.execute(transaction)
+      ).rows[0];
+      expect(stored?.enabledStatuses).toBeNull();
+
+      // Unknown statuses are refused loudly, never silently dropped.
+      await expect(
+        service.setEnabledStatuses(world.companyId, ["delivered", "hold"], actor),
+      ).rejects.toMatchObject({ errorCode: "whatsapp_template_status_unknown" });
+
+      // The status selection preserves the enable switch and vice versa.
+      const disabled = await service.setEnabled(
+        world.companyId,
+        { enabled: false, reason: "pause" },
+        actor,
+      );
+      expect(disabled.enabled).toBe(false);
+      const afterReEnable = await service.setEnabled(world.companyId, { enabled: true }, actor);
+      expect(afterReEnable.templates.every((template) => template.enabled)).toBe(true);
+    });
+  });
+
   it("renders a Company's custom template with placeholders; other statuses keep the default", async () => {
     await withRolledBackCommunicationFixtures(database, async (transaction, runId) => {
       const world = await createWorld(transaction, runId, "wa-tpl");

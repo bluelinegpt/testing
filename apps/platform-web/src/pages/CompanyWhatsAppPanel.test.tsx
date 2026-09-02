@@ -24,6 +24,7 @@ const baseOverview: CompanyWhatsAppOverview = {
     {
       bodyAr: "تحديث: {{orderNumber}}",
       bodyEn: "Update: {{orderNumber}}",
+      enabled: true,
       isCustom: false,
       status: "delivered",
       updatedAt: null,
@@ -31,6 +32,7 @@ const baseOverview: CompanyWhatsAppOverview = {
     {
       bodyAr: "ملغى: {{orderNumber}}",
       bodyEn: "Cancelled: {{orderNumber}}",
+      enabled: true,
       isCustom: true,
       status: "cancelled",
       updatedAt: "2026-09-01T09:00:00Z",
@@ -92,6 +94,25 @@ describe("CompanyWhatsAppPanel", () => {
         bodyEn: "Order {{orderNumber}} was delivered — {{companyName}}",
       }),
     );
+  });
+
+  it("turns one status off by sending the complete remaining allowlist", async () => {
+    vi.spyOn(platformApi, "companyWhatsApp").mockResolvedValue(baseOverview);
+    vi.spyOn(platformApi, "companyWhatsAppMessages").mockResolvedValue(emptyMessages);
+    const setStatuses = vi.spyOn(platformApi, "setCompanyWhatsAppStatuses").mockResolvedValue({
+      ...baseOverview,
+      templates: baseOverview.templates.map((template) =>
+        template.status === "delivered" ? { ...template, enabled: false } : template,
+      ),
+    });
+
+    render(<CompanyWhatsAppPanel companyId="company-a" />);
+    const toggles = await screen.findAllByRole("button", { name: "Turn off" });
+    expect(toggles).toHaveLength(2);
+    fireEvent.click(toggles[0]!);
+    await waitFor(() => expect(setStatuses).toHaveBeenCalledWith("company-a", ["cancelled"]));
+    expect(await screen.findByRole("button", { name: "Turn on" })).toBeInTheDocument();
+    expect(screen.getByText("Off")).toBeInTheDocument();
   });
 
   it("offers Reset to default only for a custom template", async () => {

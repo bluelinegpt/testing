@@ -25,6 +25,7 @@ import {
 import {
   ListCompanyWhatsAppMessagesQueryDto,
   SetCompanyWhatsAppEnabledDto,
+  SetCompanyWhatsAppStatusesDto,
   UpdateCompanyWhatsAppTemplateDto,
 } from "./platform-company-whatsapp.dto.js";
 import { PlatformCompanyWhatsAppService } from "./platform-company-whatsapp.service.js";
@@ -64,6 +65,16 @@ export class PlatformCompanyWhatsAppController {
     @Req() request: Request,
   ) {
     return this.whatsapp.setEnabled(companyId, input, this.actor(request));
+  }
+
+  @RequirePlatformPermissions(PLATFORM_COMPANY_WHATSAPP_MANAGE)
+  @Put("statuses")
+  public setEnabledStatuses(
+    @Param("companyId") companyId: string,
+    @Body() input: SetCompanyWhatsAppStatusesDto,
+    @Req() request: Request,
+  ) {
+    return this.whatsapp.setEnabledStatuses(companyId, input.statuses, this.actor(request));
   }
 
   @RequirePlatformPermissions(PLATFORM_COMPANY_WHATSAPP_MANAGE)

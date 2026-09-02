@@ -1,5 +1,8 @@
 import { Type } from "class-transformer";
 import {
+  ArrayMaxSize,
+  ArrayUnique,
+  IsArray,
   IsBoolean,
   IsInt,
   IsOptional,
@@ -25,6 +28,17 @@ export class SetCompanyWhatsAppEnabledDto {
   @IsString()
   @MaxLength(500)
   public reason?: string;
+}
+
+export class SetCompanyWhatsAppStatusesDto {
+  /** The COMPLETE list of statuses that should send automatic notifications
+   *  for this Company. May be empty (no automatic notifications). Membership
+   *  in the notifiable-status catalogue is asserted by the service. */
+  @IsArray()
+  @IsString({ each: true })
+  @ArrayUnique()
+  @ArrayMaxSize(6)
+  public statuses!: string[];
 }
 
 export class UpdateCompanyWhatsAppTemplateDto {

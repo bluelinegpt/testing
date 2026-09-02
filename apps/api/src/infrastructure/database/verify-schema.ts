@@ -414,6 +414,7 @@ const expectedConstraints = [
   "whatsapp_message_outbox_message_type_check",
   "whatsapp_message_outbox_type_shape_check",
   "company_whatsapp_platform_settings_reason_shape_check",
+  "company_whatsapp_platform_settings_statuses_check",
   "company_whatsapp_message_templates_status_check",
   "company_whatsapp_message_templates_body_check",
 ] as const;

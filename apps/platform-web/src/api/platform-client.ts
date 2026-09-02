@@ -1038,6 +1038,9 @@ export interface CompanyWhatsAppTemplate {
   status: string;
   bodyAr: string;
   bodyEn: string;
+  /** Whether this status currently sends automatic notifications for the
+   *  Company (the per-status allowlist; all statuses by default). */
+  enabled: boolean;
   isCustom: boolean;
   updatedAt: string | null;
 }
@@ -1482,6 +1485,18 @@ export const platformApi = {
     const result = await request<CompanyWhatsAppOverview>(
       `platform/companies/${companyId}/whatsapp/enabled`,
       { body: { enabled, ...(reason === undefined ? {} : { reason }) }, method: "PUT" },
+    );
+    if (result === undefined) throw new PlatformApiError("Empty WhatsApp response", "empty", 500);
+    return result;
+  },
+
+  async setCompanyWhatsAppStatuses(
+    companyId: string,
+    statuses: string[],
+  ): Promise<CompanyWhatsAppOverview> {
+    const result = await request<CompanyWhatsAppOverview>(
+      `platform/companies/${companyId}/whatsapp/statuses`,
+      { body: { statuses }, method: "PUT" },
     );
     if (result === undefined) throw new PlatformApiError("Empty WhatsApp response", "empty", 500);
     return result;

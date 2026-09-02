@@ -207,14 +207,16 @@ export function CompanyWhatsAppPanel({ companyId }: { companyId: string }): Reac
 
           <h4>Message templates</h4>
           <p className="platform-muted">
-            Each order status has a default bilingual message. Editing a template changes future
-            messages for this company only — already-sent messages are never rewritten.
-            Placeholders: {overview.placeholders.map((name) => `{{${name}}}`).join(", ")}
+            Each order status has a default bilingual message. Turn a status off and this company
+            sends no notification for it; editing a template changes future messages for this
+            company only — already-sent messages are never rewritten. Placeholders:{" "}
+            {overview.placeholders.map((name) => `{{${name}}}`).join(", ")}
           </p>
           <table className="platform-table">
             <thead>
               <tr>
                 <th scope="col">Status</th>
+                <th scope="col">Sending</th>
                 <th scope="col">Wording</th>
                 <th scope="col">Actions</th>
               </tr>
@@ -223,10 +225,34 @@ export function CompanyWhatsAppPanel({ companyId }: { companyId: string }): Reac
               {overview.templates.map((template) => (
                 <tr key={template.status}>
                   <td>{STATUS_LABELS[template.status] ?? template.status}</td>
+                  <td>{template.enabled ? "On" : "Off"}</td>
                   <td>{template.isCustom ? "Custom" : "Default"}</td>
                   <td>
                     {canManage ? (
                       <div className="platform-actions">
+                        <button
+                          className="platform-button platform-button--quiet"
+                          disabled={busy}
+                          onClick={() =>
+                            void run(
+                              () =>
+                                platformApi.setCompanyWhatsAppStatuses(
+                                  companyId,
+                                  overview.templates
+                                    .filter((row) =>
+                                      row.status === template.status
+                                        ? !template.enabled
+                                        : row.enabled,
+                                    )
+                                    .map((row) => row.status),
+                                ),
+                              "Status selection could not be saved.",
+                            )
+                          }
+                          type="button"
+                        >
+                          {template.enabled ? "Turn off" : "Turn on"}
+                        </button>
                         <button
                           className="platform-button platform-button--quiet"
                           onClick={() => startEditing(template)}

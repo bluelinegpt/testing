@@ -200,6 +200,12 @@ Administrator role):
   session, Trader mappings and history are KEPT, so re-enabling restores
   service without re-scanning a QR code. An optional reason is shown to the
   Company while disabled.
+- **Status selection** — per-Company allowlist of WHICH statuses send
+  automatic notifications (`enabled_statuses`; NULL = all six, the default).
+  E.g. "Delivered only". An off status writes no outbox intent at all; test
+  messages and the connection are unaffected. Turning every status on stores
+  NULL again, so a future seventh status is auto-enabled for unrestricted
+  Companies.
 - **Message templates** — per-status overrides
   (`company_whatsapp_message_templates`) of the built-in bilingual
   order-status wording. Placeholders: `{{orderNumber}}`,
