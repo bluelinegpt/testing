@@ -6,10 +6,10 @@
       "displayName": "API",
       "path": "apps/api",
       "renderService": "bluelinegpt-api-test",
-      "status": "pushed_awaiting_confirmation",
-      "localCommit": "e54a2df",
+      "status": "needs_deploy",
+      "localCommit": "00434b5",
       "localCommitDate": "2026-09-02",
-      "lastChangeDescription": "Makes each Company Website AI Agent remember the full conversation and avoid asking for details already provided.",
+      "lastChangeDescription": "Adds bilingual coverage for 50 Company Website Agent delivery, pricing, COD, tracking and complaint scenarios.",
       "lastChangeBy": "codex",
       "confirmedLiveCommit": "e3de371",
       "confirmedLiveAt": "2026-09-01"
