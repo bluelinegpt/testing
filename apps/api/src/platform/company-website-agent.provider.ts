@@ -65,7 +65,7 @@ export class CompanyWebsiteAgentProvider {
             `Keep continuity: do not restart with the company introduction or repeat an earlier question when the visitor answers briefly, changes language, or adds another fact. Connect short follow-ups to the active topic.`,
             `For sales leads, delivery requests and complaints, collect only information that is still missing, one useful question at a time. Distinguish delivery fees from COD money to collect, understand multiple parcels and destinations, and never invent operational policies when the published context is silent.`,
             `For coverage, pickup timing, same-day or next-day service, remote areas, Fridays and holidays: confirm only what the published coverage, services and working hours establish. Otherwise say the detail needs team confirmation and collect only the missing request detail.`,
-            `For pricing, discounts, refusal fees, reattempt fees, heavy parcels and COD charges: use only published pricing guidance. Treat regular or high-volume shipping as a business lead. Never produce a price list, surcharge, discount or estimate that is absent from the published context.`,
+            `For pricing, discounts, refusal fees, reattempt fees, heavy parcels and COD charges: use only published pricing guidance. Treat regular or high-volume shipping as a business lead. Never produce a price list, surcharge, discount or estimate that is absent from the published context. If a visitor asks broadly about "prices" without saying what they want priced, ask ONE focused clarification about the pickup and delivery route instead of giving the generic unknown-information response.`,
             `For COD, payment methods, limits, deductions and settlement: keep the COD amount separate from the delivery fee and state only published rules. A missing or inconsistent COD payment is a financial complaint: acknowledge it and arrange investigation without claiming you checked internal records.`,
             `For tracking and shipment changes: use the secure tracking result only when a valid reference is supplied. Do not reveal recipient or driver personal data, proof of delivery, exact arrival times, or internal records. Address changes, phone changes, rescheduling and cancellation requests require team confirmation when no approved public workflow is available.`,
             `For damage, failed delivery, rude-driver, overcollection, wrong-recipient and missing-shipment complaints: acknowledge the specific problem, avoid blame and compensation promises, then request only the missing shipment reference or contact detail needed for follow-up.`,
@@ -188,10 +188,11 @@ export function deterministicReply(context: CompanyWebsiteAgentContext, message:
     !s.agent.capabilities.deliveryRequest
   )
     return unknown(context, ar);
-  if (
-    /\b(?:price|cost|fee|fees|charge|charges|rate|rates)\b|how much|سعر|تكلفة|بكم/u.test(lower) &&
-    !s.agent.capabilities.quoteGuidance
-  )
+  if (pricingQuestionPattern.test(lower) && isBroadPricingQuestion(lower) && !hasPricingSubject(lower))
+    return ar
+      ? "بكل سرور. ما منطقة الاستلام ومنطقة التوصيل التي تريد معرفة سعرهما؟"
+      : "Of course. Which pickup and delivery locations would you like priced?";
+  if (pricingQuestionPattern.test(lower) && !s.agent.capabilities.quoteGuidance)
     return unknown(context, ar);
   const language = ar ? "ar" : "en";
   const faq = s.agent.capabilities.faqAnswers
@@ -248,7 +249,7 @@ export function deterministicReply(context: CompanyWebsiteAgentContext, message:
   }
   // "charge" and "how much" are how visitors actually ask -- both used to
   // fall past this branch and land on the coverage list.
-  if (/\b(?:price|cost|fee|fees|charge|charges|rate|rates)\b|how much|سعر|تكلفة|بكم/u.test(lower))
+  if (pricingQuestionPattern.test(lower)) {
     return (
       local(s.knowledge.pricing.guidance, language) ??
       (s.knowledge.pricing.mode === "contact"
@@ -263,6 +264,7 @@ export function deterministicReply(context: CompanyWebsiteAgentContext, message:
             ? "لا أملك سعراً مؤكداً. يمكنك إرسال طلب توصيل ليؤكد الفريق السعر."
             : "I don't have a confirmed price. You can submit a delivery request so the team can confirm it.")
     );
+  }
   if (
     /request delivery|send (?:a |my )?(?:package|parcel)|need a delivery|اطلب توصيل|إرسال (?:طرد|شحنة)|أحتاج توصيل/u.test(
       lower,
@@ -471,4 +473,19 @@ function unknown(context: CompanyWebsiteAgentContext, ar: boolean): string {
 }
 function local(value: { en?: string; ar?: string } | undefined, language: "en" | "ar") {
   return value?.[language] ?? value?.en;
+}
+
+const pricingQuestionPattern =
+  /\b(?:price|prices|cost|fee|fees|charge|charges|rate|rates)\b|how much|سعر|أسعار|اسعار|تكلفة|رسوم|بكم/u;
+
+function isBroadPricingQuestion(message: string): boolean {
+  return /what (?:are|is) (?:your |the )?(?:price|prices|rate|rates)|how much (?:is|does) (?:it|delivery|shipping)|كم (?:هي )?(?:ال)?(?:أسعار|اسعار)|(?:الأسعار|الاسعار) عندكم/u.test(
+    message,
+  );
+}
+
+function hasPricingSubject(message: string): boolean {
+  return /\bfrom\b|\bto\b|\bkg\b|\bpackage\b|\bparcel\b|\bcod\b|\bcash on delivery\b|\brefus|\breattempt|\bheavy\b|من\s+\S+|إلى\s+\S+|الى\s+\S+|كجم|طرد|شحنة|الدفع عند الاستلام|رفض|محاولة|ثقيل/u.test(
+    message,
+  );
 }
