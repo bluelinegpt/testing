@@ -58,8 +58,8 @@ async function seedCompany(client: pg.PoolClient, label: string): Promise<Fixtur
   }
 
   await client.query(
-    "insert into companies (id, code, subdomain, name_en, status, activated_at) " +
-      "values ($1, $2, $3, $4, 'active', now())",
+    "insert into companies (id, code, subdomain, name_en, status, environment, activated_at) " +
+      "values ($1, $2, $3, $4, 'active', 'development', now())",
     [
       fixture.company,
       `DEV-RST-${label}-${suffix}`,
@@ -285,12 +285,23 @@ describe.skipIf(!runDatabaseTests)("reset execution engine against a real databa
     try {
       const company = randomUUID();
       const suffix = company.slice(0, 8);
+      // Deliberately no `environment` column here: this proves the CURRENT
+      // guard (`runReset` refusing a non-development `environment`, see
+      // reset-company-test-data.engine.ts) still refuses a Company that was
+      // never marked as a development/test Company, using the schema's own
+      // `production` default -- the same real-world shape as any Company
+      // nobody has ever explicitly moved to a test environment. This test
+      // used to assert an older `code` naming-convention guard
+      // (`/not a DEV-\*/`) that no longer exists in the engine; updated to
+      // assert the guard that replaced it.
       await client.query(
         "insert into companies (id, code, subdomain, name_en, status) " +
           "values ($1, $2, $3, 'Live', 'active')",
         [company, `LIVE-${suffix}`, `live-${suffix}`],
       );
-      await expect(runReset(client, company, () => undefined)).rejects.toThrow(/not a DEV-\*/);
+      await expect(runReset(client, company, () => undefined)).rejects.toThrow(
+        /environment is 'production'/,
+      );
 
       const disabled = await client.query<{ tgname: string }>(
         "select tgname from pg_trigger where not tgisinternal and tgenabled <> 'O'",

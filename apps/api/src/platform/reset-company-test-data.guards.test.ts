@@ -195,6 +195,8 @@ describe("legacy compatibility edges", () => {
       "store_orders.delivery_company_relationship_id",
       "store_orders.delivery_company_relationship_id+trader_commerce_id+delivery_company_id",
       "commerce_integration_credentials.connection_id",
+      "platform_customer_quote_requests.converted_order_id",
+      "platform_workflow_test_scenarios.generated_order_id",
     ]);
     // Every entry must say why, so the next reader is not left guessing.
     for (const entry of LEGACY_COMPATIBILITY_EDGES) {

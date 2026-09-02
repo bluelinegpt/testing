@@ -167,6 +167,20 @@ export const PURGE_TABLES = new Set([
   "trader_delivery_company_relationships",
   "trader_service_prices",
   "traders",
+  /*
+   * Platform fee revenue on customer-quote-marketplace Orders (reviewed
+   * 2026-09-02, `20260915000000_platform_fee_receivables`). Both carry a
+   * direct, not-null `company_id`, and `platform_fee_receivables.order_id`
+   * is a not-null RESTRICT reference into `orders`, which this reset already
+   * removes -- so the fee tied to a purged Order must be purged with it, not
+   * left dangling. `platform_fee_payments.receivable_id` is a pure child of
+   * `platform_fee_receivables`, ordered before it automatically by
+   * `dependencyOrder`. Purged records are demo/training fee rows only:
+   * a Company can never be reset once it is production, so no live Platform
+   * revenue record is reachable through this path.
+   */
+  "platform_fee_payments",
+  "platform_fee_receivables",
 ]);
 
 /**
@@ -329,6 +343,40 @@ export const PRESERVE_TABLES = new Set([
   "platform_website_pages",
   "platform_website_pricing_plans",
   "platform_website_revisions",
+  /*
+   * Reviewed 2026-09-02, against the live schema.
+   *
+   * `company_whatsapp_platform_settings` / `company_whatsapp_message_templates`
+   * (`20260960000000_platform_whatsapp_controls`) are pure Company configuration --
+   * the Platform's WhatsApp enable/disable switch and per-status message-wording
+   * overrides -- no transactional rows, same category as `company_settings`.
+   *
+   * `platform_workflow_test_runs` / `_scenarios` / `_steps`
+   * (`20260946000000_automated_workflow_testing`) are the Platform's OWN evidence
+   * of automated test runs performed against a Company, not the Company's business
+   * data -- same rationale as `client_error_reports` and `audit_events`: a training
+   * reset must not erase the record of what the Platform tested. `_scenarios.
+   * generated_order_id` is a live reference into `orders` that the database nulls
+   * out on its own when the Order it points to is removed; declared in
+   * LEGACY_COMPATIBILITY_EDGES below so the structural check does not block every
+   * reset over an edge the database already heals on its own.
+   *
+   * `shipment_prefix_reservations` (`20260944000000_company_shipment_serial_prefixes`)
+   * is the permanent, Platform-wide prefix ledger -- already GLOBAL_TABLES; added
+   * here too, the same dual-listing convention `marketplace_categories` and
+   * `permissions` already use.
+   *
+   * `store_order_idempotency_keys` (`20260924000000_store_order_idempotency_keys`)
+   * carries no `company_id` at all -- it references only `store_orders`, itself
+   * Trader Commerce-owned, not Delivery Company-owned. Global, not Company data.
+   */
+  "company_whatsapp_message_templates",
+  "company_whatsapp_platform_settings",
+  "platform_workflow_test_runs",
+  "platform_workflow_test_scenarios",
+  "platform_workflow_test_steps",
+  "shipment_prefix_reservations",
+  "store_order_idempotency_keys",
 ]);
 
 /**
@@ -343,6 +391,8 @@ export const GLOBAL_TABLES = new Set([
   "companies",
   // Permanent PSystem prefix tombstones survive Company deletion and reset.
   "shipment_prefix_reservations",
+  // Carries no `company_id`; references only `store_orders` (Trader Commerce-owned).
+  "store_order_idempotency_keys",
   "emirates",
   "kysely_migration",
   "kysely_migration_lock",
@@ -497,6 +547,28 @@ export const LEGACY_COMPATIBILITY_EDGES: {
       "credential rows intentionally carry no company_id; the directly scoped connection is " +
       "removed only when no preserved credential row still references it, otherwise the " +
       "database RESTRICT constraint aborts the reset",
+  },
+  /*
+   * Customer-quote-marketplace and automated-workflow-testing edges into the removal set
+   * (reviewed 2026-09-02). Same delegation pattern as the store_orders edges above.
+   */
+  {
+    child: "platform_customer_quote_requests",
+    parent: "orders",
+    columns: ["converted_order_id"],
+    reason:
+      "live edge -- set when a marketplace quote is converted into a real delivery Order; " +
+      "RESTRICT in the database, so a Company whose Orders are still the converted target " +
+      "of a quote request aborts the reset and rolls back rather than losing the link",
+  },
+  {
+    child: "platform_workflow_test_scenarios",
+    parent: "orders",
+    columns: ["generated_order_id"],
+    reason:
+      "live edge, but the database clears this column itself when the Order it points to " +
+      "is removed, so the up-front structural check would otherwise block every reset over " +
+      "an edge that self-heals",
   },
 ];
 
