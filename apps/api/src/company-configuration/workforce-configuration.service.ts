@@ -729,13 +729,17 @@ export class WorkforceConfigurationService {
         "Role name is required",
         HttpStatus.BAD_REQUEST,
       );
-    // Derive a stable code from the name; the operator only types the name.
-    const code =
-      name
-        .toUpperCase()
-        .replace(/[^A-Z0-9]+/g, "_")
-        .replace(/^_+|_+$/g, "")
-        .slice(0, 40) || "ROLE";
+    // Derive a code from the name for readability, then append a short
+    // random suffix so it stays unique even when the name carries no A-Z/0-9
+    // characters at all -- e.g. an Arabic-only name like "مندوب" strips to
+    // nothing, so without this every Arabic-named Role would collapse onto
+    // the same "ROLE" code and the next one would fail as a duplicate.
+    const base = name
+      .toUpperCase()
+      .replace(/[^A-Z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "")
+      .slice(0, 32);
+    const code = `${base || "ROLE"}_${randomUUID().replace(/-/g, "").slice(0, 6).toUpperCase()}`;
     try {
       const result = await sql<Record<string, unknown>>`
         insert into employee_roles (company_id, code, name_en, is_driver_role)
