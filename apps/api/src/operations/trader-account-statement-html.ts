@@ -71,13 +71,13 @@ export function buildTraderAccountStatementHtml(
 <html lang="${language}" dir="${ar ? "rtl" : "ltr"}">
 <head><meta charset="utf-8"><style>
 @page{size:A4;margin:14mm 12mm 18mm}*{box-sizing:border-box}body{font-family:Arial,"Noto Sans Arabic",sans-serif;color:#182033;font-size:10px}
-h1{font-size:22px;margin:0 0 4px}h2{font-size:13px;margin:14px 0 5px}.muted{color:#667085}.header{display:flex;justify-content:space-between;border-bottom:2px solid #3158e8;padding-bottom:10px;margin-bottom:12px}.brand{display:flex;gap:9px}.logo{width:48px;height:48px;object-fit:contain}
+h1{font-size:22px;margin:0 0 4px}h2{font-size:13px;margin:14px 0 5px}.muted{color:#667085}.header{display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #3158e8;padding-bottom:10px;margin-bottom:12px}.brand{display:flex;align-items:center;gap:9px}.logo{width:48px;height:48px;object-fit:contain}.trader-line{font-size:15px;font-weight:700}
 .cards{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:12px 0}.card{border:1px solid #d9dfeb;border-radius:6px;padding:8px}.card strong{display:block;font-size:14px;margin-top:4px}
 table{width:100%;border-collapse:collapse;table-layout:fixed}thead{display:table-header-group}th{background:#eef2ff;text-align:${ar ? "right" : "left"};padding:6px;border:1px solid #d9dfeb}td{padding:6px;border:1px solid #e2e6ef;vertical-align:top;overflow-wrap:anywhere}.money{text-align:end;font-variant-numeric:tabular-nums}
 .warning{margin-top:10px;padding:8px;background:#fff7e6;border:1px solid #f4c66a}.footer-note{margin-top:10px;color:#667085}.settlement{break-inside:avoid;margin-top:14px}
 </style></head>
 <body>
-  <section class="header"><div class="brand">${data.company.logoDataUri === null ? "" : `<img class="logo" alt="" src="${escapeHtml(data.company.logoDataUri)}">`}<div><h1>${labels.title}</h1><div>${escapeHtml(data.trader.number)} · ${escapeHtml(ar ? data.trader.nameAr || data.trader.nameEn : data.trader.nameEn)}</div></div></div>
+  <section class="header"><div class="brand">${data.company.logoDataUri === null ? "" : `<img class="logo" alt="" src="${escapeHtml(data.company.logoDataUri)}">`}<div><h1>${labels.title}</h1><div class="trader-line">${escapeHtml(data.trader.number)} · ${escapeHtml(ar ? data.trader.nameAr || data.trader.nameEn : data.trader.nameEn)}</div></div></div>
   <div><strong>${escapeHtml(ar ? data.company.nameAr || data.company.nameEn : data.company.nameEn)}</strong><br>${labels.from}: ${escapeHtml(data.period.from)}<br>${labels.to}: ${escapeHtml(data.period.to)}</div></section>
   <section class="cards">
     <div class="card">${ar ? "غير المدفوع للتاجر" : "Unpaid to Trader"}<strong>AED ${escapeHtml(data.summary.outstandingAmount)}</strong></div>
