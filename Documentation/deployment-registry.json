@@ -6,10 +6,10 @@
       "displayName": "API",
       "path": "apps/api",
       "renderService": "bluelinegpt-api-test",
-      "status": "pushed_awaiting_confirmation",
-      "localCommit": "7482fa4",
+      "status": "needs_deploy",
+      "localCommit": "a6be488",
       "localCommitDate": "2026-09-03",
-      "lastChangeDescription": "Makes company website agents recognize common Arabic coverage questions and clarify instead of repeating a generic refusal.",
+      "lastChangeDescription": "Understands colloquial Arabic greetings, assistant-identity questions, and UAE coverage questions on company websites.",
       "lastChangeBy": "codex",
       "confirmedLiveCommit": "e3de371",
       "confirmedLiveAt": "2026-09-01"
