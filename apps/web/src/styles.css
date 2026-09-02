@@ -11578,7 +11578,7 @@ tr.row-highlighted {
 }
 .company-agent__panel {
   width: min(380px, calc(100vw - 2rem));
-  height: min(570px, calc(100dvh - 8rem));
+  height: min(720px, calc(100dvh - 2rem));
   margin-bottom: 0.75rem;
   display: grid;
   grid-template-rows: auto minmax(80px, 1fr) auto auto auto auto;
@@ -11953,7 +11953,7 @@ tr.row-highlighted {
 .company-agent__panel {
   bottom: auto;
   inset-inline-end: auto;
-  height: min(570px, calc(100dvh - 6.5rem));
+  height: min(720px, calc(100dvh - 2rem));
   margin-bottom: 0.75rem;
   position: static;
   top: auto;
@@ -12047,7 +12047,7 @@ tr.row-highlighted {
     bottom: calc(4.75rem + env(safe-area-inset-bottom)) !important;
   }
   .company-agent__panel {
-    height: min(70dvh, calc(100dvh - 10rem));
+    height: min(88dvh, calc(100dvh - 6rem));
     inset-inline: auto;
     position: static;
     width: calc(100vw - 1.5rem);
