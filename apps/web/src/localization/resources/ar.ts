@@ -1453,6 +1453,7 @@ export const arabicTranslations = {
       runReport: "تشغيل التقرير",
       settlement: "التسوية",
       showTraderPayments: "عرض مدفوعات التجار",
+      showTraderCollections: "عرض المبالغ المحصّلة من التجار",
       showMoneyToCollectFromTraders: "عرض المبالغ المطلوب تحصيلها من التجار",
       showMoneyToPayToTraders: "عرض المبالغ المطلوب دفعها للتجار",
       summary: "الملخص",
@@ -1463,7 +1464,9 @@ export const arabicTranslations = {
       totalDeliveredOrders: "إجمالي الطلبات المُسلَّمة",
       totalExpenses: "إجمالي المصروفات",
       totalTraderPayments: "إجمالي مدفوعات التجار",
+      totalTraderCollections: "إجمالي المبالغ المحصّلة من التجار",
       traderPayments: "مدفوعات التجار",
+      traderCollections: "المبالغ المحصّلة من التجار",
       moneyToCollectFromTraders: "مبالغ مطلوبة من التجار",
       totalMoneyToCollectFromTraders: "إجمالي المبالغ المطلوب تحصيلها من التجار",
       moneyToPayToTraders: "مبالغ مطلوب دفعها للتجار",
@@ -1476,6 +1479,8 @@ export const arabicTranslations = {
         "يعرض المبالغ المتبقية التي يجب على الشركة تحصيلها من التجار ضمن هذه الفترة.",
       traderPaymentsHelp:
         "يعرض المدفوعات المؤكدة للتجار ضمن هذه الفترة. تظهر للمتابعة النقدية ولا تُحتسب كمصروفات تشغيلية.",
+      traderCollectionsHelp:
+        "يعرض المبالغ المؤكدة المحصّلة من التجار ضمن هذه الفترة. تظهر للمتابعة النقدية ولا تُحتسب كإيرادات تشغيلية.",
       viewOrders: "عرض الطلبات",
       yesterday: "أمس",
     },

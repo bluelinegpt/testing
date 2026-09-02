@@ -254,6 +254,20 @@ async function insertPaidTraderSettlement(
      where id=${settlementId}::uuid and company_id=${fixture.companyId}::uuid`.execute(transaction);
 }
 
+async function insertTraderCollection(
+  transaction: Transaction<DatabaseSchema>,
+  fixture: Fixture,
+  amount: string,
+  paymentDate: string,
+  confirmedAt: string,
+): Promise<void> {
+  await sql`insert into trader_collections(id,company_id,collection_number,trader_id,payment_date,
+      payment_method,amount_received,status,received_by_account_id,confirmed_at)
+    values(${randomUUID()}::uuid,${fixture.companyId}::uuid,${`COL-${randomUUID().slice(0, 8)}`},
+      ${fixture.traderId}::uuid,${paymentDate}::date,'cash',${amount},'confirmed',
+      ${fixture.actorId}::uuid,${confirmedAt}::timestamptz)`.execute(transaction);
+}
+
 async function insertDriverCollection(
   transaction: Transaction<DatabaseSchema>,
   fixture: Fixture,
@@ -797,6 +811,37 @@ describe.skipIf(!runDatabaseTests)("Daily Operations Summary — Date Mode", () 
         dateTo: "2026-08-22",
       });
       expect(previousBusinessDay.totalTraderPayments).toBe("0.00");
+    });
+  });
+
+  it("shows confirmed Trader collections by payment_date Business Date even when confirmed_at is midnight", async () => {
+    await inRolledBackTransaction(async (transaction) => {
+      const fixture = await seed(transaction, "DMC", "08:00:00");
+      const service = buildService(transaction, fixture.companyId, fixture.actorId);
+      await insertTraderCollection(
+        transaction,
+        fixture,
+        "200.00",
+        "2026-08-23",
+        "2026-08-23T00:00:00+04:00",
+      );
+
+      const business = await service.report({
+        dateFrom: "2026-08-23",
+        dateMode: "business_day",
+        dateTo: "2026-08-23",
+      });
+      expect(business.totalTraderCollections).toBe("200.00");
+      expect(business.traderCollections).toHaveLength(1);
+      expect(business.traderCollections[0]?.businessDate).toBe("2026-08-23");
+      expect(business.traderCollections[0]?.calendarDate).toBe("2026-08-23");
+
+      const previousBusinessDay = await service.report({
+        dateFrom: "2026-08-22",
+        dateMode: "business_day",
+        dateTo: "2026-08-22",
+      });
+      expect(previousBusinessDay.totalTraderCollections).toBe("0.00");
     });
   });
 

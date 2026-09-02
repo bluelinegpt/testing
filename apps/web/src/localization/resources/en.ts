@@ -1477,6 +1477,7 @@ export const englishTranslations = {
       runReport: "Run Report",
       settlement: "Settlement",
       showTraderPayments: "Show Trader payments",
+      showTraderCollections: "Show money collected from Traders",
       showMoneyToCollectFromTraders: "Show money to collect from Traders",
       showMoneyToPayToTraders: "Show money to pay Traders",
       summary: "Summary",
@@ -1487,7 +1488,9 @@ export const englishTranslations = {
       totalDeliveredOrders: "Total Delivered Orders",
       totalExpenses: "Total Expenses",
       totalTraderPayments: "Total Trader Payments",
+      totalTraderCollections: "Total Trader Collections",
       traderPayments: "Trader Payments",
+      traderCollections: "Trader Collections",
       moneyToCollectFromTraders: "Money to Collect from Traders",
       totalMoneyToCollectFromTraders: "Total Money to Collect from Traders",
       moneyToPayToTraders: "Money to Pay to Traders",
@@ -1500,6 +1503,8 @@ export const englishTranslations = {
         "Shows outstanding amounts the Company still needs to collect from Traders in this date range.",
       traderPaymentsHelp:
         "Shows confirmed payments made to Traders in this date range. These are displayed for cash visibility and are not counted as operating expenses.",
+      traderCollectionsHelp:
+        "Shows confirmed money collected from Traders in this date range. These are displayed for cash visibility and are not counted as operating income.",
       viewOrders: "View Orders",
       yesterday: "Yesterday",
     },

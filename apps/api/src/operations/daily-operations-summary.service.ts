@@ -136,6 +136,17 @@ export interface TraderPaymentRow {
   readonly traderName: string;
 }
 
+export interface TraderCollectionRow {
+  readonly amount: string;
+  readonly businessDate: string;
+  readonly calendarDate: string;
+  readonly collectionId: string;
+  readonly collectionNumber: string;
+  readonly paymentMethod: "bank_transfer" | "cash";
+  readonly reference: string;
+  readonly traderName: string;
+}
+
 export interface TraderReceivableDueRow {
   readonly amountCollected: string;
   readonly businessDate: string;
@@ -204,16 +215,19 @@ export interface DailyOperationsSummaryReport {
   readonly netResult: string;
   readonly netStatus: "break_even" | "negative" | "positive";
   readonly includeTraderPayments: boolean;
+  readonly includeTraderCollections: boolean;
   readonly includeTraderPayables: boolean;
   readonly includeTraderReceivables: boolean;
   readonly totalDeliveryIncome: string;
   readonly totalExpenses: string;
   readonly totalOrders: number;
   readonly totalTraderPayments: string;
+  readonly totalTraderCollections: string;
   readonly totalTraderPayables: string;
   readonly totalTraderReceivables: string;
   readonly traderPayables: readonly TraderPayableDueRow[];
   readonly traderPayments: readonly TraderPaymentRow[];
+  readonly traderCollections: readonly TraderCollectionRow[];
   readonly traderReceivables: readonly TraderReceivableDueRow[];
 }
 
@@ -292,7 +306,7 @@ export class DailyOperationsSummaryService {
     const driverId = query.driverId ?? null;
     const driverType = query.driverType ?? null;
 
-    const [driverRows, expenseRows, traderPaymentRows, traderReceivableRows, traderPayableRows] = await Promise.all([
+    const [driverRows, expenseRows, traderPaymentRows, traderCollectionRows, traderReceivableRows, traderPayableRows] = await Promise.all([
       sql<DriverDeliverySummaryRow>`
         with reportable_orders as (
           select o.*, coalesce(cash.confirmed_at, o.delivered_at) as report_activity_at
@@ -453,6 +467,35 @@ export class DailyOperationsSummaryService {
            )
          order by s.business_date desc, p.payment_at desc, s.settlement_number, o.serial_number nulls last, o.order_number
       `.execute(this.database),
+      sql<
+        Omit<TraderCollectionRow, "businessDate" | "calendarDate"> & {
+          businessDate: string;
+          confirmedAt: string;
+        }
+      >`
+        select c.id as "collectionId", c.collection_number as "collectionNumber",
+               t.name_en as "traderName", c.payment_method as "paymentMethod",
+               c.amount_received::text as amount, c.confirmed_at::text as "confirmedAt",
+               c.payment_date::text as "businessDate",
+               coalesce(nullif(c.payment_reference, ''), c.collection_number) as reference
+          from trader_collections c
+          join traders t on t.id = c.trader_id and t.company_id = c.company_id
+         where c.company_id = ${companyId}::uuid
+           and c.status = 'confirmed'
+           and (
+             (
+               ${dateMode}::text = 'business_day'
+               and c.payment_date >= ${query.dateFrom}::date
+               and c.payment_date <= ${query.dateTo}::date
+             )
+             or (
+               ${dateMode}::text = 'calendar_day'
+               and c.confirmed_at >= ${window.startUtc}::timestamptz
+               and c.confirmed_at < ${window.endUtc}::timestamptz
+             )
+           )
+         order by c.payment_date desc, c.confirmed_at desc, c.collection_number
+      `.execute(this.database),
       sql<TraderReceivableDueRow>`
         select r.id as "receivableId", r.receivable_number as "receivableNumber",
                t.name_en as "traderName", r.business_date::text as "businessDate",
@@ -554,6 +597,19 @@ export class DailyOperationsSummaryService {
       settlementNumber: row.settlementNumber,
       traderName: row.traderName,
     }));
+    const traderCollectionTimestamps = traderCollectionRows.rows.map((row) => row.confirmedAt);
+    const traderCollectionCalendarDates =
+      await this.businessDays.calendarDatesFor(traderCollectionTimestamps);
+    const traderCollections = traderCollectionRows.rows.map((row) => ({
+      amount: row.amount,
+      businessDate: row.businessDate,
+      calendarDate: traderCollectionCalendarDates.get(row.confirmedAt) ?? row.confirmedAt.slice(0, 10),
+      collectionId: row.collectionId,
+      collectionNumber: row.collectionNumber,
+      paymentMethod: row.paymentMethod,
+      reference: row.reference,
+      traderName: row.traderName,
+    }));
     const totalOrders = driverSummary.reduce((total, row) => total + row.deliveredOrders, 0);
     const totalDeliveryIncome = sumMoney(driverSummary.map((row) => row.deliveryIncome));
     const totalExpenses = sumMoney(expenses.map((row) => row.amount));
@@ -575,6 +631,7 @@ export class DailyOperationsSummaryService {
       calendarDate: traderPayableCalendarDates.get(row.deliveredAt) ?? row.deliveredAt.slice(0, 10),
     }));
     const totalTraderPayments = sumMoney(traderPayments.map((row) => row.amount));
+    const totalTraderCollections = sumMoney(traderCollections.map((row) => row.amount));
     const totalTraderPayables = sumMoney(traderPayables.map((row) => row.outstandingAmount));
     const totalTraderReceivables = sumMoney(traderReceivables.map((row) => row.outstandingAmount));
     const netResult = (Number(totalDeliveryIncome) - Number(totalExpenses)).toFixed(2);
@@ -586,6 +643,7 @@ export class DailyOperationsSummaryService {
       driverSummary,
       expenses,
       includeTraderPayments: isTruthyQueryFlag(query.includeTraderPayments),
+      includeTraderCollections: isTruthyQueryFlag(query.includeTraderCollections),
       includeTraderPayables: isTruthyQueryFlag(query.includeTraderPayables),
       includeTraderReceivables: isTruthyQueryFlag(query.includeTraderReceivables),
       metadata: {
@@ -604,10 +662,12 @@ export class DailyOperationsSummaryService {
       totalExpenses,
       totalOrders,
       totalTraderPayments,
+      totalTraderCollections,
       totalTraderPayables,
       totalTraderReceivables,
       traderPayables,
       traderPayments,
+      traderCollections,
       traderReceivables,
     };
   }

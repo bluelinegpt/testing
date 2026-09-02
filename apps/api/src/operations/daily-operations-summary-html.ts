@@ -42,6 +42,7 @@ interface Labels {
   readonly totalExpenses: string;
   readonly totalOrders: string;
   readonly totalTraderPayments: string;
+  readonly totalTraderCollections: string;
   readonly totalTraderPayables: string;
   readonly totalTraderReceivables: string;
   readonly trader: string;
@@ -53,6 +54,8 @@ interface Labels {
   readonly previouslyCollected: string;
   readonly outstanding: string;
   readonly traderPaymentsTitle: string;
+  readonly traderCollectionsTitle: string;
+  readonly collectionNumber: string;
   readonly settlement: string;
 }
 
@@ -89,6 +92,7 @@ const LABELS: Readonly<Record<ReportLanguage, Labels>> = {
     totalExpenses: "Total Expenses",
     totalOrders: "Total Orders",
     totalTraderPayments: "Total Trader Payments",
+    totalTraderCollections: "Total Trader Collections",
     totalTraderPayables: "Total Money to Pay to Traders",
     totalTraderReceivables: "Total Money to Collect from Traders",
     trader: "Trader",
@@ -100,6 +104,8 @@ const LABELS: Readonly<Record<ReportLanguage, Labels>> = {
     previouslyCollected: "Previously Collected",
     outstanding: "Outstanding",
     traderPaymentsTitle: "Trader Payments",
+    traderCollectionsTitle: "Trader Collections",
+    collectionNumber: "Collection Number",
     settlement: "Settlement",
   },
   ar: {
@@ -134,6 +140,7 @@ const LABELS: Readonly<Record<ReportLanguage, Labels>> = {
     totalExpenses: "إجمالي المصروفات",
     totalOrders: "إجمالي الطلبات",
     totalTraderPayments: "إجمالي مدفوعات التجار",
+    totalTraderCollections: "إجمالي تحصيلات التجار",
     totalTraderPayables: "إجمالي المبالغ المطلوب دفعها للتجار",
     totalTraderReceivables: "إجمالي المبالغ المطلوب تحصيلها من التجار",
     trader: "التاجر",
@@ -145,6 +152,8 @@ const LABELS: Readonly<Record<ReportLanguage, Labels>> = {
     previouslyCollected: "تم تحصيله سابقاً",
     outstanding: "المتبقي",
     traderPaymentsTitle: "مدفوعات التجار",
+    traderCollectionsTitle: "تحصيلات التجار",
+    collectionNumber: "رقم التحصيل",
     settlement: "التسوية",
   },
 };
@@ -262,6 +271,37 @@ export function buildDailyOperationsSummaryHtml(
     `</tr></thead><tbody>${traderPaymentRows}` +
     `<tr class="total-row"><td colspan="8">${escapeHtml(labels.totalTraderPayments)}</td>` +
     `<td class="num">${money(report.totalTraderPayments)}</td></tr>` +
+    `</tbody></table>`;
+  const traderCollectionRows = report.traderCollections
+    .map(
+      (row) =>
+        "<tr>" +
+        `<td>${escapeHtml(row.businessDate)}</td>` +
+        `<td>${escapeHtml(row.calendarDate)}</td>` +
+        `<td>${escapeHtml(row.traderName)}</td>` +
+        `<td class="mono">${escapeHtml(row.collectionNumber)}</td>` +
+        `<td class="mono">${escapeHtml(row.reference)}</td>` +
+        `<td>${escapeHtml(row.paymentMethod)}</td>` +
+        `<td class="num">${money(row.amount)}</td>` +
+        "</tr>",
+    )
+    .join("");
+  const traderCollectionTable =
+    `<table class="grid compact"><thead><tr>` +
+    [
+      labels.businessDate,
+      labels.calendarDate,
+      labels.trader,
+      labels.collectionNumber,
+      labels.reference,
+      labels.paymentMethod,
+      labels.amount,
+    ]
+      .map((label) => `<th>${escapeHtml(label)}</th>`)
+      .join("") +
+    `</tr></thead><tbody>${traderCollectionRows}` +
+    `<tr class="total-row"><td colspan="6">${escapeHtml(labels.totalTraderCollections)}</td>` +
+    `<td class="num">${money(report.totalTraderCollections)}</td></tr>` +
     `</tbody></table>`;
   const traderReceivableRows = report.traderReceivables
     .map(
@@ -381,6 +421,7 @@ export function buildDailyOperationsSummaryHtml(
     (report.includeTraderReceivables ? `<div class="section-title">${escapeHtml(labels.traderReceivablesTitle)}</div>${traderReceivableTable}` : "") +
     (report.includeTraderPayables ? `<div class="section-title">${escapeHtml(labels.traderPayablesTitle)}</div>${traderPayableTable}` : "") +
     (report.includeTraderPayments ? `<div class="section-title">${escapeHtml(labels.traderPaymentsTitle)}</div>${traderPaymentTable}` : "") +
+    (report.includeTraderCollections ? `<div class="section-title">${escapeHtml(labels.traderCollectionsTitle)}</div>${traderCollectionTable}` : "") +
     `<div class="summary-section">` +
     `<div class="summary-line"><span>${escapeHtml(labels.totalOrders)}</span><span>${report.totalOrders}</span></div>` +
     `<div class="summary-line"><span>${escapeHtml(labels.totalDeliveryIncome)}</span><span>${money(report.totalDeliveryIncome)}</span></div>` +
@@ -388,6 +429,7 @@ export function buildDailyOperationsSummaryHtml(
     (report.includeTraderReceivables ? `<div class="summary-line"><span>${escapeHtml(labels.totalTraderReceivables)}</span><span>${money(report.totalTraderReceivables)}</span></div>` : "") +
     (report.includeTraderPayables ? `<div class="summary-line"><span>${escapeHtml(labels.totalTraderPayables)}</span><span>${money(report.totalTraderPayables)}</span></div>` : "") +
     (report.includeTraderPayments ? `<div class="summary-line"><span>${escapeHtml(labels.totalTraderPayments)}</span><span>${money(report.totalTraderPayments)}</span></div>` : "") +
+    (report.includeTraderCollections ? `<div class="summary-line"><span>${escapeHtml(labels.totalTraderCollections)}</span><span>${money(report.totalTraderCollections)}</span></div>` : "") +
     `<div class="summary-line ${netClass}"><span>${escapeHtml(labels.netResult)}</span><span>${netSign}${money(report.netResult)}</span></div>` +
     `<div class="summary-line ${netClass}"><span>${escapeHtml(labels.status)}</span><span>${escapeHtml(netLabel)}</span></div>` +
     `</div></body></html>`

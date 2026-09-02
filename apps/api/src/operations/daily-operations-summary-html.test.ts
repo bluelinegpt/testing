@@ -27,15 +27,29 @@ const sampleReport: DailyOperationsSummaryReport = {
   netResult: "95.00",
   netStatus: "positive",
   includeTraderPayments: true,
+  includeTraderCollections: true,
   includeTraderPayables: false,
   includeTraderReceivables: true,
   totalDeliveryIncome: "95.00",
   totalExpenses: "0.00",
   totalOrders: 5,
   totalTraderPayments: "275.00",
+  totalTraderCollections: "200.00",
   totalTraderPayables: "0.00",
   totalTraderReceivables: "50.00",
   traderPayables: [],
+  traderCollections: [
+    {
+      amount: "200.00",
+      businessDate: "2026-08-23",
+      calendarDate: "2026-08-23",
+      collectionId: "collection-1",
+      collectionNumber: "COL-000016",
+      paymentMethod: "cash",
+      reference: "COL-000016",
+      traderName: "Ahmed Store",
+    },
+  ],
   traderPayments: [
     {
       amount: "275.00",
@@ -87,15 +101,36 @@ describe("buildDailyOperationsSummaryHtml", () => {
 
   it("hides optional Trader sections when the report flags are false", () => {
     const html = buildDailyOperationsSummaryHtml(
-      { ...sampleReport, includeTraderPayments: false, includeTraderReceivables: false },
+      {
+        ...sampleReport,
+        includeTraderPayments: false,
+        includeTraderCollections: false,
+        includeTraderReceivables: false,
+      },
       "en",
       "23/08/2026, 14:19 (UAE)",
     );
 
     expect(html).not.toContain("Trader Payments");
+    expect(html).not.toContain("Trader Collections");
     expect(html).not.toContain("Money to Collect from Traders");
     expect(html).not.toContain("flah");
     expect(html).not.toContain("RCV-000012");
+    expect(html).not.toContain("COL-000016");
+  });
+
+  it("renders Trader Collections when the PDF flag is enabled", () => {
+    const html = buildDailyOperationsSummaryHtml(
+      { ...sampleReport, includeTraderPayments: false, includeTraderReceivables: false },
+      "en",
+      "23/08/2026, 14:19 (UAE)",
+    );
+
+    expect(html).toContain("Trader Collections");
+    expect(html).toContain("Total Trader Collections");
+    expect(html).toContain("Ahmed Store");
+    expect(html).toContain("COL-000016");
+    expect(html).toContain("AED 200.00");
   });
 
   it("renders Money to Collect from Traders when the PDF flag is enabled", () => {

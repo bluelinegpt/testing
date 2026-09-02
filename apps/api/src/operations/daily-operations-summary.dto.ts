@@ -48,6 +48,11 @@ export class DailyOperationsSummaryQueryDto {
   @IsOptional()
   @Transform(({ value }) => value === true || value === "true")
   @IsBoolean()
+  public readonly includeTraderCollections?: boolean;
+
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === "true")
+  @IsBoolean()
   public readonly includeTraderReceivables?: boolean;
 
   @IsOptional()

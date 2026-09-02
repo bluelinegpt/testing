@@ -78,6 +78,17 @@ interface TraderPaymentRow {
   readonly traderName: string;
 }
 
+interface TraderCollectionRow {
+  readonly amount: string;
+  readonly businessDate: string;
+  readonly calendarDate: string;
+  readonly collectionId: string;
+  readonly collectionNumber: string;
+  readonly paymentMethod: "bank_transfer" | "cash";
+  readonly reference: string;
+  readonly traderName: string;
+}
+
 interface TraderReceivableDueRow {
   readonly amountCollected: string;
   readonly businessDate: string;
@@ -132,10 +143,12 @@ interface ReportData {
   readonly totalExpenses: string;
   readonly totalOrders: number;
   readonly totalTraderPayments?: string;
+  readonly totalTraderCollections?: string;
   readonly totalTraderPayables?: string;
   readonly totalTraderReceivables?: string;
   readonly traderPayables?: readonly TraderPayableDueRow[];
   readonly traderPayments?: readonly TraderPaymentRow[];
+  readonly traderCollections?: readonly TraderCollectionRow[];
   readonly traderReceivables?: readonly TraderReceivableDueRow[];
 }
 
@@ -252,6 +265,7 @@ export function DailyOperationsSummaryReport({
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState<"pdf" | "print" | "xlsx">();
   const [showTraderPayments, setShowTraderPayments] = useState(false);
+  const [showTraderCollections, setShowTraderCollections] = useState(false);
   const [showTraderPayables, setShowTraderPayables] = useState(false);
   const [showTraderReceivables, setShowTraderReceivables] = useState(false);
   const [expandedDriverId, setExpandedDriverId] = useState<string>();
@@ -289,6 +303,7 @@ export function DailyOperationsSummaryReport({
       dateMode,
     });
     if (showTraderPayments) params.set("includeTraderPayments", "true");
+    if (showTraderCollections) params.set("includeTraderCollections", "true");
     if (showTraderPayables) params.set("includeTraderPayables", "true");
     if (showTraderReceivables) params.set("includeTraderReceivables", "true");
     return params.toString();
@@ -374,6 +389,8 @@ export function DailyOperationsSummaryReport({
   const money = (value: string | null | undefined) => formatCurrency(value ?? "0.00", "AED", locale);
   const traderPayments = report?.traderPayments ?? [];
   const totalTraderPayments = report?.totalTraderPayments ?? "0.00";
+  const traderCollections = report?.traderCollections ?? [];
+  const totalTraderCollections = report?.totalTraderCollections ?? "0.00";
   const traderPayables = report?.traderPayables ?? [];
   const totalTraderPayables = report?.totalTraderPayables ?? "0.00";
   const traderReceivables = report?.traderReceivables ?? [];
@@ -482,6 +499,14 @@ const netLabel =
               type="checkbox"
             />
             <span>{t("reports.dailyOperationsSummary.showTraderPayments")}</span>
+          </label>
+          <label className="field field-checkbox">
+            <input
+              checked={showTraderCollections}
+              onChange={(event) => setShowTraderCollections(event.target.checked)}
+              type="checkbox"
+            />
+            <span>{t("reports.dailyOperationsSummary.showTraderCollections")}</span>
           </label>
           <label className="field field-checkbox">
             <input
@@ -862,6 +887,66 @@ const netLabel =
                       </td>
                       <td>
                         <strong>{money(totalTraderPayments)}</strong>
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </section>
+          ) : null}
+          {showTraderCollections ? (
+            <section className="detail-section">
+              <h2>{t("reports.dailyOperationsSummary.traderCollections")}</h2>
+              <p className="muted-text">{t("reports.dailyOperationsSummary.traderCollectionsHelp")}</p>
+              <div className="table-frame">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>{t("configuration.businessDay.businessDate")}</th>
+                      <th>{t("configuration.businessDay.calendarDate")}</th>
+                      <th>{t("operations.trader")}</th>
+                      <th>{t("traderSettlements.columnPaymentReference")}</th>
+                      <th>{t("traderSettlements.filterPaymentMethod")}</th>
+                      <th>{t("operations.amount")}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {traderCollections.length === 0 ? (
+                      <tr>
+                        <td colSpan={6}>{t("reports.dailyOperationsSummary.noData")}</td>
+                      </tr>
+                    ) : (
+                      traderCollections.map((row) => (
+                        <tr key={row.collectionId}>
+                          <td>{row.businessDate}</td>
+                          <td>{row.calendarDate}</td>
+                          <td>{row.traderName}</td>
+                          <td>
+                            <button
+                              className="link-button"
+                              onClick={() => onNavigate(`/trader-receivables/collections/${row.collectionId}`)}
+                              type="button"
+                            >
+                              {row.collectionNumber}
+                            </button>
+                          </td>
+                          <td>
+                            {row.paymentMethod === "cash"
+                              ? t("traderSettlements.paymentMethodCash")
+                              : t("traderSettlements.paymentMethodBankTransfer")}
+                          </td>
+                          <td>{money(row.amount)}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                  <tfoot>
+                    <tr>
+                      <td colSpan={5}>
+                        <strong>{t("reports.dailyOperationsSummary.totalTraderCollections")}</strong>
+                      </td>
+                      <td>
+                        <strong>{money(totalTraderCollections)}</strong>
                       </td>
                     </tr>
                   </tfoot>
