@@ -6,7 +6,7 @@
       "displayName": "API",
       "path": "apps/api",
       "renderService": "bluelinegpt-api-test",
-      "status": "needs_deploy",
+      "status": "pushed_awaiting_confirmation",
       "localCommit": "a6be488",
       "localCommitDate": "2026-09-03",
       "lastChangeDescription": "Understands colloquial Arabic greetings, assistant-identity questions, and UAE coverage questions on company websites.",
