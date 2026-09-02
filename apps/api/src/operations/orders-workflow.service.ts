@@ -376,12 +376,13 @@ export class OrdersWorkflowService {
   }
 
   /**
-   * A fresh assignment (no Driver yet) is eligible while New/In-Branch/Hold.
-   * A reassignment (already has a Driver) is eligible only while
-   * Assigned-to-Driver or Hold — matching `enforce_initial_order_assignment`,
-   * which only permits a new active `order_assignments` row while the Order
-   * is in one of those two states. Once Out for Delivery or later, the
-   * Driver is locked in and can only change through a status transition.
+   * A Driver may be assigned or reassigned any time an Order is not yet
+   * Delivered and not in a terminal state — matching
+   * `enforce_initial_order_assignment`, which permits a new active
+   * `order_assignments` row for the same status set. Cancelled, Closed,
+   * and the two Returned statuses are deliberately excluded even though
+   * they too are "not Delivered": those are finished states where
+   * reassigning a Driver has no operational meaning.
    */
   private assignmentIneligibilityReason(
     order: SelectedOrder,
@@ -390,14 +391,16 @@ export class OrdersWorkflowService {
     if (order.assignedDriverId === targetDriverId) {
       return "Driver is already assigned to this Order";
     }
-    if (order.assignedDriverId === null) {
-      return ["new", "in_branch", "hold", "collect_order"].includes(order.deliveryStatus)
-        ? null
-        : "Only New, In-Branch, Hold, or Collect Orders are eligible for assignment";
-    }
-    return ["assigned_to_driver", "hold"].includes(order.deliveryStatus)
+    return [
+      "new",
+      "in_branch",
+      "assigned_to_driver",
+      "out_for_delivery",
+      "hold",
+      "collect_order",
+    ].includes(order.deliveryStatus)
       ? null
-      : "Only Assigned-to-Driver or Hold Orders are eligible for reassignment";
+      : "Only New, In-Branch, Assigned-to-Driver, Out-for-Delivery, Hold, or Collect Orders are eligible for driver assignment";
   }
 
   private assignmentAssessment(
