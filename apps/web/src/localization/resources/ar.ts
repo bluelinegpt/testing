@@ -3011,6 +3011,7 @@ export const arabicTranslations = {
     customer: "Customer",
     customers: "Customers",
     defaultAddress: "Default address",
+    addressTextMissing: "لم يتم إدخال عنوان الشارع",
     deliveryInstructions: "Operational delivery instructions",
     deliveryNotes: "Reusable delivery notes",
     descending: "Descending",

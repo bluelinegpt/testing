@@ -1074,11 +1074,32 @@ export function CreateOrderDialog({
                       >
                         {customerAddresses
                           .filter((item) => Boolean(item.isActive))
-                          .map((item) => (
-                            <option key={String(item.id)} value={String(item.id)}>
-                              {String(item.label ?? item.address)}
-                            </option>
-                          ))}
+                          .map((item) => {
+                            // A saved address's street text is optional (an
+                            // Order created for a new Customer with only an
+                            // Area chosen legitimately leaves it blank — see
+                            // operations.service.ts's inline Customer
+                            // creation). `label ?? address` alone renders as
+                            // pure whitespace once both are "", since `??`
+                            // does not fall through on an empty string —
+                            // exactly what made two such addresses
+                            // indistinguishable and unreadable in this list.
+                            const label = item.label ? String(item.label) : "";
+                            const addressText = item.address ? String(item.address) : "";
+                            const primaryText =
+                              label ||
+                              addressText ||
+                              `${String(item.areaName ?? "")} — ${t("customerConfig.addressTextMissing")}`;
+                            const suffix = item.isDefault
+                              ? ` (${t("customerConfig.defaultAddress")})`
+                              : "";
+                            return (
+                              <option key={String(item.id)} value={String(item.id)}>
+                                {primaryText}
+                                {suffix}
+                              </option>
+                            );
+                          })}
                       </select>
                     </label>
                   ) : null}

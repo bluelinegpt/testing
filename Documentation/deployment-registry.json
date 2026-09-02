@@ -20,7 +20,7 @@
       "path": "apps/web",
       "renderService": "bluelinegpt-web-test",
       "status": "needs_deploy",
-      "localCommit": "6899313",
+      "localCommit": "088587c",
       "localCommitDate": "2026-09-02",
       "lastChangeDescription": "fix(orders): allow Area/Emirate override in Edit Order when a Customer is linked",
       "lastChangeBy": "human",

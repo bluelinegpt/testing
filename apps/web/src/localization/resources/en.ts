@@ -3048,6 +3048,7 @@ export const englishTranslations = {
     customer: "Customer",
     customers: "Customers",
     defaultAddress: "Default address",
+    addressTextMissing: "No street address entered",
     deliveryInstructions: "Operational delivery instructions",
     deliveryNotes: "Reusable delivery notes",
     descending: "Descending",
