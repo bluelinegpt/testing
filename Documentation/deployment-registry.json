@@ -7,9 +7,9 @@
       "path": "apps/api",
       "renderService": "bluelinegpt-api-test",
       "status": "needs_deploy",
-      "localCommit": "dd9edab",
+      "localCommit": "6899313",
       "localCommitDate": "2026-09-02",
-      "lastChangeDescription": "style(reports): standardize logo size to 52px across all report PDFs",
+      "lastChangeDescription": "fix(orders): allow Area/Emirate override in Edit Order when a Customer is linked",
       "lastChangeBy": "human",
       "confirmedLiveCommit": "e3de371",
       "confirmedLiveAt": "2026-09-01"
@@ -20,9 +20,9 @@
       "path": "apps/web",
       "renderService": "bluelinegpt-web-test",
       "status": "needs_deploy",
-      "localCommit": "0d2bd7d",
+      "localCommit": "6899313",
       "localCommitDate": "2026-09-02",
-      "lastChangeDescription": "fix(accounting): stop unhandled AbortError console noise on request cancellation",
+      "lastChangeDescription": "fix(orders): allow Area/Emirate override in Edit Order when a Customer is linked",
       "lastChangeBy": "human",
       "confirmedLiveCommit": "9666706",
       "confirmedLiveAt": "2026-09-01"

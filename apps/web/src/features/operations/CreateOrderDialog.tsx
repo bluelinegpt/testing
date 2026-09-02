@@ -1152,7 +1152,16 @@ export function CreateOrderDialog({
                       allowCreate={canCreateArea && customer === undefined}
                       api={api}
                       arabicFirst={locale === "ar"}
-                      disabled={customer !== undefined}
+                      // A saved Customer's own address normally determines the
+                      // Area at creation time. Editing an existing Order is a
+                      // one-off correction, not a change to the Customer's
+                      // profile -- the Customer link and its address snapshot
+                      // stay intact (see the payload assembly below); only
+                      // THIS Order's Area is overridden, matching what the
+                      // server already accepts (a directly selected Area wins
+                      // over the Customer's own when the Customer itself did
+                      // not change).
+                      disabled={customer !== undefined && !isEdit}
                       onChange={(selected) => {
                         setArea(selected);
                         setOverrideEnabled(false);
