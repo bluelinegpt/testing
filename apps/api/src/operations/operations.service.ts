@@ -3837,11 +3837,16 @@ export class OperationsService {
       const vatPolicy = await this.vatPolicy(transaction, companyId);
       const orderNumber = await this.nextOrderNumber(transaction, companyId);
       const driverCost = new Decimal(driverRow?.outsourcedFee ?? 0);
+      // "Pay by Trader" means the Trader already collected from the Customer
+      // and is being billed the delivery fee separately -- the Order is
+      // prepaid, so nothing is left for the Driver to collect at delivery.
+      const traderPrepaid = input.paymentCondition === "customer_pays_cod_trader_pays_fee";
       const financials = this.calculateOrderFinancials({
         // Both forced, never trusted from the client: a free Order with a COD is
         // not a state this system recognises.
         additionalFees: freeOrder || collectOrder ? new Decimal(0) : new Decimal(additionalFees),
-        codAmount: freeOrder || collectOrder ? new Decimal(0) : new Decimal(input.codAmount),
+        codAmount:
+          freeOrder || collectOrder || traderPrepaid ? new Decimal(0) : new Decimal(input.codAmount),
         driverCost: collectOrder ? new Decimal(0) : driverCost,
         prospective: true,
         serviceFee: pricing.finalFee,
@@ -4562,7 +4567,7 @@ export class OperationsService {
         });
       if (
         !providedOnlySafeIdentifierContactChange &&
-        !["new", "in_branch", "assigned_to_driver", "out_for_delivery"].includes(
+        !["new", "in_branch", "assigned_to_driver", "out_for_delivery", "hold"].includes(
           current.deliveryStatus,
         )
       ) {
@@ -4867,8 +4872,16 @@ export class OperationsService {
       // configured fee against a zero COD and violate
       // orders_prospective_financial_model_check on save.
       const isFreeOrder = current.isFreeOrder;
+      // A "Pay by Trader" Order is prepaid: the Trader already collected from
+      // the Customer, so nothing is owed at delivery. `payment_condition`
+      // itself is immutable after creation (never accepted by this DTO), so
+      // this pins COD to zero for the life of the Order the same way a Free
+      // Order's zero is pinned above — an edit can never reintroduce a COD
+      // for an Order whose payer was fixed at creation.
+      const codAmountLocked =
+        isFreeOrder || current.paymentCondition === "customer_pays_cod_trader_pays_fee";
       const nextCod =
-        isFreeOrder || input.codAmount === undefined ? currentCod : new Decimal(input.codAmount);
+        codAmountLocked || input.codAmount === undefined ? currentCod : new Decimal(input.codAmount);
       const codChanged = !this.money(nextCod).equals(this.money(currentCod));
       const manualFeeProvided = !isFreeOrder && input.serviceFee !== undefined;
       const manualFee = manualFeeProvided ? new Decimal(input.serviceFee ?? 0) : currentFee;
