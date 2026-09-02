@@ -20,9 +20,9 @@
       "path": "apps/web",
       "renderService": "bluelinegpt-web-test",
       "status": "needs_deploy",
-      "localCommit": "defab48",
+      "localCommit": "fc7b140",
       "localCommitDate": "2026-09-01",
-      "lastChangeDescription": "fix(trader-receivables): add required reason field to receivable creation form",
+      "lastChangeDescription": "fix(trader-receivables): add required reason field and allocations support",
       "lastChangeBy": "human",
       "confirmedLiveCommit": "9666706",
       "confirmedLiveAt": "2026-09-01"

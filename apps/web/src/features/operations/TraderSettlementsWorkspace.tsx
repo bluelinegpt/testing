@@ -3421,7 +3421,9 @@ function CollectFromTraderDialog({
   onCollected: () => void;
 }) {
   const { t } = useTranslation();
-  const [traders, setTraders] = useState<readonly { readonly id: string; readonly name: string }[]>([]);
+  const [traders, setTraders] = useState<
+    readonly { readonly outstandingAmount: string; readonly traderId: string; readonly traderName: string }[]
+  >([]);
   const [traderId, setTraderId] = useState("");
   const [outstandingAmount, setOutstandingAmount] = useState("0.00");
   const [collectionAmount, setCollectionAmount] = useState("");
@@ -3430,43 +3432,23 @@ function CollectFromTraderDialog({
   const [notes, setNotes] = useState("");
   const [error, setError] = useState<string>();
   const [saving, setSaving] = useState(false);
-  const [loading, setLoading] = useState(false);
   const idempotency = useIdempotencyKey();
 
   useEffect(() => {
     void api
-      .get<readonly { id: string; name: string }[]>("operations/trader-receivables/traders-with-balance")
+      .get<
+        readonly { outstandingAmount: string; traderId: string; traderName: string }[]
+      >("operations/trader-receivables/traders-with-balance")
       .then(setTraders)
       .catch(() => setTraders([]));
   }, [api]);
-
-  const loadTraderBalance = useCallback(
-    async (tid: string) => {
-      if (!tid) {
-        setOutstandingAmount("0.00");
-        return;
-      }
-      setLoading(true);
-      try {
-        const response = await api.get<readonly { readonly outstandingAmount: string }[]>(
-          `operations/trader-receivables/eligible?traderId=${tid}`
-        );
-        const total = response.reduce((sum, item) => sum + safeMoneyValue(item.outstandingAmount), 0);
-        setOutstandingAmount(money(total));
-      } catch {
-        setOutstandingAmount("0.00");
-      } finally {
-        setLoading(false);
-      }
-    },
-    [api]
-  );
 
   const handleTraderChange = (newTraderId: string) => {
     setTraderId(newTraderId);
     setCollectionAmount("");
     setError(undefined);
-    void loadTraderBalance(newTraderId);
+    const selected = traders.find((trader) => trader.traderId === newTraderId);
+    setOutstandingAmount(selected === undefined ? "0.00" : money(safeMoneyValue(selected.outstandingAmount)));
   };
 
   const amountInput = parseMoneyInput(collectionAmount, { required: true });
@@ -3531,8 +3513,8 @@ function CollectFromTraderDialog({
         <select onChange={(event) => handleTraderChange(event.target.value)} value={traderId}>
           <option value="">{t("traderSettlements.selectTrader", "Select a Trader")}</option>
           {traders.map((trader) => (
-            <option key={trader.id} value={trader.id}>
-              {trader.name}
+            <option key={trader.traderId} value={trader.traderId}>
+              {trader.traderName}
             </option>
           ))}
         </select>
@@ -3597,7 +3579,7 @@ function CollectFromTraderDialog({
         </button>
         <button
           className="button button-primary"
-          disabled={!isValid || saving || loading}
+          disabled={!isValid || saving}
           onClick={() => void submit()}
           type="button"
         >
@@ -3733,17 +3715,6 @@ function AddReceivableDialog({
           value={sourceReference}
         />
         <small>{sourceReference.length}/160</small>
-      </label>
-
-      <label className="field required-field">
-        <span>{t("common.reason", "Reason")}</span>
-        <textarea
-          maxLength={500}
-          onChange={(event) => setReason(event.target.value)}
-          placeholder={t("traderReceivable.reasonPlaceholder", "Explain why this charge is being applied...")}
-          value={reason}
-        />
-        <small>{reason.length}/500</small>
       </label>
 
       <label className="field">
