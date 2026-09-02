@@ -6,7 +6,7 @@
       "displayName": "API",
       "path": "apps/api",
       "renderService": "bluelinegpt-api-test",
-      "status": "needs_deploy",
+      "status": "pushed_awaiting_confirmation",
       "localCommit": "8580024",
       "localCommitDate": "2026-09-03",
       "lastChangeDescription": "fix(agent): clarify unknown questions and greet naturally",
