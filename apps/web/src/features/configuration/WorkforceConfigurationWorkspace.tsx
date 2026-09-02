@@ -438,6 +438,12 @@ function WorkforceForm({
   const [earningRules, setEarningRules] = useState<VariableEarningRules>();
   const [deliveryEnabled, setDeliveryEnabled] = useState(false);
   const [collectionType, setCollectionType] = useState("none");
+  // Outsourced-type Collect Order / collection earning -- a separate rate
+  // from the Employee-side "Collection Earnings" above (which writes
+  // employee_collection_earning_rules and only ever pays an Employee).
+  const [outsourcedCollectionType, setOutsourcedCollectionType] = useState(
+    String(detail?.outsourced_collection_payment_type ?? "none"),
+  );
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const initialEmployeeActive = detail?.is_active !== false;
   const [employeeActive, setEmployeeActive] = useState(initialEmployeeActive);
@@ -497,6 +503,9 @@ function WorkforceForm({
       );
       const deliveryAmount = parseMoneyInput(String(data.get("deliveryAmount") ?? "0"));
       const collectionAmount = parseMoneyInput(String(data.get("collectionAmount") ?? "0"));
+      const outsourcedCollectionAmount = parseMoneyInput(
+        String(data.get("outsourcedCollectionAmount") ?? "0"),
+      );
       const deliveryFrom = String(data.get("deliveryFrom") ?? "");
       const deliveryTo = optional(data, "deliveryTo");
       const collectionFrom = String(data.get("collectionFrom") ?? "");
@@ -509,19 +518,32 @@ function WorkforceForm({
         if (deliveryTo && deliveryTo <= deliveryFrom)
           earningErrors.deliveryTo = t("workforce.invalidDateRange");
       }
-      if (isDriverRole && collectionType !== "none") {
+      if (isDriverRole && engagement === "employee" && collectionType !== "none") {
         if (!collectionAmount.ok || collectionAmount.value <= 0)
           earningErrors.collectionAmount = t("workforce.positiveAmountRequired");
         if (!collectionFrom) earningErrors.collectionFrom = t("workforce.dateRequired");
         if (collectionTo && collectionTo <= collectionFrom)
           earningErrors.collectionTo = t("workforce.invalidDateRange");
       }
+      if (
+        isDriverRole &&
+        engagement === "outsourced" &&
+        outsourcedCollectionType !== "none" &&
+        (!outsourcedCollectionAmount.ok || outsourcedCollectionAmount.value <= 0)
+      ) {
+        earningErrors.outsourcedCollectionAmount = t("workforce.positiveAmountRequired");
+      }
       if (Object.keys(earningErrors).length > 0) {
         setFieldErrors(earningErrors);
         showFormError(t("workforce.variableEarningInvalid"));
         return;
       }
-      if (!basicSalary.ok || !outsourcedFee.ok || allowanceAmounts.some((amount) => !amount.ok)) {
+      if (
+        !basicSalary.ok ||
+        !outsourcedFee.ok ||
+        !outsourcedCollectionAmount.ok ||
+        allowanceAmounts.some((amount) => !amount.ok)
+      ) {
         showFormError(t("workforce.invalidAmount"));
         return;
       }
@@ -567,7 +589,20 @@ function WorkforceForm({
         employeeRoleId: roleId,
         payrollEligible: salaried && data.get("payrollEligible") === "on",
         ...(isDriverRole ? { engagement } : {}),
-        ...(salaried ? compensation : { outsourcedFeePerDeliveredOrder: outsourcedFee.value }),
+        ...(salaried
+          ? compensation
+          : {
+              outsourcedFeePerDeliveredOrder: outsourcedFee.value,
+              outsourcedCollectionPaymentType: outsourcedCollectionType as
+                | "none"
+                | "per_collected_order",
+              outsourcedCollectionAmount:
+                outsourcedCollectionType === "none"
+                  ? 0
+                  : outsourcedCollectionAmount.ok
+                    ? outsourcedCollectionAmount.value
+                    : 0,
+            }),
       };
       const id = String(detail?.id ?? "");
       // Everything is created through the Employee endpoint; a driver-role
@@ -603,7 +638,7 @@ function WorkforceForm({
               normalizeDateValue(collectionFrom) ||
             normalizeDateValue(currentCollection.effectiveTo) !==
               normalizeDateValue(collectionTo);
-      if (isDriverRole && collectionChanged) {
+      if (isDriverRole && engagement === "employee" && collectionChanged) {
         await api.post(`configuration/employees/${employeeId}/variable-earnings/collection`, {
           amount: collectionType === "none" ? 0 : collectionAmount.ok ? collectionAmount.value : 0,
           collectionPaymentType: collectionType,
@@ -732,16 +767,47 @@ function WorkforceForm({
               </label>
             ) : null}
             {isDriverRole && engagement === "outsourced" ? (
-              <label className="field">
-                <span>{t("workforce.outsourcedFee")}</span>
-                <input
-                  defaultValue={String(detail?.outsourced_fee_per_delivered_order ?? "0")}
-                  min="0"
-                  name="outsourcedFee"
-                  step="0.01"
-                  type="number"
-                />
-              </label>
+              <>
+                <label className="field">
+                  <span>{t("workforce.outsourcedFee")}</span>
+                  <input
+                    defaultValue={String(detail?.outsourced_fee_per_delivered_order ?? "0")}
+                    min="0"
+                    name="outsourcedFee"
+                    step="0.01"
+                    type="number"
+                  />
+                </label>
+                <label className="field">
+                  <span>{t("workforce.outsourcedCollectionPaymentType")}</span>
+                  <select
+                    onChange={(event) => setOutsourcedCollectionType(event.target.value)}
+                    value={outsourcedCollectionType}
+                  >
+                    <option value="none">{t("workforce.collectionNone")}</option>
+                    <option value="per_collected_order">
+                      {t("workforce.perCollectedOrder")}
+                    </option>
+                  </select>
+                </label>
+                {outsourcedCollectionType !== "none" ? (
+                  <label className="field">
+                    <span>{t("workforce.outsourcedCollectionAmount")}</span>
+                    <input
+                      defaultValue={String(detail?.outsourced_collection_amount ?? "0")}
+                      min="0"
+                      name="outsourcedCollectionAmount"
+                      step="0.01"
+                      type="number"
+                    />
+                    {fieldErrors.outsourcedCollectionAmount ? (
+                      <small className="field-error">
+                        {fieldErrors.outsourcedCollectionAmount}
+                      </small>
+                    ) : null}
+                  </label>
+                ) : null}
+              </>
             ) : null}
             <label className="field">
               <span>{t("workforce.employeeStatus")}</span>
@@ -818,7 +884,7 @@ function WorkforceForm({
               require save â†’ reopen â†’ edit just to enter the earning rates.
               The rules are posted right after the create call returns the new
               employee id. */}
-          {isDriverRole ? (
+          {isDriverRole && engagement === "employee" ? (
             <DriverVariableEarningsFields
               collectionType={collectionType}
               deliveryEnabled={deliveryEnabled}
@@ -1007,6 +1073,7 @@ function DriverVariableEarningsFields({
           ) : null}
         </section>
       ) : null}
+      {engagement === "employee" ? (
       <section>
         <h3>{t("workforce.collectionEarnings")}</h3>
         <label className="field">
@@ -1043,6 +1110,7 @@ function DriverVariableEarningsFields({
           </>
         ) : null}
       </section>
+      ) : null}
       {history.length > 0 ? (
         <details>
           <summary>{t("workforce.rateHistory")}</summary>

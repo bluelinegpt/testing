@@ -70,6 +70,20 @@ export class SaveEmployeeDto {
   @Min(0)
   public readonly outsourcedFeePerDeliveredOrder?: number;
 
+  // --- Outsourced-type Collect Order / collection earning ------------------
+  // Reuses `outsourced_driver_collection_earning_rules` -- the same rate
+  // already pays a confirmed cash reconciliation collection; a closed
+  // Collect Order draws from the identical rule, matching the Employee
+  // side's own design (one "collection earning" rate for both).
+  @IsOptional()
+  @IsIn(["none", "per_collected_order"])
+  public readonly outsourcedCollectionPaymentType?: "none" | "per_collected_order";
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  public readonly outsourcedCollectionAmount?: number;
+
   @IsString()
   @MaxLength(160)
   public readonly name!: string;

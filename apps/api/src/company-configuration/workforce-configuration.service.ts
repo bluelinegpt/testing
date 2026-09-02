@@ -446,6 +446,17 @@ export class WorkforceConfigurationService {
           effectiveFrom,
         );
       }
+      if (engagement === "outsourced" && input.outsourcedCollectionPaymentType !== undefined) {
+        await this.syncOutsourcedCollectionEarningRule(
+          transaction,
+          companyId,
+          created.rows[0]!.id,
+          actorId,
+          input.outsourcedCollectionPaymentType,
+          input.outsourcedCollectionAmount ?? 0,
+          effectiveFrom,
+        );
+      }
     } else {
       await sql`update drivers set name_en=${input.name.trim()}, mobile_number=${input.mobileNumber.trim()},
         second_mobile_number=${input.secondMobileNumber?.trim() || null}, email=${input.email?.trim() || null},
@@ -465,7 +476,92 @@ export class WorkforceConfigurationService {
           effectiveFrom,
         );
       }
+      if (engagement === "outsourced" && input.outsourcedCollectionPaymentType !== undefined) {
+        await this.syncOutsourcedCollectionEarningRule(
+          transaction,
+          companyId,
+          existing.rows[0].id,
+          actorId,
+          input.outsourcedCollectionPaymentType,
+          input.outsourcedCollectionAmount ?? 0,
+          effectiveFrom,
+        );
+      }
     }
+  }
+
+  /**
+   * Employee setup exposes the outsourced Driver's Collect Order / collection
+   * earning rate, reusing `outsourced_driver_collection_earning_rules` --
+   * the same table `OutsourcedDriverFeeService.createForConfirmedCollection`
+   * already reads for a confirmed cash reconciliation, and the same table
+   * `capture_outsourced_collect_order_earning` reads for a closed Collect
+   * Order. One rate, two triggers -- matching the Employee side's own
+   * design of one "collection earning" rule for both.
+   */
+  private async syncOutsourcedCollectionEarningRule(
+    transaction: Kysely<DatabaseSchema>,
+    companyId: string,
+    driverId: string,
+    actorId: string,
+    paymentType: "none" | "per_collected_order",
+    amount: number,
+    effectiveFrom: string | null,
+  ): Promise<void> {
+    const requestedAmount = new Decimal(amount);
+    const none = paymentType === "none";
+    if ((none && !requestedAmount.isZero()) || (!none && requestedAmount.lessThanOrEqualTo(0))) {
+      throw new ApplicationException(
+        "outsourced_collection_rate_invalid",
+        "The collection payment type and amount do not agree",
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    const effective = await sql<{ value: string }>`
+      select coalesce(${effectiveFrom}::date, current_date)::text as value
+    `.execute(transaction);
+    const requestedEffectiveFrom = effective.rows[0]!.value;
+
+    const active = await sql<{
+      readonly amount: string;
+      readonly effectiveFrom: string;
+      readonly id: string;
+      readonly paymentType: string;
+    }>`
+      select id, collection_payment_type as "paymentType", amount::text,
+             effective_from::text as "effectiveFrom"
+        from outsourced_driver_collection_earning_rules
+       where company_id=${companyId}::uuid and driver_id=${driverId}::uuid
+         and is_active and effective_to is null
+       order by effective_from desc
+       for update
+    `.execute(transaction);
+    const current = active.rows[0];
+    if (
+      current !== undefined &&
+      current.paymentType === paymentType &&
+      new Decimal(current.amount).equals(requestedAmount)
+    ) {
+      return;
+    }
+
+    if (current !== undefined) {
+      await sql`
+        update outsourced_driver_collection_earning_rules
+           set effective_to=${requestedEffectiveFrom}::date, updated_at=now(), version=version+1
+         where id=${current.id}::uuid and company_id=${companyId}::uuid
+      `.execute(transaction);
+    }
+    await sql`
+      insert into outsourced_driver_collection_earning_rules(
+        company_id, driver_id, collection_payment_type, amount, effective_from, is_active,
+        created_by_account_id
+      ) values (
+        ${companyId}::uuid, ${driverId}::uuid, ${paymentType}, ${requestedAmount.toFixed(2)},
+        ${requestedEffectiveFrom}::date, true, ${actorId}::uuid
+      )
+    `.execute(transaction);
   }
 
   /**
@@ -1522,7 +1618,9 @@ export class WorkforceConfigurationService {
           >`select e.*,a.id as "linked_account_id",a.username as "linked_username",
                      cu.display_name as "linked_user_name",
                      salary.effective_from::text as salary_effective_from,
-                     d.driver_type,d.outsourced_fee_per_delivered_order
+                     d.driver_type,d.outsourced_fee_per_delivered_order,
+                     ocr.collection_payment_type as outsourced_collection_payment_type,
+                     ocr.amount::text as outsourced_collection_amount
                from employees e left join company_users cu on cu.id=e.company_user_id and cu.company_id=e.company_id
                left join accounts a on a.id=cu.account_id and a.company_id=cu.company_id
                left join drivers d on d.employee_id=e.id and d.company_id=e.company_id
@@ -1531,6 +1629,11 @@ export class WorkforceConfigurationService {
                  where company_id=e.company_id and employee_id=e.id
                  order by effective_from desc limit 1
               ) salary on true
+               left join lateral (
+                select collection_payment_type, amount from outsourced_driver_collection_earning_rules
+                 where company_id=d.company_id and driver_id=d.id and is_active and effective_to is null
+                 order by effective_from desc limit 1
+              ) ocr on true
              where e.company_id=${companyId}::uuid and lower(e.employee_number)=lower(${code})`.execute(
             this.database,
           )
