@@ -67,11 +67,17 @@ export function readStoredPreference(
 ): ThemePreference {
   try {
     const value = storage?.getItem(THEME_STORAGE_KEY);
-    return isThemePreference(value) ? value : "system";
+    // Defaults to "light" rather than "system": a Platform Administrator's OS
+    // dark-mode setting should not decide the first look of an internal admin
+    // tool nobody has configured yet. An explicit choice — including
+    // explicitly picking "System" from the theme control — is still honoured
+    // exactly as before; this only changes what an administrator who has
+    // never touched the control sees.
+    return isThemePreference(value) ? value : "light";
   } catch {
     // Storage can throw outright: private browsing, a disabled-cookies policy,
     // a full quota. A theme must never be the reason the Portal fails to load.
-    return "system";
+    return "light";
   }
 }
 

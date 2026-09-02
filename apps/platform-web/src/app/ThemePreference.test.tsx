@@ -87,8 +87,8 @@ afterEach(() => {
 });
 
 describe("Theme preference storage", () => {
-  it("defaults to following the system when nothing is stored", () => {
-    expect(readStoredPreference()).toBe("system");
+  it("defaults to light when nothing is stored", () => {
+    expect(readStoredPreference()).toBe("light");
   });
 
   it("round-trips a stored preference", () => {
@@ -103,7 +103,7 @@ describe("Theme preference storage", () => {
    */
   it("ignores a stored value that is not one of the three choices", () => {
     localStorage.setItem(THEME_STORAGE_KEY, "midnight");
-    expect(readStoredPreference()).toBe("system");
+    expect(readStoredPreference()).toBe("light");
   });
 
   /** Storage throws in private browsing. A theme must not break the Portal. */
@@ -116,7 +116,7 @@ describe("Theme preference storage", () => {
         throw new Error("denied");
       },
     };
-    expect(readStoredPreference(throwing)).toBe("system");
+    expect(readStoredPreference(throwing)).toBe("light");
     expect(() => writeStoredPreference("dark", throwing)).not.toThrow();
   });
 

@@ -33,8 +33,8 @@
   --platform-surface: #0b1220;
   --platform-surface-raised: #131c2e;
   --platform-border: #26324a;
-  --platform-text: #000000;
-  --platform-muted: #000000;
+  --platform-text: #eef2f9;
+  --platform-muted: #97a3ba;
   --platform-accent: #4c8dff;
   /* Purple secondary accent, used only by Dashboard analytics (a second
      Orders Trend series, the Environment donut) — never for status meaning,
@@ -42,17 +42,17 @@
   --platform-accent-secondary: #a78bfa;
   /* Text placed ON the accent. Not a shade of the accent: it has to stay
      readable against it in both themes, so it is its own variable. */
-  --platform-on-accent: #000000;
-  --platform-danger: #000000;
+  --platform-on-accent: #06101f;
+  --platform-danger: #ff6b6b;
 
   --platform-ok-border: #2f7a52;
-  --platform-ok-text: #000000;
+  --platform-ok-text: #7ee2a8;
   --platform-warn-border: #8a6d1f;
-  --platform-warn-text: #000000;
+  --platform-warn-text: #f0c674;
   --platform-bad-border: #6b2f2f;
-  --platform-bad-text: #000000;
+  --platform-bad-text: #ff9b9b;
   --platform-alert-border: #8a3b3b;
-  --platform-alert-text: #000000;
+  --platform-alert-text: #ffb4b4;
 
   color-scheme: dark;
 }
@@ -74,21 +74,22 @@
   --platform-surface: #f4f6fb;
   --platform-surface-raised: #ffffff;
   --platform-border: #d3dae8;
+  /* Pure black by explicit request — white background, black text. */
   --platform-text: #000000;
-  --platform-muted: #000000;
+  --platform-muted: #5a6884;
   --platform-accent: #2563eb;
   --platform-accent-secondary: #7c3aed;
-  --platform-on-accent: #000000;
-  --platform-danger: #000000;
+  --platform-on-accent: #ffffff;
+  --platform-danger: #c02626;
 
   --platform-ok-border: #9fd8b8;
-  --platform-ok-text: #000000;
+  --platform-ok-text: #17693f;
   --platform-warn-border: #e2c98a;
-  --platform-warn-text: #000000;
+  --platform-warn-text: #7a5a06;
   --platform-bad-border: #e8b0b0;
-  --platform-bad-text: #000000;
+  --platform-bad-text: #a32020;
   --platform-alert-border: #e0a0a0;
-  --platform-alert-text: #000000;
+  --platform-alert-text: #96201f;
 
   color-scheme: light;
 }
