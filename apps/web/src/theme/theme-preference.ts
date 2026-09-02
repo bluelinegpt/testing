@@ -14,12 +14,14 @@ export function isResolvedTheme(value: unknown): value is ResolvedTheme {
   return typeof value === "string" && resolvedThemeValues.has(value as ResolvedTheme);
 }
 
-export function resolveThemePreference(
-  preference: ThemePreference,
-  media: Pick<Window, "matchMedia"> | undefined = globalThis.window,
-): ResolvedTheme {
+export function resolveThemePreference(preference: ThemePreference): ResolvedTheme {
   if (preference !== "system") return preference;
-  return media?.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  // Defaults to light rather than following the OS: the Company Portal is an
+  // operational tool, and it should not silently become unreadable because of
+  // an operator's OS dark-mode setting. Explicitly choosing "Dark" in the
+  // theme control is unaffected -- this only changes what "System" resolves
+  // to.
+  return "light";
 }
 
 export function readCachedResolvedTheme(
