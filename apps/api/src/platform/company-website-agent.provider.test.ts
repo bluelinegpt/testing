@@ -220,6 +220,26 @@ describe("Company website agent public boundary", () => {
     expect(deterministicReply(value, "شلونك")).not.toContain("لا أملك معلومات مؤكدة");
   });
 
+  it("answers the Arabic salaam naturally and routes it through the deterministic boundary", () => {
+    const value = context();
+    value.language = "ar";
+    value.settings.agent.welcomeMessage = { ar: "اهلا" };
+    expect(deterministicReply(value, "السلام عليكم")).toBe(
+      "وعليكم السلام ورحمة الله وبركاته. كيف يمكنني مساعدتك؟",
+    );
+  });
+
+  it("asks one helpful clarification instead of repeating the generic unknown response", () => {
+    const value = context();
+    value.language = "ar";
+    const reply = deterministicReply(value, "ليش ما بترد كويس");
+    expect(reply).toContain("هل يمكنك توضيح");
+    expect(reply).not.toContain("لا أملك معلومات مؤكدة");
+
+    value.language = "en";
+    expect(deterministicReply(value, "Can you explain better?")).toContain("Could you clarify");
+  });
+
   it("recognizes 'من انت' (no hamza) the same as 'من أنت' -- informal spelling should not break the boundary answer", () => {
     const value = context();
     value.language = "ar";

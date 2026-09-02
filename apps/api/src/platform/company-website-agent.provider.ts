@@ -90,6 +90,12 @@ export class CompanyWebsiteAgentProvider {
   }
 }
 
+function isSimpleGreeting(message: string): boolean {
+  return /^(?:hello|hi|hey|good morning|good afternoon|good evening|مرحبا|مرحباً|اهلا|أهلا|السلام عليكم|سلام عليكم)[.!،,؟?\s]*$/iu.test(
+    message.trim(),
+  );
+}
+
 export function visitorMemory(context: CompanyWebsiteAgentContext, message: string) {
   const userText = [
     ...context.history.filter((item) => item.role === "user").map((item) => item.content),
@@ -120,8 +126,11 @@ function requiresDeterministicBoundary(message: string): boolean {
   // address. The model is already restricted to the published public context
   // and instructed never to invent facts, so only identity, platform
   // attribution, social links, and injection/secret probes stay hard-coded.
-  return /who are you|what is this company|tawseelhub|instagram|facebook|tiktok|linkedin|youtube|social|ignore (?:all|previous)|system prompt|api key|other compan|all orders|all drivers|switch tenant|internal|من أنت|من انت|توصيل هب|انستغرام|فيسبوك|مفتاح|تجاهل التعليمات|كل الطلبات/iu.test(
-    message,
+  return (
+    isSimpleGreeting(message) ||
+    /who are you|what is this company|tawseelhub|instagram|facebook|tiktok|linkedin|youtube|social|ignore (?:all|previous)|system prompt|api key|other compan|all orders|all drivers|switch tenant|internal|من أنت|من انت|توصيل هب|انستغرام|فيسبوك|مفتاح|تجاهل التعليمات|كل الطلبات/iu.test(
+      message,
+    )
   );
 }
 
@@ -411,6 +420,12 @@ export function deterministicReply(context: CompanyWebsiteAgentContext, message:
       : `I'm doing well, thank you! How can I help you with ${context.companyName} today?`;
   // Word-bounded: without \b, the letters "hi" inside "anything" or "this"
   // answered refusal-policy questions with the welcome message.
+  if (isSimpleGreeting(message))
+    return /السلام عليكم|سلام عليكم/u.test(message)
+      ? "وعليكم السلام ورحمة الله وبركاته. كيف يمكنني مساعدتك؟"
+      : ar
+        ? `أهلاً وسهلاً! كيف يمكنني مساعدتك مع ${context.companyName}؟`
+        : `Hello! How can I help you with ${context.companyName} today?`;
   if (/\b(?:hello|hi|hey)\b|مرحبا|السلام/u.test(lower))
     return (
       local(s.agent.welcomeMessage, ar ? "ar" : "en") ??
@@ -468,8 +483,8 @@ function unknown(context: CompanyWebsiteAgentContext, ar: boolean): string {
       ? `لا أملك معلومات مؤكدة عن ذلك. يرجى التواصل مع ${context.companyName}.`
       : `I don't have confirmed information about that. Please contact ${context.companyName}.`;
   return ar
-    ? `لا أملك معلومات مؤكدة عن ذلك. يمكنني المساعدة فقط بالمعلومات العامة المنشورة لـ ${context.companyName}.`
-    : `I don't have confirmed information about that. I can help only with ${context.companyName}'s published public information.`;
+    ? "أود مساعدتك بشكل أفضل. هل يمكنك توضيح ما الذي تريد معرفته عن التوصيل؟"
+    : "I'd like to help. Could you clarify what you would like to know about delivery?";
 }
 function local(value: { en?: string; ar?: string } | undefined, language: "en" | "ar") {
   return value?.[language] ?? value?.en;
