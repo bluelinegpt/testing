@@ -7,9 +7,9 @@
       "path": "apps/api",
       "renderService": "bluelinegpt-api-test",
       "status": "needs_deploy",
-      "localCommit": "8fc80bb",
+      "localCommit": "cd3d563",
       "localCommitDate": "2026-09-02",
-      "lastChangeDescription": "feat(orders): allow driver reassignment any time before Delivered",
+      "lastChangeDescription": "style(trader-account-statement): bold/larger trader identifier line, vertically centered logo",
       "lastChangeBy": "human",
       "confirmedLiveCommit": "e3de371",
       "confirmedLiveAt": "2026-09-01"

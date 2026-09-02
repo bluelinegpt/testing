@@ -298,7 +298,7 @@ export function buildDriverShipmentManifestHtml(
     body { font-family: "Segoe UI", Tahoma, Arial, sans-serif; color: #111; margin: 0; font-size: 9px; }
     .report-header { border-bottom: 2px solid #333; margin-bottom: 10px; padding-bottom: 8px; }
     .company-block { display: flex; align-items: center; gap: 10px; }
-    .company-logo { width: 44px; height: 44px; object-fit: contain; }
+    .company-logo { width: 52px; height: 52px; object-fit: contain; }
     .company-name { font-size: 14px; font-weight: 800; }
     .company-subtitle, .company-telephone { font-size: 9px; color: #444; }
     .report-title { font-size: 16px; margin: 6px 0 5px; }
