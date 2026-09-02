@@ -7,9 +7,9 @@
       "path": "apps/api",
       "renderService": "bluelinegpt-api-test",
       "status": "needs_deploy",
-      "localCommit": "cd3d563",
+      "localCommit": "dd9edab",
       "localCommitDate": "2026-09-02",
-      "lastChangeDescription": "style(trader-account-statement): bold/larger trader identifier line, vertically centered logo",
+      "lastChangeDescription": "style(reports): standardize logo size to 52px across all report PDFs",
       "lastChangeBy": "human",
       "confirmedLiveCommit": "e3de371",
       "confirmedLiveAt": "2026-09-01"
