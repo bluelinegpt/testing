@@ -6,7 +6,7 @@
       "displayName": "API",
       "path": "apps/api",
       "renderService": "bluelinegpt-api-test",
-      "status": "needs_deploy",
+      "status": "pushed_awaiting_confirmation",
       "localCommit": "7482fa4",
       "localCommitDate": "2026-09-03",
       "lastChangeDescription": "Makes company website agents recognize common Arabic coverage questions and clarify instead of repeating a generic refusal.",
