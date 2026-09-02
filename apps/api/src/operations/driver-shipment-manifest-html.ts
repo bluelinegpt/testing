@@ -238,10 +238,6 @@ export function buildDriverShipmentManifestHtml(
       .join("") +
     `</tr></thead><tbody>${orderRows}</tbody></table>`;
 
-  const headerMeta = (label: string, value: string) =>
-    `<div class="meta-item"><span class="meta-label">${escapeHtml(label)}</span>` +
-    `<span class="meta-value">${escapeHtml(value)}</span></div>`;
-
   const header =
     `<header class="report-header">` +
     `<div class="company-block">` +
@@ -264,9 +260,9 @@ export function buildDriverShipmentManifestHtml(
       : `<div class="company-telephone">${escapeHtml(data.header.company.telephone)}</div>`) +
     `</div></div>` +
     `<h1 class="report-title">${escapeHtml(labels.title)}</h1>` +
-    `<div class="meta-grid">` +
-    headerMeta(labels.reportDate, generatedAt) +
-    headerMeta(labels.driver, data.header.driverName) +
+    `<div class="header-meta">` +
+    `<div class="meta-date">${escapeHtml(labels.reportDate)}: ${escapeHtml(generatedAt)}</div>` +
+    `<div class="meta-driver">${escapeHtml(labels.driver)}: ${escapeHtml(data.header.driverName)}</div>` +
     `</div>` +
     `</header>`;
 
@@ -298,14 +294,13 @@ export function buildDriverShipmentManifestHtml(
     body { font-family: "Segoe UI", Tahoma, Arial, sans-serif; color: #111; margin: 0; font-size: 9px; }
     .report-header { border-bottom: 2px solid #333; margin-bottom: 10px; padding-bottom: 8px; }
     .company-block { display: flex; align-items: center; gap: 10px; }
-    .company-logo { width: 52px; height: 52px; object-fit: contain; }
+    .company-logo { width: 78px; height: 78px; object-fit: contain; }
     .company-name { font-size: 14px; font-weight: 800; }
     .company-subtitle, .company-telephone { font-size: 9px; color: #444; }
     .report-title { font-size: 16px; margin: 6px 0 5px; }
-    .meta-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 3px 18px; font-size: 8.5px; }
-    .meta-item { display: flex; justify-content: space-between; border-bottom: 1px dotted #ccc; padding: 2px 0; }
-    .meta-label { color: #555; }
-    .meta-value { font-weight: 600; }
+    .header-meta { margin-top: 4px; }
+    .meta-date { font-size: 10px; color: #333; text-align: end; margin-bottom: 3px; }
+    .meta-driver { font-size: 15px; font-weight: 800; text-align: end; }
     .section-title { font-size: 13px; margin: 14px 0 6px; }
     table.grid { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 12px; margin-bottom: 8px; }
     table.grid th, table.grid td { border: 1px solid #999; padding: 4px; text-align: start; overflow-wrap: anywhere; line-height: 1.25; }
