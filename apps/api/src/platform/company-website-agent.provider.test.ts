@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   deterministicReply,
+  normalizeGeneratedReply,
   publicKnowledge,
   visitorMemory,
   workingHoursNow,
@@ -238,6 +239,24 @@ describe("Company website agent public boundary", () => {
 
     value.language = "en";
     expect(deterministicReply(value, "Can you explain better?")).toContain("Could you clarify");
+  });
+
+  it("recognizes common Arabic UAE coverage spellings", () => {
+    const value = context();
+    value.language = "ar";
+    expect(deterministicReply(value, "عندكم توصيل ل ابو ظبي")).toContain("Dubai");
+  });
+
+  it("replaces a generated generic refusal with one clarification question", () => {
+    const value = context();
+    value.language = "ar";
+    expect(
+      normalizeGeneratedReply(
+        value,
+        "ليش ما بترد كويس",
+        "لا أملك معلومات مؤكدة عن ذلك. يمكنني المساعدة فقط بالمعلومات العامة المنشورة لـ Dana.",
+      ),
+    ).toContain("هل يمكنك توضيح");
   });
 
   it("recognizes 'من انت' (no hamza) the same as 'من أنت' -- informal spelling should not break the boundary answer", () => {

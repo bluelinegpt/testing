@@ -83,7 +83,11 @@ export class CompanyWebsiteAgentProvider {
         ),
       ]);
       const text = response.output_text?.trim();
-      return { reply: text || fallback, provider: "openai", model: this.model };
+      return {
+        reply: normalizeGeneratedReply(context, message, text) || fallback,
+        provider: "openai",
+        model: this.model,
+      };
     } catch {
       return { reply: fallback, provider: "deterministic", model: "company-website-rules-v1" };
     }
@@ -94,6 +98,34 @@ function isSimpleGreeting(message: string): boolean {
   return /^(?:hello|hi|hey|good morning|good afternoon|good evening|مرحبا|مرحباً|اهلا|أهلا|السلام عليكم|سلام عليكم)[.!،,؟?\s]*$/iu.test(
     message.trim(),
   );
+}
+
+function normalizedArabic(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[أإآٱ]/gu, "ا")
+    .replace(/\s+/gu, " ")
+    .trim();
+}
+
+function isCoverageQuestion(message: string): boolean {
+  const normalized = normalizedArabic(message);
+  return /deliver to|delivery to|coverage|coverage area|dubai|ajman|abu\s*dhabi|sharjah|fujairah|ras al khaimah|umm al quwain|تغط|دبي|عجمان|ابو\s*ظبي|الشارقه|الشارقة|الفجيره|الفجيرة|راس الخيمه|رأس الخيمة|ام القيوين/u.test(
+    normalized,
+  );
+}
+
+export function normalizeGeneratedReply(
+  context: CompanyWebsiteAgentContext,
+  message: string,
+  reply: string | undefined,
+): string | undefined {
+  if (!reply) return undefined;
+  const genericRefusal =
+    /(?:لا (?:أملك|املك|تتوفر لدي) معلومات (?:مؤكدة|كافية)|يمكنني المساعدة فقط بالمعلومات العامة المنشورة|i (?:do not|don't) have confirmed information|i can (?:only )?help (?:only )?with .*published public information)/iu.test(
+      reply,
+    );
+  return genericRefusal ? unknown(context, /[\u0600-\u06ff]/u.test(message)) : reply;
 }
 
 export function visitorMemory(context: CompanyWebsiteAgentContext, message: string) {
@@ -128,6 +160,7 @@ function requiresDeterministicBoundary(message: string): boolean {
   // attribution, social links, and injection/secret probes stay hard-coded.
   return (
     isSimpleGreeting(message) ||
+    isCoverageQuestion(message) ||
     /who are you|what is this company|tawseelhub|instagram|facebook|tiktok|linkedin|youtube|social|ignore (?:all|previous)|system prompt|api key|other compan|all orders|all drivers|switch tenant|internal|من أنت|من انت|توصيل هب|انستغرام|فيسبوك|مفتاح|تجاهل التعليمات|كل الطلبات/iu.test(
       message,
     )
@@ -368,11 +401,7 @@ export function deterministicReply(context: CompanyWebsiteAgentContext, message:
       ? "لا تتوفر وسيلة تواصل عامة مؤكدة حالياً."
       : "I don't have a confirmed public contact option right now.";
   }
-  if (
-    /deliver to|coverage|area|dubai|ajman|abu dhabi|sharjah|تغط|دبي|عجمان|أبوظبي|الشارقة/u.test(
-      lower,
-    )
-  ) {
+  if (isCoverageQuestion(message)) {
     const areas = s.coverage
       .filter((x) => x.enabled)
       .map((x) => [x.emirate, x.area].filter(Boolean).join(" - "));
