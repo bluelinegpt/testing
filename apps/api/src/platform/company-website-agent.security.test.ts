@@ -42,9 +42,10 @@ describe("Company website agent tenant isolation certification", () => {
     );
     expect(previewBody).not.toContain("company_website_agent_conversations");
   });
-  it("retains the full bounded transcript while limiting provider context", () => {
-    expect(source).toContain("history: conversation.messages.slice(-16)");
-    expect(source).not.toContain("] .slice(-16)");
+  it("supplies the full bounded transcript and saved contact as conversation memory", () => {
+    expect(source).toContain("history: conversation.messages");
+    expect(source).toContain("visitorContactNumber: conversation.visitorContactNumber");
+    expect(source).not.toContain("conversation.messages.slice(");
     expect(source).toContain("messageCount >= 40");
   });
   it("routes opaque tracking references through the existing public-safe Company flow", () => {

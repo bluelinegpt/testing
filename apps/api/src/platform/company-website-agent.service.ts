@@ -35,6 +35,7 @@ interface ConversationRow {
   messages: Array<{ role: "user" | "assistant"; content: string }>;
   messageCount: number;
   expiresAt: string;
+  visitorContactNumber: string | null;
 }
 
 @Injectable()
@@ -84,7 +85,7 @@ export class CompanyWebsiteAgentService {
     this.assertEnabled(row, settings);
     const result = await this.transactions.execute(async (trx) => {
       const conversation = (
-        await sql<ConversationRow>`select id,company_id as "companyId",company_website_id as "websiteId",language,messages,message_count as "messageCount",expires_at as "expiresAt" from company_website_agent_conversations where public_token_hash=${hash(token)} and company_id=${row.companyId}::uuid and company_website_id=${row.websiteId}::uuid and expires_at>now() for update`.execute(
+        await sql<ConversationRow>`select id,company_id as "companyId",company_website_id as "websiteId",language,messages,message_count as "messageCount",expires_at as "expiresAt",visitor_contact_number as "visitorContactNumber" from company_website_agent_conversations where public_token_hash=${hash(token)} and company_id=${row.companyId}::uuid and company_website_id=${row.websiteId}::uuid and expires_at>now() for update`.execute(
           trx,
         )
       ).rows[0];
@@ -105,9 +106,11 @@ export class CompanyWebsiteAgentService {
         language: selected,
         timezone: row.timezone,
         settings,
-        // The Company inbox retains the complete bounded transcript, while the
-        // provider receives only recent context to keep prompt cost controlled.
-        history: conversation.messages.slice(-16),
+        // The conversation is already bounded to 40 visitor turns. Supplying
+        // the complete transcript prevents the Agent from forgetting details
+        // collected early in a longer sales, booking or complaint flow.
+        history: conversation.messages,
+        visitorContactNumber: conversation.visitorContactNumber,
       };
       const trackingReference =
         settings.agent.capabilities.tracking && settings.functions.trackingEnabled

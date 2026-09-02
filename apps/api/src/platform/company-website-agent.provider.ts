@@ -9,6 +9,7 @@ export interface CompanyWebsiteAgentContext {
   timezone: string;
   settings: CompanyWebsiteSettings;
   history: Array<{ role: "user" | "assistant"; content: string }>;
+  visitorContactNumber?: string | null;
 }
 
 @Injectable()
@@ -59,11 +60,16 @@ export class CompanyWebsiteAgentProvider {
             `When the visitor is a store or business asking about regular, daily, or bulk deliveries, treat it as a sales lead: answer briefly from the published context, then ask for their name and mobile number (the chat has a Share Contact option) so the team can contact them, and confirm the team will follow up.`,
             `When the visitor reports a problem or complaint (parcel not received, damage, driver dispute, wrong amount collected), acknowledge it seriously, never assign blame or promise compensation, and ask for their mobile number so the team can investigate and follow up.`,
             `Be natural and warm, like a helpful colleague. Answer the question actually asked, keep replies short, and ask at most ONE clarifying question at a time.`,
+            `Treat the complete conversation transcript and known visitor details as memory for this same visitor. Before asking any follow-up, check everything the visitor already provided. Never ask for the same detail twice, including their name, mobile number, business type, order volume, pickup area, destinations, package type, COD amount, or complaint reference. If the visitor corrects a detail, use the newest value.`,
+            `If a mobile number is present in knownVisitorDetails or anywhere earlier in the conversation, do not ask for it again. Acknowledge that the contact is already available and continue with the next missing detail or confirm that the team will follow up.`,
+            `Keep continuity: do not restart with the company introduction or repeat an earlier question when the visitor answers briefly, changes language, or adds another fact. Connect short follow-ups to the active topic.`,
+            `For sales leads, delivery requests and complaints, collect only information that is still missing, one useful question at a time. Distinguish delivery fees from COD money to collect, understand multiple parcels and destinations, and never invent operational policies when the published context is silent.`,
             `Reply in the language of the visitor's latest message (Arabic or English), defaulting to ${context.language === "ar" ? "Arabic" : "English"}; a language switch continues the same conversation.`,
           ].join("\n"),
           input: JSON.stringify({
             publishedPublicContext: safeContext,
-            recentConversation: context.history.slice(-8),
+            completeConversation: context.history,
+            knownVisitorDetails: visitorMemory(context, message),
             visitorMessage: message,
           }),
         } as any),
@@ -77,6 +83,24 @@ export class CompanyWebsiteAgentProvider {
       return { reply: fallback, provider: "deterministic", model: "company-website-rules-v1" };
     }
   }
+}
+
+export function visitorMemory(context: CompanyWebsiteAgentContext, message: string) {
+  const userText = [
+    ...context.history.filter((item) => item.role === "user").map((item) => item.content),
+    message,
+  ];
+  return {
+    contactNumber: context.visitorContactNumber?.trim() || findContactNumber(userText) || null,
+  };
+}
+
+function findContactNumber(messages: readonly string[]): string | undefined {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const match = messages[index]?.match(/(?:\+?971[\s()-]*|0)5\d(?:[\s()-]*\d){7}|\+?\d(?:[\s()-]*\d){7,14}/u);
+    if (match?.[0]) return match[0].replace(/[\s()-]/gu, "");
+  }
+  return undefined;
 }
 
 function requiresDeterministicBoundary(message: string): boolean {

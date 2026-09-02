@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   deterministicReply,
   publicKnowledge,
+  visitorMemory,
   workingHoursNow,
   type CompanyWebsiteAgentContext,
 } from "./company-website-agent.provider.js";
@@ -226,5 +227,23 @@ describe("Company website agent public boundary", () => {
     const english = context();
     english.settings.knowledge.description = { en: "Dana delivers across the UAE." };
     expect(deterministicReply(english, "who is Dana")).toContain("Dana delivers");
+  });
+
+  it("remembers a mobile supplied earlier and prefers the saved Share Contact value", () => {
+    const value = context();
+    value.history = [
+      { role: "user", content: "I have around 70 orders every week." },
+      { role: "assistant", content: "What is your mobile number?" },
+      { role: "user", content: "My mobile is 050 123 4567." },
+      { role: "assistant", content: "Thank you." },
+    ];
+    expect(visitorMemory(value, "Most orders are COD.")).toEqual({
+      contactNumber: "0501234567",
+    });
+
+    value.visitorContactNumber = "+971501112222";
+    expect(visitorMemory(value, "How can I start?")).toEqual({
+      contactNumber: "+971501112222",
+    });
   });
 });
