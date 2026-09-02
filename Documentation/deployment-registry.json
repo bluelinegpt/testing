@@ -20,9 +20,9 @@
       "path": "apps/web",
       "renderService": "bluelinegpt-web-test",
       "status": "needs_deploy",
-      "localCommit": "fc7b140",
-      "localCommitDate": "2026-09-01",
-      "lastChangeDescription": "fix(trader-receivables): add required reason field and allocations support",
+      "localCommit": "1801e8b",
+      "localCommitDate": "2026-09-02",
+      "lastChangeDescription": "fix(trader-receivables): fix field name mismatch, allocation shape, and duplicate reason field",
       "lastChangeBy": "human",
       "confirmedLiveCommit": "9666706",
       "confirmedLiveAt": "2026-09-01"

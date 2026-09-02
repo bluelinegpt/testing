@@ -3476,16 +3476,21 @@ function CollectFromTraderDialog({
     });
 
     try {
-      // Get allocation proposal from the server
-      const proposal = await api.post<{ readonly allocations: readonly { receivableId: string; amount: number }[] }>(
-        "operations/trader-receivables/allocation-proposal",
-        { traderId, amount }
-      );
+      // Oldest-first allocation proposal. Its lines carry reporting fields
+      // (businessDate, outstandingBefore/After, receivableNumber, proposedAmount)
+      // that the collections endpoint's DTO does not accept — only
+      // { receivableId, amount } is forwarded.
+      const proposal = await api.post<{
+        readonly allocations: readonly { receivableId: string; proposedAmount: string }[];
+      }>("operations/trader-receivables/allocation-proposal", { traderId, amount });
 
       await api.post("operations/trader-receivables/collections", {
         traderId,
         amountReceived: amount,
-        allocations: proposal.allocations,
+        allocations: proposal.allocations.map((line) => ({
+          amount: safeMoneyValue(line.proposedAmount),
+          receivableId: line.receivableId,
+        })),
         paymentMethod: paymentMethod || undefined,
         paymentDate: paymentDate || undefined,
         notes: notes.trim() === "" ? undefined : notes.trim(),
