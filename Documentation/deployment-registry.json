@@ -7,9 +7,9 @@
       "path": "apps/api",
       "renderService": "bluelinegpt-api-test",
       "status": "needs_deploy",
-      "localCommit": "30aaa19",
+      "localCommit": "3e4001e",
       "localCommitDate": "2026-09-02",
-      "lastChangeDescription": "feat(platform): grant public site settings to the SEO Consultant role",
+      "lastChangeDescription": "fix(platform): classify 9 unreviewed tables in the Company reset manifest",
       "lastChangeBy": "claude",
       "confirmedLiveCommit": "e3de371",
       "confirmedLiveAt": "2026-09-01"
