@@ -20,9 +20,9 @@
       "path": "apps/web",
       "renderService": "bluelinegpt-web-test",
       "status": "needs_deploy",
-      "localCommit": "1801e8b",
+      "localCommit": "bbc9799",
       "localCommitDate": "2026-09-02",
-      "lastChangeDescription": "fix(trader-receivables): fix field name mismatch, allocation shape, and duplicate reason field",
+      "lastChangeDescription": "fix(trader-receivables): map allocation-proposal lines to the collections DTO shape",
       "lastChangeBy": "human",
       "confirmedLiveCommit": "9666706",
       "confirmedLiveAt": "2026-09-01"

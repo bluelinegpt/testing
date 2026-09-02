@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import { HttpStatus, Inject, Injectable } from "@nestjs/common";
 import { Decimal } from "decimal.js";
@@ -922,6 +922,21 @@ export class TraderReceivableService {
         throw new Error("Trader collection creation did not return an identifier");
       }
 
+      // The insert above already captured the authoritative Trader Collection
+      // Accounting Event (the `trader_collections` status trigger fires
+      // synchronously on this same INSERT). The operational Cash/Bank
+      // Movement below only links to that Event -- it must not post a
+      // second Journal for the same fact.
+      await this.createCollectionMovement(transaction, {
+        actorId: identity.identityId,
+        amountReceived: amountReceived.toFixed(2),
+        collectionId,
+        collectionNumber,
+        companyId,
+        payment,
+        paymentDate: input.paymentDate ?? new Date().toISOString().slice(0, 10),
+      });
+
       let remainingDue = new Decimal(0);
       for (const receivable of receivables) {
         const amount = new Decimal(amountByReceivable.get(receivable.id) ?? 0);
@@ -1516,6 +1531,7 @@ export class TraderReceivableService {
     },
   ): Promise<{
     readonly bankAccountId: string | null;
+    readonly cashAccountId: string | null;
     readonly method: "bank_transfer" | "cash";
     readonly paymentReference: string | null;
   }> {
@@ -1530,7 +1546,24 @@ export class TraderReceivableService {
           HttpStatus.BAD_REQUEST,
         );
       }
-      return { bankAccountId: null, method, paymentReference: null };
+      // Auto-select the default (main_cash) Company cash account, matching
+      // the Trader Settlement funding-account pattern -- a cash collection
+      // always needs somewhere in the Cashbook to land.
+      const defaultCashAccount = await sql<{ id: string }>`
+        select id from company_cash_accounts
+         where company_id = ${companyId}::uuid and is_active and cash_account_type = 'main_cash'
+         order by created_at asc
+         limit 1
+      `.execute(database);
+      const cashAccountId = defaultCashAccount.rows[0]?.id;
+      if (cashAccountId === undefined) {
+        throw new ApplicationException(
+          "cash_account_not_configured",
+          "No active main Cash account is configured for this Company",
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      return { bankAccountId: null, cashAccountId, method, paymentReference: null };
     }
     if (bankAccountId === null || paymentReference === null) {
       throw new ApplicationException(
@@ -1551,7 +1584,125 @@ export class TraderReceivableService {
         HttpStatus.BAD_REQUEST,
       );
     }
-    return { bankAccountId, method, paymentReference };
+    return { bankAccountId, cashAccountId: null, method, paymentReference };
+  }
+
+  /**
+   * Create and confirm the operational Cash/Bank Movement for a confirmed
+   * Trader collection -- the reverse direction of a Trader Settlement's
+   * funding movement. Money comes IN from the Trader, so this is always a
+   * deposit: `cash_deposit` (destination = the resolved main Cash account)
+   * or `bank_deposit` (destination = the chosen Company bank account), with
+   * no source account -- the Trader is external to the Company's own
+   * accounts. Mirrors `createSettlementMovement`'s pattern: the Accounting
+   * Event is already captured synchronously by the `trader_collections`
+   * status trigger, so this Movement only links to it and must not post a
+   * second Journal for the same fact.
+   */
+  private async createCollectionMovement(
+    transaction: Kysely<DatabaseSchema>,
+    options: {
+      readonly companyId: string;
+      readonly collectionId: string;
+      readonly collectionNumber: string;
+      readonly payment: {
+        readonly bankAccountId: string | null;
+        readonly cashAccountId: string | null;
+        readonly method: "bank_transfer" | "cash";
+      };
+      readonly amountReceived: string;
+      readonly paymentDate: string;
+      readonly actorId: string;
+    },
+  ): Promise<void> {
+    const ownership = await sql<{
+      eventId: string | null;
+      accountingEnabled: boolean;
+    }>`
+      select
+        (
+          select e.id from accounting_events e
+          where e.company_id = ${options.companyId}::uuid
+            and e.source_entity_type = 'trader_collection'
+            and e.source_entity_id = ${options.collectionId}::uuid
+            and e.event_type = 'trader_receivable_payment_received'
+        ) as "eventId",
+        exists (
+          select 1 from accounting_configurations c
+          where c.company_id = ${options.companyId}::uuid
+            and c.accounting_enabled
+        ) as "accountingEnabled"
+    `.execute(transaction);
+    const ownerEventId = ownership.rows[0]?.eventId ?? null;
+    if (ownerEventId === null && ownership.rows[0]?.accountingEnabled === true) {
+      throw new ApplicationException(
+        "trader_collection_cash_movement_not_created",
+        "The Trader Collection Cash/Bank Movement could not be linked to Accounting",
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+
+    const isCash = options.payment.method === "cash";
+    const movementType = isCash ? "cash_deposit" : "bank_deposit";
+    const paymentMethodForMovement = isCash ? "cash" : "visa";
+    const movementNumber = await this.history.nextReferenceNumber(
+      transaction,
+      options.companyId,
+      "cash_bank_movement",
+      "CBM",
+    );
+    const idempotencyKey = `${options.collectionNumber}_${movementNumber}`;
+    await sql`
+      insert into cash_bank_movements (
+        id,
+        company_id,
+        movement_number,
+        movement_type,
+        movement_date,
+        accounting_date,
+        source_cash_account_id,
+        source_bank_account_id,
+        destination_cash_account_id,
+        destination_bank_account_id,
+        amount,
+        fee_amount,
+        payment_method,
+        reference_number,
+        description,
+        status,
+        correlation_id,
+        idempotency_identity,
+        accounting_event_id,
+        confirmed_by_account_id,
+        confirmed_at,
+        created_by_account_id,
+        created_at
+      ) values (
+        ${randomUUID()}::uuid,
+        ${options.companyId}::uuid,
+        ${movementNumber},
+        ${movementType},
+        ${options.paymentDate}::date,
+        ${options.paymentDate}::date,
+        null::uuid,
+        null::uuid,
+        ${isCash ? options.payment.cashAccountId : null}::uuid,
+        ${isCash ? null : options.payment.bankAccountId}::uuid,
+        ${new Decimal(options.amountReceived).toFixed(2)}::numeric,
+        '0'::numeric,
+        ${paymentMethodForMovement},
+        ${options.collectionNumber},
+        ${"Trader collection " + options.collectionNumber},
+        'confirmed',
+        ${options.collectionId},
+        ${idempotencyKey},
+        ${ownerEventId}::uuid,
+        ${options.actorId}::uuid,
+        now(),
+        ${options.actorId}::uuid,
+        now()
+      )
+    `.execute(transaction);
   }
 
   private async receivableResult(
