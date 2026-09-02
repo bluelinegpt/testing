@@ -8,6 +8,7 @@ import {
   PLATFORM_BLOG_CREATE,
   PLATFORM_BLOG_EDIT,
   PLATFORM_BLOG_READ,
+  PLATFORM_PUBLIC_SITE_SETTINGS_MANAGE,
   PLATFORM_WEBSITE_MEDIA_MANAGE,
   PLATFORM_WEBSITE_READ,
   PLATFORM_WEBSITE_SEO_MANAGE,
@@ -24,6 +25,12 @@ export const PLATFORM_SEO_CONSULTANT_PERMISSIONS = [
   PLATFORM_WEBSITE_READ,
   PLATFORM_WEBSITE_MEDIA_MANAGE,
   PLATFORM_WEBSITE_SEO_MANAGE,
+  // Granted explicitly, on request: site-wide tracking/SEO settings (GTM,
+  // GA4, Search Console, Clarity, canonical base URL). Deliberately kept
+  // separate from PLATFORM_WEBSITE_SEO_MANAGE above -- that one is per-page
+  // SEO fields with no site-wide blast radius; this one edits one shared
+  // record with no draft/publish step, live the moment it's saved.
+  PLATFORM_PUBLIC_SITE_SETTINGS_MANAGE,
 ] as const;
 
 export interface PlatformSeoConsultantProvisioningInput {

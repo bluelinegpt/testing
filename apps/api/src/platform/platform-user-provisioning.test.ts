@@ -17,6 +17,7 @@ describe("Platform SEO Consultant provisioning", () => {
       "platform.website.read",
       "platform.website.media.manage",
       "platform.website.seo.manage",
+      "platform.public_site_settings.manage",
     ]);
     expect(PLATFORM_SEO_CONSULTANT_PERMISSIONS).not.toContain("platform.blog.publish");
     expect(PLATFORM_SEO_CONSULTANT_PERMISSIONS).not.toContain("platform.companies.manage");
