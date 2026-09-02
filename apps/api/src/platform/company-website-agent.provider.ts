@@ -115,6 +115,20 @@ function isCoverageQuestion(message: string): boolean {
   );
 }
 
+function isSmallTalk(message: string): boolean {
+  const normalized = normalizedArabic(message);
+  return /how are you|how're you|how are u|how('?s| is) it going|كيفك|كيف حالك|كيف الحال|شلونك|شخبارك|اخبارك/u.test(
+    normalized,
+  );
+}
+
+function isIdentityQuestion(message: string): boolean {
+  const normalized = normalizedArabic(message);
+  return /who are you|who am i speaking (?:with|to)|who is this|من انت|مين انت|مين معي|مين معاي|مع من اتكلم/u.test(
+    normalized,
+  );
+}
+
 export function normalizeGeneratedReply(
   context: CompanyWebsiteAgentContext,
   message: string,
@@ -160,6 +174,8 @@ function requiresDeterministicBoundary(message: string): boolean {
   // attribution, social links, and injection/secret probes stay hard-coded.
   return (
     isSimpleGreeting(message) ||
+    isSmallTalk(message) ||
+    isIdentityQuestion(message) ||
     isCoverageQuestion(message) ||
     /who are you|what is this company|tawseelhub|instagram|facebook|tiktok|linkedin|youtube|social|ignore (?:all|previous)|system prompt|api key|other compan|all orders|all drivers|switch tenant|internal|من أنت|من انت|توصيل هب|انستغرام|فيسبوك|مفتاح|تجاهل التعليمات|كل الطلبات/iu.test(
       message,
@@ -253,10 +269,12 @@ export function deterministicReply(context: CompanyWebsiteAgentContext, message:
         })
     : undefined;
   if (faq) return local(faq.answer, language) ?? unknown(context, ar);
+  if (isIdentityQuestion(message))
+    return ar
+      ? `معك ${context.agentName}، المساعد الإلكتروني لشركة ${context.companyName}. كيف يمكنني مساعدتك؟`
+      : `You're chatting with ${context.agentName}, ${context.companyName}'s website assistant. How can I help?`;
   if (
-    /who are you|what is this company|about (?:you|the company)|من أنت|من انت|ما هي هذه الشركة/u.test(
-      lower,
-    ) ||
+    /what is this company|about (?:you|the company)|ما هي هذه الشركة/u.test(lower) ||
     // "من هي دانة" / "who is Dana" -- asking about the assistant by the
     // Company's own name, not just the generic "who are you". Loosely
     // normalized so "دانه" (as a visitor commonly types it) still matches
@@ -439,11 +457,7 @@ export function deterministicReply(context: CompanyWebsiteAgentContext, message:
   // spellings as well as standard Arabic and English. Previously fell
   // straight through to the generic "I don't have confirmed information"
   // refusal, which reads as broken for the most ordinary greeting.
-  if (
-    /how are you|how're you|how are u|how('?s| is) it going|كيفك|كيف حالك|شلونك|شخبارك|اخبارك|أخبارك/u.test(
-      lower,
-    )
-  )
+  if (isSmallTalk(message))
     return ar
       ? `بخير والحمد لله، شكراً لسؤالك! كيف يمكنني مساعدتك مع ${context.companyName}؟`
       : `I'm doing well, thank you! How can I help you with ${context.companyName} today?`;

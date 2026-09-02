@@ -219,6 +219,15 @@ describe("Company website agent public boundary", () => {
     expect(deterministicReply(value, "كيفك")).not.toContain("لا أملك معلومات مؤكدة");
     expect(deterministicReply(value, "كيفك")).toMatch(/بخير/u);
     expect(deterministicReply(value, "شلونك")).not.toContain("لا أملك معلومات مؤكدة");
+    expect(deterministicReply(value, "كيف الحال")).toMatch(/بخير/u);
+  });
+
+  it("answers colloquial Arabic identity questions with the company identity", () => {
+    const value = context();
+    value.language = "ar";
+    value.settings.knowledge.description = { ar: "دانة شركة توصيل في الإمارات." };
+    expect(deterministicReply(value, "مين معاي")).toContain("Dana Assistant");
+    expect(deterministicReply(value, "مين معاي")).toContain("Dana");
   });
 
   it("answers the Arabic salaam naturally and routes it through the deterministic boundary", () => {
