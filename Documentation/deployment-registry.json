@@ -7,10 +7,10 @@
       "path": "apps/api",
       "renderService": "bluelinegpt-api-test",
       "status": "needs_deploy",
-      "localCommit": "1e7ba11",
+      "localCommit": "e54a2df",
       "localCommitDate": "2026-09-02",
-      "lastChangeDescription": "fix(trader-receivables): post a Cash/Bank Movement when a collection is confirmed",
-      "lastChangeBy": "human",
+      "lastChangeDescription": "Makes each Company Website AI Agent remember the full conversation and avoid asking for details already provided.",
+      "lastChangeBy": "codex",
       "confirmedLiveCommit": "e3de371",
       "confirmedLiveAt": "2026-09-01"
     },
