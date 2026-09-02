@@ -6,10 +6,10 @@
       "displayName": "API",
       "path": "apps/api",
       "renderService": "bluelinegpt-api-test",
-      "status": "pushed_awaiting_confirmation",
-      "localCommit": "8580024",
+      "status": "needs_deploy",
+      "localCommit": "7482fa4",
       "localCommitDate": "2026-09-03",
-      "lastChangeDescription": "fix(agent): clarify unknown questions and greet naturally",
+      "lastChangeDescription": "Makes company website agents recognize common Arabic coverage questions and clarify instead of repeating a generic refusal.",
       "lastChangeBy": "codex",
       "confirmedLiveCommit": "e3de371",
       "confirmedLiveAt": "2026-09-01"
