@@ -1,4 +1,8 @@
-import { Body, Controller, Get, HttpCode, Inject, Param, Patch, Post } from "@nestjs/common";
+import { Body, Controller, Get, HttpCode, Inject, Param, Patch, Post, UploadedFile, UseInterceptors } from "@nestjs/common";
+import { FileInterceptor } from "@nestjs/platform-express";
+import { Throttle } from "@nestjs/throttler";
+import { BlogImportService, IMPORT_MAX_BYTES, type ArticleImportFile } from "../blog/blog-import.service.js";
+import { BlogImportDto } from "../blog/blog-import.dto.js";
 import {
   ArticleStatusDto,
   CategoryDto,
@@ -19,9 +23,17 @@ export class PlatformBlogController {
   constructor(
     @Inject(BlogService) private readonly blog: BlogService,
     @Inject(IdentityContextAccessor) private readonly identity: IdentityContextAccessor,
+    @Inject(BlogImportService) private readonly importer: BlogImportService,
   ) {}
   private actor() {
     return this.identity.current().identityId;
+  }
+  @RequirePlatformPermissions(CREATE)
+  @Post("import") @HttpCode(200)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @UseInterceptors(FileInterceptor("file", { limits: { fileSize: IMPORT_MAX_BYTES, files: 1, fields: 1 } }))
+  importArticle(@UploadedFile() file: ArticleImportFile | undefined, @Body() body: BlogImportDto) {
+    return this.importer.propose(file, body.googleDocUrl);
   }
   @RequirePlatformPermissions(READ) @Get() list() {
     return this.blog.adminList();

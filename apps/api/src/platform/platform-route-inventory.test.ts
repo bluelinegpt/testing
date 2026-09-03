@@ -209,6 +209,7 @@ describe("Platform route inventory", () => {
       "discardDraft",
       "previewAgent",
       "proposeAiSetup",
+      "importArticle", // Read-only proposal, restricted to blog creators like other editor previews.
       "previewTrack",
       "addDomain",
       "refreshDomain",

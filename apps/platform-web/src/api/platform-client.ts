@@ -90,13 +90,13 @@ async function request<TResponse>(
   );
   try {
     const response = await fetch(`${platformConfiguration.apiBaseUrl}/${path.replace(/^\//, "")}`, {
-      ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
+      ...(init.body === undefined ? {} : { body: init.body instanceof FormData ? init.body : JSON.stringify(init.body) }),
       cache: "no-store",
       credentials: "include",
       headers: {
         Accept: "application/json",
         "X-Blueline-Session": "cookie",
-        ...(init.body === undefined ? {} : { "Content-Type": "application/json" }),
+        ...(init.body === undefined || init.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
         ...init.headers,
       },
       method: init.method,
@@ -2027,6 +2027,12 @@ export const platformApi = {
   },
   async blogArticles(): Promise<any[]> {
     return (await request<any[]>("platform/blog", { method: "GET" })) ?? [];
+  },
+  async importBlogArticle(file: File | null, googleDocUrl: string): Promise<{ fields: Record<string, string>; warnings: string[] }> {
+    const body = new FormData();
+    if (file) body.append("file", file);
+    else body.append("googleDocUrl", googleDocUrl.trim());
+    return (await request<{ fields: Record<string, string>; warnings: string[] }>("platform/blog/import", { method: "POST", body, timeoutMs: 30000 }))!;
   },
   async blogArticle(id: string): Promise<any> {
     return await request<any>(`platform/blog/${id}`, { method: "GET" });
