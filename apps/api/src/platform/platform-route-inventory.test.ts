@@ -210,6 +210,7 @@ describe("Platform route inventory", () => {
       "previewAgent",
       "proposeAiSetup",
       "importArticle", // Read-only proposal, restricted to blog creators like other editor previews.
+      "deleteArticle",
       "previewTrack",
       "addDomain",
       "refreshDomain",

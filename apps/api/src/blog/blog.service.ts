@@ -129,12 +129,14 @@ export class BlogService {
   }
   async adminList() {
     return (
-      await sql<any>`select a.id,a.slug,a.language,a.title,a.status,a.has_unpublished_changes,a.published_at,a.scheduled_at,a.updated_at,c.name category,u.display_name author from platform_blog_articles a join platform_blog_categories c on c.id=a.category_id join platform_blog_authors u on u.id=a.author_id order by a.updated_at desc`.execute(
+      await sql<any>`select a.id,a.slug,a.language,a.title,a.status,a.has_unpublished_changes,a.published_at,a.scheduled_at,a.updated_at,c.name category,u.display_name author from platform_blog_articles a join platform_blog_categories c on c.id=a.category_id join platform_blog_authors u on u.id=a.author_id where not exists (select 1 from platform_blog_publication_history h where h.article_id=a.id and h.event_type='deleted') order by a.updated_at desc`.execute(
         this.db,
       )
     ).rows;
   }
   async adminDetail(id: string) {
+    const deleted = (await sql`select 1 from platform_blog_publication_history where article_id=${id}::uuid and event_type='deleted' limit 1`.execute(this.db)).rows.length > 0;
+    if (deleted) throw new NotFoundException();
     const article = (
       await sql<any>`select * from platform_blog_articles where id=${id}::uuid`.execute(this.db)
     ).rows[0];
@@ -219,6 +221,9 @@ export class BlogService {
     }
   }
   async update(id: string, input: SaveBlogArticleDto, actor: string) {
+    return this.withArticleLock(id, service => service.updateLocked(id, input, actor));
+  }
+  private async updateLocked(id: string, input: SaveBlogArticleDto, actor: string) {
     const current = await this.adminDetail(id);
     const blocks = cleanBlocks(input.content);
     const draftPayload = articlePayload(input, blocks);
@@ -239,6 +244,9 @@ export class BlogService {
     return this.adminDetail(id);
   }
   async status(id: string, input: ArticleStatusDto, actor: string) {
+    return this.withArticleLock(id, service => service.statusLocked(id, input, actor));
+  }
+  private async statusLocked(id: string, input: ArticleStatusDto, actor: string) {
     const old = (await sql<any>`select * from platform_blog_articles where id=${id}::uuid`.execute(this.db)).rows[0];
     if (!old) throw new NotFoundException();
     if (
@@ -263,6 +271,24 @@ export class BlogService {
     }
     await sql`insert into platform_blog_publication_history(article_id,event_type,old_status,new_status,actor_account_id) values(${id}::uuid,${input.status},${old.status},${input.status},${actor}::uuid)`.execute(this.db);
     return this.adminDetail(id);
+  }
+  // Serialize edits/publication/deletion; preserve history and shared media.
+  private async withArticleLock<T>(id: string, action: (service: BlogService) => Promise<T>): Promise<T> {
+    return this.db.transaction().execute(async transaction => {
+      const row = (await sql`select id from platform_blog_articles where id=${id}::uuid for update`.execute(transaction)).rows[0];
+      if (!row) throw new NotFoundException();
+      const service = new BlogService(transaction);
+      await service.adminDetail(id);
+      return action(service);
+    });
+  }
+  async deleteArticle(id: string, actor: string) {
+    return this.withArticleLock(id, async service => {
+      const article = await service.adminDetail(id);
+      if (article.status !== "unpublished") throw new ConflictException("Unpublish the article before deleting it.");
+      await sql`update platform_blog_articles set status='archived',scheduled_at=null,updated_by_account_id=${actor}::uuid,updated_at=now() where id=${id}::uuid`.execute(service.db);
+      await sql`insert into platform_blog_publication_history(article_id,event_type,old_status,new_status,actor_account_id,detail) values(${id}::uuid,'deleted','unpublished','archived',${actor}::uuid,'{"recoverable":true}'::jsonb)`.execute(service.db);
+    });
   }
   async createCategory(input: CategoryDto) {
     return (

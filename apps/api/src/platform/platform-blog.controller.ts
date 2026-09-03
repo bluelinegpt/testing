@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, Inject, Param, Patch, Post, UploadedFile, UseInterceptors } from "@nestjs/common";
+import { Body, Controller, Delete, Get, HttpCode, Inject, Param, ParseUUIDPipe, Patch, Post, UploadedFile, UseInterceptors } from "@nestjs/common";
 import { FileInterceptor } from "@nestjs/platform-express";
 import { Throttle } from "@nestjs/throttler";
 import { BlogImportService, IMPORT_MAX_BYTES, type ArticleImportFile } from "../blog/blog-import.service.js";
@@ -71,6 +71,10 @@ export class PlatformBlogController {
     @Body() body: ArticleStatusDto,
   ) {
     return this.blog.status(id, body, this.actor());
+  }
+  @RequirePlatformPermissions(PUBLISH) @Delete(":id") @HttpCode(204)
+  deleteArticle(@Param("id", new ParseUUIDPipe()) id: string) {
+    return this.blog.deleteArticle(id, this.actor());
   }
   @RequirePlatformPermissions(CATEGORIES) @Post("categories") createCategory(
     @Body() body: CategoryDto,

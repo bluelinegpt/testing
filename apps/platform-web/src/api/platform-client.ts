@@ -2037,6 +2037,9 @@ export const platformApi = {
   async blogArticle(id: string): Promise<any> {
     return await request<any>(`platform/blog/${id}`, { method: "GET" });
   },
+  async deleteBlogArticle(id: string): Promise<void> {
+    await request<void>(`platform/blog/${id}`, { method: "DELETE" });
+  },
   async blogArticlePreview(id: string): Promise<any> {
     return await request<any>(`platform/blog/${id}/preview`, { method: "GET" });
   },
