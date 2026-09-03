@@ -5,6 +5,7 @@ import { trackEvent } from "./analytics";
 import { applyPageMetadata } from "./seo";
 import { getPreloaded, PreloadContext } from "./preload-context";
 import { usePublicLocale } from "./public-localization";
+import { BlogEnquiry } from "./BlogEnquiry";
 /** Preload cache keys, exported so entry-server.tsx populates the exact
     same keys these components read -- one source of truth for both sides. */
 export const blogListingPreloadKey = (locale: string, page: number, categorySlug?: string) =>
@@ -421,6 +422,7 @@ export function BlogArticlePage() {
           <Link to="/send-a-package">{text.sendPackage}</Link>
         </aside>
       </div>
+      <BlogEnquiry key={a.slug} slug={a.slug} language={String(a.language ?? "en")} />
       <section className="related-articles">
         <h2>{text.related}</h2>
         {data.related.map((x) => (
@@ -436,6 +438,8 @@ export function BlogArticlePage() {
   );
 }
 function BlockView({ block }: { block: Block }) {
+  // HTML blocks are allowlist-sanitized by the API on both save and public reads.
+  if (block.type === "html") return <div dangerouslySetInnerHTML={{__html: (block.text ?? "").replace(/src="(\/api\/v1\/public\/website\/media\/[A-Za-z0-9_-]+)"/g, (_match, path:string) => `src="${publicAssetUrl(path).replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;")}"`)}} />;
   if (block.type === "h2") return <h2>{block.text}</h2>;
   if (block.type === "h3") return <h3>{block.text}</h3>;
   if (block.type === "blockquote") return <blockquote>{block.text}</blockquote>;

@@ -6,6 +6,7 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import { sql, type Kysely } from "kysely";
+import { cleanBlogHtml } from "./blog-html.js";
 import { DATABASE } from "../infrastructure/database/database.tokens.js";
 import type { DatabaseSchema } from "../infrastructure/database/database.types.js";
 import type {
@@ -22,7 +23,7 @@ const cleanText = (value: string) =>
 const cleanBlocks = (blocks: SaveBlogArticleDto["content"]) =>
   blocks
     .map((b) =>
-      b.items
+      b.type === "html" ? { type: "html", text: cleanBlogHtml(b.text ?? "") } : b.items
         ? { type: b.type, items: b.items.map(cleanText).filter(Boolean) }
         : { type: b.type, text: cleanText(b.text ?? "") },
     )
@@ -90,6 +91,9 @@ export class BlogService {
         this.db,
       )
     ).rows;
+    // Sanitize at the public boundary too, including previously saved markup.
+    article.content = cleanBlocks(article.content ?? []);
+    delete article.draft_payload;
     return { article, related };
   }
   /**
@@ -227,6 +231,7 @@ export class BlogService {
     const current = await this.adminDetail(id);
     const blocks = cleanBlocks(input.content);
     const draftPayload = articlePayload(input, blocks);
+    if (!blocks.length) throw new BadRequestException("article_content_required");
     const persisted = (await sql<any>`select status,slug from platform_blog_articles where id=${id}::uuid`.execute(this.db)).rows[0];
     if (persisted.status === "published") {
       await sql`update platform_blog_articles set draft_payload=${JSON.stringify(draftPayload)}::jsonb,has_unpublished_changes=true,last_unpublished_change_at=now(),updated_by_account_id=${actor}::uuid,updated_at=now() where id=${id}::uuid`.execute(this.db);

@@ -2,6 +2,19 @@
   "$comment": "Local-version-vs-Render status catalog, shown on /administration/deployment-status (Company Portal) and Platform Administration's Deployment Registry screen. Kept current by .githooks/post-commit and .githooks/pre-push via scripts/deployment-registry.mjs -- not by hand. confirmed_live/confirmedLiveAt are the one exception: only a human confirming Render is actually showing the change sets those (scripts/deployment-registry.mjs mark-confirmed-live).",
   "apps": [
     {
+      "id": "public-web",
+      "displayName": "Public website",
+      "path": "apps/public-web",
+      "renderService": null,
+      "status": "needs_deploy",
+      "localCommit": "35ea11a",
+      "localCommitDate": "2026-09-03",
+      "lastChangeDescription": "Adds formatted blog bodies, private email enquiries and a WhatsApp contact button.",
+      "lastChangeBy": "codex",
+      "confirmedLiveCommit": null,
+      "confirmedLiveAt": null
+    },
+    {
       "id": "api",
       "displayName": "API",
       "path": "apps/api",
