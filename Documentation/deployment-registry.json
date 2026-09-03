@@ -6,10 +6,10 @@
       "displayName": "Public website",
       "path": "apps/public-web",
       "renderService": null,
-      "status": "pushed_awaiting_confirmation",
-      "localCommit": "0f2e8b6",
+      "status": "needs_deploy",
+      "localCommit": "683f214",
       "localCommitDate": "2026-09-03",
-      "lastChangeDescription": "feat(blog): add rich HTML editing and private enquiries",
+      "lastChangeDescription": "feat(blog): redesign listing with consistent responsive cards",
       "lastChangeBy": "codex",
       "confirmedLiveCommit": null,
       "confirmedLiveAt": null
