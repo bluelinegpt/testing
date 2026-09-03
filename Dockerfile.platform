@@ -12,6 +12,7 @@ RUN pnpm install --frozen-lockfile --filter . --filter @blueline/platform-web...
 
 COPY apps/platform-web apps/platform-web
 ARG VITE_API_BASE_URL
+ARG VITE_PUBLIC_WEB_BASE_URL
 RUN test -n "$VITE_API_BASE_URL" && pnpm --filter @blueline/platform-web build
 
 FROM node:24-bookworm-slim AS runtime
