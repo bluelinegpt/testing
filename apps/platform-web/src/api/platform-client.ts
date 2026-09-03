@@ -45,6 +45,7 @@ interface ErrorPayload {
     readonly code?: string;
     readonly message?: string;
     readonly correlationId?: string;
+    readonly details?: readonly string[];
   };
 }
 
@@ -113,7 +114,9 @@ async function request<TResponse>(
       // the details went and the reference to find them by.
       const message = platformApiErrorMessage(
         response.status,
-        payload?.error?.message,
+        response.status === 400 && Array.isArray(payload?.error?.details) && payload.error.details.length
+          ? `${payload.error.message ?? "Validation failed"} ${payload.error.details.filter(x => typeof x === "string").slice(0, 8).join("; ")}`
+          : payload?.error?.message,
         correlationId,
       );
       throw new PlatformApiError(

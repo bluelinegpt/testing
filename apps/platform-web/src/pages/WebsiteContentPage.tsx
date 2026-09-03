@@ -6,11 +6,11 @@ import { usePlatformSession } from "../app/PlatformSession.js";
 import { platformConfiguration } from "../config/environment.js";
 import { BlogRichEditor, blocksToHtml, plainBlogHtml, safeEditorHtml } from "./BlogRichEditor.js";
 import { useBlogUnsavedWarning } from "./useBlogUnsavedWarning.js";
+import { blogSavePayload as payload } from "./blog-save-payload.js";
 import { BlogArticleImport } from "./BlogArticleImport.js";
 
 const tabs = ["Overview", "Pages", "Pricing", "Features", "FAQs", "Help Center", "Blog", "Media", "SEO", "Contact & Social", "Navigation"] as const;
 const blankArticle={slug:"",language:"en",title:"",excerpt:"",content:"",authorId:"",categoryId:"",featuredImagePublicUrl:"",featuredImageAlt:"",seoTitle:"",metaDescription:"",canonicalUrl:"",robotsIndex:true,robotsFollow:true,socialTitle:"",socialDescription:"",socialImageUrl:""};
-const payload=(f:any)=>({...f,content:[{type:"html",text:String(f.content)}],...f.featuredImagePublicUrl?{}:{featuredImagePublicUrl:undefined,featuredImageAlt:undefined},...f.canonicalUrl?{}:{canonicalUrl:undefined},...f.socialImageUrl?{}:{socialImageUrl:undefined}});
 const label=(value:string)=>value.replace(/_/g," ").replace(/\b\w/g,letter=>letter.toUpperCase());
 const publicWebBase=platformConfiguration.publicWebBaseUrl.replace(/\/$/,"");
 const imageUrlPattern=/^(https:\/\/[^?#]+\.(?:jpe?g|png|webp)(?:[?#].*)?|\/api\/v1\/public\/website\/media\/[A-Za-z0-9_-]+)$/i;

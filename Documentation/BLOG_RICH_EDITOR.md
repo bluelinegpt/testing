@@ -19,6 +19,13 @@ a link with unsaved edits prompts a warning. Safe inline font-weight, font-style
 and text-decoration survive sanitization; pasted H1 becomes H2 without dropping
 the heading text. Editor save/reopen and failed-save regression tests use a
 mocked API; live Render persistence still requires deployment verification.
+Save requests now explicitly select only SaveBlogArticleDto fields: response
+metadata (id, status, timestamps, snake-case fields and draft_payload) is never
+sent back. A cross-app contract test passes the actual frontend serializer
+through Nest's production ValidationPipe, reproducing the previous 400 for
+extra fields. Platform validation errors display the server's field details.
+The Platform CSP allows sanitized style attributes via style-src-attr, while
+inline scripts and style blocks remain blocked; HTTPS inline images are allowed.
 
 Every public platform blog article has an English/Arabic private enquiry form
 and WhatsApp link to +971506898604 with the approved Tawseelhub greeting.

@@ -80,7 +80,8 @@ function addSecurityHeaders(response) {
     // through an authenticated endpoint are rendered via
     // URL.createObjectURL(blob) -- see apps/web/serve.mjs's own comment on
     // this same line for the full explanation (identical setup here).
-    `default-src 'self'; connect-src ${connectSources}; img-src 'self' data: blob:; frame-src ${frameSources}; object-src 'none'; base-uri 'self'; frame-ancestors 'none'`,
+    // Rich text uses sanitized style attributes. Inline scripts and style blocks remain blocked.
+    `default-src 'self'; script-src 'self'; style-src 'self'; style-src-attr 'unsafe-inline'; connect-src ${connectSources}; img-src 'self' https: data: blob:; frame-src ${frameSources}; object-src 'none'; base-uri 'self'; frame-ancestors 'none'`,
   );
   response.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
   response.setHeader("X-Content-Type-Options", "nosniff");

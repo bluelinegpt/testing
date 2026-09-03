@@ -4,6 +4,10 @@ import { platformApi, platformApiErrorMessage } from "./platform-client.js";
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Platform API user-facing errors", () => {
+  it("shows specific validation failures instead of hiding the rejected field",async()=>{
+    vi.stubGlobal("fetch",vi.fn().mockResolvedValue({ok:false,status:400,headers:new Headers({"content-type":"application/json"}),json:async()=>({error:{message:"Request validation failed.",details:["title must be longer than or equal to 5 characters"]}})}));
+    await expect(platformApi.updateBlogArticle("article",{})).rejects.toThrow("title must be longer");
+  });
   it("sends import files as multipart with session and CSRF protection", async () => {
     const fetcher = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ fields: {}, warnings: [] }) });
     vi.stubGlobal("fetch", fetcher);
