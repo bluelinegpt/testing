@@ -7,6 +7,7 @@ import { installTracking } from './tracking';
 import './styles.css';
 import './quote.css';
 import './blog.css';
+import './blog-index.css';
 
 installCrashReporting();
 // Deferred out of the critical rendering path (Lighthouse network-dependency

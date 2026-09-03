@@ -88,6 +88,7 @@ const blogText = {
     page: "Page",
     minRead: "min read",
     readPreview: "Read preview",
+    readArticle: "Read article",
     notFoundTitle: "Article not found",
     notFoundCopy: "This article is not published or the address is incorrect.",
     returnBlog: "Return to Blog",
@@ -120,6 +121,7 @@ const blogText = {
     page: "صفحة",
     minRead: "دقائق قراءة",
     readPreview: "اقرأ المقال",
+    readArticle: "اقرأ المقال",
     notFoundTitle: "المقال غير موجود",
     notFoundCopy: "هذا المقال غير منشور أو أن العنوان غير صحيح.",
     returnBlog: "العودة إلى المدونة",
@@ -219,14 +221,14 @@ export function BlogListingPage() {
         <p>{text.heroCopy}</p>
       </section>
       <nav className="blog-categories" aria-label={text.categories}>
-        <Link to="/blog">{text.all}</Link>
+        <Link to="/blog" aria-current={!categorySlug ? "page" : undefined}>{text.all}</Link>
         {categories.map((c) => (
-          <Link key={c.slug} to={`/blog/category/${c.slug}`}>
+          <Link key={c.slug} to={`/blog/category/${c.slug}`} aria-current={categorySlug === c.slug ? "page" : undefined}>
             {c.name}
           </Link>
         ))}
       </nav>
-      <section className="blog-listing">
+      <section className="blog-listing blog-index" dir={locale === "ar" ? "rtl" : "ltr"} lang={locale}>
         {failed ? (
           <div className="empty-content">
             <h2>{text.unavailableTitle}</h2>
@@ -248,11 +250,8 @@ export function BlogListingPage() {
           </div>
         ) : (
           <>
-            <article className="featured-article">
-              <CardView article={data.items[0]!} featured />
-            </article>
             <div className="blog-grid">
-              {data.items.slice(1).map((a) => (
+              {data.items.map((a) => (
                 <CardView key={a.slug} article={a} />
               ))}
             </div>
@@ -275,21 +274,24 @@ export function BlogListingPage() {
     </>
   );
 }
-function CardView({ article, featured = false }: { article: Card; featured?: boolean }) {
-  const imageUrl = publicAssetUrl(article.featuredImageUrl);
+function CardView({ article }: { article: Card }) {
+  const [failedImage, setFailedImage] = useState<string | null>(null);
+  const imageUrl = publicAssetUrl(article.featuredImageUrl) || articleImageFallback(article.slug);
   const locale = usePublicLocale();
   const text = blogText[locale];
   return (
-    <article className={featured ? "blog-card featured" : ""}>
-      {imageUrl && (
+    <article className="blog-card">
+      <Link className="blog-card-cover" to={`/blog/${article.slug}`} aria-label={`${text.readArticle}: ${article.title}`}>
+      {imageUrl && failedImage !== imageUrl ? (
         <img
           src={imageUrl}
           alt={article.featuredImageAlt ?? ""}
-          loading={featured ? "eager" : "lazy"}
-          onError={(event) => useArticleImageFallback(event, article.slug)}
+          loading="lazy"
+          onError={() => setFailedImage(imageUrl)}
         />
-      )}
-      <div>
+      ) : <div className="blog-cover-placeholder" aria-hidden="true"><span>TAWSEELHUB</span><strong>{text.eyebrow}</strong><span className="blog-cover-mark">↗</span></div>}
+      </Link>
+      <div className="blog-card-content">
         <Link className="blog-category" to={`/blog/category/${article.categorySlug}`}>
           {article.category}
         </Link>
@@ -298,9 +300,12 @@ function CardView({ article, featured = false }: { article: Card; featured?: boo
         </h2>
         <p>{article.excerpt}</p>
         <small>
-          {article.author} · {new Date(article.publishedAt).toLocaleDateString()} ·{" "}
+          {article.author} · {new Date(article.publishedAt).toLocaleDateString(locale === "ar" ? "ar-AE" : "en-GB", {day:"numeric", month:"short", year:"numeric"})} ·{" "}
           {article.readingMinutes} {text.minRead}
         </small>
+        <Link className="blog-read-link" to={`/blog/${article.slug}`} aria-label={`${text.readArticle}: ${article.title}`}>
+          {text.readArticle}<span aria-hidden="true">{locale === "ar" ? "←" : "→"}</span>
+        </Link>
       </div>
     </article>
   );
