@@ -10,6 +10,9 @@ export function cleanBlogHtml(html: string): string {
     allowedStyles: { "*": {
       "font-family": [/^(Arial|Georgia|Verdana|Tahoma|sans-serif|serif)$/i],
       "font-size": [/^(12|14|16|18|20|24|28|32|36|48)px$/],
+      "font-weight": [/^(normal|bold|[1-9]00)$/],
+      "font-style": [/^(normal|italic)$/],
+      "text-decoration": [/^(none|underline|line-through)$/],
       "text-align": [/^(left|right|center|justify)$/],
       "color": [/^#[0-9a-f]{3,6}$/i],
       "width": [/^(25|50|75|100)%$/],

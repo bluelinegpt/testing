@@ -12,6 +12,13 @@ No schema migration, direct database operation, or historical backfill is needed
 Scripts, forms, handlers, unsafe schemes, and arbitrary styles are removed server-side.
 Public reads sanitize again; H1 within body is normalized to H2.
 Save Draft and Publish remain separate. Existing publication permissions apply.
+The sticky save bar identifies unsaved edits and surfaces failures beside the
+save controls. Publish first saves current edits and aborts if saving fails;
+it no longer silently publishes an older draft. Closing/reloading or following
+a link with unsaved edits prompts a warning. Safe inline font-weight, font-style
+and text-decoration survive sanitization; pasted H1 becomes H2 without dropping
+the heading text. Editor save/reopen and failed-save regression tests use a
+mocked API; live Render persistence still requires deployment verification.
 
 Every public platform blog article has an English/Arabic private enquiry form
 and WhatsApp link to +971506898604 with the approved Tawseelhub greeting.
