@@ -32,10 +32,10 @@
       "displayName": "Platform admin",
       "path": "apps/platform-web",
       "renderService": "bluelinegpt-platform-test",
-      "status": "pushed_awaiting_confirmation",
-      "localCommit": "646db29",
+      "status": "needs_deploy",
+      "localCommit": "118d961",
       "localCommitDate": "2026-09-03",
-      "lastChangeDescription": "Leaves the Google Docs article-import link box empty without an example URL.",
+      "lastChangeDescription": "Makes article import review fields full-width with clear labels, larger body text and spaced actions.",
       "lastChangeBy": "codex",
       "confirmedLiveCommit": "aee8bb0",
       "confirmedLiveAt": "2026-08-31"
