@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { platformApi } from "../api/platform-client.js";
+import "./BlogArticleImport.css";
 
 const labels: Record<string, string> = {
   title: "Title", slug: "Slug", content: "Article body", excerpt: "Excerpt", language: "Language",
@@ -43,33 +44,40 @@ export function BlogArticleImport({ current, onApply, authors = [], categories =
     onApply(Object.fromEntries(selected.map(key => [key, proposal.fields[key]!]))) ;
     setProposal(null); setError("");
   }
-  return <details className="platform-panel">
+  return <details className="platform-panel blog-import">
     <summary><strong>Import Article — Word, text or Google Docs</strong></summary>
     <p>Propose article fields from your document. Nothing is saved or published. Existing fields are unchecked by default.</p>
     <p>Use .docx or UTF-8 .txt (up to 2 MB). For a private Google Doc or a file in Drive, download it as Word and upload it here. Images and formatting are not imported.</p>
-    <label>Upload article from computer<input type="file" accept=".docx,.txt" disabled={busy}
+    <div className="blog-import__sources">
+    <label className="blog-import__input">Upload article from computer<input type="file" accept=".docx,.txt" disabled={busy}
       onChange={event => { setFile(event.target.files?.[0] ?? null); setProposal(null); }} /></label>
-    <label>Or paste Google Docs link<input type="url" value={link} disabled={busy || Boolean(file)}
+    <label className="blog-import__input">Or paste Google Docs link<input type="url" value={link} disabled={busy || Boolean(file)}
       onChange={event => { setLink(event.target.value); setProposal(null); }} /></label>
+    </div>
+    <div className="blog-import__actions">
     {file && <button type="button" disabled={busy} onClick={() => { setFile(null); setProposal(null); }}>Use Google Docs instead</button>}
     <button type="button" disabled={busy || (!file && !link.trim())} onClick={() => void prepare()}>{busy ? "Reading document…" : "Prepare import review"}</button>
+    </div>
     {error && <p role="alert">{error}</p>}
-    {proposal && <section aria-label="Review imported article">
+    {proposal && <section className="blog-import__review" aria-label="Review imported article">
       <h3>Review proposed changes</h3>
       {proposal.warnings.map(warning => <p key={warning}>{warning}</p>)}
       <p>Check each field you want to apply. Checking an existing field explicitly replaces its value. Language is also preserved unless selected.</p>
-      {Object.entries(proposal.fields).map(([key, value]) => <div key={key}>
-        <label><input type="checkbox" checked={selected.includes(key)} onChange={event => setSelected(keys => event.target.checked ? [...keys, key] : keys.filter(k => k !== key))} />Apply {labels[key] ?? key}</label>
+      <p className="blog-import__notice">{selected.length} fields selected. After reviewing, use “Confirm selected fields” below to fill the main editor. Saving is a separate step.</p>
+      {Object.entries(proposal.fields).map(([key, value]) => <div className={`blog-import__field${key === "content" ? " blog-import__field--body" : ""}`} key={key}>
+        <label className="blog-import__toggle"><input type="checkbox" checked={selected.includes(key)} onChange={event => setSelected(keys => event.target.checked ? [...keys, key] : keys.filter(k => k !== key))} />Apply {labels[key] ?? key}</label>
         {String(current[key] ?? "").trim() && <details><summary>Existing value — preserved unless checked</summary><p style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{String(current[key])}</p></details>}
-        <label>Proposed {labels[key] ?? key}{key === "authorId" || key === "categoryId" ? <select value={value}
+        <label className="blog-import__input">Proposed {labels[key] ?? key}{key === "authorId" || key === "categoryId" ? <select value={value}
           onChange={event => setProposal(p => p ? { ...p, fields: { ...p.fields, [key]: event.target.value } } : p)}>
           <option value="">Select an existing {key === "authorId" ? "author" : "category"}</option>
           {(key === "authorId" ? authors.map(a => ({ id: a.id, name: a.display_name })) : categories).map(option => <option key={option.id} value={option.id}>{option.name}</option>)}
-        </select> : <textarea rows={key === "content" ? 10 : 2} value={value}
+        </select> : <textarea dir="auto" rows={key === "content" ? 18 : 3} value={value}
           onChange={event => setProposal(p => p ? { ...p, fields: { ...p.fields, [key]: event.target.value } } : p)} />}</label>
       </div>)}
-      <button type="button" disabled={!selected.length} onClick={apply}>Confirm selected fields — do not save</button>
+      <div className="blog-import__actions">
+      <button className="platform-button" type="button" disabled={!selected.length} onClick={apply}>Confirm selected fields — do not save</button>
       <button type="button" onClick={() => setProposal(null)}>Discard proposal</button>
+      </div>
     </section>}
   </details>;
 }
