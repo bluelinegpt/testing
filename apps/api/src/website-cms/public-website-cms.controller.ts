@@ -46,6 +46,11 @@ export class PublicWebsiteCmsController {
   @Public()
   @Get("media/:id")
   @Header("Cache-Control", "public, max-age=86400, immutable")
+  // Public CMS media is intentionally embedded by the separate public-site
+  // origin (for example tawseelhub.com). Helmet otherwise defaults CORP to
+  // `same-origin`, which makes browsers reject these successful image
+  // responses with ERR_BLOCKED_BY_RESPONSE.NotSameOrigin.
+  @Header("Cross-Origin-Resource-Policy", "cross-origin")
   public async media(@Param("id") id: string, @Res() response: Response) {
     const file = await this.cms.readMedia(id);
     response.type(file.mediaType);
