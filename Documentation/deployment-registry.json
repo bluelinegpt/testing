@@ -32,10 +32,10 @@
       "displayName": "Platform admin",
       "path": "apps/platform-web",
       "renderService": "bluelinegpt-platform-test",
-      "status": "pushed_awaiting_confirmation",
-      "localCommit": "ce72227",
+      "status": "needs_deploy",
+      "localCommit": "646db29",
       "localCommitDate": "2026-09-03",
-      "lastChangeDescription": "Adds article upload and Google Docs import with field-by-field review and preservation of existing content.",
+      "lastChangeDescription": "Leaves the Google Docs article-import link box empty without an example URL.",
       "lastChangeBy": "codex",
       "confirmedLiveCommit": "aee8bb0",
       "confirmedLiveAt": "2026-08-31"
