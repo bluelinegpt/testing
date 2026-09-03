@@ -5,6 +5,12 @@ import { platformApi } from "../api/platform-client.js";
 vi.mock("../api/platform-client.js", () => ({ platformApi: { importBlogArticle: vi.fn() } }));
 
 describe("Blog article import review", () => {
+  it("starts with an empty Google Docs input and no example URL", () => {
+    render(<BlogArticleImport current={{}} onApply={vi.fn()} />);
+    const input = screen.getByLabelText("Or paste Google Docs link");
+    expect(input).toHaveValue("");
+    expect(input).not.toHaveAttribute("placeholder");
+  });
   it("preserves all populated fields including language", () => {
     expect(emptyImportFields({ title: "Existing", language: "en", content: "" }, { title: "Imported", language: "ar", content: "Body" })).toEqual(["content"]);
   });

@@ -49,7 +49,7 @@ export function BlogArticleImport({ current, onApply, authors = [], categories =
     <p>Use .docx or UTF-8 .txt (up to 2 MB). For a private Google Doc or a file in Drive, download it as Word and upload it here. Images and formatting are not imported.</p>
     <label>Upload article from computer<input type="file" accept=".docx,.txt" disabled={busy}
       onChange={event => { setFile(event.target.files?.[0] ?? null); setProposal(null); }} /></label>
-    <label>Or paste Google Docs link<input type="url" value={link} disabled={busy || Boolean(file)} placeholder="https://docs.google.com/document/d/..."
+    <label>Or paste Google Docs link<input type="url" value={link} disabled={busy || Boolean(file)}
       onChange={event => { setLink(event.target.value); setProposal(null); }} /></label>
     {file && <button type="button" disabled={busy} onClick={() => { setFile(null); setProposal(null); }}>Use Google Docs instead</button>}
     <button type="button" disabled={busy || (!file && !link.trim())} onClick={() => void prepare()}>{busy ? "Reading document…" : "Prepare import review"}</button>
