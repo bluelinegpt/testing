@@ -54,14 +54,13 @@ describe("AgentService privacy boundary", () => {
 });
 
 describe("AgentService public conversation intro", () => {
-  it("asks for the visitor name before answering business questions", () => {
+  it("does not block general questions with contact collection", () => {
     const response = publicConversationIntroStep("ما هو توصيل هب", "ar", {
       slots: {},
       audience: "unknown",
     });
 
-    expect(response?.content).toContain("ما اسمك");
-    expect(response?.structured.state.lastAskedSlot).toBe("contactName");
+    expect(response).toBeUndefined();
   });
 
   it("collects only name and UAE mobile -- never company/store name or email, regardless of context", () => {
@@ -69,13 +68,14 @@ describe("AgentService public conversation intro", () => {
       slots: {},
       audience: "unknown",
       lastAskedSlot: "contactName",
-    });
+    }, "customer_quote");
     expect(afterName?.content).toContain("الهاتف");
 
     const afterMobile = publicConversationIntroStep(
       "0506468441",
       "ar",
       afterName!.structured.state,
+      "customer_quote",
     );
     // No pending workflow -- generic acknowledgement, not a company/email ask.
     expect(afterMobile?.content).toContain("كيف يمكنني مساعدتك");
@@ -91,7 +91,7 @@ describe("AgentService public conversation intro", () => {
       slots: { contactName: "علي" },
       audience: "unknown",
       lastAskedSlot: "requesterMobile",
-    });
+    }, "customer_quote");
 
     expect(response?.content).toContain("رقم الهاتف غير واضح");
     expect(response?.structured.state.lastAskedSlot).toBe("requesterMobile");
@@ -159,14 +159,13 @@ describe("AgentService public conversation intro -- resuming a pending workflow"
     expect(afterMobile?.resumeIntent).toBe("shipment_tracking");
   });
 
-  it("gives the generic acknowledgement, not a resume, when no workflow is pending", () => {
+  it("does not collect contact details when no workflow is pending", () => {
     const afterMobile = publicConversationIntroStep("0501234567", "en", {
       slots: { contactName: "Ahmed" },
       audience: "unknown",
       lastAskedSlot: "requesterMobile",
     });
-    expect(afterMobile?.resumeIntent).toBeUndefined();
-    expect(afterMobile?.content).toContain("Thanks, I saved the contact details");
+    expect(afterMobile).toBeUndefined();
   });
 });
 

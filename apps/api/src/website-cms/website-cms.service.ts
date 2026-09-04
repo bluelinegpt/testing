@@ -153,6 +153,17 @@ export function isImage(bytes: Uint8Array, declared: string): { ok: true; mediaT
   return { ok: true, ...detected };
 }
 
+export function isWebsiteMedia(bytes: Uint8Array, declared: string): { ok: true; mediaType: string; ext: string } | { ok: false; reason: string } {
+  const image = isImage(bytes, declared);
+  if (image.ok) return image;
+  if (bytes.length === 0) return { ok: false, reason: "empty_file" };
+  if (bytes.length > 20 * 1024 * 1024) return { ok: false, reason: "file_too_large" };
+  const mp4 = bytes.length >= 12 && Buffer.from(bytes.subarray(4, 8)).toString("ascii") === "ftyp";
+  if (!mp4) return { ok: false, reason: "unsupported_media_signature" };
+  if (declared.toLowerCase() !== "video/mp4") return { ok: false, reason: "declared_media_type_mismatch" };
+  return { ok: true, mediaType: "video/mp4", ext: "mp4" };
+}
+
 @Injectable()
 export class WebsiteCmsService {
   private readonly storageProvider: string;
@@ -475,9 +486,9 @@ export class WebsiteCmsService {
   }
 
   public async uploadMedia(file: UploadedFile | undefined, body: MediaAltDto, actor: string) {
-    if (!file) throw new BadRequestException("Featured image must be JPG, PNG, or WebP.");
-    const validation = isImage(file.buffer, file.mimetype);
-    if (!validation.ok) throw new BadRequestException(`Featured image must be JPG, PNG, or WebP (${validation.reason}).`);
+    if (!file) throw new BadRequestException("Website media must be MP4, JPG, PNG, or WebP.");
+    const validation = isWebsiteMedia(file.buffer, file.mimetype);
+    if (!validation.ok) throw new BadRequestException(`Website media must be MP4, JPG, PNG, or WebP (${validation.reason}).`);
     const mediaToken = randomUUID();
     const key = `website/${mediaToken}.${validation.ext}`;
     await this.storage.storeWebsite(key, file.buffer);

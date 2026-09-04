@@ -1,4 +1,4 @@
-import { apiBase } from "./api-base";
+import { apiBase, publicAssetUrl } from "./api-base";
 
 const base = () => apiBase();
 
@@ -39,6 +39,65 @@ export interface AgentAvailability {
   readonly status: "available" | "unavailable";
 }
 
+export interface AgentAvatarSettings {
+  readonly enabled: boolean;
+  readonly displayName: string;
+  readonly titleEn: string;
+  readonly titleAr: string;
+  readonly imageUrl?: string;
+  readonly introVideoUrlEn?: string;
+  readonly introVideoUrlAr?: string;
+  readonly introImageUrlEn?: string;
+  readonly introImageUrlAr?: string;
+  readonly homeOperationsImageUrlEn?: string;
+  readonly homeOperationsImageUrlAr?: string;
+  readonly introTranscriptEn: string;
+  readonly introTranscriptAr: string;
+  readonly showOnHomepage: boolean;
+  readonly showOnPricing: boolean;
+  readonly showOnDeliveryCompany: boolean;
+  readonly showOnTrader: boolean;
+  readonly showOnSendPackage: boolean;
+  readonly autoOpen: boolean;
+  readonly provider: "prerecorded" | "heygen" | "tavus" | "future_provider";
+  readonly status: "active" | "offline";
+  readonly liveEnabled: boolean;
+  readonly liveProvider: "heygen_live" | "tavus_live" | "future_provider";
+  readonly liveConfigured: boolean;
+}
+
+export const fallbackAvatarSettings: AgentAvatarSettings = {
+  enabled: false,
+  displayName: "Yousef",
+  titleEn: "Tawseelhub AI Advisor",
+  titleAr: "مستشار توصيل هب الذكي",
+  imageUrl: "/yousef-ai-advisor.svg",
+  introTranscriptEn: "Hi, I’m Yousef, Tawseelhub’s AI advisor. Ask me anything about Tawseelhub and I’ll guide you.",
+  introTranscriptAr: "مرحباً، أنا يوسف، المستشار الذكي لمنصة توصيل هب. اسألني عن أي شيء يخص توصيل هب وسأساعدك.",
+  showOnHomepage: true,
+  showOnPricing: true,
+  showOnDeliveryCompany: true,
+  showOnTrader: true,
+  showOnSendPackage: true,
+  autoOpen: false,
+  provider: "prerecorded",
+  status: "active",
+  liveEnabled: false,
+  liveProvider: "heygen_live",
+  liveConfigured: false,
+};
+
+export type LiveAvatarSessionToken = {
+  readonly provider: "heygen_live";
+  readonly token: string;
+  readonly sandbox: boolean;
+  readonly idleTimeoutSeconds: number;
+  readonly maxSessionSeconds: number;
+  readonly usageId: string;
+};
+
+export type LiveAvatarUsageEvent = "response_completed" | "fallback" | "provider_error" | "ended";
+
 // Exported so the chat widget can render its WhatsApp CTA instantly from
 // this, keeping the settings request out of the page-load network chain --
 // the live settings are fetched on first user interaction instead.
@@ -60,13 +119,33 @@ async function parse(response: Response): Promise<AgentConversation> {
   return body as AgentConversation;
 }
 
-export async function createAgentConversation(language: "en" | "ar", visitorId?: string): Promise<AgentConversation> {
+export async function createAgentConversation(language: "en" | "ar", visitorId?: string, surface: "website" | "website_avatar" = "website"): Promise<AgentConversation> {
   const response = await fetch(`${base()}/public/agent/conversations`, {
-    body: JSON.stringify({ language, ...(visitorId === undefined ? {} : { visitorId }) }),
+    body: JSON.stringify({ language, surface, ...(visitorId === undefined ? {} : { visitorId }) }),
     headers: { "content-type": "application/json" },
     method: "POST",
   });
   return parse(response);
+}
+
+export async function getAvatarSettings(): Promise<AgentAvatarSettings> {
+  try {
+    const response = await fetch(`${base()}/public/agent/avatar/settings`, { method: "GET" });
+    if (!response.ok) return fallbackAvatarSettings;
+    const settings = { ...fallbackAvatarSettings, ...(await response.json()) };
+    return {
+      ...settings,
+      imageUrl: publicAssetUrl(settings.imageUrl),
+      introVideoUrlEn: publicAssetUrl(settings.introVideoUrlEn),
+      introVideoUrlAr: publicAssetUrl(settings.introVideoUrlAr),
+      introImageUrlEn: publicAssetUrl(settings.introImageUrlEn),
+      introImageUrlAr: publicAssetUrl(settings.introImageUrlAr),
+      homeOperationsImageUrlEn: publicAssetUrl(settings.homeOperationsImageUrlEn),
+      homeOperationsImageUrlAr: publicAssetUrl(settings.homeOperationsImageUrlAr),
+    };
+  } catch {
+    return fallbackAvatarSettings;
+  }
 }
 
 export async function getAgentConversation(token: string): Promise<AgentConversation> {
@@ -81,6 +160,25 @@ export async function sendAgentMessage(token: string, message: string, language:
     method: "POST",
   });
   return parse(response);
+}
+
+export async function createLiveAvatarSession(token: string, language: "en" | "ar"): Promise<LiveAvatarSessionToken> {
+  const response = await fetch(`${base()}/public/agent/conversations/${encodeURIComponent(token)}/avatar/live-session`, {
+    body: JSON.stringify({ language }),
+    headers: { "content-type": "application/json" },
+    method: "POST",
+  });
+  if (!response.ok) throw new Error("live_avatar_unavailable");
+  return response.json() as Promise<LiveAvatarSessionToken>;
+}
+
+export async function reportLiveAvatarUsage(token: string, usageId: string, event: LiveAvatarUsageEvent, durationSeconds?: number, reason?: string) {
+  await fetch(`${base()}/public/agent/conversations/${encodeURIComponent(token)}/avatar/live-usage/${encodeURIComponent(usageId)}`, {
+    body: JSON.stringify({ event, ...(durationSeconds === undefined ? {} : { durationSeconds }), ...(reason ? { reason } : {}) }),
+    headers: { "content-type": "application/json" },
+    keepalive: event === "ended",
+    method: "POST",
+  }).catch(() => undefined);
 }
 
 export async function getWhatsAppSettings(): Promise<WhatsAppPublicSettings> {

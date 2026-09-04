@@ -1,11 +1,59 @@
 import { Transform } from "class-transformer";
-import { IsIn, IsOptional, IsString, MaxLength, MinLength } from "class-validator";
+import { IsIn, IsInt, IsNumber, IsOptional, IsString, Matches, Max, MaxLength, Min, MinLength } from "class-validator";
 
 const trim = ({ value }: { value: unknown }) => (typeof value === "string" ? value.trim() : value);
 
 export class CreateAgentConversationDto {
   @IsOptional() @IsIn(["en", "ar"]) readonly language?: "en" | "ar";
   @IsOptional() @Transform(trim) @IsString() @MaxLength(80) readonly visitorId?: string;
+  @IsOptional() @IsIn(["website", "website_avatar"]) readonly surface?: "website" | "website_avatar";
+}
+
+export class AgentAvatarSettingsDto {
+  @IsIn([true, false]) readonly enabled!: boolean;
+  @Transform(trim) @IsString() @MinLength(2) @MaxLength(80) readonly displayName!: string;
+  @Transform(trim) @IsString() @MinLength(2) @MaxLength(120) readonly titleEn!: string;
+  @Transform(trim) @IsString() @MinLength(2) @MaxLength(120) readonly titleAr!: string;
+  @IsOptional() @Transform(trim) @Matches(/^(https:\/\/|\/)/) @MaxLength(1000) readonly imageUrl?: string;
+  @IsOptional() @Transform(trim) @Matches(/^(https:\/\/|\/api\/v1\/public\/website\/media\/)/) @MaxLength(1000) readonly introVideoUrlEn?: string;
+  @IsOptional() @Transform(trim) @Matches(/^(https:\/\/|\/api\/v1\/public\/website\/media\/)/) @MaxLength(1000) readonly introVideoUrlAr?: string;
+  @IsOptional() @Transform(trim) @Matches(/^(https:\/\/|\/api\/v1\/public\/website\/media\/|\/)/) @MaxLength(1000) readonly introImageUrlEn?: string;
+  @IsOptional() @Transform(trim) @Matches(/^(https:\/\/|\/api\/v1\/public\/website\/media\/|\/)/) @MaxLength(1000) readonly introImageUrlAr?: string;
+  @IsOptional() @Transform(trim) @Matches(/^(https:\/\/|\/api\/v1\/public\/website\/media\/|\/)/) @MaxLength(1000) readonly homeOperationsImageUrlEn?: string;
+  @IsOptional() @Transform(trim) @Matches(/^(https:\/\/|\/api\/v1\/public\/website\/media\/|\/)/) @MaxLength(1000) readonly homeOperationsImageUrlAr?: string;
+  @Transform(trim) @IsString() @MinLength(10) @MaxLength(4000) readonly introTranscriptEn!: string;
+  @Transform(trim) @IsString() @MinLength(10) @MaxLength(4000) readonly introTranscriptAr!: string;
+  @IsIn([true, false]) readonly showOnHomepage!: boolean;
+  @IsIn([true, false]) readonly showOnPricing!: boolean;
+  @IsIn([true, false]) readonly showOnDeliveryCompany!: boolean;
+  @IsIn([true, false]) readonly showOnTrader!: boolean;
+  @IsIn([true, false]) readonly showOnSendPackage!: boolean;
+  @IsIn([true, false]) readonly autoOpen!: boolean;
+  @IsIn(["prerecorded", "heygen", "tavus", "future_provider"]) readonly provider!: "prerecorded" | "heygen" | "tavus" | "future_provider";
+  @IsIn(["active", "offline"]) readonly status!: "active" | "offline";
+  @IsOptional() @IsIn([true, false]) readonly liveEnabled?: boolean;
+  @IsOptional() @IsIn(["heygen_live", "tavus_live", "future_provider"]) readonly liveProvider?: "heygen_live" | "tavus_live" | "future_provider";
+  @IsOptional() @Transform(trim) @IsString() @MaxLength(200) readonly liveAvatarId?: string;
+  @IsOptional() @Transform(trim) @IsString() @MaxLength(200) readonly liveVoiceIdEn?: string;
+  @IsOptional() @Transform(trim) @IsString() @MaxLength(200) readonly liveVoiceIdAr?: string;
+  @IsOptional() @Transform(trim) @IsString() @MaxLength(200) readonly liveVoiceAgentIdEn?: string;
+  @IsOptional() @Transform(trim) @IsString() @MaxLength(200) readonly liveVoiceAgentIdAr?: string;
+  @IsOptional() @IsInt() @Min(30) @Max(1800) readonly liveMaxSessionSeconds?: number;
+  @IsOptional() @IsInt() @Min(15) @Max(300) readonly liveIdleTimeoutSeconds?: number;
+  @IsOptional() @IsInt() @Min(1) @Max(100) readonly liveMaxConcurrentSessions?: number;
+  @IsOptional() @IsInt() @Min(1) @Max(60) readonly liveStartRateLimitPerMinute?: number;
+  @IsOptional() @IsInt() @Min(1) @Max(100000) readonly liveDailyMinuteCap?: number;
+  @IsOptional() @IsNumber() @Min(0) @Max(100000) readonly liveCostPerMinute?: number;
+}
+
+export class CreateLiveAvatarSessionDto {
+  @IsIn(["en", "ar"]) readonly language!: "en" | "ar";
+}
+
+export class LiveAvatarUsageDto {
+  @IsIn(["response_completed", "fallback", "provider_error", "ended"]) readonly event!: "response_completed" | "fallback" | "provider_error" | "ended";
+  @IsOptional() @IsNumber() @Min(0) @Max(1800) readonly durationSeconds?: number;
+  @IsOptional() @Transform(trim) @IsString() @MaxLength(80) readonly reason?: string;
 }
 
 export class SendAgentMessageDto {

@@ -47,6 +47,26 @@ export type AnalyticsEventName =
   | "agent_demo_request_success"
   | "agent_handoff_created"
   | "agent_error"
+  | "avatar_opened"
+  | "intro_started"
+  | "intro_completed"
+  | "voice_session_started"
+  | "speech_to_text_seconds"
+  | "text_to_speech_characters"
+  | "voice_response_completed"
+  | "voice_error"
+  | "live_avatar_session_started"
+  | "live_avatar_session_seconds"
+  | "live_avatar_response_started"
+  | "live_avatar_response_completed"
+  | "live_avatar_error"
+  | "live_avatar_fallback_used"
+  | "question_asked"
+  | "quick_action_clicked"
+  | "demo_started_from_avatar"
+  | "trader_registration_started_from_avatar"
+  | "quote_started_from_avatar"
+  | "avatar_closed"
   | "delivery_company_page_view"
   | "trader_page_view"
   | "trader_registration_clicked"
@@ -98,11 +118,15 @@ export type SafeMetadata = {
   cta_type?: string | undefined;
   article_slug?: string | undefined;
   category_slug?: string | undefined;
-  channel?: "website" | "whatsapp" | "simulator" | undefined;
+  channel?: "website" | "website_avatar" | "whatsapp" | "simulator" | undefined;
   initiated_from?: "agent" | "website_cta" | string | undefined;
   intent?: string | undefined;
   classification?: string | undefined;
   actionResult?: string | undefined;
+  provider?: string | undefined;
+  duration_seconds?: number | undefined;
+  character_count?: number | undefined;
+  error_code?: string | undefined;
   reference?: string | undefined;
   demo_reference?: string | undefined;
   quote_reference?: string | undefined;

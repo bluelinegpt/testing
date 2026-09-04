@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Inject, Param, Patch, Post, Query } from "@nestjs/common";
-import { AgentConversationCommentDto, AgentConversationReviewDto, AgentKnowledgeDto, AgentSettingsDto, ConversationModeDto, HandoffStatusDto, PlatformWhatsAppReplyDto } from "../agent/agent.dto.js";
+import { AgentAvatarSettingsDto, AgentConversationCommentDto, AgentConversationReviewDto, AgentKnowledgeDto, AgentSettingsDto, ConversationModeDto, HandoffStatusDto, PlatformWhatsAppReplyDto } from "../agent/agent.dto.js";
 import { AgentService } from "../agent/agent.service.js";
 import { IdentityContextAccessor } from "../security/identity-context.js";
 import { RequirePlatformPermissions } from "./platform-authorization.js";
@@ -106,5 +106,10 @@ export class PlatformAgentController {
   @RequirePlatformPermissions(MANAGE) @Patch("settings")
   public updateSettings(@Body() body: AgentSettingsDto) {
     return this.agent.updateSettings(body, this.actor());
+  }
+
+  @RequirePlatformPermissions(MANAGE) @Patch("avatar/settings")
+  public updateAvatarSettings(@Body() body: AgentAvatarSettingsDto) {
+    return this.agent.updateAvatarSettings(body, this.actor());
   }
 }

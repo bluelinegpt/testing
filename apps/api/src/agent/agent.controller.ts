@@ -3,7 +3,7 @@ import type { Request } from "express";
 import { Throttle } from "@nestjs/throttler";
 import { Public } from "../authentication/authentication.decorators.js";
 import { AgentService } from "./agent.service.js";
-import { CreateAgentConversationDto, SendAgentMessageDto, SimulateWhatsAppMessageDto } from "./agent.dto.js";
+import { CreateAgentConversationDto, CreateLiveAvatarSessionDto, LiveAvatarUsageDto, SendAgentMessageDto, SimulateWhatsAppMessageDto } from "./agent.dto.js";
 
 @Controller("public/agent")
 export class PublicAgentController {
@@ -24,8 +24,12 @@ export class PublicAgentController {
 
   @Public() @Throttle({ default: { limit: 8, ttl: 60000 } }) @HttpCode(201) @Post("conversations")
   public create(@Body() body: CreateAgentConversationDto, @Req() request: Request) {
-    return this.agent.createWebsiteConversation(body.language, body.visitorId, this.requestIp(request));
+    return this.agent.createWebsiteConversation(body.language, body.visitorId, this.requestIp(request), body.surface);
   }
+
+  @Public() @Get("avatar/settings")
+  @Header("Cache-Control", "no-store")
+  public avatarSettings() { return this.agent.publicAvatarSettings(); }
 
   @Public() @Throttle({ default: { limit: 30, ttl: 60000 } }) @Get("conversations/:token")
   public get(@Param("token") token: string) {
@@ -35,6 +39,16 @@ export class PublicAgentController {
   @Public() @Throttle({ default: { limit: 18, ttl: 60000 } }) @Post("conversations/:token/messages")
   public message(@Param("token") token: string, @Body() body: SendAgentMessageDto, @Req() request: Request) {
     return this.agent.receiveWebsiteMessage(token, body.message, body.language, this.requestIp(request));
+  }
+
+  @Public() @Throttle({ default: { limit: 3, ttl: 60000 } }) @HttpCode(201) @Post("conversations/:token/avatar/live-session")
+  public liveAvatarSession(@Param("token") token: string, @Body() body: CreateLiveAvatarSessionDto, @Req() request: Request) {
+    return this.agent.createLiveAvatarSession(token, body.language, this.requestIp(request));
+  }
+
+  @Public() @Throttle({ default: { limit: 60, ttl: 60000 } }) @Post("conversations/:token/avatar/live-usage/:usageId")
+  public liveAvatarUsage(@Param("token") token: string, @Param("usageId") usageId: string, @Body() body: LiveAvatarUsageDto) {
+    return this.agent.reportLiveAvatarUsage(token, usageId, body);
   }
 
   @Public() @Throttle({ default: { limit: 20, ttl: 60000 } }) @Post("whatsapp/simulate")

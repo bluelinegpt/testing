@@ -14,8 +14,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 vi.mock('./agent-client', () => ({
   buildWhatsAppMessageUrl: (url: string) => url,
   createAgentConversation: vi.fn().mockResolvedValue({ conversationId: 'c1', token: 't1', welcomeMessages: [] }),
+  fallbackAvatarSettings: { enabled: false, displayName: 'Yousef', titleEn: 'AI Advisor', titleAr: 'مستشار ذكي', introTranscriptEn: 'Hello from Yousef', introTranscriptAr: 'مرحباً من يوسف', showOnHomepage: true, showOnPricing: true, showOnDeliveryCompany: true, showOnTrader: true, showOnSendPackage: true, autoOpen: false, provider: 'prerecorded', status: 'active' },
   fallbackWhatsAppSettings: { enabled: false, label: 'Chat on WhatsApp', number: '', url: null },
   getAgentAvailability: vi.fn().mockResolvedValue({ assistantAvailable: true, humanAvailable: false, status: 'assistant_only' }),
+  getAvatarSettings: vi.fn().mockResolvedValue({ enabled: false }),
   getAgentConversation: vi.fn().mockResolvedValue(null),
   getWhatsAppSettings: vi.fn().mockResolvedValue({ enabled: false, url: null }),
   sendAgentMessage: vi.fn(),

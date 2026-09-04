@@ -1,17 +1,35 @@
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { FormEvent } from "react";
 import {
   buildWhatsAppMessageUrl,
   createAgentConversation,
+  createLiveAvatarSession,
   fallbackWhatsAppSettings,
+  fallbackAvatarSettings,
   getAgentAvailability,
+  getAvatarSettings,
   getAgentConversation,
   getWhatsAppSettings,
+  reportLiveAvatarUsage,
   sendAgentMessage,
   type AgentAvailability,
+  type AgentAvatarSettings,
   type AgentMessage,
   type WhatsAppPublicSettings,
 } from "./agent-client";
+import {
+  createAvatarProvider,
+  HeyGenLiveAvatarProvider,
+  transcriptTrackUrl,
+  type AvatarState,
+} from "./avatar-provider";
 import { trackEvent } from "./analytics";
+import {
+  createSpeechToTextProvider,
+  createTextToSpeechProvider,
+  type SpeechToTextProvider,
+  type TextToSpeechProvider,
+} from "./voice-provider";
 import {
   getStoredPublicLocale,
   publicLocaleChangeEvent,
@@ -39,6 +57,22 @@ const fallbackQuickActions = {
     "التسجيل كتاجر",
     "طلب عرض لنظام شركة توصيل",
     "معرفة المزيد عن Tawseelhub",
+  ],
+} as const;
+const avatarQuickActions = {
+  en: [
+    "How Tawseelhub Works",
+    "Get a Delivery Quote",
+    "Register as Trader",
+    "Request a Demo",
+    "Send a Package",
+  ],
+  ar: [
+    "كيف تعمل Tawseelhub",
+    "احصل على عرض توصيل",
+    "التسجيل كتاجر",
+    "طلب عرض توضيحي",
+    "إرسال شحنة",
   ],
 } as const;
 const visitorIdKey = "tawseelhub-agent-visitor-id";
@@ -85,6 +119,16 @@ export function AgentChat() {
     humanAvailable: false,
     status: "unavailable",
   });
+  const [avatar, setAvatar] = useState<AgentAvatarSettings>(fallbackAvatarSettings);
+  const [avatarState, setAvatarState] = useState<AvatarState>("idle");
+  const [voiceListening, setVoiceListening] = useState(false);
+  const [voiceSpeaking, setVoiceSpeaking] = useState(false);
+  const [voiceRepliesEnabled, setVoiceRepliesEnabled] = useState(false);
+  const [liveSessionActive, setLiveSessionActive] = useState(false);
+  const [lastSpokenAnswer, setLastSpokenAnswer] = useState("");
+  const [introVideoFailed, setIntroVideoFailed] = useState(false);
+  const [introImageFailed, setIntroImageFailed] = useState(false);
+  const [defaultImageFailed, setDefaultImageFailed] = useState(false);
   const [handoffRequested, setHandoffRequested] = useState(false);
   const [humanState, setHumanState] = useState<"ai_active" | "waiting_for_human" | "human_active">(
     "ai_active",
@@ -93,8 +137,28 @@ export function AgentChat() {
   const messagesRef = useRef<HTMLDivElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const liveVideoRef = useRef<HTMLVideoElement | null>(null);
+  const liveAvatarProviderRef = useRef<HeyGenLiveAvatarProvider | null>(null);
+  const liveUsageRef = useRef<{ token: string; usageId: string } | null>(null);
+  const introStartedRef = useRef(false);
+  const speechToTextRef = useRef<SpeechToTextProvider | null>(null);
+  const textToSpeechRef = useRef<TextToSpeechProvider | null>(null);
+  const autoOpenedRef = useRef(false);
   const widgetDataLoaderRef = useRef<(() => void) | null>(null);
   const isRtl = language === "ar";
+  const path = window.location.pathname.replace(/\/$/, "") || "/";
+  const avatarAllowedOnPage =
+    (path === "/" && avatar.showOnHomepage) ||
+    (path === "/pricing" && avatar.showOnPricing) ||
+    (["/delivery-companies", "/delivery-company"].includes(path) && avatar.showOnDeliveryCompany) ||
+    (["/traders", "/trader"].includes(path) && avatar.showOnTrader) ||
+    (["/send-a-package", "/send-package"].includes(path) && avatar.showOnSendPackage);
+  const avatarMode = avatar.enabled && avatar.status === "active" && avatarAllowedOnPage;
+  const avatarTitle = isRtl ? avatar.titleAr : avatar.titleEn;
+  const introTranscript = isRtl ? avatar.introTranscriptAr : avatar.introTranscriptEn;
+  const introVideoUrl = isRtl ? avatar.introVideoUrlAr : avatar.introVideoUrlEn;
+  const introImageUrl = isRtl ? avatar.introImageUrlAr : avatar.introImageUrlEn;
   const launcherLabel = isRtl ? "اسأل Tawseelhub" : "Ask Tawseelhub";
   const humanAvailable = availability.humanAvailable;
   const humanStatusLabel = humanAvailable
@@ -104,12 +168,37 @@ export function AgentChat() {
     : isRtl
       ? "لا يوجد دعم بشري الآن"
       : "Human support unavailable now";
+  speechToTextRef.current ??= createSpeechToTextProvider("browser");
+  textToSpeechRef.current ??= createTextToSpeechProvider("browser");
   const welcome = useMemo(() => (messages.length > 0 ? messages : []), [messages]);
+
+  useEffect(() => {
+    introStartedRef.current = false;
+    setIntroVideoFailed(false);
+    setIntroImageFailed(false);
+    setDefaultImageFailed(false);
+  }, [introImageUrl, introVideoUrl]);
+
+  useEffect(
+    () => () => {
+      void liveAvatarProviderRef.current?.endSession();
+      liveAvatarProviderRef.current = null;
+    },
+    [],
+  );
+
+  useEffect(() => {
+    const stop = () => void liveAvatarProviderRef.current?.endSession();
+    window.addEventListener("pagehide", stop);
+    return () => window.removeEventListener("pagehide", stop);
+  }, []);
   // Reads the LATEST assistant message, not just the first one -- so quick
   // actions correctly disappear once a real question is pending (that
   // message carries no quickActions) and can reappear later (e.g. after
   // typing "menu" to start over) without needing a special case here.
   const visibleQuickActions = useMemo(() => {
+    if (avatarMode && !messages.some((message) => message.senderType === "user"))
+      return [...avatarQuickActions[language]];
     const latestAssistantMessage = [...messages]
       .reverse()
       .find((message) => message.senderType === "assistant");
@@ -122,11 +211,21 @@ export function AgentChat() {
     // No assistant message yet (still waiting on the network) -- show the
     // fallback list so quick actions never visibly "pop in" once it lands.
     return [...fallbackQuickActions[language]];
-  }, [language, messages]);
+  }, [avatarMode, language, messages]);
 
   useEffect(() => {
     const id = window.setTimeout(() => setMounted(true), 700);
     return () => window.clearTimeout(id);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void getAvatarSettings().then((next) => {
+      if (!cancelled) setAvatar(next);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -150,8 +249,7 @@ export function AgentChat() {
       });
     };
     const events = ["pointerdown", "keydown", "scroll", "touchstart"] as const;
-    const remove = () =>
-      events.forEach((name) => window.removeEventListener(name, loadWidgetData));
+    const remove = () => events.forEach((name) => window.removeEventListener(name, loadWidgetData));
     events.forEach((name) =>
       window.addEventListener(name, loadWidgetData, { once: true, passive: true }),
     );
@@ -162,6 +260,12 @@ export function AgentChat() {
       widgetDataLoaderRef.current = null;
     };
   }, []);
+
+  useEffect(() => {
+    if (!avatarMode || !avatar.autoOpen || autoOpenedRef.current) return;
+    autoOpenedRef.current = true;
+    void openChat();
+  }, [avatar.autoOpen, avatarMode]);
 
   useEffect(() => {
     // Availability polling only while the panel is open -- a closed widget
@@ -254,7 +358,11 @@ export function AgentChat() {
 
   async function ensureConversation(nextLanguage = language) {
     if (token) return token;
-    const created = await createAgentConversation(nextLanguage, visitorId());
+    const created = await createAgentConversation(
+      nextLanguage,
+      visitorId(),
+      avatarMode ? "website_avatar" : "website",
+    );
     setToken(created.conversationToken ?? null);
     // `createAgentConversation` returns quickActions as a top-level field,
     // not nested in a message -- unlike every later turn's response, which
@@ -273,7 +381,7 @@ export function AgentChat() {
     );
     setHumanState(created.humanState ?? "ai_active");
     trackEvent("agent_conversation_started", {
-      channel: "website",
+      channel: avatarMode ? "website_avatar" : "website",
       language: nextLanguage,
       page: window.location.pathname,
     });
@@ -284,10 +392,12 @@ export function AgentChat() {
     setOpen(true);
     widgetDataLoaderRef.current?.();
     trackEvent("agent_opened", { channel: "website", language, page: window.location.pathname });
+    if (avatarMode)
+      trackEvent("avatar_opened", { channel: "website_avatar", language, page: path });
     try {
       setBusy(true);
       await ensureConversation();
-    } catch (err) {
+    } catch {
       setHandoffRequested(true);
       setError(
         isRtl
@@ -317,6 +427,10 @@ export function AgentChat() {
       createdAt: new Date().toISOString(),
     };
     setMessages((items) => [...items, optimistic]);
+    if (avatarMode) {
+      setAvatarState("thinking");
+      trackEvent("question_asked", { channel: "website_avatar", language, page: path });
+    }
     scrollMessagesToBottom();
     try {
       setBusy(true);
@@ -324,6 +438,9 @@ export function AgentChat() {
       if (!currentToken) throw new Error("The Assistant could not start a secure session.");
       const result = await sendAgentMessage(currentToken, text, language);
       setMessages(result.messages ?? []);
+      const assistantAnswer = [...(result.messages ?? [])]
+        .reverse()
+        .find((item) => item.senderType === "assistant")?.content;
       setHumanState(
         result.humanState ??
           (result.conversationMode === "human_active"
@@ -351,6 +468,13 @@ export function AgentChat() {
           });
       }
       if (result.intent === "customer_quote")
+        if (avatarMode)
+          trackEvent("quote_started_from_avatar", {
+            channel: "website_avatar",
+            language,
+            page: path,
+          });
+      if (result.intent === "customer_quote")
         trackEvent("agent_quote_started", {
           channel: "website",
           language: result.language,
@@ -358,12 +482,26 @@ export function AgentChat() {
           page: window.location.pathname,
         });
       if (result.intent === "trader")
+        if (avatarMode)
+          trackEvent("trader_registration_started_from_avatar", {
+            channel: "website_avatar",
+            language,
+            page: path,
+          });
+      if (result.intent === "trader")
         trackEvent("agent_trader_application_started", {
           channel: "website",
           language: result.language,
           intent: result.intent,
           page: window.location.pathname,
         });
+      if (result.intent === "delivery_company_demo")
+        if (avatarMode)
+          trackEvent("demo_started_from_avatar", {
+            channel: "website_avatar",
+            language,
+            page: path,
+          });
       if (result.intent === "delivery_company_demo")
         trackEvent("agent_demo_request_started", {
           channel: "website",
@@ -384,7 +522,10 @@ export function AgentChat() {
         /whatsapp|واتساب/i.test(text)
       )
         setHandoffRequested(true);
-    } catch (err) {
+      if (assistantAnswer && voiceRepliesEnabled)
+        await speakAnswer(assistantAnswer, currentToken);
+      return assistantAnswer;
+    } catch {
       setHandoffRequested(true);
       setError(
         isRtl
@@ -399,6 +540,7 @@ export function AgentChat() {
       });
     } finally {
       setBusy(false);
+      if (avatarMode) setAvatarState("intro_finished");
       focusInput();
     }
   }
@@ -409,6 +551,13 @@ export function AgentChat() {
   }
 
   async function changeLanguage() {
+    speechToTextRef.current?.cancel();
+    textToSpeechRef.current?.stop();
+    await liveAvatarProviderRef.current?.endSession();
+    liveAvatarProviderRef.current = null;
+    setLiveSessionActive(false);
+    setVoiceListening(false);
+    setVoiceSpeaking(false);
     const nextLanguage = language === "en" ? "ar" : "en";
     savePublicLocale(nextLanguage);
     setLanguage(nextLanguage);
@@ -420,7 +569,11 @@ export function AgentChat() {
     if (!open) return;
     try {
       setBusy(true);
-      const created = await createAgentConversation(nextLanguage, visitorId());
+      const created = await createAgentConversation(
+        nextLanguage,
+        visitorId(),
+        avatarMode ? "website_avatar" : "website",
+      );
       setToken(created.conversationToken ?? null);
       setMessages(
         created.messages ?? [
@@ -438,7 +591,7 @@ export function AgentChat() {
         language: nextLanguage,
         page: window.location.pathname,
       });
-    } catch (err) {
+    } catch {
       setHandoffRequested(true);
       setError(
         nextLanguage === "ar"
@@ -457,10 +610,263 @@ export function AgentChat() {
     }
   }
 
+  async function playIntro() {
+    setAvatarState("intro_playing");
+    const result = await createAvatarProvider(avatar.provider, videoRef.current).playIntro();
+    if (result.status === "not_supported") setAvatarState("offline");
+    if (result.status === "error") setAvatarState("error");
+  }
+
+  function voiceFailure(code: string) {
+    setAvatarState("error");
+    setError(
+      isRtl
+        ? "تعذر استخدام الصوت الآن. يمكنك المحاولة مرة أخرى أو متابعة الكتابة."
+        : "Voice is unavailable right now. Try again or continue typing.",
+    );
+    trackEvent("voice_error", {
+      channel: "website_avatar",
+      language,
+      page: path,
+      provider: "browser",
+      error_code: code,
+    });
+  }
+
+  async function speakAnswer(answer: string, conversationToken = token) {
+    if (
+      avatarMode &&
+      avatar.liveEnabled &&
+      avatar.liveProvider === "heygen_live" &&
+      avatar.liveConfigured
+    ) {
+      const currentLiveSettings = await getAvatarSettings();
+      if (!currentLiveSettings.liveEnabled) {
+        await liveAvatarProviderRef.current?.endSession("kill_switch");
+        liveAvatarProviderRef.current = null;
+      } else {
+        const liveVideo = liveVideoRef.current;
+        const currentToken = conversationToken;
+        if (liveVideo && currentToken) {
+          liveAvatarProviderRef.current ??= new HeyGenLiveAvatarProvider({
+            video: liveVideo,
+            createToken: async () => {
+              const created = await createLiveAvatarSession(currentToken, language);
+              liveUsageRef.current = { token: currentToken, usageId: created.usageId };
+              return created;
+            },
+            onSessionStarted: (metrics) => {
+              setLiveSessionActive(true);
+              trackEvent("live_avatar_session_started", {
+                channel: "website_avatar",
+                language,
+                page: path,
+                provider: "heygen_live",
+                duration_seconds: Math.round(metrics.initializationMs) / 1000,
+              });
+            },
+            onResponseStarted: (metrics) => {
+              setAvatarState("speaking");
+              setVoiceSpeaking(true);
+              trackEvent("live_avatar_response_started", {
+                channel: "website_avatar",
+                language,
+                page: path,
+                provider: "heygen_live",
+                duration_seconds: Math.round((metrics.responseFirstFrameMs ?? 0) / 10) / 100,
+              });
+            },
+            onResponseCompleted: () => {
+              setAvatarState("idle");
+              setVoiceSpeaking(false);
+              trackEvent("live_avatar_response_completed", {
+                channel: "website_avatar",
+                language,
+                page: path,
+                provider: "heygen_live",
+              });
+              const usage = liveUsageRef.current;
+              if (usage)
+                void reportLiveAvatarUsage(usage.token, usage.usageId, "response_completed");
+            },
+            onSessionEnded: (metrics) => {
+              setLiveSessionActive(false);
+              trackEvent("live_avatar_session_seconds", {
+                channel: "website_avatar",
+                language,
+                page: path,
+                provider: "heygen_live",
+                duration_seconds: Math.round(metrics.sessionDurationSeconds * 100) / 100,
+              });
+              const usage = liveUsageRef.current;
+              liveUsageRef.current = null;
+              if (usage)
+                void reportLiveAvatarUsage(
+                  usage.token,
+                  usage.usageId,
+                  "ended",
+                  metrics.sessionDurationSeconds,
+                  metrics.endReason,
+                );
+            },
+            onError: (code) => {
+              trackEvent("live_avatar_error", {
+                channel: "website_avatar",
+                language,
+                page: path,
+                provider: "heygen_live",
+                error_code: code.slice(0, 80),
+              });
+              const usage = liveUsageRef.current;
+              if (usage)
+                void reportLiveAvatarUsage(
+                  usage.token,
+                  usage.usageId,
+                  "provider_error",
+                  undefined,
+                  code.slice(0, 80),
+                );
+            },
+          });
+          setLastSpokenAnswer(answer);
+          const result = await liveAvatarProviderRef.current.speakResponse(answer);
+          if (result.status === "ok") return;
+          trackEvent("live_avatar_fallback_used", {
+            channel: "website_avatar",
+            language,
+            page: path,
+            provider: "heygen_live",
+            error_code: result.status === "error" ? result.reason : "not_supported",
+          });
+          const usage = liveUsageRef.current;
+          if (usage)
+            void reportLiveAvatarUsage(
+              usage.token,
+              usage.usageId,
+              "fallback",
+              undefined,
+              result.status === "error" ? result.reason : "not_supported",
+            );
+        }
+      }
+    }
+    const provider = textToSpeechRef.current;
+    if (!provider?.isSupported()) {
+      voiceFailure("tts_unsupported");
+      return;
+    }
+    setVoiceSpeaking(true);
+    setAvatarState("speaking");
+    setLastSpokenAnswer(answer);
+    trackEvent("text_to_speech_characters", {
+      channel: "website_avatar",
+      language,
+      page: path,
+      provider: provider.id,
+      character_count: answer.length,
+    });
+    try {
+      await provider.speak(answer, language);
+      trackEvent("voice_response_completed", {
+        channel: "website_avatar",
+        language,
+        page: path,
+        provider: provider.id,
+      });
+      setAvatarState("idle");
+    } catch {
+      voiceFailure("tts_failed");
+    } finally {
+      setVoiceSpeaking(false);
+    }
+  }
+
+  async function toggleListening() {
+    const provider = speechToTextRef.current;
+    if (voiceListening) {
+      setVoiceListening(false);
+      setAvatarState("thinking");
+      provider?.stop();
+      return;
+    }
+    if (!provider?.isSupported()) {
+      voiceFailure("stt_unsupported");
+      return;
+    }
+    textToSpeechRef.current?.stop();
+    videoRef.current?.pause();
+    setVoiceSpeaking(false);
+    setVoiceListening(true);
+    setAvatarState("listening");
+    setError(null);
+    trackEvent("voice_session_started", {
+      channel: "website_avatar",
+      language,
+      page: path,
+      provider: provider.id,
+    });
+    try {
+      const result = await provider.listen(language);
+      setVoiceListening(false);
+      trackEvent("speech_to_text_seconds", {
+        channel: "website_avatar",
+        language,
+        page: path,
+        provider: provider.id,
+        duration_seconds: Math.round(result.durationSeconds * 100) / 100,
+      });
+      await submitMessage(result.transcript);
+    } catch (caught) {
+      setVoiceListening(false);
+      const code = caught instanceof Error ? caught.message : "stt_failed";
+      if (code === "speech_recognition_cancelled") return;
+      voiceFailure(code === "not-allowed" ? "microphone_denied" : "stt_failed");
+    }
+  }
+
+  function stopVoice() {
+    speechToTextRef.current?.cancel();
+    textToSpeechRef.current?.stop();
+    (liveAvatarProviderRef.current as HeyGenLiveAvatarProvider | null)?.interrupt();
+    setVoiceListening(false);
+    setVoiceSpeaking(false);
+    setAvatarState("idle");
+  }
+
+  function toggleVoiceReplies(enabled: boolean) {
+    setVoiceRepliesEnabled(enabled);
+    if (enabled) return;
+    stopVoice();
+    void liveAvatarProviderRef.current?.endSession("voice_disabled");
+    liveAvatarProviderRef.current = null;
+    setLiveSessionActive(false);
+  }
+
+  function closeAvatar() {
+    stopVoice();
+    void createAvatarProvider(avatar.provider, videoRef.current).endSession();
+    void liveAvatarProviderRef.current?.endSession();
+    liveAvatarProviderRef.current = null;
+    setLiveSessionActive(false);
+    if (avatarMode)
+      trackEvent("avatar_closed", { channel: "website_avatar", language, page: path });
+    setOpen(false);
+  }
+
+  function submitQuickAction(action: string) {
+    if (avatarMode)
+      trackEvent("quick_action_clicked", { channel: "website_avatar", language, page: path });
+    void submitMessage(action);
+  }
+
   if (!mounted) return null;
 
   return (
-    <div className={`agent-chat ${isRtl ? "agent-chat--rtl" : ""}`} dir={isRtl ? "rtl" : "ltr"}>
+    <div
+      className={`agent-chat ${isRtl ? "agent-chat--rtl" : ""} ${avatarMode ? "agent-chat--avatar" : ""}`}
+      dir={isRtl ? "rtl" : "ltr"}
+      data-avatar-state={avatarMode ? avatarState : undefined}
+    >
       {!open ? (
         <div className="agent-chat__floating-actions">
           {whatsapp?.enabled && whatsapp.url ? (
@@ -490,13 +896,31 @@ export function AgentChat() {
             </a>
           ) : null}
           <button
-            className="agent-chat__launcher"
+            className={`agent-chat__launcher ${avatarMode ? "agent-chat__avatar-launcher" : ""}`}
             type="button"
             onClick={() => void openChat()}
             aria-label={launcherLabel}
           >
-            <span aria-hidden="true">T</span>
-            <b>{launcherLabel}</b>
+            <span aria-hidden="true">
+              {avatarMode && avatar.imageUrl ? (
+                <img src={avatar.imageUrl} alt="" />
+              ) : avatarMode ? (
+                "Y"
+              ) : (
+                "T"
+              )}
+            </span>
+            <b>
+              {avatarMode ? (
+                <>
+                  <small>{isRtl ? "قابل يوسف" : "Meet Yousef"}</small>
+                  {avatarTitle}
+                  <em>{isRtl ? "مستشار ذكي" : "AI Advisor"}</em>
+                </>
+              ) : (
+                launcherLabel
+              )}
+            </b>
             <i
               className={
                 humanAvailable
@@ -546,7 +970,7 @@ export function AgentChat() {
             </button>
             <button
               type="button"
-              onClick={() => setOpen(false)}
+              onClick={closeAvatar}
               aria-label={isRtl ? "تصغير المحادثة" : "Minimize chat"}
             >
               <span aria-hidden="true">−</span>
@@ -554,15 +978,107 @@ export function AgentChat() {
             <button
               type="button"
               onClick={() => {
-                setOpen(false);
-                setMessages([]);
-                setToken(null);
+                closeAvatar();
+                if (!avatarMode) {
+                  setMessages([]);
+                  setToken(null);
+                }
               }}
               aria-label={isRtl ? "إغلاق المحادثة" : "Close chat"}
             >
               <span aria-hidden="true">×</span>
             </button>
           </header>
+          {avatarMode ? (
+            <div className="agent-chat__avatar-stage">
+              <div className="agent-chat__avatar-media">
+                <video
+                  className={
+                    liveSessionActive
+                      ? "agent-chat__live-avatar"
+                      : "agent-chat__live-avatar agent-chat__avatar-media--inactive"
+                  }
+                  ref={liveVideoRef}
+                  autoPlay
+                  playsInline
+                  aria-label={isRtl ? "فيديو يوسف المباشر" : "Live Yousef video"}
+                />
+                {introVideoUrl && !introVideoFailed && avatar.provider === "prerecorded" ? (
+                  <video
+                    className={
+                      !liveSessionActive
+                        ? "agent-chat__intro-avatar"
+                        : "agent-chat__intro-avatar agent-chat__avatar-media--inactive"
+                    }
+                    ref={videoRef}
+                    controls
+                    playsInline
+                    preload="metadata"
+                    poster={!introImageFailed ? introImageUrl ?? avatar.imageUrl : avatar.imageUrl}
+                    src={introVideoUrl}
+                    onPlay={() => {
+                      setAvatarState("intro_playing");
+                      if (!introStartedRef.current) {
+                        introStartedRef.current = true;
+                        trackEvent("intro_started", {
+                          channel: "website_avatar",
+                          language,
+                          page: path,
+                        });
+                      }
+                    }}
+                    onEnded={() => {
+                      setAvatarState("intro_finished");
+                      trackEvent("intro_completed", {
+                        channel: "website_avatar",
+                        language,
+                        page: path,
+                      });
+                    }}
+                    onError={() => {
+                      setIntroVideoFailed(true);
+                      setAvatarState("error");
+                    }}
+                  >
+                    <track
+                      kind="captions"
+                      src={transcriptTrackUrl(introTranscript)}
+                      srcLang={language}
+                      label={language === "ar" ? "العربية" : "English"}
+                    />
+                  </video>
+                ) : introImageUrl && !introImageFailed ? (
+                  <img src={introImageUrl} alt="" onError={() => setIntroImageFailed(true)} />
+                ) : avatar.imageUrl && !defaultImageFailed ? (
+                  <img src={avatar.imageUrl} alt="" onError={() => setDefaultImageFailed(true)} />
+                ) : (
+                  <div className="agent-chat__avatar-fallback" aria-hidden="true">
+                    Y
+                  </div>
+                )}
+              </div>
+              <div className="agent-chat__avatar-status">
+                <span>
+                  {avatar.displayName} · {isRtl ? "مستشار ذكي" : "AI Advisor"}
+                </span>
+                {introVideoUrl && !introVideoFailed &&
+                avatar.provider === "prerecorded" &&
+                !liveSessionActive &&
+                avatarState !== "intro_playing" ? (
+                  <button type="button" onClick={() => void playIntro()}>
+                    {isRtl ? "تشغيل المقدمة" : "Play introduction"}
+                  </button>
+                ) : null}
+                {avatarState === "error" || avatarState === "offline" ? (
+                  <small>
+                    {isRtl
+                      ? "الفيديو غير متاح. يمكنك متابعة المحادثة النصية أدناه."
+                      : "Video is unavailable. Continue with the text conversation below."}
+                  </small>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
           <div
             className="agent-chat__messages"
             role="log"
@@ -600,7 +1116,7 @@ export function AgentChat() {
                 aria-label={isRtl ? "إجراءات سريعة" : "Quick actions"}
               >
                 {visibleQuickActions.map((action) => (
-                  <button key={action} type="button" onClick={() => void submitMessage(action)}>
+                  <button key={action} type="button" onClick={() => submitQuickAction(action)}>
                     {action}
                   </button>
                 ))}
@@ -644,30 +1160,101 @@ export function AgentChat() {
             ) : null}
             <div ref={messagesEndRef} aria-hidden="true" />
           </div>
-          <form className="agent-chat__form" onSubmit={onSubmit}>
-            <label htmlFor="agent-chat-input">{isRtl ? "رسالتك" : "Your message"}</label>
-            <input
-              id="agent-chat-input"
-              ref={inputRef}
-              value={input}
-              onChange={(event) => {
-                setInput(event.target.value);
-                scrollMessagesToBottom();
-              }}
-              onFocus={() => scrollMessagesToBottom("auto")}
-              placeholder={isRtl ? "اكتب رسالتك" : "Type your message"}
-              maxLength={1200}
-              readOnly={busy}
-              aria-busy={busy}
-            />
-            <button
-              type="submit"
-              disabled={busy || !input.trim()}
-              aria-label={isRtl ? "إرسال" : "Send"}
-            >
-              {isRtl ? "إرسال" : "Send"}
-            </button>
-          </form>
+          <div className="agent-chat__controls">
+            {avatarMode ? (
+              <label className="agent-chat__voice-toggle">
+                <span>{isRtl ? "الردود الصوتية" : "Voice replies"}</span>
+                <input
+                  type="checkbox"
+                  role="switch"
+                  checked={voiceRepliesEnabled}
+                  onChange={(event) => toggleVoiceReplies(event.target.checked)}
+                  aria-label={isRtl ? "تفعيل الردود الصوتية" : "Enable voice replies"}
+                />
+                <span aria-hidden="true" className="agent-chat__voice-toggle-track" />
+                <span className="agent-chat__voice-toggle-state">
+                  {voiceRepliesEnabled
+                    ? isRtl
+                      ? "مفعّل"
+                      : "On"
+                    : isRtl
+                      ? "متوقف"
+                      : "Off"}
+                </span>
+              </label>
+            ) : null}
+            <form className="agent-chat__form" onSubmit={onSubmit}>
+              <label htmlFor="agent-chat-input">{isRtl ? "رسالتك" : "Your message"}</label>
+              <input
+                id="agent-chat-input"
+                ref={inputRef}
+                value={input}
+                onChange={(event) => {
+                  setInput(event.target.value);
+                  scrollMessagesToBottom();
+                }}
+                onFocus={() => scrollMessagesToBottom("auto")}
+                placeholder={isRtl ? "اكتب رسالتك" : "Type your message"}
+                maxLength={1200}
+                readOnly={busy}
+                aria-busy={busy}
+              />
+              <button
+                type="submit"
+                disabled={busy || !input.trim()}
+                aria-label={isRtl ? "إرسال" : "Send"}
+              >
+                {isRtl ? "إرسال" : "Send"}
+              </button>
+              {avatarMode ? (
+                <button
+                  className={`agent-chat__microphone ${voiceListening ? "agent-chat__microphone--listening" : ""}`}
+                  type="button"
+                  onClick={() => void toggleListening()}
+                  disabled={busy || voiceSpeaking}
+                  aria-pressed={voiceListening}
+                  aria-label={
+                    voiceListening
+                      ? isRtl
+                        ? "إيقاف الاستماع"
+                        : "Stop listening"
+                      : isRtl
+                        ? "اسأل يوسف بصوتك"
+                        : "Ask Yousef by voice"
+                  }
+                >
+                  <span aria-hidden="true">🎙</span>
+                </button>
+              ) : null}
+            </form>
+            {avatarMode && (voiceListening || voiceSpeaking || lastSpokenAnswer) ? (
+              <div className="agent-chat__voice-controls" role="status" aria-live="polite">
+                <span>
+                  {voiceListening
+                    ? isRtl
+                      ? "أستمع الآن… اضغط الميكروفون للإيقاف"
+                      : "Listening… press the microphone to stop"
+                    : voiceSpeaking
+                      ? isRtl
+                        ? "يوسف يتحدث…"
+                        : "Yousef is speaking…"
+                      : isRtl
+                        ? "الرد الصوتي جاهز"
+                        : "Voice answer ready"}
+                </span>
+                {voiceSpeaking ? (
+                  <button type="button" onClick={stopVoice}>
+                    {isRtl ? "إيقاف الصوت" : "Stop audio"}
+                  </button>
+                ) : null}
+                {!voiceListening && !voiceSpeaking && lastSpokenAnswer ? (
+                  <button type="button" onClick={() => void speakAnswer(lastSpokenAnswer)}>
+                    {isRtl ? "إعادة التشغيل" : "Replay"}
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
           <a className="agent-chat__privacy" href="/privacy">
             {isRtl ? "الخصوصية" : "Privacy notice"}
           </a>

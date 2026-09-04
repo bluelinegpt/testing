@@ -1335,7 +1335,7 @@ export const platformApi = {
     });
     if (!response.ok) {
       throw new PlatformApiError(
-        "Featured image must be JPG, PNG, or WebP.",
+        "Website media must be MP4, JPG, PNG, or WebP.",
         "media_upload_failed",
         response.status,
       );
@@ -2139,6 +2139,9 @@ export const platformApi = {
   },
   async updateAgentSettings(input: any): Promise<any> {
     return await request<any>("platform/agent/settings", { method: "PATCH", body: input });
+  },
+  async updateAgentAvatarSettings(input: any): Promise<any> {
+    return await request<any>("platform/agent/avatar/settings", { method: "PATCH", body: input });
   },
   async commerceProviders(): Promise<any> {
     return (

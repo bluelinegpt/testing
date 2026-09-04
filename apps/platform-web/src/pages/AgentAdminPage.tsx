@@ -1,6 +1,7 @@
 import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { platformApi } from "../api/platform-client.js";
+import { platformConfiguration } from "../config/environment.js";
 
 type Tab = "conversations" | "handoffs" | "knowledge" | "settings";
 type ConversationFilters = {
@@ -74,6 +75,134 @@ function textDirection(value: string | undefined) {
   return /[\u0600-\u06ff]/u.test(value ?? "") ? "rtl" : "ltr";
 }
 
+function conversationChannel(conversation: any) {
+  return conversation?.channel === "website" && conversation?.state?.entrySurface === "website_avatar"
+    ? "Website Avatar"
+    : titleize(conversation?.channel ?? "website");
+}
+
+type WebsiteMedia = {
+  id?: string;
+  publicUrl: string;
+  originalFilename?: string;
+  mediaType?: string;
+  sizeBytes?: number;
+  createdAt?: string;
+};
+
+function websiteMediaPreviewUrl(value: string | undefined) {
+  const path = String(value ?? "").trim();
+  if (!path || /^https?:\/\//i.test(path)) return path;
+  if (path.startsWith("/api/"))
+    return `${platformConfiguration.apiBaseUrl.replace(/\/$/, "")}${path.replace(/^\/api\/v1/, "")}`;
+  return path;
+}
+
+function formatMediaSize(value: number | undefined) {
+  if (!value) return "Not available";
+  return value >= 1024 * 1024
+    ? `${(value / (1024 * 1024)).toFixed(2)} MB`
+    : `${Math.ceil(value / 1024)} KB`;
+}
+
+function formatDuration(seconds: number | null) {
+  if (seconds === null || !Number.isFinite(seconds)) return "Not available";
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes}:${String(Math.round(seconds % 60)).padStart(2, "0")}`;
+}
+
+function AvatarMediaControl({
+  kind,
+  language,
+  media,
+  onChange,
+  onUploaded,
+  purpose = "intro",
+  value,
+}: {
+  kind: "video" | "image";
+  language: "English" | "Arabic";
+  media: WebsiteMedia[];
+  onChange: (value: string) => void;
+  onUploaded: (item: WebsiteMedia) => void;
+  purpose?: string;
+  value: string;
+}) {
+  const [file, setFile] = useState<File | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [previewFailed, setPreviewFailed] = useState(false);
+  const [duration, setDuration] = useState<number | null>(null);
+  const expectedPrefix = kind === "video" ? "video/" : "image/";
+  const choices = media.filter((item) => item.mediaType?.startsWith(expectedPrefix));
+  const current = media.find((item) => item.publicUrl === value);
+  const accept = kind === "video" ? "video/mp4" : "image/jpeg,image/png,image/webp";
+  const maximumBytes = kind === "video" ? 20 * 1024 * 1024 : 5 * 1024 * 1024;
+  const previewUrl = websiteMediaPreviewUrl(value);
+
+  useEffect(() => {
+    setDuration(null);
+    setPreviewFailed(false);
+  }, [value]);
+
+  async function upload() {
+    if (!file) return;
+    const extensionAccepted = kind === "video"
+      ? /\.mp4$/i.test(file.name)
+      : /\.(?:jpe?g|png|webp)$/i.test(file.name);
+    if ((!file.type.startsWith(expectedPrefix) && !extensionAccepted) || (kind === "video" && file.type && file.type !== "video/mp4")) {
+      setError(kind === "video" ? "Select an MP4 video." : "Select a JPG, PNG, or WebP image.");
+      return;
+    }
+    if (file.size > maximumBytes) {
+      setError(`${kind === "video" ? "Video" : "Image"} exceeds the ${maximumBytes / (1024 * 1024)} MB limit.`);
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const uploaded = await platformApi.uploadWebsiteMedia(file, {
+        altText: `${language} ${purpose} ${kind}`,
+        caption: `${purpose} · ${language}`,
+      }) as WebsiteMedia;
+      onUploaded(uploaded);
+      onChange(uploaded.publicUrl);
+      setFile(null);
+      setPreviewFailed(false);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Media upload failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <fieldset className="agent-avatar-media">
+      <legend>{language} {purpose} {kind}</legend>
+      <label>Current media URL/reference<input value={value} onChange={(event) => { onChange(event.target.value.trim()); setPreviewFailed(false); }} placeholder={kind === "video" ? "Upload or enter an HTTPS MP4 URL" : "Upload or enter an HTTPS image URL"} /></label>
+      <div className="agent-avatar-media__actions">
+        <label className="agent-avatar-media__file">Replace {kind}<input type="file" accept={accept} onChange={(event) => setFile(event.target.files?.[0] ?? null)} /></label>
+        <button type="button" disabled={!file || busy} onClick={() => void upload()}>{busy ? "Uploading…" : `Upload & preview ${kind}`}</button>
+        <button type="button" disabled={!value} onClick={() => { onChange(""); setPreviewFailed(false); }}>Remove {kind}</button>
+      </div>
+      <label>Restore/select previous media<select value="" onChange={(event) => { onChange(event.target.value); setPreviewFailed(false); }}><option value="">Choose from Media Library…</option>{choices.map((item) => <option key={item.id ?? item.publicUrl} value={item.publicUrl}>{item.originalFilename ?? item.publicUrl}</option>)}</select></label>
+      {error ? <p role="alert">{error}</p> : null}
+      <dl className="agent-avatar-media__metadata">
+        <div><dt>File name</dt><dd>{current?.originalFilename ?? (value ? "External/direct reference" : "None")}</dd></div>
+        <div><dt>File size</dt><dd>{formatMediaSize(current?.sizeBytes)}</dd></div>
+        {kind === "video" ? <div><dt>Duration</dt><dd>{formatDuration(duration)}</dd></div> : null}
+        <div><dt>Last updated</dt><dd>{current?.createdAt ? new Date(current.createdAt).toLocaleString() : "Not available"}</dd></div>
+      </dl>
+      {previewUrl && !previewFailed ? kind === "video" ? (
+        <video className="agent-avatar-media__preview" controls preload="metadata" src={previewUrl} onLoadedMetadata={(event) => setDuration(event.currentTarget.duration)} onError={() => setPreviewFailed(true)} />
+      ) : (
+        <img className="agent-avatar-media__preview" src={previewUrl} alt={`${language} intro preview`} onError={() => setPreviewFailed(true)} />
+      ) : value ? <p role="alert">Current {kind} could not be previewed. Choose another file or reference before saving.</p> : <p className="platform-muted">No {kind} selected. The public avatar will use its safe fallback.</p>}
+      <small className="platform-muted">Uploading creates a new Media Library item. Previous files are retained and can be selected again.</small>
+    </fieldset>
+  );
+}
+
 export function AgentAdminPage() {
   const [searchParams] = useSearchParams();
   const initialSearch = searchParams.get("search") ?? "";
@@ -85,6 +214,9 @@ export function AgentAdminPage() {
   const [handoffs, setHandoffs] = useState<any[]>([]);
   const [knowledge, setKnowledge] = useState<any[]>([]);
   const [settings, setSettings] = useState<any | null>(null);
+  const [settingsLoading, setSettingsLoading] = useState(true);
+  const [settingsError, setSettingsError] = useState<string | null>(null);
+  const [websiteMedia, setWebsiteMedia] = useState<WebsiteMedia[]>([]);
   const [selectedConversation, setSelectedConversation] = useState<any | null>(null);
   const [selectedConversationIds, setSelectedConversationIds] = useState<string[]>([]);
   const [reviewDraft, setReviewDraft] = useState({ action: "", assignedToAccountId: "", classification: "general_enquiry", comment: "", status: "new" });
@@ -109,11 +241,11 @@ export function AgentAdminPage() {
   const waitingForHumanCount = Number(conversationPage.counters?.waitingForHuman ?? 0);
 
   async function load() {
-    const [nextConversationPage, nextHandoffs, nextKnowledge, nextSettings, nextAssignees] = await Promise.all([
+    const settingsRequest = loadSettings();
+    const [nextConversationPage, nextHandoffs, nextKnowledge, nextAssignees] = await Promise.all([
       platformApi.agentConversations(conversationFilters),
       platformApi.agentHandoffs(),
       platformApi.agentKnowledge(),
-      platformApi.agentSettings(),
       platformApi.agentAssignees(),
     ]);
     setConversationPage(nextConversationPage);
@@ -122,8 +254,26 @@ export function AgentAdminPage() {
     setConversationRefreshError(null);
     setHandoffs(nextHandoffs);
     setKnowledge(nextKnowledge);
-    setSettings(nextSettings);
     setAssignees(nextAssignees);
+    await settingsRequest;
+  }
+
+  async function loadSettings() {
+    setSettingsLoading(true);
+    setSettingsError(null);
+    try {
+      const [nextSettings, cms] = await Promise.all([
+        platformApi.agentSettings(),
+        platformApi.websiteCms().catch(() => ({ media: [] })),
+      ]);
+      if (!nextSettings) throw new Error("missing_agent_settings");
+      setSettings(nextSettings);
+      setWebsiteMedia(Array.isArray(cms.media) ? cms.media : []);
+    } catch {
+      setSettingsError("Agent settings could not be loaded. Confirm the local API is running and the local database migrations are current, then retry.");
+    } finally {
+      setSettingsLoading(false);
+    }
   }
 
   async function refreshSelectedConversation(id: string) {
@@ -310,6 +460,49 @@ export function AgentAdminPage() {
     if (!settings) return;
     await platformApi.updateAgentSettings(settings);
     setMessage("Agent settings saved.");
+    await load();
+  }
+
+  async function saveAvatarSettings() {
+    if (!settings) return;
+    const value = (key: string) => settings[key] || undefined;
+    await platformApi.updateAgentAvatarSettings({
+      enabled: Boolean(settings.avatarEnabled),
+      displayName: settings.avatarDisplayName,
+      titleEn: settings.avatarTitleEn,
+      titleAr: settings.avatarTitleAr,
+      imageUrl: value("avatarImageUrl"),
+      introVideoUrlEn: value("avatarIntroVideoUrlEn"),
+      introVideoUrlAr: value("avatarIntroVideoUrlAr"),
+      introImageUrlEn: value("avatarIntroImageUrlEn"),
+      introImageUrlAr: value("avatarIntroImageUrlAr"),
+      homeOperationsImageUrlEn: value("avatarHomeOperationsImageUrlEn"),
+      homeOperationsImageUrlAr: value("avatarHomeOperationsImageUrlAr"),
+      introTranscriptEn: settings.avatarIntroTranscriptEn,
+      introTranscriptAr: settings.avatarIntroTranscriptAr,
+      showOnHomepage: Boolean(settings.avatarShowHomepage),
+      showOnPricing: Boolean(settings.avatarShowPricing),
+      showOnDeliveryCompany: Boolean(settings.avatarShowDeliveryCompany),
+      showOnTrader: Boolean(settings.avatarShowTrader),
+      showOnSendPackage: Boolean(settings.avatarShowSendPackage),
+      autoOpen: Boolean(settings.avatarAutoOpen),
+      provider: settings.avatarProvider,
+      status: settings.avatarStatus,
+      liveEnabled: Boolean(settings.avatarLiveEnabled),
+      liveProvider: settings.avatarLiveProvider ?? "heygen_live",
+      liveAvatarId: value("avatarLiveAvatarId"),
+      liveVoiceIdEn: value("avatarLiveVoiceIdEn"),
+      liveVoiceIdAr: value("avatarLiveVoiceIdAr"),
+      liveVoiceAgentIdEn: value("avatarLiveVoiceAgentIdEn"),
+      liveVoiceAgentIdAr: value("avatarLiveVoiceAgentIdAr"),
+      liveMaxSessionSeconds: Number(settings.avatarLiveMaxSessionSeconds ?? 300),
+      liveIdleTimeoutSeconds: Number(settings.avatarLiveIdleTimeoutSeconds ?? 60),
+      liveMaxConcurrentSessions: Number(settings.avatarLiveMaxConcurrentSessions ?? 2),
+      liveStartRateLimitPerMinute: Number(settings.avatarLiveStartRateLimitPerMinute ?? 3),
+      liveDailyMinuteCap: settings.avatarLiveDailyMinuteCap ? Number(settings.avatarLiveDailyMinuteCap) : undefined,
+      liveCostPerMinute: settings.avatarLiveCostPerMinute === "" || settings.avatarLiveCostPerMinute == null ? undefined : Number(settings.avatarLiveCostPerMinute),
+    });
+    setMessage("Avatar settings saved.");
     await load();
   }
 
@@ -616,7 +809,7 @@ export function AgentAdminPage() {
                 </>
               ) : null}
               <select value={conversationFilters.status} onChange={(event) => setConversationFilter("status", event.target.value)}><option value="all">All Statuses</option><option value="open,in_progress">Open / In Progress</option>{statusOptions.map((status) => <option key={status} value={status}>{titleize(status)}</option>)}</select>
-              <select value={conversationFilters.channel} onChange={(event) => setConversationFilter("channel", event.target.value)}><option value="all">All Channels</option><option value="website">Website</option><option value="whatsapp">WhatsApp</option><option value="simulator">WhatsApp Simulator</option></select>
+              <select value={conversationFilters.channel} onChange={(event) => setConversationFilter("channel", event.target.value)}><option value="all">All Channels</option><option value="website">Website</option><option value="website_avatar">Website Avatar</option><option value="whatsapp">WhatsApp</option><option value="simulator">WhatsApp Simulator</option></select>
               <select value={conversationFilters.conversationMode} onChange={(event) => setConversationFilter("conversationMode", event.target.value)}><option value="all">All Agent Modes</option><option value="paused">Waiting for Human</option><option value="human_active">Human Active</option><option value="ai_active">Yousef Active</option><option value="ai_resume">Returned to Yousef</option></select>
               <select value={conversationFilters.audience} onChange={(event) => setConversationFilter("audience", event.target.value)}><option value="all">All Audiences</option><option value="customer">Customer</option><option value="trader">Trader</option><option value="delivery_company">Delivery Company</option><option value="unknown">Unknown</option></select>
               <select value={conversationFilters.classification} onChange={(event) => setConversationFilter("classification", event.target.value)}><option value="all">All Classifications</option>{classificationOptions.map((classification) => <option key={classification} value={classification}>{titleize(classification)}</option>)}</select>
@@ -674,7 +867,7 @@ export function AgentAdminPage() {
                 </div>
                 <div className="agent-inbox-item__meta">
                   <span>{titleize(item.operationalClassification)}</span>
-                  <span>{titleize(item.channel)}</span>
+                  <span>{conversationChannel(item)}</span>
                   <span>{item.mobileNumber ?? "No mobile"}</span>
                   {item.identityMatchType === "ip" && Number(item.conversationCount ?? 1) > 1 ? <span className="platform-badge agent-ip-badge">Same IP</span> : item.hasVisitorIp ? <span className="platform-badge agent-ip-badge">IP captured</span> : null}
                 </div>
@@ -713,14 +906,14 @@ export function AgentAdminPage() {
                 {!detailCollapsed ? (
                   <div className="agent-detail-top">
                     <h3>{selectedConversation.customerName ?? "Anonymous"} · {selectedConversation.referenceNumber}</h3>
-                    <p className="platform-muted">{selectedConversation.conversationCount ?? 1} session(s) in this Dubai business-day thread · {selectedConversation.channel} · {selectedConversation.language} · Mode: {selectedModeLabel}</p>
+                    <p className="platform-muted">{selectedConversation.conversationCount ?? 1} session(s) in this Dubai business-day thread · {conversationChannel(selectedConversation)} · {selectedConversation.language} · Mode: {selectedModeLabel}</p>
                     <div className="lead-action-grid">
                       <span className="platform-badge">{selectedConversation.mobileNumber ?? "No mobile"}</span>
                       {selectedConversation.visitorIpHash ? <span className="platform-badge agent-ip-badge">IP captured</span> : null}
                       <span className="platform-badge">{titleize(selectedConversation.audience)}</span>
                       <span className="platform-badge">{titleize(selectedConversation.operationalClassification)}</span>
                       <span className="platform-badge">{selectedConversation.email ?? "No email"}</span>
-                      <span className="platform-badge">Last channel {titleize(selectedConversation.lastChannel ?? selectedConversation.channel)}</span>
+                      <span className="platform-badge">Last channel {selectedConversation.state?.entrySurface === "website_avatar" ? "Website Avatar" : titleize(selectedConversation.lastChannel ?? selectedConversation.channel)}</span>
                       <span className="platform-badge">Assigned to {selectedConversation.assignedToUsername ?? "Unassigned"}</span>
                       {selectedIsHidden && !selectedIsDeleted ? <span className="platform-badge agent-hidden-badge">Hidden</span> : null}
                       {selectedIsDeleted ? <span className="platform-badge agent-deleted-badge">Deleted</span> : null}
@@ -848,7 +1041,22 @@ export function AgentAdminPage() {
         </div>
       ) : null}
 
-      {tab === "settings" && settings ? (
+      {tab === "settings" && settingsLoading ? (
+        <div className="platform-card" role="status">
+          <h2>Agent Settings</h2>
+          <p className="platform-muted">Loading settings…</p>
+        </div>
+      ) : null}
+
+      {tab === "settings" && !settingsLoading && settingsError ? (
+        <div className="platform-card" role="alert">
+          <h2>Agent Settings unavailable</h2>
+          <p>{settingsError}</p>
+          <button className="platform-button platform-button--primary" type="button" onClick={() => void loadSettings()}>Retry settings</button>
+        </div>
+      ) : null}
+
+      {tab === "settings" && !settingsLoading && !settingsError && settings ? (
         <div className="platform-grid platform-grid--two">
           <form className="platform-card platform-form" onSubmit={saveSettings}>
             <h2>Agent Settings</h2>
@@ -888,6 +1096,73 @@ export function AgentAdminPage() {
               </tbody>
             </table>
             <p className="platform-muted">Diagnostics intentionally show provider state only. API keys and raw model payloads are never exposed in Platform.</p>
+          </div>
+          <div className="platform-card platform-form agent-avatar-settings">
+            <h2>Website AI Avatar</h2>
+            <p className="platform-muted">Phase 1 uses a prerecorded introduction and the existing Yousef text conversation. It never requests camera or microphone access.</p>
+            <label className="agent-avatar-settings__checkbox"><input type="checkbox" checked={settings.avatarEnabled ?? false} onChange={(event) => setSettings({ ...settings, avatarEnabled: event.target.checked })} /> Avatar enabled</label>
+            <label>Status<select value={settings.avatarStatus ?? "active"} onChange={(event) => setSettings({ ...settings, avatarStatus: event.target.value })}><option value="active">Active</option><option value="offline">Offline / text fallback</option></select></label>
+            <label>Provider<select value={settings.avatarProvider ?? "prerecorded"} onChange={(event) => setSettings({ ...settings, avatarProvider: event.target.value })}><option value="prerecorded">Prerecorded (Phase 1)</option><option value="heygen">HeyGen (not connected)</option><option value="tavus">Tavus (not connected)</option><option value="future_provider">Future provider (not connected)</option></select></label>
+            <fieldset className="agent-avatar-settings__fieldset agent-avatar-settings__live"><legend>Real-time avatar pilot</legend>
+              <label className="agent-avatar-settings__checkbox"><input type="checkbox" checked={settings.avatarLiveEnabled ?? false} onChange={(event) => setSettings({ ...settings, avatarLiveEnabled: event.target.checked })} /> Enable real-time avatar after the visitor asks a question</label>
+              <label>Live provider<select value={settings.avatarLiveProvider ?? "heygen_live"} onChange={(event) => setSettings({ ...settings, avatarLiveProvider: event.target.value })}><option value="heygen_live">HeyGen LiveAvatar</option><option value="tavus_live">Tavus live (not connected)</option><option value="future_provider">Future provider (not connected)</option></select></label>
+              <label>Final Yousef LiveAvatar ID<input value={settings.avatarLiveAvatarId ?? ""} onChange={(event) => setSettings({ ...settings, avatarLiveAvatarId: event.target.value })} placeholder="Required before production" /></label>
+              <label>English voice ID<input value={settings.avatarLiveVoiceIdEn ?? ""} onChange={(event) => setSettings({ ...settings, avatarLiveVoiceIdEn: event.target.value })} /></label>
+              <label>Arabic voice ID<input value={settings.avatarLiveVoiceIdAr ?? ""} onChange={(event) => setSettings({ ...settings, avatarLiveVoiceIdAr: event.target.value })} /></label>
+              <label>English voice-agent ID<input value={settings.avatarLiveVoiceAgentIdEn ?? ""} onChange={(event) => setSettings({ ...settings, avatarLiveVoiceAgentIdEn: event.target.value })} /></label>
+              <label>Arabic voice-agent ID<input value={settings.avatarLiveVoiceAgentIdAr ?? ""} onChange={(event) => setSettings({ ...settings, avatarLiveVoiceAgentIdAr: event.target.value })} /></label>
+              <label>Maximum session seconds<input type="number" min="30" max="1800" value={settings.avatarLiveMaxSessionSeconds ?? 300} onChange={(event) => setSettings({ ...settings, avatarLiveMaxSessionSeconds: Number(event.target.value) })} /></label>
+              <label>Idle timeout seconds<input type="number" min="15" max="300" value={settings.avatarLiveIdleTimeoutSeconds ?? 60} onChange={(event) => setSettings({ ...settings, avatarLiveIdleTimeoutSeconds: Number(event.target.value) })} /></label>
+              <label>Maximum concurrent sessions<input type="number" min="1" max="100" value={settings.avatarLiveMaxConcurrentSessions ?? 2} onChange={(event) => setSettings({ ...settings, avatarLiveMaxConcurrentSessions: Number(event.target.value) })} /></label>
+              <label>Starts per IP per minute<input type="number" min="1" max="60" value={settings.avatarLiveStartRateLimitPerMinute ?? 3} onChange={(event) => setSettings({ ...settings, avatarLiveStartRateLimitPerMinute: Number(event.target.value) })} /></label>
+              <label>Daily minute cap (blank = unlimited)<input type="number" min="1" value={settings.avatarLiveDailyMinuteCap ?? ""} onChange={(event) => setSettings({ ...settings, avatarLiveDailyMinuteCap: event.target.value })} /></label>
+              <label>Estimated provider cost per minute<input type="number" min="0" step="0.000001" value={settings.avatarLiveCostPerMinute ?? ""} onChange={(event) => setSettings({ ...settings, avatarLiveCostPerMinute: event.target.value })} /></label>
+              <p className="platform-muted">Server credential: {settings.avatarLiveConfigured ? "Configured" : "Not configured"}. The pilot is OFF by default and falls back to browser speech if unavailable.</p>
+              <table className="platform-table"><tbody>
+                <tr><th>Today's live sessions</th><td>{settings.avatarLiveUsage?.todaySessions ?? 0}</td></tr>
+                <tr><th>Today's live minutes</th><td>{settings.avatarLiveUsage?.todayMinutes ?? 0}</td></tr>
+                <tr><th>Active sessions</th><td>{settings.avatarLiveUsage?.activeSessions ?? 0}</td></tr>
+                <tr><th>Responses</th><td>{settings.avatarLiveUsage?.responseCount ?? 0}</td></tr>
+                <tr><th>Fallbacks</th><td>{settings.avatarLiveUsage?.fallbackCount ?? 0}</td></tr>
+                <tr><th>Provider errors</th><td>{settings.avatarLiveUsage?.providerErrorCount ?? 0}</td></tr>
+                <tr><th>Estimated cost</th><td>{settings.avatarLiveUsage?.estimatedCost ?? 0}</td></tr>
+              </tbody></table>
+            </fieldset>
+            <label>Avatar display name<input value={settings.avatarDisplayName ?? "Yousef"} onChange={(event) => setSettings({ ...settings, avatarDisplayName: event.target.value })} /></label>
+            <label>Avatar title EN<input value={settings.avatarTitleEn ?? "Tawseelhub AI Advisor"} onChange={(event) => setSettings({ ...settings, avatarTitleEn: event.target.value })} /></label>
+            <label>Avatar title AR<input dir="rtl" value={settings.avatarTitleAr ?? "مستشار توصيل هب الذكي"} onChange={(event) => setSettings({ ...settings, avatarTitleAr: event.target.value })} /></label>
+            <label>Built-in/default avatar image<input type="url" placeholder="HTTPS or first-party image path" value={settings.avatarImageUrl ?? ""} onChange={(event) => setSettings({ ...settings, avatarImageUrl: event.target.value })} /><small>Used only when the selected language has no working intro image or video.</small></label>
+            <div className="agent-avatar-settings__media-grid">
+              <section className="agent-avatar-settings__language-media">
+                <h3>English media</h3>
+                <AvatarMediaControl kind="video" language="English" media={websiteMedia} value={settings.avatarIntroVideoUrlEn ?? ""} onChange={(value) => setSettings({ ...settings, avatarIntroVideoUrlEn: value })} onUploaded={(item) => setWebsiteMedia((current) => [item, ...current])} />
+                <AvatarMediaControl kind="image" language="English" media={websiteMedia} value={settings.avatarIntroImageUrlEn ?? ""} onChange={(value) => setSettings({ ...settings, avatarIntroImageUrlEn: value })} onUploaded={(item) => setWebsiteMedia((current) => [item, ...current])} />
+              </section>
+              <section className="agent-avatar-settings__language-media" dir="rtl">
+                <h3>Arabic media · الوسائط العربية</h3>
+                <AvatarMediaControl kind="video" language="Arabic" media={websiteMedia} value={settings.avatarIntroVideoUrlAr ?? ""} onChange={(value) => setSettings({ ...settings, avatarIntroVideoUrlAr: value })} onUploaded={(item) => setWebsiteMedia((current) => [item, ...current])} />
+                <AvatarMediaControl kind="image" language="Arabic" media={websiteMedia} value={settings.avatarIntroImageUrlAr ?? ""} onChange={(value) => setSettings({ ...settings, avatarIntroImageUrlAr: value })} onUploaded={(item) => setWebsiteMedia((current) => [item, ...current])} />
+              </section>
+            </div>
+            <section className="agent-avatar-settings__homepage-media">
+              <h3>Homepage · Delivery Operating System visual</h3>
+              <p className="platform-muted">Optional language-specific image shown with the operational capability card. Removing it restores the built-in visual.</p>
+              <div className="agent-avatar-settings__media-grid">
+                <AvatarMediaControl kind="image" language="English" purpose="Delivery OS" media={websiteMedia} value={settings.avatarHomeOperationsImageUrlEn ?? ""} onChange={(value) => setSettings({ ...settings, avatarHomeOperationsImageUrlEn: value })} onUploaded={(item) => setWebsiteMedia((current) => [item, ...current])} />
+                <div dir="rtl"><AvatarMediaControl kind="image" language="Arabic" purpose="Delivery OS" media={websiteMedia} value={settings.avatarHomeOperationsImageUrlAr ?? ""} onChange={(value) => setSettings({ ...settings, avatarHomeOperationsImageUrlAr: value })} onUploaded={(item) => setWebsiteMedia((current) => [item, ...current])} /></div>
+              </div>
+            </section>
+            <label>English transcript<textarea rows={4} value={settings.avatarIntroTranscriptEn ?? ""} onChange={(event) => setSettings({ ...settings, avatarIntroTranscriptEn: event.target.value })} /></label>
+            <label>Arabic transcript<textarea dir="rtl" rows={4} value={settings.avatarIntroTranscriptAr ?? ""} onChange={(event) => setSettings({ ...settings, avatarIntroTranscriptAr: event.target.value })} /></label>
+            <fieldset className="agent-avatar-settings__fieldset agent-avatar-settings__visibility"><legend>Page visibility</legend>
+              <label className="agent-avatar-settings__checkbox"><input type="checkbox" checked={settings.avatarShowHomepage ?? true} onChange={(event) => setSettings({ ...settings, avatarShowHomepage: event.target.checked })} /> Show on Homepage</label>
+              <label className="agent-avatar-settings__checkbox"><input type="checkbox" checked={settings.avatarShowPricing ?? true} onChange={(event) => setSettings({ ...settings, avatarShowPricing: event.target.checked })} /> Show on Pricing</label>
+              <label className="agent-avatar-settings__checkbox"><input type="checkbox" checked={settings.avatarShowDeliveryCompany ?? true} onChange={(event) => setSettings({ ...settings, avatarShowDeliveryCompany: event.target.checked })} /> Show on Delivery Company pages</label>
+              <label className="agent-avatar-settings__checkbox"><input type="checkbox" checked={settings.avatarShowTrader ?? true} onChange={(event) => setSettings({ ...settings, avatarShowTrader: event.target.checked })} /> Show on Trader pages</label>
+              <label className="agent-avatar-settings__checkbox"><input type="checkbox" checked={settings.avatarShowSendPackage ?? true} onChange={(event) => setSettings({ ...settings, avatarShowSendPackage: event.target.checked })} /> Show on Send a Package pages</label>
+            </fieldset>
+            <label className="agent-avatar-settings__checkbox"><input type="checkbox" checked={settings.avatarAutoOpen ?? false} onChange={(event) => setSettings({ ...settings, avatarAutoOpen: event.target.checked })} /> Auto-open panel (video still requires visitor play)</label>
+            <button className="platform-button platform-button--primary" type="button" onClick={() => void saveAvatarSettings()}>Save avatar settings</button>
           </div>
         </div>
       ) : null}

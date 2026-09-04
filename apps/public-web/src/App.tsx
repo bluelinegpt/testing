@@ -12,7 +12,10 @@ import { getPreloaded, PreloadContext } from "./preload-context";
 import { AgentChat } from "./AgentChat";
 import {
   buildWhatsAppMessageUrl,
+  fallbackAvatarSettings,
+  getAvatarSettings,
   getWhatsAppSettings,
+  type AgentAvatarSettings,
   type WhatsAppPublicSettings,
 } from "./agent-client";
 import {
@@ -392,7 +395,7 @@ function HomePage() {
             ))}
           </div>
         </div>
-        <OperationsVisual />
+        <HomepageOperationsShowcase />
       </section>
       <QuoteModule compact />
       <TrackingHomepageSection />
@@ -504,8 +507,60 @@ function TrackingHomepageSection() {
   );
 }
 
-function OperationsVisual() {
+function HomepageOperationsShowcase() {
+  const { locale } = useCms();
+  const [settings, setSettings] = useState<AgentAvatarSettings>(fallbackAvatarSettings);
+  const [videoFailed, setVideoFailed] = useState(false);
+  const [imageFailed, setImageFailed] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    void getAvatarSettings().then((value) => active && setSettings(value));
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    setVideoFailed(false);
+    setImageFailed(false);
+  }, [locale, settings.introVideoUrlEn, settings.introVideoUrlAr, settings.introImageUrlEn, settings.introImageUrlAr]);
+
+  const videoUrl = locale === "ar" ? settings.introVideoUrlAr : settings.introVideoUrlEn;
+  const posterUrl = locale === "ar" ? settings.introImageUrlAr : settings.introImageUrlEn;
+  const fallbackImage = posterUrl || settings.imageUrl || "/yousef-ai-advisor.svg";
+  const operationsImage = locale === "ar" ? settings.homeOperationsImageUrlAr : settings.homeOperationsImageUrlEn;
+  const showAdvisor = settings.enabled && settings.status === "active" && settings.showOnHomepage;
+  const label = locale === "ar" ? "يوسف · مستشار ذكي" : "Yousef · AI Advisor";
+  const button = locale === "ar" ? "اسأل يوسف" : "Ask Yousef";
+
+  return (
+    <div className={`homepage-operations-showcase${showAdvisor ? "" : " homepage-operations-showcase--single"}`}>
+      <OperationsVisual managedImageUrl={operationsImage} />
+      {showAdvisor ? (
+        <aside className="homepage-advisor" aria-label={label}>
+          <div className="homepage-advisor__media">
+            {videoUrl && !videoFailed ? (
+              <video controls playsInline preload="metadata" poster={posterUrl} onError={() => setVideoFailed(true)}>
+                <source src={videoUrl} type="video/mp4" />
+              </video>
+            ) : fallbackImage && !imageFailed ? (
+              <img src={fallbackImage} alt={label} onError={() => setImageFailed(true)} />
+            ) : (
+              <div className="homepage-advisor__empty" aria-hidden="true" />
+            )}
+          </div>
+          <div className="homepage-advisor__footer">
+            <span>{label}</span>
+            <button className="button button-primary" type="button" onClick={() => window.dispatchEvent(new CustomEvent("tawseelhub:open-agent"))}>{button}</button>
+          </div>
+        </aside>
+      ) : null}
+    </div>
+  );
+}
+
+function OperationsVisual({ managedImageUrl }: { managedImageUrl: string | undefined }) {
   const { locale } = useCms(),
+    [managedImageFailed, setManagedImageFailed] = useState(false),
     copy =
       locale === "ar"
         ? {
@@ -550,8 +605,10 @@ function OperationsVisual() {
               ["Teams", "Connected"],
             ],
           };
+  useEffect(() => setManagedImageFailed(false), [managedImageUrl]);
   return (
     <div className="operations-visual" aria-label={copy.label}>
+      {managedImageUrl && !managedImageFailed ? <img className="operations-visual__managed-image" src={managedImageUrl} alt="" onError={() => setManagedImageFailed(true)} /> : null}
       <div className="visual-topline">
         <span>{copy.network}</span>
         <span className="status">{copy.status}</span>

@@ -494,6 +494,158 @@ body {
   border-top: 1px solid var(--platform-border);
 }
 
+/* Website-avatar settings contain several provider identifiers and numeric
+ * limits. Keep every label attached to its own control instead of allowing
+ * the browser's default inline label flow to merge neighbouring fields. */
+.agent-avatar-settings {
+  max-width: none;
+}
+
+.agent-avatar-settings > label:not(.agent-avatar-settings__checkbox),
+.agent-avatar-settings__live > label:not(.agent-avatar-settings__checkbox) {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.agent-avatar-settings input:not([type="checkbox"]),
+.agent-avatar-settings select,
+.agent-avatar-settings textarea {
+  width: 100%;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--platform-border);
+  border-radius: 8px;
+  background: var(--platform-surface);
+  color: var(--platform-text);
+  font: inherit;
+}
+
+.agent-avatar-settings__fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 14px;
+  border: 1px solid var(--platform-border);
+  border-radius: 10px;
+}
+
+.agent-avatar-settings__live {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.agent-avatar-settings__live > .agent-avatar-settings__checkbox,
+.agent-avatar-settings__live > .platform-muted,
+.agent-avatar-settings__live > .platform-table {
+  grid-column: 1 / -1;
+}
+
+.agent-avatar-settings__checkbox {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.agent-avatar-settings__checkbox input {
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
+.agent-avatar-settings__visibility {
+  display: grid;
+  gap: 10px;
+}
+
+.agent-avatar-settings__media-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.agent-avatar-settings__language-media {
+  background: color-mix(in srgb, var(--platform-surface) 92%, var(--platform-border));
+  border: 1px solid var(--platform-border);
+  border-radius: 12px;
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  padding: 14px;
+}
+
+.agent-avatar-settings__language-media > h3 {
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+
+.agent-avatar-media {
+  border: 1px solid var(--platform-border);
+  border-radius: 10px;
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  min-width: 0;
+  padding: 12px;
+}
+
+.agent-avatar-media > label {
+  display: grid;
+  gap: 6px;
+}
+
+.agent-avatar-media__actions {
+  align-items: end;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.agent-avatar-media__file {
+  display: grid;
+  flex: 1 1 220px;
+  gap: 6px;
+}
+
+.agent-avatar-media__metadata {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+
+.agent-avatar-media__metadata > div {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(90px, 0.35fr) minmax(0, 1fr);
+}
+
+.agent-avatar-media__metadata dt {
+  color: var(--platform-muted);
+  font-weight: 700;
+}
+
+.agent-avatar-media__metadata dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.agent-avatar-media__preview {
+  aspect-ratio: 16 / 9;
+  background: #071d2a;
+  border-radius: 8px;
+  display: block;
+  max-height: 260px;
+  object-fit: contain;
+  width: 100%;
+}
+
+@media (max-width: 700px) {
+  .agent-avatar-settings__live,
+  .agent-avatar-settings__media-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .platform-actions {
   display: flex;
   gap: 10px;

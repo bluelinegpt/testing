@@ -137,7 +137,7 @@ export class PlatformWebsiteCmsController {
   @HttpCode(201)
   @Post("media")
   @ApiConsumes("multipart/form-data")
-  @UseInterceptors(FileInterceptor("file", { limits: { fileSize: 5 * 1024 * 1024, files: 1 } }))
+  @UseInterceptors(FileInterceptor("file", { limits: { fileSize: 20 * 1024 * 1024, files: 1 } }))
   public uploadMedia(@UploadedFile() file: MulterFile | undefined, @Body() body: MediaAltDto) {
     return this.cms.uploadMedia(file, body, this.actor());
   }

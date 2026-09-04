@@ -4,6 +4,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  ServiceUnavailableException,
   UnauthorizedException,
 } from "@nestjs/common";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
@@ -16,10 +17,14 @@ import type { DatabaseSchema } from "../infrastructure/database/database.types.j
 import { PublicTrackingService } from "../operations/public-tracking.service.js";
 import { TraderApplicationService } from "../trader-applications/trader-application.service.js";
 import type {
+  AgentAvatarSettingsDto,
   AgentConversationReviewDto,
   AgentKnowledgeDto,
+  LiveAvatarUsageDto,
   AgentSettingsDto,
 } from "./agent.dto.js";
+import { createLiveAvatarServerProvider } from "./live-avatar.provider.js";
+import { liveAvatarAdmissionFailure } from "./live-avatar-controls.js";
 import type {
   AgentChannel,
   AgentIntent,
@@ -511,6 +516,14 @@ export function publicConversationIntroStep(
       resumeIntent?: AgentIntent;
     }
   | undefined {
+  // General knowledge and small-talk questions must remain immediately
+  // answerable. Contact details are required only when the visitor has
+  // started a workflow that actually needs them (quote, demo, trader,
+  // tracking or handoff). Requiring identity for every avatar question made
+  // the assistant appear unresponsive because it replaced the requested
+  // answer with a name/mobile interview.
+  if (!pendingWorkflowIntent || pendingWorkflowIntent === "general_question") return undefined;
+
   const slots = { ...state.slots };
   const answer = text.trim();
   const previousMissing = state.lastAskedSlot;
@@ -589,7 +602,7 @@ export function publicConversationIntroStep(
     };
   }
   if (previousMissing === "contactName" || previousMissing === "requesterMobile") {
-    if (pendingWorkflowIntent && pendingWorkflowIntent !== "general_question") {
+    if (pendingWorkflowIntent) {
       const { lastAskedSlot: _lastAskedSlot, ...resumedState } = {
         ...state,
         slots,
@@ -643,6 +656,7 @@ export class AgentService {
     language?: AgentLanguage,
     visitorId?: string,
     visitorIp?: string,
+    surface: "website" | "website_avatar" = "website",
   ) {
     const sessionToken = token();
     const settings = await this.settings();
@@ -651,7 +665,7 @@ export class AgentService {
     const ref = await reference(this.db, "platform_agent_conversation_reference_seq", "AGT");
     const stableVisitorId = validUuid.test(visitorId ?? "") ? visitorId! : randomUUID();
     const visitorIpHash = this.visitorIpHash(visitorIp);
-    await sql`insert into platform_agent_conversations(reference_number,public_session_token_hash,visitor_id,visitor_ip_hash,visitor_ip_seen_at,channel,language,current_intent,status,requester_type,audience,last_message_at,state) values(${ref},${hash(sessionToken)},${stableVisitorId}::uuid,${visitorIpHash},case when ${visitorIpHash}::text is not null then now() else null end,'website',${language ?? settings.defaultLanguage},'unknown','active','unknown','unknown',now(),${JSON.stringify({ slots: {}, audience: "unknown", discussedTopics: [], visitorId: stableVisitorId })}::jsonb)`.execute(
+    await sql`insert into platform_agent_conversations(reference_number,public_session_token_hash,visitor_id,visitor_ip_hash,visitor_ip_seen_at,channel,language,current_intent,status,requester_type,audience,last_message_at,state) values(${ref},${hash(sessionToken)},${stableVisitorId}::uuid,${visitorIpHash},case when ${visitorIpHash}::text is not null then now() else null end,'website',${language ?? settings.defaultLanguage},'unknown','active','unknown','unknown',now(),${JSON.stringify({ slots: {}, audience: "unknown", discussedTopics: [], visitorId: stableVisitorId, entrySurface: surface })}::jsonb)`.execute(
       this.db,
     );
     const selectedLanguage = language ?? settings.defaultLanguage;
@@ -2866,7 +2880,9 @@ export class AgentService {
       filters.push(sql`c.hidden_at is null and c.deleted_at is null`);
     if (query.status && query.status !== "all")
       filters.push(sql`c.review_status = any(${query.status.split(",")})`);
-    if (query.channel && query.channel !== "all") filters.push(sql`c.channel=${query.channel}`);
+    if (query.channel === "website_avatar")
+      filters.push(sql`c.channel='website' and c.state->>'entrySurface'='website_avatar'`);
+    else if (query.channel && query.channel !== "all") filters.push(sql`c.channel=${query.channel}`);
     if (query.conversationMode && query.conversationMode !== "all")
       filters.push(sql`c.conversation_mode=${query.conversationMode}`);
     if (query.audience && query.audience !== "all") filters.push(sql`c.audience=${query.audience}`);
@@ -2966,6 +2982,7 @@ export class AgentService {
         max(b.last_message_at) last_message_at,
         max(b.updated_at) updated_at,
         (array_agg(b.channel order by b.last_message_at desc))[1] channel,
+        (array_agg(b.state order by b.last_message_at desc))[1] state,
         (array_agg(b.current_intent order by b.last_message_at desc))[1] current_intent,
         (array_agg(b.language order by b.last_message_at desc))[1] language,
         (array_agg(b.status order by b.last_message_at desc))[1] status,
@@ -3547,7 +3564,10 @@ export class AgentService {
     const row = (
       await sql<
         Record<string, unknown>
-      >`select agent_enabled,website_chat_enabled,whatsapp_agent_enabled,assistant_display_name,default_language,human_handoff_enabled,general_fallback_message,model_provider,model_identifier,max_response_length,handoff_failure_threshold,supported_public_intents,whatsapp_provider,whatsapp_business_number,whatsapp_business_number_normalized,whatsapp_public_cta_enabled,whatsapp_last_webhook_at,whatsapp_last_outbound_at,whatsapp_last_error_code,whatsapp_configuration_note from platform_agent_settings where id=true`.execute(
+      >`select agent_enabled,website_chat_enabled,whatsapp_agent_enabled,assistant_display_name,default_language,human_handoff_enabled,general_fallback_message,model_provider,model_identifier,max_response_length,handoff_failure_threshold,supported_public_intents,whatsapp_provider,whatsapp_business_number,whatsapp_business_number_normalized,whatsapp_public_cta_enabled,whatsapp_last_webhook_at,whatsapp_last_outbound_at,whatsapp_last_error_code,whatsapp_configuration_note,
+        avatar_enabled,avatar_display_name,avatar_title_en,avatar_title_ar,avatar_image_url,avatar_intro_video_url_en,avatar_intro_video_url_ar,avatar_intro_image_url_en,avatar_intro_image_url_ar,avatar_home_operations_image_url_en,avatar_home_operations_image_url_ar,avatar_intro_transcript_en,avatar_intro_transcript_ar,avatar_show_homepage,avatar_show_pricing,avatar_show_delivery_company,avatar_show_trader,avatar_show_send_package,avatar_auto_open,avatar_provider,avatar_status,avatar_live_enabled,avatar_live_provider,
+        avatar_live_avatar_id,avatar_live_voice_id_en,avatar_live_voice_id_ar,avatar_live_voice_agent_id_en,avatar_live_voice_agent_id_ar,avatar_live_max_session_seconds,avatar_live_idle_timeout_seconds,avatar_live_max_concurrent_sessions,avatar_live_start_rate_limit_per_minute,avatar_live_daily_minute_cap,avatar_live_cost_per_minute
+        from platform_agent_settings where id=true`.execute(
         this.db,
       )
     ).rows[0]!;
@@ -3555,6 +3575,8 @@ export class AgentService {
     return {
       ...mapped,
       diagnostics: this.model.diagnostics(),
+      avatarLiveConfigured: Boolean(createLiveAvatarServerProvider(String(mapped.avatarLiveProvider ?? "heygen_live"))?.configured()),
+      avatarLiveUsage: await this.liveAvatarUsageSummary(),
       whatsappDiagnostics: this.whatsappProvider(
         String(mapped.whatsappProvider ?? "meta_cloud"),
       ).status(),
@@ -3596,6 +3618,146 @@ export class AgentService {
       humanAvailable,
       status: humanAvailable ? "available" : "unavailable",
     };
+  }
+
+  public async publicAvatarSettings() {
+    const row = (await sql<Record<string, unknown>>`
+      select avatar_enabled,avatar_display_name,avatar_title_en,avatar_title_ar,avatar_image_url,
+        avatar_intro_video_url_en,avatar_intro_video_url_ar,avatar_intro_image_url_en,avatar_intro_image_url_ar,avatar_home_operations_image_url_en,avatar_home_operations_image_url_ar,avatar_intro_transcript_en,
+        avatar_intro_transcript_ar,avatar_show_homepage,avatar_show_pricing,
+        avatar_show_delivery_company,avatar_show_trader,avatar_show_send_package,
+        avatar_auto_open,avatar_provider,avatar_status,avatar_live_enabled,avatar_live_provider,
+        avatar_live_max_session_seconds,avatar_live_idle_timeout_seconds
+      from platform_agent_settings where id=true
+    `.execute(this.db)).rows[0]!;
+    const settings = mapRow(row) as Record<string, unknown>;
+    return {
+      enabled: Boolean(settings.avatarEnabled),
+      displayName: String(settings.avatarDisplayName),
+      titleEn: String(settings.avatarTitleEn),
+      titleAr: String(settings.avatarTitleAr),
+      imageUrl: settings.avatarImageUrl,
+      introVideoUrlEn: settings.avatarIntroVideoUrlEn,
+      introVideoUrlAr: settings.avatarIntroVideoUrlAr,
+      introImageUrlEn: settings.avatarIntroImageUrlEn,
+      introImageUrlAr: settings.avatarIntroImageUrlAr,
+      homeOperationsImageUrlEn: settings.avatarHomeOperationsImageUrlEn,
+      homeOperationsImageUrlAr: settings.avatarHomeOperationsImageUrlAr,
+      introTranscriptEn: String(settings.avatarIntroTranscriptEn),
+      introTranscriptAr: String(settings.avatarIntroTranscriptAr),
+      showOnHomepage: Boolean(settings.avatarShowHomepage),
+      showOnPricing: Boolean(settings.avatarShowPricing),
+      showOnDeliveryCompany: Boolean(settings.avatarShowDeliveryCompany),
+      showOnTrader: Boolean(settings.avatarShowTrader),
+      showOnSendPackage: Boolean(settings.avatarShowSendPackage),
+      autoOpen: Boolean(settings.avatarAutoOpen),
+      provider: String(settings.avatarProvider),
+      status: String(settings.avatarStatus),
+      liveEnabled: Boolean(settings.avatarLiveEnabled),
+      liveProvider: String(settings.avatarLiveProvider ?? "heygen_live"),
+      liveConfigured: Boolean(createLiveAvatarServerProvider(String(settings.avatarLiveProvider ?? "heygen_live"))?.configured()),
+      liveMaxSessionSeconds: Number(settings.avatarLiveMaxSessionSeconds ?? 300),
+      liveIdleTimeoutSeconds: Number(settings.avatarLiveIdleTimeoutSeconds ?? 60),
+    };
+  }
+
+  public async createLiveAvatarSession(conversationToken: string, language: "en" | "ar", visitorIp?: string) {
+    const conversation = await this.findByToken(conversationToken);
+    const settings = await this.settings();
+    if (!settings.avatarEnabled || settings.avatarStatus !== "active" || !settings.avatarLiveEnabled)
+      throw new BadRequestException("live_avatar_disabled");
+    const provider = createLiveAvatarServerProvider(String(settings.avatarLiveProvider));
+    if (!provider?.configured()) throw new BadRequestException("live_avatar_not_configured");
+    const maxSeconds = Number(settings.avatarLiveMaxSessionSeconds ?? 300);
+    const idleSeconds = Math.min(Number(settings.avatarLiveIdleTimeoutSeconds ?? 60), maxSeconds);
+    const ipHash = this.visitorIpHash(visitorIp) ?? (String(conversation.visitor_ip_hash ?? "") || null);
+    const usageId = await this.db.transaction().execute(async (trx) => {
+      await sql`select pg_advisory_xact_lock(hashtext('live-avatar-admission'))`.execute(trx);
+      await sql`update platform_agent_live_avatar_usage set ended_at=started_at + ${maxSeconds} * interval '1 second',duration_seconds=${maxSeconds},end_reason='max_duration_recovered',updated_at=now() where ended_at is null and started_at < now() - ${maxSeconds} * interval '1 second'`.execute(trx);
+      const active = Number((await sql<{ count: string }>`select count(*)::text as count from platform_agent_live_avatar_usage where ended_at is null`.execute(trx)).rows[0]?.count ?? 0);
+      const recent = ipHash
+        ? Number((await sql<{ count: string }>`select count(*)::text as count from platform_agent_live_avatar_usage where ip_hash=${ipHash} and started_at >= now() - interval '1 minute'`.execute(trx)).rows[0]?.count ?? 0)
+        : 0;
+      const dailyCap = settings.avatarLiveDailyMinuteCap == null ? null : Number(settings.avatarLiveDailyMinuteCap);
+      const seconds = dailyCap === null ? 0 : Number((await sql<{ seconds: string }>`select coalesce(sum(case when ended_at is null then least(${maxSeconds}::numeric,extract(epoch from now()-started_at)) else duration_seconds end),0)::text as seconds from platform_agent_live_avatar_usage where started_at >= date_trunc('day',now())`.execute(trx)).rows[0]?.seconds ?? 0);
+      const failure = liveAvatarAdmissionFailure({
+        activeSessions: active,
+        maxConcurrentSessions: Number(settings.avatarLiveMaxConcurrentSessions ?? 2),
+        recentIpStarts: recent,
+        startRateLimitPerMinute: Number(settings.avatarLiveStartRateLimitPerMinute ?? 3),
+        usedSecondsToday: seconds,
+        dailyMinuteCap: dailyCap,
+      });
+      if (failure === "live_avatar_rate_limit_reached") throw new BadRequestException(failure);
+      if (failure) throw new ServiceUnavailableException(failure);
+      return (await sql<{ id: string }>`insert into platform_agent_live_avatar_usage(conversation_id,provider,language,ip_hash) values(${String(conversation.id)}::uuid,${String(settings.avatarLiveProvider)},${language},${ipHash}) returning id`.execute(trx)).rows[0]!.id;
+    });
+    try {
+      const tokenResult = await provider.createSessionToken(language, {
+        avatarId: settings.avatarLiveAvatarId || undefined,
+        voiceId: language === "ar" ? settings.avatarLiveVoiceIdAr || undefined : settings.avatarLiveVoiceIdEn || undefined,
+        voiceAgentId: language === "ar" ? settings.avatarLiveVoiceAgentIdAr || undefined : settings.avatarLiveVoiceAgentIdEn || undefined,
+        idleTimeoutSeconds: idleSeconds,
+        maxSessionSeconds: maxSeconds,
+      });
+      return { ...tokenResult, usageId, maxSessionSeconds: maxSeconds };
+    } catch {
+      await sql`update platform_agent_live_avatar_usage set ended_at=now(),provider_error_count=1,fallback_count=1,end_reason='token_failure',updated_at=now() where id=${usageId}::uuid`.execute(this.db);
+      throw new ServiceUnavailableException("live_avatar_unavailable");
+    }
+  }
+
+  public async reportLiveAvatarUsage(conversationToken: string, usageId: string, input: LiveAvatarUsageDto) {
+    const conversation = await this.findByToken(conversationToken);
+    const settings = await this.settings();
+    const duration = Math.min(Math.max(Number(input.durationSeconds ?? 0), 0), Number(settings.avatarLiveMaxSessionSeconds ?? 300));
+    const result = await sql`update platform_agent_live_avatar_usage set
+      response_count=response_count + case when ${input.event}='response_completed' then 1 else 0 end,
+      fallback_count=fallback_count + case when ${input.event}='fallback' then 1 else 0 end,
+      provider_error_count=provider_error_count + case when ${input.event}='provider_error' then 1 else 0 end,
+      ended_at=case when ${input.event}='ended' then coalesce(ended_at,now()) else ended_at end,
+      duration_seconds=case when ${input.event}='ended' then greatest(duration_seconds,${duration}) else duration_seconds end,
+      end_reason=case when ${input.event}='ended' then ${input.reason ?? "client_ended"} else end_reason end,updated_at=now()
+      where id=${usageId}::uuid and conversation_id=${String(conversation.id)}::uuid returning id`.execute(this.db);
+    if (!result.rows[0]) throw new NotFoundException("live_avatar_usage_not_found");
+    return { recorded: true };
+  }
+
+  private async liveAvatarUsageSummary() {
+    const row = (await sql<Record<string, unknown>>`select
+      count(*) filter(where started_at >= date_trunc('day',now()))::int as "todaySessions",
+      round(coalesce(sum(duration_seconds) filter(where started_at >= date_trunc('day',now())),0)::numeric/60,2) as "todayMinutes",
+      count(*) filter(where ended_at is null)::int as "activeSessions",
+      coalesce(sum(fallback_count) filter(where started_at >= date_trunc('day',now())),0)::int as "fallbackCount",
+      coalesce(sum(provider_error_count) filter(where started_at >= date_trunc('day',now())),0)::int as "providerErrorCount",
+      coalesce(sum(response_count) filter(where started_at >= date_trunc('day',now())),0)::int as "responseCount"
+      from platform_agent_live_avatar_usage`.execute(this.db)).rows[0] ?? {};
+    const mapped = mapRow(row) as Record<string, unknown>;
+    const cost = Number((await sql<{ value: string | null }>`select avatar_live_cost_per_minute::text as value from platform_agent_settings where id=true`.execute(this.db)).rows[0]?.value ?? 0);
+    return { ...mapped, estimatedCost: Math.round(Number(mapped.todayMinutes ?? 0) * cost * 100) / 100 };
+  }
+
+  public async updateAvatarSettings(input: AgentAvatarSettingsDto, actorId: string) {
+    await sql`update platform_agent_settings set
+      avatar_enabled=${input.enabled},avatar_display_name=${input.displayName},avatar_title_en=${input.titleEn},
+      avatar_title_ar=${input.titleAr},avatar_image_url=${input.imageUrl ?? null},
+      avatar_intro_video_url_en=${input.introVideoUrlEn ?? null},avatar_intro_video_url_ar=${input.introVideoUrlAr ?? null},
+      avatar_intro_image_url_en=${input.introImageUrlEn ?? null},avatar_intro_image_url_ar=${input.introImageUrlAr ?? null},
+      avatar_home_operations_image_url_en=${input.homeOperationsImageUrlEn ?? null},avatar_home_operations_image_url_ar=${input.homeOperationsImageUrlAr ?? null},
+      avatar_intro_transcript_en=${input.introTranscriptEn},avatar_intro_transcript_ar=${input.introTranscriptAr},
+      avatar_show_homepage=${input.showOnHomepage},avatar_show_pricing=${input.showOnPricing},
+      avatar_show_delivery_company=${input.showOnDeliveryCompany},avatar_show_trader=${input.showOnTrader},
+      avatar_show_send_package=${input.showOnSendPackage},avatar_auto_open=${input.autoOpen},
+      avatar_provider=${input.provider},avatar_status=${input.status},avatar_live_enabled=${input.liveEnabled ?? false},
+      avatar_live_provider=${input.liveProvider ?? "heygen_live"},avatar_live_avatar_id=${input.liveAvatarId ?? null},
+      avatar_live_voice_id_en=${input.liveVoiceIdEn ?? null},avatar_live_voice_id_ar=${input.liveVoiceIdAr ?? null},
+      avatar_live_voice_agent_id_en=${input.liveVoiceAgentIdEn ?? null},avatar_live_voice_agent_id_ar=${input.liveVoiceAgentIdAr ?? null},
+      avatar_live_max_session_seconds=${input.liveMaxSessionSeconds ?? 300},avatar_live_idle_timeout_seconds=${input.liveIdleTimeoutSeconds ?? 60},
+      avatar_live_max_concurrent_sessions=${input.liveMaxConcurrentSessions ?? 2},avatar_live_start_rate_limit_per_minute=${input.liveStartRateLimitPerMinute ?? 3},
+      avatar_live_daily_minute_cap=${input.liveDailyMinuteCap ?? null},avatar_live_cost_per_minute=${input.liveCostPerMinute ?? null},
+      updated_by_account_id=${actorId}::uuid,updated_at=now()
+      where id=true`.execute(this.db);
+    return this.publicAvatarSettings();
   }
 
   public async updateSettings(input: AgentSettingsDto, actorId: string) {
