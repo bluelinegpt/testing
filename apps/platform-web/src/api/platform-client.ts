@@ -2049,6 +2049,17 @@ export const platformApi = {
   async blogReferences(): Promise<any> {
     return await request<any>("platform/blog/references", { method: "GET" });
   },
+  async blogSeoHealth():Promise<any>{return await request<any>("platform/blog/seo-health",{method:"GET"});},
+  async blogProductionSeoHealth():Promise<any>{return await request<any>("platform/blog/production-seo-health",{method:"GET"});},
+  async blogSeoReadiness(id:string):Promise<any>{return await request<any>(`platform/blog/${id}/seo-readiness`,{method:"GET"});},
+  async blogRedirects():Promise<any[]>{return(await request<any[]>("platform/blog/redirects",{method:"GET"}))??[];},
+  async blogNotFoundPaths():Promise<any[]>{return(await request<any[]>("platform/blog/not-found",{method:"GET"}))??[];},
+  async createBlogCategory(body:any):Promise<any>{return await request<any>("platform/blog/categories",{method:"POST",body});},
+  async updateBlogCategory(id:string,body:any):Promise<any>{return await request<any>(`platform/blog/categories/${id}`,{method:"PATCH",body});},
+  async saveBlogTag(id:string|undefined,body:any):Promise<any>{return await request<any>(id?`platform/blog/tags/${id}`:"platform/blog/tags",{method:id?"PATCH":"POST",body});},
+  async saveBlogAuthor(id:string|undefined,body:any):Promise<any>{return await request<any>(id?`platform/blog/authors/${id}`:"platform/blog/authors",{method:id?"PATCH":"POST",body});},
+  async saveBlogTopic(id:string|undefined,body:any):Promise<any>{return await request<any>(id?`platform/blog/topics/${id}`:"platform/blog/topics",{method:id?"PATCH":"POST",body});},
+  async createBlogRedirect(body:any):Promise<any>{return await request<any>("platform/blog/redirects",{method:"POST",body});},
   async createBlogArticle(input: any): Promise<any> {
     return await request<any>("platform/blog", { method: "POST", body: input });
   },

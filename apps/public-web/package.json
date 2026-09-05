@@ -5,10 +5,14 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
+    "start": "node serve.mjs",
     "build": "tsc -b && vite build && vite build --ssr src/entry-server.tsx --outDir dist-ssr && node scripts/prerender.mjs && node -e \"require('fs').rmSync('dist-ssr',{recursive:true,force:true})\"",
     "typecheck": "tsc -b --pretty false",
     "test": "vitest run",
-    "test:prerender": "node scripts/verify-prerender-output.mjs"
+    "test:prerender": "node scripts/verify-prerender-output.mjs",
+    "test:server": "node --test --test-isolation=none serve.node-test.mjs",
+    "audit:performance": "node scripts/performance-budget.mjs",
+    "certify:seo": "node scripts/seo-certification.mjs"
   },
   "dependencies": {
     "@heygen/liveavatar-web-sdk": "0.0.18",

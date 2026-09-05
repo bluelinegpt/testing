@@ -1,10 +1,10 @@
 import { useContext, useEffect, useState, type SyntheticEvent } from "react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import { Link as RouterLink, useLocation, useParams, useSearchParams, type LinkProps } from "react-router-dom";
 import { apiUrl, publicAssetUrl } from "./api-base";
 import { trackEvent } from "./analytics";
-import { applyPageMetadata } from "./seo";
+import { applyPageMetadata, publicRobotsDirective } from "./seo";
 import { getPreloaded, PreloadContext } from "./preload-context";
-import { usePublicLocale } from "./public-localization";
+import { localeFromPublicPath, localizePublicPath } from "./public-localization";
 import { BlogEnquiry } from "./BlogEnquiry";
 /** Preload cache keys, exported so entry-server.tsx populates the exact
     same keys these components read -- one source of truth for both sides. */
@@ -13,6 +13,13 @@ export const blogListingPreloadKey = (locale: string, page: number, categorySlug
 export const blogCategoriesPreloadKey = (locale: string) => `blog-categories:${locale}`;
 export const blogArticlePreloadKey = (slug: string, locale: string) =>
   `blog-article:${slug}:${locale}`;
+export const blogLandingPreloadKey=(kind:string,slug:string,locale:string)=>`blog-landing:${kind}:${slug}:${locale}`;
+export const blogLandingListPreloadKey=(kind:string,slug:string,locale:string)=>`blog-landing-list:${kind}:${slug}:${locale}`;
+const useRouteLocale = () => localeFromPublicPath(useLocation().pathname);
+const Link = ({to,...props}:LinkProps) => {
+  const locale=useRouteLocale();
+  return <RouterLink to={typeof to === "string" && to.startsWith("/") ? localizePublicPath(to,locale) : to} {...props}/>;
+};
 
 type Card = {
   slug: string;
@@ -20,13 +27,17 @@ type Card = {
   excerpt: string;
   featuredImageUrl?: string;
   featuredImageAlt?: string;
+  featuredImageWidth?: number;
+  featuredImageHeight?: number;
   publishedAt: string;
   updatedAt?: string;
   category: string;
   categorySlug: string;
   author: string;
+  authorSlug?: string;
   readingMinutes: number;
 };
+type Landing={name:string;title?:string;display_name?:string;slug:string;description?:string;short_bio?:string;biography?:string;expertise?:string[];profile_image_public_url?:string;article_count:number;robots_index:boolean;seo:Record<string,any>};
 type Block = { type: string; text?: string; items?: string[] };
 type Article = Record<string, unknown> & {
   slug: string;
@@ -36,18 +47,23 @@ type Article = Record<string, unknown> & {
   category: string;
   category_slug: string;
   author: string;
+  author_slug?: string;
   published_at: string;
   updated_content_at?: string;
   featured_image_public_url?: string;
   featured_image_alt?: string;
+  featured_image_width?: number;
+  featured_image_height?: number;
   seo_title?: string;
   meta_description?: string;
   canonical_url?: string;
   robots_index: boolean;
   robots_follow: boolean;
   social_title?: string;
+  seo?: Record<string, any>;
   social_description?: string;
   social_image_url?: string;
+  tags?: Array<{name:string;slug:string}>;
 };
 /**
  * A request that never settles -- a dropped connection, a dev-server
@@ -69,6 +85,17 @@ async function api<T>(path: string): Promise<T> {
     clearTimeout(timeout);
   }
 }
+
+export function BlogLandingPage(){
+  const preloadMap=useContext(PreloadContext),{slug=""}=useParams(),location=useLocation(),kind=location.pathname.match(/\/blog\/(category|tag|topic|author)\//)?.[1]??"tag",locale=useRouteLocale(),[landing,setLanding]=useState<Landing|undefined>(()=>getPreloaded(preloadMap,blogLandingPreloadKey(kind,slug,locale))),[listing,setListing]=useState<{items:Card[]}|undefined>(()=>getPreloaded(preloadMap,blogLandingListPreloadKey(kind,slug,locale))),[missing,setMissing]=useState(false);
+  useEffect(()=>{void Promise.all([api<Landing>(`/${kind}s/${encodeURIComponent(slug)}?language=${locale}`),api<{items:Card[]}>(`?language=${locale}&${kind}=${encodeURIComponent(slug)}`)]).then(([page,articles])=>{setLanding(page);setListing(articles);}).catch(async()=>{try{const redirect=await api<{to:string}>(`/redirect?path=${encodeURIComponent(location.pathname)}`);if(redirect.to){window.location.replace(redirect.to);return;}}catch{}setMissing(true);void fetch(apiUrl("/public/blog/not-found"),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({path:location.pathname,referer:document.referrer})});});},[kind,slug,locale]);
+  useEffect(()=>{if(!landing)return;const seo=landing.seo??{};applyPageMetadata(String(seo.title??landing.name),String(seo.description??landing.description??landing.short_bio??""),`/blog/${kind}/${slug}`,{canonical:String(seo.canonical??""),locale,robots:publicRobotsDirective(landing.robots_index,false!==valueBoolean(landing,"robots_follow")),schema:seo.graph,alternates:seo.alternates,xDefault:seo.xDefault,image:publicAssetUrl(seo.image)});},[landing,kind,slug,locale]);
+  if(missing)return <section className="article-empty"><h1>{blogText[locale].notFoundTitle}</h1><p>{blogText[locale].notFoundCopy}</p><Link to="/blog">{blogText[locale].returnBlog}</Link></section>;
+  if(!landing||!listing)return <section className="article-empty">{blogText[locale].loading}</section>;
+  const title=landing.name||landing.title||landing.display_name||slug;
+  return <><section className="blog-hero blog-landing" dir={locale==="ar"?"rtl":"ltr"}><p className="eyebrow"><span/>{kind}</p>{landing.profile_image_public_url&&<img className="author-avatar" src={publicAssetUrl(landing.profile_image_public_url)} alt="" width="160" height="160" loading="eager" decoding="async"/>}<h1>{title}</h1><p>{landing.description||landing.short_bio}</p>{landing.biography&&<p>{landing.biography}</p>}{landing.expertise?.length?<ul className="author-expertise">{landing.expertise.map(x=><li key={x}>{x}</li>)}</ul>:null}</section><section className="blog-listing blog-index"><div className="blog-grid">{listing.items.map(article=><CardView key={article.slug} article={article}/>)}</div></section></>;
+}
+function valueBoolean(row:Record<string,unknown>,key:string){return row[key]??row[key.replace(/[A-Z]/g,m=>`_${m.toLowerCase()}`)];}
 const blogText = {
   en: {
     defaultTitle: "Tawseelhub Insights",
@@ -157,7 +184,7 @@ export function BlogListingPage() {
   const { categorySlug } = useParams(),
     [query, setQuery] = useSearchParams(),
     page = Math.max(1, Number(query.get("page")) || 1),
-    locale = usePublicLocale(),
+    locale = useRouteLocale(),
     [data, setData] = useState<
       { items: Card[]; page: number; pageSize: number; total: number } | undefined
     >(() => getPreloaded(preloadMap, blogListingPreloadKey(locale, page, categorySlug))),
@@ -195,6 +222,12 @@ export function BlogListingPage() {
   const title = categorySlug
     ? (categories.find((x) => x.slug === categorySlug)?.name ?? text.categoryTitle)
     : text.defaultTitle;
+  const category = categories.find((x) => x.slug === categorySlug) as (typeof categories[number] & {translationSlug?:string;translationLanguage?:"en"|"ar"}) | undefined;
+  const basePath = categorySlug ? `/blog/category/${categorySlug}` : "/blog";
+  const canonicalPath = localizePublicPath(basePath, locale);
+  const alternates = categorySlug
+    ? [{language:locale,url:`https://tawseelhub.com${canonicalPath}`},...(category?.translationSlug&&category.translationLanguage?[{language:category.translationLanguage,url:`https://tawseelhub.com${localizePublicPath(`/blog/category/${category.translationSlug}`,category.translationLanguage)}`}]:[])]
+    : [{language:"en" as const,url:"https://tawseelhub.com/blog"},{language:"ar" as const,url:"https://tawseelhub.com/ar/blog"}];
   useEffect(
     () =>
       applyPageMetadata(
@@ -206,9 +239,10 @@ export function BlogListingPage() {
           : locale === "ar"
             ? "إرشادات عملية لشركات التوصيل والتجار وعمليات الميل الأخير الحديثة."
             : "Practical guidance for UAE delivery companies, Traders and modern last-mile operations.",
-        categorySlug ? `/blog/category/${categorySlug}` : "/blog",
+        canonicalPath,
+        {locale,alternates,xDefault:alternates.find((item)=>item.language==="en")?.url??null},
       ),
-    [categorySlug, title],
+    [categorySlug, page, title, locale, canonicalPath, category?.translationSlug],
   );
   return (
     <>
@@ -277,7 +311,7 @@ export function BlogListingPage() {
 function CardView({ article }: { article: Card }) {
   const [failedImage, setFailedImage] = useState<string | null>(null);
   const imageUrl = publicAssetUrl(article.featuredImageUrl) || articleImageFallback(article.slug);
-  const locale = usePublicLocale();
+  const locale = useRouteLocale();
   const text = blogText[locale];
   return (
     <article className="blog-card">
@@ -286,7 +320,10 @@ function CardView({ article }: { article: Card }) {
         <img
           src={imageUrl}
           alt={article.featuredImageAlt ?? ""}
+          width={article.featuredImageWidth ?? 800}
+          height={article.featuredImageHeight ?? 450}
           loading="lazy"
+          decoding="async"
           onError={() => setFailedImage(imageUrl)}
         />
       ) : <div className="blog-cover-placeholder" aria-hidden="true"><span>TAWSEELHUB</span><strong>{text.eyebrow}</strong><span className="blog-cover-mark">↗</span></div>}
@@ -300,7 +337,7 @@ function CardView({ article }: { article: Card }) {
         </h2>
         <p>{article.excerpt}</p>
         <small>
-          {article.author} · {new Date(article.publishedAt).toLocaleDateString(locale === "ar" ? "ar-AE" : "en-GB", {day:"numeric", month:"short", year:"numeric"})} ·{" "}
+          {article.authorSlug ? <Link to={`/blog/author/${article.authorSlug}`}>{article.author}</Link> : article.author} · {new Date(article.publishedAt).toLocaleDateString(locale === "ar" ? "ar-AE" : "en-GB", {day:"numeric", month:"short", year:"numeric"})} ·{" "}
           {article.readingMinutes} {text.minRead}
         </small>
         <Link className="blog-read-link" to={`/blog/${article.slug}`} aria-label={`${text.readArticle}: ${article.title}`}>
@@ -313,7 +350,7 @@ function CardView({ article }: { article: Card }) {
 export function BlogArticlePage() {
   const preloadMap = useContext(PreloadContext);
   const { slug = "" } = useParams(),
-    locale = usePublicLocale(),
+    locale = useRouteLocale(),
     [data, setData] = useState<
       | {
           article: Article;
@@ -339,15 +376,24 @@ export function BlogArticlePage() {
     const a = data.article;
     const featuredImageUrl = publicAssetUrl(a.featured_image_public_url);
     const socialImageUrl = publicAssetUrl(a.social_image_url);
+    const seo = a.seo ?? {};
     applyPageMetadata(
-      String(a.seo_title ?? a.title),
-      String(a.meta_description ?? a.excerpt),
+      String(seo.title ?? a.seo_title ?? a.title),
+      String(seo.description ?? a.meta_description ?? a.excerpt),
       `/blog/${a.slug}`,
       {
         type: "article",
-        image: socialImageUrl || featuredImageUrl,
-        canonical: String(a.canonical_url ?? ""),
-        robots: `${a.robots_index ? "index" : "noindex"},${a.robots_follow ? "follow" : "nofollow"}`,
+        image: publicAssetUrl(seo.image) || socialImageUrl || featuredImageUrl,
+        imageAlt: seo.imageAlt,
+        imageWidth: seo.imageWidth,
+        imageHeight: seo.imageHeight,
+        canonical: String(seo.canonical ?? a.canonical_url ?? ""),
+        locale,
+        schema: seo.graph,
+        alternates: seo.alternates,
+        xDefault: seo.xDefault,
+        alternateLocale: seo.alternateLocale,
+        robots: publicRobotsDirective(a.robots_index, a.robots_follow),
       },
     );
     trackEvent("blog_article_view", {
@@ -355,27 +401,6 @@ export function BlogArticlePage() {
       category_slug: a.category_slug,
       language: locale,
     });
-    const schema = document.createElement("script");
-    schema.type = "application/ld+json";
-    schema.dataset.blogSchema = "true";
-    schema.text = JSON.stringify({
-      "@context": "https://schema.org",
-      "@type": "BlogPosting",
-      headline: a.title,
-      description: a.excerpt,
-      datePublished: a.published_at,
-      dateModified: a.updated_content_at ?? a.published_at,
-      author: { "@type": "Organization", name: a.author },
-      publisher: {
-        "@type": "Organization",
-        name: "Tawseelhub",
-        logo: { "@type": "ImageObject", url: "https://tawseelhub.com/tawseelhub-logo.png" },
-      },
-      mainEntityOfPage: `https://tawseelhub.com/blog/${a.slug}`,
-      ...(featuredImageUrl ? { image: featuredImageUrl } : {}),
-    });
-    document.head.append(schema);
-    return () => schema.remove();
   }, [data, locale]);
   if (missing)
     return (
@@ -399,18 +424,24 @@ export function BlogArticlePage() {
         <h1>{a.title}</h1>
         <p>{a.excerpt}</p>
         <small>
-          {a.author} · {text.published}{" "}
+          {a.author_slug ? <Link to={`/blog/author/${a.author_slug}`}>{a.author}</Link> : a.author} · {text.published}{" "}
           {new Date(a.published_at).toLocaleDateString(locale === "ar" ? "ar-AE" : "en-AE")}
           {a.updated_content_at
             ? ` · ${text.updated} ${new Date(a.updated_content_at).toLocaleDateString(locale === "ar" ? "ar-AE" : "en-AE")}`
             : ""}
         </small>
       </header>
+      {a.tags?.length ? <nav className="blog-categories" aria-label="Article tags">{a.tags.map(tag=><Link key={tag.slug} to={`/blog/tag/${tag.slug}`}>#{tag.name}</Link>)}</nav> : null}
       {featuredImageUrl && (
         <img
           className="article-image"
           src={featuredImageUrl}
           alt={a.featured_image_alt ?? ""}
+          width={a.featured_image_width ?? 1200}
+          height={a.featured_image_height ?? 675}
+          loading="eager"
+          decoding="async"
+          fetchPriority="high"
           onError={(event) => useArticleImageFallback(event, a.slug)}
         />
       )}
@@ -444,7 +475,7 @@ export function BlogArticlePage() {
 }
 function BlockView({ block }: { block: Block }) {
   // HTML blocks are allowlist-sanitized by the API on both save and public reads.
-  if (block.type === "html") return <div dangerouslySetInnerHTML={{__html: (block.text ?? "").replace(/src="(\/api\/v1\/public\/website\/media\/[A-Za-z0-9_-]+)"/g, (_match, path:string) => `src="${publicAssetUrl(path).replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;")}"`)}} />;
+  if (block.type === "html") return <div dangerouslySetInnerHTML={{__html: (block.text ?? "").replace(/<img(?![^>]*\bloading=)/gi, '<img loading="lazy" decoding="async"').replace(/src="(\/api\/v1\/public\/website\/media\/[A-Za-z0-9_-]+)"/g, (_match, path:string) => `src="${publicAssetUrl(path).replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;")}"`)}} />;
   if (block.type === "h2") return <h2>{block.text}</h2>;
   if (block.type === "h3") return <h3>{block.text}</h3>;
   if (block.type === "blockquote") return <blockquote>{block.text}</blockquote>;

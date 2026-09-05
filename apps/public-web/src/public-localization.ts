@@ -1,14 +1,36 @@
-import { useEffect, useState } from "react";
+import { createContext, createElement, useContext, useEffect, useState, type ReactNode } from "react";
+import { Link as RouterLink, type LinkProps } from "react-router-dom";
 import type { Locale } from "./website-cms-client";
 
 export type PublicLocale = Locale;
+const PublicLocaleContext = createContext<PublicLocale | null>(null);
+export function PublicLocaleProvider({locale,children}:{locale:PublicLocale;children:ReactNode}) {
+  return createElement(PublicLocaleContext.Provider,{value:locale},children);
+}
 
 export const publicLocaleStorageKey = "tawseelhub.locale";
 export const publicLocaleChangeEvent = "tawseelhub:locale-changed";
 
+export function localeFromPublicPath(pathname: string): PublicLocale {
+  return pathname === "/ar" || pathname.startsWith("/ar/") ? "ar" : "en";
+}
+
+export function stripPublicLocale(pathname: string): string {
+  if (pathname === "/ar") return "/";
+  return pathname.startsWith("/ar/") ? pathname.slice(3) || "/" : pathname;
+}
+
+export function localizePublicPath(pathname: string, locale: PublicLocale): string {
+  const [pathWithQuery, hash = ""] = pathname.split("#", 2);
+  const [path, query = ""] = pathWithQuery!.split("?", 2);
+  const base = stripPublicLocale(path || "/");
+  const localized = locale === "ar" ? (base === "/" ? "/ar" : `/ar${base}`) : base;
+  return `${localized}${query ? `?${query}` : ""}${hash ? `#${hash}` : ""}`;
+}
+
 export function getStoredPublicLocale(): PublicLocale {
   if (typeof window === "undefined") return "en";
-  return window.localStorage.getItem(publicLocaleStorageKey) === "ar" ? "ar" : "en";
+  return localeFromPublicPath(window.location.pathname);
 }
 
 export function savePublicLocale(locale: PublicLocale): void {
@@ -18,6 +40,7 @@ export function savePublicLocale(locale: PublicLocale): void {
 }
 
 export function usePublicLocale(): PublicLocale {
+  const routedLocale=useContext(PublicLocaleContext);
   const [locale, setLocale] = useState<PublicLocale>(() => getStoredPublicLocale());
   useEffect(() => {
     const update = () => setLocale(getStoredPublicLocale());
@@ -28,7 +51,11 @@ export function usePublicLocale(): PublicLocale {
       window.removeEventListener(publicLocaleChangeEvent, update);
     };
   }, []);
-  return locale;
+  return routedLocale ?? locale;
+}
+export function LocalizedPublicLink({to,...props}:LinkProps) {
+  const locale=usePublicLocale();
+  return createElement(RouterLink,{...props,to:typeof to==="string"&&to.startsWith("/")?localizePublicPath(to,locale):to});
 }
 
 export const routeMetadata: Record<

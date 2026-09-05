@@ -27,6 +27,7 @@ import { DemoRequestsPage } from "./DemoRequestsPage.js";
 import { TraderApplicationsPage } from "./TraderApplicationsPage.js";
 import { CustomerQuotesPage } from "./CustomerQuotesPage.js";
 import { WebsiteContentPage } from "./WebsiteContentPage.js";
+import { BlogEditorialSeoPage } from "./BlogEditorialSeoPage.js";
 import { AgentAdminPage } from "./AgentAdminPage.js";
 import { CommerceIntegrationsPage } from "./CommerceIntegrationsPage.js";
 
@@ -209,6 +210,7 @@ export function PlatformShell(): ReactElement {
             {session.can("platform.website.read") ? (
               <>
                 <Route element={<WebsiteContentPage />} path="/website" />
+                <Route element={<BlogEditorialSeoPage />} path="/website/editorial-seo" />
                 <Route element={<WebsiteContentPage preview />} path="/website/:id/preview" />
                 <Route element={<WebsiteContentPage />} path="/website/:id" />
                 <Route element={<Navigate replace to="/website" />} path="/website-content" />

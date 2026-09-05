@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it } from 'vitest';
 import { CustomerQuoteFlow } from './CustomerQuoteFlow';
-import { publicLocaleStorageKey } from './public-localization';
+import { PublicLocaleProvider } from './public-localization';
 
 afterEach(() => {
   cleanup();
@@ -13,10 +13,9 @@ afterEach(() => {
 });
 
 function renderArabicQuoteFlow() {
-  localStorage.setItem(publicLocaleStorageKey, 'ar');
   render(
-    <MemoryRouter>
-      <CustomerQuoteFlow />
+    <MemoryRouter initialEntries={['/ar/send-a-package']}>
+      <PublicLocaleProvider locale="ar"><CustomerQuoteFlow /></PublicLocaleProvider>
     </MemoryRouter>,
   );
 }

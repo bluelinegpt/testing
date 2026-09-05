@@ -1,9 +1,8 @@
 /* eslint-disable @typescript-eslint/ban-ts-comment, @typescript-eslint/no-explicit-any */
 // @ts-nocheck -- form field bag is intentionally dynamic across four progressive steps.
 import { useRef, useState, type FormEvent } from 'react';
-import { Link } from 'react-router-dom';
 import { leadAttribution, trackConversionOnce, trackEvent, utmMetadata } from './analytics';
-import { emiratesByLocale, localizedEmirateName, usePublicLocale } from './public-localization';
+import { emiratesByLocale, LocalizedPublicLink as Link, localizedEmirateName, usePublicLocale } from './public-localization';
 import { submitTraderApplication } from './trader-application-client';
 
 const categoryOptions = {

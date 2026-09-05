@@ -147,7 +147,7 @@ export function AgentChat() {
   const autoOpenedRef = useRef(false);
   const widgetDataLoaderRef = useRef<(() => void) | null>(null);
   const isRtl = language === "ar";
-  const path = window.location.pathname.replace(/\/$/, "") || "/";
+  const path = typeof window === "undefined" ? "/" : (window.location.pathname.replace(/\/$/, "") || "/");
   const avatarAllowedOnPage =
     (path === "/" && avatar.showOnHomepage) ||
     (path === "/pricing" && avatar.showOnPricing) ||

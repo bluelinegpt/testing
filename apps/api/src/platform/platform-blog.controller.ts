@@ -5,9 +5,13 @@ import { BlogImportService, IMPORT_MAX_BYTES, type ArticleImportFile } from "../
 import { BlogImportDto } from "../blog/blog-import.dto.js";
 import {
   ArticleStatusDto,
+  AuthorDto,
   CategoryDto,
+  ManualRedirectDto,
   PublicSiteSettingsDto,
   SaveBlogArticleDto,
+  TagDto,
+  TopicDto,
 } from "../blog/blog.dto.js";
 import { BlogService } from "../blog/blog.service.js";
 import { IdentityContextAccessor } from "../security/identity-context.js";
@@ -49,6 +53,19 @@ export class PlatformBlogController {
   ) {
     return this.blog.updateSettings(body, this.actor());
   }
+  @RequirePlatformPermissions(READ) @Get("seo-health") seoHealth(){return this.blog.seoHealth();}
+  @RequirePlatformPermissions(READ) @Get("production-seo-health") productionSeoHealth(){return this.blog.productionSeoHealth();}
+  @RequirePlatformPermissions(READ) @Get("redirects") redirects(){return this.blog.redirects();}
+  @RequirePlatformPermissions(READ) @Get("not-found") notFound(){return this.blog.notFoundPaths();}
+  @RequirePlatformPermissions(READ) @Get(":id/seo-readiness") readiness(@Param("id")id:string){return this.blog.seoReadiness(id);}
+  @RequirePlatformPermissions(CATEGORIES) @Patch("categories/:id") updateCategory(@Param("id")id:string,@Body()body:CategoryDto){return this.blog.updateCategory(id,body);}
+  @RequirePlatformPermissions(CATEGORIES) @Post("tags") createTag(@Body()body:TagDto){return this.blog.saveTag(undefined,body);}
+  @RequirePlatformPermissions(CATEGORIES) @Patch("tags/:id") updateTag(@Param("id")id:string,@Body()body:TagDto){return this.blog.saveTag(id,body);}
+  @RequirePlatformPermissions(CATEGORIES) @Post("authors") createAuthor(@Body()body:AuthorDto){return this.blog.saveAuthor(undefined,body);}
+  @RequirePlatformPermissions(CATEGORIES) @Patch("authors/:id") updateAuthor(@Param("id")id:string,@Body()body:AuthorDto){return this.blog.saveAuthor(id,body);}
+  @RequirePlatformPermissions(CATEGORIES) @Post("topics") createTopic(@Body()body:TopicDto){return this.blog.saveTopic(undefined,body);}
+  @RequirePlatformPermissions(CATEGORIES) @Patch("topics/:id") updateTopic(@Param("id")id:string,@Body()body:TopicDto){return this.blog.saveTopic(id,body);}
+  @RequirePlatformPermissions(CATEGORIES) @Post("redirects") createRedirect(@Body()body:ManualRedirectDto){return this.blog.saveRedirect(body,this.actor());}
   @RequirePlatformPermissions(READ) @Get(":id") detail(@Param("id") id: string) {
     return this.blog.adminDetail(id);
   }

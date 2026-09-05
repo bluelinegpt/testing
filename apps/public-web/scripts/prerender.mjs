@@ -4,7 +4,7 @@ import { join } from "node:path";
 // (`vite build --ssr src/entry-server.tsx --outDir dist-ssr`) -- plain Vite
 // SSR, not a second framework. Renders the exact same <App/> tree and
 // react-router routes the browser uses; see entry-server.tsx.
-import { render } from "../dist-ssr/entry-server.js";
+import { render, routeMetadata } from "../dist-ssr/entry-server.js";
 
 const siteUrl = "https://tawseelhub.com";
 const endpoint = process.env.PUBLIC_API_BASE_URL ?? "http://127.0.0.1:3000/api/v1";
@@ -121,6 +121,7 @@ function htmlEscape(value) {
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;");
 }
+const safeJson = (value) => JSON.stringify(value).replaceAll("<", "\\u003c").replaceAll("\u2028", "\\u2028").replaceAll("\u2029", "\\u2029");
 
 function fullTitle(title) {
   return /tawseelhub/i.test(title) ? title : `${title} | Tawseelhub`;
@@ -150,12 +151,27 @@ async function fetchJson(path) {
 const routeMap = new Map(
   staticRoutes.map((route) => [route.path, { type: "website", image: defaultImage, ...route }]),
 );
+for (const [path, metadata] of Object.entries(routeMetadata.ar)) {
+  const localizedPath = path === "/" ? "/ar" : `/ar${path}`;
+  routeMap.set(localizedPath, { path:localizedPath, type:"website", image:defaultImage, locale:"ar_AE", ...metadata,
+    alternates:[{language:"en",url:`${siteUrl}${path}`},{language:"ar",url:`${siteUrl}${localizedPath}`}], xDefault:`${siteUrl}${path}` });
+}
+for (const route of routeMap.values()) {
+  if (!route.alternates) route.alternates=[{language:"en",url:`${siteUrl}${route.path}`},{language:"ar",url:`${siteUrl}${route.path==="/"?"/ar":`/ar${route.path}`}`}];
+  if (!route.xDefault) route.xDefault=`${siteUrl}${route.path}`;
+}
+const organization = { "@type":"Organization", "@id":`${siteUrl}/#organization`, name:"Tawseelhub", url:siteUrl, logo:{ "@type":"ImageObject", url:`${siteUrl}/tawseelhub-logo.png` } };
+const website = { "@type":"WebSite", "@id":`${siteUrl}/#website`, name:"Tawseelhub", url:siteUrl, publisher:{ "@id":organization["@id"] }, inLanguage:"en" };
+routeMap.get("/").schema = { "@context":"https://schema.org", "@graph":[organization, website] };
+routeMap.get("/blog").schema = { "@context":"https://schema.org", "@graph":[organization, website, { "@type":"BreadcrumbList", "@id":`${siteUrl}/blog#breadcrumb`, itemListElement:[{ "@type":"ListItem", position:1, name:"Home", item:`${siteUrl}/` },{ "@type":"ListItem", position:2, name:"Blog", item:`${siteUrl}/blog` }] }] };
 
 // Homepage renders its own "Insights & Resources" cards from the same
 // listing endpoint /blog page 1 uses -- preload both from one fetch below.
 try {
   const homeListing = await fetchJson("/public/blog?language=en&page=1");
   routeMap.get("/").preload = [["blog-listing:en:1:", homeListing]];
+  const arabicHomeListing = await fetchJson("/public/blog?language=ar&page=1");
+  routeMap.get("/ar").preload = [["blog-listing:ar:1:", arabicHomeListing]];
 } catch {
   // Left un-preloaded: SSR still renders the section's own honest
   // "coming soon" state (articles === null -> section renders nothing,
@@ -163,60 +179,75 @@ try {
 }
 
 try {
-  const [blogListing, blogCategories] = await Promise.all([
+  const [blogListing, blogCategories, arabicBlogListing, arabicBlogCategories] = await Promise.all([
     fetchJson("/public/blog?language=en&page=1"),
     fetchJson("/public/blog/categories?language=en"),
+    fetchJson("/public/blog?language=ar&page=1"),
+    fetchJson("/public/blog/categories?language=ar"),
   ]);
   const blogPreload = [
     ["blog-listing:en:1:", blogListing],
     ["blog-categories:en", blogCategories],
   ];
   routeMap.get("/blog").preload = blogPreload;
+  routeMap.get("/ar/blog").preload = [["blog-listing:ar:1:",arabicBlogListing],["blog-categories:ar",arabicBlogCategories]];
 
-  const entries = await fetchJson("/public/blog/sitemap-entries");
+  const entries = await fetchJson("/public/website/sitemap-entries");
   for (const entry of entries) {
-    if (!String(entry.path ?? "").startsWith("/blog/")) continue;
-    if (String(entry.path).startsWith("/blog/category/")) {
-      const slug = String(entry.path).replace("/blog/category/", "");
-      let categoryListing = blogListing;
-      try {
-        categoryListing = await fetchJson(
-          `/public/blog?language=en&page=1&category=${encodeURIComponent(slug)}`,
-        );
-      } catch {
-        // Falls back to the unfiltered listing above rather than an empty preload.
-      }
+    const entryPath=String(entry.path??"");
+    const locale=entryPath==="/ar"||entryPath.startsWith("/ar/")?"ar":"en";
+    const basePath=locale==="ar"?entryPath.slice(3)||"/":entryPath;
+    if (!basePath.startsWith("/blog/")) continue;
+    const categories=locale==="ar"?arabicBlogCategories:blogCategories;
+    const landingMatch=basePath.match(/^\/blog\/(category|tag|topic|author)\/(.+)$/);
+    if (landingMatch) {
+      const [,kind,slug]=landingMatch;
+      const [landing,landingListing]=await Promise.all([
+        fetchJson(`/public/blog/${kind}s/${encodeURIComponent(slug)}?language=${locale}`),
+        fetchJson(`/public/blog?language=${locale}&page=1&${kind}=${encodeURIComponent(slug)}`),
+      ]);
+      const seo=landing.seo??{};
       routeMap.set(entry.path, {
         path: entry.path,
-        title: "Tawseelhub Blog",
-        description: "Practical guidance for UAE delivery operations.",
+        title: seo.title??landing.name??landing.title??landing.display_name??"Tawseelhub Blog",
+        description: seo.description??landing.description??landing.short_bio??"Practical guidance for UAE delivery operations.",
+        canonical:seo.canonical,
         type: "website",
-        image: defaultImage,
-        preload: [
-          ["blog-listing:en:1:" + slug, categoryListing],
-          ["blog-categories:en", blogCategories],
-        ],
+        image: normalizeImageUrl(seo.image)??defaultImage,
+        locale:locale==="ar"?"ar_AE":"en_AE",
+        alternates:seo.alternates??entry.alternates?.map((x)=>({language:x.locale,url:`${siteUrl}${x.path}`})),
+        xDefault:seo.xDefault??(entry.xDefault?`${siteUrl}${entry.xDefault}`:null),
+        schema:seo.graph,
+        robots:`${landing.robots_index?"index":"noindex"},${landing.robots_follow===false?"nofollow":"follow"}`,
+        preload: [[`blog-landing:${kind}:${slug}:${locale}`,landing],[`blog-landing-list:${kind}:${slug}:${locale}`,landingListing]],
       });
       continue;
     }
-    const slug = String(entry.path).replace("/blog/", "");
-    const detail = await fetchJson(`/public/blog/articles/${encodeURIComponent(slug)}?language=en`);
+    const slug = basePath.replace("/blog/", "");
+    const detail = await fetchJson(`/public/blog/articles/${encodeURIComponent(slug)}?language=${locale}`);
     const article = detail.article ?? detail;
-    const image = normalizeImageUrl(article.social_image_url ?? article.featured_image_public_url);
+    const seo = article.seo ?? {};
+    const image = normalizeImageUrl(seo.image ?? article.social_image_url ?? article.featured_image_public_url);
     routeMap.set(entry.path, {
       path: entry.path,
-      title: article.seo_title ?? article.social_title ?? article.title ?? "Tawseelhub Blog",
+      title: seo.title ?? article.social_title ?? article.seo_title ?? article.title ?? "Tawseelhub Blog",
       description:
-        article.meta_description ??
-        article.social_description ??
+        seo.description ?? article.social_description ?? article.meta_description ??
         article.excerpt ??
         "Practical guidance for UAE delivery operations.",
-      canonical: normalizeCanonical(article.canonical_url, entry.path),
+      canonical: normalizeCanonical(seo.canonical ?? article.canonical_url, entry.path),
       type: "article",
       image,
+      imageAlt: seo.imageAlt,
+      imageWidth: seo.imageWidth,
+      imageHeight: seo.imageHeight,
+      locale: article.language === "ar" ? "ar_AE" : "en_AE",
+      alternates:seo.alternates,
+      xDefault:seo.xDefault,
+      schema: seo.graph,
       robots: `${article.robots_index === false ? "noindex" : "index"},${article.robots_follow === false ? "nofollow" : "follow"}`,
       // The exact shape BlogArticlePage's own fetch would have produced.
-      preload: [[`blog-article:${slug}:en`, detail]],
+      preload: [[`blog-article:${slug}:${locale}`, detail]],
     });
   }
 
@@ -263,8 +294,12 @@ for (const route of allRoutes) {
   const title = fullTitle(route.title);
   const description = route.description;
   const image = route.image ?? defaultImage;
-  const robots = route.robots ? `<meta name="robots" content="${htmlEscape(route.robots)}" />` : "";
-  const metadata = `${robots}<link rel="canonical" href="${htmlEscape(canonical)}" /><link rel="alternate" hreflang="en" href="${htmlEscape(`${siteUrl}${route.path}`)}" /><link rel="alternate" hreflang="x-default" href="${htmlEscape(canonical)}" /><meta property="og:title" content="${htmlEscape(title)}" /><meta property="og:description" content="${htmlEscape(description)}" /><meta property="og:type" content="${htmlEscape(route.type ?? "website")}" /><meta property="og:url" content="${htmlEscape(canonical)}" /><meta property="og:image" content="${htmlEscape(image)}" /><meta name="twitter:card" content="summary_large_image" /><meta name="twitter:title" content="${htmlEscape(title)}" /><meta name="twitter:description" content="${htmlEscape(description)}" /><meta name="twitter:image" content="${htmlEscape(image)}" />`;
+  const effectiveRobots = route.robots ?? "index,follow,max-image-preview:large";
+  const robots = `<meta name="robots" content="${htmlEscape(effectiveRobots.includes("noindex") ? effectiveRobots : `${effectiveRobots},max-image-preview:large`.replace(",max-image-preview:large,max-image-preview:large", ",max-image-preview:large"))}" />`;
+  const imageDetails = `${route.imageAlt ? `<meta property="og:image:alt" content="${htmlEscape(route.imageAlt)}" /><meta name="twitter:image:alt" content="${htmlEscape(route.imageAlt)}" />` : ""}${route.imageWidth ? `<meta property="og:image:width" content="${route.imageWidth}" />` : ""}${route.imageHeight ? `<meta property="og:image:height" content="${route.imageHeight}" />` : ""}`;
+  const schema = route.schema ? `<script type="application/ld+json" data-seo-schema="true">${safeJson(route.schema)}</script>` : "";
+  const alternateLinks=(route.alternates??[]).map((item)=>`<link rel="alternate" hreflang="${item.language}" href="${htmlEscape(item.url)}" />`).join("")+ (route.xDefault?`<link rel="alternate" hreflang="x-default" href="${htmlEscape(route.xDefault)}" />`:"")+`<link rel="alternate" type="application/rss+xml" title="Tawseelhub Blog RSS" href="${route.locale==="ar_AE"?"/ar":""}/blog/rss.xml" />`;
+  const metadata = `${robots}<link rel="canonical" href="${htmlEscape(canonical)}" />${alternateLinks}<meta property="og:title" content="${htmlEscape(title)}" /><meta property="og:description" content="${htmlEscape(description)}" /><meta property="og:type" content="${htmlEscape(route.type ?? "website")}" /><meta property="og:url" content="${htmlEscape(canonical)}" /><meta property="og:image" content="${htmlEscape(image)}" />${imageDetails}<meta property="og:site_name" content="Tawseelhub" /><meta property="og:locale" content="${route.locale ?? "en_AE"}" />${route.locale==="ar_AE"?'<meta property="og:locale:alternate" content="en_AE" />':'<meta property="og:locale:alternate" content="ar_AE" />'}<meta name="twitter:card" content="summary_large_image" /><meta name="twitter:title" content="${htmlEscape(title)}" /><meta name="twitter:description" content="${htmlEscape(description)}" /><meta name="twitter:image" content="${htmlEscape(image)}" />${schema}`;
   // Real, visible body content for crawlers and no-JS users: render the
   // exact same <App/> tree the browser mounts, server-side, with any
   // fetched data above handed in so the very first render already has it
@@ -279,10 +314,11 @@ for (const route of allRoutes) {
     bodyRenderFailures += 1;
     console.warn(
       `[prerender] SSR body render failed for ${route.path}:`,
-      error instanceof Error ? error.message : error,
+      error instanceof Error ? (error.stack ?? error.message) : error,
     );
   }
   const html = template
+    .replace(/<html lang="[^"]+"(?: dir="[^"]+")?>/, route.locale==="ar_AE"?'<html lang="ar" dir="rtl">':'<html lang="en" dir="ltr">')
     .replace(/<title>.*?<\/title>/, `<title>${htmlEscape(title)}</title>`)
     .replace(
       /<meta name="description" content=".*?" \/>/,

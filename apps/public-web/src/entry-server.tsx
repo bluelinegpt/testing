@@ -2,6 +2,7 @@ import { renderToString } from "react-dom/server";
 import { StaticRouter } from "react-router-dom";
 import { App } from "./App";
 import { PreloadContext, type PreloadMap } from "./preload-context";
+export { routeMetadata } from "./public-localization";
 
 /**
  * The one and only Node-side render entry point.

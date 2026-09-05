@@ -1,0 +1,61 @@
+.editorial-seo__tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 1rem 0 1.5rem;
+}
+.editorial-seo__tabs .active {
+  background: var(--platform-accent, #4654e8);
+  color: #fff;
+}
+.editorial-seo__health {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+  gap: 1rem;
+  margin-bottom: 2rem;
+}
+.editorial-seo__health article {
+  display: grid;
+  gap: 0.4rem;
+  padding: 1.25rem;
+  border: 1px solid var(--platform-border, #dce3ef);
+  border-radius: 0.75rem;
+}
+.editorial-seo__health strong {
+  font-size: 1.8rem;
+}
+.editorial-seo__split {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(320px, 1fr);
+  gap: 1.5rem;
+}
+.editorial-seo form {
+  display: grid;
+  align-content: start;
+  gap: 0.8rem;
+}
+.editorial-seo label {
+  display: grid;
+  gap: 0.3rem;
+}
+.editorial-seo fieldset label {
+  display: flex;
+  gap: 0.4rem;
+}
+.editorial-seo__redirect {
+  grid-template-columns: 2fr 2fr 1fr auto;
+  align-items: end;
+  margin-bottom: 1.5rem;
+}
+.editorial-seo tr.selectable {
+  cursor: pointer;
+}
+.editorial-seo tr.selectable:hover {
+  background: rgba(70, 84, 232, 0.06);
+}
+@media (max-width: 850px) {
+  .editorial-seo__split,
+  .editorial-seo__redirect {
+    grid-template-columns: 1fr;
+  }
+}

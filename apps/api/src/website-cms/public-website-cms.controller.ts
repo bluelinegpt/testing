@@ -23,6 +23,14 @@ export class PublicWebsiteCmsController {
   }
 
   @Public()
+  @Get("sitemap.xml")
+  @Header("Content-Type", "application/xml; charset=utf-8")
+  @Header("Cache-Control", "public, max-age=60, stale-while-revalidate=300")
+  public async sitemapXml(@Res() response: Response) {
+    response.status(200).send(await this.cms.sitemapXml());
+  }
+
+  @Public()
   @Get("help")
   @Header("Cache-Control", "public, max-age=60, stale-while-revalidate=300")
   public helpHome(@Query("locale") locale?: string) {

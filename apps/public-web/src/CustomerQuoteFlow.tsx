@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { apiUrl } from './api-base';
 import { leadAttribution, trackConversionOnce, trackEvent } from './analytics';
-import { canonicalCountryName, countriesByLocale, emiratesByLocale, localizedEmirateName, localizedPackageType, packageTypesByLocale, usePublicLocale } from './public-localization';
+import { canonicalCountryName, countriesByLocale, emiratesByLocale, LocalizedPublicLink as Link, localizedEmirateName, localizedPackageType, packageTypesByLocale, usePublicLocale } from './public-localization';
 
 const currencies = ['AED', 'SAR', 'OMR', 'QAR', 'KWD', 'BHD', 'JOD', 'EGP', 'GBP', 'USD', 'INR', 'EUR'] as const;
 const dialingCodes: Record<string, string> = { AE: '971', SA: '966', OM: '968', QA: '974', KW: '965', BH: '973', JO: '962', EG: '20', GB: '44', US: '1', IN: '91', PK: '92', PH: '63', TR: '90', CN: '86', DE: '49', FR: '33' };

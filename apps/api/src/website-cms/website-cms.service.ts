@@ -25,6 +25,18 @@ type UploadedFile = {
   readonly originalname: string;
   readonly size: number;
 };
+export type LocalizedSitemapEntry={path:string;lastmod:Date|string;alternates:Array<{locale:string;path:string}>;xDefault:string|null};
+export function renderLocalizedSitemap(origin:string,entries:LocalizedSitemapEntry[]) {
+  const escape = (value: string) => value
+    .replaceAll("&", "&amp;").replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&apos;");
+  const urls=entries.map(({path,lastmod,alternates,xDefault})=>{
+    const normalizedPath=path==="/"?"/":`/${path.replace(/^\/+|\/+$/g,"")}`;
+    const links=[...alternates.map((alternate)=>`<xhtml:link rel="alternate" hreflang="${escape(alternate.locale)}" href="${escape(`${origin}${alternate.path}`)}" />`),...(xDefault?[`<xhtml:link rel="alternate" hreflang="x-default" href="${escape(`${origin}${xDefault}`)}" />`]:[])].join("");
+    return `  <url><loc>${escape(`${origin}${normalizedPath}`)}</loc><lastmod>${new Date(lastmod).toISOString()}</lastmod>${links}</url>`;
+  });
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">\n${urls.join("\n")}\n</urlset>\n`;
+}
 
 const allowedRoutes = new Set([
   "/",
@@ -153,6 +165,16 @@ export function isImage(bytes: Uint8Array, declared: string): { ok: true; mediaT
   return { ok: true, ...detected };
 }
 
+export function imageDimensions(bytes: Uint8Array, mediaType: string): { width: number; height: number } | null {
+  const b = Buffer.from(bytes);
+  if (mediaType === "image/png" && b.length >= 24) return { width:b.readUInt32BE(16), height:b.readUInt32BE(20) };
+  if (mediaType === "image/webp" && b.length >= 30 && b.toString("ascii", 12, 16) === "VP8X") return { width:1+b.readUIntLE(24,3), height:1+b.readUIntLE(27,3) };
+  if (mediaType === "image/jpeg") {
+    for (let offset=2; offset+9<b.length;) { if (b[offset]!==0xff) break; const marker=b[offset+1]!; const size=b.readUInt16BE(offset+2); if ([0xc0,0xc1,0xc2,0xc3,0xc5,0xc6,0xc7,0xc9,0xca,0xcb,0xcd,0xce,0xcf].includes(marker)) return { height:b.readUInt16BE(offset+5), width:b.readUInt16BE(offset+7) }; if (size<2) break; offset+=2+size; }
+  }
+  return null;
+}
+
 export function isWebsiteMedia(bytes: Uint8Array, declared: string): { ok: true; mediaType: string; ext: string } | { ok: false; reason: string } {
   const image = isImage(bytes, declared);
   if (image.ok) return image;
@@ -203,37 +225,85 @@ export class WebsiteCmsService {
   }
 
   public async sitemapEntries() {
-    const pages = (await sql<{ page_key: string; updated_at: Date }>`
-      select page_key, greatest(updated_at, coalesce(published_at, updated_at)) as updated_at
+    type LocalizedEntry = { key: string; locale: "en" | "ar"; path: string; updated_at: Date };
+    const pages = (await sql<LocalizedEntry>`
+      select 'page:' || page_key as key, locale, case when page_key='home' then '/' else '/' || page_key end as path,
+             greatest(updated_at, coalesce(published_at, updated_at)) as updated_at
       from platform_website_pages
-      where visible = true and status = 'published' and locale = 'en'
+      where visible = true and status = 'published'
     `.execute(this.db)).rows;
-    const navigation = (await sql<{ destination: string; updated_at: Date }>`
-      select destination, updated_at
+    const navigation = (await sql<LocalizedEntry>`
+      select 'navigation:' || item_key as key, locale, destination as path, updated_at
       from platform_website_navigation_items
-      where visible = true and locale = 'en'
+      where visible = true
     `.execute(this.db)).rows;
-    const blog = (await sql<{ path: string; updated_at: Date }>`
-      select '/blog/' || slug as path, coalesce(updated_content_at, updated_at) as updated_at
+    const blog = (await sql<LocalizedEntry>`
+      select 'article:' || coalesce(translation_group_id::text,id::text) as key, language as locale,
+             '/blog/' || slug as path, coalesce(updated_content_at, published_at, scheduled_at, updated_at) as updated_at
       from platform_blog_articles
-      where language = 'en'
-        and ((status = 'published' and published_at <= now()) or (status = 'scheduled' and scheduled_at <= now()))
-    `.execute(this.db)).rows;
-    const help = (await sql<{ path: string; updated_at: Date }>`
-      select '/resources/' || slug as path, greatest(updated_at, coalesce(published_at, updated_at)) as updated_at
-      from platform_help_articles
-      where locale = 'en'
-        and status = 'published'
+      where ((status = 'published' and published_at <= now()) or (status = 'scheduled' and scheduled_at <= now()))
         and robots_index = true
     `.execute(this.db)).rows;
-    const pagePaths = pages.map((row) => ({
-      path: row.page_key === "home" ? "/" : `/${row.page_key}`,
+    const blogCategories = (await sql<LocalizedEntry>`
+      select 'category:' || coalesce(c.translation_group_id::text,c.id::text) as key, c.language as locale,
+             '/blog/category/' || c.slug as path, c.updated_at
+      from platform_blog_categories c
+       where c.active = true and c.robots_index = true and nullif(btrim(c.description),'') is not null and exists (
+         select 1 from platform_blog_article_categories ac join platform_blog_articles a on a.id=ac.article_id where ac.category_id = c.id
+          and a.language = c.language and a.robots_index = true
+          and ((a.status = 'published' and a.published_at <= now()) or (a.status = 'scheduled' and a.scheduled_at <= now()))
+      )
+    `.execute(this.db)).rows;
+    const blogTags = (await sql<LocalizedEntry>`
+      select 'tag:' || t.translation_group_id::text as key,t.language as locale,'/blog/tag/'||t.slug as path,t.updated_at
+      from platform_blog_tags t where t.active and t.robots_index and nullif(btrim(t.description),'') is not null and exists(
+        select 1 from platform_blog_article_tags at join platform_blog_articles a on a.id=at.article_id where at.tag_id=t.id and a.robots_index and ((a.status='published' and a.published_at<=now())or(a.status='scheduled' and a.scheduled_at<=now())))
+    `.execute(this.db)).rows;
+    const blogTopics = (await sql<LocalizedEntry>`
+      select 'topic:'||t.translation_group_id::text as key,t.language as locale,'/blog/topic/'||t.slug as path,t.updated_at
+      from platform_blog_topics t where t.status='published' and t.robots_index and nullif(btrim(t.description),'') is not null and exists(
+        select 1 from platform_blog_topic_articles ta join platform_blog_articles a on a.id=ta.article_id where ta.topic_id=t.id and a.robots_index and ((a.status='published' and a.published_at<=now())or(a.status='scheduled' and a.scheduled_at<=now())))
+    `.execute(this.db)).rows;
+    const blogAuthors = (await sql<LocalizedEntry>`
+      select 'author:'||u.translation_group_id::text as key,u.language as locale,'/blog/author/'||u.slug as path,u.updated_at
+      from platform_blog_authors u where u.active and u.robots_index and nullif(btrim(u.short_bio),'') is not null and exists(
+        select 1 from platform_blog_articles a where a.author_id=u.id and a.robots_index and ((a.status='published' and a.published_at<=now())or(a.status='scheduled' and a.scheduled_at<=now())))
+    `.execute(this.db)).rows;
+    const help = (await sql<LocalizedEntry>`
+      select 'help:' || slug as key, locale, '/resources/' || slug as path,
+             greatest(updated_at, coalesce(published_at, updated_at)) as updated_at
+      from platform_help_articles
+      where status = 'published'
+        and robots_index = true
+    `.execute(this.db)).rows;
+    const rows = [...pages, ...navigation, ...blog, ...blogCategories, ...blogTags, ...blogTopics, ...blogAuthors, ...help];
+    const localizedPath = (row: LocalizedEntry) => row.locale === "ar"
+      ? row.path === "/" ? "/ar" : `/ar${row.path}`
+      : row.path;
+    const excluded = /^(\/ar)?(\/track|\/send-a-package\/quote)(\/|$)/;
+    const groups = new Map<string, LocalizedEntry[]>();
+    for (const row of rows) {
+      const path = localizedPath(row);
+      if (!path.startsWith("/") || path.includes("?") || path.includes("#") || excluded.test(path)) continue;
+      groups.set(row.key, [...(groups.get(row.key) ?? []), row]);
+    }
+    const entries = [...groups.values()].flatMap((group) => group.map((row) => ({
+      path: localizedPath(row),
       lastmod: row.updated_at,
-    }));
-    const navigationPaths = navigation.map((row) => ({ path: row.destination, lastmod: row.updated_at }));
-    const blogPaths = blog.map((row) => ({ path: row.path, lastmod: row.updated_at }));
-    const helpPaths = help.map((row) => ({ path: row.path, lastmod: row.updated_at }));
-    return [...new Map([...pagePaths, ...navigationPaths, ...blogPaths, ...helpPaths].map((entry) => [entry.path, entry])).values()].sort((a, b) => a.path.localeCompare(b.path));
+      alternates: group.map((alternate) => ({ locale: alternate.locale, path: localizedPath(alternate) })),
+      xDefault: group.find((alternate) => alternate.locale === "en") ? localizedPath(group.find((alternate) => alternate.locale === "en")!) : null,
+    })));
+    return [...new Map(entries.map((entry) => [entry.path, entry])).values()]
+      .sort((a, b) => a.path.localeCompare(b.path));
+  }
+
+  public async sitemapXml() {
+    const settings = (await sql<{ canonical_base_url: string }>`
+      select canonical_base_url from platform_public_site_settings where id = true
+    `.execute(this.db)).rows[0];
+    const origin = new URL(settings?.canonical_base_url ?? "https://tawseelhub.com").origin;
+    const entries = await this.sitemapEntries();
+    return renderLocalizedSitemap(origin,entries);
   }
 
   public async overview() {
@@ -260,7 +330,7 @@ export class WebsiteCmsService {
       sql<any>`select * from platform_website_faqs order by sort_order, faq_key, locale`.execute(this.db),
       sql<any>`select * from platform_help_categories order by sort_order, slug, locale`.execute(this.db),
       sql<any>`select a.*, c.slug as category_slug, c.name as category_name from platform_help_articles a left join platform_help_categories c on c.id=a.category_id order by a.sort_order, a.slug, a.locale`.execute(this.db),
-      sql<any>`select id, public_url as "publicUrl", original_filename as "originalFilename", media_type as "mediaType", size_bytes as "sizeBytes", alt_text as "altText", caption, created_at as "createdAt" from platform_website_media where deleted_at is null order by created_at desc limit 50`.execute(this.db),
+      sql<any>`select id, public_url as "publicUrl", original_filename as "originalFilename", media_type as "mediaType", size_bytes as "sizeBytes", width, height, alt_text as "altText", caption, created_at as "createdAt" from platform_website_media where deleted_at is null order by created_at desc limit 50`.execute(this.db),
       sql<any>`select * from platform_website_navigation_items order by sort_order, item_key, locale`.execute(this.db),
       sql<any>`select * from platform_website_contact_settings where id=true`.execute(this.db),
       sql<any>`select entity_type as "entityType", entity_key as "entityKey", locale, event_type as "eventType", created_at as "createdAt" from platform_website_revisions order by created_at desc limit 30`.execute(this.db),
@@ -492,7 +562,8 @@ export class WebsiteCmsService {
     const mediaToken = randomUUID();
     const key = `website/${mediaToken}.${validation.ext}`;
     await this.storage.storeWebsite(key, file.buffer);
-    const row = (await sql<any>`insert into platform_website_media(storage_provider,storage_key,public_url,original_filename,media_type,size_bytes,alt_text,caption,uploaded_by_account_id) values(${this.storageProvider},${key},${`/api/v1/public/website/media/${mediaToken}`},${cleanText(file.originalname) ?? "upload"},${validation.mediaType},${file.size},${cleanText(body.altText)},${cleanText(body.caption)},${actor}::uuid) returning id,public_url as "publicUrl",original_filename as "originalFilename",media_type as "mediaType",size_bytes as "sizeBytes",alt_text as "altText",caption,created_at as "createdAt"`.execute(this.db)).rows[0];
+    const dimensions = imageDimensions(file.buffer, validation.mediaType);
+    const row = (await sql<any>`insert into platform_website_media(storage_provider,storage_key,public_url,original_filename,media_type,size_bytes,width,height,alt_text,caption,uploaded_by_account_id) values(${this.storageProvider},${key},${`/api/v1/public/website/media/${mediaToken}`},${cleanText(file.originalname) ?? "upload"},${validation.mediaType},${file.size},${dimensions?.width ?? null},${dimensions?.height ?? null},${cleanText(body.altText)},${cleanText(body.caption)},${actor}::uuid) returning id,public_url as "publicUrl",original_filename as "originalFilename",media_type as "mediaType",size_bytes as "sizeBytes",width,height,alt_text as "altText",caption,created_at as "createdAt"`.execute(this.db)).rows[0];
     await this.revision(actor, "media", row.id, null, "uploaded", { mediaType: validation.mediaType, sizeBytes: file.size });
     return row;
   }

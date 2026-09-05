@@ -1,7 +1,6 @@
 import { useEffect } from 'react';
-import { Link } from 'react-router-dom';
 import { applyPageMetadata } from './seo';
-import { usePublicLocale } from './public-localization';
+import { LocalizedPublicLink as Link, usePublicLocale } from './public-localization';
 
 /**
  * Privacy Policy and Terms of Service.

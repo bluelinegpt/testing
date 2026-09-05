@@ -1,7 +1,6 @@
 import { useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { LocalizedPublicLink as Link, usePublicLocale } from './public-localization';
 import { trackEvent } from './analytics';
-import { usePublicLocale } from './public-localization';
 
 const copy = {
   en: {

@@ -1,7 +1,6 @@
 import { useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { LocalizedPublicLink as Link, usePublicLocale } from './public-localization';
 import { trackEvent } from './analytics';
-import { usePublicLocale } from './public-localization';
 
 const channels = ['Salla', 'Shopify', 'WooCommerce', 'Own Website', 'Instagram', 'Facebook', 'TikTok', 'WhatsApp', 'Physical Store', 'Offline / manual sales'];
 const channelsAr = ['Salla', 'Shopify', 'WooCommerce', 'موقع خاص', 'Instagram', 'Facebook', 'TikTok', 'WhatsApp', 'متجر فعلي', 'مبيعات يدوية / خارجية'];

@@ -1,15 +1,14 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
-import { Link, NavLink, Route, Routes, useLocation, useParams } from "react-router-dom";
-import { applyPageMetadata } from "./seo";
+import { createContext, lazy, Suspense, useContext, useEffect, useState, type ReactNode } from "react";
+import { Link as RouterLink, NavLink as RouterNavLink, Route, Routes, useLocation, useNavigate, useParams, type LinkProps, type NavLinkProps } from "react-router-dom";
+import { applyPageMetadata, publicRobotsDirective } from "./seo";
 import { DeliveryCompanyPage } from "./DeliveryCompanyPage";
 import { DemoRequestPage } from "./DemoRequestPage";
 import { TraderPage } from "./TraderPage";
 import { TraderRegistrationPage } from "./TraderRegistrationPage";
 import { CustomerQuoteFlow, CustomerQuoteResult } from "./CustomerQuoteFlow";
-import { BlogArticlePage, blogListingPreloadKey, BlogListingPage } from "./BlogPages";
+import { BlogArticlePage, BlogLandingPage, blogListingPreloadKey, BlogListingPage } from "./BlogPages";
 import { PrivacyPolicyPage, TermsOfServicePage } from "./LegalPages";
 import { getPreloaded, PreloadContext } from "./preload-context";
-import { AgentChat } from "./AgentChat";
 import {
   buildWhatsAppMessageUrl,
   fallbackAvatarSettings,
@@ -44,11 +43,14 @@ import {
 } from "./help-center-client";
 import {
   countriesByLocale,
-  getStoredPublicLocale,
+  localeFromPublicPath,
+  localizePublicPath,
   navItemsByLocale,
   publicUi,
+  PublicLocaleProvider,
   routeMetadata,
   savePublicLocale,
+  stripPublicLocale,
 } from "./public-localization";
 import { apiUrl } from "./api-base";
 import { DemoRequestError, submitDemoRequest } from "./demo-request-client";
@@ -58,8 +60,25 @@ export const routeDefinitions = Object.entries(routeMetadata.en).map(([path, met
   ...metadata,
 })) as Array<{ path: string; title: string; description: string }>;
 
+const AgentChat = lazy(() => import("./AgentChat").then((module) => ({ default: module.AgentChat })));
+
+function DeferredAgentChat() {
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    const show = () => setReady(true);
+    if ("requestIdleCallback" in window) {
+      const id = window.requestIdleCallback(show, { timeout: 5000 });
+      return () => window.cancelIdleCallback(id);
+    }
+    const id = globalThis.setTimeout(show, 3000);
+    return () => globalThis.clearTimeout(id);
+  }, []);
+  return ready ? <Suspense fallback={null}><AgentChat /></Suspense> : null;
+}
+
 export function isDynamicContentRoute(pathname: string): boolean {
-  return pathname.startsWith("/blog/") || /^\/resources\/[^/]+\/?$/.test(pathname);
+  const path = stripPublicLocale(pathname);
+  return path.startsWith("/blog/") || /^\/resources\/[^/]+\/?$/.test(path);
 }
 
 const CmsContext = createContext<{
@@ -68,6 +87,14 @@ const CmsContext = createContext<{
   setLocale: (locale: Locale) => void;
 }>({ cms: null, locale: "en", setLocale: () => undefined });
 const useCms = () => useContext(CmsContext);
+const Link = ({ to, ...props }: LinkProps) => {
+  const { locale } = useCms();
+  return <RouterLink to={typeof to === "string" && to.startsWith("/") ? localizePublicPath(to, locale) : to} {...props} />;
+};
+const NavLink = ({ to, ...props }: NavLinkProps) => {
+  const { locale } = useCms();
+  return <RouterNavLink to={typeof to === "string" && to.startsWith("/") ? localizePublicPath(to, locale) : to} {...props} />;
+};
 
 const capabilities = [
   [
@@ -153,12 +180,14 @@ const trackCta = (input: {
 
 function AppLayout() {
   const location = useLocation();
+  const navigate = useNavigate();
+  const path = stripPublicLocale(location.pathname);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [locale, setLocaleState] = useState<Locale>(() => getStoredPublicLocale());
+  const [locale, setLocaleState] = useState<Locale>(() => localeFromPublicPath(location.pathname));
   const [cms, setCms] = useState<WebsiteCmsBundle | null>(null);
   const route =
-    routeDefinitions.find((item) => item.path === location.pathname) ?? routeDefinitions[0]!;
-  const routeSeo = routeMetadata[locale][location.pathname] ?? routeMetadata[locale]["/"]!;
+    routeDefinitions.find((item) => item.path === path) ?? routeDefinitions[0]!;
+  const routeSeo = routeMetadata[locale][path] ?? routeMetadata[locale]["/"]!;
   const copy = publicUi[locale];
   const activeCms = cms?.locale === locale ? cms : null;
   const cmsNav = activeCms?.navigation?.length
@@ -177,7 +206,11 @@ function AppLayout() {
     savePublicLocale(next);
     setCms(null);
     setLocaleState(next);
+    const alternate = document.head.querySelector<HTMLLinkElement>(`link[rel="alternate"][hreflang="${next}"]`)?.href;
+    const safeFallback=path.startsWith("/blog/")?"/blog":/^\/resources\/[^/]+/.test(path)?"/resources":path;
+    navigate(alternate ? `${new URL(alternate).pathname}${location.search}` : localizePublicPath(safeFallback, next));
   };
+  useEffect(() => setLocaleState(localeFromPublicPath(location.pathname)), [location.pathname]);
   useEffect(() => {
     let cancelled = false;
     document.documentElement.lang = locale;
@@ -192,24 +225,30 @@ function AppLayout() {
   }, [locale]);
   useEffect(() => {
     if (!isDynamicContentRoute(location.pathname)) {
+      const canonicalPath = localizePublicPath(path, locale);
       applyPageMetadata(
-        location.pathname === "/" && homeSeo?.title ? homeSeo.title : routeSeo.title,
-        location.pathname === "/" && homeSeo?.description
+        path === "/" && homeSeo?.title ? homeSeo.title : routeSeo.title,
+        path === "/" && homeSeo?.description
           ? homeSeo.description
           : routeSeo.description,
-        location.pathname === "/" && homeSeo?.canonical ? homeSeo.canonical : route.path,
-        location.pathname === "/" && homeSeo
+        path === "/" && homeSeo?.canonical ? canonicalPath : canonicalPath,
+        path === "/" && homeSeo
           ? {
-              robots: `${homeSeo.robotsIndex === false ? "noindex" : "index"},${homeSeo.robotsFollow === false ? "nofollow" : "follow"}`,
+              robots: publicRobotsDirective(homeSeo.robotsIndex !== false, homeSeo.robotsFollow !== false),
+              locale,
+              alternates: [{language:"en",url:`https://tawseelhub.com${path}`},{language:"ar",url:`https://tawseelhub.com${localizePublicPath(path,"ar")}`}],
             }
-          : {},
+          : { locale, alternates:[{language:"en",url:`https://tawseelhub.com${path}`},{language:"ar",url:`https://tawseelhub.com${localizePublicPath(path,"ar")}`}] },
       );
+    } else {
+      document.head.querySelectorAll('link[rel="alternate"][hreflang]').forEach((link)=>link.remove());
     }
     setMenuOpen(false);
     window.scrollTo({ top: 0, behavior: "instant" });
-  }, [route, location.pathname, homeSeo]);
+  }, [route, path, locale, location.pathname, homeSeo]);
   return (
     <CmsContext.Provider value={{ cms: activeCms, locale, setLocale }}>
+      <PublicLocaleProvider locale={locale}>
       <div className="site-shell" dir={locale === "ar" ? "rtl" : "ltr"}>
         <a className="skip-link" href="#main-content">
           {copy.skipToContent}
@@ -290,7 +329,10 @@ function AppLayout() {
             <Route path="/resources/:slug" element={<HelpArticlePage />} />
             <Route path="/pricing" element={<PricingPage />} />
             <Route path="/blog" element={<BlogListingPage />} />
-            <Route path="/blog/category/:categorySlug" element={<BlogListingPage />} />
+            <Route path="/blog/category/:slug" element={<BlogLandingPage />} />
+            <Route path="/blog/tag/:slug" element={<BlogLandingPage />} />
+            <Route path="/blog/topic/:slug" element={<BlogLandingPage />} />
+            <Route path="/blog/author/:slug" element={<BlogLandingPage />} />
             <Route path="/blog/:slug" element={<BlogArticlePage />} />
             <Route path="/faq" element={<FaqPage />} />
             <Route path="/about" element={<AboutPage />} />
@@ -298,16 +340,40 @@ function AppLayout() {
             <Route path="/privacy" element={<PrivacyPolicyPage />} />
             <Route path="/terms" element={<TermsOfServicePage />} />
             <Route path="/request-demo" element={<DemoRequestPage />} />
+            <Route path="/ar" element={<HomePage />} />
+            <Route path="/ar/delivery-companies" element={<DeliveryCompanyPage />} />
+            <Route path="/ar/send-a-package" element={<SendPackagePage />} />
+            <Route path="/ar/send-a-package/quote/:reference" element={<CustomerQuoteResult />} />
+            <Route path="/ar/track" element={<TrackingPage />} />
+            <Route path="/ar/traders" element={<TraderPage />} />
+            <Route path="/ar/traders/register" element={<TraderRegistrationPage />} />
+            <Route path="/ar/integrations" element={<IntegrationsPage />} />
+            <Route path="/ar/resources" element={<ResourcesPage />} />
+            <Route path="/ar/resources/:slug" element={<HelpArticlePage />} />
+            <Route path="/ar/pricing" element={<PricingPage />} />
+            <Route path="/ar/blog" element={<BlogListingPage />} />
+            <Route path="/ar/blog/category/:slug" element={<BlogLandingPage />} />
+            <Route path="/ar/blog/tag/:slug" element={<BlogLandingPage />} />
+            <Route path="/ar/blog/topic/:slug" element={<BlogLandingPage />} />
+            <Route path="/ar/blog/author/:slug" element={<BlogLandingPage />} />
+            <Route path="/ar/blog/:slug" element={<BlogArticlePage />} />
+            <Route path="/ar/faq" element={<FaqPage />} />
+            <Route path="/ar/about" element={<AboutPage />} />
+            <Route path="/ar/contact" element={<ContactPage />} />
+            <Route path="/ar/privacy" element={<PrivacyPolicyPage />} />
+            <Route path="/ar/terms" element={<TermsOfServicePage />} />
+            <Route path="/ar/request-demo" element={<DemoRequestPage />} />
             <Route path="*" element={<NotFoundPage />} />
           </Routes>
         </main>
         <Footer />
-        <AgentChat />
+        <DeferredAgentChat />
         {/* No visible version badge on the public marketing site (removed on
             product-owner instruction; the CLAUDE.md badge requirement covers
             apps/web and apps/platform-web, not this app). The build version
             still reaches crash reports via error-reporting.ts. */}
       </div>
+      </PublicLocaleProvider>
     </CmsContext.Provider>
   );
 }
