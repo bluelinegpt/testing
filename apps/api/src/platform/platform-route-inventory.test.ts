@@ -268,6 +268,10 @@ describe("Platform route inventory", () => {
     for (const method of methods) {
       const start = source.indexOf(`${method}(`);
       expect(start, `${method} route should exist`).toBeGreaterThan(-1);
+      const beforeMethod = source.slice(Math.max(0, start - 220), start);
+      expect(beforeMethod, `${method} route should use a UUID-only route pattern`).toContain(
+        ":id([0-9a-fA-F-]{36})",
+      );
       const fragment = source.slice(start, start + 220);
       expect(fragment, `${method} route should parse id as UUID`).toContain(
         '@Param("id", new ParseUUIDPipe())',

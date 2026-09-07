@@ -57,7 +57,7 @@ export class PlatformBlogController {
   @RequirePlatformPermissions(READ) @Get("production-seo-health") productionSeoHealth(){return this.blog.productionSeoHealth();}
   @RequirePlatformPermissions(READ) @Get("redirects") redirects(){return this.blog.redirects();}
   @RequirePlatformPermissions(READ) @Get("not-found") notFound(){return this.blog.notFoundPaths();}
-  @RequirePlatformPermissions(READ) @Get(":id/seo-readiness") readiness(@Param("id", new ParseUUIDPipe())id:string){return this.blog.seoReadiness(id);}
+  @RequirePlatformPermissions(READ) @Get(":id([0-9a-fA-F-]{36})/seo-readiness") readiness(@Param("id", new ParseUUIDPipe())id:string){return this.blog.seoReadiness(id);}
   @RequirePlatformPermissions(CATEGORIES) @Patch("categories/:id") updateCategory(@Param("id")id:string,@Body()body:CategoryDto){return this.blog.updateCategory(id,body);}
   @RequirePlatformPermissions(CATEGORIES) @Post("tags") createTag(@Body()body:TagDto){return this.blog.saveTag(undefined,body);}
   @RequirePlatformPermissions(CATEGORIES) @Patch("tags/:id") updateTag(@Param("id")id:string,@Body()body:TagDto){return this.blog.saveTag(id,body);}
@@ -66,10 +66,10 @@ export class PlatformBlogController {
   @RequirePlatformPermissions(CATEGORIES) @Post("topics") createTopic(@Body()body:TopicDto){return this.blog.saveTopic(undefined,body);}
   @RequirePlatformPermissions(CATEGORIES) @Patch("topics/:id") updateTopic(@Param("id")id:string,@Body()body:TopicDto){return this.blog.saveTopic(id,body);}
   @RequirePlatformPermissions(CATEGORIES) @Post("redirects") createRedirect(@Body()body:ManualRedirectDto){return this.blog.saveRedirect(body,this.actor());}
-  @RequirePlatformPermissions(READ) @Get(":id") detail(@Param("id", new ParseUUIDPipe()) id: string) {
+  @RequirePlatformPermissions(READ) @Get(":id([0-9a-fA-F-]{36})") detail(@Param("id", new ParseUUIDPipe()) id: string) {
     return this.blog.adminDetail(id);
   }
-  @RequirePlatformPermissions(READ) @Get(":id/preview") preview(@Param("id", new ParseUUIDPipe()) id: string) {
+  @RequirePlatformPermissions(READ) @Get(":id([0-9a-fA-F-]{36})/preview") preview(@Param("id", new ParseUUIDPipe()) id: string) {
     return this.blog.adminPreview(id);
   }
   @RequirePlatformPermissions(CREATE) @HttpCode(201) @Post() create(
@@ -77,19 +77,19 @@ export class PlatformBlogController {
   ) {
     return this.blog.create(body, this.actor());
   }
-  @RequirePlatformPermissions(EDIT) @Patch(":id") update(
+  @RequirePlatformPermissions(EDIT) @Patch(":id([0-9a-fA-F-]{36})") update(
     @Param("id", new ParseUUIDPipe()) id: string,
     @Body() body: SaveBlogArticleDto,
   ) {
     return this.blog.update(id, body, this.actor());
   }
-  @RequirePlatformPermissions(PUBLISH) @Patch(":id/status") status(
+  @RequirePlatformPermissions(PUBLISH) @Patch(":id([0-9a-fA-F-]{36})/status") status(
     @Param("id", new ParseUUIDPipe()) id: string,
     @Body() body: ArticleStatusDto,
   ) {
     return this.blog.status(id, body, this.actor());
   }
-  @RequirePlatformPermissions(PUBLISH) @Delete(":id") @HttpCode(204)
+  @RequirePlatformPermissions(PUBLISH) @Delete(":id([0-9a-fA-F-]{36})") @HttpCode(204)
   deleteArticle(@Param("id", new ParseUUIDPipe()) id: string) {
     return this.blog.deleteArticle(id, this.actor());
   }
