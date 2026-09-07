@@ -19,10 +19,10 @@
       "displayName": "API",
       "path": "apps/api",
       "renderService": "bluelinegpt-api-test",
-      "status": "pushed_awaiting_confirmation",
-      "localCommit": "126c587",
+      "status": "needs_deploy",
+      "localCommit": "a034e3f",
       "localCommitDate": "2026-09-07",
-      "lastChangeDescription": "fix(api): repair blog international seo migration",
+      "lastChangeDescription": "fix(api): repair public blog article lookup",
       "lastChangeBy": "codex",
       "confirmedLiveCommit": "e3de371",
       "confirmedLiveAt": "2026-09-01"
