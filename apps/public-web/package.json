@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "start": "node serve.mjs",
-    "build": "tsc -b && vite build && vite build --ssr src/entry-server.tsx --outDir dist-ssr && node scripts/prerender.mjs",
+    "build": "tsc -b && vite build && vite build --ssr src/entry-server.tsx --outDir dist-ssr && node scripts/prerender.mjs && node -e \"require('fs').rmSync('dist-ssr',{recursive:true,force:true})\"",
     "typecheck": "tsc -b --pretty false",
     "test": "vitest run",
     "test:prerender": "node scripts/verify-prerender-output.mjs",

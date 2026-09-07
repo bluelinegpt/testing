@@ -1,11 +1,10 @@
 import { createServer } from "node:http";
 import { readFile, stat } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { brotliCompressSync, gzipSync } from "node:zlib";
 
 const directory = join(fileURLToPath(new URL(".", import.meta.url)), "dist");
-const ssrEntry = join(fileURLToPath(new URL(".", import.meta.url)), "dist-ssr", "entry-server.js");
 const apiBase = (process.env.PUBLIC_API_BASE_URL ?? process.env.VITE_API_BASE_URL ?? "http://127.0.0.1:3000/api/v1").replace(/\/$/, "");
 const canonicalOrigin = "https://tawseelhub.com";
 const production = process.env.PUBLIC_SEO_ENVIRONMENT === "production";
@@ -63,18 +62,36 @@ async function fileResponse(pathname) {
 }
 export function injectRenderedRoot(html, rendered) {
   const body = String(rendered ?? "");
+  const rootStart = html.indexOf('<div id="root"');
+  if (rootStart < 0) return html;
+  const rootOpenEnd = html.indexOf(">", rootStart);
+  if (rootOpenEnd < 0) return html;
+  const scriptStart = html.indexOf('<script type="module"', rootOpenEnd);
+  if (scriptStart >= 0) return `${html.slice(0, rootStart)}<div id="root">${body}</div>\n    ${html.slice(scriptStart)}`;
+  const bodyEnd = html.indexOf("</body>", rootOpenEnd);
+  if (bodyEnd >= 0) return `${html.slice(0, rootStart)}<div id="root">${body}</div>${html.slice(bodyEnd)}`;
   return html.replace(/<div id="root">[\s\S]*?<\/div>/, `<div id="root">${body}</div>`);
 }
-async function renderRouteHtml(html, pathname, preloadEntries) {
-  if (!preloadEntries?.length) return html;
-  try {
-    const { render } = await import(pathToFileURL(ssrEntry).href);
-    return injectRenderedRoot(html, render(pathname, new Map(preloadEntries)));
-  } catch {
-    return html;
-  }
+function articleBlockHtml(block) {
+  const text = block?.text ?? "";
+  if (block?.type === "html") return text;
+  if (block?.type === "h2") return `<h2>${escape(text)}</h2>`;
+  if (block?.type === "h3") return `<h3>${escape(text)}</h3>`;
+  if (block?.type === "blockquote") return `<blockquote>${escape(text)}</blockquote>`;
+  if (block?.type === "bullet_list") return `<ul>${(block.items ?? []).map((item) => `<li>${escape(item)}</li>`).join("")}</ul>`;
+  if (block?.type === "numbered_list") return `<ol>${(block.items ?? []).map((item) => `<li>${escape(item)}</li>`).join("")}</ol>`;
+  return `<p>${escape(text)}</p>`;
 }
-export const blogArticlePreloadKey = (slug, locale) => `blog-article:${slug}:${locale}`;
+export function renderArticleShell(article, related = []) {
+  const language = article.language === "ar" ? "ar" : "en";
+  const dir = language === "ar" ? "rtl" : "ltr";
+  const categorySlug = article.category_slug ?? "";
+  const image = assetUrl(article.featured_image_public_url);
+  const tags = (article.tags ?? []).map((tag) => `<a href="${language === "ar" ? "/ar" : ""}/blog/tag/${escape(tag.slug)}">#${escape(tag.name)}</a>`).join("");
+  const blocks = (article.content ?? []).map(articleBlockHtml).join("");
+  const relatedHtml = related.length ? `<section class="related-articles"><h2>${language === "ar" ? "مقالات ذات صلة" : "Related articles"}</h2>${related.map((item) => `<article><h3><a href="${language === "ar" ? "/ar" : ""}/blog/${escape(item.slug)}">${escape(item.title)}</a></h3><p>${escape(item.excerpt ?? "")}</p></article>`).join("")}</section>` : "";
+  return `<article class="article-page" dir="${dir}" lang="${language}"><nav aria-label="Breadcrumb"><a href="${language === "ar" ? "/ar" : "/"}">${language === "ar" ? "الرئيسية" : "Home"}</a> / <a href="${language === "ar" ? "/ar" : ""}/blog">${language === "ar" ? "المدونة" : "Blog"}</a> / <a href="${language === "ar" ? "/ar" : ""}/blog/category/${escape(categorySlug)}">${escape(article.category ?? "")}</a></nav><header><span>${escape(article.category ?? "")}</span><h1>${escape(article.title)}</h1><p>${escape(article.excerpt)}</p></header>${tags ? `<nav class="blog-categories" aria-label="Article tags">${tags}</nav>` : ""}${image ? `<img class="article-image" src="${escape(image)}" alt="${escape(article.featured_image_alt ?? "")}" width="${article.featured_image_width ?? 1200}" height="${article.featured_image_height ?? 675}" loading="eager" decoding="async" fetchpriority="high" />` : ""}<div class="article-layout"><div class="article-body">${blocks}</div><aside><h2>${language === "ar" ? "استكشف Tawseelhub" : "Explore Tawseelhub"}</h2><a href="${language === "ar" ? "/ar" : ""}/delivery-companies">${language === "ar" ? "منصة شركة التوصيل" : "Delivery Company platform"}</a><a href="${language === "ar" ? "/ar" : ""}/traders">${language === "ar" ? "حلول للتجار" : "Solutions for Traders"}</a><a href="${language === "ar" ? "/ar" : ""}/send-a-package">${language === "ar" ? "أرسل شحنة" : "Send a Package"}</a></aside></div>${relatedHtml}</article>`;
+}
 export function createPublicServer() {
   return createServer(async (request, response) => {
     try {
@@ -103,7 +120,7 @@ export function createPublicServer() {
        const clientRoute = Boolean(article || landing || helpMatch || /^\/send-a-package\/quote(\/|$)/.test(pathname));
       if (!file && clientRoute) file = await fileResponse("/");
       if (!file) { response.writeHead(404).end("Not found"); return; }
-       let body = file.body; if (article && file.type.startsWith("text/html")) { const rendered = await renderRouteHtml(body.toString(), pathname, [[blogArticlePreloadKey(articleSlug, articleLanguage), articlePayload]]); body = Buffer.from(injectArticleMetadata(rendered, article, pathname)); } else if(landing&&file.type.startsWith("text/html"))body=Buffer.from(injectLandingMetadata(body.toString(),landing));
+       let body = file.body; if (article && file.type.startsWith("text/html")) { const rendered = injectRenderedRoot(body.toString(), renderArticleShell(article, articlePayload?.related)); body = Buffer.from(injectArticleMetadata(rendered, article, pathname)); } else if(landing&&file.type.startsWith("text/html"))body=Buffer.from(injectLandingMetadata(body.toString(),landing));
       send(response, 200, { "content-type":file.type, "cache-control":cacheControlFor(pathname,file.type), "x-content-type-options":"nosniff" }, body, request.headers["accept-encoding"]);
     } catch { response.writeHead(502).end("Upstream unavailable"); }
   });
