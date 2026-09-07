@@ -2038,20 +2038,20 @@ export const platformApi = {
     return (await request<{ fields: Record<string, string>; warnings: string[] }>("platform/blog/import", { method: "POST", body, timeoutMs: 30000 }))!;
   },
   async blogArticle(id: string): Promise<any> {
-    return await request<any>(`platform/blog/${id}`, { method: "GET" });
+    return await request<any>(`platform/blog/articles/${id}`, { method: "GET" });
   },
   async deleteBlogArticle(id: string): Promise<void> {
-    await request<void>(`platform/blog/${id}`, { method: "DELETE" });
+    await request<void>(`platform/blog/articles/${id}`, { method: "DELETE" });
   },
   async blogArticlePreview(id: string): Promise<any> {
-    return await request<any>(`platform/blog/${id}/preview`, { method: "GET" });
+    return await request<any>(`platform/blog/articles/${id}/preview`, { method: "GET" });
   },
   async blogReferences(): Promise<any> {
     return await request<any>("platform/blog/references", { method: "GET" });
   },
   async blogSeoHealth():Promise<any>{return await request<any>("platform/blog/seo-health",{method:"GET"});},
   async blogProductionSeoHealth():Promise<any>{return await request<any>("platform/blog/production-seo-health",{method:"GET"});},
-  async blogSeoReadiness(id:string):Promise<any>{return await request<any>(`platform/blog/${id}/seo-readiness`,{method:"GET"});},
+  async blogSeoReadiness(id:string):Promise<any>{return await request<any>(`platform/blog/articles/${id}/seo-readiness`,{method:"GET"});},
   async blogRedirects():Promise<any[]>{return(await request<any[]>("platform/blog/redirects",{method:"GET"}))??[];},
   async blogNotFoundPaths():Promise<any[]>{return(await request<any[]>("platform/blog/not-found",{method:"GET"}))??[];},
   async createBlogCategory(body:any):Promise<any>{return await request<any>("platform/blog/categories",{method:"POST",body});},
@@ -2064,10 +2064,10 @@ export const platformApi = {
     return await request<any>("platform/blog", { method: "POST", body: input });
   },
   async updateBlogArticle(id: string, input: any): Promise<any> {
-    return await request<any>(`platform/blog/${id}`, { method: "PATCH", body: input });
+    return await request<any>(`platform/blog/articles/${id}`, { method: "PATCH", body: input });
   },
   async updateBlogArticleStatus(id: string, input: any): Promise<any> {
-    return await request<any>(`platform/blog/${id}/status`, { method: "PATCH", body: input });
+    return await request<any>(`platform/blog/articles/${id}/status`, { method: "PATCH", body: input });
   },
   async publicSiteSettings(): Promise<any> {
     return await request<any>("platform/blog/settings", { method: "GET" });

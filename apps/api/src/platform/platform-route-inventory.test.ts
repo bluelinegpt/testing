@@ -262,15 +262,15 @@ describe("Platform route inventory", () => {
     expect(audit?.permissions).not.toContain("platform.companies.manage");
   });
 
-  it("keeps dynamic Platform blog article routes constrained to UUID ids", () => {
+  it("keeps dynamic Platform blog article routes away from static SEO routes", () => {
     const source = readFileSync(resolve(process.cwd(), "src/platform/platform-blog.controller.ts"), "utf8");
     const methods = ["readiness", "detail", "preview", "update", "status", "deleteArticle"];
     for (const method of methods) {
       const start = source.indexOf(`${method}(`);
       expect(start, `${method} route should exist`).toBeGreaterThan(-1);
       const beforeMethod = source.slice(Math.max(0, start - 220), start);
-      expect(beforeMethod, `${method} route should use a UUID-only route pattern`).toContain(
-        ":id([0-9a-fA-F-]{36})",
+      expect(beforeMethod, `${method} route should live under /articles/:id`).toContain(
+        "articles/:id",
       );
       const fragment = source.slice(start, start + 220);
       expect(fragment, `${method} route should parse id as UUID`).toContain(

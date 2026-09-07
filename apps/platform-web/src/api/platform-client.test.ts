@@ -8,6 +8,14 @@ describe("Platform API user-facing errors", () => {
     vi.stubGlobal("fetch",vi.fn().mockResolvedValue({ok:false,status:400,headers:new Headers({"content-type":"application/json"}),json:async()=>({error:{message:"Request validation failed.",details:["title must be longer than or equal to 5 characters"]}})}));
     await expect(platformApi.updateBlogArticle("article",{})).rejects.toThrow("title must be longer");
   });
+  it("keeps blog article API calls under /articles so SEO utility routes cannot be mistaken for ids", async () => {
+    const fetcher = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({}) });
+    vi.stubGlobal("fetch", fetcher);
+    await platformApi.blogSeoReadiness("11111111-1111-4111-8111-111111111111");
+    expect(fetcher.mock.calls[0]![0]).toContain(
+      "/platform/blog/articles/11111111-1111-4111-8111-111111111111/seo-readiness",
+    );
+  });
   it("sends import files as multipart with session and CSRF protection", async () => {
     const fetcher = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ fields: {}, warnings: [] }) });
     vi.stubGlobal("fetch", fetcher);
