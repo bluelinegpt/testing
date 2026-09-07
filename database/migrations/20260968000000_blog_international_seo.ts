@@ -14,15 +14,15 @@ export async function up(database: Kysely<MigrationDatabase>): Promise<void> {
         and slug !~ '[[:space:][:cntrl:]/?#]'
         and position(E'\\\\' in slug) = 0
         and slug not in ('.', '..')
-        and position(U&'\202A' in slug) = 0
-        and position(U&'\202B' in slug) = 0
-        and position(U&'\202C' in slug) = 0
-        and position(U&'\202D' in slug) = 0
-        and position(U&'\202E' in slug) = 0
-        and position(U&'\2066' in slug) = 0
-        and position(U&'\2067' in slug) = 0
-        and position(U&'\2068' in slug) = 0
-        and position(U&'\2069' in slug) = 0
+        and position(chr(8234) in slug) = 0
+        and position(chr(8235) in slug) = 0
+        and position(chr(8236) in slug) = 0
+        and position(chr(8237) in slug) = 0
+        and position(chr(8238) in slug) = 0
+        and position(chr(8294) in slug) = 0
+        and position(chr(8295) in slug) = 0
+        and position(chr(8296) in slug) = 0
+        and position(chr(8297) in slug) = 0
       );
 
     update platform_blog_articles set translation_group_id=gen_random_uuid() where translation_group_id is null;
@@ -47,15 +47,15 @@ export async function up(database: Kysely<MigrationDatabase>): Promise<void> {
         and slug !~ '[[:space:][:cntrl:]/?#]'
         and position(E'\\\\' in slug) = 0
         and slug not in ('.', '..')
-        and position(U&'\202A' in slug) = 0
-        and position(U&'\202B' in slug) = 0
-        and position(U&'\202C' in slug) = 0
-        and position(U&'\202D' in slug) = 0
-        and position(U&'\202E' in slug) = 0
-        and position(U&'\2066' in slug) = 0
-        and position(U&'\2067' in slug) = 0
-        and position(U&'\2068' in slug) = 0
-        and position(U&'\2069' in slug) = 0
+        and position(chr(8234) in slug) = 0
+        and position(chr(8235) in slug) = 0
+        and position(chr(8236) in slug) = 0
+        and position(chr(8237) in slug) = 0
+        and position(chr(8238) in slug) = 0
+        and position(chr(8294) in slug) = 0
+        and position(chr(8295) in slug) = 0
+        and position(chr(8296) in slug) = 0
+        and position(chr(8297) in slug) = 0
       );
   `.execute(database);
 }
