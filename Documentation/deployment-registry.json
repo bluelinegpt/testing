@@ -19,10 +19,10 @@
       "displayName": "API",
       "path": "apps/api",
       "renderService": "bluelinegpt-api-test",
-      "status": "pushed_awaiting_confirmation",
-      "localCommit": "a034e3f",
+      "status": "needs_deploy",
+      "localCommit": "cdfe463",
       "localCommitDate": "2026-09-07",
-      "lastChangeDescription": "fix(api): repair public blog article lookup",
+      "lastChangeDescription": "fix(api): save blog relationships with single statements",
       "lastChangeBy": "codex",
       "confirmedLiveCommit": "e3de371",
       "confirmedLiveAt": "2026-09-01"
