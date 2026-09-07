@@ -262,6 +262,19 @@ describe("Platform route inventory", () => {
     expect(audit?.permissions).not.toContain("platform.companies.manage");
   });
 
+  it("keeps dynamic Platform blog article routes constrained to UUID ids", () => {
+    const source = readFileSync(resolve(process.cwd(), "src/platform/platform-blog.controller.ts"), "utf8");
+    const methods = ["readiness", "detail", "preview", "update", "status", "deleteArticle"];
+    for (const method of methods) {
+      const start = source.indexOf(`${method}(`);
+      expect(start, `${method} route should exist`).toBeGreaterThan(-1);
+      const fragment = source.slice(start, start + 220);
+      expect(fragment, `${method} route should parse id as UUID`).toContain(
+        '@Param("id", new ParseUUIDPipe())',
+      );
+    }
+  });
+
   /**
    * Every route naming a Company must be under the target-Company guard, so the
    * Company is re-resolved server-side rather than trusted from the request.
