@@ -571,6 +571,13 @@ export class WebsiteCmsService {
   public async readMedia(shaOrId: string) {
     const row = (await sql<any>`select storage_key as "storageKey", media_type as "mediaType" from platform_website_media where deleted_at is null and (public_url=${`/api/v1/public/website/media/${shaOrId}`} or id::text=${shaOrId})`.execute(this.db)).rows[0];
     if (!row) throw new NotFoundException("media_not_found");
-    return { bytes: await this.storage.readWebsite(row.storageKey), mediaType: row.mediaType };
+    try {
+      return { bytes: await this.storage.readWebsite(row.storageKey), mediaType: row.mediaType };
+    } catch (error) {
+      if (error instanceof Error && /No object found for storage key/.test(error.message)) {
+        throw new NotFoundException("media_file_missing_reupload_required");
+      }
+      throw error;
+    }
   }
 }

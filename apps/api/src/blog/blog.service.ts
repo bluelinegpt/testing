@@ -4,9 +4,11 @@ import {
   Inject,
   Injectable,
   NotFoundException,
+  Optional,
 } from "@nestjs/common";
 import { sql, type Kysely } from "kysely";
 import { cleanBlogHtml } from "./blog-html.js";
+import { FileStoragePort } from "../files/file-storage.port.js";
 import { DATABASE } from "../infrastructure/database/database.tokens.js";
 import type { DatabaseSchema } from "../infrastructure/database/database.types.js";
 import type {
@@ -56,6 +58,17 @@ const cleanBlocks = (blocks: SaveBlogArticleDto["content"]) =>
         : { type: b.type, text: cleanText(b.text ?? "") },
     )
     .filter((b) => ("text" in b && b.text) || ("items" in b && b.items.length));
+const websiteMediaPathPattern = /^\/api\/v1\/public\/website\/media\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
+const websiteMediaImagePattern = /<img\b[^>]*\bsrc=(["'])(https?:\/\/[^"']+\/api\/v1\/public\/website\/media\/[0-9a-f-]{36}|\/api\/v1\/public\/website\/media\/[0-9a-f-]{36})\1[^>]*>/gi;
+const websiteMediaPublicPath = (value: string) => {
+  if (websiteMediaPathPattern.test(value)) return value;
+  try {
+    const url = new URL(value);
+    return websiteMediaPathPattern.test(url.pathname) ? url.pathname : null;
+  } catch {
+    return null;
+  }
+};
 const articlePayload = (input: SaveBlogArticleDto, blocks = cleanBlocks(input.content)) => ({
   authorId: input.authorId,
   canonicalUrl: safeCanonical(input.canonicalUrl, localizedBlogPath(input.language, input.slug)),
@@ -124,7 +137,65 @@ export function publicArticleSeo(article: Record<string, any>) {
 }
 @Injectable()
 export class BlogService {
-  constructor(@Inject(DATABASE) private readonly db: Kysely<DatabaseSchema>) {}
+  constructor(
+    @Inject(DATABASE) private readonly db: Kysely<DatabaseSchema>,
+    @Optional() @Inject(FileStoragePort) private readonly storage?: FileStoragePort,
+  ) {}
+  private async websiteMediaExists(publicUrl: string | null | undefined): Promise<boolean> {
+    if (!publicUrl) return true;
+    const publicPath = websiteMediaPublicPath(publicUrl);
+    if (!publicPath) return true;
+    const row = (await sql<{ storage_key: string }>`select storage_key from platform_website_media where deleted_at is null and public_url=${publicPath}`.execute(this.db)).rows[0];
+    if (!row) return false;
+    if (!this.storage) return true;
+    try {
+      await this.storage.readWebsite(row.storage_key);
+      return true;
+    } catch (error) {
+      if (error instanceof Error && /No object found for storage key/.test(error.message)) return false;
+      throw error;
+    }
+  }
+  private async removeBrokenWebsiteMedia(payload: ReturnType<typeof articlePayload>) {
+    const warnings: string[] = [];
+    const next = { ...payload, content: payload.content.map((block) => ({ ...block })) };
+    if (!(await this.websiteMediaExists(next.featuredImagePublicUrl))) {
+      next.featuredImagePublicUrl = null;
+      next.featuredImageAlt = null;
+      next.featuredImageWidth = null;
+      next.featuredImageHeight = null;
+      warnings.push("The featured image was removed because its R2 file is missing. Please upload/select a fresh featured image, then Save & Publish.");
+    }
+    if (!(await this.websiteMediaExists(next.socialImageUrl))) {
+      next.socialImageUrl = null;
+      next.socialImageAlt = null;
+      next.socialImageWidth = null;
+      next.socialImageHeight = null;
+      warnings.push("The social sharing image was removed because its R2 file is missing. Please upload/select a fresh social image if you need one.");
+    }
+    const brokenBodyImages = new Set<string>();
+    for (const block of next.content) {
+      if (block.type !== "html" || !("text" in block) || !block.text) continue;
+      const matches = [...block.text.matchAll(websiteMediaImagePattern)];
+      for (const match of matches) {
+        const url = match[2]!;
+        if (!(await this.websiteMediaExists(url))) brokenBodyImages.add(url);
+      }
+      if (brokenBodyImages.size) {
+        block.text = block.text.replace(websiteMediaImagePattern, (tag, quote, url) =>
+          brokenBodyImages.has(url) ? "" : tag,
+        );
+      }
+    }
+    if (brokenBodyImages.size) {
+      warnings.push(`${brokenBodyImages.size} inserted article image${brokenBodyImages.size === 1 ? " was" : "s were"} removed because the R2 file is missing. Please re-upload the image inside the article body if it should remain visible.`);
+    }
+    return { payload: next, warnings };
+  }
+  private async detailWithWarnings(id: string, warnings: string[]) {
+    const detail = await this.adminDetail(id);
+    return warnings.length ? { ...detail, editorWarnings: warnings } : detail;
+  }
   private async ensureCategoryLanguage(categoryId:string,language:string) {
     const category=(await sql<{language:string}>`select language from platform_blog_categories where id=${categoryId}::uuid and active=true`.execute(this.db)).rows[0];
     if (!category || category.language!==language) throw new BadRequestException("blog_category_language_mismatch");
@@ -315,7 +386,9 @@ export class BlogService {
         content: draft.content,
         excerpt: draft.excerpt,
         featured_image_alt: draft.featuredImageAlt,
+        featured_image_height: draft.featuredImageHeight,
         featured_image_public_url: draft.featuredImagePublicUrl,
+        featured_image_width: draft.featuredImageWidth,
         language: draft.language,
         tag_ids: draft.tagIds ?? [],
         related_article_ids: draft.relatedArticleIds ?? [],
@@ -327,7 +400,10 @@ export class BlogService {
         seo_title: draft.seoTitle,
         slug: draft.slug,
         social_description: draft.socialDescription,
+        social_image_alt: draft.socialImageAlt,
+        social_image_height: draft.socialImageHeight,
         social_image_url: draft.socialImageUrl,
+        social_image_width: draft.socialImageWidth,
         social_title: draft.socialTitle,
         title: draft.title,
       };
@@ -376,10 +452,11 @@ export class BlogService {
     await this.validateRelationships(input);
     const blocks = cleanBlocks(input.content);
     if (!blocks.length) throw new BadRequestException("article_content_required");
-    const draftPayload = articlePayload(input, blocks);
+    const cleanup = await this.removeBrokenWebsiteMedia(articlePayload(input, blocks));
+    const draftPayload = cleanup.payload;
     try {
       const row =
-        await sql<any>`insert into platform_blog_articles(slug,language,translation_group_id,title,excerpt,content,author_id,category_id,cornerstone,featured_image_public_url,featured_image_alt,featured_image_width,featured_image_height,seo_title,meta_description,canonical_url,robots_index,robots_follow,social_title,social_description,social_image_url,social_image_alt,social_image_width,social_image_height,created_by_account_id,updated_by_account_id,draft_payload,has_unpublished_changes,last_unpublished_change_at) values(${input.slug},${input.language},coalesce(${input.translationGroupId ?? null}::uuid,gen_random_uuid()),${cleanText(input.title)},${cleanText(input.excerpt)},${JSON.stringify(blocks)}::jsonb,${input.authorId}::uuid,${input.categoryId}::uuid,${input.cornerstone},${input.featuredImagePublicUrl ?? null},${input.featuredImageAlt ? cleanText(input.featuredImageAlt) : null},${input.featuredImageWidth ?? null},${input.featuredImageHeight ?? null},${input.seoTitle ? cleanText(input.seoTitle) : null},${input.metaDescription ? cleanText(input.metaDescription) : null},${input.canonicalUrl ?? null},${input.robotsIndex},${input.robotsFollow},${input.socialTitle ? cleanText(input.socialTitle) : null},${input.socialDescription ? cleanText(input.socialDescription) : null},${input.socialImageUrl ?? null},${input.socialImageAlt ? cleanText(input.socialImageAlt) : null},${input.socialImageWidth ?? null},${input.socialImageHeight ?? null},${actor}::uuid,${actor}::uuid,${JSON.stringify(draftPayload)}::jsonb,true,now()) returning *`.execute(
+        await sql<any>`insert into platform_blog_articles(slug,language,translation_group_id,title,excerpt,content,author_id,category_id,cornerstone,featured_image_public_url,featured_image_alt,featured_image_width,featured_image_height,seo_title,meta_description,canonical_url,robots_index,robots_follow,social_title,social_description,social_image_url,social_image_alt,social_image_width,social_image_height,created_by_account_id,updated_by_account_id,draft_payload,has_unpublished_changes,last_unpublished_change_at) values(${draftPayload.slug},${draftPayload.language},coalesce(${draftPayload.translationGroupId ?? null}::uuid,gen_random_uuid()),${draftPayload.title},${draftPayload.excerpt},${JSON.stringify(draftPayload.content)}::jsonb,${draftPayload.authorId}::uuid,${draftPayload.categoryId}::uuid,${draftPayload.cornerstone},${draftPayload.featuredImagePublicUrl},${draftPayload.featuredImageAlt},${draftPayload.featuredImageWidth},${draftPayload.featuredImageHeight},${draftPayload.seoTitle},${draftPayload.metaDescription},${draftPayload.canonicalUrl},${draftPayload.robotsIndex},${draftPayload.robotsFollow},${draftPayload.socialTitle},${draftPayload.socialDescription},${draftPayload.socialImageUrl},${draftPayload.socialImageAlt},${draftPayload.socialImageWidth},${draftPayload.socialImageHeight},${actor}::uuid,${actor}::uuid,${JSON.stringify(draftPayload)}::jsonb,true,now()) returning *`.execute(
           this.db,
         );
       const article = row.rows[0];
@@ -387,7 +464,7 @@ export class BlogService {
       await sql`insert into platform_blog_publication_history(article_id,event_type,new_status,actor_account_id) values(${article.id}::uuid,'created','draft',${actor}::uuid)`.execute(
         this.db,
       );
-      return article;
+      return cleanup.warnings.length ? { ...article, editorWarnings: cleanup.warnings } : article;
     } catch (e) {
       if ((e as { code?: string }).code === "23505")
         throw new ConflictException("blog_slug_exists");
@@ -403,16 +480,17 @@ export class BlogService {
     await this.validateRelationships(input);
     const current = await this.adminDetail(id);
     const blocks = cleanBlocks(input.content);
-    const draftPayload = {...articlePayload(input, blocks),translationGroupId:input.translationGroupId??current.translation_group_id};
+    const cleanup = await this.removeBrokenWebsiteMedia({...articlePayload(input, blocks),translationGroupId:input.translationGroupId??current.translation_group_id});
+    const draftPayload = cleanup.payload;
     if (!blocks.length) throw new BadRequestException("article_content_required");
     const persisted = (await sql<any>`select status,slug from platform_blog_articles where id=${id}::uuid`.execute(this.db)).rows[0];
     if (persisted.status === "published") {
       await sql`update platform_blog_articles set draft_payload=${JSON.stringify(draftPayload)}::jsonb,has_unpublished_changes=true,last_unpublished_change_at=now(),updated_by_account_id=${actor}::uuid,updated_at=now() where id=${id}::uuid`.execute(this.db);
       await sql`insert into platform_blog_publication_history(article_id,event_type,old_status,new_status,actor_account_id,detail) values(${id}::uuid,'draft_saved','published','published',${actor}::uuid,${JSON.stringify({ hasUnpublishedChanges: true })}::jsonb)`.execute(this.db);
-      return this.adminDetail(id);
+      return this.detailWithWarnings(id, cleanup.warnings);
     }
     try {
-      await sql`update platform_blog_articles set slug=${input.slug},language=${input.language},translation_group_id=${draftPayload.translationGroupId}::uuid,title=${cleanText(input.title)},excerpt=${cleanText(input.excerpt)},content=${JSON.stringify(blocks)}::jsonb,author_id=${input.authorId}::uuid,category_id=${input.categoryId}::uuid,cornerstone=${input.cornerstone},featured_image_public_url=${input.featuredImagePublicUrl ?? null},featured_image_alt=${input.featuredImageAlt ? cleanText(input.featuredImageAlt) : null},featured_image_width=${input.featuredImageWidth ?? null},featured_image_height=${input.featuredImageHeight ?? null},seo_title=${input.seoTitle ? cleanText(input.seoTitle) : null},meta_description=${input.metaDescription ? cleanText(input.metaDescription) : null},canonical_url=${input.canonicalUrl ?? null},robots_index=${input.robotsIndex},robots_follow=${input.robotsFollow},social_title=${input.socialTitle ? cleanText(input.socialTitle) : null},social_description=${input.socialDescription ? cleanText(input.socialDescription) : null},social_image_url=${input.socialImageUrl ?? null},social_image_alt=${input.socialImageAlt ? cleanText(input.socialImageAlt) : null},social_image_width=${input.socialImageWidth ?? null},social_image_height=${input.socialImageHeight ?? null},draft_payload=${JSON.stringify(draftPayload)}::jsonb,has_unpublished_changes=true,last_unpublished_change_at=now(),updated_by_account_id=${actor}::uuid,updated_content_at=now(),updated_at=now() where id=${id}::uuid`.execute(
+      await sql`update platform_blog_articles set slug=${draftPayload.slug},language=${draftPayload.language},translation_group_id=${draftPayload.translationGroupId}::uuid,title=${draftPayload.title},excerpt=${draftPayload.excerpt},content=${JSON.stringify(draftPayload.content)}::jsonb,author_id=${draftPayload.authorId}::uuid,category_id=${draftPayload.categoryId}::uuid,cornerstone=${draftPayload.cornerstone},featured_image_public_url=${draftPayload.featuredImagePublicUrl},featured_image_alt=${draftPayload.featuredImageAlt},featured_image_width=${draftPayload.featuredImageWidth},featured_image_height=${draftPayload.featuredImageHeight},seo_title=${draftPayload.seoTitle},meta_description=${draftPayload.metaDescription},canonical_url=${draftPayload.canonicalUrl},robots_index=${draftPayload.robotsIndex},robots_follow=${draftPayload.robotsFollow},social_title=${draftPayload.socialTitle},social_description=${draftPayload.socialDescription},social_image_url=${draftPayload.socialImageUrl},social_image_alt=${draftPayload.socialImageAlt},social_image_width=${draftPayload.socialImageWidth},social_image_height=${draftPayload.socialImageHeight},draft_payload=${JSON.stringify(draftPayload)}::jsonb,has_unpublished_changes=true,last_unpublished_change_at=now(),updated_by_account_id=${actor}::uuid,updated_content_at=now(),updated_at=now() where id=${id}::uuid`.execute(
         this.db,
       );
       await this.syncRelationships(id,draftPayload);
@@ -420,7 +498,7 @@ export class BlogService {
       if ((e as { code?: string }).code === "23505") throw new ConflictException("blog_slug_exists");
       throw e;
     }
-    return this.adminDetail(id);
+    return this.detailWithWarnings(id, cleanup.warnings);
   }
   async status(id: string, input: ArticleStatusDto, actor: string) {
     return this.withArticleLock(id, service => service.statusLocked(id, input, actor));
@@ -433,9 +511,13 @@ export class BlogService {
       (!input.scheduledAt || Number.isNaN(Date.parse(input.scheduledAt)))
     )
       throw new BadRequestException("valid_schedule_required");
-    const draft = old.draft_payload as Record<string, unknown> | null;
+    let draft = old.draft_payload as Record<string, unknown> | null;
+    let editorWarnings: string[] = [];
     try {
       if (input.status === "published" && draft) {
+        const cleanup = await this.removeBrokenWebsiteMedia(draft as ReturnType<typeof articlePayload>);
+        draft = cleanup.payload;
+        editorWarnings = cleanup.warnings;
         if (old.slug !== draft.slug && old.status === "published") {
           const oldPath = localizedBlogPath(old.language, old.slug);
           const newPath = localizedBlogPath(String(draft.language), String(draft.slug));
@@ -457,14 +539,14 @@ export class BlogService {
       throw e;
     }
     await sql`insert into platform_blog_publication_history(article_id,event_type,old_status,new_status,actor_account_id) values(${id}::uuid,${input.status},${old.status},${input.status},${actor}::uuid)`.execute(this.db);
-    return this.adminDetail(id);
+    return this.detailWithWarnings(id, editorWarnings);
   }
   // Serialize edits/publication/deletion; preserve history and shared media.
   private async withArticleLock<T>(id: string, action: (service: BlogService) => Promise<T>): Promise<T> {
     return this.db.transaction().execute(async transaction => {
       const row = (await sql`select id from platform_blog_articles where id=${id}::uuid for update`.execute(transaction)).rows[0];
       if (!row) throw new NotFoundException();
-      const service = new BlogService(transaction);
+      const service = new BlogService(transaction, this.storage);
       await service.adminDetail(id);
       return action(service);
     });

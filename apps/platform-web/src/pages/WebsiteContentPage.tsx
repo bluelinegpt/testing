@@ -1411,6 +1411,10 @@ export function BlogEditor({ id }: { id: string }) {
     setForm(loaded);
     setSavedSnapshot(JSON.stringify(loaded));
   };
+  const saveMessage = (article: any, fallback: string) => {
+    const warnings = Array.isArray(article?.editorWarnings) ? article.editorWarnings : [];
+    return warnings.length ? warnings.join(" ") : fallback;
+  };
   useEffect(() => {
     void Promise.all([platformApi.blogReferences(), platformApi.blogArticles()]).then(
       ([r, articles]) => {
@@ -1456,7 +1460,7 @@ export function BlogEditor({ id }: { id: string }) {
     try {
       const saved = await persistDraft();
       acceptSaved(saved);
-      setMessage("Draft saved. Your text and formatting are saved.");
+      setMessage(saveMessage(saved, "Draft saved. Your text and formatting are saved."));
       if (isNew) location.assign(`/website/${saved.id}`);
     } catch (e) {
       setError(
@@ -1487,7 +1491,7 @@ export function BlogEditor({ id }: { id: string }) {
       }
       const saved = await platformApi.updateBlogArticleStatus(id, { status: "published" });
       acceptSaved(saved);
-      setMessage("Current changes saved and published.");
+      setMessage(saveMessage(saved, "Current changes saved and published."));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Save or publish failed. Please try again.");
     } finally {
