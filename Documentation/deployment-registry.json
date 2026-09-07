@@ -19,7 +19,7 @@
       "displayName": "API",
       "path": "apps/api",
       "renderService": "bluelinegpt-api-test",
-      "status": "needs_deploy",
+      "status": "pushed_awaiting_confirmation",
       "localCommit": "a034e3f",
       "localCommitDate": "2026-09-07",
       "lastChangeDescription": "fix(api): repair public blog article lookup",
