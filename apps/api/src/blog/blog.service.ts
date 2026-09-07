@@ -142,7 +142,12 @@ export class BlogService {
     const categoryIds=[...new Set([payload.categoryId,...(payload.categoryIds??[])])];
     const tagIds=[...new Set(payload.tagIds??[])];
     const relatedIds=[...new Set(payload.relatedArticleIds??[])].filter(id=>id!==articleId);
-    await sql`delete from platform_blog_article_categories where article_id=${articleId}::uuid;insert into platform_blog_article_categories(article_id,category_id) select ${articleId}::uuid,x from unnest(${categoryIds}::uuid[])x;delete from platform_blog_article_tags where article_id=${articleId}::uuid;insert into platform_blog_article_tags(article_id,tag_id) select ${articleId}::uuid,x from unnest(${tagIds}::uuid[])x;delete from platform_blog_article_relations where article_id=${articleId}::uuid and relation_type='editorial';insert into platform_blog_article_relations(article_id,related_article_id,relation_type,sort_order) select ${articleId}::uuid,x,'editorial',n from unnest(${relatedIds}::uuid[])with ordinality as u(x,n)`.execute(this.db);
+    await sql`delete from platform_blog_article_categories where article_id=${articleId}::uuid`.execute(this.db);
+    await sql`insert into platform_blog_article_categories(article_id,category_id) select ${articleId}::uuid,x from unnest(${categoryIds}::uuid[])x`.execute(this.db);
+    await sql`delete from platform_blog_article_tags where article_id=${articleId}::uuid`.execute(this.db);
+    await sql`insert into platform_blog_article_tags(article_id,tag_id) select ${articleId}::uuid,x from unnest(${tagIds}::uuid[])x`.execute(this.db);
+    await sql`delete from platform_blog_article_relations where article_id=${articleId}::uuid and relation_type='editorial'`.execute(this.db);
+    await sql`insert into platform_blog_article_relations(article_id,related_article_id,relation_type,sort_order) select ${articleId}::uuid,x,'editorial',n from unnest(${relatedIds}::uuid[])with ordinality as u(x,n)`.execute(this.db);
   }
   async publicList(input: { language?: string; category?: string; tag?: string; author?: string; topic?: string; page?: number }) {
     const language = input.language ?? "en",
