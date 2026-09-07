@@ -7,9 +7,9 @@
       "path": "apps/public-web",
       "renderService": "tawseelhub-public-web",
       "status": "needs_deploy",
-      "localCommit": "ff76452",
+      "localCommit": "231cabc",
       "localCommitDate": "2026-09-07",
-      "lastChangeDescription": "fix(seo): render blog article HTML at request time",
+      "lastChangeDescription": "fix(seo): embed blog article body in source html",
       "lastChangeBy": "codex",
       "confirmedLiveCommit": null,
       "confirmedLiveAt": null
