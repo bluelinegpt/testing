@@ -19,10 +19,10 @@
       "displayName": "API",
       "path": "apps/api",
       "renderService": "bluelinegpt-api-test",
-      "status": "pushed_awaiting_confirmation",
-      "localCommit": "32640e9",
+      "status": "needs_deploy",
+      "localCommit": "003f6d9",
       "localCommitDate": "2026-09-07",
-      "lastChangeDescription": "fix(platform): constrain blog article id routes",
+      "lastChangeDescription": "fix(platform): make blog article routes uuid-only",
       "lastChangeBy": "codex",
       "confirmedLiveCommit": "e3de371",
       "confirmedLiveAt": "2026-09-01"
