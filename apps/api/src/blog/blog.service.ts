@@ -183,7 +183,7 @@ export class BlogService {
       throw new NotFoundException("blog_article_not_found");
     }
     const related = (
-      await sql<any>`select distinct x.slug,x.title,x.excerpt,x.cornerstone from platform_blog_articles x left join platform_blog_article_relations r on r.article_id=${article.id}::uuid and r.related_article_id=x.id left join platform_blog_article_tags xt on xt.article_id=x.id left join platform_blog_article_tags at on at.article_id=${article.id}::uuid and at.tag_id=xt.tag_id where x.id<>${article.id}::uuid and x.language=${language} and (r.related_article_id is not null or x.category_id=${article.category_id}::uuid or at.tag_id is not null) and ((x.status='published' and x.published_at<=now()) or (x.status='scheduled' and x.scheduled_at<=now())) order by x.cornerstone desc,coalesce(x.published_at,x.scheduled_at) desc limit 3`.execute(
+      await sql<any>`select x.slug,x.title,x.excerpt,x.cornerstone from platform_blog_articles x left join platform_blog_article_relations r on r.article_id=${article.id}::uuid and r.related_article_id=x.id left join platform_blog_article_tags xt on xt.article_id=x.id left join platform_blog_article_tags at on at.article_id=${article.id}::uuid and at.tag_id=xt.tag_id where x.id<>${article.id}::uuid and x.language=${language} and (r.related_article_id is not null or x.category_id=${article.category_id}::uuid or at.tag_id is not null) and ((x.status='published' and x.published_at<=now()) or (x.status='scheduled' and x.scheduled_at<=now())) group by x.id,x.slug,x.title,x.excerpt,x.cornerstone,x.published_at,x.scheduled_at order by x.cornerstone desc,coalesce(x.published_at,x.scheduled_at) desc limit 3`.execute(
         this.db,
       )
     ).rows;
