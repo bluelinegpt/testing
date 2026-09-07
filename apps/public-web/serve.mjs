@@ -1,10 +1,11 @@
 import { createServer } from "node:http";
 import { readFile, stat } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { brotliCompressSync, gzipSync } from "node:zlib";
 
 const directory = join(fileURLToPath(new URL(".", import.meta.url)), "dist");
+const ssrEntry = join(fileURLToPath(new URL(".", import.meta.url)), "dist-ssr", "entry-server.js");
 const apiBase = (process.env.PUBLIC_API_BASE_URL ?? process.env.VITE_API_BASE_URL ?? "http://127.0.0.1:3000/api/v1").replace(/\/$/, "");
 const canonicalOrigin = "https://tawseelhub.com";
 const production = process.env.PUBLIC_SEO_ENVIRONMENT === "production";
@@ -60,6 +61,20 @@ async function fileResponse(pathname) {
   if (!candidate.startsWith(directory)) return undefined;
   try { const info = await stat(candidate); const file = info.isDirectory() ? join(candidate, "index.html") : candidate; return { body: await readFile(file), type: types[extname(file)] ?? "application/octet-stream" }; } catch { return undefined; }
 }
+export function injectRenderedRoot(html, rendered) {
+  const body = String(rendered ?? "");
+  return html.replace(/<div id="root">[\s\S]*?<\/div>/, `<div id="root">${body}</div>`);
+}
+async function renderRouteHtml(html, pathname, preloadEntries) {
+  if (!preloadEntries?.length) return html;
+  try {
+    const { render } = await import(pathToFileURL(ssrEntry).href);
+    return injectRenderedRoot(html, render(pathname, new Map(preloadEntries)));
+  } catch {
+    return html;
+  }
+}
+export const blogArticlePreloadKey = (slug, locale) => `blog-article:${slug}:${locale}`;
 export function createPublicServer() {
   return createServer(async (request, response) => {
     try {
@@ -80,15 +95,15 @@ export function createPublicServer() {
       let landing;
       if(landingMatch){const language=landingMatch[1]?"ar":"en";landing=await api(`/public/blog/${landingMatch[2]}s/${encodeURIComponent(landingMatch[3])}?language=${language}`);if(!landing){const redirect=await api(`/public/blog/redirect?path=${encodeURIComponent(pathname)}`);if(redirect?.to){response.writeHead(redirect.statusCode===301?301:308,{location:redirect.to}).end();return;}await fetch(`${apiBase}/public/blog/not-found`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({path:pathname,referer:request.headers.referer})}).catch(()=>{});response.writeHead(404).end("Not found");return;}}
       const blogMatch = pathname.match(/^(\/ar)?\/blog\/([^/]+)$/);
-      let article;
-       if (blogMatch) { const language=blogMatch[1]?"ar":"en"; const payload = await api(`/public/blog/articles/${encodeURIComponent(blogMatch[2])}?language=${language}`); if (payload?.redirect?.to) { response.writeHead(payload.redirect.statusCode === 301 ? 301 : 308, { location: payload.redirect.to }).end(); return; } article = payload?.article; if (!article) { await fetch(`${apiBase}/public/blog/not-found`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({path:pathname,referer:request.headers.referer})}).catch(()=>{});response.writeHead(404).end("Not found"); return; } }
+      let article, articlePayload, articleSlug, articleLanguage;
+       if (blogMatch) { articleLanguage=blogMatch[1]?"ar":"en"; articleSlug=blogMatch[2]; articlePayload = await api(`/public/blog/articles/${encodeURIComponent(articleSlug)}?language=${articleLanguage}`); if (articlePayload?.redirect?.to) { response.writeHead(articlePayload.redirect.statusCode === 301 ? 301 : 308, { location: articlePayload.redirect.to }).end(); return; } article = articlePayload?.article; if (!article) { await fetch(`${apiBase}/public/blog/not-found`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({path:pathname,referer:request.headers.referer})}).catch(()=>{});response.writeHead(404).end("Not found"); return; } }
       const helpMatch = pathname.match(/^\/resources\/([^/]+)$/);
       if (helpMatch) { const payload = await api(`/public/website/help/articles/${encodeURIComponent(helpMatch[1])}?locale=en`); if (!payload?.article) { response.writeHead(404).end("Not found"); return; } }
       let file = await fileResponse(pathname);
        const clientRoute = Boolean(article || landing || helpMatch || /^\/send-a-package\/quote(\/|$)/.test(pathname));
       if (!file && clientRoute) file = await fileResponse("/");
       if (!file) { response.writeHead(404).end("Not found"); return; }
-       let body = file.body; if (article && file.type.startsWith("text/html")) body = Buffer.from(injectArticleMetadata(body.toString(), article, pathname));else if(landing&&file.type.startsWith("text/html"))body=Buffer.from(injectLandingMetadata(body.toString(),landing));
+       let body = file.body; if (article && file.type.startsWith("text/html")) { const rendered = await renderRouteHtml(body.toString(), pathname, [[blogArticlePreloadKey(articleSlug, articleLanguage), articlePayload]]); body = Buffer.from(injectArticleMetadata(rendered, article, pathname)); } else if(landing&&file.type.startsWith("text/html"))body=Buffer.from(injectLandingMetadata(body.toString(),landing));
       send(response, 200, { "content-type":file.type, "cache-control":cacheControlFor(pathname,file.type), "x-content-type-options":"nosniff" }, body, request.headers["accept-encoding"]);
     } catch { response.writeHead(502).end("Upstream unavailable"); }
   });

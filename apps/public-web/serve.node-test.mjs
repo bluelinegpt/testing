@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { cacheControlFor, encodedBody, injectArticleMetadata, injectLandingMetadata, isOriginHost, normalizePath, robotsHeader } from "./serve.mjs";
+import { cacheControlFor, encodedBody, injectArticleMetadata, injectLandingMetadata, injectRenderedRoot, isOriginHost, normalizePath, robotsHeader } from "./serve.mjs";
 test("normalizes public paths", () => { assert.equal(normalizePath("//blog/example///"), "/blog/example"); assert.equal(normalizePath("/"), "/"); });
 test("recognizes Render origins", () => assert.equal(isOriginHost("site.onrender.com"), true));
 test("non-production is noindex", () => assert.equal(robotsHeader("tawseelhub.com"), "noindex, nofollow"));
@@ -19,6 +19,14 @@ test("initial article HTML contains safe structured and social metadata", () => 
   assert.match(html,/"@type":"BlogPosting"/);
   assert.doesNotMatch(html,/<\/script><script>alert/);
   assert.match(html,/\\u003c\/script>/);
+});
+test("article HTML source can carry the rendered body for crawlers", () => {
+  const html = '<html><head></head><body><div id="root"><main>Old shell</main></div></body></html>';
+  const rendered = '<article><h1>Delivery Management Software UAE</h1><p>UAE&#x27;s delivery landscape has changed beyond recognition.</p></article>';
+  const result = injectRenderedRoot(html, rendered);
+  assert.match(result, /Delivery Management Software UAE/);
+  assert.match(result, /UAE&#x27;s delivery landscape/);
+  assert.doesNotMatch(result, /Old shell/);
 });
 test("initial Arabic article HTML is RTL and contains reciprocal language metadata",()=>{
   const html=injectArticleMetadata('<html lang="en"><head><title>Old</title><meta name="description" content="Old" /></head></html>',{language:"ar",title:"عنوان عربي",excerpt:"وصف عربي",robots_index:true,robots_follow:true,seo:{canonical:"https://tawseelhub.com/ar/blog/مقال",alternates:[{language:"ar",url:"https://tawseelhub.com/ar/blog/مقال"},{language:"en",url:"https://tawseelhub.com/blog/article"}],xDefault:"https://tawseelhub.com/blog/article",alternateLocale:"en_AE"}},"/ar/blog/مقال");
