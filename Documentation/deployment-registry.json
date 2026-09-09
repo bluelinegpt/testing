@@ -46,9 +46,9 @@
       "path": "apps/platform-web",
       "renderService": "bluelinegpt-platform-test",
       "status": "needs_deploy",
-      "localCommit": "7c2895e",
+      "localCommit": "17500c0",
       "localCommitDate": "2026-09-09",
-      "lastChangeDescription": "fix(platform): clarify blog image upload errors and selected file state",
+      "lastChangeDescription": "fix(platform): clarify blog image upload feedback",
       "lastChangeBy": "codex",
       "confirmedLiveCommit": "aee8bb0",
       "confirmedLiveAt": "2026-08-31"
