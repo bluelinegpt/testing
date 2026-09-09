@@ -146,6 +146,23 @@ async function request<TResponse>(
   }
 }
 
+async function uploadError(response: Response, fallback: string): Promise<PlatformApiError> {
+  const payload = (response.headers.get("content-type") ?? "").includes("application/json")
+    ? ((await response.json()) as ErrorPayload)
+    : undefined;
+  const correlationId = payload?.error?.correlationId;
+  const apiMessage =
+    response.status === 400 && Array.isArray(payload?.error?.details) && payload.error.details.length
+      ? `${payload.error.message ?? "Validation failed"} ${payload.error.details.filter((x) => typeof x === "string").slice(0, 8).join("; ")}`
+      : payload?.error?.message;
+  return new PlatformApiError(
+    platformApiErrorMessage(response.status, apiMessage ?? fallback, correlationId),
+    payload?.error?.code ?? "media_upload_failed",
+    response.status,
+    correlationId,
+  );
+}
+
 export interface PlatformIdentity {
   readonly accountId: string;
   readonly username: string;
@@ -1334,11 +1351,7 @@ export const platformApi = {
       body: form,
     });
     if (!response.ok) {
-      throw new PlatformApiError(
-        "Website media must be MP4, JPG, PNG, or WebP.",
-        "media_upload_failed",
-        response.status,
-      );
+      throw await uploadError(response, "Website media must be MP4, JPG, PNG, or WebP.");
     }
     return await response.json();
   },

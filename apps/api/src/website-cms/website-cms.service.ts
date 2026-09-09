@@ -186,6 +186,17 @@ export function isWebsiteMedia(bytes: Uint8Array, declared: string): { ok: true;
   return { ok: true, mediaType: "video/mp4", ext: "mp4" };
 }
 
+function websiteMediaValidationMessage(reason: string) {
+  const help: Record<string, string> = {
+    declared_media_type_mismatch: "The selected file's browser-reported type does not match its real image data. Export it again as JPG, PNG, or WebP instead of renaming the file.",
+    empty_file: "The selected file is empty. Please choose the original image file again.",
+    file_too_large: "The selected file is larger than the 20 MB website media limit. Please compress or export a smaller JPG, PNG, WebP, or MP4.",
+    markup_or_script_rejected: "SVG, HTML, XML, and script-like files are not accepted for blog media. Please export the image as JPG, PNG, or WebP.",
+    unsupported_media_signature: "The selected file is not a readable JPG, PNG, WebP, or MP4 file. HEIC, AVIF, GIF, SVG, PDF, and renamed files are not supported.",
+  };
+  return help[reason] ?? "The selected file could not be validated as JPG, PNG, WebP, or MP4. Please export it again and retry.";
+}
+
 @Injectable()
 export class WebsiteCmsService {
   private readonly storageProvider: string;
@@ -558,7 +569,7 @@ export class WebsiteCmsService {
   public async uploadMedia(file: UploadedFile | undefined, body: MediaAltDto, actor: string) {
     if (!file) throw new BadRequestException("Website media must be MP4, JPG, PNG, or WebP.");
     const validation = isWebsiteMedia(file.buffer, file.mimetype);
-    if (!validation.ok) throw new BadRequestException(`Website media must be MP4, JPG, PNG, or WebP (${validation.reason}).`);
+    if (!validation.ok) throw new BadRequestException(websiteMediaValidationMessage(validation.reason));
     const mediaToken = randomUUID();
     const key = `website/${mediaToken}.${validation.ext}`;
     await this.storage.storeWebsite(key, file.buffer);
