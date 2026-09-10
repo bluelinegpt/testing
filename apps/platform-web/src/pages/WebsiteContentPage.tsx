@@ -70,6 +70,23 @@ const articleUrl = (slug: string, language = "en") =>
   `${publicWebBase}${articlePath(slug, language)}`;
 const helpPath = (slug: string) => `/resources/${slug || "guide-slug"}`;
 const helpUrl = (slug: string) => `${publicWebBase}${helpPath(slug)}`;
+const cleanOptionalTrackingId = (value: unknown, placeholderPattern?: RegExp) => {
+  const text = typeof value === "string" ? value.trim() : "";
+  return text && !placeholderPattern?.test(text) ? text : undefined;
+};
+const normalizePublicSiteSettings = (x: any) => ({
+  canonicalBaseUrl: x.canonicalBaseUrl ?? x.canonical_base_url ?? "",
+  defaultSiteTitle: x.defaultSiteTitle ?? x.default_site_title ?? "",
+  defaultMetaDescription: x.defaultMetaDescription ?? x.default_meta_description ?? "",
+  defaultSocialImage: x.defaultSocialImage ?? x.default_social_image ?? "",
+  searchConsoleVerification: x.searchConsoleVerification ?? x.search_console_verification ?? "",
+  gtmContainerId: x.gtmContainerId ?? x.gtm_container_id ?? "",
+  ga4MeasurementId: x.ga4MeasurementId ?? x.ga4_measurement_id ?? "",
+  analyticsEnabled: x.analyticsEnabled ?? x.analytics_enabled ?? false,
+  clarityProjectId: x.clarityProjectId ?? x.clarity_project_id ?? "",
+  clarityEnabled: x.clarityEnabled ?? x.clarity_enabled ?? false,
+  trackingEnvironment: x.trackingEnvironment ?? x.tracking_environment ?? "production",
+});
 const articleImageFallback = (slug: string) =>
   slug === "manage-cod-delivery-operations"
     ? `${publicWebBase}/blog-images/manage-cod-delivery-operations.jpg`
@@ -1541,8 +1558,8 @@ export function BlogEditor({ id }: { id: string }) {
       <Link to="/website">← Website</Link>
       <h2>{isNew ? "New Blog Article" : form.title || "Edit Article"}</h2>
       <p className="platform-muted">
-        Each language is an independently published article. Link the matching translation below;
-        an unpublished translation never creates a public URL or hreflang.
+        Each language is an independently published article. Link the matching translation below; an
+        unpublished translation never creates a public URL or hreflang.
       </p>
       <div className="blog-save-bar">
         <strong role="status">
@@ -1697,18 +1714,22 @@ export function BlogEditor({ id }: { id: string }) {
           <label>
             Category
             <select value={form.categoryId} onChange={(e) => set("categoryId", e.target.value)}>
-              {refs.categories.filter((x: any) => x.language === form.language).map((x: any) => (
-                <option key={x.id} value={x.id}>
-                  {x.name}
-                </option>
-              ))}
+              {refs.categories
+                .filter((x: any) => x.language === form.language)
+                .map((x: any) => (
+                  <option key={x.id} value={x.id}>
+                    {x.name}
+                  </option>
+                ))}
             </select>
           </label>
           <label>
             Additional categories
             <select
               multiple
-              value={form.categoryIds.filter((categoryId: string) => categoryId !== form.categoryId)}
+              value={form.categoryIds.filter(
+                (categoryId: string) => categoryId !== form.categoryId,
+              )}
               onChange={(e) =>
                 set("categoryIds", [
                   form.categoryId,
@@ -1757,7 +1778,8 @@ export function BlogEditor({ id }: { id: string }) {
                   ...current,
                   language,
                   categoryId:
-                    refs.categories.find((category: any) => category.language === language)?.id ?? "",
+                    refs.categories.find((category: any) => category.language === language)?.id ??
+                    "",
                 }));
               }}
             >
@@ -1771,12 +1793,15 @@ export function BlogEditor({ id }: { id: string }) {
               value={form.translationGroupId}
               onChange={(e) => set("translationGroupId", e.target.value)}
             >
-              <option value={form.translationGroupId || ""}>No matching translation selected</option>
+              <option value={form.translationGroupId || ""}>
+                No matching translation selected
+              </option>
               {(refs.articles ?? [])
                 .filter((article: any) => article.id !== id && article.language !== form.language)
                 .map((article: any) => (
                   <option key={article.id} value={article.translation_group_id}>
-                    {article.language === "ar" ? "Arabic" : "English"}: {article.title} ({article.status})
+                    {article.language === "ar" ? "Arabic" : "English"}: {article.title} (
+                    {article.status})
                   </option>
                 ))}
             </select>
@@ -1829,20 +1854,20 @@ export function BlogEditor({ id }: { id: string }) {
                 type="button"
                 key={`suggestion-${article.id}`}
                 disabled={form.relatedArticleIds.includes(article.id)}
-                onClick={() =>
-                  set("relatedArticleIds", [...form.relatedArticleIds, article.id])
-                }
+                onClick={() => set("relatedArticleIds", [...form.relatedArticleIds, article.id])}
               >
                 {article.cornerstone ? "Cornerstone: " : "Related: "}
                 {article.title}
               </button>
             ))}
         </label>
-        {form.language === "ar" && (!form.title.trim() || !form.slug.trim() || !form.content.trim()) && (
-          <p className="platform-warning">
-            Arabic title, body and slug are required before this language version can be published.
-          </p>
-        )}
+        {form.language === "ar" &&
+          (!form.title.trim() || !form.slug.trim() || !form.content.trim()) && (
+            <p className="platform-warning">
+              Arabic title, body and slug are required before this language version can be
+              published.
+            </p>
+          )}
         <h3>Featured image</h3>
         <div className="publishing-actions">
           <label className="platform-inline-field">
@@ -2111,7 +2136,16 @@ export function BlogEditor({ id }: { id: string }) {
 
 function SeoReadiness({ form, articles }: { form: any; articles: any[] }) {
   const body = String(form.content ?? "");
-  const duplicateTitle = Boolean(form.seoTitle && articles.some((article) => article.id !== form.id && article.language === form.language && article.status === "published" && String(article.seo_title ?? "").toLocaleLowerCase() === form.seoTitle.toLocaleLowerCase()));
+  const duplicateTitle = Boolean(
+    form.seoTitle &&
+    articles.some(
+      (article) =>
+        article.id !== form.id &&
+        article.language === form.language &&
+        article.status === "published" &&
+        String(article.seo_title ?? "").toLocaleLowerCase() === form.seoTitle.toLocaleLowerCase(),
+    ),
+  );
   const checks = [
     ["SEO title", Boolean(form.seoTitle), "warning"],
     ["Unique SEO title", !duplicateTitle, "warning"],
@@ -2120,12 +2154,48 @@ function SeoReadiness({ form, articles }: { form: any; articles: any[] }) {
     ["Image alt", !form.featuredImagePublicUrl || Boolean(form.featuredImageAlt), "warning"],
     ["Author", Boolean(form.authorId), "blocking"],
     ["Primary category", Boolean(form.categoryId), "blocking"],
-    ["Internal or related link", /href\s*=/.test(body) || form.relatedArticleIds.length > 0, "warning"],
-    ["Canonical", !form.canonicalUrl || form.canonicalUrl === articleUrl(form.slug, form.language), "blocking"],
-    ["Arabic metadata", form.language !== "ar" || Boolean(form.title && form.slug && body && form.seoTitle && form.metaDescription && form.translationGroupId), "warning"],
+    [
+      "Internal or related link",
+      /href\s*=/.test(body) || form.relatedArticleIds.length > 0,
+      "warning",
+    ],
+    [
+      "Canonical",
+      !form.canonicalUrl || form.canonicalUrl === articleUrl(form.slug, form.language),
+      "blocking",
+    ],
+    [
+      "Arabic metadata",
+      form.language !== "ar" ||
+        Boolean(
+          form.title &&
+          form.slug &&
+          body &&
+          form.seoTitle &&
+          form.metaDescription &&
+          form.translationGroupId,
+        ),
+      "warning",
+    ],
   ] as const;
-  const status = checks.some(([, pass, severity]) => !pass && severity === "blocking") ? "Needs Attention" : checks.some(([, pass]) => !pass) ? "Warnings" : "SEO Ready";
-  return <section className="seo-readiness"><h4>SEO Readiness: {status}</h4><p className="platform-muted">Advisory editorial checks—not a search-ranking score.</p><ul>{checks.map(([name, pass, severity]) => <li key={name} className={pass ? "pass" : severity}>{pass ? "PASS" : severity === "blocking" ? "BLOCKING" : "WARNING"} — {name}</li>)}</ul></section>;
+  const status = checks.some(([, pass, severity]) => !pass && severity === "blocking")
+    ? "Needs Attention"
+    : checks.some(([, pass]) => !pass)
+      ? "Warnings"
+      : "SEO Ready";
+  return (
+    <section className="seo-readiness">
+      <h4>SEO Readiness: {status}</h4>
+      <p className="platform-muted">Advisory editorial checks—not a search-ranking score.</p>
+      <ul>
+        {checks.map(([name, pass, severity]) => (
+          <li key={name} className={pass ? "pass" : severity}>
+            {pass ? "PASS" : severity === "blocking" ? "BLOCKING" : "WARNING"} — {name}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
 }
 
 function BlogDraftPreview({ id }: { id: string }) {
@@ -2210,23 +2280,7 @@ function Settings() {
     [s, setS] = useState<any>();
   useEffect(() => {
     if (session.can("platform.public_site_settings.manage"))
-      void platformApi
-        .publicSiteSettings()
-        .then((x) =>
-          setS({
-            canonicalBaseUrl: x.canonical_base_url,
-            defaultSiteTitle: x.default_site_title,
-            defaultMetaDescription: x.default_meta_description,
-            defaultSocialImage: x.default_social_image ?? "",
-            searchConsoleVerification: x.search_console_verification ?? "",
-            gtmContainerId: x.gtm_container_id ?? "",
-            ga4MeasurementId: x.ga4_measurement_id ?? "",
-            analyticsEnabled: x.analytics_enabled,
-            clarityProjectId: x.clarity_project_id ?? "",
-            clarityEnabled: x.clarity_enabled,
-            trackingEnvironment: x.tracking_environment,
-          }),
-        );
+      void platformApi.publicSiteSettings().then((x) => setS(normalizePublicSiteSettings(x)));
   }, [session]);
   if (!s) return <p className="platform-muted">SEO settings require permission.</p>;
   const set = (k: string, v: any) => setS({ ...s, [k]: v });
@@ -2304,12 +2358,12 @@ function Settings() {
               .updatePublicSiteSettings({
                 ...s,
                 defaultSocialImage: s.defaultSocialImage || undefined,
-                searchConsoleVerification: s.searchConsoleVerification || undefined,
-                gtmContainerId: s.gtmContainerId || undefined,
-                ga4MeasurementId: s.ga4MeasurementId || undefined,
-                clarityProjectId: s.clarityProjectId || undefined,
+                searchConsoleVerification: cleanOptionalTrackingId(s.searchConsoleVerification),
+                gtmContainerId: cleanOptionalTrackingId(s.gtmContainerId, /^GTM-X+$/i),
+                ga4MeasurementId: cleanOptionalTrackingId(s.ga4MeasurementId, /^G-X+$/i),
+                clarityProjectId: cleanOptionalTrackingId(s.clarityProjectId),
               })
-              .then(setS)
+              .then((x) => setS(normalizePublicSiteSettings(x)))
           }
         >
           Save SEO settings
