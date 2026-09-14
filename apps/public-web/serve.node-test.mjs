@@ -6,11 +6,13 @@ import {
   injectArticleMetadata,
   injectLandingMetadata,
   injectRenderedRoot,
+  injectStaticPageMetadata,
   isOriginHost,
   normalizePath,
   renderArticleShell,
   robotsHeader,
   sitemapStylesheet,
+  structuredDataForPath,
 } from "./serve.mjs";
 test("normalizes public paths", () => {
   assert.equal(normalizePath("//blog/example///"), "/blog/example");
@@ -40,6 +42,35 @@ test("sitemap stylesheet renders sitemap XML as a human-readable table", () => {
   );
   assert.match(sitemapStylesheet, /xmlns:xhtml="http:\/\/www\.w3\.org\/1999\/xhtml"/);
   assert.match(sitemapStylesheet, /sitemap:urlset\/sitemap:url/);
+});
+test("static homepage HTML includes parseable public page structured data", () => {
+  const html = injectStaticPageMetadata(
+    "<html><head><title>Tawseelhub</title></head><body></body></html>",
+    "/",
+  );
+  assert.match(html, /data-static-schema="true"/);
+  assert.match(html, /SoftwareApplication/);
+  assert.match(html, /FAQPage/);
+  const json = html.match(
+    /<script type="application\/ld\+json" data-static-schema="true">([\s\S]*?)<\/script>/,
+  )?.[1];
+  assert.ok(json);
+  const parsed = JSON.parse(json);
+  assert.equal(parsed["@context"], "https://schema.org");
+  assert.ok(parsed["@graph"].some((item) => item["@type"] === "SoftwareApplication"));
+});
+test("request-demo structured data points to the request-demo page", () => {
+  const graph = structuredDataForPath("/request-demo");
+  assert.ok(graph);
+  const serialized = JSON.stringify(graph);
+  assert.match(serialized, /\/request-demo#demo-request/);
+  assert.doesNotMatch(serialized, /\/integrations#service/);
+  assert.doesNotMatch(serialized, /Commerce Integrations/);
+});
+test("FAQ route structured data is only emitted for the real English FAQ route", () => {
+  const english = injectStaticPageMetadata("<html><head></head><body></body></html>", "/faq");
+  assert.match(english, /FAQPage/);
+  assert.equal(structuredDataForPath("/ar/faq"), undefined);
 });
 test("initial article HTML contains safe structured and social metadata", () => {
   const graph = {

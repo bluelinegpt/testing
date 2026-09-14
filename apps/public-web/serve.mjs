@@ -128,6 +128,523 @@ const assetUrl = (value) =>
       : value.startsWith("/api/")
         ? `${apiBase.replace(/\/api\/v1$/, "")}${value}`
         : `${canonicalOrigin}${value.startsWith("/") ? value : `/${value}`}`;
+const organizationSchema = {
+  "@type": "Organization",
+  "@id": `${canonicalOrigin}/#organization`,
+  name: "Tawseelhub",
+  url: `${canonicalOrigin}/`,
+  description:
+    "Tawseelhub provides a delivery operating system for modern delivery companies in the UAE.",
+  telephone: "+971506898604",
+  areaServed: { "@type": "Country", name: "United Arab Emirates" },
+  address: {
+    "@type": "PostalAddress",
+    streetAddress: "Shop No. 9, Freej Avenue, Al Hamidiya",
+    addressLocality: "Ajman",
+    addressCountry: "AE",
+  },
+};
+const websiteSchema = {
+  "@type": "WebSite",
+  "@id": `${canonicalOrigin}/#website`,
+  url: `${canonicalOrigin}/`,
+  name: "Tawseelhub",
+  publisher: { "@id": `${canonicalOrigin}/#organization` },
+  inLanguage: ["en", "ar"],
+};
+const softwareSchema = {
+  "@type": "SoftwareApplication",
+  "@id": `${canonicalOrigin}/#software`,
+  name: "Tawseelhub",
+  url: `${canonicalOrigin}/`,
+  applicationCategory: "BusinessApplication",
+  applicationSubCategory: "Delivery Management Software",
+  operatingSystem: "Web",
+  description:
+    "Tawseelhub is a delivery operating system for UAE delivery companies that helps manage orders, drivers, COD collections, trader settlements, accounting, payroll, reporting and connected sales channels.",
+  areaServed: { "@type": "Country", name: "United Arab Emirates" },
+  offers: {
+    "@type": "Offer",
+    price: "0",
+    priceCurrency: "AED",
+    description: "Free plan for up to 100 orders per month.",
+  },
+  publisher: { "@id": `${canonicalOrigin}/#organization` },
+};
+const homeFaqs = [
+  [
+    "What is Tawseelhub?",
+    "Tawseelhub is a delivery operating system built for UAE delivery companies, helping them manage orders, drivers, cash on delivery (COD), trader settlements, accounting, and payroll in one platform.",
+  ],
+  [
+    "Who is Tawseelhub designed for?",
+    "Tawseelhub is built for delivery and courier companies, last-mile logistics providers, and businesses managing their own fleet of delivery drivers across the UAE.",
+  ],
+  [
+    "Can Tawseelhub handle Cash on Delivery (COD) management?",
+    "Yes. Tawseelhub tracks COD collections from drivers, reconciles cash against orders, and helps prevent discrepancies in real time.",
+  ],
+  [
+    "Does Tawseelhub support driver management?",
+    "Yes. Tawseelhub includes tools to assign orders, track driver performance, monitor deliveries, and manage driver payroll.",
+  ],
+  [
+    "What is trader settlement in Tawseelhub?",
+    "Trader settlement refers to reconciling and paying merchants or traders whose orders were delivered. Tawseelhub supports calculation and payout tracking.",
+  ],
+  [
+    "Does Tawseelhub include accounting features?",
+    "Yes. Tawseelhub includes accounting functions so delivery companies can track revenue, expenses, and settlements.",
+  ],
+  [
+    "Can I manage driver payroll through Tawseelhub?",
+    "Yes. Payroll management is built into Tawseelhub and can factor in deliveries completed, COD handled, and other performance metrics.",
+  ],
+  [
+    "Is Tawseelhub only for large delivery companies?",
+    "No. Tawseelhub is designed to scale for both small and large delivery operations across the UAE.",
+  ],
+  [
+    "Does Tawseelhub offer real-time order tracking?",
+    "Yes. Businesses and their customers can track order status from dispatch to delivery.",
+  ],
+  [
+    "Is Tawseelhub cloud-based?",
+    "Yes. Tawseelhub operates as a cloud-based platform accessible from anywhere without heavy on-premise infrastructure.",
+  ],
+  [
+    "Can Tawseelhub integrate with existing e-commerce systems?",
+    "Yes. Tawseelhub's Trader Portal is built to connect order intake from sales channels such as Salla, Shopify and WooCommerce.",
+  ],
+  [
+    "What UAE cities does Tawseelhub support?",
+    "Tawseelhub supports delivery companies across the UAE, including Dubai, Abu Dhabi, Sharjah and Ajman.",
+  ],
+  [
+    "Is there a free trial or demo available?",
+    "Yes. You can request a demo, and the Free plan gives access for up to 100 orders per month.",
+  ],
+  [
+    "How much does Tawseelhub cost?",
+    "Tawseelhub starts free for up to 100 orders per month. Paid plans are available based on monthly order volume.",
+  ],
+];
+const breadcrumbSchema = (path, name) => ({
+  "@type": "BreadcrumbList",
+  "@id": `${canonicalOrigin}${path}#breadcrumb`,
+  itemListElement: [
+    { "@type": "ListItem", position: 1, name: "Home", item: `${canonicalOrigin}/` },
+    ...(path === "/"
+      ? []
+      : [{ "@type": "ListItem", position: 2, name, item: `${canonicalOrigin}${path}` }]),
+  ],
+});
+const webpageSchema = ({ path, type = "WebPage", name, description, mainEntity, about }) => ({
+  "@type": type,
+  "@id": `${canonicalOrigin}${path === "/" ? "/" : path}#webpage`,
+  url: `${canonicalOrigin}${path}`,
+  name,
+  description,
+  inLanguage: "en",
+  isPartOf: { "@id": `${canonicalOrigin}/#website` },
+  publisher: { "@id": `${canonicalOrigin}/#organization` },
+  ...(about ? { about: { "@id": about } } : {}),
+  ...(mainEntity ? { mainEntity: { "@id": mainEntity } } : {}),
+  breadcrumb: { "@id": `${canonicalOrigin}${path}#breadcrumb` },
+});
+const serviceSchema = ({ path, id, name, serviceType, description, audience }) => ({
+  "@type": "Service",
+  "@id": `${canonicalOrigin}${path}#${id}`,
+  name,
+  serviceType,
+  description,
+  provider: { "@id": `${canonicalOrigin}/#organization` },
+  areaServed: { "@type": "Country", name: "United Arab Emirates" },
+  ...(audience ? { audience: { "@type": "BusinessAudience", audienceType: audience } } : {}),
+  url: `${canonicalOrigin}${path}`,
+});
+const itemListSchema = ({ path, id, name, items }) => ({
+  "@type": "ItemList",
+  "@id": `${canonicalOrigin}${path}#${id}`,
+  name,
+  numberOfItems: items.length,
+  itemListElement: items.map((item, index) => ({
+    "@type": "ListItem",
+    position: index + 1,
+    ...(typeof item === "string" ? { name: item } : item),
+  })),
+});
+export function structuredDataForPath(pathname) {
+  if (pathname === "/ar" || pathname.startsWith("/ar/")) return undefined;
+  const path = pathname;
+  if (path === "/") {
+    return {
+      "@context": "https://schema.org",
+      "@graph": [
+        softwareSchema,
+        organizationSchema,
+        websiteSchema,
+        webpageSchema({
+          path: "/",
+          name: "Delivery Operating System for Delivery Companies | Tawseelhub",
+          description:
+            "Tawseelhub is a delivery operating system for UAE delivery companies, connecting orders, drivers, COD collections, trader settlements, accounting, payroll, reporting and commerce integrations.",
+          about: `${canonicalOrigin}/#software`,
+          mainEntity: `${canonicalOrigin}/#software`,
+        }),
+        {
+          "@type": "FAQPage",
+          "@id": `${canonicalOrigin}/#faq`,
+          url: `${canonicalOrigin}/`,
+          mainEntity: homeFaqs.map(([name, text]) => ({
+            "@type": "Question",
+            name,
+            acceptedAnswer: { "@type": "Answer", text },
+          })),
+        },
+        breadcrumbSchema("/", "Home"),
+      ],
+    };
+  }
+  const routes = {
+    "/delivery-companies": () => {
+      const serviceId = `${canonicalOrigin}/delivery-companies#service`;
+      return [
+        webpageSchema({
+          path,
+          name: "Delivery Management Software UAE | Tawseelhub Delivery Operating System",
+          description:
+            "Tawseelhub helps UAE delivery companies manage orders, drivers, COD collections, trader settlements, accounting, payroll, reporting and connected sales channels from one operating system.",
+          about: serviceId,
+          mainEntity: serviceId,
+        }),
+        serviceSchema({
+          path,
+          id: "service",
+          name: "Delivery Management Software for Delivery Companies",
+          serviceType: "Delivery Management Software",
+          description:
+            "A complete operating system for delivery companies to manage orders, drivers, COD collections, trader relationships, settlements, accounting, payroll, reporting and connected commerce channels.",
+          audience: "Delivery Companies",
+        }),
+        itemListSchema({
+          path,
+          id: "features",
+          name: "Tawseelhub Delivery Company Features",
+          items: [
+            "Orders",
+            "Driver Operations",
+            "COD & Collections",
+            "Trader Management",
+            "Trader Settlements",
+            "Accounting",
+            "Payroll",
+            "Reports",
+            "Mobile Operations",
+            "Integrations",
+          ],
+        }),
+        breadcrumbSchema(path, "Delivery Companies"),
+      ];
+    },
+    "/send-a-package": () => {
+      const serviceId = `${canonicalOrigin}/send-a-package#service`;
+      return [
+        webpageSchema({
+          path,
+          name: "Send a Package Across the UAE | Tawseelhub",
+          description:
+            "Get a delivery quotation with Tawseelhub for UAE domestic, UAE-to-international, international-to-UAE and international-to-international package shipments.",
+          about: serviceId,
+          mainEntity: serviceId,
+        }),
+        {
+          ...serviceSchema({
+            path,
+            id: "service",
+            name: "Package Delivery Quotation",
+            serviceType: "Package Delivery",
+            description:
+              "Tawseelhub provides delivery quotation requests for UAE domestic, UAE-to-international, international-to-UAE and international-to-international shipments.",
+          }),
+          areaServed: [
+            { "@type": "Country", name: "United Arab Emirates" },
+            { "@type": "Place", name: "International" },
+          ],
+        },
+        itemListSchema({
+          path,
+          id: "features",
+          name: "Package Delivery Quote Options",
+          items: [
+            "Instant pricing for configured UAE routes",
+            "International quote capture",
+            "COD for UAE domestic routes",
+            "Guest quote without an account",
+            "Custom review for unusual shipments",
+          ],
+        }),
+        breadcrumbSchema(path, "Send a Package"),
+      ];
+    },
+    "/traders": () => {
+      const serviceId = `${canonicalOrigin}/traders#service`;
+      return [
+        webpageSchema({
+          path,
+          name: "Delivery Solutions for Traders & Online Sellers UAE | Tawseelhub",
+          description:
+            "Tawseelhub connects traders and online sellers in the UAE to structured delivery operations, order management, commerce integrations, delivery companies and settlement visibility.",
+          about: serviceId,
+          mainEntity: serviceId,
+        }),
+        serviceSchema({
+          path,
+          id: "service",
+          name: "Delivery Solutions for Traders & Online Sellers",
+          serviceType: "Trader Delivery Management",
+          description:
+            "Tawseelhub helps traders and online sellers manage delivery orders, track order history and status, connect commerce channels, work with delivery companies and view settlement information.",
+          audience: ["Traders", "Online Sellers", "E-commerce Businesses"],
+        }),
+        itemListSchema({
+          path,
+          id: "features",
+          name: "Tawseelhub Trader Features",
+          items: [
+            "Manage Delivery Orders",
+            "Track Order History & Status",
+            "Connect Existing Commerce Channels",
+            "Connect Your Existing Delivery Company",
+            "Find a Delivery Company",
+            "Settlement Visibility",
+          ],
+        }),
+        breadcrumbSchema(path, "Traders"),
+      ];
+    },
+    "/pricing": () => [
+      webpageSchema({
+        path,
+        name: "Tawseelhub Pricing | AED Plans for Delivery Companies",
+        description:
+          "Explore Tawseelhub delivery operating system plans based on monthly order volume, including Free, Starter, Growth and Business plans.",
+        about: `${canonicalOrigin}/#software`,
+        mainEntity: `${canonicalOrigin}/pricing#plans`,
+      }),
+      itemListSchema({
+        path,
+        id: "plans",
+        name: "Tawseelhub Pricing Plans",
+        items: [
+          ["Free", "0", "Up to 100 orders per month."],
+          ["Starter", "500", "100 to 2,000 orders per month."],
+          ["Growth", "1000", "2,001 to 5,000 orders per month."],
+          ["Business", "2000", "5,001 to 10,000 orders per month."],
+        ].map(([name, price, description]) => ({
+          name: `${name} Plan`,
+          item: {
+            "@type": "Offer",
+            "@id": `${canonicalOrigin}/pricing#${name.toLowerCase()}`,
+            name,
+            price,
+            priceCurrency: "AED",
+            priceSpecification: {
+              "@type": "UnitPriceSpecification",
+              price,
+              priceCurrency: "AED",
+              unitText: "MONTH",
+            },
+            description,
+            url: `${canonicalOrigin}/pricing`,
+          },
+        })),
+      }),
+      breadcrumbSchema(path, "Pricing"),
+    ],
+    "/traders/register": () => [
+      webpageSchema({
+        path,
+        name: "Trader Registration | Tawseelhub",
+        description:
+          "Register your business with Tawseelhub to connect your business to delivery operations in the UAE.",
+        mainEntity: `${canonicalOrigin}/traders/register#application`,
+      }),
+      {
+        "@type": "WebApplication",
+        "@id": `${canonicalOrigin}/traders/register#application`,
+        name: "Tawseelhub Trader Registration",
+        url: `${canonicalOrigin}/traders/register`,
+        applicationCategory: "BusinessApplication",
+        applicationSubCategory: "Business Registration",
+        operatingSystem: "Web",
+        description:
+          "Online trader application form for businesses that want to register with Tawseelhub and connect their business to delivery operations.",
+        provider: { "@id": `${canonicalOrigin}/#organization` },
+        areaServed: { "@type": "Country", name: "United Arab Emirates" },
+        inLanguage: "en",
+      },
+      {
+        ...breadcrumbSchema(path, "Register as Trader"),
+        itemListElement: [
+          { "@type": "ListItem", position: 1, name: "Home", item: `${canonicalOrigin}/` },
+          {
+            "@type": "ListItem",
+            position: 2,
+            name: "Traders",
+            item: `${canonicalOrigin}/traders`,
+          },
+          {
+            "@type": "ListItem",
+            position: 3,
+            name: "Register as Trader",
+            item: `${canonicalOrigin}/traders/register`,
+          },
+        ],
+      },
+    ],
+    "/integrations": () => {
+      const serviceId = `${canonicalOrigin}/integrations#service`;
+      return [
+        webpageSchema({
+          path,
+          name: "Commerce Integrations | Tawseelhub",
+          description:
+            "Connect Salla, Shopify and WooCommerce orders with Tawseelhub to streamline order intake and delivery operations without manual re-entry.",
+          mainEntity: serviceId,
+        }),
+        serviceSchema({
+          path,
+          id: "service",
+          name: "Commerce Integrations",
+          serviceType: "E-commerce Order Integration",
+          description:
+            "Commerce integration service designed to connect Trader orders from Salla, Shopify and WooCommerce with Tawseelhub delivery operations.",
+          audience: "Delivery Companies and Online Traders",
+        }),
+        itemListSchema({
+          path,
+          id: "platforms",
+          name: "Tawseelhub Commerce Integrations",
+          items: ["Salla", "Shopify", "WooCommerce"].map((name) => ({
+            name,
+            item: {
+              "@type": "SoftwareApplication",
+              name,
+              applicationCategory: "E-commerce Platform",
+            },
+          })),
+        }),
+        breadcrumbSchema(path, "Integrations"),
+      ];
+    },
+    "/request-demo": () => [
+      webpageSchema({
+        path,
+        name: "Request a Tawseelhub Demo",
+        description:
+          "Request a tailored Tawseelhub demo for your delivery company and see how orders, drivers, COD collections, trader settlements, accounting and reporting work together.",
+        mainEntity: `${canonicalOrigin}/request-demo#demo-request`,
+      }),
+      {
+        "@type": "WebApplication",
+        "@id": `${canonicalOrigin}/request-demo#demo-request`,
+        name: "Tawseelhub Demo Request",
+        url: `${canonicalOrigin}/request-demo`,
+        applicationCategory: "BusinessApplication",
+        applicationSubCategory: "Demo Request",
+        operatingSystem: "Web",
+        description:
+          "Online demo request form for delivery companies that want to evaluate Tawseelhub.",
+        provider: { "@id": `${canonicalOrigin}/#organization` },
+        areaServed: { "@type": "Country", name: "United Arab Emirates" },
+      },
+      breadcrumbSchema(path, "Request Demo"),
+    ],
+    "/about": () => [
+      webpageSchema({
+        path,
+        type: "AboutPage",
+        name: "About Tawseelhub",
+        description:
+          "Learn why Tawseelhub is building a connected delivery operating system for delivery businesses in the UAE.",
+        mainEntity: `${canonicalOrigin}/#organization`,
+      }),
+      organizationSchema,
+      breadcrumbSchema(path, "About"),
+    ],
+    "/contact": () => [
+      webpageSchema({
+        path,
+        type: "ContactPage",
+        name: "Contact Tawseelhub",
+        description:
+          "Contact Tawseelhub to discuss your delivery operation, request a tailored product demonstration or send a product enquiry.",
+        mainEntity: `${canonicalOrigin}/#organization`,
+      }),
+      organizationSchema,
+      breadcrumbSchema(path, "Contact"),
+    ],
+    "/privacy": () => [
+      webpageSchema({
+        path,
+        type: "PrivacyPolicy",
+        name: "Privacy Policy | Tawseelhub",
+        description:
+          "Tawseelhub privacy policy covering information collection, use of information, data sharing, data retention and user rights.",
+        mainEntity: `${canonicalOrigin}/privacy#webpage`,
+      }),
+      breadcrumbSchema(path, "Privacy Policy"),
+    ],
+    "/terms": () => [
+      webpageSchema({
+        path,
+        type: "TermsOfService",
+        name: "Terms of Service | Tawseelhub",
+        description:
+          "Terms of Service for using the Tawseelhub website and delivery operating system, including service description, account responsibilities, limitation of liability, governing law and changes to terms.",
+        mainEntity: `${canonicalOrigin}/terms#webpage`,
+      }),
+      breadcrumbSchema(path, "Terms of Service"),
+    ],
+    "/faq": () => [
+      webpageSchema({
+        path,
+        name: "Frequently Asked Questions | Tawseelhub",
+        description:
+          "Answers about Tawseelhub delivery management software for the UAE — COD reconciliation, driver management, trader settlements, accounting, payroll and pricing.",
+        mainEntity: `${canonicalOrigin}/faq#faq`,
+      }),
+      {
+        "@type": "FAQPage",
+        "@id": `${canonicalOrigin}/faq#faq`,
+        url: `${canonicalOrigin}/faq`,
+        mainEntity: homeFaqs.map(([name, text]) => ({
+          "@type": "Question",
+          name,
+          acceptedAnswer: { "@type": "Answer", text },
+        })),
+      },
+      breadcrumbSchema(path, "FAQs"),
+    ],
+  };
+  const build = routes[path];
+  if (!build) return undefined;
+  return {
+    "@context": "https://schema.org",
+    "@graph": [organizationSchema, websiteSchema, ...build()],
+  };
+}
+export function injectStaticPageMetadata(html, pathname) {
+  const graph = structuredDataForPath(pathname);
+  if (!graph) return html;
+  const cleaned = html.replace(
+    /<script type="application\/ld\+json"[^>]*data-static-schema="true"[^>]*>[\s\S]*?<\/script>/g,
+    "",
+  );
+  const script = `<script type="application/ld+json" data-static-schema="true">${safeJson(graph)}</script>`;
+  return cleaned.includes("</head>") ? cleaned.replace("</head>", `${script}</head>`) : cleaned;
+}
 async function api(path) {
   const response = await fetch(`${apiBase}${path}`, { headers: { accept: "application/json" } });
   return response.ok ? response.json() : undefined;
@@ -425,6 +942,8 @@ export function createPublicServer() {
         body = Buffer.from(injectArticleMetadata(rendered, article, pathname));
       } else if (landing && file.type.startsWith("text/html"))
         body = Buffer.from(injectLandingMetadata(body.toString(), landing));
+      else if (file.type.startsWith("text/html"))
+        body = Buffer.from(injectStaticPageMetadata(body.toString(), pathname));
       send(
         response,
         200,

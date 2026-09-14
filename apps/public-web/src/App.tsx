@@ -1,12 +1,35 @@
-import { createContext, lazy, Suspense, useContext, useEffect, useState, type ReactNode } from "react";
-import { Link as RouterLink, NavLink as RouterNavLink, Route, Routes, useLocation, useNavigate, useParams, type LinkProps, type NavLinkProps } from "react-router-dom";
+import {
+  createContext,
+  lazy,
+  Suspense,
+  useContext,
+  useEffect,
+  useState,
+  type ReactNode,
+} from "react";
+import {
+  Link as RouterLink,
+  NavLink as RouterNavLink,
+  Route,
+  Routes,
+  useLocation,
+  useNavigate,
+  useParams,
+  type LinkProps,
+  type NavLinkProps,
+} from "react-router-dom";
 import { applyPageMetadata, publicRobotsDirective } from "./seo";
 import { DeliveryCompanyPage } from "./DeliveryCompanyPage";
 import { DemoRequestPage } from "./DemoRequestPage";
 import { TraderPage } from "./TraderPage";
 import { TraderRegistrationPage } from "./TraderRegistrationPage";
 import { CustomerQuoteFlow, CustomerQuoteResult } from "./CustomerQuoteFlow";
-import { BlogArticlePage, BlogLandingPage, blogListingPreloadKey, BlogListingPage } from "./BlogPages";
+import {
+  BlogArticlePage,
+  BlogLandingPage,
+  blogListingPreloadKey,
+  BlogListingPage,
+} from "./BlogPages";
 import { PrivacyPolicyPage, TermsOfServicePage } from "./LegalPages";
 import { getPreloaded, PreloadContext } from "./preload-context";
 import {
@@ -60,7 +83,9 @@ export const routeDefinitions = Object.entries(routeMetadata.en).map(([path, met
   ...metadata,
 })) as Array<{ path: string; title: string; description: string }>;
 
-const AgentChat = lazy(() => import("./AgentChat").then((module) => ({ default: module.AgentChat })));
+const AgentChat = lazy(() =>
+  import("./AgentChat").then((module) => ({ default: module.AgentChat })),
+);
 
 function DeferredAgentChat() {
   const [ready, setReady] = useState(false);
@@ -73,7 +98,11 @@ function DeferredAgentChat() {
     const id = globalThis.setTimeout(show, 3000);
     return () => globalThis.clearTimeout(id);
   }, []);
-  return ready ? <Suspense fallback={null}><AgentChat /></Suspense> : null;
+  return ready ? (
+    <Suspense fallback={null}>
+      <AgentChat />
+    </Suspense>
+  ) : null;
 }
 
 export function isDynamicContentRoute(pathname: string): boolean {
@@ -89,11 +118,21 @@ const CmsContext = createContext<{
 const useCms = () => useContext(CmsContext);
 const Link = ({ to, ...props }: LinkProps) => {
   const { locale } = useCms();
-  return <RouterLink to={typeof to === "string" && to.startsWith("/") ? localizePublicPath(to, locale) : to} {...props} />;
+  return (
+    <RouterLink
+      to={typeof to === "string" && to.startsWith("/") ? localizePublicPath(to, locale) : to}
+      {...props}
+    />
+  );
 };
 const NavLink = ({ to, ...props }: NavLinkProps) => {
   const { locale } = useCms();
-  return <RouterNavLink to={typeof to === "string" && to.startsWith("/") ? localizePublicPath(to, locale) : to} {...props} />;
+  return (
+    <RouterNavLink
+      to={typeof to === "string" && to.startsWith("/") ? localizePublicPath(to, locale) : to}
+      {...props}
+    />
+  );
 };
 
 const capabilities = [
@@ -185,8 +224,7 @@ function AppLayout() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [locale, setLocaleState] = useState<Locale>(() => localeFromPublicPath(location.pathname));
   const [cms, setCms] = useState<WebsiteCmsBundle | null>(null);
-  const route =
-    routeDefinitions.find((item) => item.path === path) ?? routeDefinitions[0]!;
+  const route = routeDefinitions.find((item) => item.path === path) ?? routeDefinitions[0]!;
   const routeSeo = routeMetadata[locale][path] ?? routeMetadata[locale]["/"]!;
   const copy = publicUi[locale];
   const activeCms = cms?.locale === locale ? cms : null;
@@ -206,9 +244,19 @@ function AppLayout() {
     savePublicLocale(next);
     setCms(null);
     setLocaleState(next);
-    const alternate = document.head.querySelector<HTMLLinkElement>(`link[rel="alternate"][hreflang="${next}"]`)?.href;
-    const safeFallback=path.startsWith("/blog/")?"/blog":/^\/resources\/[^/]+/.test(path)?"/resources":path;
-    navigate(alternate ? `${new URL(alternate).pathname}${location.search}` : localizePublicPath(safeFallback, next));
+    const alternate = document.head.querySelector<HTMLLinkElement>(
+      `link[rel="alternate"][hreflang="${next}"]`,
+    )?.href;
+    const safeFallback = path.startsWith("/blog/")
+      ? "/blog"
+      : /^\/resources\/[^/]+/.test(path)
+        ? "/resources"
+        : path;
+    navigate(
+      alternate
+        ? `${new URL(alternate).pathname}${location.search}`
+        : localizePublicPath(safeFallback, next),
+    );
   };
   useEffect(() => setLocaleState(localeFromPublicPath(location.pathname)), [location.pathname]);
   useEffect(() => {
@@ -228,20 +276,32 @@ function AppLayout() {
       const canonicalPath = localizePublicPath(path, locale);
       applyPageMetadata(
         path === "/" && homeSeo?.title ? homeSeo.title : routeSeo.title,
-        path === "/" && homeSeo?.description
-          ? homeSeo.description
-          : routeSeo.description,
+        path === "/" && homeSeo?.description ? homeSeo.description : routeSeo.description,
         path === "/" && homeSeo?.canonical ? canonicalPath : canonicalPath,
         path === "/" && homeSeo
           ? {
-              robots: publicRobotsDirective(homeSeo.robotsIndex !== false, homeSeo.robotsFollow !== false),
+              robots: publicRobotsDirective(
+                homeSeo.robotsIndex !== false,
+                homeSeo.robotsFollow !== false,
+              ),
               locale,
-              alternates: [{language:"en",url:`https://tawseelhub.com${path}`},{language:"ar",url:`https://tawseelhub.com${localizePublicPath(path,"ar")}`}],
+              alternates: [
+                { language: "en", url: `https://tawseelhub.com${path}` },
+                { language: "ar", url: `https://tawseelhub.com${localizePublicPath(path, "ar")}` },
+              ],
             }
-          : { locale, alternates:[{language:"en",url:`https://tawseelhub.com${path}`},{language:"ar",url:`https://tawseelhub.com${localizePublicPath(path,"ar")}`}] },
+          : {
+              locale,
+              alternates: [
+                { language: "en", url: `https://tawseelhub.com${path}` },
+                { language: "ar", url: `https://tawseelhub.com${localizePublicPath(path, "ar")}` },
+              ],
+            },
       );
     } else {
-      document.head.querySelectorAll('link[rel="alternate"][hreflang]').forEach((link)=>link.remove());
+      document.head
+        .querySelectorAll('link[rel="alternate"][hreflang]')
+        .forEach((link) => link.remove());
     }
     setMenuOpen(false);
     window.scrollTo({ top: 0, behavior: "instant" });
@@ -249,130 +309,130 @@ function AppLayout() {
   return (
     <CmsContext.Provider value={{ cms: activeCms, locale, setLocale }}>
       <PublicLocaleProvider locale={locale}>
-      <div className="site-shell" dir={locale === "ar" ? "rtl" : "ltr"}>
-        <a className="skip-link" href="#main-content">
-          {copy.skipToContent}
-        </a>
-        <header className="site-header">
-          <Link className="brand" to="/" aria-label="Tawseelhub home">
-            <img src="/tawseelhub-logo-web.png" alt="Tawseelhub" />
-          </Link>
-          <nav className="desktop-nav" aria-label={copy.mainNavigation}>
-            {nav.map(([href, label]) => (
-              <NavLink key={href} to={href}>
-                {label}
-              </NavLink>
-            ))}
-          </nav>
-          <div className="header-actions">
-            <button
-              className="language"
-              type="button"
-              aria-label={`Switch language to ${copy.languageToggle}`}
-              onClick={() => setLocale(locale === "en" ? "ar" : "en")}
-            >
-              {copy.languageToggle}
-            </button>
-            <Link
-              className="button button-primary desktop-cta"
-              to="/request-demo"
-              onClick={() =>
-                trackCta({
-                  ctaId: "header_request_demo",
-                  audience: "delivery_company",
-                  locale,
-                  ctaLocation: "header",
-                })
-              }
-            >
-              {copy.requestDemo}
+        <div className="site-shell" dir={locale === "ar" ? "rtl" : "ltr"}>
+          <a className="skip-link" href="#main-content">
+            {copy.skipToContent}
+          </a>
+          <header className="site-header">
+            <Link className="brand" to="/" aria-label="Tawseelhub home">
+              <img src="/tawseelhub-logo-web.png" alt="Tawseelhub" />
             </Link>
-            <button
-              className="menu-button"
-              type="button"
-              aria-label={copy.openNavigation}
-              aria-expanded={menuOpen}
-              onClick={() => setMenuOpen(!menuOpen)}
-            >
-              <span />
-              <span />
-            </button>
-          </div>
-          {menuOpen && (
-            <nav className="mobile-nav" aria-label={copy.mobileNavigation}>
+            <nav className="desktop-nav" aria-label={copy.mainNavigation}>
               {nav.map(([href, label]) => (
                 <NavLink key={href} to={href}>
                   {label}
-                  <span>→</span>
                 </NavLink>
               ))}
-              <NavLink to="/request-demo">
-                {copy.requestDemo} <span>→</span>
-              </NavLink>
-              <button type="button" onClick={() => setLocale(locale === "en" ? "ar" : "en")}>
-                {copy.mobileLanguage}
-              </button>
             </nav>
-          )}
-        </header>
-        <main id="main-content">
-          <Routes>
-            <Route path="/" element={<HomePage />} />
-            <Route path="/delivery-companies" element={<DeliveryCompanyPage />} />
-            <Route path="/send-a-package" element={<SendPackagePage />} />
-            <Route path="/send-a-package/quote/:reference" element={<CustomerQuoteResult />} />
-            <Route path="/track" element={<TrackingPage />} />
-            <Route path="/traders" element={<TraderPage />} />
-            <Route path="/traders/register" element={<TraderRegistrationPage />} />
-            <Route path="/integrations" element={<IntegrationsPage />} />
-            <Route path="/resources" element={<ResourcesPage />} />
-            <Route path="/resources/:slug" element={<HelpArticlePage />} />
-            <Route path="/pricing" element={<PricingPage />} />
-            <Route path="/blog" element={<BlogListingPage />} />
-            <Route path="/blog/category/:slug" element={<BlogLandingPage />} />
-            <Route path="/blog/tag/:slug" element={<BlogLandingPage />} />
-            <Route path="/blog/topic/:slug" element={<BlogLandingPage />} />
-            <Route path="/blog/author/:slug" element={<BlogLandingPage />} />
-            <Route path="/blog/:slug" element={<BlogArticlePage />} />
-            <Route path="/faq" element={<FaqPage />} />
-            <Route path="/about" element={<AboutPage />} />
-            <Route path="/contact" element={<ContactPage />} />
-            <Route path="/privacy" element={<PrivacyPolicyPage />} />
-            <Route path="/terms" element={<TermsOfServicePage />} />
-            <Route path="/request-demo" element={<DemoRequestPage />} />
-            <Route path="/ar" element={<HomePage />} />
-            <Route path="/ar/delivery-companies" element={<DeliveryCompanyPage />} />
-            <Route path="/ar/send-a-package" element={<SendPackagePage />} />
-            <Route path="/ar/send-a-package/quote/:reference" element={<CustomerQuoteResult />} />
-            <Route path="/ar/track" element={<TrackingPage />} />
-            <Route path="/ar/traders" element={<TraderPage />} />
-            <Route path="/ar/traders/register" element={<TraderRegistrationPage />} />
-            <Route path="/ar/integrations" element={<IntegrationsPage />} />
-            <Route path="/ar/resources" element={<ResourcesPage />} />
-            <Route path="/ar/resources/:slug" element={<HelpArticlePage />} />
-            <Route path="/ar/pricing" element={<PricingPage />} />
-            <Route path="/ar/blog" element={<BlogListingPage />} />
-            <Route path="/ar/blog/category/:slug" element={<BlogLandingPage />} />
-            <Route path="/ar/blog/tag/:slug" element={<BlogLandingPage />} />
-            <Route path="/ar/blog/topic/:slug" element={<BlogLandingPage />} />
-            <Route path="/ar/blog/author/:slug" element={<BlogLandingPage />} />
-            <Route path="/ar/blog/:slug" element={<BlogArticlePage />} />
-            <Route path="/ar/faq" element={<FaqPage />} />
-            <Route path="/ar/about" element={<AboutPage />} />
-            <Route path="/ar/contact" element={<ContactPage />} />
-            <Route path="/ar/privacy" element={<PrivacyPolicyPage />} />
-            <Route path="/ar/terms" element={<TermsOfServicePage />} />
-            <Route path="/ar/request-demo" element={<DemoRequestPage />} />
-            <Route path="*" element={<NotFoundPage />} />
-          </Routes>
-        </main>
-        <Footer />
-        <DeferredAgentChat />
-        {/* No visible version badge on the public marketing site (removed on
+            <div className="header-actions">
+              <button
+                className="language"
+                type="button"
+                aria-label={`Switch language to ${copy.languageToggle}`}
+                onClick={() => setLocale(locale === "en" ? "ar" : "en")}
+              >
+                {copy.languageToggle}
+              </button>
+              <Link
+                className="button button-primary desktop-cta"
+                to="/request-demo"
+                onClick={() =>
+                  trackCta({
+                    ctaId: "header_request_demo",
+                    audience: "delivery_company",
+                    locale,
+                    ctaLocation: "header",
+                  })
+                }
+              >
+                {copy.requestDemo}
+              </Link>
+              <button
+                className="menu-button"
+                type="button"
+                aria-label={copy.openNavigation}
+                aria-expanded={menuOpen}
+                onClick={() => setMenuOpen(!menuOpen)}
+              >
+                <span />
+                <span />
+              </button>
+            </div>
+            {menuOpen && (
+              <nav className="mobile-nav" aria-label={copy.mobileNavigation}>
+                {nav.map(([href, label]) => (
+                  <NavLink key={href} to={href}>
+                    {label}
+                    <span>→</span>
+                  </NavLink>
+                ))}
+                <NavLink to="/request-demo">
+                  {copy.requestDemo} <span>→</span>
+                </NavLink>
+                <button type="button" onClick={() => setLocale(locale === "en" ? "ar" : "en")}>
+                  {copy.mobileLanguage}
+                </button>
+              </nav>
+            )}
+          </header>
+          <main id="main-content">
+            <Routes>
+              <Route path="/" element={<HomePage />} />
+              <Route path="/delivery-companies" element={<DeliveryCompanyPage />} />
+              <Route path="/send-a-package" element={<SendPackagePage />} />
+              <Route path="/send-a-package/quote/:reference" element={<CustomerQuoteResult />} />
+              <Route path="/track" element={<TrackingPage />} />
+              <Route path="/traders" element={<TraderPage />} />
+              <Route path="/traders/register" element={<TraderRegistrationPage />} />
+              <Route path="/integrations" element={<IntegrationsPage />} />
+              <Route path="/resources" element={<ResourcesPage />} />
+              <Route path="/resources/:slug" element={<HelpArticlePage />} />
+              <Route path="/pricing" element={<PricingPage />} />
+              <Route path="/blog" element={<BlogListingPage />} />
+              <Route path="/blog/category/:slug" element={<BlogLandingPage />} />
+              <Route path="/blog/tag/:slug" element={<BlogLandingPage />} />
+              <Route path="/blog/topic/:slug" element={<BlogLandingPage />} />
+              <Route path="/blog/author/:slug" element={<BlogLandingPage />} />
+              <Route path="/blog/:slug" element={<BlogArticlePage />} />
+              <Route path="/faq" element={<FaqPage />} />
+              <Route path="/about" element={<AboutPage />} />
+              <Route path="/contact" element={<ContactPage />} />
+              <Route path="/privacy" element={<PrivacyPolicyPage />} />
+              <Route path="/terms" element={<TermsOfServicePage />} />
+              <Route path="/request-demo" element={<DemoRequestPage />} />
+              <Route path="/ar" element={<HomePage />} />
+              <Route path="/ar/delivery-companies" element={<DeliveryCompanyPage />} />
+              <Route path="/ar/send-a-package" element={<SendPackagePage />} />
+              <Route path="/ar/send-a-package/quote/:reference" element={<CustomerQuoteResult />} />
+              <Route path="/ar/track" element={<TrackingPage />} />
+              <Route path="/ar/traders" element={<TraderPage />} />
+              <Route path="/ar/traders/register" element={<TraderRegistrationPage />} />
+              <Route path="/ar/integrations" element={<IntegrationsPage />} />
+              <Route path="/ar/resources" element={<ResourcesPage />} />
+              <Route path="/ar/resources/:slug" element={<HelpArticlePage />} />
+              <Route path="/ar/pricing" element={<PricingPage />} />
+              <Route path="/ar/blog" element={<BlogListingPage />} />
+              <Route path="/ar/blog/category/:slug" element={<BlogLandingPage />} />
+              <Route path="/ar/blog/tag/:slug" element={<BlogLandingPage />} />
+              <Route path="/ar/blog/topic/:slug" element={<BlogLandingPage />} />
+              <Route path="/ar/blog/author/:slug" element={<BlogLandingPage />} />
+              <Route path="/ar/blog/:slug" element={<BlogArticlePage />} />
+              <Route path="/ar/faq" element={<FaqPage />} />
+              <Route path="/ar/about" element={<AboutPage />} />
+              <Route path="/ar/contact" element={<ContactPage />} />
+              <Route path="/ar/privacy" element={<PrivacyPolicyPage />} />
+              <Route path="/ar/terms" element={<TermsOfServicePage />} />
+              <Route path="/ar/request-demo" element={<DemoRequestPage />} />
+              <Route path="*" element={<NotFoundPage />} />
+            </Routes>
+          </main>
+          <Footer />
+          <DeferredAgentChat />
+          {/* No visible version badge on the public marketing site (removed on
             product-owner instruction; the CLAUDE.md badge requirement covers
             apps/web and apps/platform-web, not this app). The build version
             still reaches crash reports via error-reporting.ts. */}
-      </div>
+        </div>
       </PublicLocaleProvider>
     </CmsContext.Provider>
   );
@@ -485,8 +545,13 @@ function HomeSeoSummary() {
   if (locale === "ar") return null;
   return (
     <section className="section home-seo-summary" aria-labelledby="home-uae-software-title">
-      <p className="eyebrow"><span />Built for UAE delivery operations</p>
-      <h2 id="home-uae-software-title">Delivery management software UAE teams can run every day.</h2>
+      <p className="eyebrow">
+        <span />
+        Built for UAE delivery operations
+      </p>
+      <h2 id="home-uae-software-title">
+        Delivery management software UAE teams can run every day.
+      </h2>
       <p>
         Tawseelhub is a delivery management system Dubai and UAE delivery companies can use. It
         combines courier management software UAE-wide operations need, last mile delivery software
@@ -516,23 +581,6 @@ function HomeFaqSection() {
           intro:
             "Everything you need to know about Tawseelhub — delivery management software for the UAE, from courier management and last mile delivery software in Dubai to COD reconciliation software and a delivery driver management app for your fleet.",
         };
-  useEffect(() => {
-    // FAQPage structured data so these answers are eligible for rich results.
-    const script = document.createElement("script");
-    script.type = "application/ld+json";
-    script.dataset.homeFaqSchema = "true";
-    script.text = JSON.stringify({
-      "@context": "https://schema.org",
-      "@type": "FAQPage",
-      mainEntity: homeFaqs.map((faq) => ({
-        "@type": "Question",
-        name: faq.q.en,
-        acceptedAnswer: { "@type": "Answer", text: faq.a.en },
-      })),
-    });
-    document.head.append(script);
-    return () => script.remove();
-  }, []);
   return (
     <section className="section home-faq-section">
       <div className="section-heading">
@@ -582,30 +630,47 @@ function HomepageOperationsShowcase() {
   useEffect(() => {
     let active = true;
     void getAvatarSettings().then((value) => active && setSettings(value));
-    return () => { active = false; };
+    return () => {
+      active = false;
+    };
   }, []);
 
   useEffect(() => {
     setVideoFailed(false);
     setImageFailed(false);
-  }, [locale, settings.introVideoUrlEn, settings.introVideoUrlAr, settings.introImageUrlEn, settings.introImageUrlAr]);
+  }, [
+    locale,
+    settings.introVideoUrlEn,
+    settings.introVideoUrlAr,
+    settings.introImageUrlEn,
+    settings.introImageUrlAr,
+  ]);
 
   const videoUrl = locale === "ar" ? settings.introVideoUrlAr : settings.introVideoUrlEn;
   const posterUrl = locale === "ar" ? settings.introImageUrlAr : settings.introImageUrlEn;
   const fallbackImage = posterUrl || settings.imageUrl || "/yousef-ai-advisor.svg";
-  const operationsImage = locale === "ar" ? settings.homeOperationsImageUrlAr : settings.homeOperationsImageUrlEn;
+  const operationsImage =
+    locale === "ar" ? settings.homeOperationsImageUrlAr : settings.homeOperationsImageUrlEn;
   const showAdvisor = settings.enabled && settings.status === "active" && settings.showOnHomepage;
   const label = locale === "ar" ? "يوسف · مستشار ذكي" : "Yousef · AI Advisor";
   const button = locale === "ar" ? "اسأل يوسف" : "Ask Yousef";
 
   return (
-    <div className={`homepage-operations-showcase${showAdvisor ? "" : " homepage-operations-showcase--single"}`}>
+    <div
+      className={`homepage-operations-showcase${showAdvisor ? "" : " homepage-operations-showcase--single"}`}
+    >
       <OperationsVisual managedImageUrl={operationsImage} />
       {showAdvisor ? (
         <aside className="homepage-advisor" aria-label={label}>
           <div className="homepage-advisor__media">
             {videoUrl && !videoFailed ? (
-              <video controls playsInline preload="metadata" poster={posterUrl} onError={() => setVideoFailed(true)}>
+              <video
+                controls
+                playsInline
+                preload="metadata"
+                poster={posterUrl}
+                onError={() => setVideoFailed(true)}
+              >
                 <source src={videoUrl} type="video/mp4" />
               </video>
             ) : fallbackImage && !imageFailed ? (
@@ -616,7 +681,13 @@ function HomepageOperationsShowcase() {
           </div>
           <div className="homepage-advisor__footer">
             <span>{label}</span>
-            <button className="button button-primary" type="button" onClick={() => window.dispatchEvent(new CustomEvent("tawseelhub:open-agent"))}>{button}</button>
+            <button
+              className="button button-primary"
+              type="button"
+              onClick={() => window.dispatchEvent(new CustomEvent("tawseelhub:open-agent"))}
+            >
+              {button}
+            </button>
           </div>
         </aside>
       ) : null}
@@ -674,7 +745,14 @@ function OperationsVisual({ managedImageUrl }: { managedImageUrl: string | undef
   useEffect(() => setManagedImageFailed(false), [managedImageUrl]);
   return (
     <div className="operations-visual" aria-label={copy.label}>
-      {managedImageUrl && !managedImageFailed ? <img className="operations-visual__managed-image" src={managedImageUrl} alt="" onError={() => setManagedImageFailed(true)} /> : null}
+      {managedImageUrl && !managedImageFailed ? (
+        <img
+          className="operations-visual__managed-image"
+          src={managedImageUrl}
+          alt=""
+          onError={() => setManagedImageFailed(true)}
+        />
+      ) : null}
       <div className="visual-topline">
         <span>{copy.network}</span>
         <span className="status">{copy.status}</span>
