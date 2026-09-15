@@ -768,6 +768,34 @@ export function renderArticleShell(article, related = []) {
     : "";
   return `<article class="article-page" dir="${dir}" lang="${language}"><nav aria-label="Breadcrumb"><a href="${language === "ar" ? "/ar" : "/"}">${language === "ar" ? "الرئيسية" : "Home"}</a> / <a href="${language === "ar" ? "/ar" : ""}/blog">${language === "ar" ? "المدونة" : "Blog"}</a> / <a href="${language === "ar" ? "/ar" : ""}/blog/category/${escape(categorySlug)}">${escape(article.category ?? "")}</a></nav><header><span>${escape(article.category ?? "")}</span><h1>${escape(article.title)}</h1><p>${escape(article.excerpt)}</p></header>${tags ? `<nav class="blog-categories" aria-label="Article tags">${tags}</nav>` : ""}${image ? `<img class="article-image" src="${escape(image)}" alt="${escape(article.featured_image_alt ?? "")}" width="${article.featured_image_width ?? 1200}" height="${article.featured_image_height ?? 675}" loading="eager" decoding="async" fetchpriority="high" />` : ""}<div class="article-layout"><div class="article-body">${blocks}</div><aside><h2>${language === "ar" ? "استكشف Tawseelhub" : "Explore Tawseelhub"}</h2><a href="${language === "ar" ? "/ar" : ""}/delivery-companies">${language === "ar" ? "منصة شركة التوصيل" : "Delivery Company platform"}</a><a href="${language === "ar" ? "/ar" : ""}/traders">${language === "ar" ? "حلول للتجار" : "Solutions for Traders"}</a><a href="${language === "ar" ? "/ar" : ""}/send-a-package">${language === "ar" ? "أرسل شحنة" : "Send a Package"}</a></aside></div>${relatedHtml}</article>`;
 }
+export function helpArticleRequestForPath(pathname) {
+  const match = pathname.match(/^(\/ar)?\/resources\/([^/]+)$/);
+  if (!match) return undefined;
+  return {
+    slug: match[2],
+    locale: match[1] ? "ar" : "en",
+    apiPath: `/public/website/help/articles/${encodeURIComponent(match[2])}?locale=${
+      match[1] ? "ar" : "en"
+    }`,
+  };
+}
+export function blogLandingRequestForPath(pathname) {
+  const match = pathname.match(/^(\/ar)?\/blog\/(category|tag|topic|author)\/([^/]+)$/);
+  if (!match) return undefined;
+  const collection = {
+    category: "categories",
+    tag: "tags",
+    topic: "topics",
+    author: "authors",
+  }[match[2]];
+  const language = match[1] ? "ar" : "en";
+  return {
+    kind: match[2],
+    slug: match[3],
+    language,
+    apiPath: `/public/blog/${collection}/${encodeURIComponent(match[3])}?language=${language}`,
+  };
+}
 export function createPublicServer() {
   return createServer(async (request, response) => {
     try {
@@ -863,13 +891,10 @@ export function createPublicServer() {
           .end("User-agent: *\nDisallow: /\n");
         return;
       }
-      const landingMatch = pathname.match(/^(\/ar)?\/blog\/(category|tag|topic|author)\/([^/]+)$/);
+      const landingRequest = blogLandingRequestForPath(pathname);
       let landing;
-      if (landingMatch) {
-        const language = landingMatch[1] ? "ar" : "en";
-        landing = await api(
-          `/public/blog/${landingMatch[2]}s/${encodeURIComponent(landingMatch[3])}?language=${language}`,
-        );
+      if (landingRequest) {
+        landing = await api(landingRequest.apiPath);
         if (!landing) {
           const redirect = await api(`/public/blog/redirect?path=${encodeURIComponent(pathname)}`);
           if (redirect?.to) {
@@ -914,11 +939,9 @@ export function createPublicServer() {
           return;
         }
       }
-      const helpMatch = pathname.match(/^\/resources\/([^/]+)$/);
-      if (helpMatch) {
-        const payload = await api(
-          `/public/website/help/articles/${encodeURIComponent(helpMatch[1])}?locale=en`,
-        );
+      const helpArticleRequest = helpArticleRequestForPath(pathname);
+      if (helpArticleRequest) {
+        const payload = await api(helpArticleRequest.apiPath);
         if (!payload?.article) {
           response.writeHead(404).end("Not found");
           return;
@@ -926,7 +949,7 @@ export function createPublicServer() {
       }
       let file = await fileResponse(pathname);
       const clientRoute = Boolean(
-        article || landing || helpMatch || /^\/send-a-package\/quote(\/|$)/.test(pathname),
+        article || landing || helpArticleRequest || /^\/send-a-package\/quote(\/|$)/.test(pathname),
       );
       if (!file && clientRoute) file = await fileResponse("/");
       if (!file) {

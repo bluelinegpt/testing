@@ -2,7 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   cacheControlFor,
+  blogLandingRequestForPath,
   encodedBody,
+  helpArticleRequestForPath,
   injectArticleMetadata,
   injectLandingMetadata,
   injectRenderedRoot,
@@ -71,6 +73,34 @@ test("FAQ route structured data is only emitted for the real English FAQ route",
   const english = injectStaticPageMetadata("<html><head></head><body></body></html>", "/faq");
   assert.match(english, /FAQPage/);
   assert.equal(structuredDataForPath("/ar/faq"), undefined);
+});
+test("Arabic help article paths request Arabic help content before falling back to the app shell", () => {
+  assert.deepEqual(helpArticleRequestForPath("/ar/resources/what-is-tawseelhub"), {
+    slug: "what-is-tawseelhub",
+    locale: "ar",
+    apiPath: "/public/website/help/articles/what-is-tawseelhub?locale=ar",
+  });
+  assert.deepEqual(helpArticleRequestForPath("/resources/what-is-tawseelhub"), {
+    slug: "what-is-tawseelhub",
+    locale: "en",
+    apiPath: "/public/website/help/articles/what-is-tawseelhub?locale=en",
+  });
+  assert.equal(helpArticleRequestForPath("/ar/resources"), undefined);
+});
+test("blog landing paths call the correct plural public API routes", () => {
+  assert.deepEqual(blogLandingRequestForPath("/blog/category/delivery-operations"), {
+    kind: "category",
+    slug: "delivery-operations",
+    language: "en",
+    apiPath: "/public/blog/categories/delivery-operations?language=en",
+  });
+  assert.deepEqual(blogLandingRequestForPath("/ar/blog/category/delivery-operations"), {
+    kind: "category",
+    slug: "delivery-operations",
+    language: "ar",
+    apiPath: "/public/blog/categories/delivery-operations?language=ar",
+  });
+  assert.equal(blogLandingRequestForPath("/blog"), undefined);
 });
 test("initial article HTML contains safe structured and social metadata", () => {
   const graph = {
