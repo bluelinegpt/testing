@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
-import '@testing-library/jest-dom/vitest';
-import { act, cleanup, render, screen } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { BlogListingPage } from './BlogPages';
+import "@testing-library/jest-dom/vitest";
+import { act, cleanup, render, screen } from "@testing-library/react";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { BlogListingPage, blogLandingCollection } from "./BlogPages";
 
 /**
  * The Blog page used to have no request timeout at all: if the underlying
@@ -14,32 +14,55 @@ import { BlogListingPage } from './BlogPages';
  * settles, so the page falls back to the retry state instead of hanging
  * indefinitely.
  */
-afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.useRealTimers(); });
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+  vi.useRealTimers();
+});
 
-describe('Blog listing page — request timeout', () => {
-  it('falls back to the retry state instead of hanging forever when the request never resolves', async () => {
+describe("Blog listing page — request timeout", () => {
+  it("uses valid API collection names for blog landing pages", () => {
+    expect(blogLandingCollection("category")).toBe("categories");
+    expect(blogLandingCollection("tag")).toBe("tags");
+    expect(blogLandingCollection("topic")).toBe("topics");
+    expect(blogLandingCollection("author")).toBe("authors");
+  });
+
+  it("falls back to the retry state instead of hanging forever when the request never resolves", async () => {
     vi.useFakeTimers();
     // A fetch that hangs until aborted -- exactly the failure mode this
     // test guards against, but honoring AbortSignal like a real fetch does,
     // so the test actually exercises the timeout's abort wiring rather than
     // a promise that could never settle under any circumstance.
-    vi.stubGlobal('fetch', vi.fn((_url: string, options?: { signal?: AbortSignal }) => new Promise((_resolve, reject) => {
-      options?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
-    })));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        (_url: string, options?: { signal?: AbortSignal }) =>
+          new Promise((_resolve, reject) => {
+            options?.signal?.addEventListener("abort", () =>
+              reject(new DOMException("Aborted", "AbortError")),
+            );
+          }),
+      ),
+    );
 
     render(
-      <MemoryRouter initialEntries={['/blog']}>
-        <Routes><Route path="/blog" element={<BlogListingPage />} /></Routes>
+      <MemoryRouter initialEntries={["/blog"]}>
+        <Routes>
+          <Route path="/blog" element={<BlogListingPage />} />
+        </Routes>
       </MemoryRouter>,
     );
 
-    expect(screen.getByText('Loading articles…')).toBeInTheDocument();
+    expect(screen.getByText("Loading articles…")).toBeInTheDocument();
 
     // Advance past the internal request timeout.
-    await act(async () => { await vi.advanceTimersByTimeAsync(13_000); });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(13_000);
+    });
 
-    expect(screen.queryByText('Loading articles…')).not.toBeInTheDocument();
-    expect(screen.getByText('Articles are temporarily unavailable')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+    expect(screen.queryByText("Loading articles…")).not.toBeInTheDocument();
+    expect(screen.getByText("Articles are temporarily unavailable")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
   });
 });
