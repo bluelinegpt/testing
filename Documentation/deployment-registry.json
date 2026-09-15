@@ -19,10 +19,10 @@
       "displayName": "API",
       "path": "apps/api",
       "renderService": "bluelinegpt-api-test",
-      "status": "pushed_awaiting_confirmation",
-      "localCommit": "4147d9a",
+      "status": "needs_deploy",
+      "localCommit": "e6e8cfb",
       "localCommitDate": "2026-09-15",
-      "lastChangeDescription": "Company website domains can be mapped manually after DNS points to Render.",
+      "lastChangeDescription": "Making a verified company website domain primary now uses safe transactional updates.",
       "lastChangeBy": "codex",
       "confirmedLiveCommit": "e3de371",
       "confirmedLiveAt": "2026-09-01"
