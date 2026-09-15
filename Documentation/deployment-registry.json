@@ -19,7 +19,7 @@
       "displayName": "API",
       "path": "apps/api",
       "renderService": "bluelinegpt-api-test",
-      "status": "needs_deploy",
+      "status": "pushed_awaiting_confirmation",
       "localCommit": "e6e8cfb",
       "localCommitDate": "2026-09-15",
       "lastChangeDescription": "Making a verified company website domain primary now uses safe transactional updates.",
