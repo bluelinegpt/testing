@@ -79,7 +79,12 @@ export function CompanyWebsiteDomainsPanel({
           After verification records are added, point the hostname to{" "}
           <code>{data.cnameTarget}</code> using the DNS record supported by the registrar.
         </p>
-      ) : null}
+      ) : (
+        <p className="platform-muted">
+          Manual domain mode is active. Add a domain here only after DNS and SSL are verified on the
+          hosting service.
+        </p>
+      )}
       <div className="website-domain-list">
         {data?.domains.map((domain) => (
           <article className="website-template-card" key={domain.id}>
@@ -131,7 +136,9 @@ export function CompanyWebsiteDomainsPanel({
                   }
                   type="button"
                 >
-                  Check Verification
+                  {domain.provider === "manual-render"
+                    ? "Check DNS Verification"
+                    : "Check Verification"}
                 </button>
                 {domain.status === "active" && !domain.isPrimary ? (
                   <button

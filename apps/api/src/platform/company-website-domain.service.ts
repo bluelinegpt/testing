@@ -1,5 +1,6 @@
 import { HttpStatus, Inject, Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
+import { resolve4, resolveCname } from "node:dns/promises";
 import { isIP } from "node:net";
 import { type Kysely, sql } from "kysely";
 import type { AppConfiguration } from "../configuration/environment.js";
@@ -15,6 +16,9 @@ import {
 
 export type CustomDomainStatus =
   "pending_verification" | "verified" | "pending_ssl" | "active" | "failed" | "disabled";
+const MANUAL_DOMAIN_PROVIDER = "manual-render";
+const RENDER_APEX_IP = "216.24.57.1";
+
 export interface DomainRow {
   id: string;
   companyId: string;
@@ -122,27 +126,29 @@ export class CompanyWebsiteDomainService {
       }>`select id from company_websites where company_id=${companyId}::uuid`.execute(this.db)
     ).rows[0];
     if (!website) throw this.notFound();
-    let state: DomainProviderState;
-    try {
-      state = await this.provider.create(hostname);
-    } catch (error) {
-      throw this.providerFailure(error);
-    }
+    const manual = this.provider.name === "disabled";
+    let state: DomainProviderState | undefined;
+    if (!manual)
+      try {
+        state = await this.provider.create(hostname);
+      } catch (error) {
+        throw this.providerFailure(error);
+      }
     try {
       return await this.transactions.execute(async (trx) => {
         const row = (
-          await sql<DomainRow>`insert into company_website_domains(company_website_id,company_id,hostname,verification_records,provider,provider_reference,last_updated_by_account_id) values(${website.id}::uuid,${companyId}::uuid,${hostname},${JSON.stringify(state.records)}::jsonb,${this.provider.name},${state.reference},${actor.accountId}::uuid) returning id,company_id "companyId",company_website_id "websiteId",hostname,status,verification_status "verificationStatus",ssl_status "sslStatus",is_primary "isPrimary",verification_method "verificationMethod",verification_records "verificationRecords",provider,provider_reference "providerReference",last_error "lastError",version,created_at "createdAt",updated_at "updatedAt",verified_at "verifiedAt",activated_at "activatedAt",disabled_at "disabledAt"`.execute(
+          await sql<DomainRow>`insert into company_website_domains(company_website_id,company_id,hostname,status,verification_status,ssl_status,verification_records,provider,provider_reference,last_updated_by_account_id) values(${website.id}::uuid,${companyId}::uuid,${hostname},'pending_verification','pending','pending',${JSON.stringify(state?.records ?? [])}::jsonb,${manual ? MANUAL_DOMAIN_PROVIDER : this.provider.name},${state?.reference ?? null},${actor.accountId}::uuid) returning id,company_id "companyId",company_website_id "websiteId",hostname,status,verification_status "verificationStatus",ssl_status "sslStatus",is_primary "isPrimary",verification_method "verificationMethod",verification_records "verificationRecords",provider,provider_reference "providerReference",last_error "lastError",version,created_at "createdAt",updated_at "updatedAt",verified_at "verifiedAt",activated_at "activatedAt",disabled_at "disabledAt"`.execute(
             trx,
           )
         ).rows[0]!;
         await this.audit(trx, companyId, actor, "custom_domain_added", row.id, null, {
           hostname,
-          provider: this.provider.name,
+          provider: row.provider,
         });
         return row;
       });
     } catch (error) {
-      void this.provider.remove(state.reference).catch(() => undefined);
+      if (state) void this.provider.remove(state.reference).catch(() => undefined);
       if ((error as { code?: string }).code === "23505")
         throw new ApplicationException(
           "company_website_domain_taken",
@@ -160,6 +166,8 @@ export class CompanyWebsiteDomainService {
   ) {
     const before = await this.domain(companyId, id);
     if (before.version !== expectedVersion) throw this.conflict();
+    if (before.provider === MANUAL_DOMAIN_PROVIDER)
+      return this.refreshManualDomain(companyId, id, expectedVersion, actor, before);
     if (!before.providerReference)
       throw this.providerFailure(new Error("provider_reference_missing"));
     let state: DomainProviderState;
@@ -343,6 +351,65 @@ export class CompanyWebsiteDomainService {
       HttpStatus.BAD_GATEWAY,
     );
   }
+  private async refreshManualDomain(
+    companyId: string,
+    id: string,
+    expectedVersion: number,
+    actor: { accountId: string; correlationId: string },
+    before: DomainRow,
+  ) {
+    const dns = await verifyManualRenderDns(before.hostname, this.cnameTarget);
+    return this.transactions.execute(async (trx) => {
+      const row = (
+        await sql<DomainRow>`update company_website_domains set status=${dns.verified ? "active" : "pending_verification"},verification_status=${dns.verified ? "verified" : "pending"},ssl_status=${dns.verified ? "active" : "pending"},last_error=${dns.verified ? null : dns.error},verified_at=case when ${dns.verified} then coalesce(verified_at,now()) else verified_at end,activated_at=case when ${dns.verified} then coalesce(activated_at,now()) else activated_at end,updated_at=now(),version=version+1,last_updated_by_account_id=${actor.accountId}::uuid where id=${id}::uuid and company_id=${companyId}::uuid and version=${expectedVersion} returning id,company_id "companyId",company_website_id "websiteId",hostname,status,verification_status "verificationStatus",ssl_status "sslStatus",is_primary "isPrimary",verification_method "verificationMethod",verification_records "verificationRecords",provider,provider_reference "providerReference",last_error "lastError",version,created_at "createdAt",updated_at "updatedAt",verified_at "verifiedAt",activated_at "activatedAt",disabled_at "disabledAt"`.execute(
+          trx,
+        )
+      ).rows[0];
+      if (!row) throw this.conflict();
+      await this.audit(
+        trx,
+        companyId,
+        actor,
+        row.status === "active" && before.status !== "active"
+          ? "custom_domain_activated"
+          : "custom_domain_status_refreshed",
+        id,
+        { status: before.status, sslStatus: before.sslStatus },
+        { status: row.status, sslStatus: row.sslStatus, provider: MANUAL_DOMAIN_PROVIDER },
+      );
+      return row;
+    });
+  }
+}
+
+async function verifyManualRenderDns(hostname: string, cnameTarget?: string) {
+  const expectedCname = cnameTarget?.replace(/\.$/u, "").toLowerCase();
+  const details: string[] = [];
+  try {
+    const addresses = await resolve4(hostname);
+    details.push(`A=${addresses.join(",")}`);
+    if (addresses.includes(RENDER_APEX_IP)) return { verified: true, error: null };
+  } catch (error) {
+    details.push(`A lookup failed: ${safeError(error)}`);
+  }
+  if (expectedCname)
+    try {
+      const cnames = (await resolveCname(hostname)).map((value) =>
+        value.replace(/\.$/u, "").toLowerCase(),
+      );
+      details.push(`CNAME=${cnames.join(",")}`);
+      if (cnames.includes(expectedCname)) return { verified: true, error: null };
+    } catch (error) {
+      details.push(`CNAME lookup failed: ${safeError(error)}`);
+    }
+  return {
+    verified: false,
+    error:
+      `DNS is not pointing to Render yet. Expected A ${RENDER_APEX_IP}${expectedCname ? ` or CNAME ${expectedCname}` : ""}. ${details.join("; ")}`.slice(
+        0,
+        500,
+      ),
+  };
 }
 function mapState(state: DomainProviderState) {
   const verified = state.hostnameStatus === "active",
