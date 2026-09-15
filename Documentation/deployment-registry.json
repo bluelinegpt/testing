@@ -7,9 +7,9 @@
       "path": "apps/public-web",
       "renderService": "tawseelhub-public-web",
       "status": "needs_deploy",
-      "localCommit": "c50b454",
-      "localCommitDate": "2026-09-14",
-      "lastChangeDescription": "fix(seo): add public page structured data",
+      "localCommit": "c4df8b9",
+      "localCommitDate": "2026-09-15",
+      "lastChangeDescription": "fix(public-web): serve sitemap resource and category links",
       "lastChangeBy": "codex",
       "confirmedLiveCommit": null,
       "confirmedLiveAt": null
