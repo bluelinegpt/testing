@@ -245,6 +245,35 @@ export function isPublicCompanyWebsiteHost(): boolean {
   );
 }
 
+export function resolveCompanyWebsiteLocale(
+  settings: WebsiteSettings | undefined,
+  defaultLocale: "en" | "ar" | undefined,
+  pathname: string,
+  search: string,
+): "en" | "ar" {
+  const requestedLocale = new URLSearchParams(search).get("lang");
+  if (
+    (pathname === "/ar" || pathname.startsWith("/ar/") || requestedLocale === "ar") &&
+    settings?.languages.ar
+  )
+    return "ar";
+  if (
+    (pathname === "/en" || pathname.startsWith("/en/") || requestedLocale === "en") &&
+    settings?.languages.en
+  )
+    return "en";
+  const configuredDefault = settings?.languages.defaultLocale ?? defaultLocale ?? "en";
+  if (configuredDefault === "ar" && settings?.languages.ar !== false) return "ar";
+  if (configuredDefault === "en" && settings?.languages.en !== false) return "en";
+  return settings?.languages.ar ? "ar" : "en";
+}
+
+function alternateLanguageUrl(locale: "en" | "ar"): string {
+  const target = new URL(globalThis.location.href);
+  target.searchParams.set("lang", locale === "en" ? "ar" : "en");
+  return `${target.pathname}${target.search}${target.hash}`;
+}
+
 export function PublicCompanyWebsite({
   previewPayload,
 }: { previewPayload?: PublicWebsitePayload } = {}): ReactNode {
@@ -287,7 +316,12 @@ export function PublicCompanyWebsite({
         ? "index,follow"
         : "noindex,nofollow";
     if (payload?.company) {
-      const locale = new URLSearchParams(location.search).get("lang") === "ar" ? "ar" : "en";
+      const locale = resolveCompanyWebsiteLocale(
+        payload.settings,
+        payload.defaultLocale,
+        location.pathname,
+        location.search,
+      );
       // The app shell boots the document as ltr/en-AE. A Company Website in
       // Arabic must flip the DOCUMENT, not just the template wrapper --
       // fixed elements outside the template (WhatsApp button, agent bubble,
@@ -358,13 +392,12 @@ export function PublicCompanyWebsite({
   if (!payload) return <main className="company-site company-site--loading">Loading…</main>;
   if (payload.availability === "disabled" || !payload.company) return <Unavailable />;
   const settings = payload.settings;
-  const requestedLocale = new URLSearchParams(globalThis.location.search).get("lang");
-  const locale: "en" | "ar" =
-    requestedLocale === "ar" && settings?.languages.ar
-      ? "ar"
-      : requestedLocale === "en" && settings?.languages.en
-        ? "en"
-        : (settings?.languages.defaultLocale ?? payload.defaultLocale ?? "en");
+  const locale = resolveCompanyWebsiteLocale(
+    settings,
+    payload.defaultLocale,
+    globalThis.location.pathname,
+    globalThis.location.search,
+  );
   const company = payload.company;
   const localized = (value: Localized | undefined, fallback: string | null = null) =>
     value?.[locale] ?? value?.en ?? fallback;
@@ -418,7 +451,9 @@ export function PublicCompanyWebsite({
       ? `${apiBase()}/public/company-website/logo${override ? `?host=${encodeURIComponent(override)}` : ""}`
       : null);
   const websiteTheme = {
-    ...(settings?.branding.primaryColor ? { "--site-primary": settings.branding.primaryColor } : {}),
+    ...(settings?.branding.primaryColor
+      ? { "--site-primary": settings.branding.primaryColor }
+      : {}),
     ...(settings?.branding.secondaryColor
       ? { "--site-secondary": settings.branding.secondaryColor }
       : {}),
@@ -581,7 +616,7 @@ export function PublicCompanyWebsite({
           ? {
               alternateLanguage: {
                 label: locale === "en" ? "AR" : "EN",
-                url: `?lang=${locale === "en" ? "ar" : "en"}`,
+                url: alternateLanguageUrl(locale),
               },
             }
           : {}),

@@ -1,19 +1,53 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+// @vitest-environment jsdom
+import "@testing-library/jest-dom/vitest";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   CompanyWebsiteDraftPreviewReceiver,
   isPublicCompanyWebsiteHost,
   PublicCompanyWebsite,
+  resolveCompanyWebsiteLocale,
 } from "./PublicCompanyWebsite.js";
 
 afterEach(() => {
+  cleanup();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   history.replaceState({}, "", "/");
 });
 
+Object.defineProperty(globalThis, "__APP_VERSION__", {
+  configurable: true,
+  value: "test-version",
+});
+
 describe("public Company website shell", () => {
+  it("resolves the saved Company website default language when no language is requested", () => {
+    const settings = {
+      branding: {},
+      languages: { en: true, ar: true, defaultLocale: "ar" as const },
+      presentation: {},
+      contact: {
+        whatsappEnabled: false,
+        showPhone: false,
+        showEmail: false,
+        showWhatsapp: false,
+        showAddress: false,
+        showWorkingHours: false,
+        workingHours: [],
+      },
+      services: [],
+      coverage: [],
+      benefits: [],
+      socialLinks: {},
+      sections: [],
+    };
+    expect(resolveCompanyWebsiteLocale(settings, "en", "/", "")).toBe("ar");
+    expect(resolveCompanyWebsiteLocale(settings, "en", "/", "?lang=en")).toBe("en");
+    expect(resolveCompanyWebsiteLocale(settings, "en", "/ar", "")).toBe("ar");
+  });
+
   it("keeps draft-preview navigation inside the preview instead of opening Company Portal login", async () => {
     history.replaceState({}, "", "/?websiteDraftPreview=1");
     const scrollIntoView = vi.fn();
@@ -144,7 +178,9 @@ describe("public Company website shell", () => {
     render(<PublicCompanyWebsite />);
     expect(await screen.findByRole("heading", { name: "Dana Delivery" })).toBeInTheDocument();
     const themeBoundary = screen.getByTestId("company-site-theme-boundary");
-    expect(themeBoundary).toContainElement(screen.getByRole("heading", { name: "Request delivery" }));
+    expect(themeBoundary).toContainElement(
+      screen.getByRole("heading", { name: "Request delivery" }),
+    );
     expect(themeBoundary.style.getPropertyValue("--site-primary")).toBe("#aa0000");
     expect(screen.getByText("hello@dana.test")).toBeInTheDocument();
     expect(screen.queryByText(/phone/i)).not.toBeInTheDocument();
@@ -342,5 +378,55 @@ describe("public Company website shell", () => {
     expect(screen.getByRole("heading", { name: "تتبع الشحنة مباشرة" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "EN" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "AR" })).not.toBeInTheDocument();
+  });
+
+  it("renders Arabic by default on the root page when the published settings default is Arabic", async () => {
+    history.replaceState({}, "", "/?companyWebsiteHost=dana.tawseelhub.com");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          availability: "published",
+          slug: "dana",
+          templateKey: "corporate",
+          defaultLocale: "en",
+          settings: {
+            branding: {},
+            languages: { en: true, ar: true, defaultLocale: "ar" },
+            presentation: { displayName: { en: "Dana", ar: "دانا" } },
+            contact: {
+              whatsappEnabled: false,
+              showPhone: false,
+              showEmail: false,
+              showWhatsapp: false,
+              showAddress: false,
+              showWorkingHours: false,
+              workingHours: [],
+            },
+            services: [],
+            coverage: [],
+            benefits: [],
+            socialLinks: {},
+            sections: [],
+          },
+          company: {
+            nameEn: "Dana",
+            nameAr: "دانا",
+            subtitleEn: null,
+            subtitleAr: null,
+            telephone: null,
+            email: null,
+            addressEn: null,
+            addressAr: null,
+            hasLogo: false,
+          },
+        }),
+      }),
+    );
+    render(<PublicCompanyWebsite />);
+    expect(await screen.findByRole("heading", { level: 1, name: "دانا" })).toBeInTheDocument();
+    await waitFor(() => expect(document.documentElement).toHaveAttribute("dir", "rtl"));
+    expect(document.documentElement).toHaveAttribute("lang", "ar-AE");
   });
 });
