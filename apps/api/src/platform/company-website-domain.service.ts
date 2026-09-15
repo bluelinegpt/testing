@@ -242,9 +242,19 @@ export class CompanyWebsiteDomainService {
           "Only a verified domain with active SSL can become primary",
           HttpStatus.CONFLICT,
         );
-      await sql`update company_website_domains set is_primary=false,updated_at=now(),version=version+1,last_updated_by_account_id=${actor.accountId}::uuid where company_website_id=${website.id}::uuid and is_primary;update company_website_domains set is_primary=true,updated_at=now(),version=version+1,last_updated_by_account_id=${actor.accountId}::uuid where id=${id}::uuid;update company_websites set version=version+1,updated_at=now(),last_updated_by_account_id=${actor.accountId}::uuid where id=${website.id}::uuid and version=${websiteVersion}`.execute(
+      await sql`update company_website_domains set is_primary=false,updated_at=now(),version=version+1,last_updated_by_account_id=${actor.accountId}::uuid where company_website_id=${website.id}::uuid and is_primary`.execute(
         trx,
       );
+      const promoted =
+        await sql`update company_website_domains set is_primary=true,updated_at=now(),version=version+1,last_updated_by_account_id=${actor.accountId}::uuid where id=${id}::uuid and company_id=${companyId}::uuid`.execute(
+          trx,
+        );
+      if (Number(promoted.numAffectedRows) !== 1) throw this.conflict();
+      const updatedWebsite =
+        await sql`update company_websites set version=version+1,updated_at=now(),last_updated_by_account_id=${actor.accountId}::uuid where id=${website.id}::uuid and version=${websiteVersion}`.execute(
+          trx,
+        );
+      if (Number(updatedWebsite.numAffectedRows) !== 1) throw this.conflict();
       await this.audit(trx, companyId, actor, "custom_domain_made_primary", id, null, {
         hostname: domain.hostname,
       });
