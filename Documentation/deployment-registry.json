@@ -32,10 +32,10 @@
       "displayName": "Main app",
       "path": "apps/web",
       "renderService": "bluelinegpt-web-test",
-      "status": "pushed_awaiting_confirmation",
-      "localCommit": "e0d487c",
+      "status": "needs_deploy",
+      "localCommit": "3f8c6f0",
       "localCommitDate": "2026-09-16",
-      "lastChangeDescription": "Company website tracking copy no longer references Dana on other companies' sites.",
+      "lastChangeDescription": "Arabic and English language buttons stay visible in the mobile company app header.",
       "lastChangeBy": "codex",
       "confirmedLiveCommit": "9666706",
       "confirmedLiveAt": "2026-09-01"
