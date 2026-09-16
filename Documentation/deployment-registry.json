@@ -32,7 +32,7 @@
       "displayName": "Main app",
       "path": "apps/web",
       "renderService": "bluelinegpt-web-test",
-      "status": "needs_deploy",
+      "status": "pushed_awaiting_confirmation",
       "localCommit": "3f8c6f0",
       "localCommitDate": "2026-09-16",
       "lastChangeDescription": "Arabic and English language buttons stay visible in the mobile company app header.",
