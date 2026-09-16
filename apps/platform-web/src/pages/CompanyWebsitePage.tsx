@@ -71,7 +71,7 @@ export function CompanyWebsitePage(): ReactElement {
       <WebsitePageHeader company={company} />
       <aside className="company-website-setup-guide" aria-labelledby="website-setup-guide-heading">
         <div>
-          <h3 id="website-setup-guide-heading">Set up Dana&apos;s Website</h3>
+          <h3 id="website-setup-guide-heading">Set up {company.nameEn}&apos;s Website</h3>
           <p>
             Create the Website foundation first. The complete branding, content, WhatsApp, AI and
             SEO editor appears immediately after it is saved.

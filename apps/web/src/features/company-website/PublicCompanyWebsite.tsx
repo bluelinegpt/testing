@@ -771,7 +771,7 @@ export function CompanyWebsiteDraftPreviewReceiver(): ReactNode {
 const copy = {
   en: {
     track: "Real-Time Tracking",
-    trackingHelp: "Enter your secure tracking reference or Dana order number.",
+    trackingHelp: "Enter your secure tracking reference or order number.",
     token: "Shipment reference",
     trackAction: "Track",
     trackingLoading: "Checking shipment status…",
@@ -803,7 +803,7 @@ const copy = {
   },
   ar: {
     track: "تتبع الشحنة مباشرة",
-    trackingHelp: "أدخل مرجع التتبع الآمن أو رقم طلب دانا.",
+    trackingHelp: "أدخل مرجع التتبع الآمن أو رقم الطلب.",
     token: "رقم تتبع الشحنة",
     trackAction: "تتبع",
     trackingLoading: "جارٍ التحقق من حالة الشحنة…",
