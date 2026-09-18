@@ -113,6 +113,24 @@ export class LocalFileStorageAdapter extends FileStoragePort {
     await rm(this.absolutePathFor(storageKey), { force: true });
   }
 
+  public override async storeSeoSource(
+    storageKey: string,
+    content: Uint8Array,
+    _contentType: string,
+  ): Promise<StoredFileReference> {
+    void _contentType;
+    this.assertSeoSourceKey(storageKey);
+    const absolutePath = this.absolutePathFor(storageKey);
+    await mkdir(dirname(absolutePath), { recursive: true });
+    await writeFile(absolutePath, Buffer.from(content), { flag: "wx", mode: 0o600 });
+    return { storageKey };
+  }
+
+  public override async readSeoSource(storageKey: string): Promise<Uint8Array> {
+    this.assertSeoSourceKey(storageKey);
+    return readFile(this.absolutePathFor(storageKey));
+  }
+
   /**
    * Commerce operations may only touch the Commerce namespace.
    *
@@ -129,6 +147,12 @@ export class LocalFileStorageAdapter extends FileStoragePort {
   private assertWebsiteKey(storageKey: string): void {
     if (!storageKey.startsWith("website/")) {
       throw new Error("Refusing to operate on a non-Website storage key");
+    }
+  }
+
+  private assertSeoSourceKey(storageKey: string): void {
+    if (!storageKey.startsWith("seo-source-documents/")) {
+      throw new Error("Refusing to operate on a non-SEO-source storage key");
     }
   }
 

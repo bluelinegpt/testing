@@ -30,6 +30,7 @@ import {
   blogListingPreloadKey,
   BlogListingPage,
 } from "./BlogPages";
+import { GuidePage } from "./GuidePage";
 import { PrivacyPolicyPage, TermsOfServicePage } from "./LegalPages";
 import { getPreloaded, PreloadContext } from "./preload-context";
 import {
@@ -394,6 +395,7 @@ function AppLayout() {
               <Route path="/blog/topic/:slug" element={<BlogLandingPage />} />
               <Route path="/blog/author/:slug" element={<BlogLandingPage />} />
               <Route path="/blog/:slug" element={<BlogArticlePage />} />
+              <Route path="/guides/:slug" element={<GuidePage />} />
               <Route path="/faq" element={<FaqPage />} />
               <Route path="/about" element={<AboutPage />} />
               <Route path="/contact" element={<ContactPage />} />
@@ -417,6 +419,7 @@ function AppLayout() {
               <Route path="/ar/blog/topic/:slug" element={<BlogLandingPage />} />
               <Route path="/ar/blog/author/:slug" element={<BlogLandingPage />} />
               <Route path="/ar/blog/:slug" element={<BlogArticlePage />} />
+              <Route path="/ar/guides/:slug" element={<GuidePage />} />
               <Route path="/ar/faq" element={<FaqPage />} />
               <Route path="/ar/about" element={<AboutPage />} />
               <Route path="/ar/contact" element={<ContactPage />} />

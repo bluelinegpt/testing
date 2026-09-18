@@ -75,6 +75,7 @@ export type AnalyticsEventName =
   | "blog_category_view"
   | "blog_internal_link_clicked"
   | "blog_cta_clicked"
+  | "seo_guide_view"
   | "contact_form_submitted"
   | "tracking_started"
   | "tracking_verification_required"
@@ -117,6 +118,7 @@ export type SafeMetadata = {
   plan_name?: string | undefined;
   cta_type?: string | undefined;
   article_slug?: string | undefined;
+  guide_slug?: string | undefined;
   category_slug?: string | undefined;
   channel?: "website" | "website_avatar" | "whatsapp" | "simulator" | undefined;
   initiated_from?: "agent" | "website_cta" | string | undefined;

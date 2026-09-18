@@ -379,6 +379,18 @@ export class WebsiteCmsService {
         and robots_index = true
     `.execute(this.db)
     ).rows;
+    const guides = (
+      await sql<LocalizedEntry>`
+      select 'guide:' || translation_group_id::text as key, language as locale,
+             '/guides/' || slug as path,
+             coalesce(updated_content_at, published_at, scheduled_at, updated_at) as updated_at
+      from platform_seo_guides
+      where ((status = 'published' and published_at <= now()) or
+             (status = 'scheduled' and scheduled_at <= now()))
+        and robots_index = true
+        and include_in_sitemap = true
+    `.execute(this.db)
+    ).rows;
     const blogCategories = (
       await sql<LocalizedEntry>`
       select 'category:' || coalesce(c.translation_group_id::text,c.id::text) as key, c.language as locale,
@@ -425,6 +437,7 @@ export class WebsiteCmsService {
       ...pages,
       ...navigation,
       ...blog,
+      ...guides,
       ...blogCategories,
       ...blogTags,
       ...blogTopics,

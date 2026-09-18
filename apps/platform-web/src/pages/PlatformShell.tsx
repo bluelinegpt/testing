@@ -30,6 +30,7 @@ import { WebsiteContentPage } from "./WebsiteContentPage.js";
 import { BlogEditorialSeoPage } from "./BlogEditorialSeoPage.js";
 import { AgentAdminPage } from "./AgentAdminPage.js";
 import { CommerceIntegrationsPage } from "./CommerceIntegrationsPage.js";
+import { SeoGuidesPage } from "./SeoGuidesPage.js";
 
 interface NavigationItem {
   readonly label: string;
@@ -58,6 +59,7 @@ const navigation: readonly NavigationItem[] = [
     permission: "platform.customer_quotes.read",
   },
   { label: "Website", path: "/website", permission: "platform.website.read" },
+  { label: "SEO Guides", path: "/website/seo-guides", permission: "platform.website.read" },
   { label: "Agent", path: "/agent", permission: "platform.agent.read" },
   { label: "Commerce Integrations", path: "/commerce-integrations", permission: "platform.access" },
   { label: "Audit", path: "/audit", permission: "platform.audit.read" },
@@ -210,6 +212,8 @@ export function PlatformShell(): ReactElement {
             {session.can("platform.website.read") ? (
               <>
                 <Route element={<WebsiteContentPage />} path="/website" />
+                <Route element={<SeoGuidesPage />} path="/website/seo-guides" />
+                <Route element={<SeoGuidesPage />} path="/website/seo-guides/:id" />
                 <Route element={<BlogEditorialSeoPage />} path="/website/editorial-seo" />
                 <Route element={<WebsiteContentPage preview />} path="/website/:id/preview" />
                 <Route element={<WebsiteContentPage />} path="/website/:id" />

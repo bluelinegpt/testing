@@ -2082,6 +2082,32 @@ export const platformApi = {
   async updateBlogArticleStatus(id: string, input: any): Promise<any> {
     return await request<any>(`platform/blog/articles/${id}/status`, { method: "PATCH", body: input });
   },
+  async seoGuides(): Promise<any[]> {
+    return (await request<any[]>("platform/seo-guides", { method: "GET" })) ?? [];
+  },
+  async seoGuide(id: string): Promise<any> {
+    return await request<any>(`platform/seo-guides/${id}`, { method: "GET" });
+  },
+  async createSeoGuide(input: any): Promise<any> {
+    return await request<any>("platform/seo-guides", { method: "POST", body: input });
+  },
+  async updateSeoGuide(id: string, input: any): Promise<any> {
+    return await request<any>(`platform/seo-guides/${id}`, { method: "PATCH", body: input });
+  },
+  async updateSeoGuideStatus(id: string, input: any): Promise<any> {
+    return await request<any>(`platform/seo-guides/${id}/status`, { method: "PATCH", body: input });
+  },
+  async seoGuideReadiness(id: string): Promise<any> {
+    return await request<any>(`platform/seo-guides/${id}/seo-readiness`, { method: "GET" });
+  },
+  async uploadSeoGuideSource(id: string, file: File): Promise<any> {
+    const body = new FormData();
+    body.append("file", file);
+    return await request<any>(`platform/seo-guides/${id}/sources`, { method: "POST", body, timeoutMs: 30_000 });
+  },
+  seoGuideSourceDownloadUrl(id: string, sourceId: string): string {
+    return `${platformConfiguration.apiBaseUrl}/platform/seo-guides/${id}/sources/${sourceId}/download`;
+  },
   async publicSiteSettings(): Promise<any> {
     return await request<any>("platform/blog/settings", { method: "GET" });
   },

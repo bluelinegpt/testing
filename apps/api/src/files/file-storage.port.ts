@@ -65,4 +65,16 @@ export abstract class FileStoragePort {
     void storageKey;
     throw new Error("Website media storage is not implemented by this adapter");
   }
+
+  public storeSeoSource(storageKey: string, content: Uint8Array, contentType: string): Promise<StoredFileReference> {
+    void storageKey;
+    void content;
+    void contentType;
+    throw new Error("SEO source storage is not implemented by this adapter");
+  }
+
+  public readSeoSource(storageKey: string): Promise<Uint8Array> {
+    void storageKey;
+    throw new Error("SEO source storage is not implemented by this adapter");
+  }
 }

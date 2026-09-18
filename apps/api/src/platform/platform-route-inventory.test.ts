@@ -24,6 +24,7 @@ import { PlatformDemoRequestController } from "./platform-demo-request.controlle
 import { PlatformTraderApplicationController } from "./platform-trader-application.controller.js";
 import { PlatformCustomerQuoteController } from "./platform-customer-quote.controller.js";
 import { PlatformBlogController } from "./platform-blog.controller.js";
+import { PlatformSeoGuideController } from "./platform-seo-guide.controller.js";
 import { PlatformWebsiteCmsController } from "./platform-website-cms.controller.js";
 import { PlatformAgentController } from "./platform-agent.controller.js";
 import { PlatformCompanyWebsiteController } from "./company-website.controller.js";
@@ -54,6 +55,7 @@ const platformControllers = [
   PlatformTraderApplicationController,
   PlatformCustomerQuoteController,
   PlatformBlogController,
+  PlatformSeoGuideController,
   PlatformWebsiteCmsController,
   PlatformAgentController,
   PlatformTargetCompanyController,
@@ -219,6 +221,8 @@ describe("Platform route inventory", () => {
       "proposeAiSetup",
       "importArticle", // Read-only proposal, restricted to blog creators like other editor previews.
       "deleteArticle",
+      "archive",
+      "upload",
       "previewTrack",
       "addDomain",
       "refreshDomain",

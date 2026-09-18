@@ -106,6 +106,12 @@ class TempStorage implements FileStoragePort {
   public deleteWebsite(): never {
     throw new Error("not used");
   }
+  public storeSeoSource(): never {
+    throw new Error("not used");
+  }
+  public readSeoSource(): never {
+    throw new Error("not used");
+  }
 }
 
 interface Fixture {

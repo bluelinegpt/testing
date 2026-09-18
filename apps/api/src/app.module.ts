@@ -19,6 +19,7 @@ import { WebsiteCmsModule } from "./website-cms/website-cms.module.js";
 import { TraderApplicationsModule } from "./trader-applications/trader-applications.module.js";
 import { CustomerQuotesModule } from "./customer-quotes/customer-quotes.module.js";
 import { BlogModule } from "./blog/blog.module.js";
+import { SeoGuideModule } from "./seo-guides/seo-guide.module.js";
 import { AgentModule } from "./agent/agent.module.js";
 import { createHttpLoggerOptions } from "./logging/http-logger.config.js";
 import { ObservabilityModule } from "./observability/observability.module.js";
@@ -57,6 +58,7 @@ import { WhatsAppModule } from "./whatsapp/whatsapp.module.js";
     TraderApplicationsModule,
     CustomerQuotesModule,
     BlogModule,
+    SeoGuideModule,
     AgentModule,
     AuthenticationModule,
     CommerceIntegrationModule,

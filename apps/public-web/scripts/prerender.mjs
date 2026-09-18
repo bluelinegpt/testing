@@ -197,6 +197,13 @@ try {
     const entryPath=String(entry.path??"");
     const locale=entryPath==="/ar"||entryPath.startsWith("/ar/")?"ar":"en";
     const basePath=locale==="ar"?entryPath.slice(3)||"/":entryPath;
+    if(basePath.startsWith("/guides/")) {
+      const slug=basePath.replace("/guides/","");
+      const guide=await fetchJson(`/public/guides/${encodeURIComponent(slug)}?language=${locale}`);
+      const seo=guide.seo??{};
+      routeMap.set(entry.path,{path:entry.path,title:seo.title??guide.title??"Tawseelhub Guide",description:seo.description??guide.summary??"Tawseelhub delivery operations guide.",canonical:normalizeCanonical(seo.canonical,entry.path),type:"website",image:normalizeImageUrl(seo.image??guide.socialImageUrl??guide.featuredImagePublicUrl),imageAlt:seo.imageAlt??guide.socialImageAlt??guide.featuredImageAlt,locale:locale==="ar"?"ar_AE":"en_AE",alternates:seo.alternates,xDefault:seo.xDefault,schema:seo.graph,robots:`${guide.robotsIndex===false?"noindex":"index"},${guide.robotsFollow===false?"nofollow":"follow"}`,preload:[[ `seo-guide:${slug}:${locale}`,guide ]]});
+      continue;
+    }
     if (!basePath.startsWith("/blog/")) continue;
     const categories=locale==="ar"?arabicBlogCategories:blogCategories;
     const landingMatch=basePath.match(/^\/blog\/(category|tag|topic|author)\/(.+)$/);

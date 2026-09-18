@@ -112,6 +112,21 @@ export class R2FileStorageAdapter extends FileStoragePort {
     await this.delete(storageKey);
   }
 
+  public override async storeSeoSource(
+    storageKey: string,
+    content: Uint8Array,
+    contentType: string,
+  ): Promise<StoredFileReference> {
+    this.assertKey(storageKey, "seo-source-documents/");
+    await this.put(storageKey, Buffer.from(content), contentType);
+    return { storageKey };
+  }
+
+  public override async readSeoSource(storageKey: string): Promise<Uint8Array> {
+    this.assertKey(storageKey, "seo-source-documents/");
+    return this.get(storageKey);
+  }
+
   /** Every namespace check across all six methods narrows to this one guard,
    *  so a caller passing (or forging) a key outside its own tree is refused
    *  before any network call, exactly like the local adapter. */

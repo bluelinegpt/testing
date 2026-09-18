@@ -12,6 +12,7 @@ import {
   isOriginHost,
   normalizePath,
   renderArticleShell,
+  renderGuideShell,
   robotsHeader,
   sitemapStylesheet,
   structuredDataForPath,
@@ -19,6 +20,12 @@ import {
 test("normalizes public paths", () => {
   assert.equal(normalizePath("//blog/example///"), "/blog/example");
   assert.equal(normalizePath("/"), "/");
+});
+test("server-rendered SEO Guide shell exposes full public content without Blog breadcrumbs",()=>{
+  const html=renderGuideShell({language:"en",title:"Delivery Management Software UAE",summary:"Long-form guide summary",content:[{type:"h2",text:"Operations"},{type:"paragraph",text:"Crawler-visible Guide content."}]});
+  assert.match(html,/Delivery Management Software UAE/);
+  assert.match(html,/Crawler-visible Guide content/);
+  assert.doesNotMatch(html,/href="\/blog/);
 });
 test("recognizes Render origins", () => assert.equal(isOriginHost("site.onrender.com"), true));
 test("non-production is noindex", () =>

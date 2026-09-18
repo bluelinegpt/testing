@@ -13,6 +13,8 @@ import { CustomerQuotesModule } from "../customer-quotes/customer-quotes.module.
 import { PlatformCustomerQuoteController } from "./platform-customer-quote.controller.js";
 import { BlogModule } from "../blog/blog.module.js";
 import { PlatformBlogController } from "./platform-blog.controller.js";
+import { SeoGuideModule } from "../seo-guides/seo-guide.module.js";
+import { PlatformSeoGuideController } from "./platform-seo-guide.controller.js";
 import { WebsiteCmsModule } from "../website-cms/website-cms.module.js";
 import { PlatformWebsiteCmsController } from "./platform-website-cms.controller.js";
 import { AgentModule } from "../agent/agent.module.js";
@@ -87,6 +89,7 @@ import { CompanyWebsiteAiSetupProvider } from "./company-website-ai-setup.provid
     PlatformTraderApplicationController,
     PlatformCustomerQuoteController,
     PlatformBlogController,
+    PlatformSeoGuideController,
     PlatformWebsiteCmsController,
     PlatformAgentController,
     PlatformTargetCompanyController,
@@ -102,6 +105,7 @@ import { CompanyWebsiteAiSetupProvider } from "./company-website-ai-setup.provid
     TraderApplicationsModule,
     CustomerQuotesModule,
     BlogModule,
+    SeoGuideModule,
     WebsiteCmsModule,
     AgentModule,
     FilesModule,

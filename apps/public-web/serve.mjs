@@ -768,6 +768,12 @@ export function renderArticleShell(article, related = []) {
     : "";
   return `<article class="article-page" dir="${dir}" lang="${language}"><nav aria-label="Breadcrumb"><a href="${language === "ar" ? "/ar" : "/"}">${language === "ar" ? "الرئيسية" : "Home"}</a> / <a href="${language === "ar" ? "/ar" : ""}/blog">${language === "ar" ? "المدونة" : "Blog"}</a> / <a href="${language === "ar" ? "/ar" : ""}/blog/category/${escape(categorySlug)}">${escape(article.category ?? "")}</a></nav><header><span>${escape(article.category ?? "")}</span><h1>${escape(article.title)}</h1><p>${escape(article.excerpt)}</p></header>${tags ? `<nav class="blog-categories" aria-label="Article tags">${tags}</nav>` : ""}${image ? `<img class="article-image" src="${escape(image)}" alt="${escape(article.featured_image_alt ?? "")}" width="${article.featured_image_width ?? 1200}" height="${article.featured_image_height ?? 675}" loading="eager" decoding="async" fetchpriority="high" />` : ""}<div class="article-layout"><div class="article-body">${blocks}</div><aside><h2>${language === "ar" ? "استكشف Tawseelhub" : "Explore Tawseelhub"}</h2><a href="${language === "ar" ? "/ar" : ""}/delivery-companies">${language === "ar" ? "منصة شركة التوصيل" : "Delivery Company platform"}</a><a href="${language === "ar" ? "/ar" : ""}/traders">${language === "ar" ? "حلول للتجار" : "Solutions for Traders"}</a><a href="${language === "ar" ? "/ar" : ""}/send-a-package">${language === "ar" ? "أرسل شحنة" : "Send a Package"}</a></aside></div>${relatedHtml}</article>`;
 }
+export function renderGuideShell(guide) {
+  const language=guide.language==="ar"?"ar":"en",dir=language==="ar"?"rtl":"ltr";
+  const image=assetUrl(guide.featuredImagePublicUrl);
+  const blocks=(guide.content??[]).map(articleBlockHtml).join("");
+  return `<article class="article-page guide-page" dir="${dir}" lang="${language}"><nav aria-label="Breadcrumb"><a href="${language==="ar"?"/ar":"/"}">${language==="ar"?"الرئيسية":"Home"}</a> / ${escape(guide.title)}</nav><header><span>${language==="ar"?"دليل Tawseelhub":"Tawseelhub Guide"}</span><h1>${escape(guide.title)}</h1><p>${escape(guide.summary)}</p></header>${image?`<img class="article-image" src="${escape(image)}" alt="${escape(guide.featuredImageAlt??"")}" loading="eager" decoding="async" fetchpriority="high" />`:""}<div class="article-layout"><div class="article-body">${blocks}</div></div></article>`;
+}
 export function helpArticleRequestForPath(pathname) {
   const match = pathname.match(/^(\/ar)?\/resources\/([^/]+)$/);
   if (!match) return undefined;
@@ -939,6 +945,14 @@ export function createPublicServer() {
           return;
         }
       }
+      const guideMatch=pathname.match(/^(\/ar)?\/guides\/([^/]+)$/);
+      let guide;
+      if(guideMatch){
+        const language=guideMatch[1]?"ar":"en";
+        guide=await api(`/public/guides/${encodeURIComponent(guideMatch[2])}?language=${language}`);
+        if(guide?.redirect?.to){response.writeHead(guide.redirect.statusCode===301?301:308,{location:guide.redirect.to}).end();return;}
+        if(!guide){response.writeHead(404).end("Not found");return;}
+      }
       const helpArticleRequest = helpArticleRequestForPath(pathname);
       if (helpArticleRequest) {
         const payload = await api(helpArticleRequest.apiPath);
@@ -949,7 +963,7 @@ export function createPublicServer() {
       }
       let file = await fileResponse(pathname);
       const clientRoute = Boolean(
-        article || landing || helpArticleRequest || /^\/send-a-package\/quote(\/|$)/.test(pathname),
+        article || guide || landing || helpArticleRequest || /^\/send-a-package\/quote(\/|$)/.test(pathname),
       );
       if (!file && clientRoute) file = await fileResponse("/");
       if (!file) {
@@ -963,6 +977,9 @@ export function createPublicServer() {
           renderArticleShell(article, articlePayload?.related),
         );
         body = Buffer.from(injectArticleMetadata(rendered, article, pathname));
+      } else if(guide && file.type.startsWith("text/html")) {
+        const normalized={...guide,excerpt:guide.summary,featured_image_public_url:guide.featuredImagePublicUrl,featured_image_alt:guide.featuredImageAlt,robots_index:guide.robotsIndex,robots_follow:guide.robotsFollow,social_title:guide.socialTitle,social_description:guide.socialDescription,social_image_url:guide.socialImageUrl};
+        body=Buffer.from(injectArticleMetadata(injectRenderedRoot(body.toString(),renderGuideShell(guide)),normalized,pathname).replace('property="og:type" content="article"','property="og:type" content="website"'));
       } else if (landing && file.type.startsWith("text/html"))
         body = Buffer.from(injectLandingMetadata(body.toString(), landing));
       else if (file.type.startsWith("text/html"))
