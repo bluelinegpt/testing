@@ -7,9 +7,9 @@
       "path": "apps/public-web",
       "renderService": "tawseelhub-public-web",
       "status": "needs_deploy",
-      "localCommit": "e3aedb6",
+      "localCommit": "65614dc",
       "localCommitDate": "2026-09-20",
-      "lastChangeDescription": "fix(seo): correct public indexing signals",
+      "lastChangeDescription": "fix(seo): expose resource links in initial HTML",
       "lastChangeBy": "codex",
       "confirmedLiveCommit": null,
       "confirmedLiveAt": null
