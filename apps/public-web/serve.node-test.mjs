@@ -16,6 +16,7 @@ import {
   normalizePath,
   renderArticleShell,
   renderHelpArticleShell,
+  renderHelpHomeShell,
   renderGuideShell,
   robotsHeader,
   sitemapStylesheet,
@@ -261,4 +262,17 @@ test("runtime Help articles keep their own canonical and crawler-visible content
   assert.match(html, /rel="canonical" href="https:\/\/tawseelhub.com\/resources\/create-an-order"/);
   assert.match(html, /name="robots" content="index,follow,max-image-preview:large"/);
   assert.doesNotMatch(html, /rel="canonical" href="https:\/\/tawseelhub.com\/"/);
+});
+test("runtime Help landing exposes published guide links in initial HTML", () => {
+  const html = renderHelpHomeShell({
+    locale: "ar",
+    articles: [
+      { locale: "ar", slug: "what-is-tawseelhub", title: "ما هو Tawseelhub؟", summary: "دليل عربي", categoryName: "البداية" },
+      { locale: "en", slug: "create-an-order", title: "Create an order", summary: "English fallback", categoryName: "Orders" },
+    ],
+  });
+  assert.match(html, /href="\/ar\/resources\/what-is-tawseelhub"/);
+  assert.match(html, /href="\/resources\/create-an-order"/);
+  assert.match(html, /ما هو Tawseelhub/);
+  assert.match(html, /Create an order/);
 });

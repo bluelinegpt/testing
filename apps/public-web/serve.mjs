@@ -742,6 +742,18 @@ export function renderHelpArticleShell(article, related = []) {
   return `<article class="section help-article${language === "ar" ? " help-article--rtl" : ""}" dir="${dir}" lang="${language}"><a class="text-link" href="${language === "ar" ? "/ar" : ""}/resources">← ${language === "ar" ? "مركز المساعدة" : "Help Center"}</a><header><span>${escape(article.categoryName ?? "")}</span><h1>${escape(article.title)}</h1><p>${escape(article.summary)}</p></header><div class="help-article-body">${blocks}</div>${relatedHtml}</article>`;
 }
 
+export function renderHelpHomeShell(payload) {
+  const language = payload?.locale === "ar" ? "ar" : "en";
+  const dir = language === "ar" ? "rtl" : "ltr";
+  const articles = (payload?.articles ?? [])
+    .map((article) => {
+      const prefix = article.locale === "ar" ? "/ar" : "";
+      return `<article class="help-result-card"><span>${escape(article.categoryName ?? article.categorySlug ?? (language === "ar" ? "دليل" : "Guide"))}</span><h2><a href="${prefix}/resources/${escape(article.slug)}">${escape(article.title)}</a></h2><p>${escape(article.summary)}</p><a class="text-link" href="${prefix}/resources/${escape(article.slug)}">${language === "ar" ? "اقرأ الدليل" : "Read guide"} →</a></article>`;
+    })
+    .join("");
+  return `<section class="section resources-page" dir="${dir}" lang="${language}"><header><span>${language === "ar" ? "مركز المساعدة" : "Help Center"}</span><h1>${language === "ar" ? "أدلة وإجابات Tawseelhub" : "Tawseelhub guides and answers"}</h1><p>${language === "ar" ? "أدلة عملية للطلبات والسائقين والتحصيل والتقارير والتكاملات والدعم." : "Practical guides for orders, drivers, COD collections, reports, integrations and support."}</p></header><div class="help-results">${articles}</div></section>`;
+}
+
 export function injectHelpArticleMetadata(html, article, pathname) {
   const canonicalPath = article.canonical_path || pathname;
   const canonical = /^https?:\/\//i.test(canonicalPath)
@@ -1005,6 +1017,10 @@ export function createPublicServer() {
         if(guide?.redirect?.to){response.writeHead(guide.redirect.statusCode===301?301:308,{location:guide.redirect.to}).end();return;}
         if(!guide){response.writeHead(404).end("Not found");return;}
       }
+      const helpHomeRequest = /^(\/ar)?\/resources$/.exec(pathname);
+      const helpHomePayload = helpHomeRequest
+        ? await api(`/public/website/help?locale=${helpHomeRequest[1] ? "ar" : "en"}`)
+        : undefined;
       const helpArticleRequest = helpArticleRequestForPath(pathname);
       let helpArticlePayload;
       if (helpArticleRequest) {
@@ -1035,6 +1051,10 @@ export function createPublicServer() {
         body=Buffer.from(injectArticleMetadata(injectRenderedRoot(body.toString(),renderGuideShell(guide)),normalized,pathname).replace('property="og:type" content="article"','property="og:type" content="website"'));
       } else if (landing && file.type.startsWith("text/html"))
         body = Buffer.from(injectLandingMetadata(body.toString(), landing));
+      else if (helpHomePayload && file.type.startsWith("text/html"))
+        body = Buffer.from(
+          injectRenderedRoot(body.toString(), renderHelpHomeShell(helpHomePayload)),
+        );
       else if (helpArticlePayload?.article && file.type.startsWith("text/html")) {
         const rendered = injectRenderedRoot(
           body.toString(),
