@@ -17,6 +17,19 @@ export const normalizePath = (pathname) =>
 export const isOriginHost = (host) => /\.onrender\.com(?::\d+)?$/i.test(host);
 export const robotsHeader = (host) =>
   production && !isOriginHost(host) ? undefined : "noindex, nofollow";
+export const isPrivateIndexingPath = (pathname, searchParams = new URLSearchParams()) => {
+  const publicPath = pathname.startsWith("/ar/") ? pathname.slice(3) : pathname;
+  return (
+    /^(\/track|\/send-a-package\/quote)(\/|$)/.test(publicPath) ||
+    (publicPath === "/resources" && searchParams.has("q"))
+  );
+};
+export const injectRobotsDirective = (html, directive) => {
+  const meta = `<meta name="robots" content="${escape(directive)}" />`;
+  if (/<meta name="robots"[^>]*>/i.test(html))
+    return html.replace(/<meta name="robots"[^>]*>/gi, meta);
+  return html.includes("</head>") ? html.replace("</head>", `${meta}</head>`) : html;
+};
 export const cacheControlFor = (pathname, type) =>
   pathname.startsWith("/assets/")
     ? "public, max-age=31536000, immutable"
@@ -707,11 +720,52 @@ export function injectLandingMetadata(html, landing) {
       : "");
   const metadata = `<meta name="robots" content="${landing.robots_index ? "index" : "noindex"},${landing.robots_follow === false ? "nofollow" : "follow"},max-image-preview:large" /><link rel="canonical" href="${escape(canonical)}" />${alternates}<link rel="alternate" type="application/rss+xml" title="Tawseelhub Blog RSS" href="${landing.language === "ar" ? "/ar" : ""}/blog/rss.xml" /><meta property="og:type" content="website" /><meta property="og:title" content="${escape(title)}" /><meta property="og:description" content="${escape(description)}" /><meta property="og:url" content="${escape(canonical)}" />${seo.graph ? `<script type="application/ld+json" data-seo-schema="true">${safeJson(seo.graph)}</script>` : ""}`;
   return html
+    .replace(/<link rel="canonical"[^>]*>/g, "")
+    .replace(/<link rel="alternate"[^>]*>/g, "")
+    .replace(/<meta name="robots"[^>]*>/g, "")
+    .replace(/<meta (?:property="og:[^"]+"|name="twitter:[^"]+")[^>]*>/g, "")
+    .replace(/<script type="application\/ld\+json"[^>]*>[\s\S]*?<\/script>/g, "")
     .replace(/<title>.*?<\/title>/, `<title>${escape(title)} | Tawseelhub</title>`)
     .replace(
       /<meta name="description" content=".*?" \/>/,
       `<meta name="description" content="${escape(description)}" />${metadata}`,
     );
+}
+
+export function renderHelpArticleShell(article, related = []) {
+  const language = article.locale === "ar" ? "ar" : "en";
+  const dir = language === "ar" ? "rtl" : "ltr";
+  const blocks = (article.body ?? []).map(articleBlockHtml).join("");
+  const relatedHtml = related.length
+    ? `<aside class="related-guides"><h2>${language === "ar" ? "أدلة ذات صلة" : "Related guides"}</h2>${related.map((item) => `<a href="${language === "ar" ? "/ar" : ""}/resources/${escape(item.slug)}">${escape(item.title)}</a>`).join("")}</aside>`
+    : "";
+  return `<article class="section help-article${language === "ar" ? " help-article--rtl" : ""}" dir="${dir}" lang="${language}"><a class="text-link" href="${language === "ar" ? "/ar" : ""}/resources">← ${language === "ar" ? "مركز المساعدة" : "Help Center"}</a><header><span>${escape(article.categoryName ?? "")}</span><h1>${escape(article.title)}</h1><p>${escape(article.summary)}</p></header><div class="help-article-body">${blocks}</div>${relatedHtml}</article>`;
+}
+
+export function injectHelpArticleMetadata(html, article, pathname) {
+  const canonicalPath = article.canonical_path || pathname;
+  const canonical = /^https?:\/\//i.test(canonicalPath)
+    ? canonicalPath
+    : `${canonicalOrigin}${canonicalPath.startsWith("/") ? canonicalPath : `/${canonicalPath}`}`;
+  return injectArticleMetadata(
+    html,
+    {
+      language: article.locale === "ar" ? "ar" : "en",
+      title: article.title,
+      excerpt: article.summary,
+      seo_title: article.seo_title,
+      meta_description: article.meta_description,
+      canonical_url: canonical,
+      robots_index: article.robots_index !== false,
+      robots_follow: article.robots_follow !== false,
+      seo: {
+        canonical,
+        title: article.seo_title ?? article.title,
+        description: article.meta_description ?? article.summary,
+      },
+    },
+    pathname,
+  ).replace('property="og:type" content="article"', 'property="og:type" content="website"');
 }
 async function fileResponse(pathname) {
   const relative = pathname === "/" ? "index.html" : pathname.slice(1);
@@ -831,9 +885,7 @@ export function createPublicServer() {
         response.writeHead(308, { location: `${pathname}${search ? `?${search}` : ""}` }).end();
         return;
       }
-      const privatePath =
-        /^(\/track|\/send-a-package\/quote)(\/|$)/.test(pathname) ||
-        (pathname === "/resources" && url.searchParams.has("q"));
+      const privatePath = isPrivateIndexingPath(pathname, url.searchParams);
       const noindex = privatePath ? "noindex, follow" : robotsHeader(host);
       if (noindex) response.setHeader("X-Robots-Tag", noindex);
       if (pathname.startsWith("/api/")) {
@@ -954,16 +1006,17 @@ export function createPublicServer() {
         if(!guide){response.writeHead(404).end("Not found");return;}
       }
       const helpArticleRequest = helpArticleRequestForPath(pathname);
+      let helpArticlePayload;
       if (helpArticleRequest) {
-        const payload = await api(helpArticleRequest.apiPath);
-        if (!payload?.article) {
+        helpArticlePayload = await api(helpArticleRequest.apiPath);
+        if (!helpArticlePayload?.article) {
           response.writeHead(404).end("Not found");
           return;
         }
       }
       let file = await fileResponse(pathname);
       const clientRoute = Boolean(
-        article || guide || landing || helpArticleRequest || /^\/send-a-package\/quote(\/|$)/.test(pathname),
+        article || guide || landing || helpArticlePayload || /^(\/ar)?\/send-a-package\/quote(\/|$)/.test(pathname),
       );
       if (!file && clientRoute) file = await fileResponse("/");
       if (!file) {
@@ -982,8 +1035,19 @@ export function createPublicServer() {
         body=Buffer.from(injectArticleMetadata(injectRenderedRoot(body.toString(),renderGuideShell(guide)),normalized,pathname).replace('property="og:type" content="article"','property="og:type" content="website"'));
       } else if (landing && file.type.startsWith("text/html"))
         body = Buffer.from(injectLandingMetadata(body.toString(), landing));
+      else if (helpArticlePayload?.article && file.type.startsWith("text/html")) {
+        const rendered = injectRenderedRoot(
+          body.toString(),
+          renderHelpArticleShell(helpArticlePayload.article, helpArticlePayload.related),
+        );
+        body = Buffer.from(
+          injectHelpArticleMetadata(rendered, helpArticlePayload.article, pathname),
+        );
+      }
       else if (file.type.startsWith("text/html"))
         body = Buffer.from(injectStaticPageMetadata(body.toString(), pathname));
+      if (noindex && file.type.startsWith("text/html"))
+        body = Buffer.from(injectRobotsDirective(body.toString(), noindex));
       send(
         response,
         200,

@@ -6,12 +6,16 @@ import {
   encodedBody,
   helpArticleRequestForPath,
   injectArticleMetadata,
+  injectHelpArticleMetadata,
   injectLandingMetadata,
+  injectRobotsDirective,
   injectRenderedRoot,
   injectStaticPageMetadata,
   isOriginHost,
+  isPrivateIndexingPath,
   normalizePath,
   renderArticleShell,
+  renderHelpArticleShell,
   renderGuideShell,
   robotsHeader,
   sitemapStylesheet,
@@ -30,6 +34,17 @@ test("server-rendered SEO Guide shell exposes full public content without Blog b
 test("recognizes Render origins", () => assert.equal(isOriginHost("site.onrender.com"), true));
 test("non-production is noindex", () =>
   assert.equal(robotsHeader("tawseelhub.com"), "noindex, nofollow"));
+test("private result and search routes are noindex in English and Arabic", () => {
+  for (const path of ["/track", "/ar/track", "/send-a-package/quote/Q-1", "/ar/send-a-package/quote/Q-1"])
+    assert.equal(isPrivateIndexingPath(path), true, path);
+  assert.equal(isPrivateIndexingPath("/resources", new URLSearchParams("q=order")), true);
+  assert.equal(isPrivateIndexingPath("/ar/resources", new URLSearchParams("q=order")), true);
+  assert.equal(isPrivateIndexingPath("/ar/resources"), false);
+  assert.match(
+    injectRobotsDirective('<head><meta name="robots" content="index,follow" /></head>', "noindex, follow"),
+    /content="noindex, follow"/,
+  );
+});
 test("immutable bundles and compressible responses use production-safe delivery", () => {
   assert.equal(
     cacheControlFor("/assets/index-abc.js", "text/javascript"),
@@ -205,7 +220,7 @@ test("initial Arabic article HTML is RTL and contains reciprocal language metada
 });
 test("initial taxonomy HTML contains canonical, schema, noindex policy and RSS discovery", () => {
   const html = injectLandingMetadata(
-    '<html lang="en"><head><title>Old</title><meta name="description" content="Old" /></head></html>',
+    '<html lang="en"><head><title>Old</title><meta name="description" content="Old" /><link rel="canonical" href="https://tawseelhub.com/blog" /><link rel="alternate" hreflang="en" href="https://tawseelhub.com/blog" /></head></html>',
     {
       name: "COD & Finance",
       language: "en",
@@ -224,4 +239,26 @@ test("initial taxonomy HTML contains canonical, schema, noindex policy and RSS d
   assert.match(html, /rel="canonical" href="https:\/\/tawseelhub.com\/blog\/tag\/cod"/);
   assert.match(html, /type="application\/rss\+xml"/);
   assert.match(html, /CollectionPage/);
+  assert.equal((html.match(/hreflang="en"/g) ?? []).length, 1);
+});
+test("runtime Help articles keep their own canonical and crawler-visible content", () => {
+  const article = {
+    locale: "en",
+    title: "Create an order",
+    summary: "How to create an order.",
+    body: [{ type: "paragraph", text: "Open Orders and select New Order." }],
+    canonical_path: "/resources/create-an-order",
+    robots_index: true,
+    robots_follow: true,
+  };
+  const shell = renderHelpArticleShell(article);
+  assert.match(shell, /Open Orders and select New Order/);
+  const html = injectHelpArticleMetadata(
+    '<html lang="en"><head><title>Home</title><meta name="description" content="Home" /><link rel="canonical" href="https://tawseelhub.com/" /></head><body></body></html>',
+    article,
+    "/resources/create-an-order",
+  );
+  assert.match(html, /rel="canonical" href="https:\/\/tawseelhub.com\/resources\/create-an-order"/);
+  assert.match(html, /name="robots" content="index,follow,max-image-preview:large"/);
+  assert.doesNotMatch(html, /rel="canonical" href="https:\/\/tawseelhub.com\/"/);
 });

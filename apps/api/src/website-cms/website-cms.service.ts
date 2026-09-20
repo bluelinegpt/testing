@@ -92,7 +92,8 @@ function requireSafePath(path: string): string {
     !allowedRoutes.has(cleaned) &&
     !cleaned.startsWith("/blog/category/") &&
     !cleaned.startsWith("/blog/") &&
-    !cleaned.startsWith("/resources/")
+    !cleaned.startsWith("/resources/") &&
+    !cleaned.startsWith("/ar/resources/")
   ) {
     throw new BadRequestException("Destination must be an approved public route.");
   }
@@ -115,7 +116,7 @@ function helpArticlePayload(input: HelpArticleDto) {
       description: cleanText(input.metaDescription),
       canonical: input.canonicalPath
         ? requireSafePath(input.canonicalPath)
-        : `/resources/${input.slug}`,
+        : `${input.locale === "ar" ? "/ar" : ""}/resources/${input.slug}`,
       robotsIndex: input.robotsIndex,
       robotsFollow: input.robotsFollow,
       ogTitle: cleanText(input.ogTitle),

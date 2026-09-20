@@ -147,7 +147,7 @@ export class HelpArticleDto {
   @Type(() => Number) @IsInt() @Min(0) @Max(10000) sortOrder = 100;
   @IsString() @MinLength(5) @MaxLength(200) seoTitle!: string;
   @IsString() @MinLength(20) @MaxLength(320) metaDescription!: string;
-  @IsOptional() @Matches(/^\/resources\/[a-z0-9]+(?:-[a-z0-9]+)*$/) canonicalPath?: string;
+  @IsOptional() @Matches(/^(?:\/ar)?\/resources\/[a-z0-9]+(?:-[a-z0-9]+)*$/) canonicalPath?: string;
   @IsBoolean() robotsIndex = true;
   @IsBoolean() robotsFollow = true;
   @IsOptional() @IsString() @MaxLength(200) ogTitle?: string;

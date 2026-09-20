@@ -97,6 +97,7 @@ const staticRoutes = [
     title: "Track Your Shipment | Tawseelhub",
     description:
       "Track your shipment securely using your Airway Bill and view the latest delivery status.",
+    robots: "noindex,follow",
   },
   ...[
     "delivery-operations",
@@ -156,6 +157,7 @@ for (const [path, metadata] of Object.entries(routeMetadata.ar)) {
   routeMap.set(localizedPath, { path:localizedPath, type:"website", image:defaultImage, locale:"ar_AE", ...metadata,
     alternates:[{language:"en",url:`${siteUrl}${path}`},{language:"ar",url:`${siteUrl}${localizedPath}`}], xDefault:`${siteUrl}${path}` });
 }
+if (routeMap.has("/ar/track")) routeMap.get("/ar/track").robots = "noindex,follow";
 for (const route of routeMap.values()) {
   if (!route.alternates) route.alternates=[{language:"en",url:`${siteUrl}${route.path}`},{language:"ar",url:`${siteUrl}${route.path==="/"?"/ar":`/ar${route.path}`}`}];
   if (!route.xDefault) route.xDefault=`${siteUrl}${route.path}`;
