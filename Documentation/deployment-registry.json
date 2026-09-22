@@ -19,10 +19,10 @@
       "displayName": "API",
       "path": "apps/api",
       "renderService": "bluelinegpt-api-test",
-      "status": "pushed_awaiting_confirmation",
-      "localCommit": "ec19b34",
+      "status": "needs_deploy",
+      "localCommit": "a20ce17",
       "localCommitDate": "2026-09-22",
-      "lastChangeDescription": "fix(platform): load trader applications",
+      "lastChangeDescription": "fix(api): allow Arabic help canonicals",
       "lastChangeBy": "codex",
       "confirmedLiveCommit": "e3de371",
       "confirmedLiveAt": "2026-09-01"
