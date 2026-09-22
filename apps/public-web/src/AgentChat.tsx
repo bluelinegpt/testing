@@ -11,6 +11,7 @@ import {
   getAgentConversation,
   getWhatsAppSettings,
   reportLiveAvatarUsage,
+  recordAgentOpened,
   sendAgentMessage,
   type AgentAvailability,
   type AgentAvatarSettings,
@@ -23,7 +24,7 @@ import {
   transcriptTrackUrl,
   type AvatarState,
 } from "./avatar-provider";
-import { trackEvent } from "./analytics";
+import { currentAttribution, trackEvent, trackEventOnce } from "./analytics";
 import {
   createSpeechToTextProvider,
   createTextToSpeechProvider,
@@ -76,7 +77,43 @@ const avatarQuickActions = {
   ],
 } as const;
 const visitorIdKey = "tawseelhub-agent-visitor-id";
+const landingPageKey = "tawseelhub-agent-landing-page";
 const linkPattern = /(https?:\/\/[^\s،]+)/g;
+
+function visitorContext() {
+  let landingPage = window.location.pathname;
+  try {
+    landingPage = window.sessionStorage.getItem(landingPageKey) ?? landingPage;
+    window.sessionStorage.setItem(landingPageKey, landingPage);
+  } catch {
+    // First-party context is best-effort and must never block the Agent.
+  }
+  let referrerDomain: string | undefined;
+  try {
+    const hostname = document.referrer ? new URL(document.referrer).hostname : "";
+    if (hostname && hostname !== window.location.hostname) referrerDomain = hostname;
+  } catch {
+    referrerDomain = undefined;
+  }
+  const attribution = currentAttribution();
+  return {
+    landingPage,
+    ...(referrerDomain ? { referrerDomain } : {}),
+    sourceHostname: window.location.hostname,
+    sourcePage: window.location.pathname,
+    ...(attribution.utmCampaign ? { utmCampaign: attribution.utmCampaign } : {}),
+    ...(attribution.utmMedium ? { utmMedium: attribution.utmMedium } : {}),
+    ...(attribution.utmSource ? { utmSource: attribution.utmSource } : {}),
+  };
+}
+
+function analyticsEventId() {
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (character) => {
+    const random = Math.floor(Math.random() * 16);
+    return (character === "x" ? random : (random & 0x3) | 0x8).toString(16);
+  });
+}
 
 function visitorId() {
   const existing = window.localStorage.getItem(visitorIdKey);
@@ -362,6 +399,7 @@ export function AgentChat() {
       nextLanguage,
       visitorId(),
       avatarMode ? "website_avatar" : "website",
+      visitorContext(),
     );
     setToken(created.conversationToken ?? null);
     // `createAgentConversation` returns quickActions as a top-level field,
@@ -380,23 +418,20 @@ export function AgentChat() {
       ],
     );
     setHumanState(created.humanState ?? "ai_active");
-    trackEvent("agent_conversation_started", {
-      channel: avatarMode ? "website_avatar" : "website",
-      language: nextLanguage,
-      page: window.location.pathname,
-    });
     return created.conversationToken ?? null;
   }
 
   async function openChat() {
     setOpen(true);
     widgetDataLoaderRef.current?.();
-    trackEvent("agent_opened", { channel: "website", language, page: window.location.pathname });
+    const openEventId = analyticsEventId();
+    trackEventOnce("agent_opened", openEventId, { channel: "website", language, page: window.location.pathname });
     if (avatarMode)
       trackEvent("avatar_opened", { channel: "website_avatar", language, page: path });
     try {
       setBusy(true);
-      await ensureConversation();
+      const currentToken = await ensureConversation();
+      if (currentToken) await recordAgentOpened(currentToken, openEventId);
     } catch {
       setHandoffRequested(true);
       setError(
@@ -436,8 +471,26 @@ export function AgentChat() {
       setBusy(true);
       const currentToken = await ensureConversation();
       if (!currentToken) throw new Error("The Assistant could not start a secure session.");
-      const result = await sendAgentMessage(currentToken, text, language);
+      const inboundMessageId = analyticsEventId();
+      const result = await sendAgentMessage(currentToken, text, language, inboundMessageId);
       setMessages(result.messages ?? []);
+      const analyticsMetadata = {
+        channel: avatarMode ? "website_avatar" as const : "website" as const,
+        language: result.language,
+        page: window.location.pathname,
+        reference: result.reference,
+      };
+      trackEventOnce("agent_message_sent", `${result.reference}:${inboundMessageId}`, analyticsMetadata);
+      if (result.analytics?.conversationStarted)
+        trackEventOnce("agent_conversation_started", result.reference, analyticsMetadata);
+      if (result.analytics?.contactRequested)
+        trackEventOnce("agent_contact_requested", result.reference, analyticsMetadata);
+      if (result.analytics?.contactCaptured)
+        trackEventOnce("agent_contact_captured", result.reference, analyticsMetadata);
+      if (result.analytics?.handoffRequested)
+        trackEventOnce("agent_handoff_requested", result.reference, analyticsMetadata);
+      if (result.analytics?.qualifiedLead)
+        trackEventOnce("agent_lead_created", result.reference, analyticsMetadata);
       const assistantAnswer = [...(result.messages ?? [])]
         .reverse()
         .find((item) => item.senderType === "assistant")?.content;
@@ -509,13 +562,6 @@ export function AgentChat() {
           intent: result.intent,
           page: window.location.pathname,
         });
-      if (result.intent === "handoff")
-        trackEvent("agent_handoff_requested", {
-          channel: "website",
-          language: result.language,
-          intent: result.intent,
-          page: window.location.pathname,
-        });
       if (
         result.humanState === "waiting_for_human" ||
         result.conversationMode === "paused" ||
@@ -573,6 +619,7 @@ export function AgentChat() {
         nextLanguage,
         visitorId(),
         avatarMode ? "website_avatar" : "website",
+        visitorContext(),
       );
       setToken(created.conversationToken ?? null);
       setMessages(
@@ -586,11 +633,6 @@ export function AgentChat() {
         ],
       );
       setHumanState(created.humanState ?? "ai_active");
-      trackEvent("agent_conversation_started", {
-        channel: "website",
-        language: nextLanguage,
-        page: window.location.pathname,
-      });
     } catch {
       setHandoffRequested(true);
       setError(

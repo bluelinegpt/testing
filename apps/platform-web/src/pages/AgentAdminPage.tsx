@@ -10,12 +10,17 @@ type ConversationFilters = {
   channel: string;
   classification: string;
   conversationMode: string;
+  country: string;
   datePreset: string;
   from: string;
+  identity: string;
+  language: string;
+  leadStatus: string;
   needsReply: string;
   page: number;
   pageSize: number;
   search: string;
+  sourceCampaign: string;
   status: string;
   to: string;
   unread: string;
@@ -23,7 +28,7 @@ type ConversationFilters = {
 };
 
 const emptyKnowledge = { audience: "all", featureStatus: "informational", language: "en", title: "", content: "", category: "Tawseelhub Overview", status: "draft", sortOrder: 100, visibility: "public_agent" };
-const statusOptions = ["new", "open", "in_progress", "waiting_for_customer", "follow_up", "resolved", "closed"] as const;
+const statusOptions = ["new", "open", "in_progress", "waiting_for_customer", "follow_up", "resolved", "closed", "spam"] as const;
 const classificationOptions = ["shipment_quote", "trader_lead", "delivery_company_lead", "demo_request", "product_question", "storefront_commerce", "support", "general_enquiry", "pricing_enquiry", "partnership_enquiry"] as const;
 
 function titleize(value: string | undefined) {
@@ -73,6 +78,12 @@ function messageClass(message: any) {
 
 function textDirection(value: string | undefined) {
   return /[\u0600-\u06ff]/u.test(value ?? "") ? "rtl" : "ltr";
+}
+
+function whatsappContactUrl(value: unknown) {
+  const digits = String(value ?? "").replace(/\D/g, "");
+  if (!digits) return null;
+  return `https://wa.me/${digits.startsWith("0") ? `971${digits.slice(1)}` : digits}`;
 }
 
 function conversationChannel(conversation: any) {
@@ -209,7 +220,7 @@ export function AgentAdminPage() {
   const [tab, setTab] = useState<Tab>("conversations");
   const [conversations, setConversations] = useState<any[]>([]);
   const [conversationPage, setConversationPage] = useState<any>({ counters: {}, page: 1, pageSize: 25, total: 0 });
-  const [conversationFilters, setConversationFilters] = useState<ConversationFilters>({ assignedToAccountId: "all", audience: "all", channel: "all", classification: "all", conversationMode: "all", datePreset: "all", from: "", needsReply: "all", page: 1, pageSize: 25, search: initialSearch, status: "all", to: "", unread: "all", visibility: "active" });
+  const [conversationFilters, setConversationFilters] = useState<ConversationFilters>({ assignedToAccountId: "all", audience: "all", channel: "all", classification: "all", conversationMode: "all", country: "all", datePreset: "all", from: "", identity: "all", language: "all", leadStatus: "all", needsReply: "all", page: 1, pageSize: 25, search: initialSearch, sourceCampaign: "", status: "all", to: "", unread: "all", visibility: "active" });
   const [assignees, setAssignees] = useState<any[]>([]);
   const [handoffs, setHandoffs] = useState<any[]>([]);
   const [knowledge, setKnowledge] = useState<any[]>([]);
@@ -219,7 +230,7 @@ export function AgentAdminPage() {
   const [websiteMedia, setWebsiteMedia] = useState<WebsiteMedia[]>([]);
   const [selectedConversation, setSelectedConversation] = useState<any | null>(null);
   const [selectedConversationIds, setSelectedConversationIds] = useState<string[]>([]);
-  const [reviewDraft, setReviewDraft] = useState({ action: "", assignedToAccountId: "", classification: "general_enquiry", comment: "", status: "new" });
+  const [reviewDraft, setReviewDraft] = useState({ action: "", assignedToAccountId: "", classification: "general_enquiry", comment: "", leadStatus: "not_lead", status: "new" });
   const [internalComment, setInternalComment] = useState("");
   const [replyText, setReplyText] = useState("");
   const [draft, setDraft] = useState<any>(emptyKnowledge);
@@ -517,7 +528,7 @@ export function AgentAdminPage() {
     lastMessageIdRef.current = messages.length ? String(messages[messages.length - 1]?.id ?? `${messages[messages.length - 1]?.createdAt ?? ""}-${messages.length}`) : null;
     setSelectedConversation(detail);
     setHasNewMessageBelow(false);
-    setReviewDraft({ action: detail.reviewAction ?? "", assignedToAccountId: detail.assignedToAccountId ?? "", classification: detail.operationalClassification ?? "general_enquiry", comment: detail.reviewComment ?? "", status: detail.reviewStatus ?? "new" });
+    setReviewDraft({ action: detail.reviewAction ?? "", assignedToAccountId: detail.assignedToAccountId ?? "", classification: detail.operationalClassification ?? "general_enquiry", comment: detail.reviewComment ?? "", leadStatus: detail.leadStatus ?? "not_lead", status: detail.reviewStatus ?? "new" });
     window.setTimeout(() => transcriptRef.current?.scrollTo({ top: transcriptRef.current.scrollHeight }), 0);
   }
 
@@ -584,13 +595,18 @@ export function AgentAdminPage() {
       channel: "all",
       classification: "all",
       conversationMode: "all",
+      country: "all",
       datePreset: "all",
       from: "",
+      identity: "all",
+      language: "all",
+      leadStatus: "all",
       needsReply: "all",
       to: "",
       page: 1,
       pageSize: current.pageSize,
       search: "",
+      sourceCampaign: "",
       status: "all",
       unread: "all",
       visibility: "active",
@@ -605,12 +621,17 @@ export function AgentAdminPage() {
       channel: "all",
       classification: "all",
       conversationMode: "paused",
+      country: "all",
       datePreset: "all",
       from: "",
+      identity: "all",
+      language: "all",
+      leadStatus: "all",
       needsReply: "all",
       page: 1,
       pageSize: conversationFilters.pageSize,
       search: "",
+      sourceCampaign: "",
       status: "all",
       to: "",
       unread: "all",
@@ -781,6 +802,15 @@ export function AgentAdminPage() {
             </div>
             {!inboxCollapsed ? (
               <>
+              <div className="lead-action-grid" aria-label="Agent analytics summary">
+                <span className="platform-badge">Widget Opens {conversationPage.counters?.widgetOpens ?? 0}</span>
+                <span className="platform-badge">Meaningful Conversations {conversationPage.counters?.meaningfulConversations ?? 0}</span>
+                <span className="platform-badge">Anonymous Conversations {conversationPage.counters?.anonymousConversations ?? 0}</span>
+                <span className="platform-badge">Identified Conversations {conversationPage.counters?.identifiedConversations ?? 0}</span>
+                <span className="platform-badge">Contacts Captured {conversationPage.counters?.contactsCaptured ?? 0}</span>
+                <span className="platform-badge">Handoff Requests {conversationPage.counters?.handoffRequests ?? 0}</span>
+                <span className="platform-badge">Qualified Leads {conversationPage.counters?.qualifiedLeads ?? 0}</span>
+              </div>
               <div className="lead-action-grid">
               <button className="platform-badge agent-counter-button" type="button" onClick={() => applyConversationShortcut({ needsReply: "all", status: "new" })}>New {conversationPage.counters?.new ?? 0}</button>
               <button className="platform-badge agent-counter-button" type="button" onClick={() => applyConversationShortcut({ needsReply: "all", status: "open,in_progress" })}>Open {conversationPage.counters?.open ?? 0}</button>
@@ -813,6 +843,11 @@ export function AgentAdminPage() {
               <select value={conversationFilters.conversationMode} onChange={(event) => setConversationFilter("conversationMode", event.target.value)}><option value="all">All Agent Modes</option><option value="paused">Waiting for Human</option><option value="human_active">Human Active</option><option value="ai_active">Yousef Active</option><option value="ai_resume">Returned to Yousef</option></select>
               <select value={conversationFilters.audience} onChange={(event) => setConversationFilter("audience", event.target.value)}><option value="all">All Audiences</option><option value="customer">Customer</option><option value="trader">Trader</option><option value="delivery_company">Delivery Company</option><option value="unknown">Unknown</option></select>
               <select value={conversationFilters.classification} onChange={(event) => setConversationFilter("classification", event.target.value)}><option value="all">All Classifications</option>{classificationOptions.map((classification) => <option key={classification} value={classification}>{titleize(classification)}</option>)}</select>
+              <select value={conversationFilters.identity} onChange={(event) => setConversationFilter("identity", event.target.value)}><option value="all">All Visitors</option><option value="contact">Has Contact Details</option><option value="anonymous">Anonymous</option></select>
+              <select value={conversationFilters.language} onChange={(event) => setConversationFilter("language", event.target.value)}><option value="all">All Languages</option><option value="en">English</option><option value="ar">Arabic</option></select>
+              <input maxLength={2} placeholder="Country code (AE, SA…)" value={conversationFilters.country === "all" ? "" : conversationFilters.country} onChange={(event) => setConversationFilter("country", event.target.value.trim().toUpperCase() || "all")} />
+              <select value={conversationFilters.leadStatus} onChange={(event) => setConversationFilter("leadStatus", event.target.value)}><option value="all">All Lead Statuses</option><option value="not_lead">Not a Lead</option><option value="new">New</option><option value="qualified">Qualified</option><option value="contacted">Contacted</option><option value="closed">Closed</option><option value="spam">Spam</option></select>
+              <input placeholder="Source, referrer or campaign" value={conversationFilters.sourceCampaign} onChange={(event) => setConversationFilter("sourceCampaign", event.target.value)} />
               <select value={conversationFilters.assignedToAccountId} onChange={(event) => setConversationFilter("assignedToAccountId", event.target.value)}><option value="all">All Assignees</option><option value="unassigned">Unassigned</option>{assignees.map((assignee) => <option key={assignee.id} value={assignee.id}>{assignee.username}</option>)}</select>
               <select value={conversationFilters.unread} onChange={(event) => setConversationFilter("unread", event.target.value)}><option value="all">All Read States</option><option value="unread">Unread</option><option value="read">Read</option></select>
               <select value={conversationFilters.visibility} onChange={(event) => setConversationFilter("visibility", event.target.value)}><option value="active">Active Chats</option><option value="hidden">Hidden Chats</option><option value="all">All Including Hidden</option></select>
@@ -868,7 +903,12 @@ export function AgentAdminPage() {
                 <div className="agent-inbox-item__meta">
                   <span>{titleize(item.operationalClassification)}</span>
                   <span>{conversationChannel(item)}</span>
+                  <span>{String(item.language ?? "unknown").toUpperCase()}</span>
                   <span>{item.mobileNumber ?? "No mobile"}</span>
+                  <span>{item.sourcePage ?? "Source page unavailable"}</span>
+                  <span>{item.countryName ?? item.countryCode ?? "Country unavailable"}</span>
+                  <span>{titleize(item.leadStatus ?? "not_lead")}</span>
+                  {item.handoffRequestedAt || item.handoffReference ? <span className="platform-badge">Handoff requested</span> : null}
                   {item.identityMatchType === "ip" && Number(item.conversationCount ?? 1) > 1 ? <span className="platform-badge agent-ip-badge">Same IP</span> : item.hasVisitorIp ? <span className="platform-badge agent-ip-badge">IP captured</span> : null}
                 </div>
                 <div className="agent-inbox-item__state">
@@ -883,7 +923,8 @@ export function AgentAdminPage() {
                 <div className="agent-inbox-item__footer">
                   <span>{item.assignedToUsername ? `Assigned to ${item.assignedToUsername}` : "Unassigned"}</span>
                   <span>{item.messageCount ?? 0} total messages</span>
-                  <span>{formatDubaiTime(item.lastMessageAt ?? item.updatedAt)}</span>
+                  <span>Started {formatDubaiTime(item.createdAt)}</span>
+                  <span>Last activity {formatDubaiTime(item.lastMessageAt ?? item.updatedAt)}</span>
                 </div>
               </article>) : !conversationLoading ? <p className="platform-muted">No conversations match the current filters.</p> : null}
             </div>
@@ -915,11 +956,26 @@ export function AgentAdminPage() {
                       <span className="platform-badge">{selectedConversation.email ?? "No email"}</span>
                       <span className="platform-badge">Last channel {selectedConversation.state?.entrySurface === "website_avatar" ? "Website Avatar" : titleize(selectedConversation.lastChannel ?? selectedConversation.channel)}</span>
                       <span className="platform-badge">Assigned to {selectedConversation.assignedToUsername ?? "Unassigned"}</span>
+                      <span className="platform-badge">Started {formatDubaiTime(selectedConversation.createdAt)}</span>
+                      <span className="platform-badge">Last activity {formatDubaiTime(selectedConversation.lastMessageAt ?? selectedConversation.updatedAt)}</span>
+                      <span className="platform-badge">Contact requested {selectedConversation.contactRequestedAt ? "Yes" : "No"}</span>
+                      <span className="platform-badge">Contact captured {selectedConversation.contactCapturedAt ? "Yes" : "No"}</span>
+                      <span className="platform-badge">Handoff requested {selectedConversation.handoffRequestedAt || selectedConversation.handoffReference ? "Yes" : "No"}</span>
+                      <span className="platform-badge">Lead status {titleize(selectedConversation.leadStatus ?? "not_lead")}</span>
+                      <span className="platform-badge">Country {selectedConversation.countryName ?? selectedConversation.countryCode ?? "Unavailable"}</span>
+                      <span className="platform-badge">Campaign {[selectedConversation.referrerDomain, selectedConversation.utmSource, selectedConversation.utmMedium, selectedConversation.utmCampaign].filter(Boolean).join(" · ") || "Unavailable"}</span>
+                      <span className="platform-badge">Device {[selectedConversation.deviceCategory, selectedConversation.browserFamily, selectedConversation.operatingSystemFamily].filter(Boolean).join(" · ") || "Unavailable"}</span>
+                      {selectedConversation.sourceHostname || selectedConversation.sourcePage ? <span className="platform-badge">Source {[selectedConversation.sourceHostname, selectedConversation.sourcePage].filter(Boolean).join("")}</span> : null}
                       {selectedIsHidden && !selectedIsDeleted ? <span className="platform-badge agent-hidden-badge">Hidden</span> : null}
                       {selectedIsDeleted ? <span className="platform-badge agent-deleted-badge">Deleted</span> : null}
                       {selectedConversation.previousDays?.length ? <span className="platform-badge">Related history {selectedConversation.previousDays.length} day(s)</span> : null}
                       {selectedWaitingCount > 0 ? <span className="agent-waiting-pill">● {selectedWaitingCount} waiting</span> : null}
                       {selectedWaitingDuration ? <span className="agent-waiting-time">{selectedWaitingDuration}</span> : null}
+                    </div>
+                    <div className="lead-contact-actions" aria-label="Visitor contact actions">
+                      {selectedConversation.mobileNumber ? <a className="platform-button platform-button--quiet" href={`tel:${selectedConversation.mobileNumber}`}>Call</a> : null}
+                      {whatsappContactUrl(selectedConversation.mobileNumber) ? <a className="platform-button platform-button--quiet" href={whatsappContactUrl(selectedConversation.mobileNumber) ?? undefined} rel="noreferrer" target="_blank">WhatsApp</a> : null}
+                      {selectedConversation.email ? <a className="platform-button platform-button--quiet" href={`mailto:${selectedConversation.email}`}>Email</a> : null}
                     </div>
                     <div className="agent-management-actions">
                       {!selectedIsHidden && !selectedIsDeleted ? <button className="platform-button platform-button--quiet" type="button" onClick={() => void hideSelectedConversation()}>Hide this chat</button> : null}
@@ -948,6 +1004,7 @@ export function AgentAdminPage() {
                   <p className="platform-muted">Status tracks business follow-up. Classification is what the conversation is about. Assignee is the Platform staff owner. Mode stays separate above because it controls whether Yousef or a human replies.</p>
                   <div className="agent-review-grid">
                     <label>Status<span>Status tracks the business follow-up state.</span><select value={reviewDraft.status} onChange={(event) => setReviewDraft({ ...reviewDraft, status: event.target.value })}>{statusOptions.map((status) => <option key={status} value={status}>{titleize(status)}</option>)}</select></label>
+                    <label>Lead Status<span>Only qualified commercial or follow-up conversations are leads.</span><select value={reviewDraft.leadStatus} onChange={(event) => setReviewDraft({ ...reviewDraft, leadStatus: event.target.value })}><option value="not_lead">Not a Lead</option><option value="new">New</option><option value="qualified">Qualified</option><option value="contacted">Contacted</option><option value="closed">Closed</option><option value="spam">Spam</option></select></label>
                     <label>Classification<span>Used for routing, filtering and reporting.</span><select value={reviewDraft.classification} onChange={(event) => setReviewDraft({ ...reviewDraft, classification: event.target.value })}>{classificationOptions.map((classification) => <option key={classification} value={classification}>{titleize(classification)}</option>)}</select></label>
                     <label>Assignee<span>Who owns or follows up this conversation.</span><select value={reviewDraft.assignedToAccountId} onChange={(event) => setReviewDraft({ ...reviewDraft, assignedToAccountId: event.target.value })}><option value="">Unassigned</option>{assignees.map((assignee) => <option key={assignee.id} value={assignee.id}>{assignee.username}</option>)}</select></label>
                   </div>

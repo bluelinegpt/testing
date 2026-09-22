@@ -657,6 +657,19 @@ export class AgentService {
     visitorId?: string,
     visitorIp?: string,
     surface: "website" | "website_avatar" = "website",
+    context: {
+      browserFamily?: string;
+      countryCode?: string;
+      deviceCategory?: string;
+      landingPage?: string;
+      operatingSystemFamily?: string;
+      referrerDomain?: string;
+      sourceHostname?: string;
+      sourcePage?: string;
+      utmCampaign?: string;
+      utmMedium?: string;
+      utmSource?: string;
+    } = {},
   ) {
     const sessionToken = token();
     const settings = await this.settings();
@@ -665,7 +678,8 @@ export class AgentService {
     const ref = await reference(this.db, "platform_agent_conversation_reference_seq", "AGT");
     const stableVisitorId = validUuid.test(visitorId ?? "") ? visitorId! : randomUUID();
     const visitorIpHash = this.visitorIpHash(visitorIp);
-    await sql`insert into platform_agent_conversations(reference_number,public_session_token_hash,visitor_id,visitor_ip_hash,visitor_ip_seen_at,channel,language,current_intent,status,requester_type,audience,last_message_at,state) values(${ref},${hash(sessionToken)},${stableVisitorId}::uuid,${visitorIpHash},case when ${visitorIpHash}::text is not null then now() else null end,'website',${language ?? settings.defaultLanguage},'unknown','active','unknown','unknown',now(),${JSON.stringify({ slots: {}, audience: "unknown", discussedTopics: [], visitorId: stableVisitorId, entrySurface: surface })}::jsonb)`.execute(
+    const countryNames: Record<string, string> = { AE: "United Arab Emirates", SA: "Saudi Arabia" };
+    await sql`insert into platform_agent_conversations(reference_number,public_session_token_hash,visitor_id,visitor_ip_hash,visitor_ip_seen_at,channel,language,current_intent,status,requester_type,audience,last_message_at,source_hostname,source_page,landing_page,referrer_domain,utm_source,utm_medium,utm_campaign,country_code,country_name,device_category,browser_family,operating_system_family,widget_opened_at,state) values(${ref},${hash(sessionToken)},${stableVisitorId}::uuid,${visitorIpHash},case when ${visitorIpHash}::text is not null then now() else null end,'website',${language ?? settings.defaultLanguage},'unknown','active','unknown','unknown',now(),${context.sourceHostname?.toLowerCase() ?? null},${context.sourcePage ?? null},${context.landingPage ?? context.sourcePage ?? null},${context.referrerDomain?.toLowerCase() ?? null},${context.utmSource ?? null},${context.utmMedium ?? null},${context.utmCampaign ?? null},${context.countryCode ?? null},${context.countryCode ? countryNames[context.countryCode] ?? null : null},${context.deviceCategory ?? "unknown"},${context.browserFamily ?? null},${context.operatingSystemFamily ?? null},now(),${JSON.stringify({ slots: {}, audience: "unknown", discussedTopics: [], visitorId: stableVisitorId, entrySurface: surface })}::jsonb)`.execute(
       this.db,
     );
     const selectedLanguage = language ?? settings.defaultLanguage;
@@ -687,11 +701,19 @@ export class AgentService {
     return this.publicConversation(conversation);
   }
 
+  public async recordWebsiteOpen(sessionToken: string, eventId: string) {
+    const conversation = await this.findByToken(sessionToken);
+    await sql`insert into platform_agent_analytics_events(conversation_id,event_name,dedupe_key) values(${conversation.id}::uuid,'agent_opened',${eventId}) on conflict do nothing`.execute(
+      this.db,
+    );
+  }
+
   public async receiveWebsiteMessage(
     sessionToken: string,
     text: string,
     language?: AgentLanguage,
     visitorIp?: string,
+    inboundMessageId?: string,
   ) {
     const conversation = await this.findByToken(sessionToken);
     const visitorIpHash = this.visitorIpHash(visitorIp);
@@ -707,6 +729,7 @@ export class AgentService {
     }
     return this.handleInbound(conversation, {
       channel: "website",
+      ...(inboundMessageId === undefined ? {} : { inboundMessageId }),
       text,
       ...(language === undefined ? {} : { language }),
     });
@@ -915,6 +938,9 @@ export class AgentService {
         ? {}
         : { providerMessageId: input.providerMessageId }),
     });
+    await sql`update platform_agent_conversations set conversation_started_at=coalesce(conversation_started_at,now()),last_customer_message_at=now(),updated_at=now(),last_message_at=now() where id=${conversation.id}::uuid`.execute(
+      this.db,
+    );
     if (
       conversation.conversation_mode === "paused" &&
       cancelHumanRequestPattern.test(input.text.trim())
@@ -1136,7 +1162,7 @@ export class AgentService {
             ...(input.provider === undefined ? {} : { provider: input.provider }),
           },
         );
-        await sql`update platform_agent_conversations set language=${language},current_intent=${persistedIntent},status=${resumed.status ?? "waiting_for_user"},audience=${mergedState.audience ?? "unknown"},customer_name=${identity.name},mobile_number=${identity.mobileOriginal},mobile_number_normalized=${identity.mobileNormalized},email=${identity.email},state=${JSON.stringify(mergedState)}::jsonb,updated_at=now(),last_message_at=now() where id=${conversation.id}::uuid`.execute(
+        await sql`update platform_agent_conversations set language=${language},current_intent=${persistedIntent},status=${resumed.status ?? "waiting_for_user"},audience=${mergedState.audience ?? "unknown"},customer_name=${identity.name},mobile_number=${identity.mobileOriginal},mobile_number_normalized=${identity.mobileNormalized},email=${identity.email},contact_requested_at=coalesce(contact_requested_at,now()),contact_captured_at=case when ${Boolean(identity.name || identity.mobileOriginal || identity.email)} then coalesce(contact_captured_at,now()) else contact_captured_at end,qualified_lead_at=case when ${Boolean(identity.name && identity.mobileOriginal && ["customer_quote", "trader", "delivery_company_demo", "handoff"].includes(intro.resumeIntent))} then coalesce(qualified_lead_at,now()) else qualified_lead_at end,lead_status=case when ${Boolean(identity.name && identity.mobileOriginal && ["customer_quote", "trader", "delivery_company_demo", "handoff"].includes(intro.resumeIntent))} and lead_status='not_lead' then 'qualified' else lead_status end,state=${JSON.stringify(mergedState)}::jsonb,updated_at=now(),last_message_at=now() where id=${conversation.id}::uuid`.execute(
           this.db,
         );
         const updated = (
@@ -1166,7 +1192,7 @@ export class AgentService {
           ...(input.provider === undefined ? {} : { provider: input.provider }),
         },
       );
-      await sql`update platform_agent_conversations set language=${language},current_intent='general_question',status=${intro.status},audience=${introState.audience ?? "unknown"},customer_name=${identity.name},mobile_number=${identity.mobileOriginal},mobile_number_normalized=${identity.mobileNormalized},email=${identity.email},state=${JSON.stringify(introState)}::jsonb,updated_at=now(),last_message_at=now() where id=${conversation.id}::uuid`.execute(
+      await sql`update platform_agent_conversations set language=${language},current_intent='general_question',status=${intro.status},audience=${introState.audience ?? "unknown"},customer_name=${identity.name},mobile_number=${identity.mobileOriginal},mobile_number_normalized=${identity.mobileNormalized},email=${identity.email},contact_requested_at=coalesce(contact_requested_at,now()),contact_captured_at=case when ${Boolean(identity.name || identity.mobileOriginal || identity.email)} then coalesce(contact_captured_at,now()) else contact_captured_at end,state=${JSON.stringify(introState)}::jsonb,updated_at=now(),last_message_at=now() where id=${conversation.id}::uuid`.execute(
         this.db,
       );
       const updated = (
@@ -2045,7 +2071,7 @@ export class AgentService {
       )
     ).rows[0];
     if (quote)
-      await sql`update platform_agent_conversations set linked_quote_request_id=${quote.id}::uuid where id=${conversationId}::uuid`.execute(
+      await sql`update platform_agent_conversations set linked_quote_request_id=${quote.id}::uuid,qualified_lead_at=coalesce(qualified_lead_at,now()),lead_status=case when lead_status='not_lead' then 'qualified' else lead_status end where id=${conversationId}::uuid`.execute(
         this.db,
       );
     const offerText = result.offers.length
@@ -2087,7 +2113,7 @@ export class AgentService {
     await sql`insert into platform_agent_actions(conversation_id,action_type,status,request_snapshot,response_snapshot) values(${conversationId}::uuid,'submit_trader_application','completed',${JSON.stringify(this.redactSlots(s))}::jsonb,${JSON.stringify({ referenceNumber: result.referenceNumber, status: result.status })}::jsonb)`.execute(
       this.db,
     );
-    await sql`update platform_agent_conversations set linked_trader_application_id=${result.id}::uuid where id=${conversationId}::uuid`.execute(
+    await sql`update platform_agent_conversations set linked_trader_application_id=${result.id}::uuid,qualified_lead_at=coalesce(qualified_lead_at,now()),lead_status=case when lead_status='not_lead' then 'qualified' else lead_status end where id=${conversationId}::uuid`.execute(
       this.db,
     );
     return {
@@ -2129,7 +2155,7 @@ export class AgentService {
     await sql`insert into platform_agent_actions(conversation_id,action_type,status,request_snapshot,response_snapshot) values(${conversationId}::uuid,'submit_demo_request','completed',${JSON.stringify(this.redactSlots(s))}::jsonb,${JSON.stringify({ referenceNumber: result.referenceNumber })}::jsonb)`.execute(
       this.db,
     );
-    await sql`update platform_agent_conversations set linked_demo_request_id=${result.id}::uuid where id=${conversationId}::uuid`.execute(
+    await sql`update platform_agent_conversations set linked_demo_request_id=${result.id}::uuid,qualified_lead_at=coalesce(qualified_lead_at,now()),lead_status=case when lead_status='not_lead' then 'qualified' else lead_status end where id=${conversationId}::uuid`.execute(
       this.db,
     );
     return {
@@ -2286,6 +2312,9 @@ export class AgentService {
       this.db,
     );
     await sql`insert into platform_agent_handoff_history(handoff_id,old_status,new_status,notes) values(${inserted.rows[0]!.id}::uuid,null,'new','Created by Tawseelhub Agent'); insert into platform_agent_actions(conversation_id,action_type,status,request_snapshot,response_snapshot) values(${conversationId}::uuid,'create_handoff','completed',${JSON.stringify(this.redactSlots(s))}::jsonb,${JSON.stringify({ referenceNumber: ref })}::jsonb)`.execute(
+      this.db,
+    );
+    await sql`update platform_agent_conversations set handoff_requested_at=coalesce(handoff_requested_at,now()),contact_requested_at=coalesce(contact_requested_at,now()),qualified_lead_at=coalesce(qualified_lead_at,now()),lead_status=case when lead_status='not_lead' then 'qualified' else lead_status end where id=${conversationId}::uuid`.execute(
       this.db,
     );
     return {
@@ -2888,6 +2917,17 @@ export class AgentService {
     if (query.audience && query.audience !== "all") filters.push(sql`c.audience=${query.audience}`);
     if (query.classification && query.classification !== "all")
       filters.push(sql`c.operational_classification=${query.classification}`);
+    if (query.language && query.language !== "all") filters.push(sql`c.language=${query.language}`);
+    if (query.country && query.country !== "all") filters.push(sql`c.country_code=${query.country}`);
+    if (query.leadStatus && query.leadStatus !== "all") filters.push(sql`c.lead_status=${query.leadStatus}`);
+    if (query.sourceCampaign?.trim()) {
+      const sourceCampaign = `%${query.sourceCampaign.trim()}%`;
+      filters.push(sql`(c.source_page ilike ${sourceCampaign} or c.referrer_domain ilike ${sourceCampaign} or c.utm_source ilike ${sourceCampaign} or c.utm_campaign ilike ${sourceCampaign})`);
+    }
+    if (query.identity === "contact")
+      filters.push(sql`(c.customer_name is not null or c.mobile_number is not null or c.email is not null)`);
+    else if (query.identity === "anonymous")
+      filters.push(sql`c.customer_name is null and c.mobile_number is null and c.email is null`);
     if (query.assignedToAccountId === "unassigned")
       filters.push(sql`c.assigned_to_account_id is null`);
     else if (query.assignedToAccountId && query.assignedToAccountId !== "all")
@@ -3037,6 +3077,13 @@ export class AgentService {
       (
         await sql<Record<string, unknown>>`
       select
+        (select count(*)::int from platform_agent_analytics_events where event_name='agent_opened') widget_opens,
+        count(*) filter(where conversation_started_at is not null)::int meaningful_conversations,
+        count(*) filter(where conversation_started_at is not null and customer_name is null and mobile_number is null and email is null)::int anonymous_conversations,
+        count(*) filter(where conversation_started_at is not null and (customer_name is not null or mobile_number is not null or email is not null))::int identified_conversations,
+        count(*) filter(where contact_captured_at is not null)::int contacts_captured,
+        count(*) filter(where handoff_requested_at is not null)::int handoff_requests,
+        count(*) filter(where qualified_lead_at is not null)::int qualified_leads,
         count(*) filter(where hidden_at is null and deleted_at is null and review_status='new')::int new,
         count(*) filter(where hidden_at is null and deleted_at is null and review_status in('open','in_progress'))::int open,
         count(*) filter(where hidden_at is null and deleted_at is null and review_status='waiting_for_customer')::int waiting_for_customer,
@@ -3158,6 +3205,7 @@ export class AgentService {
     await sql`
       update platform_agent_conversations
       set review_status=${input.status},
+          lead_status=coalesce(${input.leadStatus ?? null},lead_status),
           review_comment=${input.comment?.trim() || null},
           review_action=${input.action?.trim() || null},
           operational_classification=${this.normalizeClassification(input.classification)},
@@ -4385,6 +4433,13 @@ export class AgentService {
       language: conversation.language,
       intent: conversation.current_intent,
       status: conversation.status,
+      analytics: {
+        contactCaptured: Boolean(conversation.contact_captured_at),
+        contactRequested: Boolean(conversation.contact_requested_at),
+        conversationStarted: Boolean(conversation.conversation_started_at),
+        handoffRequested: Boolean(conversation.handoff_requested_at),
+        qualifiedLead: Boolean(conversation.qualified_lead_at),
+      },
       messages: messages.rows.map((row) => {
         const mapped = mapRow(row);
         return {
@@ -4437,7 +4492,7 @@ export class AgentService {
   ) {
     await sql`
       update platform_agent_conversations
-      set conversation_mode='paused', status='waiting_for_user', review_status=case when review_status='new' then 'open' else review_status end, mode_changed_at=now(), updated_at=now()
+      set conversation_mode='paused', status='waiting_for_user', review_status=case when review_status='new' then 'open' else review_status end, handoff_requested_at=coalesce(handoff_requested_at,now()), qualified_lead_at=coalesce(qualified_lead_at,now()), lead_status=case when lead_status='not_lead' then 'qualified' else lead_status end, mode_changed_at=now(), updated_at=now()
       where id=${conversationId}::uuid
     `.execute(this.db);
     await this.recordModeHistory(conversationId, oldMode, "paused", null, comment);

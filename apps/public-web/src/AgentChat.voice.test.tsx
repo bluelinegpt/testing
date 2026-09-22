@@ -29,7 +29,7 @@ vi.mock("./voice-provider", () => ({
   }),
 }));
 
-vi.mock("./analytics", () => ({ trackEvent: mocks.track }));
+vi.mock("./analytics", () => ({ currentAttribution: () => ({}), trackEvent: mocks.track, trackEventOnce: mocks.track }));
 
 vi.mock("./agent-client", () => ({
   buildWhatsAppMessageUrl: (url: string) => url,
@@ -93,6 +93,7 @@ vi.mock("./agent-client", () => ({
     }),
   getAgentConversation: vi.fn().mockResolvedValue(null),
   getWhatsAppSettings: vi.fn().mockResolvedValue({ enabled: false, url: null }),
+  recordAgentOpened: vi.fn().mockResolvedValue(undefined),
   sendAgentMessage: mocks.send,
 }));
 
@@ -147,7 +148,7 @@ describe("Agent voice conversation", () => {
     await waitFor(() =>
       expect(mocks.speak).toHaveBeenCalledWith("Tawseelhub connects delivery operations.", "en"),
     );
-    expect(mocks.send).toHaveBeenCalledWith("token", "What is Tawseelhub?", "en");
+    expect(mocks.send).toHaveBeenCalledWith("token", "What is Tawseelhub?", "en", expect.any(String));
     expect(JSON.stringify(mocks.track.mock.calls)).not.toMatch(
       /What is Tawseelhub|connects delivery operations/,
     );
@@ -198,7 +199,7 @@ describe("Agent voice conversation", () => {
     await waitFor(() =>
       expect(mocks.speak).toHaveBeenCalledWith("توصيل هب منصة تشغيل متكاملة.", "ar"),
     );
-    expect(mocks.send).toHaveBeenCalledWith("token", "ما هي توصيل هب؟", "ar");
+    expect(mocks.send).toHaveBeenCalledWith("token", "ما هي توصيل هب؟", "ar", expect.any(String));
   });
 
   it("preserves the visible Agent answer when speech synthesis fails", async () => {

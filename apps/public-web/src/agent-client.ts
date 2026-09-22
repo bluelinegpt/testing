@@ -24,7 +24,24 @@ export interface AgentConversation {
   readonly reply?: string;
   readonly quickActions?: string[];
   readonly messages?: AgentMessage[];
+  readonly analytics?: {
+    readonly contactCaptured: boolean;
+    readonly contactRequested: boolean;
+    readonly conversationStarted: boolean;
+    readonly handoffRequested: boolean;
+    readonly qualifiedLead: boolean;
+  };
 }
+
+export type AgentVisitorContext = {
+  readonly landingPage?: string;
+  readonly referrerDomain?: string;
+  readonly sourceHostname?: string;
+  readonly sourcePage?: string;
+  readonly utmCampaign?: string;
+  readonly utmMedium?: string;
+  readonly utmSource?: string;
+};
 
 export interface WhatsAppPublicSettings {
   readonly enabled: boolean;
@@ -119,9 +136,9 @@ async function parse(response: Response): Promise<AgentConversation> {
   return body as AgentConversation;
 }
 
-export async function createAgentConversation(language: "en" | "ar", visitorId?: string, surface: "website" | "website_avatar" = "website"): Promise<AgentConversation> {
+export async function createAgentConversation(language: "en" | "ar", visitorId?: string, surface: "website" | "website_avatar" = "website", context: AgentVisitorContext = {}): Promise<AgentConversation> {
   const response = await fetch(`${base()}/public/agent/conversations`, {
-    body: JSON.stringify({ language, surface, ...(visitorId === undefined ? {} : { visitorId }) }),
+    body: JSON.stringify({ language, surface, ...(visitorId === undefined ? {} : { visitorId }), ...context }),
     headers: { "content-type": "application/json" },
     method: "POST",
   });
@@ -153,9 +170,17 @@ export async function getAgentConversation(token: string): Promise<AgentConversa
   return parse(response);
 }
 
-export async function sendAgentMessage(token: string, message: string, language: "en" | "ar"): Promise<AgentConversation> {
+export async function recordAgentOpened(token: string, eventId: string): Promise<void> {
+  await fetch(`${base()}/public/agent/conversations/${encodeURIComponent(token)}/events/opened`, {
+    body: JSON.stringify({ eventId }),
+    headers: { "content-type": "application/json" },
+    method: "POST",
+  });
+}
+
+export async function sendAgentMessage(token: string, message: string, language: "en" | "ar", inboundMessageId?: string): Promise<AgentConversation> {
   const response = await fetch(`${base()}/public/agent/conversations/${encodeURIComponent(token)}/messages`, {
-    body: JSON.stringify({ language, message }),
+    body: JSON.stringify({ language, message, ...(inboundMessageId ? { inboundMessageId } : {}) }),
     headers: { "content-type": "application/json" },
     method: "POST",
   });

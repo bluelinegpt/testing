@@ -55,6 +55,7 @@ const defaults = {
 const { api } = vi.hoisted(() => ({
   api: {
     agentAssignees: vi.fn().mockResolvedValue([]),
+    agentConversation: vi.fn(),
     agentConversations: vi.fn().mockResolvedValue({ counters: {}, items: [], page: 1, pageSize: 25, total: 0 }),
     agentHandoffs: vi.fn().mockResolvedValue([]),
     agentKnowledge: vi.fn().mockResolvedValue([]),
@@ -151,5 +152,52 @@ describe("Agent Administration settings", () => {
       liveEnabled: false,
       liveAvatarId: "final-yousef-id",
     })));
+  });
+});
+
+describe("Agent conversation follow-up", () => {
+  it("filters identified visitors and only renders available contact actions", async () => {
+    Object.defineProperty(HTMLElement.prototype, "scrollTo", { configurable: true, value: vi.fn() });
+    const conversation = {
+      channel: "website",
+      contactRequestedAt: "2026-09-22T08:00:00.000Z",
+      contactCapturedAt: "2026-09-22T08:01:00.000Z",
+      countryCode: "AE",
+      countryName: "United Arab Emirates",
+      createdAt: "2026-09-22T08:00:00.000Z",
+      customerName: "Ahmed",
+      email: "ahmed@example.com",
+      handoffRequestedAt: "2026-09-22T08:02:00.000Z",
+      id: "conversation-1",
+      language: "ar",
+      leadStatus: "qualified",
+      lastMessageAt: "2026-09-22T08:03:00.000Z",
+      messageCount: 2,
+      messages: [],
+      mobileNumber: "0501234567",
+      operationalClassification: "pricing_enquiry",
+      referenceNumber: "AGT-000001",
+      reviewStatus: "new",
+      sourceHostname: "tawseelhub.com",
+      sourcePage: "/ar/pricing",
+    };
+    api.agentConversations.mockResolvedValue({ counters: {}, items: [conversation], page: 1, pageSize: 25, total: 1 });
+    api.agentConversation.mockResolvedValue(conversation);
+
+    const { AgentAdminPage } = await import("./AgentAdminPage.js");
+    render(<MemoryRouter><AgentAdminPage /></MemoryRouter>);
+
+    fireEvent.change(await screen.findByDisplayValue("All Visitors"), { target: { value: "contact" } });
+    await waitFor(() => expect(api.agentConversations).toHaveBeenLastCalledWith(expect.objectContaining({ identity: "contact" })));
+    fireEvent.change(screen.getByPlaceholderText("Country code (AE, SA…)"), { target: { value: "AE" } });
+    await waitFor(() => expect(api.agentConversations).toHaveBeenLastCalledWith(expect.objectContaining({ country: "AE", identity: "contact" })));
+    fireEvent.change(screen.getByPlaceholderText("Source, referrer or campaign"), { target: { value: "launch" } });
+    await waitFor(() => expect(api.agentConversations).toHaveBeenLastCalledWith(expect.objectContaining({ sourceCampaign: "launch" })));
+    fireEvent.click(screen.getByRole("button", { name: "View" }));
+
+    expect(await screen.findByRole("link", { name: "Call" })).toHaveAttribute("href", "tel:0501234567");
+    expect(screen.getByRole("link", { name: "WhatsApp" })).toHaveAttribute("href", "https://wa.me/971501234567");
+    expect(screen.getByRole("link", { name: "Email" })).toHaveAttribute("href", "mailto:ahmed@example.com");
+    expect(screen.getByText("Source tawseelhub.com/ar/pricing")).toBeVisible();
   });
 });

@@ -7,6 +7,13 @@ export class CreateAgentConversationDto {
   @IsOptional() @IsIn(["en", "ar"]) readonly language?: "en" | "ar";
   @IsOptional() @Transform(trim) @IsString() @MaxLength(80) readonly visitorId?: string;
   @IsOptional() @IsIn(["website", "website_avatar"]) readonly surface?: "website" | "website_avatar";
+  @IsOptional() @Transform(trim) @Matches(/^[A-Za-z0-9.-]+$/) @MaxLength(253) readonly sourceHostname?: string;
+  @IsOptional() @Transform(trim) @Matches(/^\/[A-Za-z0-9/_?&=.%+-]*$/) @MaxLength(500) readonly sourcePage?: string;
+  @IsOptional() @Transform(trim) @Matches(/^\/[A-Za-z0-9/_?&=.%+-]*$/) @MaxLength(500) readonly landingPage?: string;
+  @IsOptional() @Transform(trim) @Matches(/^[A-Za-z0-9.-]+$/) @MaxLength(253) readonly referrerDomain?: string;
+  @IsOptional() @Transform(trim) @IsString() @MaxLength(120) readonly utmSource?: string;
+  @IsOptional() @Transform(trim) @IsString() @MaxLength(120) readonly utmMedium?: string;
+  @IsOptional() @Transform(trim) @IsString() @MaxLength(120) readonly utmCampaign?: string;
 }
 
 export class AgentAvatarSettingsDto {
@@ -62,6 +69,11 @@ export class SendAgentMessageDto {
   @IsOptional() @IsIn(["en", "ar"]) readonly language?: "en" | "ar";
 }
 
+export class AgentOpenedEventDto {
+  @Transform(trim) @Matches(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i)
+  readonly eventId!: string;
+}
+
 export class SimulateWhatsAppMessageDto {
   @Transform(trim) @IsString() @MinLength(8) @MaxLength(40) readonly sender!: string;
   @Transform(trim) @IsString() @MinLength(1) @MaxLength(1200) readonly message!: string;
@@ -101,8 +113,10 @@ export class HandoffStatusDto {
 }
 
 export class AgentConversationReviewDto {
-  @IsIn(["new", "open", "in_progress", "waiting_for_customer", "follow_up", "resolved", "closed"])
-  readonly status!: "new" | "open" | "in_progress" | "waiting_for_customer" | "follow_up" | "resolved" | "closed";
+  @IsIn(["new", "open", "in_progress", "waiting_for_customer", "follow_up", "resolved", "closed", "spam"])
+  readonly status!: "new" | "open" | "in_progress" | "waiting_for_customer" | "follow_up" | "resolved" | "closed" | "spam";
+  @IsOptional() @IsIn(["not_lead", "new", "qualified", "contacted", "closed", "spam"])
+  readonly leadStatus?: "not_lead" | "new" | "qualified" | "contacted" | "closed" | "spam";
   @IsOptional() @Transform(trim) @IsString() @MaxLength(1000) readonly comment?: string;
   @IsOptional() @Transform(trim) @IsString() @MaxLength(200) readonly action?: string;
   @IsOptional() @Transform(trim) @IsString() @MaxLength(80) readonly assignedToAccountId?: string;

@@ -77,8 +77,10 @@ describe("AgentService public conversation intro", () => {
       afterName!.structured.state,
       "customer_quote",
     );
-    // No pending workflow -- generic acknowledgement, not a company/email ask.
-    expect(afterMobile?.content).toContain("كيف يمكنني مساعدتك");
+    // The pending workflow resumes after contact capture; it must not ask for
+    // unrelated company/email details before handing control back to it.
+    expect(afterMobile?.resumeIntent).toBe("customer_quote");
+    expect(afterMobile?.content).toBe("");
     expect(afterMobile?.content).not.toContain("الشركة أو المتجر");
     expect(afterMobile?.structured.state.lastAskedSlot).toBeUndefined();
     expect(afterMobile?.structured.state.slots.requesterMobile).toBe("0506468441");

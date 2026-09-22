@@ -40,7 +40,7 @@ export function PrivacyPolicyPage() {
   }, [isAr]);
   const sections = isAr
     ? [
-        ['المعلومات التي نجمعها', 'قد نجمع بيانات التواصل (الاسم والبريد ورقم الجوال) عند طلب عرض أو التسجيل كتاجر أو إرسال طلب شحنة، إضافة إلى بيانات استخدام أساسية للموقع العام.'],
+        ['المعلومات التي نجمعها', 'قد نجمع محادثة وكيل الموقع وبيانات التواصل التي تقدمها (الاسم والبريد ورقم الجوال)، إضافة إلى بلد تقريبي من وكيل الشبكة الموثوق، وصفحة المصدر والحملة، وفئة الجهاز والمتصفح ونظام التشغيل بشكل عام. لا نجمع موقع GPS دقيقاً ولا ننشئ بصمة تعريف للجهاز.'],
         ['كيف نستخدم المعلومات', 'تُستخدم المعلومات للرد على الطلبات وتشغيل الحساب وتحسين المنصة. لا يبيع Tawseelhub البيانات الشخصية لأطراف ثالثة.'],
         ['مشاركة البيانات', 'تتم مشاركة البيانات فقط مع مزودي خدمة ضروريين لتشغيل المنصة (مثل الاستضافة والتحليلات)، وبموجب اتفاقيات تحد من استخدامهم لها.'],
         ['الاحتفاظ بالبيانات', 'تُحفظ البيانات طالما كانت ضرورية لتقديم الخدمة أو الالتزام بمتطلبات قانونية سارية.'],
@@ -48,7 +48,7 @@ export function PrivacyPolicyPage() {
         ['التواصل', 'لأي استفسار يخص الخصوصية، تواصل معنا عبر صفحة التواصل.'],
       ]
     : [
-        ['Information We Collect', 'We may collect contact details (name, email, mobile number) when you request a demo, register as a Trader, or submit a package request, along with basic usage data from the public website.'],
+        ['Information We Collect', 'We may retain Website Agent conversations and contact details you provide (name, email and mobile), together with coarse country from a trusted network proxy, source page and campaign, and general device, browser and operating-system categories. We do not collect precise GPS location or create device fingerprints.'],
         ['How We Use Information', 'Information is used to respond to requests, operate your account, and improve the platform. Tawseelhub does not sell personal data to third parties.'],
         ['Sharing of Data', 'Data is shared only with service providers necessary to run the platform (such as hosting and analytics), under agreements limiting their use of it.'],
         ['Data Retention', 'Data is kept for as long as necessary to provide the service or to meet applicable legal requirements.'],

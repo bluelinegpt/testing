@@ -31,7 +31,11 @@ export type AnalyticsEventName =
   | "trader_application_failed"
   | "whatsapp_contact_started"
   | "agent_opened"
+  | "agent_message_sent"
   | "agent_conversation_started"
+  | "agent_contact_requested"
+  | "agent_contact_captured"
+  | "agent_lead_created"
   | "agent_business_intent_detected"
   | "agent_intent_detected"
   | "agent_handoff_requested"
@@ -89,6 +93,7 @@ export type SafeMetadata = {
   source?: string | undefined;
   sourcePage?: string | undefined;
   source_page?: string | undefined;
+  landingPage?: string | undefined;
   ctaId?: string | undefined;
   cta_id?: string | undefined;
   ctaLocation?: string | undefined;
@@ -125,6 +130,7 @@ export type SafeMetadata = {
   intent?: string | undefined;
   classification?: string | undefined;
   actionResult?: string | undefined;
+  contactFields?: string | undefined;
   provider?: string | undefined;
   duration_seconds?: number | undefined;
   character_count?: number | undefined;
@@ -361,4 +367,21 @@ export function trackConversionOnce(
     // If session storage is unavailable, still report the conversion once for this call.
   }
   return trackEvent(name, { ...metadata, reference });
+}
+
+export function trackEventOnce(
+  name: AnalyticsEventName,
+  dedupeKey: string,
+  metadata: SafeMetadata = {},
+) {
+  const safeKey = cleanText(dedupeKey, 240)?.replace(/[^A-Za-z0-9:._-]/g, "");
+  if (!safeKey) return undefined;
+  const key = `${dedupePrefix}${name}.${safeKey}`;
+  try {
+    if (window.sessionStorage.getItem(key)) return undefined;
+    window.sessionStorage.setItem(key, "true");
+  } catch {
+    // Storage is best-effort; the server remains the source of truth for Agent metrics.
+  }
+  return trackEvent(name, metadata);
 }
