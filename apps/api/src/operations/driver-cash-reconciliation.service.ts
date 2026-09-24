@@ -64,8 +64,15 @@ interface EligibleOrder {
   readonly driverReconciliationStatus: string;
   readonly id: string;
   readonly orderNumber: string;
+  readonly orderType: string;
   readonly traderId: string;
   readonly traderNetPayable: string;
+}
+
+export function internationalCollectionError(orderType: string): string | null {
+  return orderType === "gcc_international"
+    ? "International Orders are not eligible for Driver Collections"
+    : null;
 }
 
 export interface DriverReconciliationResult {
@@ -399,6 +406,7 @@ export class DriverCashReconciliationService {
          where company_id = ${companyId}::uuid
            and delivery_status = 'delivered'
            and driver_reconciliation_status = 'pending'
+           and order_type <> 'gcc_international'
          group by assigned_driver_id
       )
       select d.id, d.code, d.name_en as name, d.mobile_number as "mobileNumber",
@@ -454,6 +462,7 @@ export class DriverCashReconciliationService {
         and o.assigned_driver_id = ${query.driverId}::uuid
         and o.delivery_status = 'delivered'
         and o.driver_reconciliation_status = 'pending'
+        and o.order_type <> 'gcc_international'
         and (${search}::text is null
              or o.order_number ilike '%' || ${search} || '%'
              or o.serial_number ilike '%' || ${search} || '%'
@@ -1289,8 +1298,8 @@ export class DriverCashReconciliationService {
   ): Promise<DriverReconciliationResult> {
     this.assertAnyPermission("reconciliations.create");
     const { companyId } = this.tenants.current();
-    const result = await sql<{ amountCollected: string }>`
-      select customer_amount_due::text as "amountCollected" from orders
+    const result = await sql<{ amountCollected: string; orderType: string }>`
+      select customer_amount_due::text as "amountCollected", order_type as "orderType" from orders
       where id = ${orderId}::uuid and company_id = ${companyId}::uuid
     `.execute(this.database);
     const order = result.rows[0];
@@ -1301,6 +1310,8 @@ export class DriverCashReconciliationService {
         HttpStatus.NOT_FOUND,
       );
     }
+    const collectionError = internationalCollectionError(order.orderType);
+    if (collectionError !== null) throw new ApplicationException("international_collection_forbidden", collectionError, HttpStatus.CONFLICT);
     const amount = new Decimal(order.amountCollected);
     const paymentMethod = payment.paymentMethod ?? "cash";
     // Bank fields are omitted entirely for Cash, which the payment validation requires.
@@ -1620,6 +1631,7 @@ export class DriverCashReconciliationService {
         left join areas a on a.id = o.area_id and a.company_id = o.company_id
        where o.company_id = ${companyId}::uuid
          and o.delivery_status = 'delivered'
+         and o.order_type <> 'gcc_international'
          and o.driver_reconciliation_status = 'pending'
          and (${query.driverId ?? null}::uuid is null
               or o.assigned_driver_id = ${query.driverId ?? null}::uuid)
@@ -2521,6 +2533,7 @@ export class DriverCashReconciliationService {
       if (ids.length === 0) return [];
       const result = await sql<EligibleOrder>`
         select id, order_number as "orderNumber", assigned_driver_id as "assignedDriverId",
+               order_type as "orderType",
                delivery_status as "deliveryStatus",
                driver_reconciliation_status as "driverReconciliationStatus",
                customer_amount_due::text as "amountCollected",
@@ -2533,6 +2546,10 @@ export class DriverCashReconciliationService {
         order by id
         ${sql.raw(lock ? "for update" : "")}
       `.execute(database);
+      const international = result.rows.find((row) => row.orderType === "gcc_international");
+      if (international !== undefined) {
+        throw new ApplicationException("international_collection_forbidden", internationalCollectionError(international.orderType)!, HttpStatus.CONFLICT);
+      }
       return result.rows;
     }
     // Filter selection is constrained to reconciliation-eligible Orders in SQL so
@@ -2548,6 +2565,7 @@ export class DriverCashReconciliationService {
       from orders o
       where o.company_id = ${companyId}::uuid
         and o.delivery_status = 'delivered'
+        and o.order_type <> 'gcc_international'
         and o.driver_reconciliation_status = 'pending'
         and (${input.driverId ?? null}::uuid is null
           or o.assigned_driver_id = ${input.driverId ?? null}::uuid)
