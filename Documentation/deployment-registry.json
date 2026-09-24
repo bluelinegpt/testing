@@ -20,9 +20,9 @@
       "path": "apps/api",
       "renderService": "bluelinegpt-api-test",
       "status": "pushed_awaiting_confirmation",
-      "localCommit": "02d2903",
+      "localCommit": "e8909fd",
       "localCommitDate": "2026-09-24",
-      "lastChangeDescription": "fix: place historical migration after Neon history",
+      "lastChangeDescription": "fix: order international migration after Neon history",
       "lastChangeBy": "codex",
       "confirmedLiveCommit": "e3de371",
       "confirmedLiveAt": "2026-09-01"
