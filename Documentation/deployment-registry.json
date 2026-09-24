@@ -20,9 +20,9 @@
       "path": "apps/api",
       "renderService": "bluelinegpt-api-test",
       "status": "pushed_awaiting_confirmation",
-      "localCommit": "5d6457d",
+      "localCommit": "e0b442f",
       "localCommitDate": "2026-09-24",
-      "lastChangeDescription": "feat: expand delivery and trader settlement workflows",
+      "lastChangeDescription": "fix: keep historical migration order compatible",
       "lastChangeBy": "codex",
       "confirmedLiveCommit": "e3de371",
       "confirmedLiveAt": "2026-09-01"
