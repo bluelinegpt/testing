@@ -164,8 +164,8 @@ export class OrderSelectionDto {
   public readonly deliveryStatus?: string;
 
   @IsOptional()
-  @IsIn(["delivery", "collect_order"])
-  public readonly orderType?: "collect_order" | "delivery";
+  @IsIn(["delivery", "collect_order", "gcc_international"])
+  public readonly orderType?: "collect_order" | "delivery" | "gcc_international";
 
   @IsOptional()
   @IsString()
@@ -174,6 +174,11 @@ export class OrderSelectionDto {
   @IsOptional()
   @IsString()
   public readonly settlementStatus?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(160)
+  public readonly thirdPartyDeliveryCompanyName?: string;
 
   @IsOptional()
   @IsIn(orderWorkflowSteps)
@@ -443,8 +448,9 @@ export class InlineOrderCustomerDto {
   @Matches(noControlChars, mobileCharsMessage)
   public readonly secondMobileNumber?: string;
 
+  @IsOptional()
   @IsUUID()
-  public readonly areaId!: string;
+  public readonly areaId?: string;
 
   /*
    * Optional, matching `customerAddress` on the Order itself. A new Customer
@@ -463,8 +469,30 @@ export class CreateOrderDto {
   public readonly psystemSerial?: never;
 
   @IsOptional()
-  @IsIn(["delivery", "collect_order"])
-  public readonly orderType?: "collect_order" | "delivery";
+  @IsIn(["delivery", "collect_order", "gcc_international"])
+  public readonly orderType?: "collect_order" | "delivery" | "gcc_international";
+
+  @ValidateIf((dto: CreateOrderDto) => dto.orderType === "gcc_international")
+  @IsString()
+  @MinLength(2)
+  @MaxLength(120)
+  @TrimText()
+  public readonly destinationCountryName?: string;
+
+  @IsOptional()
+  @IsUUID()
+  public readonly destinationCountryId?: string;
+
+  @ValidateIf((dto: CreateOrderDto) => dto.orderType === "gcc_international")
+  @IsString()
+  @MinLength(2)
+  @MaxLength(160)
+  @TrimText()
+  public readonly thirdPartyDeliveryCompanyName?: string;
+
+  @IsOptional()
+  @IsUUID()
+  public readonly thirdPartyDeliveryCompanyId?: string;
 
   /*
    * A deliberate free delivery. Never inferred from zero amounts -- a
@@ -523,7 +551,9 @@ export class CreateOrderDto {
   public readonly traderId!: string;
 
   @ValidateIf(
-    (dto: CreateOrderDto) => dto.orderType !== "collect_order" || dto.areaId !== undefined,
+    (dto: CreateOrderDto) =>
+      (dto.orderType !== "collect_order" && dto.orderType !== "gcc_international") ||
+      dto.areaId !== undefined,
   )
   @IsUUID()
   public readonly areaId?: string;
@@ -645,6 +675,13 @@ export class CreateTraderPortalOrderDto extends OmitType(CreateOrderDto, [
 // optional; only the provided fields change. Changing the Trader, or the Customer + address
 // (which sets the Area), re-prices the order.
 export class UpdateOrderDto {
+  @IsOptional()
+  @IsUUID()
+  public readonly destinationCountryId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  public readonly thirdPartyDeliveryCompanyId?: string;
   @IsOptional()
   @IsString()
   @MinLength(1)
@@ -894,6 +931,14 @@ export class CreateDriverDto {
   @IsNumber()
   @Min(0)
   public readonly outsourcedFeePerDeliveredOrder?: number;
+}
+
+export class CreateInternationalCatalogEntryDto {
+  @IsString()
+  @MinLength(2)
+  @MaxLength(160)
+  @TrimText()
+  public readonly name!: string;
 }
 
 export const reconciliationPageSizes = [25, 50, 100] as const;

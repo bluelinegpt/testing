@@ -29,12 +29,18 @@ interface SelectedOrder {
   readonly id: string;
   readonly isFreeOrder: boolean;
   readonly orderNumber: string;
-  readonly orderType: "collect_order" | "delivery";
+  readonly orderType: "collect_order" | "delivery" | "gcc_international";
   readonly returnStatus: string;
   readonly settlementStatus: string;
   readonly amountCollected: string;
   readonly customerAmountDue: string;
   readonly traderNetPayable: string;
+}
+
+export function internationalDriverAssignmentError(orderType: string, hasDriverAssignment: boolean): string | null {
+  return orderType === "gcc_international" && hasDriverAssignment
+    ? "International Orders cannot be assigned to an internal Driver"
+    : null;
 }
 
 export interface BulkActionPreview {
@@ -179,7 +185,7 @@ export class OrdersWorkflowService {
 
   public async selectionSummary(input: OrderSelectionDto): Promise<BulkActionPreview> {
     const { companyId } = this.tenants.current();
-    const orders = await this.resolveSelection(this.database, companyId, input, false);
+    const orders = await this.resolveSelection(this.database, companyId, input, false, true);
     return {
       eligibleCount: orders.length,
       ineligible: [],
@@ -388,6 +394,8 @@ export class OrdersWorkflowService {
     order: SelectedOrder,
     targetDriverId: string,
   ): string | null {
+    const internationalError = internationalDriverAssignmentError(order.orderType, true);
+    if (internationalError !== null) return internationalError;
     if (order.assignedDriverId === targetDriverId) {
       return "Driver is already assigned to this Order";
     }
@@ -425,6 +433,9 @@ export class OrdersWorkflowService {
   }
 
   private statusIneligibility(order: SelectedOrder, target: string): string | null {
+    if (order.orderType === "gcc_international" && ["delivered", "out_for_delivery"].includes(target)) {
+      return "International Orders cannot enter Driver workflow statuses";
+    }
     // Each transition is allowed only from the states the single-order workflow
     // permits, so a bulk change is exactly a batch of the per-row transitions.
     const from: Readonly<Record<string, readonly string[]>> = {
@@ -594,6 +605,7 @@ export class OrdersWorkflowService {
     companyId: string,
     input: OrderSelectionDto,
     lock: boolean,
+    excludeInternational = false,
   ): Promise<readonly SelectedOrder[]> {
     const excluded = new Set(input.excludedOrderIds ?? []);
     if (input.selectionMode === "ids") {
@@ -702,6 +714,7 @@ export class OrdersWorkflowService {
         and (${input.deliveryStatus ?? null}::text is null or o.delivery_status = ${input.deliveryStatus ?? null})
         and ${workflowStepPredicate}
         and (${input.orderType ?? null}::text is null or o.order_type=${input.orderType ?? null})
+        and (${excludeInternational} = false or o.order_type <> 'gcc_international')
         and (${input.cashStatus ?? null}::text is null or o.driver_reconciliation_status = ${input.cashStatus ?? null})
         and (${input.settlementStatus ?? null}::text is null or o.trader_settlement_status = ${input.settlementStatus ?? null})
         and (${input.traderId ?? null}::uuid is null or o.trader_id = ${input.traderId ?? null}::uuid)

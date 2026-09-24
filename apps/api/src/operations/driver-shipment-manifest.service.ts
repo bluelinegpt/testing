@@ -135,6 +135,7 @@ export class DriverShipmentManifestService {
         left join areas a on a.id = o.area_id and a.company_id = o.company_id
         left join emirates e on e.id = a.emirate_id
        where o.company_id = ${companyId}::uuid
+         and o.order_type <> 'gcc_international'
          and o.id in (${sql.join(orderIds.map((id) => sql`${id}::uuid`))})
        order by o.delivered_at nulls last, o.order_number
     `.execute(this.database);
@@ -176,6 +177,7 @@ export class DriverShipmentManifestService {
         left join areas a on a.id = o.area_id and a.company_id = o.company_id
         left join emirates e on e.id = a.emirate_id
        where o.company_id = ${companyId}::uuid
+         and o.order_type <> 'gcc_international'
          and o.assigned_driver_id is not null
          and (${input.search?.trim() || null}::text is null
            or o.order_number ilike '%' || ${input.search?.trim() || null} || '%'

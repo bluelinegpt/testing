@@ -435,6 +435,10 @@ export interface OperationsBillingSummary {
 }
 
 export interface OperationsOrder {
+  readonly destinationCountryId?: string | null;
+  readonly destinationCountryName?: string | null;
+  readonly thirdPartyDeliveryCompanyId?: string | null;
+  readonly thirdPartyDeliveryCompanyName?: string | null;
   /** Server-computed: the Order carries COD, Fee, Additional Fees or VAT. */
   readonly accountingRequired?: boolean;
   /** Delivery instant. Null until delivered. */
@@ -475,7 +479,7 @@ export interface OperationsOrder {
   readonly id: string;
   readonly orderDate: string;
   readonly orderNumber: string;
-  readonly orderType?: "collect_order" | "delivery";
+  readonly orderType?: "collect_order" | "delivery" | "gcc_international";
   readonly orderProfit: string;
   readonly outsourcedDriverFeeAmount: string | null;
   readonly outsourcedDriverFeeOutstanding: string | null;

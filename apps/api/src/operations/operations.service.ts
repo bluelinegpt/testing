@@ -122,7 +122,9 @@ export interface OperationsOrderFilters {
   readonly dateTo?: string | undefined;
   readonly deliveryStatus?: string | undefined;
   readonly driverId?: string | undefined;
-  readonly orderType?: "collect_order" | "delivery" | undefined;
+  readonly orderType?: "collect_order" | "delivery" | "gcc_international" | undefined;
+  readonly thirdPartyDeliveryCompanyName?: string | undefined;
+  readonly destinationCountryName?: string | undefined;
   /** External Reference Number, partial match. Distinct from `search`. */
   readonly referenceNumber?: string | undefined;
   /** Serial Number, partial match. Distinct from `search`. */
@@ -227,6 +229,10 @@ export interface OperationsBillingSummary {
 }
 
 export interface OperationsOrder {
+  readonly destinationCountryId?: string | null;
+  readonly destinationCountryName?: string | null;
+  readonly thirdPartyDeliveryCompanyId?: string | null;
+  readonly thirdPartyDeliveryCompanyName?: string | null;
   /** Mirrors the capture trigger: |COD|+|Fee|+|Additional|+|VAT| is not zero. */
   readonly accountingRequired: boolean;
   /** The delivery instant. Null until the Order is delivered. */
@@ -278,7 +284,7 @@ export interface OperationsOrder {
   readonly isFreeOrder?: boolean;
   readonly orderDate: string;
   readonly orderNumber: string;
-  readonly orderType?: "collect_order" | "delivery";
+  readonly orderType?: "collect_order" | "delivery" | "gcc_international";
   readonly orderProfit: string;
   readonly outsourcedDriverFeeAmount: string | null;
   readonly outsourcedDriverFeeOutstanding: string | null;
@@ -890,6 +896,7 @@ export class OperationsService {
           from orders
          where company_id = ${identity.companyId}::uuid
            and assigned_driver_id = ${driver.id}::uuid
+           and order_type <> 'gcc_international'
            and delivery_status in ('assigned_to_driver', 'out_for_delivery', 'returned_to_branch')
          group by delivery_status
       `.execute(this.database),
@@ -897,6 +904,7 @@ export class OperationsService {
         select count(*)::int as count from orders
          where company_id = ${identity.companyId}::uuid
            and assigned_driver_id = ${driver.id}::uuid
+           and order_type <> 'gcc_international'
            and delivery_status = 'delivered' and delivered_at::date = current_date
       `.execute(this.database),
     ]);
@@ -958,6 +966,8 @@ export class OperationsService {
     const serialTerm = serialNumber === null ? null : this.normalizeOrderIdentifier(serialNumber);
     const deliveryStatus = this.optionalFilter(filters.deliveryStatus);
     const orderType = this.optionalFilter(filters.orderType);
+    const thirdPartyDeliveryCompanyName = this.optionalFilter(filters.thirdPartyDeliveryCompanyName);
+    const destinationCountryName = this.optionalFilter(filters.destinationCountryName);
     const cashStatus = this.optionalFilter(filters.cashStatus);
     const settlementStatus = this.optionalFilter(filters.settlementStatus);
     const workflowStep = this.optionalFilter(filters.workflowStep);
@@ -1127,6 +1137,8 @@ export class OperationsService {
       and (${deliveryStatus}::text is null or o.delivery_status = ${deliveryStatus})
       and ${workflowStepPredicate}
       and (${orderType}::text is null or o.order_type = ${orderType})
+      and (${thirdPartyDeliveryCompanyName}::text is null or lower(o.third_party_delivery_company_name) like '%' || lower(${thirdPartyDeliveryCompanyName}::text) || '%')
+      and (${destinationCountryName}::text is null or lower(o.destination_country_name) like '%' || lower(${destinationCountryName}::text) || '%')
       and (${cashStatus}::text is null or o.driver_reconciliation_status = ${cashStatus})
       and (${settlementStatus}::text is null or o.trader_settlement_status = ${settlementStatus})
       and (${traderId}::uuid is null or o.trader_id = ${traderId}::uuid)
@@ -1174,6 +1186,10 @@ export class OperationsService {
              o.amount_collected::text as "amountCollected",
              o.is_free_order as "isFreeOrder",
              o.order_type as "orderType",
+             o.destination_country_id as "destinationCountryId",
+             coalesce(dc.name, o.destination_country_name) as "destinationCountryName",
+             o.third_party_delivery_company_id as "thirdPartyDeliveryCompanyId",
+             coalesce(pc.name, o.third_party_delivery_company_name) as "thirdPartyDeliveryCompanyName",
              o.vat_amount::text as "vatAmount",
              o.company_revenue::text as "companyRevenue",
              o.order_profit::text as "orderProfit",
@@ -1218,6 +1234,8 @@ export class OperationsService {
       join traders t on t.id = o.trader_id and t.company_id = o.company_id
       left join areas a on a.id = o.area_id and a.company_id = o.company_id
       left join drivers d on d.id = o.assigned_driver_id and d.company_id = o.company_id
+      left join destination_countries dc on dc.id = o.destination_country_id and dc.company_id = o.company_id
+      left join third_party_delivery_companies pc on pc.id = o.third_party_delivery_company_id and pc.company_id = o.company_id
       left join outsourced_driver_fee_accruals fee
         on fee.order_id = o.id and fee.company_id = o.company_id
       /* ONE set-based lateral for the whole page, not a lookup per row: the
@@ -2986,6 +3004,7 @@ export class OperationsService {
       left join emirates e on e.id = a.emirate_id
       where o.company_id = ${identity.companyId}::uuid
         and o.assigned_driver_id = ${driver.id}::uuid
+        and o.order_type <> 'gcc_international'
         and o.delivery_status in (
           'assigned_to_driver', 'out_for_delivery', 'delivered', 'returned_to_branch'
         )
@@ -3048,6 +3067,7 @@ export class OperationsService {
       where o.company_id = ${companyId}::uuid
         and o.id = ${orderId}::uuid
         and o.assigned_driver_id = ${driverId}::uuid
+        and o.order_type <> 'gcc_international'
       limit 1
     `.execute(this.database);
     return result.rows[0];
@@ -3082,6 +3102,7 @@ export class OperationsService {
       select id from orders
        where id = ${orderId}::uuid and company_id = ${identity.companyId}::uuid
          and assigned_driver_id = ${driver.id}::uuid
+         and order_type <> 'gcc_international'
        limit 1
     `.execute(this.database);
     if (owned.rows[0] === undefined) {
@@ -3130,6 +3151,7 @@ export class OperationsService {
       where id = ${orderId}::uuid
         and company_id = ${identity.companyId}::uuid
         and assigned_driver_id = ${driver.id}::uuid
+        and order_type <> 'gcc_international'
       limit 1
     `.execute(this.database);
     if (current.rows[0] === undefined) {
@@ -3570,14 +3592,32 @@ export class OperationsService {
     const referenceNumberNormalized =
       referenceNumber === null ? null : this.normalizeOrderIdentifier(referenceNumber);
     const collectOrder = input.orderType === "collect_order";
+    const internationalOrder = input.orderType === "gcc_international";
+    if (internationalOrder && input.destinationCountryId === undefined && input.destinationCountryName === undefined) {
+      throw new ApplicationException(
+        "destination_country_required",
+        "Select a destination country for an international order",
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    if (internationalOrder && input.thirdPartyDeliveryCompanyId === undefined && input.thirdPartyDeliveryCompanyName === undefined) {
+      throw new ApplicationException(
+        "carrier_required",
+        "Select a third-party delivery company for an international order",
+        HttpStatus.BAD_REQUEST,
+      );
+    }
     const requestedDriverId = collectOrder ? undefined : input.driverId;
+    if (internationalOrder && input.driverId !== undefined) {
+      throw new ApplicationException("international_driver_forbidden", "International Orders cannot be assigned to an internal Driver", HttpStatus.BAD_REQUEST);
+    }
     const inlineCustomer = input.inlineCustomer;
     const customerOmitted =
       input.customerId === undefined &&
       input.customerAddressId === undefined &&
       inlineCustomer === undefined;
     const orderAreaId = input.areaId ?? inlineCustomer?.areaId;
-    if (!customerOmitted && orderAreaId === undefined) {
+    if (!internationalOrder && !customerOmitted && orderAreaId === undefined) {
       throw new ApplicationException(
         "area_required",
         "Select an Area when Customer details are entered",
@@ -3727,7 +3767,7 @@ export class OperationsService {
         );
       }
 
-      const resolvedCustomer = customerOmitted
+      const resolvedCustomer = customerOmitted || (internationalOrder && orderAreaId === undefined)
         ? undefined
         : await this.resolveCreateOrderCustomer(transaction, {
             companyId,
@@ -3740,6 +3780,14 @@ export class OperationsService {
             ...(inlineCustomer === undefined ? {} : { inlineCustomer }),
             orderAreaId: orderAreaId!,
           });
+      const internationalReferences = internationalOrder
+        ? await this.resolveInternationalReferences(transaction, companyId, {
+            carrierId: input.thirdPartyDeliveryCompanyId,
+            carrierName: input.thirdPartyDeliveryCompanyName,
+            countryId: input.destinationCountryId,
+            countryName: input.destinationCountryName,
+          })
+        : undefined;
       const customerAddressRow = resolvedCustomer?.address;
       const customerRow = resolvedCustomer?.customer;
       const latitude = input.customerLatitude ?? customerAddressRow?.latitude ?? null;
@@ -3824,7 +3872,16 @@ export class OperationsService {
               provenance: "manual" as const,
               servicePriceId: null,
             }
-          : await this.resolveServiceFee(transaction, {
+          : internationalOrder
+            ? {
+                configuredFee: this.money(new Decimal(input.serviceFee ?? 0)),
+                finalFee: this.money(new Decimal(input.serviceFee ?? 0)),
+                overrideApplied: false,
+                overrideReason: "International manual service fee",
+                provenance: "manual" as const,
+                servicePriceId: null,
+              }
+            : await this.resolveServiceFee(transaction, {
               areaId: area!.id,
               companyId,
               permissions: identity.permissions,
@@ -3885,7 +3942,9 @@ export class OperationsService {
           vat_price_mode_snapshot,company_revenue,order_profit,delivery_status,trader_settlement_status,
           pricing_provenance_status, trader_service_price_id,
           configured_service_fee_snapshot, final_service_fee_snapshot,
-          service_fee_override_reason, is_free_order, free_order_reason, order_type
+          service_fee_override_reason, is_free_order, free_order_reason, order_type,
+          destination_country_id, destination_country_name,
+          third_party_delivery_company_id, third_party_delivery_company_name
         ) values (
           ${companyId}::uuid, ${orderNumber}, ${serialNumber}, ${serialNumberNormalized},
           ${psystemSerial}, ${psystemSerialNormalized},
@@ -3913,7 +3972,12 @@ export class OperationsService {
           ${deliveryStatus}, ${traderSettlementStatus},
           ${pricing.provenance}, ${pricing.servicePriceId}::uuid,
           ${pricing.configuredFee.toFixed(2)}, ${pricing.finalFee.toFixed(2)},
-          ${pricing.overrideReason}, ${freeOrder}, ${freeOrderReason}, ${collectOrder ? "collect_order" : "delivery"}
+          ${pricing.overrideReason}, ${freeOrder}, ${freeOrderReason},
+          ${collectOrder ? "collect_order" : internationalOrder ? "gcc_international" : "delivery"},
+          ${internationalReferences?.countryId ?? null}::uuid,
+          ${internationalReferences?.countryName ?? null},
+          ${internationalReferences?.carrierId ?? null}::uuid,
+          ${internationalReferences?.carrierName ?? null}
         )
         returning id
       `.execute(transaction);
@@ -4458,6 +4522,9 @@ export class OperationsService {
           traderNetPayable: string;
           traderServicePriceId: string | null;
           vatAmount: string;
+          orderType: string;
+          destinationCountryId: string | null;
+          thirdPartyDeliveryCompanyId: string | null;
         }>`
           select o.area_id as "areaId",
                  o.customer_area_name_snapshot as "areaNameSnapshot",
@@ -4496,6 +4563,9 @@ export class OperationsService {
                  o.trader_net_payable::text as "traderNetPayable",
                  o.trader_service_price_id as "traderServicePriceId",
                  o.vat_amount::text as "vatAmount"
+                 ,o.order_type as "orderType",
+                 o.destination_country_id as "destinationCountryId",
+                 o.third_party_delivery_company_id as "thirdPartyDeliveryCompanyId"
           from orders o
           join traders t on t.id = o.trader_id and t.company_id = o.company_id
           where o.id = ${orderId}::uuid and o.company_id = ${companyId}::uuid
@@ -4508,6 +4578,20 @@ export class OperationsService {
         throw new ApplicationException("order_not_found", "Order not found", HttpStatus.NOT_FOUND);
       }
       const providedUpdateFields = Object.entries(input).filter(([, value]) => value !== undefined);
+      const internationalOrder = current.orderType === "gcc_international";
+      if (!internationalOrder && (input.destinationCountryId !== undefined || input.thirdPartyDeliveryCompanyId !== undefined)) {
+        throw new ApplicationException("international_fields_invalid", "Carrier and destination country apply only to International orders", HttpStatus.BAD_REQUEST);
+      }
+      let destinationCountryId = current.destinationCountryId;
+      let thirdPartyDeliveryCompanyId = current.thirdPartyDeliveryCompanyId;
+      if (internationalOrder && (input.destinationCountryId !== undefined || input.thirdPartyDeliveryCompanyId !== undefined)) {
+        const refs = await this.resolveInternationalReferences(transaction, companyId, {
+          countryId: input.destinationCountryId ?? current.destinationCountryId ?? undefined,
+          carrierId: input.thirdPartyDeliveryCompanyId ?? current.thirdPartyDeliveryCompanyId ?? undefined,
+        });
+        destinationCountryId = refs.countryId;
+        thirdPartyDeliveryCompanyId = refs.carrierId;
+      }
       const sameMobileNumber = (nextValue: string | null, currentValue: string | null): boolean => {
         const nextTrimmed = nextValue?.trim() || null;
         const currentTrimmed = currentValue?.trim() || null;
@@ -5045,6 +5129,8 @@ export class OperationsService {
                reference_number=${referenceNumber},
                reference_number_normalized=${referenceNumberNormalized},
                trader_id = ${traderId}::uuid,
+               destination_country_id = ${destinationCountryId}::uuid,
+               third_party_delivery_company_id = ${thirdPartyDeliveryCompanyId}::uuid,
                customer_id = ${customerColumns?.customerId ?? current.customerId}::uuid,
                customer_address_id = ${
                  customerColumns?.addressId ?? current.customerAddressId
@@ -6246,6 +6332,141 @@ export class OperationsService {
     return provider;
   }
 
+  private async resolveInternationalReferences(
+    database: Parameters<Parameters<KyselyTransactionManager["execute"]>[0]>[0],
+    companyId: string,
+    input: {
+      carrierId?: string | undefined;
+      carrierName?: string | undefined;
+      countryId?: string | undefined;
+      countryName?: string | undefined;
+    },
+  ): Promise<{ carrierId: string; carrierName: string; countryId: string; countryName: string }> {
+    const carrier = (
+      await sql<{ id: string; name: string }>`
+        select id, name from third_party_delivery_companies
+         where company_id=${companyId}::uuid and is_active
+           and (${input.carrierId ?? null}::uuid is null or id=${input.carrierId ?? null}::uuid)
+           and (${input.carrierName ?? null}::text is null or lower(regexp_replace(btrim(name), '\\s+', ' ', 'g')) = lower(regexp_replace(btrim(${input.carrierName ?? null}), '\\s+', ' ', 'g')))
+         limit 1
+      `.execute(database)
+    ).rows[0];
+    if (carrier === undefined) {
+      throw new ApplicationException("international_carrier_invalid", "The selected carrier is missing, inactive, or not available in this Company", HttpStatus.BAD_REQUEST);
+    }
+    const country = (
+      await sql<{ id: string; name: string }>`
+        select id, name from destination_countries
+         where company_id=${companyId}::uuid and is_active
+           and (${input.countryId ?? null}::uuid is null or id=${input.countryId ?? null}::uuid)
+           and (${input.countryName ?? null}::text is null or normalized_name = lower(regexp_replace(btrim(${input.countryName ?? null}), '\\s+', ' ', 'g')))
+         limit 1
+      `.execute(database)
+    ).rows[0];
+    if (country === undefined) {
+      throw new ApplicationException("destination_country_invalid", "The selected destination country is missing, inactive, or not available in this Company", HttpStatus.BAD_REQUEST);
+    }
+    return { carrierId: carrier.id, carrierName: carrier.name, countryId: country.id, countryName: country.name };
+  }
+
+  public async thirdPartyDeliveryCompanies(search?: string): Promise<{ items: readonly { id: string; name: string }[]; total: number; hasMore: boolean }> {
+    const { companyId } = this.tenants.current();
+    const result = await sql<{ id: string; name: string }>`
+      select id, name
+      from third_party_delivery_companies
+      where company_id = ${companyId}::uuid and is_active = true
+        and (${search?.trim() || null}::text is null or lower(regexp_replace(btrim(name), '\\s+', ' ', 'g')) like '%' || lower(regexp_replace(btrim(${search?.trim() || null}), '\\s+', ' ', 'g')) || '%')
+      order by lower(name)
+      limit 20
+    `.execute(this.database);
+    return { items: result.rows, total: result.rows.length, hasMore: false };
+  }
+
+  public async createThirdPartyDeliveryCompany(name: string): Promise<{ id: string; name: string }> {
+    const { companyId } = this.tenants.current();
+    const displayName = name.normalize("NFKC").trim().replace(/\s+/gu, " ");
+    try {
+      const result = await sql<{ id: string; name: string }>`
+        insert into third_party_delivery_companies (company_id, name, is_active)
+        values (${companyId}::uuid, ${displayName}, true)
+        returning id, name
+      `.execute(this.database);
+      return result.rows[0]!;
+    } catch (error) {
+      this.rethrowDuplicate(error, "third_party_delivery_company_exists", "A carrier with this name already exists");
+      throw error;
+    }
+  }
+
+  public async destinationCountries(search?: string): Promise<{ items: readonly { id: string; name: string }[]; total: number; hasMore: boolean }> {
+    const { companyId } = this.tenants.current();
+    const result = await sql<{ id: string; name: string }>`
+      select id, name from destination_countries
+       where company_id=${companyId}::uuid and is_active
+         and (${search?.trim() || null}::text is null or normalized_name like '%' || lower(regexp_replace(btrim(${search?.trim() || null}), '\\s+', ' ', 'g')) || '%')
+       order by normalized_name limit 100
+    `.execute(this.database);
+    return { items: result.rows, total: result.rows.length, hasMore: false };
+  }
+
+  public async createDestinationCountry(name: string): Promise<{ id: string; name: string }> {
+    const { companyId } = this.tenants.current();
+    const displayName = name.normalize("NFKC").trim().replace(/\s+/gu, " ");
+    const normalizedName = displayName.toLocaleLowerCase();
+    try {
+      const result = await sql<{ id: string; name: string }>`
+        insert into destination_countries (company_id, name, normalized_name)
+        values (${companyId}::uuid, ${displayName}, ${normalizedName})
+        returning id, name
+      `.execute(this.database);
+      return result.rows[0]!;
+    } catch (error) {
+      this.rethrowDuplicate(error, "destination_country_exists", "A destination country with this name already exists");
+      throw error;
+    }
+  }
+
+  public async deactivateThirdPartyDeliveryCompany(id: string, correlationId: string): Promise<void> {
+    await this.setInternationalCatalogActive("third_party_delivery_companies", id, correlationId);
+  }
+
+  public async deactivateDestinationCountry(id: string, correlationId: string): Promise<void> {
+    await this.setInternationalCatalogActive("destination_countries", id, correlationId);
+  }
+
+  public async deleteThirdPartyDeliveryCompany(id: string, correlationId: string): Promise<void> {
+    await this.deleteInternationalCatalog("third_party_delivery_companies", id, correlationId);
+  }
+
+  public async deleteDestinationCountry(id: string, correlationId: string): Promise<void> {
+    await this.deleteInternationalCatalog("destination_countries", id, correlationId);
+  }
+
+  private async setInternationalCatalogActive(table: "destination_countries" | "third_party_delivery_companies", id: string, correlationId: string): Promise<void> {
+    const { companyId } = this.tenants.current();
+    const identity = this.identities.current();
+    await this.transactions.execute(async (database) => {
+      const result = await sql<{ id: string }>`
+        update ${sql.table(table)} set is_active=false, updated_at=now(), version=version+1
+         where id=${id}::uuid and company_id=${companyId}::uuid and is_active=true returning id
+      `.execute(database);
+      if (result.rows[0] === undefined) throw new ApplicationException("catalog_entry_not_found", "Catalog entry not found or already inactive", HttpStatus.NOT_FOUND);
+      await this.audit(database, { action: `${table}.deactivate`, actorId: identity.identityId, after: { isActive: false }, companyId, correlationId, subjectId: id, subjectType: table });
+    });
+  }
+
+  private async deleteInternationalCatalog(table: "destination_countries" | "third_party_delivery_companies", id: string, correlationId: string): Promise<void> {
+    const { companyId } = this.tenants.current();
+    const identity = this.identities.current();
+    await this.transactions.execute(async (database) => {
+      const referenced = await sql<{ exists: boolean }>`select exists(select 1 from orders where company_id=${companyId}::uuid and ${sql.raw(table === "destination_countries" ? "destination_country_id" : "third_party_delivery_company_id")}=${id}::uuid) as exists`.execute(database);
+      if (referenced.rows[0]?.exists) throw new ApplicationException("catalog_entry_referenced", "Referenced catalog entries cannot be deleted; deactivate them instead", HttpStatus.CONFLICT);
+      const result = await sql<{ id: string }>`delete from ${sql.table(table)} where id=${id}::uuid and company_id=${companyId}::uuid returning id`.execute(database);
+      if (result.rows[0] === undefined) throw new ApplicationException("catalog_entry_not_found", "Catalog entry not found", HttpStatus.NOT_FOUND);
+      await this.audit(database, { action: `${table}.delete`, actorId: identity.identityId, after: { deleted: true }, companyId, correlationId, subjectId: id, subjectType: table });
+    });
+  }
+
   private async recordOrderUsageEvent(
     database: Parameters<Parameters<KyselyTransactionManager["execute"]>[0]>[0],
     companyId: string,
@@ -7102,10 +7323,17 @@ export class OperationsService {
              o.delivery_status as "deliveryStatus",
              o.driver_reconciliation_status as "driverReconciliationStatus",
              o.trader_settlement_status as "traderSettlementStatus"
+             ,o.order_type as "orderType",
+             o.destination_country_id as "destinationCountryId",
+             coalesce(dc.name, o.destination_country_name) as "destinationCountryName",
+             o.third_party_delivery_company_id as "thirdPartyDeliveryCompanyId",
+             coalesce(pc.name, o.third_party_delivery_company_name) as "thirdPartyDeliveryCompanyName"
       from orders o
       join traders t on t.id = o.trader_id and t.company_id = o.company_id
       left join areas a on a.id = o.area_id and a.company_id = o.company_id
       left join drivers d on d.id = o.assigned_driver_id and d.company_id = o.company_id
+      left join destination_countries dc on dc.id = o.destination_country_id and dc.company_id = o.company_id
+      left join third_party_delivery_companies pc on pc.id = o.third_party_delivery_company_id and pc.company_id = o.company_id
       where o.id = ${orderId}::uuid and o.company_id = ${companyId}::uuid
       limit 1
     `.execute(database);
