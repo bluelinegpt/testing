@@ -709,6 +709,12 @@ export class UpdateOrderDto {
   public readonly codAmount?: number;
 
   @IsOptional()
+  @IsIn(orderPaymentConditions)
+  public readonly paymentCondition?:
+    | "customer_pays_cod_and_fee"
+    | "customer_pays_cod_trader_pays_fee";
+
+  @IsOptional()
   @IsNumber()
   @Min(0)
   public readonly serviceFee?: number;

@@ -4445,6 +4445,7 @@ export class OperationsService {
           vatPriceModeSnapshot: "exclusive" | "inclusive" | null;
           vatRateSnapshot: string | null;
           notes: string | null;
+          orderNumber: string;
           orderDate: string;
           orderProfit: string;
           packageCount: number;
@@ -4482,6 +4483,7 @@ export class OperationsService {
                  o.vat_price_mode_snapshot as "vatPriceModeSnapshot",
                  o.vat_rate_snapshot::text as "vatRateSnapshot",
                  o.notes,
+                 o.order_number as "orderNumber",
                  o.order_date::text as "orderDate",
                  o.order_profit::text as "orderProfit",
                  o.package_count as "packageCount",
@@ -4545,6 +4547,8 @@ export class OperationsService {
               return this.money(new Decimal(Number(value))).equals(
                 this.money(new Decimal(current.codAmount)),
               );
+            case "paymentCondition":
+              return value === current.paymentCondition;
             case "serviceFee":
               return this.money(new Decimal(Number(value))).equals(
                 this.money(new Decimal(current.serviceFee)),
@@ -4872,14 +4876,19 @@ export class OperationsService {
       // configured fee against a zero COD and violate
       // orders_prospective_financial_model_check on save.
       const isFreeOrder = current.isFreeOrder;
+      const nextPaymentCondition = input.paymentCondition ?? current.paymentCondition;
+      if (isFreeOrder && nextPaymentCondition !== current.paymentCondition) {
+        throw new ApplicationException(
+          "free_order_payment_condition_locked",
+          "Who pays cannot be changed for a Free Order",
+          HttpStatus.CONFLICT,
+        );
+      }
       // A "Pay by Trader" Order is prepaid: the Trader already collected from
-      // the Customer, so nothing is owed at delivery. `payment_condition`
-      // itself is immutable after creation (never accepted by this DTO), so
-      // this pins COD to zero for the life of the Order the same way a Free
-      // Order's zero is pinned above — an edit can never reintroduce a COD
-      // for an Order whose payer was fixed at creation.
+      // the Customer, so nothing is owed at delivery. Switching to it always
+      // pins COD to zero; switching back permits the operator to enter COD.
       const codAmountLocked =
-        isFreeOrder || current.paymentCondition === "customer_pays_cod_trader_pays_fee";
+        isFreeOrder || nextPaymentCondition === "customer_pays_cod_trader_pays_fee";
       const nextCod =
         codAmountLocked || input.codAmount === undefined ? currentCod : new Decimal(input.codAmount);
       const codChanged = !this.money(nextCod).equals(this.money(currentCod));
@@ -4947,7 +4956,7 @@ export class OperationsService {
         driverCost: new Decimal(current.driverCost),
         prospective: isProspective,
         serviceFee: finalFee,
-        paymentCondition: current.paymentCondition as
+        paymentCondition: nextPaymentCondition as
           "customer_pays_cod_and_fee" | "customer_pays_cod_trader_pays_fee",
         vatPolicy: currentVatPolicy,
       });
@@ -4985,6 +4994,12 @@ export class OperationsService {
         String(next.packageCount),
       );
       track("notes", "user_action", current.notes, next.notes);
+      track(
+        "payment_condition",
+        "financial_change",
+        current.paymentCondition,
+        nextPaymentCondition,
+      );
       if (codChanged) {
         changes.push({
           category: "financial_change",
@@ -5080,6 +5095,7 @@ export class OperationsService {
                customer_address = ${next.customerAddress},
                package_count = ${next.packageCount},
                notes = ${next.notes},
+               payment_condition = ${nextPaymentCondition},
                cod_amount = ${financial.codAmount}::numeric,
                service_fee = ${financial.serviceFee}::numeric,
                service_fee_net_amount = case when ${isProspective}
@@ -5117,6 +5133,96 @@ export class OperationsService {
                version = version + 1
          where id = ${orderId}::uuid and company_id = ${companyId}::uuid
       `.execute(transaction);
+
+      if (nextPaymentCondition !== current.paymentCondition) {
+        const linkedReceivables = (
+          await sql<{
+            amountCollected: string;
+            id: string;
+            status: string;
+          }>`
+            select id, amount_collected::text as "amountCollected", status
+              from trader_receivables
+             where company_id=${companyId}::uuid
+               and source_type='service_charge'
+               and source_reference=${current.orderNumber}
+               and status in ('outstanding','partially_collected','collected')
+             for update
+          `.execute(transaction)
+        ).rows;
+        if (
+          linkedReceivables.some(
+            (receivable) =>
+              receivable.status !== "outstanding" ||
+              new Decimal(receivable.amountCollected).greaterThan(0),
+          )
+        ) {
+          throw new ApplicationException(
+            "order_payment_condition_has_collections",
+            "Who pays cannot be changed after money has been collected from the Trader",
+            HttpStatus.CONFLICT,
+          );
+        }
+        if (linkedReceivables.length > 1) {
+          throw new ApplicationException(
+            "order_payment_condition_receivable_conflict",
+            "Who pays cannot be changed because multiple active Trader Receivables exist",
+            HttpStatus.CONFLICT,
+          );
+        }
+        const linkedReceivable = linkedReceivables[0];
+        if (financials.traderReceivableDue.greaterThan(0)) {
+          if (linkedReceivable === undefined) {
+            await this.createOrderTraderReceivableIfNeeded(transaction, {
+              actorAccountId: identity.identityId,
+              amountDue: financials.traderReceivableDue,
+              companyId,
+              correlationId,
+              orderId,
+              orderNumber: current.orderNumber,
+              traderId,
+            });
+          } else {
+            await sql`
+              update trader_receivables
+                 set trader_id=${traderId}::uuid,
+                     original_amount_due=${financials.traderReceivableDue.toFixed(2)}::numeric,
+                     updated_at=now()
+               where id=${linkedReceivable.id}::uuid and company_id=${companyId}::uuid
+            `.execute(transaction);
+            await this.audit(transaction, {
+              action: "trader_receivable.update_from_order",
+              actorId: identity.identityId,
+              after: {
+                amountDue: financials.traderReceivableDue.toFixed(2),
+                orderNumber: current.orderNumber,
+                traderId,
+              },
+              companyId,
+              correlationId,
+              subjectId: linkedReceivable.id,
+              subjectType: "trader_receivable",
+            });
+          }
+        } else if (linkedReceivable !== undefined) {
+          await sql`
+            update trader_receivables set status='cancelled',updated_at=now()
+             where id=${linkedReceivable.id}::uuid and company_id=${companyId}::uuid
+          `.execute(transaction);
+          await this.audit(transaction, {
+            action: "trader_receivable.cancel_from_order",
+            actorId: identity.identityId,
+            after: {
+              orderNumber: current.orderNumber,
+              reason: "Order payment condition changed",
+            },
+            companyId,
+            correlationId,
+            subjectId: linkedReceivable.id,
+            subjectType: "trader_receivable",
+          });
+        }
+      }
 
       const role = await sql<{ name: string }>`
         select coalesce(string_agg(distinct r.name, ', ' order by r.name), a.account_kind) as name

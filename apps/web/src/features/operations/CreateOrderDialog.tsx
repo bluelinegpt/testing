@@ -707,6 +707,9 @@ export function CreateOrderDialog({
           payload.packageCount = packageCountInput.value;
         }
         if (!isFreeOrder) {
+          if (paymentCondition !== editDetail.metadata.paymentCondition) {
+            payload.paymentCondition = paymentCondition;
+          }
           if (codInput.ok && codInput.value !== Number(editDetail.codAmount)) {
             payload.codAmount = codInput.value;
           }
@@ -1235,9 +1238,7 @@ export function CreateOrderDialog({
                     <label className="field">
                       <span>{t("operations.orderType")}</span>
                       <select
-                        // The order type, payment condition and free-order flag
-                        // define the Order's financial identity; they are fixed
-                        // at creation and shown read-only when editing.
+                        // Order type remains part of the immutable operational identity.
                         disabled={isEdit}
                         value={orderType}
                         onChange={(event) => {
@@ -1266,7 +1267,6 @@ export function CreateOrderDialog({
                       <label className="field">
                         <span>{t("operations.paymentCondition")}</span>
                         <select
-                          disabled={isEdit}
                           value={paymentCondition}
                           onChange={(event) => {
                             const next = event.target.value as

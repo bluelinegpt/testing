@@ -124,6 +124,20 @@ describe("Order DTO validation", () => {
     expect(errors.some((error) => error.property === "packageCount")).toBe(false);
   });
 
+  it("accepts a supported payment condition when updating an Order", async () => {
+    const input = plainToInstance(UpdateOrderDto, {
+      paymentCondition: "customer_pays_cod_trader_pays_fee",
+    });
+    const errors = await validate(input);
+    expect(errors.some((error) => error.property === "paymentCondition")).toBe(false);
+  });
+
+  it("rejects an unsupported payment condition when updating an Order", async () => {
+    const input = plainToInstance(UpdateOrderDto, { paymentCondition: "unknown_payer" });
+    const errors = await validate(input);
+    expect(errors.some((error) => error.property === "paymentCondition")).toBe(true);
+  });
+
   it("accepts an unconventional Customer mobile on the Create Order path (advisory only)", async () => {
     const input = plainToInstance(CreateOrderDto, {
       ...validCreateOrder,

@@ -124,6 +124,59 @@ describe("Edit order", () => {
     );
   });
 
+  it("allows changing who pays and sends the financial choice to the API", async () => {
+    const api = {
+      get: vi.fn().mockResolvedValue(detail),
+      patch: vi.fn().mockResolvedValue({}),
+      post: vi.fn().mockResolvedValue({
+        additionalFees: "0.00",
+        additionalFeeVatAmount: "0.00",
+        codAmount: "0.00",
+        companyRevenue: "10.00",
+        configuredServiceFee: "10.00",
+        customerAmountDue: "0.00",
+        orderProfit: "10.00",
+        overrideApplied: false,
+        pricingProvenance: "resolved",
+        pricingRuleId: "pricing-rule-1",
+        serviceFee: "10.00",
+        serviceFeeVatAmount: "0.00",
+        totalDeductions: "10.00",
+        traderNetPayable: "0.00",
+        vatAmount: "0.00",
+        vatEnabled: false,
+        vatPriceMode: null,
+        vatRate: "0.00",
+      }),
+    };
+    render(
+      <OrderDetailsWorkspace
+        api={api as unknown as ApiClient}
+        companyId="00000000-0000-4000-8000-000000000001"
+        onBack={vi.fn()}
+        orderNumber="ORD-000001"
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Edit order" }));
+    const whoPays = await screen.findByLabelText("Who pays?");
+    expect(whoPays).toBeEnabled();
+    fireEvent.change(whoPays, {
+      target: { value: "customer_pays_cod_trader_pays_fee" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(api.patch).toHaveBeenCalledWith(
+        `operations/orders/${detail.id}`,
+        expect.objectContaining({
+          codAmount: 0,
+          paymentCondition: "customer_pays_cod_trader_pays_fee",
+        }),
+      ),
+    );
+  });
+
   it("hides Edit order once the order is delivered", async () => {
     const delivered = { ...detail, deliveryStatus: "delivered" };
     const api = { get: vi.fn().mockResolvedValue(delivered), patch: vi.fn() };
