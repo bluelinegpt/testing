@@ -26,6 +26,7 @@ interface Labels {
   readonly emirate: string;
   readonly externalReference: string;
   readonly generatedAt: string;
+  readonly grossOrderPayable: string;
   readonly lineNumber: string;
   readonly moneyReceivedDate: string;
   readonly moneyReceivedNotice: string;
@@ -36,6 +37,10 @@ interface Labels {
   readonly numberOfOrders: string;
   readonly orderSerial: string;
   readonly originalTraderPayable: string;
+  readonly receivableDeductions: string;
+  readonly receivableNumber: string;
+  readonly receivableReason: string;
+  readonly receivableSource: string;
   readonly paymentDate: string;
   readonly paymentMethod: string;
   readonly paymentMethodBankTransfer: string;
@@ -85,6 +90,7 @@ const LABELS: Record<ReportLanguage, Labels> = {
     emirate: "الإمارة",
     externalReference: "الرقم المرجعي الخارجي",
     generatedAt: "تاريخ ووقت إنشاء التقرير",
+    grossOrderPayable: "إجمالي مستحقات الطلبات (+)",
     lineNumber: "#",
     moneyReceivedDate: "تاريخ استلام التاجر للمبلغ",
     moneyReceivedNotice: "تم تأكيد استلام التاجر للمبلغ",
@@ -95,6 +101,10 @@ const LABELS: Record<ReportLanguage, Labels> = {
     numberOfOrders: "عدد الطلبات",
     orderSerial: "الرقم التسلسلي للطلب",
     originalTraderPayable: "المستحق الأصلي للتاجر",
+    receivableDeductions: "رسوم مستحقة على التاجر (-)",
+    receivableNumber: "رقم المبلغ المستحق",
+    receivableReason: "السبب",
+    receivableSource: "المرجع / الطلب",
     paymentDate: "تاريخ الدفعة",
     paymentMethod: "طريقة الدفع",
     paymentMethodBankTransfer: "تحويل بنكي",
@@ -142,6 +152,7 @@ const LABELS: Record<ReportLanguage, Labels> = {
     emirate: "Emirate",
     externalReference: "External Reference Number",
     generatedAt: "Generated Date and Time",
+    grossOrderPayable: "Gross Order Payable (+)",
     lineNumber: "#",
     moneyReceivedDate: "Money Received Date",
     moneyReceivedNotice: "Money Received by Trader confirmed.",
@@ -152,6 +163,10 @@ const LABELS: Record<ReportLanguage, Labels> = {
     numberOfOrders: "Number of Orders",
     orderSerial: "Order Serial Number",
     originalTraderPayable: "Original Trader Payable",
+    receivableDeductions: "Company Fee Deductions (-)",
+    receivableNumber: "Receivable Number",
+    receivableReason: "Reason",
+    receivableSource: "Reference / Order",
     paymentDate: "Payment Date",
     paymentMethod: "Payment Method",
     paymentMethodBankTransfer: "Bank Transfer",
@@ -292,6 +307,36 @@ export function buildTraderSettlementStatementHtml(
       .join("") +
     `</tr></thead><tbody>${orderRows}</tbody></table>`;
 
+  const deductionRows = data.receivableOffsets
+    .map(
+      (line, index) =>
+        "<tr>" +
+        `<td class="num">${index + 1}</td>` +
+        `<td class="mono">${escapeHtml(line.receivableNumber)}</td>` +
+        `<td>${dateOnly(line.businessDate)}</td>` +
+        `<td class="mono">${escapeHtml(line.orderSerialNumber ?? line.sourceReference ?? "")}</td>` +
+        `<td>${escapeHtml(line.reason)}</td>` +
+        `<td class="num negative">-${money(line.amountApplied)}</td>` +
+        "</tr>",
+    )
+    .join("");
+  const deductionTable =
+    data.receivableOffsets.length === 0
+      ? ""
+      : `<h2 class="section-title">${escapeHtml(labels.receivableDeductions)}</h2>` +
+        `<table class="grid"><thead><tr>` +
+        [
+          labels.lineNumber,
+          labels.receivableNumber,
+          labels.paymentDate,
+          labels.receivableSource,
+          labels.receivableReason,
+          labels.receivableDeductions,
+        ]
+          .map((label) => `<th>${escapeHtml(label)}</th>`)
+          .join("") +
+        `</tr></thead><tbody>${deductionRows}</tbody></table>`;
+
   const headerMeta = (label: string, value: string) =>
     `<div class="meta-item"><span class="meta-label">${escapeHtml(label)}</span>` +
     `<span class="meta-value">${escapeHtml(value)}</span></div>`;
@@ -415,7 +460,9 @@ export function buildTraderSettlementStatementHtml(
     summaryLine(labels.serviceFee, money(data.summary.totalServiceFees)) +
     summaryLine(labels.originalTraderPayable, money(data.summary.totalOriginalTraderPayable)) +
     summaryLine(labels.previouslyPaid, money(data.summary.previouslyPaid)) +
-    summaryLine(labels.amountPaidNow, money(data.summary.amountPaidNow)) +
+    summaryLine(labels.grossOrderPayable, money(data.summary.grossOrderPayable)) +
+    summaryLine(labels.receivableDeductions, `-${money(data.summary.traderFeeDeductions)}`) +
+    summaryLine(labels.amountPaidNow, money(data.summary.netPayment)) +
     summaryLine(labels.remainingOutstanding, money(data.summary.remainingOutstanding)) +
     `</section>`;
 
@@ -454,6 +501,7 @@ export function buildTraderSettlementStatementHtml(
     table.grid thead { display: table-header-group; }
     table.grid thead th { background: #f0f0f0; }
     table.grid td.num, table.grid th.num { text-align: end; white-space: nowrap; }
+    .negative { color: #a32626; }
     .mono { font-variant-numeric: tabular-nums; }
     .summary-section { margin-top: 12px; max-width: 360px; }
     .summary-line { display: flex; justify-content: space-between; border-bottom: 1px solid #ddd; padding: 4px 0; font-size: 12px; }
@@ -470,6 +518,7 @@ export function buildTraderSettlementStatementHtml(
     reportHeader +
     noticeSection +
     orderTable +
+    deductionTable +
     summary +
     signatures +
     `</body></html>`

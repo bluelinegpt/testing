@@ -131,6 +131,7 @@ function classificationCase(requiredExpression: string, mappingOk: string): stri
       when not (${requiredExpression}) then 'no_accounting_required'
       when ev.active_count > 1 then 'duplicate'
       when ev.latest_status = 'ignored_duplicate' then 'duplicate'
+      when ev.latest_status = 'ignored_no_accounting_required' then 'no_accounting_required'
       when ev.posted_count >= 1 then 'already_posted'
       when ev.latest_status = 'reversed' then 'blocked'
       when ev.active_count = 1 then 'blocked'
@@ -186,7 +187,7 @@ function actionCase(requiredExpression: string, mappingOk: string): string {
 function eventLateral(sourceType: string, eventType: string, alias: string): string {
   return `
     left join lateral (
-      select count(*) filter (where e.processing_status not in ('reversed', 'ignored_duplicate'))
+      select count(*) filter (where e.processing_status not in ('reversed', 'ignored_duplicate', 'ignored_no_accounting_required'))
                ::int as active_count,
              count(*) filter (where e.processing_status = 'posted')::int as posted_count,
              (array_agg(e.id order by e.event_version desc, e.created_at desc))[1] as event_id,

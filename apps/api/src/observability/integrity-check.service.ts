@@ -118,7 +118,7 @@ export class IntegrityCheckService {
              e.processing_status as "processingStatus", e.created_at::text as "createdAt"
         from accounting_events e
         join companies c on c.id = e.company_id
-       where e.processing_status not in ('posted', 'reversed', 'ignored_duplicate')
+       where e.processing_status not in ('posted', 'reversed', 'ignored_duplicate', 'ignored_no_accounting_required')
          and e.created_at < now() - interval '24 hours'
          and (${companyId ?? null}::uuid is null or e.company_id = ${companyId ?? null}::uuid)
        order by e.created_at

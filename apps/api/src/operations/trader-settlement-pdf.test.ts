@@ -67,8 +67,11 @@ const baseData: TraderSettlementReportData = {
     traderName: "Test Trader",
   },
   orders: manyOrders(3),
+  receivableOffsets: [],
   summary: {
     amountPaidNow: "150.00",
+    grossOrderPayable: "150.00",
+    netPayment: "150.00",
     orderCount: 3,
     previouslyPaid: "0.00",
     remainingOutstanding: "0.00",
@@ -78,6 +81,7 @@ const baseData: TraderSettlementReportData = {
     totalOriginalTraderPayable: "150.00",
     totalServiceFees: "15.00",
     totalVat: "0.00",
+    traderFeeDeductions: "0.00",
   },
 };
 

@@ -1519,6 +1519,15 @@ export function OrdersModuleWorkspace({
       {bulkAction === "status" ? (
         <BulkStatusDialog
           api={api}
+          reopenDeliveredOrderId={
+            selection.selectionMode === "ids" &&
+            selection.orderIds?.length === 1 &&
+            bulkSelectedOrders.length === 1 &&
+            bulkSelectedOrders[0]?.deliveryStatus === "delivered" &&
+            permissions.includes("users_roles.manage")
+              ? bulkSelectedOrders[0].id
+              : undefined
+          }
           selection={selection}
           onClose={() => setBulkAction(undefined)}
           onComplete={async () => {
@@ -2376,6 +2385,7 @@ export function OrderDetailsWorkspace({
   const [historyFilter, setHistoryFilter] = useState("all");
   const [editOpen, setEditOpen] = useState(false);
   const [holdOpen, setHoldOpen] = useState(false);
+  const [reopenDeliveryOpen, setReopenDeliveryOpen] = useState(false);
   const [statusBusy, setStatusBusy] = useState(false);
   const [error, setError] = useState<string>();
   const [viewCollectionId, setViewCollectionId] = useState<string>();
@@ -2624,6 +2634,16 @@ export function OrderDetailsWorkspace({
             >
               <Pencil aria-hidden="true" size={18} />
               {t("operations.editOrder")}
+            </button>
+          ) : null}
+          {detail.deliveryStatus === "delivered" &&
+          permissions.includes("users_roles.manage") ? (
+            <button
+              className="button button-secondary"
+              onClick={() => setReopenDeliveryOpen(true)}
+              type="button"
+            >
+              {t("operations.reopenDelivery")}
             </button>
           ) : null}
           <button
@@ -3134,6 +3154,27 @@ export function OrderDetailsWorkspace({
           title={t("operations.actions.hold")}
         />
       ) : null}
+      {reopenDeliveryOpen ? (
+        <ReasonDialog
+          busy={statusBusy}
+          label={t("operations.reopenDeliveryReason")}
+          onClose={() => setReopenDeliveryOpen(false)}
+          onSubmit={(reason) => {
+            setStatusBusy(true);
+            void api
+              .post(`operations/orders/${detail.id}/reopen-delivery`, { reason: reason.trim() })
+              .then(async () => {
+                setReopenDeliveryOpen(false);
+                await load();
+              })
+              .catch((requestError) =>
+                setError(message(requestError, t("operations.reopenDeliveryFailed"))),
+              )
+              .finally(() => setStatusBusy(false));
+          }}
+          title={t("operations.reopenDelivery")}
+        />
+      ) : null}
       {collectionError === undefined ? null : (
         <div className="alert alert-error" role="alert">
           {collectionError}
@@ -3271,11 +3312,13 @@ function BulkStatusDialog({
   api,
   onClose,
   onComplete,
+  reopenDeliveredOrderId,
   selection,
 }: {
   api: ApiClient;
   onClose: () => void;
   onComplete: () => Promise<void>;
+  reopenDeliveredOrderId?: string | undefined;
   selection: SelectionPayload;
 }) {
   const { t } = useTranslation();
@@ -3284,17 +3327,26 @@ function BulkStatusDialog({
   const [partial, setPartial] = useState(false);
   const [error, setError] = useState<string>();
   const [saving, setSaving] = useState(false);
-  const reasonRequired = ["hold", "cancelled", "returned_to_trader"].includes(status);
+  const reopeningDeliveredOrder =
+    reopenDeliveredOrderId !== undefined && status === "out_for_delivery";
+  const reasonRequired =
+    reopeningDeliveredOrder || ["hold", "cancelled", "returned_to_trader"].includes(status);
   const submit = async () => {
     if (reasonRequired && !reason.trim()) return;
     setSaving(true);
     try {
-      await api.post("operations/orders/bulk-status", {
-        ...selection,
-        allowPartial: partial,
-        reason: reason.trim() || undefined,
-        targetStatus: status,
-      });
+      if (reopeningDeliveredOrder && reopenDeliveredOrderId !== undefined) {
+        await api.post(`operations/orders/${reopenDeliveredOrderId}/reopen-delivery`, {
+          reason: reason.trim(),
+        });
+      } else {
+        await api.post("operations/orders/bulk-status", {
+          ...selection,
+          allowPartial: partial,
+          reason: reason.trim() || undefined,
+          targetStatus: status,
+        });
+      }
       await onComplete();
     } catch (requestError) {
       setError(bulkStatusError(requestError, t));
@@ -3319,6 +3371,9 @@ function BulkStatusDialog({
           ))}
         </select>
       </label>
+      {reopeningDeliveredOrder ? (
+        <div className="alert alert-info">{t("operations.reopenDelivery")}</div>
+      ) : null}
       <label className="field">
         <span>{t("operations.reason")}</span>
         <textarea

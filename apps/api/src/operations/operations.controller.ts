@@ -111,6 +111,7 @@ import {
   EligibleOrdersQueryDto,
   ProposeTraderAllocationDto,
   ReconciliationListQueryDto,
+  ReopenDeliveredOrderDto,
   ReverseTraderSettlementDto,
   CreateOrderDto,
   CreateTraderPortalOrderDto,
@@ -133,6 +134,7 @@ import {
   GenerateShipmentManifestDto,
   UpdateTraderPortalProfileDto,
 } from "./operations.dto.js";
+import { OrderDeliveryReopenService } from "./order-delivery-reopen.service.js";
 
 @ApiTags("operations")
 @ApiBearerAuth()
@@ -151,6 +153,8 @@ export class OperationsController {
     private readonly traderSettlementService: TraderSettlementService,
     @Inject(TraderAccountStatementService)
     private readonly traderAccountStatementService: TraderAccountStatementService,
+    @Inject(OrderDeliveryReopenService)
+    private readonly deliveryReopen: OrderDeliveryReopenService,
   ) {}
 
   @ApiOperation({ summary: "Show operational totals for the authenticated Company" })
@@ -179,7 +183,7 @@ export class OperationsController {
   public orders(
     @Query("search") search?: string,
     @Query("deliveryStatus") deliveryStatus?: string,
-    @Query("orderType") orderType?: "collect_order" | "delivery",
+    @Query("orderType") orderType?: "collect_order" | "delivery" | "gcc_international",
     @Query("cashStatus") cashStatus?: string,
     @Query("settlementStatus") settlementStatus?: string,
     @Query("workflowStep")
@@ -781,6 +785,19 @@ export class OperationsController {
     @Req() request: Request,
   ): Promise<OperationsOrder> {
     return this.operations.updateOrder(orderId, input, this.correlationId(request));
+  }
+
+  @RequireAnyPermission("users_roles.manage")
+  @ApiOperation({
+    summary: "Administratively reopen a Delivered Order and reverse linked Driver financials",
+  })
+  @Post("orders/:orderId/reopen-delivery")
+  public reopenDeliveredOrder(
+    @Param("orderId", new ParseUUIDPipe()) orderId: string,
+    @Body() input: ReopenDeliveredOrderDto,
+    @Req() request: Request,
+  ): Promise<OperationsOrder> {
+    return this.deliveryReopen.reopen(orderId, input.reason, this.correlationId(request));
   }
 
   // No permission requirement at the guard layer (deliberately empty, NOT

@@ -219,15 +219,6 @@ export class GeneralExpensePaymentService {
           )
         `.execute(transaction);
       }
-      // Create and confirm cash/bank movements for each payment row.
-      // This records where the money came from (which cash/bank account),
-      // completing the audit trail: accounting entry + operational movement.
-      await this.createPaymentMovements(transaction, {
-        accountingDate: input.accountingDate ?? input.paymentDate,
-        paymentDate: input.paymentDate,
-        paymentNumber,
-        paymentRows: input.rows,
-      });
       // Only now, with the payment AND all of its rows inserted. One audit per
       // overridden funding account, keyed to this payment; the coordinator
       // skips any that already exist and the unique index behind it makes that
@@ -273,6 +264,16 @@ export class GeneralExpensePaymentService {
         sourceEntityId: paymentId,
         sourceEntityType: "general_expense_payment",
         sourceReference: paymentNumber,
+      });
+      // The payment Event owns the Journal. Its generated Cash/Bank Movements
+      // are operational evidence only, so link them to that Event rather than
+      // enqueueing a second Journal-producing Event for the same payment.
+      await this.createPaymentMovements(transaction, {
+        accountingDate: input.accountingDate ?? input.paymentDate,
+        accountingEventId: eventId,
+        paymentDate: input.paymentDate,
+        paymentNumber,
+        paymentRows: input.rows,
       });
       const response = {
         accountingEventId: eventId,
@@ -426,6 +427,7 @@ export class GeneralExpensePaymentService {
     database: Kysely<DatabaseSchema>,
     options: {
       readonly accountingDate: string;
+      readonly accountingEventId: string;
       readonly paymentDate: string;
       readonly paymentNumber: string;
       readonly paymentRows: CreateGeneralExpensePaymentDto["rows"];
@@ -471,6 +473,7 @@ export class GeneralExpensePaymentService {
           status,
           correlation_id,
           idempotency_identity,
+          accounting_event_id,
           confirmed_by_account_id,
           confirmed_at,
           created_by_account_id,
@@ -494,6 +497,7 @@ export class GeneralExpensePaymentService {
           'confirmed',
           ${movementId},
           ${`general_expense_payment:${options.paymentNumber}:${rowIndex + 1}`},
+          ${options.accountingEventId}::uuid,
           ${actorId}::uuid,
           now(),
           ${actorId}::uuid,
@@ -501,24 +505,6 @@ export class GeneralExpensePaymentService {
         )
       `.execute(database);
 
-      // Create corresponding accounting event for the movement
-      // This triggers the operational source loader to generate GL journal entries
-      await this.eventWriter.enqueue(database, {
-        accountingDate: options.accountingDate,
-        actorId,
-        companyId,
-        correlationId: movementId,
-        description: `Expense payment ${options.paymentNumber} cash/bank movement`,
-        eventType: movementType === "cash_withdrawal" ? "cash_withdrawal_confirmed" : "bank_withdrawal_confirmed",
-        metadata: {
-          amount: new Decimal(row.amount).toFixed(2),
-          movementNumber,
-          paymentNumber: options.paymentNumber,
-        },
-        sourceEntityId: movementId,
-        sourceEntityType: "general_expense_payment",
-        sourceReference: movementNumber,
-      });
     }
   }
 

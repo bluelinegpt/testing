@@ -191,4 +191,33 @@ describe("Edit order", () => {
     await screen.findByText("ORD-000001");
     expect(screen.queryByRole("button", { name: "Edit order" })).not.toBeInTheDocument();
   });
+
+  it("lets an administrator reopen a delivered order with a reason", async () => {
+    const delivered = { ...detail, deliveryStatus: "delivered" };
+    const api = {
+      get: vi.fn().mockResolvedValue(delivered),
+      patch: vi.fn(),
+      post: vi.fn().mockResolvedValue({}),
+    };
+    render(
+      <OrderDetailsWorkspace
+        api={api as unknown as ApiClient}
+        companyId="00000000-0000-4000-8000-000000000001"
+        onBack={vi.fn()}
+        orderNumber="ORD-000001"
+        permissions={["users_roles.manage"]}
+      />,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Reopen delivery" }));
+    fireEvent.change(screen.getByLabelText("Reason for reopening this delivered order"), {
+      target: { value: "Customer requested another delivery attempt" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
+    await waitFor(() =>
+      expect(api.post).toHaveBeenCalledWith(
+        `operations/orders/${detail.id}/reopen-delivery`,
+        { reason: "Customer requested another delivery attempt" },
+      ),
+    );
+  });
 });

@@ -324,7 +324,14 @@ export class OperationalSourceLoader {
          and company_id=${event.companyId}::uuid for share
     `.execute(database);
     const row = result.rows[0];
-    if (row === undefined || row.deliveryStatus !== "delivered" || row.deliveredDate === null) {
+    // Closing an already delivered Order is a later operational lifecycle
+    // step; it must not make the immutable delivery fact unreadable while an
+    // Accounting Event is waiting or being reprocessed.
+    if (
+      row === undefined ||
+      !["delivered", "closed"].includes(row.deliveryStatus) ||
+      row.deliveredDate === null
+    ) {
       this.invalidSource("accounting_order_not_recognizable");
     }
     const dimensions = {
@@ -517,13 +524,15 @@ export class OperationalSourceLoader {
   ): Promise<OperationalJournalFacts> {
     const header = await sql<{
       businessDate: string;
+      grossPayable: string;
       netPayable: string;
       settlementNumber: string;
       status: string;
       traderId: string;
     }>`
       select settlement_number as "settlementNumber",trader_id as "traderId",
-             business_date::text as "businessDate",net_payable::text as "netPayable",status
+             business_date::text as "businessDate",gross_payable::text as "grossPayable",
+             net_payable::text as "netPayable",status
         from trader_settlements where id=${event.sourceEntityId}::uuid
          and company_id=${event.companyId}::uuid for share
     `.execute(database);
@@ -553,6 +562,33 @@ export class OperationalSourceLoader {
          and settlement_id=${event.sourceEntityId}::uuid
        order by created_at,id
     `.execute(database);
+    const offsetSchema = await sql<{ tableExists: boolean }>`
+      select to_regclass('public.trader_settlement_receivable_offsets') is not null as "tableExists"
+    `.execute(database);
+    // Older local databases predate receivable offsets. Treat those settlements
+    // as order/payment-only so their accounting events can still be loaded.
+    const offsets =
+      offsetSchema.rows[0]?.tableExists === true
+        ? await sql<{
+            amount: string;
+            receivableId: string;
+            receivableNumber: string;
+            sourceReference: string | null;
+          }>`
+            select x.amount_allocated::text as amount,x.receivable_id as "receivableId",
+                   r.receivable_number as "receivableNumber",r.source_reference as "sourceReference"
+              from trader_settlement_receivable_offsets x
+              join trader_receivables r on r.id=x.receivable_id and r.company_id=x.company_id
+             where x.company_id=${event.companyId}::uuid
+               and x.settlement_id=${event.sourceEntityId}::uuid
+             order by r.business_date,r.receivable_number
+          `.execute(database)
+        : { rows: [] as Array<{
+            amount: string;
+            receivableId: string;
+            receivableNumber: string;
+            sourceReference: string | null;
+          }> };
     const base = {
       sourceEntityId: event.sourceEntityId,
       sourceEntityType: "trader_settlement",
@@ -567,7 +603,7 @@ export class OperationalSourceLoader {
       components: present([
         component(
           "trader_payable",
-          row.netPayable,
+          row.grossPayable,
           "debit",
           "trader_payable",
           base,
@@ -583,10 +619,25 @@ export class OperationalSourceLoader {
             `${payment.paymentMethod} payment for ${row.settlementNumber}`,
           ),
         ),
+        ...offsets.rows.map((offset) =>
+          component(
+            "cod_receivable",
+            offset.amount,
+            "credit",
+            "cod_receivable",
+            { ...base, traderReceivableId: offset.receivableId },
+            `Trader fee offset ${offset.receivableNumber} in ${row.settlementNumber}`,
+          ),
+        ),
       ]),
       description: `Trader settlement ${row.settlementNumber}`,
       journalSource: "trader_settlement",
-      metadata: { ...base, allocations: allocations.rows, paymentRows: payments.rows },
+      metadata: {
+        ...base,
+        allocations: allocations.rows,
+        paymentRows: payments.rows,
+        receivableOffsets: offsets.rows,
+      },
       sourceReference: row.settlementNumber,
     };
   }

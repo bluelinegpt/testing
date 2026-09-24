@@ -6,9 +6,38 @@ import { validate } from "class-validator";
 import {
   ChangeOrderStatusDto,
   CreateOrderDto,
+  CreateTraderSettlementDto,
   TraderAccountStatementQueryDto,
   UpdateOrderDto,
+  ReopenDeliveredOrderDto,
 } from "./operations.dto.js";
+
+describe("Trader settlement DTO validation", () => {
+  const baseSettlement = {
+    allocations: [{ amount: 100, orderId: "10000000-0000-4000-8000-000000000001" }],
+    amount: 75,
+    cashAccountId: "30000000-0000-4000-8000-000000000001",
+    paymentMethod: "cash",
+    traderId: "20000000-0000-4000-8000-000000000001",
+  };
+
+  it("accepts a valid Trader receivable deduction", async () => {
+    const input = plainToInstance(CreateTraderSettlementDto, {
+      ...baseSettlement,
+      receivableOffsets: [{ amount: 25, receivableId: "40000000-0000-4000-8000-000000000001" }],
+    });
+    await expect(validate(input)).resolves.toEqual([]);
+  });
+
+  it("rejects an invalid or zero Trader receivable deduction", async () => {
+    const input = plainToInstance(CreateTraderSettlementDto, {
+      ...baseSettlement,
+      receivableOffsets: [{ amount: 0, receivableId: "40000000-0000-4000-8000-000000000001" }],
+    });
+    const errors = await validate(input);
+    expect(errors.some((error) => error.property === "receivableOffsets")).toBe(true);
+  });
+});
 
 const validCreateOrder = {
   areaId: "10000000-0000-4000-8000-000000000001",
@@ -136,6 +165,15 @@ describe("Order DTO validation", () => {
     const input = plainToInstance(UpdateOrderDto, { paymentCondition: "unknown_payer" });
     const errors = await validate(input);
     expect(errors.some((error) => error.property === "paymentCondition")).toBe(true);
+  });
+
+  it("requires a meaningful reason to reopen a delivered Order", async () => {
+    const invalid = await validate(plainToInstance(ReopenDeliveredOrderDto, { reason: "  " }));
+    const valid = await validate(
+      plainToInstance(ReopenDeliveredOrderDto, { reason: "Customer requested redelivery" }),
+    );
+    expect(invalid.some((error) => error.property === "reason")).toBe(true);
+    expect(valid.some((error) => error.property === "reason")).toBe(false);
   });
 
   it("accepts an unconventional Customer mobile on the Create Order path (advisory only)", async () => {

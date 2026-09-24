@@ -454,6 +454,7 @@ export const englishTranslations = {
       event_currently_processing: "The Accounting Event is currently processing.",
       event_reversed: "The Accounting Event was reversed.",
       event_ignored_duplicate: "The Accounting Event was ignored as a duplicate.",
+      event_no_accounting_required: "The source has no financial components to post.",
       event_status_not_reprocessable: "This Accounting Event status cannot be reprocessed.",
       event_journal_already_exists: "A Journal already exists for this Accounting Event.",
       accounting_disabled: "Accounting is disabled for this Company.",
@@ -1719,6 +1720,7 @@ export const englishTranslations = {
       pending: "Pending collection",
       reconciled: "Money received from Driver",
       reversed: "Reversed",
+      noAccountingRequired: "No Accounting Required",
     },
     accounting: {
       not_applicable: "No Accounting Required",
@@ -2084,6 +2086,10 @@ export const englishTranslations = {
     },
     inlineCustomerHint: "This creates a Customer master record and uses it for this Order.",
     editOrder: "Edit order",
+    reopenDelivery: "Reopen delivery",
+    reopenDeliveryReason: "Reason for reopening this delivered order",
+    reopenDeliveryFailed:
+      "The order could not be reopened. Reverse any blocking Trader payment first.",
     editOrderFailed: "The order could not be updated.",
     serviceFeeReason: "Reason for changing the service fee",
     addPricing: "Add pricing for this trader",
@@ -3913,6 +3919,7 @@ export const englishTranslations = {
     stepEligibleOrders: "Eligible Orders",
     stepPaymentDetails: "Payment Details",
     stepAllocation: "Allocation",
+    stepReceivableDeductions: "Outstanding Company Fees",
     stepReview: "Review",
     searchTraders: "Search Traders",
     noTraders: "No Traders found.",
@@ -3971,6 +3978,21 @@ export const englishTranslations = {
     allocationDuplicateOrder: "This Order is already allocated in this payment.",
     allocationTotalMismatch: "The total allocated amount must equal the Payment Amount.",
     invalidAmount: "Enter a valid amount with no more than two decimal places.",
+    receivableDeductionsHelp:
+      "Outstanding fees are selected oldest-first. Uncheck or edit a line if it should not be deducted from this settlement.",
+    receivableNumber: "Receivable Number",
+    receivableBusinessDate: "Business Date",
+    receivableReference: "Reference / Order",
+    receivableReason: "Reason",
+    deductionAmount: "Deduction Amount",
+    grossOrderPayable: "Gross Order Payable (+)",
+    companyFeeDeductions: "Company Fee Deductions (-)",
+    netPaymentToTrader: "Net Payment to Trader",
+    receivablesLoadFailed: "Outstanding Trader fees could not be loaded.",
+    invalidReceivableOffset: "Enter a valid amount for every selected fee deduction.",
+    receivableOffsetExceedsOutstanding: "A fee deduction cannot exceed its outstanding amount.",
+    receivableOffsetsExceedPayable:
+      "Fee deductions must leave a positive net payment to the Trader.",
     accountStatement: "Trader Account Statement",
     generateStatement: "Generate Statement",
     selectTrader: "Select a Trader",
@@ -5180,6 +5202,8 @@ export const englishTranslations = {
         retryPending: "This Event failed temporarily and will retry automatically.",
         ignoredDuplicate:
           "An Accounting Event already exists for this transaction, so this one was ignored to prevent a duplicate Journal.",
+        noAccountingRequired:
+          "The source contains no financial amount to post, so no Journal is required.",
       },
       actions: {
         openAutomaticPosting: "Open Automatic Posting",

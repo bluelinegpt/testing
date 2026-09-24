@@ -5,9 +5,10 @@ import { operationalAreaLabel } from "./accounting-labels.js";
 /**
  * The single business-facing model of an Accounting Event's lifecycle.
  *
- * The backend stores nine technical states — `received`, `processing`,
+ * The backend stores technical states — `received`, `processing`,
  * `validated`, `posted`, `failed`, `retry_pending`, `blocked_configuration`,
- * `reversed`, `ignored_duplicate` — and none of them says *why* an Event is
+ * `reversed`, `ignored_duplicate`, `ignored_no_accounting_required` — and the
+ * active states do not by themselves say *why* an Event is
  * sitting still. Two facts made that a real problem:
  *
  *  - `blocked_configuration` is defined in the schema but **no code ever
@@ -184,6 +185,15 @@ export function eventLifecycle(row: Record<string, unknown>, t: TFunction): Even
       label: t("accounting.failures.duplicateJournalPrevented"),
       retryable: false,
       state: "ignoredDuplicate",
+      tone: "info",
+    };
+  }
+  if (status === "ignored_no_accounting_required") {
+    return {
+      explanation: t("accounting.lifecycle.explain.noAccountingRequired"),
+      label: t("accounting.lifecycle.noAccountingRequired"),
+      retryable: false,
+      state: "noAccountingRequired",
       tone: "info",
     };
   }

@@ -83,8 +83,10 @@ export class TraderReceivableController {
     return this.traderReceivables.tradersWithBalance();
   }
 
-  @RequireAnyPermission("trader_receivables.create", "users_roles.manage")
-  @ApiOperation({ summary: "Eligible Trader receivables for a Collection, paginated" })
+  @RequireAnyPermission("trader_receivables.create", "settlements.create", "users_roles.manage")
+  @ApiOperation({
+    summary: "Eligible Trader receivables for a Collection or settlement, paginated",
+  })
   @Get("eligible")
   public eligible(
     @Query() query: TraderReceivableEligibleQueryDto,

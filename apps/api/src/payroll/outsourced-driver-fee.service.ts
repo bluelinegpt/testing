@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 
 import { HttpStatus, Inject, Injectable } from "@nestjs/common";
 import { Decimal } from "decimal.js";
-import { type Kysely, sql } from "kysely";
+import { type Kysely, sql, type Transaction } from "kysely";
 
 import { DATABASE } from "../infrastructure/database/database.tokens.js";
 import type { DatabaseSchema } from "../infrastructure/database/database.types.js";
@@ -242,6 +242,7 @@ export class OutsourcedDriverFeeService {
     reason: string,
     idempotencyKey: string | undefined,
     correlationId: string,
+    outerTransaction?: Transaction<DatabaseSchema>,
   ) {
     this.support.assertPermission("outsourced_driver_fees.reverse");
     const normalizedReason = reason.trim();
@@ -253,7 +254,7 @@ export class OutsourcedDriverFeeService {
       );
     }
     const { actorId, companyId } = this.support.context();
-    return this.transactions.execute(async (transaction) => {
+    const reverseInTransaction = async (transaction: Transaction<DatabaseSchema>) => {
       const reservation = await this.support.reserveIdempotency(transaction, {
         companyId,
         idempotencyKey,
@@ -308,7 +309,10 @@ export class OutsourcedDriverFeeService {
         response,
       );
       return response;
-    });
+    };
+    return outerTransaction === undefined
+      ? this.transactions.execute(reverseInTransaction)
+      : reverseInTransaction(outerTransaction);
   }
 
   public async accrualSummary() {
@@ -575,10 +579,11 @@ export class OutsourcedDriverFeeService {
     reason: string,
     idempotencyKey: string | undefined,
     correlationId: string,
+    outerTransaction?: Transaction<DatabaseSchema>,
   ) {
     this.support.assertPermission("outsourced_driver_fees.reverse");
     const { actorId, companyId } = this.support.context();
-    return this.transactions.execute(async (transaction) => {
+    const reverseInTransaction = async (transaction: Transaction<DatabaseSchema>) => {
       const reservation = await this.support.reserveIdempotency(transaction, {
         companyId,
         idempotencyKey,
@@ -621,7 +626,10 @@ export class OutsourcedDriverFeeService {
         response,
       );
       return response;
-    });
+    };
+    return outerTransaction === undefined
+      ? this.transactions.execute(reverseInTransaction)
+      : reverseInTransaction(outerTransaction);
   }
 
   public async paymentSummary() {

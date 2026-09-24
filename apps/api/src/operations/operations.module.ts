@@ -48,6 +48,7 @@ import { OperationsHistoryWriter } from "./operations-history.writer.js";
 import { WhatsAppOutboxWriter } from "../whatsapp/whatsapp-outbox-writer.service.js";
 import { OperationsService } from "./operations.service.js";
 import { OrdersWorkflowService } from "./orders-workflow.service.js";
+import { OrderDeliveryReopenService } from "./order-delivery-reopen.service.js";
 import { PublicTrackingService } from "./public-tracking.service.js";
 import { TraderReceivableController } from "./trader-receivable.controller.js";
 import { TraderReceivableService } from "./trader-receivable.service.js";
@@ -91,6 +92,7 @@ import { TraderSettlementService } from "./trader-settlement.service.js";
     WhatsAppOutboxWriter,
     OperationsService,
     OrdersWorkflowService,
+    OrderDeliveryReopenService,
     PublicTrackingService,
     EmployeeDeliveryEarningService,
     EmployeeCollectionEarningService,

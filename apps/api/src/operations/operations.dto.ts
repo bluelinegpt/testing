@@ -164,8 +164,8 @@ export class OrderSelectionDto {
   public readonly deliveryStatus?: string;
 
   @IsOptional()
-  @IsIn(["delivery", "collect_order"])
-  public readonly orderType?: "collect_order" | "delivery";
+  @IsIn(["delivery", "collect_order", "gcc_international"])
+  public readonly orderType?: "collect_order" | "delivery" | "gcc_international";
 
   @IsOptional()
   @IsString()
@@ -463,8 +463,15 @@ export class CreateOrderDto {
   public readonly psystemSerial?: never;
 
   @IsOptional()
-  @IsIn(["delivery", "collect_order"])
-  public readonly orderType?: "collect_order" | "delivery";
+  @IsIn(["delivery", "collect_order", "gcc_international"])
+  public readonly orderType?: "collect_order" | "delivery" | "gcc_international";
+
+  @ValidateIf((dto: CreateOrderDto) => dto.orderType === "gcc_international")
+  @IsString()
+  @MinLength(2)
+  @MaxLength(120)
+  @TrimText()
+  public readonly destinationCountryName?: string;
 
   /*
    * A deliberate free delivery. Never inferred from zero amounts -- a
@@ -711,8 +718,7 @@ export class UpdateOrderDto {
   @IsOptional()
   @IsIn(orderPaymentConditions)
   public readonly paymentCondition?:
-    | "customer_pays_cod_and_fee"
-    | "customer_pays_cod_trader_pays_fee";
+    "customer_pays_cod_and_fee" | "customer_pays_cod_trader_pays_fee";
 
   @IsOptional()
   @IsNumber()
@@ -739,6 +745,14 @@ export class UpdateOrderDto {
   @IsString()
   @MaxLength(1000)
   public readonly notes?: string;
+}
+
+export class ReopenDeliveredOrderDto {
+  @IsString()
+  @MinLength(3)
+  @MaxLength(500)
+  @TrimText()
+  public readonly reason!: string;
 }
 
 export class OrderQuoteDto {
@@ -1241,6 +1255,16 @@ export class TraderSettlementAllocationLineDto {
   public readonly amount!: number;
 }
 
+export class TraderSettlementReceivableOffsetDto {
+  @IsUUID()
+  public readonly receivableId!: string;
+
+  @IsNumber({ allowInfinity: false, allowNaN: false, maxDecimalPlaces: 2 })
+  @Max(9999999999999.99)
+  @Min(0.01)
+  public readonly amount!: number;
+}
+
 export class CreateTraderSettlementDto {
   /**
    * Company CASH account funding a cash settlement.
@@ -1267,6 +1291,13 @@ export class CreateTraderSettlementDto {
   @ValidateNested({ each: true })
   @Type(() => TraderSettlementAllocationLineDto)
   public readonly allocations!: readonly TraderSettlementAllocationLineDto[];
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(500)
+  @ValidateNested({ each: true })
+  @Type(() => TraderSettlementReceivableOffsetDto)
+  public readonly receivableOffsets?: readonly TraderSettlementReceivableOffsetDto[];
 
   @IsOptional()
   @IsIn(paymentMethods)

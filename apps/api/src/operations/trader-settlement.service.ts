@@ -119,7 +119,10 @@ export interface TraderAllocationProposal {
 
 export interface CreateTraderSettlementResult {
   readonly amount: string;
+  readonly grossAmount: string;
   readonly orderCount: number;
+  readonly receivableOffsetAmount: string;
+  readonly receivableOffsetCount: number;
   readonly paymentMethod: "bank_transfer" | "cash";
   readonly settlementId: string;
   readonly settlementNumber: string;
@@ -189,8 +192,20 @@ export interface TraderSettlementDetailOrder {
   readonly vatAmount: string;
 }
 
+export interface TraderSettlementReceivableOffset {
+  readonly amountApplied: string;
+  readonly businessDate: string;
+  readonly orderSerialNumber: string | null;
+  readonly reason: string;
+  readonly receivableNumber: string;
+  readonly sourceReference: string | null;
+  readonly sourceType: string;
+}
+
 interface TraderSettlementSummaryTotals {
   readonly amountPaidNow: string;
+  readonly grossOrderPayable: string;
+  readonly netPayment: string;
   readonly orderCount: number;
   readonly previouslyPaid: string;
   readonly remainingOutstanding: string;
@@ -200,6 +215,7 @@ interface TraderSettlementSummaryTotals {
   readonly totalOriginalTraderPayable: string;
   readonly totalServiceFees: string;
   readonly totalVat: string;
+  readonly traderFeeDeductions: string;
 }
 
 export interface TraderSettlementDetail {
@@ -213,6 +229,7 @@ export interface TraderSettlementDetail {
   readonly moneySentAt: string | null;
   readonly notes: string | null;
   readonly orders: readonly TraderSettlementDetailOrder[];
+  readonly receivableOffsets: readonly TraderSettlementReceivableOffset[];
   readonly paymentDate: string;
   readonly paymentMethod: "bank_transfer" | "cash";
   readonly paymentReference: string | null;
@@ -264,6 +281,7 @@ export interface TraderSettlementReportData {
     readonly traderName: string;
   };
   readonly orders: readonly TraderSettlementDetailOrder[];
+  readonly receivableOffsets: readonly TraderSettlementReceivableOffset[];
   readonly summary: TraderSettlementSummaryTotals;
 }
 
@@ -515,10 +533,31 @@ export class TraderSettlementService {
         (sum, line) => sum.plus(line.amount),
         new Decimal(0),
       );
-      if (!this.money(allocationTotal).equals(this.money(new Decimal(input.amount)))) {
+      const receivableOffsets = (input.receivableOffsets ?? []).filter((line) => line.amount > 0);
+      const receivableIds = receivableOffsets.map((line) => line.receivableId);
+      if (new Set(receivableIds).size !== receivableIds.length) {
+        throw new ApplicationException(
+          "settlement_offset_duplicate_receivable",
+          "The same Trader receivable cannot be deducted twice",
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      const offsetTotal = receivableOffsets.reduce(
+        (sum, line) => sum.plus(line.amount),
+        new Decimal(0),
+      );
+      const netPayment = this.money(allocationTotal.minus(offsetTotal));
+      if (netPayment.lessThan(0)) {
+        throw new ApplicationException(
+          "settlement_offsets_exceed_payable",
+          "Trader fee deductions cannot exceed the selected Order payables",
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      if (!netPayment.equals(this.money(new Decimal(input.amount)))) {
         throw new ApplicationException(
           "settlement_allocation_mismatch",
-          "The total allocation must equal the payment amount exactly",
+          "Gross Order payables minus fee deductions must equal the payment amount",
           HttpStatus.BAD_REQUEST,
         );
       }
@@ -540,6 +579,55 @@ export class TraderSettlementService {
           HttpStatus.NOT_FOUND,
         );
       }
+      const lockedReceivables =
+        receivableIds.length === 0
+          ? []
+          : (
+              await sql<{
+                amountCollected: string;
+                id: string;
+                originalAmountDue: string;
+                receivableNumber: string;
+                status: string;
+                traderId: string;
+              }>`
+              select id,trader_id as "traderId",receivable_number as "receivableNumber",
+                     original_amount_due::text as "originalAmountDue",
+                     amount_collected::text as "amountCollected",status
+                from trader_receivables
+               where company_id=${companyId}::uuid
+                 and id in (${sql.join(receivableIds.map((id) => sql`${id}::uuid`))})
+               order by id for update
+            `.execute(transaction)
+            ).rows;
+      if (lockedReceivables.length !== receivableIds.length) {
+        throw new ApplicationException(
+          "settlement_offset_receivable_not_found",
+          "One or more selected Trader receivables were not found",
+          HttpStatus.NOT_FOUND,
+        );
+      }
+      const offsetByReceivable = new Map(
+        receivableOffsets.map((line) => [line.receivableId, new Decimal(line.amount)]),
+      );
+      for (const receivable of lockedReceivables) {
+        const amount = offsetByReceivable.get(receivable.id) ?? new Decimal(0);
+        const outstanding = new Decimal(receivable.originalAmountDue).minus(
+          receivable.amountCollected,
+        );
+        if (
+          receivable.traderId !== input.traderId ||
+          !["outstanding", "partially_collected"].includes(receivable.status) ||
+          amount.greaterThan(outstanding)
+        ) {
+          throw new ApplicationException(
+            "settlement_offset_receivable_ineligible",
+            "A selected Trader fee is no longer eligible for deduction",
+            HttpStatus.CONFLICT,
+            [receivable.receivableNumber],
+          );
+        }
+      }
       const eligibleBeforePayment = await this.resolveEligibleOrdersForTrader(
         transaction,
         companyId,
@@ -547,7 +635,7 @@ export class TraderSettlementService {
         false,
       );
       const expectedOldestFirst = new Map<string, string>();
-      let expectedRemaining = this.money(new Decimal(input.amount));
+      let expectedRemaining = this.money(allocationTotal);
       for (const order of eligibleBeforePayment) {
         if (expectedRemaining.lessThanOrEqualTo(0)) break;
         const expected = Decimal.min(expectedRemaining, new Decimal(order.outstandingBalance));
@@ -594,7 +682,7 @@ export class TraderSettlementService {
         companyId,
         input.traderId,
       );
-      if (new Decimal(input.amount).greaterThan(settlementCapacity)) {
+      if (allocationTotal.greaterThan(settlementCapacity)) {
         throw new ApplicationException(
           "settlement_exceeds_trader_net_position",
           "The payment cannot exceed the Trader's signed net payable balance",
@@ -628,7 +716,8 @@ export class TraderSettlementService {
       // 20260729100000). Each Order's own full gross/deductions/adjustments
       // remain fully preserved on its `trader_settlement_orders` line and on
       // `orders` itself, untouched by this simplification.
-      const netPayable = this.money(allocationTotal);
+      const grossPayable = this.money(allocationTotal);
+      const netPayable = netPayment;
 
       // 4. Write everything atomically: header (draft, then confirmed so the
       //    trigger actually validates it), lines, payment, Order updates.
@@ -646,7 +735,8 @@ export class TraderSettlementService {
         ) values (
           ${companyId}::uuid, ${settlementNumber}, ${input.traderId}::uuid,
           coalesce(${input.paymentDate ?? null}::date, current_date),
-          ${netPayable.toNumber()}, 0, 0, 0, 0, ${netPayable.toNumber()},
+          ${grossPayable.toNumber()}, 0, ${this.money(offsetTotal).toNumber()}, 0, 0,
+          ${netPayable.toNumber()},
           'draft', ${identity.identityId}::uuid
         )
         returning id
@@ -673,6 +763,24 @@ export class TraderSettlementService {
             0, ${this.money(new Decimal(order.traderNetPayableFull)).toNumber()},
             ${this.money(amount).toNumber()}
           )
+        `.execute(transaction);
+      }
+      for (const receivable of lockedReceivables) {
+        const amount = this.money(offsetByReceivable.get(receivable.id) ?? new Decimal(0));
+        await sql`
+          insert into trader_settlement_receivable_offsets(
+            company_id,settlement_id,receivable_id,amount_allocated
+          ) values(
+            ${companyId}::uuid,${settlementId}::uuid,${receivable.id}::uuid,${amount.toNumber()}
+          )
+        `.execute(transaction);
+        const newCollected = this.money(new Decimal(receivable.amountCollected).plus(amount));
+        const fullyCollected = newCollected.greaterThanOrEqualTo(receivable.originalAmountDue);
+        await sql`
+          update trader_receivables
+             set amount_collected=${newCollected.toNumber()},
+                 status=${fullyCollected ? "collected" : "partially_collected"},updated_at=now()
+           where company_id=${companyId}::uuid and id=${receivable.id}::uuid
         `.execute(transaction);
       }
       // A bank transfer names its Bank account and nothing else. Rejecting a
@@ -835,12 +943,18 @@ export class TraderSettlementService {
         actorId: identity.identityId,
         after: {
           amount: netPayable.toFixed(2),
+          grossOrderPayable: grossPayable.toFixed(2),
           // `trader_settlements` has no `notes` column; the create-time note is
           // captured here on the append-only audit trail instead, and read back
           // by `settlementHeader()` for the detail/report-data views.
           notes: input.notes?.trim() || null,
           orderCount: orders.length,
           paymentMethod: payment.method,
+          receivableOffsets: receivableOffsets.map((line) => ({
+            amount: this.money(new Decimal(line.amount)).toFixed(2),
+            receivableId: line.receivableId,
+          })),
+          traderFeeDeductions: this.money(offsetTotal).toFixed(2),
           settlementNumber,
           traderId: input.traderId,
         },
@@ -883,6 +997,7 @@ export class TraderSettlementService {
 
       return {
         amount: netPayable.toFixed(2),
+        grossAmount: grossPayable.toFixed(2),
         // Advisory, never blocking: the balance this settlement was judged
         // against excludes confirmed payments that never recorded which account
         // funded them.
@@ -890,6 +1005,8 @@ export class TraderSettlementService {
         balanceCoverageIncomplete: enforcement.balanceCoverageIncomplete,
         orderCount: orders.length,
         paymentMethod: payment.method,
+        receivableOffsetAmount: this.money(offsetTotal).toFixed(2),
+        receivableOffsetCount: lockedReceivables.length,
         settlementId,
         settlementNumber,
         traderId: input.traderId,
@@ -1254,6 +1371,32 @@ export class TraderSettlementService {
         `.execute(transaction)
       ).rows;
 
+      const offsetSchema = await sql<{ tableExists: boolean }>`
+        select to_regclass('public.trader_settlement_receivable_offsets') is not null as "tableExists"
+      `.execute(transaction);
+      // Legacy local databases have never stored receivable offsets. They can
+      // still reverse their order-only settlements safely; any settlement
+      // containing offsets necessarily requires the table/migration.
+      const offsets =
+        offsetSchema.rows[0]?.tableExists === true
+          ? (
+              await sql<{
+                amountAllocated: string;
+                amountCollected: string;
+                originalAmountDue: string;
+                receivableId: string;
+              }>`
+                select x.receivable_id as "receivableId",x.amount_allocated::text as "amountAllocated",
+                       r.amount_collected::text as "amountCollected",
+                       r.original_amount_due::text as "originalAmountDue"
+                  from trader_settlement_receivable_offsets x
+                  join trader_receivables r on r.id=x.receivable_id and r.company_id=x.company_id
+                 where x.company_id=${companyId}::uuid and x.settlement_id=${settlementId}::uuid
+                 order by r.id for update of r
+              `.execute(transaction)
+            ).rows
+          : [];
+
       const reversalNumber = await this.history.nextReferenceNumber(
         transaction,
         companyId,
@@ -1325,6 +1468,23 @@ export class TraderSettlementService {
           relatedSettlementId: reversalId,
           source: "web_portal",
         });
+      }
+      for (const offset of offsets) {
+        const restoredCollected = Decimal.max(
+          0,
+          new Decimal(offset.amountCollected).minus(offset.amountAllocated),
+        );
+        const restoredStatus = restoredCollected.lessThanOrEqualTo(0)
+          ? "outstanding"
+          : restoredCollected.lessThan(offset.originalAmountDue)
+            ? "partially_collected"
+            : "collected";
+        await sql`
+          update trader_receivables
+             set amount_collected=${this.money(restoredCollected).toNumber()},
+                 status=${restoredStatus},updated_at=now()
+           where company_id=${companyId}::uuid and id=${offset.receivableId}::uuid
+        `.execute(transaction);
       }
       await this.history.audit(transaction, {
         action: "trader_settlement.reverse",
@@ -1521,6 +1681,8 @@ export class TraderSettlementService {
     const { companyId } = this.tenants.current();
     const header = await this.settlementHeader(companyId, settlementId);
     const orders = await this.settlementOrders(companyId, settlementId);
+    const receivableOffsets = await this.settlementReceivableOffsets(companyId, settlementId);
+    const summary = this.settlementSummaryWithOffsets(orders.summary, receivableOffsets);
     return {
       beneficiaryBank: header.beneficiaryBank,
       confirmedBy: header.confirmedBy,
@@ -1532,6 +1694,7 @@ export class TraderSettlementService {
       moneySentAt: header.moneySentAt,
       notes: header.notes,
       orders: orders.lines,
+      receivableOffsets,
       paymentDate: header.paymentDate,
       paymentMethod: header.paymentMethod,
       paymentReference: header.paymentReference,
@@ -1544,7 +1707,7 @@ export class TraderSettlementService {
       settlementNumber: header.settlementNumber,
       sourceBank: header.sourceBank,
       status: header.status,
-      summary: orders.summary,
+      summary,
       traderId: header.traderId,
       traderName: header.traderName,
     };
@@ -1579,6 +1742,7 @@ export class TraderSettlementService {
     const { companyId } = this.tenants.current();
     const header = await this.settlementHeader(companyId, settlementId);
     const orders = await this.settlementOrders(companyId, settlementId);
+    const receivableOffsets = await this.settlementReceivableOffsets(companyId, settlementId);
     const branding = await this.companyProfile.branding();
     const logoDataUri = branding.hasLogo
       ? await this.companyProfile
@@ -1628,7 +1792,8 @@ export class TraderSettlementService {
         traderName: header.traderName,
       },
       orders: orders.lines,
-      summary: orders.summary,
+      receivableOffsets,
+      summary: this.settlementSummaryWithOffsets(orders.summary, receivableOffsets),
     };
   }
 
@@ -1946,6 +2111,8 @@ export class TraderSettlementService {
       lines,
       summary: {
         amountPaidNow: totals.amountPaidNow.toFixed(2),
+        grossOrderPayable: totals.amountPaidNow.toFixed(2),
+        netPayment: totals.amountPaidNow.toFixed(2),
         orderCount: lines.length,
         previouslyPaid: totals.previouslyPaid.toFixed(2),
         remainingOutstanding: totals.remainingOutstanding.toFixed(2),
@@ -1955,7 +2122,56 @@ export class TraderSettlementService {
         totalOriginalTraderPayable: totals.totalOriginalTraderPayable.toFixed(2),
         totalServiceFees: totals.totalServiceFees.toFixed(2),
         totalVat: totals.totalVat.toFixed(2),
+        traderFeeDeductions: "0.00",
       },
+    };
+  }
+
+  private async settlementReceivableOffsets(
+    companyId: string,
+    settlementId: string,
+  ): Promise<readonly TraderSettlementReceivableOffset[]> {
+    // A read-only compatibility path for databases that predate receivable
+    // offsets. Such databases cannot contain settlement offsets, so legacy
+    // Settlement Detail and report reads remain valid without a migration.
+    // Creation and reversal paths still require the migration before offsets
+    // can be written or changed.
+    const schema = await sql<{ tableExists: boolean }>`
+      select to_regclass('public.trader_settlement_receivable_offsets') is not null as "tableExists"
+    `.execute(this.database);
+    if (schema.rows[0]?.tableExists !== true) return [];
+
+    const rows = await sql<TraderSettlementReceivableOffset>`
+      select x.amount_allocated::text as "amountApplied",
+             r.business_date::text as "businessDate", r.receivable_number as "receivableNumber",
+             r.source_type as "sourceType", r.source_reference as "sourceReference", r.reason,
+             o.serial_number as "orderSerialNumber"
+        from trader_settlement_receivable_offsets x
+        join trader_receivables r on r.id=x.receivable_id and r.company_id=x.company_id
+        left join orders o on o.company_id=r.company_id
+          and r.source_type='service_charge' and o.order_number=r.source_reference
+       where x.company_id=${companyId}::uuid and x.settlement_id=${settlementId}::uuid
+       order by r.business_date, r.receivable_number
+    `.execute(this.database);
+    return rows.rows.map((row) => ({
+      ...row,
+      amountApplied: new Decimal(row.amountApplied).toFixed(2),
+    }));
+  }
+
+  private settlementSummaryWithOffsets(
+    summary: TraderSettlementSummaryTotals,
+    offsets: readonly TraderSettlementReceivableOffset[],
+  ): TraderSettlementSummaryTotals {
+    const deductions = offsets.reduce(
+      (total, offset) => total.plus(offset.amountApplied),
+      new Decimal(0),
+    );
+    return {
+      ...summary,
+      grossOrderPayable: summary.amountPaidNow,
+      netPayment: new Decimal(summary.amountPaidNow).minus(deductions).toFixed(2),
+      traderFeeDeductions: deductions.toFixed(2),
     };
   }
 
@@ -2275,8 +2491,11 @@ export class TraderSettlementService {
       select s.id as "settlementId", s.settlement_number as "settlementNumber",
              s.trader_id as "traderId", t.name_en as "traderName",
              s.net_payable::text as "amount",
+             s.gross_payable::text as "grossAmount",
+             s.other_deductions::text as "receivableOffsetAmount",
              coalesce(p.payment_method, 'cash') as "paymentMethod",
-             coalesce(lines.total, 0)::int as "orderCount"
+             coalesce(lines.total, 0)::int as "orderCount",
+             coalesce(offsets.total, 0)::int as "receivableOffsetCount"
         from trader_settlements s
         join traders t on t.id = s.trader_id and t.company_id = s.company_id
         left join lateral (
@@ -2287,6 +2506,10 @@ export class TraderSettlementService {
           select count(*)::int as total from trader_settlement_orders link
            where link.settlement_id = s.id and link.company_id = s.company_id
         ) lines on true
+        left join lateral (
+          select count(*)::int as total from trader_settlement_receivable_offsets x
+           where x.settlement_id = s.id and x.company_id = s.company_id
+        ) offsets on true
        where s.id = ${settlementId}::uuid and s.company_id = ${companyId}::uuid
     `.execute(database);
     const row = result.rows[0];
@@ -2331,6 +2554,9 @@ export class TraderSettlementService {
       notes: input.notes?.trim() ?? "",
       paymentDate: input.paymentDate ?? "",
       paymentMethod: input.paymentMethod ?? "cash",
+      receivableOffsets: (input.receivableOffsets ?? [])
+        .map((line) => [line.receivableId, new Decimal(line.amount).toFixed(2)].join("|"))
+        .sort(),
       traderBankAccountId: input.traderBankAccountId ?? "",
       traderId: input.traderId,
     };

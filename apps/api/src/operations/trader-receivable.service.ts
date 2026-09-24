@@ -650,7 +650,7 @@ export class TraderReceivableService {
   public async eligibleReceivables(
     query: TraderReceivableEligibleQueryDto,
   ): Promise<Page<TraderReceivableEligibleRow>> {
-    this.assertAnyPermission("trader_receivables.create");
+    this.assertAnyPermission(["trader_receivables.create", "settlements.create"]);
     const { companyId } = this.tenants.current();
     const { limit, offset, page, pageSize } = this.pagination(query);
     const direction = query.sortDirection === "desc" ? "desc" : "asc";

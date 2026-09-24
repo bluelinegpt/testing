@@ -2,7 +2,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 
 import { HttpStatus, Inject, Injectable } from "@nestjs/common";
 import { Decimal } from "decimal.js";
-import { type Kysely, sql } from "kysely";
+import { type Kysely, sql, type Transaction } from "kysely";
 
 import { PasswordHasher } from "../authentication/password-hasher.js";
 import { DATABASE } from "../infrastructure/database/database.tokens.js";
@@ -122,7 +122,7 @@ export interface OperationsOrderFilters {
   readonly dateTo?: string | undefined;
   readonly deliveryStatus?: string | undefined;
   readonly driverId?: string | undefined;
-  readonly orderType?: "collect_order" | "delivery" | undefined;
+  readonly orderType?: "collect_order" | "delivery" | "gcc_international" | undefined;
   /** External Reference Number, partial match. Distinct from `search`. */
   readonly referenceNumber?: string | undefined;
   /** Serial Number, partial match. Distinct from `search`. */
@@ -278,7 +278,7 @@ export interface OperationsOrder {
   readonly isFreeOrder?: boolean;
   readonly orderDate: string;
   readonly orderNumber: string;
-  readonly orderType?: "collect_order" | "delivery";
+  readonly orderType?: "collect_order" | "delivery" | "gcc_international";
   readonly orderProfit: string;
   readonly outsourcedDriverFeeAmount: string | null;
   readonly outsourcedDriverFeeOutstanding: string | null;
@@ -3570,6 +3570,14 @@ export class OperationsService {
     const referenceNumberNormalized =
       referenceNumber === null ? null : this.normalizeOrderIdentifier(referenceNumber);
     const collectOrder = input.orderType === "collect_order";
+    const internationalOrder = input.orderType === "gcc_international";
+    if (internationalOrder && input.destinationCountryName?.trim() === undefined) {
+      throw new ApplicationException(
+        "destination_country_required",
+        "Select a destination country for an international order",
+        HttpStatus.BAD_REQUEST,
+      );
+    }
     const requestedDriverId = collectOrder ? undefined : input.driverId;
     const inlineCustomer = input.inlineCustomer;
     const customerOmitted =
@@ -3695,11 +3703,12 @@ export class OperationsService {
       // PSystem allocation happens only after this idempotency key has won its
       // reservation. It shares the Order transaction, so a rollback consumes
       // no number. Legacy Companies that are not enabled receive NULL.
-      const psystemSerial = (
-        await sql<{ value: string | null }>`
+      const psystemSerial =
+        (
+          await sql<{ value: string | null }>`
           select allocate_company_psystem_serial(${companyId}::uuid) as value
         `.execute(transaction)
-      ).rows[0]?.value ?? null;
+        ).rows[0]?.value ?? null;
       const psystemSerialNormalized = psystemSerial?.toLowerCase() ?? null;
       const serialNumber = suppliedSerialNumber;
       const serialNumberNormalized = this.normalizeOrderIdentifier(serialNumber);
@@ -3880,7 +3889,8 @@ export class OperationsService {
           vat_price_mode_snapshot,company_revenue,order_profit,delivery_status,trader_settlement_status,
           pricing_provenance_status, trader_service_price_id,
           configured_service_fee_snapshot, final_service_fee_snapshot,
-          service_fee_override_reason, is_free_order, free_order_reason, order_type
+          service_fee_override_reason, is_free_order, free_order_reason, order_type,
+          destination_country_name
         ) values (
           ${companyId}::uuid, ${orderNumber}, ${serialNumber}, ${serialNumberNormalized},
           ${psystemSerial}, ${psystemSerialNormalized},
@@ -3908,7 +3918,9 @@ export class OperationsService {
           ${deliveryStatus}, ${traderSettlementStatus},
           ${pricing.provenance}, ${pricing.servicePriceId}::uuid,
           ${pricing.configuredFee.toFixed(2)}, ${pricing.finalFee.toFixed(2)},
-          ${pricing.overrideReason}, ${freeOrder}, ${freeOrderReason}, ${collectOrder ? "collect_order" : "delivery"}
+          ${pricing.overrideReason}, ${freeOrder}, ${freeOrderReason},
+          ${collectOrder ? "collect_order" : internationalOrder ? "gcc_international" : "delivery"},
+          ${internationalOrder ? (input.destinationCountryName?.trim() ?? null) : null}
         )
         returning id
       `.execute(transaction);
@@ -4883,7 +4895,9 @@ export class OperationsService {
       // from the Customer on behalf of the Trader under either fee arrangement.
       const codAmountLocked = isFreeOrder;
       const nextCod =
-        codAmountLocked || input.codAmount === undefined ? currentCod : new Decimal(input.codAmount);
+        codAmountLocked || input.codAmount === undefined
+          ? currentCod
+          : new Decimal(input.codAmount);
       const codChanged = !this.money(nextCod).equals(this.money(currentCod));
       const manualFeeProvided = !isFreeOrder && input.serviceFee !== undefined;
       const manualFee = manualFeeProvided ? new Decimal(input.serviceFee ?? 0) : currentFee;
@@ -5669,6 +5683,112 @@ export class OperationsService {
     return this.orderById(companyId, orderId);
   }
 
+  public async reopenDeliveredOrder(
+    orderId: string,
+    reason: string,
+    correlationId: string,
+    outerTransaction?: Transaction<DatabaseSchema>,
+  ): Promise<OperationsOrder> {
+    const { companyId } = this.tenants.current();
+    const identity = this.identities.current();
+    if (!identity.permissions.has("users_roles.manage")) {
+      throw new ApplicationException(
+        "order_reopen_admin_required",
+        "Only an administrator can reopen a delivered Order",
+        HttpStatus.FORBIDDEN,
+      );
+    }
+    const reopenInTransaction = async (transaction: Transaction<DatabaseSchema>) => {
+      const order = (
+        await sql<{
+          assignedDriverId: string | null;
+          deliveryStatus: string;
+          settlementStatus: string;
+          traderNetPayable: string;
+        }>`select assigned_driver_id as "assignedDriverId",delivery_status as "deliveryStatus",
+                   trader_settlement_status as "settlementStatus",
+                   trader_net_payable::text as "traderNetPayable"
+              from orders where id=${orderId}::uuid and company_id=${companyId}::uuid for update`.execute(
+          transaction,
+        )
+      ).rows[0];
+      if (order === undefined) {
+        throw new ApplicationException("order_not_found", "Order not found", HttpStatus.NOT_FOUND);
+      }
+      if (order.deliveryStatus !== "delivered") {
+        throw new ApplicationException(
+          "order_reopen_requires_delivered",
+          "Only a Delivered Order can be reopened",
+          HttpStatus.CONFLICT,
+        );
+      }
+      if (!["unsettled", "not_eligible", "reversed"].includes(order.settlementStatus)) {
+        throw new ApplicationException(
+          "order_reopen_blocked_by_trader_payment",
+          "Reverse the Trader settlement before reopening this Order",
+          HttpStatus.CONFLICT,
+        );
+      }
+      if (order.assignedDriverId === null) {
+        throw new ApplicationException(
+          "order_driver_required_for_delivery",
+          "A Driver must remain assigned before this Order can be reopened",
+          HttpStatus.CONFLICT,
+        );
+      }
+      await sql`
+        update orders set delivery_status='out_for_delivery',delivered_at=null,
+          operational_completed_at=null,amount_collected=0,
+          driver_reconciliation_status='not_applicable',
+          trader_settlement_status=${Number(order.traderNetPayable) <= 0 ? "not_eligible" : "unsettled"},
+          updated_at=now(),version=version+1
+        where id=${orderId}::uuid and company_id=${companyId}::uuid
+      `.execute(transaction);
+      await this.history.statusHistory(transaction, {
+        actorId: identity.identityId,
+        companyId,
+        from: "delivered",
+        orderId,
+        reason,
+        statusDimension: "delivery",
+        to: "out_for_delivery",
+      });
+      const actorRole = await this.history.actorRole(transaction, companyId, identity.identityId);
+      await this.history.orderEvent(transaction, {
+        actorId: identity.identityId,
+        actorRole,
+        category: "status_change",
+        companyId,
+        correlationId,
+        eventType: "order.delivery_reopened",
+        fieldName: "delivery_status",
+        newValue: "out_for_delivery",
+        orderId,
+        previousValue: "delivered",
+        reason,
+        relatedDriverId: order.assignedDriverId,
+        relatedPaymentId: null,
+        relatedReconciliationId: null,
+        source: "web_portal",
+      });
+      await this.audit(transaction, {
+        action: "order.delivery_reopen",
+        actorId: identity.identityId,
+        after: { reason, status: "out_for_delivery" },
+        companyId,
+        correlationId,
+        subjectId: orderId,
+        subjectType: "order",
+      });
+    };
+    if (outerTransaction === undefined) {
+      await this.transactions.execute(reopenInTransaction);
+    } else {
+      await reopenInTransaction(outerTransaction);
+    }
+    return this.orderById(companyId, orderId, outerTransaction);
+  }
+
   public async settleOrderTrader(
     orderId: string,
     input: FinancialPaymentDto = {},
@@ -6165,7 +6285,11 @@ export class OperationsService {
     return this.orderById(companyId, orderId);
   }
 
-  private async orderById(companyId: string, orderId: string): Promise<OperationsOrder> {
+  private async orderById(
+    companyId: string,
+    orderId: string,
+    queryExecutor: Kysely<DatabaseSchema> | Transaction<DatabaseSchema> = this.database,
+  ): Promise<OperationsOrder> {
     const result = await sql<OperationsOrder>`
       select o.id,
              o.area_id as "areaId",
@@ -6261,7 +6385,7 @@ export class OperationsService {
         limit 1
       ) receivable on true
       where o.company_id = ${companyId}::uuid and o.id = ${orderId}::uuid
-    `.execute(this.database);
+    `.execute(queryExecutor);
     const order = result.rows[0];
     if (order === undefined) {
       throw new ApplicationException("order_not_found", "Order not found", HttpStatus.NOT_FOUND);
@@ -6758,11 +6882,12 @@ export class OperationsService {
       );
     }
     const serialNumber = suppliedSerialNumber;
-    const psystemSerial = (
-      await sql<{ value: string | null }>`
+    const psystemSerial =
+      (
+        await sql<{ value: string | null }>`
         select allocate_company_psystem_serial(${companyId}::uuid) value
       `.execute(database)
-    ).rows[0]?.value ?? null;
+      ).rows[0]?.value ?? null;
     const psystemSerialNormalized = psystemSerial?.toLowerCase() ?? null;
     const referenceNumber = input.referenceNumber?.trim() || null;
     const serialNumberNormalized = this.normalizeOrderIdentifier(serialNumber);

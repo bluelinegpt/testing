@@ -533,6 +533,9 @@ export class AccountingEventQueryService {
     else if (status === "processing") blockers.push("event_currently_processing");
     else if (status === "reversed") blockers.push("event_reversed");
     else if (status === "ignored_duplicate") blockers.push("event_ignored_duplicate");
+    else if (status === "ignored_no_accounting_required") {
+      blockers.push("event_no_accounting_required");
+    }
     else if (!["failed", "blocked_configuration", "retry_pending"].includes(status)) {
       blockers.push("event_status_not_reprocessable");
     }

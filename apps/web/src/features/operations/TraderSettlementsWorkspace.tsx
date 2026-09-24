@@ -99,12 +99,26 @@ interface TraderAllocationProposal {
 
 interface CreateTraderSettlementResult {
   readonly amount: string;
+  readonly grossAmount: string;
   readonly orderCount: number;
   readonly paymentMethod: "bank_transfer" | "cash";
+  readonly receivableOffsetAmount: string;
+  readonly receivableOffsetCount: number;
   readonly settlementId: string;
   readonly settlementNumber: string;
   readonly traderId: string;
   readonly traderName: string;
+}
+
+interface TraderReceivableEligibleRow {
+  readonly businessDate: string;
+  readonly id: string;
+  readonly orderSerialNumber?: string | null;
+  readonly outstandingAmount: string;
+  readonly reason: string;
+  readonly receivableNumber: string;
+  readonly sourceReference: string | null;
+  readonly sourceType: string;
 }
 
 interface MaskedBankSnapshot {
@@ -138,6 +152,8 @@ interface TraderSettlementDetailOrder {
 
 interface TraderSettlementSummaryTotals {
   readonly amountPaidNow: string;
+  readonly grossOrderPayable: string;
+  readonly netPayment: string;
   readonly orderCount: number;
   readonly previouslyPaid: string;
   readonly remainingOutstanding: string;
@@ -147,6 +163,16 @@ interface TraderSettlementSummaryTotals {
   readonly totalOriginalTraderPayable: string;
   readonly totalServiceFees: string;
   readonly totalVat: string;
+  readonly traderFeeDeductions: string;
+}
+
+interface TraderSettlementReceivableOffset {
+  readonly amountApplied: string;
+  readonly businessDate: string;
+  readonly orderSerialNumber: string | null;
+  readonly reason: string;
+  readonly receivableNumber: string;
+  readonly sourceReference: string | null;
 }
 
 interface TraderSettlementDetail {
@@ -160,6 +186,7 @@ interface TraderSettlementDetail {
   readonly moneySentAt: string | null;
   readonly notes: string | null;
   readonly orders: readonly TraderSettlementDetailOrder[];
+  readonly receivableOffsets: readonly TraderSettlementReceivableOffset[];
   readonly paymentDate: string;
   readonly paymentMethod: "bank_transfer" | "cash";
   readonly paymentReference: string | null;
@@ -1480,11 +1507,24 @@ function NewSettlementDialog({
     useState<PagedResponse<TraderEligibleOrderRow>>();
   const [ordersError, setOrdersError] = useState<string>();
   const [orderFilters, setOrderFilters] = useState<EligibleOrderFilters>(emptyEligibleOrderFilters);
-  const [eligibleFiltersOpen, setEligibleFiltersOpen] = useState(() => initialOrderId === undefined);
+  const [eligibleFiltersOpen, setEligibleFiltersOpen] = useState(
+    () => initialOrderId === undefined,
+  );
   const [ordersPage, setOrdersPage] = useState(1);
   const eligibleOrders = eligibleOrdersPage?.items ?? [];
   const ordersTotal = eligibleOrdersPage?.total ?? 0;
   const ordersPageCount = ordersTotal === 0 ? 1 : Math.ceil(ordersTotal / 50);
+
+  // Optional Company-fee deductions owed by this Trader. These are loaded
+  // oldest-first and selected by default up to the gross Order payable.
+  const [eligibleReceivables, setEligibleReceivables] = useState<
+    readonly TraderReceivableEligibleRow[]
+  >([]);
+  const [receivablesError, setReceivablesError] = useState<string>();
+  const [receivableOffsets, setReceivableOffsets] = useState<
+    readonly { amount: string; receivableId: string }[]
+  >([]);
+  const [receivableOffsetsCustomized, setReceivableOffsetsCustomized] = useState(false);
 
   // Step 3 — Payment Details.
   const [amount, setAmount] = useState("");
@@ -1625,6 +1665,46 @@ function NewSettlementDialog({
   }, [api, trader, orderFilters, ordersPage, t]);
 
   useEffect(() => loadOrders(), [loadOrders]);
+
+  useEffect(() => {
+    if (trader === undefined) {
+      setEligibleReceivables([]);
+      setReceivableOffsets([]);
+      setReceivablesError(undefined);
+      return;
+    }
+    const controller = new AbortController();
+    setReceivablesError(undefined);
+    const loadReceivables = async () => {
+      const base = `operations/trader-receivables/eligible?traderId=${trader.id}&outstandingOnly=true&sortBy=businessDate&sortDirection=asc&pageSize=100`;
+      const first = await api.get<PagedResponse<TraderReceivableEligibleRow>>(
+        `${base}&page=1`,
+        controller.signal,
+      );
+      const pages = Math.ceil(first.total / 100);
+      const remaining = await Promise.all(
+        Array.from({ length: Math.max(0, pages - 1) }, (_, index) =>
+          api.get<PagedResponse<TraderReceivableEligibleRow>>(
+            `${base}&page=${index + 2}`,
+            controller.signal,
+          ),
+        ),
+      );
+      return [first, ...remaining].flatMap((page) => page.items);
+    };
+    void loadReceivables()
+      .then((rows) => {
+        setEligibleReceivables(rows);
+        setReceivableOffsetsCustomized(false);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) {
+          setEligibleReceivables([]);
+          setReceivablesError(t("traderSettlements.receivablesLoadFailed"));
+        }
+      });
+    return () => controller.abort();
+  }, [api, trader, t]);
   /* Select the originating Order once, from the eligible list the backend just
      returned.
 
@@ -1701,6 +1781,8 @@ function NewSettlementDialog({
     setProposal(undefined);
     setAllocations([]);
     setSelectedOrderRows({});
+    setReceivableOffsets([]);
+    setReceivableOffsetsCustomized(false);
     setOverrideConfirmed(false);
     setOriginatingOrderDefaultActive(false);
     setOriginatingOrderRow(undefined);
@@ -1817,6 +1899,39 @@ function NewSettlementDialog({
     return sum + (parsed.ok ? parsed.value : 0);
   }, 0);
   const requestedAmount = amountInput.ok ? amountInput.value : 0;
+  useEffect(() => {
+    if (receivableOffsetsCustomized) return;
+    let remaining = Math.max(0, requestedAmount - 0.01);
+    const defaults: { amount: string; receivableId: string }[] = [];
+    for (const receivable of eligibleReceivables) {
+      if (remaining <= 0.005) break;
+      const applied = Math.min(remaining, safeMoneyValue(receivable.outstandingAmount));
+      if (applied > 0.005) {
+        defaults.push({ amount: applied.toFixed(2), receivableId: receivable.id });
+        remaining -= applied;
+      }
+    }
+    setReceivableOffsets(defaults);
+  }, [eligibleReceivables, receivableOffsetsCustomized, requestedAmount]);
+  const receivableById = new Map(eligibleReceivables.map((row) => [row.id, row]));
+  const receivableOffsetTotal = receivableOffsets.reduce(
+    (total, line) => total + safeMoneyValue(line.amount),
+    0,
+  );
+  const netPayment = requestedAmount - receivableOffsetTotal;
+  const receivableOffsetErrors: string[] = [];
+  for (const line of receivableOffsets) {
+    const row = receivableById.get(line.receivableId);
+    const parsed = parseMoneyInput(line.amount, { required: true });
+    if (row === undefined || !parsed.ok || parsed.value <= 0) {
+      receivableOffsetErrors.push(t("traderSettlements.invalidReceivableOffset"));
+    } else if (parsed.value > safeMoneyValue(row.outstandingAmount) + 0.001) {
+      receivableOffsetErrors.push(t("traderSettlements.receivableOffsetExceedsOutstanding"));
+    }
+  }
+  if (receivableOffsetTotal > requestedAmount - 0.005) {
+    receivableOffsetErrors.push(t("traderSettlements.receivableOffsetsExceedPayable"));
+  }
   const unallocated = money(requestedAmount - allocatedTotal);
   const allocationErrors: string[] = [];
   const seenOrders = new Set<string>();
@@ -1871,8 +1986,10 @@ function NewSettlementDialog({
   const canProceedToReview =
     trader !== undefined &&
     requestedAmount > 0 &&
+    netPayment > 0 &&
     activeAllocations.length > 0 &&
     allocationErrors.length === 0 &&
+    receivableOffsetErrors.length === 0 &&
     (!manualOverride || overrideConfirmed) &&
     (paymentMethod === "cash"
       ? cashAccountId !== ""
@@ -1882,13 +1999,16 @@ function NewSettlementDialog({
     allocations: [...activeAllocations].sort((left, right) =>
       left.orderId.localeCompare(right.orderId),
     ),
-    amount: money(requestedAmount),
+    amount: money(netPayment),
     bankReference: bankReference.trim(),
     beneficiaryBankId,
     cashAccountId,
     notes: notes.trim(),
     paymentDate,
     paymentMethod,
+    receivableOffsets: [...receivableOffsets].sort((left, right) =>
+      left.receivableId.localeCompare(right.receivableId),
+    ),
     sourceBankId,
     traderId: trader?.id,
   });
@@ -1905,7 +2025,7 @@ function NewSettlementDialog({
             amount: safeMoneyValue(line.amount),
             orderId: line.orderId,
           })),
-          amount: safeMoneyValue(requestedAmount),
+          amount: safeMoneyValue(netPayment),
           ...(paymentMethod === "bank_transfer"
             ? {
                 bankAccountId: sourceBankId,
@@ -1916,6 +2036,10 @@ function NewSettlementDialog({
           notes: notes.trim() === "" ? undefined : notes.trim(),
           paymentDate,
           paymentMethod,
+          receivableOffsets: receivableOffsets.map((line) => ({
+            amount: safeMoneyValue(line.amount),
+            receivableId: line.receivableId,
+          })),
           traderId: trader.id,
         },
         { "X-Idempotency-Key": idempotency.keyFor(fingerprint) },
@@ -2001,8 +2125,16 @@ function NewSettlementDialog({
               </div>
             )}
             <div className="detail-line">
-              <dt>{t("traderSettlements.paymentAmount")}</dt>
+              <dt>{t("traderSettlements.netPaymentToTrader")}</dt>
               <dd>{money(confirmed.amount)}</dd>
+            </div>
+            <div className="detail-line">
+              <dt>{t("traderSettlements.grossOrderPayable")}</dt>
+              <dd>{money(confirmed.grossAmount)}</dd>
+            </div>
+            <div className="detail-line">
+              <dt>{t("traderSettlements.companyFeeDeductions")}</dt>
+              <dd>-{money(confirmed.receivableOffsetAmount)}</dd>
             </div>
             <div className="detail-line">
               <dt>{t("traderSettlements.columnOrders")}</dt>
@@ -2130,90 +2262,92 @@ function NewSettlementDialog({
                 >
                   <summary>{t("common.filter")}</summary>
                   <div className="compact-filters">
-                  <label className="field">
-                    <span>{t("traderSettlements.filterOrderSerialNumber")}</span>
-                    <input
-                      onChange={(event) => applyOrderFilter({ serialNumber: event.target.value })}
-                      type="search"
-                      value={orderFilters.serialNumber}
-                    />
-                  </label>
-                  <label className="field">
-                    <span>{t("traderSettlements.filterExternalReference")}</span>
-                    <input
-                      onChange={(event) =>
-                        applyOrderFilter({ referenceNumber: event.target.value })
-                      }
-                      type="search"
-                      value={orderFilters.referenceNumber}
-                    />
-                  </label>
-                  <label className="field">
-                    <span>{t("traderSettlements.filterDeliveryDateFrom")}</span>
-                    <input
-                      onChange={(event) => applyOrderFilter({ deliveredFrom: event.target.value })}
-                      type="date"
-                      value={orderFilters.deliveredFrom}
-                    />
-                  </label>
-                  <label className="field">
-                    <span>{t("traderSettlements.filterDeliveryDateTo")}</span>
-                    <input
-                      onChange={(event) => applyOrderFilter({ deliveredTo: event.target.value })}
-                      type="date"
-                      value={orderFilters.deliveredTo}
-                    />
-                  </label>
-                  <div className="field" data-field="area">
-                    <span>{t("areas.emirate")}</span>
-                    <AreaSelector
-                      allowCreate={false}
-                      api={api}
-                      onChange={(area) =>
-                        applyOrderFilter({
-                          areaId: area?.id ?? "",
-                          emirateId: area?.emirateId ?? "",
-                        })
-                      }
-                      value={undefined}
-                    />
+                    <label className="field">
+                      <span>{t("traderSettlements.filterOrderSerialNumber")}</span>
+                      <input
+                        onChange={(event) => applyOrderFilter({ serialNumber: event.target.value })}
+                        type="search"
+                        value={orderFilters.serialNumber}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>{t("traderSettlements.filterExternalReference")}</span>
+                      <input
+                        onChange={(event) =>
+                          applyOrderFilter({ referenceNumber: event.target.value })
+                        }
+                        type="search"
+                        value={orderFilters.referenceNumber}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>{t("traderSettlements.filterDeliveryDateFrom")}</span>
+                      <input
+                        onChange={(event) =>
+                          applyOrderFilter({ deliveredFrom: event.target.value })
+                        }
+                        type="date"
+                        value={orderFilters.deliveredFrom}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>{t("traderSettlements.filterDeliveryDateTo")}</span>
+                      <input
+                        onChange={(event) => applyOrderFilter({ deliveredTo: event.target.value })}
+                        type="date"
+                        value={orderFilters.deliveredTo}
+                      />
+                    </label>
+                    <div className="field" data-field="area">
+                      <span>{t("areas.emirate")}</span>
+                      <AreaSelector
+                        allowCreate={false}
+                        api={api}
+                        onChange={(area) =>
+                          applyOrderFilter({
+                            areaId: area?.id ?? "",
+                            emirateId: area?.emirateId ?? "",
+                          })
+                        }
+                        value={undefined}
+                      />
+                    </div>
+                    <label className="field">
+                      <span>{t("traderSettlements.filterSettlementStatus")}</span>
+                      <select
+                        onChange={(event) =>
+                          applyOrderFilter({ settlementStatus: event.target.value })
+                        }
+                        value={orderFilters.settlementStatus}
+                      >
+                        <option value="">{t("common.all")}</option>
+                        {orderSettlementStatuses.map((status) => (
+                          <option key={status} value={status}>
+                            {t(`traderSettlements.orderStatus${statusKey(status)}`)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="field field-checkbox">
+                      <input
+                        checked={orderFilters.outstandingOnly}
+                        onChange={(event) =>
+                          applyOrderFilter({ outstandingOnly: event.target.checked })
+                        }
+                        type="checkbox"
+                      />
+                      <span>{t("traderSettlements.filterOutstandingOnly")}</span>
+                    </label>
+                    <div className="filter-actions">
+                      <button
+                        className="button button-secondary"
+                        onClick={clearOrderFilters}
+                        type="button"
+                      >
+                        {t("traderSettlements.clearFilters")}
+                      </button>
+                    </div>
                   </div>
-                  <label className="field">
-                    <span>{t("traderSettlements.filterSettlementStatus")}</span>
-                    <select
-                      onChange={(event) =>
-                        applyOrderFilter({ settlementStatus: event.target.value })
-                      }
-                      value={orderFilters.settlementStatus}
-                    >
-                      <option value="">{t("common.all")}</option>
-                      {orderSettlementStatuses.map((status) => (
-                        <option key={status} value={status}>
-                          {t(`traderSettlements.orderStatus${statusKey(status)}`)}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="field field-checkbox">
-                    <input
-                      checked={orderFilters.outstandingOnly}
-                      onChange={(event) =>
-                        applyOrderFilter({ outstandingOnly: event.target.checked })
-                      }
-                      type="checkbox"
-                    />
-                    <span>{t("traderSettlements.filterOutstandingOnly")}</span>
-                  </label>
-                  <div className="filter-actions">
-                    <button
-                      className="button button-secondary"
-                      onClick={clearOrderFilters}
-                      type="button"
-                    >
-                      {t("traderSettlements.clearFilters")}
-                    </button>
-                  </div>
-                </div>
                 </details>
                 <div className="table-scroll-x">
                   <table>
@@ -2356,7 +2490,7 @@ function NewSettlementDialog({
                 <h3>{t("traderSettlements.stepPaymentDetails")}</h3>
                 <div className="form-grid">
                   <label className="field required-field">
-                    <span>{t("traderSettlements.paymentAmount")}</span>
+                    <span>{t("traderSettlements.grossOrderPayable")}</span>
                     {/* `no-spinner` and min="0" to match every other money field
                       in the application; the spinner arrows are one more way to
                       nudge an amount by a cent nobody meant to enter. The
@@ -2648,6 +2782,116 @@ function NewSettlementDialog({
                 </section>
               )}
 
+              {amount.trim() === "" ||
+              (eligibleReceivables.length === 0 && receivablesError === undefined) ? null : (
+                <section className="workspace-step">
+                  <h3>{t("traderSettlements.stepReceivableDeductions")}</h3>
+                  <p className="field-hint">{t("traderSettlements.receivableDeductionsHelp")}</p>
+                  {receivablesError === undefined ? null : (
+                    <div className="alert alert-error">{receivablesError}</div>
+                  )}
+                  {receivableOffsetErrors.length === 0 ? null : (
+                    <div className="alert alert-error" role="alert">
+                      {[...new Set(receivableOffsetErrors)].map((error) => (
+                        <p key={error}>{error}</p>
+                      ))}
+                    </div>
+                  )}
+                  <div className="table-scroll-x">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th scope="col">{t("common.select")}</th>
+                          <th scope="col">{t("traderSettlements.receivableNumber")}</th>
+                          <th scope="col">{t("traderSettlements.receivableBusinessDate")}</th>
+                          <th scope="col">{t("traderSettlements.receivableReference")}</th>
+                          <th scope="col">{t("traderSettlements.receivableReason")}</th>
+                          <th scope="col">{t("traderSettlements.columnOutstandingBalance")}</th>
+                          <th scope="col">{t("traderSettlements.deductionAmount")}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {eligibleReceivables.map((receivable) => {
+                          const offset = receivableOffsets.find(
+                            (line) => line.receivableId === receivable.id,
+                          );
+                          return (
+                            <tr key={receivable.id}>
+                              <td>
+                                <input
+                                  checked={offset !== undefined}
+                                  onChange={(event) => {
+                                    setReceivableOffsetsCustomized(true);
+                                    setReceivableOffsets((current) =>
+                                      event.target.checked
+                                        ? [
+                                            ...current,
+                                            {
+                                              amount: receivable.outstandingAmount,
+                                              receivableId: receivable.id,
+                                            },
+                                          ]
+                                        : current.filter(
+                                            (line) => line.receivableId !== receivable.id,
+                                          ),
+                                    );
+                                  }}
+                                  type="checkbox"
+                                />
+                              </td>
+                              <td className="mono">{receivable.receivableNumber}</td>
+                              <td>{receivable.businessDate}</td>
+                              <td className="mono">
+                                {receivable.orderSerialNumber ?? receivable.sourceReference ?? "-"}
+                              </td>
+                              <td>{receivable.reason}</td>
+                              <td>{money(receivable.outstandingAmount)}</td>
+                              <td>
+                                {offset === undefined ? (
+                                  "-"
+                                ) : (
+                                  <input
+                                    inputMode="decimal"
+                                    min="0.01"
+                                    onChange={(event) => {
+                                      setReceivableOffsetsCustomized(true);
+                                      setReceivableOffsets((current) =>
+                                        current.map((line) =>
+                                          line.receivableId === receivable.id
+                                            ? { ...line, amount: event.target.value }
+                                            : line,
+                                        ),
+                                      );
+                                    }}
+                                    step="0.01"
+                                    type="number"
+                                    value={offset.amount}
+                                  />
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  <dl className="reconciliation-summary">
+                    <div className="detail-line">
+                      <dt>{t("traderSettlements.grossOrderPayable")}</dt>
+                      <dd>{money(requestedAmount)}</dd>
+                    </div>
+                    <div className="detail-line">
+                      <dt>{t("traderSettlements.companyFeeDeductions")}</dt>
+                      <dd>-{money(receivableOffsetTotal)}</dd>
+                    </div>
+                    <div className="detail-line">
+                      <dt>{t("traderSettlements.netPaymentToTrader")}</dt>
+                      <dd>{money(netPayment)}</dd>
+                    </div>
+                  </dl>
+                </section>
+              )}
+
               {/* Step 6/7 — Review + Confirm */}
               {!canProceedToReview ? null : (
                 <section className="workspace-step">
@@ -2658,8 +2902,16 @@ function NewSettlementDialog({
                       <dd>{trader.name}</dd>
                     </div>
                     <div className="detail-line">
-                      <dt>{t("traderSettlements.paymentAmount")}</dt>
+                      <dt>{t("traderSettlements.grossOrderPayable")}</dt>
                       <dd>{money(requestedAmount)}</dd>
+                    </div>
+                    <div className="detail-line">
+                      <dt>{t("traderSettlements.companyFeeDeductions")}</dt>
+                      <dd>-{money(receivableOffsetTotal)}</dd>
+                    </div>
+                    <div className="detail-line">
+                      <dt>{t("traderSettlements.netPaymentToTrader")}</dt>
+                      <dd>{money(netPayment)}</dd>
                     </div>
                     <div className="detail-line">
                       <dt>{t("traderSettlements.paymentDate")}</dt>
@@ -3239,6 +3491,38 @@ export function SettlementDetailDialog({
             </table>
           </div>
 
+          {(detail.receivableOffsets?.length ?? 0) === 0 ? null : (
+            <section className="workspace-step">
+              <h3>{t("traderSettlements.stepReceivableDeductions")}</h3>
+              <div className="table-scroll-x">
+                <table>
+                  <thead>
+                    <tr>
+                      <th scope="col">{t("traderSettlements.receivableNumber")}</th>
+                      <th scope="col">{t("traderSettlements.receivableBusinessDate")}</th>
+                      <th scope="col">{t("traderSettlements.receivableReference")}</th>
+                      <th scope="col">{t("traderSettlements.receivableReason")}</th>
+                      <th scope="col">{t("traderSettlements.deductionAmount")}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(detail.receivableOffsets ?? []).map((offset) => (
+                      <tr key={offset.receivableNumber}>
+                        <td className="mono">{offset.receivableNumber}</td>
+                        <td>{offset.businessDate}</td>
+                        <td className="mono">
+                          {offset.orderSerialNumber ?? offset.sourceReference ?? "-"}
+                        </td>
+                        <td>{offset.reason}</td>
+                        <td>-{money(offset.amountApplied)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          )}
+
           <dl className="reconciliation-summary">
             <div className="detail-line">
               <dt>{t("traderSettlements.numberOfOrders")}</dt>
@@ -3273,8 +3557,16 @@ export function SettlementDetailDialog({
               <dd>{money(detail.summary.previouslyPaid)}</dd>
             </div>
             <div className="detail-line">
-              <dt>{t("traderSettlements.amountPaidNow")}</dt>
-              <dd>{money(detail.summary.amountPaidNow)}</dd>
+              <dt>{t("traderSettlements.grossOrderPayable")}</dt>
+              <dd>{money(detail.summary.grossOrderPayable)}</dd>
+            </div>
+            <div className="detail-line">
+              <dt>{t("traderSettlements.companyFeeDeductions")}</dt>
+              <dd>-{money(detail.summary.traderFeeDeductions)}</dd>
+            </div>
+            <div className="detail-line">
+              <dt>{t("traderSettlements.netPaymentToTrader")}</dt>
+              <dd>{money(detail.summary.netPayment)}</dd>
             </div>
             <div className="detail-line">
               <dt>{t("traderSettlements.columnRemainingOutstanding")}</dt>
@@ -3422,7 +3714,11 @@ function CollectFromTraderDialog({
 }) {
   const { t } = useTranslation();
   const [traders, setTraders] = useState<
-    readonly { readonly outstandingAmount: string; readonly traderId: string; readonly traderName: string }[]
+    readonly {
+      readonly outstandingAmount: string;
+      readonly traderId: string;
+      readonly traderName: string;
+    }[]
   >([]);
   const [traderId, setTraderId] = useState("");
   const [outstandingAmount, setOutstandingAmount] = useState("0.00");
@@ -3436,9 +3732,9 @@ function CollectFromTraderDialog({
 
   useEffect(() => {
     void api
-      .get<
-        readonly { outstandingAmount: string; traderId: string; traderName: string }[]
-      >("operations/trader-receivables/traders-with-balance")
+      .get<readonly { outstandingAmount: string; traderId: string; traderName: string }[]>(
+        "operations/trader-receivables/traders-with-balance",
+      )
       .then(setTraders)
       .catch(() => setTraders([]));
   }, [api]);
@@ -3448,7 +3744,9 @@ function CollectFromTraderDialog({
     setCollectionAmount("");
     setError(undefined);
     const selected = traders.find((trader) => trader.traderId === newTraderId);
-    setOutstandingAmount(selected === undefined ? "0.00" : money(safeMoneyValue(selected.outstandingAmount)));
+    setOutstandingAmount(
+      selected === undefined ? "0.00" : money(safeMoneyValue(selected.outstandingAmount)),
+    );
   };
 
   const amountInput = parseMoneyInput(collectionAmount, { required: true });
@@ -3484,21 +3782,27 @@ function CollectFromTraderDialog({
         readonly allocations: readonly { receivableId: string; proposedAmount: string }[];
       }>("operations/trader-receivables/allocation-proposal", { traderId, amount });
 
-      await api.post("operations/trader-receivables/collections", {
-        traderId,
-        amountReceived: amount,
-        allocations: proposal.allocations.map((line) => ({
-          amount: safeMoneyValue(line.proposedAmount),
-          receivableId: line.receivableId,
-        })),
-        paymentMethod: paymentMethod || undefined,
-        paymentDate: paymentDate || undefined,
-        notes: notes.trim() === "" ? undefined : notes.trim(),
-      }, { "X-Idempotency-Key": idempotency.keyFor(fingerprint) });
+      await api.post(
+        "operations/trader-receivables/collections",
+        {
+          traderId,
+          amountReceived: amount,
+          allocations: proposal.allocations.map((line) => ({
+            amount: safeMoneyValue(line.proposedAmount),
+            receivableId: line.receivableId,
+          })),
+          paymentMethod: paymentMethod || undefined,
+          paymentDate: paymentDate || undefined,
+          notes: notes.trim() === "" ? undefined : notes.trim(),
+        },
+        { "X-Idempotency-Key": idempotency.keyFor(fingerprint) },
+      );
       idempotency.reset();
       onCollected();
     } catch (requestError) {
-      setError(message(requestError, t("traderSettlements.collectionFailed", "Failed to collect payment")));
+      setError(
+        message(requestError, t("traderSettlements.collectionFailed", "Failed to collect payment")),
+      );
     } finally {
       setSaving(false);
     }
@@ -3545,32 +3849,53 @@ function CollectFromTraderDialog({
               value={collectionAmount}
             />
             {collectionAmount !== "" && !amountInput.ok ? (
-              <small className="error">{t("traderSettlements.invalidAmount", "Invalid amount")}</small>
+              <small className="error">
+                {t("traderSettlements.invalidAmount", "Invalid amount")}
+              </small>
             ) : null}
             {collectionAmount !== "" && amountInput.ok && amountInput.value > outstandingValue ? (
-              <small className="error">{t("traderSettlements.amountExceedsOutstanding", "Amount exceeds outstanding balance")}</small>
+              <small className="error">
+                {t(
+                  "traderSettlements.amountExceedsOutstanding",
+                  "Amount exceeds outstanding balance",
+                )}
+              </small>
             ) : null}
           </label>
 
           <label className="field">
             <span>{t("traderSettlements.filterPaymentMethod", "Payment Method")}</span>
-            <select onChange={(event) => setPaymentMethod(event.target.value as "cash" | "bank_transfer")} value={paymentMethod}>
+            <select
+              onChange={(event) => setPaymentMethod(event.target.value as "cash" | "bank_transfer")}
+              value={paymentMethod}
+            >
               <option value="cash">{t("traderSettlements.paymentMethodCash", "Cash")}</option>
-              <option value="bank_transfer">{t("traderSettlements.paymentMethodBankTransfer", "Bank Transfer")}</option>
+              <option value="bank_transfer">
+                {t("traderSettlements.paymentMethodBankTransfer", "Bank Transfer")}
+              </option>
             </select>
           </label>
 
           <label className="field">
             <span>{t("traderSettlements.paymentDate", "Payment Date")}</span>
-            <input onChange={(event) => setPaymentDate(event.target.value)} type="date" value={paymentDate} />
+            <input
+              onChange={(event) => setPaymentDate(event.target.value)}
+              type="date"
+              value={paymentDate}
+            />
           </label>
 
           <label className="field">
-            <span>{t("common.notes", "Notes")} ({t("common.optional", "Optional")})</span>
+            <span>
+              {t("common.notes", "Notes")} ({t("common.optional", "Optional")})
+            </span>
             <textarea
               maxLength={300}
               onChange={(event) => setNotes(event.target.value)}
-              placeholder={t("traderSettlements.collectionNotesPlaceholder", "Add notes about this collection...")}
+              placeholder={t(
+                "traderSettlements.collectionNotesPlaceholder",
+                "Add notes about this collection...",
+              )}
               value={notes}
             />
             <small>{notes.length}/300</small>
@@ -3588,7 +3913,9 @@ function CollectFromTraderDialog({
           onClick={() => void submit()}
           type="button"
         >
-          {saving ? t("common.saving", "Saving...") : t("traderSettlements.confirmCollection", "Confirm Collection")}
+          {saving
+            ? t("common.saving", "Saving...")
+            : t("traderSettlements.confirmCollection", "Confirm Collection")}
         </button>
       </div>
     </Modal>
@@ -3617,12 +3944,27 @@ function AddReceivableDialog({
   const idempotency = useIdempotencyKey();
 
   const sourceTypes = [
-    { value: "manual_adjustment", label: t("traderReceivable.sourceType.manualAdjustment", "Manual Adjustment") },
-    { value: "trader_penalty", label: t("traderReceivable.sourceType.traderPenalty", "Trader Penalty") },
-    { value: "overpayment_recovery", label: t("traderReceivable.sourceType.overpaymentRecovery", "Overpayment Recovery") },
+    {
+      value: "manual_adjustment",
+      label: t("traderReceivable.sourceType.manualAdjustment", "Manual Adjustment"),
+    },
+    {
+      value: "trader_penalty",
+      label: t("traderReceivable.sourceType.traderPenalty", "Trader Penalty"),
+    },
+    {
+      value: "overpayment_recovery",
+      label: t("traderReceivable.sourceType.overpaymentRecovery", "Overpayment Recovery"),
+    },
     { value: "refund_due", label: t("traderReceivable.sourceType.refundDue", "Refund Due") },
-    { value: "service_charge", label: t("traderReceivable.sourceType.serviceCharge", "Service Charge") },
-    { value: "damaged_or_lost_shipment_recovery", label: t("traderReceivable.sourceType.damagedShipment", "Damaged/Lost Shipment") },
+    {
+      value: "service_charge",
+      label: t("traderReceivable.sourceType.serviceCharge", "Service Charge"),
+    },
+    {
+      value: "damaged_or_lost_shipment_recovery",
+      label: t("traderReceivable.sourceType.damagedShipment", "Damaged/Lost Shipment"),
+    },
     { value: "other", label: t("common.other", "Other") },
   ];
 
@@ -3634,7 +3976,12 @@ function AddReceivableDialog({
   }, [api]);
 
   const amountInput = parseMoneyInput(amountDue, { required: true });
-  const isValid = traderId !== "" && reason.trim() !== "" && businessDate !== "" && amountInput.ok && amountInput.value > 0;
+  const isValid =
+    traderId !== "" &&
+    reason.trim() !== "" &&
+    businessDate !== "" &&
+    amountInput.ok &&
+    amountInput.value > 0;
 
   const submit = async () => {
     if (!isValid || saving) return;
@@ -3651,18 +3998,27 @@ function AddReceivableDialog({
     });
 
     try {
-      await api.post("operations/trader-receivables/receivables", {
-        traderId,
-        sourceType,
-        sourceReference: sourceReference.trim() === "" ? undefined : sourceReference.trim(),
-        reason: reason.trim(),
-        businessDate,
-        amountDue: amountInput.ok ? amountInput.value : 0,
-      }, { "X-Idempotency-Key": idempotency.keyFor(fingerprint) });
+      await api.post(
+        "operations/trader-receivables/receivables",
+        {
+          traderId,
+          sourceType,
+          sourceReference: sourceReference.trim() === "" ? undefined : sourceReference.trim(),
+          reason: reason.trim(),
+          businessDate,
+          amountDue: amountInput.ok ? amountInput.value : 0,
+        },
+        { "X-Idempotency-Key": idempotency.keyFor(fingerprint) },
+      );
       idempotency.reset();
       onCreated();
     } catch (requestError) {
-      setError(message(requestError, t("traderSettlements.receivableCreationFailed", "Failed to add charge")));
+      setError(
+        message(
+          requestError,
+          t("traderSettlements.receivableCreationFailed", "Failed to add charge"),
+        ),
+      );
     } finally {
       setSaving(false);
     }
@@ -3705,7 +4061,10 @@ function AddReceivableDialog({
         <textarea
           maxLength={500}
           onChange={(event) => setReason(event.target.value)}
-          placeholder={t("traderReceivable.reasonPlaceholder", "Explain why this charge is being applied...")}
+          placeholder={t(
+            "traderReceivable.reasonPlaceholder",
+            "Explain why this charge is being applied...",
+          )}
           value={reason}
         />
         <small>{reason.length}/500</small>
@@ -3716,7 +4075,10 @@ function AddReceivableDialog({
         <textarea
           maxLength={160}
           onChange={(event) => setSourceReference(event.target.value)}
-          placeholder={t("traderReceivable.sourceReferencePlaceholder", "Enter details about this charge...")}
+          placeholder={t(
+            "traderReceivable.sourceReferencePlaceholder",
+            "Enter details about this charge...",
+          )}
           value={sourceReference}
         />
         <small>{sourceReference.length}/160</small>
@@ -3724,7 +4086,11 @@ function AddReceivableDialog({
 
       <label className="field">
         <span>{t("configuration.businessDay.businessDate", "Business Date")}</span>
-        <input onChange={(event) => setBusinessDate(event.target.value)} type="date" value={businessDate} />
+        <input
+          onChange={(event) => setBusinessDate(event.target.value)}
+          type="date"
+          value={businessDate}
+        />
       </label>
 
       <label className="field">
@@ -3752,7 +4118,9 @@ function AddReceivableDialog({
           onClick={() => void submit()}
           type="button"
         >
-          {saving ? t("common.saving", "Saving...") : t("traderSettlements.addCharge", "Add Charge")}
+          {saving
+            ? t("common.saving", "Saving...")
+            : t("traderSettlements.addCharge", "Add Charge")}
         </button>
       </div>
     </Modal>

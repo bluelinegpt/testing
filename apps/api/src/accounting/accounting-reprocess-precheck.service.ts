@@ -447,6 +447,7 @@ export class AccountingReprocessPrecheckService {
       event_already_posted: "The Accounting Event is already posted",
       event_currently_processing: "The Accounting Event is currently processing",
       event_ignored_duplicate: "The Accounting Event was ignored as a duplicate",
+      event_no_accounting_required: "The source has no financial components to post",
       event_journal_already_exists: "A Journal already exists for this Accounting Event",
       event_reversed: "The Accounting Event was reversed",
       event_status_not_reprocessable: "This Accounting Event status cannot be reprocessed",

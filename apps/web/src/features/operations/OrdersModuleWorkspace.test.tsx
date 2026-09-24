@@ -20,7 +20,7 @@ import { vi } from "vitest";
 
 import type { ApiClient } from "../../api/api-client.js";
 import { i18nInstance } from "../../localization/i18n.js";
-import { OrdersModuleWorkspace } from "./OrdersModuleWorkspace.js";
+import { OrderDetailsWorkspace, OrdersModuleWorkspace } from "./OrdersModuleWorkspace.js";
 
 const order = {
   amountCollected: "0.00",
@@ -65,6 +65,135 @@ const heldOrder = {
 
 describe("OrdersModuleWorkspace", () => {
   beforeEach(async () => i18nInstance.changeLanguage("en"));
+
+  it("lets an administrator reopen a Delivered Order through the dedicated action", async () => {
+    const deliveredOrder = {
+      ...order,
+      assignedDriverId: "20000000-0000-4000-8000-000000000001",
+      assignedDriverMobile: "971501234568",
+      assignedDriverName: "Ahmed",
+      deliveryStatus: "delivered",
+      driverReconciliationStatus: "not_applicable",
+      id: "10000000-0000-4000-8000-000000000099",
+      orderNumber: "ORD-000099",
+      traderSettlementStatus: "unsettled",
+      attachments: [],
+      events: [],
+      history: [],
+      internationalShipment: null,
+      metadata: {
+        closedAt: null,
+        createdAt: "2026-09-24T00:00:00.000Z",
+        createdBy: "Admin",
+        customerSecondMobileNumber: null,
+        driverCost: "0.00",
+        notes: null,
+        operationalCompletedAt: "2026-09-24T00:00:00.000Z",
+        orderExpensesTotal: "0.00",
+        packageCount: 1,
+        paymentCondition: "cod",
+        returnDriverFee: "0.00",
+        traderNetPayable: "90.00",
+      },
+    };
+    const api = {
+      get: vi.fn((path: string) =>
+        path.startsWith("operations/order-details/")
+          ? Promise.resolve(deliveredOrder)
+          : Promise.resolve([]),
+      ),
+      post: vi.fn().mockResolvedValue({}),
+    };
+
+    renderWithRouter(
+      <OrderDetailsWorkspace
+        api={api as unknown as ApiClient}
+        companyId="company-1"
+        onBack={vi.fn()}
+        orderNumber={deliveredOrder.orderNumber}
+        permissions={["users_roles.manage"]}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Reopen delivery" }));
+    fireEvent.change(screen.getByLabelText("Reason for reopening this delivered order"), {
+      target: { value: "Customer requested another delivery" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
+
+    await waitFor(() =>
+      expect(api.post).toHaveBeenCalledWith(
+        `operations/orders/${deliveredOrder.id}/reopen-delivery`,
+        { reason: "Customer requested another delivery" },
+      ),
+    );
+  });
+
+  it("routes a single selected Delivered Order through the dedicated reopen flow", async () => {
+    const deliveredOrder = {
+      ...order,
+      assignedDriverId: "20000000-0000-4000-8000-000000000001",
+      assignedDriverMobile: "971501234568",
+      assignedDriverName: "Ahmed",
+      deliveryStatus: "delivered",
+      driverReconciliationStatus: "not_applicable",
+      id: "10000000-0000-4000-8000-000000000099",
+      orderNumber: "ORD-000099",
+      traderSettlementStatus: "unsettled",
+    };
+    const api = {
+      get: vi.fn((path: string) => {
+        if (path.startsWith("operations/orders?")) {
+          return Promise.resolve({
+            filteredCount: 1,
+            items: [deliveredOrder],
+            page: 1,
+            pageSize: 25,
+            totalCount: 1,
+          });
+        }
+        if (path.startsWith("configuration/areas")) {
+          return Promise.resolve({ items: [], page: 1, pageSize: 100, total: 0 });
+        }
+        return Promise.resolve([]);
+      }),
+      post: vi.fn((path: string) =>
+        path === "operations/orders/selection-summary"
+          ? Promise.resolve({
+              eligibleCount: 1,
+              ineligible: [],
+              selectedAmountToCollect: "110.00",
+              selectedCount: 1,
+            })
+          : Promise.resolve({}),
+      ),
+    };
+    renderWithRouter(
+      <OrdersModuleWorkspace
+        api={api as unknown as ApiClient}
+        onNavigate={vi.fn()}
+        permissions={["users_roles.manage"]}
+      />,
+    );
+
+    fireEvent.click(await screen.findByLabelText("Select Order SER-000001"));
+    fireEvent.click(screen.getByRole("button", { name: "Change delivery status" }));
+    fireEvent.change(screen.getByLabelText("Reason"), {
+      target: { value: "Customer requested another delivery" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
+
+    await waitFor(() =>
+      expect(api.post).toHaveBeenCalledWith(
+        `operations/orders/${deliveredOrder.id}/reopen-delivery`,
+        { reason: "Customer requested another delivery" },
+      ),
+    );
+    expect(api.post).not.toHaveBeenCalledWith(
+      "operations/orders/bulk-status",
+      expect.anything(),
+    );
+  });
 
   it("uses Active Orders server paging and supports selection across matching results", async () => {
     const api = {

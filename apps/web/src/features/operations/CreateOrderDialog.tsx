@@ -93,7 +93,9 @@ export function CreateOrderDialog({
      a zero COD and a zero fee: those two numbers also describe a pricing gap,
      and the operator's intent is what the backend stores and audits. */
   const [isFreeOrder, setIsFreeOrder] = useState(false);
-  const [orderType, setOrderType] = useState<"collect_order" | "delivery">("delivery");
+  const [orderType, setOrderType] = useState<
+    "collect_order" | "delivery" | "gcc_international"
+  >("delivery");
   const [paymentCondition, setPaymentCondition] = useState<
     "customer_pays_cod_and_fee" | "customer_pays_cod_trader_pays_fee"
   >("customer_pays_cod_and_fee");

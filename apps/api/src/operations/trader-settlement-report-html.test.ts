@@ -61,8 +61,11 @@ const sample: TraderSettlementReportData = {
       vatAmount: "0.00",
     },
   ],
+  receivableOffsets: [],
   summary: {
     amountPaidNow: "100.00",
+    grossOrderPayable: "100.00",
+    netPayment: "100.00",
     orderCount: 1,
     previouslyPaid: "0.00",
     remainingOutstanding: "0.00",
@@ -72,6 +75,7 @@ const sample: TraderSettlementReportData = {
     totalOriginalTraderPayable: "100.00",
     totalServiceFees: "10.00",
     totalVat: "0.00",
+    traderFeeDeductions: "0.00",
   },
 };
 
@@ -164,6 +168,35 @@ describe("buildTraderSettlementStatementHtml", () => {
     const html = buildTraderSettlementStatementHtml(partial, "en");
     expect(html).toContain("AED 60.00");
     expect(html).toContain("AED 40.00");
+  });
+
+  it("shows Trader fee deductions as negative lines and the net payment", () => {
+    const withDeduction: TraderSettlementReportData = {
+      ...sample,
+      receivableOffsets: [
+        {
+          amountApplied: "25.00",
+          businessDate: "2026-07-19",
+          orderSerialNumber: "SER-FEE-1",
+          reason: "Service fee owed by Trader",
+          receivableNumber: "RCV-000123",
+          sourceReference: "ORD-FEE-1",
+          sourceType: "service_charge",
+        },
+      ],
+      summary: {
+        ...sample.summary,
+        grossOrderPayable: "100.00",
+        netPayment: "75.00",
+        traderFeeDeductions: "25.00",
+      },
+    };
+    const html = buildTraderSettlementStatementHtml(withDeduction, "en");
+    expect(html).toContain("RCV-000123");
+    expect(html).toContain("SER-FEE-1");
+    expect(html).toContain("Service fee owed by Trader");
+    expect(html).toContain("-AED 25.00");
+    expect(html).toContain("AED 75.00");
   });
 
   it("shows a Money Received notice with reference and notes when confirmed", () => {

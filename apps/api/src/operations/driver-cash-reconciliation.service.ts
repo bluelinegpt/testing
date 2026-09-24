@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 
 import { HttpStatus, Inject, Injectable } from "@nestjs/common";
 import { Decimal } from "decimal.js";
-import { type Kysely, sql } from "kysely";
+import { type Kysely, sql, type Transaction } from "kysely";
 
 import { CompanyProfileService } from "../company-profile/company-profile.service.js";
 import { DriverCollectionPdfService } from "./driver-collection-pdf.service.js";
@@ -991,6 +991,7 @@ export class DriverCashReconciliationService {
     reason: string,
     correlationId: string,
     idempotencyKey?: string,
+    outerTransaction?: Transaction<DatabaseSchema>,
   ): Promise<{
     linkedDriverFeePaymentReversed: boolean;
     orderCount: number;
@@ -1018,7 +1019,7 @@ export class DriverCashReconciliationService {
         HttpStatus.BAD_REQUEST,
       );
     }
-    return this.transactions.execute(async (transaction) => {
+    const reverseInTransaction = async (transaction: Transaction<DatabaseSchema>) => {
       const requestHash = createHash("sha256")
         .update(JSON.stringify({ reason: trimmedReason, reconciliationId }))
         .digest("hex");
@@ -1263,7 +1264,10 @@ export class DriverCashReconciliationService {
           and idempotency_key=${key}
       `.execute(transaction);
       return response;
-    });
+    };
+    return outerTransaction === undefined
+      ? this.transactions.execute(reverseInTransaction)
+      : reverseInTransaction(outerTransaction);
   }
 
   /**

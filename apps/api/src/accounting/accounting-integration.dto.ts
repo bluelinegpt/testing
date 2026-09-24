@@ -47,6 +47,7 @@ export class AccountingEventListQueryDto {
     "blocked_configuration",
     "reversed",
     "ignored_duplicate",
+    "ignored_no_accounting_required",
   ])
   public readonly status?: string;
 
