@@ -170,11 +170,11 @@ describe("Edit order", () => {
       expect(api.patch).toHaveBeenCalledWith(
         `operations/orders/${detail.id}`,
         expect.objectContaining({
-          codAmount: 0,
           paymentCondition: "customer_pays_cod_trader_pays_fee",
         }),
       ),
     );
+    expect(api.patch.mock.calls[0]?.[1]).not.toHaveProperty("codAmount");
   });
 
   it("hides Edit order once the order is delivered", async () => {

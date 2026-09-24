@@ -128,6 +128,28 @@ describe("prospective Order financial model", () => {
     expect(result.traderNetPayable.toFixed(2)).toBe("0.00");
     expect(result.traderReceivableDue.toFixed(2)).toBe("20.00");
   });
+
+  it("keeps COD collectible when the Trader pays the delivery fee", () => {
+    const result = service.calculateOrderFinancials({
+      additionalFees: new Decimal(0),
+      codAmount: new Decimal(105),
+      driverCost: new Decimal(0),
+      paymentCondition: "customer_pays_cod_trader_pays_fee",
+      prospective: true,
+      serviceFee: new Decimal(25),
+      vatPolicy: {
+        enabled: false,
+        priceMode: null,
+        rate: new Decimal(0),
+      },
+    });
+
+    expect(result.customerAmountDue.toFixed(2)).toBe("105.00");
+    expect(result.totalDeductions.toFixed(2)).toBe("25.00");
+    expect(result.traderNetPayable.toFixed(2)).toBe("80.00");
+    expect(result.traderReceivableDue.toFixed(2)).toBe("0.00");
+  });
+
   it("collects the service fee from the Customer when the Customer pays COD and fee", () => {
     const result = service.calculateOrderFinancials({
       additionalFees: new Decimal(0),

@@ -1273,14 +1273,6 @@ export function CreateOrderDialog({
                               | "customer_pays_cod_and_fee"
                               | "customer_pays_cod_trader_pays_fee";
                             setPaymentCondition(next);
-                            // Trader-prepaid: the Trader already collected from the
-                            // Customer, so nothing is left for the Driver to collect —
-                            // the server pins this to zero regardless (see
-                            // operations.service.ts), zeroed here too so the on-screen
-                            // total never implies otherwise before saving.
-                            if (next === "customer_pays_cod_trader_pays_fee") {
-                              setCodAmount("0.00");
-                            }
                           }}
                         >
                           <option value="customer_pays_cod_and_fee">
@@ -1360,9 +1352,7 @@ export function CreateOrderDialog({
                         aria-describedby={describedBy("codAmount")}
                         aria-invalid={errorFor("codAmount") !== undefined}
                         disabled={
-                          isFreeOrder ||
-                          orderType === "collect_order" ||
-                          paymentCondition === "customer_pays_cod_trader_pays_fee"
+                          isFreeOrder || orderType === "collect_order"
                         }
                         id="order-cod"
                         min="0"

@@ -3837,16 +3837,11 @@ export class OperationsService {
       const vatPolicy = await this.vatPolicy(transaction, companyId);
       const orderNumber = await this.nextOrderNumber(transaction, companyId);
       const driverCost = new Decimal(driverRow?.outsourcedFee ?? 0);
-      // "Pay by Trader" means the Trader already collected from the Customer
-      // and is being billed the delivery fee separately -- the Order is
-      // prepaid, so nothing is left for the Driver to collect at delivery.
-      const traderPrepaid = input.paymentCondition === "customer_pays_cod_trader_pays_fee";
       const financials = this.calculateOrderFinancials({
         // Both forced, never trusted from the client: a free Order with a COD is
         // not a state this system recognises.
         additionalFees: freeOrder || collectOrder ? new Decimal(0) : new Decimal(additionalFees),
-        codAmount:
-          freeOrder || collectOrder || traderPrepaid ? new Decimal(0) : new Decimal(input.codAmount),
+        codAmount: freeOrder || collectOrder ? new Decimal(0) : new Decimal(input.codAmount),
         driverCost: collectOrder ? new Decimal(0) : driverCost,
         prospective: true,
         serviceFee: pricing.finalFee,
@@ -4884,11 +4879,9 @@ export class OperationsService {
           HttpStatus.CONFLICT,
         );
       }
-      // A "Pay by Trader" Order is prepaid: the Trader already collected from
-      // the Customer, so nothing is owed at delivery. Switching to it always
-      // pins COD to zero; switching back permits the operator to enter COD.
-      const codAmountLocked =
-        isFreeOrder || nextPaymentCondition === "customer_pays_cod_trader_pays_fee";
+      // "Who pays" assigns the delivery fees. COD remains the amount collected
+      // from the Customer on behalf of the Trader under either fee arrangement.
+      const codAmountLocked = isFreeOrder;
       const nextCod =
         codAmountLocked || input.codAmount === undefined ? currentCod : new Decimal(input.codAmount);
       const codChanged = !this.money(nextCod).equals(this.money(currentCod));
