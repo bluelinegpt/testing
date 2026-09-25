@@ -114,7 +114,9 @@ interface TraderReceivableEligibleRow {
   readonly businessDate: string;
   readonly id: string;
   readonly orderSerialNumber?: string | null;
+  readonly originalAmountDue: string;
   readonly outstandingAmount: string;
+  readonly previouslyCollected: string;
   readonly reason: string;
   readonly receivableNumber: string;
   readonly sourceReference: string | null;
@@ -242,7 +244,14 @@ interface TraderAccountStatement {
     readonly lineNumber: number;
     readonly reference: string;
     readonly runningBalance: string;
-    readonly type: "order" | "payment" | "reversal";
+    readonly type:
+      | "order"
+      | "payment"
+      | "reversal"
+      | "receivable"
+      | "collection"
+      | "collection_reversal"
+      | "receivable_cancellation";
   }[];
   readonly warnings: readonly string[];
 }
@@ -996,7 +1005,13 @@ function TraderAccountStatementDialog({
         ),
       );
     } catch (requestError) {
-      setError(message(requestError, t("traderSettlements.statementLoadFailed")));
+      setError(
+        requestError instanceof ApiError && requestError.status >= 500
+          ? t("traderSettlements.statementServerError", {
+              reference: requestError.correlationId ?? requestError.code,
+            })
+          : message(requestError, t("traderSettlements.statementLoadFailed")),
+      );
     } finally {
       setLoading(false);
     }
@@ -1031,7 +1046,13 @@ function TraderAccountStatementDialog({
       action,
     );
     if (requestError !== undefined) {
-      setError(message(requestError, t("traderSettlements.pdfGenerationFailed")));
+      setError(
+        requestError instanceof ApiError && requestError.status >= 500
+          ? t("traderSettlements.statementServerError", {
+              reference: requestError.correlationId ?? requestError.code,
+            })
+          : message(requestError, t("traderSettlements.pdfGenerationFailed")),
+      );
     }
   };
 
@@ -1596,6 +1617,10 @@ function NewSettlementDialog({
     rows.reduce((total, order) => total + safeMoneyValue(order.outstandingBalance), 0);
   const listedOutstandingTotal = sumOutstanding(eligibleOrders);
   const selectedOutstandingTotal = sumOutstanding(selectedEligibleOrders);
+  const listedReceivableTotal = eligibleReceivables.reduce(
+    (total, receivable) => total + safeMoneyValue(receivable.outstandingAmount),
+    0,
+  );
   const allListedSelected =
     eligibleOrders.length > 0 && selectedEligibleOrders.length === eligibleOrders.length;
 
@@ -2255,6 +2280,12 @@ function NewSettlementDialog({
                 {ordersError === undefined ? null : (
                   <div className="alert alert-error">{ordersError}</div>
                 )}
+                {receivablesError === undefined ? null : (
+                  <div className="alert alert-error">{receivablesError}</div>
+                )}
+                {eligibleReceivables.length === 0 ? null : (
+                  <p className="field-hint">{t("traderSettlements.receivableDeductionsHelp")}</p>
+                )}
                 <details
                   className="filter-drawer"
                   onToggle={(event) => setEligibleFiltersOpen(event.currentTarget.open)}
@@ -2369,10 +2400,13 @@ function NewSettlementDialog({
                         <th scope="col">{t("traderSettlements.filterExternalReference")}</th>
                         <th scope="col">{t("traderSettlements.filterDeliveryDateFrom")}</th>
                         <th scope="col">{t("common.name")}</th>
+                        <th scope="col">{t("traderSettlements.settlementItemType")}</th>
                         <th scope="col">{t("traderSettlements.columnOriginalAmountDue")}</th>
                         <th scope="col">{t("traderSettlements.columnPreviouslyPaid")}</th>
                         <th scope="col">{t("traderSettlements.columnOutstandingBalance")}</th>
-                        <th scope="col">{t("traderSettlements.orderSettlementStatus")}</th>
+                        <th scope="col">
+                          {t("traderSettlements.orderSettlementStatusOrDeduction")}
+                        </th>
                       </tr>
                     </thead>
                     <tbody>
@@ -2416,6 +2450,7 @@ function NewSettlementDialog({
                             {order.deliveryDate === null ? "-" : order.deliveryDate.slice(0, 10)}
                           </td>
                           <td>{order.customerName}</td>
+                          <td>{t("traderSettlements.orderPayablePlus")}</td>
                           <td>{money(order.originalAmountDueToTrader)}</td>
                           <td>{money(order.previouslyPaid)}</td>
                           <td>{money(order.outstandingBalance)}</td>
@@ -2424,9 +2459,82 @@ function NewSettlementDialog({
                           </td>
                         </tr>
                       ))}
-                      {eligibleOrders.length === 0 && ordersError === undefined ? (
+                      {eligibleReceivables.map((receivable) => {
+                        const offset = receivableOffsets.find(
+                          (line) => line.receivableId === receivable.id,
+                        );
+                        return (
+                          <tr key={`receivable-${receivable.id}`}>
+                            <td>
+                              <input
+                                aria-label={t("traderSettlements.applyFeeDeduction", {
+                                  number:
+                                    receivable.orderSerialNumber ??
+                                    receivable.sourceReference ??
+                                    receivable.receivableNumber,
+                                })}
+                                checked={offset !== undefined}
+                                onChange={(event) => {
+                                  setReceivableOffsetsCustomized(true);
+                                  setReceivableOffsets((current) =>
+                                    event.target.checked
+                                      ? [
+                                          ...current,
+                                          {
+                                            amount: receivable.outstandingAmount,
+                                            receivableId: receivable.id,
+                                          },
+                                        ]
+                                      : current.filter(
+                                          (line) => line.receivableId !== receivable.id,
+                                        ),
+                                  );
+                                }}
+                                type="checkbox"
+                              />
+                            </td>
+                            <td className="mono">
+                              {receivable.orderSerialNumber ??
+                                receivable.sourceReference ??
+                                receivable.receivableNumber}
+                            </td>
+                            <td className="mono">{receivable.receivableNumber}</td>
+                            <td>{receivable.businessDate.slice(0, 10)}</td>
+                            <td>{receivable.reason}</td>
+                            <td>{t("traderSettlements.feeDeductionMinus")}</td>
+                            <td className="numeric">-{money(receivable.originalAmountDue)}</td>
+                            <td>{money(receivable.previouslyCollected)}</td>
+                            <td className="numeric">-{money(receivable.outstandingAmount)}</td>
+                            <td>
+                              {offset === undefined ? (
+                                "-"
+                              ) : (
+                                <input
+                                  aria-label={t("traderSettlements.deductionAmount")}
+                                  inputMode="decimal"
+                                  min="0.01"
+                                  onChange={(event) => {
+                                    setReceivableOffsetsCustomized(true);
+                                    setReceivableOffsets((current) =>
+                                      current.map((line) =>
+                                        line.receivableId === receivable.id
+                                          ? { ...line, amount: event.target.value }
+                                          : line,
+                                      ),
+                                    );
+                                  }}
+                                  step="0.01"
+                                  type="number"
+                                  value={offset.amount}
+                                />
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      {eligibleOrders.length === 0 && eligibleReceivables.length === 0 ? (
                         <tr>
-                          <td className="empty-state" colSpan={9}>
+                          <td className="empty-state" colSpan={10}>
                             {t("traderSettlements.noEligibleOrders")}
                           </td>
                         </tr>
@@ -2453,6 +2561,20 @@ function NewSettlementDialog({
                           count: selectedEligibleOrders.length,
                         })}
                         <strong>{money(selectedOutstandingTotal.toFixed(2))}</strong>
+                      </span>
+                    )}
+                  </div>
+                )}
+                {eligibleReceivables.length === 0 ? null : (
+                  <div className="eligible-orders-totals" role="status">
+                    <span>
+                      {t("traderSettlements.availableFeeDeductions")}
+                      <strong>-{money(listedReceivableTotal.toFixed(2))}</strong>
+                    </span>
+                    {amount.trim() === "" ? null : (
+                      <span className="eligible-orders-selected">
+                        {t("traderSettlements.netPaymentToTrader")}
+                        <strong>{money(netPayment.toFixed(2))}</strong>
                       </span>
                     )}
                   </div>
@@ -2782,114 +2904,12 @@ function NewSettlementDialog({
                 </section>
               )}
 
-              {amount.trim() === "" ||
-              (eligibleReceivables.length === 0 && receivablesError === undefined) ? null : (
-                <section className="workspace-step">
-                  <h3>{t("traderSettlements.stepReceivableDeductions")}</h3>
-                  <p className="field-hint">{t("traderSettlements.receivableDeductionsHelp")}</p>
-                  {receivablesError === undefined ? null : (
-                    <div className="alert alert-error">{receivablesError}</div>
-                  )}
-                  {receivableOffsetErrors.length === 0 ? null : (
-                    <div className="alert alert-error" role="alert">
-                      {[...new Set(receivableOffsetErrors)].map((error) => (
-                        <p key={error}>{error}</p>
-                      ))}
-                    </div>
-                  )}
-                  <div className="table-scroll-x">
-                    <table>
-                      <thead>
-                        <tr>
-                          <th scope="col">{t("common.select")}</th>
-                          <th scope="col">{t("traderSettlements.receivableNumber")}</th>
-                          <th scope="col">{t("traderSettlements.receivableBusinessDate")}</th>
-                          <th scope="col">{t("traderSettlements.receivableReference")}</th>
-                          <th scope="col">{t("traderSettlements.receivableReason")}</th>
-                          <th scope="col">{t("traderSettlements.columnOutstandingBalance")}</th>
-                          <th scope="col">{t("traderSettlements.deductionAmount")}</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {eligibleReceivables.map((receivable) => {
-                          const offset = receivableOffsets.find(
-                            (line) => line.receivableId === receivable.id,
-                          );
-                          return (
-                            <tr key={receivable.id}>
-                              <td>
-                                <input
-                                  checked={offset !== undefined}
-                                  onChange={(event) => {
-                                    setReceivableOffsetsCustomized(true);
-                                    setReceivableOffsets((current) =>
-                                      event.target.checked
-                                        ? [
-                                            ...current,
-                                            {
-                                              amount: receivable.outstandingAmount,
-                                              receivableId: receivable.id,
-                                            },
-                                          ]
-                                        : current.filter(
-                                            (line) => line.receivableId !== receivable.id,
-                                          ),
-                                    );
-                                  }}
-                                  type="checkbox"
-                                />
-                              </td>
-                              <td className="mono">{receivable.receivableNumber}</td>
-                              <td>{receivable.businessDate}</td>
-                              <td className="mono">
-                                {receivable.orderSerialNumber ?? receivable.sourceReference ?? "-"}
-                              </td>
-                              <td>{receivable.reason}</td>
-                              <td>{money(receivable.outstandingAmount)}</td>
-                              <td>
-                                {offset === undefined ? (
-                                  "-"
-                                ) : (
-                                  <input
-                                    inputMode="decimal"
-                                    min="0.01"
-                                    onChange={(event) => {
-                                      setReceivableOffsetsCustomized(true);
-                                      setReceivableOffsets((current) =>
-                                        current.map((line) =>
-                                          line.receivableId === receivable.id
-                                            ? { ...line, amount: event.target.value }
-                                            : line,
-                                        ),
-                                      );
-                                    }}
-                                    step="0.01"
-                                    type="number"
-                                    value={offset.amount}
-                                  />
-                                )}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                  <dl className="reconciliation-summary">
-                    <div className="detail-line">
-                      <dt>{t("traderSettlements.grossOrderPayable")}</dt>
-                      <dd>{money(requestedAmount)}</dd>
-                    </div>
-                    <div className="detail-line">
-                      <dt>{t("traderSettlements.companyFeeDeductions")}</dt>
-                      <dd>-{money(receivableOffsetTotal)}</dd>
-                    </div>
-                    <div className="detail-line">
-                      <dt>{t("traderSettlements.netPaymentToTrader")}</dt>
-                      <dd>{money(netPayment)}</dd>
-                    </div>
-                  </dl>
-                </section>
+              {receivableOffsetErrors.length === 0 ? null : (
+                <div className="alert alert-error" role="alert">
+                  {[...new Set(receivableOffsetErrors)].map((error) => (
+                    <p key={error}>{error}</p>
+                  ))}
+                </div>
               )}
 
               {/* Step 6/7 — Review + Confirm */}

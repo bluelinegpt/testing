@@ -19,6 +19,8 @@ import {
 interface StatementSourceRow {
   readonly additionalFee: string;
   readonly amount: string;
+  /** Positive increases the amount owed to the Trader; negative reduces it. */
+  readonly balanceImpact: string;
   readonly codAmount: string;
   readonly createdAt: string;
   readonly date: string;
@@ -29,6 +31,7 @@ interface StatementSourceRow {
   readonly orderNumber: string | null;
   readonly paymentReference: string | null;
   readonly reference: string;
+  readonly settlementNumber: string | null;
   readonly reversalAmount: string;
   readonly sequence: number;
   readonly serialNumber: string | null;
@@ -36,7 +39,14 @@ interface StatementSourceRow {
   readonly settlementAmount: string;
   readonly sourceStatus: string;
   readonly traderPayable: string;
-  readonly type: "order" | "payment" | "reversal";
+  readonly type:
+    | "order"
+    | "payment"
+    | "reversal"
+    | "receivable"
+    | "collection"
+    | "collection_reversal"
+    | "receivable_cancellation";
 }
 
 export interface TraderAccountStatementLine {
@@ -60,7 +70,14 @@ export interface TraderAccountStatementLine {
   readonly reversalAmount: string;
   readonly status: string;
   readonly runningBalance: string;
-  readonly type: "order" | "payment" | "reversal";
+  readonly type:
+    | "order"
+    | "payment"
+    | "reversal"
+    | "receivable"
+    | "collection"
+    | "collection_reversal"
+    | "receivable_cancellation";
   readonly traderPayable: string;
 }
 
@@ -163,7 +180,8 @@ export class TraderAccountStatementService {
                o.service_fee::text as "serviceFee", coalesce(o.additional_fees, 0)::text as "additionalFee",
                o.trader_net_payable::text as "traderPayable", '0.00'::text as "settlementAmount",
                '0.00'::text as "reversalAmount", o.delivery_status as "sourceStatus",
-               o.notes
+               o.notes, o.trader_net_payable::text as "balanceImpact",
+               null::text as "settlementNumber"
           from orders o
          where o.company_id = ${companyId}::uuid and o.trader_id = ${traderId}::uuid
            -- 'closed' is the terminal state a delivered Order reaches once its
@@ -185,7 +203,8 @@ export class TraderAccountStatementService {
                s.settlement_number, 'Trader payment', p.amount::text, false,
                null::text, null::text, p.bank_reference, '0.00'::text, '0.00'::text,
                '0.00'::text, '0.00'::text, p.amount::text, '0.00'::text,
-               s.status, null::text
+               s.status, null::text, (-p.amount)::text,
+               s.settlement_number as "settlementNumber"
           from trader_settlements s
           join trader_settlement_payments p
             on p.settlement_id = s.id and p.company_id = s.company_id
@@ -198,7 +217,8 @@ export class TraderAccountStatementService {
                coalesce(p.amount, 0)::text, false,
                null::text, null::text, p.bank_reference, '0.00'::text, '0.00'::text,
                '0.00'::text, '0.00'::text, '0.00'::text, coalesce(p.amount, 0)::text,
-               'reversed'::text, null::text
+               'reversed'::text, null::text, coalesce(p.amount, 0)::text,
+               r.settlement_number as "settlementNumber"
           from trader_settlements r
           join trader_settlements original
             on original.id = r.reversal_of_id and original.company_id = r.company_id
@@ -206,7 +226,83 @@ export class TraderAccountStatementService {
             on p.settlement_id = original.id and p.company_id = original.company_id
          where r.company_id = ${companyId}::uuid and r.trader_id = ${traderId}::uuid
            and r.business_date between ${from}::date and ${to}::date
-         order by date, "createdAt", sequence, id
+        union all
+        select r.id, 'receivable'::text, r.business_date::text, r.created_at::text, 2,
+               r.receivable_number,
+               (case when r.source_type = 'service_charge' then 'Service fee receivable'
+                     else 'Trader receivable · ' || r.reason end
+                || case when linked.id is null then '' else ' · Order '
+                     || coalesce(linked.serial_number, linked.order_number) || ' (' || linked.order_number || ')' end),
+               r.original_amount_due::text, (r.outstanding_amount > 0),
+               linked.order_number, coalesce(linked.serial_number, linked.order_number),
+               null::text, '0.00'::text, '0.00'::text, '0.00'::text, '0.00'::text,
+               '0.00'::text, '0.00'::text, r.status, r.notes, (-r.original_amount_due)::text,
+               null::text as "settlementNumber"
+          from trader_receivables r
+          left join orders linked on linked.company_id = r.company_id
+            and r.source_type = 'service_charge' and linked.order_number = r.source_reference
+         where r.company_id = ${companyId}::uuid and r.trader_id = ${traderId}::uuid
+           and r.business_date between ${from}::date and ${to}::date
+        union all
+        select alloc.id, 'collection'::text, c.payment_date::text, c.created_at::text, 3,
+               c.collection_number,
+               'Trader collection received · ' || r.receivable_number
+                 || case when linked.id is null then '' else ' · Order '
+                     || coalesce(linked.serial_number, linked.order_number) || ' (' || linked.order_number || ')' end,
+               alloc.amount_allocated::text, false,
+               linked.order_number, coalesce(linked.serial_number, linked.order_number),
+               c.payment_reference, '0.00'::text, '0.00'::text, '0.00'::text, '0.00'::text,
+               '0.00'::text, '0.00'::text, c.status, c.notes, alloc.amount_allocated::text,
+               c.collection_number as "settlementNumber"
+          from trader_collection_allocations alloc
+          join trader_collections c on c.id = alloc.collection_id and c.company_id = alloc.company_id
+          join trader_receivables r on r.id = alloc.receivable_id and r.company_id = alloc.company_id
+          left join orders linked on linked.company_id = r.company_id
+            and r.source_type = 'service_charge' and linked.order_number = r.source_reference
+         where c.company_id = ${companyId}::uuid and c.trader_id = ${traderId}::uuid
+           and c.payment_date between ${from}::date and ${to}::date
+        union all
+        select alloc.id, 'collection_reversal'::text,
+               (c.reversed_at at time zone 'Asia/Dubai')::date::text, c.reversed_at::text, 4,
+               c.collection_number, 'Reversal of Trader collection ' || c.collection_number
+                 || ' · ' || r.receivable_number
+                 || case when linked.id is null then '' else ' · Order '
+                     || coalesce(linked.serial_number, linked.order_number) || ' (' || linked.order_number || ')' end,
+               alloc.amount_allocated::text, false,
+               linked.order_number, coalesce(linked.serial_number, linked.order_number),
+               c.payment_reference, '0.00'::text, '0.00'::text, '0.00'::text, '0.00'::text,
+               '0.00'::text, '0.00'::text, 'reversed'::text, c.reversal_reason, (-alloc.amount_allocated)::text,
+               c.collection_number as "settlementNumber"
+          from trader_collection_allocations alloc
+          join trader_collections c on c.id = alloc.collection_id and c.company_id = alloc.company_id
+          join trader_receivables r on r.id = alloc.receivable_id and r.company_id = alloc.company_id
+          left join orders linked on linked.company_id = r.company_id
+            and r.source_type = 'service_charge' and linked.order_number = r.source_reference
+         where c.company_id = ${companyId}::uuid and c.trader_id = ${traderId}::uuid
+           and c.status = 'reversed'
+           and (c.reversed_at at time zone 'Asia/Dubai')::date between ${from}::date and ${to}::date
+        union all
+        select r.id, 'receivable_cancellation'::text,
+               (a.occurred_at at time zone 'Asia/Dubai')::date::text, a.occurred_at::text, 5,
+               r.receivable_number,
+               'Cancellation of Trader receivable · ' || r.receivable_number
+                 || case when linked.id is null then '' else ' · Order '
+                     || coalesce(linked.serial_number, linked.order_number) || ' (' || linked.order_number || ')' end,
+               r.original_amount_due::text, false,
+               linked.order_number, coalesce(linked.serial_number, linked.order_number),
+               null::text, '0.00'::text, '0.00'::text, '0.00'::text, '0.00'::text,
+               '0.00'::text,
+               '0.00'::text, 'cancelled'::text, a.after_data ->> 'reason',
+               r.original_amount_due::text, null::text as "settlementNumber"
+          from audit_events a
+          join trader_receivables r on r.id::text = a.subject_id and r.company_id = a.company_id
+          left join orders linked on linked.company_id = r.company_id
+            and r.source_type = 'service_charge' and linked.order_number = r.source_reference
+         where a.company_id = ${companyId}::uuid and a.subject_type = 'trader_receivable'
+           and a.action = 'trader_receivable.cancel'
+           and r.trader_id = ${traderId}::uuid
+           and (a.occurred_at at time zone 'Asia/Dubai')::date between ${from}::date and ${to}::date
+        order by date, "createdAt", sequence, id
       `.execute(this.database)
     ).rows;
     const periodSummary = (
@@ -266,7 +362,7 @@ export class TraderAccountStatementService {
     ).rows;
     const settlements: TraderAccountStatementSettlement[] = [];
     for (const settlement of settlementRows) {
-      const allocations = (
+      const allocationRows = (
         await sql<TraderAccountStatementSettlement["allocations"][number]>`
           select o.order_number as "orderNumber",
                  coalesce(o.serial_number, o.order_number) as "serialNumber",
@@ -319,6 +415,16 @@ export class TraderAccountStatementService {
            order by o.delivered_at, o.created_at, o.id
         `.execute(this.database)
       ).rows;
+      const allocations = settlement.isReversed
+        ? allocationRows.map((allocation) => ({
+            ...allocation,
+            allocatedAmount: "0.00",
+            remainingAfterSettlement: Decimal.max(
+              0,
+              new Decimal(allocation.originalTraderPayable).minus(allocation.previouslySettled),
+            ).toFixed(2),
+          }))
+        : allocationRows;
       settlements.push({ ...settlement, allocations });
     }
     const reversedSettlementNumbers = new Set(
@@ -332,22 +438,21 @@ export class TraderAccountStatementService {
     let reversals = new Decimal(0);
     const allTransactions = source.map((row, index): TraderAccountStatementLine => {
       const amount = this.money(row.amount);
+      const balanceImpact = this.money(row.balanceImpact);
+      running = running.plus(balanceImpact);
       if (row.type === "order") {
-        running = running.plus(amount);
         payable = payable.plus(amount);
       } else if (row.type === "payment") {
-        running = running.minus(amount);
         payments = payments.plus(amount);
-      } else {
-        running = running.plus(amount);
+      } else if (row.type === "reversal") {
         reversals = reversals.plus(amount);
       }
       return {
         additionalFee: row.additionalFee,
         codAmount: row.codAmount,
-        credit: row.type === "payment" ? amount.toFixed(2) : "0.00",
+        credit: balanceImpact.lessThan(0) ? balanceImpact.abs().toFixed(2) : "0.00",
         date: row.date,
-        debit: row.type === "payment" ? "0.00" : amount.toFixed(2),
+        debit: balanceImpact.greaterThan(0) ? balanceImpact.toFixed(2) : "0.00",
         description: row.description,
         id: row.id,
         isOutstanding: row.isOutstanding,
@@ -357,7 +462,7 @@ export class TraderAccountStatementService {
         paymentReference: row.paymentReference,
         reference: row.reference,
         runningBalance: this.money(running).toFixed(2),
-        settlementNumber: row.type === "order" ? null : row.reference,
+        settlementNumber: row.settlementNumber,
         serialNumber: row.serialNumber,
         serviceFee: row.serviceFee,
         settlementAmount: row.settlementAmount,
@@ -368,10 +473,16 @@ export class TraderAccountStatementService {
       };
     });
     const transactions = allTransactions.filter((row) => {
-      if (query.reversedOnly === true && row.type !== "reversal") return false;
-      if (query.paidOnly === true && !["payment", "reversal"].includes(row.type)) return false;
-      if (query.outstandingOnly === true && (row.type !== "order" || !row.isOutstanding))
+      if (query.reversedOnly === true && !["reversal", "collection_reversal"].includes(row.type))
         return false;
+      if (
+        query.paidOnly === true &&
+        !["payment", "reversal", "collection", "collection_reversal"].includes(row.type)
+      )
+        return false;
+      if (query.outstandingOnly === true && !["order", "receivable"].includes(row.type))
+        return false;
+      if (query.outstandingOnly === true && !row.isOutstanding) return false;
       if (
         query.settlementStatus === "reversed" &&
         row.type !== "reversal" &&
@@ -387,7 +498,11 @@ export class TraderAccountStatementService {
       return (
         query.transactionType === undefined ||
         query.transactionType === "all" ||
-        row.type === query.transactionType
+        (query.transactionType === "order" &&
+          ["order", "receivable", "receivable_cancellation"].includes(row.type)) ||
+        (query.transactionType === "payment" && ["payment", "collection"].includes(row.type)) ||
+        (query.transactionType === "reversal" &&
+          ["reversal", "collection_reversal"].includes(row.type))
       );
     });
     const branding = await this.companyProfile.branding();
@@ -491,6 +606,26 @@ export class TraderAccountStatementService {
               and not exists (select 1 from trader_settlements r
                 where r.company_id = s.company_id and r.reversal_of_id = s.id
                   and r.business_date < ${from}::date)), 0)
+          - coalesce((select sum(r.original_amount_due) from trader_receivables r
+            where r.company_id = ${companyId}::uuid and r.trader_id = ${traderId}::uuid
+              and r.business_date < ${from}::date), 0)
+          + coalesce((select sum(a.original_amount_due)
+            from audit_events e join trader_receivables a
+              on a.id::text = e.subject_id and a.company_id = e.company_id
+            where e.company_id = ${companyId}::uuid and e.subject_type = 'trader_receivable'
+              and e.action = 'trader_receivable.cancel' and a.trader_id = ${traderId}::uuid
+              and (e.occurred_at at time zone 'Asia/Dubai')::date < ${from}::date), 0)
+          + coalesce((select sum(alloc.amount_allocated)
+            from trader_collection_allocations alloc
+            join trader_collections c on c.id = alloc.collection_id and c.company_id = alloc.company_id
+            where c.company_id = ${companyId}::uuid and c.trader_id = ${traderId}::uuid
+              and c.payment_date < ${from}::date), 0)
+          - coalesce((select sum(alloc.amount_allocated)
+            from trader_collection_allocations alloc
+            join trader_collections c on c.id = alloc.collection_id and c.company_id = alloc.company_id
+            where c.company_id = ${companyId}::uuid and c.trader_id = ${traderId}::uuid
+              and c.status = 'reversed'
+              and (c.reversed_at at time zone 'Asia/Dubai')::date < ${from}::date), 0)
         )::text as opening
       `.execute(this.database)
     ).rows[0];

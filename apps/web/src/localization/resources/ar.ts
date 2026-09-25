@@ -3875,6 +3875,12 @@ export const arabicTranslations = {
     columnOutstandingBalance: "الرصيد المستحق",
     columnCod: "الدفع عند الاستلام",
     columnTotalDeductions: "إجمالي الخصومات",
+    settlementItemType: "بند التسوية",
+    orderPayablePlus: "مستحق للتاجر (+)",
+    feeDeductionMinus: "خصم رسوم الشركة (-)",
+    orderSettlementStatusOrDeduction: "الحالة / مبلغ الخصم",
+    availableFeeDeductions: "الرسوم المتاحة للخصم (-)",
+    applyFeeDeduction: "خصم الرسم المرتبط بالطلب {{number}}",
     noEligibleOrders: "لا توجد طلبات مؤهلة لهذا التاجر.",
     // See the English file: `selectAllOrders` is already used below.
     selectAllEligibleOrders: "تحديد كل الطلبات المعروضة",
@@ -3960,8 +3966,9 @@ export const arabicTranslations = {
     statementClosingBalance: "الرصيد الختامي",
     statementCodCollected: "قيمة الدفع عند الاستلام للطلبات المؤكد تحصيلها",
     statementCodHint: "لا يشمل الطلبات التي ما زالت بانتظار التحصيل من المندوب",
-    statementServiceFees: "رسوم الخدمة المخصومة من مستحق التاجر",
-    statementServiceFeesHint: "رسوم الطلبات المؤكد تحصيلها فقط",
+    statementServiceFees: "رسوم الخدمة للطلبات المؤكد تحصيلها",
+    statementServiceFeesHint:
+      "رسوم الطلبات ذات المستحق الصفري تظهر كمبالغ منفصلة مستحقة على التاجر",
     statementOutstanding: "غير المدفوع للتاجر",
     statementOutstandingHint: "المبلغ المتبقي المستحق للتاجر في نهاية الفترة",
     statementDeliveredOrders: "الطلبات المسلّمة",
@@ -3971,6 +3978,8 @@ export const arabicTranslations = {
     statementBalance: "الرصيد الجاري",
     statementSelectionRequired: "اختر التاجر وشهر كشف الحساب.",
     statementLoadFailed: "تعذّر تحميل كشف حساب التاجر.",
+    statementServerError:
+      "تعذر على الخادم تحميل هذا الكشف. رقم المرجع: {{reference}}. يرجى مشاركة هذا الرقم مع الدعم.",
     // Review
     reviewTitle: "مراجعة تسوية التاجر",
     reviewTotalPreviouslyPaid: "إجمالي المدفوع سابقاً",

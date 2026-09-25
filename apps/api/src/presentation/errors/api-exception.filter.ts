@@ -41,13 +41,16 @@ export class ApiExceptionFilter implements ExceptionFilter {
     const correlationId = String(request.id ?? request.headers["x-correlation-id"] ?? "unknown");
 
     const databaseIntegrityError = this.isDatabaseIntegrityError(exception);
+    const missingOrderCountryColumn = this.isMissingOrderCountryColumn(exception);
     const status =
       exception instanceof HttpException
         ? exception.getStatus()
         : databaseIntegrityError
           ? HttpStatus.CONFLICT
           : 500;
-    const safeMessage = databaseIntegrityError
+    const safeMessage = missingOrderCountryColumn
+      ? "The database schema is missing the Destination Country field required to create this order. Apply the pending database migrations, then retry."
+      : databaseIntegrityError
       ? "The operation conflicts with current data integrity rules."
       : exception instanceof ApplicationException
         ? this.message(exception)
@@ -58,7 +61,9 @@ export class ApiExceptionFilter implements ExceptionFilter {
     const code =
       exception instanceof ApplicationException
         ? exception.errorCode
-        : databaseIntegrityError
+        : missingOrderCountryColumn
+          ? "database_migration_required"
+          : databaseIntegrityError
           ? "database_integrity_conflict"
           : (statusCodes[status] ?? "internal_server_error");
 
@@ -176,6 +181,23 @@ export class ApiExceptionFilter implements ExceptionFilter {
       return false;
     }
     return ["23503", "23505", "23514", "23P01"].includes(String(exception.code));
+  }
+
+  private isMissingOrderCountryColumn(exception: unknown): boolean {
+    if (typeof exception !== "object" || exception === null) {
+      return false;
+    }
+    const pgError = exception as {
+      code?: unknown;
+      column?: unknown;
+      message?: unknown;
+      table?: unknown;
+    };
+    return (
+      pgError.code === "42703" &&
+      ((pgError.table === "orders" && pgError.column === "destination_country_name") ||
+        pgError.message === 'column "destination_country_name" of relation "orders" does not exist')
+    );
   }
 
   private message(exception: unknown): string {

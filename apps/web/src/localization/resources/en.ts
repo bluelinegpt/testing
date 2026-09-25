@@ -3933,6 +3933,12 @@ export const englishTranslations = {
     columnOutstandingBalance: "Outstanding Balance",
     columnCod: "COD Amount",
     columnTotalDeductions: "Total Deductions",
+    settlementItemType: "Settlement Item",
+    orderPayablePlus: "Payable to Trader (+)",
+    feeDeductionMinus: "Company fee deduction (-)",
+    orderSettlementStatusOrDeduction: "Status / Deduction Amount",
+    availableFeeDeductions: "Available fee deductions (-)",
+    applyFeeDeduction: "Deduct fee linked to Order {{number}}",
     noEligibleOrders: "No eligible Orders for this Trader.",
     // NOT `selectAllOrders`: that key already exists further down this same
     // object for the Allocation step's button, and a duplicate key silently
@@ -4015,8 +4021,9 @@ export const englishTranslations = {
     statementClosingBalance: "Closing Balance",
     statementCodCollected: "COD from Collection-Confirmed Orders",
     statementCodHint: "Excludes orders still waiting for Driver Collection",
-    statementServiceFees: "Service Fees Deducted from Trader Payable",
-    statementServiceFeesHint: "Fees on collection-confirmed orders only",
+    statementServiceFees: "Service Fees on Collection-Confirmed Orders",
+    statementServiceFeesHint:
+      "Fees on zero-payable orders are shown separately as Trader receivables",
     statementOutstanding: "Unpaid to Trader",
     statementOutstandingHint: "Amount still owed to the trader at the end of the period",
     statementDeliveredOrders: "Delivered Orders",
@@ -4026,6 +4033,8 @@ export const englishTranslations = {
     statementBalance: "Running Balance",
     statementSelectionRequired: "Select a Trader and statement month.",
     statementLoadFailed: "The Trader account statement could not be loaded.",
+    statementServerError:
+      "The server could not load this statement. Reference: {{reference}}. Please share this reference with support.",
     // Review
     reviewTitle: "Review Trader Settlement",
     reviewTotalPreviouslyPaid: "Total Previously Paid",

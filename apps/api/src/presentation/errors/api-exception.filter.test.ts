@@ -39,6 +39,29 @@ describe("ApiExceptionFilter", () => {
     expect(logger.warn).toHaveBeenCalledOnce();
   });
 
+  it("explains that the order schema needs the International-order migration", () => {
+    const logger = { error: vi.fn(), warn: vi.fn() } as unknown as Logger;
+    const { host, json, status } = buildHost({ path: "/api/v1/operations/orders" });
+
+    new ApiExceptionFilter(logger).catch(
+      {
+        code: "42703",
+        message: 'column "destination_country_name" of relation "orders" does not exist',
+      },
+      host,
+    );
+
+    expect(status).toHaveBeenCalledWith(500);
+    expect(json).toHaveBeenCalledWith({
+      error: {
+        code: "database_migration_required",
+        correlationId: "correlation-1",
+        message:
+          "The database schema is missing the Destination Country field required to create this order. Apply the pending database migrations, then retry.",
+      },
+    });
+  });
+
   /* ---------------------------------------------------------------------
      System-Wide Error Handler Audit prompt, §56/§57/§59/§35 -- the ONE test
      file this filter had (above) constructs it with no `errorReports` at

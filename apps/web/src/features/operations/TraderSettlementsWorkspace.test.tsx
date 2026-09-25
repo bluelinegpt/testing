@@ -16,7 +16,6 @@ function renderWithRouter(ui: ReactElement, initialEntries: readonly string[] = 
   return render(<MemoryRouter initialEntries={[...initialEntries]}>{ui}</MemoryRouter>);
 }
 
-
 import { ApiError, type ApiClient } from "../../api/api-client.js";
 import { i18nInstance } from "../../localization/i18n.js";
 import { TraderSettlementsWorkspace } from "./TraderSettlementsWorkspace.js";
@@ -80,6 +79,19 @@ const eligibleOrder = {
   settlementStatus: "unsettled",
   totalDeductions: "10.00",
   vatAmount: "0.00",
+};
+
+const eligibleTraderFee = {
+  businessDate: "2026-07-21",
+  id: "receivable-1",
+  orderSerialNumber: "SER-0",
+  originalAmountDue: "18.00",
+  outstandingAmount: "18.00",
+  previouslyCollected: "0.00",
+  reason: "Order service fee owed by Trader",
+  receivableNumber: "RCV-000001",
+  sourceReference: "ORD-000001",
+  sourceType: "service_charge",
 };
 
 /** The Cash account a cash settlement is funded from. */
@@ -348,6 +360,39 @@ describe("TraderSettlementsWorkspace", () => {
     expect(await screen.findByText("SER-1")).toBeInTheDocument();
   });
 
+  it("shows Trader fee deductions as negative order-linked rows beside payable Orders", async () => {
+    setup({
+      getExtra: (path) =>
+        path.startsWith("operations/trader-receivables/eligible")
+          ? { items: [eligibleTraderFee], page: 1, pageSize: 100, total: 1 }
+          : undefined,
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Traders New Settlement" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Test Trader/ }));
+
+    const orderRow = (await screen.findByText("SER-1")).closest("tr");
+    const feeRow = (await screen.findByText("RCV-000001")).closest("tr");
+    expect(orderRow).not.toBeNull();
+    expect(feeRow).not.toBeNull();
+    expect(feeRow?.closest("table")).toBe(orderRow?.closest("table"));
+    expect(feeRow?.textContent).toContain("SER-0");
+    expect(feeRow?.textContent).toContain("Company fee deduction (-)");
+    expect(feeRow?.textContent).toContain("-18.00");
+
+    fireEvent.change(screen.getByLabelText("Gross Order Payable (+)"), {
+      target: { value: "100.00" },
+    });
+    await waitFor(() =>
+      expect(
+        screen.getByRole("checkbox", { name: "Deduct fee linked to Order SER-0" }),
+      ).toBeChecked(),
+    );
+    const totals = [...document.querySelectorAll(".eligible-orders-totals")].find((element) =>
+      element.textContent?.includes("Net Payment to Trader"),
+    );
+    expect(totals?.textContent).toContain("82.00");
+  });
+
   it("calls the oldest-first allocation proposal endpoint when a Payment Amount is entered", async () => {
     const { postCalls } = setup();
     fireEvent.click(await screen.findByRole("button", { name: "Traders New Settlement" }));
@@ -481,7 +526,9 @@ describe("TraderSettlementsWorkspace", () => {
       }),
       getBinary: vi.fn(),
       post: vi.fn((path: string) =>
-        Promise.resolve(path === "operations/settlements/payments/propose-allocation" ? proposal : {}),
+        Promise.resolve(
+          path === "operations/settlements/payments/propose-allocation" ? proposal : {},
+        ),
       ),
     };
     renderWithRouter(
@@ -689,7 +736,9 @@ describe("confirm_receipt deep link", () => {
   });
 
   it("opens the existing confirmation dialog for a unique settlement", async () => {
-    visit("?traderId=trader-1&settlementId=settlement-1&openDialog=confirm_receipt&returnTo=%2Forders");
+    visit(
+      "?traderId=trader-1&settlementId=settlement-1&openDialog=confirm_receipt&returnTo=%2Forders",
+    );
     const { postCalls } = setup();
 
     const dialog = await screen.findByRole("dialog");
@@ -782,7 +831,9 @@ describe("confirm_receipt deep link", () => {
     // A cross-Company or invented id is simply absent from the scoped list.
     visit("?settlementId=settlement-from-another-company&openDialog=confirm_receipt");
     setup();
-    expect(await screen.findByText(/no longer available for receipt confirmation/i)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/no longer available for receipt confirmation/i),
+    ).toBeInTheDocument();
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
@@ -823,7 +874,9 @@ describe("new_settlement Order preselection", () => {
   });
 
   it("opens Traders New Settlement with the Trader and originating Order selected", async () => {
-    visit("?traderId=trader-1&orderId=order-1&orderNumber=ORD-1&openDialog=new_settlement&returnTo=%2Forders");
+    visit(
+      "?traderId=trader-1&orderId=order-1&orderNumber=ORD-1&openDialog=new_settlement&returnTo=%2Forders",
+    );
     const { postCalls } = setup();
 
     const dialog = await screen.findByRole("dialog");
@@ -866,9 +919,7 @@ describe("new_settlement Order preselection", () => {
     await dialog.findByText("SER-0");
     await waitFor(() => expect(dialog.getAllByText("SER-1").length).toBeGreaterThan(0));
 
-    await waitFor(() =>
-      expect(dialog.getByLabelText("Payment Amount")).toHaveDisplayValue(""),
-    );
+    await waitFor(() => expect(dialog.getByLabelText("Payment Amount")).toHaveDisplayValue(""));
     const ordersTable = dialog.getAllByRole("table")[0]!;
     const rowCheckboxes = within(ordersTable)
       .getAllByRole("checkbox")
@@ -972,9 +1023,7 @@ describe("new_settlement Order preselection", () => {
       const selectAll = await dialog.findByRole("checkbox", { name: "Select all listed Orders" });
       fireEvent.click(selectAll);
 
-      await waitFor(() =>
-        expect(dialog.getByText(/2 Orders selected, total/)).toBeInTheDocument(),
-      );
+      await waitFor(() => expect(dialog.getByText(/2 Orders selected, total/)).toBeInTheDocument());
       const rowBoxes = rowCheckboxes(dialog);
       expect(rowBoxes).toHaveLength(2);
       expect(rowBoxes.every((box) => (box as HTMLInputElement).checked)).toBe(true);
@@ -1059,7 +1108,10 @@ describe("new_settlement Order preselection", () => {
 
     it("lets the settlement proceed once the override is confirmed", async () => {
       const dialog = await payTheSecondOrderOnly();
-      const override = await dialog.findByRole("checkbox", { checked: false, name: /oldest-first/i });
+      const override = await dialog.findByRole("checkbox", {
+        checked: false,
+        name: /oldest-first/i,
+      });
       fireEvent.click(override);
 
       await waitFor(() =>
@@ -1127,10 +1179,12 @@ describe("new_settlement Order preselection", () => {
     };
 
     /** Opens the dialog; `generate` false stops before the first request. */
-    const openStatement = async (generate = true) => {
+    const openStatement = async (generate = true, getExtra?: (path: string) => unknown) => {
       const { api } = setup({
-        getExtra: (path: string) =>
-          path.includes("account-statement") ? statementResponse : undefined,
+        getExtra: (path: string) => {
+          if (!path.includes("account-statement")) return undefined;
+          return getExtra?.(path) ?? statementResponse;
+        },
       });
       fireEvent.click(await screen.findByRole("button", { name: "Trader Account Statement" }));
       const dialog = within(await screen.findByRole("dialog"));
@@ -1184,6 +1238,26 @@ describe("new_settlement Order preselection", () => {
       // Nothing is on screen to refresh, and the Trader and period are chosen
       // deliberately rather than reactively.
       await waitFor(() => expect(statementCalls(api)).toHaveLength(0));
+    });
+
+    it("shows the server reference when statement loading fails with HTTP 500", async () => {
+      const { dialog } = await openStatement(true, () =>
+        Promise.reject(
+          new ApiError(
+            "An unexpected error occurred.",
+            "internal_server_error",
+            500,
+            undefined,
+            "req-123",
+          ),
+        ),
+      );
+
+      expect(
+        await dialog.findByText(
+          "The server could not load this statement. Reference: req-123. Please share this reference with support.",
+        ),
+      ).toBeInTheDocument();
     });
   });
 

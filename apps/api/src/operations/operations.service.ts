@@ -3865,6 +3865,20 @@ export class OperationsService {
         : driverRow === undefined
           ? "new"
           : "assigned_to_driver";
+      const orderType = collectOrder
+        ? "collect_order"
+        : internationalOrder
+          ? "gcc_international"
+          : "delivery";
+      // Keep domestic order creation compatible with databases that have not
+      // applied the unfinished International-order migration yet. PostgreSQL
+      // rejects even an explicitly supplied NULL when the column is absent.
+      const destinationCountryColumn = internationalOrder
+        ? sql`, destination_country_name`
+        : sql``;
+      const destinationCountryValue = internationalOrder
+        ? sql`, ${input.destinationCountryName?.trim() ?? null}`
+        : sql``;
       const traderSettlementStatus =
         freeOrder || collectOrder || financials.traderNetPayable.isZero()
           ? "not_eligible"
@@ -3889,8 +3903,8 @@ export class OperationsService {
           vat_price_mode_snapshot,company_revenue,order_profit,delivery_status,trader_settlement_status,
           pricing_provenance_status, trader_service_price_id,
           configured_service_fee_snapshot, final_service_fee_snapshot,
-          service_fee_override_reason, is_free_order, free_order_reason, order_type,
-          destination_country_name
+          service_fee_override_reason, is_free_order, free_order_reason, order_type
+          ${destinationCountryColumn}
         ) values (
           ${companyId}::uuid, ${orderNumber}, ${serialNumber}, ${serialNumberNormalized},
           ${psystemSerial}, ${psystemSerialNormalized},
@@ -3919,8 +3933,7 @@ export class OperationsService {
           ${pricing.provenance}, ${pricing.servicePriceId}::uuid,
           ${pricing.configuredFee.toFixed(2)}, ${pricing.finalFee.toFixed(2)},
           ${pricing.overrideReason}, ${freeOrder}, ${freeOrderReason},
-          ${collectOrder ? "collect_order" : internationalOrder ? "gcc_international" : "delivery"},
-          ${internationalOrder ? (input.destinationCountryName?.trim() ?? null) : null}
+          ${orderType}${destinationCountryValue}
         )
         returning id
       `.execute(transaction);

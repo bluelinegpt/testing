@@ -544,6 +544,7 @@ const expectedColumns = [
   "orders.vat_price_mode_snapshot",
   "orders.customer_area_name_ar_snapshot",
   "orders.area_name_fallback_used",
+  "orders.destination_country_name",
   "accounts.force_password_change",
   "accounts.temporary_password_expires_at",
   "accounts.last_failed_login_at",
@@ -750,7 +751,7 @@ try {
   );
   const missingColumns = expectedColumns.filter((name) => !actualColumns.has(name));
   if (missingColumns.length > 0) {
-    throw new Error(`Missing expected payment traceability columns: ${missingColumns.join(", ")}`);
+    throw new Error(`Missing expected schema columns: ${missingColumns.join(", ")}`);
   }
   const permissionResult = await client.query<{ code: string }>(
     `select code from permissions where code = any($1::text[])`,

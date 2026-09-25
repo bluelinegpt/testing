@@ -50,7 +50,7 @@ export function buildTraderAccountStatementHtml(
         <td>${line.lineNumber}</td>
         <td>${escapeHtml(line.date)}</td>
         <td>${escapeHtml(line.reference)}</td>
-        <td>${escapeHtml(ar ? (line.type === "order" ? "طلب مسلّم" : line.type === "payment" ? "دفعة للتاجر" : "عكس دفعة للتاجر") : line.description)}</td>
+        <td>${escapeHtml(ar ? arabicDescription(line.type) : line.description)}</td>
         <td class="money">${escapeHtml(line.debit)}</td>
         <td class="money">${escapeHtml(line.credit)}</td>
         <td class="money">${escapeHtml(line.runningBalance)}</td>
@@ -87,7 +87,7 @@ table{width:100%;border-collapse:collapse;table-layout:fixed}thead{display:table
   <section class="cards">
     <div class="card">${labels.opening}<strong>AED ${escapeHtml(data.summary.openingBalance)}</strong></div>
     <div class="card">${ar ? "قيمة الدفع عند الاستلام للطلبات المؤكد تحصيلها" : "COD from Collection-Confirmed Orders"}<strong>AED ${escapeHtml(data.summary.codCollected)}</strong><span class="muted">${ar ? "لا يشمل الطلبات بانتظار التحصيل من المندوب" : "Excludes orders awaiting Driver Collection"}</span></div>
-    <div class="card">${ar ? "رسوم الخدمة المخصومة من مستحق التاجر" : "Service Fees Deducted from Trader Payable"}<strong>AED ${escapeHtml(data.summary.serviceFeesDeducted)}</strong><span class="muted">${ar ? "رسوم الطلبات المؤكد تحصيلها فقط" : "Collection-confirmed orders only"}</span></div>
+    <div class="card">${ar ? "رسوم الخدمة للطلبات المؤكد تحصيلها" : "Service Fees on Collection-Confirmed Orders"}<strong>AED ${escapeHtml(data.summary.serviceFeesDeducted)}</strong><span class="muted">${ar ? "قد تُسجل رسوم الطلبات ذات المستحق الصفري كمبالغ منفصلة مستحقة على التاجر" : "Fees on zero-payable orders are shown separately as Trader receivables"}</span></div>
   </section>
   <table><thead><tr><th>#</th><th>${labels.date}</th><th>${labels.transaction}</th><th>${labels.description}</th><th>${labels.debit}</th><th>${labels.credit}</th><th>${labels.balance}</th></tr></thead>
   <tbody>${rows}</tbody></table>
@@ -95,4 +95,23 @@ table{width:100%;border-collapse:collapse;table-layout:fixed}thead{display:table
   ${data.warnings.length === 0 ? "" : `<div class="warning">${data.warnings.map(escapeHtml).join("<br>")}</div>`}
   <div class="footer-note">${labels.summary}: AED ${escapeHtml(data.summary.closingBalance)} · ${escapeHtml(data.generatedAt)} (Asia/Dubai)</div>
 </body></html>`;
+}
+
+function arabicDescription(type: TraderAccountStatement["transactions"][number]["type"]): string {
+  switch (type) {
+    case "order":
+      return "طلب مسلّم";
+    case "payment":
+      return "دفعة للتاجر";
+    case "reversal":
+      return "عكس دفعة للتاجر";
+    case "receivable":
+      return "مبلغ مستحق على التاجر";
+    case "collection":
+      return "تحصيل من التاجر";
+    case "collection_reversal":
+      return "عكس تحصيل من التاجر";
+    case "receivable_cancellation":
+      return "إلغاء مبلغ مستحق على التاجر";
+  }
 }
