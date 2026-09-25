@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { vi } from "vitest";
 
 import { ApiError, type ApiClient } from "../../api/api-client.js";
@@ -111,6 +111,7 @@ function dumpTrace(context: string) {
 
 function setup() {
   let resolveOrder: ((value: unknown) => void) | undefined;
+  let rejectOrder: ((reason: unknown) => void) | undefined;
   const api = {
     get: vi.fn((path: string, signal?: AbortSignal) => {
       const callId = sequence + 1;
@@ -142,6 +143,8 @@ function setup() {
       if (path.startsWith("configuration/customers/CUS-000001")) {
         return Promise.resolve({ addresses: [{ ...customer, isActive: true, isDefault: true }] });
       }
+      if (path.startsWith("operations/destination-countries")) return Promise.resolve({ hasMore: false, items: [{ id: "country-1", name: "Oman" }], total: 1 });
+      if (path.startsWith("operations/third-party-delivery-companies")) return Promise.resolve({ hasMore: false, items: [{ id: "carrier-1", name: "Carrier X" }], total: 1 });
       const items = path.startsWith("operations/traders")
         ? [trader]
         : path.startsWith("configuration/customers")
@@ -161,8 +164,11 @@ function setup() {
       void headers;
       if (path.endsWith("/quote")) return Promise.resolve(quote);
       if (path === "configuration/areas") return Promise.resolve(area);
-      return new Promise((resolve) => {
+      if (path === "operations/destination-countries") return Promise.resolve({ id: "country-new", name: String((body as { name: string }).name) });
+      if (path === "operations/third-party-delivery-companies") return Promise.resolve({ id: "carrier-new", name: String((body as { name: string }).name) });
+      return new Promise((resolve, reject) => {
         resolveOrder = resolve;
+        rejectOrder = reject;
       });
     }),
   };
@@ -181,7 +187,12 @@ function setup() {
       searchDebounceMs={0}
     />,
   );
-  return { api, onSaved, resolve: (value: unknown) => resolveOrder?.(value) };
+  return {
+    api,
+    onSaved,
+    reject: (reason: unknown) => rejectOrder?.(reason),
+    resolve: (value: unknown) => resolveOrder?.(value),
+  };
 }
 
 async function selectTraderAndCustomer() {
@@ -283,6 +294,32 @@ describe("CreateOrderDialog", () => {
     expect(creates[0]?.[1]).not.toHaveProperty("areaId");
     expect(creates[0]?.[1]).not.toHaveProperty("driverId");
     resolve({ orderNumber: "ORD-000500", serialNumber: "000123" });
+  });
+
+  it("shows the support reference for a server failure and keeps the entered order details", async () => {
+    const { reject } = setup();
+    await selectTraderAndCustomer();
+    fireEvent.change(screen.getByLabelText("COD amount"), { target: { value: "100" } });
+    await screen.findAllByText("AED 90.00");
+
+    fireEvent.click(screen.getByRole("button", { name: "Create order" }));
+    await act(async () => {
+      reject(
+        new ApiError(
+          "An unexpected error occurred.",
+          "internal_server_error",
+          500,
+          undefined,
+          "test-correlation-123",
+        ),
+      );
+    });
+
+    expect(
+      await screen.findByText(/Share reference test-correlation-123 with support/),
+    ).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Search or type a new Customer Name")).toHaveValue("Aisha");
+    expect(screen.getByLabelText("COD amount")).toHaveValue(100);
   });
 
   it("selecting an existing Customer populates its saved details in the Order form", async () => {
@@ -654,6 +691,46 @@ describe("CreateOrderDialog", () => {
       ),
     );
     await waitFor(() => expect(screen.getByLabelText("Service fee")).toHaveValue("12.5"));
+  });
+});
+
+describe("International order controls", () => {
+  it("shows searchable country and carrier selectors and restores them in edit mode", async () => {
+    const { api } = setup();
+    await selectTraderOnly();
+    fireEvent.change(screen.getByLabelText(/Order type/i), { target: { value: "gcc_international" } });
+    expect(screen.getByLabelText("Destination country")).toBeInTheDocument();
+    expect(screen.getByLabelText("Third-party shipping company")).toBeInTheDocument();
+    fireEvent.focus(screen.getByLabelText("Destination country"));
+    fireEvent.change(screen.getByLabelText("Destination country"), { target: { value: "Oman" } });
+    expect(await screen.findByRole("option", { name: "Oman" })).toBeInTheDocument();
+    fireEvent.focus(screen.getByLabelText("Third-party shipping company"));
+    fireEvent.change(screen.getByLabelText("Third-party shipping company"), { target: { value: "Carrier" } });
+    expect(await screen.findByRole("option", { name: "Carrier X" })).toBeInTheDocument();
+    expect(api.get).toHaveBeenCalledWith(expect.stringContaining("operations/destination-countries"), expect.anything());
+  });
+
+  it("hides Area and Emirate while International is selected and restores domestic Area validation", async () => {
+    setup();
+    await selectTraderOnly();
+    const type = screen.getByLabelText(/Order type/i);
+    fireEvent.change(type, { target: { value: "gcc_international" } });
+    expect(screen.queryByLabelText("Emirate")).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("Search by Area name or code")).not.toBeInTheDocument();
+    fireEvent.change(type, { target: { value: "delivery" } });
+    expect(screen.getByLabelText("Emirate")).toBeInTheDocument();
+  });
+
+  it("creates a country through the application dialog and reports validation", async () => {
+    const { api } = setup();
+    await selectTraderOnly();
+    fireEvent.change(screen.getByLabelText(/Order type/i), { target: { value: "gcc_international" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create country" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Create$/ }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Enter a name");
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Oman" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Create$/ }));
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith("operations/destination-countries", { name: "Oman" }));
   });
 });
 

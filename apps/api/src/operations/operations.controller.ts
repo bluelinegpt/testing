@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Headers,
   HttpCode,
@@ -105,6 +106,7 @@ import {
   ConfirmTraderSettlementReceiptDto,
   CreateDriverReconciliationDto,
   CreateDriverDto,
+  CreateInternationalCatalogEntryDto,
   CreateTraderSettlementDto,
   DriverCollectionsSummaryQueryDto,
   DriverSearchQueryDto,
@@ -184,6 +186,8 @@ export class OperationsController {
     @Query("search") search?: string,
     @Query("deliveryStatus") deliveryStatus?: string,
     @Query("orderType") orderType?: "collect_order" | "delivery" | "gcc_international",
+    @Query("thirdPartyDeliveryCompanyName") thirdPartyDeliveryCompanyName?: string,
+    @Query("destinationCountryName") destinationCountryName?: string,
     @Query("cashStatus") cashStatus?: string,
     @Query("settlementStatus") settlementStatus?: string,
     @Query("workflowStep")
@@ -215,6 +219,8 @@ export class OperationsController {
       dateTo,
       deliveryStatus,
       orderType,
+      thirdPartyDeliveryCompanyName,
+      destinationCountryName,
       driverId,
       areaId,
       emirateId,
@@ -530,6 +536,58 @@ export class OperationsController {
   @Get("drivers")
   public drivers(): Promise<readonly OperationsDriver[]> {
     return this.operations.drivers();
+  }
+
+  @ApiOperation({ summary: "List active third-party delivery companies" })
+  @RequireAnyPermission("orders.create", "users_roles.manage")
+  @Get("third-party-delivery-companies")
+  public thirdPartyDeliveryCompanies(@Query("search") search?: string): Promise<{ items: readonly { id: string; name: string }[]; total: number; hasMore: boolean }> {
+    return this.operations.thirdPartyDeliveryCompanies(search);
+  }
+
+  @ApiOperation({ summary: "Create a third-party delivery company" })
+  @RequireAnyPermission("company_profile.manage", "users_roles.manage")
+  @Post("third-party-delivery-companies")
+  public createThirdPartyDeliveryCompany(@Body() input: CreateInternationalCatalogEntryDto): Promise<{ id: string; name: string }> {
+    return this.operations.createThirdPartyDeliveryCompany(input.name);
+  }
+
+  @Patch("third-party-delivery-companies/:id/deactivate")
+  @RequireAnyPermission("company_profile.manage", "users_roles.manage")
+  public deactivateThirdPartyDeliveryCompany(@Param("id", new ParseUUIDPipe()) id: string, @Req() request: Request) {
+    return this.operations.deactivateThirdPartyDeliveryCompany(id, this.correlationId(request));
+  }
+
+  @Delete("third-party-delivery-companies/:id")
+  @RequireAnyPermission("company_profile.manage", "users_roles.manage")
+  public deleteThirdPartyDeliveryCompany(@Param("id", new ParseUUIDPipe()) id: string, @Req() request: Request) {
+    return this.operations.deleteThirdPartyDeliveryCompany(id, this.correlationId(request));
+  }
+
+  @ApiOperation({ summary: "List active destination countries" })
+  @RequireAnyPermission("orders.create", "users_roles.manage")
+  @Get("destination-countries")
+  public destinationCountries(@Query("search") search?: string): Promise<{ items: readonly { id: string; name: string }[]; total: number; hasMore: boolean }> {
+    return this.operations.destinationCountries(search);
+  }
+
+  @ApiOperation({ summary: "Create a destination country" })
+  @RequireAnyPermission("company_profile.manage", "users_roles.manage")
+  @Post("destination-countries")
+  public createDestinationCountry(@Body() input: CreateInternationalCatalogEntryDto): Promise<{ id: string; name: string }> {
+    return this.operations.createDestinationCountry(input.name);
+  }
+
+  @Patch("destination-countries/:id/deactivate")
+  @RequireAnyPermission("company_profile.manage", "users_roles.manage")
+  public deactivateDestinationCountry(@Param("id", new ParseUUIDPipe()) id: string, @Req() request: Request) {
+    return this.operations.deactivateDestinationCountry(id, this.correlationId(request));
+  }
+
+  @Delete("destination-countries/:id")
+  @RequireAnyPermission("company_profile.manage", "users_roles.manage")
+  public deleteDestinationCountry(@Param("id", new ParseUUIDPipe()) id: string, @Req() request: Request) {
+    return this.operations.deleteDestinationCountry(id, this.correlationId(request));
   }
 
   @ApiOperation({ summary: "List delivered orders with pending driver cash" })

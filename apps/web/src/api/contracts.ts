@@ -435,6 +435,10 @@ export interface OperationsBillingSummary {
 }
 
 export interface OperationsOrder {
+  readonly destinationCountryId?: string | null;
+  readonly destinationCountryName?: string | null;
+  readonly thirdPartyDeliveryCompanyId?: string | null;
+  readonly thirdPartyDeliveryCompanyName?: string | null;
   /** Server-computed: the Order carries COD, Fee, Additional Fees or VAT. */
   readonly accountingRequired?: boolean;
   /** Delivery instant. Null until delivered. */

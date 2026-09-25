@@ -2035,6 +2035,10 @@ export const arabicTranslations = {
     created: "تم الإنشاء",
     createOrder: "إنشاء طلب",
     createOrderFailed: "تعذر إنشاء الطلب. تم الاحتفاظ بالقيم المدخلة.",
+    createOrderServerError:
+      "تعذر على الخادم إكمال الطلب. لا تزال البيانات التي أدخلتها موجودة؛ يرجى المحاولة لاحقاً.",
+    createOrderServerErrorWithReference:
+      "تعذر على الخادم إكمال الطلب. لا تزال البيانات التي أدخلتها موجودة. أرسل الرقم المرجعي {{reference}} إلى الدعم لمعرفة السبب الدقيق.",
     creatingOrder: "جارٍ إنشاء الطلب…",
     customerFieldHint: "ابحث لاختيار عميل موجود، أو اكتب اسم عميل جديد.",
     customerSearchOrType: "ابحث أو اكتب اسم عميل جديد",

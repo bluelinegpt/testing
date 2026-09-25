@@ -102,6 +102,8 @@ interface OrderFilters {
   deliveryStatus: string;
   driverId: string;
   orderType: string;
+  thirdPartyDeliveryCompanyName: string;
+  destinationCountryName: string;
   quickView: QuickView;
   // Delivery Activity. Empty in every other view, so `filterQuery` omits them
   // and no other quick view can be affected by a stale value.
@@ -137,6 +139,8 @@ const bulkSelectionFilterKeys = [
   "deliveryStatus",
   "driverId",
   "orderType",
+  "thirdPartyDeliveryCompanyName",
+  "destinationCountryName",
   "quickView",
   "search",
   "serialNumber",
@@ -196,6 +200,8 @@ const initialFilters: OrderFilters = {
   deliveryStatus: "",
   driverId: "",
   orderType: "",
+  thirdPartyDeliveryCompanyName: "",
+  destinationCountryName: "",
   quickView: "active",
   deliveredOnly: "",
   deliveryDateFrom: "",
@@ -308,6 +314,7 @@ export function OrdersModuleWorkspace({
     filters.deliveryStatus,
     filters.driverId,
     filters.orderType,
+    filters.thirdPartyDeliveryCompanyName,
     filters.deliveryDateFrom,
     filters.deliveryDateTo,
     filters.businessDateFrom,
@@ -1166,7 +1173,20 @@ export function OrdersModuleWorkspace({
             >
               <option value="delivery">{t("operations.internalDelivery")}</option>
               <option value="collect_order">{t("operations.collectOrder")}</option>
+              <option value="gcc_international">GCC &amp; International</option>
             </FilterSelect>
+            <label className="filter-select">
+              <span className="sr-only">Third-party shipping company</span>
+              <input
+                placeholder="Carrier"
+                value={filters.thirdPartyDeliveryCompanyName}
+                onChange={(event) => updateFilters({ thirdPartyDeliveryCompanyName: event.target.value })}
+              />
+            </label>
+            <label className="filter-select">
+              <span className="sr-only">Destination country</span>
+              <input placeholder="Country" value={filters.destinationCountryName} onChange={(event) => updateFilters({ destinationCountryName: event.target.value })} />
+            </label>
             <div className="filter-grouping-multi-select" id="grouping-popover-anchor">
               <button
                 className="grouping-button"

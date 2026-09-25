@@ -12,6 +12,8 @@ import type {
   OperationsTraderOption,
   SearchPage,
 } from "../../api/contracts.js";
+
+type CatalogOption = { readonly id: string; readonly name: string };
 import { Modal } from "../../components/Modal.js";
 import { isUaeMobile, normalizeUaeMobile } from "../../domain/uae-mobile.js";
 import { SearchCombobox } from "../../components/SearchCombobox.js";
@@ -96,6 +98,12 @@ export function CreateOrderDialog({
   const [orderType, setOrderType] = useState<
     "collect_order" | "delivery" | "gcc_international"
   >("delivery");
+  const [destinationCountry, setDestinationCountry] = useState<CatalogOption>();
+  const [thirdPartyDeliveryCompany, setThirdPartyDeliveryCompany] = useState<CatalogOption>();
+  const [catalogError, setCatalogError] = useState<string>();
+  const [catalogKind, setCatalogKind] = useState<"country" | "carrier">();
+  const [catalogName, setCatalogName] = useState("");
+  const [catalogSaving, setCatalogSaving] = useState(false);
   const [paymentCondition, setPaymentCondition] = useState<
     "customer_pays_cod_and_fee" | "customer_pays_cod_trader_pays_fee"
   >("customer_pays_cod_and_fee");
@@ -177,11 +185,16 @@ export function CreateOrderDialog({
     validationErrors.serialNumber = t("operations.errors.serialRequired");
   else if (identifierError !== undefined) validationErrors.serialNumber = identifierError;
   if (trader === undefined) validationErrors.trader = t("operations.errors.traderRequired");
+  if (orderType === "gcc_international" && destinationCountry === undefined)
+    validationErrors.destinationCountry = "Select a destination country";
+  if (orderType === "gcc_international" && thirdPartyDeliveryCompany === undefined)
+    validationErrors.thirdPartyDeliveryCompany = "Select a carrier";
   // A Customer is captured by typing a Name directly (new) or selecting a saved
   // one; either way the Name must be present. No separate "select a Customer"
   // gate and no UAE mobile-format gate — those are handled inline/advisory.
   if (
     area === undefined &&
+    orderType !== "gcc_international" &&
     (orderType !== "collect_order" || customerName.trim() !== "" || mobile.trim() !== "")
   )
     validationErrors.area = t("operations.errors.areaRequired");
@@ -368,6 +381,8 @@ export function CreateOrderDialog({
         setNotes(loaded.metadata.notes ?? "");
         setIsFreeOrder(loaded.isFreeOrder === true);
         if (loaded.orderType !== undefined) setOrderType(loaded.orderType);
+        if (loaded.destinationCountryId && loaded.destinationCountryName) setDestinationCountry({ id: loaded.destinationCountryId, name: loaded.destinationCountryName });
+        if (loaded.thirdPartyDeliveryCompanyId && loaded.thirdPartyDeliveryCompanyName) setThirdPartyDeliveryCompany({ id: loaded.thirdPartyDeliveryCompanyId, name: loaded.thirdPartyDeliveryCompanyName });
         if (
           loaded.metadata.paymentCondition === "customer_pays_cod_and_fee" ||
           loaded.metadata.paymentCondition === "customer_pays_cod_trader_pays_fee"
@@ -753,6 +768,12 @@ export function CreateOrderDialog({
           // keeps the request readable in a network log.
           isFreeOrder,
           orderType,
+          ...(orderType === "gcc_international" && destinationCountry
+            ? { destinationCountryId: destinationCountry.id, destinationCountryName: destinationCountry.name }
+            : {}),
+          ...(orderType === "gcc_international" && thirdPartyDeliveryCompany
+            ? { thirdPartyDeliveryCompanyId: thirdPartyDeliveryCompany.id, thirdPartyDeliveryCompanyName: thirdPartyDeliveryCompany.name }
+            : {}),
           ...(isFreeOrder ? { freeOrderReason: freeOrderReason.trim() } : {}),
           customerAddress: address.trim(),
           customerAddressId: customer?.addressId,
@@ -858,6 +879,14 @@ export function CreateOrderDialog({
         setError(t("operations.errors.sessionExpired"));
       } else if (code === "permission_denied" || code === "identity_kind_denied") {
         setError(t("operations.errors.permissionDenied"));
+      } else if (requestError instanceof ApiError && requestError.status >= 500) {
+        setError(
+          requestError.correlationId === undefined
+            ? t("operations.createOrderServerError")
+            : t("operations.createOrderServerErrorWithReference", {
+                reference: requestError.correlationId,
+              }),
+        );
       } else {
         // A safe, human-readable fallback; raw database/stack detail is never
         // surfaced (the server already returns a sanitized message).
@@ -1170,7 +1199,7 @@ export function CreateOrderDialog({
                       ) : null}
                     </label>
                   </div>
-                  <div
+                  {orderType === "gcc_international" ? null : <div
                     className={orderType === "collect_order" ? "field" : "required-field"}
                     data-field="area"
                   >
@@ -1202,7 +1231,7 @@ export function CreateOrderDialog({
                         {errorFor("area")}
                       </small>
                     )}
-                  </div>
+                  </div>}
                   {/* Optional on every path -- never marked required. */}
                   <label className="field field-grow">
                     <span>{t("operations.customerAddress")}</span>
@@ -1244,7 +1273,10 @@ export function CreateOrderDialog({
                         disabled={isEdit}
                         value={orderType}
                         onChange={(event) => {
-                          const next = event.target.value as "collect_order" | "delivery";
+                          const next = event.target.value as
+                            | "collect_order"
+                            | "delivery"
+                            | "gcc_international";
                           setOrderType(next);
                           if (next === "collect_order") {
                             setIsFreeOrder(false);
@@ -1258,8 +1290,18 @@ export function CreateOrderDialog({
                       >
                         <option value="delivery">{t("operations.internalDelivery")}</option>
                         <option value="collect_order">{t("operations.collectOrder")}</option>
+                        <option value="gcc_international">GCC &amp; International</option>
                       </select>
                     </label>
+                    {orderType === "gcc_international" ? (
+                      <>
+                        <SearchCombobox<CatalogOption> api={api} {...(searchDebounceMs === undefined ? {} : { debounceMs: searchDebounceMs })} emptyText="No country found" getLabel={(option) => option.name} label="Destination country" onChange={setDestinationCountry} path="operations/destination-countries" placeholder="Search destination country" value={destinationCountry} />
+                        <button type="button" onClick={() => { setCatalogKind("country"); setCatalogName(""); setCatalogError(undefined); }}>Create country</button>
+                        <SearchCombobox<CatalogOption> api={api} {...(searchDebounceMs === undefined ? {} : { debounceMs: searchDebounceMs })} emptyText="No carrier found" getLabel={(option) => option.name} label="Third-party shipping company" onChange={setThirdPartyDeliveryCompany} path="operations/third-party-delivery-companies" placeholder="Search carrier" value={thirdPartyDeliveryCompany} />
+                        <button type="button" onClick={() => { setCatalogKind("carrier"); setCatalogName(""); setCatalogError(undefined); }}>Create carrier</button>
+                        {catalogError ? <div className="form-error">{catalogError}</div> : null}
+                      </>
+                    ) : null}
                     {orderType === "collect_order" ? (
                       <div className="field">
                         <span>{t("operations.financialHandling")}</span>
@@ -1801,6 +1843,15 @@ export function CreateOrderDialog({
           title={t("operations.pricingSetup")}
           trader={createdTrader}
         />
+      ) : null}
+      {catalogKind !== undefined ? (
+        <Modal closeLabel="Close" onRequestClose={() => setCatalogKind(undefined)} title={catalogKind === "country" ? "Create destination country" : "Create carrier"} titleId="international-catalog-dialog">
+          <form onSubmit={(event) => { event.preventDefault(); if (!catalogName.trim()) { setCatalogError("Enter a name"); return; } setCatalogSaving(true); setCatalogError(undefined); const path = catalogKind === "country" ? "operations/destination-countries" : "operations/third-party-delivery-companies"; void api.post<CatalogOption>(path, { name: catalogName }).then((created) => { if (catalogKind === "country") setDestinationCountry(created); else setThirdPartyDeliveryCompany(created); setCatalogKind(undefined); }).catch((reason: unknown) => setCatalogError(reason instanceof Error ? reason.message : "Could not create record")).finally(() => setCatalogSaving(false)); }}>
+            <label className="field required-field"><span>Name</span><input autoFocus value={catalogName} onChange={(event) => setCatalogName(event.target.value)} maxLength={160} /></label>
+            {catalogError ? <div className="form-error" role="alert">{catalogError}</div> : null}
+            <div className="modal-actions"><button className="button button-secondary" type="button" onClick={() => setCatalogKind(undefined)}>Cancel</button><button className="button button-primary" disabled={catalogSaving} type="submit">{catalogSaving ? "Saving…" : "Create"}</button></div>
+          </form>
+        </Modal>
       ) : null}
     </>
   );

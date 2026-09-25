@@ -2001,6 +2001,10 @@ export const englishTranslations = {
     created: "Created",
     createOrder: "Create order",
     createOrderFailed: "The order could not be created. Your entered values have been preserved.",
+    createOrderServerError:
+      "The server could not complete the order. Your entered values are still here; please try again later.",
+    createOrderServerErrorWithReference:
+      "The server could not complete the order. Your entered values are still here. Share reference {{reference}} with support so they can find the exact cause.",
     fastEntry: "Fast entry",
     fastEntryAddRows: "Add rows",
     fastEntryAutoFee: "Auto",
