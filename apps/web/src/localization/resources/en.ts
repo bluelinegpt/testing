@@ -2201,6 +2201,23 @@ export const englishTranslations = {
     deliveryFee: "Delivery fee",
     deliveryPhoto: "Delivery photo",
     deliveryStatus: "Delivery status",
+    internationalCarrierStatuses: {
+      ready_for_carrier: "Ready for Carrier",
+      handed_to_carrier: "Handed to Carrier",
+      in_transit: "In Transit",
+    },
+    internationalCarrierActions: {
+      handed_to_carrier: "Hand to Carrier",
+      in_transit: "Start Carrier Transit",
+    },
+    internationalCarrierStatusUpdateFailed: "The carrier stage could not be updated.",
+    internationalCarrierBulkAction: "Update carrier stage",
+    internationalCarrierTargetStage: "Target carrier stage",
+    internationalCarrierStage: "Carrier stage",
+    allInternationalCarrierStages: "All carrier stages",
+    internationalCarrierBulkSummary: "Eligible: {{eligible}}. Ineligible: {{ineligible}}.",
+    internationalCarrierDomesticIneligible: "Domestic orders cannot use carrier stages.",
+    internationalCarrierPreviousStageRequired: "Previous stage must be {{stage}}.",
     financialStatusColumn: "Collection / Settlement",
     workflowStep: "Workflow step",
     workflowStepFilters: {

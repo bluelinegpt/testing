@@ -17,6 +17,7 @@ import { OperationsHistoryWriter } from "./operations-history.writer.js";
 import type {
   BulkAssignDriverDto,
   BulkChangeOrderStatusDto,
+  BulkChangeInternationalCarrierStatusDto,
   OrderSelectionDto,
   ReactivateHoldOrdersDto,
 } from "./operations.dto.js";
@@ -24,6 +25,7 @@ import type {
 interface SelectedOrder {
   readonly assignedDriverId: string | null;
   readonly deliveryStatus: string;
+  readonly internationalCarrierStatus: string | null;
   readonly driverCost: string;
   readonly driverReconciliationStatus: string;
   readonly id: string;
@@ -381,6 +383,31 @@ export class OrdersWorkflowService {
     });
   }
 
+  public async bulkChangeInternationalCarrierStatus(
+    input: BulkChangeInternationalCarrierStatusDto,
+    correlationId: string,
+  ): Promise<BulkActionResult> {
+    this.assertAnyPermission("orders.update_delivery_status");
+    const { companyId } = this.tenants.current();
+    const identity = this.identities.current();
+    const bulkActionId = randomUUID();
+    return this.transactions.execute(async (transaction) => {
+      const orders = await this.resolveSelection(transaction, companyId, input, true);
+      const requiredPrevious = input.targetStatus === "handed_to_carrier" ? "ready_for_carrier" : "handed_to_carrier";
+      const ineligible = orders.map((order) => ({ order, reason: order.orderType !== "gcc_international" ? "Only International orders can use carrier stages" : order.internationalCarrierStatus !== requiredPrevious ? "The order is not at the required previous carrier stage" : null })).filter((item): item is { order: SelectedOrder; reason: string } => item.reason !== null);
+      if (ineligible.length > 0 && input.allowPartial !== true) throw new ApplicationException("bulk_international_carrier_status_ineligible", "One or more selected Orders cannot move to the requested carrier stage", HttpStatus.CONFLICT);
+      let processedCount = 0;
+      for (const order of orders) {
+        if (ineligible.some((item) => item.order.id === order.id)) continue;
+        await sql`update orders set international_carrier_status = ${input.targetStatus} where id = ${order.id}::uuid and company_id = ${companyId}::uuid`.execute(transaction);
+        await this.history.orderEvent(transaction, { actorId: identity.identityId, actorRole: identity.kind, bulkActionId, category: "status_change", companyId, correlationId, eventType: "order.international_carrier_status_change", fieldName: "international_carrier_status", newValue: input.targetStatus, orderId: order.id, previousValue: order.internationalCarrierStatus, reason: null, source: "web_portal" });
+        processedCount += 1;
+      }
+      await this.history.audit(transaction, { action: "orders.bulk_international_carrier_status_change", actorId: identity.identityId, after: { bulkActionId, processedCount, targetStatus: input.targetStatus }, companyId, correlationId, subjectId: bulkActionId, subjectType: "bulk_order_action" });
+      return { bulkActionId, eligibleCount: orders.length - ineligible.length, ineligible: ineligible.map((item) => ({ orderNumber: item.order.orderNumber, reason: item.reason })), processedCount, selectedAmountToCollect: "0.00", selectedCount: orders.length };
+    });
+  }
+
   /**
    * A Driver may be assigned or reassigned any time an Order is not yet
    * Delivered and not in a terminal state — matching
@@ -613,7 +640,7 @@ export class OrdersWorkflowService {
       if (ids.length === 0) return [];
       const result = await sql<SelectedOrder>`
         select id, order_number as "orderNumber", assigned_driver_id as "assignedDriverId",
-               order_type as "orderType",
+               order_type as "orderType", international_carrier_status as "internationalCarrierStatus",
                delivery_status as "deliveryStatus", return_status as "returnStatus",
                driver_reconciliation_status as "driverReconciliationStatus",
                trader_settlement_status as "settlementStatus",
@@ -690,7 +717,7 @@ export class OrdersWorkflowService {
     `;
     const result = await sql<SelectedOrder>`
       select o.id, o.order_number as "orderNumber", o.assigned_driver_id as "assignedDriverId",
-             o.order_type as "orderType",
+             o.order_type as "orderType", o.international_carrier_status as "internationalCarrierStatus",
              o.delivery_status as "deliveryStatus", o.return_status as "returnStatus",
              o.driver_reconciliation_status as "driverReconciliationStatus",
              o.trader_settlement_status as "settlementStatus",

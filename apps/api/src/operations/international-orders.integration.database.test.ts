@@ -136,11 +136,98 @@ describe("International order carrier and country persistence", () => {
           const valid = await request(server).post("/api/v1/operations/orders").set("Authorization", `Bearer ${a.token}`).set("Host", `${a.subdomain}.blueline.test`).set("x-idempotency-key", randomUUID()).send({ ...createBody(carrierA, countryA, `HTTP-GOOD-${suffix}`), destinationCountryName: "Oman", thirdPartyDeliveryCompanyName: "A Carrier" });
           expect(valid.status, JSON.stringify(valid.body)).toBe(201);
           const orderId = String(valid.body.id);
+          const carrierStatusPath = `/api/v1/operations/orders/${orderId}/carrier-status`;
+          const carrierStatus = (status: string) => request(server)
+            .patch(carrierStatusPath)
+            .set("Authorization", `Bearer ${a.token}`)
+            .set("Host", `${a.subdomain}.blueline.test`)
+            .send({ status });
+          expect((await sql`select international_carrier_status from orders where id=${orderId}::uuid`.execute(transaction)).rows[0])
+            .toEqual({ international_carrier_status: "ready_for_carrier" });
+          await carrierStatus("handed_to_carrier").expect(200);
+          expect((await sql`select international_carrier_status from orders where id=${orderId}::uuid`.execute(transaction)).rows[0])
+            .toEqual({ international_carrier_status: "handed_to_carrier" });
+          await carrierStatus("in_transit").expect(200);
+          expect((await sql`select international_carrier_status from orders where id=${orderId}::uuid`.execute(transaction)).rows[0])
+            .toEqual({ international_carrier_status: "in_transit" });
+          expect((await sql`select field_name, previous_value, new_value from order_events where order_id=${orderId}::uuid and event_type='order.international_carrier_status_change' order by occurred_at`.execute(transaction)).rows)
+            .toEqual([
+              { field_name: "international_carrier_status", previous_value: "ready_for_carrier", new_value: "handed_to_carrier" },
+              { field_name: "international_carrier_status", previous_value: "handed_to_carrier", new_value: "in_transit" },
+            ]);
+          await carrierStatus("ready_for_carrier").expect(409);
+          const eventCountBeforeConcurrent = (await sql<{ count: number }>`select count(*)::int as count from order_events where order_id=${orderId}::uuid and event_type='order.international_carrier_status_change'`.execute(transaction)).rows[0]?.count;
+          const concurrentResults = await Promise.all([
+            carrierStatus("in_transit"),
+            carrierStatus("in_transit"),
+          ]);
+          expect(concurrentResults.every((result) => result.status >= 400 && result.status < 500)).toBe(true);
+          expect((await sql<{ count: number }>`select count(*)::int as count from order_events where order_id=${orderId}::uuid and event_type='order.international_carrier_status_change'`.execute(transaction)).rows[0]?.count).toBe(eventCountBeforeConcurrent);
           expect((await sql`select area_id from orders where id=${orderId}::uuid`.execute(transaction)).rows[0]).toEqual({ area_id: null });
           expect((await sql`select name,mobile_number from customers where id=${customerId}::uuid`.execute(transaction)).rows[0]).toEqual(customerBeforeInternational.rows[0]);
           const before = await sql`select destination_country_id,third_party_delivery_company_id from orders where id=${orderId}::uuid`.execute(transaction);
           const domestic = await request(server).post("/api/v1/operations/orders").set("Authorization", `Bearer ${a.token}`).set("Host", `${a.subdomain}.blueline.test`).set("x-idempotency-key", randomUUID()).send({ orderType: "delivery", serialNumber: `HTTP-DOMESTIC-ASSIGN-${suffix}`, traderId, areaId, codAmount: 125, serviceFee: 5, packageCount: 1 }).expect(201);
           const domesticOrderId = String(domestic.body.id);
+          const domesticBeforeCarrierAttempt = await sql`select delivery_status,assigned_driver_id,international_carrier_status from orders where id=${domesticOrderId}::uuid`.execute(transaction);
+          const domesticCarrierAttempt = await request(server).patch(`/api/v1/operations/orders/${domesticOrderId}/carrier-status`).set("Authorization", `Bearer ${a.token}`).set("Host", `${a.subdomain}.blueline.test`).send({ status: "handed_to_carrier" });
+          expect(domesticCarrierAttempt.status).toBe(409);
+          expect((await sql`select delivery_status,assigned_driver_id,international_carrier_status from orders where id=${domesticOrderId}::uuid`.execute(transaction)).rows[0]).toEqual(domesticBeforeCarrierAttempt.rows[0]);
+          await sql`update orders set international_carrier_status='handed_to_carrier' where id=${orderId}::uuid`.execute(transaction);
+          const mixedCarrierSelection = { selectionMode: "ids", orderIds: [orderId, domesticOrderId], targetStatus: "in_transit" };
+          const mixedAllOrNothing = await request(server).post("/api/v1/operations/orders/bulk-carrier-status").set("Authorization", `Bearer ${a.token}`).set("Host", `${a.subdomain}.blueline.test`).send({ ...mixedCarrierSelection, allowPartial: false });
+          expect(mixedAllOrNothing.status).toBe(409);
+          expect((await sql`select international_carrier_status,delivery_status from orders where id in (${sql.join([orderId, domesticOrderId].map((id) => sql`${id}::uuid`))}) order by id`.execute(transaction)).rows).toEqual(expect.arrayContaining([{ international_carrier_status: "handed_to_carrier", delivery_status: "new" }]));
+          const mixedPartial = await request(server).post("/api/v1/operations/orders/bulk-carrier-status").set("Authorization", `Bearer ${a.token}`).set("Host", `${a.subdomain}.blueline.test`).send({ ...mixedCarrierSelection, allowPartial: true }).expect(201);
+          expect(mixedPartial.body).toMatchObject({ eligibleCount: 1, processedCount: 1, selectedCount: 2 });
+          expect((await sql`select international_carrier_status,delivery_status from orders where id in (${sql.join([orderId, domesticOrderId].map((id) => sql`${id}::uuid`))}) order by id`.execute(transaction)).rows).toEqual(expect.arrayContaining([
+            { international_carrier_status: "in_transit", delivery_status: "new" },
+            { international_carrier_status: null, delivery_status: "new" },
+          ]));
+          expect((await sql<{ count: number }>`select count(*)::int as count from order_events where order_id=${orderId}::uuid and event_type='order.international_carrier_status_change' and new_value=to_jsonb('in_transit'::text)`.execute(transaction)).rows[0]?.count).toBe(2);
+
+          const filteredOrders = await request(server)
+            .get("/api/v1/operations/orders")
+            .query({
+              quickView: "all",
+              internationalCarrierStatus: "in_transit",
+              destinationCountryName: "Oman",
+              thirdPartyDeliveryCompanyName: "A Carrier",
+              orderType: "gcc_international",
+              search: `HTTP-GOOD-${suffix}`,
+              page: "1",
+              pageSize: "25",
+            })
+            .set("Authorization", `Bearer ${a.token}`)
+            .set("Host", `${a.subdomain}.blueline.test`)
+            .expect(200);
+          expect(filteredOrders.body.matchingCount).toBe(1);
+          expect(filteredOrders.body.items).toHaveLength(1);
+          expect(filteredOrders.body.items[0]).toMatchObject({
+            id: orderId,
+            orderType: "gcc_international",
+            internationalCarrierStatus: "in_transit",
+            destinationCountryName: "Oman",
+            thirdPartyDeliveryCompanyName: "A Carrier",
+          });
+
+          const domesticExcludedByCarrierFilter = await request(server)
+            .get("/api/v1/operations/orders")
+            .query({ quickView: "all", internationalCarrierStatus: "in_transit", orderType: "gcc_international", search: `HTTP-GOOD-${suffix}`, page: "1", pageSize: "25" })
+            .set("Authorization", `Bearer ${a.token}`)
+            .set("Host", `${a.subdomain}.blueline.test`)
+            .expect(200);
+          expect(domesticExcludedByCarrierFilter.body.items.map((item: { id: string }) => item.id)).not.toContain(domesticOrderId);
+          expect(domesticExcludedByCarrierFilter.body.matchingCount).toBe(1);
+
+          const pagedFilteredOrders = await request(server)
+            .get("/api/v1/operations/orders")
+            .query({ quickView: "all", internationalCarrierStatus: "in_transit", orderType: "gcc_international", search: `HTTP-GOOD-${suffix}`, page: "2", pageSize: "25" })
+            .set("Authorization", `Bearer ${a.token}`)
+            .set("Host", `${a.subdomain}.blueline.test`)
+            .expect(200);
+          expect(pagedFilteredOrders.body.matchingCount).toBe(1);
+          expect(pagedFilteredOrders.body.items).toHaveLength(0);
+
           await sql`update orders set cod_amount = 125, service_fee = 5, customer_amount_due = 125 where id = ${domesticOrderId}::uuid`.execute(transaction);
           await sql`update orders set cod_amount = 999, service_fee = 0, customer_amount_due = 999 where id = ${orderId}::uuid`.execute(transaction);
           const assignmentSelection = { selectionMode: "ids", orderIds: [orderId, domesticOrderId], driverIdToAssign: driverId };

@@ -63,6 +63,14 @@ const heldOrder = {
   serialNumber: "SER-000002",
 };
 
+const internationalOrder = {
+  ...order,
+  id: "10000000-0000-4000-8000-000000000003",
+  orderNumber: "ORD-INT-000003",
+  orderType: "gcc_international",
+  internationalCarrierStatus: "ready_for_carrier",
+};
+
 describe("OrdersModuleWorkspace", () => {
   beforeEach(async () => i18nInstance.changeLanguage("en"));
 
@@ -193,6 +201,70 @@ describe("OrdersModuleWorkspace", () => {
       "operations/orders/bulk-status",
       expect.anything(),
     );
+  });
+
+  it("displays the International carrier stage and sends its server-side filter", async () => {
+    const api = {
+      get: vi.fn((path: string) => {
+        if (path.startsWith("operations/orders?")) {
+          return Promise.resolve({ filteredCount: 1, items: [internationalOrder], matchingCount: 1, page: 1, pageSize: 25, totalCount: 1, tabTotalCount: 1 });
+        }
+        if (path.startsWith("configuration/areas")) return Promise.resolve({ items: [], page: 1, pageSize: 100, total: 0 });
+        return Promise.resolve([]);
+      }),
+      post: vi.fn().mockResolvedValue({}),
+    };
+    renderWithRouter(<OrdersModuleWorkspace api={api as unknown as ApiClient} onNavigate={vi.fn()} permissions={["users_roles.manage"]} />);
+    const serialCell = await screen.findByText("SER-000001");
+    const orderRow = serialCell.closest("tr");
+    expect(orderRow).not.toBeNull();
+    expect(within(orderRow as HTMLElement).getByText("Ready for Carrier")).toBeInTheDocument();
+    expect(screen.getByText("Carrier stage")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Carrier stage"), { target: { value: "ready_for_carrier" } });
+    await waitFor(() => expect(api.get).toHaveBeenCalledWith(expect.stringContaining("internationalCarrierStatus=ready_for_carrier")));
+  });
+
+  it("shows mixed bulk carrier eligibility and requires partial processing before submission", async () => {
+    const domesticOrder = { ...order, id: "10000000-0000-4000-8000-000000000004", serialNumber: "SER-000004", orderNumber: "ORD-DOM-000004" };
+    const api = {
+      get: vi.fn((path: string) => {
+        if (path.startsWith("operations/orders?")) return Promise.resolve({ filteredCount: 2, items: [internationalOrder, domesticOrder], matchingCount: 2, page: 1, pageSize: 25, totalCount: 2, tabTotalCount: 2 });
+        if (path.startsWith("configuration/areas")) return Promise.resolve({ items: [], page: 1, pageSize: 100, total: 0 });
+        return Promise.resolve([]);
+      }),
+      post: vi.fn().mockResolvedValue({}),
+    };
+    renderWithRouter(<OrdersModuleWorkspace api={api as unknown as ApiClient} onNavigate={vi.fn()} permissions={["users_roles.manage"]} />);
+    await screen.findByText("SER-000004");
+    fireEvent.click(screen.getByLabelText("Select Order SER-000001"));
+    fireEvent.click(screen.getByLabelText("Select Order SER-000004"));
+    fireEvent.click(screen.getByRole("button", { name: "Update carrier stage" }));
+    expect(await screen.findByText("Eligible: 1. Ineligible: 1.")).toBeInTheDocument();
+    expect(screen.getByText(/Domestic orders cannot use carrier stages/)).toBeInTheDocument();
+    const confirm = screen.getByRole("button", { name: "Confirm" });
+    expect(confirm).toBeDisabled();
+    fireEvent.click(screen.getByRole("checkbox", { name: /Change the orders that can make this move/ }));
+    expect(confirm).toBeEnabled();
+    fireEvent.click(confirm);
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith("operations/orders/bulk-carrier-status", expect.objectContaining({ allowPartial: true, targetStatus: "handed_to_carrier" })));
+  });
+
+  it("uses Arabic labels for carrier-stage display and bulk actions", async () => {
+    await i18nInstance.changeLanguage("ar");
+    const api = {
+      get: vi.fn((path: string) => {
+        if (path.startsWith("operations/orders?")) return Promise.resolve({ filteredCount: 1, items: [internationalOrder], matchingCount: 1, page: 1, pageSize: 25, totalCount: 1, tabTotalCount: 1 });
+        if (path.startsWith("configuration/areas")) return Promise.resolve({ items: [], page: 1, pageSize: 100, total: 0 });
+        return Promise.resolve([]);
+      }),
+      post: vi.fn().mockResolvedValue({}),
+    };
+    renderWithRouter(<OrdersModuleWorkspace api={api as unknown as ApiClient} onNavigate={vi.fn()} permissions={["users_roles.manage"]} />);
+    const serialCell = await screen.findByText("SER-000001");
+    const orderRow = serialCell.closest("tr");
+    expect(orderRow).not.toBeNull();
+    expect(screen.getByText("مرحلة شركة الشحن")).toBeInTheDocument();
+    expect(within(orderRow as HTMLElement).getByText("جاهز لشركة الشحن")).toBeInTheDocument();
   });
 
   it("uses Active Orders server paging and supports selection across matching results", async () => {

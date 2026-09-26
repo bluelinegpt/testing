@@ -33,6 +33,7 @@ import { OutsourcedDriverFeeService } from "../payroll/outsourced-driver-fee.ser
 import type {
   BulkSettleTraderDto,
   ChangeOrderStatusDto,
+  ChangeInternationalCarrierStatusDto,
   CreateDriverDto,
   CreateOrderDto,
   CreateTraderPortalOrderDto,
@@ -121,6 +122,7 @@ export interface OperationsOrderFilters {
   readonly dateFrom?: string | undefined;
   readonly dateTo?: string | undefined;
   readonly deliveryStatus?: string | undefined;
+  readonly internationalCarrierStatus?: string | undefined;
   readonly driverId?: string | undefined;
   readonly orderType?: "collect_order" | "delivery" | "gcc_international" | undefined;
   readonly thirdPartyDeliveryCompanyName?: string | undefined;
@@ -279,6 +281,7 @@ export interface OperationsOrder {
   readonly customerMobileNumber: string;
   readonly customerName: string;
   readonly deliveryStatus: string;
+  readonly internationalCarrierStatus?: "ready_for_carrier" | "handed_to_carrier" | "in_transit" | null;
   readonly driverReconciliationStatus: string;
   readonly id: string;
   readonly isFreeOrder?: boolean;
@@ -965,6 +968,7 @@ export class OperationsService {
     const serialNumber = this.optionalFilter(filters.serialNumber);
     const serialTerm = serialNumber === null ? null : this.normalizeOrderIdentifier(serialNumber);
     const deliveryStatus = this.optionalFilter(filters.deliveryStatus);
+    const internationalCarrierStatus = this.optionalFilter(filters.internationalCarrierStatus);
     const orderType = this.optionalFilter(filters.orderType);
     const thirdPartyDeliveryCompanyName = this.optionalFilter(filters.thirdPartyDeliveryCompanyName);
     const destinationCountryName = this.optionalFilter(filters.destinationCountryName);
@@ -1135,6 +1139,7 @@ export class OperationsService {
            or o.serial_number_normalized = ${serialTerm}::text)
       and ${unifiedOrderSearchPredicate(search)}
       and (${deliveryStatus}::text is null or o.delivery_status = ${deliveryStatus})
+      and (${internationalCarrierStatus}::text is null or o.international_carrier_status = ${internationalCarrierStatus})
       and ${workflowStepPredicate}
       and (${orderType}::text is null or o.order_type = ${orderType})
       and (${thirdPartyDeliveryCompanyName}::text is null or lower(o.third_party_delivery_company_name) like '%' || lower(${thirdPartyDeliveryCompanyName}::text) || '%')
@@ -1186,6 +1191,7 @@ export class OperationsService {
              o.amount_collected::text as "amountCollected",
              o.is_free_order as "isFreeOrder",
              o.order_type as "orderType",
+             o.international_carrier_status as "internationalCarrierStatus",
              o.destination_country_id as "destinationCountryId",
              coalesce(dc.name, o.destination_country_name) as "destinationCountryName",
              o.third_party_delivery_company_id as "thirdPartyDeliveryCompanyId",
@@ -1625,6 +1631,7 @@ export class OperationsService {
              o.company_revenue::text as "companyRevenue",
              o.order_profit::text as "orderProfit",
              o.delivery_status as "deliveryStatus",
+             o.international_carrier_status as "internationalCarrierStatus",
              o.driver_reconciliation_status as "driverReconciliationStatus",
              o.trader_settlement_status as "traderSettlementStatus",
              now()::text as "exportedAt"
@@ -6556,6 +6563,35 @@ export class OperationsService {
       throw new Error("Third-party delivery provider creation did not return an identifier");
     }
     return provider;
+  }
+
+  public async changeInternationalCarrierStatus(
+    orderId: string,
+    input: ChangeInternationalCarrierStatusDto,
+    correlationId: string,
+  ): Promise<OperationsOrder> {
+    const { companyId } = this.tenants.current();
+    const identity = this.identities.current();
+    if (!identity.permissions.has("orders.update_delivery_status") && !identity.permissions.has("users_roles.manage")) {
+      throw new ApplicationException("permission_denied", "The authenticated account does not have permission for this operation", HttpStatus.FORBIDDEN);
+    }
+    await this.transactions.execute(async (transaction) => {
+      const current = await sql<{ orderType: string; status: string | null }>`
+        select order_type as "orderType", international_carrier_status as status
+          from orders where id = ${orderId}::uuid and company_id = ${companyId}::uuid for update
+      `.execute(transaction);
+      const row = current.rows[0];
+      if (row === undefined) throw new ApplicationException("order_not_found", "Order not found", HttpStatus.NOT_FOUND);
+      if (row.orderType !== "gcc_international") throw new ApplicationException("international_carrier_status_not_allowed", "Carrier status applies only to International orders", HttpStatus.CONFLICT);
+      const transitions: Record<string, string[]> = { ready_for_carrier: ["handed_to_carrier"], handed_to_carrier: ["in_transit"], in_transit: [] };
+      if (!(transitions[row.status ?? "ready_for_carrier"] ?? []).includes(input.status)) {
+        throw new ApplicationException("international_carrier_status_transition_invalid", "Invalid International carrier status transition", HttpStatus.CONFLICT);
+      }
+      await sql`update orders set international_carrier_status = ${input.status} where id = ${orderId}::uuid and company_id = ${companyId}::uuid`.execute(transaction);
+      await this.history.orderEvent(transaction, { actorId: identity.identityId, actorRole: identity.kind, category: "status_change", companyId, correlationId, eventType: "order.international_carrier_status_change", fieldName: "international_carrier_status", newValue: input.status, orderId, previousValue: row.status ?? "ready_for_carrier", reason: null, source: "api" });
+      await this.audit(transaction, { action: "order.international_carrier_status_change", actorId: identity.identityId, after: { status: input.status }, companyId, correlationId, subjectId: orderId, subjectType: "order" });
+    });
+    return this.orderById(companyId, orderId);
   }
 
   private async resolveInternationalReferences(

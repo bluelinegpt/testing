@@ -946,6 +946,20 @@ export class CreateDriverDto {
   public readonly outsourcedFeePerDeliveredOrder?: number;
 }
 
+export class BulkChangeInternationalCarrierStatusDto extends OrderSelectionDto {
+  @IsIn(["handed_to_carrier", "in_transit"])
+  public readonly targetStatus!: "handed_to_carrier" | "in_transit";
+
+  @IsOptional()
+  @IsBoolean()
+  public readonly allowPartial?: boolean;
+}
+
+export class ChangeInternationalCarrierStatusDto {
+  @IsIn(["ready_for_carrier", "handed_to_carrier", "in_transit"])
+  public readonly status!: "ready_for_carrier" | "handed_to_carrier" | "in_transit";
+}
+
 export class CreateInternationalCatalogEntryDto {
   @IsString()
   @MinLength(2)
