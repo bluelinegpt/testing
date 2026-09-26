@@ -42,6 +42,40 @@ const legacyAssignmentMigration = await sql<{ exists: boolean }>`
   ) as "exists"
 `.execute(database);
 const hasLegacyAssignmentMigration = legacyAssignmentMigration.rows[0]?.exists === true;
+const legacyInternationalOrderFoundationMigration = await sql<{ exists: boolean }>`
+  select exists (select 1 from kysely_migration where name = '20260973000000_gcc_international_order_type') as "exists"
+`.execute(database);
+const hasLegacyInternationalOrderFoundationMigration = legacyInternationalOrderFoundationMigration.rows[0]?.exists === true;
+const legacyInternationalCarrierMigration = await sql<{ exists: boolean }>`
+  select exists (select 1 from kysely_migration where name = '20260974000000_international_carrier_status') as "exists"
+`.execute(database);
+const hasLegacyInternationalCarrierMigration = legacyInternationalCarrierMigration.rows[0]?.exists === true;
+const legacyInternationalOrderSchema = await sql<{ exists: boolean }>`
+  select exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'orders' and column_name = 'destination_country_id'
+  ) and exists (
+    select 1 from information_schema.tables
+    where table_schema = 'public' and table_name = 'destination_countries'
+  ) as "exists"
+`.execute(database);
+const hasLegacyInternationalOrderSchema = legacyInternationalOrderSchema.rows[0]?.exists === true;
+const legacyInternationalCarrierSchema = await sql<{ exists: boolean }>`
+  select exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'orders' and column_name = 'international_carrier_status'
+  ) and exists (
+    select 1 from pg_indexes
+    where schemaname = 'public' and tablename = 'orders' and indexname = 'orders_company_international_carrier_status_idx'
+  ) as "exists"
+`.execute(database);
+const hasLegacyInternationalCarrierSchema = legacyInternationalCarrierSchema.rows[0]?.exists === true;
+if (hasLegacyInternationalOrderFoundationMigration && !hasLegacyInternationalOrderSchema) {
+  throw new Error("Legacy International order migration is recorded but its schema is missing");
+}
+if (hasLegacyInternationalCarrierMigration && !hasLegacyInternationalCarrierSchema) {
+  throw new Error("Legacy International carrier migration is recorded but its schema is missing");
+}
 const provider: MigrationProvider = {
   async getMigrations(): Promise<Record<string, Migration>> {
     const migrations = await fileMigrationProvider.getMigrations();
@@ -62,6 +96,20 @@ const provider: MigrationProvider = {
         },
       };
       delete migrations["20260902012500_collect_order_assignment_customer_optional"];
+    }
+    if (hasLegacyInternationalOrderFoundationMigration) {
+      migrations["20260973000000_gcc_international_order_type"] ??= {
+        async up(db) { await sql`select 1`.execute(db); },
+        async down(db) { await sql`select 1`.execute(db); },
+      };
+      delete migrations["20260975000000_gcc_international_order_type"];
+    }
+    if (hasLegacyInternationalCarrierMigration) {
+      migrations["20260974000000_international_carrier_status"] ??= {
+        async up(db) { await sql`select 1`.execute(db); },
+        async down(db) { await sql`select 1`.execute(db); },
+      };
+      delete migrations["20260976000000_international_carrier_status"];
     }
     return migrations;
   },

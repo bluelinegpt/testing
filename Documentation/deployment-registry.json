@@ -20,9 +20,9 @@
       "path": "apps/api",
       "renderService": "bluelinegpt-api-test",
       "status": "needs_deploy",
-      "localCommit": "e4d1a45",
+      "localCommit": "8282c1e",
       "localCommitDate": "2026-09-26",
-      "lastChangeDescription": "Adds International carrier workflow and settlement preview authorization",
+      "lastChangeDescription": "Keeps renamed International migrations compatible with legacy ledgers",
       "lastChangeBy": "codex",
       "confirmedLiveCommit": "e3de371",
       "confirmedLiveAt": "2026-09-01"
