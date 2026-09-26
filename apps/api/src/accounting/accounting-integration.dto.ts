@@ -37,7 +37,17 @@ export class AutomaticPostingDisableDto {
 
 export class AccountingEventListQueryDto {
   @IsOptional()
-  @IsIn(["received","processing","validated","posted","failed","retry_pending","blocked_configuration","reversed","ignored_duplicate"])
+  @IsIn([
+    "received",
+    "processing",
+    "validated",
+    "posted",
+    "failed",
+    "retry_pending",
+    "blocked_configuration",
+    "reversed",
+    "ignored_duplicate",
+  ])
   public readonly status?: string;
 
   @IsOptional()
@@ -70,12 +80,45 @@ export class AccountingEventListQueryDto {
   @Min(1)
   @Max(200)
   public readonly pageSize?: number;
+  // Business sort keys, never column names. Unrecognised values fall back to
+  // the list default in the query layer rather than rejecting the request.
+  @IsOptional()
+  @IsIn([
+    "accountingDate",
+    "amount",
+    "attemptCount",
+    "createdAt",
+    "eventType",
+    "journalNumber",
+    "sourceReference",
+    "status",
+  ])
+  public readonly sortBy?: string;
+
+  @IsOptional()
+  @IsIn(["asc", "desc"])
+  public readonly sortDirection?: string;
+
 }
 
 export class AccountingEventReprocessDto {
   @IsString()
   @MaxLength(500)
   public readonly reason!: string;
+
+  /**
+   * The Event status the caller last SAW — from the precheck they reviewed.
+   *
+   * Part of the idempotency payload, so the same key with a different observed
+   * status is a payload mismatch rather than a replay; and validated against
+   * the Event's current status inside the transaction, so an Event that moved
+   * on since the precheck is refused rather than run against a different
+   * state. Optional because the bulk path and older callers do not send it.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  public readonly expectedStatus?: string;
 }
 
 export class AccountingEventBulkReprocessDto extends AccountingEventReprocessDto {
@@ -87,7 +130,7 @@ export class AccountingEventBulkReprocessDto extends AccountingEventReprocessDto
 
 export class AccountingReconciliationQueryDto extends AccountingEventListQueryDto {
   @IsOptional()
-  @IsIn(["missing","mismatch","failed","posted","reversed","queued"])
+  @IsIn(["missing", "mismatch", "failed", "posted", "reversed", "queued"])
   public readonly result?: string;
 }
 

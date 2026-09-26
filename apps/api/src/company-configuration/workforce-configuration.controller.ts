@@ -22,10 +22,20 @@ import type {
   DriverSummary,
   WorkforcePage,
 } from "./workforce-configuration.service.js";
+import type { Kysely } from "kysely";
+
+import { DATABASE } from "../infrastructure/database/database.tokens.js";
+import type { DatabaseSchema } from "../infrastructure/database/database.types.js";
+import {
+  EmployeeVariableEarningService,
+  type VariableEarningRule,
+  type VariableEarningRules,
+} from "./employee-variable-earning.service.js";
 import { WorkforceConfigurationService } from "./workforce-configuration.service.js";
 // Runtime classes are required by Nest validation metadata.
 // eslint-disable-next-line @typescript-eslint/consistent-type-imports
 import {
+  ChangeEmployeeRoleStatusDto,
   ChangeWorkforceStatusDto,
   ConfirmOutsourcedPaymentDto,
   CreateAllowanceTypeDto,
@@ -33,6 +43,8 @@ import {
   CreateCommissionRuleDto,
   CreateHrDocumentDto,
   RunCommissionCalculationDto,
+  SaveCollectionEarningRuleDto,
+  SaveDeliveryEarningRuleDto,
   SaveDriverDto,
   SaveEmployeeDto,
 } from "./workforce-configuration.dto.js";
@@ -46,6 +58,9 @@ export class WorkforceConfigurationController {
   public constructor(
     @Inject(WorkforceConfigurationService)
     private readonly workforce: WorkforceConfigurationService,
+    @Inject(EmployeeVariableEarningService)
+    private readonly variableEarningRules: EmployeeVariableEarningService,
+    @Inject(DATABASE) private readonly database: Kysely<DatabaseSchema>,
   ) {}
 
   @Get("employees")
@@ -89,6 +104,45 @@ export class WorkforceConfigurationController {
       employeeId,
       input.isActive,
       input.reason,
+      this.correlationId(request),
+    );
+  }
+
+  /*
+   * Employee Driver variable earnings. A changed amount starts a new dated
+   * rate. Changing only the dates corrects the current matching rule and writes
+   * its prior values into the audit event.
+   */
+  @Get("employees/:employeeId/variable-earnings")
+  @ApiOperation({ summary: "Delivery and collection earning rules for one Employee" })
+  public variableEarnings(
+    @Param("employeeId", new ParseUUIDPipe()) employeeId: string,
+  ): Promise<VariableEarningRules> {
+    return this.variableEarningRules.rules(this.database, employeeId);
+  }
+
+  @Post("employees/:employeeId/variable-earnings/delivery")
+  public setDeliveryEarningRule(
+    @Param("employeeId", new ParseUUIDPipe()) employeeId: string,
+    @Body() input: SaveDeliveryEarningRuleDto,
+    @Req() request: Request,
+  ): Promise<VariableEarningRule> {
+    return this.variableEarningRules.setDeliveryRule(
+      employeeId,
+      input,
+      this.correlationId(request),
+    );
+  }
+
+  @Post("employees/:employeeId/variable-earnings/collection")
+  public setCollectionEarningRule(
+    @Param("employeeId", new ParseUUIDPipe()) employeeId: string,
+    @Body() input: SaveCollectionEarningRuleDto,
+    @Req() request: Request,
+  ): Promise<VariableEarningRule> {
+    return this.variableEarningRules.setCollectionRule(
+      employeeId,
+      input,
       this.correlationId(request),
     );
   }
@@ -214,6 +268,15 @@ export class WorkforceConfigurationController {
     @Req() request: Request,
   ): Promise<Record<string, unknown>> {
     return this.workforce.createEmployeeRole(input, this.correlationId(request));
+  }
+
+  @Patch("employee-roles/:roleId/status")
+  public employeeRoleStatus(
+    @Param("roleId", new ParseUUIDPipe()) roleId: string,
+    @Body() input: ChangeEmployeeRoleStatusDto,
+    @Req() request: Request,
+  ): Promise<void> {
+    return this.workforce.setEmployeeRoleStatus(roleId, input.isActive, this.correlationId(request));
   }
 
   private correlationId(request: Request): string {

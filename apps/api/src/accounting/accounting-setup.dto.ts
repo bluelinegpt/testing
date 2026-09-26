@@ -19,6 +19,12 @@ export class AccountingSetupDateQueryDto {
   @IsOptional() @Matches(datePattern) public readonly effectiveOn?: string;
 }
 
+export class AccountingPayrollSupportRepairDto {
+  @Matches(datePattern) public readonly effectiveFrom!: string;
+  @IsBoolean() public readonly confirmation!: boolean;
+  @IsString() @MinLength(1) @MaxLength(1000) public readonly reason!: string;
+}
+
 export class AccountingMappingDecisionDto {
   @IsIn(["accept", "change", "reject", "unresolved", "not_applicable"])
   public readonly decision!: "accept" | "change" | "reject" | "unresolved" | "not_applicable";
@@ -39,7 +45,10 @@ export class AccountingZeroOpeningDto {
 
 export class AccountingActivationPreviewDto {
   @Matches(datePattern) public readonly activationDate!: string;
-  @IsOptional() @IsArray() @ArrayMaxSize(50) @IsString({ each: true })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(50)
+  @IsString({ each: true })
   public readonly acknowledgedWarningCodes?: string[];
 }
 

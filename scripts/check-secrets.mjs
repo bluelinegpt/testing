@@ -7,6 +7,9 @@ const ignoredDirectories = new Set([
   ".docx_review",
   ".docx_review_v2",
   ".docx_review_v3",
+  ".dart_tool",
+  ".tools",
+  "build",
   "coverage",
   "dist",
   "node_modules",
@@ -41,6 +44,7 @@ async function collectFiles(directory) {
     const path = join(directory, entry.name);
     if (entry.isDirectory()) files.push(...(await collectFiles(path)));
     else if (
+      entry.isFile() &&
       !ignoredFiles.has(entry.name) &&
       !isLocalEnvironmentFile(entry.name) &&
       textExtensions.has(extname(entry.name))

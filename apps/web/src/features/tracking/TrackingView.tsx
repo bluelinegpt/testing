@@ -39,16 +39,9 @@ export function TrackingView({ api, token }: { api: ApiClient; token: string }) 
         ) : (
           <>
             <h1>{tracking.orderNumber}</h1>
-            <div className="tracking-status">{tracking.deliveryStatus}</div>
+            <div className="tracking-status">{tracking.deliveryStatusLabel}</div>
             <div className="tracking-grid">
-              <TrackingLine label={t("tracking.company")} value={tracking.companyName} />
               <TrackingLine label={t("tracking.order")} value={tracking.orderNumber} />
-              <TrackingLine label={t("operations.customer")} value={tracking.customerName} />
-              <TrackingLine label={t("tracking.area")} value={tracking.areaName} />
-              <TrackingLine
-                label={t("tracking.driver")}
-                value={tracking.assignedDriverName ?? t("operations.unassigned")}
-              />
               <TrackingLine
                 label={t("tracking.lastUpdated")}
                 value={formatDate(tracking.lastUpdatedAt, locale)}

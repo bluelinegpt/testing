@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Website media fix (temporary tool)</title>
+<meta name="robots" content="noindex" />
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; color: #111; }
+  h1 { font-size: 1.2rem; }
+  p.warn { background: #fffbeb; border: 1px solid #fcd34d; border-radius: 8px; padding: 0.75rem 1rem; color: #92400e; }
+  label { display: block; margin: 1rem 0 0.25rem; font-weight: 600; }
+  input[type="text"] { width: 100%; padding: 0.4rem; box-sizing: border-box; }
+  button { margin-top: 1.5rem; padding: 0.6rem 1.2rem; font-size: 1rem; cursor: pointer; }
+  #status { white-space: pre-wrap; margin-top: 1.5rem; padding: 1rem; border-radius: 8px; background: #f4f6fb; border: 1px solid #d3dae8; font-family: monospace; font-size: 0.85rem; }
+  #status.error { background: #fef2f2; border-color: #fca5a5; color: #991b1b; }
+  #status.ok { background: #ecfdf5; border-color: #86efac; color: #166534; }
+</style>
+</head>
+<body>
+  <h1>Temporary tool: replace a Website's logo/banners</h1>
+  <p class="warn">
+    This is a throwaway emergency tool, not part of the app -- it exists only to
+    replace an oversized, base64-embedded logo/banner with small R2-hosted
+    images by calling the same upload/save endpoints the Website editor uses.
+    It will be deleted once no longer needed. Uses your existing Platform
+    Administration login session; open this page in the same browser tab set
+    where you are already signed in.
+  </p>
+
+  <label for="companyId">Company ID</label>
+  <input id="companyId" type="text" value="4d9095cb-3da6-4b8b-9d8e-ff01f8192bdb" />
+
+  <label for="logo">Website logo (PNG/JPEG, optional)</label>
+  <input id="logo" type="file" accept="image/png,image/jpeg" />
+
+  <label for="banners">Homepage banners -- EN (PNG/JPEG/WebP, up to 3, optional)</label>
+  <input id="banners" type="file" accept="image/png,image/jpeg,image/webp" multiple />
+
+  <label for="bannersAr">Homepage banners -- AR (PNG/JPEG/WebP, up to 3, optional)</label>
+  <input id="bannersAr" type="file" accept="image/png,image/jpeg,image/webp" multiple />
+
+  <button id="run">Upload selected images and save</button>
+
+  <div id="status">Ready.</div>
+
+<script>
+const statusEl = document.getElementById("status");
+function setStatus(text, kind) {
+  statusEl.textContent = text;
+  statusEl.className = kind || "";
+}
+function appendStatus(text) {
+  statusEl.textContent += "\n" + text;
+}
+
+async function apiGet(path) {
+  const response = await fetch(path, {
+    credentials: "include",
+    headers: { Accept: "application/json", "X-Blueline-Session": "cookie" },
+  });
+  const body = await response.json().catch(() => undefined);
+  if (!response.ok) throw new Error((body && body.error && body.error.message) || `GET ${path} failed (${response.status})`);
+  return body;
+}
+
+async function apiPatch(path, payload) {
+  const response = await fetch(path, {
+    method: "PATCH",
+    credentials: "include",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      "X-Blueline-Session": "cookie",
+    },
+    body: JSON.stringify(payload),
+  });
+  const body = await response.json().catch(() => undefined);
+  if (!response.ok) throw new Error((body && body.error && body.error.message) || `PATCH ${path} failed (${response.status})`);
+  return body;
+}
+
+async function uploadMedia(companyId, file) {
+  const form = new FormData();
+  form.append("file", file);
+  const response = await fetch(`/api/v1/platform/companies/${companyId}/website/media`, {
+    method: "POST",
+    credentials: "include",
+    headers: { Accept: "application/json", "X-Blueline-Session": "cookie" },
+    body: form,
+  });
+  const body = await response.json().catch(() => undefined);
+  if (!response.ok) throw new Error((body && body.error && body.error.message) || `Upload of ${file.name} failed (${response.status})`);
+  return body.url;
+}
+
+document.getElementById("run").addEventListener("click", async () => {
+  const companyId = document.getElementById("companyId").value.trim();
+  const logoFile = document.getElementById("logo").files[0];
+  const bannerFiles = Array.from(document.getElementById("banners").files);
+  const bannerArFiles = Array.from(document.getElementById("bannersAr").files);
+  if (!companyId) { setStatus("Enter a Company ID.", "error"); return; }
+  if (!logoFile && bannerFiles.length === 0 && bannerArFiles.length === 0) {
+    setStatus("Select at least one file to upload.", "error");
+    return;
+  }
+  try {
+    setStatus(`Loading current Website settings for ${companyId} ...`);
+    const website = await apiGet(`/api/v1/platform/companies/${companyId}/website`);
+    if (!website || website.status === "not_configured") {
+      throw new Error("This Company has no Website configured yet.");
+    }
+    const settings = website.settings ?? {};
+    settings.branding = settings.branding ?? {};
+
+    if (logoFile) {
+      appendStatus(`Uploading logo (${logoFile.name}) ...`);
+      settings.branding.logoDataUrl = await uploadMedia(companyId, logoFile);
+      appendStatus(`Logo uploaded: ${settings.branding.logoDataUrl}`);
+    }
+    if (bannerFiles.length) {
+      const urls = [];
+      for (const file of bannerFiles) {
+        appendStatus(`Uploading EN banner (${file.name}) ...`);
+        urls.push(await uploadMedia(companyId, file));
+      }
+      settings.branding.bannerDataUrls = urls;
+      delete settings.branding.bannerDataUrl;
+      appendStatus(`EN banners uploaded: ${urls.join(", ")}`);
+    }
+    if (bannerArFiles.length) {
+      const urls = [];
+      for (const file of bannerArFiles) {
+        appendStatus(`Uploading AR banner (${file.name}) ...`);
+        urls.push(await uploadMedia(companyId, file));
+      }
+      settings.branding.bannerDataUrlsAr = urls;
+      appendStatus(`AR banners uploaded: ${urls.join(", ")}`);
+    }
+
+    appendStatus("Saving Website draft with the new settings ...");
+    const saved = await apiPatch(`/api/v1/platform/companies/${companyId}/website`, {
+      slug: website.slug,
+      primaryLanguage: website.primaryLanguage,
+      defaultLocale: website.defaultLocale,
+      templateKey: website.templateKey,
+      expectedVersion: website.version,
+      settings,
+    });
+    appendStatus(`Saved. New draft version: ${saved.version}.`);
+    setStatus(statusEl.textContent + "\n\nDone. Re-enable the Website from Platform Administration when ready.", "ok");
+  } catch (error) {
+    appendStatus(`ERROR: ${error.message}`);
+    setStatus(statusEl.textContent, "error");
+  }
+});
+</script>
+</body>
+</html>

@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import { HttpStatus, Inject, Injectable } from "@nestjs/common";
 import { Decimal } from "decimal.js";
@@ -10,6 +10,11 @@ import { KyselyTransactionManager } from "../infrastructure/database/transaction
 import { ApplicationException } from "../presentation/errors/application.exception.js";
 import { IdentityContextAccessor } from "../security/identity-context.js";
 import { TenantContextAccessor } from "../tenancy/tenant-context.js";
+import { BusinessDayService } from "../company-configuration/business-day.service.js";
+import {
+  type AppliedReportDateMode,
+  ReportDateModeService,
+} from "../company-configuration/report-date-mode.js";
 
 import { CompanyProfileService } from "../company-profile/company-profile.service.js";
 import { DriverCollectionPdfService } from "./driver-collection-pdf.service.js";
@@ -57,7 +62,24 @@ interface LockedReceivableRow {
   readonly traderId: string;
 }
 
+/**
+ * The authoritative operational timestamp for Trader Collection activity.
+ *
+ * Distinct from `trader_receivables.business_date`: that is the Receivable's own
+ * date-only field, this is when the Collection was confirmed.
+ */
+const BUSINESS_DATE_COLUMN = "c.confirmed_at";
+
 export interface Page<T> {
+  /**
+   * The Date Mode actually applied, resolved by the backend.
+   *
+   * Optional so existing callers are unaffected; present whenever the screen
+   * asked for a mode. Carries the window, the timezone, the authoritative
+   * timestamp and the two warning flags, so the caption above a total always
+   * describes the predicate that produced it.
+   */
+  readonly appliedDateMode?: AppliedReportDateMode;
   readonly items: readonly T[];
   readonly page: number;
   readonly pageSize: number;
@@ -80,11 +102,16 @@ export interface TraderReceivableCollectionHistoryLine {
   readonly collectionDate: string;
   readonly collectionId: string;
   readonly collectionNumber: string;
+  readonly paymentMethod: "bank_transfer" | "cash";
+  /** Receivable balance remaining after this allocation. */
+  readonly remainingBalance: string;
   readonly status: "confirmed" | "reversed";
 }
 
 export interface TraderReceivableDetail {
   readonly amountCollected: string;
+  readonly traderCode?: string | null;
+  readonly traderNameAr?: string | null;
   readonly businessDate: string;
   readonly cancelledAt: string | null;
   readonly cancelledReason: string | null;
@@ -107,6 +134,7 @@ export interface TraderReceivableDetail {
 export interface TraderReceivableEligibleRow {
   readonly businessDate: string;
   readonly id: string;
+  readonly orderSerialNumber: string | null;
   readonly originalAmountDue: string;
   readonly outstandingAmount: string;
   readonly previouslyCollected: string;
@@ -157,6 +185,9 @@ export interface ReverseTraderCollectionResult {
 
 export interface TraderCollectionListRow {
   readonly amountReceived: string;
+  /** Transaction Business Date from confirmedAt. NOT the Receivable business date. */
+  readonly confirmationBusinessDate?: string | null;
+  readonly confirmedAt?: string | null;
   readonly collectionId: string;
   readonly collectionNumber: string;
   readonly createdAt: string;
@@ -196,6 +227,8 @@ interface MaskedBankSnapshot {
 
 export interface TraderCollectionAllocationDetail {
   readonly amountCollectedNow: string;
+  /** Identifier the Receivable detail route consumes; never displayed. */
+  readonly receivableId: string;
   readonly businessDate: string;
   readonly originalAmountDue: string;
   readonly previouslyCollected: string;
@@ -212,11 +245,19 @@ interface TraderCollectionSummaryTotals {
   readonly previouslyCollected: string;
   readonly receivableCount: number;
   readonly remainingDue: string;
+  /** Sum of what this Collection allocated across its Receivables. */
+  readonly totalApplied?: string;
   readonly totalOriginalAmountDue: string;
+  /** The Trader's total outstanding Receivable balance, all Receivables. */
+  readonly traderOutstandingBalance?: string;
+  /** Amount Received less Total Applied; never negative. */
+  readonly unappliedAmount?: string;
 }
 
 export interface TraderCollectionDetail {
   readonly allocations: readonly TraderCollectionAllocationDetail[];
+  readonly traderCode?: string | null;
+  readonly traderNameAr?: string | null;
   readonly collectionId: string;
   readonly collectionNumber: string;
   readonly companyBankAccount: MaskedBankSnapshot | null;
@@ -256,6 +297,15 @@ export interface TraderCollectionReportData {
     readonly reversalReason: string | null;
     readonly reversedBy: string | null;
     readonly status: "confirmed" | "reversed";
+    /**
+     * Trader business Code (`t.code`), distinct from the id and the name.
+     *
+     * Optional and nullable, matching the row types at lines 553 and 1642
+     * which both declare `traderCode: string | null`, and the sibling
+     * declarations at lines 113 and 258. Not every path that builds this
+     * header selects it.
+     */
+    readonly traderCode?: string | null;
     readonly traderName: string;
   };
   readonly lines: readonly TraderCollectionAllocationDetail[];
@@ -277,6 +327,8 @@ export class TraderReceivableService {
     @Inject(KyselyTransactionManager)
     private readonly transactions: KyselyTransactionManager,
     @Inject(TenantContextAccessor) private readonly tenants: TenantContextAccessor,
+    @Inject(ReportDateModeService) private readonly reportDateModes: ReportDateModeService,
+    @Inject(BusinessDayService) private readonly businessDays: BusinessDayService,
     @Inject(IdentityContextAccessor) private readonly identities: IdentityContextAccessor,
     @Inject(OperationsHistoryWriter) private readonly history: OperationsHistoryWriter,
     @Inject(CompanyProfileService) private readonly companyProfile: CompanyProfileService,
@@ -506,10 +558,13 @@ export class TraderReceivableService {
         sourceType: string;
         status: string;
         traderId: string;
+        traderCode: string | null;
         traderName: string;
+        traderNameAr: string | null;
       }>`
         select r.receivable_number as "receivableNumber", r.trader_id as "traderId",
-               t.name_en as "traderName", r.source_type as "sourceType",
+               t.name_en as "traderName", t.code as "traderCode",
+               t.name_ar as "traderNameAr", r.source_type as "sourceType",
                r.source_reference as "sourceReference", r.business_date::text as "businessDate",
                r.original_amount_due::text as "originalAmountDue",
                r.amount_collected::text as "amountCollected",
@@ -542,15 +597,25 @@ export class TraderReceivableService {
                order by occurred_at desc limit 1
             `.execute(this.database)
           ).rows[0];
+    const originalAmountDue = row.originalAmountDue;
     const collections = (
       await sql<TraderReceivableCollectionHistoryLine>`
         select c.id as "collectionId", c.collection_number as "collectionNumber",
-               c.payment_date::text as "collectionDate", alloc.amount_allocated::text as "amountCollected",
-               c.status
+               c.payment_date::text as "collectionDate",
+               alloc.amount_allocated::text as "amountCollected",
+               c.payment_method as "paymentMethod", c.status,
+               -- Running balance after this allocation: the original amount due
+               -- less everything allocated up to and including this row. A
+               -- window function, so the whole history costs one pass and no
+               -- per-row query.
+               (${originalAmountDue}::numeric - sum(alloc.amount_allocated) over (
+                  order by c.created_at, alloc.id
+                  rows between unbounded preceding and current row
+                ))::text as "remainingBalance"
           from trader_collection_allocations alloc
           join trader_collections c on c.id = alloc.collection_id and c.company_id = alloc.company_id
          where alloc.receivable_id = ${receivableId}::uuid and alloc.company_id = ${companyId}::uuid
-         order by c.created_at
+         order by c.created_at, alloc.id
       `.execute(this.database)
     ).rows;
     return {
@@ -571,7 +636,9 @@ export class TraderReceivableService {
       sourceType: row.sourceType,
       status: row.status,
       traderId: row.traderId,
+      traderCode: row.traderCode,
       traderName: row.traderName,
+      traderNameAr: row.traderNameAr,
     };
   }
 
@@ -613,13 +680,16 @@ export class TraderReceivableService {
       select r.id, r.receivable_number as "receivableNumber", r.trader_id as "traderId",
              t.name_en as "traderName",
              r.business_date::text as "businessDate", r.source_type as "sourceType",
-             r.source_reference as "sourceReference", r.reason,
+             r.source_reference as "sourceReference", ord.serial_number as "orderSerialNumber", r.reason,
              r.original_amount_due::text as "originalAmountDue",
              r.amount_collected::text as "previouslyCollected",
              r.outstanding_amount::text as "outstandingAmount", r.status,
              count(*) over()::int as total
         from trader_receivables r
         join traders t on t.id = r.trader_id and t.company_id = r.company_id
+        left join orders ord on ord.company_id = r.company_id
+          and r.source_type = 'service_charge'
+          and ord.order_number = r.source_reference
        where ${filters}
        order by ${sql.raw(sortColumn)} ${sql.raw(direction)}, r.receivable_number ${sql.raw(direction)}
        limit ${limit} offset ${offset}
@@ -661,7 +731,9 @@ export class TraderReceivableService {
     const allocations: TraderAllocationProposalLine[] = [];
     for (const receivable of receivables) {
       if (remaining.lessThanOrEqualTo(0)) break;
-      const outstanding = new Decimal(receivable.originalAmountDue).minus(receivable.amountCollected);
+      const outstanding = new Decimal(receivable.originalAmountDue).minus(
+        receivable.amountCollected,
+      );
       if (outstanding.lessThanOrEqualTo(0)) continue;
       const allocated = Decimal.min(remaining, outstanding);
       allocations.push({
@@ -768,7 +840,10 @@ export class TraderReceivableService {
           HttpStatus.BAD_REQUEST,
         );
       }
-      const allocationTotal = allocated.reduce((sum, line) => sum.plus(line.amount), new Decimal(0));
+      const allocationTotal = allocated.reduce(
+        (sum, line) => sum.plus(line.amount),
+        new Decimal(0),
+      );
       const amountReceived = this.money(new Decimal(input.amountReceived));
       if (!this.money(allocationTotal).equals(amountReceived)) {
         throw new ApplicationException(
@@ -794,7 +869,9 @@ export class TraderReceivableService {
       const amountByReceivable = new Map(allocated.map((line) => [line.receivableId, line.amount]));
       const overAllocated = receivables.filter((receivable) => {
         const amount = amountByReceivable.get(receivable.id) ?? 0;
-        const outstanding = new Decimal(receivable.originalAmountDue).minus(receivable.amountCollected);
+        const outstanding = new Decimal(receivable.originalAmountDue).minus(
+          receivable.amountCollected,
+        );
         return new Decimal(amount).greaterThan(outstanding);
       });
       if (overAllocated.length > 0) {
@@ -810,7 +887,9 @@ export class TraderReceivableService {
       const payment = await this.resolveCollectionPayment(transaction, companyId, {
         ...(input.bankAccountId === undefined ? {} : { bankAccountId: input.bankAccountId }),
         ...(input.paymentMethod === undefined ? {} : { paymentMethod: input.paymentMethod }),
-        ...(input.paymentReference === undefined ? {} : { paymentReference: input.paymentReference }),
+        ...(input.paymentReference === undefined
+          ? {}
+          : { paymentReference: input.paymentReference }),
       });
 
       // 5. Write everything atomically: header, allocation rows, receivable updates.
@@ -824,12 +903,17 @@ export class TraderReceivableService {
         insert into trader_collections (
           company_id, collection_number, trader_id, payment_date, payment_method,
           amount_received, company_bank_account_id, payment_reference, notes, status,
-          received_by_account_id
+          received_by_account_id, confirmed_at
         ) values (
           ${companyId}::uuid, ${collectionNumber}, ${input.traderId}::uuid,
           coalesce(${input.paymentDate ?? null}::date, current_date), ${payment.method},
           ${amountReceived.toNumber()}, ${payment.bankAccountId}::uuid, ${payment.paymentReference},
-          ${input.notes?.trim() || null}, 'confirmed', ${identity.identityId}::uuid
+          ${input.notes?.trim() || null}, 'confirmed', ${identity.identityId}::uuid,
+          -- Server clock, in the same transaction as the insert. The record is
+          -- created already confirmed, so this IS the confirmation moment. Never
+          -- taken from the request: a caller-supplied time would let anyone
+          -- place money in whichever business day suited them.
+          now()
         )
         returning id
       `.execute(transaction);
@@ -837,6 +921,21 @@ export class TraderReceivableService {
       if (collectionId === undefined) {
         throw new Error("Trader collection creation did not return an identifier");
       }
+
+      // The insert above already captured the authoritative Trader Collection
+      // Accounting Event (the `trader_collections` status trigger fires
+      // synchronously on this same INSERT). The operational Cash/Bank
+      // Movement below only links to that Event -- it must not post a
+      // second Journal for the same fact.
+      await this.createCollectionMovement(transaction, {
+        actorId: identity.identityId,
+        amountReceived: amountReceived.toFixed(2),
+        collectionId,
+        collectionNumber,
+        companyId,
+        payment,
+        paymentDate: input.paymentDate ?? new Date().toISOString().slice(0, 10),
+      });
 
       let remainingDue = new Decimal(0);
       for (const receivable of receivables) {
@@ -850,7 +949,9 @@ export class TraderReceivableService {
         `.execute(transaction);
         const newCollected = new Decimal(receivable.amountCollected).plus(amount);
         const outstandingAfter = new Decimal(receivable.originalAmountDue).minus(newCollected);
-        const newStatus = outstandingAfter.lessThanOrEqualTo(0) ? "collected" : "partially_collected";
+        const newStatus = outstandingAfter.lessThanOrEqualTo(0)
+          ? "collected"
+          : "partially_collected";
         await sql`
           update trader_receivables
              set amount_collected = ${this.money(newCollected).toNumber()}, status = ${newStatus},
@@ -859,7 +960,10 @@ export class TraderReceivableService {
         `.execute(transaction);
         remainingDue = remainingDue.plus(Decimal.max(0, outstandingAfter));
         await this.history.audit(transaction, {
-          action: newStatus === "collected" ? "trader_receivable.collected" : "trader_receivable.partial_collection",
+          action:
+            newStatus === "collected"
+              ? "trader_receivable.collected"
+              : "trader_receivable.partial_collection",
           actorId: identity.identityId,
           after: {
             allocatedAmount: this.money(amount).toFixed(2),
@@ -1053,8 +1157,13 @@ export class TraderReceivableService {
     const { companyId } = this.tenants.current();
     const { limit, offset, page, pageSize } = this.pagination(query);
     const direction = query.sortDirection === "asc" ? "asc" : "desc";
-    const sortColumn = query.sortBy === "collectionNumber" ? "c.collection_number" : "c.payment_date";
-    const filters = this.collectionFilters(companyId, query);
+    const sortColumn =
+      query.sortBy === "collectionNumber" ? "c.collection_number" : "c.payment_date";
+    // Resolved once per request: one configuration query, boundaries computed
+    // once, and the same object feeds the row query, the count that rides the
+    // same statement, and the caption returned to the caller.
+    const applied = await this.reportDateModes.resolve("trader-collection-activity", query);
+    const filters = this.collectionFilters(companyId, query, applied);
     const result = await sql<TraderCollectionListRow & { total: number }>`
       select c.id as "collectionId", c.collection_number as "collectionNumber",
              t.name_en as "traderName", c.payment_date::text as "paymentDate",
@@ -1063,6 +1172,7 @@ export class TraderReceivableService {
              (c.status = 'reversed') as "isReversed",
              coalesce(receiver.username, 'Legacy/Unknown') as "receivedBy",
              c.created_at::text as "createdAt",
+             c.confirmed_at::text as "confirmedAt",
              coalesce(lines.total, 0)::int as "receivableCount",
              count(*) over()::int as total
         from trader_collections c
@@ -1077,7 +1187,24 @@ export class TraderReceivableService {
        order by ${sql.raw(sortColumn)} ${sql.raw(direction)}, c.created_at desc
        limit ${limit} offset ${offset}
     `.execute(this.database);
-    return this.page(result.rows, page, pageSize);
+    // ONE configuration query for the whole page, then pure in-memory
+    // resolution. Calling businessDateOf per row would be an N+1; deriving
+    // the date in SQL would restate the rule in a second language.
+    const businessDates = await this.businessDays.businessDatesFor(
+      result.rows.map((row) => row.confirmedAt),
+    );
+    const enriched = result.rows.map((row) => ({
+      ...row,
+      // Transaction Business Date — from the Collection confirmation
+      // instant, NOT trader_receivables.business_date. Null when no
+      // authoritative timestamp exists; never guessed.
+      confirmationBusinessDate:
+        // `== null` so an absent value is treated the same as an explicit one:
+        // `confirmedAt` is optional on this row type, so `=== null` let
+        // `undefined` through and every such row silently lost its Business Date.
+        row.confirmedAt == null ? null : (businessDates.get(row.confirmedAt) ?? null),
+    }));
+    return { ...this.page(enriched, page, pageSize), appliedDateMode: applied };
   }
 
   /**
@@ -1110,7 +1237,10 @@ export class TraderReceivableService {
          and (${query.traderId ?? null}::uuid is null or r.trader_id = ${query.traderId ?? null}::uuid)
     `.execute(this.database);
     const filters = this.collectionFilters(companyId, query);
-    const collectionTotals = await sql<{ collectedThisPeriod: string; reversedCollections: number }>`
+    const collectionTotals = await sql<{
+      collectedThisPeriod: string;
+      reversedCollections: number;
+    }>`
       select
         coalesce(sum(c.amount_received) filter (where c.status = 'confirmed'), 0)::text as "collectedThisPeriod",
         count(*) filter (where c.status = 'reversed')::int as "reversedCollections"
@@ -1125,13 +1255,18 @@ export class TraderReceivableService {
       totalRemainingDue: "0.00",
       tradersWithOutstandingReceivables: 0,
     };
-    const collectionRow = collectionTotals.rows[0] ?? { collectedThisPeriod: "0.00", reversedCollections: 0 };
+    const collectionRow = collectionTotals.rows[0] ?? {
+      collectedThisPeriod: "0.00",
+      reversedCollections: 0,
+    };
     return {
       collectedThisPeriod: new Decimal(collectionRow.collectedThisPeriod).toFixed(2),
       outstandingReceivablesCount: receivableRow.outstandingReceivablesCount,
       partiallyCollectedAmount: new Decimal(receivableRow.partiallyCollectedAmount).toFixed(2),
       reversedCollections: collectionRow.reversedCollections,
-      totalOutstandingReceivables: new Decimal(receivableRow.totalOutstandingReceivables).toFixed(2),
+      totalOutstandingReceivables: new Decimal(receivableRow.totalOutstandingReceivables).toFixed(
+        2,
+      ),
       totalRemainingDue: new Decimal(receivableRow.totalRemainingDue).toFixed(2),
       tradersWithOutstandingReceivables: receivableRow.tradersWithOutstandingReceivables,
     };
@@ -1175,10 +1310,7 @@ export class TraderReceivableService {
     const logoDataUri = branding.hasLogo
       ? await this.companyProfile
           .logoContent()
-          .then(
-            (logo) =>
-              `data:${logo.mediaType};base64,${logo.bytes.toString("base64")}`,
-          )
+          .then((logo) => `data:${logo.mediaType};base64,${logo.bytes.toString("base64")}`)
           .catch(() => null)
       : null;
     const generatedAt = new Intl.DateTimeFormat("en-GB", {
@@ -1392,9 +1524,14 @@ export class TraderReceivableService {
   private async resolveCollectionPayment(
     database: Kysely<DatabaseSchema>,
     companyId: string,
-    input: { bankAccountId?: string; paymentMethod?: "bank_transfer" | "cash"; paymentReference?: string },
+    input: {
+      bankAccountId?: string;
+      paymentMethod?: "bank_transfer" | "cash";
+      paymentReference?: string;
+    },
   ): Promise<{
     readonly bankAccountId: string | null;
+    readonly cashAccountId: string | null;
     readonly method: "bank_transfer" | "cash";
     readonly paymentReference: string | null;
   }> {
@@ -1409,7 +1546,24 @@ export class TraderReceivableService {
           HttpStatus.BAD_REQUEST,
         );
       }
-      return { bankAccountId: null, method, paymentReference: null };
+      // Auto-select the default (main_cash) Company cash account, matching
+      // the Trader Settlement funding-account pattern -- a cash collection
+      // always needs somewhere in the Cashbook to land.
+      const defaultCashAccount = await sql<{ id: string }>`
+        select id from company_cash_accounts
+         where company_id = ${companyId}::uuid and is_active and cash_account_type = 'main_cash'
+         order by created_at asc
+         limit 1
+      `.execute(database);
+      const cashAccountId = defaultCashAccount.rows[0]?.id;
+      if (cashAccountId === undefined) {
+        throw new ApplicationException(
+          "cash_account_not_configured",
+          "No active main Cash account is configured for this Company",
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      return { bankAccountId: null, cashAccountId, method, paymentReference: null };
     }
     if (bankAccountId === null || paymentReference === null) {
       throw new ApplicationException(
@@ -1430,7 +1584,125 @@ export class TraderReceivableService {
         HttpStatus.BAD_REQUEST,
       );
     }
-    return { bankAccountId, method, paymentReference };
+    return { bankAccountId, cashAccountId: null, method, paymentReference };
+  }
+
+  /**
+   * Create and confirm the operational Cash/Bank Movement for a confirmed
+   * Trader collection -- the reverse direction of a Trader Settlement's
+   * funding movement. Money comes IN from the Trader, so this is always a
+   * deposit: `cash_deposit` (destination = the resolved main Cash account)
+   * or `bank_deposit` (destination = the chosen Company bank account), with
+   * no source account -- the Trader is external to the Company's own
+   * accounts. Mirrors `createSettlementMovement`'s pattern: the Accounting
+   * Event is already captured synchronously by the `trader_collections`
+   * status trigger, so this Movement only links to it and must not post a
+   * second Journal for the same fact.
+   */
+  private async createCollectionMovement(
+    transaction: Kysely<DatabaseSchema>,
+    options: {
+      readonly companyId: string;
+      readonly collectionId: string;
+      readonly collectionNumber: string;
+      readonly payment: {
+        readonly bankAccountId: string | null;
+        readonly cashAccountId: string | null;
+        readonly method: "bank_transfer" | "cash";
+      };
+      readonly amountReceived: string;
+      readonly paymentDate: string;
+      readonly actorId: string;
+    },
+  ): Promise<void> {
+    const ownership = await sql<{
+      eventId: string | null;
+      accountingEnabled: boolean;
+    }>`
+      select
+        (
+          select e.id from accounting_events e
+          where e.company_id = ${options.companyId}::uuid
+            and e.source_entity_type = 'trader_collection'
+            and e.source_entity_id = ${options.collectionId}::uuid
+            and e.event_type = 'trader_receivable_payment_received'
+        ) as "eventId",
+        exists (
+          select 1 from accounting_configurations c
+          where c.company_id = ${options.companyId}::uuid
+            and c.accounting_enabled
+        ) as "accountingEnabled"
+    `.execute(transaction);
+    const ownerEventId = ownership.rows[0]?.eventId ?? null;
+    if (ownerEventId === null && ownership.rows[0]?.accountingEnabled === true) {
+      throw new ApplicationException(
+        "trader_collection_cash_movement_not_created",
+        "The Trader Collection Cash/Bank Movement could not be linked to Accounting",
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+
+    const isCash = options.payment.method === "cash";
+    const movementType = isCash ? "cash_deposit" : "bank_deposit";
+    const paymentMethodForMovement = isCash ? "cash" : "visa";
+    const movementNumber = await this.history.nextReferenceNumber(
+      transaction,
+      options.companyId,
+      "cash_bank_movement",
+      "CBM",
+    );
+    const idempotencyKey = `${options.collectionNumber}_${movementNumber}`;
+    await sql`
+      insert into cash_bank_movements (
+        id,
+        company_id,
+        movement_number,
+        movement_type,
+        movement_date,
+        accounting_date,
+        source_cash_account_id,
+        source_bank_account_id,
+        destination_cash_account_id,
+        destination_bank_account_id,
+        amount,
+        fee_amount,
+        payment_method,
+        reference_number,
+        description,
+        status,
+        correlation_id,
+        idempotency_identity,
+        accounting_event_id,
+        confirmed_by_account_id,
+        confirmed_at,
+        created_by_account_id,
+        created_at
+      ) values (
+        ${randomUUID()}::uuid,
+        ${options.companyId}::uuid,
+        ${movementNumber},
+        ${movementType},
+        ${options.paymentDate}::date,
+        ${options.paymentDate}::date,
+        null::uuid,
+        null::uuid,
+        ${isCash ? options.payment.cashAccountId : null}::uuid,
+        ${isCash ? null : options.payment.bankAccountId}::uuid,
+        ${new Decimal(options.amountReceived).toFixed(2)}::numeric,
+        '0'::numeric,
+        ${paymentMethodForMovement},
+        ${options.collectionNumber},
+        ${"Trader collection " + options.collectionNumber},
+        'confirmed',
+        ${options.collectionId},
+        ${idempotencyKey},
+        ${ownerEventId}::uuid,
+        ${options.actorId}::uuid,
+        now(),
+        ${options.actorId}::uuid,
+        now()
+      )
+    `.execute(transaction);
   }
 
   private async receivableResult(
@@ -1508,7 +1780,16 @@ export class TraderReceivableService {
     readonly reversalReason: string | null;
     readonly reversedBy: string | null;
     readonly status: "confirmed" | "reversed";
+    /**
+     * Trader business Code (`t.code`).
+     *
+     * Required because the mapper assigns it on every row; nullable because
+     * the source row declares `traderCode: string | null`.
+     */
+    readonly traderCode: string | null;
     readonly traderName: string;
+    /** Arabic Trader name. Nullable: `t.name_ar` is optional on the Trader. */
+    readonly traderNameAr: string | null;
   }> {
     const row = (
       await sql<{
@@ -1529,11 +1810,14 @@ export class TraderReceivableService {
         status: "confirmed" | "reversed";
         swiftCode: string | null;
         traderName: string;
+        traderCode: string | null;
+        traderNameAr: string | null;
       }>`
         select c.collection_number as "collectionNumber", c.status,
                c.payment_date::text as "paymentDate", c.payment_method as "paymentMethod",
                c.payment_reference as "paymentReference", c.notes, c.created_at::text as "createdAt",
-               t.name_en as "traderName",
+               t.name_en as "traderName", t.code as "traderCode",
+               t.name_ar as "traderNameAr",
                coalesce(receiver.username, 'Legacy/Unknown') as "receivedBy",
                coalesce(reverser.username, 'Legacy/Unknown') as "reversedBy",
                c.reversed_at::text as "reversedAt", c.reversal_reason as "reversalReason",
@@ -1583,7 +1867,9 @@ export class TraderReceivableService {
       reversalReason: row.reversalReason,
       reversedBy: row.status === "reversed" ? row.reversedBy : null,
       status: row.status,
+      traderCode: row.traderCode,
       traderName: row.traderName,
+      traderNameAr: row.traderNameAr,
     };
   }
 
@@ -1594,6 +1880,24 @@ export class TraderReceivableService {
     readonly lines: readonly TraderCollectionAllocationDetail[];
     readonly summary: TraderCollectionSummaryTotals;
   }> {
+    // Amount Received and the Trader's total outstanding balance, in one
+    // Company-scoped query. The correlated subquery is scoped to the same
+    // Company and Trader as the Collection, so no other Company's Receivables
+    // can contribute to the balance.
+    const context = (
+      await sql<{ amountReceived: string; traderOutstandingBalance: string }>`
+        select c.amount_received::text as "amountReceived",
+               coalesce((
+                 select sum(r.outstanding_amount)
+                   from trader_receivables r
+                  where r.company_id = c.company_id and r.trader_id = c.trader_id
+               ), 0)::text as "traderOutstandingBalance"
+          from trader_collections c
+         where c.id = ${collectionId}::uuid and c.company_id = ${companyId}::uuid
+      `.execute(this.database)
+    ).rows[0];
+    const collectionAmountReceived = context?.amountReceived ?? "0";
+    const traderOutstandingBalance = new Decimal(context?.traderOutstandingBalance ?? 0).toFixed(2);
     const rows = (
       await sql<{
         amountAllocated: string;
@@ -1603,10 +1907,14 @@ export class TraderReceivableService {
         receivableNumber: string;
         receivableStatus: string;
         reason: string;
+        receivableId: string;
         sourceReference: string | null;
         sourceType: string;
       }>`
-        select r.receivable_number as "receivableNumber", r.source_type as "sourceType",
+        -- The Receivable identifier is what its detail route consumes; the
+        -- Receivable Number stays the value the User reads.
+        select r.id as "receivableId",
+               r.receivable_number as "receivableNumber", r.source_type as "sourceType",
                r.source_reference as "sourceReference", r.business_date::text as "businessDate",
                r.reason, r.original_amount_due::text as "originalAmountDue",
                r.outstanding_amount::text as "outstandingAmount", r.status as "receivableStatus",
@@ -1619,6 +1927,7 @@ export class TraderReceivableService {
     ).rows;
     const lines: TraderCollectionAllocationDetail[] = rows.map((row) => ({
       amountCollectedNow: new Decimal(row.amountAllocated).toFixed(2),
+      receivableId: row.receivableId,
       businessDate: row.businessDate,
       originalAmountDue: new Decimal(row.originalAmountDue).toFixed(2),
       previouslyCollected: new Decimal(row.originalAmountDue)
@@ -1646,6 +1955,12 @@ export class TraderReceivableService {
         totalOriginalAmountDue: new Decimal(0),
       },
     );
+    // Total Applied is the sum of what this Collection allocated. Unapplied is
+    // whatever the Trader paid beyond that; it is clamped at zero because a
+    // negative "unapplied" is not a real state — over-allocation is prevented
+    // upstream, so a negative here would only ever be a rounding artefact.
+    const amountReceived = new Decimal(collectionAmountReceived);
+    const unapplied = amountReceived.minus(totals.amountReceivedNow);
     return {
       lines,
       summary: {
@@ -1653,7 +1968,10 @@ export class TraderReceivableService {
         previouslyCollected: totals.previouslyCollected.toFixed(2),
         receivableCount: lines.length,
         remainingDue: totals.remainingDue.toFixed(2),
+        totalApplied: totals.amountReceivedNow.toFixed(2),
         totalOriginalAmountDue: totals.totalOriginalAmountDue.toFixed(2),
+        traderOutstandingBalance: traderOutstandingBalance,
+        unappliedAmount: unapplied.lessThan(0) ? "0.00" : unapplied.toFixed(2),
       },
     };
   }
@@ -1663,12 +1981,32 @@ export class TraderReceivableService {
    * endpoints, so the summary cards always describe the same slice the list
    * shows.
    */
+  /**
+   * The Business Date predicate, or a no-op.
+   *
+   * Built by `ReportDateModeService` so this screen cannot develop its own idea
+   * of where a business day begins. Matches everything in Calendar Date mode,
+   * which is why the calendar filters alongside it need no conditional.
+   *
+   * The column is `trader_collections.confirmed_at` — the operational instant
+   * the Collection was confirmed. It is NOT `trader_receivables.business_date`,
+   * which is a separate date-only field with its own established meaning.
+   */
+  private businessDatePredicate(
+    applied: AppliedReportDateMode | undefined,
+  ): ReturnType<typeof sql> {
+    if (applied === undefined || applied.dateMode !== "business_date") return sql`true`;
+    return this.reportDateModes.predicate(BUSINESS_DATE_COLUMN, applied);
+  }
+
   private collectionFilters(
     companyId: string,
     query: TraderCollectionFilterDto,
+    applied?: AppliedReportDateMode,
   ): ReturnType<typeof sql> {
     return sql`
       c.company_id = ${companyId}::uuid
+        and ${this.businessDatePredicate(applied)}
         and (${query.traderId ?? null}::uuid is null or c.trader_id = ${query.traderId ?? null}::uuid)
         and (${query.collectionNumber ?? null}::text is null
              or c.collection_number ilike '%' || ${query.collectionNumber ?? null} || '%')

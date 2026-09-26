@@ -177,7 +177,7 @@ older, competing reconciliation workflows described later in this document.
   Preview/Print/Download available from the collection success screen, the
   Driver Collections list/detail, and the Order row/detail.
 - Driver Shipment Manifest: a separate document (`POST
-  cash/driver-shipment-manifest/pdf`), reusing the same PDF renderer but with
+cash/driver-shipment-manifest/pdf`), reusing the same PDF renderer but with
   its own HTML template — triggered only from an Orders bulk action, never
   merged with the Driver Collection Report.
 
@@ -197,7 +197,7 @@ per-Order and bulk "Settle Trader" UI, both fully removed.
 - Route: `/trader-settlements` (single nav entry). `/traders` redirects here.
 - **Positive balance only.** The New Settlement Trader picker shows a Trader
   only when their server-computed `unsettledNetPayable` (from `GET
-  operations/traders`) is strictly greater than zero, sorted highest-due
+operations/traders`) is strictly greater than zero, sorted highest-due
   first. A zero balance (nothing to settle) or a negative balance (the
   Trader owes the Company — see limitation below) never appears in this
   workflow.

@@ -5,15 +5,24 @@ import {
   RequireAnyPermission,
   RequireIdentityKinds,
 } from "../authentication/authentication.decorators.js";
+// Imported as values, not types: `emitDecoratorMetadata` can only record a
+// DTO class for the global ValidationPipe when the symbol survives to runtime,
+// so these query/body contracts are actually validated.
+// eslint-disable-next-line @typescript-eslint/consistent-type-imports
 import {
   AccountingActivationDto,
   AccountingActivationPreviewDto,
   AccountingAreaChangeDto,
   AccountingMappingDecisionDto,
+  AccountingPayrollSupportRepairDto,
   AccountingSetupDateQueryDto,
   AccountingZeroOpeningDto,
 } from "./accounting-setup.dto.js";
 import { AccountingSetupService } from "./accounting-setup.service.js";
+// Imported as a value, not a type: `emitDecoratorMetadata` can only record a
+// DTO class for the global ValidationPipe when the symbol survives to runtime,
+// so this body contract is actually validated.
+// eslint-disable-next-line @typescript-eslint/consistent-type-imports
 import { AccountingReasonDto } from "./accounting.dto.js";
 
 @ApiTags("accounting-setup")
@@ -45,6 +54,15 @@ export class AccountingSetupController {
     @Headers("x-idempotency-key") key?: string,
   ) {
     return this.setup.decideSuggestion(suggestionId, input, key);
+  }
+
+  @Post("setup/payroll-support/repair")
+  @RequireAnyPermission("accounting.configuration.manage", "users_roles.manage")
+  public repairPayrollSupport(
+    @Body() input: AccountingPayrollSupportRepairDto,
+    @Headers("x-idempotency-key") key?: string,
+  ) {
+    return this.setup.repairPayrollSupport(input, key);
   }
 
   @Get("setup/zero-opening")

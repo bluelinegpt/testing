@@ -7,10 +7,7 @@ import { DATABASE } from "../infrastructure/database/database.tokens.js";
 import type { DatabaseSchema } from "../infrastructure/database/database.types.js";
 import { ApplicationException } from "../presentation/errors/application.exception.js";
 import { AccountingOperationSupport } from "./accounting-operation.support.js";
-import type {
-  AccountingReportKind,
-  AccountingReportQueryDto,
-} from "./accounting-report.dto.js";
+import type { AccountingReportKind, AccountingReportQueryDto } from "./accounting-report.dto.js";
 
 type Row = Readonly<Record<string, unknown>>;
 type ReportMode = "interactive" | "export" | "pdf";
@@ -94,7 +91,9 @@ export class AccountingReportService {
         ...(row.hasPostedJournals === false ? ["No Posted Journals are available yet."] : []),
         ...(Number(row.approvedUnpostedCount) > 0 ? ["Approved but unposted Journals exist."] : []),
         ...(Number(row.failedEventCount) > 0 ? ["Failed Accounting Events exist."] : []),
-        ...(Number(row.configurationBlockedCount) > 0 ? ["Configuration-blocked Accounting Events exist."] : []),
+        ...(Number(row.configurationBlockedCount) > 0
+          ? ["Configuration-blocked Accounting Events exist."]
+          : []),
         ...(Number(row.periodBlockedCount) > 0 ? ["Period-blocked Accounting Events exist."] : []),
         ...(Number(row.unclassifiedAccountCount) > 0
           ? ["Some posting Accounts are unclassified and will remain visible under Unclassified."]
@@ -102,11 +101,17 @@ export class AccountingReportService {
       ],
       warningCodes: [
         ...(row.hasPostedJournals === false ? ["accounting_report_no_posted_journals"] : []),
-        ...(Number(row.approvedUnpostedCount) > 0 ? ["accounting_report_unposted_journals_exist"] : []),
+        ...(Number(row.approvedUnpostedCount) > 0
+          ? ["accounting_report_unposted_journals_exist"]
+          : []),
         ...(Number(row.failedEventCount) > 0 ? ["accounting_report_failed_events_exist"] : []),
-        ...(Number(row.configurationBlockedCount) > 0 ? ["accounting_report_configuration_blockers_exist"] : []),
+        ...(Number(row.configurationBlockedCount) > 0
+          ? ["accounting_report_configuration_blockers_exist"]
+          : []),
         ...(Number(row.periodBlockedCount) > 0 ? ["accounting_report_period_blockers_exist"] : []),
-        ...(Number(row.unclassifiedAccountCount) > 0 ? ["accounting_report_unclassified_accounts"] : []),
+        ...(Number(row.unclassifiedAccountCount) > 0
+          ? ["accounting_report_unclassified_accounts"]
+          : []),
       ],
     };
   }
@@ -118,18 +123,39 @@ export class AccountingReportService {
   ): Promise<AccountingReportEnvelope> {
     this.support.assertPermission("accounting.view");
     this.validate(kind, query);
-    const limit = mode === "interactive" ? Math.min(query.pageSize ?? 50, 200) : mode === "pdf" ? 1_000 : 5_000;
-    const page = mode === "interactive" ? query.page ?? 1 : 1;
-    let data: { columns: readonly string[]; items: readonly Row[]; total: number; totals: Row; warnings?: readonly string[] };
+    const limit =
+      mode === "interactive" ? Math.min(query.pageSize ?? 50, 200) : mode === "pdf" ? 1_000 : 5_000;
+    const page = mode === "interactive" ? (query.page ?? 1) : 1;
+    let data: {
+      columns: readonly string[];
+      items: readonly Row[];
+      total: number;
+      totals: Row;
+      warnings?: readonly string[];
+    };
     switch (kind) {
-      case "trial-balance": data = await this.trialBalance(query, page, limit); break;
+      case "trial-balance":
+        data = await this.trialBalance(query, page, limit);
+        break;
       case "general-ledger":
-      case "account-statement": data = await this.ledger(query, page, limit); break;
-      case "profit-and-loss": data = await this.profitAndLoss(query); break;
-      case "balance-sheet": data = await this.balanceSheet(query); break;
-      case "cash-movement": data = await this.cashMovement(query); break;
-      case "general-expenses": data = await this.generalExpenses(query, page, limit); break;
-      case "vat": data = await this.vat(query); break;
+      case "account-statement":
+        data = await this.ledger(query, page, limit);
+        break;
+      case "profit-and-loss":
+        data = await this.profitAndLoss(query);
+        break;
+      case "balance-sheet":
+        data = await this.balanceSheet(query);
+        break;
+      case "cash-movement":
+        data = await this.cashMovement(query);
+        break;
+      case "general-expenses":
+        data = await this.generalExpenses(query, page, limit);
+        break;
+      case "vat":
+        data = await this.vat(query);
+        break;
     }
     const metadata = await sql<{ provisional: boolean; snapshotAt: string }>`
       select now()::text as "snapshotAt",
@@ -145,7 +171,8 @@ export class AccountingReportService {
     return {
       columns: data.columns,
       currency: "AED",
-      dataSource: kind === "general-expenses" ? "operational_reconciliation" : "posted_journal_lines",
+      dataSource:
+        kind === "general-expenses" ? "operational_reconciliation" : "posted_journal_lines",
       filters: {
         accountId: query.accountId,
         asOfDate: query.asOfDate,
@@ -165,17 +192,25 @@ export class AccountingReportService {
       totals: data.totals,
       truncated,
       warnings: [
-        ...(metadata.rows[0]!.provisional ? ["This report includes an Open or Reopened Period and is provisional."] : []),
+        ...(metadata.rows[0]!.provisional
+          ? ["This report includes an Open or Reopened Period and is provisional."]
+          : []),
         ...(data.warnings ?? []),
-        ...(truncated ? [`The ${mode} limit is ${limit} rows. Narrow the filters to include all rows.`] : []),
+        ...(truncated
+          ? [`The ${mode} limit is ${limit} rows. Narrow the filters to include all rows.`]
+          : []),
       ],
       warningCodes: [
         ...(metadata.rows[0]!.provisional ? ["accounting_report_open_period_provisional"] : []),
         ...(kind === "vat" ? ["accounting_report_vat_not_tax_return"] : []),
         ...(kind === "cash-movement" ? ["accounting_report_bank_reconciliation_unavailable"] : []),
-        ...(kind === "general-expenses" ? ["accounting_report_reconciliation_difference_possible"] : []),
-        ...((data.warnings?.length ?? 0) > 0 && !["vat","cash-movement","general-expenses"].includes(kind)
-          ? ["accounting_report_reconciliation_difference"] : []),
+        ...(kind === "general-expenses"
+          ? ["accounting_report_reconciliation_difference_possible"]
+          : []),
+        ...((data.warnings?.length ?? 0) > 0 &&
+        !["vat", "cash-movement", "general-expenses"].includes(kind)
+          ? ["accounting_report_reconciliation_difference"]
+          : []),
         ...(truncated ? ["accounting_report_query_limit_exceeded"] : []),
       ],
     };
@@ -195,7 +230,12 @@ export class AccountingReportService {
   public async document(
     type: "journal" | "opening-balance" | "expense" | "expense-payment" | "cash-bank-movement",
     id: string,
-  ): Promise<{ columns: readonly string[]; items: readonly Row[]; title: string; warnings: readonly string[] }> {
+  ): Promise<{
+    columns: readonly string[];
+    items: readonly Row[];
+    title: string;
+    warnings: readonly string[];
+  }> {
     this.support.assertPermission("accounting.view");
     const { companyId } = this.support.context();
     let result;
@@ -250,17 +290,38 @@ export class AccountingReportService {
       `.execute(this.database);
     }
     if (result.rows.length === 0) {
-      throw new ApplicationException("accounting_document_not_found", "The Accounting document was not found", HttpStatus.NOT_FOUND);
+      throw new ApplicationException(
+        "accounting_document_not_found",
+        "The Accounting document was not found",
+        HttpStatus.NOT_FOUND,
+      );
     }
-    return { columns: Object.keys(result.rows[0]!), items: result.rows, title: titlesForDocument[type], warnings: [] };
+    return {
+      columns: Object.keys(result.rows[0]!),
+      items: result.rows,
+      title: titlesForDocument[type],
+      warnings: [],
+    };
   }
 
   private validate(kind: AccountingReportKind, query: AccountingReportQueryDto): void {
-    if (query.dateFrom !== undefined && query.dateTo !== undefined && query.dateFrom > query.dateTo) {
-      throw new ApplicationException("accounting_report_date_range_invalid", "The report start date must not be after the end date", HttpStatus.BAD_REQUEST);
+    if (
+      query.dateFrom !== undefined &&
+      query.dateTo !== undefined &&
+      query.dateFrom > query.dateTo
+    ) {
+      throw new ApplicationException(
+        "accounting_report_date_range_invalid",
+        "The report start date must not be after the end date",
+        HttpStatus.BAD_REQUEST,
+      );
     }
     if (["general-ledger", "account-statement"].includes(kind) && query.accountId === undefined) {
-      throw new ApplicationException("accounting_report_account_required", "Select an Account for this report", HttpStatus.BAD_REQUEST);
+      throw new ApplicationException(
+        "accounting_report_account_required",
+        "Select an Account for this report",
+        HttpStatus.BAD_REQUEST,
+      );
     }
   }
 
@@ -311,7 +372,27 @@ export class AccountingReportService {
            -coalesce(sum(greatest(-(opening+debits-credits),0)),0))::text as difference from balances
     `.execute(this.database);
     const total = result.rows[0]?.totalRows ?? 0;
-    return { columns: ["code","accountNameEn","accountNameAr","accountType","accountClass","openingDebit","openingCredit","periodDebit","periodCredit","closingDebit","closingCredit"], items: result.rows.map(({ totalRows: _, ...row }) => row), total, totals: totals.rows[0] ?? {} };
+    return {
+      columns: [
+        "code",
+        "accountNameEn",
+        "accountNameAr",
+        "accountType",
+        "accountClass",
+        "openingDebit",
+        "openingCredit",
+        "periodDebit",
+        "periodCredit",
+        "closingDebit",
+        "closingCredit",
+      ],
+      items: result.rows.map(({ totalRows, ...row }) => {
+        void totalRows;
+        return row;
+      }),
+      total,
+      totals: totals.rows[0] ?? {},
+    };
   }
 
   private async ledger(query: AccountingReportQueryDto, page: number, limit: number) {
@@ -325,10 +406,18 @@ export class AccountingReportService {
     `.execute(this.database);
     const account = accountResult.rows[0];
     if (account === undefined) {
-      throw new ApplicationException("accounting_account_not_found", "The selected Account was not found", HttpStatus.NOT_FOUND);
+      throw new ApplicationException(
+        "accounting_account_not_found",
+        "The selected Account was not found",
+        HttpStatus.NOT_FOUND,
+      );
     }
     if (account.isPostingAccount !== true) {
-      throw new ApplicationException("accounting_report_posting_account_required", "Select a Posting Account for this report", HttpStatus.BAD_REQUEST);
+      throw new ApplicationException(
+        "accounting_report_posting_account_required",
+        "Select a Posting Account for this report",
+        HttpStatus.BAD_REQUEST,
+      );
     }
     const result = await sql<Row & { totalRows: number }>`
       with base as (
@@ -338,6 +427,8 @@ export class AccountingReportService {
            and j.business_date < ${query.dateFrom ?? "0001-01-01"}::date
       ), activity as (
         select j.id as "journalId",j.journal_number as "journalNumber",j.business_date::text as "date",
+               j.source_entity_type as "sourceEntityType",j.source_entity_id as "sourceEntityId",
+               j.accounting_event_id as "eventId",
                l.line_number as "lineNumber",j.source_type as "source",coalesce(l.description,j.description) as "description",
                j.source_reference as "reference",l.debit::text as "debit",l.credit::text as "credit",
                (select opening from base)+sum(l.debit-l.credit) over(order by j.business_date,j.journal_number,l.line_number,l.id) as running,
@@ -351,15 +442,38 @@ export class AccountingReportService {
              closing::text as "closingBalance"
         from activity order by date,"journalNumber","lineNumber" limit ${limit} offset ${offset}
     `.execute(this.database);
-    const items = result.rows.map(({ totalRows: _, running: _running, closing: _closing, ...row }) => row);
+    const items = result.rows.map(({ totalRows, running, closing, ...row }) => {
+      void totalRows;
+      void running;
+      void closing;
+      return row;
+    });
     const total = result.rows[0]?.totalRows ?? 0;
-    return { columns: ["date","journalNumber","source","description","reference","debit","credit","runningBalance"], items, total, totals: { ...account, openingBalance: result.rows[0]?.openingBalance ?? "0", closingBalance: result.rows[0]?.closingBalance ?? result.rows[0]?.openingBalance ?? "0" } };
+    return {
+      columns: [
+        "date",
+        "journalNumber",
+        "source",
+        "description",
+        "reference",
+        "debit",
+        "credit",
+        "runningBalance",
+      ],
+      items,
+      total,
+      totals: {
+        ...account,
+        openingBalance: result.rows[0]?.openingBalance ?? "0",
+        closingBalance: result.rows[0]?.closingBalance ?? result.rows[0]?.openingBalance ?? "0",
+      },
+    };
   }
 
   private async profitAndLoss(query: AccountingReportQueryDto) {
     const { companyId } = this.support.context();
     const result = await sql<Row>`
-      select a.account_type as "section",coalesce(a.account_class,'unclassified') as "accountClass",
+      select a.id,a.account_type as "section",coalesce(a.account_class,'unclassified') as "accountClass",
              a.code,a.name_en as "accountNameEn",a.name_ar as "accountNameAr",
              (case when a.account_type='revenue' then sum(l.credit-l.debit) else sum(l.debit-l.credit) end)::text as amount
         from journal_lines l join journal_entries j on j.id=l.journal_entry_id and j.company_id=l.company_id
@@ -378,14 +492,19 @@ export class AccountingReportService {
        where j.company_id=${companyId}::uuid and j.status in ('posted','reversed')
          and j.business_date between ${query.dateFrom ?? "0001-01-01"}::date and ${query.dateTo ?? "9999-12-31"}::date
     `.execute(this.database);
-    return { columns: ["section","accountClass","code","accountNameEn","accountNameAr","amount"], items: result.rows, total: result.rows.length, totals: totals.rows[0] ?? {} };
+    return {
+      columns: ["section", "accountClass", "code", "accountNameEn", "accountNameAr", "amount"],
+      items: result.rows,
+      total: result.rows.length,
+      totals: totals.rows[0] ?? {},
+    };
   }
 
   private async balanceSheet(query: AccountingReportQueryDto) {
     const { companyId } = this.support.context();
     const asOf = query.asOfDate ?? query.dateTo ?? "9999-12-31";
     const result = await sql<Row>`
-      select a.account_type as "section",coalesce(a.account_class,'unclassified') as "accountClass",
+      select a.id,a.account_type as "section",coalesce(a.account_class,'unclassified') as "accountClass",
              a.code,a.name_en as "accountNameEn",a.name_ar as "accountNameAr",
              (case when a.account_type='asset' then sum(l.debit-l.credit) else sum(l.credit-l.debit) end)::text as amount
         from journal_lines l join journal_entries j on j.id=l.journal_entry_id and j.company_id=l.company_id
@@ -419,13 +538,24 @@ export class AccountingReportService {
              (assets-liabilities-equity-earnings.value)::text as "balanceDifference",
              (assets=liabilities+equity+earnings.value) as balanced from values,earnings
     `.execute(this.database);
-    return { columns: ["section","accountClass","code","accountNameEn","accountNameAr","amount"], items: result.rows, total: result.rows.length, totals: totals.rows[0] ?? {}, warnings: totals.rows[0]?.balanced === false ? ["Assets do not equal Liabilities plus Equity. No artificial balancing row was added."] : [] };
+    return {
+      columns: ["section", "accountClass", "code", "accountNameEn", "accountNameAr", "amount"],
+      items: result.rows,
+      total: result.rows.length,
+      totals: totals.rows[0] ?? {},
+      warnings:
+        totals.rows[0]?.balanced === false
+          ? ["Assets do not equal Liabilities plus Equity. No artificial balancing row was added."]
+          : [],
+    };
   }
 
   private async cashMovement(query: AccountingReportQueryDto) {
     const { companyId } = this.support.context();
     const result = await sql<Row>`
-      select j.business_date::text as date,j.journal_number as "journalNumber",j.source_type as source,
+      select j.id as "journalId",j.source_entity_type as "sourceEntityType",
+             j.source_entity_id as "sourceEntityId",j.accounting_event_id as "eventId",
+             j.business_date::text as date,j.journal_number as "journalNumber",j.source_type as source,
              case when j.source_type='bank_transfer' or (
                select count(*) from journal_lines x join chart_of_accounts xa on xa.id=x.account_id and xa.company_id=x.company_id
                 where x.journal_entry_id=j.id and xa.account_class in('cash','bank'))>1 then 'internal_transfer'
@@ -439,7 +569,8 @@ export class AccountingReportService {
         join chart_of_accounts a on a.id=l.account_id and a.company_id=l.company_id
        where j.company_id=${companyId}::uuid and j.status in ('posted','reversed') and a.account_class in('cash','bank')
          and j.business_date between ${query.dateFrom ?? "0001-01-01"}::date and ${query.dateTo ?? "9999-12-31"}::date
-       group by j.id,j.business_date,j.journal_number,j.source_type,j.description,j.source_reference
+       group by j.id,j.source_entity_type,j.source_entity_id,j.accounting_event_id,
+             j.business_date,j.journal_number,j.source_type,j.description,j.source_reference
        order by j.business_date,j.journal_number
     `.execute(this.database);
     const totals = await sql<Row>`
@@ -456,7 +587,23 @@ export class AccountingReportService {
                coalesce(sum(transfer_amount) filter(where internal),0)::text as "internalTransfers"
           from movements
     `.execute(this.database);
-    return { columns: ["date","journalNumber","source","direction","amount","description","reference"], items: result.rows, total: result.rows.length, totals: totals.rows[0] ?? {}, warnings: ["Internal transfers are shown but excluded from consolidated external inflow and outflow totals."] };
+    return {
+      columns: [
+        "date",
+        "journalNumber",
+        "source",
+        "direction",
+        "amount",
+        "description",
+        "reference",
+      ],
+      items: result.rows,
+      total: result.rows.length,
+      totals: totals.rows[0] ?? {},
+      warnings: [
+        "Internal transfers are shown but excluded from consolidated external inflow and outflow totals.",
+      ],
+    };
   }
 
   private async generalExpenses(query: AccountingReportQueryDto, page: number, limit: number) {
@@ -469,9 +616,27 @@ export class AccountingReportService {
              e.payee_name_snapshot as payee,e.description,e.status,e.payment_status as "paymentStatus",
              e.approved_amount::text as "operationalApproved",e.paid_amount::text as "operationalPaid",
              e.outstanding_amount::text as "operationalOutstanding",e.recoverable_vat_amount::text as "recoverableVat",
-             coalesce((select sum(l.debit-l.credit) from journal_lines l join journal_entries j
-                on j.id=l.journal_entry_id and j.company_id=l.company_id
-               where l.general_expense_id=e.id and j.status in ('posted','reversed')),0)::text as "postedNet",
+             -- Posted Net is the expense actually RECOGNISED in the ledger, so
+             -- it sums only lines that hit an expense-type Account.
+             --
+             -- Without that restriction the subquery summed every posted line
+             -- carrying this Expense — both sides of the approval Journal and
+             -- both sides of each payment Journal. Those always balance, so the
+             -- column could only ever report 0.00 once the Expense was posted,
+             -- which read as "nothing was posted" for a correctly posted
+             -- Expense. Recoverable input VAT is deliberately still excluded:
+             -- it debits a receivable, not an expense, and has its own column.
+             --
+             -- 'reversed' stays alongside 'posted': a reversed original keeps
+             -- its lines and the reversal Journal contributes the counter-lines,
+             -- so a reversed Expense correctly nets back to zero.
+             coalesce((select sum(l.debit-l.credit) from journal_lines l
+                join journal_entries j
+                  on j.id=l.journal_entry_id and j.company_id=l.company_id
+                join chart_of_accounts a
+                  on a.id=l.account_id and a.company_id=l.company_id
+               where l.general_expense_id=e.id and j.status in ('posted','reversed')
+                 and a.account_type='expense'),0)::text as "postedNet",
              count(*) over()::int as "totalRows"
         from general_expenses e where e.company_id=${companyId}::uuid
          and e.expense_date between ${query.dateFrom ?? "0001-01-01"}::date and ${query.dateTo ?? "9999-12-31"}::date
@@ -479,13 +644,40 @@ export class AccountingReportService {
        order by e.expense_date,e.expense_number limit ${limit} offset ${offset}
     `.execute(this.database);
     const total = result.rows[0]?.totalRows ?? 0;
-    return { columns: ["expenseNumber","expenseDate","accountingDate","categoryCode","categoryNameEn","categoryNameAr","payee","description","status","paymentStatus","operationalApproved","operationalPaid","operationalOutstanding","recoverableVat","postedNet"], items: result.rows.map(({ totalRows: _, ...row }) => row), total, totals: {}, warnings: ["Operational values are shown beside Posted Journal recognition; differences remain visible for reconciliation."] };
+    return {
+      columns: [
+        "expenseNumber",
+        "expenseDate",
+        "accountingDate",
+        "categoryCode",
+        "categoryNameEn",
+        "categoryNameAr",
+        "payee",
+        "description",
+        "status",
+        "paymentStatus",
+        "operationalApproved",
+        "operationalPaid",
+        "operationalOutstanding",
+        "recoverableVat",
+        "postedNet",
+      ],
+      items: result.rows.map(({ totalRows, ...row }) => {
+        void totalRows;
+        return row;
+      }),
+      total,
+      totals: {},
+      warnings: [
+        "Operational values are shown beside Posted Journal recognition; differences remain visible for reconciliation.",
+      ],
+    };
   }
 
   private async vat(query: AccountingReportQueryDto) {
     const { companyId } = this.support.context();
     const result = await sql<Row>`
-      select a.code,a.name_en as "accountNameEn",a.name_ar as "accountNameAr",
+      select a.id,a.code,a.name_en as "accountNameEn",a.name_ar as "accountNameAr",
              a.account_class as "accountClass",sum(l.debit)::text as debit,sum(l.credit)::text as credit,
              sum(l.credit-l.debit)::text as "netVat"
         from journal_lines l join journal_entries j on j.id=l.journal_entry_id and j.company_id=l.company_id
@@ -506,7 +698,23 @@ export class AccountingReportService {
        where e.company_id=${companyId}::uuid and e.status in('approved','partially_paid','paid')
          and e.accounting_date between ${query.dateFrom ?? "0001-01-01"}::date and ${query.dateTo ?? "9999-12-31"}::date
     `.execute(this.database);
-    return { columns: ["code","accountNameEn","accountNameAr","accountClass","debit","credit","netVat"], items: result.rows, total: result.rows.length, totals: totals.rows[0] ?? {}, warnings: ["This is a VAT reporting foundation for reconciliation only. It is not an FTA return, filing, or tax advice."] };
+    return {
+      columns: [
+        "code",
+        "accountNameEn",
+        "accountNameAr",
+        "accountClass",
+        "debit",
+        "credit",
+        "netVat",
+      ],
+      items: result.rows,
+      total: result.rows.length,
+      totals: totals.rows[0] ?? {},
+      warnings: [
+        "This is a VAT reporting foundation for reconciliation only. It is not an FTA return, filing, or tax advice.",
+      ],
+    };
   }
 }
 

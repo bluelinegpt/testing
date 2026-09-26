@@ -62,6 +62,11 @@ export class AccountingFoundationRepository {
              base_currency as "baseCurrency",
              fiscal_year_start_month as "fiscalYearStartMonth",
              default_accounting_method as "defaultAccountingMethod",
+             -- Read through to_jsonb so the configuration still loads on a
+             -- database that has not yet applied
+             -- 20260803110000_accounting_segregation_policy.
+             to_jsonb(accounting_configurations)->>'segregation_policy'
+               as "segregationPolicy",
              manual_accounting_activation_date::text as "manualAccountingActivationDate",
              manual_accounting_enabled_at as "manualAccountingEnabledAt",
              version::text as version

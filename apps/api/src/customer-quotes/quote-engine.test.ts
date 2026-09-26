@@ -1,0 +1,23 @@
+import { calculateCommission,runQuoteEngine,type QuoteRule,type Shipment } from "./quote-engine.js";
+const baseRule:QuoteRule={id:"r1",companyId:"c1",profileId:"p1",priority:100,serviceType:"standard",pickupEmirate:"ajman",pickupArea:null,deliveryEmirate:"dubai",deliveryArea:null,basePrice:"40.00",includedWeightKg:"5",extraWeightPrice:"3",codSurcharge:"2",minimumCharge:null,maximumStandardWeight:"25",maxCodAmount:"5000",maxWeightKg:"25",maxLengthCm:"100",maxWidthCm:"100",maxHeightCm:"100",supportedPackageTypes:["small_parcel","document"]};
+const shipment:Shipment={pickupEmirate:"ajman",pickupArea:"Al Nuaimiya",deliveryEmirate:"dubai",deliveryArea:"Al Barsha",serviceType:"standard",packageType:"small_parcel",weightKg:2,quantity:1,codRequired:false,codAmount:0,specialHandlingFlags:[]};
+const run=(s:Shipment=shipment,r:QuoteRule[]= [baseRule])=>runQuoteEngine(s,r,"0.15");
+describe("customer quote engine",()=>{
+ it("matches an Emirate fallback",()=>expect(run().offers[0]?.gross).toBe("40.00"));
+ it("matches exact Areas",()=>expect(run(shipment,[{...baseRule,pickupArea:"Al Nuaimiya",deliveryArea:"Al Barsha"}]).offers).toHaveLength(1));
+ it("rejects an uncovered route",()=>expect(run({...shipment,deliveryEmirate:"sharjah"}).customReason).toBe("no_standard_pricing_rule"));
+ it("uses the included weight",()=>expect(run({...shipment,weightKg:5}).offers[0]?.gross).toBe("40.00"));
+ it("prices extra weight",()=>expect(run({...shipment,weightKg:8}).offers[0]?.gross).toBe("49.00"));
+ it("rejects weight over the limit",()=>expect(run({...shipment,weightKg:26}).offers).toHaveLength(0));
+ it("rejects dimensions over the limit",()=>expect(run({...shipment,lengthCm:101}).offers).toHaveLength(0));
+ it("rejects unsupported package types",()=>expect(run({...shipment,packageType:"food"}).offers).toHaveLength(0));
+ it("rejects COD above the company limit",()=>expect(run({...shipment,codRequired:true,codAmount:5001}).offers).toHaveLength(0));
+ it("adds COD surcharge",()=>expect(run({...shipment,codRequired:true,codAmount:100}).offers[0]?.gross).toBe("42.00"));
+ it("routes special handling to custom",()=>expect(run({...shipment,specialHandlingFlags:["hazardous"]}).customReason).toBe("special_or_unusual_handling"));
+ it("uses the most-specific rule per company",()=>expect(run(shipment,[baseRule,{...baseRule,id:"r2",pickupArea:"Al Nuaimiya",deliveryArea:"Al Barsha",basePrice:"45"}]).offers[0]?.ruleId).toBe("r2"));
+ it("uses lowest price across companies",()=>expect(run(shipment,[baseRule,{...baseRule,id:"r2",companyId:"c2",profileId:"p2",basePrice:"35"}]).offers[0]?.companyId).toBe("c2"));
+ it("uses priority only for an equal-price tie",()=>expect(run(shipment,[baseRule,{...baseRule,id:"r2",companyId:"c2",profileId:"p2",priority:1}]).offers[0]?.companyId).toBe("c2"));
+ it("uses stable company id as the final tie break",()=>expect(run(shipment,[{...baseRule,companyId:"z"},{...baseRule,id:"r2",companyId:"a",profileId:"p2"}]).offers[0]?.companyId).toBe("a"));
+ it("rounds AED commission HALF_UP",()=>expect(calculateCommission("33.33","0.15")).toEqual({gross:"33.33",commission:"5.00",net:"28.33"}));
+ it("preserves gross = commission + net",()=>{const x=calculateCommission("49","0.15");expect(Number(x.commission)+Number(x.net)).toBe(Number(x.gross));});
+});

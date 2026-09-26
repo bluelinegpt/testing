@@ -165,9 +165,21 @@ export class UserAdministrationService {
              coalesce(a.mobile_number,linked_trader.mobile_number) as "mobileNumber",
              cu.name_en as "legacyNameEn", cu.name_ar as "legacyNameAr",
              e.id as "employeeId", e.employee_number as "employeeCode", e.name_en as "employeeName",
-             e.job_title as "employeeJobTitle", case when e.is_active then 'active' else 'disabled' end as "employeeStatus"
+             e.job_title as "employeeJobTitle", case when e.is_active then 'active' else 'disabled' end as "employeeStatus",
+             -- The Driver identity this account actually operates as, if any --
+             -- either this IS a driver-kind account (linked via
+             -- user_business_links, linked_driver below), or its linked
+             -- Employee (via company_users) has a backing Driver record
+             -- (drivers.employee_id, set when the Driver was created/edited
+             -- as an employee-type Driver -- see workforce-configuration.
+             -- service.ts's saveDriver). Read-only surfacing for
+             -- Administration display; it does NOT change how any
+             -- Driver-scoped API resolves the caller's own identity.
+             coalesce(linked_driver.id, employee_driver.id) as "driverId",
+             coalesce(linked_driver.code, employee_driver.code) as "driverCode"
         from accounts a left join company_users cu on cu.account_id = a.id and cu.company_id = a.company_id
         left join employees e on e.company_user_id = cu.id and e.company_id = cu.company_id
+        left join drivers employee_driver on employee_driver.employee_id = e.id and employee_driver.company_id = e.company_id
         left join user_business_links profile_link on profile_link.account_id=a.id
           and profile_link.company_id=a.company_id
           and profile_link.access_status in ('invited','active','suspended')
@@ -193,7 +205,7 @@ export class UserAdministrationService {
       ),
       this.sessions(accountId),
       this.auditHistory(accountId, 1, 50),
-      sql<Record<string,unknown>>`
+      sql<Record<string, unknown>>`
         select l.id,l.entity_type as "profileType",l.entity_id as "profileId",
           l.access_status as "accessStatus",l.created_at as "createdAt",l.updated_at as "updatedAt",
           coalesce(e.employee_number,d.code,t.code) as code,
@@ -378,7 +390,8 @@ export class UserAdministrationService {
         ...(input.email === undefined ? {} : { email: input.email }),
         ...(input.mobileNumber == null ? {} : { mobileNumber: input.mobileNumber }),
       });
-      if (user.companyUserId !== null) await sql`
+      if (user.companyUserId !== null)
+        await sql`
         update company_users
            set display_name=coalesce(${input.displayName ?? null},display_name),
                updated_at=now(),version=version+1
@@ -420,11 +433,12 @@ export class UserAdministrationService {
     await this.transactions.execute(async (transaction) => {
       await this.lockCompany(transaction, companyId);
       const account = await this.lockCompanyUser(transaction, companyId, accountId);
-      if (account.accountKind !== "company_user") throw new ApplicationException(
-        "account_kind_roles_not_supported",
-        "Roles can only be assigned to Company User accounts",
-        HttpStatus.CONFLICT,
-      );
+      if (account.accountKind !== "company_user")
+        throw new ApplicationException(
+          "account_kind_roles_not_supported",
+          "Roles can only be assigned to Company User accounts",
+          HttpStatus.CONFLICT,
+        );
       await this.assertRoles(transaction, companyId, requested, account.status === "active");
       const current = await sql<{
         roleId: string;
@@ -766,9 +780,7 @@ export class UserAdministrationService {
         from accounts a
         left join company_users cu on cu.account_id=a.id and cu.company_id=a.company_id
        where a.id=${accountId}::uuid and a.company_id=${companyId}::uuid
-         and a.account_kind<>'platform_user' for update of a`.execute(
-      tx,
-    );
+         and a.account_kind<>'platform_user' for update of a`.execute(tx);
     const row = result.rows[0];
     if (!row) throw this.notFound();
     return row;

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { vi } from "vitest";
 
 import { ApiError, type ApiClient } from "../../api/api-client.js";
@@ -111,6 +111,7 @@ function dumpTrace(context: string) {
 
 function setup() {
   let resolveOrder: ((value: unknown) => void) | undefined;
+  let rejectOrder: ((reason: unknown) => void) | undefined;
   const api = {
     get: vi.fn((path: string, signal?: AbortSignal) => {
       const callId = sequence + 1;
@@ -130,6 +131,9 @@ function setup() {
           },
         ]);
       }
+      if (path === "operations/orders/next-serial-number") {
+        return Promise.resolve({ serialNumber: "000123" });
+      }
       if (path.startsWith("operations/orders/identifier-availability")) {
         return Promise.resolve({
           referenceNumberAvailable: true,
@@ -139,6 +143,8 @@ function setup() {
       if (path.startsWith("configuration/customers/CUS-000001")) {
         return Promise.resolve({ addresses: [{ ...customer, isActive: true, isDefault: true }] });
       }
+      if (path.startsWith("operations/destination-countries")) return Promise.resolve({ hasMore: false, items: [{ id: "country-1", name: "Oman" }], total: 1 });
+      if (path.startsWith("operations/third-party-delivery-companies")) return Promise.resolve({ hasMore: false, items: [{ id: "carrier-1", name: "Carrier X" }], total: 1 });
       const items = path.startsWith("operations/traders")
         ? [trader]
         : path.startsWith("configuration/customers")
@@ -158,8 +164,11 @@ function setup() {
       void headers;
       if (path.endsWith("/quote")) return Promise.resolve(quote);
       if (path === "configuration/areas") return Promise.resolve(area);
-      return new Promise((resolve) => {
+      if (path === "operations/destination-countries") return Promise.resolve({ id: "country-new", name: String((body as { name: string }).name) });
+      if (path === "operations/third-party-delivery-companies") return Promise.resolve({ id: "carrier-new", name: String((body as { name: string }).name) });
+      return new Promise((resolve, reject) => {
         resolveOrder = resolve;
+        rejectOrder = reject;
       });
     }),
   };
@@ -172,14 +181,18 @@ function setup() {
   render(
     <CreateOrderDialog
       api={api as unknown as ApiClient}
-      drivers={[]}
       onClose={vi.fn()}
       onSaved={onSaved}
       permissions={["users_roles.manage", "orders.override_service_fee"]}
       searchDebounceMs={0}
     />,
   );
-  return { api, onSaved, resolve: (value: unknown) => resolveOrder?.(value) };
+  return {
+    api,
+    onSaved,
+    reject: (reason: unknown) => rejectOrder?.(reason),
+    resolve: (value: unknown) => resolveOrder?.(value),
+  };
 }
 
 async function selectTraderAndCustomer() {
@@ -261,6 +274,54 @@ describe("CreateOrderDialog", () => {
     if (context.task.result?.state === "fail") dumpTrace(context.task.name);
   });
 
+  it("creates a Collect Order without mandatory Customer details", async () => {
+    const { api, resolve } = setup();
+    await selectTraderOnly();
+    fireEvent.change(screen.getByLabelText(/Order type/i), {
+      target: { value: "collect_order" },
+    });
+    expect(screen.getByLabelText(/Customer name/i)).not.toBeRequired();
+    expect(screen.getByLabelText(/^Mobile number$/i)).not.toBeRequired();
+    expect(screen.queryByLabelText(/Assigned driver/i)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Create order" }));
+
+    const creates = api.post.mock.calls.filter(([path]) => path === "operations/orders");
+    expect(creates).toHaveLength(1);
+    expect(creates[0]?.[1]).toMatchObject({ orderType: "collect_order" });
+    expect(creates[0]?.[1]).not.toHaveProperty("customerName");
+    expect(creates[0]?.[1]).not.toHaveProperty("customerMobileNumber");
+    expect(creates[0]?.[1]).not.toHaveProperty("inlineCustomer");
+    expect(creates[0]?.[1]).not.toHaveProperty("areaId");
+    expect(creates[0]?.[1]).not.toHaveProperty("driverId");
+    resolve({ orderNumber: "ORD-000500", serialNumber: "000123" });
+  });
+
+  it("shows the support reference for a server failure and keeps the entered order details", async () => {
+    const { reject } = setup();
+    await selectTraderAndCustomer();
+    fireEvent.change(screen.getByLabelText("COD amount"), { target: { value: "100" } });
+    await screen.findAllByText("AED 90.00");
+
+    fireEvent.click(screen.getByRole("button", { name: "Create order" }));
+    await act(async () => {
+      reject(
+        new ApiError(
+          "An unexpected error occurred.",
+          "internal_server_error",
+          500,
+          undefined,
+          "test-correlation-123",
+        ),
+      );
+    });
+
+    expect(
+      await screen.findByText(/Share reference test-correlation-123 with support/),
+    ).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Search or type a new Customer Name")).toHaveValue("Aisha");
+    expect(screen.getByLabelText("COD amount")).toHaveValue(100);
+  });
+
   it("selecting an existing Customer populates its saved details in the Order form", async () => {
     setup();
     // There is no separate read-only name field: the Customer field itself is
@@ -303,11 +364,12 @@ describe("CreateOrderDialog", () => {
     expect(creates[0]?.[1]).toMatchObject({
       additionalFees: 0,
       customerMobileNumber: "0506468441",
-      driverId: undefined,
+      paymentCondition: "customer_pays_cod_and_fee",
       referenceNumber: "REF-A1",
       serialNumber: "000123",
       serviceFee: undefined,
     });
+    expect(creates[0]?.[1]).not.toHaveProperty("driverId");
     expect(creates[0]?.[2]).toHaveProperty("X-Idempotency-Key");
     resolve({ orderNumber: "ORD-000123", serialNumber: "000123" });
     expect(await screen.findByText(/000123/)).toBeInTheDocument();
@@ -360,6 +422,142 @@ describe("CreateOrderDialog", () => {
     await waitFor(() => expect(areaInput).toHaveValue("Dubai"));
   });
 
+  /* Free Order. The blocker this feature removes is real: an unpriced
+     Trader/Area otherwise refuses the quote and the operator has no way to say
+     "this one is deliberately free". */
+  const unpricedApi = () => ({
+    get: vi.fn((path: string) => {
+      if (path.startsWith("operations/orders/identifier-availability")) {
+        return Promise.resolve({ referenceNumberAvailable: true, serialNumberAvailable: true });
+      }
+      if (path === "configuration/emirates") {
+        return Promise.resolve([
+          {
+            code: "DXB",
+            id: area.emirateId,
+            nameAr: area.emirateNameAr,
+            nameEn: area.emirateNameEn,
+          },
+        ]);
+      }
+      if (path === "operations/orders/next-serial-number") {
+        return Promise.resolve({ serialNumber: "000123" });
+      }
+      if (path.startsWith("configuration/customers/CUS-000001")) {
+        return Promise.resolve({ addresses: [{ ...customer, isActive: true, isDefault: true }] });
+      }
+      // Same dispatch as `setup()`: Trader search lives under operations/.
+      const items = path.startsWith("operations/traders")
+        ? [trader]
+        : path.startsWith("configuration/customers")
+          ? [customer]
+          : [area];
+      return Promise.resolve({ hasMore: false, items, total: 1 });
+    }),
+    post: vi.fn((path: string) => {
+      // No configured price: the quote always refuses.
+      if (path === "operations/orders/quote") {
+        return Promise.reject(new ApiError("no price", "pricing_not_configured", 422));
+      }
+      return Promise.resolve({ orderNumber: "ORD-000300" });
+    }),
+  });
+
+  const renderWith = (api: ReturnType<typeof unpricedApi>) =>
+    render(
+      <CreateOrderDialog
+        api={api as unknown as ApiClient}
+        onClose={vi.fn()}
+        onSaved={vi.fn().mockResolvedValue(undefined)}
+        permissions={["users_roles.manage"]}
+        searchDebounceMs={0}
+      />,
+    );
+
+  it("offers a Free Order checkbox, unchecked by default", async () => {
+    renderWith(unpricedApi());
+    await selectTraderAndCustomer();
+    const checkbox = screen.getByLabelText("Free Order");
+    expect(checkbox).toBeInTheDocument();
+    expect(checkbox).not.toBeChecked();
+    // The reason only exists once the decision is made.
+    expect(screen.queryByLabelText("Free Order Reason")).not.toBeInTheDocument();
+  });
+
+  it("zeroes and locks the money when Free Order is checked", async () => {
+    renderWith(unpricedApi());
+    await selectTraderAndCustomer();
+    fireEvent.change(screen.getByLabelText("COD amount"), { target: { value: "300" } });
+    fireEvent.click(screen.getByLabelText("Free Order"));
+
+    const cod = screen.getByLabelText("COD amount");
+    // Set for the operator rather than typed by them, and no longer editable.
+    expect(cod).toHaveValue(0);
+    expect(cod).toBeDisabled();
+    expect(screen.getByText(/this Order is free/i)).toBeInTheDocument();
+    expect(await screen.findByLabelText("Free Order Reason")).toBeInTheDocument();
+  });
+
+  it("does not let unresolved Trader pricing block a Free Order", async () => {
+    const api = unpricedApi();
+    renderWith(api);
+    await selectTraderAndCustomer();
+    // The pricing dead end is present for a normal Order...
+    expect(await screen.findByText(/could not be resolved/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText("Free Order"));
+    const reason = await screen.findByLabelText("Free Order Reason");
+    fireEvent.change(reason, {
+      target: { value: "Free delivery test" },
+    });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Create order" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Create order" }));
+
+    // ...and does not stop this one, because it was never a pricing question.
+    await waitFor(() =>
+      expect(api.post).toHaveBeenCalledWith(
+        "operations/orders",
+        expect.objectContaining({
+          codAmount: 0,
+          freeOrderReason: "Free delivery test",
+          isFreeOrder: true,
+        }),
+        expect.objectContaining({ "X-Idempotency-Key": expect.any(String) }),
+      ),
+    );
+  });
+
+  it("blocks a Free Order with a blank reason before it reaches the server", async () => {
+    const api = unpricedApi();
+    renderWith(api);
+    await selectTraderAndCustomer();
+    fireEvent.click(screen.getByLabelText("Free Order"));
+    const reason = await screen.findByLabelText("Free Order Reason");
+    fireEvent.change(reason, { target: { value: "   " } });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Create order" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Create order" }));
+
+    const reasonErrors = await screen.findAllByText("Enter a reason for the Free Order.");
+    expect(reasonErrors).toHaveLength(2);
+    expect(api.post).not.toHaveBeenCalledWith("operations/orders", expect.anything());
+  });
+
+  it("hands pricing back and drops the reason when Free Order is unchecked", async () => {
+    renderWith(unpricedApi());
+    await selectTraderAndCustomer();
+    fireEvent.click(screen.getByLabelText("Free Order"));
+    fireEvent.change(screen.getByLabelText("Free Order Reason"), {
+      target: { value: "Free delivery test" },
+    });
+    fireEvent.click(screen.getByLabelText("Free Order"));
+
+    // COD editable again, reason gone, and the normal pricing dead end returns
+    // rather than a stale zero fee being kept.
+    expect(screen.getByLabelText("COD amount")).toBeEnabled();
+    expect(screen.queryByLabelText("Free Order Reason")).not.toBeInTheDocument();
+    expect(await screen.findByText(/could not be resolved/i)).toBeInTheDocument();
+  });
+
   it("lets the operator enter a manual fee when the Trader has no configured price", async () => {
     // The quote endpoint refuses until a manual service fee is supplied, then
     // prices the order manually — the resolver's no-configured-price path.
@@ -406,7 +604,6 @@ describe("CreateOrderDialog", () => {
     render(
       <CreateOrderDialog
         api={api as unknown as ApiClient}
-        drivers={[]}
         onClose={vi.fn()}
         onSaved={vi.fn().mockResolvedValue(undefined)}
         permissions={["users_roles.manage"]}
@@ -477,7 +674,6 @@ describe("CreateOrderDialog", () => {
     render(
       <CreateOrderDialog
         api={api as unknown as ApiClient}
-        drivers={[]}
         onClose={vi.fn()}
         onSaved={vi.fn().mockResolvedValue(undefined)}
         permissions={["users_roles.manage"]}
@@ -495,6 +691,46 @@ describe("CreateOrderDialog", () => {
       ),
     );
     await waitFor(() => expect(screen.getByLabelText("Service fee")).toHaveValue("12.5"));
+  });
+});
+
+describe("International order controls", () => {
+  it("shows searchable country and carrier selectors and restores them in edit mode", async () => {
+    const { api } = setup();
+    await selectTraderOnly();
+    fireEvent.change(screen.getByLabelText(/Order type/i), { target: { value: "gcc_international" } });
+    expect(screen.getByLabelText("Destination country")).toBeInTheDocument();
+    expect(screen.getByLabelText("Third-party shipping company")).toBeInTheDocument();
+    fireEvent.focus(screen.getByLabelText("Destination country"));
+    fireEvent.change(screen.getByLabelText("Destination country"), { target: { value: "Oman" } });
+    expect(await screen.findByRole("option", { name: "Oman" })).toBeInTheDocument();
+    fireEvent.focus(screen.getByLabelText("Third-party shipping company"));
+    fireEvent.change(screen.getByLabelText("Third-party shipping company"), { target: { value: "Carrier" } });
+    expect(await screen.findByRole("option", { name: "Carrier X" })).toBeInTheDocument();
+    expect(api.get).toHaveBeenCalledWith(expect.stringContaining("operations/destination-countries"), expect.anything());
+  });
+
+  it("hides Area and Emirate while International is selected and restores domestic Area validation", async () => {
+    setup();
+    await selectTraderOnly();
+    const type = screen.getByLabelText(/Order type/i);
+    fireEvent.change(type, { target: { value: "gcc_international" } });
+    expect(screen.queryByLabelText("Emirate")).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("Search by Area name or code")).not.toBeInTheDocument();
+    fireEvent.change(type, { target: { value: "delivery" } });
+    expect(screen.getByLabelText("Emirate")).toBeInTheDocument();
+  });
+
+  it("creates a country through the application dialog and reports validation", async () => {
+    const { api } = setup();
+    await selectTraderOnly();
+    fireEvent.change(screen.getByLabelText(/Order type/i), { target: { value: "gcc_international" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create country" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Create$/ }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Enter a name");
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Oman" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Create$/ }));
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith("operations/destination-countries", { name: "Oman" }));
   });
 });
 
@@ -522,9 +758,9 @@ describe("CreateOrderDialog validation (Phase 3)", () => {
         "Unable to create the Order. Please complete or correct the following fields:",
       ),
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Enter a Serial Number." })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Select a valid Trader." })).toBeInTheDocument();
-    // The first invalid field (Serial Number) receives focus.
+    // A submit may occur while the generated Serial Number request is still
+    // settling. The ordered validation focus remains deterministic.
     expect(document.activeElement).toBe(document.getElementById("order-serial"));
   });
 
@@ -609,7 +845,12 @@ describe("CreateOrderDialog validation (Phase 3)", () => {
         }
         if (path === "configuration/emirates") {
           return Promise.resolve([
-            { code: "DXB", id: area.emirateId, nameAr: area.emirateNameAr, nameEn: area.emirateNameEn },
+            {
+              code: "DXB",
+              id: area.emirateId,
+              nameAr: area.emirateNameAr,
+              nameEn: area.emirateNameEn,
+            },
           ]);
         }
         if (path.startsWith("configuration/customers/CUS-000001")) {
@@ -632,7 +873,6 @@ describe("CreateOrderDialog validation (Phase 3)", () => {
     render(
       <CreateOrderDialog
         api={api as unknown as ApiClient}
-        drivers={[]}
         onClose={vi.fn()}
         onSaved={vi.fn().mockResolvedValue(undefined)}
         permissions={["users_roles.manage"]}
@@ -683,17 +923,22 @@ describe("CreateOrderDialog validation (Phase 3)", () => {
     resolve({ orderNumber: "ORD-000400", serialNumber: "000123" });
   });
 
-  it("keeps an empty Primary Mobile blocking even for a typed new Customer", async () => {
-    setup();
+  it("allows a new Order with a typed Customer name and no Primary Mobile", async () => {
+    const { api, resolve } = setup();
     await selectTraderOnly();
     await typeNewCustomerAndArea("No Phone Buyer");
     fireEvent.change(screen.getByLabelText("Customer address"), { target: { value: "Somewhere" } });
     fireEvent.change(screen.getByLabelText("COD amount"), { target: { value: "100" } });
-    // Mobile deliberately left empty.
+    await screen.findAllByText("AED 90.00");
+    // Mobile deliberately left empty: the typed details stay on the Order and
+    // no incomplete saved-Customer record is created.
     fireEvent.click(screen.getByRole("button", { name: "Create order" }));
-    expect(
-      await screen.findByRole("button", { name: "Enter a mobile number." }),
-    ).toBeInTheDocument();
+    const creates = api.post.mock.calls.filter(([path]) => path === "operations/orders");
+    expect(creates).toHaveLength(1);
+    expect(creates[0]?.[1]).toMatchObject({ customerName: "No Phone Buyer" });
+    expect(creates[0]?.[1]).not.toHaveProperty("customerMobileNumber");
+    expect(creates[0]?.[1]).not.toHaveProperty("inlineCustomer");
+    resolve({ orderNumber: "ORD-000401", serialNumber: "000123" });
   });
 
   it("maps a duplicate-Customer backend error to the Customer field and preserves values", async () => {
@@ -728,7 +973,6 @@ describe("CreateOrderDialog validation (Phase 3)", () => {
     render(
       <CreateOrderDialog
         api={api as unknown as ApiClient}
-        drivers={[]}
         onClose={vi.fn()}
         onSaved={vi.fn().mockResolvedValue(undefined)}
         permissions={["users_roles.manage"]}

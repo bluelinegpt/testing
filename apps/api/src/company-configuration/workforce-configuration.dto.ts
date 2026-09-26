@@ -70,6 +70,20 @@ export class SaveEmployeeDto {
   @Min(0)
   public readonly outsourcedFeePerDeliveredOrder?: number;
 
+  // --- Outsourced-type Collect Order / collection earning ------------------
+  // Reuses `outsourced_driver_collection_earning_rules` -- the same rate
+  // already pays a confirmed cash reconciliation collection; a closed
+  // Collect Order draws from the identical rule, matching the Employee
+  // side's own design (one "collection earning" rate for both).
+  @IsOptional()
+  @IsIn(["none", "per_collected_order"])
+  public readonly outsourcedCollectionPaymentType?: "none" | "per_collected_order";
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  public readonly outsourcedCollectionAmount?: number;
+
   @IsString()
   @MaxLength(160)
   public readonly name!: string;
@@ -181,6 +195,16 @@ export class CreateEmployeeRoleDto {
   @IsOptional()
   @IsBoolean()
   public readonly isDriverRole?: boolean;
+}
+
+// A Role is a lookup/reference value, not a person -- unlike
+// ChangeWorkforceStatusDto (Employee/Driver), deactivating one needs no
+// reason. Deactivation only removes it from the picker for new assignments
+// (employeeRoles() filters is_active); any Employee already on this Role
+// keeps it, unaffected.
+export class ChangeEmployeeRoleStatusDto {
+  @IsBoolean()
+  public readonly isActive!: boolean;
 }
 
 /**
@@ -394,4 +418,46 @@ export class ConfirmOutsourcedPaymentDto {
 
   @Matches(/^[A-Za-z0-9._:-]{16,128}$/)
   public readonly idempotencyKey!: string;
+}
+
+/*
+ * Employee Driver variable earnings.
+ *
+ * Deliberately separate from `SaveEmployeeDto`: a rate is effective-dated
+ * history, not a property of the Employee record. Folding it into the Employee
+ * PATCH would mean every profile edit implicitly restated the rate, which is
+ * exactly the overwrite the rule tables exist to prevent.
+ */
+const earningDatePattern = /^\d{4}-\d{2}-\d{2}$/;
+
+export class SaveDeliveryEarningRuleDto {
+  /** Flat amount per delivered Order. Zero is not a rate, it is a mistake. */
+  @IsNumber({ allowInfinity: false, allowNaN: false, maxDecimalPlaces: 2 })
+  @Min(0.01)
+  public readonly amountPerOrder!: number;
+
+  @Matches(earningDatePattern)
+  public readonly effectiveFrom!: string;
+
+  /** Omitted means "still in force". */
+  @IsOptional()
+  @Matches(earningDatePattern)
+  public readonly effectiveTo?: string;
+}
+
+export class SaveCollectionEarningRuleDto {
+  @IsIn(["none", "per_collected_order"])
+  public readonly collectionPaymentType!: "none" | "per_collected_order";
+
+  /** Must be 0 for `none`, and above 0 for either paid type. */
+  @IsNumber({ allowInfinity: false, allowNaN: false, maxDecimalPlaces: 2 })
+  @Min(0)
+  public readonly amount!: number;
+
+  @Matches(earningDatePattern)
+  public readonly effectiveFrom!: string;
+
+  @IsOptional()
+  @Matches(earningDatePattern)
+  public readonly effectiveTo?: string;
 }

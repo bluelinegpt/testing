@@ -6,22 +6,41 @@ import { type Kysely, sql } from "kysely";
 
 import { PasswordHasher } from "../authentication/password-hasher.js";
 import { DATABASE } from "../infrastructure/database/database.tokens.js";
+import { BusinessDayService } from "../company-configuration/business-day.service.js";
+import {
+  type AppliedReportDateMode,
+  ReportDateModeService,
+} from "../company-configuration/report-date-mode.js";
+import {
+  type OrderFeeSource,
+  orderAccountingColumns,
+  orderFeeSource,
+} from "./order-accounting-classification.js";
+import { deriveOrderWorkflowGuidance } from "./order-workflow-guidance.js";
 import type { DatabaseSchema } from "../infrastructure/database/database.types.js";
 import { KyselyTransactionManager } from "../infrastructure/database/transaction-manager.js";
 import { ApplicationException } from "../presentation/errors/application.exception.js";
+import { normalizeReferenceTerm, unifiedOrderSearchPredicate } from "./order-search.js";
+import { mapPublicTrackingStatus } from "./public-tracking-status.js";
+import { traderCommerceOrderScopePairs } from "./trader-commerce-order-scope.js";
 import { mobileComparisonKey, normalizeUaeMobile } from "../shared/uae-mobile.js";
+import { PushOutboxWriter } from "../push/push-outbox-writer.service.js";
+import { OperationsHistoryWriter } from "./operations-history.writer.js";
 import { IdentityContextAccessor } from "../security/identity-context.js";
 import { TenantContextAccessor } from "../tenancy/tenant-context.js";
+import { EmployeeDeliveryEarningService } from "../payroll/employee-delivery-earning.service.js";
 import { OutsourcedDriverFeeService } from "../payroll/outsourced-driver-fee.service.js";
 import type {
   BulkSettleTraderDto,
   ChangeOrderStatusDto,
+  ChangeInternationalCarrierStatusDto,
   CreateDriverDto,
   CreateOrderDto,
   CreateTraderPortalOrderDto,
   CreateTraderDto,
   FinancialPaymentDto,
   ImportOrdersCsvDto,
+  ImportTraderPortalOrdersCsvDto,
   OrderIdentifierAvailabilityQueryDto,
   OrderQuoteDto,
   RegisterInternationalShipmentDto,
@@ -58,16 +77,82 @@ export interface OperationsStatusCount {
   readonly status: string;
 }
 
+/**
+ * Operational counts only — deliberately no COD/revenue/profit totals, so an
+ * Operator holding only dispatch permissions (`orders.assign_driver`,
+ * `orders.update_delivery_status`) can call this without ever being granted
+ * `reports.financial.view`. `byStatus` always includes every known delivery
+ * status key (zero-filled), so a mobile client never has to special-case a
+ * status that simply has no Orders right now.
+ */
+export interface OperationsOperatorDashboardSummary {
+  readonly activeTotal: number;
+  readonly byStatus: Readonly<Record<string, number>>;
+  readonly deliveredToday: number;
+  readonly returnPending: number;
+}
+
+/** Driver-scoped dashboard counts — never Company-wide, never another
+ *  Driver's. See {@link OperationsService.driverDashboardSummary}. */
+export interface OperationsDriverDashboardSummary {
+  readonly activeTotal: number;
+  readonly assignedToMe: number;
+  readonly deliveredToday: number;
+  readonly outForDelivery: number;
+  readonly returnPending: number;
+}
+
+/**
+ * Recorded as the Service Fee reason when a Trader/Area is CONFIGURED at
+ * zero and no fee was requested.
+ *
+ * This is deliberately a system-generated explanation, not a user's words:
+ * nobody made an exceptional decision here, the price simply is zero. It
+ * satisfies `orders_zero_service_fee_reason_check` while keeping a
+ * configured zero clearly distinguishable from a manual override in both
+ * the Order record and the audit trail.
+ */
+export const configuredZeroPriceReason = "Configured Trader/Area price is zero";
+
 export interface OperationsOrderFilters {
   readonly areaId?: string | undefined;
+  /** Every Order in an Emirate, without having to pick each Area inside it. */
+  readonly emirateId?: string | undefined;
   readonly cashStatus?: string | undefined;
   readonly dateFrom?: string | undefined;
   readonly dateTo?: string | undefined;
   readonly deliveryStatus?: string | undefined;
+  readonly internationalCarrierStatus?: string | undefined;
   readonly driverId?: string | undefined;
+  readonly orderType?: "collect_order" | "delivery" | "gcc_international" | undefined;
+  readonly thirdPartyDeliveryCompanyName?: string | undefined;
+  readonly destinationCountryName?: string | undefined;
+  /** External Reference Number, partial match. Distinct from `search`. */
+  readonly referenceNumber?: string | undefined;
+  /** Serial Number, partial match. Distinct from `search`. */
+  readonly serialNumber?: string | undefined;
   readonly search?: string | undefined;
   readonly settlementStatus?: string | undefined;
-  readonly quickView?: "active" | "all" | "cancelled" | "closed" | "hold" | undefined;
+  readonly workflowStep?:
+    "complete" | "collect_from_driver" | "collect_from_trader" | "settle_trader" | undefined;
+  readonly quickView?:
+    "active" | "all" | "cancelled" | "closed" | "hold" | "accountant" | undefined;
+  /**
+   * Delivery Activity: only Orders that actually reached a customer.
+   *
+   * Gated on `delivered_at is not null`, never on delivery_status. An Order
+   * later returned or cancelled still WAS delivered, and the view exists to
+   * report that the delivery happened; its current status stays visible in its
+   * own column.
+   */
+  readonly deliveredOnly?: boolean | undefined;
+  /** Calendar Date mode, against the Company-local date of `delivered_at`. */
+  readonly deliveryDateFrom?: string | undefined;
+  readonly deliveryDateTo?: string | undefined;
+  /** Delivery Activity only. `dateFrom`/`dateTo` keep meaning Order Date. */
+  readonly dateMode?: string | undefined;
+  readonly businessDateFrom?: string | undefined;
+  readonly businessDateTo?: string | undefined;
   readonly page?: number | undefined;
   readonly pageSize?: 25 | 50 | 100 | undefined;
   readonly sortBy?: "amountToCollect" | "createdAt" | "orderDate" | "orderNumber" | undefined;
@@ -76,11 +161,17 @@ export interface OperationsOrderFilters {
 }
 
 export interface OperationsOrderPage {
+  /** Present when Delivery Activity resolved a Date Mode; absent otherwise. */
+  readonly appliedDateMode?: AppliedReportDateMode;
   readonly filteredCount: number;
+  /** Rows matching the selected tab and the optional filters. */
+  readonly matchingCount: number;
   readonly items: readonly OperationsOrder[];
   readonly page: number;
   readonly pageSize: 25 | 50 | 100;
   readonly totalCount: number;
+  /** Rows in the selected tab before optional filters are applied. */
+  readonly tabTotalCount: number;
 }
 
 export interface OperationsOrderQuote {
@@ -140,11 +231,47 @@ export interface OperationsBillingSummary {
 }
 
 export interface OperationsOrder {
+  readonly destinationCountryId?: string | null;
+  readonly destinationCountryName?: string | null;
+  readonly thirdPartyDeliveryCompanyId?: string | null;
+  readonly thirdPartyDeliveryCompanyName?: string | null;
+  /** Mirrors the capture trigger: |COD|+|Fee|+|Additional|+|VAT| is not zero. */
+  readonly accountingRequired: boolean;
+  /** The delivery instant. Null until the Order is delivered. */
+  readonly deliveredAt?: string | null;
+  /**
+   * Business Date of the delivery, backend-derived from `deliveredAt`.
+   *
+   * Present only on Delivery Activity responses. Deliberately NOT named
+   * `confirmationBusinessDate`: this one comes from a delivery, not a
+   * confirmation.
+   */
+  readonly deliveryBusinessDate?: string | null;
   readonly additionalFees: string | null;
   readonly additionalFeeVatAmount: string | null;
   readonly amountCollected: string;
   readonly areaName: string;
+  readonly areaId?: string;
+  readonly areaNameEn?: string | null;
+  readonly areaNameAr?: string | null;
+  readonly emirateId?: string | null;
+  /** Present only on the single-order detail fetch (`orderById`) — the list
+      and export queries do not join `emirates`, so this is undefined there. */
+  readonly emirateNameEn?: string;
+  readonly emirateNameAr?: string;
   readonly assignedDriverId: string | null;
+  /** Identifier only; used to prefilter the Trader Settlement screen.
+      Optional because two other constructors of this shape (Fast Entry and the
+      export path) do not select it and do not derive workflow guidance. */
+  readonly traderId?: string;
+  /** Settlements this Order could lawfully have its receipt confirmed on. */
+  readonly confirmableSettlementCount?: number;
+  /** Present only when exactly one confirmable settlement exists. */
+  readonly confirmableSettlementId?: string | null;
+  /** Ledger-derived Accounting state; see the lateral in the list query. */
+  readonly accountingState?: string;
+  readonly accountingEventId?: string | null;
+  readonly accountingJournalId?: string | null;
   readonly assignedDriverMobile: string | null;
   readonly assignedDriverName: string | null;
   readonly codAmount: string;
@@ -154,18 +281,33 @@ export interface OperationsOrder {
   readonly customerMobileNumber: string;
   readonly customerName: string;
   readonly deliveryStatus: string;
+  readonly internationalCarrierStatus?: "ready_for_carrier" | "handed_to_carrier" | "in_transit" | null;
   readonly driverReconciliationStatus: string;
   readonly id: string;
+  readonly isFreeOrder?: boolean;
   readonly orderDate: string;
   readonly orderNumber: string;
+  readonly orderType?: "collect_order" | "delivery" | "gcc_international";
   readonly orderProfit: string;
+  readonly outsourcedDriverFeeAmount: string | null;
+  readonly outsourcedDriverFeeOutstanding: string | null;
+  readonly outsourcedDriverFeePaid: string | null;
+  readonly outsourcedDriverFeePaymentNumbers: string | null;
+  readonly outsourcedDriverFeeStatus: string;
   readonly returnStatus: string;
   readonly referenceNumber: string | null;
+  readonly psystemSerial: string | null;
   readonly serialNumber: string | null;
   readonly serviceFee: string;
+  /** Why the fee is zero or differs from the configured price. */
+  readonly serviceFeeOverrideReason: string | null;
   readonly serviceFeeVatAmount: string | null;
   readonly totalDeductions: string | null;
   readonly traderNetPayable: string;
+  readonly traderReceivableId?: string | null;
+  readonly traderReceivableNumber?: string | null;
+  readonly traderReceivableOutstanding?: string | null;
+  readonly traderReceivableStatus?: string | null;
   readonly traderName: string;
   readonly traderSettlementStatus: string;
   readonly vatAmount: string;
@@ -243,13 +385,17 @@ export interface OperationsTrackingLink {
   readonly url: string;
 }
 
+/**
+ * Privacy-limited by design -- no customer/receiver name, no Driver name, no
+ * Area, no raw internal status. Shares the same public status vocabulary as
+ * the central `/track` flow and the Yousef agent (`mapPublicTrackingStatus`)
+ * so this legacy per-order tracking-link endpoint cannot drift into a
+ * different, less-safe contract than the rest of public tracking.
+ */
 export interface PublicOrderTracking {
-  readonly areaName: string;
-  readonly assignedDriverName: string | null;
-  readonly companyName: string;
-  readonly customerName: string;
   readonly deliveredAt: string | null;
   readonly deliveryStatus: string;
+  readonly deliveryStatusLabel: string;
   readonly lastUpdatedAt: string;
   readonly orderNumber: string;
 }
@@ -270,18 +416,105 @@ export interface PortalOrder {
   readonly orderNumber: string;
   readonly packageCount: number;
   readonly referenceNumber: string | null;
+  readonly psystemSerial: string | null;
   readonly serialNumber: string;
   readonly serviceFee: string;
   readonly traderName: string;
   readonly traderSettlementStatus: string;
+  readonly emirateNameEn: string | null;
+  readonly emirateNameAr: string | null;
+}
+
+/**
+ * One Order row, safe for a Trader session.
+ *
+ * An explicit allow-list, not `OperationsOrder` narrowed down: a field added
+ * to `OperationsOrder` later must be deliberately added here too, rather than
+ * reaching a Trader's browser by default.
+ */
+export interface TraderPortalOrderSummary {
+  readonly areaName: string;
+  readonly codAmount: string;
+  readonly customerAddress: string;
+  readonly customerAmountDue: string;
+  readonly customerMobileNumber: string;
+  readonly customerName: string;
+  /**
+   * The Delivery Company that processed this Order. Present only from
+   * `traderPortalOrdersPageAllCompanies` -- the single-Company `orders()`
+   * delegate has nothing else to put here, since every row already belongs
+   * to the caller's one session Company, so it stays absent there rather
+   * than repeating a value the caller already knows.
+   */
+  readonly deliveryCompanyId?: string;
+  readonly deliveryCompanyName?: string;
+  readonly deliveryStatus: string;
+  readonly id: string;
+  readonly orderDate: string;
+  readonly orderNumber: string;
+  readonly referenceNumber: string | null;
+  readonly serviceFee: string;
+}
+
+export interface TraderPortalOrderPage {
+  readonly filteredCount: number;
+  readonly items: readonly TraderPortalOrderSummary[];
+  readonly page: number;
+  readonly pageSize: 25 | 50 | 100;
+  readonly totalCount: number;
 }
 
 export interface TraderPortalProfile {
   readonly code: string;
+  readonly commercialNumber: string | null;
+  /**
+   * The Company's six-digit Mobile Code, for the Trader portal's "Mobile App
+   * — Scan QR" panel. Authenticated Traders only — never on a public route.
+   */
+  readonly companyMobileCode: string;
+  readonly contactPerson: string | null;
   readonly email: string | null;
   readonly id: string;
   readonly mobileNumber: string;
   readonly name: string;
+  readonly nameAr: string | null;
+  /** The account's own display preference, not a Trader business field. */
+  readonly preferredLanguage: string;
+  readonly telephone: string | null;
+}
+
+export interface TraderPortalDashboard {
+  readonly commerce: {
+    readonly activeProducts: number;
+    readonly deliveryCompanyCount: number;
+    readonly draftProducts: number;
+    readonly hasStore: boolean;
+    readonly storeName: string | null;
+    readonly storeStatus: string | null;
+    readonly storeUrl: string | null;
+    readonly totalProducts: number;
+  };
+  readonly orders: {
+    readonly active: number;
+    readonly cancelled: number;
+    readonly delivered: number;
+    readonly newOrders: number;
+    readonly returned: number;
+    readonly total: number;
+  };
+  /** Current-month figures only; see the Dashboard's own period label. */
+  readonly period: {
+    readonly monthCodTotal: string;
+    readonly monthLabel: string;
+  };
+  readonly recentOrders: readonly {
+    readonly amountDue: string;
+    readonly customerName: string;
+    readonly deliveryCompanyName: string | null;
+    readonly orderDate: string;
+    readonly orderNumber: string;
+    readonly status: string;
+  }[];
 }
 
 export interface TraderPortalArea {
@@ -293,11 +526,36 @@ export interface TraderPortalArea {
   readonly nameEn: string;
 }
 
+/**
+ * One row's outcome, in the importer's terms rather than the database's.
+ *
+ * Added alongside the existing flat `errors` list, never in place of it, so an
+ * older client that only reads `errors` keeps working unchanged.
+ */
+export interface OperationsOrderImportRow {
+  /** True once the Order exists; false for every validation failure. */
+  readonly accountingRequired: boolean | null;
+  readonly errorField: string | null;
+  /** Friendly, already-explained. Never SQL, a stack, or a constraint name. */
+  readonly errorMessage: string | null;
+  readonly feeSource: OrderFeeSource | null;
+  readonly orderNumber: string | null;
+  /** Preserved exactly as written, leading zeros and all. */
+  readonly referenceNumber: string | null;
+  readonly resolvedServiceFee: string | null;
+  /** Line number in the uploaded file, counting the header as row 1. */
+  readonly rowNumber: number;
+  readonly status: "imported" | "invalid";
+  readonly zeroFeeReason: string | null;
+}
+
 export interface OperationsOrderImportResult {
   readonly errors: readonly string[];
   readonly importNumber: string;
   readonly importedRows: number;
   readonly invalidRows: number;
+  /** Per-row detail. Additive; `errors` remains the summary view. */
+  readonly rows: readonly OperationsOrderImportRow[];
   readonly totalRows: number;
 }
 
@@ -432,6 +690,9 @@ interface OrderFinancials {
   readonly serviceFeeNetAmount: Decimal;
   readonly serviceFeeVatAmount: Decimal;
   readonly totalDeductions: Decimal;
+  readonly traderDeductions: Decimal;
+  readonly traderPaidServiceFee: Decimal;
+  readonly traderReceivableDue: Decimal;
   readonly traderNetPayable: Decimal;
   readonly vatAmount: Decimal;
 }
@@ -447,9 +708,11 @@ interface ResolvedServiceFee {
   readonly servicePriceId: string | null;
 }
 
-interface InsertOrderInput extends CreateOrderDto {
+interface InsertOrderInput extends Omit<CreateOrderDto, "customerMobileNumber" | "customerName"> {
   readonly correlationId: string;
   readonly createdByAccountId: string;
+  readonly customerMobileNumber: string;
+  readonly customerName: string;
   readonly importBatchId?: string;
 }
 
@@ -460,10 +723,19 @@ export class OperationsService {
     @Inject(KyselyTransactionManager)
     private readonly transactions: KyselyTransactionManager,
     @Inject(TenantContextAccessor) private readonly tenants: TenantContextAccessor,
+    @Inject(ReportDateModeService) private readonly reportDateModes: ReportDateModeService,
+    @Inject(BusinessDayService) private readonly businessDays: BusinessDayService,
     @Inject(IdentityContextAccessor) private readonly identities: IdentityContextAccessor,
     @Inject(PasswordHasher) private readonly passwords: PasswordHasher,
     @Inject(OutsourcedDriverFeeService)
     private readonly outsourcedDriverFees: OutsourcedDriverFeeService,
+    @Inject(EmployeeDeliveryEarningService)
+    private readonly employeeDeliveryEarnings: EmployeeDeliveryEarningService,
+    @Inject(PushOutboxWriter) private readonly pushOutbox: PushOutboxWriter,
+    // The shared canonical status-history writer. Delivery-dimension events
+    // MUST go through it (not raw inserts) so the Trader WhatsApp
+    // notification hook fires once for every legitimate path.
+    @Inject(OperationsHistoryWriter) private readonly history: OperationsHistoryWriter,
   ) {}
 
   public async overview(filters: OperationsOverviewFilters = {}): Promise<OperationsOverview> {
@@ -524,18 +796,255 @@ export class OperationsService {
     };
   }
 
+  /**
+   * Every value here comes from a server-side `count(*) ... group by`, never
+   * a client-downloaded page of Orders — a mobile dashboard must not fake
+   * counts by paging through full history. `activeTotal` uses the exact
+   * `quickView = 'active'` boundary the Orders list already applies
+   * (`delivery_status not in ('hold', 'closed', 'cancelled')`), so a Driver
+   * out for delivery or an Order Returned to Trader still counts as Active
+   * here exactly as it does when quick-viewing "Active" in the list.
+   */
+  public async operatorDashboardSummary(): Promise<OperationsOperatorDashboardSummary> {
+    const { companyId } = this.tenants.current();
+    const knownStatuses = [
+      "new",
+      "in_branch",
+      "assigned_to_driver",
+      "out_for_delivery",
+      "hold",
+      "delivered",
+      "returned_to_branch",
+      "returned_to_trader",
+      "cancelled",
+      "closed",
+    ] as const;
+    // A "Driver User" (a `company_user` account whose linked Employee backs a
+    // `drivers.employee_id` record — see `currentEmployeeDriverId`) must see
+    // ONLY their own Driver's counts here, exactly like `orders()` and
+    // `orderDetail()` already narrow for them. Without this, a Driver User's
+    // mobile dashboard leaked full Company-wide totals even though the very
+    // same identity's Orders list was already correctly scoped to just their
+    // own assignments — the two views disagreed about what this account is.
+    // An ordinary Operator (no linked Driver) is completely unaffected:
+    // `ownDriverId` is `undefined` and every predicate below is a no-op.
+    const ownDriverId = await this.currentEmployeeDriverId();
+    const driverScope = sql`(${ownDriverId ?? null}::uuid is null or assigned_driver_id = ${ownDriverId ?? null}::uuid)`;
+    const [statusCounts, activeTotal, deliveredToday, returnPending] = await Promise.all([
+      sql<OperationsStatusCount>`
+        select delivery_status as status, count(*)::int as count
+          from orders
+         where company_id = ${companyId}::uuid
+           and ${driverScope}
+         group by delivery_status
+      `.execute(this.database),
+      sql<{ count: number }>`
+        select count(*)::int as count from orders
+         where company_id = ${companyId}::uuid
+           and delivery_status not in ('hold', 'closed', 'cancelled')
+           and ${driverScope}
+      `.execute(this.database),
+      sql<{ count: number }>`
+        select count(*)::int as count from orders
+         where company_id = ${companyId}::uuid
+           and delivery_status = 'delivered' and delivered_at::date = current_date
+           and ${driverScope}
+      `.execute(this.database),
+      sql<{ count: number }>`
+        select count(*)::int as count from orders
+         where company_id = ${companyId}::uuid and delivery_status = 'returned_to_branch'
+           and ${driverScope}
+      `.execute(this.database),
+    ]);
+    const byStatus: Record<string, number> = Object.fromEntries(
+      knownStatuses.map((status) => [status, 0]),
+    );
+    for (const row of statusCounts.rows) byStatus[row.status] = row.count;
+    return {
+      activeTotal: activeTotal.rows[0]?.count ?? 0,
+      byStatus,
+      deliveredToday: deliveredToday.rows[0]?.count ?? 0,
+      returnPending: returnPending.rows[0]?.count ?? 0,
+    };
+  }
+
+  /**
+   * Dashboard summary for the authenticated Driver ONLY — every count is
+   * scoped to `assigned_driver_id = driver.id`, where `driver` is resolved
+   * from the authenticated identity via `driverForAccount` exactly like
+   * `driverPortalOrders`/`changeDriverPortalOrderStatus` already do. There is
+   * no `driverId` input anywhere in this method's signature — a client can
+   * only ever see its own counts, never another Driver's or the Company's.
+   *
+   * Unlike the Operator summary, "New" (unassigned) Orders are intentionally
+   * excluded: an Order not yet assigned to this Driver is not their concern.
+   */
+  public async driverDashboardSummary(): Promise<OperationsDriverDashboardSummary> {
+    const identity = this.identities.current();
+    if (identity.companyId === null) {
+      throw new ApplicationException(
+        "tenant_required",
+        "A Company account is required",
+        HttpStatus.FORBIDDEN,
+      );
+    }
+    const driver = await this.driverForAccount(
+      identity.companyId,
+      identity.identityId,
+      identity.profileId,
+    );
+    const [statusCounts, deliveredToday] = await Promise.all([
+      sql<{ status: string; count: number }>`
+        select delivery_status as status, count(*)::int as count
+          from orders
+         where company_id = ${identity.companyId}::uuid
+           and assigned_driver_id = ${driver.id}::uuid
+           and order_type <> 'gcc_international'
+           and delivery_status in ('assigned_to_driver', 'out_for_delivery', 'returned_to_branch')
+         group by delivery_status
+      `.execute(this.database),
+      sql<{ count: number }>`
+        select count(*)::int as count from orders
+         where company_id = ${identity.companyId}::uuid
+           and assigned_driver_id = ${driver.id}::uuid
+           and order_type <> 'gcc_international'
+           and delivery_status = 'delivered' and delivered_at::date = current_date
+      `.execute(this.database),
+    ]);
+    const byStatus: Record<string, number> = {
+      assigned_to_driver: 0,
+      out_for_delivery: 0,
+      returned_to_branch: 0,
+    };
+    for (const row of statusCounts.rows) byStatus[row.status] = row.count;
+    const assignedToMe = byStatus.assigned_to_driver ?? 0;
+    const outForDelivery = byStatus.out_for_delivery ?? 0;
+    const returnPending = byStatus.returned_to_branch ?? 0;
+    return {
+      activeTotal: assignedToMe + outForDelivery,
+      assignedToMe,
+      deliveredToday: deliveredToday.rows[0]?.count ?? 0,
+      outForDelivery,
+      returnPending,
+    };
+  }
+
+  /**
+   * The Driver this authenticated identity operates as, if any -- resolved
+   * ONLY from the explicit `employees.company_user_id` / `drivers.employee_id`
+   * chain (never from name, mobile, or email matching). `IdentityContext`
+   * already carries `profileType`/`profileId` for a `company_user` session
+   * (set at login from `user_business_links`, defaulting to the "employee"
+   * profile type -- see `authentication.repository.ts`'s `activeProfile`), so
+   * this is a single deterministic lookup, not an inference.
+   *
+   * Returns `undefined` for every other identity (an ordinary office User
+   * with no Driver behind their linked Employee, an Employee that IS a
+   * Driver but wasn't yet resolved this way, a Platform Administrator, ...),
+   * in which case Orders visibility is completely unchanged -- this never
+   * narrows what an Operator/Admin can already see.
+   */
+  private async currentEmployeeDriverId(): Promise<string | undefined> {
+    const identity = this.identities.current();
+    if (identity.kind !== "company_user" || identity.profileType !== "employee") {
+      return undefined;
+    }
+    const { companyId } = this.tenants.current();
+    const result = await sql<{ id: string }>`
+      select id from drivers
+       where employee_id = ${identity.profileId ?? null}::uuid and company_id = ${companyId}::uuid
+       limit 1
+    `.execute(this.database);
+    return result.rows[0]?.id;
+  }
+
   public async orders(filters: OperationsOrderFilters = {}): Promise<OperationsOrderPage> {
     const { companyId } = this.tenants.current();
     const search = this.optionalFilter(filters.search);
+    const referenceNumber = this.optionalFilter(filters.referenceNumber);
+    // Normalised to match how reference_number_normalized is stored, so the
+    // deprecated filter reaches the same index the unified search uses.
+    const referenceTerm = referenceNumber === null ? null : normalizeReferenceTerm(referenceNumber);
+    const serialNumber = this.optionalFilter(filters.serialNumber);
+    const serialTerm = serialNumber === null ? null : this.normalizeOrderIdentifier(serialNumber);
     const deliveryStatus = this.optionalFilter(filters.deliveryStatus);
+    const internationalCarrierStatus = this.optionalFilter(filters.internationalCarrierStatus);
+    const orderType = this.optionalFilter(filters.orderType);
+    const thirdPartyDeliveryCompanyName = this.optionalFilter(filters.thirdPartyDeliveryCompanyName);
+    const destinationCountryName = this.optionalFilter(filters.destinationCountryName);
     const cashStatus = this.optionalFilter(filters.cashStatus);
     const settlementStatus = this.optionalFilter(filters.settlementStatus);
+    const workflowStep = this.optionalFilter(filters.workflowStep);
     const traderId = this.optionalUuidFilter(filters.traderId);
-    const driverId = this.optionalUuidFilter(filters.driverId);
+    // A Driver User must see only Orders assigned to them, regardless of
+    // which Orders permission their Role happens to grant, and regardless of
+    // any `driverId` the client sends -- never let the caller pick someone
+    // else's Driver identity to view. Everyone else's behaviour, including
+    // the client-supplied `driverId` filter, is completely unchanged.
+    const ownDriverId = await this.currentEmployeeDriverId();
+    const driverId = ownDriverId ?? this.optionalUuidFilter(filters.driverId);
     const areaId = this.optionalUuidFilter(filters.areaId);
+    const emirateId = this.optionalUuidFilter(filters.emirateId);
     const dateFrom = this.optionalDate(filters.dateFrom);
     const dateTo = this.optionalDate(filters.dateTo);
     const quickView = filters.quickView ?? "active";
+    const openTraderReceivablePredicate = sql`
+      exists (
+        select 1
+        from trader_receivables workflow_receivable
+        where workflow_receivable.company_id = o.company_id
+          and workflow_receivable.source_type = 'service_charge'
+          and workflow_receivable.source_reference = o.order_number
+          and workflow_receivable.status in ('outstanding', 'partially_collected')
+          and workflow_receivable.outstanding_amount > 0
+      )
+    `;
+    const failedAccountingPredicate = sql`
+      exists (
+        select 1
+        from accounting_events workflow_event
+        where workflow_event.company_id = o.company_id
+          and workflow_event.source_entity_type = 'order'
+          and workflow_event.source_reference = o.order_number
+          and workflow_event.id = (
+            select latest_workflow_event.id
+            from accounting_events latest_workflow_event
+            where latest_workflow_event.company_id = o.company_id
+              and latest_workflow_event.source_entity_type = 'order'
+              and latest_workflow_event.source_reference = o.order_number
+            order by latest_workflow_event.created_at desc, latest_workflow_event.id desc
+            limit 1
+          )
+          and workflow_event.processing_status = 'failed'
+      )
+    `;
+    const workflowStepPredicate = sql`
+      (${workflowStep}::text is null
+        or (${workflowStep} = 'collect_from_driver'
+          and o.delivery_status = 'delivered'
+          and o.driver_reconciliation_status = 'pending'
+          and o.customer_amount_due > 0)
+        or (${workflowStep} = 'collect_from_trader' and ${openTraderReceivablePredicate})
+        or (${workflowStep} = 'settle_trader'
+          and o.delivery_status = 'delivered'
+          and o.driver_reconciliation_status in ('reconciled', 'not_applicable')
+          and o.trader_net_payable > 0
+          and o.trader_settlement_status in ('unsettled', 'partially_settled'))
+        or (${workflowStep} = 'complete'
+          and o.delivery_status in ('delivered', 'closed', 'returned_to_trader', 'cancelled')
+          and not (o.delivery_status = 'delivered'
+            and o.driver_reconciliation_status = 'pending'
+            and o.customer_amount_due > 0)
+          and not (o.delivery_status = 'delivered'
+            and o.driver_reconciliation_status in ('reconciled', 'not_applicable')
+            and o.trader_net_payable > 0
+            and o.trader_settlement_status in ('unsettled', 'partially_settled', 'money_sent_to_trader'))
+          and not ${openTraderReceivablePredicate}
+          and not ${failedAccountingPredicate})
+      )
+    `;
+    const delivery = await this.deliveryActivity(filters);
+    const { applied, deliveredOnly } = delivery;
     const page =
       Number.isInteger(filters.page) && (filters.page ?? 0) > 0 ? (filters.page ?? 1) : 1;
     const pageSize = ([25, 50, 100] as const).includes(filters.pageSize ?? 25)
@@ -550,43 +1059,122 @@ export class OperationsService {
     } as const;
     const sortColumn = sortColumns[filters.sortBy ?? "orderDate"];
     const sortDirection = filters.sortDirection === "asc" ? "asc" : "desc";
+    /* Serial Number is the secondary key, so Orders sharing a date read in
+       Serial order instead of by `id` -- which is a random UUID and therefore
+       an arbitrary shuffle within each day. `order_date` is a DATE, so on a busy
+       day that shuffle was the entire visible ordering.
+       Compared NUMERICALLY: the digits are extracted and cast, because
+       lexically '10' sorts before '9'. Delivery Activity already does this to
+       its Order Number for the same reason.
+
+       ALWAYS ascending, deliberately, even when the date sorts descending: the
+       newest day belongs at the top, but within that day the Orders should read
+       in the sequence they were raised -- 1, 2, 3 -- which is how an operator
+       works through them. `id` stays as the final key: without a unique
+       tie-break, offset pagination can repeat one row and skip another. */
+    const serialSortKey = "nullif(regexp_replace(o.serial_number,'[^0-9]','','g'),'')::bigint";
     const quickViewPredicate = sql`
       (${quickView} = 'all'
-        or (${quickView} = 'active' and o.delivery_status not in ('hold', 'closed', 'cancelled'))
+        or (${quickView} = 'active' and o.delivery_status in ('new','in_branch','assigned_to_driver','out_for_delivery','hold','delivered','returned_to_branch','returned_to_trader','collect_order'))
         or (${quickView} = 'closed' and o.delivery_status = 'closed')
         or (${quickView} = 'hold' and o.delivery_status = 'hold')
-        or (${quickView} = 'cancelled' and o.delivery_status = 'cancelled'))
+        or (${quickView} = 'cancelled' and o.delivery_status = 'cancelled')
+        or (${quickView} = 'accountant'
+          and o.delivery_status = 'delivered'
+          and (
+            o.driver_reconciliation_status = 'pending'
+            or (
+              o.driver_reconciliation_status in ('reconciled', 'not_applicable')
+              and o.trader_net_payable > 0
+              and o.trader_settlement_status in ('unsettled', 'partially_settled')
+            )
+            or (
+              o.driver_reconciliation_status in ('reconciled', 'not_applicable')
+              and o.trader_settlement_status = 'money_sent_to_trader'
+              and 1 = (
+                select count(*)
+                from trader_settlement_orders accountant_tso
+                join trader_settlements accountant_s
+                  on accountant_s.id = accountant_tso.settlement_id
+                 and accountant_s.company_id = accountant_tso.company_id
+                where accountant_tso.company_id = o.company_id
+                  and accountant_tso.order_id = o.id
+                  and accountant_s.reversal_of_id is null
+                  and accountant_s.status = 'confirmed'
+                  and not exists (
+                    select 1
+                    from trader_settlements accountant_reversal
+                    where accountant_reversal.company_id = accountant_s.company_id
+                      and accountant_reversal.reversal_of_id = accountant_s.id
+                  )
+              )
+            )
+            or exists (
+              select 1
+              from trader_receivables accountant_receivable
+              where accountant_receivable.company_id = o.company_id
+                and accountant_receivable.source_type = 'service_charge'
+                and accountant_receivable.source_reference = o.order_number
+                and accountant_receivable.status in ('outstanding', 'partially_collected')
+                and accountant_receivable.outstanding_amount > 0
+            )
+          )
+        ))
+    `;
+    const tabPredicate = sql`
+      ${quickViewPredicate}
+      and (${ownDriverId}::uuid is null or o.assigned_driver_id = ${ownDriverId}::uuid)
+      and (${deliveredOnly} = false or o.delivered_at is not null)
     `;
     const filterPredicate = sql`
-      ${quickViewPredicate}
-      and (${search}::text is null or (
-        o.order_number ilike '%' || ${search}::text || '%'
-        or coalesce(o.serial_number,'') ilike '%' || ${search}::text || '%'
-        or coalesce(o.reference_number,'') ilike '%' || ${search}::text || '%'
-        or o.customer_name ilike '%' || ${search}::text || '%'
-        or o.customer_mobile_number ilike '%' || ${search}::text || '%'
-        or t.name_en ilike '%' || ${search}::text || '%'
-        or coalesce(t.name_ar, '') ilike '%' || ${search}::text || '%'
-      ))
+      ${tabPredicate}
+      -- Deprecated dedicated Reference filter, kept for callers that still send
+      -- it; the web no longer renders a field for it. Now matched against the
+      -- normalised column so it uses the trigram index instead of scanning, and
+      -- leading zeros in values like '000123' still survive because the
+      -- normalisation lower-cases and trims but never casts to a number.
+      and (${referenceTerm}::text is null
+           or o.reference_number_normalized like '%' || ${referenceTerm}::text || '%')
+      and (${serialTerm}::text is null
+           or o.serial_number_normalized = ${serialTerm}::text)
+      and ${unifiedOrderSearchPredicate(search)}
       and (${deliveryStatus}::text is null or o.delivery_status = ${deliveryStatus})
+      and (${internationalCarrierStatus}::text is null or o.international_carrier_status = ${internationalCarrierStatus})
+      and ${workflowStepPredicate}
+      and (${orderType}::text is null or o.order_type = ${orderType})
+      and (${thirdPartyDeliveryCompanyName}::text is null or lower(o.third_party_delivery_company_name) like '%' || lower(${thirdPartyDeliveryCompanyName}::text) || '%')
+      and (${destinationCountryName}::text is null or lower(o.destination_country_name) like '%' || lower(${destinationCountryName}::text) || '%')
       and (${cashStatus}::text is null or o.driver_reconciliation_status = ${cashStatus})
       and (${settlementStatus}::text is null or o.trader_settlement_status = ${settlementStatus})
       and (${traderId}::uuid is null or o.trader_id = ${traderId}::uuid)
       and (${driverId}::uuid is null or o.assigned_driver_id = ${driverId}::uuid)
       and (${areaId}::uuid is null or o.area_id = ${areaId}::uuid)
+      -- Through the Area the Order already joins, so no extra join is needed and
+      -- the existing access path is unchanged. Selecting an Emirate used to
+      -- narrow only the Area picker and filtered nothing.
+      and (${emirateId}::uuid is null or a.emirate_id = ${emirateId}::uuid)
       and (${dateFrom}::date is null or o.order_date >= ${dateFrom}::date)
       and (${dateTo}::date is null or o.order_date <= ${dateTo}::date)
+      -- Delivery Activity. One shared fragment, so the list, the count and the
+      -- export cannot drift apart. Matches everything when it is off.
+      and ${delivery.predicate}
     `;
     const result = await sql<OperationsOrder>`
       select o.id,
              o.order_number as "orderNumber",
              o.serial_number as "serialNumber",
+             o.psystem_serial as "psystemSerial",
              o.reference_number as "referenceNumber",
              o.order_date::text as "orderDate",
              t.name_en as "traderName",
+             a.name_en as "areaNameEn",
+             a.name_ar as "areaNameAr",
              coalesce(o.customer_area_name_ar_snapshot,a.name_ar,
                       o.customer_area_name_snapshot,a.name_en) as "areaName",
              o.assigned_driver_id as "assignedDriverId",
+             /* Identifier only, so the workflow guidance can prefilter the
+                Trader Settlement screen. No financial column is added. */
+             o.trader_id as "traderId",
              d.name_en as "assignedDriverName",
              d.mobile_number as "assignedDriverMobile",
              o.customer_name as "customerName",
@@ -601,50 +1189,413 @@ export class OperationsService {
              o.trader_net_payable::text as "traderNetPayable",
              o.customer_amount_due::text as "customerAmountDue",
              o.amount_collected::text as "amountCollected",
+             o.is_free_order as "isFreeOrder",
+             o.order_type as "orderType",
+             o.international_carrier_status as "internationalCarrierStatus",
+             o.destination_country_id as "destinationCountryId",
+             coalesce(dc.name, o.destination_country_name) as "destinationCountryName",
+             o.third_party_delivery_company_id as "thirdPartyDeliveryCompanyId",
+             coalesce(pc.name, o.third_party_delivery_company_name) as "thirdPartyDeliveryCompanyName",
              o.vat_amount::text as "vatAmount",
              o.company_revenue::text as "companyRevenue",
              o.order_profit::text as "orderProfit",
              o.delivery_status as "deliveryStatus",
              o.driver_reconciliation_status as "driverReconciliationStatus",
              o.trader_settlement_status as "traderSettlementStatus",
-             o.return_status as "returnStatus"
+             case
+               when d.id is null or d.driver_type <> 'outsourced' then 'not_required'
+               when o.delivery_status <> 'delivered' then 'pending_delivery'
+               when fee.id is null then 'missing_accrual'
+               when fee.status = 'accrued' then 'unpaid'
+               else fee.status
+             end as "outsourcedDriverFeeStatus",
+             fee.earned_amount::text as "outsourcedDriverFeeAmount",
+             fee.paid_amount::text as "outsourcedDriverFeePaid",
+             fee.outstanding_amount::text as "outsourcedDriverFeeOutstanding",
+             fee_payments.payment_numbers as "outsourcedDriverFeePaymentNumbers",
+             receivable.receivable_id as "traderReceivableId",
+             receivable.receivable_number as "traderReceivableNumber",
+             receivable.outstanding_amount as "traderReceivableOutstanding",
+             receivable.status as "traderReceivableStatus",
+             o.return_status as "returnStatus",
+             o.delivered_at::text as "deliveredAt",
+             /* Authoritative Accounting state for this Order.
+
+                Derived from the Accounting Event and its Journal rather than
+                predicted from the Order's own money fields: an Order that is
+                "Accounting Required" tells you an Event SHOULD exist, never
+                that one did post. The lateral below is the ledger's answer. */
+             /* Receipt-confirmation target for this Order.
+
+                Settlement-level, because that is what the confirmation action
+                takes: confirmMoneyReceived(settlementId). There is deliberately
+                NO paymentId here -- one settlement carries many payment rows and
+                none of them is a confirmation target. */
+             coalesce(receipt.confirmable_count, 0) as "confirmableSettlementCount",
+             receipt.settlement_id as "confirmableSettlementId",
+             coalesce(acct.state, 'accounting_event_missing') as "accountingState",
+             acct.event_id as "accountingEventId",
+             acct.journal_id as "accountingJournalId"
       from orders o
       join traders t on t.id = o.trader_id and t.company_id = o.company_id
-      join areas a on a.id = o.area_id and a.company_id = o.company_id
+      left join areas a on a.id = o.area_id and a.company_id = o.company_id
       left join drivers d on d.id = o.assigned_driver_id and d.company_id = o.company_id
+      left join destination_countries dc on dc.id = o.destination_country_id and dc.company_id = o.company_id
+      left join third_party_delivery_companies pc on pc.id = o.third_party_delivery_company_id and pc.company_id = o.company_id
+      left join outsourced_driver_fee_accruals fee
+        on fee.order_id = o.id and fee.company_id = o.company_id
+      /* ONE set-based lateral for the whole page, not a lookup per row: the
+         planner runs it as part of this single query, so adding it cannot
+         introduce an N+1 no matter how many Orders are returned.
+
+         The ordering below takes the CURRENT Event. An Order
+         can accumulate several (a reversal raises another), and the newest is
+         the one whose state the operator has to act on.
+
+         The classification order matters. A duplicate is reported as a
+         duplicate even though it also lands in the failed status, and a
+         mapping block is named as such rather than as a generic failure --
+         each one sends the operator to a different screen. */
+      /* ONE set-based lateral, evaluated as part of this single page query.
+
+         The eligibility test mirrors the service's own guards in
+         confirmMoneyReceived (trader-settlement.service.ts): a settlement can
+         receive a Money Received confirmation only when it is NOT itself a
+         reversal record, its status is 'confirmed' (money sent), no reversal
+         of it exists, and its receipt has not ALREADY been confirmed (the
+         audit_events marker the service itself checks). All four conditions
+         are restated here rather than reinvented, so the count can never
+         disagree with what the action would accept. Without the fourth, an
+         Order paid across two settlements whose first receipt was confirmed
+         while the Order was still partially settled keeps counting that
+         settlement forever -- the chip then reports ambiguity when exactly
+         one real target remains.
+
+         When several settlements are awaiting receipt, the oldest payment is
+         the deterministic next target. This lets the Orders action open the
+         existing confirmation dialog instead of abandoning the operator on
+         the settlement list. */
+      left join lateral (
+        select
+          count(*)::int as confirmable_count,
+          (array_agg(
+            s.id::text
+            order by s.business_date asc, s.created_at asc, s.id asc
+          ))[1] as settlement_id
+        from trader_settlement_orders tso
+        join trader_settlements s
+          on s.id = tso.settlement_id and s.company_id = tso.company_id
+        where tso.company_id = o.company_id
+          and tso.order_id = o.id
+          -- Only an Order actually awaiting receipt has a confirmable target.
+          and o.trader_settlement_status = 'money_sent_to_trader'
+          and s.status = 'confirmed'
+          and s.reversal_of_id is null
+          and not exists (
+            select 1
+            from trader_settlements r
+            where r.company_id = s.company_id and r.reversal_of_id = s.id
+          )
+          and not exists (
+            select 1
+            from audit_events ae
+            where ae.company_id = s.company_id
+              and ae.subject_type = 'trader_settlement'
+              and ae.subject_id = s.id::text
+              and ae.action = 'trader_settlement.receipt_confirmed'
+          )
+      ) receipt on true
+      left join lateral (
+        select
+          e.id as event_id,
+          j.id as journal_id,
+          case
+            when e.error_code is not null and e.error_code like '%duplicate%'
+              then 'accounting_blocked_duplicate'
+            when e.processing_status = 'blocked_period' or e.failure_category = 'period'
+              then 'accounting_blocked_closed_period'
+            when e.processing_status = 'blocked_configuration'
+              or e.failure_category = 'configuration'
+              then 'accounting_blocked_missing_mapping'
+            when e.processing_status = 'failed' then 'accounting_event_failed'
+            when e.processing_status in ('received', 'validated', 'processing', 'retry_pending')
+              then 'accounting_event_waiting'
+            when e.processing_status = 'posted' and j.status = 'posted' then 'journal_posted'
+            when e.processing_status = 'posted' and j.id is not null then 'journal_pending'
+            when e.processing_status = 'posted' then 'accounting_event_posted'
+            else 'accounting_event_waiting'
+          end as state
+        from accounting_events e
+        left join journal_entries j on j.id = e.journal_id and j.company_id = e.company_id
+        where e.company_id = o.company_id
+          and e.source_entity_type = 'order'
+          and e.source_entity_id = o.id
+        order by e.created_at desc
+        limit 1
+      ) acct on true
+      left join lateral (
+        select string_agg(payments.payment_number, ', ' order by payments.payment_number) as payment_numbers
+        from (
+          select distinct p.payment_number
+          from outsourced_driver_fee_payment_allocations pa
+          join outsourced_driver_fee_payments p
+            on p.id = pa.payment_id and p.company_id = pa.company_id
+          where pa.company_id = o.company_id
+            and pa.accrual_id = fee.id
+            and pa.reversed_at is null
+            and p.status = 'confirmed'
+        ) payments
+      ) fee_payments on true
+      left join lateral (
+        select
+          r.id::text as receivable_id,
+          r.receivable_number,
+          greatest(r.original_amount_due - r.amount_collected, 0::numeric)::text as outstanding_amount,
+          r.status
+        from trader_receivables r
+        where r.company_id = o.company_id
+          and r.source_type = 'service_charge'
+          and r.source_reference = o.order_number
+          and r.status not in ('cancelled', 'reversed')
+        order by r.created_at desc
+        limit 1
+      ) receivable on true
       where o.company_id = ${companyId}::uuid
         and ${filterPredicate}
-      order by ${sql.raw(sortColumn)} ${sql.raw(sortDirection)}, o.id ${sql.raw(sortDirection)}
+      order by ${
+        delivery.order ??
+        sql`${sql.raw(sortColumn)} ${sql.raw(sortDirection)},
+            ${sql.raw(serialSortKey)} asc nulls last,
+            o.id ${sql.raw(sortDirection)}`
+      }
       limit ${pageSize} offset ${offset}
     `.execute(this.database);
-    const counts = await sql<{ filteredCount: number; totalCount: number }>`
+    const counts = await sql<{ matchingCount: number; tabTotalCount: number }>`
       select
-        (select count(*)::int from orders where company_id = ${companyId}::uuid) as "totalCount",
-        count(*)::int as "filteredCount"
+        count(*) filter (where ${filterPredicate})::int as "matchingCount",
+        count(*) filter (where ${tabPredicate})::int as "tabTotalCount"
       from orders o
       join traders t on t.id = o.trader_id and t.company_id = o.company_id
-      where o.company_id = ${companyId}::uuid and ${filterPredicate}
+      -- The shared filter predicate reaches the Emirate through the Area, so
+      -- the count must join it too. Both queries use the same predicate; only
+      -- one of them joining is how the Emirate filter broke the whole list.
+      left join areas a on a.id = o.area_id and a.company_id = o.company_id
+      where o.company_id = ${companyId}::uuid
     `.execute(this.database);
+    // ONE Business Day configuration query for the whole page. Calling the
+    // resolver per Order would be an N+1; deriving the date in SQL would
+    // restate the business-day rule in a second language.
+    const deliveryBusinessDates = deliveredOnly
+      ? await this.businessDays.businessDatesFor(result.rows.map((row) => row.deliveredAt))
+      : undefined;
+    /* Workflow guidance is derived per row from columns this select ALREADY
+       returns -- no extra query, no join, no per-row lookup. See
+       `order-workflow-guidance.ts`; the four persisted statuses stay
+       authoritative and nothing here is written back. */
+    const items = result.rows.map((row) => ({
+      ...row,
+      ...(deliveryBusinessDates === undefined
+        ? {}
+        : {
+            // Only from delivered_at. Never created_at, never order_date.
+            deliveryBusinessDate:
+              row.deliveredAt == null ? null : (deliveryBusinessDates.get(row.deliveredAt) ?? null),
+          }),
+      workflowGuidance: deriveOrderWorkflowGuidance({
+        accountingRequired: row.accountingRequired === true,
+        accountingEventId: row.accountingEventId ?? null,
+        accountingJournalId: row.accountingJournalId ?? null,
+        accountingState: row.accountingState ?? null,
+        confirmableSettlementCount: row.confirmableSettlementCount ?? 0,
+        confirmableSettlementId: row.confirmableSettlementId ?? null,
+        assignedDriverId: row.assignedDriverId ?? null,
+        customerAmountDue: row.customerAmountDue,
+        deliveryStatus: row.deliveryStatus,
+        driverReconciliationStatus: row.driverReconciliationStatus,
+        isFreeOrder: row.isFreeOrder === true,
+        orderId: row.id,
+        orderNumber: row.orderNumber,
+        returnStatus: row.returnStatus ?? null,
+        traderId: row.traderId ?? "",
+        traderNetPayable: row.traderNetPayable,
+        traderReceivableId: row.traderReceivableId ?? null,
+        traderReceivableOutstanding: row.traderReceivableOutstanding ?? null,
+        traderReceivableStatus: row.traderReceivableStatus ?? null,
+        traderSettlementStatus: row.traderSettlementStatus,
+      }),
+    }));
     return {
-      filteredCount: counts.rows[0]?.filteredCount ?? 0,
-      items: result.rows,
+      ...(applied === undefined ? {} : { appliedDateMode: applied }),
+      filteredCount: counts.rows[0]?.matchingCount ?? 0,
+      matchingCount: counts.rows[0]?.matchingCount ?? 0,
+      items,
       page,
       pageSize,
-      totalCount: counts.rows[0]?.totalCount ?? 0,
+      totalCount: counts.rows[0]?.tabTotalCount ?? 0,
+      tabTotalCount: counts.rows[0]?.tabTotalCount ?? 0,
     };
+  }
+
+  /**
+   * The Delivery Activity predicate and ordering, built once and shared by the
+   * list, the count and the export.
+   *
+   * Three copies of this would eventually disagree, and the disagreement would
+   * be an export that does not match the screen it came from - the exact defect
+   * the temporary 501 refusal existed to prevent.
+   *
+   * Everything it returns is inert when Delivery Activity is off, so the
+   * Active/All/Hold/Cancelled/Closed views and every ordinary export keep their
+   * existing behaviour untouched.
+   */
+  private async deliveryActivity(filters: OperationsOrderFilters): Promise<{
+    readonly applied: AppliedReportDateMode | undefined;
+    readonly deliveredOnly: boolean;
+    readonly order: ReturnType<typeof sql> | null;
+    readonly predicate: ReturnType<typeof sql>;
+  }> {
+    const deliveredOnly = filters.deliveredOnly === true;
+    // Business Date is refused outside Delivery Activity rather than ignored:
+    // an Orders list has no authoritative operational instant, so answering
+    // would be answering a different question.
+    if (!deliveredOnly && filters.dateMode === "business_date") {
+      throw new ApplicationException(
+        "report_date_mode_not_supported",
+        "Business Date mode applies to Delivery Activity only",
+        HttpStatus.UNPROCESSABLE_ENTITY,
+      );
+    }
+    if (!deliveredOnly) {
+      return { applied: undefined, deliveredOnly, order: null, predicate: sql`true` };
+    }
+    // One resolution per request: one configuration query, boundaries computed
+    // once, and the same object feeds rows, count and export.
+    const applied = await this.reportDateModes.resolve("order-delivery-activity", {
+      businessDateFrom: filters.businessDateFrom,
+      businessDateTo: filters.businessDateTo,
+      dateMode: filters.dateMode,
+    });
+    const timezone = applied.timezone ?? (await this.companyTimezone());
+    const from = this.optionalDate(filters.deliveryDateFrom);
+    const to = this.optionalDate(filters.deliveryDateTo);
+    // Business Date compares the raw timestamp against UTC bounds, so no
+    // function wraps the indexed column there.
+    const businessDate =
+      applied.dateMode === "business_date"
+        ? this.reportDateModes.predicate("o.delivered_at", applied)
+        : sql`true`;
+    return {
+      applied,
+      deliveredOnly,
+      // Two Orders delivered in the same second must land in a fixed order, or
+      // offset pagination can repeat one row and skip another. Order Number is
+      // compared NUMERICALLY - lexically ORD-9 sorts after ORD-10 - with the id
+      // as the guaranteed-unique final key.
+      order:
+        filters.sortBy === undefined
+          ? sql`o.delivered_at desc nulls last,
+              nullif(regexp_replace(o.order_number,'[^0-9]','','g'),'')::bigint desc nulls last,
+              o.id desc`
+          : null,
+      // Calendar Date reads the COMPANY-LOCAL date of the delivery instant. A
+      // UTC date would put deliveries before 04:00 Dubai on the previous day.
+      predicate: sql`(
+        o.delivered_at is not null
+        and (${from}::date is null
+             or (o.delivered_at at time zone ${timezone})::date >= ${from}::date)
+        and (${to}::date is null
+             or (o.delivered_at at time zone ${timezone})::date <= ${to}::date)
+        and ${businessDate}
+      )`,
+    };
+  }
+
+  /** Company timezone for Calendar Date mode. One row, cached by Postgres. */
+  private async companyTimezone(): Promise<string> {
+    const { companyId } = this.tenants.current();
+    const result = await sql<{ timezone: string }>`
+      select timezone from company_settings where company_id = ${companyId}::uuid
+    `.execute(this.database);
+    return result.rows[0]?.timezone ?? "Asia/Dubai";
   }
 
   public async exportOrders(filters: OperationsOrderFilters = {}): Promise<OperationsExportFile> {
     const { companyId } = this.tenants.current();
+    // Same shared fragment the list and count use, so the exported rows are
+    // exactly the rows the operator saw.
+    const delivery = await this.deliveryActivity(filters);
     const search = this.optionalFilter(filters.search);
+    const referenceNumber = this.optionalFilter(filters.referenceNumber);
+    // Normalised to match how reference_number_normalized is stored, so the
+    // deprecated filter reaches the same index the unified search uses.
+    const referenceTerm = referenceNumber === null ? null : normalizeReferenceTerm(referenceNumber);
+    const serialNumber = this.optionalFilter(filters.serialNumber);
+    const serialTerm = serialNumber === null ? null : this.normalizeOrderIdentifier(serialNumber);
     const deliveryStatus = this.optionalFilter(filters.deliveryStatus);
     const cashStatus = this.optionalFilter(filters.cashStatus);
     const settlementStatus = this.optionalFilter(filters.settlementStatus);
+    const workflowStep = this.optionalFilter(filters.workflowStep);
     const traderId = this.optionalUuidFilter(filters.traderId);
     const driverId = this.optionalUuidFilter(filters.driverId);
     const areaId = this.optionalUuidFilter(filters.areaId);
+    const emirateId = this.optionalUuidFilter(filters.emirateId);
     const dateFrom = this.optionalDate(filters.dateFrom);
     const dateTo = this.optionalDate(filters.dateTo);
+    const exportOpenTraderReceivablePredicate = sql`
+      exists (
+        select 1
+        from trader_receivables workflow_receivable
+        where workflow_receivable.company_id = o.company_id
+          and workflow_receivable.source_type = 'service_charge'
+          and workflow_receivable.source_reference = o.order_number
+          and workflow_receivable.status in ('outstanding', 'partially_collected')
+          and workflow_receivable.outstanding_amount > 0
+      )
+    `;
+    const exportFailedAccountingPredicate = sql`
+      exists (
+        select 1
+        from accounting_events workflow_event
+        where workflow_event.company_id = o.company_id
+          and workflow_event.source_entity_type = 'order'
+          and workflow_event.source_reference = o.order_number
+          and workflow_event.id = (
+            select latest_workflow_event.id
+            from accounting_events latest_workflow_event
+            where latest_workflow_event.company_id = o.company_id
+              and latest_workflow_event.source_entity_type = 'order'
+              and latest_workflow_event.source_reference = o.order_number
+            order by latest_workflow_event.created_at desc, latest_workflow_event.id desc
+            limit 1
+          )
+          and workflow_event.processing_status = 'failed'
+      )
+    `;
+    const exportWorkflowStepPredicate = sql`
+      (${workflowStep}::text is null
+        or (${workflowStep} = 'collect_from_driver'
+          and o.delivery_status = 'delivered'
+          and o.driver_reconciliation_status = 'pending'
+          and o.customer_amount_due > 0)
+        or (${workflowStep} = 'collect_from_trader' and ${exportOpenTraderReceivablePredicate})
+        or (${workflowStep} = 'settle_trader'
+          and o.delivery_status = 'delivered'
+          and o.driver_reconciliation_status in ('reconciled', 'not_applicable')
+          and o.trader_net_payable > 0
+          and o.trader_settlement_status in ('unsettled', 'partially_settled'))
+        or (${workflowStep} = 'complete'
+          and o.delivery_status in ('delivered', 'closed', 'returned_to_trader', 'cancelled')
+          and not (o.delivery_status = 'delivered'
+            and o.driver_reconciliation_status = 'pending'
+            and o.customer_amount_due > 0)
+          and not (o.delivery_status = 'delivered'
+            and o.driver_reconciliation_status in ('reconciled', 'not_applicable')
+            and o.trader_net_payable > 0
+            and o.trader_settlement_status in ('unsettled', 'partially_settled', 'money_sent_to_trader'))
+          and not ${exportOpenTraderReceivablePredicate}
+          and not ${exportFailedAccountingPredicate})
+      )
+    `;
     const result = await sql<
       OperationsOrder & {
         readonly exportedAt: string;
@@ -653,9 +1604,12 @@ export class OperationsService {
       select o.id,
              o.order_number as "orderNumber",
              o.serial_number as "serialNumber",
+             o.psystem_serial as "psystemSerial",
              o.reference_number as "referenceNumber",
              o.order_date::text as "orderDate",
              t.name_en as "traderName",
+             a.name_en as "areaNameEn",
+             a.name_ar as "areaNameAr",
              coalesce(o.customer_area_name_ar_snapshot,a.name_ar,
                       o.customer_area_name_snapshot,a.name_en) as "areaName",
              o.assigned_driver_id as "assignedDriverId",
@@ -677,37 +1631,40 @@ export class OperationsService {
              o.company_revenue::text as "companyRevenue",
              o.order_profit::text as "orderProfit",
              o.delivery_status as "deliveryStatus",
+             o.international_carrier_status as "internationalCarrierStatus",
              o.driver_reconciliation_status as "driverReconciliationStatus",
              o.trader_settlement_status as "traderSettlementStatus",
              now()::text as "exportedAt"
       from orders o
       join traders t on t.id = o.trader_id and t.company_id = o.company_id
-      join areas a on a.id = o.area_id and a.company_id = o.company_id
+      left join areas a on a.id = o.area_id and a.company_id = o.company_id
       left join drivers d on d.id = o.assigned_driver_id and d.company_id = o.company_id
       where o.company_id = ${companyId}::uuid
-        and (${search}::text is null or (
-          o.order_number ilike '%' || ${search}::text || '%'
-          or coalesce(o.serial_number,'') ilike '%' || ${search}::text || '%'
-          or coalesce(o.reference_number,'') ilike '%' || ${search}::text || '%'
-          or o.customer_name ilike '%' || ${search}::text || '%'
-          or o.customer_mobile_number ilike '%' || ${search}::text || '%'
-          or t.name_en ilike '%' || ${search}::text || '%'
-          or coalesce(d.name_en, '') ilike '%' || ${search}::text || '%'
-        ))
+        -- The same two fragments as the list, so an export reproduces exactly
+        -- what the operator saw on screen.
+      and (${referenceTerm}::text is null
+             or o.reference_number_normalized like '%' || ${referenceTerm}::text || '%')
+        and (${serialTerm}::text is null
+             or o.serial_number_normalized = ${serialTerm}::text)
+        and ${unifiedOrderSearchPredicate(search)}
         and (${deliveryStatus}::text is null or o.delivery_status = ${deliveryStatus})
+        and ${exportWorkflowStepPredicate}
         and (${cashStatus}::text is null or o.driver_reconciliation_status = ${cashStatus})
         and (${settlementStatus}::text is null or o.trader_settlement_status = ${settlementStatus})
         and (${traderId}::uuid is null or o.trader_id = ${traderId}::uuid)
         and (${driverId}::uuid is null or o.assigned_driver_id = ${driverId}::uuid)
         and (${areaId}::uuid is null or o.area_id = ${areaId}::uuid)
+        and (${emirateId}::uuid is null or a.emirate_id = ${emirateId}::uuid)
         and (${dateFrom}::date is null or o.order_date >= ${dateFrom}::date)
         and (${dateTo}::date is null or o.order_date <= ${dateTo}::date)
-      order by o.order_date desc, o.created_at desc, o.order_number
+        and ${delivery.predicate}
+      order by ${delivery.order ?? sql`o.order_date desc, o.created_at desc, o.order_number`}
       limit 5000
     `.execute(this.database);
     const content = this.toCsv([
       [
         "serial_number",
+        "psystem_serial",
         "reference_number",
         "order_number",
         "order_date",
@@ -733,6 +1690,7 @@ export class OperationsService {
       ],
       ...result.rows.map((order) => [
         order.serialNumber ?? "",
+        order.psystemSerial ?? "",
         order.referenceNumber ?? "",
         order.orderNumber,
         order.orderDate,
@@ -795,10 +1753,20 @@ export class OperationsService {
 
   public async orderDetail(orderId: string): Promise<OperationsOrderDetail> {
     const { companyId } = this.tenants.current();
-    const [order, history, attachments, internationalShipment, metadata, events] =
-      await Promise.all([
-        this.orderById(companyId, orderId),
-        sql<OperationsOrderDetail["history"][number]>`
+    // `orders()` (the list) already scopes to the caller's own Driver id when
+    // one is resolved -- but this single-Order lookup is reachable by the
+    // SAME `orders.*` permissions and takes an arbitrary id, so without this
+    // check a Driver could read any other Order in the Company by guessing/
+    // iterating ids, bypassing the list scoping entirely. Same fate as a
+    // truly nonexistent Order (`order_not_found`), not a distinct 403 --
+    // this never confirms to the caller that a Order they cannot see exists.
+    const ownDriverId = await this.currentEmployeeDriverId();
+    const order = await this.orderById(companyId, orderId);
+    if (ownDriverId !== undefined && order.assignedDriverId !== ownDriverId) {
+      throw new ApplicationException("order_not_found", "Order not found", HttpStatus.NOT_FOUND);
+    }
+    const [history, attachments, internationalShipment, metadata, events] = await Promise.all([
+      sql<OperationsOrderDetail["history"][number]>`
         select h.status_dimension as "statusDimension",
                h.from_status as "fromStatus",
                h.to_status as "toStatus",
@@ -810,9 +1778,9 @@ export class OperationsService {
         where h.company_id = ${companyId}::uuid and h.order_id = ${orderId}::uuid
         order by h.occurred_at, h.id
       `.execute(this.database),
-        this.orderAttachments(companyId, orderId),
-        this.internationalShipment(companyId, orderId),
-        sql<OperationsOrderDetail["metadata"]>`
+      this.orderAttachments(companyId, orderId),
+      this.internationalShipment(companyId, orderId),
+      sql<OperationsOrderDetail["metadata"]>`
         select o.created_at::text as "createdAt", creator.username as "createdBy",
                o.customer_second_mobile_number as "customerSecondMobileNumber",
                o.package_count as "packageCount", o.notes, o.payment_condition as "paymentCondition",
@@ -826,7 +1794,7 @@ export class OperationsService {
           and creator.company_id = o.company_id
         where o.company_id = ${companyId}::uuid and o.id = ${orderId}::uuid
       `.execute(this.database),
-        sql<OperationsOrderDetail["events"][number]>`
+      sql<OperationsOrderDetail["events"][number]>`
         select e.id, e.event_type as "eventType", e.event_category as category,
                e.field_name as "fieldName", e.previous_value as "previousValue",
                e.new_value as "newValue", coalesce(a.username, 'System') as actor,
@@ -837,7 +1805,7 @@ export class OperationsService {
         where e.company_id = ${companyId}::uuid and e.order_id = ${orderId}::uuid
         order by e.occurred_at desc, e.id desc
       `.execute(this.database),
-      ]);
+    ]);
     const detailMetadata = metadata.rows[0];
     if (detailMetadata === undefined) {
       throw new ApplicationException("order_not_found", "Order not found", HttpStatus.NOT_FOUND);
@@ -1065,27 +2033,26 @@ export class OperationsService {
       );
     }
     const tokenHash = createHash("sha256").update(token, "utf8").digest("hex");
-    const result = await sql<PublicOrderTracking & { readonly trackingTokenId: string }>`
+    const result = await sql<{
+      trackingTokenId: string;
+      orderNumber: string;
+      deliveryStatus: string;
+      deliveredAt: string | null;
+      lastUpdatedAt: string;
+    }>`
       select tt.id as "trackingTokenId",
-             c.name_en as "companyName",
              o.order_number as "orderNumber",
-             o.customer_name as "customerName",
-             coalesce(o.customer_area_name_ar_snapshot,a.name_ar,
-                      o.customer_area_name_snapshot,a.name_en) as "areaName",
-             d.name_en as "assignedDriverName",
              o.delivery_status as "deliveryStatus",
              o.delivered_at::text as "deliveredAt",
              greatest(o.updated_at, coalesce(max(h.occurred_at), o.updated_at))::text as "lastUpdatedAt"
       from tracking_tokens tt
       join orders o on o.id = tt.order_id and o.company_id = tt.company_id
       join companies c on c.id = tt.company_id and c.status = 'active'
-      join areas a on a.id = o.area_id and a.company_id = o.company_id
-      left join drivers d on d.id = o.assigned_driver_id and d.company_id = o.company_id
       left join order_status_history h on h.order_id = o.id and h.company_id = o.company_id
       where tt.token_hash = ${tokenHash}
         and tt.revoked_at is null
         and (tt.expires_at is null or tt.expires_at > now())
-      group by tt.id, c.name_en, o.id, a.name_en, a.name_ar, d.name_en
+      group by tt.id, o.id
       limit 1
     `.execute(this.database);
     const tracking = result.rows[0];
@@ -1109,9 +2076,14 @@ export class OperationsService {
          set last_accessed_at = now()
        where id = ${tracking.trackingTokenId}::uuid
     `.execute(this.database);
-    const { trackingTokenId: _trackingTokenId, ...publicTracking } = tracking;
-    void _trackingTokenId;
-    return publicTracking;
+    const status = mapPublicTrackingStatus(tracking.deliveryStatus);
+    return {
+      deliveredAt: tracking.deliveredAt,
+      deliveryStatus: status.status,
+      deliveryStatusLabel: status.statusLabel,
+      lastUpdatedAt: tracking.lastUpdatedAt,
+      orderNumber: tracking.orderNumber,
+    };
   }
 
   public async traderPortalProfile(): Promise<TraderPortalProfile> {
@@ -1123,14 +2095,251 @@ export class OperationsService {
         HttpStatus.FORBIDDEN,
       );
     }
-    const trader = await this.traderForAccount(identity.companyId, identity.identityId, identity.profileId);
+    const trader = await this.traderForAccount(
+      identity.companyId,
+      identity.identityId,
+      identity.profileId,
+    );
     const result = await sql<TraderPortalProfile>`
-      select id,code,name_en as name,mobile_number as "mobileNumber",email
-        from traders
-       where id=${trader.id}::uuid and company_id=${identity.companyId}::uuid
+      select t.id, t.code, t.name_en as name, t.name_ar as "nameAr",
+             t.mobile_number as "mobileNumber", t.telephone, t.email,
+             t.contact_person as "contactPerson", t.commercial_number as "commercialNumber",
+             coalesce(a.preferred_language, 'en') as "preferredLanguage",
+             c.mobile_code as "companyMobileCode"
+        from traders t
+        join companies c on c.id = t.company_id
+        left join accounts a on a.id = ${identity.identityId}::uuid
+       where t.id=${trader.id}::uuid and t.company_id=${identity.companyId}::uuid
        limit 1
     `.execute(this.database);
     return result.rows[0]!;
+  }
+
+  /**
+   * Fields a Trader may edit about itself from the portal.
+   *
+   * The primary login mobile and Trader name are deliberately absent: §42 of
+   * the workspace prompt treats them as identity-sensitive and defers a
+   * verification flow to a later prompt, rather than letting a Trader quietly
+   * change the number Delivery Orders and settlements already reference.
+   */
+  public async updateTraderPortalProfile(input: {
+    readonly commercialNumber?: string | null;
+    readonly contactPerson?: string | null;
+    readonly email?: string | null;
+    readonly preferredLanguage?: string;
+    readonly telephone?: string | null;
+  }): Promise<TraderPortalProfile> {
+    const identity = this.identities.current();
+    if (identity.companyId === null) {
+      throw new ApplicationException(
+        "tenant_required",
+        "A Company account is required",
+        HttpStatus.FORBIDDEN,
+      );
+    }
+    const trader = await this.traderForAccount(
+      identity.companyId,
+      identity.identityId,
+      identity.profileId,
+    );
+    await this.transactions.execute(async (transaction) => {
+      await sql`
+        update traders set
+          contact_person = ${input.contactPerson === undefined ? sql`contact_person` : input.contactPerson},
+          telephone = ${input.telephone === undefined ? sql`telephone` : input.telephone},
+          email = ${input.email === undefined ? sql`email` : input.email},
+          commercial_number =
+            ${input.commercialNumber === undefined ? sql`commercial_number` : input.commercialNumber},
+          updated_at = now(), version = version + 1
+        where id = ${trader.id}::uuid and company_id = ${identity.companyId}::uuid
+      `.execute(transaction);
+      if (input.preferredLanguage !== undefined) {
+        await sql`
+          update accounts set preferred_language = ${input.preferredLanguage}, updated_at = now()
+           where id = ${identity.identityId}::uuid
+        `.execute(transaction);
+      }
+    });
+    return this.traderPortalProfile();
+  }
+
+  /**
+   * The Trader's own Dashboard.
+   *
+   * Reports the Trader's EXISTING Delivery Orders (this Company context's
+   * `orders` rows) alongside a read-only Commerce summary. It does not invent
+   * a Store Order concept — that domain does not exist yet, and this Dashboard
+   * is explicit that "Orders" here means Delivery Orders. When the Store Order
+   * domain lands, its KPIs are added beside these, not blended into them.
+   */
+  public async traderPortalDashboard(): Promise<TraderPortalDashboard> {
+    const identity = this.identities.current();
+    if (identity.companyId === null) {
+      throw new ApplicationException(
+        "tenant_required",
+        "A Company account is required",
+        HttpStatus.FORBIDDEN,
+      );
+    }
+    const trader = await this.traderForAccount(
+      identity.companyId,
+      identity.identityId,
+      identity.profileId,
+    );
+
+    // Same cross-Company scope as `traderPortalOrdersPageAllCompanies` (Trader
+    // Acceptance Prompt T8, §45): a Trader Commerce identity linked to more
+    // than one Delivery Company saw ALL its Orders on the Orders list page but
+    // only the current session Company's Orders here -- two different counts
+    // for "how many Orders do I have" is not two views of the same truth, it
+    // is a wrong one. The caller's own session pair is still unioned in, so a
+    // Trader with no Trader Commerce identity yet (most Traders, until they
+    // touch My Store) keeps seeing its own Orders exactly as before.
+    const scopePairs = traderCommerceOrderScopePairs(trader.id);
+    const scopePredicate = sql`
+      (o.company_id, o.trader_id) in (
+        select "companyId", "traderId" from (${scopePairs}) scope
+        union
+        select ${identity.companyId}::uuid, ${trader.id}::uuid
+      )
+    `;
+
+    const orderCounts = await sql<{
+      active: string;
+      cancelled: string;
+      delivered: string;
+      newOrders: string;
+      returned: string;
+      total: string;
+    }>`
+      select
+        count(*) filter (where o.delivery_status = 'new') as "newOrders",
+        count(*) filter (
+          where o.delivery_status in ('in_branch', 'assigned_to_driver', 'out_for_delivery', 'hold')
+        ) as active,
+        -- T10: closed is a POST-delivery terminal state (see the comment in
+        -- order-workflow-guidance.ts), not a separate outcome from delivered
+        -- -- same Order, further along. Counting only delivered here silently
+        -- dropped every closed Order from the whole breakdown: Total kept
+        -- counting it, but no bucket did, so New+Active+Delivered+Cancelled+
+        -- Returned never summed to Total. Matches the existing
+        -- (delivered, closed, ...) grouping already used elsewhere in this
+        -- file (workflow-step queries above).
+        count(*) filter (where o.delivery_status in ('delivered', 'closed')) as delivered,
+        count(*) filter (where o.delivery_status = 'cancelled') as cancelled,
+        count(*) filter (
+          where o.delivery_status in ('returned_to_branch', 'returned_to_trader')
+        ) as returned,
+        count(*) as total
+        from orders o
+       where ${scopePredicate}
+    `.execute(this.database);
+
+    const monthCod = await sql<{ total: string }>`
+      select coalesce(sum(o.cod_amount), 0)::text as total
+        from orders o
+       where ${scopePredicate}
+         and o.order_date >= date_trunc('month', now())
+    `.execute(this.database);
+
+    const recent = await sql<{
+      amountDue: string;
+      customerName: string;
+      companyName: string;
+      orderDate: string;
+      orderNumber: string;
+      status: string;
+    }>`
+      select o.order_number as "orderNumber", o.order_date::text as "orderDate",
+             o.customer_name as "customerName", o.delivery_status as status,
+             o.customer_amount_due::text as "amountDue", c.name_en as "companyName"
+        from orders o
+        join companies c on c.id = o.company_id
+       where ${scopePredicate}
+       order by o.order_date desc, o.created_at desc
+       limit 5
+    `.execute(this.database);
+
+    // Trader Commerce is optional: a Trader who has never touched My Store
+    // gets zeros here rather than an error, because a Dashboard that fails to
+    // load over a Store that does not exist yet is a worse first screen than
+    // an honest empty summary.
+    const commerce = await sql<{
+      activeProducts: string;
+      deliveryCompanyCount: string;
+      draftProducts: string;
+      slug: string | null;
+      status: string | null;
+      storeName: string | null;
+      storefrontId: string | null;
+      totalProducts: string;
+    }>`
+      with commerce_identity as (
+        select trader_commerce_id from trader_commerce_company_links
+         where trader_id = ${trader.id}::uuid
+      ),
+      store as (
+        select s.id, s.display_name, s.slug, s.status, s.trader_commerce_id
+          from trader_storefronts s
+          join commerce_identity ci on ci.trader_commerce_id = s.trader_commerce_id
+      )
+      select
+        store.id as "storefrontId", store.display_name as "storeName", store.slug, store.status,
+        coalesce(
+          (select count(*) from trader_storefront_products p
+            where p.storefront_id = store.id and p.lifecycle_status = 'active'), 0) as "activeProducts",
+        coalesce(
+          (select count(*) from trader_storefront_products p
+            where p.storefront_id = store.id and p.lifecycle_status = 'draft'), 0) as "draftProducts",
+        coalesce(
+          (select count(*) from trader_storefront_products p
+            where p.storefront_id = store.id), 0) as "totalProducts",
+        coalesce(
+          (select count(*) from trader_delivery_company_relationships r
+            where r.trader_commerce_id = store.trader_commerce_id and r.status = 'active'), 0)
+          as "deliveryCompanyCount"
+        from commerce_identity
+        left join store on store.trader_commerce_id = commerce_identity.trader_commerce_id
+    `.execute(this.database);
+
+    const commerceRow = commerce.rows[0];
+    const counts = orderCounts.rows[0]!;
+    return {
+      commerce: {
+        activeProducts: Number(commerceRow?.activeProducts ?? 0),
+        deliveryCompanyCount: Number(commerceRow?.deliveryCompanyCount ?? 0),
+        draftProducts: Number(commerceRow?.draftProducts ?? 0),
+        hasStore: commerceRow?.storefrontId !== undefined && commerceRow.storefrontId !== null,
+        storeName: commerceRow?.storeName ?? null,
+        storeStatus: commerceRow?.status ?? null,
+        storeUrl:
+          commerceRow?.slug !== null && commerceRow?.slug !== undefined
+            ? `/store/${commerceRow.slug}`
+            : null,
+        totalProducts: Number(commerceRow?.totalProducts ?? 0),
+      },
+      orders: {
+        active: Number(counts.active),
+        cancelled: Number(counts.cancelled),
+        delivered: Number(counts.delivered),
+        newOrders: Number(counts.newOrders),
+        returned: Number(counts.returned),
+        total: Number(counts.total),
+      },
+      period: {
+        monthCodTotal: monthCod.rows[0]?.total ?? "0",
+        monthLabel: new Date().toISOString().slice(0, 7),
+      },
+      recentOrders: recent.rows.map((row) => ({
+        amountDue: row.amountDue,
+        customerName: row.customerName,
+        deliveryCompanyName: row.companyName,
+        orderDate: row.orderDate,
+        orderNumber: row.orderNumber,
+        status: row.status,
+      })),
+    };
   }
 
   public async traderPortalAreas(): Promise<readonly TraderPortalArea[]> {
@@ -1155,6 +2364,87 @@ export class OperationsService {
     return result.rows;
   }
 
+  /**
+   * Which Delivery Company (and that Company's own Trader record) a Trader
+   * Portal write should land under — the write-side counterpart of
+   * `traderPortalOrdersPageAllCompanies`'s read-side aggregation (Trader
+   * Portal Prompt 3T-C, Part D).
+   *
+   * The set of companies eligible for `target` is the exact same UNION
+   * `traderPortalOrdersPageAllCompanies` reads from — the caller's own
+   * session Company, always, plus every Company its Trader Commerce identity
+   * is actively linked to. Reusing that set (rather than inventing a second
+   * one) means "which Companies can I see Orders for" and "which Companies
+   * can I create an Order under" can never drift apart.
+   *
+   * Resolution alone is always safe and always cross-Company: it never
+   * writes anything, and correctly rejects an unrelated or inactive Company
+   * regardless of what the actual write does with the result.
+   *
+   * ---------------------------------------------------------------------------
+   * WHY `accountId` IS PART OF THE RESULT
+   * ---------------------------------------------------------------------------
+   *
+   * `orders`, `order_status_history`, `order_events`, `order_assignments`,
+   * `customers`, `customer_addresses`, `file_objects` and `import_batches`
+   * all carry a COMPOSITE actor foreign key —
+   * `(*_account_id, company_id) references accounts(id, company_id)` — so
+   * writing under a Company other than the caller's own session Company
+   * requires an account that actually belongs to THAT Company. The caller's
+   * own login account never does. `target.accountId` is the resolved
+   * Company Trader record's OWN account (`traders.account_id`) for
+   * `target.companyId` — genuinely valid there — and is passed as
+   * `createOrder`'s/`importOrdersCsv`'s `actingAccountIdOverride` by the two
+   * callers below whenever `target.companyId !== identity.companyId`. This
+   * satisfies every one of those constraints without touching
+   * `IdentityContextAccessor`, `TenantContextAccessor`, `identities.current()`,
+   * or the login/session model itself.
+   */
+  private async resolveTraderPortalDeliveryCompany(
+    ownCompanyId: string,
+    callerTraderId: string,
+    requestedCompanyId: string | undefined,
+  ): Promise<{
+    readonly accountId: string;
+    readonly companyId: string;
+    readonly traderId: string;
+  }> {
+    const scopePairs = traderCommerceOrderScopePairs(callerTraderId);
+    const result = await sql<{ accountId: string; companyId: string; traderId: string }>`
+      select scope."companyId", scope."traderId", t.account_id as "accountId"
+        from (
+          select "companyId", "traderId" from (${scopePairs}) scope
+          union
+          select ${ownCompanyId}::uuid as "companyId", ${callerTraderId}::uuid as "traderId"
+        ) scope
+        join traders t on t.id = scope."traderId" and t.company_id = scope."companyId"
+    `.execute(this.database);
+    const options = result.rows;
+    // Unreachable in practice — the UNION above always contributes the
+    // caller's own Company — but kept as an explicit, honest guard rather
+    // than trusting that invariant silently (§ Part A: "zero Companies
+    // blocks manual Order creation").
+    if (options.length === 0) {
+      throw new ApplicationException(
+        "no_delivery_company_available",
+        "No Delivery Company is available for this Trader",
+        HttpStatus.FORBIDDEN,
+      );
+    }
+    if (requestedCompanyId === undefined) {
+      return options.find((option) => option.companyId === ownCompanyId) ?? options[0]!;
+    }
+    const match = options.find((option) => option.companyId === requestedCompanyId);
+    if (match === undefined) {
+      throw new ApplicationException(
+        "delivery_company_not_linked",
+        "The selected Delivery Company is not an active relationship for this Trader",
+        HttpStatus.FORBIDDEN,
+      );
+    }
+    return match;
+  }
+
   public async createTraderPortalOrder(
     input: CreateTraderPortalOrderDto,
     correlationId: string,
@@ -1168,15 +2458,65 @@ export class OperationsService {
         HttpStatus.FORBIDDEN,
       );
     }
-    const trader = await this.traderForAccount(
+    const callerTrader = await this.traderForAccount(
       identity.companyId,
       identity.identityId,
       identity.profileId,
     );
-    return this.createOrder(
-      { ...input, traderId: trader.id },
-      correlationId,
-      idempotencyKey,
+    // Pricing is the Company's decision, not the Trader's. The portal contract
+    // inherits `serviceFee` and `serviceFeeOverrideReason` from the Operator
+    // DTO, so both are stripped here rather than trusted — the same reason
+    // `traderId` is resolved from the session instead of the request body.
+    //
+    // Stripped, not rejected, so an existing mobile build that still sends the
+    // fields keeps working: the Order is simply priced from the authoritative
+    // Trader/Area table, which is what it should always have been. A configured
+    // zero price therefore succeeds with no reason demanded of the Trader.
+    const {
+      deliveryCompanyId,
+      serviceFee: _clientServiceFee,
+      serviceFeeOverrideReason: _clientReason,
+      ...pricedByCompany
+    } = input;
+    void _clientServiceFee;
+    void _clientReason;
+    const target = await this.resolveTraderPortalDeliveryCompany(
+      identity.companyId,
+      callerTrader.id,
+      deliveryCompanyId,
+    );
+    // Trader Portal serial numbers are Company-owned operational identifiers.
+    // The Trader should not type or control them; generate the next serial in
+    // the target Company tenant scope immediately before creating the Order.
+    // Own Company: no override needed, identical to today's behaviour except
+    // for server-generated serial numbers.
+    if (target.companyId === identity.companyId) {
+      const nextSerial = await this.legacySerialInputForAutomaticPath();
+      return this.createOrder(
+        { ...pricedByCompany, ...nextSerial, traderId: target.traderId },
+        correlationId,
+        idempotencyKey,
+      );
+    }
+    // A different, actively-linked Company: `tenants.run()` redirects
+    // `resolveServiceFee`'s (and everything else's) `companyId` to the
+    // target Company for the duration of this one call -- so pricing
+    // resolves from THAT Company's own Trader/Area table, not the caller's
+    // session Company -- and `target.accountId` (that Company's own linked
+    // Trader account) satisfies every composite actor FK `createOrder`
+    // writes through. See `resolveTraderPortalDeliveryCompany`'s doc
+    // comment for the full reasoning.
+    return this.tenants.run(
+      { companyId: target.companyId, identityId: identity.identityId },
+      async () => {
+        const nextSerial = await this.legacySerialInputForAutomaticPath();
+        return this.createOrder(
+          { ...pricedByCompany, ...nextSerial, traderId: target.traderId },
+          correlationId,
+          idempotencyKey,
+          target.accountId,
+        );
+      },
     );
   }
 
@@ -1198,7 +2538,16 @@ export class OperationsService {
       identity.identityId,
       identity.profileId,
     );
-    const { traderId: _ignoredTraderId, ...safeInput } = input;
+    // Same rule as creation: the Trader owns the Order's business fields, never
+    // its price. Editing must not become the way around the creation guard.
+    const {
+      serviceFee: _ignoredServiceFee,
+      serviceFeeReason: _ignoredReason,
+      traderId: _ignoredTraderId,
+      ...safeInput
+    } = input;
+    void _ignoredServiceFee;
+    void _ignoredReason;
     void _ignoredTraderId;
     return this.updateOrder(orderId, safeInput, correlationId, trader.id);
   }
@@ -1212,17 +2561,24 @@ export class OperationsService {
         HttpStatus.FORBIDDEN,
       );
     }
-    const trader = await this.traderForAccount(identity.companyId, identity.identityId, identity.profileId);
+    const trader = await this.traderForAccount(
+      identity.companyId,
+      identity.identityId,
+      identity.profileId,
+    );
     const result = await sql<PortalOrder>`
       select o.id,
              o.order_number as "orderNumber",
              o.order_date::text as "orderDate",
              o.serial_number as "serialNumber",
+             o.psystem_serial as "psystemSerial",
              o.reference_number as "referenceNumber",
              o.area_id as "areaId",
              o.package_count as "packageCount",
              o.notes,
              t.name_en as "traderName",
+             a.name_en as "areaNameEn",
+             a.name_ar as "areaNameAr",
              coalesce(o.customer_area_name_ar_snapshot,a.name_ar,
                       o.customer_area_name_snapshot,a.name_en) as "areaName",
              o.customer_name as "customerName",
@@ -1233,16 +2589,379 @@ export class OperationsService {
              o.customer_amount_due::text as "customerAmountDue",
              o.amount_collected::text as "amountCollected",
              o.delivery_status as "deliveryStatus",
-             o.trader_settlement_status as "traderSettlementStatus"
+             o.trader_settlement_status as "traderSettlementStatus",
+             e.id as "emirateId",
+             e.name_en as "emirateNameEn",
+             e.name_ar as "emirateNameAr"
       from orders o
       join traders t on t.id = o.trader_id and t.company_id = o.company_id
-      join areas a on a.id = o.area_id and a.company_id = o.company_id
+      left join areas a on a.id = o.area_id and a.company_id = o.company_id
+      left join emirates e on e.id = a.emirate_id
       where o.company_id = ${identity.companyId}::uuid
         and o.trader_id = ${trader.id}::uuid
       order by o.order_date desc, o.created_at desc, o.order_number
       limit 100
     `.execute(this.database);
     return result.rows;
+  }
+
+  /**
+   * The Trader's own Orders, searchable and paginated.
+   *
+   * ---------------------------------------------------------------------------
+   * WHY THIS DELEGATES RATHER THAN QUERYING AGAIN
+   * ---------------------------------------------------------------------------
+   *
+   * `traderPortalOrders()` above is an unbounded `limit 100` list with no
+   * search, filter or paging — adequate for the Dashboard's "recent Orders",
+   * inadequate as a Trader's actual Order list (Trader Workspace Prompt 3T-B,
+   * §4/§45: "no unbounded list"). Rather than write a second search/filter/sort
+   * implementation, this forces `traderId` to the authenticated Trader and
+   * hands the SAME filters to `orders()` — the identical engine the Company
+   * portal's Orders page already uses, including unified search, quickView
+   * status grouping and the reference-number index.
+   *
+   * `filters.traderId` from the caller is never read: only the server-derived
+   * `trader.id` is ever passed through, so a manipulated `traderId` in a
+   * request body cannot reach another Trader's Orders (§11/§42).
+   *
+   * ---------------------------------------------------------------------------
+   * WHY THE RESULT IS REDACTED BEFORE IT LEAVES THIS METHOD
+   * ---------------------------------------------------------------------------
+   *
+   * `orders()` was built for a Company Operator and its row shape reflects
+   * that: `companyRevenue`, `orderProfit`, `traderNetPayable`,
+   * `outsourcedDriverFee*`, `assignedDriverId/Name/Mobile`,
+   * `accountingEventId/JournalId` and confirmable-settlement identifiers are
+   * all present on every row, unconditionally — the query has no notion of
+   * caller kind. Returning that unchanged to a Trader session would leak
+   * Company financial internals and Driver identity over the wire even if the
+   * Trader UI never renders them (§7/§34/§70 of the Customer/Trader prompts
+   * both name this exact category of leak).
+   *
+   * Redacted into `TraderPortalOrderSummary` — a purpose-built, explicit
+   * allow-list — rather than reusing `OperationsOrder` as-is or padding
+   * `PortalOrder`'s shape with placeholder values it has no data for.
+   */
+  public async traderPortalOrdersPage(
+    filters: Omit<OperationsOrderFilters, "traderId">,
+  ): Promise<TraderPortalOrderPage> {
+    const identity = this.identities.current();
+    if (identity.companyId === null) {
+      throw new ApplicationException(
+        "tenant_required",
+        "A Company account is required",
+        HttpStatus.FORBIDDEN,
+      );
+    }
+    const trader = await this.traderForAccount(
+      identity.companyId,
+      identity.identityId,
+      identity.profileId,
+    );
+    const result = await this.orders({ ...filters, traderId: trader.id });
+    return {
+      filteredCount: result.filteredCount,
+      items: result.items.map((order): TraderPortalOrderSummary => ({
+        areaName: order.areaName,
+        codAmount: order.codAmount,
+        customerAddress: order.customerAddress,
+        customerAmountDue: order.customerAmountDue,
+        customerMobileNumber: order.customerMobileNumber,
+        customerName: order.customerName,
+        deliveryStatus: order.deliveryStatus,
+        id: order.id,
+        orderDate: order.orderDate,
+        orderNumber: order.orderNumber,
+        referenceNumber: order.referenceNumber ?? null,
+        serviceFee: order.serviceFee,
+      })),
+      page: result.page,
+      pageSize: result.pageSize,
+      totalCount: result.totalCount,
+    };
+  }
+
+  /**
+   * The Trader's Orders across every Delivery Company its Trader Commerce
+   * identity is linked to -- "one common Trader Order history" (Trader
+   * Portal Prompt 3T-C, Part C).
+   *
+   * ---------------------------------------------------------------------------
+   * WHY THIS IS A SEPARATE METHOD, NOT A WIDER `traderPortalOrdersPage`
+   * ---------------------------------------------------------------------------
+   *
+   * `traderPortalOrdersPage` delegates to `orders()`, the shared engine the
+   * Company Operator also uses, which is scoped by `tenants.current().companyId`
+   * -- one Company, always. That scoping is exactly what Driver Cash
+   * Reconciliation and Trader Settlements are built on, so `orders()` and
+   * `traderPortalOrdersPage` are left completely untouched here.
+   *
+   * This method instead resolves every `(company_id, trader_id)` pair the
+   * caller's Trader Commerce identity is actively linked to
+   * (`traderCommerceOrderScopePairs`, read-only, see that module's comment)
+   * and runs its own bounded, redacted query against that set. It deliberately
+   * re-implements only the filters the Trader Portal's toolbar actually
+   * offers -- search, status quick-view, Order Date range, paging -- rather
+   * than the full sort/driver/Delivery-Activity/financial-column surface
+   * `orders()` carries for the Operator, which this Trader-facing view has no
+   * business exposing or needing.
+   */
+  public async traderPortalOrdersPageAllCompanies(
+    filters: Pick<
+      OperationsOrderFilters,
+      "dateFrom" | "dateTo" | "page" | "pageSize" | "quickView" | "search"
+    > & { readonly deliveryCompanyId?: string | undefined },
+  ): Promise<TraderPortalOrderPage> {
+    const identity = this.identities.current();
+    if (identity.companyId === null) {
+      throw new ApplicationException(
+        "tenant_required",
+        "A Company account is required",
+        HttpStatus.FORBIDDEN,
+      );
+    }
+    const trader = await this.traderForAccount(
+      identity.companyId,
+      identity.identityId,
+      identity.profileId,
+    );
+
+    const search = this.optionalFilter(filters.search);
+    const dateFrom = this.optionalDate(filters.dateFrom);
+    const dateTo = this.optionalDate(filters.dateTo);
+    const deliveryCompanyId = this.optionalUuidFilter(filters.deliveryCompanyId);
+    const quickView = filters.quickView ?? "active";
+    const page =
+      Number.isInteger(filters.page) && (filters.page ?? 0) > 0 ? (filters.page ?? 1) : 1;
+    const pageSize = ([25, 50, 100] as const).includes(filters.pageSize ?? 25)
+      ? (filters.pageSize ?? 25)
+      : 25;
+    const offset = (page - 1) * pageSize;
+
+    const quickViewPredicate = sql`
+      (${quickView} = 'all'
+        or (${quickView} = 'active' and o.delivery_status in ('new','in_branch','assigned_to_driver','out_for_delivery','hold','delivered','returned_to_branch','returned_to_trader','collect_order'))
+        or (${quickView} = 'closed' and o.delivery_status = 'closed')
+        or (${quickView} = 'hold' and o.delivery_status = 'hold')
+        or (${quickView} = 'cancelled' and o.delivery_status = 'cancelled'))
+    `;
+    const scopePairs = traderCommerceOrderScopePairs(trader.id);
+    // `scopePairs` is empty for a Trader with no Trader Commerce identity yet
+    // (no `trader_commerce_company_links` row at all -- most Traders, until
+    // they touch My Store). Without this UNION such a Trader would see zero
+    // Orders instead of their own, which is a regression, not a narrowing:
+    // the caller's own `(company_id, trader_id)` pair is always in scope for
+    // its own session regardless of whether a Commerce identity exists.
+    const filterPredicate = sql`
+      (o.company_id, o.trader_id) in (
+        select "companyId", "traderId" from (${scopePairs}) scope
+        union
+        select ${identity.companyId}::uuid, ${trader.id}::uuid
+      )
+      and (${deliveryCompanyId}::uuid is null or o.company_id = ${deliveryCompanyId}::uuid)
+      and ${quickViewPredicate}
+      and ${unifiedOrderSearchPredicate(search)}
+      and (${dateFrom}::date is null or o.order_date >= ${dateFrom}::date)
+      and (${dateTo}::date is null or o.order_date <= ${dateTo}::date)
+    `;
+
+    const countResult = await sql<{ total: string }>`
+      select count(*)::text as total
+        from orders o
+       where ${filterPredicate}
+    `.execute(this.database);
+
+    const result = await sql<{
+      areaName: string;
+      codAmount: string;
+      companyId: string;
+      companyName: string;
+      customerAddress: string;
+      customerAmountDue: string;
+      customerMobileNumber: string;
+      customerName: string;
+      deliveryStatus: string;
+      id: string;
+      orderDate: string;
+      orderNumber: string;
+      referenceNumber: string | null;
+      serviceFee: string;
+    }>`
+      select o.id, o.order_number as "orderNumber", o.order_date::text as "orderDate",
+             o.reference_number as "referenceNumber",
+             coalesce(o.customer_area_name_ar_snapshot,a.name_ar,
+                      o.customer_area_name_snapshot,a.name_en) as "areaName",
+             o.customer_name as "customerName",
+             o.customer_address as "customerAddress",
+             o.customer_mobile_number as "customerMobileNumber",
+             o.cod_amount::text as "codAmount",
+             o.service_fee::text as "serviceFee",
+             o.customer_amount_due::text as "customerAmountDue",
+             o.delivery_status as "deliveryStatus",
+             o.company_id as "companyId",
+             c.name_en as "companyName"
+        from orders o
+        left join areas a on a.id = o.area_id and a.company_id = o.company_id
+        join companies c on c.id = o.company_id
+       where ${filterPredicate}
+       order by o.order_date desc, o.created_at desc, o.order_number
+       limit ${pageSize} offset ${offset}
+    `.execute(this.database);
+
+    const totalCount = Number(countResult.rows[0]?.total ?? 0);
+    return {
+      filteredCount: totalCount,
+      items: result.rows.map((order): TraderPortalOrderSummary => ({
+        areaName: order.areaName,
+        codAmount: order.codAmount,
+        customerAddress: order.customerAddress,
+        customerAmountDue: order.customerAmountDue,
+        customerMobileNumber: order.customerMobileNumber,
+        customerName: order.customerName,
+        deliveryCompanyId: order.companyId,
+        deliveryCompanyName: order.companyName,
+        deliveryStatus: order.deliveryStatus,
+        id: order.id,
+        orderDate: order.orderDate,
+        orderNumber: order.orderNumber,
+        referenceNumber: order.referenceNumber ?? null,
+        serviceFee: order.serviceFee,
+      })),
+      page,
+      pageSize,
+      totalCount,
+    };
+  }
+
+  /**
+   * The Delivery Companies the caller's Trader Commerce identity is actively
+   * linked to -- populates the Trader Orders "Delivery Company" filter
+   * without requiring a Store to already exist (unlike
+   * `operations/trader-storefronts/:id/delivery-companies`, which is
+   * Store-scoped). Read-only, same `trader_commerce_company_links` fan-out as
+   * `traderPortalOrdersPageAllCompanies`.
+   */
+  public async traderPortalLinkedDeliveryCompanies(): Promise<
+    readonly { readonly id: string; readonly isOwn: boolean; readonly name: string }[]
+  > {
+    const identity = this.identities.current();
+    if (identity.companyId === null) {
+      throw new ApplicationException(
+        "tenant_required",
+        "A Company account is required",
+        HttpStatus.FORBIDDEN,
+      );
+    }
+    const trader = await this.traderForAccount(
+      identity.companyId,
+      identity.identityId,
+      identity.profileId,
+    );
+    const scopePairs = traderCommerceOrderScopePairs(trader.id);
+    // `isOwn` marks the ONE Company the caller is actually logged into —
+    // the only Company Order creation and bulk import can currently write
+    // under (`assertTraderPortalWriteStaysInOwnCompany`). The UI uses this
+    // to disable the other, merely-visible-not-yet-writable options rather
+    // than let a Trader submit a form that is certain to be rejected.
+    const result = await sql<{ id: string; isOwn: boolean; name: string }>`
+      select distinct c.id, c.name_en as name, c.id = ${identity.companyId}::uuid as "isOwn"
+        from (
+          select scope."companyId", scope."traderId" from (${scopePairs}) scope
+          union
+          select ${identity.companyId}::uuid as "companyId", ${trader.id}::uuid as "traderId"
+        ) scope
+        join companies c on c.id = scope."companyId"
+       order by "isOwn" desc, c.name_en
+    `.execute(this.database);
+    return result.rows;
+  }
+
+  /**
+   * Bulk Order creation for a Trader, reusing the Company import engine.
+   *
+   * ---------------------------------------------------------------------------
+   * WHY THE CSV IS RE-WRITTEN RATHER THAN A SECOND IMPORTER BUILT
+   * ---------------------------------------------------------------------------
+   *
+   * `importOrdersCsv` already owns every rule this needs — column validation,
+   * per-row pricing from the Trader/Area table, the zero-fee-needs-a-reason
+   * check, atomic all-or-nothing failure, and the row-level result the UI
+   * shows as a preview of what happened. Building a parallel Trader importer
+   * would be exactly the second Order engine §3/§69 forbid.
+   *
+   * So the only new work is enforcing Trader scope BEFORE that engine ever
+   * runs: any `traderId` or `driverId` column the Trader's file supplies is
+   * dropped — a Trader manually assigning a Driver or naming a different
+   * Trader is not a typo to correct, it is exactly the input this method
+   * exists to refuse — and a `traderId` column is added back with the
+   * server-resolved Trader on every row. `importOrdersCsv` then sees a file
+   * that looks exactly like one the Trader's own portal produced honestly.
+   */
+  public async createTraderPortalOrdersImport(
+    input: ImportTraderPortalOrdersCsvDto,
+    correlationId: string,
+  ): Promise<OperationsOrderImportResult> {
+    const identity = this.identities.current();
+    if (identity.companyId === null) {
+      throw new ApplicationException(
+        "tenant_required",
+        "A Company account is required",
+        HttpStatus.FORBIDDEN,
+      );
+    }
+    const callerTrader = await this.traderForAccount(
+      identity.companyId,
+      identity.identityId,
+      identity.profileId,
+    );
+    // One Delivery Company for the whole batch (Part D): resolved once,
+    // before any row is read, exactly like the single-Order path above —
+    // never per-row, and never from a column inside the CSV itself.
+    const target = await this.resolveTraderPortalDeliveryCompany(
+      identity.companyId,
+      callerTrader.id,
+      input.deliveryCompanyId,
+    );
+    const scoped = this.scopeCsvToTrader(
+      String((input as { csv?: unknown }).csv ?? ""),
+      target.traderId,
+    );
+    if (target.companyId === identity.companyId) {
+      return this.importOrdersCsv({ csv: scoped }, correlationId);
+    }
+    // Same cross-Company write bridge as `createTraderPortalOrder`: redirect
+    // `companyId` for this one call, and use the target Company's own
+    // linked Trader account for every composite-FK'd actor column
+    // `importOrdersCsv` writes through (`file_objects`, `import_batches`,
+    // and — via `insertOrder`/`resolveImportedCustomer` — `orders`,
+    // `order_status_history`, `order_events`, `order_assignments`,
+    // `customers`, `customer_addresses`).
+    return this.tenants.run({ companyId: target.companyId, identityId: identity.identityId }, () =>
+      this.importOrdersCsv({ csv: scoped }, correlationId, target.accountId),
+    );
+  }
+
+  /** Strips any `traderId`/`driverId` column and forces the given Trader. */
+  private scopeCsvToTrader(csv: string, traderId: string): string {
+    const rows = this.parseCsv(csv).filter((row) => row.some((cell) => cell.trim().length > 0));
+    if (rows.length === 0) return csv;
+    const header = rows[0]!.map((cell) => cell.trim());
+    const dropped = new Set(["traderid", "driverid"]);
+    const keepIndexes = header
+      .map((name, position) => [name, position] as const)
+      .filter(([name]) => !dropped.has(name.toLowerCase()));
+    const writeRow = (cells: readonly string[]): string =>
+      cells
+        .map((cell) => (/[",\n\r]/.test(cell) ? `"${cell.replaceAll('"', '""')}"` : cell))
+        .join(",");
+    const rebuilt = [
+      writeRow([...keepIndexes.map(([name]) => name), "traderId"]),
+      ...rows
+        .slice(1)
+        .map((row) => writeRow([...keepIndexes.map(([, index]) => row[index] ?? ""), traderId])),
+    ];
+    return rebuilt.join("\n");
   }
 
   public async driverPortalOrders(): Promise<readonly PortalOrder[]> {
@@ -1254,17 +2973,24 @@ export class OperationsService {
         HttpStatus.FORBIDDEN,
       );
     }
-    const driver = await this.driverForAccount(identity.companyId, identity.identityId, identity.profileId);
+    const driver = await this.driverForAccount(
+      identity.companyId,
+      identity.identityId,
+      identity.profileId,
+    );
     const result = await sql<PortalOrder>`
       select o.id,
              o.order_number as "orderNumber",
              o.order_date::text as "orderDate",
              o.serial_number as "serialNumber",
+             o.psystem_serial as "psystemSerial",
              o.reference_number as "referenceNumber",
              o.area_id as "areaId",
              o.package_count as "packageCount",
              o.notes,
              t.name_en as "traderName",
+             a.name_en as "areaNameEn",
+             a.name_ar as "areaNameAr",
              coalesce(o.customer_area_name_ar_snapshot,a.name_ar,
                       o.customer_area_name_snapshot,a.name_en) as "areaName",
              o.customer_name as "customerName",
@@ -1275,12 +3001,17 @@ export class OperationsService {
              o.customer_amount_due::text as "customerAmountDue",
              o.amount_collected::text as "amountCollected",
              o.delivery_status as "deliveryStatus",
-             o.trader_settlement_status as "traderSettlementStatus"
+             o.trader_settlement_status as "traderSettlementStatus",
+             e.id as "emirateId",
+             e.name_en as "emirateNameEn",
+             e.name_ar as "emirateNameAr"
       from orders o
       join traders t on t.id = o.trader_id and t.company_id = o.company_id
-      join areas a on a.id = o.area_id and a.company_id = o.company_id
+      left join areas a on a.id = o.area_id and a.company_id = o.company_id
+      left join emirates e on e.id = a.emirate_id
       where o.company_id = ${identity.companyId}::uuid
         and o.assigned_driver_id = ${driver.id}::uuid
+        and o.order_type <> 'gcc_international'
         and o.delivery_status in (
           'assigned_to_driver', 'out_for_delivery', 'delivered', 'returned_to_branch'
         )
@@ -1290,10 +3021,123 @@ export class OperationsService {
     return result.rows;
   }
 
+  /**
+   * A single Order, scoped to one Driver's own assignment, with NO status
+   * filter — unlike `driverPortalOrders()` (the Orders list), which
+   * deliberately only surfaces the statuses a Driver actively works: Hold is
+   * excluded there by design (it drops off the Driver's list once put on
+   * Hold, matching "Driver: limited operational next actions" — resuming it
+   * is Operations-only). `changeDriverPortalOrderStatus` still needs to
+   * return the Order it just changed regardless of which status that left it
+   * in, which is exactly what caused a real bug this method fixes: reusing
+   * `driverPortalOrders()` for that re-fetch meant a successful Hold (a valid
+   * status this Driver Physical Correction newly allows) could never be
+   * found again by `.find()`, throwing "Updated driver portal order could
+   * not be loaded" as a 500 on every Hold attempt.
+   */
+  private async driverPortalOrderById(
+    companyId: string,
+    driverId: string,
+    orderId: string,
+  ): Promise<PortalOrder | undefined> {
+    const result = await sql<PortalOrder>`
+      select o.id,
+             o.order_number as "orderNumber",
+             o.order_date::text as "orderDate",
+             o.serial_number as "serialNumber",
+             o.psystem_serial as "psystemSerial",
+             o.reference_number as "referenceNumber",
+             o.area_id as "areaId",
+             o.package_count as "packageCount",
+             o.notes,
+             t.name_en as "traderName",
+             a.name_en as "areaNameEn",
+             a.name_ar as "areaNameAr",
+             coalesce(o.customer_area_name_ar_snapshot,a.name_ar,
+                      o.customer_area_name_snapshot,a.name_en) as "areaName",
+             o.customer_name as "customerName",
+             o.customer_address as "customerAddress",
+             o.customer_mobile_number as "customerMobileNumber",
+             o.cod_amount::text as "codAmount",
+             o.service_fee::text as "serviceFee",
+             o.customer_amount_due::text as "customerAmountDue",
+             o.amount_collected::text as "amountCollected",
+             o.delivery_status as "deliveryStatus",
+             o.trader_settlement_status as "traderSettlementStatus",
+             e.id as "emirateId",
+             e.name_en as "emirateNameEn",
+             e.name_ar as "emirateNameAr"
+      from orders o
+      join traders t on t.id = o.trader_id and t.company_id = o.company_id
+      left join areas a on a.id = o.area_id and a.company_id = o.company_id
+      left join emirates e on e.id = a.emirate_id
+      where o.company_id = ${companyId}::uuid
+        and o.id = ${orderId}::uuid
+        and o.assigned_driver_id = ${driverId}::uuid
+        and o.order_type <> 'gcc_international'
+      limit 1
+    `.execute(this.database);
+    return result.rows[0];
+  }
+
+  /**
+   * Read-only status timeline for one Order this Driver is (or was, for a
+   * just-completed delivery) assigned to. Ownership is re-checked here
+   * independently of whatever the caller was ever shown via
+   * `driverPortalOrders()` — the same defense-in-depth pattern
+   * `changeDriverPortalOrderStatus` already uses. Loaded on demand only
+   * (the mobile client fetches this when the Driver expands History, not on
+   * every Order Detail open), so no cost is paid for a Driver who never asks.
+   */
+  public async driverPortalOrderHistory(
+    orderId: string,
+  ): Promise<readonly { fromStatus: string | null; toStatus: string; occurredAt: string }[]> {
+    const identity = this.identities.current();
+    if (identity.companyId === null) {
+      throw new ApplicationException(
+        "tenant_required",
+        "A Company account is required",
+        HttpStatus.FORBIDDEN,
+      );
+    }
+    const driver = await this.driverForAccount(
+      identity.companyId,
+      identity.identityId,
+      identity.profileId,
+    );
+    const owned = await sql<{ id: string }>`
+      select id from orders
+       where id = ${orderId}::uuid and company_id = ${identity.companyId}::uuid
+         and assigned_driver_id = ${driver.id}::uuid
+         and order_type <> 'gcc_international'
+       limit 1
+    `.execute(this.database);
+    if (owned.rows[0] === undefined) {
+      throw new ApplicationException(
+        "driver_order_access_denied",
+        "The order was not found",
+        HttpStatus.NOT_FOUND,
+      );
+    }
+    const history = await sql<{
+      fromStatus: string | null;
+      toStatus: string;
+      occurredAt: string;
+    }>`
+      select h.from_status as "fromStatus", h.to_status as "toStatus",
+             h.occurred_at::text as "occurredAt"
+        from order_status_history h
+       where h.company_id = ${identity.companyId}::uuid and h.order_id = ${orderId}::uuid
+       order by h.occurred_at, h.id
+    `.execute(this.database);
+    return history.rows;
+  }
+
   public async changeDriverPortalOrderStatus(
     orderId: string,
     input: ChangeOrderStatusDto,
     correlationId: string,
+    idempotencyKey?: string,
   ): Promise<PortalOrder> {
     const identity = this.identities.current();
     if (identity.companyId === null) {
@@ -1303,13 +3147,18 @@ export class OperationsService {
         HttpStatus.FORBIDDEN,
       );
     }
-    const driver = await this.driverForAccount(identity.companyId, identity.identityId, identity.profileId);
+    const driver = await this.driverForAccount(
+      identity.companyId,
+      identity.identityId,
+      identity.profileId,
+    );
     const current = await sql<{ driverId: string | null }>`
       select assigned_driver_id as "driverId"
       from orders
       where id = ${orderId}::uuid
         and company_id = ${identity.companyId}::uuid
         and assigned_driver_id = ${driver.id}::uuid
+        and order_type <> 'gcc_international'
       limit 1
     `.execute(this.database);
     if (current.rows[0] === undefined) {
@@ -1325,8 +3174,8 @@ export class OperationsService {
         HttpStatus.NOT_FOUND,
       );
     }
-    await this.changeOrderStatus(orderId, input, correlationId);
-    const updated = (await this.driverPortalOrders()).find((order) => order.id === orderId);
+    await this.changeOrderStatus(orderId, input, correlationId, idempotencyKey);
+    const updated = await this.driverPortalOrderById(identity.companyId, driver.id, orderId);
     if (updated === undefined) {
       throw new Error("Updated driver portal order could not be loaded");
     }
@@ -1347,7 +3196,6 @@ export class OperationsService {
                where o.delivery_status = 'delivered'
                  and o.driver_reconciliation_status in ('reconciled', 'not_applicable')
                  and o.trader_settlement_status not in ('not_eligible', 'reversed')
-                 and o.trader_outstanding_balance > 0
              ), 0)::text as "unsettledNetPayable"
       from traders t
       left join orders o on o.trader_id = t.id and o.company_id = t.company_id
@@ -1582,7 +3430,7 @@ export class OperationsService {
     const { companyId } = this.tenants.current();
     const identity = this.identities.current();
     const name = input.nameEn.trim();
-    const mobileNumber = input.mobileNumber.trim();
+    const mobileNumber = input.mobileNumber?.trim() || null;
     const passwordHash = await this.passwords.hash(randomUUID());
     try {
       const createdTrader = await this.transactions.execute(async (transaction) => {
@@ -1626,7 +3474,7 @@ export class OperationsService {
       return {
         code: createdTrader.code,
         id: createdTrader.traderId,
-        mobileNumber,
+        mobileNumber: mobileNumber ?? "",
         name,
         openOrders: 0,
         status: "active",
@@ -1707,9 +3555,31 @@ export class OperationsService {
     input: CreateOrderDto,
     correlationId: string,
     idempotencyKey?: string,
+    /**
+     * Overrides which account this Order (and its Customer, if inline) is
+     * recorded as created by. Every existing caller omits this and gets
+     * today's exact behaviour: `identity.identityId`, the session's own
+     * account.
+     *
+     * Exists ONLY for the Trader Portal's cross-Company write bridge
+     * (`createTraderPortalOrder`, Trader Portal Prompt 3T-C, Part A/B):
+     * `orders`, `order_status_history`, `order_events`, `order_assignments`,
+     * `customers` and `customer_addresses` all carry a COMPOSITE foreign key
+     * — `(*_account_id, company_id) references accounts(id, company_id)` —
+     * so writing under a Company other than the caller's own session Company
+     * requires an account that actually belongs to THAT Company. The
+     * caller's own login account never does. Passing the target Company's
+     * own linked Trader account here (resolved server-side, never from the
+     * client) satisfies every one of those constraints without touching
+     * `IdentityContextAccessor`/`TenantContextAccessor`, `identities.current()`,
+     * or the login/session model itself — `identity.kind`/`identity.permissions`
+     * (role label, override-fee permission) still come from the real caller.
+     */
+    actingAccountIdOverride?: string,
   ): Promise<OperationsOrder> {
     const { companyId } = this.tenants.current();
     const identity = this.identities.current();
+    const actingAccountId = actingAccountIdOverride ?? identity.identityId;
     const actorRole =
       identity.kind === "trader"
         ? "Trader"
@@ -1724,35 +3594,75 @@ export class OperationsService {
         HttpStatus.BAD_REQUEST,
       );
     }
-    const serialNumber = input.serialNumber.trim();
+    const suppliedSerialNumber = input.serialNumber?.trim() || null;
     const referenceNumber = input.referenceNumber?.trim() || null;
-    const serialNumberNormalized = this.normalizeOrderIdentifier(serialNumber);
     const referenceNumberNormalized =
       referenceNumber === null ? null : this.normalizeOrderIdentifier(referenceNumber);
+    const collectOrder = input.orderType === "collect_order";
+    const internationalOrder = input.orderType === "gcc_international";
+    if (internationalOrder && input.destinationCountryId === undefined && input.destinationCountryName === undefined) {
+      throw new ApplicationException(
+        "destination_country_required",
+        "Select a destination country for an international order",
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    if (internationalOrder && input.thirdPartyDeliveryCompanyId === undefined && input.thirdPartyDeliveryCompanyName === undefined) {
+      throw new ApplicationException(
+        "carrier_required",
+        "Select a third-party delivery company for an international order",
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    const requestedDriverId = collectOrder ? undefined : input.driverId;
+    if (internationalOrder && input.driverId !== undefined) {
+      throw new ApplicationException("international_driver_forbidden", "International Orders cannot be assigned to an internal Driver", HttpStatus.BAD_REQUEST);
+    }
     const inlineCustomer = input.inlineCustomer;
+    const customerOmitted =
+      input.customerId === undefined &&
+      input.customerAddressId === undefined &&
+      inlineCustomer === undefined;
+    const orderAreaId = input.areaId ?? inlineCustomer?.areaId;
+    if (!internationalOrder && !customerOmitted && orderAreaId === undefined) {
+      throw new ApplicationException(
+        "area_required",
+        "Select an Area when Customer details are entered",
+        HttpStatus.BAD_REQUEST,
+      );
+    }
     const hasExistingCustomer =
       input.customerId !== undefined && input.customerAddressId !== undefined;
-    if (hasExistingCustomer === (inlineCustomer !== undefined)) {
+    if (!customerOmitted && hasExistingCustomer === (inlineCustomer !== undefined)) {
       throw new ApplicationException(
         "order_customer_selection_invalid",
         "Select an existing Customer or enter one new Customer",
         HttpStatus.BAD_REQUEST,
       );
     }
-    if (inlineCustomer !== undefined && inlineCustomer.areaId !== input.areaId) {
+    if (
+      inlineCustomer !== undefined &&
+      input.areaId !== undefined &&
+      inlineCustomer.areaId !== input.areaId
+    ) {
       throw new ApplicationException(
         "customer_area_mismatch",
         "The new Customer Area must match the Order Area",
         HttpStatus.BAD_REQUEST,
       );
     }
-    const customerName = (inlineCustomer?.name ?? input.customerName).trim();
+    const customerName = (inlineCustomer?.name ?? input.customerName ?? "").trim();
     const customerMobileNumber = (
-      inlineCustomer?.mobileNumber ?? input.customerMobileNumber
+      inlineCustomer?.mobileNumber ??
+      input.customerMobileNumber ??
+      ""
     ).trim();
     const customerSecondMobileNumber =
       (inlineCustomer?.secondMobileNumber ?? input.customerSecondMobileNumber)?.trim() || null;
-    const customerAddress = (inlineCustomer?.address ?? input.customerAddress).trim();
+    /* Address is optional. Stored as '' rather than NULL when absent: the column
+       is NOT NULL with no non-empty check, so an empty string satisfies the
+       schema and no migration is needed to relax it. */
+    const customerAddress = (inlineCustomer?.address ?? input.customerAddress ?? "").trim();
     const notes = input.notes?.trim() || null;
     const packageCount = input.packageCount ?? 1;
     const additionalFees = input.additionalFees ?? 0;
@@ -1773,11 +3683,11 @@ export class OperationsService {
           customerMobileNumber,
           customerName,
           customerSecondMobileNumber,
-          driverId: input.driverId ?? null,
+          driverId: requestedDriverId ?? null,
           notes,
           packageCount,
           referenceNumber,
-          serialNumber,
+          serialNumber: suppliedSerialNumber,
           serviceFee: input.serviceFee ?? null,
           serviceFeeOverrideReason: input.serviceFeeOverrideReason?.trim() || null,
           traderId: input.traderId,
@@ -1786,6 +3696,13 @@ export class OperationsService {
       .digest("hex");
 
     return this.transactions.execute(async (transaction) => {
+      if (suppliedSerialNumber === null) {
+        throw new ApplicationException(
+          "serial_number_required",
+          "Serial Number is required",
+          HttpStatus.BAD_REQUEST,
+        );
+      }
       const reservation = await sql<{ id: string }>`
         insert into idempotency_records (
           company_id, operation, idempotency_key, request_hash, expires_at
@@ -1822,6 +3739,18 @@ export class OperationsService {
         );
       }
 
+      // PSystem allocation happens only after this idempotency key has won its
+      // reservation. It shares the Order transaction, so a rollback consumes
+      // no number. Legacy Companies that are not enabled receive NULL.
+      const psystemSerial = (
+        await sql<{ value: string | null }>`
+          select allocate_company_psystem_serial(${companyId}::uuid) as value
+        `.execute(transaction)
+      ).rows[0]?.value ?? null;
+      const psystemSerialNormalized = psystemSerial?.toLowerCase() ?? null;
+      const serialNumber = suppliedSerialNumber;
+      const serialNumberNormalized = this.normalizeOrderIdentifier(serialNumber);
+
       await this.assertOrderIdentifiersAvailable(transaction, companyId, {
         referenceNumber,
         referenceNumberNormalized,
@@ -1845,20 +3774,31 @@ export class OperationsService {
         );
       }
 
-      const { address: customerAddressRow, customer: customerRow } =
-        await this.resolveCreateOrderCustomer(transaction, {
-          companyId,
-          correlationId,
-          createdByAccountId: identity.identityId,
-          ...(input.customerAddressId === undefined
-            ? {}
-            : { customerAddressId: input.customerAddressId }),
-          ...(input.customerId === undefined ? {} : { customerId: input.customerId }),
-          ...(inlineCustomer === undefined ? {} : { inlineCustomer }),
-          orderAreaId: input.areaId,
-        });
-      const latitude = input.customerLatitude ?? customerAddressRow.latitude;
-      const longitude = input.customerLongitude ?? customerAddressRow.longitude;
+      const resolvedCustomer = customerOmitted || (internationalOrder && orderAreaId === undefined)
+        ? undefined
+        : await this.resolveCreateOrderCustomer(transaction, {
+            companyId,
+            correlationId,
+            createdByAccountId: actingAccountId,
+            ...(input.customerAddressId === undefined
+              ? {}
+              : { customerAddressId: input.customerAddressId }),
+            ...(input.customerId === undefined ? {} : { customerId: input.customerId }),
+            ...(inlineCustomer === undefined ? {} : { inlineCustomer }),
+            orderAreaId: orderAreaId!,
+          });
+      const internationalReferences = internationalOrder
+        ? await this.resolveInternationalReferences(transaction, companyId, {
+            carrierId: input.thirdPartyDeliveryCompanyId,
+            carrierName: input.thirdPartyDeliveryCompanyName,
+            countryId: input.destinationCountryId,
+            countryName: input.destinationCountryName,
+          })
+        : undefined;
+      const customerAddressRow = resolvedCustomer?.address;
+      const customerRow = resolvedCustomer?.customer;
+      const latitude = input.customerLatitude ?? customerAddressRow?.latitude ?? null;
+      const longitude = input.customerLongitude ?? customerAddressRow?.longitude ?? null;
       if (
         (latitude === null || latitude === undefined) !==
         (longitude === null || longitude === undefined)
@@ -1870,14 +3810,15 @@ export class OperationsService {
         );
       }
       const customerLocationLink =
-        input.customerLocationLink?.trim() || customerAddressRow.locationLink;
+        input.customerLocationLink?.trim() || customerAddressRow?.locationLink || null;
       const customerDeliveryNotes =
         input.customerDeliveryNotes?.trim() ||
-        customerAddressRow.deliveryInstructions ||
-        customerRow.deliveryNotes;
+        customerAddressRow?.deliveryInstructions ||
+        customerRow?.deliveryNotes ||
+        null;
 
       const driverRow =
-        input.driverId === undefined
+        requestedDriverId === undefined
           ? undefined
           : (
               await sql<{ id: string; name: string; outsourcedFee: string | null }>`
@@ -1885,12 +3826,12 @@ export class OperationsService {
                        name_en as name,
                        outsourced_fee_per_delivered_order::text as "outsourcedFee"
                 from drivers
-                where id = ${input.driverId}::uuid
+                where id = ${requestedDriverId}::uuid
                   and company_id = ${companyId}::uuid
                   and account_status = 'active'
               `.execute(transaction)
             ).rows[0];
-      if (input.driverId !== undefined && driverRow === undefined) {
+      if (requestedDriverId !== undefined && driverRow === undefined) {
         throw new ApplicationException(
           "driver_not_found",
           "The selected driver is not active in this Company",
@@ -1898,33 +3839,101 @@ export class OperationsService {
         );
       }
 
-      const area = await this.activeArea(transaction, companyId, input.areaId);
-      const pricing = await this.resolveServiceFee(transaction, {
-        areaId: area.id,
-        companyId,
-        permissions: identity.permissions,
-        ...(input.serviceFee === undefined ? {} : { requestedFee: input.serviceFee }),
-        ...(input.serviceFeeOverrideReason === undefined
-          ? {}
-          : { requestedReason: input.serviceFeeOverrideReason }),
-        traderId: traderRow.id,
-      });
+      const area =
+        input.areaId === undefined
+          ? undefined
+          : await this.activeArea(transaction, companyId, input.areaId);
+      /*
+       * A Free Order is a decision, so it does not ask the pricing engine a
+       * question it has already answered. Skipping `resolveServiceFee` is the
+       * point: an Area with no configured price raises `pricing_not_configured`,
+       * which would block an Order the operator has explicitly declared free.
+       *
+       * The Trader's own pricing is not read, written or affected -- this is one
+       * Order, and the next one prices normally.
+       *
+       * `manual` provenance with a zero configured fee is the honest record: no
+       * `trader_service_price_id` was applied, and the zero came from a person.
+       * The operator's reason is copied into `service_fee_override_reason` so
+       * `orders_zero_service_fee_reason_check` is satisfied by the same stated
+       * words that justify the free delivery; `is_free_order` remains what
+       * distinguishes this from a configured-zero price.
+       */
+      const freeOrder = !collectOrder && input.isFreeOrder === true;
+      const freeOrderReason = freeOrder ? (input.freeOrderReason ?? "").trim() : null;
+      if (freeOrder && freeOrderReason === "") {
+        throw new ApplicationException(
+          "free_order_reason_required",
+          "Enter a reason for the Free Order",
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      const pricing =
+        freeOrder || collectOrder
+          ? {
+              configuredFee: this.money(new Decimal(0)),
+              finalFee: this.money(new Decimal(0)),
+              overrideApplied: false,
+              overrideReason:
+                freeOrderReason ?? (collectOrder ? "Collect Order — operational only" : null),
+              provenance: "manual" as const,
+              servicePriceId: null,
+            }
+          : internationalOrder
+            ? {
+                configuredFee: this.money(new Decimal(input.serviceFee ?? 0)),
+                finalFee: this.money(new Decimal(input.serviceFee ?? 0)),
+                overrideApplied: false,
+                overrideReason: "International manual service fee",
+                provenance: "manual" as const,
+                servicePriceId: null,
+              }
+            : await this.resolveServiceFee(transaction, {
+              areaId: area!.id,
+              companyId,
+              permissions: identity.permissions,
+              ...(input.serviceFee === undefined ? {} : { requestedFee: input.serviceFee }),
+              ...(input.serviceFeeOverrideReason === undefined
+                ? {}
+                : { requestedReason: input.serviceFeeOverrideReason }),
+              traderId: traderRow.id,
+            });
       const vatPolicy = await this.vatPolicy(transaction, companyId);
       const orderNumber = await this.nextOrderNumber(transaction, companyId);
       const driverCost = new Decimal(driverRow?.outsourcedFee ?? 0);
+      // "Pay by Trader" means the Trader already collected from the Customer
+      // and is being billed the delivery fee separately -- the Order is
+      // prepaid, so nothing is left for the Driver to collect at delivery.
+      const traderPrepaid = input.paymentCondition === "customer_pays_cod_trader_pays_fee";
       const financials = this.calculateOrderFinancials({
-        additionalFees: new Decimal(additionalFees),
-        codAmount: new Decimal(input.codAmount),
-        driverCost,
+        // Both forced, never trusted from the client: a free Order with a COD is
+        // not a state this system recognises.
+        additionalFees: freeOrder || collectOrder ? new Decimal(0) : new Decimal(additionalFees),
+        codAmount:
+          freeOrder || collectOrder || traderPrepaid ? new Decimal(0) : new Decimal(input.codAmount),
+        driverCost: collectOrder ? new Decimal(0) : driverCost,
         prospective: true,
         serviceFee: pricing.finalFee,
+        paymentCondition: input.paymentCondition ?? "customer_pays_cod_and_fee",
         vatPolicy,
       });
-      const deliveryStatus = driverRow === undefined ? "new" : "assigned_to_driver";
+      // A Collect Order is not complete when it is created. Without a Driver
+      // it starts New so the normal assignment action is available. Once a
+      // Driver is already supplied it can enter the collect task directly.
+      const deliveryStatus = collectOrder
+        ? "collect_order"
+        : driverRow === undefined
+          ? "new"
+          : "assigned_to_driver";
+      const traderSettlementStatus =
+        freeOrder || collectOrder || financials.traderNetPayable.isZero()
+          ? "not_eligible"
+          : "unsettled";
 
       const inserted = await sql<{ id: string }>`
         insert into orders (
           company_id, order_number, serial_number, serial_number_normalized,
+          psystem_serial, psystem_serial_normalized,
           reference_number, reference_number_normalized, financial_model_version,
           order_date, trader_id, area_id, created_by_account_id,
           assigned_driver_id, customer_id, customer_address_id,customer_name, customer_mobile_number,
@@ -1939,31 +3948,43 @@ export class OperationsService {
           trader_net_payable,driver_cost,vat_amount,vat_enabled_snapshot,vat_rate_snapshot,
           vat_price_mode_snapshot,company_revenue,order_profit,delivery_status,trader_settlement_status,
           pricing_provenance_status, trader_service_price_id,
-          configured_service_fee_snapshot, final_service_fee_snapshot
+          configured_service_fee_snapshot, final_service_fee_snapshot,
+          service_fee_override_reason, is_free_order, free_order_reason, order_type,
+          destination_country_id, destination_country_name,
+          third_party_delivery_company_id, third_party_delivery_company_name
         ) values (
           ${companyId}::uuid, ${orderNumber}, ${serialNumber}, ${serialNumberNormalized},
+          ${psystemSerial}, ${psystemSerialNormalized},
           ${referenceNumber}, ${referenceNumberNormalized}, 'trader_deduction_v1',
           current_date, ${traderRow.id}::uuid,
-          ${area.id}::uuid, ${identity.identityId}::uuid,
-          ${driverRow?.id ?? null}::uuid,${customerRow.id}::uuid,${customerAddressRow.id}::uuid,
+          ${area?.id ?? null}::uuid, ${actingAccountId}::uuid,
+          ${driverRow?.id ?? null}::uuid,${customerRow?.id ?? null}::uuid,${customerAddressRow?.id ?? null}::uuid,
           ${customerName}, ${customerMobileNumber},${customerSecondMobileNumber}, ${customerAddress},
-          ${latitude ?? null},${longitude ?? null},${notes},${customerRow.code},
-          ${customerRow.customerReference},${customerAddressRow.areaCode},${customerAddressRow.areaNameEn},
-          ${customerAddressRow.areaNameAr},${customerAddressRow.areaNameAr === null},
-          ${customerLocationLink},${customerDeliveryNotes},'resolved',
-          ${packageCount}, 'customer_pays_cod_trader_pays_fee',
+          ${latitude ?? null},${longitude ?? null},${notes},${customerRow?.code ?? null},
+          ${customerRow?.customerReference ?? null},${customerAddressRow?.areaCode ?? null},${customerAddressRow?.areaNameEn ?? null},
+          ${customerAddressRow?.areaNameAr ?? null},${customerAddressRow === undefined ? null : customerAddressRow.areaNameAr === null},
+          ${customerLocationLink},${customerDeliveryNotes},${customerOmitted ? "not_applicable" : "resolved"},
+          ${packageCount}, ${input.paymentCondition ?? "customer_pays_cod_and_fee"},
           ${financials.codAmount.toFixed(2)}, ${financials.serviceFee.toFixed(2)},
           ${financials.serviceFeeNetAmount.toFixed(2)},${financials.serviceFeeVatAmount.toFixed(2)},
           ${financials.additionalFees.toFixed(2)},${financials.additionalFeeVatAmount.toFixed(2)},
           ${financials.totalDeductions.toFixed(2)},${financials.customerAmountDue.toFixed(2)},
-          ${financials.codAmount.toFixed(2)},${financials.serviceFeeNetAmount.plus(financials.serviceFeeVatAmount).toFixed(2)},
-          ${financials.additionalFees.plus(financials.additionalFeeVatAmount).toFixed(2)},
-          ${financials.traderNetPayable.toFixed(2)},${driverCost.toFixed(2)},
+          ${financials.codAmount.toFixed(2)},
+          ${financials.traderPaidServiceFee.toFixed(2)},
+          ${financials.traderDeductions.toFixed(2)},
+          ${financials.traderNetPayable.toFixed(2)},${collectOrder ? "0.00" : driverCost.toFixed(2)},
           ${financials.vatAmount.toFixed(2)},${vatPolicy.enabled},${vatPolicy.rate.toFixed(4)},
           ${vatPolicy.enabled ? vatPolicy.priceMode : null},
           ${financials.companyRevenue.toFixed(2)}, ${financials.orderProfit.toFixed(2)},
-          ${deliveryStatus}, 'unsettled', ${pricing.provenance}, ${pricing.servicePriceId}::uuid,
-          ${pricing.configuredFee.toFixed(2)}, ${pricing.finalFee.toFixed(2)}
+          ${deliveryStatus}, ${traderSettlementStatus},
+          ${pricing.provenance}, ${pricing.servicePriceId}::uuid,
+          ${pricing.configuredFee.toFixed(2)}, ${pricing.finalFee.toFixed(2)},
+          ${pricing.overrideReason}, ${freeOrder}, ${freeOrderReason},
+          ${collectOrder ? "collect_order" : internationalOrder ? "gcc_international" : "delivery"},
+          ${internationalReferences?.countryId ?? null}::uuid,
+          ${internationalReferences?.countryName ?? null},
+          ${internationalReferences?.carrierId ?? null}::uuid,
+          ${internationalReferences?.carrierName ?? null}
         )
         returning id
       `.execute(transaction);
@@ -1971,6 +3992,15 @@ export class OperationsService {
       if (orderId === undefined) {
         throw new Error("Order creation did not return an identifier");
       }
+      await this.createOrderTraderReceivableIfNeeded(transaction, {
+        actorAccountId: actingAccountId,
+        amountDue: financials.traderReceivableDue,
+        companyId,
+        correlationId,
+        orderId,
+        orderNumber,
+        traderId: traderRow.id,
+      });
 
       if (driverRow !== undefined) {
         await sql`
@@ -1978,19 +4008,18 @@ export class OperationsService {
             company_id, order_id, driver_id, assigned_by_account_id
           ) values (
             ${companyId}::uuid, ${orderId}::uuid, ${driverRow.id}::uuid,
-            ${identity.identityId}::uuid
+            ${actingAccountId}::uuid
           )
         `.execute(transaction);
       }
 
-      await sql`
-        insert into order_status_history (
-          company_id, order_id, status_dimension, to_status, changed_by_account_id
-        ) values (
-          ${companyId}::uuid, ${orderId}::uuid, 'delivery', ${deliveryStatus},
-          ${identity.identityId}::uuid
-        )
-      `.execute(transaction);
+      await this.history.statusHistory(transaction, {
+        actorId: actingAccountId,
+        companyId,
+        from: null,
+        orderId,
+        to: deliveryStatus,
+      });
       await sql`
         insert into order_events (
           company_id, order_id, event_type, event_category, field_name,
@@ -1998,7 +4027,7 @@ export class OperationsService {
           related_driver_id
         ) values (
           ${companyId}::uuid, ${orderId}::uuid, 'order.created', 'user_action',
-          'delivery_status', to_jsonb(${deliveryStatus}::text), ${identity.identityId}::uuid,
+          'delivery_status', to_jsonb(${deliveryStatus}::text), ${actingAccountId}::uuid,
           ${actorRole}, 'web_portal', ${correlationId}, ${driverRow?.id ?? null}::uuid
         )
       `.execute(transaction);
@@ -2011,7 +4040,7 @@ export class OperationsService {
           ) values (
             ${companyId}::uuid, ${orderId}::uuid, 'order.driver_assigned',
             'driver_assignment', 'assigned_driver_id', to_jsonb(${driverRow.id}::text),
-            ${identity.identityId}::uuid, ${actorRole}, 'web_portal', ${correlationId},
+            ${actingAccountId}::uuid, ${actorRole}, 'web_portal', ${correlationId},
             ${driverRow.id}::uuid
           )
         `.execute(transaction);
@@ -2019,32 +4048,34 @@ export class OperationsService {
       await this.recordOrderUsageEvent(transaction, companyId, orderId);
       await this.audit(transaction, {
         action: "order.create",
-        actorId: identity.identityId,
+        actorId: actingAccountId,
         after: { orderNumber, traderId: traderRow.id, driverId: driverRow?.id ?? null },
         companyId,
         correlationId,
         subjectId: orderId,
         subjectType: "order",
       });
-      await this.audit(transaction, {
-        action: "customer.selected_for_order",
-        actorId: identity.identityId,
-        after: {
-          customerAddressId: customerAddressRow.id,
-          customerId: customerRow.id,
-          orderId,
-          orderNumber,
-        },
-        companyId,
-        correlationId,
-        subjectId: customerRow.id,
-        subjectType: "customer",
-      });
+      if (customerRow !== undefined && customerAddressRow !== undefined) {
+        await this.audit(transaction, {
+          action: "customer.selected_for_order",
+          actorId: actingAccountId,
+          after: {
+            customerAddressId: customerAddressRow.id,
+            customerId: customerRow.id,
+            orderId,
+            orderNumber,
+          },
+          companyId,
+          correlationId,
+          subjectId: customerRow.id,
+          subjectType: "customer",
+        });
+      }
 
       if (pricing.overrideApplied) {
         await this.audit(transaction, {
           action: "order.service_fee_override",
-          actorId: identity.identityId,
+          actorId: actingAccountId,
           after: {
             configuredFee: pricing.configuredFee.toFixed(2),
             overriddenFee: pricing.finalFee.toFixed(2),
@@ -2064,7 +4095,31 @@ export class OperationsService {
             ${companyId}::uuid, ${orderId}::uuid, 'order.service_fee_override',
             'financial_change', 'service_fee',
             to_jsonb(${pricing.configuredFee.toFixed(2)}::text),
-            to_jsonb(${pricing.finalFee.toFixed(2)}::text), ${identity.identityId}::uuid,
+            to_jsonb(${pricing.finalFee.toFixed(2)}::text), ${actingAccountId}::uuid,
+              ${actorRole}, 'web_portal', ${pricing.overrideReason}, ${correlationId}
+          )
+        `.execute(transaction);
+      }
+
+      // A zero Service Fee that is NOT an override still deserves a line in the
+      // Order history. It is the case the zero-fee policy exists to make
+      // visible, and without this the history would simply show a zero fee with
+      // no explanation of where it came from.
+      //
+      // Recorded as its own event type, never as an override: nobody overrode
+      // anything here, and filing it under `order.service_fee_override` would
+      // misattribute an ordinary configured price to a person's decision.
+      if (!pricing.overrideApplied && pricing.finalFee.isZero()) {
+        await sql`
+          insert into order_events (
+            company_id, order_id, event_type, event_category, field_name,
+            previous_value, new_value, actor_account_id, actor_role, source,
+            reason, correlation_id
+          ) values (
+            ${companyId}::uuid, ${orderId}::uuid, 'order.zero_service_fee',
+            'financial_change', 'service_fee',
+            to_jsonb(${pricing.configuredFee.toFixed(2)}::text),
+            to_jsonb(${pricing.finalFee.toFixed(2)}::text), ${actingAccountId}::uuid,
               ${actorRole}, 'web_portal', ${pricing.overrideReason}, ${correlationId}
           )
         `.execute(transaction);
@@ -2082,10 +4137,19 @@ export class OperationsService {
       `.execute(transaction);
 
       return {
+        // The four components the capture trigger tests, computed here so a caller
+        // acting on the freshly created Order sees the same classification the
+        // list and detail queries will later report.
+        accountingRequired: !(
+          financials.codAmount.isZero() &&
+          financials.serviceFee.isZero() &&
+          financials.additionalFees.isZero() &&
+          financials.vatAmount.isZero()
+        ),
         additionalFees: financials.additionalFees.toFixed(2),
         additionalFeeVatAmount: financials.additionalFeeVatAmount.toFixed(2),
         amountCollected: "0.00",
-        areaName: area.nameAr ?? area.nameEn,
+        areaName: area?.nameAr ?? area?.nameEn ?? "",
         assignedDriverId: driverRow?.id ?? null,
         assignedDriverMobile: null,
         assignedDriverName: driverRow?.name ?? null,
@@ -2101,10 +4165,18 @@ export class OperationsService {
         orderDate: new Date().toISOString().slice(0, 10),
         orderNumber,
         orderProfit: financials.orderProfit.toFixed(2),
+        outsourcedDriverFeeAmount: null,
+        outsourcedDriverFeeOutstanding: null,
+        outsourcedDriverFeePaid: null,
+        outsourcedDriverFeePaymentNumbers: null,
+        outsourcedDriverFeeStatus:
+          driverRow?.outsourcedFee == null ? "not_required" : "pending_delivery",
         referenceNumber,
         returnStatus: "not_applicable",
+        psystemSerial,
         serialNumber,
         serviceFee: financials.serviceFee.toFixed(2),
+        serviceFeeOverrideReason: pricing.overrideReason,
         serviceFeeVatAmount: financials.serviceFeeVatAmount.toFixed(2),
         totalDeductions: financials.totalDeductions.toFixed(2),
         traderNetPayable: financials.traderNetPayable.toFixed(2),
@@ -2165,6 +4237,7 @@ export class OperationsService {
       driverCost,
       prospective: true,
       serviceFee: pricing.finalFee,
+      paymentCondition: input.paymentCondition ?? "customer_pays_cod_and_fee",
       vatPolicy,
     });
     return {
@@ -2235,21 +4308,36 @@ export class OperationsService {
     return { serialNumber: result.rows[0]?.serialNumber ?? "1" };
   }
 
+  private async legacySerialInputForAutomaticPath(): Promise<{ serialNumber?: string }> {
+    return this.nextSerialNumber();
+  }
+
   public async importOrdersCsv(
     input: ImportOrdersCsvDto,
     correlationId: string,
+    /** Same override, same reason, as `createOrder`'s -- see that parameter's
+     * doc comment. Every existing caller omits this and gets today's exact
+     * behaviour: `identity.identityId`. */
+    actingAccountIdOverride?: string,
   ): Promise<OperationsOrderImportResult> {
     const { companyId } = this.tenants.current();
     const identity = this.identities.current();
+    const actingAccountId = actingAccountIdOverride ?? identity.identityId;
     const csv = String((input as { readonly csv?: unknown }).csv ?? "");
     const parsed = this.parseOrdersCsv(csv);
     const errors = parsed.errors.slice();
+    // Validation is all-or-nothing and runs BEFORE the transaction opens, which
+    // is what makes this import atomic in the way it already promised: if any
+    // row is bad, nothing is written and every bad row is reported at once. The
+    // importer fixes the whole file and resubmits, rather than discovering
+    // problems one failed upload at a time.
     if (errors.length > 0) {
       return {
         errors,
         importNumber: "",
         importedRows: 0,
         invalidRows: errors.length,
+        rows: parsed.invalid,
         totalRows: parsed.totalRows,
       };
     }
@@ -2271,7 +4359,7 @@ export class OperationsService {
           ${companyId}::uuid, 'database', ${`imports/${companyId}/${importNumber}.csv`},
           ${`${importNumber}.csv`}, 'text/csv', ${Buffer.byteLength(csv, "utf8")},
           ${createHash("sha256").update(csv).digest("hex")}, 'private', 'clean',
-          ${identity.identityId}::uuid
+          ${actingAccountId}::uuid
         )
         returning id
       `.execute(transaction);
@@ -2287,7 +4375,7 @@ export class OperationsService {
         ) values (
           ${companyId}::uuid, ${importNumber}, 'orders', ${fileId}::uuid, 'csv-v1',
           'importing', ${parsed.totalRows}, ${parsed.rows.length}, 0, 0,
-          ${identity.identityId}::uuid, null
+          ${actingAccountId}::uuid, null
         )
         returning id
       `.execute(transaction);
@@ -2297,21 +4385,46 @@ export class OperationsService {
       }
 
       let importedRows = 0;
-      for (const row of parsed.rows) {
+      const rowResults: OperationsOrderImportRow[] = [];
+      for (const { row, rowNumber } of parsed.rows) {
+        // Pricing, permissions and the zero-fee policy are all decided inside
+        // `insertOrder` -> `resolveServiceFee`, so an authorization or reason
+        // failure surfaces here as an ApplicationException. Left unhandled it
+        // would abort the import with a message that never says WHICH line
+        // caused it, so it is re-thrown with the row and reference attached.
+        //
+        // Re-thrown, not swallowed: this import is atomic and must stay atomic.
+        // Continuing past a failed row would leave a partial import behind.
         const created = await this.insertOrder(transaction, {
           ...row,
           correlationId,
-          createdByAccountId: identity.identityId,
+          createdByAccountId: actingAccountId,
+          customerMobileNumber: row.customerMobileNumber ?? "",
+          customerName: row.customerName ?? "",
           importBatchId,
+        }).catch((cause: unknown) => {
+          throw this.importRowFailure(cause, rowNumber, row.referenceNumber ?? null);
         });
         await this.audit(transaction, {
           action: "order.import_create",
-          actorId: identity.identityId,
+          actorId: actingAccountId,
           after: { importNumber, orderNumber: created.orderNumber },
           companyId,
           correlationId,
           subjectId: created.id,
           subjectType: "order",
+        });
+        rowResults.push({
+          accountingRequired: created.accountingRequired,
+          errorField: null,
+          errorMessage: null,
+          feeSource: orderFeeSource(created.serviceFee, created.serviceFeeOverrideReason),
+          orderNumber: created.orderNumber,
+          referenceNumber: created.referenceNumber,
+          resolvedServiceFee: created.serviceFee,
+          rowNumber,
+          status: "imported",
+          zeroFeeReason: created.serviceFeeOverrideReason,
         });
         importedRows += 1;
       }
@@ -2329,9 +4442,40 @@ export class OperationsService {
         importNumber,
         importedRows,
         invalidRows: 0,
+        rows: rowResults,
         totalRows: parsed.totalRows,
       };
     });
+  }
+
+  /**
+   * Turn a mid-import failure into something the importer can act on.
+   *
+   * Only the message from an ApplicationException is reused — those are written
+   * for people. Anything else (a driver error, a constraint violation, a bug)
+   * is replaced with a generic sentence, because its text may name a table, a
+   * constraint or a query and none of that belongs in front of a user.
+   *
+   * The original is kept as `cause` so the log still has the whole story.
+   */
+  private importRowFailure(
+    cause: unknown,
+    rowNumber: number,
+    referenceNumber: string | null,
+  ): ApplicationException {
+    const where =
+      referenceNumber === null ? `Row ${rowNumber}` : `Row ${rowNumber} (${referenceNumber})`;
+    const explanation =
+      cause instanceof ApplicationException
+        ? cause.message
+        : "This row could not be imported. Check the Trader, Area and amounts, then try again.";
+    const failure = new ApplicationException(
+      cause instanceof ApplicationException ? cause.errorCode : "orders_import_row_failed",
+      `${where}: ${explanation}`,
+      cause instanceof ApplicationException ? cause.getStatus() : HttpStatus.UNPROCESSABLE_ENTITY,
+    );
+    (failure as { cause?: unknown }).cause = cause;
+    return failure;
   }
 
   // Edits an order's business fields before delivery. Changing the Trader, or the Customer +
@@ -2361,24 +4505,33 @@ export class OperationsService {
           customerId: string;
           customerMobileNumber: string;
           customerName: string;
+          customerProvenanceStatus: string;
           customerSecondMobileNumber: string | null;
           deliveryStatus: string;
           driverCost: string;
           financialModelVersion: string | null;
+          isFreeOrder: boolean;
           additionalFees: string | null;
           vatEnabledSnapshot: boolean | null;
           vatPriceModeSnapshot: "exclusive" | "inclusive" | null;
           vatRateSnapshot: string | null;
           notes: string | null;
+          orderDate: string;
           orderProfit: string;
           packageCount: number;
+          paymentCondition: string;
           pricingProvenance: string;
+          referenceNumber: string | null;
+          serialNumber: string;
           serviceFee: string;
           traderId: string;
           traderName: string;
           traderNetPayable: string;
           traderServicePriceId: string | null;
           vatAmount: string;
+          orderType: string;
+          destinationCountryId: string | null;
+          thirdPartyDeliveryCompanyId: string | null;
         }>`
           select o.area_id as "areaId",
                  o.customer_area_name_snapshot as "areaNameSnapshot",
@@ -2392,24 +4545,34 @@ export class OperationsService {
                  o.customer_id as "customerId",
                  o.customer_mobile_number as "customerMobileNumber",
                  o.customer_name as "customerName",
+                 o.customer_provenance_status as "customerProvenanceStatus",
                  o.customer_second_mobile_number as "customerSecondMobileNumber",
                  o.delivery_status as "deliveryStatus",
                  o.driver_cost::text as "driverCost",
                  o.financial_model_version as "financialModelVersion",
+                 o.is_free_order as "isFreeOrder",
                  o.additional_fees::text as "additionalFees",
                  o.vat_enabled_snapshot as "vatEnabledSnapshot",
                  o.vat_price_mode_snapshot as "vatPriceModeSnapshot",
                  o.vat_rate_snapshot::text as "vatRateSnapshot",
                  o.notes,
+                 o.order_date::text as "orderDate",
                  o.order_profit::text as "orderProfit",
                  o.package_count as "packageCount",
+                 o.payment_condition as "paymentCondition",
                  o.pricing_provenance_status as "pricingProvenance",
+                 o.reference_number as "referenceNumber",
+                 o.serial_number as "serialNumber",
+                 o.psystem_serial as "psystemSerial",
                  o.service_fee::text as "serviceFee",
                  o.trader_id as "traderId",
                  t.name_en as "traderName",
                  o.trader_net_payable::text as "traderNetPayable",
                  o.trader_service_price_id as "traderServicePriceId",
                  o.vat_amount::text as "vatAmount"
+                 ,o.order_type as "orderType",
+                 o.destination_country_id as "destinationCountryId",
+                 o.third_party_delivery_company_id as "thirdPartyDeliveryCompanyId"
           from orders o
           join traders t on t.id = o.trader_id and t.company_id = o.company_id
           where o.id = ${orderId}::uuid and o.company_id = ${companyId}::uuid
@@ -2421,8 +4584,81 @@ export class OperationsService {
       if (current === undefined) {
         throw new ApplicationException("order_not_found", "Order not found", HttpStatus.NOT_FOUND);
       }
+      const providedUpdateFields = Object.entries(input).filter(([, value]) => value !== undefined);
+      const internationalOrder = current.orderType === "gcc_international";
+      if (!internationalOrder && (input.destinationCountryId !== undefined || input.thirdPartyDeliveryCompanyId !== undefined)) {
+        throw new ApplicationException("international_fields_invalid", "Carrier and destination country apply only to International orders", HttpStatus.BAD_REQUEST);
+      }
+      let destinationCountryId = current.destinationCountryId;
+      let thirdPartyDeliveryCompanyId = current.thirdPartyDeliveryCompanyId;
+      if (internationalOrder && (input.destinationCountryId !== undefined || input.thirdPartyDeliveryCompanyId !== undefined)) {
+        const refs = await this.resolveInternationalReferences(transaction, companyId, {
+          countryId: input.destinationCountryId ?? current.destinationCountryId ?? undefined,
+          carrierId: input.thirdPartyDeliveryCompanyId ?? current.thirdPartyDeliveryCompanyId ?? undefined,
+        });
+        destinationCountryId = refs.countryId;
+        thirdPartyDeliveryCompanyId = refs.carrierId;
+      }
+      const sameMobileNumber = (nextValue: string | null, currentValue: string | null): boolean => {
+        const nextTrimmed = nextValue?.trim() || null;
+        const currentTrimmed = currentValue?.trim() || null;
+        if (nextTrimmed === currentTrimmed) return true;
+        if (nextTrimmed === null || currentTrimmed === null) return false;
+        return mobileComparisonKey(nextTrimmed) === mobileComparisonKey(currentTrimmed);
+      };
+      const providedOnlySafeIdentifierContactChange =
+        providedUpdateFields.length > 0 &&
+        providedUpdateFields.every(([field, value]) => {
+          switch (field) {
+            case "referenceNumber":
+              return true;
+            case "serialNumber":
+              return value === current.serialNumber;
+            case "traderId":
+              return value === current.traderId;
+            case "customerId":
+              return value === current.customerId;
+            case "customerAddressId":
+              return value === current.customerAddressId;
+            case "areaId":
+              return value === current.areaId;
+            case "customerName":
+              return String(value).trim() === current.customerName;
+            case "customerMobileNumber":
+              return sameMobileNumber(String(value), current.customerMobileNumber);
+            case "customerSecondMobileNumber": {
+              const nextSecondMobile = String(value).trim() || null;
+              return sameMobileNumber(nextSecondMobile, current.customerSecondMobileNumber);
+            }
+            case "customerAddress":
+              return String(value).trim() === current.customerAddress;
+            case "codAmount":
+              return this.money(new Decimal(Number(value))).equals(
+                this.money(new Decimal(current.codAmount)),
+              );
+            case "serviceFee":
+              return this.money(new Decimal(Number(value))).equals(
+                this.money(new Decimal(current.serviceFee)),
+              );
+            case "additionalFees":
+              return this.money(new Decimal(Number(value))).equals(
+                this.money(new Decimal(current.additionalFees ?? 0)),
+              );
+            case "packageCount":
+              return Number(value) === current.packageCount;
+            case "notes": {
+              const nextNotes = String(value).trim() || null;
+              return nextNotes === current.notes;
+            }
+            case "serviceFeeReason":
+              return String(value).trim() === "";
+            default:
+              return false;
+          }
+        });
       if (
-        !["new", "in_branch", "assigned_to_driver", "out_for_delivery"].includes(
+        !providedOnlySafeIdentifierContactChange &&
+        !["new", "in_branch", "assigned_to_driver", "out_for_delivery", "hold"].includes(
           current.deliveryStatus,
         )
       ) {
@@ -2432,7 +4668,6 @@ export class OperationsService {
           HttpStatus.CONFLICT,
         );
       }
-
       const changes: {
         category: string;
         field: string;
@@ -2451,6 +4686,86 @@ export class OperationsService {
         }
       };
 
+      const serialNumber = input.serialNumber ?? current.serialNumber;
+      const serialNumberNormalized = this.normalizeOrderIdentifier(serialNumber);
+      const referenceNumber =
+        input.referenceNumber === undefined ? current.referenceNumber : input.referenceNumber;
+      const referenceNumberNormalized =
+        referenceNumber === null ? null : this.normalizeOrderIdentifier(referenceNumber);
+      if (serialNumber !== current.serialNumber || referenceNumber !== current.referenceNumber) {
+        const duplicate = await sql<{ referenceExists: boolean; serialExists: boolean }>`
+          select exists(select 1 from orders where company_id=${companyId}::uuid
+            and id<>${orderId}::uuid and order_date=${current.orderDate}::date
+            and serial_number_normalized=${serialNumberNormalized}) as "serialExists",
+            exists(select 1 from orders where company_id=${companyId}::uuid
+            and id<>${orderId}::uuid and ${referenceNumberNormalized}::text is not null
+            and reference_number_normalized=${referenceNumberNormalized}) as "referenceExists"
+        `.execute(transaction);
+        if (duplicate.rows[0]?.serialExists) {
+          throw new ApplicationException(
+            "order_serial_already_exists_for_date",
+            `Serial Number "${serialNumber}" is already used on this date`,
+            HttpStatus.CONFLICT,
+          );
+        }
+        if (duplicate.rows[0]?.referenceExists) {
+          throw new ApplicationException(
+            "reference_number_exists",
+            `Reference Number "${referenceNumber}" is already used`,
+            HttpStatus.CONFLICT,
+          );
+        }
+        track("serial_number", "user_action", current.serialNumber, serialNumber);
+        track("reference_number", "user_action", current.referenceNumber, referenceNumber);
+      }
+
+      if (providedOnlySafeIdentifierContactChange) {
+        if (changes.length === 0) return;
+        await sql`
+          update orders
+             set reference_number=${referenceNumber},
+                 reference_number_normalized=${referenceNumberNormalized},
+                 updated_at = now(),
+                 version = version + 1
+           where id = ${orderId}::uuid and company_id = ${companyId}::uuid
+        `.execute(transaction);
+
+        const role = await sql<{ name: string }>`
+          select coalesce(string_agg(distinct r.name, ', ' order by r.name), a.account_kind) as name
+          from accounts a
+          left join account_roles ar on ar.account_id = a.id and ar.company_id = a.company_id
+          left join roles r on r.id = ar.role_id and r.company_id = ar.company_id
+          where a.id = ${identity.identityId}::uuid and a.company_id = ${companyId}::uuid
+          group by a.id
+        `.execute(transaction);
+        const actorRole = role.rows[0]?.name ?? identity.kind;
+        for (const change of changes) {
+          await sql`
+            insert into order_events (
+              company_id, order_id, event_type, event_category, field_name,
+              previous_value, new_value, actor_account_id, actor_role, source,
+              reason, correlation_id
+            ) values (
+              ${companyId}::uuid, ${orderId}::uuid, 'order.updated', ${change.category},
+              ${change.field},
+              ${change.previous === null ? null : sql`to_jsonb(${change.previous}::text)`},
+              ${change.next === null ? null : sql`to_jsonb(${change.next}::text)`},
+              ${identity.identityId}::uuid, ${actorRole}, 'web_portal',
+              ${change.reason}, ${correlationId}
+            )
+          `.execute(transaction);
+        }
+        await this.audit(transaction, {
+          action: "order.update",
+          actorId: identity.identityId,
+          after: { changedFields: changes.map((change) => change.field) },
+          companyId,
+          correlationId,
+          subjectId: orderId,
+          subjectType: "order",
+        });
+        return;
+      }
       // --- Trader change ------------------------------------------------------
       const traderChanged = input.traderId !== undefined && input.traderId !== current.traderId;
       let traderId = current.traderId;
@@ -2564,14 +4879,102 @@ export class OperationsService {
         track("delivery_area", "user_action", current.areaNameSnapshot, addr.areaName);
       }
 
+      // A directly selected Area is valid for manually entered/optional Customers too.
+      // It deliberately wins over the previous Area when no saved Customer address was
+      // selected in this edit.
+      if (!customerChanged && input.areaId !== undefined && input.areaId !== current.areaId) {
+        const selectedArea = (
+          await sql<{ code: string; id: string; name: string; nameAr: string | null }>`
+            select id, code, name_en as name, name_ar as "nameAr" from areas
+             where id=${input.areaId}::uuid and company_id=${companyId}::uuid and is_active
+          `.execute(transaction)
+        ).rows[0];
+        if (selectedArea === undefined) {
+          throw new ApplicationException(
+            "area_not_found",
+            "The selected Area is not active in this Company",
+            HttpStatus.BAD_REQUEST,
+          );
+        }
+        areaId = selectedArea.id;
+        track("delivery_area", "user_action", current.areaNameSnapshot, selectedArea.name);
+        // A 'resolved' Order must keep pointing at one of its Customer's saved
+        // addresses in the Order's Area (orders_customer_scope_guard) — the
+        // same invariant create enforces. Moving the Order to a new Area
+        // therefore links an existing address of this Customer there, or
+        // records a new one, exactly as create does for an inline Customer.
+        // The Customer's other addresses and Orders are untouched.
+        let addressId = current.customerAddressId;
+        if (current.customerProvenanceStatus === "resolved") {
+          const existingAddress = (
+            await sql<{ id: string }>`
+              select id from customer_addresses
+               where customer_id=${current.customerId}::uuid
+                 and company_id=${companyId}::uuid
+                 and area_id=${selectedArea.id}::uuid and is_active
+               order by is_default desc, created_at desc
+               limit 1
+            `.execute(transaction)
+          ).rows[0];
+          if (existingAddress !== undefined) {
+            addressId = existingAddress.id;
+          } else {
+            const createdAddress = (
+              await sql<{ id: string }>`
+                insert into customer_addresses(
+                  company_id, customer_id, area_id, address, is_default,
+                  created_by_account_id
+                ) values (
+                  ${companyId}::uuid, ${current.customerId}::uuid,
+                  ${selectedArea.id}::uuid,
+                  ${(input.customerAddress ?? current.customerAddress).trim()},
+                  false, ${identity.identityId}::uuid
+                )
+                returning id
+              `.execute(transaction)
+            ).rows[0];
+            if (createdAddress === undefined) {
+              throw new Error("Customer address creation returned no identifier");
+            }
+            addressId = createdAddress.id;
+          }
+        }
+        customerColumns = {
+          addressId,
+          areaCode: selectedArea.code,
+          areaName: selectedArea.name,
+          areaNameAr: selectedArea.nameAr,
+          code: current.customerCodeSnapshot ?? "",
+          customerId: current.customerId,
+          deliveryNotes: null,
+          locationLink: null,
+          reference: null,
+        };
+      }
+
       // --- Pricing ------------------------------------------------------------
       const areaChanged = areaId !== current.areaId;
       const identityRepriced = traderChanged || areaChanged;
       const currentCod = new Decimal(current.codAmount);
       const currentFee = new Decimal(current.serviceFee);
-      const nextCod = input.codAmount === undefined ? currentCod : new Decimal(input.codAmount);
+      // A Free Order's financial identity is fixed at creation: zero COD, zero
+      // fees (createOrder forces all of them to zero). Edits must preserve
+      // that — re-pricing after a Trader/Area change would otherwise write the
+      // configured fee against a zero COD and violate
+      // orders_prospective_financial_model_check on save.
+      const isFreeOrder = current.isFreeOrder;
+      // A "Pay by Trader" Order is prepaid: the Trader already collected from
+      // the Customer, so nothing is owed at delivery. `payment_condition`
+      // itself is immutable after creation (never accepted by this DTO), so
+      // this pins COD to zero for the life of the Order the same way a Free
+      // Order's zero is pinned above — an edit can never reintroduce a COD
+      // for an Order whose payer was fixed at creation.
+      const codAmountLocked =
+        isFreeOrder || current.paymentCondition === "customer_pays_cod_trader_pays_fee";
+      const nextCod =
+        codAmountLocked || input.codAmount === undefined ? currentCod : new Decimal(input.codAmount);
       const codChanged = !this.money(nextCod).equals(this.money(currentCod));
-      const manualFeeProvided = input.serviceFee !== undefined;
+      const manualFeeProvided = !isFreeOrder && input.serviceFee !== undefined;
       const manualFee = manualFeeProvided ? new Decimal(input.serviceFee ?? 0) : currentFee;
       const manualFeeChanged =
         !identityRepriced &&
@@ -2600,18 +5003,20 @@ export class OperationsService {
 
       // When the Trader or Area changes, re-run pricing so provenance/rule follow the new
       // context; otherwise a supplied fee is a manual override of the existing price.
-      const pricing = identityRepriced
-        ? await this.resolveServiceFee(transaction, {
-            areaId,
-            companyId,
-            permissions: identity.permissions,
-            ...(input.serviceFee === undefined ? {} : { requestedFee: input.serviceFee }),
-            ...(input.serviceFeeReason === undefined
-              ? {}
-              : { requestedReason: input.serviceFeeReason }),
-            traderId,
-          })
-        : null;
+      // Free Orders are never re-priced: their fee is zero by definition.
+      const pricing =
+        identityRepriced && !isFreeOrder
+          ? await this.resolveServiceFee(transaction, {
+              areaId,
+              companyId,
+              permissions: identity.permissions,
+              ...(input.serviceFee === undefined ? {} : { requestedFee: input.serviceFee }),
+              ...(input.serviceFeeReason === undefined
+                ? {}
+                : { requestedReason: input.serviceFeeReason }),
+              traderId,
+            })
+          : null;
       const finalFee = pricing ? pricing.finalFee : manualFeeProvided ? manualFee : currentFee;
       const feeValueChanged = !this.money(finalFee).equals(this.money(currentFee));
 
@@ -2624,11 +5029,17 @@ export class OperationsService {
           }
         : await this.vatPolicy(transaction, companyId);
       const financials = this.calculateOrderFinancials({
-        additionalFees: new Decimal(current.additionalFees ?? 0),
+        additionalFees: new Decimal(
+          isFreeOrder
+            ? (current.additionalFees ?? 0)
+            : (input.additionalFees ?? current.additionalFees ?? 0),
+        ),
         codAmount: nextCod,
         driverCost: new Decimal(current.driverCost),
         prospective: isProspective,
         serviceFee: finalFee,
+        paymentCondition: current.paymentCondition as
+          "customer_pays_cod_and_fee" | "customer_pays_cod_trader_pays_fee",
         vatPolicy: currentVatPolicy,
       });
 
@@ -2683,6 +5094,21 @@ export class OperationsService {
           reason: (input.serviceFeeReason ?? "").trim() || null,
         });
       }
+      if (
+        !isFreeOrder &&
+        input.additionalFees !== undefined &&
+        !this.money(new Decimal(input.additionalFees)).equals(
+          this.money(new Decimal(current.additionalFees ?? 0)),
+        )
+      ) {
+        changes.push({
+          category: "financial_change",
+          field: "additional_fees",
+          next: this.money(new Decimal(input.additionalFees)).toFixed(2),
+          previous: this.money(new Decimal(current.additionalFees ?? 0)).toFixed(2),
+          reason: null,
+        });
+      }
 
       if (changes.length === 0) return;
 
@@ -2705,7 +5131,13 @@ export class OperationsService {
 
       await sql`
         update orders
-           set trader_id = ${traderId}::uuid,
+           set serial_number=${serialNumber},
+               serial_number_normalized=${serialNumberNormalized},
+               reference_number=${referenceNumber},
+               reference_number_normalized=${referenceNumberNormalized},
+               trader_id = ${traderId}::uuid,
+               destination_country_id = ${destinationCountryId}::uuid,
+               third_party_delivery_company_id = ${thirdPartyDeliveryCompanyId}::uuid,
                customer_id = ${customerColumns?.customerId ?? current.customerId}::uuid,
                customer_address_id = ${
                  customerColumns?.addressId ?? current.customerAddressId
@@ -2733,47 +5165,47 @@ export class OperationsService {
                  else customer_delivery_notes_snapshot end,
                pricing_provenance_status = ${pricingProvenance},
                trader_service_price_id = ${traderServicePriceId}::uuid,
-               configured_service_fee_snapshot = ${configuredFeeSnapshot},
-               final_service_fee_snapshot = ${financial.serviceFee},
+               configured_service_fee_snapshot = ${configuredFeeSnapshot}::numeric,
+               final_service_fee_snapshot = ${financial.serviceFee}::numeric,
                customer_name = ${next.customerName},
                customer_mobile_number = ${next.customerMobileNumber},
                customer_second_mobile_number = ${next.customerSecondMobileNumber},
                customer_address = ${next.customerAddress},
                package_count = ${next.packageCount},
                notes = ${next.notes},
-               cod_amount = ${financial.codAmount},
-               service_fee = ${financial.serviceFee},
+               cod_amount = ${financial.codAmount}::numeric,
+               service_fee = ${financial.serviceFee}::numeric,
                service_fee_net_amount = case when ${isProspective}
-                 then ${financials.serviceFeeNetAmount.toFixed(2)}
+                 then ${financials.serviceFeeNetAmount.toFixed(2)}::numeric
                  else service_fee_net_amount end,
                service_fee_vat_amount = case when ${isProspective}
-                 then ${financials.serviceFeeVatAmount.toFixed(2)}
+                 then ${financials.serviceFeeVatAmount.toFixed(2)}::numeric
                  else service_fee_vat_amount end,
                additional_fees = case when ${isProspective}
-                 then ${financials.additionalFees.toFixed(2)}
+                 then ${financials.additionalFees.toFixed(2)}::numeric
                  else additional_fees end,
                additional_fee_vat_amount = case when ${isProspective}
-                 then ${financials.additionalFeeVatAmount.toFixed(2)}
+                 then ${financials.additionalFeeVatAmount.toFixed(2)}::numeric
                  else additional_fee_vat_amount end,
                total_deductions = case when ${isProspective}
-                 then ${financials.totalDeductions.toFixed(2)}
+                 then ${financials.totalDeductions.toFixed(2)}::numeric
                  else total_deductions end,
-               vat_amount = ${financial.vatAmount},
-               customer_amount_due = ${financial.customerAmountDue},
-               company_revenue = ${financial.companyRevenue},
-               trader_gross_payable = ${financial.codAmount},
+               vat_amount = ${financial.vatAmount}::numeric,
+               customer_amount_due = ${financial.customerAmountDue}::numeric,
+               company_revenue = ${financial.companyRevenue}::numeric,
+               trader_gross_payable = ${financial.codAmount}::numeric,
                trader_paid_service_fee = case when ${isProspective}
                  then ${financials.serviceFeeNetAmount
                    .plus(financials.serviceFeeVatAmount)
-                   .toFixed(2)}
-                 else ${financial.serviceFee} end,
+                   .toFixed(2)}::numeric
+                 else ${financial.serviceFee}::numeric end,
                trader_deductions = case when ${isProspective}
                  then ${financials.additionalFees
                    .plus(financials.additionalFeeVatAmount)
-                   .toFixed(2)}
+                   .toFixed(2)}::numeric
                  else trader_deductions end,
-               trader_net_payable = ${financial.traderNetPayable},
-               order_profit = ${financial.orderProfit},
+               trader_net_payable = ${financial.traderNetPayable}::numeric,
+               order_profit = ${financial.orderProfit}::numeric,
                updated_at = now(),
                version = version + 1
          where id = ${orderId}::uuid and company_id = ${companyId}::uuid
@@ -2821,27 +5253,134 @@ export class OperationsService {
     orderId: string,
     input: ChangeOrderStatusDto,
     correlationId: string,
+    idempotencyKey?: string,
   ): Promise<OperationsOrder> {
     const { companyId } = this.tenants.current();
     const identity = this.identities.current();
     const status = input.status;
+    // Driver Order Detail status-action fix: the guard on this route no
+    // longer requires any permission (see `operations.controller.ts`), so
+    // authorization is decided here. A plain Operator still needs one of
+    // these two — completely unchanged from before.
+    const hasOperatorStatusPermission =
+      identity.permissions.has("orders.update_delivery_status") ||
+      identity.permissions.has("users_roles.manage");
+    // A "Driver User" — a `company_user` whose linked Employee backs a
+    // `drivers.employee_id` record (`currentEmployeeDriverId`) — reaches this
+    // SAME endpoint (a `company_user` can never call the driver-only
+    // `/portal/driver/*` routes) but may hold none of the Operator
+    // permissions above; that must not block them from managing their OWN
+    // Driver's Orders, exactly like a genuine `driver`-kind identity needs no
+    // permission at all. Resolved only when actually needed (an ordinary
+    // Operator with the right permission never pays for this extra lookup).
+    const ownDriverIdForStatusChange =
+      identity.kind === "company_user" && !hasOperatorStatusPermission
+        ? await this.currentEmployeeDriverId()
+        : undefined;
+    const actingAsDriverUser = ownDriverIdForStatusChange !== undefined;
+    if (identity.kind === "company_user" && !hasOperatorStatusPermission && !actingAsDriverUser) {
+      // No broad Operator permission, and not a Driver User either (no
+      // linked Driver at all) — the same rejection the guard used to give,
+      // just relocated here.
+      throw new ApplicationException(
+        "permission_denied",
+        "The authenticated account does not have permission for this operation",
+        HttpStatus.FORBIDDEN,
+      );
+    }
+    // Prompt 16 (Driver offline sync): a Driver's queued offline mutation
+    // carries a stable idempotency key so a retried sync submission (app
+    // kill, timeout, duplicate reconnect attempt) can never create a second
+    // status-history/event row for the same logical action. Optional and
+    // driver-only by construction — Operator's own call site never passes a
+    // key, so this reservation dance never runs for it and its behavior is
+    // byte-for-byte unchanged. Mirrors `createOrder`'s exact
+    // `idempotency_records` pattern (reservation -> on conflict, compare
+    // request hash -> replay or reject).
+    const key = identity.kind === "driver" ? idempotencyKey?.trim() : undefined;
+    if (key !== undefined && key !== "" && !/^[A-Za-z0-9._:-]{16,128}$/.test(key)) {
+      throw new ApplicationException(
+        "idempotency_key_invalid",
+        "A valid idempotency key is required",
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    const requestHash =
+      key === undefined || key === ""
+        ? undefined
+        : createHash("sha256")
+            .update(
+              JSON.stringify({
+                expectedStatus: input.expectedStatus ?? null,
+                orderId,
+                reason: input.reason?.trim() || null,
+                status,
+              }),
+            )
+            .digest("hex");
     await this.transactions.execute(async (transaction) => {
+      if (key !== undefined && key !== "" && requestHash !== undefined) {
+        const reservation = await sql<{ id: string }>`
+          insert into idempotency_records (
+            company_id, operation, idempotency_key, request_hash, expires_at
+          ) values (
+            ${companyId}::uuid, 'driver.order_status_change', ${key}, ${requestHash},
+            now() + interval '24 hours'
+          )
+          on conflict (company_id, operation, idempotency_key) do nothing
+          returning id
+        `.execute(transaction);
+        if (reservation.rows[0] === undefined) {
+          const existing = await sql<{ requestHash: string; resourceId: string | null }>`
+            select request_hash as "requestHash", resource_id as "resourceId"
+              from idempotency_records
+             where company_id = ${companyId}::uuid
+               and operation = 'driver.order_status_change'
+               and idempotency_key = ${key}
+             for update
+          `.execute(transaction);
+          const record = existing.rows[0];
+          if (record === undefined || record.requestHash !== requestHash) {
+            throw new ApplicationException(
+              "idempotency_key_reused",
+              "This submission key was already used for a different status change",
+              HttpStatus.CONFLICT,
+            );
+          }
+          if (record.resourceId !== null) {
+            // The exact same mutation already completed — a safe replay, not
+            // a second logical action. No new history/event row is written.
+            return;
+          }
+          throw new ApplicationException(
+            "order_status_change_in_progress",
+            "This status change is still being processed",
+            HttpStatus.CONFLICT,
+          );
+        }
+      }
       const current = await sql<{
         amountCollected: string;
         assignedDriverId: string | null;
         customerAmountDue: string;
         deliveryStatus: string;
         driverReconciliationStatus: string;
+        isFreeOrder: boolean;
+        orderType: string;
         returnStatus: string;
         settlementStatus: string;
+        traderNetPayable: string;
       }>`
         select amount_collected::text as "amountCollected",
                assigned_driver_id as "assignedDriverId",
                customer_amount_due::text as "customerAmountDue",
                delivery_status as "deliveryStatus",
                driver_reconciliation_status as "driverReconciliationStatus",
+               is_free_order as "isFreeOrder",
+               order_type as "orderType",
                return_status as "returnStatus",
-               trader_settlement_status as "settlementStatus"
+               trader_settlement_status as "settlementStatus",
+               trader_net_payable::text as "traderNetPayable"
         from orders
         where id = ${orderId}::uuid
           and company_id = ${companyId}::uuid
@@ -2849,31 +5388,87 @@ export class OperationsService {
             ${identity.kind} <> 'driver'
             or assigned_driver_id = ${identity.profileId ?? null}::uuid
           )
+          and (
+            ${!actingAsDriverUser}
+            or assigned_driver_id = ${ownDriverIdForStatusChange ?? null}::uuid
+          )
         for update
       `.execute(transaction);
       const order = current.rows[0];
       if (order === undefined) {
         throw new ApplicationException("order_not_found", "Order not found", HttpStatus.NOT_FOUND);
       }
+      // Prompt 16 Section O/P: the Order changed while the caller was
+      // offline in a way its queued action did not anticipate — reject
+      // rather than silently overwrite newer server state. Excludes the
+      // "already applied" case just below, which is a safe no-op, not a
+      // conflict.
+      if (
+        input.expectedStatus !== undefined &&
+        input.expectedStatus !== order.deliveryStatus &&
+        order.deliveryStatus !== status
+      ) {
+        throw new ApplicationException(
+          "order_status_conflict",
+          "This Order changed since it was last synced",
+          HttpStatus.CONFLICT,
+        );
+      }
+      // Section P Case 1/4: the target state was already reached (this
+      // exact request already succeeded under a different sync attempt, or
+      // another session/actor reached the same state independently). Resolve
+      // as already-applied rather than re-running the transition — no
+      // duplicate history/event row.
+      if (order.deliveryStatus === status) {
+        if (key !== undefined && key !== "") {
+          await sql`
+            update idempotency_records
+               set response_status = 200, resource_type = 'order', resource_id = ${orderId}::uuid
+             where company_id = ${companyId}::uuid and operation = 'driver.order_status_change'
+               and idempotency_key = ${key}
+          `.execute(transaction);
+        }
+        return;
+      }
       const reason = input.reason?.trim() || null;
+      // Driver Physical Correction (Section F): "Hold" is not a new status —
+      // it already exists for Operations (`operationsTransitions` below) with
+      // its own reason requirement and audit/history recording, both handled
+      // identically regardless of identity kind by the shared code after this
+      // lookup. The Driver's own approved action set is deliberately narrower
+      // than Operations' full lifecycle: `assigned_to_driver` only ever moves
+      // forward to `out_for_delivery` ("Start Delivery"); once Out for
+      // Delivery, a Driver may additionally Hold it (their own no-move-yet
+      // case, e.g. customer unreachable), Deliver it, or Return it to Branch.
+      // Deliberately NOT included for a Driver: assigning/reassigning,
+      // `cancelled`, `returned_to_trader`, or resuming an Order OUT of Hold —
+      // those remain Operations-only, unchanged from before this correction.
       const driverTransitions: Readonly<Record<string, readonly string[]>> = {
         assigned_to_driver: ["out_for_delivery"],
-        out_for_delivery: ["delivered", "returned_to_branch"],
+        out_for_delivery: ["hold", "delivered", "in_branch"],
+        collect_order: ["closed"],
       };
       // Operations/admin can drive every step of the lifecycle, including the
       // driver-facing moves (out for delivery, delivered, return to branch),
       // recorded against the operator's identity for the audit trail.
       const operationsTransitions: Readonly<Record<string, readonly string[]>> = {
         new: ["in_branch", "hold", "cancelled"],
-        in_branch: ["cancelled"],
+        in_branch: ["out_for_delivery", "hold", "returned_to_trader", "cancelled"],
         assigned_to_driver: ["out_for_delivery", "hold", "cancelled"],
-        out_for_delivery: ["hold", "delivered", "returned_to_branch", "cancelled"],
+        out_for_delivery: ["in_branch", "hold", "delivered", "cancelled"],
         hold: ["out_for_delivery", "delivered", "returned_to_trader", "cancelled"],
         delivered: ["closed"],
-        returned_to_branch: ["returned_to_trader"],
+        returned_to_branch: ["in_branch", "out_for_delivery", "returned_to_trader"],
         returned_to_trader: ["closed"],
+        collect_order: ["closed"],
       };
-      const transitions = identity.kind === "driver" ? driverTransitions : operationsTransitions;
+      // A Driver User gets exactly the narrow set a genuine Driver gets here
+      // too — never the broader Operator lifecycle, regardless of holding
+      // `orders.assign_driver` or any other Orders permission on their Role.
+      const transitions =
+        identity.kind === "driver" || actingAsDriverUser
+          ? driverTransitions
+          : operationsTransitions;
       if (!(transitions[order.deliveryStatus] ?? []).includes(status)) {
         throw new ApplicationException(
           "order_status_transition_invalid",
@@ -2881,10 +5476,7 @@ export class OperationsService {
           HttpStatus.CONFLICT,
         );
       }
-      if (
-        ["hold", "cancelled", "returned_to_branch", "returned_to_trader"].includes(status) &&
-        reason === null
-      ) {
+      if (["hold", "cancelled", "returned_to_trader"].includes(status) && reason === null) {
         throw new ApplicationException(
           "order_status_reason_required",
           status === "hold"
@@ -2911,11 +5503,10 @@ export class OperationsService {
         const cashComplete = ["reconciled", "not_applicable"].includes(
           order.driverReconciliationStatus,
         );
-        const settlementComplete = [
-          "money_sent_to_trader",
-          "money_received_by_trader",
-          "not_eligible",
-        ].includes(order.settlementStatus);
+        const settlementComplete =
+          ["money_sent_to_trader", "money_received_by_trader", "not_eligible"].includes(
+            order.settlementStatus,
+          ) || Number(order.traderNetPayable) <= 0;
         const returnComplete =
           order.deliveryStatus !== "returned_to_trader" ||
           order.returnStatus === "returned_to_trader";
@@ -2929,12 +5520,22 @@ export class OperationsService {
       }
 
       const amountDue = Number(order.customerAmountDue);
+      const traderPayable = Number(order.traderNetPayable);
+      const noTraderPaymentDue = Number.isFinite(traderPayable) && traderPayable <= 0;
+      const deliveredFreeNoValue =
+        status === "delivered" &&
+        order.isFreeOrder === true &&
+        amountDue === 0 &&
+        traderPayable === 0;
       const amountCollected =
         status === "hold" ? Number(order.amountCollected) : status === "delivered" ? amountDue : 0;
       const reconciliationStatus =
         status === "hold"
           ? order.driverReconciliationStatus
-          : status === "delivered" && order.assignedDriverId !== null && amountDue > 0
+          : status === "delivered" &&
+              order.assignedDriverId !== null &&
+              amountDue > 0 &&
+              !deliveredFreeNoValue
             ? "pending"
             : status === "closed"
               ? order.driverReconciliationStatus
@@ -2942,7 +5543,7 @@ export class OperationsService {
       const returnStatus =
         status === "hold"
           ? order.returnStatus
-          : status === "returned_to_branch" || status === "returned_to_trader"
+          : status === "returned_to_trader"
             ? status
             : status === "closed"
               ? order.returnStatus
@@ -2950,13 +5551,13 @@ export class OperationsService {
       const traderSettlementStatus =
         status === "hold"
           ? order.settlementStatus
-          : status === "cancelled" ||
-              status === "returned_to_branch" ||
-              status === "returned_to_trader"
+          : status === "cancelled" || status === "returned_to_trader"
             ? "not_eligible"
-            : status === "closed" || status === "in_branch"
-              ? order.settlementStatus
-              : "unsettled";
+            : deliveredFreeNoValue || noTraderPaymentDue
+              ? "not_eligible"
+              : status === "closed" || status === "in_branch"
+                ? order.settlementStatus
+                : "unsettled";
       await sql`
         update orders
            set delivery_status = ${status},
@@ -2974,16 +5575,14 @@ export class OperationsService {
                version = version + 1
          where id = ${orderId}::uuid and company_id = ${companyId}::uuid
       `.execute(transaction);
-      await sql`
-        insert into order_status_history (
-          company_id, order_id, status_dimension, from_status, to_status,
-          reason, changed_by_account_id
-        ) values (
-          ${companyId}::uuid, ${orderId}::uuid, 'delivery',
-          ${order.deliveryStatus}, ${status}, ${reason},
-          ${identity.identityId}::uuid
-        )
-      `.execute(transaction);
+      await this.history.statusHistory(transaction, {
+        actorId: identity.identityId,
+        companyId,
+        from: order.deliveryStatus,
+        orderId,
+        reason,
+        to: status,
+      });
       const role = await sql<{ name: string }>`
         select coalesce(string_agg(distinct r.name, ', ' order by r.name), a.account_kind) as name
         from accounts a
@@ -3014,6 +5613,25 @@ export class OperationsService {
         subjectId: orderId,
         subjectType: "order",
       });
+      // Trader push: the statuses that actually change what a Trader would
+      // want to know, not every internal step (Section O: "keep this
+      // operational, not noisy").
+      if (
+        [
+          "out_for_delivery",
+          "delivered",
+          "returned_to_branch",
+          "returned_to_trader",
+          "cancelled",
+        ].includes(status)
+      ) {
+        await this.pushOutbox.writeOrderStatusChanged(transaction, {
+          companyId,
+          orderId,
+          newStatus: status,
+          correlationId,
+        });
+      }
       if (status === "delivered") {
         await this.outsourcedDriverFees.createForDeliveredOrder(
           transaction,
@@ -3021,6 +5639,25 @@ export class OperationsService {
           identity.identityId,
           correlationId,
         );
+        // Employee Drivers accrue per-delivery earnings here, in the SAME
+        // transaction as the status change: the accrual reads the delivered_at
+        // this statement just wrote, and an outside transaction would still see
+        // the pre-delivery null. It rolls back with the delivery for the same
+        // reason — an earning for a delivery that did not stick is not owed.
+        //
+        // Returns null for Orders with no employee Driver or no rule in force,
+        // and the existing earning on a replay. Neither is an error, so the
+        // result is deliberately not inspected: nothing downstream depends on
+        // it, and this must never be the reason a delivery fails to record.
+        await this.employeeDeliveryEarnings.accrueForDelivery(transaction, orderId);
+      }
+      if (key !== undefined && key !== "") {
+        await sql`
+          update idempotency_records
+             set response_status = 200, resource_type = 'order', resource_id = ${orderId}::uuid
+           where company_id = ${companyId}::uuid and operation = 'driver.order_status_change'
+             and idempotency_key = ${key}
+        `.execute(transaction);
       }
     });
     return this.orderById(companyId, orderId);
@@ -3525,13 +6162,25 @@ export class OperationsService {
   private async orderById(companyId: string, orderId: string): Promise<OperationsOrder> {
     const result = await sql<OperationsOrder>`
       select o.id,
+             o.area_id as "areaId",
              o.order_number as "orderNumber",
              o.serial_number as "serialNumber",
+             o.psystem_serial as "psystemSerial",
              o.reference_number as "referenceNumber",
              o.order_date::text as "orderDate",
+             /* Identifier-only additions mirroring the list response, so the
+                Edit form can pre-fill without a second lookup. */
+             o.trader_id as "traderId",
+             o.is_free_order as "isFreeOrder",
+             o.order_type as "orderType",
              t.name_en as "traderName",
+             a.name_en as "areaNameEn",
+             a.name_ar as "areaNameAr",
              coalesce(o.customer_area_name_ar_snapshot,a.name_ar,
                       o.customer_area_name_snapshot,a.name_en) as "areaName",
+             e.id as "emirateId",
+             e.name_en as "emirateNameEn",
+             e.name_ar as "emirateNameAr",
              o.assigned_driver_id as "assignedDriverId",
              d.name_en as "assignedDriverName",
              d.mobile_number as "assignedDriverMobile",
@@ -3553,11 +6202,58 @@ export class OperationsService {
              o.delivery_status as "deliveryStatus",
              o.driver_reconciliation_status as "driverReconciliationStatus",
              o.trader_settlement_status as "traderSettlementStatus",
-             o.return_status as "returnStatus"
+             case
+               when d.id is null or d.driver_type <> 'outsourced' then 'not_required'
+               when o.delivery_status <> 'delivered' then 'pending_delivery'
+               when fee.id is null then 'missing_accrual'
+               when fee.status = 'accrued' then 'unpaid'
+               else fee.status
+             end as "outsourcedDriverFeeStatus",
+             fee.earned_amount::text as "outsourcedDriverFeeAmount",
+             fee.paid_amount::text as "outsourcedDriverFeePaid",
+             fee.outstanding_amount::text as "outsourcedDriverFeeOutstanding",
+             fee_payments.payment_numbers as "outsourcedDriverFeePaymentNumbers",
+             receivable.receivable_id as "traderReceivableId",
+             receivable.receivable_number as "traderReceivableNumber",
+             receivable.outstanding_amount as "traderReceivableOutstanding",
+             receivable.status as "traderReceivableStatus",
+             o.return_status as "returnStatus",
+             o.delivered_at::text as "deliveredAt",
+             ${orderAccountingColumns}
       from orders o
       join traders t on t.id = o.trader_id and t.company_id = o.company_id
-      join areas a on a.id = o.area_id and a.company_id = o.company_id
+      left join areas a on a.id = o.area_id and a.company_id = o.company_id
+      left join emirates e on e.id = a.emirate_id
       left join drivers d on d.id = o.assigned_driver_id and d.company_id = o.company_id
+      left join outsourced_driver_fee_accruals fee
+        on fee.order_id = o.id and fee.company_id = o.company_id
+      left join lateral (
+        select string_agg(payments.payment_number, ', ' order by payments.payment_number) as payment_numbers
+        from (
+          select distinct p.payment_number
+          from outsourced_driver_fee_payment_allocations pa
+          join outsourced_driver_fee_payments p
+            on p.id = pa.payment_id and p.company_id = pa.company_id
+          where pa.company_id = o.company_id
+            and pa.accrual_id = fee.id
+            and pa.reversed_at is null
+            and p.status = 'confirmed'
+        ) payments
+      ) fee_payments on true
+      left join lateral (
+        select
+          r.id::text as receivable_id,
+          r.receivable_number,
+          greatest(r.original_amount_due - r.amount_collected, 0::numeric)::text as outstanding_amount,
+          r.status
+        from trader_receivables r
+        where r.company_id = o.company_id
+          and r.source_type = 'service_charge'
+          and r.source_reference = o.order_number
+          and r.status not in ('cancelled', 'reversed')
+        order by r.created_at desc
+        limit 1
+      ) receivable on true
       where o.company_id = ${companyId}::uuid and o.id = ${orderId}::uuid
     `.execute(this.database);
     const order = result.rows[0];
@@ -3643,6 +6339,170 @@ export class OperationsService {
     return provider;
   }
 
+  public async changeInternationalCarrierStatus(
+    orderId: string,
+    input: ChangeInternationalCarrierStatusDto,
+    correlationId: string,
+  ): Promise<OperationsOrder> {
+    const { companyId } = this.tenants.current();
+    const identity = this.identities.current();
+    if (!identity.permissions.has("orders.update_delivery_status") && !identity.permissions.has("users_roles.manage")) {
+      throw new ApplicationException("permission_denied", "The authenticated account does not have permission for this operation", HttpStatus.FORBIDDEN);
+    }
+    await this.transactions.execute(async (transaction) => {
+      const current = await sql<{ orderType: string; status: string | null }>`
+        select order_type as "orderType", international_carrier_status as status
+          from orders where id = ${orderId}::uuid and company_id = ${companyId}::uuid for update
+      `.execute(transaction);
+      const row = current.rows[0];
+      if (row === undefined) throw new ApplicationException("order_not_found", "Order not found", HttpStatus.NOT_FOUND);
+      if (row.orderType !== "gcc_international") throw new ApplicationException("international_carrier_status_not_allowed", "Carrier status applies only to International orders", HttpStatus.CONFLICT);
+      const transitions: Record<string, string[]> = { ready_for_carrier: ["handed_to_carrier"], handed_to_carrier: ["in_transit"], in_transit: [] };
+      if (!(transitions[row.status ?? "ready_for_carrier"] ?? []).includes(input.status)) {
+        throw new ApplicationException("international_carrier_status_transition_invalid", "Invalid International carrier status transition", HttpStatus.CONFLICT);
+      }
+      await sql`update orders set international_carrier_status = ${input.status} where id = ${orderId}::uuid and company_id = ${companyId}::uuid`.execute(transaction);
+      await this.history.orderEvent(transaction, { actorId: identity.identityId, actorRole: identity.kind, category: "status_change", companyId, correlationId, eventType: "order.international_carrier_status_change", fieldName: "international_carrier_status", newValue: input.status, orderId, previousValue: row.status ?? "ready_for_carrier", reason: null, source: "api" });
+      await this.audit(transaction, { action: "order.international_carrier_status_change", actorId: identity.identityId, after: { status: input.status }, companyId, correlationId, subjectId: orderId, subjectType: "order" });
+    });
+    return this.orderById(companyId, orderId);
+  }
+
+  private async resolveInternationalReferences(
+    database: Parameters<Parameters<KyselyTransactionManager["execute"]>[0]>[0],
+    companyId: string,
+    input: {
+      carrierId?: string | undefined;
+      carrierName?: string | undefined;
+      countryId?: string | undefined;
+      countryName?: string | undefined;
+    },
+  ): Promise<{ carrierId: string; carrierName: string; countryId: string; countryName: string }> {
+    const carrier = (
+      await sql<{ id: string; name: string }>`
+        select id, name from third_party_delivery_companies
+         where company_id=${companyId}::uuid and is_active
+           and (${input.carrierId ?? null}::uuid is null or id=${input.carrierId ?? null}::uuid)
+           and (${input.carrierName ?? null}::text is null or lower(regexp_replace(btrim(name), '\\s+', ' ', 'g')) = lower(regexp_replace(btrim(${input.carrierName ?? null}), '\\s+', ' ', 'g')))
+         limit 1
+      `.execute(database)
+    ).rows[0];
+    if (carrier === undefined) {
+      throw new ApplicationException("international_carrier_invalid", "The selected carrier is missing, inactive, or not available in this Company", HttpStatus.BAD_REQUEST);
+    }
+    const country = (
+      await sql<{ id: string; name: string }>`
+        select id, name from destination_countries
+         where company_id=${companyId}::uuid and is_active
+           and (${input.countryId ?? null}::uuid is null or id=${input.countryId ?? null}::uuid)
+           and (${input.countryName ?? null}::text is null or normalized_name = lower(regexp_replace(btrim(${input.countryName ?? null}), '\\s+', ' ', 'g')))
+         limit 1
+      `.execute(database)
+    ).rows[0];
+    if (country === undefined) {
+      throw new ApplicationException("destination_country_invalid", "The selected destination country is missing, inactive, or not available in this Company", HttpStatus.BAD_REQUEST);
+    }
+    return { carrierId: carrier.id, carrierName: carrier.name, countryId: country.id, countryName: country.name };
+  }
+
+  public async thirdPartyDeliveryCompanies(search?: string): Promise<{ items: readonly { id: string; name: string }[]; total: number; hasMore: boolean }> {
+    const { companyId } = this.tenants.current();
+    const result = await sql<{ id: string; name: string }>`
+      select id, name
+      from third_party_delivery_companies
+      where company_id = ${companyId}::uuid and is_active = true
+        and (${search?.trim() || null}::text is null or lower(regexp_replace(btrim(name), '\\s+', ' ', 'g')) like '%' || lower(regexp_replace(btrim(${search?.trim() || null}), '\\s+', ' ', 'g')) || '%')
+      order by lower(name)
+      limit 20
+    `.execute(this.database);
+    return { items: result.rows, total: result.rows.length, hasMore: false };
+  }
+
+  public async createThirdPartyDeliveryCompany(name: string): Promise<{ id: string; name: string }> {
+    const { companyId } = this.tenants.current();
+    const displayName = name.normalize("NFKC").trim().replace(/\s+/gu, " ");
+    try {
+      const result = await sql<{ id: string; name: string }>`
+        insert into third_party_delivery_companies (company_id, name, is_active)
+        values (${companyId}::uuid, ${displayName}, true)
+        returning id, name
+      `.execute(this.database);
+      return result.rows[0]!;
+    } catch (error) {
+      this.rethrowDuplicate(error, "third_party_delivery_company_exists", "A carrier with this name already exists");
+      throw error;
+    }
+  }
+
+  public async destinationCountries(search?: string): Promise<{ items: readonly { id: string; name: string }[]; total: number; hasMore: boolean }> {
+    const { companyId } = this.tenants.current();
+    const result = await sql<{ id: string; name: string }>`
+      select id, name from destination_countries
+       where company_id=${companyId}::uuid and is_active
+         and (${search?.trim() || null}::text is null or normalized_name like '%' || lower(regexp_replace(btrim(${search?.trim() || null}), '\\s+', ' ', 'g')) || '%')
+       order by normalized_name limit 100
+    `.execute(this.database);
+    return { items: result.rows, total: result.rows.length, hasMore: false };
+  }
+
+  public async createDestinationCountry(name: string): Promise<{ id: string; name: string }> {
+    const { companyId } = this.tenants.current();
+    const displayName = name.normalize("NFKC").trim().replace(/\s+/gu, " ");
+    const normalizedName = displayName.toLocaleLowerCase();
+    try {
+      const result = await sql<{ id: string; name: string }>`
+        insert into destination_countries (company_id, name, normalized_name)
+        values (${companyId}::uuid, ${displayName}, ${normalizedName})
+        returning id, name
+      `.execute(this.database);
+      return result.rows[0]!;
+    } catch (error) {
+      this.rethrowDuplicate(error, "destination_country_exists", "A destination country with this name already exists");
+      throw error;
+    }
+  }
+
+  public async deactivateThirdPartyDeliveryCompany(id: string, correlationId: string): Promise<void> {
+    await this.setInternationalCatalogActive("third_party_delivery_companies", id, correlationId);
+  }
+
+  public async deactivateDestinationCountry(id: string, correlationId: string): Promise<void> {
+    await this.setInternationalCatalogActive("destination_countries", id, correlationId);
+  }
+
+  public async deleteThirdPartyDeliveryCompany(id: string, correlationId: string): Promise<void> {
+    await this.deleteInternationalCatalog("third_party_delivery_companies", id, correlationId);
+  }
+
+  public async deleteDestinationCountry(id: string, correlationId: string): Promise<void> {
+    await this.deleteInternationalCatalog("destination_countries", id, correlationId);
+  }
+
+  private async setInternationalCatalogActive(table: "destination_countries" | "third_party_delivery_companies", id: string, correlationId: string): Promise<void> {
+    const { companyId } = this.tenants.current();
+    const identity = this.identities.current();
+    await this.transactions.execute(async (database) => {
+      const result = await sql<{ id: string }>`
+        update ${sql.table(table)} set is_active=false, updated_at=now(), version=version+1
+         where id=${id}::uuid and company_id=${companyId}::uuid and is_active=true returning id
+      `.execute(database);
+      if (result.rows[0] === undefined) throw new ApplicationException("catalog_entry_not_found", "Catalog entry not found or already inactive", HttpStatus.NOT_FOUND);
+      await this.audit(database, { action: `${table}.deactivate`, actorId: identity.identityId, after: { isActive: false }, companyId, correlationId, subjectId: id, subjectType: table });
+    });
+  }
+
+  private async deleteInternationalCatalog(table: "destination_countries" | "third_party_delivery_companies", id: string, correlationId: string): Promise<void> {
+    const { companyId } = this.tenants.current();
+    const identity = this.identities.current();
+    await this.transactions.execute(async (database) => {
+      const referenced = await sql<{ exists: boolean }>`select exists(select 1 from orders where company_id=${companyId}::uuid and ${sql.raw(table === "destination_countries" ? "destination_country_id" : "third_party_delivery_company_id")}=${id}::uuid) as exists`.execute(database);
+      if (referenced.rows[0]?.exists) throw new ApplicationException("catalog_entry_referenced", "Referenced catalog entries cannot be deleted; deactivate them instead", HttpStatus.CONFLICT);
+      const result = await sql<{ id: string }>`delete from ${sql.table(table)} where id=${id}::uuid and company_id=${companyId}::uuid returning id`.execute(database);
+      if (result.rows[0] === undefined) throw new ApplicationException("catalog_entry_not_found", "Catalog entry not found", HttpStatus.NOT_FOUND);
+      await this.audit(database, { action: `${table}.delete`, actorId: identity.identityId, after: { deleted: true }, companyId, correlationId, subjectId: id, subjectType: table });
+    });
+  }
+
   private async recordOrderUsageEvent(
     database: Parameters<Parameters<KyselyTransactionManager["execute"]>[0]>[0],
     companyId: string,
@@ -3680,7 +6540,9 @@ export class OperationsService {
     if (trader === undefined) {
       throw new ApplicationException(
         profileId === undefined ? "profile_scope_required" : "profile_access_inactive",
-        profileId === undefined ? "An authenticated profile is required" : "The profile is not active",
+        profileId === undefined
+          ? "An authenticated profile is required"
+          : "The profile is not active",
         HttpStatus.FORBIDDEN,
       );
     }
@@ -3729,7 +6591,11 @@ export class OperationsService {
         )
       `.execute(transaction);
     }
-    const duplicate = await sql<{ orderDate: string; referenceExists: boolean; serialExists: boolean }>`
+    const duplicate = await sql<{
+      orderDate: string;
+      referenceExists: boolean;
+      serialExists: boolean;
+    }>`
       select
         current_date::text as "orderDate",
         exists(
@@ -3892,12 +6758,19 @@ export class OperationsService {
     `.execute(transaction);
     const customerRow = customer.rows[0];
     if (customerRow === undefined) throw new Error("Customer creation returned no identifier");
+    /* The address record is ALWAYS created, even with no street line.
+       `orders_customer_provenance_check` requires `customer_address_id` on a
+       'resolved' Order, so skipping the record is not an option -- the Order
+       would be rejected. The Area is known regardless, so the record is
+       meaningful; only the address text may be empty, which is why
+       `customer_addresses_address_nonempty` was dropped. No placeholder is
+       invented: an empty line reads as absent, "n/a" reads as data. */
     const address = await sql<{ id: string }>`
       insert into customer_addresses(
         company_id,customer_id,area_id,address,is_default,created_by_account_id
       ) values (
-        ${input.companyId}::uuid,${customerRow.id}::uuid,${area.id}::uuid,${draft.address.trim()},
-        true,${input.createdByAccountId}::uuid
+        ${input.companyId}::uuid,${customerRow.id}::uuid,${area.id}::uuid,
+        ${draft.address?.trim() ?? ""},true,${input.createdByAccountId}::uuid
       )
       returning id
     `.execute(transaction);
@@ -3951,7 +6824,9 @@ export class OperationsService {
     if (driver === undefined) {
       throw new ApplicationException(
         profileId === undefined ? "profile_scope_required" : "profile_access_inactive",
-        profileId === undefined ? "An authenticated profile is required" : "The profile is not active",
+        profileId === undefined
+          ? "An authenticated profile is required"
+          : "The profile is not active",
         HttpStatus.FORBIDDEN,
       );
     }
@@ -4029,8 +6904,24 @@ export class OperationsService {
     const { companyId } = this.tenants.current();
     const customerName = input.customerName.trim();
     const customerMobileNumber = input.customerMobileNumber.trim();
-    const customerAddress = input.customerAddress.trim();
-    const serialNumber = input.serialNumber.trim();
+    // Optional, same as the primary create path: absent becomes '', which the
+    // NOT NULL column accepts because it carries no non-empty check.
+    const customerAddress = (input.customerAddress ?? "").trim();
+    const suppliedSerialNumber = input.serialNumber?.trim() || null;
+    if (suppliedSerialNumber === null) {
+      throw new ApplicationException(
+        "serial_number_required",
+        "Serial Number is required",
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    const serialNumber = suppliedSerialNumber;
+    const psystemSerial = (
+      await sql<{ value: string | null }>`
+        select allocate_company_psystem_serial(${companyId}::uuid) value
+      `.execute(database)
+    ).rows[0]?.value ?? null;
+    const psystemSerialNormalized = psystemSerial?.toLowerCase() ?? null;
     const referenceNumber = input.referenceNumber?.trim() || null;
     const serialNumberNormalized = this.normalizeOrderIdentifier(serialNumber);
     const referenceNumberNormalized =
@@ -4113,13 +7004,18 @@ export class OperationsService {
       driverCost,
       prospective: true,
       serviceFee: pricing.finalFee,
+      paymentCondition: input.paymentCondition ?? "customer_pays_cod_and_fee",
       vatPolicy,
     });
     const deliveryStatus = driverRow === undefined ? "new" : "assigned_to_driver";
+    const traderSettlementStatus = financials.traderNetPayable.isZero()
+      ? "not_eligible"
+      : "unsettled";
 
     const inserted = await sql<{ id: string }>`
       insert into orders (
         company_id, order_number, serial_number, serial_number_normalized,
+        psystem_serial, psystem_serial_normalized,
         reference_number, reference_number_normalized, financial_model_version,
         order_date, trader_id, area_id, created_by_account_id,
         import_batch_id, assigned_driver_id,customer_id,customer_address_id,
@@ -4134,9 +7030,11 @@ export class OperationsService {
         trader_net_payable,driver_cost,vat_amount,vat_enabled_snapshot,vat_rate_snapshot,
         vat_price_mode_snapshot,company_revenue,order_profit,delivery_status,trader_settlement_status,
         pricing_provenance_status, trader_service_price_id,
-        configured_service_fee_snapshot, final_service_fee_snapshot
+        configured_service_fee_snapshot, final_service_fee_snapshot,
+        service_fee_override_reason
       ) values (
         ${companyId}::uuid, ${orderNumber}, ${serialNumber}, ${serialNumberNormalized},
+        ${psystemSerial}, ${psystemSerialNormalized},
         ${referenceNumber}, ${referenceNumberNormalized}, 'trader_deduction_v1',
         current_date, ${traderRow.id}::uuid,
         ${area.id}::uuid, ${input.createdByAccountId}::uuid,
@@ -4145,19 +7043,20 @@ export class OperationsService {
         ${input.customerSecondMobileNumber?.trim() || null},${customerAddress},${customer.code},
         ${customer.customerReference},${area.code},${area.name},${customer.locationLink},
         ${customer.deliveryNotes},'resolved',${area.nameAr},${area.nameAr === null},${packageCount},
-        'customer_pays_cod_trader_pays_fee', ${financials.codAmount.toFixed(2)},
+        ${input.paymentCondition ?? "customer_pays_cod_and_fee"}, ${financials.codAmount.toFixed(2)},
         ${financials.serviceFee.toFixed(2)},${financials.serviceFeeNetAmount.toFixed(2)},
         ${financials.serviceFeeVatAmount.toFixed(2)},${financials.additionalFees.toFixed(2)},
         ${financials.additionalFeeVatAmount.toFixed(2)},${financials.totalDeductions.toFixed(2)},
         ${financials.customerAmountDue.toFixed(2)},${financials.codAmount.toFixed(2)},
-        ${financials.serviceFeeNetAmount.plus(financials.serviceFeeVatAmount).toFixed(2)},
-        ${financials.additionalFees.plus(financials.additionalFeeVatAmount).toFixed(2)},
+        ${financials.traderPaidServiceFee.toFixed(2)},
+          ${financials.traderDeductions.toFixed(2)},
         ${financials.traderNetPayable.toFixed(2)}, ${driverCost.toFixed(2)},
         ${financials.vatAmount.toFixed(2)},${vatPolicy.enabled},${vatPolicy.rate.toFixed(4)},
         ${vatPolicy.enabled ? vatPolicy.priceMode : null},${financials.companyRevenue.toFixed(2)},
-        ${financials.orderProfit.toFixed(2)}, ${deliveryStatus}, 'unsettled',
+        ${financials.orderProfit.toFixed(2)}, ${deliveryStatus}, ${traderSettlementStatus},
         ${pricing.provenance}, ${pricing.servicePriceId}::uuid,
-        ${pricing.configuredFee.toFixed(2)}, ${pricing.finalFee.toFixed(2)}
+        ${pricing.configuredFee.toFixed(2)}, ${pricing.finalFee.toFixed(2)},
+        ${pricing.overrideReason}
       )
       returning id
     `.execute(database);
@@ -4165,6 +7064,15 @@ export class OperationsService {
     if (orderId === undefined) {
       throw new Error("Order creation did not return an identifier");
     }
+    await this.createOrderTraderReceivableIfNeeded(database, {
+      actorAccountId: input.createdByAccountId,
+      amountDue: financials.traderReceivableDue,
+      companyId,
+      correlationId: input.correlationId,
+      orderId,
+      orderNumber,
+      traderId: traderRow.id,
+    });
 
     if (driverRow !== undefined) {
       await sql`
@@ -4177,14 +7085,13 @@ export class OperationsService {
       `.execute(database);
     }
 
-    await sql`
-      insert into order_status_history (
-        company_id, order_id, status_dimension, to_status, changed_by_account_id
-      ) values (
-        ${companyId}::uuid, ${orderId}::uuid, 'delivery', ${deliveryStatus},
-        ${input.createdByAccountId}::uuid
-      )
-    `.execute(database);
+    await this.history.statusHistory(database, {
+      actorId: input.createdByAccountId,
+      companyId,
+      from: null,
+      orderId,
+      to: deliveryStatus,
+    });
     await sql`
       insert into order_events (
         company_id, order_id, event_type, event_category, field_name,
@@ -4200,6 +7107,15 @@ export class OperationsService {
     await this.recordOrderUsageEvent(database, companyId, orderId);
 
     return {
+      // The four components the capture trigger tests, computed here so a caller
+      // acting on the freshly created Order sees the same classification the
+      // list and detail queries will later report.
+      accountingRequired: !(
+        financials.codAmount.isZero() &&
+        financials.serviceFee.isZero() &&
+        financials.additionalFees.isZero() &&
+        financials.vatAmount.isZero()
+      ),
       amountCollected: "0.00",
       additionalFees: financials.additionalFees.toFixed(2),
       additionalFeeVatAmount: financials.additionalFeeVatAmount.toFixed(2),
@@ -4219,10 +7135,18 @@ export class OperationsService {
       orderDate: new Date().toISOString().slice(0, 10),
       orderNumber,
       orderProfit: financials.orderProfit.toFixed(2),
+      outsourcedDriverFeeAmount: null,
+      outsourcedDriverFeeOutstanding: null,
+      outsourcedDriverFeePaid: null,
+      outsourcedDriverFeePaymentNumbers: null,
+      outsourcedDriverFeeStatus:
+        driverRow?.outsourcedFee == null ? "not_required" : "pending_delivery",
       referenceNumber,
       returnStatus: "not_applicable",
+      psystemSerial,
       serialNumber,
       serviceFee: financials.serviceFee.toFixed(2),
+      serviceFeeOverrideReason: pricing.overrideReason,
       serviceFeeVatAmount: financials.serviceFeeVatAmount.toFixed(2),
       totalDeductions: financials.totalDeductions.toFixed(2),
       traderNetPayable: financials.traderNetPayable.toFixed(2),
@@ -4277,7 +7201,17 @@ export class OperationsService {
 
     const requested =
       input.requestedFee === undefined ? undefined : this.money(new Decimal(input.requestedFee));
-    const reason = input.requestedReason?.trim() || null;
+    // A caller must not be able to hand us the system marker and have it stored
+    // as though the pricing engine wrote it. Fee Source is derived from this
+    // string, so accepting it verbatim would let any client make a manual
+    // override present itself as an ordinary configured zero price.
+    //
+    // The marker is discarded rather than rejected: it is not a user's reason,
+    // so the correct treatment is "no reason was given". A manual zero then
+    // fails the normal reason check with the normal message, and a genuine
+    // configured zero has the marker re-applied below by the server.
+    const submitted = input.requestedReason?.trim() || null;
+    const reason = submitted === configuredZeroPriceReason ? null : submitted;
     const matched = result.rows[0];
 
     if (matched === undefined) {
@@ -4292,6 +7226,26 @@ export class OperationsService {
           HttpStatus.UNPROCESSABLE_ENTITY,
         );
       }
+      // This branch is only reached when the caller hand-entered a fee (there
+      // is no configured price at any level), so a zero here is always a
+      // deliberate manual decision. Trader mobile never reaches this path: it
+      // sends no fee, so an unpriced Area fails earlier above with
+      // pricing_not_configured.
+      //
+      // `overrideApplied` is false here — there is no configured price to
+      // override — so the permission gate further down never fires. A zero fee
+      // is exactly the decision that gate exists to control, so it is enforced
+      // explicitly. Deliberately limited to zero: entering a NON-zero fee for
+      // an unpriced Area remains open to any User who can create Orders, which
+      // is the existing approved behaviour and is not changed here.
+      if (requested.isZero() && !input.permissions.has("orders.override_service_fee")) {
+        throw new ApplicationException(
+          "service_fee_override_denied",
+          "You do not have permission to apply a zero service fee",
+          HttpStatus.FORBIDDEN,
+        );
+      }
+      this.assertZeroServiceFeeReason(requested, reason);
       return {
         configuredFee: requested,
         finalFee: requested,
@@ -4319,14 +7273,52 @@ export class OperationsService {
         HttpStatus.BAD_REQUEST,
       );
     }
+    // A zero Service Fee has two very different origins, and conflating them
+    // breaks Trader mobile:
+    //
+    //   MANUAL ZERO   - the caller asked for 0 against a priced Area. This is
+    //                   an exceptional business decision and needs a reason.
+    //   CONFIGURED 0  - the Trader/Area is simply priced at 0 and the caller
+    //                   asked for nothing. That is ordinary pricing, not an
+    //                   override, and Trader mobile has no field to supply a
+    //                   reason with. Demanding one would reject a perfectly
+    //                   valid Order.
+    //
+    // So the reason is required only when the ZERO WAS REQUESTED. A configured
+    // zero records a system-generated explanation instead, which keeps the
+    // constraint satisfied without inventing a user's words.
+    const requestedZero = requested !== undefined && requested.isZero();
+    if (requestedZero) this.assertZeroServiceFeeReason(finalFee, reason);
+    const resolvedReason =
+      finalFee.isZero() && !requestedZero && reason === null ? configuredZeroPriceReason : reason;
     return {
       configuredFee,
       finalFee,
       overrideApplied,
-      overrideReason: reason,
+      overrideReason: resolvedReason,
       provenance: "resolved",
       servicePriceId: matched.id,
     };
+  }
+
+  /**
+   * A Service Fee of exactly zero always requires a reason.
+   *
+   * `isZero()` on the Decimal, never `!fee` or `fee === 0`: the value is a
+   * Decimal, so a truthy test would be meaningless and a strict equality
+   * test would miss `0.00`.
+   *
+   * This mirrors the `orders_zero_service_fee_reason_check` constraint, so
+   * the rule is refused with a clear business error before the database has
+   * to refuse it with a constraint violation.
+   */
+  private assertZeroServiceFeeReason(fee: Decimal, reason: string | null): void {
+    if (!fee.isZero() || reason !== null) return;
+    throw new ApplicationException(
+      "service_fee_zero_reason_required",
+      "A reason is required when the Service Fee is zero",
+      HttpStatus.BAD_REQUEST,
+    );
   }
 
   private async loadOrder(
@@ -4338,9 +7330,12 @@ export class OperationsService {
       select o.id,
              o.order_number as "orderNumber",
              o.serial_number as "serialNumber",
+             o.psystem_serial as "psystemSerial",
              o.reference_number as "referenceNumber",
              o.order_date::text as "orderDate",
              t.name_en as "traderName",
+             a.name_en as "areaNameEn",
+             a.name_ar as "areaNameAr",
              coalesce(o.customer_area_name_ar_snapshot,a.name_ar,
                       o.customer_area_name_snapshot,a.name_en) as "areaName",
              o.assigned_driver_id as "assignedDriverId",
@@ -4364,10 +7359,17 @@ export class OperationsService {
              o.delivery_status as "deliveryStatus",
              o.driver_reconciliation_status as "driverReconciliationStatus",
              o.trader_settlement_status as "traderSettlementStatus"
+             ,o.order_type as "orderType",
+             o.destination_country_id as "destinationCountryId",
+             coalesce(dc.name, o.destination_country_name) as "destinationCountryName",
+             o.third_party_delivery_company_id as "thirdPartyDeliveryCompanyId",
+             coalesce(pc.name, o.third_party_delivery_company_name) as "thirdPartyDeliveryCompanyName"
       from orders o
       join traders t on t.id = o.trader_id and t.company_id = o.company_id
-      join areas a on a.id = o.area_id and a.company_id = o.company_id
+      left join areas a on a.id = o.area_id and a.company_id = o.company_id
       left join drivers d on d.id = o.assigned_driver_id and d.company_id = o.company_id
+      left join destination_countries dc on dc.id = o.destination_country_id and dc.company_id = o.company_id
+      left join third_party_delivery_companies pc on pc.id = o.third_party_delivery_company_id and pc.company_id = o.company_id
       where o.id = ${orderId}::uuid and o.company_id = ${companyId}::uuid
       limit 1
     `.execute(database);
@@ -4405,6 +7407,7 @@ export class OperationsService {
     readonly additionalFees?: Decimal;
     readonly codAmount: Decimal;
     readonly driverCost: Decimal;
+    readonly paymentCondition?: "customer_pays_cod_and_fee" | "customer_pays_cod_trader_pays_fee";
     readonly prospective?: boolean;
     readonly serviceFee: Decimal;
     readonly vatPolicy: VatPolicy;
@@ -4419,17 +7422,23 @@ export class OperationsService {
     const additionalFees = inclusive
       ? additionalFeeInput.minus(additionalFeeVatAmount)
       : additionalFeeInput;
-    const totalDeductions = serviceFeeNetAmount
+    const feeTotal = serviceFeeNetAmount
       .plus(serviceFeeVatAmount)
       .plus(additionalFees)
       .plus(additionalFeeVatAmount);
-    if (input.prospective && totalDeductions.greaterThan(input.codAmount)) {
-      throw new ApplicationException(
-        "order_deductions_exceed_cod",
-        "Total Company deductions cannot exceed the COD Amount",
-        HttpStatus.BAD_REQUEST,
-      );
-    }
+    const customerPaysFee = input.paymentCondition !== "customer_pays_cod_trader_pays_fee";
+    const customerPaidFeeCoveredByCod = customerPaysFee && input.codAmount.greaterThan(0);
+    const traderPaidServiceFee = input.prospective
+      ? customerPaidFeeCoveredByCod || !customerPaysFee
+        ? serviceFeeNetAmount.plus(serviceFeeVatAmount)
+        : new Decimal(0)
+      : serviceFeeNetAmount.plus(serviceFeeVatAmount);
+    const traderDeductions = input.prospective
+      ? customerPaidFeeCoveredByCod || !customerPaysFee
+        ? additionalFees.plus(additionalFeeVatAmount)
+        : new Decimal(0)
+      : additionalFees.plus(additionalFeeVatAmount);
+    const totalDeductions = traderPaidServiceFee.plus(traderDeductions);
     const vatAmount = input.prospective
       ? serviceFeeVatAmount.plus(additionalFeeVatAmount)
       : serviceFeeVatAmount;
@@ -4437,13 +7446,22 @@ export class OperationsService {
       ? serviceFeeNetAmount.plus(additionalFees)
       : serviceFeeNetAmount;
     const customerAmountDue = input.prospective
-      ? input.codAmount
+      ? customerPaysFee
+        ? input.codAmount.greaterThan(0)
+          ? input.codAmount
+          : feeTotal
+        : input.codAmount
       : input.vatPolicy.enabled && input.vatPolicy.priceMode === "exclusive"
         ? input.codAmount.plus(input.serviceFee).plus(serviceFeeVatAmount)
         : input.codAmount.plus(input.serviceFee);
+    const signedTraderPosition = input.codAmount.minus(totalDeductions);
     const traderNetPayable = input.prospective
-      ? input.codAmount.minus(totalDeductions)
+      ? Decimal.max(signedTraderPosition, 0)
       : Decimal.max(input.codAmount.minus(input.serviceFee), 0);
+    const traderReceivableDue =
+      input.prospective && !customerPaysFee
+        ? Decimal.max(signedTraderPosition.negated(), 0)
+        : new Decimal(0);
     return {
       additionalFees: this.money(additionalFees),
       additionalFeeVatAmount: this.money(additionalFeeVatAmount),
@@ -4455,11 +7473,62 @@ export class OperationsService {
       serviceFeeNetAmount: this.money(serviceFeeNetAmount),
       serviceFeeVatAmount: this.money(serviceFeeVatAmount),
       totalDeductions: this.money(totalDeductions),
+      traderDeductions: this.money(traderDeductions),
+      traderPaidServiceFee: this.money(traderPaidServiceFee),
+      traderReceivableDue: this.money(traderReceivableDue),
       traderNetPayable: this.money(traderNetPayable),
       vatAmount: this.money(vatAmount),
     };
   }
-
+  private async createOrderTraderReceivableIfNeeded(
+    database: Parameters<Parameters<KyselyTransactionManager["execute"]>[0]>[0],
+    input: {
+      readonly actorAccountId: string;
+      readonly amountDue: Decimal;
+      readonly companyId: string;
+      readonly correlationId: string;
+      readonly orderId: string;
+      readonly orderNumber: string;
+      readonly traderId: string;
+    },
+  ): Promise<void> {
+    const amountDue = this.money(input.amountDue);
+    if (amountDue.lessThanOrEqualTo(0)) {
+      return;
+    }
+    const receivableNumber = await this.nextReferenceNumber(
+      database,
+      input.companyId,
+      "trader_receivable",
+      "RCV",
+    );
+    const reason = "Order service fee owed by Trader";
+    await sql`
+      insert into trader_receivables (
+        company_id, receivable_number, trader_id, source_type, source_reference,
+        business_date, original_amount_due, amount_collected, status, reason, notes,
+        created_by_account_id
+      ) values (
+        ${input.companyId}::uuid, ${receivableNumber}, ${input.traderId}::uuid,
+        'service_charge', ${input.orderNumber}, current_date, ${amountDue.toFixed(2)},
+        0, 'outstanding', ${reason},
+        ${`Created automatically because Order ${input.orderNumber} has fees greater than COD. Collect from Trader as a Receivable, not a negative settlement.`},
+        ${input.actorAccountId}::uuid
+      )
+      on conflict do nothing
+    `.execute(database);
+    await sql`
+      insert into order_events (
+        company_id, order_id, event_type, event_category, field_name, new_value,
+        actor_account_id, actor_role, source, correlation_id
+      ) values (
+        ${input.companyId}::uuid, ${input.orderId}::uuid,
+        'trader_receivable.created_from_order', 'financial_change',
+        'trader_receivable_due', to_jsonb(${amountDue.toFixed(2)}::text),
+        ${input.actorAccountId}::uuid, 'Company User', 'system', ${input.correlationId}
+      )
+    `.execute(database);
+  }
   private calculateVatAmount(serviceFee: Decimal, vatPolicy: VatPolicy): Decimal {
     if (!vatPolicy.enabled || vatPolicy.rate.isZero()) {
       return new Decimal(0);
@@ -4476,15 +7545,38 @@ export class OperationsService {
 
   private parseOrdersCsv(csv: string): {
     readonly errors: readonly string[];
-    readonly rows: readonly CreateOrderDto[];
+    /** Rows that failed validation, already phrased for the importer. */
+    readonly invalid: readonly OperationsOrderImportRow[];
+    /** Rows that passed, each still carrying the file line it came from. */
+    readonly rows: readonly { readonly row: CreateOrderDto; readonly rowNumber: number }[];
     readonly totalRows: number;
   } {
     const lines = this.parseCsv(csv).filter((row) => row.some((cell) => cell.trim().length > 0));
     if (lines.length === 0) {
-      return { errors: [], rows: [], totalRows: 0 };
+      return { errors: [], invalid: [], rows: [], totalRows: 0 };
     }
     const header = lines[0]?.map((cell) => cell.trim()) ?? [];
     const index = new Map(header.map((name, position) => [name, position]));
+    if (index.has("psystemSerial") || index.has("psystem_serial")) {
+      return {
+        errors: ["PSystem Serial is generated by Tawseelhub and must not be supplied in imports"],
+        invalid: [],
+        rows: [],
+        totalRows: Math.max(lines.length - 1, 0),
+      };
+    }
+    // `serviceFee` is deliberately NOT required.
+    //
+    // Leaving the column out — or leaving a cell blank — means "price this from
+    // the authoritative Trader/Area table", which is the same path the Operator
+    // form and Trader mobile take. A configured zero price then imports
+    // normally, with the system explanation recorded, and nobody has to invent
+    // a justification for the Company's own price list.
+    //
+    // Supplying a value keeps the old behaviour exactly: it is a requested fee,
+    // and a requested zero is a manual override subject to the usual permission
+    // and reason rules. Existing import files that carry the column are
+    // therefore unaffected.
     const required = [
       "serialNumber",
       "traderId",
@@ -4492,25 +7584,32 @@ export class OperationsService {
       "customerMobileNumber",
       "customerAddress",
       "codAmount",
-      "serviceFee",
     ];
     const missing = required.filter((name) => !index.has(name));
     if (missing.length > 0) {
       return {
         errors: [`Missing required columns: ${missing.join(", ")}`],
+        invalid: [],
         rows: [],
         totalRows: Math.max(lines.length - 1, 0),
       };
     }
 
     const errors: string[] = [];
-    const rows: CreateOrderDto[] = [];
+    const invalid: OperationsOrderImportRow[] = [];
+    const rows: { row: CreateOrderDto; rowNumber: number }[] = [];
     const totalRows = Math.max(lines.length - 1, 0);
     for (const [offset, line] of lines.slice(1).entries()) {
       const rowNumber = offset + 2;
       const read = (column: string) => line[index.get(column) ?? -1]?.trim() ?? "";
-      const codAmount = Number(read("codAmount"));
-      const serviceFee = Number(read("serviceFee"));
+      const codAmountText = read("codAmount");
+      // Blank is NOT zero. `Number("")` is 0, which would silently turn a
+      // forgotten cell into a legitimate zero-COD Order, so the blank check
+      // below runs against the raw text and not the parsed number.
+      const codAmount = Number(codAmountText);
+      const serviceFeeText = read("serviceFee");
+      const serviceFee = serviceFeeText.length === 0 ? undefined : Number(serviceFeeText);
+      const zeroFeeReason = read("serviceFeeOverrideReason");
       const additionalFeesText = read("additionalFees");
       const additionalFees = additionalFeesText.length === 0 ? 0 : Number(additionalFeesText);
       const packageCountText = read("packageCount");
@@ -4519,10 +7618,31 @@ export class OperationsService {
       for (const column of required) {
         if (read(column).length === 0) rowErrors.push(`${column} is required`);
       }
-      if (!Number.isFinite(codAmount) || codAmount < 0)
-        rowErrors.push("codAmount must be 0 or more");
-      if (!Number.isFinite(serviceFee) || serviceFee < 0) {
-        rowErrors.push("serviceFee must be 0 or more");
+      if (!Number.isFinite(codAmount)) {
+        rowErrors.push("Invalid COD: enter a number, or 0 for a no-collection Order");
+      } else if (codAmount < 0) {
+        rowErrors.push("Negative COD: the amount to collect cannot be less than 0");
+      }
+      if (serviceFee !== undefined && (!Number.isFinite(serviceFee) || serviceFee < 0)) {
+        rowErrors.push(
+          serviceFee < 0
+            ? "Negative Service Fee: the fee cannot be less than 0"
+            : "Invalid Service Fee: enter a number, or leave blank to use configured pricing",
+        );
+      }
+      // An explicitly imported zero IS a requested zero, so it is a manual
+      // override and owes a reason — the same rule the Operator form applies.
+      // Caught here, per row, rather than as an exception that would abort the
+      // whole file with no indication of which line caused it.
+      //
+      // Authorization is NOT decided here: `resolveServiceFee` holds the single
+      // permission gate, and duplicating it in the parser would give two places
+      // to disagree about who may do this.
+      if (serviceFee === 0 && zeroFeeReason.trim() === "") {
+        rowErrors.push(
+          "Zero Service Fee Reason Required: give a reason, or leave Service Fee " +
+            "blank to use configured pricing",
+        );
       }
       if (!Number.isFinite(additionalFees) || additionalFees < 0) {
         rowErrors.push("additionalFees must be 0 or more");
@@ -4533,8 +7653,23 @@ export class OperationsService {
       if (!Number.isInteger(packageCount) || packageCount < 1) {
         rowErrors.push("packageCount must be a whole number greater than 0");
       }
+      // Read as raw text, never through Number(): a Reference Number is an
+      // identifier, not a quantity, and "0042" must survive as "0042".
+      const rowReference = this.optionalCsvValue(read("referenceNumber")) ?? null;
       if (rowErrors.length > 0) {
         errors.push(`Row ${rowNumber}: ${rowErrors.join("; ")}`);
+        invalid.push({
+          accountingRequired: null,
+          errorField: this.importErrorField(rowErrors[0] ?? ""),
+          errorMessage: rowErrors.join("; "),
+          feeSource: null,
+          orderNumber: null,
+          referenceNumber: rowReference,
+          resolvedServiceFee: null,
+          rowNumber,
+          status: "invalid",
+          zeroFeeReason: zeroFeeReason.trim() === "" ? null : zeroFeeReason.trim(),
+        });
         continue;
       }
       const parsedRow = {
@@ -4544,13 +7679,21 @@ export class OperationsService {
         customerMobileNumber: read("customerMobileNumber"),
         customerName: read("customerName"),
         packageCount,
-        serialNumber: read("serialNumber"),
-        serviceFee,
         traderId: read("traderId"),
       } as CreateOrderDto;
-      const referenceNumber = this.optionalCsvValue(read("referenceNumber"));
-      if (referenceNumber !== undefined) {
-        (parsedRow as { referenceNumber: string }).referenceNumber = referenceNumber;
+      (parsedRow as { serialNumber: string }).serialNumber = read("serialNumber");
+      // Omitted rather than sent as undefined: `insertOrder` spreads the fee in
+      // only when the key is present, and a present-but-undefined key would
+      // read as a requested fee of nothing.
+      if (serviceFee !== undefined) {
+        (parsedRow as { serviceFee: number }).serviceFee = serviceFee;
+      }
+      if (zeroFeeReason.trim() !== "") {
+        (parsedRow as { serviceFeeOverrideReason: string }).serviceFeeOverrideReason =
+          zeroFeeReason.trim();
+      }
+      if (rowReference !== null) {
+        (parsedRow as { referenceNumber: string }).referenceNumber = rowReference;
       }
       const areaId = this.optionalCsvValue(read("areaId"));
       const driverId = this.optionalCsvValue(read("driverId"));
@@ -4560,9 +7703,29 @@ export class OperationsService {
       if (driverId !== undefined) {
         (parsedRow as { driverId: string }).driverId = driverId;
       }
-      rows.push(parsedRow);
+      rows.push({ row: parsedRow, rowNumber });
     }
-    return { errors, rows, totalRows };
+    return { errors, invalid, rows, totalRows };
+  }
+
+  /**
+   * Which cell the importer should go and look at.
+   *
+   * Derived from the message we just wrote, so the two can never disagree about
+   * what went wrong. Only the first error is attributed — pointing at five
+   * fields at once helps nobody.
+   */
+  private importErrorField(message: string): string | null {
+    if (message.startsWith("Invalid COD") || message.startsWith("Negative COD")) return "codAmount";
+    if (message.startsWith("Invalid Service Fee") || message.startsWith("Negative Service Fee")) {
+      return "serviceFee";
+    }
+    if (message.startsWith("Zero Service Fee Reason")) return "serviceFeeOverrideReason";
+    if (message.startsWith("customerMobileNumber")) return "customerMobileNumber";
+    if (message.startsWith("packageCount")) return "packageCount";
+    if (message.startsWith("additionalFees")) return "additionalFees";
+    const requiredField = /^([A-Za-z]+) is required$/.exec(message);
+    return requiredField?.[1] ?? null;
   }
 
   private parseCsv(csv: string): string[][] {

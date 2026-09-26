@@ -8,7 +8,6 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
-  Query,
 } from "@nestjs/common";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 
@@ -16,6 +15,10 @@ import {
   RequireAnyPermission,
   RequireIdentityKinds,
 } from "../authentication/authentication.decorators.js";
+// Imported as values, not types: `emitDecoratorMetadata` can only record a
+// DTO class for the global ValidationPipe when the symbol survives to runtime,
+// so these query/body contracts are actually validated.
+// eslint-disable-next-line @typescript-eslint/consistent-type-imports
 import {
   AccountingConfigurationDto,
   AccountingReasonDto,
@@ -31,6 +34,10 @@ import { AccountingManagementService } from "./accounting-management.service.js"
 import { AccountingQueryService } from "./accounting-query.service.js";
 import { FiscalCalendarService } from "./fiscal-calendar.service.js";
 import { AccountingSetupService } from "./accounting-setup.service.js";
+// Imported as a value, not a type: `emitDecoratorMetadata` can only record a
+// DTO class for the global ValidationPipe when the symbol survives to runtime,
+// so this query contract is actually validated.
+// eslint-disable-next-line @typescript-eslint/consistent-type-imports
 import { AccountingActivationDto } from "./accounting-setup.dto.js";
 
 @ApiTags("accounting")
@@ -166,9 +173,7 @@ export class AccountingManagementController {
 
   @Get("fiscal-years/:fiscalYearId/dependencies")
   @RequireAnyPermission("accounting.view", "users_roles.manage")
-  public fiscalYearDependencies(
-    @Param("fiscalYearId", new ParseUUIDPipe()) fiscalYearId: string,
-  ) {
+  public fiscalYearDependencies(@Param("fiscalYearId", new ParseUUIDPipe()) fiscalYearId: string) {
     return this.calendar.yearDependencies(fiscalYearId);
   }
 

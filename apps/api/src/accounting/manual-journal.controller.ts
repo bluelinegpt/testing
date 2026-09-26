@@ -18,6 +18,10 @@ import {
   RequireAnyPermission,
   RequireIdentityKinds,
 } from "../authentication/authentication.decorators.js";
+// Imported as values, not types: `emitDecoratorMetadata` can only record a
+// DTO class for the global ValidationPipe when the symbol survives to runtime,
+// so these query/body contracts are actually validated.
+// eslint-disable-next-line @typescript-eslint/consistent-type-imports
 import {
   AccountingNoteDto,
   CancelJournalDto,
@@ -59,10 +63,7 @@ export class ManualJournalController {
 
   @Post()
   @RequireAnyPermission("accounting.manage", "users_roles.manage")
-  public create(
-    @Body() input: CreateJournalDto,
-    @Headers("x-idempotency-key") key?: string,
-  ) {
+  public create(@Body() input: CreateJournalDto, @Headers("x-idempotency-key") key?: string) {
     return this.journals.create(input, key);
   }
 

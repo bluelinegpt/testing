@@ -1,0 +1,16 @@
+import { useState, type FormEvent } from "react";
+import { apiUrl } from "./api-base";
+import "./BlogEnquiry.css";
+
+export const blogWhatsAppUrl="https://api.whatsapp.com/send/?phone=971506898604&text=Hi%2C%20I%20would%20like%20to%20contact%20Tawseelhub%20on%20WhatsApp.&type=phone_number&app_absent=0";
+export function BlogEnquiry({slug,language}:{slug:string;language:string}) {
+  const ar=language==="ar",[busy,setBusy]=useState(false),[sent,setSent]=useState(false),[error,setError]=useState("");
+  async function submit(event:FormEvent<HTMLFormElement>){event.preventDefault();if(busy)return;const data=new FormData(event.currentTarget);setBusy(true);setError("");try{
+    const response=await fetch(apiUrl(`/public/blog/articles/${encodeURIComponent(slug)}/enquiry`),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:data.get("name"),email:data.get("email"),message:data.get("message"),website:data.get("website"),consent:data.get("consent")==="on",language:ar?"ar":"en"}),signal:AbortSignal.timeout(30000)});
+    if(!response.ok)throw new Error(response.status===429?(ar?"يرجى الانتظار دقيقة قبل المحاولة مرة أخرى.":"Please wait a minute before trying again."):(ar?"تعذر إرسال رسالتك. حاول لاحقاً أو تواصل معنا عبر واتساب.":"Your message could not be sent. Try later or contact us on WhatsApp."));
+    const result=await response.json();if(result.sent!==true)throw new Error("Unable to confirm sending.");setSent(true);
+  }catch(err){setError(err instanceof Error&&err.name!=="TimeoutError"?err.message:(ar?"لم نتمكن من تأكيد الإرسال. يرجى التواصل عبر واتساب.":"We could not confirm sending. Please contact us on WhatsApp."))}finally{setBusy(false)}}
+  return <section className="blog-enquiry" dir={ar?"rtl":"ltr"}><h2>{ar?"تواصل معنا بخصوص هذا المقال":"Have a question about this article?"}</h2><p>{ar?"أرسل استفسارك بشكل خاص. لن ننشر اسمك أو بريدك أو رسالتك.":"Send us a private enquiry. Your name, email and message will not be published."}</p>
+  {sent?<p role="status">{ar?"تم إرسال رسالتك. شكراً لتواصلك معنا.":"Your message has been sent. Thank you for contacting us."}</p>:<form onSubmit={submit}><label>{ar?"رسالتك":"Your message"}<textarea name="message" required minLength={10} maxLength={5000} rows={5}/></label><div className="blog-enquiry-fields"><label>{ar?"الاسم":"Your name"}<input name="name" autoComplete="name" required minLength={2} maxLength={100}/></label><label>{ar?"البريد الإلكتروني":"Your email"}<input type="email" name="email" autoComplete="email" required maxLength={254}/></label></div><div hidden aria-hidden="true"><label>Website<input name="website" tabIndex={-1} autoComplete="off"/></label></div><label className="blog-enquiry-consent"><input type="checkbox" name="consent" required/>{ar?"أوافق على استخدام بياناتي للرد على هذا الاستفسار.":"I agree to my details being used to respond to this enquiry."}</label>{error&&<p role="alert">{error}</p>}<button disabled={busy} type="submit">{busy?(ar?"جارٍ الإرسال…":"Sending…"):(ar?"إرسال الاستفسار":"Send enquiry")}</button></form>}
+  <a className="blog-whatsapp" href={blogWhatsAppUrl} target="_blank" rel="noopener noreferrer">{ar?"تواصل معنا عبر واتساب":"Contact us on WhatsApp"}</a></section>;
+}

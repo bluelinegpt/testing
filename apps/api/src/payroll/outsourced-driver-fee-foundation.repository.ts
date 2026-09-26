@@ -51,10 +51,7 @@ export class OutsourcedDriverFeeFoundationRepository {
     return result.rows[0];
   }
 
-  public async representedByLegacyCommission(
-    companyId: string,
-    orderId: string,
-  ): Promise<boolean> {
+  public async representedByLegacyCommission(companyId: string, orderId: string): Promise<boolean> {
     const result = await sql<{ represented: boolean }>`
       select exists(
         select 1

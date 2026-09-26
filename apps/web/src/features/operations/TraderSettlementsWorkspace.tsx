@@ -1,19 +1,28 @@
-import { useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+
+import { useSessionAccess } from "../../app/SessionAccessContext.js";
+import { useListState } from "../accounting/use-list-state.js";
+import { formatDate } from "../../localization/formatters.js";
+import { normalizeLocale } from "../../localization/locale.js";
+
+import {
+  businessDateFilterDefaults,
+  BusinessDateFilterControls,
+} from "./BusinessDateFilterControls.js";
 
 import { ApiError, type ApiClient } from "../../api/api-client.js";
 import type { CompanyBankAccount, OperationsTrader, PagedResponse } from "../../api/contracts.js";
-import { CompanyBrandingContext } from "../../app/CompanyBrandingContext.js";
+import { useRouteDetail } from "../../app/use-route-detail.js";
+import { OperationalReference } from "./OperationalReference.js";
+import { AccountingRelatedPanel } from "../accounting/AccountingRelatedPanel.js";
 import { Modal } from "../../components/Modal.js";
 import { PageHeader } from "../../components/PageHeader.js";
-import {
-  formatMoneyValue,
-  parseMoneyInput,
-  safeMoneyValue,
-} from "../../utils/numeric-input.js";
+import { formatMoneyValue, parseMoneyInput, safeMoneyValue } from "../../utils/numeric-input.js";
 import { AreaSelector } from "../configuration/AreaSelector.js";
 
 import { type PdfAction, useReconciliationPdfActions } from "./reconciliation-pdf.js";
+import { useWorkflowDeepLink, type WorkflowDialog } from "./use-workflow-deep-link.js";
 import { useIdempotencyKey } from "./useIdempotencyKey.js";
 
 // ---- Server response shapes (mirror trader-settlement.service.ts). ----
@@ -31,6 +40,8 @@ interface TraderSettlementSummary {
 }
 
 interface TraderSettlementListRow {
+  /** Company Business Date from the backend, derived from the confirmation instant. */
+  readonly confirmationBusinessDate?: string | null;
   readonly confirmedBy: string;
   readonly createdBy: string;
   readonly isReversed: boolean;
@@ -56,6 +67,7 @@ interface TraderEligibleOrderRow {
   readonly codAmount: string;
   readonly customerName: string;
   readonly deliveryDate: string | null;
+  readonly orderNumber: string;
   readonly emirateName: string | null;
   readonly id: string;
   readonly originalAmountDueToTrader: string;
@@ -111,6 +123,8 @@ interface TraderSettlementDetailOrder {
   readonly customerName: string;
   readonly deliveryDate: string | null;
   readonly emirateName: string | null;
+  /** System Order Number. Required on the backend contract (line 177). */
+  readonly orderNumber: string;
   readonly orderSettlementStatus: string;
   readonly originalTraderPayable: string;
   readonly previouslyPaid: string;
@@ -208,7 +222,11 @@ interface TraderAccountStatement {
 
 // ---------------------------------------------------------------------------
 
+/** Stable module-level identity: an inline array would re-run the effect. */
+const settlementDialogs: readonly WorkflowDialog[] = ["new_settlement", "confirm_receipt"];
+
 const emptyFilters = {
+  ...businessDateFilterDefaults,
   deliveredFrom: "",
   deliveredTo: "",
   moneyReceivedStatus: "",
@@ -225,6 +243,16 @@ const emptyFilters = {
 };
 
 type Filters = typeof emptyFilters;
+
+/**
+ * Filter names this screen puts in the URL. Module-level and built once:
+ * `useListState` memoizes on this array, so a literal created during render
+ * would produce new state every render and re-fire the request effect forever.
+ */
+const filterKeys = Object.keys(emptyFilters);
+
+/** Sort keys the Trader Settlements endpoint accepts. */
+const sortKeys = new Set(["businessDate", "settlementNumber"]);
 
 function money(value: string | number | undefined): string {
   return formatMoneyValue(value);
@@ -293,51 +321,175 @@ function maskAccountNumber(value: string | undefined): string {
  */
 export function TraderSettlementsWorkspace({
   api,
+  detailId: routeDetailId,
   initialStatementOpen = false,
   permissions,
   presetTraderId,
 }: {
   api: ApiClient;
+  /** Settlement opened by the canonical route `/trader-settlements/:id`. */
+  detailId?: string | undefined;
   initialStatementOpen?: boolean;
   permissions: readonly string[];
-  presetTraderId?: string;
+  presetTraderId?: string | undefined;
 }) {
-  const { t } = useTranslation();
-  const branding = useContext(CompanyBrandingContext);
-  const reportLanguage = branding?.textLanguage === "ar" ? "ar" : "en";
+  const { i18n, t } = useTranslation();
+  const locale = normalizeLocale(i18n.language);
+  const reportLanguage = locale;
   const isAdministrator = permissions.includes("users_roles.manage");
   const canManage = isAdministrator || permissions.includes("settlements.create");
   const canReverse = isAdministrator || permissions.includes("settlements.reverse");
   const canViewReport = canManage || permissions.includes("reports.export");
 
   const [summary, setSummary] = useState<TraderSettlementSummary>();
-  const [filters, setFilters] = useState<Filters>({
-    ...emptyFilters,
-    traderId: presetTraderId ?? "",
+  // The URL is the authoritative list state. No parallel local or session copy
+  // of these fields remains to drift out of step with it.
+  const session = useSessionAccess();
+  const list = useListState({
+    companyId: session?.companyId,
+    defaultSortBy: "businessDate",
+    filterKeys,
   });
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState<25 | 50 | 100>(25);
+  const { page } = list;
+  const pageSize = list.pageSize;
+  const setPage = list.setPage;
+  // `useListState` omits empty filters and stores everything as text; the panel
+  // and `filterQuery` expect every key present and `outstandingOnly` boolean.
+  //
+  // `presetTraderId` is applied only as a fallback, never written to the URL:
+  // writing it during render would be a normalization effect that fires on every
+  // mount, and the User's own choice must still be able to clear it.
+  const filters = useMemo<Filters>(
+    () => ({
+      ...emptyFilters,
+      traderId: presetTraderId ?? "",
+      ...list.filters,
+      outstandingOnly: list.filters.outstandingOnly === "true",
+    }),
+    [list.filters, presetTraderId],
+  );
   const [listPage, setListPage] = useState<PagedResponse<TraderSettlementListRow>>();
+  /* Opened only for a request this screen owns, and only when a Trader was
+     actually supplied: a New Settlement dialog with no Trader is worse than no
+     dialog, because it looks like the context was lost rather than absent. The
+     Trader itself is re-validated by the backend on every request the dialog
+     makes, so a Trader from another Company simply returns nothing here. */
   const [listError, setListError] = useState<string>();
   const [newSettlementOpen, setNewSettlementOpen] = useState(false);
+  const [addReceivableOpen, setAddReceivableOpen] = useState(false);
+  const [collectFromTraderOpen, setCollectFromTraderOpen] = useState(false);
+  /* A smart next action from the Orders list can ask this screen to open New
+     Settlement with the Trader and the originating Order already carried in.
+     The hook reads that request ONCE and strips it from the URL, so a refresh
+     after completing the settlement cannot reopen the dialog. It performs no
+     write: everything below is prefill, and the existing dialog still owns
+     eligibility, oldest-first allocation and confirmation. */
+  const deepLink = useWorkflowDeepLink(settlementDialogs);
+  const returnToOrigin = () => {
+    if (deepLink.returnTo === null) return false;
+    session?.navigate(deepLink.returnTo);
+    return session !== undefined;
+  };
+  const [deepLinkTraderId, setDeepLinkTraderId] = useState<string>();
+  const [deepLinkOrderId, setDeepLinkOrderId] = useState<string>();
+  /* Shown when a receipt deep link cannot lawfully open the dialog: the target
+     is ambiguous, gone, already confirmed, or not visible to this Company. */
+  const [receiptNotice, setReceiptNotice] = useState<string>();
+  /* Each receipt deep link is RESOLVED exactly once. Without this, the effect
+     below re-fires on every listPage refresh (a dependency it genuinely needs
+     while waiting for the page), so confirming a DIFFERENT settlement -- which
+     refreshes the list -- re-opened the deep-linked settlement's dialog on top
+     of the work the user had just finished. */
+  const resolvedReceiptLink = useRef<object | null>(null);
   const [statementOpen, setStatementOpen] = useState(initialStatementOpen);
   const [statementTraderId, setStatementTraderId] = useState(presetTraderId);
-  const [detailId, setDetailId] = useState<string>();
+
+  // One write, not one per key: switching Date Mode changes several filters
+  // together, and separate writes would each start from stale state. The hook
+  // resets the page to 1 itself. Declared before the receipt deep-link effect
+  // below, which narrows the list when the target is ambiguous.
+  const applyFilter = (change: Partial<Filters>) => {
+    const patch: Record<string, string> = {};
+    for (const [key, value] of Object.entries(change)) {
+      patch[key] = typeof value === "boolean" ? (value ? "true" : "") : (value ?? "");
+    }
+    list.setFilters(patch);
+  };
+
+  useEffect(() => {
+    const link = deepLink.link;
+    if (link === null || link.dialog !== "confirm_receipt") return;
+    // Already resolved (dialog opened or notice shown): a list refresh must
+    // not replay the instruction.
+    if (resolvedReceiptLink.current === link) return;
+
+    /* Ambiguous: the backend found more than one confirmable settlement and
+       deliberately emitted no id. Guessing one would confirm receipt of a
+       payment the user never chose. Instead the list is narrowed to the
+       settlements still awaiting receipt (the Trader filter is already
+       applied from the URL), so the rows on screen ARE the choices and each
+       carries its own Confirm Money Received button. */
+    if (link.settlementId === null) {
+      resolvedReceiptLink.current = link;
+      applyFilter({ moneyReceivedStatus: "not_received" });
+      setReceiptNotice(t("traderSettlements.receiptAmbiguous"));
+      return;
+    }
+    if (!canManage) {
+      resolvedReceiptLink.current = link;
+      setReceiptNotice(t("traderSettlements.receiptNoPermission"));
+      return;
+    }
+    // Wait for the page; the row is the resolution, not the URL. NOT marked
+    // resolved: the effect must run again when the page arrives.
+    if (listPage === undefined) return;
+    resolvedReceiptLink.current = link;
+
+    /* Resolved through the Company-scoped list API. A settlement belonging to
+       another Company is simply not in these rows, so it can never be opened
+       and its existence is never revealed. */
+    const target = listPage.items.find((row) => row.settlementId === link.settlementId);
+    if (target === undefined) {
+      setReceiptNotice(t("traderSettlements.receiptUnavailable"));
+      return;
+    }
+    if (target.moneyReceivedConfirmed) {
+      // A stale link for work already done.
+      setReceiptNotice(t("traderSettlements.receiptAlreadyConfirmed"));
+      return;
+    }
+    setReceiptNotice(undefined);
+    // Opens the EXISTING dialog. Nothing is written by opening it.
+    setReceiptTarget(target);
+  }, [canManage, deepLink, listPage, t]);
+
+  useEffect(() => {
+    const link = deepLink.link;
+    if (link === null || link.dialog !== "new_settlement") return;
+    if (link.traderId === null) return;
+    // Frontend gating only hides a control the backend would refuse anyway.
+    if (!canManage) return;
+    setDeepLinkTraderId(link.traderId);
+    if (link.orderId !== null) setDeepLinkOrderId(link.orderId);
+    /* The originating Order is NOT passed on: `NewSettlementDialog` has no
+       prop for preselecting one, and inventing a contract for it belongs to
+       the dialog, not to this deep link. The Trader is preselected and the
+       dialog lists that Trader's eligible Orders under the existing
+       oldest-first rules. */
+    setNewSettlementOpen(true);
+  }, [canManage, deepLink]);
+  const {
+    close: closeDetail,
+    detailId,
+    open: openDetail,
+  } = useRouteDetail("trader_settlement", routeDetailId);
   const [receiptTarget, setReceiptTarget] = useState<TraderSettlementListRow>();
   const [reverseTarget, setReverseTarget] = useState<TraderSettlementListRow>();
   const pdf = useReconciliationPdfActions(api);
   const [pdfError, setPdfError] = useState<string>();
   const [pdfBusyId, setPdfBusyId] = useState<string>();
 
-  const applyFilter = (change: Partial<Filters>) => {
-    setPage(1);
-    setFilters((current) => ({ ...current, ...change }));
-  };
-  const clearFilters = () => {
-    setPage(1);
-    setPageSize(25);
-    setFilters(emptyFilters);
-  };
+  const clearFilters = () => list.clearFilters();
 
   const refresh = useCallback(() => {
     if (!canManage) return;
@@ -351,13 +503,19 @@ export function TraderSettlementsWorkspace({
     const params = filterQuery(filters);
     params.set("page", String(page));
     params.set("pageSize", String(pageSize));
+    // Allowlisted before it leaves the browser, so a hand-edited URL cannot
+    // send the API a sort key it does not support.
+    if (sortKeys.has(list.sortBy) && list.sortBy !== "businessDate") {
+      params.set("sortBy", list.sortBy);
+      params.set("sortDirection", list.sortDirection);
+    }
     void api
       .get<PagedResponse<TraderSettlementListRow>>(
         `operations/settlements/payments/list?${params.toString()}`,
       )
       .then(setListPage)
       .catch(() => setListError(t("traderSettlements.detailLoadFailed")));
-  }, [api, canManage, filters, page, pageSize, t]);
+  }, [api, canManage, filters, list.sortBy, list.sortDirection, page, pageSize, t]);
 
   useEffect(() => refresh(), [refresh]);
 
@@ -424,6 +582,20 @@ export function TraderSettlementsWorkspace({
             </button>
             <button
               className="button button-secondary"
+              onClick={() => setAddReceivableOpen(true)}
+              type="button"
+            >
+              {t("traderSettlements.addReceivable", "Add Charge to Trader")}
+            </button>
+            <button
+              className="button button-secondary"
+              onClick={() => setCollectFromTraderOpen(true)}
+              type="button"
+            >
+              {t("traderSettlements.collectFromTrader", "Collect from Trader")}
+            </button>
+            <button
+              className="button button-secondary"
               onClick={() => setStatementOpen(true)}
               type="button"
             >
@@ -449,125 +621,161 @@ export function TraderSettlementsWorkspace({
           {pdfError}
         </div>
       )}
+      {/* First thing on the page when a receipt deep link could not open a
+          dialog: the user just clicked "Confirm receipt" on an Order and must
+          immediately see why nothing opened and what to do instead. */}
+      {receiptNotice === undefined ? null : (
+        <div className="alert alert-info" role="status">
+          {receiptNotice}
+        </div>
+      )}
 
       {summary === undefined ? null : <SummaryCards summary={summary} />}
 
       <FilterBar api={api} filters={filters} onChange={applyFilter} onClear={clearFilters} />
+      {/* Date Mode sits beside the list rather than inside the filter bar:
+          the summary it renders describes the response, so it belongs where
+          the response is. All three screens share this one component. */}
+      <BusinessDateFilterControls
+        applied={listPage?.appliedDateMode}
+        businessDateFrom={filters.businessDateFrom}
+        businessDateTo={filters.businessDateTo}
+        dateMode={filters.dateMode}
+        onChange={(patch) => applyFilter(patch)}
+      />
 
       <section aria-labelledby="trader-settlements-list-heading">
         <h2 id="trader-settlements-list-heading">{t("traderSettlements.pageTitle")}</h2>
         <div className="table-scroll-x">
-        <table>
-          <thead>
-            <tr>
-              <th scope="col">{t("traderSettlements.columnSettlementNumber")}</th>
-              <th scope="col">{t("traderSettlements.columnTrader")}</th>
-              <th scope="col">{t("traderSettlements.columnPaymentDate")}</th>
-              <th scope="col">{t("traderSettlements.columnPaymentMethod")}</th>
-              <th scope="col">{t("traderSettlements.columnPaymentReference")}</th>
-              <th scope="col">{t("traderSettlements.columnOrders")}</th>
-              <th scope="col">{t("traderSettlements.columnPaymentAmount")}</th>
-              <th scope="col">{t("traderSettlements.columnRemainingOutstanding")}</th>
-              <th scope="col">{t("traderSettlements.columnMoneySent")}</th>
-              <th scope="col">{t("traderSettlements.columnMoneyReceived")}</th>
-              <th scope="col">{t("traderSettlements.columnStatus")}</th>
-              <th scope="col">
-                <span className="sr-only">{t("common.actions")}</span>
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => (
-              <tr key={row.settlementId}>
-                <td className="mono">
-                  <button className="link-button" onClick={() => setDetailId(row.settlementId)} type="button">
-                    {row.settlementNumber}
-                  </button>
-                </td>
-                <td>{row.traderName}</td>
-                <td>{row.paymentDate}</td>
-                <td>
-                  {t(
-                    row.paymentMethod === "cash"
-                      ? "traderSettlements.paymentMethodCash"
-                      : "traderSettlements.paymentMethodBankTransfer",
-                  )}
-                </td>
-                <td className="mono">{row.paymentReference ?? "-"}</td>
-                <td>{row.orderCount}</td>
-                <td>{money(row.paymentAmount)}</td>
-                <td>{money(row.remainingOutstanding)}</td>
-                <td>{row.moneySentAt === null ? "-" : row.moneySentAt.slice(0, 10)}</td>
-                <td>
-                  {row.moneyReceivedAt === null
-                    ? row.moneyReceivedConfirmed
-                      ? t("common.yes")
-                      : "-"
-                    : row.moneyReceivedAt.slice(0, 10)}
-                </td>
-                <td>
-                  {t(row.status === "reversed" ? "traderSettlements.statusReversed" : "traderSettlements.statusConfirmed")}
-                  {row.isReversed && row.status !== "reversed" ? (
-                    <span className="badge badge-warning">{t("traderSettlements.reversedIndicator")}</span>
-                  ) : null}
-                </td>
-                <td className="row-actions">
-                  <button onClick={() => setDetailId(row.settlementId)} type="button">
-                    {t("traderSettlements.actionView")}
-                  </button>
-                  {!canViewReport ? null : (
-                    <>
-                      <button
-                        disabled={pdfBusyId === row.settlementId}
-                        onClick={() => void openRowPdf(row, "preview")}
-                        type="button"
-                      >
-                        {pdfBusyId === row.settlementId && pdf.busy === "preview"
-                          ? t("common.loading")
-                          : t("traderSettlements.actionPreviewStatement")}
-                      </button>
-                      <button
-                        disabled={pdfBusyId === row.settlementId}
-                        onClick={() => void openRowPdf(row, "print")}
-                        type="button"
-                      >
-                        {pdfBusyId === row.settlementId && pdf.busy === "print"
-                          ? t("common.loading")
-                          : t("traderSettlements.actionPrint")}
-                      </button>
-                      <button
-                        disabled={pdfBusyId === row.settlementId}
-                        onClick={() => void openRowPdf(row, "download")}
-                        type="button"
-                      >
-                        {pdfBusyId === row.settlementId && pdf.busy === "download"
-                          ? t("common.loading")
-                          : t("traderSettlements.actionDownloadPdf")}
-                      </button>
-                    </>
-                  )}
-                  {row.status === "reversed" || row.moneyReceivedConfirmed ? null : (
-                    <button onClick={() => setReceiptTarget(row)} type="button">
-                      {t("traderSettlements.actionConfirmMoneyReceived")}
-                    </button>
-                  )}
-                  {!canReverse || row.status === "reversed" || row.moneyReceivedConfirmed ? null : (
-                    <button onClick={() => setReverseTarget(row)} type="button">
-                      {t("traderSettlements.actionReverse")}
-                    </button>
-                  )}
-                </td>
-              </tr>
-            ))}
-            {rows.length === 0 ? (
+          <table>
+            <thead>
               <tr>
-                <td className="empty-state" colSpan={12}>
-                  {t("traderSettlements.noSettlements")}
-                </td>
+                <th scope="col">{t("traderSettlements.columnSettlementNumber")}</th>
+                <th scope="col">{t("traderSettlements.columnTrader")}</th>
+                <th scope="col">{t("traderSettlements.columnPaymentDate")}</th>
+                <th scope="col">{t("configuration.businessDay.businessDate")}</th>
+                <th scope="col">{t("traderSettlements.columnPaymentMethod")}</th>
+                <th scope="col">{t("traderSettlements.columnPaymentReference")}</th>
+                <th scope="col">{t("traderSettlements.columnOrders")}</th>
+                <th scope="col">{t("traderSettlements.columnPaymentAmount")}</th>
+                <th scope="col">{t("traderSettlements.columnRemainingOutstanding")}</th>
+                <th scope="col">{t("traderSettlements.columnMoneySent")}</th>
+                <th scope="col">{t("traderSettlements.columnMoneyReceived")}</th>
+                <th scope="col">{t("traderSettlements.columnStatus")}</th>
+                <th scope="col">
+                  <span className="sr-only">{t("common.actions")}</span>
+                </th>
               </tr>
-            ) : null}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {rows.map((row) => (
+                <tr key={row.settlementId}>
+                  <td className="mono">
+                    <button
+                      className="link-button"
+                      onClick={() => openDetail(row.settlementId)}
+                      type="button"
+                    >
+                      {row.settlementNumber}
+                    </button>
+                  </td>
+                  <td>{row.traderName}</td>
+                  <td>{row.paymentDate}</td>
+                  <td dir="ltr">
+                    {row.confirmationBusinessDate == null
+                      ? t("configuration.businessDay.historicalTimestampUnavailable")
+                      : formatDate(row.confirmationBusinessDate, locale)}
+                  </td>
+                  <td>
+                    {t(
+                      row.paymentMethod === "cash"
+                        ? "traderSettlements.paymentMethodCash"
+                        : "traderSettlements.paymentMethodBankTransfer",
+                    )}
+                  </td>
+                  <td className="mono">{row.paymentReference ?? "-"}</td>
+                  <td>{row.orderCount}</td>
+                  <td>{money(row.paymentAmount)}</td>
+                  <td>{money(row.remainingOutstanding)}</td>
+                  <td>{row.moneySentAt === null ? "-" : row.moneySentAt.slice(0, 10)}</td>
+                  <td>
+                    {row.moneyReceivedAt === null
+                      ? row.moneyReceivedConfirmed
+                        ? t("common.yes")
+                        : "-"
+                      : row.moneyReceivedAt.slice(0, 10)}
+                  </td>
+                  <td>
+                    {t(
+                      row.status === "reversed"
+                        ? "traderSettlements.statusReversed"
+                        : "traderSettlements.statusConfirmed",
+                    )}
+                    {row.isReversed && row.status !== "reversed" ? (
+                      <span className="badge badge-warning">
+                        {t("traderSettlements.reversedIndicator")}
+                      </span>
+                    ) : null}
+                  </td>
+                  <td className="row-actions">
+                    <button onClick={() => openDetail(row.settlementId)} type="button">
+                      {t("traderSettlements.actionView")}
+                    </button>
+                    {!canViewReport ? null : (
+                      <>
+                        <button
+                          disabled={pdfBusyId === row.settlementId}
+                          onClick={() => void openRowPdf(row, "preview")}
+                          type="button"
+                        >
+                          {pdfBusyId === row.settlementId && pdf.busy === "preview"
+                            ? t("common.loading")
+                            : t("traderSettlements.actionPreviewStatement")}
+                        </button>
+                        <button
+                          disabled={pdfBusyId === row.settlementId}
+                          onClick={() => void openRowPdf(row, "print")}
+                          type="button"
+                        >
+                          {pdfBusyId === row.settlementId && pdf.busy === "print"
+                            ? t("common.loading")
+                            : t("traderSettlements.actionPrint")}
+                        </button>
+                        <button
+                          disabled={pdfBusyId === row.settlementId}
+                          onClick={() => void openRowPdf(row, "download")}
+                          type="button"
+                        >
+                          {pdfBusyId === row.settlementId && pdf.busy === "download"
+                            ? t("common.loading")
+                            : t("traderSettlements.actionDownloadPdf")}
+                        </button>
+                      </>
+                    )}
+                    {row.status === "reversed" || row.moneyReceivedConfirmed ? null : (
+                      <button onClick={() => setReceiptTarget(row)} type="button">
+                        {t("traderSettlements.actionConfirmMoneyReceived")}
+                      </button>
+                    )}
+                    {!canReverse ||
+                    row.status === "reversed" ||
+                    row.moneyReceivedConfirmed ? null : (
+                      <button onClick={() => setReverseTarget(row)} type="button">
+                        {t("traderSettlements.actionReverse")}
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+              {rows.length === 0 ? (
+                <tr>
+                  <td className="empty-state" colSpan={12}>
+                    {t("traderSettlements.noSettlements")}
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
         </div>
         <nav aria-label={t("common.pagination")} className="pagination">
           <button disabled={page <= 1} onClick={() => setPage(page - 1)} type="button">
@@ -583,12 +791,23 @@ export function TraderSettlementsWorkspace({
       {!newSettlementOpen ? null : (
         <NewSettlementDialog
           api={api}
-          {...(presetTraderId === undefined ? {} : { initialTraderId: presetTraderId })}
-          onClose={() => setNewSettlementOpen(false)}
+          {...((deepLinkTraderId ?? presetTraderId) === undefined
+            ? {}
+            : { initialTraderId: deepLinkTraderId ?? presetTraderId })}
+          {...(deepLinkOrderId === undefined ? {} : { initialOrderId: deepLinkOrderId })}
+          onOriginatingOrderIneligible={() =>
+            setReceiptNotice(t("traderSettlements.originatingOrderIneligible"))
+          }
+
+          onClose={() => {
+            setNewSettlementOpen(false);
+            returnToOrigin();
+          }}
           onCreated={(settlementId) => {
             setNewSettlementOpen(false);
+            if (returnToOrigin()) return;
             refresh();
-            setDetailId(settlementId);
+            openDetail(settlementId);
           }}
           onOpenAccountStatement={(traderId) => {
             setNewSettlementOpen(false);
@@ -613,14 +832,14 @@ export function TraderSettlementsWorkspace({
           api={api}
           canReverse={canReverse}
           canViewReport={canViewReport}
-          onClose={() => setDetailId(undefined)}
+          onClose={() => closeDetail()}
           onOpenAccountStatement={(traderId) => {
-            setDetailId(undefined);
+            closeDetail();
             setStatementTraderId(traderId);
             setStatementOpen(true);
           }}
           onReversed={() => {
-            setDetailId(undefined);
+            closeDetail();
             refresh();
           }}
           reportLanguage={reportLanguage}
@@ -631,8 +850,15 @@ export function TraderSettlementsWorkspace({
       {receiptTarget === undefined ? null : (
         <MoneyReceivedDialog
           api={api}
-          onClose={() => setReceiptTarget(undefined)}
-          onConfirmed={refresh}
+          onClose={() => {
+            setReceiptTarget(undefined);
+            returnToOrigin();
+          }}
+          onConfirmed={() => {
+            // Keep the success acknowledgement visible. Its Close action then
+            // returns to Order Search through the originating deep link.
+            refresh();
+          }}
           settlement={receiptTarget}
         />
       )}
@@ -643,6 +869,28 @@ export function TraderSettlementsWorkspace({
           onClose={() => setReverseTarget(undefined)}
           onReversed={refresh}
           settlement={reverseTarget}
+        />
+      )}
+
+      {!addReceivableOpen ? null : (
+        <AddReceivableDialog
+          api={api}
+          onClose={() => setAddReceivableOpen(false)}
+          onCreated={() => {
+            setAddReceivableOpen(false);
+            refresh();
+          }}
+        />
+      )}
+
+      {!collectFromTraderOpen ? null : (
+        <CollectFromTraderDialog
+          api={api}
+          onClose={() => setCollectFromTraderOpen(false)}
+          onCollected={() => {
+            setCollectFromTraderOpen(false);
+            refresh();
+          }}
         />
       )}
     </>
@@ -656,7 +904,7 @@ function TraderAccountStatementDialog({
   reportLanguage,
 }: {
   api: ApiClient;
-  initialTraderId?: string;
+  initialTraderId?: string | undefined;
   onClose: () => void;
   reportLanguage: "ar" | "en";
 }) {
@@ -688,7 +936,11 @@ function TraderAccountStatementDialog({
   }, [api]);
 
   const params = () => {
-    const query = new URLSearchParams({ language: reportLanguage, settlementStatus, transactionType });
+    const query = new URLSearchParams({
+      language: reportLanguage,
+      settlementStatus,
+      transactionType,
+    });
     if (periodType === "month") query.set("month", month);
     else {
       query.set("from", from);
@@ -721,6 +973,22 @@ function TraderAccountStatementDialog({
       setLoading(false);
     }
   };
+  /* Re-generate when a row filter changes, once a statement is on screen.
+     Paid only / Outstanding only / Reversed only, and the two dropdowns beside
+     them, are applied by the SERVER -- so toggling one changed nothing until
+     Generate Statement was pressed again. The controls looked live and were not,
+     which reads as a broken filter rather than a pending one.
+     Only after a first Generate: before that there is nothing to refresh, and
+     the Trader and period are chosen deliberately, not reactively. */
+  const statementLoaded = statement !== undefined;
+  useEffect(() => {
+    if (!statementLoaded) return;
+    void load();
+    // `load` is redefined every render; depending on it would loop. The filters
+    // below are the real trigger.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [outstandingOnly, paidOnly, reversedOnly, settlementStatus, statementLoaded, transactionType]);
+
   const runPdf = async (action: PdfAction) => {
     if (
       traderId === "" ||
@@ -754,27 +1022,45 @@ function TraderAccountStatementDialog({
           <select onChange={(event) => setTraderId(event.target.value)} value={traderId}>
             <option value="">{t("traderSettlements.selectTrader")}</option>
             {traders.map((trader) => (
-              <option key={trader.id} value={trader.id}>{trader.name}</option>
+              <option key={trader.id} value={trader.id}>
+                {trader.name}
+              </option>
             ))}
           </select>
         </label>
         <label className="field">
           <span>{t("traderSettlements.statementPeriodType")}</span>
-          <select onChange={(event) => setPeriodType(event.target.value as "custom" | "month")} value={periodType}>
+          <select
+            onChange={(event) => setPeriodType(event.target.value as "custom" | "month")}
+            value={periodType}
+          >
             <option value="month">{t("traderSettlements.statementFullMonth")}</option>
             <option value="custom">{t("traderSettlements.statementCustomRange")}</option>
           </select>
         </label>
-        {periodType === "month" ? <label className="field">
-          <span>{t("traderSettlements.statementMonth")}</span>
-          <input onChange={(event) => setMonth(event.target.value)} type="month" value={month} />
-        </label> : <>
-          <label className="field"><span>{t("traderSettlements.filterPaymentDateFrom")}</span><input onChange={(event) => setFrom(event.target.value)} type="date" value={from} /></label>
-          <label className="field"><span>{t("traderSettlements.filterPaymentDateTo")}</span><input onChange={(event) => setTo(event.target.value)} type="date" value={to} /></label>
-        </>}
+        {periodType === "month" ? (
+          <label className="field">
+            <span>{t("traderSettlements.statementMonth")}</span>
+            <input onChange={(event) => setMonth(event.target.value)} type="month" value={month} />
+          </label>
+        ) : (
+          <>
+            <label className="field">
+              <span>{t("traderSettlements.filterPaymentDateFrom")}</span>
+              <input onChange={(event) => setFrom(event.target.value)} type="date" value={from} />
+            </label>
+            <label className="field">
+              <span>{t("traderSettlements.filterPaymentDateTo")}</span>
+              <input onChange={(event) => setTo(event.target.value)} type="date" value={to} />
+            </label>
+          </>
+        )}
         <label className="field">
           <span>{t("traderSettlements.statementTransactionType")}</span>
-          <select onChange={(event) => setTransactionType(event.target.value)} value={transactionType}>
+          <select
+            onChange={(event) => setTransactionType(event.target.value)}
+            value={transactionType}
+          >
             <option value="all">{t("common.all")}</option>
             <option value="order">{t("traderSettlements.statementOrders")}</option>
             <option value="payment">{t("traderSettlements.statementPayments")}</option>
@@ -783,61 +1069,154 @@ function TraderAccountStatementDialog({
         </label>
         <label className="field">
           <span>{t("traderSettlements.filterSettlementStatus")}</span>
-          <select onChange={(event) => setSettlementStatus(event.target.value)} value={settlementStatus}>
+          <select
+            onChange={(event) => setSettlementStatus(event.target.value)}
+            value={settlementStatus}
+          >
             <option value="all">{t("common.all")}</option>
             <option value="confirmed">{t("traderSettlements.statusConfirmed")}</option>
             <option value="reversed">{t("traderSettlements.statusReversed")}</option>
           </select>
         </label>
-        <label className="checkbox-field"><input checked={paidOnly} onChange={(event) => setPaidOnly(event.target.checked)} type="checkbox" /><span>{t("traderSettlements.statementPaidOnly")}</span></label>
-        <label className="checkbox-field"><input checked={outstandingOnly} onChange={(event) => setOutstandingOnly(event.target.checked)} type="checkbox" /><span>{t("traderSettlements.filterOutstandingOnly")}</span></label>
-        <label className="checkbox-field"><input checked={reversedOnly} onChange={(event) => setReversedOnly(event.target.checked)} type="checkbox" /><span>{t("traderSettlements.statementReversedOnly")}</span></label>
+        <label className="checkbox-field">
+          <input
+            checked={paidOnly}
+            onChange={(event) => setPaidOnly(event.target.checked)}
+            type="checkbox"
+          />
+          <span>{t("traderSettlements.statementPaidOnly")}</span>
+        </label>
+        <label className="checkbox-field">
+          <input
+            checked={outstandingOnly}
+            onChange={(event) => setOutstandingOnly(event.target.checked)}
+            type="checkbox"
+          />
+          <span>{t("traderSettlements.filterOutstandingOnly")}</span>
+        </label>
+        <label className="checkbox-field">
+          <input
+            checked={reversedOnly}
+            onChange={(event) => setReversedOnly(event.target.checked)}
+            type="checkbox"
+          />
+          <span>{t("traderSettlements.statementReversedOnly")}</span>
+        </label>
       </div>
       <div className="modal-actions">
         <button disabled={loading} onClick={() => void load()} type="button">
           {loading ? t("common.loading") : t("traderSettlements.generateStatement")}
         </button>
-        <button onClick={() => {
-          setTraderId(initialTraderId ?? ""); setPeriodType("month"); setFrom(""); setTo("");
-          setTransactionType("all"); setSettlementStatus("all"); setPaidOnly(false);
-          setOutstandingOnly(false); setReversedOnly(false); setStatement(undefined); setError(undefined);
-        }} type="button">{t("traderSettlements.clearFilters")}</button>
-        <button disabled={pdf.busy !== undefined} onClick={() => void runPdf("preview")} type="button">
+        <button
+          onClick={() => {
+            setTraderId(initialTraderId ?? "");
+            setPeriodType("month");
+            setFrom("");
+            setTo("");
+            setTransactionType("all");
+            setSettlementStatus("all");
+            setPaidOnly(false);
+            setOutstandingOnly(false);
+            setReversedOnly(false);
+            setStatement(undefined);
+            setError(undefined);
+          }}
+          type="button"
+        >
+          {t("traderSettlements.clearFilters")}
+        </button>
+        <button
+          disabled={pdf.busy !== undefined}
+          onClick={() => void runPdf("preview")}
+          type="button"
+        >
           {t("traderSettlements.actionPreviewStatement")}
         </button>
-        <button disabled={pdf.busy !== undefined} onClick={() => void runPdf("print")} type="button">
+        <button
+          disabled={pdf.busy !== undefined}
+          onClick={() => void runPdf("print")}
+          type="button"
+        >
           {t("traderSettlements.actionPrint")}
         </button>
-        <button disabled={pdf.busy !== undefined} onClick={() => void runPdf("download")} type="button">
+        <button
+          disabled={pdf.busy !== undefined}
+          onClick={() => void runPdf("download")}
+          type="button"
+        >
           {t("traderSettlements.actionDownloadPdf")}
         </button>
       </div>
       {statement === undefined ? null : (
         <>
           <div className="summary-primary">
-            <article className="kpi-card"><span>{t("traderSettlements.statementOpeningBalance")}</span><strong>{money(statement.summary.openingBalance)}</strong></article>
-            <article className="kpi-card"><span>{t("traderSettlements.statementTotalPayable")}</span><strong>{money(statement.summary.totalPayable)}</strong></article>
-            <article className="kpi-card"><span>{t("traderSettlements.statementNetPayments")}</span><strong>{money(statement.summary.netPayments)}</strong></article>
-            <article className="kpi-card"><span>{t("traderSettlements.statementClosingBalance")}</span><strong>{money(statement.summary.closingBalance)}</strong></article>
-            <article className="kpi-card"><span>{t("traderSettlements.statementCodCollected")}</span><strong>{money(statement.summary.codCollected)}</strong></article>
-            <article className="kpi-card"><span>{t("traderSettlements.statementServiceFees")}</span><strong>{money(statement.summary.serviceFeesDeducted)}</strong></article>
-            <article className="kpi-card"><span>{t("traderSettlements.statementOutstanding")}</span><strong>{money(statement.summary.outstandingAmount)}</strong></article>
-            <article className="kpi-card"><span>{t("traderSettlements.statementDeliveredOrders")}</span><strong>{statement.summary.deliveredOrderCount}</strong></article>
+            <article className="kpi-card">
+              <span>{t("traderSettlements.statementOutstanding")}</span>
+              <strong>{money(statement.summary.outstandingAmount)}</strong>
+              <small>{t("traderSettlements.statementOutstandingHint")}</small>
+            </article>
+            <article className="kpi-card">
+              <span>{t("traderSettlements.statementPaidToTrader")}</span>
+              <strong>{money(statement.summary.netPayments)}</strong>
+              <small>{t("traderSettlements.statementPaidToTraderHint")}</small>
+            </article>
+            <article className="kpi-card">
+              <span>{t("traderSettlements.statementTotalPayable")}</span>
+              <strong>{money(statement.summary.totalPayable)}</strong>
+              <small>{t("traderSettlements.statementTotalPayableHint")}</small>
+            </article>
+            <article className="kpi-card">
+              <span>{t("traderSettlements.statementOpeningBalance")}</span>
+              <strong>{money(statement.summary.openingBalance)}</strong>
+            </article>
+            <article className="kpi-card">
+              <span>{t("traderSettlements.statementCodCollected")}</span>
+              <strong>{money(statement.summary.codCollected)}</strong>
+              <small>{t("traderSettlements.statementCodHint")}</small>
+            </article>
+            <article className="kpi-card">
+              <span>{t("traderSettlements.statementServiceFees")}</span>
+              <strong>{money(statement.summary.serviceFeesDeducted)}</strong>
+              <small>{t("traderSettlements.statementServiceFeesHint")}</small>
+            </article>
+            <article className="kpi-card">
+              <span>{t("traderSettlements.statementDeliveredOrders")}</span>
+              <strong>{statement.summary.deliveredOrderCount}</strong>
+            </article>
           </div>
-          {statement.warnings.map((warning) => <div className="alert alert-warning" key={warning}>{warning}</div>)}
-          <div className="table-scroll-x"><table>
-            <thead><tr>
-              <th>#</th><th>{t("common.date")}</th><th>{t("common.reference")}</th>
-              <th>{t("traderSettlements.statementDescription")}</th>
-              <th>{t("traderSettlements.statementDebit")}</th>
-              <th>{t("traderSettlements.statementCredit")}</th>
-              <th>{t("traderSettlements.statementBalance")}</th>
-            </tr></thead>
-            <tbody>{statement.transactions.map((line) => <tr key={`${line.type}-${line.id}`}>
-              <td>{line.lineNumber}</td><td>{line.date}</td><td className="mono">{line.reference}</td><td>{line.description}</td>
-              <td>{money(line.debit)}</td><td>{money(line.credit)}</td><td>{money(line.runningBalance)}</td>
-            </tr>)}</tbody>
-          </table></div>
+          {statement.warnings.map((warning) => (
+            <div className="alert alert-warning" key={warning}>
+              {warning}
+            </div>
+          ))}
+          <div className="table-scroll-x">
+            <table>
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>{t("common.date")}</th>
+                  <th>{t("common.reference")}</th>
+                  <th>{t("traderSettlements.statementDescription")}</th>
+                  <th>{t("traderSettlements.statementDebit")}</th>
+                  <th>{t("traderSettlements.statementCredit")}</th>
+                  <th>{t("traderSettlements.statementBalance")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {statement.transactions.map((line) => (
+                  <tr key={`${line.type}-${line.id}`}>
+                    <td>{line.lineNumber}</td>
+                    <td>{line.date}</td>
+                    <td className="mono">{line.reference}</td>
+                    <td>{line.description}</td>
+                    <td>{money(line.debit)}</td>
+                    <td>{money(line.credit)}</td>
+                    <td>{money(line.runningBalance)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </>
       )}
     </Modal>
@@ -847,12 +1226,24 @@ function TraderAccountStatementDialog({
 function SummaryCards({ summary }: { summary: TraderSettlementSummary }) {
   const { t } = useTranslation();
   const primaryCards: readonly { label: string; value: string }[] = [
-    { label: t("traderSettlements.summaryEligiblePayable"), value: money(summary.eligibleTraderPayable) },
+    {
+      label: t("traderSettlements.summaryEligiblePayable"),
+      value: money(summary.eligibleTraderPayable),
+    },
     { label: t("traderSettlements.summaryUnsettled"), value: money(summary.unsettledAmount) },
-    { label: t("traderSettlements.summaryPartiallySettled"), value: money(summary.partiallySettledAmount) },
+    {
+      label: t("traderSettlements.summaryPartiallySettled"),
+      value: money(summary.partiallySettledAmount),
+    },
     { label: t("traderSettlements.summaryMoneySent"), value: money(summary.moneySentAmount) },
-    { label: t("traderSettlements.summaryMoneyReceived"), value: money(summary.moneyReceivedAmount) },
-    { label: t("traderSettlements.summaryRemainingOutstanding"), value: money(summary.remainingOutstanding) },
+    {
+      label: t("traderSettlements.summaryMoneyReceived"),
+      value: money(summary.moneyReceivedAmount),
+    },
+    {
+      label: t("traderSettlements.summaryRemainingOutstanding"),
+      value: money(summary.remainingOutstanding),
+    },
   ];
   const secondaryCards: readonly { label: string; value: string }[] = [
     { label: t("traderSettlements.summaryEligibleOrders"), value: String(summary.eligibleOrders) },
@@ -860,7 +1251,10 @@ function SummaryCards({ summary }: { summary: TraderSettlementSummary }) {
       label: t("traderSettlements.summaryTradersOutstanding"),
       value: String(summary.tradersWithOutstandingBalance),
     },
-    { label: t("traderSettlements.summaryReversedPayments"), value: String(summary.reversedPayments) },
+    {
+      label: t("traderSettlements.summaryReversedPayments"),
+      value: String(summary.reversedPayments),
+    },
   ];
   return (
     <>
@@ -909,7 +1303,10 @@ function FilterBar({
       <div className="compact-filters">
         <label className="field">
           <span>{t("traderSettlements.filterTrader")}</span>
-          <select onChange={(event) => onChange({ traderId: event.target.value })} value={filters.traderId}>
+          <select
+            onChange={(event) => onChange({ traderId: event.target.value })}
+            value={filters.traderId}
+          >
             <option value="">{t("common.all")}</option>
             {traders.map((trader) => (
               <option key={trader.id} value={trader.id}>
@@ -934,7 +1331,9 @@ function FilterBar({
           >
             <option value="">{t("common.all")}</option>
             <option value="cash">{t("traderSettlements.paymentMethodCash")}</option>
-            <option value="bank_transfer">{t("traderSettlements.paymentMethodBankTransfer")}</option>
+            <option value="bank_transfer">
+              {t("traderSettlements.paymentMethodBankTransfer")}
+            </option>
           </select>
         </label>
         <label className="field">
@@ -1022,7 +1421,9 @@ function FilterBar({
             >
               <option value="">{t("traderSettlements.moneyReceivedAll")}</option>
               <option value="received">{t("traderSettlements.moneyReceivedReceived")}</option>
-              <option value="not_received">{t("traderSettlements.moneyReceivedNotReceived")}</option>
+              <option value="not_received">
+                {t("traderSettlements.moneyReceivedNotReceived")}
+              </option>
             </select>
           </label>
           <label className="field field-checkbox">
@@ -1048,13 +1449,19 @@ function FilterBar({
 function NewSettlementDialog({
   api,
   initialTraderId,
+  initialOrderId,
+  onOriginatingOrderIneligible,
   onClose,
   onCreated,
   onOpenAccountStatement,
   reportLanguage,
 }: {
   api: ApiClient;
-  initialTraderId?: string;
+  /** Originating Order from a smart next action, selected once it loads. */
+  initialOrderId?: string | undefined;
+  initialTraderId?: string | undefined;
+  /** Called when the originating Order is not among the eligible Orders. */
+  onOriginatingOrderIneligible?: (() => void) | undefined;
   onClose: () => void;
   onCreated: (settlementId: string) => void;
   onOpenAccountStatement: (traderId: string) => void;
@@ -1068,9 +1475,11 @@ function NewSettlementDialog({
   const [trader, setTrader] = useState<OperationsTrader>();
 
   // Step 2 — Eligible Orders (loaded once a Trader is selected).
-  const [eligibleOrdersPage, setEligibleOrdersPage] = useState<PagedResponse<TraderEligibleOrderRow>>();
+  const [eligibleOrdersPage, setEligibleOrdersPage] =
+    useState<PagedResponse<TraderEligibleOrderRow>>();
   const [ordersError, setOrdersError] = useState<string>();
   const [orderFilters, setOrderFilters] = useState<EligibleOrderFilters>(emptyEligibleOrderFilters);
+  const [eligibleFiltersOpen, setEligibleFiltersOpen] = useState(() => initialOrderId === undefined);
   const [ordersPage, setOrdersPage] = useState(1);
   const eligibleOrders = eligibleOrdersPage?.items ?? [];
   const ordersTotal = eligibleOrdersPage?.total ?? 0;
@@ -1085,16 +1494,98 @@ function NewSettlementDialog({
   const [sourceBankId, setSourceBankId] = useState("");
   const [beneficiaryBankId, setBeneficiaryBankId] = useState("");
   const [bankReference, setBankReference] = useState("");
+  const [cashAccountId, setCashAccountId] = useState("");
+  const [cashAccounts, setCashAccounts] = useState<
+    readonly { readonly id: string; readonly name: string }[]
+  >([]);
+  const [cashAccountsFailed, setCashAccountsFailed] = useState(false);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setCashAccountsFailed(false);
+    api
+      .get<readonly { id: string; name: string }[]>(
+        "operations/accounting/cash-bank/cash-accounts?activeOnly=true",
+        controller.signal,
+      )
+      .then((accounts) => {
+        setCashAccounts(accounts);
+        /* One account means there is nothing to choose. Selecting it removes a
+           required field that could only ever be answered one way, and with it
+           the "Cash Account is required" block that followed forgetting it.
+           With several, the operator still picks: auto-choosing which cash box
+           the money leaves is not a decision to make on their behalf. */
+        if (accounts.length === 1) setCashAccountId((current) => current || accounts[0]!.id);
+      })
+      .catch(() => {
+        // A failed load must not wedge the dialog: the selector stays empty,
+        // the required check blocks Review, and the backend refuses a cash
+        // settlement without an account regardless.
+        if (!controller.signal.aborted) {
+          setCashAccounts([]);
+          setCashAccountsFailed(true);
+        }
+      });
+    return () => controller.abort();
+  }, [api]);
   const [notes, setNotes] = useState("");
 
   // Step 4/5 — Allocation proposal + manual editing.
   const [proposal, setProposal] = useState<TraderAllocationProposal>();
   const [proposalError, setProposalError] = useState<string>();
-  const [allocations, setAllocations] = useState<readonly { amount: string; orderId: string }[]>([]);
+  const [allocations, setAllocations] = useState<readonly { amount: string; orderId: string }[]>(
+    [],
+  );
   const [selectedOrderRows, setSelectedOrderRows] = useState<
     Readonly<Record<string, TraderEligibleOrderRow>>
   >({});
   const [overrideConfirmed, setOverrideConfirmed] = useState(false);
+  const [originatingOrderDefaultActive, setOriginatingOrderDefaultActive] = useState(
+    () => initialOrderId !== undefined,
+  );
+  const [originatingOrderRow, setOriginatingOrderRow] = useState<TraderEligibleOrderRow>();
+
+  /* Totals for the eligible-Orders list.
+     Computed over the rows actually LISTED, which is one page. Select-all works
+     on the same rows, so the figure beside it always describes exactly what the
+     checkbox would tick -- a total spanning unseen pages would not. */
+  const selectedOrderIds = new Set(allocations.map((line) => line.orderId));
+  const selectedEligibleOrders = eligibleOrders.filter((order) => selectedOrderIds.has(order.id));
+  const sumOutstanding = (rows: readonly TraderEligibleOrderRow[]) =>
+    rows.reduce((total, order) => total + safeMoneyValue(order.outstandingBalance), 0);
+  const listedOutstandingTotal = sumOutstanding(eligibleOrders);
+  const selectedOutstandingTotal = sumOutstanding(selectedEligibleOrders);
+  const allListedSelected =
+    eligibleOrders.length > 0 && selectedEligibleOrders.length === eligibleOrders.length;
+
+  /** Ticks or clears every listed Order at once, one state change per list. */
+  const toggleAllListedOrders = (checked: boolean) => {
+    setOriginatingOrderDefaultActive(false);
+    setOverrideConfirmed(false);
+    const listedIds = new Set(eligibleOrders.map((order) => order.id));
+    if (checked) {
+      setSelectedOrderRows((current) => {
+        const next = { ...current };
+        for (const order of eligibleOrders) next[order.id] = order;
+        return next;
+      });
+      setAllocations((current) => [
+        ...current,
+        // Only the ones not already carrying an allocation, so a hand-edited
+        // amount is never reset by ticking the header.
+        ...eligibleOrders
+          .filter((order) => !current.some((line) => line.orderId === order.id))
+          .map((order) => ({ amount: "0.00", orderId: order.id })),
+      ]);
+      return;
+    }
+    setAllocations((current) => current.filter((line) => !listedIds.has(line.orderId)));
+    setSelectedOrderRows((current) => {
+      const next = { ...current };
+      for (const id of listedIds) delete next[id];
+      return next;
+    });
+  };
 
   const [saving, setSaving] = useState(false);
   const [confirmError, setConfirmError] = useState<string>();
@@ -1133,6 +1624,34 @@ function NewSettlementDialog({
   }, [api, trader, orderFilters, ordersPage, t]);
 
   useEffect(() => loadOrders(), [loadOrders]);
+  /* Select the originating Order once, from the eligible list the backend just
+     returned.
+
+     Opening New Settlement from an Order is an explicit operator intent to pay
+     that Order. Default to that Order only instead of immediately asking the
+     server for oldest-first allocation, which would pull older outstanding
+     Orders into a simple one-Order payment and require an override checkbox. */
+  const originatingApplied = useRef(false);
+  useEffect(() => {
+    if (initialOrderId === undefined || originatingApplied.current) return;
+    if (eligibleOrdersPage === undefined) return;
+    originatingApplied.current = true;
+    const row = eligibleOrders.find((candidate) => candidate.id === initialOrderId);
+    if (row === undefined) {
+      // Collected, settled or reassigned since the link was built. Reported
+      // rather than forced, so no stale allocation state is created.
+      onOriginatingOrderIneligible?.();
+      return;
+    }
+    setOriginatingOrderRow(row);
+    setOriginatingOrderDefaultActive(true);
+    setSelectedOrderRows({ [row.id]: row });
+    setAllocations([{ amount: "0.00", orderId: row.id }]);
+    setAmount("");
+    setProposal(undefined);
+    setProposalError(undefined);
+    setOverrideConfirmed(false);
+  }, [eligibleOrders, eligibleOrdersPage, initialOrderId, onOriginatingOrderIneligible]);
 
   const applyOrderFilter = (change: Partial<EligibleOrderFilters>) => {
     setOrdersPage(1);
@@ -1162,9 +1681,7 @@ function NewSettlementDialog({
       })
       .catch(() => setCompanyBanks([]));
     void api
-      .get<readonly TraderBankAccountOption[]>(
-        `configuration/traders/${trader.id}/bank-accounts`,
-      )
+      .get<readonly TraderBankAccountOption[]>(`configuration/traders/${trader.id}/bank-accounts`)
       .then((accounts) => {
         const active = accounts.filter((account) => account.isActive);
         setTraderBanks(active);
@@ -1184,17 +1701,31 @@ function NewSettlementDialog({
     setAllocations([]);
     setSelectedOrderRows({});
     setOverrideConfirmed(false);
+    setOriginatingOrderDefaultActive(false);
+    setOriginatingOrderRow(undefined);
     setBankReference("");
     setOrderFilters(emptyEligibleOrderFilters);
     setOrdersPage(1);
     idempotency.reset();
   };
-
-  // Debounced oldest-first allocation proposal: fires whenever the Payment
-  // Amount (a valid positive number) changes, mirroring how partial payments
-  // must always originate from the server, never a client-side computation.
+  // Debounced oldest-first allocation proposal: the normal New Settlement path
+  // still uses the server allocator. When opened from one Order, the default is
+  // the clicked Order only; the operator can still switch back by changing the
+  // selection or pressing Apply Oldest-First.
   useEffect(() => {
     const parsed = parseMoneyInput(amount, { required: true });
+    const originatingOrder = initialOrderId === undefined ? undefined : originatingOrderRow;
+    if (originatingOrderDefaultActive && originatingOrder !== undefined) {
+      setProposal(undefined);
+      setProposalError(undefined);
+      if (amount.trim() === "" || !parsed.ok || !(parsed.value > 0)) return;
+      const outstanding = safeMoneyValue(originatingOrder.outstandingBalance);
+      setAllocations([
+        { amount: money(Math.min(parsed.value, outstanding)), orderId: originatingOrder.id },
+      ]);
+      setOverrideConfirmed(false);
+      return;
+    }
     if (trader === undefined || amount.trim() === "" || !parsed.ok || !(parsed.value > 0)) {
       setProposal(undefined);
       setAllocations([]);
@@ -1229,7 +1760,7 @@ function NewSettlementDialog({
       active = false;
       window.clearTimeout(timer);
     };
-  }, [api, amount, trader, t]);
+  }, [api, amount, initialOrderId, originatingOrderDefaultActive, originatingOrderRow, trader, t]);
 
   // Delivery date is display-only, for the allocation table's Delivery Date
   // column — the proposal/allocation endpoints don't return it. Looked up
@@ -1289,7 +1820,8 @@ function NewSettlementDialog({
   const allocationErrors: string[] = [];
   const seenOrders = new Set<string>();
   for (const line of allocations) {
-    if (seenOrders.has(line.orderId)) allocationErrors.push(t("traderSettlements.allocationDuplicateOrder"));
+    if (seenOrders.has(line.orderId))
+      allocationErrors.push(t("traderSettlements.allocationDuplicateOrder"));
     seenOrders.add(line.orderId);
     const parsedLine = parseMoneyInput(line.amount, { required: true });
     const lineAmount = parsedLine.ok ? parsedLine.value : 0;
@@ -1297,10 +1829,7 @@ function NewSettlementDialog({
     const proposedLine = proposalLineById.get(line.orderId);
     const outstandingBefore =
       proposedLine?.outstandingBefore ?? selectedOrderRows[line.orderId]?.outstandingBalance;
-    if (
-      outstandingBefore !== undefined &&
-      lineAmount > safeMoneyValue(outstandingBefore) + 0.001
-    ) {
+    if (outstandingBefore !== undefined && lineAmount > safeMoneyValue(outstandingBefore) + 0.001) {
       allocationErrors.push(t("traderSettlements.allocationExceedsOutstanding"));
     }
   }
@@ -1325,7 +1854,13 @@ function NewSettlementDialog({
           Math.abs(safeMoneyValue(selected.amount) - safeMoneyValue(line.allocatedAmount)) > 0.001
         );
       }));
-  const remainingAfter = (proposal?.allocations ?? []).reduce((sum, line) => {
+  /* Over every line SHOWN, not only the ones the server proposed.
+     Iterating `proposal.allocations` omitted any selected Order the proposal did
+     not reach -- pay 50 against two Orders and the server proposes one line, so
+     the second Order's balance vanished from the figure. It read 130.00 when
+     260.00 was still outstanding: an understatement, on the number an operator
+     uses to decide whether the Trader is square. */
+  const remainingAfter = allocationDisplayLines.reduce((sum, line) => {
     const current = allocations.find((row) => row.orderId === line.orderId)?.amount;
     const paidNow =
       current === undefined ? safeMoneyValue(line.allocatedAmount) : safeMoneyValue(current);
@@ -1338,14 +1873,18 @@ function NewSettlementDialog({
     activeAllocations.length > 0 &&
     allocationErrors.length === 0 &&
     (!manualOverride || overrideConfirmed) &&
-    (paymentMethod === "cash" ||
-      (sourceBankId !== "" && beneficiaryBankId !== "" && bankReference.trim() !== ""));
+    (paymentMethod === "cash"
+      ? cashAccountId !== ""
+      : sourceBankId !== "" && beneficiaryBankId !== "" && bankReference.trim() !== "");
 
   const fingerprint = JSON.stringify({
-    allocations: [...activeAllocations].sort((left, right) => left.orderId.localeCompare(right.orderId)),
+    allocations: [...activeAllocations].sort((left, right) =>
+      left.orderId.localeCompare(right.orderId),
+    ),
     amount: money(requestedAmount),
     bankReference: bankReference.trim(),
     beneficiaryBankId,
+    cashAccountId,
     notes: notes.trim(),
     paymentDate,
     paymentMethod,
@@ -1367,8 +1906,12 @@ function NewSettlementDialog({
           })),
           amount: safeMoneyValue(requestedAmount),
           ...(paymentMethod === "bank_transfer"
-            ? { bankAccountId: sourceBankId, bankReference: bankReference.trim(), traderBankAccountId: beneficiaryBankId }
-            : {}),
+            ? {
+                bankAccountId: sourceBankId,
+                bankReference: bankReference.trim(),
+                traderBankAccountId: beneficiaryBankId,
+              }
+            : { cashAccountId }),
           notes: notes.trim() === "" ? undefined : notes.trim(),
           paymentDate,
           paymentMethod,
@@ -1393,7 +1936,8 @@ function NewSettlementDialog({
       `Trader-Settlement-${confirmed.settlementNumber}.pdf`,
       mode,
     );
-    if (requestError !== undefined) setPdfError(message(requestError, t("traderSettlements.pdfGenerationFailed")));
+    if (requestError !== undefined)
+      setPdfError(message(requestError, t("traderSettlements.pdfGenerationFailed")));
   };
 
   // Money Sent to Trader only ever pays down a positive balance (the Company
@@ -1423,7 +1967,9 @@ function NewSettlementDialog({
     >
       {confirmed !== undefined ? (
         <div className="reconciliation-success" role="status">
-          <p>{t("traderSettlements.settlementConfirmed", { number: confirmed.settlementNumber })}</p>
+          <p>
+            {t("traderSettlements.settlementConfirmed", { number: confirmed.settlementNumber })}
+          </p>
           <dl className="reconciliation-summary">
             <div className="detail-line">
               <dt>{t("traderSettlements.columnSettlementNumber")}</dt>
@@ -1472,14 +2018,30 @@ function NewSettlementDialog({
             </div>
           )}
           <div className="modal-actions">
-            <button disabled={pdf.busy !== undefined} onClick={() => void openConfirmedPdf("preview")} type="button">
-              {pdf.busy === "preview" ? t("common.loading") : t("traderSettlements.actionPreviewStatement")}
+            <button
+              disabled={pdf.busy !== undefined}
+              onClick={() => void openConfirmedPdf("preview")}
+              type="button"
+            >
+              {pdf.busy === "preview"
+                ? t("common.loading")
+                : t("traderSettlements.actionPreviewStatement")}
             </button>
-            <button disabled={pdf.busy !== undefined} onClick={() => void openConfirmedPdf("print")} type="button">
+            <button
+              disabled={pdf.busy !== undefined}
+              onClick={() => void openConfirmedPdf("print")}
+              type="button"
+            >
               {pdf.busy === "print" ? t("common.loading") : t("traderSettlements.actionPrint")}
             </button>
-            <button disabled={pdf.busy !== undefined} onClick={() => void openConfirmedPdf("download")} type="button">
-              {pdf.busy === "download" ? t("common.loading") : t("traderSettlements.actionDownloadPdf")}
+            <button
+              disabled={pdf.busy !== undefined}
+              onClick={() => void openConfirmedPdf("download")}
+              type="button"
+            >
+              {pdf.busy === "download"
+                ? t("common.loading")
+                : t("traderSettlements.actionDownloadPdf")}
             </button>
             <button
               className="button button-secondary"
@@ -1495,7 +2057,11 @@ function NewSettlementDialog({
             >
               {t("traderSettlements.accountStatement")}
             </button>
-            <button className="button button-primary" onClick={() => onCreated(confirmed.settlementId)} type="button">
+            <button
+              className="button button-primary"
+              onClick={() => onCreated(confirmed.settlementId)}
+              type="button"
+            >
               {t("common.done")}
             </button>
           </div>
@@ -1553,8 +2119,16 @@ function NewSettlementDialog({
               {/* Step 2 — Eligible Orders */}
               <section className="workspace-step">
                 <h3>{t("traderSettlements.stepEligibleOrders")}</h3>
-                {ordersError === undefined ? null : <div className="alert alert-error">{ordersError}</div>}
-                <div className="compact-filters">
+                {ordersError === undefined ? null : (
+                  <div className="alert alert-error">{ordersError}</div>
+                )}
+                <details
+                  className="filter-drawer"
+                  onToggle={(event) => setEligibleFiltersOpen(event.currentTarget.open)}
+                  open={eligibleFiltersOpen}
+                >
+                  <summary>{t("common.filter")}</summary>
+                  <div className="compact-filters">
                   <label className="field">
                     <span>{t("traderSettlements.filterOrderSerialNumber")}</span>
                     <input
@@ -1566,7 +2140,9 @@ function NewSettlementDialog({
                   <label className="field">
                     <span>{t("traderSettlements.filterExternalReference")}</span>
                     <input
-                      onChange={(event) => applyOrderFilter({ referenceNumber: event.target.value })}
+                      onChange={(event) =>
+                        applyOrderFilter({ referenceNumber: event.target.value })
+                      }
                       type="search"
                       value={orderFilters.referenceNumber}
                     />
@@ -1593,7 +2169,10 @@ function NewSettlementDialog({
                       allowCreate={false}
                       api={api}
                       onChange={(area) =>
-                        applyOrderFilter({ areaId: area?.id ?? "", emirateId: area?.emirateId ?? "" })
+                        applyOrderFilter({
+                          areaId: area?.id ?? "",
+                          emirateId: area?.emirateId ?? "",
+                        })
                       }
                       value={undefined}
                     />
@@ -1601,7 +2180,9 @@ function NewSettlementDialog({
                   <label className="field">
                     <span>{t("traderSettlements.filterSettlementStatus")}</span>
                     <select
-                      onChange={(event) => applyOrderFilter({ settlementStatus: event.target.value })}
+                      onChange={(event) =>
+                        applyOrderFilter({ settlementStatus: event.target.value })
+                      }
                       value={orderFilters.settlementStatus}
                     >
                       <option value="">{t("common.all")}</option>
@@ -1632,75 +2213,115 @@ function NewSettlementDialog({
                     </button>
                   </div>
                 </div>
+                </details>
                 <div className="table-scroll-x">
-                <table>
-                  <thead>
-                    <tr>
-                      <th scope="col">{t("common.select")}</th>
-                      <th scope="col">{t("traderSettlements.filterOrderSerialNumber")}</th>
-                      <th scope="col">{t("traderSettlements.filterExternalReference")}</th>
-                      <th scope="col">{t("traderSettlements.filterDeliveryDateFrom")}</th>
-                      <th scope="col">{t("common.name")}</th>
-                      <th scope="col">{t("traderSettlements.columnOriginalAmountDue")}</th>
-                      <th scope="col">{t("traderSettlements.columnPreviouslyPaid")}</th>
-                      <th scope="col">{t("traderSettlements.columnOutstandingBalance")}</th>
-                      <th scope="col">{t("traderSettlements.orderSettlementStatus")}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {eligibleOrders.map((order) => (
-                      <tr key={order.id}>
-                        <td>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th scope="col">
+                          {/* Ticks every Order listed below. Disabled with an
+                              empty list so it cannot read as "all selected"
+                              when there is nothing to select. */}
                           <input
-                            checked={allocations.some(
-                              (allocation) => allocation.orderId === order.id,
-                            )}
-                            onChange={(event) => {
-                              setOverrideConfirmed(false);
-                              if (event.target.checked) {
-                                setSelectedOrderRows((current) => ({
-                                  ...current,
-                                  [order.id]: order,
-                                }));
-                                setAllocations((current) =>
-                                  current.some((line) => line.orderId === order.id)
-                                    ? current
-                                    : [...current, { amount: "0.00", orderId: order.id }],
-                                );
-                              } else {
-                                setAllocations((current) =>
-                                  current.filter((line) => line.orderId !== order.id),
-                                );
-                                setSelectedOrderRows((current) => {
-                                  const next = { ...current };
-                                  delete next[order.id];
-                                  return next;
-                                });
-                              }
-                            }}
+                            aria-label={t("traderSettlements.selectAllEligibleOrders")}
+                            checked={allListedSelected}
+                            disabled={eligibleOrders.length === 0}
+                            onChange={(event) => toggleAllListedOrders(event.target.checked)}
                             type="checkbox"
                           />
-                        </td>
-                        <td className="mono">{order.serialNumber}</td>
-                        <td className="mono">{order.referenceNumber ?? "-"}</td>
-                        <td>{order.deliveryDate === null ? "-" : order.deliveryDate.slice(0, 10)}</td>
-                        <td>{order.customerName}</td>
-                        <td>{money(order.originalAmountDueToTrader)}</td>
-                        <td>{money(order.previouslyPaid)}</td>
-                        <td>{money(order.outstandingBalance)}</td>
-                        <td>{t(`traderSettlements.orderStatus${statusKey(order.settlementStatus)}`)}</td>
+                        </th>
+                        <th scope="col">{t("traderSettlements.filterOrderSerialNumber")}</th>
+                        <th scope="col">{t("traderSettlements.filterExternalReference")}</th>
+                        <th scope="col">{t("traderSettlements.filterDeliveryDateFrom")}</th>
+                        <th scope="col">{t("common.name")}</th>
+                        <th scope="col">{t("traderSettlements.columnOriginalAmountDue")}</th>
+                        <th scope="col">{t("traderSettlements.columnPreviouslyPaid")}</th>
+                        <th scope="col">{t("traderSettlements.columnOutstandingBalance")}</th>
+                        <th scope="col">{t("traderSettlements.orderSettlementStatus")}</th>
                       </tr>
-                    ))}
-                    {eligibleOrders.length === 0 && ordersError === undefined ? (
-                      <tr>
-                        <td className="empty-state" colSpan={9}>
-                          {t("traderSettlements.noEligibleOrders")}
-                        </td>
-                      </tr>
-                    ) : null}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {eligibleOrders.map((order) => (
+                        <tr key={order.id}>
+                          <td>
+                            <input
+                              checked={allocations.some(
+                                (allocation) => allocation.orderId === order.id,
+                              )}
+                              onChange={(event) => {
+                                setOriginatingOrderDefaultActive(false);
+                                setOverrideConfirmed(false);
+                                if (event.target.checked) {
+                                  setSelectedOrderRows((current) => ({
+                                    ...current,
+                                    [order.id]: order,
+                                  }));
+                                  setAllocations((current) =>
+                                    current.some((line) => line.orderId === order.id)
+                                      ? current
+                                      : [...current, { amount: "0.00", orderId: order.id }],
+                                  );
+                                } else {
+                                  setAllocations((current) =>
+                                    current.filter((line) => line.orderId !== order.id),
+                                  );
+                                  setSelectedOrderRows((current) => {
+                                    const next = { ...current };
+                                    delete next[order.id];
+                                    return next;
+                                  });
+                                }
+                              }}
+                              type="checkbox"
+                            />
+                          </td>
+                          <td className="mono">{order.serialNumber}</td>
+                          <td className="mono">{order.referenceNumber ?? "-"}</td>
+                          <td>
+                            {order.deliveryDate === null ? "-" : order.deliveryDate.slice(0, 10)}
+                          </td>
+                          <td>{order.customerName}</td>
+                          <td>{money(order.originalAmountDueToTrader)}</td>
+                          <td>{money(order.previouslyPaid)}</td>
+                          <td>{money(order.outstandingBalance)}</td>
+                          <td>
+                            {t(`traderSettlements.orderStatus${statusKey(order.settlementStatus)}`)}
+                          </td>
+                        </tr>
+                      ))}
+                      {eligibleOrders.length === 0 && ordersError === undefined ? (
+                        <tr>
+                          <td className="empty-state" colSpan={9}>
+                            {t("traderSettlements.noEligibleOrders")}
+                          </td>
+                        </tr>
+                      ) : null}
+                    </tbody>
+                  </table>
                 </div>
+                {/* What is listed, and what is ticked. The selected line appears
+                    only once something is ticked, so an untouched form is not
+                    already reporting a selection of zero. `role="status"` so the
+                    running total is announced as it changes rather than being
+                    silent to anyone not watching it. */}
+                {eligibleOrders.length === 0 ? null : (
+                  <div className="eligible-orders-totals" role="status">
+                    <span>
+                      {t("traderSettlements.listedOrdersTotal", {
+                        count: eligibleOrders.length,
+                      })}
+                      <strong>{money(listedOutstandingTotal.toFixed(2))}</strong>
+                    </span>
+                    {selectedEligibleOrders.length === 0 ? null : (
+                      <span className="eligible-orders-selected">
+                        {t("traderSettlements.selectedOrdersTotal", {
+                          count: selectedEligibleOrders.length,
+                        })}
+                        <strong>{money(selectedOutstandingTotal.toFixed(2))}</strong>
+                      </span>
+                    )}
+                  </div>
+                )}
                 {ordersTotal <= 50 ? null : (
                   <nav aria-label={t("common.pagination")} className="pagination">
                     <button
@@ -1710,7 +2331,9 @@ function NewSettlementDialog({
                     >
                       {t("common.previous")}
                     </button>
-                    <span>{t("common.pageOf", { page: ordersPage, pageCount: ordersPageCount })}</span>
+                    <span>
+                      {t("common.pageOf", { page: ordersPage, pageCount: ordersPageCount })}
+                    </span>
                     <button
                       disabled={ordersPage >= ordersPageCount}
                       onClick={() => setOrdersPage(ordersPage + 1)}
@@ -1722,90 +2345,147 @@ function NewSettlementDialog({
                 )}
               </section>
 
-              {/* Step 3 — Payment Details */}
+              {/* Step 3 — Payment Details.
+                  `form-grid` is the same two-column layout every other modal
+                  form in the application uses (Create Order, Edit Order); this
+                  screen was the one place still using bare full-width fields,
+                  which is why Payment Amount stretched edge to edge instead of
+                  sitting beside Payment Date. */}
               <section className="workspace-step">
                 <h3>{t("traderSettlements.stepPaymentDetails")}</h3>
-                <label className="field required-field">
-                  <span>{t("traderSettlements.paymentAmount")}</span>
-                  <input
-                    inputMode="decimal"
-                    min="0.01"
-                    onChange={(event) => setAmount(event.target.value)}
-                    step="0.01"
-                    type="number"
-                    value={amount}
-                  />
-                </label>
-                <label className="field required-field">
-                  <span>{t("traderSettlements.paymentDate")}</span>
-                  <input
-                    onChange={(event) => setPaymentDate(event.target.value)}
-                    type="date"
-                    value={paymentDate}
-                  />
-                </label>
-                <label className="field required-field">
-                  <span>{t("traderSettlements.filterPaymentMethod")}</span>
-                  <select
-                    onChange={(event) => setPaymentMethod(event.target.value as "bank_transfer" | "cash")}
-                    value={paymentMethod}
-                  >
-                    <option value="cash">{t("traderSettlements.paymentMethodCash")}</option>
-                    <option value="bank_transfer">{t("traderSettlements.paymentMethodBankTransfer")}</option>
-                  </select>
-                </label>
-                {paymentMethod !== "bank_transfer" ? null : (
-                  <>
+                <div className="form-grid">
+                  <label className="field required-field">
+                    <span>{t("traderSettlements.paymentAmount")}</span>
+                    {/* `no-spinner` and min="0" to match every other money field
+                      in the application; the spinner arrows are one more way to
+                      nudge an amount by a cent nobody meant to enter. The
+                      required/positive check is enforced by `parseMoneyInput`,
+                      not by the min attribute. */}
+                    <input
+                      className="no-spinner"
+                      inputMode="decimal"
+                      min="0"
+                      onChange={(event) => setAmount(event.target.value)}
+                      step="0.01"
+                      type="number"
+                      value={amount}
+                    />
+                  </label>
+                  <label className="field required-field">
+                    <span>{t("traderSettlements.paymentDate")}</span>
+                    <input
+                      onChange={(event) => setPaymentDate(event.target.value)}
+                      type="date"
+                      value={paymentDate}
+                    />
+                  </label>
+                  <label className="field required-field">
+                    <span>{t("traderSettlements.filterPaymentMethod")}</span>
+                    <select
+                      onChange={(event) => {
+                        const next = event.target.value as "bank_transfer" | "cash";
+                        setPaymentMethod(next);
+                        // Clear the branch we are leaving. A hidden stale account
+                        // would ride along in the fingerprint even when it is not
+                        // submitted, and could replay the wrong idempotent result.
+                        if (next === "cash") {
+                          setSourceBankId("");
+                          setBeneficiaryBankId("");
+                          setBankReference("");
+                        } else {
+                          setCashAccountId("");
+                        }
+                      }}
+                      value={paymentMethod}
+                    >
+                      <option value="cash">{t("traderSettlements.paymentMethodCash")}</option>
+                      <option value="bank_transfer">
+                        {t("traderSettlements.paymentMethodBankTransfer")}
+                      </option>
+                    </select>
+                  </label>
+                  {/* Cash accounts only. A cash settlement leaves a drawer;
+                    the field says WHICH one, never whether it is cash. */}
+                  {paymentMethod !== "cash" ? null : (
                     <label className="field required-field">
-                      <span>{t("traderSettlements.sourceBankAccount")}</span>
+                      <span>{t("traderSettlements.cashAccount")}</span>
                       <select
-                        onChange={(event) => setSourceBankId(event.target.value)}
-                        value={sourceBankId}
+                        onChange={(event) => setCashAccountId(event.target.value)}
+                        value={cashAccountId}
                       >
-                        <option value="">{t("traderSettlements.selectBankAccount")}</option>
-                        {companyBanks.map((account) => (
+                        <option value="">{t("traderSettlements.selectCashAccount")}</option>
+                        {cashAccounts.map((account) => (
                           <option key={account.id} value={account.id}>
-                            {account.bankName} — {account.accountName}
-                            {account.accountNumberMasked === null ? "" : ` (${account.accountNumberMasked})`}
+                            {account.name}
                           </option>
                         ))}
                       </select>
-                      {companyBanks.length === 0 ? (
-                        <span className="field-hint">{t("traderSettlements.noActiveBankAccounts")}</span>
+                      {cashAccountsFailed ? (
+                        <small className="form-status-error">
+                          {t("traderSettlements.cashAccountsLoadFailed")}
+                        </small>
                       ) : null}
                     </label>
-                    <label className="field required-field">
-                      <span>{t("traderSettlements.beneficiaryBankAccount")}</span>
-                      <select
-                        onChange={(event) => setBeneficiaryBankId(event.target.value)}
-                        value={beneficiaryBankId}
-                      >
-                        <option value="">{t("traderSettlements.selectBankAccount")}</option>
-                        {traderBanks.map((account) => (
-                          <option key={account.id} value={account.id}>
-                            {account.bankName} — {account.accountName} (
-                            {maskAccountNumber(account.accountNumber)})
-                          </option>
-                        ))}
-                      </select>
-                      {traderBanks.length === 0 ? (
-                        <span className="field-hint">{t("traderSettlements.noActiveBankAccounts")}</span>
-                      ) : null}
-                    </label>
-                    <label className="field required-field">
-                      <span>{t("traderSettlements.bankReference")}</span>
-                      <input
-                        onChange={(event) => setBankReference(event.target.value)}
-                        type="text"
-                        value={bankReference}
-                      />
-                    </label>
-                  </>
-                )}
-                <label className="field">
-                  <span>{t("traderSettlements.notes")}</span>
-                  <textarea onChange={(event) => setNotes(event.target.value)} value={notes} />
-                </label>
+                  )}
+                  {paymentMethod !== "bank_transfer" ? null : (
+                    <>
+                      <label className="field required-field">
+                        <span>{t("traderSettlements.sourceBankAccount")}</span>
+                        <select
+                          onChange={(event) => setSourceBankId(event.target.value)}
+                          value={sourceBankId}
+                        >
+                          <option value="">{t("traderSettlements.selectBankAccount")}</option>
+                          {companyBanks.map((account) => (
+                            <option key={account.id} value={account.id}>
+                              {account.bankName} — {account.accountName}
+                              {account.accountNumberMasked === null
+                                ? ""
+                                : ` (${account.accountNumberMasked})`}
+                            </option>
+                          ))}
+                        </select>
+                        {companyBanks.length === 0 ? (
+                          <span className="field-hint">
+                            {t("traderSettlements.noActiveBankAccounts")}
+                          </span>
+                        ) : null}
+                      </label>
+                      <label className="field required-field">
+                        <span>{t("traderSettlements.beneficiaryBankAccount")}</span>
+                        <select
+                          onChange={(event) => setBeneficiaryBankId(event.target.value)}
+                          value={beneficiaryBankId}
+                        >
+                          <option value="">{t("traderSettlements.selectBankAccount")}</option>
+                          {traderBanks.map((account) => (
+                            <option key={account.id} value={account.id}>
+                              {account.bankName} — {account.accountName} (
+                              {maskAccountNumber(account.accountNumber)})
+                            </option>
+                          ))}
+                        </select>
+                        {traderBanks.length === 0 ? (
+                          <span className="field-hint">
+                            {t("traderSettlements.noActiveBankAccounts")}
+                          </span>
+                        ) : null}
+                      </label>
+                      <label className="field required-field">
+                        <span>{t("traderSettlements.bankReference")}</span>
+                        <input
+                          onChange={(event) => setBankReference(event.target.value)}
+                          type="text"
+                          value={bankReference}
+                        />
+                      </label>
+                    </>
+                  )}
+                  <label className="field field-wide">
+                    <span>{t("traderSettlements.notes")}</span>
+                    <textarea onChange={(event) => setNotes(event.target.value)} value={notes} />
+                  </label>
+                </div>
               </section>
 
               {/* Step 4/5 — Oldest-first allocation proposal + manual editing */}
@@ -1815,6 +2495,7 @@ function NewSettlementDialog({
                   <div className="heading-actions">
                     <button
                       onClick={() => {
+                        setOriginatingOrderDefaultActive(false);
                         setAllocations(
                           (proposal?.allocations ?? []).map((line) => ({
                             amount: line.allocatedAmount,
@@ -1830,6 +2511,7 @@ function NewSettlementDialog({
                     </button>
                     <button
                       onClick={() => {
+                        setOriginatingOrderDefaultActive(false);
                         setSelectedOrderRows((current) => ({
                           ...current,
                           ...Object.fromEntries(eligibleOrders.map((order) => [order.id, order])),
@@ -1837,9 +2519,7 @@ function NewSettlementDialog({
                         setAllocations((current) => [
                           ...current,
                           ...eligibleOrders
-                            .filter(
-                              (order) => !current.some((line) => line.orderId === order.id),
-                            )
+                            .filter((order) => !current.some((line) => line.orderId === order.id))
                             .map((order) => ({ amount: "0.00", orderId: order.id })),
                         ]);
                         setOverrideConfirmed(false);
@@ -1850,6 +2530,7 @@ function NewSettlementDialog({
                     </button>
                     <button
                       onClick={() => {
+                        setOriginatingOrderDefaultActive(false);
                         setAllocations([]);
                         setSelectedOrderRows({});
                         setOverrideConfirmed(false);
@@ -1876,52 +2557,70 @@ function NewSettlementDialog({
                         onChange={(event) => setOverrideConfirmed(event.target.checked)}
                         type="checkbox"
                       />
-                      <span>{t("traderSettlements.oldestFirstOverrideWarning")}</span>
+                      <span>
+                        {t("traderSettlements.oldestFirstOverrideWarning")}
+                        {/* The consequence, stated. The warning explained WHAT
+                            the override is but not that nothing proceeds until
+                            it is ticked, so a blocked settlement looked like a
+                            rejected one -- the button was simply disabled with
+                            no reason given. */}
+                        {overrideConfirmed ? null : (
+                          <strong className="override-required">
+                            {t("traderSettlements.oldestFirstOverrideRequired")}
+                          </strong>
+                        )}
+                      </span>
                     </label>
                   )}
                   <div className="table-scroll-x">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th scope="col">{t("traderSettlements.filterOrderSerialNumber")}</th>
-                        <th scope="col">{t("traderSettlements.filterDeliveryDateFrom")}</th>
-                        <th scope="col">{t("traderSettlements.columnOutstandingBefore")}</th>
-                        <th scope="col">{t("traderSettlements.columnProposedAmount")}</th>
-                        <th scope="col">{t("traderSettlements.columnOutstandingAfter")}</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {allocationDisplayLines.map((line) => {
-                        const deliveryDate =
-                          orderById.get(line.orderId)?.deliveryDate ??
-                          selectedOrderRows[line.orderId]?.deliveryDate;
-                        const current =
-                          allocations.find((row) => row.orderId === line.orderId)?.amount ??
-                          line.allocatedAmount;
-                        const after = money(
-                          safeMoneyValue(line.outstandingBefore) - safeMoneyValue(current),
-                        );
-                        return (
-                          <tr key={line.orderId}>
-                            <td className="mono">{line.serialNumber}</td>
-                            <td>{deliveryDate === undefined || deliveryDate === null ? "-" : deliveryDate.slice(0, 10)}</td>
-                            <td>{money(line.outstandingBefore)}</td>
-                            <td>
-                              <input
-                                inputMode="decimal"
-                                min="0"
-                                onChange={(event) => setLineAmount(line.orderId, event.target.value)}
-                                step="0.01"
-                                type="number"
-                                value={current}
-                              />
-                            </td>
-                            <td>{after}</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
+                    <table>
+                      <thead>
+                        <tr>
+                          <th scope="col">{t("traderSettlements.filterOrderSerialNumber")}</th>
+                          <th scope="col">{t("traderSettlements.filterDeliveryDateFrom")}</th>
+                          <th scope="col">{t("traderSettlements.columnOutstandingBefore")}</th>
+                          <th scope="col">{t("traderSettlements.columnProposedAmount")}</th>
+                          <th scope="col">{t("traderSettlements.columnOutstandingAfter")}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {allocationDisplayLines.map((line) => {
+                          const deliveryDate =
+                            orderById.get(line.orderId)?.deliveryDate ??
+                            selectedOrderRows[line.orderId]?.deliveryDate;
+                          const current =
+                            allocations.find((row) => row.orderId === line.orderId)?.amount ??
+                            line.allocatedAmount;
+                          const after = money(
+                            safeMoneyValue(line.outstandingBefore) - safeMoneyValue(current),
+                          );
+                          return (
+                            <tr key={line.orderId}>
+                              <td className="mono">{line.serialNumber}</td>
+                              <td>
+                                {deliveryDate === undefined || deliveryDate === null
+                                  ? "-"
+                                  : deliveryDate.slice(0, 10)}
+                              </td>
+                              <td>{money(line.outstandingBefore)}</td>
+                              <td>
+                                <input
+                                  inputMode="decimal"
+                                  min="0"
+                                  onChange={(event) =>
+                                    setLineAmount(line.orderId, event.target.value)
+                                  }
+                                  step="0.01"
+                                  type="number"
+                                  value={current}
+                                />
+                              </td>
+                              <td>{after}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
                   </div>
                   <dl className="reconciliation-summary">
                     <div className="detail-line">
@@ -1986,7 +2685,10 @@ function NewSettlementDialog({
                         <div className="detail-line">
                           <dt>{t("traderSettlements.beneficiaryBankAccount")}</dt>
                           <dd>
-                            {traderBanks.find((account) => account.id === beneficiaryBankId)?.bankName}
+                            {
+                              traderBanks.find((account) => account.id === beneficiaryBankId)
+                                ?.bankName
+                            }
                           </dd>
                         </div>
                         <div className="detail-line">
@@ -2060,7 +2762,11 @@ function MoneyReceivedDialog({
   const confirm = async () => {
     setSaving(true);
     setError(undefined);
-    const fingerprint = JSON.stringify({ notes: notes.trim(), receivedDate, reference: reference.trim() });
+    const fingerprint = JSON.stringify({
+      notes: notes.trim(),
+      receivedDate,
+      reference: reference.trim(),
+    });
     try {
       await api.post(
         `operations/settlements/payments/${settlement.settlementId}/confirm-receipt`,
@@ -2127,11 +2833,19 @@ function MoneyReceivedDialog({
         <form onSubmit={(event) => void (event.preventDefault(), confirm())}>
           <label className="field">
             <span>{t("traderSettlements.receivedDate")}</span>
-            <input onChange={(event) => setReceivedDate(event.target.value)} type="date" value={receivedDate} />
+            <input
+              onChange={(event) => setReceivedDate(event.target.value)}
+              type="date"
+              value={receivedDate}
+            />
           </label>
           <label className="field">
             <span>{t("traderSettlements.receivedReference")}</span>
-            <input onChange={(event) => setReference(event.target.value)} type="text" value={reference} />
+            <input
+              onChange={(event) => setReference(event.target.value)}
+              type="text"
+              value={reference}
+            />
           </label>
           <label className="field">
             <span>{t("traderSettlements.receivedNotes")}</span>
@@ -2232,7 +2946,9 @@ function ReverseSettlementDialog({
       </dl>
       {reversed ? (
         <div className="reconciliation-success" role="status">
-          <p>{t("traderSettlements.settlementReversed", { number: settlement.settlementNumber })}</p>
+          <p>
+            {t("traderSettlements.settlementReversed", { number: settlement.settlementNumber })}
+          </p>
           <div className="modal-actions">
             <button className="button button-primary" onClick={onClose} type="button">
               {t("common.close")}
@@ -2310,10 +3026,12 @@ export function SettlementDetailDialog({
       `Trader-Settlement-${detail?.settlementNumber ?? settlementId}.pdf`,
       mode,
     );
-    if (requestError !== undefined) setPdfError(message(requestError, t("traderSettlements.pdfGenerationFailed")));
+    if (requestError !== undefined)
+      setPdfError(message(requestError, t("traderSettlements.pdfGenerationFailed")));
   };
 
-  const moneyReceivedConfirmed = detail?.moneyReceivedDate !== null && detail?.moneyReceivedDate !== undefined;
+  const moneyReceivedConfirmed =
+    detail?.moneyReceivedDate !== null && detail?.moneyReceivedDate !== undefined;
 
   return (
     <Modal
@@ -2334,7 +3052,9 @@ export function SettlementDetailDialog({
         </div>
       )}
       {detail === undefined ? (
-        error === undefined ? <div className="loading-row">{t("common.loading")}</div> : null
+        error === undefined ? (
+          <div className="loading-row">{t("common.loading")}</div>
+        ) : null
       ) : (
         <>
           <dl className="reconciliation-summary">
@@ -2405,7 +3125,9 @@ export function SettlementDetailDialog({
             </div>
             <div className="detail-line">
               <dt>{t("traderSettlements.moneyReceivedDate")}</dt>
-              <dd>{detail.moneyReceivedDate === null ? "-" : detail.moneyReceivedDate.slice(0, 10)}</dd>
+              <dd>
+                {detail.moneyReceivedDate === null ? "-" : detail.moneyReceivedDate.slice(0, 10)}
+              </dd>
             </div>
             {detail.moneyReceivedBy === null ? null : (
               <div className="detail-line">
@@ -2431,13 +3153,13 @@ export function SettlementDetailDialog({
                 <dd>{detail.notes}</dd>
               </div>
             )}
-            {detail.reversalDate === null ? null : (
+            {detail.reversalDate == null ? null : (
               <div className="detail-line">
                 <dt>{t("traderSettlements.reversalDate")}</dt>
                 <dd>{detail.reversalDate.slice(0, 16).replace("T", " ")}</dd>
               </div>
             )}
-            {detail.reversedBy === null ? null : (
+            {detail.reversedBy == null ? null : (
               <div className="detail-line">
                 <dt>{t("traderSettlements.reversedByUser")}</dt>
                 <dd>{detail.reversedBy}</dd>
@@ -2464,46 +3186,56 @@ export function SettlementDetailDialog({
           </dl>
 
           <div className="table-scroll-x">
-          <table>
-            <thead>
-              <tr>
-                <th scope="col">{t("traderSettlements.filterOrderSerialNumber")}</th>
-                <th scope="col">{t("traderSettlements.filterExternalReference")}</th>
-                <th scope="col">{t("traderSettlements.filterDeliveryDateFrom")}</th>
-                <th scope="col">{t("common.name")}</th>
-                <th scope="col">{t("traderSettlements.columnCod")}</th>
-                <th scope="col">{t("traderSettlements.totalServiceFees")}</th>
-                <th scope="col">{t("traderSettlements.totalAdditionalFees")}</th>
-                <th scope="col">{t("traderSettlements.totalVat")}</th>
-                <th scope="col">{t("traderSettlements.columnTotalDeductions")}</th>
-                <th scope="col">{t("traderSettlements.originalTraderPayable")}</th>
-                <th scope="col">{t("traderSettlements.columnPreviouslyPaid")}</th>
-                <th scope="col">{t("traderSettlements.amountPaidNow")}</th>
-                <th scope="col">{t("traderSettlements.columnOutstandingBalance")}</th>
-                <th scope="col">{t("traderSettlements.orderSettlementStatus")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {detail.orders.map((order) => (
-                <tr key={order.serialNumber}>
-                  <td className="mono">{order.serialNumber}</td>
-                  <td className="mono">{order.referenceNumber ?? "-"}</td>
-                  <td>{order.deliveryDate === null ? "-" : order.deliveryDate.slice(0, 10)}</td>
-                  <td>{order.customerName}</td>
-                  <td>{money(order.codAmount)}</td>
-                  <td>{money(order.serviceFee)}</td>
-                  <td>{money(order.additionalFees)}</td>
-                  <td>{money(order.vatAmount)}</td>
-                  <td>{money(order.totalDeductions)}</td>
-                  <td>{money(order.originalTraderPayable)}</td>
-                  <td>{money(order.previouslyPaid)}</td>
-                  <td>{money(order.amountPaidNow)}</td>
-                  <td>{money(order.remainingOutstanding)}</td>
-                  <td>{t(`traderSettlements.orderStatus${statusKey(order.orderSettlementStatus)}`)}</td>
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">{t("traderSettlements.filterOrderSerialNumber")}</th>
+                  <th scope="col">{t("traderSettlements.filterExternalReference")}</th>
+                  <th scope="col">{t("traderSettlements.filterDeliveryDateFrom")}</th>
+                  <th scope="col">{t("common.name")}</th>
+                  <th scope="col">{t("traderSettlements.columnCod")}</th>
+                  <th scope="col">{t("traderSettlements.totalServiceFees")}</th>
+                  <th scope="col">{t("traderSettlements.totalAdditionalFees")}</th>
+                  <th scope="col">{t("traderSettlements.totalVat")}</th>
+                  <th scope="col">{t("traderSettlements.columnTotalDeductions")}</th>
+                  <th scope="col">{t("traderSettlements.originalTraderPayable")}</th>
+                  <th scope="col">{t("traderSettlements.columnPreviouslyPaid")}</th>
+                  <th scope="col">{t("traderSettlements.amountPaidNow")}</th>
+                  <th scope="col">{t("traderSettlements.columnOutstandingBalance")}</th>
+                  <th scope="col">{t("traderSettlements.orderSettlementStatus")}</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {detail.orders.map((order) => (
+                  <tr key={order.serialNumber}>
+                    <td className="mono">
+                      {/* The Order route takes the Order NUMBER; the Serial
+                          Number stays the value the User reads. */}
+                      <OperationalReference
+                        identifier={order.orderNumber}
+                        reference={order.serialNumber}
+                        type="order"
+                      />
+                    </td>
+                    <td className="mono">{order.referenceNumber ?? "-"}</td>
+                    <td>{order.deliveryDate === null ? "-" : order.deliveryDate.slice(0, 10)}</td>
+                    <td>{order.customerName}</td>
+                    <td>{money(order.codAmount)}</td>
+                    <td>{money(order.serviceFee)}</td>
+                    <td>{money(order.additionalFees)}</td>
+                    <td>{money(order.vatAmount)}</td>
+                    <td>{money(order.totalDeductions)}</td>
+                    <td>{money(order.originalTraderPayable)}</td>
+                    <td>{money(order.previouslyPaid)}</td>
+                    <td>{money(order.amountPaidNow)}</td>
+                    <td>{money(order.remainingOutstanding)}</td>
+                    <td>
+                      {t(`traderSettlements.orderStatus${statusKey(order.orderSettlementStatus)}`)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
 
           <dl className="reconciliation-summary">
@@ -2549,6 +3281,14 @@ export function SettlementDetailDialog({
             </div>
           </dl>
 
+          {/* Additive Accounting link-through; renders nothing for a User
+              without Accounting access. */}
+          <AccountingRelatedPanel
+            api={api}
+            sourceId={settlementId}
+            sourceType="trader_settlement"
+          />
+
           <div className="modal-actions">
             <button
               className="button button-secondary"
@@ -2559,14 +3299,30 @@ export function SettlementDetailDialog({
             </button>
             {!canViewReport ? null : (
               <>
-                <button disabled={pdf.busy !== undefined} onClick={() => void openPdf("preview")} type="button">
-                  {pdf.busy === "preview" ? t("common.loading") : t("traderSettlements.actionPreviewStatement")}
+                <button
+                  disabled={pdf.busy !== undefined}
+                  onClick={() => void openPdf("preview")}
+                  type="button"
+                >
+                  {pdf.busy === "preview"
+                    ? t("common.loading")
+                    : t("traderSettlements.actionPreviewStatement")}
                 </button>
-                <button disabled={pdf.busy !== undefined} onClick={() => void openPdf("print")} type="button">
+                <button
+                  disabled={pdf.busy !== undefined}
+                  onClick={() => void openPdf("print")}
+                  type="button"
+                >
                   {pdf.busy === "print" ? t("common.loading") : t("traderSettlements.actionPrint")}
                 </button>
-                <button disabled={pdf.busy !== undefined} onClick={() => void openPdf("download")} type="button">
-                  {pdf.busy === "download" ? t("common.loading") : t("traderSettlements.actionDownloadPdf")}
+                <button
+                  disabled={pdf.busy !== undefined}
+                  onClick={() => void openPdf("download")}
+                  type="button"
+                >
+                  {pdf.busy === "download"
+                    ? t("common.loading")
+                    : t("traderSettlements.actionDownloadPdf")}
                 </button>
               </>
             )}
@@ -2646,6 +3402,358 @@ export function SettlementDetailDialog({
           }}
         />
       )}
+    </Modal>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Add Receivable Dialog (Charge Trader) - for manual charges/fees
+// ---------------------------------------------------------------------------
+
+function CollectFromTraderDialog({
+  api,
+  onClose,
+  onCollected,
+}: {
+  api: ApiClient;
+  onClose: () => void;
+  onCollected: () => void;
+}) {
+  const { t } = useTranslation();
+  const [traders, setTraders] = useState<
+    readonly { readonly outstandingAmount: string; readonly traderId: string; readonly traderName: string }[]
+  >([]);
+  const [traderId, setTraderId] = useState("");
+  const [outstandingAmount, setOutstandingAmount] = useState("0.00");
+  const [collectionAmount, setCollectionAmount] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState<"cash" | "bank_transfer">("cash");
+  const [paymentDate, setPaymentDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [notes, setNotes] = useState("");
+  const [error, setError] = useState<string>();
+  const [saving, setSaving] = useState(false);
+  const idempotency = useIdempotencyKey();
+
+  useEffect(() => {
+    void api
+      .get<
+        readonly { outstandingAmount: string; traderId: string; traderName: string }[]
+      >("operations/trader-receivables/traders-with-balance")
+      .then(setTraders)
+      .catch(() => setTraders([]));
+  }, [api]);
+
+  const handleTraderChange = (newTraderId: string) => {
+    setTraderId(newTraderId);
+    setCollectionAmount("");
+    setError(undefined);
+    const selected = traders.find((trader) => trader.traderId === newTraderId);
+    setOutstandingAmount(selected === undefined ? "0.00" : money(safeMoneyValue(selected.outstandingAmount)));
+  };
+
+  const amountInput = parseMoneyInput(collectionAmount, { required: true });
+  const outstandingValue = safeMoneyValue(outstandingAmount);
+  const isValid =
+    traderId !== "" &&
+    collectionAmount !== "" &&
+    amountInput.ok &&
+    amountInput.value > 0 &&
+    amountInput.value <= outstandingValue;
+
+  const submit = async () => {
+    if (!isValid || saving) return;
+    setSaving(true);
+    setError(undefined);
+
+    const amount = amountInput.ok ? amountInput.value : 0;
+
+    const fingerprint = JSON.stringify({
+      traderId,
+      amountReceived: amount,
+      paymentMethod,
+      paymentDate,
+      notes: notes.trim() === "" ? undefined : notes.trim(),
+    });
+
+    try {
+      // Oldest-first allocation proposal. Its lines carry reporting fields
+      // (businessDate, outstandingBefore/After, receivableNumber, proposedAmount)
+      // that the collections endpoint's DTO does not accept — only
+      // { receivableId, amount } is forwarded.
+      const proposal = await api.post<{
+        readonly allocations: readonly { receivableId: string; proposedAmount: string }[];
+      }>("operations/trader-receivables/allocation-proposal", { traderId, amount });
+
+      await api.post("operations/trader-receivables/collections", {
+        traderId,
+        amountReceived: amount,
+        allocations: proposal.allocations.map((line) => ({
+          amount: safeMoneyValue(line.proposedAmount),
+          receivableId: line.receivableId,
+        })),
+        paymentMethod: paymentMethod || undefined,
+        paymentDate: paymentDate || undefined,
+        notes: notes.trim() === "" ? undefined : notes.trim(),
+      }, { "X-Idempotency-Key": idempotency.keyFor(fingerprint) });
+      idempotency.reset();
+      onCollected();
+    } catch (requestError) {
+      setError(message(requestError, t("traderSettlements.collectionFailed", "Failed to collect payment")));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal
+      closeLabel={t("common.close")}
+      onRequestClose={onClose}
+      title={t("traderSettlements.collectFromTrader", "Collect from Trader")}
+      titleId="collect-from-trader-title"
+    >
+      {error === undefined ? null : <div className="alert alert-error">{error}</div>}
+
+      <label className="field">
+        <span>{t("traderSettlements.filterTrader", "Trader")}</span>
+        <select onChange={(event) => handleTraderChange(event.target.value)} value={traderId}>
+          <option value="">{t("traderSettlements.selectTrader", "Select a Trader")}</option>
+          {traders.map((trader) => (
+            <option key={trader.traderId} value={trader.traderId}>
+              {trader.traderName}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      {traderId !== "" ? (
+        <>
+          <div className="summary-primary">
+            <article className="kpi-card">
+              <span>{t("traderSettlements.outstandingAmount", "Outstanding Amount")}</span>
+              <strong>{outstandingAmount}</strong>
+            </article>
+          </div>
+
+          <label className="field">
+            <span>{t("traderSettlements.collectionAmount", "Collection Amount")} (AED)</span>
+            <input
+              onChange={(event) => setCollectionAmount(event.target.value)}
+              placeholder="0.00"
+              type="number"
+              step="0.01"
+              min="0"
+              value={collectionAmount}
+            />
+            {collectionAmount !== "" && !amountInput.ok ? (
+              <small className="error">{t("traderSettlements.invalidAmount", "Invalid amount")}</small>
+            ) : null}
+            {collectionAmount !== "" && amountInput.ok && amountInput.value > outstandingValue ? (
+              <small className="error">{t("traderSettlements.amountExceedsOutstanding", "Amount exceeds outstanding balance")}</small>
+            ) : null}
+          </label>
+
+          <label className="field">
+            <span>{t("traderSettlements.filterPaymentMethod", "Payment Method")}</span>
+            <select onChange={(event) => setPaymentMethod(event.target.value as "cash" | "bank_transfer")} value={paymentMethod}>
+              <option value="cash">{t("traderSettlements.paymentMethodCash", "Cash")}</option>
+              <option value="bank_transfer">{t("traderSettlements.paymentMethodBankTransfer", "Bank Transfer")}</option>
+            </select>
+          </label>
+
+          <label className="field">
+            <span>{t("traderSettlements.paymentDate", "Payment Date")}</span>
+            <input onChange={(event) => setPaymentDate(event.target.value)} type="date" value={paymentDate} />
+          </label>
+
+          <label className="field">
+            <span>{t("common.notes", "Notes")} ({t("common.optional", "Optional")})</span>
+            <textarea
+              maxLength={300}
+              onChange={(event) => setNotes(event.target.value)}
+              placeholder={t("traderSettlements.collectionNotesPlaceholder", "Add notes about this collection...")}
+              value={notes}
+            />
+            <small>{notes.length}/300</small>
+          </label>
+        </>
+      ) : null}
+
+      <div className="modal-actions">
+        <button className="button button-secondary" onClick={onClose} type="button">
+          {t("common.cancel", "Cancel")}
+        </button>
+        <button
+          className="button button-primary"
+          disabled={!isValid || saving}
+          onClick={() => void submit()}
+          type="button"
+        >
+          {saving ? t("common.saving", "Saving...") : t("traderSettlements.confirmCollection", "Confirm Collection")}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+function AddReceivableDialog({
+  api,
+  onClose,
+  onCreated,
+}: {
+  api: ApiClient;
+  onClose: () => void;
+  onCreated: () => void;
+}) {
+  const { t } = useTranslation();
+  const [traders, setTraders] = useState<readonly OperationsTrader[]>([]);
+  const [traderId, setTraderId] = useState("");
+  const [sourceType, setSourceType] = useState("manual_adjustment");
+  const [sourceReference, setSourceReference] = useState("");
+  const [reason, setReason] = useState("");
+  const [businessDate, setBusinessDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [amountDue, setAmountDue] = useState("");
+  const [error, setError] = useState<string>();
+  const [saving, setSaving] = useState(false);
+  const idempotency = useIdempotencyKey();
+
+  const sourceTypes = [
+    { value: "manual_adjustment", label: t("traderReceivable.sourceType.manualAdjustment", "Manual Adjustment") },
+    { value: "trader_penalty", label: t("traderReceivable.sourceType.traderPenalty", "Trader Penalty") },
+    { value: "overpayment_recovery", label: t("traderReceivable.sourceType.overpaymentRecovery", "Overpayment Recovery") },
+    { value: "refund_due", label: t("traderReceivable.sourceType.refundDue", "Refund Due") },
+    { value: "service_charge", label: t("traderReceivable.sourceType.serviceCharge", "Service Charge") },
+    { value: "damaged_or_lost_shipment_recovery", label: t("traderReceivable.sourceType.damagedShipment", "Damaged/Lost Shipment") },
+    { value: "other", label: t("common.other", "Other") },
+  ];
+
+  useEffect(() => {
+    void api
+      .get<readonly OperationsTrader[]>("operations/traders")
+      .then((rows) => setTraders(rows.filter((row) => row.status === "active")))
+      .catch(() => setTraders([]));
+  }, [api]);
+
+  const amountInput = parseMoneyInput(amountDue, { required: true });
+  const isValid = traderId !== "" && reason.trim() !== "" && businessDate !== "" && amountInput.ok && amountInput.value > 0;
+
+  const submit = async () => {
+    if (!isValid || saving) return;
+    setSaving(true);
+    setError(undefined);
+
+    const fingerprint = JSON.stringify({
+      traderId,
+      sourceType,
+      sourceReference: sourceReference.trim() === "" ? undefined : sourceReference.trim(),
+      reason: reason.trim(),
+      businessDate,
+      amountDue: amountInput.ok ? amountInput.value : 0,
+    });
+
+    try {
+      await api.post("operations/trader-receivables/receivables", {
+        traderId,
+        sourceType,
+        sourceReference: sourceReference.trim() === "" ? undefined : sourceReference.trim(),
+        reason: reason.trim(),
+        businessDate,
+        amountDue: amountInput.ok ? amountInput.value : 0,
+      }, { "X-Idempotency-Key": idempotency.keyFor(fingerprint) });
+      idempotency.reset();
+      onCreated();
+    } catch (requestError) {
+      setError(message(requestError, t("traderSettlements.receivableCreationFailed", "Failed to add charge")));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal
+      closeLabel={t("common.close")}
+      onRequestClose={onClose}
+      title={t("traderSettlements.addReceivable", "Add Charge to Trader")}
+      titleId="add-receivable-title"
+    >
+      {error === undefined ? null : <div className="alert alert-error">{error}</div>}
+
+      <label className="field">
+        <span>{t("traderSettlements.filterTrader", "Trader")}</span>
+        <select onChange={(event) => setTraderId(event.target.value)} value={traderId}>
+          <option value="">{t("traderSettlements.selectTrader", "Select a Trader")}</option>
+          {traders.map((trader) => (
+            <option key={trader.id} value={trader.id}>
+              {trader.name}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <label className="field">
+        <span>{t("traderReceivable.sourceType", "Charge Type")}</span>
+        <select onChange={(event) => setSourceType(event.target.value)} value={sourceType}>
+          {sourceTypes.map((type) => (
+            <option key={type.value} value={type.value}>
+              {type.label}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <label className="field required-field">
+        <span>{t("common.reason", "Reason")}</span>
+        <textarea
+          maxLength={500}
+          onChange={(event) => setReason(event.target.value)}
+          placeholder={t("traderReceivable.reasonPlaceholder", "Explain why this charge is being applied...")}
+          value={reason}
+        />
+        <small>{reason.length}/500</small>
+      </label>
+
+      <label className="field">
+        <span>{t("traderReceivable.sourceReference", "Reference / Details")}</span>
+        <textarea
+          maxLength={160}
+          onChange={(event) => setSourceReference(event.target.value)}
+          placeholder={t("traderReceivable.sourceReferencePlaceholder", "Enter details about this charge...")}
+          value={sourceReference}
+        />
+        <small>{sourceReference.length}/160</small>
+      </label>
+
+      <label className="field">
+        <span>{t("configuration.businessDay.businessDate", "Business Date")}</span>
+        <input onChange={(event) => setBusinessDate(event.target.value)} type="date" value={businessDate} />
+      </label>
+
+      <label className="field">
+        <span>{t("traderReceivable.amountDue", "Amount Due")} (AED)</span>
+        <input
+          onChange={(event) => setAmountDue(event.target.value)}
+          placeholder="0.00"
+          type="number"
+          step="0.01"
+          min="0"
+          value={amountDue}
+        />
+        {!amountInput.ok && amountDue !== "" ? (
+          <small className="error">{t("traderSettlements.invalidAmount", "Invalid amount")}</small>
+        ) : null}
+      </label>
+
+      <div className="modal-actions">
+        <button className="button button-secondary" onClick={onClose} type="button">
+          {t("common.cancel", "Cancel")}
+        </button>
+        <button
+          className="button button-primary"
+          disabled={!isValid || saving}
+          onClick={() => void submit()}
+          type="button"
+        >
+          {saving ? t("common.saving", "Saving...") : t("traderSettlements.addCharge", "Add Charge")}
+        </button>
+      </div>
     </Modal>
   );
 }

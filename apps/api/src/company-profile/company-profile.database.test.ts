@@ -31,6 +31,20 @@ const PNG = Buffer.concat([
 const JPEG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(64, 0x22)]);
 
 class MemoryStorage extends FileStoragePort {
+  // The Commerce half of the port. This double exists for the Company logo
+  // flow, which never touches Commerce storage, so these assert rather than
+  // pretend to work — a Company test that reached them would be a bug worth
+  // failing loudly.
+  public storeCommerce(): never {
+    throw new Error("MemoryStorage does not implement Commerce storage");
+  }
+  public readCommerce(): never {
+    throw new Error("MemoryStorage does not implement Commerce storage");
+  }
+  public deleteCommerce(): never {
+    throw new Error("MemoryStorage does not implement Commerce storage");
+  }
+
   public readonly files = new Map<string, Buffer>();
   private sequence = 0;
 
@@ -188,7 +202,13 @@ describe.skipIf(!runDatabaseTests)("Company Profile (Phase A)", () => {
 
           // Whitespace-only subtitles collapse to null.
           const blanked = await serviceA.profile.updateProfile(
-            { nameAr: "اسم", nameEn: "Acme", subtitleAr: "   ", subtitleEn: "  ", telephone: "04-1234567" },
+            {
+              nameAr: "اسم",
+              nameEn: "Acme",
+              subtitleAr: "   ",
+              subtitleEn: "  ",
+              telephone: "04-1234567",
+            },
             "corr-a2",
           );
           expect(blanked.subtitleAr).toBeNull();
@@ -253,7 +273,11 @@ describe.skipIf(!runDatabaseTests)("Company Profile (Phase A)", () => {
           ).rejects.toMatchObject({ errorCode: "logo_invalid" });
           await expect(
             serviceA.profile.uploadLogo(
-              { buffer: Buffer.from("<svg/>", "utf8"), mimetype: "image/png", originalname: "x.png" },
+              {
+                buffer: Buffer.from("<svg/>", "utf8"),
+                mimetype: "image/png",
+                originalname: "x.png",
+              },
               "corr-a7",
             ),
           ).rejects.toMatchObject({ errorCode: "logo_invalid" });

@@ -1,6 +1,7 @@
 # Dependencies and build output
 node_modules/
 dist/
+dist-ssr/
 coverage/
 .turbo/
 .vite/
@@ -46,6 +47,13 @@ apps/mobile/.dart_tool/
 apps/mobile/.flutter-plugins
 apps/mobile/.flutter-plugins-dependencies
 apps/mobile/build/
+mobile_app/.dart_tool/
+mobile_app/.flutter-plugins
+mobile_app/.flutter-plugins-dependencies
+mobile_app/build/
+
+# Workspace-local development toolchains
+.tools/
 
 # Document QA intermediates
 .docx_review/
@@ -57,9 +65,15 @@ uploads/
 private-files/
 # Locally-stored private file bytes (Company logos, etc.)
 .file-storage/
+# Same, but written by the guarded communication DB test suite's voice-message tests
+.file-storage-test/
 
 # Local database backups and baselines (never commit)
 .backups/
+backup/
+
+# Local QA screenshot/output dumps (regenerable, not source)
+test-artifacts/
 
 # Preserved test failure logs
 .test-failures/
@@ -67,3 +81,9 @@ private-files/
 # Generated local accounting artifacts
 Dana/*.xlsx
 outputs/
+
+# Local administrator recovery scripts may contain one-time credentials
+apps/api/reset-*.local.ts
+
+# Store server bundle
+apps/store/dist-server/

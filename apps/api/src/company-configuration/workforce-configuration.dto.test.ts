@@ -3,13 +3,32 @@ import "reflect-metadata";
 import { validate } from "class-validator";
 
 import {
+  ChangeEmployeeRoleStatusDto,
   CreateCommissionRuleDto,
   EmployeeAllowanceDto,
+  SaveCollectionEarningRuleDto,
   SaveDriverDto,
   SaveEmployeeDto,
 } from "./workforce-configuration.dto.js";
 
 describe("workforce configuration DTOs", () => {
+  it("accepts a Role status change with isActive true or false", async () => {
+    for (const isActive of [true, false]) {
+      const input = Object.assign(new ChangeEmployeeRoleStatusDto(), { isActive });
+      await expect(validate(input)).resolves.toEqual([]);
+    }
+  });
+
+  it("rejects a Role status change missing isActive or given a non-boolean", async () => {
+    const missing = await validate(Object.assign(new ChangeEmployeeRoleStatusDto(), {}));
+    expect(missing.map((error) => error.property)).toEqual(["isActive"]);
+
+    const wrongType = await validate(
+      Object.assign(new ChangeEmployeeRoleStatusDto(), { isActive: "yes" }),
+    );
+    expect(wrongType.map((error) => error.property)).toEqual(["isActive"]);
+  });
+
   it("accepts an Employee with a role, salary and four allowances", async () => {
     const input = Object.assign(new SaveEmployeeDto(), {
       allowances: Array.from({ length: 4 }, (_, index) =>
@@ -104,5 +123,18 @@ describe("workforce configuration DTOs", () => {
     const invalid = Object.assign(new CreateCommissionRuleDto(), { ...valid, rate: -1 });
     await expect(validate(valid)).resolves.toEqual([]);
     await expect(validate(invalid)).resolves.not.toEqual([]);
+  });
+
+  it("accepts None and Per Collected Order but rejects legacy flat collection rules", async () => {
+    const rule = (collectionPaymentType: string, amount: number) =>
+      Object.assign(new SaveCollectionEarningRuleDto(), {
+        amount,
+        collectionPaymentType,
+        effectiveFrom: "2026-08-08",
+      });
+    await expect(validate(rule("none", 0))).resolves.toEqual([]);
+    await expect(validate(rule("per_collected_order", 1))).resolves.toEqual([]);
+    const errors = await validate(rule("flat_per_confirmed_collection", 5));
+    expect(errors.map((error) => error.property)).toContain("collectionPaymentType");
   });
 });

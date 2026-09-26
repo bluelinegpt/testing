@@ -1,0 +1,396 @@
+You are working on BluelineGPT only.
+
+Audit and fix Driver Collection expenses not appearing in General Expenses / Daily Operations Summary.
+
+CURRENT MANUAL CASE
+
+On Render:
+
+Driver Collection:
+
+REC-000027
+
+Driver:
+Ahmed
+
+Driver Type:
+Employee
+
+Business Date:
+2026-08-11
+
+Driver Expense:
+
+Expense Type:
+Petrol
+
+Amount:
+AED 30
+
+Entered By:
+omar
+
+The reconciliation is Confirmed and has related accounting Journal:
+
+JRN-000087
+
+However:
+
+1. Reports → Daily Operations Summary
+   Date range 11 Aug → 12 Aug
+
+shows:
+
+Expenses and Payments:
+No data for selected period
+
+Total Expenses:
+AED 0
+
+2. Accounting → General Expenses
+
+shows:
+
+No records were found
+
+So the AED 30 Petrol entered during Driver Collection is not visible in either General Expenses or the Daily Operations Summary.
+
+==================================================
+
+1. AUDIT FIRST
+   ==================================================
+
+Inspect:
+
+* Driver Collection expense schema/table
+* DriverCashReconciliationService
+* reconciliation expense creation
+* accounting event/journal generation for reconciliation expenses
+* General Expense schema/service
+* Expense Payments
+* Daily Operations Summary expense source loader/query
+* Accounting source loader
+* Cashbook
+* expense reporting
+* current tests
+
+Determine exactly where REC-000027 Petrol AED 30 is stored.
+
+Do not assume it should be copied into General Expenses until the current accounting treatment is understood.
+
+==================================================
+2. TRACE ACCOUNTING IMPACT
+==========================
+
+For REC-000027 Petrol AED 30:
+
+trace:
+
+Driver Collection
+→ Driver Expense record
+→ Accounting Event if any
+→ JRN-000087
+→ GL accounts
+→ Cash/Driver receivable/expense effect
+
+Report the actual journal lines.
+
+Determine whether the AED 30 is already recognized as Company expense.
+
+If yes:
+do NOT create a second General Expense financial posting.
+
+If no:
+identify the missing accounting step.
+
+==================================================
+3. BUSINESS REQUIREMENT
+=======================
+
+A Driver-level expense entered during Driver Collection is a Company operating expense.
+
+Example:
+
+Petrol AED 30
+
+It must appear in management reporting as an Expense.
+
+The user must be able to trace:
+
+Driver Collection
+→ Expense
+→ Accounting
+→ Report
+
+Do not hide it only inside the reconciliation detail.
+
+==================================================
+4. GENERAL EXPENSE VISIBILITY
+=============================
+
+Audit whether Driver Collection Expenses should appear directly in:
+
+Accounting → General Expenses
+
+Preferred behavior:
+
+The General Expenses area should show operating expenses regardless of originating workflow, but distinguish the Source Type.
+
+Example row:
+
+Expense:
+Petrol
+
+Amount:
+AED 30
+
+Source:
+Driver Collection
+
+Source Reference:
+REC-000027
+
+Driver:
+Ahmed
+
+Status:
+Posted/Confirmed
+
+If the existing General Expenses table is intentionally only for manually-created General Expense batches, do NOT force-insert duplicate rows.
+
+In that case:
+either
+A. extend General Expenses enquiry to include external operational expense sources
+or
+B. provide a unified Operating Expenses enquiry/report.
+
+Choose based on repository architecture.
+
+==================================================
+5. NO DUPLICATE ACCOUNTING
+==========================
+
+Critical.
+
+Do not create:
+
+* a Driver Collection expense journal
+  AND
+* a second General Expense journal
+
+for the same AED 30.
+
+There must be exactly one economic expense.
+
+If the Driver Collection already posted:
+
+Dr Petrol/Fuel Expense 30
+Cr appropriate reconciliation/cash/driver account 30
+
+then General Expenses/reporting should READ/REFERENCE that posted source, not repost it.
+
+==================================================
+6. DAILY OPERATIONS SUMMARY
+===========================
+
+Add Driver Collection expenses as an included operating-expense source.
+
+For selected Date Mode / period:
+
+REC-000027 Petrol AED 30
+
+should appear under:
+
+Expenses and Payments
+
+Example:
+
+Business Date: 11 Aug 2026
+Calendar Date: actual transaction date
+Type: Driver Collection Expense
+Description: Petrol
+Payee/Driver: Ahmed
+Reference: REC-000027
+Amount: AED 30
+
+Reference should drill down to REC-000027 Collection Detail.
+
+==================================================
+7. DATE SEMANTICS
+=================
+
+Respect the report Date Mode:
+
+Business Day:
+use reconciliation/expense Business Date.
+
+Calendar Day:
+use actual local transaction timestamp/calendar date.
+
+Do not use General Expense dates if this source is not a General Expense row.
+
+==================================================
+8. EXPENSE CATEGORY
+===================
+
+The Driver Collection Expense type:
+
+Petrol
+
+should map/report using the appropriate operating expense category/account.
+
+Audit whether the Driver Expense currently stores:
+
+* expense type
+* category id
+* GL mapping
+* reason
+
+Do not map Petrol incorrectly to Office Supplies.
+
+If Driver Collection currently uses a different expense taxonomy, document how it maps to report categories.
+
+==================================================
+9. GENERAL EXPENSE SCREEN OPTION
+================================
+
+If architecture supports a unified General Expenses enquiry safely, show Driver Collection expense there as a read-only externally sourced expense.
+
+Recommended fields:
+
+Expense / Source Reference
+Expense Date / Business Date
+Source Type
+Driver
+Description
+Gross
+Paid/Applied
+Status
+
+For REC-000027:
+
+Source Type:
+Driver Collection Expense
+
+Reference:
+REC-000027
+
+Petrol:
+AED 30
+
+If this is not appropriate for the existing General Expense lifecycle screen, do not distort that screen. Report the architectural reason and keep it in a dedicated operational-expense enquiry while ensuring Daily Operations Summary includes it.
+
+==================================================
+10. SOURCE DRILL-DOWN
+=====================
+
+In Daily Operations Summary:
+
+click REC-000027
+→ open exact Collection Detail.
+
+Do not route only to Driver Collections list.
+
+==================================================
+11. CURRENT REGRESSION CASE
+===========================
+
+Use live-like fixture:
+
+Driver Ahmed
+Reconciliation REC-000027
+Confirmed
+Petrol Driver Expense = AED 30
+
+Expected:
+
+Daily Operations Summary:
+Expense row = AED 30
+
+Total Expenses increases by AED 30.
+
+If Delivery Income in selected period is AED 75:
+
+Expected Net:
+AED 75 - AED 30 = AED 45 Positive
+
+assuming there are no other included expenses.
+
+General Expense/Operating Expense enquiry:
+REC-000027 Petrol visible according to architecture decision.
+
+Accounting:
+AED 30 recognized exactly once.
+
+==================================================
+12. TESTS
+=========
+
+Add/update:
+
+1. Driver Collection Petrol expense stored.
+2. confirmed reconciliation expense has exact accounting effect.
+3. no duplicate expense journal.
+4. Daily Operations Summary includes Driver Collection expense.
+5. Total Expenses includes AED 30.
+6. Net Result adjusts correctly.
+7. Business Date mode correct.
+8. Calendar Date mode correct.
+9. reference drill-down opens REC-000027.
+10. General Expense/unified expense enquiry visibility follows chosen architecture.
+11. Petrol category/account correct.
+12. Company isolation.
+13. reversal behavior removes/reverses report impact correctly.
+14. screen/PDF/Excel totals agree.
+
+==================================================
+13. REVERSAL
+============
+
+If REC-000027 is reversed:
+
+the expense must no longer contribute as a positive operating expense without corresponding reversal treatment.
+
+Follow existing reversal/report conventions.
+
+Do not simply delete history.
+
+==================================================
+14. SCOPE PROTECTION
+====================
+
+Do NOT modify unrelated:
+
+* Driver earnings
+* Payroll
+* Trader settlement
+* Order workflow
+* Free Order
+* Opening Balance
+* other projects
+
+==================================================
+15. REPORT BACK
+===============
+
+Report:
+
+1. exact storage location of Driver expense
+2. exact JRN-000087 accounting treatment
+3. whether General Expense duplication risk existed
+4. chosen General Expense visibility design
+5. Daily Operations Summary integration
+6. date-mode behavior
+7. drill-down
+8. files changed
+9. tests/results
+10. typecheck/lint
+11. remaining limitations
+
+Final status exactly one of:
+
+DRIVER_COLLECTION_EXPENSE_INTEGRATION_COMPLETE
+
+or
+
+DRIVER_COLLECTION_EXPENSE_INTEGRATION_BLOCKED

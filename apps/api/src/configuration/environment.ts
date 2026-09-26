@@ -2,11 +2,21 @@ import { isAbsolute, resolve } from "node:path";
 
 const environments = ["development", "test", "production"] as const;
 type ApplicationEnvironment = (typeof environments)[number];
-const fileStorageProviders = ["local"] as const;
+const fileStorageProviders = ["local", "r2"] as const;
 type FileStorageProvider = (typeof fileStorageProviders)[number];
 const logLevels = ["fatal", "error", "warn", "info", "debug", "trace", "silent"] as const;
 
 export interface AppConfiguration {
+  websiteDomains: {
+    provider: "disabled" | "cloudflare";
+    cloudflareApiToken: string | undefined;
+    cloudflareZoneId: string | undefined;
+    cnameTarget: string | undefined;
+  };
+  companyDeletion: {
+    backupRoot: string;
+    timeoutMs: number;
+  };
   app: {
     corsOrigins: string[];
     environment: ApplicationEnvironment;
@@ -26,19 +36,63 @@ export interface AppConfiguration {
     url: string;
   };
   files: {
-    /** Storage provider for private file objects (currently only "local"). */
+    /** Storage provider for private file objects: "local" or "r2". */
     provider: FileStorageProvider;
     /**
      * Absolute directory that holds privately-stored file bytes. It must live
      * OUTSIDE any web root — nothing serves it statically; logos are streamed
-     * only through an authenticated, Company-scoped endpoint.
+     * only through an authenticated, Company-scoped endpoint. Only read when
+     * provider is "local".
      */
     localRoot: string;
+    /**
+     * Cloudflare R2 (S3-compatible) settings. Only read when provider is
+     * "r2" -- undefined otherwise, so a "local" deployment never needs these
+     * set. R2's own endpoint is derived from accountId
+     * (https://{accountId}.r2.cloudflarestorage.com); region is always
+     * "auto", R2's own convention, not a real AWS region.
+     */
+    r2:
+      | {
+          readonly accountId: string;
+          readonly accessKeyId: string;
+          readonly bucketName: string;
+          readonly secretAccessKey: string;
+        }
+      | undefined;
+  };
+  push: {
+    /**
+     * The Firebase Admin SDK service-account credential, as a JSON string
+     * (never a file path — this deploys the same way the rest of the app's
+     * secrets do, via an environment variable, and is never committed).
+     * Absent in DEV until a real Firebase project exists: `FirebasePushProvider`
+     * treats that as "not configured" and reports every send as a transient
+     * failure rather than throwing at bootstrap, so the API starts and runs
+     * normally without it.
+     */
+    firebaseServiceAccountJson: string | undefined;
+  };
+  whatsapp: {
+    accessToken: string | undefined;
+    appSecret: string | undefined;
+    phoneNumberId: string | undefined;
+    verifyToken: string | undefined;
+    graphApiBaseUrl: string;
+    /**
+     * Base64 of exactly 32 random bytes, used by `WhatsAppSessionCipher`
+     * (AES-256-GCM) to encrypt per-Company WhatsApp provider session state
+     * at rest. Lives only in the environment — never in the database, never
+     * committed. Optional until the real provider ships (Prompt 2): absent
+     * means session encryption is "not configured" and encryption refuses to
+     * run, rather than falling back to plaintext.
+     */
+    sessionEncryptionKey: string | undefined;
   };
   tenancy: {
     /**
-     * Host suffix the Company subdomain is taken from, e.g. "bluelinegpt.com"
-     * resolves `acme.bluelinegpt.com` to the Company subdomain `acme`.
+     * Host suffix the Company app label is taken from. For example,
+     * `acmeapp.tawseelhub.com` resolves to Company subdomain `acme`.
      */
     hostSuffix: string | undefined;
     /**
@@ -88,7 +142,7 @@ function parseCorsOrigins(
     throw new Error("CORS_ORIGINS is required in production");
   }
 
-  const origins = (value ?? "http://localhost:5174")
+  const origins = (value ?? "http://localhost:5174,http://localhost:5177")
     .split(",")
     .map((origin) => origin.trim())
     .filter(Boolean);
@@ -141,6 +195,18 @@ function parseLogLevel(value: string | undefined): string {
 
 const subdomainPattern = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 
+/** Validated at startup so a malformed key fails loudly at boot, not at the
+ *  first encryption attempt deep inside a connection flow. */
+function parseWhatsAppSessionEncryptionKey(value: string | undefined): string | undefined {
+  const encoded = value?.trim();
+  if (encoded === undefined || encoded.length === 0) return undefined;
+  const decoded = Buffer.from(encoded, "base64");
+  if (decoded.length !== 32) {
+    throw new Error("WHATSAPP_SESSION_ENCRYPTION_KEY must be base64 of exactly 32 bytes");
+  }
+  return encoded;
+}
+
 function parseOptionalHostSuffix(value: string | undefined): string | undefined {
   const suffix = value?.trim().toLowerCase().replace(/^\.+/, "");
   if (suffix === undefined || suffix.length === 0) return undefined;
@@ -180,13 +246,41 @@ function parseFileStorageProvider(value: string | undefined): FileStorageProvide
   return normalized as FileStorageProvider;
 }
 
+/** Required, all four, only when FILE_STORAGE_PROVIDER=r2 -- fails startup
+ *  immediately rather than booting into a File Storage that will throw on
+ *  every request. Undefined (not read) when the provider is "local". */
+function parseFileStorageR2(provider: FileStorageProvider): AppConfiguration["files"]["r2"] {
+  if (provider !== "r2") return undefined;
+  const required = (name: string, value: string | undefined): string => {
+    const trimmed = value?.trim();
+    if (trimmed === undefined || trimmed.length === 0) {
+      throw new Error(`${name} is required when FILE_STORAGE_PROVIDER=r2`);
+    }
+    return trimmed;
+  };
+  return {
+    accountId: required("R2_ACCOUNT_ID", process.env.R2_ACCOUNT_ID),
+    accessKeyId: required("R2_ACCESS_KEY_ID", process.env.R2_ACCESS_KEY_ID),
+    bucketName: required("R2_BUCKET_NAME", process.env.R2_BUCKET_NAME),
+    secretAccessKey: required("R2_SECRET_ACCESS_KEY", process.env.R2_SECRET_ACCESS_KEY),
+  };
+}
+
 function parseFileStorageLocalRoot(
   value: string | undefined,
   environment: ApplicationEnvironment,
+  // Optional and defaulted to "local": the unrelated companyDeletion.backupRoot
+  // reuses this same path-resolution helper and has nothing to do with the
+  // file storage provider, so it always wants the strict production-required
+  // behavior below, same as before this parameter existed.
+  provider: FileStorageProvider = "local",
 ): string {
   const raw = value?.trim();
   if (raw === undefined || raw.length === 0) {
-    if (environment === "production") {
+    // Only required in production when it's actually the active provider --
+    // an r2 deployment has no local disk to fall back to, and shouldn't need
+    // to set an unused path just to satisfy this check.
+    if (environment === "production" && provider === "local") {
       throw new Error("FILE_STORAGE_LOCAL_ROOT is required in production");
     }
     return resolve(process.cwd(), ".file-storage");
@@ -215,6 +309,43 @@ export function configuration(): AppConfiguration {
   }
 
   return {
+    websiteDomains: (() => {
+      const provider =
+        process.env.COMPANY_WEBSITE_DOMAIN_PROVIDER?.trim().toLowerCase() || "disabled";
+      if (!(["disabled", "cloudflare"] as const).includes(provider as "disabled" | "cloudflare"))
+        throw new Error("COMPANY_WEBSITE_DOMAIN_PROVIDER must be disabled or cloudflare");
+      const cloudflareApiToken =
+        process.env.CLOUDFLARE_CUSTOM_HOSTNAMES_API_TOKEN?.trim() || undefined;
+      const cloudflareZoneId = process.env.CLOUDFLARE_CUSTOM_HOSTNAMES_ZONE_ID?.trim() || undefined;
+      const cnameTarget =
+        process.env.COMPANY_WEBSITE_CUSTOM_DOMAIN_CNAME_TARGET?.trim().toLowerCase() || undefined;
+      if (
+        environment === "production" &&
+        provider === "cloudflare" &&
+        (!cloudflareApiToken || !cloudflareZoneId || !cnameTarget)
+      )
+        throw new Error("Cloudflare custom-hostname configuration is incomplete");
+      return {
+        provider: provider as "disabled" | "cloudflare",
+        cloudflareApiToken,
+        cloudflareZoneId,
+        cnameTarget,
+      };
+    })(),
+    companyDeletion: {
+      backupRoot: parseFileStorageLocalRoot(
+        process.env.COMPANY_DELETION_BACKUP_ROOT ??
+          resolve(process.cwd(), ".backups/company-deletion"),
+        environment,
+      ),
+      timeoutMs: parseInteger(
+        process.env.COMPANY_DELETION_BACKUP_TIMEOUT_MS,
+        "COMPANY_DELETION_BACKUP_TIMEOUT_MS",
+        300_000,
+        10_000,
+        1_800_000,
+      ),
+    },
     app: {
       corsOrigins: parseCorsOrigins(process.env.CORS_ORIGINS, environment),
       environment,
@@ -270,9 +401,34 @@ export function configuration(): AppConfiguration {
       ),
       url: parseDatabaseUrl(process.env.DATABASE_URL, environment),
     },
-    files: {
-      localRoot: parseFileStorageLocalRoot(process.env.FILE_STORAGE_LOCAL_ROOT, environment),
-      provider: parseFileStorageProvider(process.env.FILE_STORAGE_PROVIDER),
+    files: (() => {
+      const provider = parseFileStorageProvider(process.env.FILE_STORAGE_PROVIDER);
+      return {
+        localRoot: parseFileStorageLocalRoot(
+          process.env.FILE_STORAGE_LOCAL_ROOT,
+          environment,
+          provider,
+        ),
+        provider,
+        r2: parseFileStorageR2(provider),
+      };
+    })(),
+    push: {
+      firebaseServiceAccountJson:
+        process.env.FIREBASE_SERVICE_ACCOUNT_JSON?.trim() === ""
+          ? undefined
+          : process.env.FIREBASE_SERVICE_ACCOUNT_JSON,
+    },
+    whatsapp: {
+      accessToken: process.env.WHATSAPP_ACCESS_TOKEN?.trim() || undefined,
+      appSecret: process.env.WHATSAPP_APP_SECRET?.trim() || undefined,
+      phoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID?.trim() || undefined,
+      verifyToken: process.env.WHATSAPP_VERIFY_TOKEN?.trim() || undefined,
+      graphApiBaseUrl:
+        process.env.WHATSAPP_GRAPH_API_BASE_URL?.trim() || "https://graph.facebook.com/v20.0",
+      sessionEncryptionKey: parseWhatsAppSessionEncryptionKey(
+        process.env.WHATSAPP_SESSION_ENCRYPTION_KEY,
+      ),
     },
   };
 }

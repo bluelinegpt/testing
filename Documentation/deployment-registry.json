@@ -1,0 +1,70 @@
+{
+  "$comment": "Local-version-vs-Render status catalog, shown on /administration/deployment-status (Company Portal) and Platform Administration's Deployment Registry screen. Kept current by .githooks/post-commit and .githooks/pre-push via scripts/deployment-registry.mjs -- not by hand. confirmed_live/confirmedLiveAt are the one exception: only a human confirming Render is actually showing the change sets those (scripts/deployment-registry.mjs mark-confirmed-live).",
+  "apps": [
+    {
+      "id": "public-web",
+      "displayName": "Public website",
+      "path": "apps/public-web",
+      "renderService": "tawseelhub-public-web",
+      "status": "pushed_awaiting_confirmation",
+      "localCommit": "09425fc",
+      "localCommitDate": "2026-09-22",
+      "lastChangeDescription": "Separates Agent widget opens, meaningful conversations, contacts, and qualified leads with privacy-safe attribution.",
+      "lastChangeBy": "codex",
+      "confirmedLiveCommit": null,
+      "confirmedLiveAt": null
+    },
+    {
+      "id": "api",
+      "displayName": "API",
+      "path": "apps/api",
+      "renderService": "bluelinegpt-api-test",
+      "status": "needs_deploy",
+      "localCommit": "c82540c",
+      "localCommitDate": "2026-09-24",
+      "lastChangeDescription": "Protect International orders from collections",
+      "lastChangeBy": "codex",
+      "confirmedLiveCommit": "e3de371",
+      "confirmedLiveAt": "2026-09-01"
+    },
+    {
+      "id": "web",
+      "displayName": "Main app",
+      "path": "apps/web",
+      "renderService": "bluelinegpt-web-test",
+      "status": "needs_deploy",
+      "localCommit": "c82540c",
+      "localCommitDate": "2026-09-24",
+      "lastChangeDescription": "Protect International orders from collections",
+      "lastChangeBy": "codex",
+      "confirmedLiveCommit": "9666706",
+      "confirmedLiveAt": "2026-09-01"
+    },
+    {
+      "id": "platform-web",
+      "displayName": "Platform admin",
+      "path": "apps/platform-web",
+      "renderService": "bluelinegpt-platform-test",
+      "status": "pushed_awaiting_confirmation",
+      "localCommit": "09425fc",
+      "localCommitDate": "2026-09-22",
+      "lastChangeDescription": "Adds distinct Agent analytics metrics, visitor-context filters, lead status, and safe follow-up actions.",
+      "lastChangeBy": "codex",
+      "confirmedLiveCommit": "aee8bb0",
+      "confirmedLiveAt": "2026-08-31"
+    },
+    {
+      "id": "store",
+      "displayName": "Store",
+      "path": "apps/store",
+      "renderService": null,
+      "status": "pushed_awaiting_confirmation",
+      "localCommit": "22a6d95",
+      "localCommitDate": "2026-08-29",
+      "lastChangeDescription": "Expanded Company websites, local tenant routing, public tracking, checkout, and Platform lifecycle tools.",
+      "lastChangeBy": "codex",
+      "confirmedLiveCommit": null,
+      "confirmedLiveAt": null
+    }
+  ]
+}

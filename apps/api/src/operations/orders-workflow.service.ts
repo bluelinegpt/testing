@@ -10,25 +10,39 @@ import { KyselyTransactionManager } from "../infrastructure/database/transaction
 import { ApplicationException } from "../presentation/errors/application.exception.js";
 import { IdentityContextAccessor } from "../security/identity-context.js";
 import { TenantContextAccessor } from "../tenancy/tenant-context.js";
+import { PushOutboxWriter } from "../push/push-outbox-writer.service.js";
+import { EmployeeDeliveryEarningService } from "../payroll/employee-delivery-earning.service.js";
 import { OutsourcedDriverFeeService } from "../payroll/outsourced-driver-fee.service.js";
 import { OperationsHistoryWriter } from "./operations-history.writer.js";
 import type {
   BulkAssignDriverDto,
   BulkChangeOrderStatusDto,
+  BulkChangeInternationalCarrierStatusDto,
   OrderSelectionDto,
+  ReactivateHoldOrdersDto,
 } from "./operations.dto.js";
 
 interface SelectedOrder {
   readonly assignedDriverId: string | null;
   readonly deliveryStatus: string;
+  readonly internationalCarrierStatus: string | null;
   readonly driverCost: string;
   readonly driverReconciliationStatus: string;
   readonly id: string;
+  readonly isFreeOrder: boolean;
   readonly orderNumber: string;
+  readonly orderType: "collect_order" | "delivery" | "gcc_international";
   readonly returnStatus: string;
   readonly settlementStatus: string;
   readonly amountCollected: string;
   readonly customerAmountDue: string;
+  readonly traderNetPayable: string;
+}
+
+export function internationalDriverAssignmentError(orderType: string, hasDriverAssignment: boolean): string | null {
+  return orderType === "gcc_international" && hasDriverAssignment
+    ? "International Orders cannot be assigned to an internal Driver"
+    : null;
 }
 
 export interface BulkActionPreview {
@@ -54,19 +68,126 @@ export class OrdersWorkflowService {
     @Inject(OperationsHistoryWriter) private readonly history: OperationsHistoryWriter,
     @Inject(OutsourcedDriverFeeService)
     private readonly outsourcedDriverFees: OutsourcedDriverFeeService,
+    @Inject(EmployeeDeliveryEarningService)
+    private readonly employeeDeliveryEarnings: EmployeeDeliveryEarningService,
+    @Inject(PushOutboxWriter) private readonly pushOutbox: PushOutboxWriter,
   ) {}
+
+  public async reactivateHoldOrders(input: ReactivateHoldOrdersDto, correlationId: string) {
+    this.assertAnyPermission("orders.update_delivery_status");
+    if (input.orders.length === 0)
+      throw new ApplicationException(
+        "hold_reactivation_empty",
+        "Select at least one Hold Order",
+        HttpStatus.BAD_REQUEST,
+      );
+    const { companyId } = this.tenants.current();
+    const actor = this.identities.current();
+    const normalized = input.orders.map((row) => ({
+      ...row,
+      normalized: row.newSerialNumber
+        .normalize("NFKC")
+        .trim()
+        .replace(/\s+/gu, " ")
+        .toLocaleLowerCase("en-US"),
+    }));
+    const batchKeys = new Set(normalized.map((row) => `${row.newSerialDate}:${row.normalized}`));
+    if (batchKeys.size !== normalized.length)
+      throw new ApplicationException(
+        "hold_reactivation_duplicate_serial",
+        "Serial Numbers must be unique inside the batch",
+        HttpStatus.CONFLICT,
+      );
+    return this.transactions.execute(async (transaction) => {
+      const ids = normalized.map((row) => row.orderId);
+      const current = await sql<{
+        assignedDriverId: string | null;
+        id: string;
+        orderDate: string;
+        orderNumber: string;
+        serialNumber: string | null;
+        status: string;
+      }>`
+        select id,order_number "orderNumber",serial_number "serialNumber",order_date::text "orderDate",
+          delivery_status status,assigned_driver_id "assignedDriverId" from orders
+        where company_id=${companyId}::uuid and id in (${sql.join(ids.map((id) => sql`${id}::uuid`))}) order by id for update`.execute(
+        transaction,
+      );
+      if (current.rows.length !== ids.length || current.rows.some((row) => row.status !== "hold"))
+        throw new ApplicationException(
+          "hold_reactivation_requires_hold",
+          "Every selected Order must still be on Hold",
+          HttpStatus.CONFLICT,
+        );
+      const conflicts = await sql<{
+        id: string;
+      }>`select o.id from orders o where o.company_id=${companyId}::uuid
+        and o.id not in (${sql.join(ids.map((id) => sql`${id}::uuid`))}) and exists(select 1 from jsonb_to_recordset(${JSON.stringify(normalized)}::jsonb)
+          as x("newSerialDate" date,normalized text) where x."newSerialDate"=o.order_date and x.normalized=o.serial_number_normalized) limit 1`.execute(
+        transaction,
+      );
+      if (conflicts.rows[0])
+        throw new ApplicationException(
+          "hold_reactivation_serial_exists",
+          "A Serial Number already exists for its selected date",
+          HttpStatus.CONFLICT,
+        );
+      const actorRole = await this.history.actorRole(transaction, companyId, actor.identityId);
+      await sql`select set_config('blueline.hold_reactivation','on',true)`.execute(transaction);
+      for (const next of normalized) {
+        const old = current.rows.find((row) => row.id === next.orderId)!;
+        if (next.newStatus !== "in_branch" && old.assignedDriverId === null)
+          throw new ApplicationException(
+            "hold_reactivation_driver_required",
+            `Order ${old.orderNumber} requires a Driver for the selected status`,
+            HttpStatus.CONFLICT,
+          );
+        await sql`insert into order_serial_history(company_id,order_id,old_serial_number,old_serial_date,new_serial_number,new_serial_date,old_status,new_status,reason,changed_by_account_id)
+          values(${companyId}::uuid,${old.id}::uuid,${old.serialNumber},${old.orderDate}::date,${next.newSerialNumber},${next.newSerialDate}::date,'hold',${next.newStatus},'Hold Reactivation',${actor.identityId}::uuid)`.execute(
+          transaction,
+        );
+        await sql`update orders set serial_number=${next.newSerialNumber},serial_number_normalized=${next.normalized},order_date=${next.newSerialDate}::date,
+          delivery_status=${next.newStatus},delivery_reason=null,updated_at=now(),version=version+1 where id=${old.id}::uuid and company_id=${companyId}::uuid`.execute(
+          transaction,
+        );
+        await this.history.statusHistory(transaction, {
+          actorId: actor.identityId,
+          companyId,
+          from: "hold",
+          orderId: old.id,
+          reason: "Hold Reactivation",
+          to: next.newStatus,
+        });
+        await this.history.orderEvent(transaction, {
+          actorId: actor.identityId,
+          actorRole,
+          category: "status_change",
+          companyId,
+          correlationId,
+          eventType: "order.hold_reactivated",
+          fieldName: "serial_number",
+          newValue: `${next.newSerialNumber} / ${next.newSerialDate}`,
+          orderId: old.id,
+          previousValue: `${old.serialNumber ?? "—"} / ${old.orderDate}`,
+          reason: "Hold Reactivation",
+          source: "web_portal",
+        });
+      }
+      return { processedCount: normalized.length };
+    });
+  }
 
   public async assignmentPreview(input: BulkAssignDriverDto): Promise<BulkActionPreview> {
     this.assertAnyPermission("orders.assign_driver");
     const { companyId } = this.tenants.current();
-    await this.activeDriver(this.database, companyId, input.driverIdToAssign);
+    const driver = await this.activeDriver(this.database, companyId, input.driverIdToAssign);
     const orders = await this.resolveSelection(this.database, companyId, input, false);
-    return this.assignmentAssessment(orders);
+    return this.assignmentAssessment(orders, driver.id);
   }
 
   public async selectionSummary(input: OrderSelectionDto): Promise<BulkActionPreview> {
     const { companyId } = this.tenants.current();
-    const orders = await this.resolveSelection(this.database, companyId, input, false);
+    const orders = await this.resolveSelection(this.database, companyId, input, false, true);
     return {
       eligibleCount: orders.length,
       ineligible: [],
@@ -88,17 +209,22 @@ export class OrdersWorkflowService {
     return this.transactions.execute(async (transaction) => {
       const driver = await this.activeDriver(transaction, companyId, input.driverIdToAssign);
       const orders = await this.resolveSelection(transaction, companyId, input, true);
-      const assessment = this.assignmentAssessment(orders);
+      const assessment = this.assignmentAssessment(orders, driver.id);
       const actorRole = await this.history.actorRole(transaction, companyId, identity.identityId);
       let processedCount = 0;
       for (const order of orders) {
-        if (
-          !["new", "in_branch", "hold"].includes(order.deliveryStatus) ||
-          order.assignedDriverId !== null
-        )
-          continue;
+        const isReassignment = order.assignedDriverId !== null;
+        if (this.assignmentIneligibilityReason(order, driver.id) !== null) continue;
+        // A fresh assignment moves New/In-Branch into Assigned (Hold stays
+        // Hold); a reassignment only changes the Driver — the Order's own
+        // delivery status is untouched, matching how the single-order status
+        // machine treats driver changes as orthogonal to status changes.
         const nextStatus =
-          order.deliveryStatus === "hold" ? order.deliveryStatus : "assigned_to_driver";
+          isReassignment || order.deliveryStatus === "hold"
+            ? order.deliveryStatus
+            : order.orderType === "collect_order" || order.deliveryStatus === "collect_order"
+              ? "collect_order"
+              : "assigned_to_driver";
         await sql`
           update orders
              set assigned_driver_id = ${driver.id}::uuid,
@@ -106,6 +232,17 @@ export class OrdersWorkflowService {
                  updated_at = now(), version = version + 1
            where id = ${order.id}::uuid and company_id = ${companyId}::uuid
         `.execute(transaction);
+        if (isReassignment) {
+          // Only one active (unassigned_at is null) assignment row may exist
+          // per Order (`order_assignments_active_unique`) — close the
+          // previous one out before the new active row is inserted below.
+          await sql`
+            update order_assignments
+               set unassigned_at = now(), reason = 'Reassigned to a different Driver'
+             where company_id = ${companyId}::uuid and order_id = ${order.id}::uuid
+               and unassigned_at is null
+          `.execute(transaction);
+        }
         await sql`
           insert into order_assignments (
             company_id, order_id, driver_id, assigned_by_account_id
@@ -130,13 +267,20 @@ export class OrdersWorkflowService {
           category: "driver_assignment",
           companyId,
           correlationId,
-          eventType: "order.driver_assigned",
+          eventType: isReassignment ? "order.driver_reassigned" : "order.driver_assigned",
           fieldName: "assigned_driver_id",
           newValue: { driverId: driver.id, driverName: driver.name },
           orderId: order.id,
-          previousValue: null,
+          previousValue: isReassignment ? { driverId: order.assignedDriverId } : null,
           relatedDriverId: driver.id,
           source: "web_portal",
+        });
+        await this.pushOutbox.writeOrderAssigned(transaction, {
+          companyId,
+          orderId: order.id,
+          driverAccountId: driver.accountId,
+          isReassignment,
+          correlationId,
         });
         processedCount += 1;
       }
@@ -162,7 +306,7 @@ export class OrdersWorkflowService {
     const identity = this.identities.current();
     const reason = input.reason?.trim() || null;
     if (
-      ["hold", "cancelled", "returned_to_branch", "returned_to_trader"].includes(
+      ["hold", "cancelled", "returned_to_trader"].includes(
         input.targetStatus,
       ) &&
       reason === null
@@ -239,20 +383,72 @@ export class OrdersWorkflowService {
     });
   }
 
-  private assignmentAssessment(orders: readonly SelectedOrder[]): BulkActionPreview {
+  public async bulkChangeInternationalCarrierStatus(
+    input: BulkChangeInternationalCarrierStatusDto,
+    correlationId: string,
+  ): Promise<BulkActionResult> {
+    this.assertAnyPermission("orders.update_delivery_status");
+    const { companyId } = this.tenants.current();
+    const identity = this.identities.current();
+    const bulkActionId = randomUUID();
+    return this.transactions.execute(async (transaction) => {
+      const orders = await this.resolveSelection(transaction, companyId, input, true);
+      const requiredPrevious = input.targetStatus === "handed_to_carrier" ? "ready_for_carrier" : "handed_to_carrier";
+      const ineligible = orders.map((order) => ({ order, reason: order.orderType !== "gcc_international" ? "Only International orders can use carrier stages" : order.internationalCarrierStatus !== requiredPrevious ? "The order is not at the required previous carrier stage" : null })).filter((item): item is { order: SelectedOrder; reason: string } => item.reason !== null);
+      if (ineligible.length > 0 && input.allowPartial !== true) throw new ApplicationException("bulk_international_carrier_status_ineligible", "One or more selected Orders cannot move to the requested carrier stage", HttpStatus.CONFLICT);
+      let processedCount = 0;
+      for (const order of orders) {
+        if (ineligible.some((item) => item.order.id === order.id)) continue;
+        await sql`update orders set international_carrier_status = ${input.targetStatus} where id = ${order.id}::uuid and company_id = ${companyId}::uuid`.execute(transaction);
+        await this.history.orderEvent(transaction, { actorId: identity.identityId, actorRole: identity.kind, bulkActionId, category: "status_change", companyId, correlationId, eventType: "order.international_carrier_status_change", fieldName: "international_carrier_status", newValue: input.targetStatus, orderId: order.id, previousValue: order.internationalCarrierStatus, reason: null, source: "web_portal" });
+        processedCount += 1;
+      }
+      await this.history.audit(transaction, { action: "orders.bulk_international_carrier_status_change", actorId: identity.identityId, after: { bulkActionId, processedCount, targetStatus: input.targetStatus }, companyId, correlationId, subjectId: bulkActionId, subjectType: "bulk_order_action" });
+      return { bulkActionId, eligibleCount: orders.length - ineligible.length, ineligible: ineligible.map((item) => ({ orderNumber: item.order.orderNumber, reason: item.reason })), processedCount, selectedAmountToCollect: "0.00", selectedCount: orders.length };
+    });
+  }
+
+  /**
+   * A Driver may be assigned or reassigned any time an Order is not yet
+   * Delivered and not in a terminal state — matching
+   * `enforce_initial_order_assignment`, which permits a new active
+   * `order_assignments` row for the same status set. Cancelled, Closed,
+   * and the two Returned statuses are deliberately excluded even though
+   * they too are "not Delivered": those are finished states where
+   * reassigning a Driver has no operational meaning.
+   */
+  private assignmentIneligibilityReason(
+    order: SelectedOrder,
+    targetDriverId: string,
+  ): string | null {
+    const internationalError = internationalDriverAssignmentError(order.orderType, true);
+    if (internationalError !== null) return internationalError;
+    if (order.assignedDriverId === targetDriverId) {
+      return "Driver is already assigned to this Order";
+    }
+    return [
+      "new",
+      "in_branch",
+      "assigned_to_driver",
+      "out_for_delivery",
+      "hold",
+      "collect_order",
+    ].includes(order.deliveryStatus)
+      ? null
+      : "Only New, In-Branch, Assigned-to-Driver, Out-for-Delivery, Hold, or Collect Orders are eligible for driver assignment";
+  }
+
+  private assignmentAssessment(
+    orders: readonly SelectedOrder[],
+    targetDriverId: string,
+  ): BulkActionPreview {
     const ineligible = orders
-      .filter(
-        (order) =>
-          !["new", "in_branch", "hold"].includes(order.deliveryStatus) ||
-          order.assignedDriverId !== null,
-      )
       .map((order) => ({
-        orderNumber: order.orderNumber,
-        reason:
-          order.assignedDriverId !== null
-            ? "Order is already assigned; reassignment is deferred"
-            : "Only New, In-Branch, or Hold Orders are eligible for assignment",
-      }));
+        order,
+        reason: this.assignmentIneligibilityReason(order, targetDriverId),
+      }))
+      .filter((entry): entry is { order: SelectedOrder; reason: string } => entry.reason !== null)
+      .map(({ order, reason }) => ({ orderNumber: order.orderNumber, reason }));
     return {
       eligibleCount: orders.length - ineligible.length,
       ineligible,
@@ -264,16 +460,19 @@ export class OrdersWorkflowService {
   }
 
   private statusIneligibility(order: SelectedOrder, target: string): string | null {
+    if (order.orderType === "gcc_international" && ["delivered", "out_for_delivery"].includes(target)) {
+      return "International Orders cannot enter Driver workflow statuses";
+    }
     // Each transition is allowed only from the states the single-order workflow
     // permits, so a bulk change is exactly a batch of the per-row transitions.
     const from: Readonly<Record<string, readonly string[]>> = {
       cancelled: ["new", "in_branch", "assigned_to_driver", "out_for_delivery", "hold"],
       delivered: ["out_for_delivery", "hold"],
       hold: ["new", "assigned_to_driver", "out_for_delivery"],
-      in_branch: ["new"],
-      out_for_delivery: ["assigned_to_driver", "hold"],
+      in_branch: ["new", "out_for_delivery", "returned_to_branch"],
+      out_for_delivery: ["assigned_to_driver", "hold", "in_branch", "returned_to_branch"],
       returned_to_branch: ["out_for_delivery"],
-      returned_to_trader: ["returned_to_branch", "hold"],
+      returned_to_trader: ["in_branch", "returned_to_branch", "hold"],
     };
     if (target in from) {
       if (from[target]?.includes(order.deliveryStatus) !== true) {
@@ -288,13 +487,15 @@ export class OrdersWorkflowService {
       return null;
     }
     if (target === "closed") {
-      if (!["delivered", "returned_to_trader"].includes(order.deliveryStatus)) {
-        return "Only Delivered or Returned to Trader Orders can be closed";
+      if (!["delivered", "returned_to_trader", "collect_order"].includes(order.deliveryStatus)) {
+        return "Only Delivered, Returned to Trader, or Collect Orders can be closed";
       }
       if (!["reconciled", "not_applicable"].includes(order.driverReconciliationStatus)) {
         return "Driver Cash is not complete";
       }
+      const noTraderPaymentDue = new Decimal(order.traderNetPayable).lessThanOrEqualTo(0);
       if (
+        !noTraderPaymentDue &&
         !["money_sent_to_trader", "money_received_by_trader", "not_eligible"].includes(
           order.settlementStatus,
         )
@@ -330,10 +531,20 @@ export class OrdersWorkflowService {
     const status = input.targetStatus;
     const order = input.order;
     const amountDue = Number(order.customerAmountDue);
+    const traderPayable = Number(order.traderNetPayable);
+    const noTraderPaymentDue = Number.isFinite(traderPayable) && traderPayable <= 0;
+    const deliveredFreeNoValue =
+      status === "delivered" &&
+      order.isFreeOrder === true &&
+      amountDue === 0 &&
+      noTraderPaymentDue;
     const reconciliationStatus =
       status === "hold"
         ? order.driverReconciliationStatus
-        : status === "delivered" && order.assignedDriverId !== null && amountDue > 0
+        : status === "delivered" &&
+            order.assignedDriverId !== null &&
+            amountDue > 0 &&
+            !deliveredFreeNoValue
           ? "pending"
           : status === "closed"
             ? order.driverReconciliationStatus
@@ -353,9 +564,11 @@ export class OrdersWorkflowService {
             status === "returned_to_branch" ||
             status === "returned_to_trader"
           ? "not_eligible"
-          : status === "closed" || status === "in_branch"
-            ? order.settlementStatus
-            : "unsettled";
+          : deliveredFreeNoValue || noTraderPaymentDue
+            ? "not_eligible"
+            : status === "closed" || status === "in_branch"
+              ? order.settlementStatus
+              : "unsettled";
     await sql`
       update orders
          set delivery_status = ${status}, delivery_reason = ${input.reason},
@@ -402,6 +615,15 @@ export class OrdersWorkflowService {
         input.actorId,
         input.correlationId,
       );
+      // Employee Drivers accrue their per-delivery earning HERE, in the same
+      // transaction as the status change -- mirroring the driver
+      // self-service path (operations.service). Before this call, orders
+      // marked Delivered from the office web portal silently created no
+      // employee_order_earnings row, so Driver Earnings calculations found
+      // "no payable earnings" for genuinely delivered orders. Idempotent;
+      // returns null for outsourced Drivers or Employees with no rule --
+      // ordinary outcomes, so the result is deliberately not inspected.
+      await this.employeeDeliveryEarnings.accrueForDelivery(database, order.id);
     }
   }
 
@@ -410,6 +632,7 @@ export class OrdersWorkflowService {
     companyId: string,
     input: OrderSelectionDto,
     lock: boolean,
+    excludeInternational = false,
   ): Promise<readonly SelectedOrder[]> {
     const excluded = new Set(input.excludedOrderIds ?? []);
     if (input.selectionMode === "ids") {
@@ -417,11 +640,14 @@ export class OrdersWorkflowService {
       if (ids.length === 0) return [];
       const result = await sql<SelectedOrder>`
         select id, order_number as "orderNumber", assigned_driver_id as "assignedDriverId",
+               order_type as "orderType", international_carrier_status as "internationalCarrierStatus",
                delivery_status as "deliveryStatus", return_status as "returnStatus",
                driver_reconciliation_status as "driverReconciliationStatus",
                trader_settlement_status as "settlementStatus",
+               is_free_order as "isFreeOrder",
                amount_collected::text as "amountCollected",
                customer_amount_due::text as "customerAmountDue",
+               trader_net_payable::text as "traderNetPayable",
                driver_cost::text as "driverCost"
         from orders
         where company_id = ${companyId}::uuid
@@ -433,19 +659,78 @@ export class OrdersWorkflowService {
     }
     const search = input.search?.trim() || null;
     const quickView = input.quickView ?? "active";
+    const workflowStep = input.workflowStep ?? null;
+    const openTraderReceivablePredicate = sql`
+      exists (
+        select 1
+        from trader_receivables workflow_receivable
+        where workflow_receivable.company_id = o.company_id
+          and workflow_receivable.source_type = 'service_charge'
+          and workflow_receivable.source_reference = o.order_number
+          and workflow_receivable.status in ('outstanding', 'partially_collected')
+          and workflow_receivable.outstanding_amount > 0
+      )
+    `;
+    const failedAccountingPredicate = sql`
+      exists (
+        select 1
+        from accounting_events workflow_event
+        where workflow_event.company_id = o.company_id
+          and workflow_event.source_entity_type = 'order'
+          and workflow_event.source_reference = o.order_number
+          and workflow_event.id = (
+            select latest_workflow_event.id
+            from accounting_events latest_workflow_event
+            where latest_workflow_event.company_id = o.company_id
+              and latest_workflow_event.source_entity_type = 'order'
+              and latest_workflow_event.source_reference = o.order_number
+            order by latest_workflow_event.created_at desc, latest_workflow_event.id desc
+            limit 1
+          )
+          and workflow_event.processing_status = 'failed'
+      )
+    `;
+    const workflowStepPredicate = sql`
+      (${workflowStep}::text is null
+        or (${workflowStep} = 'collect_from_driver'
+          and o.delivery_status = 'delivered'
+          and o.driver_reconciliation_status = 'pending'
+          and o.customer_amount_due > 0)
+        or (${workflowStep} = 'collect_from_trader' and ${openTraderReceivablePredicate})
+        or (${workflowStep} = 'settle_trader'
+          and o.delivery_status = 'delivered'
+          and o.driver_reconciliation_status in ('reconciled', 'not_applicable')
+          and o.trader_net_payable > 0
+          and o.trader_settlement_status in ('unsettled', 'partially_settled'))
+        or (${workflowStep} = 'complete'
+          and o.delivery_status in ('delivered', 'closed', 'returned_to_trader', 'cancelled')
+          and not (o.delivery_status = 'delivered'
+            and o.driver_reconciliation_status = 'pending'
+            and o.customer_amount_due > 0)
+          and not (o.delivery_status = 'delivered'
+            and o.driver_reconciliation_status in ('reconciled', 'not_applicable')
+            and o.trader_net_payable > 0
+            and o.trader_settlement_status in ('unsettled', 'partially_settled', 'money_sent_to_trader'))
+          and not ${openTraderReceivablePredicate}
+          and not ${failedAccountingPredicate})
+      )
+    `;
     const result = await sql<SelectedOrder>`
       select o.id, o.order_number as "orderNumber", o.assigned_driver_id as "assignedDriverId",
+             o.order_type as "orderType", o.international_carrier_status as "internationalCarrierStatus",
              o.delivery_status as "deliveryStatus", o.return_status as "returnStatus",
              o.driver_reconciliation_status as "driverReconciliationStatus",
              o.trader_settlement_status as "settlementStatus",
+             o.is_free_order as "isFreeOrder",
              o.amount_collected::text as "amountCollected",
              o.customer_amount_due::text as "customerAmountDue",
+             o.trader_net_payable::text as "traderNetPayable",
              o.driver_cost::text as "driverCost"
       from orders o
       join traders t on t.id = o.trader_id and t.company_id = o.company_id
       where o.company_id = ${companyId}::uuid
         and (${quickView} = 'all'
-          or (${quickView} = 'active' and o.delivery_status not in ('hold', 'closed', 'cancelled'))
+          or (${quickView} = 'active' and o.delivery_status in ('new','in_branch','assigned_to_driver','out_for_delivery','hold','delivered','returned_to_branch','returned_to_trader','collect_order'))
           or (${quickView} = 'closed' and o.delivery_status = 'closed')
           or (${quickView} = 'hold' and o.delivery_status = 'hold')
           or (${quickView} = 'cancelled' and o.delivery_status = 'cancelled'))
@@ -454,6 +739,9 @@ export class OrdersWorkflowService {
           or o.customer_mobile_number ilike '%' || ${search} || '%'
           or t.name_en ilike '%' || ${search} || '%')
         and (${input.deliveryStatus ?? null}::text is null or o.delivery_status = ${input.deliveryStatus ?? null})
+        and ${workflowStepPredicate}
+        and (${input.orderType ?? null}::text is null or o.order_type=${input.orderType ?? null})
+        and (${excludeInternational} = false or o.order_type <> 'gcc_international')
         and (${input.cashStatus ?? null}::text is null or o.driver_reconciliation_status = ${input.cashStatus ?? null})
         and (${input.settlementStatus ?? null}::text is null or o.trader_settlement_status = ${input.settlementStatus ?? null})
         and (${input.traderId ?? null}::uuid is null or o.trader_id = ${input.traderId ?? null}::uuid)
@@ -478,9 +766,9 @@ export class OrdersWorkflowService {
     database: Kysely<DatabaseSchema>,
     companyId: string,
     driverId: string,
-  ): Promise<{ readonly id: string; readonly name: string }> {
-    const result = await sql<{ id: string; name: string }>`
-      select id, name_en as name from drivers
+  ): Promise<{ readonly id: string; readonly name: string; readonly accountId: string | null }> {
+    const result = await sql<{ id: string; name: string; accountId: string | null }>`
+      select id, name_en as name, account_id as "accountId" from drivers
       where id = ${driverId}::uuid and company_id = ${companyId}::uuid
         and account_status = 'active'
     `.execute(database);

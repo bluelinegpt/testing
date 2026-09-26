@@ -8,7 +8,12 @@ import { Pool } from "pg";
 import { configuration } from "../configuration/environment.js";
 import type { DatabaseSchema } from "../infrastructure/database/database.types.js";
 
-import { defaultExpenseTypes, seedCompanyDefaults } from "./company-defaults.js";
+import {
+  defaultEmployeeRoles,
+  defaultExpenseTypes,
+  seedCompanyDefaults,
+  seedStandardEmployeeRoles,
+} from "./company-defaults.js";
 
 const runDatabaseTests = process.env.RUN_PROVISIONING_DATABASE === "true";
 const rollbackMarker = Symbol("rollback provisioning database test");
@@ -17,6 +22,12 @@ interface ExpenseTypeRow {
   code: string;
   displayName: string;
   isActive: boolean;
+  nameEn: string;
+}
+
+interface EmployeeRoleRow {
+  code: string;
+  isDriverRole: boolean;
   nameEn: string;
 }
 
@@ -60,6 +71,36 @@ describe.skipIf(!runDatabaseTests)("company provisioning defaults", () => {
           `.execute(transaction);
           return [...result.rows];
         };
+
+        const readEmployeeRoles = async (): Promise<EmployeeRoleRow[]> => {
+          const result = await sql<EmployeeRoleRow>`
+            select code, name_en as "nameEn", is_driver_role as "isDriverRole"
+              from employee_roles
+             where company_id = ${companyId}::uuid
+             order by code
+          `.execute(transaction);
+          return [...result.rows];
+        };
+
+        await seedStandardEmployeeRoles(transaction, companyId);
+        const employeeRoles = await readEmployeeRoles();
+        expect(employeeRoles).toHaveLength(defaultEmployeeRoles.length);
+        expect(employeeRoles.filter((role) => role.isDriverRole)).toEqual([
+          expect.objectContaining({ code: "DRIVER", nameEn: "Driver" }),
+        ]);
+
+        // Re-provisioning neither duplicates the defaults nor overwrites a
+        // Company's own display-name customization.
+        await sql`update employee_roles set name_en='Delivery Rider'
+          where company_id=${companyId}::uuid and code='DRIVER'`.execute(transaction);
+        await seedStandardEmployeeRoles(transaction, companyId);
+        await seedStandardEmployeeRoles(transaction, companyId);
+        const employeeRolesAfterRepeat = await readEmployeeRoles();
+        expect(employeeRolesAfterRepeat).toHaveLength(defaultEmployeeRoles.length);
+        expect(employeeRolesAfterRepeat.find((role) => role.code === "DRIVER")).toMatchObject({
+          isDriverRole: true,
+          nameEn: "Delivery Rider",
+        });
 
         // A newly provisioned Company receives exactly the approved types, all active.
         await seedCompanyDefaults(transaction, companyId);

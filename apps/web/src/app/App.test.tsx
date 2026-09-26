@@ -24,13 +24,52 @@ describe("App", () => {
     vi.stubGlobal("fetch", createFetchMock());
     renderApp();
 
-    expect(screen.getByRole("heading", { name: "Sign in" })).toBeInTheDocument();
+    // The app asks the server whether a session exists before deciding what to
+    // render, so Sign in appears once that answer arrives — never before.
+    expect(await screen.findByRole("heading", { name: "Sign in" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "العربية" }));
 
     expect(await screen.findByRole("heading", { name: "تسجيل الدخول" })).toBeInTheDocument();
     expect(document.documentElement.dir).toBe("rtl");
-    expect(document.documentElement.lang).toBe("ar");
+    // Region-qualified, not the bare locale code: native date inputs read
+    // their dd/mm/yyyy vs mm/dd/yyyy order from this attribute.
+    expect(document.documentElement.lang).toBe("ar-AE");
     expect(localStorage.getItem(localeStorageKey)).toBe("ar");
+  });
+
+  it("shows an actionable message, not a blank page, when a Platform Administrator session reaches the Company Portal", async () => {
+    // A Platform Administrator has no companyId and this app has no branch
+    // for that identity kind -- it used to fall straight through to `null`.
+    const json = (body: unknown, status = 200) =>
+      new Response(JSON.stringify(body), {
+        headers: { "content-type": "application/json" },
+        status,
+      });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation((url: string) => {
+        if (url.endsWith("/auth/me")) {
+          return Promise.resolve(
+            json({
+              companyId: null,
+              forcePasswordChange: false,
+              identityId: "40000000-0000-4000-8000-000000000001",
+              kind: "platform_administrator",
+              permissions: ["platform.access"],
+              sessionId: "50000000-0000-4000-8000-000000000001",
+            }),
+          );
+        }
+        return Promise.resolve(json({}, 404));
+      }),
+    );
+    renderApp();
+
+    expect(
+      await screen.findByRole("heading", { name: "Wrong portal for this account" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Platform Administrator accounts should use/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
   });
 
   it("signs in, renders the shared shell, and navigates to a separate Orders route", async () => {
@@ -43,6 +82,7 @@ describe("App", () => {
     expect(screen.getByRole("navigation")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Orders" }));
+    expect(router.state.location.pathname).toBe("/orders");
     const ordersLink = screen.getByRole("link", { name: "All orders" });
     expect(ordersLink).toBeInTheDocument();
     fireEvent.click(ordersLink);
@@ -63,18 +103,23 @@ describe("App", () => {
     );
   });
 
-  it("lands on the dashboard after login regardless of the requested route", async () => {
+  it("returns to the requested authorized route after login", async () => {
     const fetchMock = createFetchMock();
     vi.stubGlobal("fetch", fetchMock);
-    // Even when the address bar points elsewhere (e.g. after a reload destroyed
-    // the in-memory session), a fresh sign-in opens the dashboard rather than
-    // resuming whatever path happened to be in the URL.
+    // A deep link that survives the login round trip: when a reload destroys
+    // the in-memory session, signing back in resumes the path the User asked
+    // for rather than dumping them on the default workspace. `landingPath`
+    // still runs the requested path through `canAccessCompanyPath`, so this
+    // only holds for a route the User is authorized to open.
     const router = renderApp("/configuration/areas");
 
     await signIn();
 
-    expect(await screen.findByRole("heading", { level: 1, name: "Dashboard" })).toBeInTheDocument();
-    expect(router.state.location.pathname).toBe("/dashboard");
+    // Both halves matter: the router actually moved there, and the screen for
+    // that route rendered. Asserting only the pathname would pass even if the
+    // page failed to mount.
+    expect(router.state.location.pathname).toBe("/configuration/areas");
+    expect(await screen.findByRole("heading", { level: 1, name: "Areas" })).toBeInTheDocument();
     expect(localStorage.getItem("accessToken")).toBeNull();
   });
 
@@ -101,10 +146,12 @@ describe("App", () => {
     await waitFor(() => expect(router.state.location.pathname).toBe("/orders/create"));
     expect(await screen.findByRole("heading", { name: "Create order" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Users" })).not.toBeInTheDocument();
-    // General Settings is reachable by everyone for their personal display
-    // preference, so the Configuration group shows — but only its General
-    // settings item, never the admin-only items (Users, etc.).
-    expect(screen.getByRole("button", { name: "Configuration" })).toBeInTheDocument();
+    // General Settings used to be reachable by every authenticated User
+    // unconditionally, so an Orders-only identity (like this one) inherited a
+    // "Configuration" group it had no real business in. It is now reachable
+    // only alongside some OTHER, non-Orders permission — an Orders-only User
+    // sees no Configuration group at all.
+    expect(screen.queryByRole("button", { name: "Configuration" })).not.toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/users"))).toBe(false);
 
     await router.navigate("/configuration/users");
@@ -167,7 +214,9 @@ describe("App", () => {
     const router = renderApp("/driver-cash-reconciliation");
     await signIn();
 
-    expect(await screen.findByRole("heading", { level: 1, name: "Driver Collections" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Driver Collections" }),
+    ).toBeInTheDocument();
     expect(router.state.location.pathname).toBe("/drivers");
   });
 
@@ -176,7 +225,9 @@ describe("App", () => {
     const router = renderApp("/operations/driver-reconciliations/new");
     await signIn();
 
-    expect(await screen.findByRole("heading", { level: 1, name: "Driver Collections" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Driver Collections" }),
+    ).toBeInTheDocument();
     expect(router.state.location.pathname).toBe("/drivers");
   });
 
@@ -217,8 +268,14 @@ function createFetchMock(permissions: readonly string[] = ["users_roles.manage"]
       status,
     });
 
+  // No session exists until a sign-in happens in the test, which is what the
+  // browser sees on a first visit. The app now asks `auth/me` on load, so a
+  // stub that always answered would render the workspace before any login.
+  let signedIn = false;
+
   return vi.fn().mockImplementation((url: string) => {
     if (url.endsWith("/auth/login")) {
+      signedIn = true;
       return Promise.resolve(
         json({
           accessToken: "t".repeat(43),
@@ -236,6 +293,11 @@ function createFetchMock(permissions: readonly string[] = ["users_roles.manage"]
       );
     }
     if (url.endsWith("/auth/me")) {
+      if (!signedIn) {
+        return Promise.resolve(
+          json({ error: { code: "authentication_required", message: "No session" } }, 401),
+        );
+      }
       return Promise.resolve(
         json({
           companyId: "10000000-0000-4000-8000-000000000001",

@@ -1,0 +1,7 @@
+{
+  "ENVIRONMENT_NAME": "development",
+  "API_BASE_URL": "http://192.168.68.108:5174/api/v1",
+  "REALTIME_URL": "ws://192.168.68.108:5174/api/v1/communication/realtime",
+  "ENABLE_VERBOSE_LOGGING": true,
+  "ENABLE_MOCK_SERVICES": false
+}

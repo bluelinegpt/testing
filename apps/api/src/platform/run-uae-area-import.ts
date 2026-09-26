@@ -11,11 +11,16 @@ import { importUaeAreas } from "./uae-area-import.js";
 loadEnvironment({ path: resolve(process.cwd(), "../../.env") });
 
 const subdomain =
-  process.argv.slice(2).find((value) => !value.startsWith("--"))?.trim() ??
+  process.argv
+    .slice(2)
+    .find((value) => !value.startsWith("--"))
+    ?.trim() ??
   process.env.BLUELINE_DEV_COMPANY_SUBDOMAIN?.trim() ??
   "";
 if (subdomain === "") {
-  throw new Error("A Company subdomain is required: pnpm --filter @blueline/api dev:import-areas <subdomain>");
+  throw new Error(
+    "A Company subdomain is required: pnpm --filter @blueline/api dev:import-areas <subdomain>",
+  );
 }
 
 const context = await NestFactory.createApplicationContext(AppModule, { logger: false });

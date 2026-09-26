@@ -1,4 +1,4 @@
-# Starts the BlueLineGPT dev servers (API on :3000, Web on :5174).
+# Starts the BlueLineGPT dev servers (API on :3000, Public on :5174, Portal on :5177).
 # Each server opens in its own PowerShell window so you can read its logs and stop it with Ctrl+C.
 # Usage (from anywhere):  pwsh -File scripts\dev.ps1   (or right-click > Run with PowerShell)
 
@@ -12,10 +12,12 @@ if (-not (Get-Command pnpm -ErrorAction SilentlyContinue)) {
 
 Write-Host "Starting BlueLineGPT dev servers from $root" -ForegroundColor Cyan
 Write-Host "  API -> http://localhost:3000" -ForegroundColor DarkGray
-Write-Host "  Web -> http://localhost:5174" -ForegroundColor DarkGray
+Write-Host "  Public -> http://localhost:5174" -ForegroundColor DarkGray
+Write-Host "  Portal -> http://localhost:5177" -ForegroundColor DarkGray
 
 Start-Process powershell -ArgumentList "-NoExit", "-Command", "Set-Location '$root'; Write-Host 'BlueLineGPT API (port 3000)' -ForegroundColor Green; pnpm --filter @blueline/api dev"
-Start-Process powershell -ArgumentList "-NoExit", "-Command", "Set-Location '$root'; Write-Host 'BlueLineGPT Web (port 5174)' -ForegroundColor Green; pnpm --filter @blueline/web dev"
+Start-Process powershell -ArgumentList "-NoExit", "-Command", "Set-Location '$root'; Write-Host 'BlueLineGPT Public Site (port 5174)' -ForegroundColor Green; pnpm --filter @blueline/public-web dev"
+Start-Process powershell -ArgumentList "-NoExit", "-Command", "Set-Location '$root'; Write-Host 'BlueLineGPT Company Portal (port 5177)' -ForegroundColor Green; pnpm --filter @blueline/web dev"
 
-Write-Host "`nTwo windows opened. When both are ready, open http://localhost:5174" -ForegroundColor Cyan
+Write-Host "`nThree windows opened. Home page: http://localhost:5174  Company Portal: http://localhost:5177" -ForegroundColor Cyan
 Write-Host "Close a window (or press Ctrl+C in it) to stop that server." -ForegroundColor DarkGray

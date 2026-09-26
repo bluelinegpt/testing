@@ -10,6 +10,7 @@ import { KyselyTransactionManager } from "../infrastructure/database/transaction
 import { ApplicationException } from "../presentation/errors/application.exception.js";
 import { IdentityContextAccessor } from "../security/identity-context.js";
 import { TenantContextAccessor } from "../tenancy/tenant-context.js";
+import { DriverRoleProvisioningService } from "../users/driver-role-provisioning.service.js";
 import type {
   ConfirmOutsourcedPaymentDto,
   CreateCommissionRuleDto,
@@ -66,6 +67,8 @@ export class WorkforceConfigurationService {
     @Inject(KyselyTransactionManager) private readonly transactions: KyselyTransactionManager,
     @Inject(TenantContextAccessor) private readonly tenants: TenantContextAccessor,
     @Inject(IdentityContextAccessor) private readonly identities: IdentityContextAccessor,
+    @Inject(DriverRoleProvisioningService)
+    private readonly driverRoles: DriverRoleProvisioningService,
   ) {}
 
   public async employees(input: {
@@ -216,13 +219,20 @@ export class WorkforceConfigurationService {
           HttpStatus.BAD_REQUEST,
         );
       const isDriverRole = role.rows[0].isDriverRole;
+      if (isDriverRole && input.mobileNumber.trim() === "") {
+        throw new ApplicationException(
+          "driver_employee_mobile_required",
+          "Mobile number is required when the employee role is Driver.",
+          HttpStatus.BAD_REQUEST,
+        );
+      }
       // Outsourced only applies to driver roles; everyone else is salaried.
       const engagement =
         isDriverRole && input.engagement === "outsourced" ? "outsourced" : "employee";
       // Outsourced staff carry no salary.
-      const salary = new Decimal(engagement === "outsourced" ? 0 : (input.basicSalary ?? 0)).toFixed(
-        2,
-      );
+      const salary = new Decimal(
+        engagement === "outsourced" ? 0 : (input.basicSalary ?? 0),
+      ).toFixed(2);
       const effectiveFrom = input.salaryEffectiveFrom ?? null;
       const salaryHold = input.salaryHold ?? false;
       const salaryHoldReason = input.salaryHoldReason?.trim() || null;
@@ -270,7 +280,9 @@ export class WorkforceConfigurationService {
       } else {
         const beforeEmployee = await this.lockEmployee(transaction, companyId, employeeId);
         const targetPayrollEligible =
-          engagement === "outsourced" ? false : (input.payrollEligible ?? beforeEmployee.payrollEligible);
+          engagement === "outsourced"
+            ? false
+            : (input.payrollEligible ?? beforeEmployee.payrollEligible);
         const targetSalaryHold =
           engagement === "outsourced" ? false : (input.salaryHold ?? beforeEmployee.salaryHold);
         effectivePayrollEligible = targetPayrollEligible;
@@ -327,7 +339,7 @@ export class WorkforceConfigurationService {
             },
             companyId,
             correlationId,
-            reason: salaryHoldReason ?? undefined,
+            ...(salaryHoldReason == null ? {} : { reason: salaryHoldReason }),
             subjectId: employeeId,
             subjectType: "employee",
           });
@@ -414,16 +426,16 @@ export class WorkforceConfigurationService {
 
     if (existing.rows[0] === undefined) {
       const code = await this.nextGeneratedCode(transaction, companyId, "driver", "DRV");
-      const created = await sql<{ id: string }>`insert into drivers (company_id, employee_id, code, name_en, mobile_number,
+      const created = await sql<{
+        id: string;
+      }>`insert into drivers (company_id, employee_id, code, name_en, mobile_number,
         second_mobile_number, email, address, area_id, driver_type, account_status,
         outsourced_fee_per_delivered_order, notes)
         values (${companyId}::uuid, ${employeeId}::uuid, ${code}, ${input.name.trim()},
         ${input.mobileNumber.trim()}, ${input.secondMobileNumber?.trim() || null},
         ${input.email?.trim() || null}, ${input.address?.trim() || null}, ${input.areaId ?? null}::uuid,
         ${engagement}, 'active', ${outsourcedFee}, ${input.notes?.trim() || null})
-        returning id`.execute(
-        transaction,
-      );
+        returning id`.execute(transaction);
       if (engagement === "outsourced" && outsourcedFee !== null) {
         await this.syncOutsourcedDriverFeeVersion(
           transaction,
@@ -434,13 +446,26 @@ export class WorkforceConfigurationService {
           effectiveFrom,
         );
       }
+      if (engagement === "outsourced" && input.outsourcedCollectionPaymentType !== undefined) {
+        await this.syncOutsourcedCollectionEarningRule(
+          transaction,
+          companyId,
+          created.rows[0]!.id,
+          actorId,
+          input.outsourcedCollectionPaymentType,
+          input.outsourcedCollectionAmount ?? 0,
+          effectiveFrom,
+        );
+      }
     } else {
       await sql`update drivers set name_en=${input.name.trim()}, mobile_number=${input.mobileNumber.trim()},
         second_mobile_number=${input.secondMobileNumber?.trim() || null}, email=${input.email?.trim() || null},
         address=${input.address?.trim() || null}, area_id=${input.areaId ?? null}::uuid,
         driver_type=${engagement}, outsourced_fee_per_delivered_order=${outsourcedFee},
         notes=${input.notes?.trim() || null}, updated_at=now(), version=version+1
-        where id=${existing.rows[0].id}::uuid and company_id=${companyId}::uuid`.execute(transaction);
+        where id=${existing.rows[0].id}::uuid and company_id=${companyId}::uuid`.execute(
+        transaction,
+      );
       if (engagement === "outsourced" && outsourcedFee !== null) {
         await this.syncOutsourcedDriverFeeVersion(
           transaction,
@@ -451,7 +476,92 @@ export class WorkforceConfigurationService {
           effectiveFrom,
         );
       }
+      if (engagement === "outsourced" && input.outsourcedCollectionPaymentType !== undefined) {
+        await this.syncOutsourcedCollectionEarningRule(
+          transaction,
+          companyId,
+          existing.rows[0].id,
+          actorId,
+          input.outsourcedCollectionPaymentType,
+          input.outsourcedCollectionAmount ?? 0,
+          effectiveFrom,
+        );
+      }
     }
+  }
+
+  /**
+   * Employee setup exposes the outsourced Driver's Collect Order / collection
+   * earning rate, reusing `outsourced_driver_collection_earning_rules` --
+   * the same table `OutsourcedDriverFeeService.createForConfirmedCollection`
+   * already reads for a confirmed cash reconciliation, and the same table
+   * `capture_outsourced_collect_order_earning` reads for a closed Collect
+   * Order. One rate, two triggers -- matching the Employee side's own
+   * design of one "collection earning" rule for both.
+   */
+  private async syncOutsourcedCollectionEarningRule(
+    transaction: Kysely<DatabaseSchema>,
+    companyId: string,
+    driverId: string,
+    actorId: string,
+    paymentType: "none" | "per_collected_order",
+    amount: number,
+    effectiveFrom: string | null,
+  ): Promise<void> {
+    const requestedAmount = new Decimal(amount);
+    const none = paymentType === "none";
+    if ((none && !requestedAmount.isZero()) || (!none && requestedAmount.lessThanOrEqualTo(0))) {
+      throw new ApplicationException(
+        "outsourced_collection_rate_invalid",
+        "The collection payment type and amount do not agree",
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    const effective = await sql<{ value: string }>`
+      select coalesce(${effectiveFrom}::date, current_date)::text as value
+    `.execute(transaction);
+    const requestedEffectiveFrom = effective.rows[0]!.value;
+
+    const active = await sql<{
+      readonly amount: string;
+      readonly effectiveFrom: string;
+      readonly id: string;
+      readonly paymentType: string;
+    }>`
+      select id, collection_payment_type as "paymentType", amount::text,
+             effective_from::text as "effectiveFrom"
+        from outsourced_driver_collection_earning_rules
+       where company_id=${companyId}::uuid and driver_id=${driverId}::uuid
+         and is_active and effective_to is null
+       order by effective_from desc
+       for update
+    `.execute(transaction);
+    const current = active.rows[0];
+    if (
+      current !== undefined &&
+      current.paymentType === paymentType &&
+      new Decimal(current.amount).equals(requestedAmount)
+    ) {
+      return;
+    }
+
+    if (current !== undefined) {
+      await sql`
+        update outsourced_driver_collection_earning_rules
+           set effective_to=${requestedEffectiveFrom}::date, updated_at=now(), version=version+1
+         where id=${current.id}::uuid and company_id=${companyId}::uuid
+      `.execute(transaction);
+    }
+    await sql`
+      insert into outsourced_driver_collection_earning_rules(
+        company_id, driver_id, collection_payment_type, amount, effective_from, is_active,
+        created_by_account_id
+      ) values (
+        ${companyId}::uuid, ${driverId}::uuid, ${paymentType}, ${requestedAmount.toFixed(2)},
+        ${requestedEffectiveFrom}::date, true, ${actorId}::uuid
+      )
+    `.execute(transaction);
   }
 
   /**
@@ -512,6 +622,40 @@ export class WorkforceConfigurationService {
     });
 
     if (matching !== undefined) return;
+
+    /* Once an accrual exists, "a rate used by an accrual is immutable"
+       (Documentation/Payroll/PAYROLL_FOUNDATIONS.md) — narrowing the version's
+       effective_to must never leave that accrual's own business date outside
+       the window it was priced from. The database trigger enforces this too
+       and is what actually protects every caller, but failing here first turns
+       a raw constraint violation into a business answer the operator can act
+       on, matching how the rest of this service reports conflicts. */
+    const orphaning = await sql<{ orderNumber: string }>`
+      select o.order_number as "orderNumber"
+        from outsourced_driver_fee_accruals a
+        join outsourced_driver_fee_versions v
+          on v.id = a.fee_rate_version_id and v.company_id = a.company_id
+        join orders o on o.id = a.order_id and o.company_id = a.company_id
+       where v.company_id=${companyId}::uuid
+         and v.driver_id=${driverId}::uuid
+         and v.status='active'
+         and v.effective_from < ${requestedEffectiveFrom}::date
+         and a.status not in ('reversed','recovery_required')
+         and a.accrual_business_date >= ${requestedEffectiveFrom}::date
+       order by o.order_number
+       limit 5
+    `.execute(transaction);
+    if (orphaning.rows.length > 0) {
+      throw new ApplicationException(
+        "outsourced_driver_fee_narrowing_would_orphan_accrual",
+        `This effective date would leave an already-accrued Driver fee (${orphaning.rows
+          .map((row) => row.orderNumber)
+          .join(
+            ", ",
+          )}) without a valid rate for its date. Choose a later effective date, or resolve those accruals first.`,
+        HttpStatus.CONFLICT,
+      );
+    }
 
     await sql`
       update outsourced_driver_fee_versions
@@ -585,9 +729,17 @@ export class WorkforceConfigurationService {
         "Role name is required",
         HttpStatus.BAD_REQUEST,
       );
-    // Derive a stable code from the name; the operator only types the name.
-    const code =
-      name.toUpperCase().replace(/[^A-Z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 40) || "ROLE";
+    // Derive a code from the name for readability, then append a short
+    // random suffix so it stays unique even when the name carries no A-Z/0-9
+    // characters at all -- e.g. an Arabic-only name like "مندوب" strips to
+    // nothing, so without this every Arabic-named Role would collapse onto
+    // the same "ROLE" code and the next one would fail as a duplicate.
+    const base = name
+      .toUpperCase()
+      .replace(/[^A-Z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "")
+      .slice(0, 32);
+    const code = `${base || "ROLE"}_${randomUUID().replace(/-/g, "").slice(0, 6).toUpperCase()}`;
     try {
       const result = await sql<Record<string, unknown>>`
         insert into employee_roles (company_id, code, name_en, is_driver_role)
@@ -615,6 +767,38 @@ export class WorkforceConfigurationService {
         );
       throw error;
     }
+  }
+
+  // Deactivating a Role only removes it from employeeRoles() -- the picker
+  // for new/changed assignments. It never touches any Employee already on
+  // this Role: their employee_role_id keeps pointing at the same row, which
+  // still exists, just excluded from is_active-filtered lists. Reversible by
+  // reactivating (isActive: true), unlike a hard delete.
+  public async setEmployeeRoleStatus(
+    roleId: string,
+    isActive: boolean,
+    correlationId: string,
+  ): Promise<void> {
+    const { companyId } = this.tenants.current();
+    const actorId = this.identities.current().identityId;
+    const result = await sql<{ id: string; nameEn: string }>`
+      update employee_roles
+         set is_active=${isActive}, updated_at=now(), version=version+1
+       where id=${roleId}::uuid and company_id=${companyId}::uuid
+      returning id, name_en as "nameEn"
+    `.execute(this.database);
+    const role = result.rows[0];
+    if (role === undefined)
+      throw new ApplicationException("role_not_found", "Role not found", HttpStatus.NOT_FOUND);
+    await this.audit(this.database, {
+      action: isActive ? "employee_role.reactivate" : "employee_role.deactivate",
+      actorId,
+      after: { isActive, name: role.nameEn },
+      companyId,
+      correlationId,
+      subjectId: role.id,
+      subjectType: "employee_role",
+    });
   }
 
   public async createDriver(
@@ -660,12 +844,12 @@ export class WorkforceConfigurationService {
       const existingEmployeeId =
         id === undefined
           ? undefined
-          : (
+          : ((
               await sql<{ employeeId: string | null }>`
                 select employee_id as "employeeId" from drivers
                  where id=${driverId}::uuid and company_id=${companyId}::uuid
               `.execute(transaction)
-            ).rows[0]?.employeeId ?? undefined;
+            ).rows[0]?.employeeId ?? undefined);
 
       const employeeId =
         input.driverType === "employee"
@@ -769,14 +953,7 @@ export class WorkforceConfigurationService {
       );
     }
 
-    await this.writeSalaryVersion(
-      transaction,
-      companyId,
-      id,
-      actorId,
-      salary,
-      effectiveFrom,
-    );
+    await this.writeSalaryVersion(transaction, companyId, id, actorId, salary, effectiveFrom);
     for (const allowance of input.allowances ?? []) {
       await sql`insert into employee_allowances (company_id,employee_id,allowance_type_id,amount,effective_from,effective_to,created_by_account_id)
         values (${companyId}::uuid,${id}::uuid,${allowance.allowanceTypeId}::uuid,${new Decimal(allowance.amount).toFixed(2)},${allowance.effectiveFrom}::date,${allowance.effectiveTo ?? null}::date,${actorId}::uuid)`.execute(
@@ -840,9 +1017,8 @@ export class WorkforceConfigurationService {
       `.execute(transaction);
       const requestedDate =
         effectiveFrom ??
-        (
-          await sql<{ today: string }>`select current_date::text as today`.execute(transaction)
-        ).rows[0]!.today;
+        (await sql<{ today: string }>`select current_date::text as today`.execute(transaction))
+          .rows[0]!.today;
 
       // Repeated edits from the Employee form may have produced several
       // contiguous versions with the same salary. Treat a date-only edit as a
@@ -850,10 +1026,7 @@ export class WorkforceConfigurationService {
       // draft/calculated Payroll references to it, and remove only the
       // redundant unused versions. Approved history is never consolidated.
       let trailingStart = versions.rows.length;
-      while (
-        trailingStart > 0 &&
-        versions.rows[trailingStart - 1]?.basicSalary === salary
-      ) {
+      while (trailingStart > 0 && versions.rows[trailingStart - 1]?.basicSalary === salary) {
         trailingStart -= 1;
       }
       const trailingSameSalary = versions.rows.slice(trailingStart);
@@ -1001,17 +1174,12 @@ export class WorkforceConfigurationService {
       `.execute(transaction);
     } catch (error) {
       const code =
-        typeof error === "object" && error !== null && "code" in error
-          ? String(error.code)
-          : "";
+        typeof error === "object" && error !== null && "code" in error ? String(error.code) : "";
       const message =
         typeof error === "object" && error !== null && "message" in error
           ? String(error.message)
           : "";
-      if (
-        ["23505", "23P01"].includes(code) &&
-        message.toLowerCase().includes("salary")
-      ) {
+      if (["23505", "23P01"].includes(code) && message.toLowerCase().includes("salary")) {
         throw new ApplicationException(
           "employee_salary_effective_date_overlap",
           "The selected salary effective date overlaps an existing salary period",
@@ -1096,16 +1264,48 @@ export class WorkforceConfigurationService {
         }
       } else {
         const result = await sql<{
+          employeeId: string | null;
           id: string;
-        }>`update drivers set account_status=${isActive ? "active" : "disabled"},deactivated_at=case when ${isActive} then null else now() end,updated_at=now(),version=version+1 where id=${id}::uuid and company_id=${companyId}::uuid returning id`.execute(
+        }>`update drivers set account_status=${isActive ? "active" : "disabled"},deactivated_at=case when ${isActive} then null else now() end,updated_at=now(),version=version+1 where id=${id}::uuid and company_id=${companyId}::uuid returning id, employee_id as "employeeId"`.execute(
           transaction,
         );
-        if (result.rows[0] === undefined)
+        const driver = result.rows[0];
+        if (driver === undefined)
           throw new ApplicationException(
             "driver_not_found",
             "Driver not found",
             HttpStatus.NOT_FOUND,
           );
+        // The Driver record was deactivated directly (not via its Employee,
+        // whose own deactivation above already disables the whole account).
+        // The linked Employee's account otherwise stays fully active, so the
+        // auto-provisioned Driver role must be revoked explicitly here or a
+        // no-longer-a-Driver User would keep Order self-service access
+        // indefinitely.
+        if (!isActive && driver.employeeId !== null) {
+          const account = await sql<{ accountId: string }>`
+            select cu.account_id as "accountId"
+              from employees e
+              join company_users cu on cu.id = e.company_user_id and cu.company_id = e.company_id
+             where e.id = ${driver.employeeId}::uuid and e.company_id = ${companyId}::uuid
+          `.execute(transaction);
+          const accountId = account.rows[0]?.accountId;
+          if (accountId !== undefined) {
+            const revoked = await this.driverRoles.revoke(transaction, companyId, accountId);
+            if (revoked) {
+              await this.audit(transaction, {
+                action: "driver.role_revoked_on_deactivation",
+                actorId,
+                after: { accountId },
+                companyId,
+                correlationId,
+                reason: reason.trim(),
+                subjectId: id,
+                subjectType: "driver",
+              });
+            }
+          }
+        }
       }
       await this.audit(transaction, {
         action: `${kind}.${isActive ? "activate" : "disable"}`,
@@ -1422,7 +1622,9 @@ export class WorkforceConfigurationService {
           >`select e.*,a.id as "linked_account_id",a.username as "linked_username",
                      cu.display_name as "linked_user_name",
                      salary.effective_from::text as salary_effective_from,
-                     d.driver_type,d.outsourced_fee_per_delivered_order
+                     d.driver_type,d.outsourced_fee_per_delivered_order,
+                     ocr.collection_payment_type as outsourced_collection_payment_type,
+                     ocr.amount::text as outsourced_collection_amount
                from employees e left join company_users cu on cu.id=e.company_user_id and cu.company_id=e.company_id
                left join accounts a on a.id=cu.account_id and a.company_id=cu.company_id
                left join drivers d on d.employee_id=e.id and d.company_id=e.company_id
@@ -1431,6 +1633,11 @@ export class WorkforceConfigurationService {
                  where company_id=e.company_id and employee_id=e.id
                  order by effective_from desc limit 1
               ) salary on true
+               left join lateral (
+                select collection_payment_type, amount from outsourced_driver_collection_earning_rules
+                 where company_id=d.company_id and driver_id=d.id and is_active and effective_to is null
+                 order by effective_from desc limit 1
+              ) ocr on true
              where e.company_id=${companyId}::uuid and lower(e.employee_number)=lower(${code})`.execute(
             this.database,
           )
@@ -1600,9 +1807,7 @@ export class WorkforceConfigurationService {
     }>`insert into payroll_periods(company_id,period_reference,payroll_month,period_start,period_end,created_by_account_id)
        values(${companyId}::uuid,${`PAY-${start.slice(0, 7)}`},date_trunc('month',${start}::date)::date,${start}::date,${end}::date,${actorId}::uuid)
        on conflict(company_id,period_start,period_end) do update set period_start=excluded.period_start
-       returning id`.execute(
-      database,
-    );
+       returning id`.execute(database);
     const payrollId = randomUUID();
     await sql`insert into payroll_entries(
       id,company_id,payroll_number,payroll_period_id,employee_id,
@@ -1627,9 +1832,7 @@ export class WorkforceConfigurationService {
       net_salary=payroll_entries.net_salary+excluded.employee_driver_commission,
       outstanding_amount=payroll_entries.outstanding_amount+excluded.employee_driver_commission,
       updated_at=now(),version=payroll_entries.version+1
-    returning id`.execute(
-      database,
-    );
+    returning id`.execute(database);
     const actual = await sql<{
       id: string;
     }>`select id from payroll_entries where company_id=${companyId}::uuid and payroll_period_id=${period.rows[0]!.id}::uuid and employee_id=${employeeId}::uuid`.execute(

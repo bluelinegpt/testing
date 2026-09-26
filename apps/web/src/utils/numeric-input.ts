@@ -1,9 +1,4 @@
-export type NumericInputError =
-  | "invalid"
-  | "negative"
-  | "precision"
-  | "too_large"
-  | "whole_number";
+export type NumericInputError = "invalid" | "negative" | "precision" | "too_large" | "whole_number";
 
 export type NumericInputResult =
   | { readonly ok: true; readonly normalized: string; readonly value: number }
@@ -14,7 +9,7 @@ export interface NumericInputOptions {
   readonly allowZero?: boolean;
   readonly decimalPlaces?: number;
   readonly maxAbsolute?: number;
-  readonly required?: boolean;
+  readonly required?: boolean | undefined;
   readonly wholeNumber?: boolean;
 }
 
@@ -97,18 +92,12 @@ export function parseMoneyInput(
   return parseNumericInput(raw, { ...options, decimalPlaces: 2 });
 }
 
-export function safeNumericValue(
-  raw: string | number | null | undefined,
-  fallback = 0,
-): number {
+export function safeNumericValue(raw: string | number | null | undefined, fallback = 0): number {
   const parsed = parseNumericInput(raw, { allowNegative: true, decimalPlaces: 6 });
   return parsed.ok ? parsed.value : fallback;
 }
 
-export function safeMoneyValue(
-  raw: string | number | null | undefined,
-  fallback = 0,
-): number {
+export function safeMoneyValue(raw: string | number | null | undefined, fallback = 0): number {
   const parsed = parseMoneyInput(raw, { allowNegative: true });
   return parsed.ok ? parsed.value : fallback;
 }

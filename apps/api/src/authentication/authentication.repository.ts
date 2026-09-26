@@ -29,6 +29,9 @@ export interface AuthenticatedSessionRecord {
   readonly profileLinkId: string | null;
   readonly profileType: "employee" | "driver" | "trader" | null;
   readonly profileId: string | null;
+  /** `null` for a Platform Administrator (`companyId` is also `null` there). */
+  readonly companyName: string | null;
+  readonly companyNameAr: string | null;
 }
 
 export interface ActiveProfileRecord {
@@ -87,6 +90,49 @@ export class AuthenticationRepository {
            )
          )
          and a.account_kind <> 'platform_administrator'
+       limit 2
+    `.execute(this.database);
+    return result.rows.length === 1 ? result.rows[0] : undefined;
+  }
+
+  /**
+   * A marketplace Customer account (`account_kind = 'customer'`,
+   * `company_id IS NULL`) by username, email, or mobile -- the same
+   * three-way identifier match `findCompanyAccount` uses, but without the
+   * `companies` join/subdomain filter that would drop every Company-less
+   * row (mirrors `findPlatformAccount`'s Company-less shape instead).
+   *
+   * Shared Commerce Foundation Prompt 3A.
+   */
+  public async findCustomerAccount(
+    identifier: string,
+    normalizedMobile: string | undefined,
+  ): Promise<AccountLoginRecord | undefined> {
+    const result = await sql<AccountLoginRecord>`
+      select a.id,
+             a.company_id as "companyId",
+             a.account_kind as kind,
+             a.username,
+             coalesce(cc.name, a.username) as "displayName",
+             a.password_hash as "passwordHash",
+             a.status as "accountStatus",
+             a.failed_login_attempts as "failedLoginAttempts",
+             a.locked_until as "lockedUntil",
+             a.force_password_change as "forcePasswordChange",
+             a.temporary_password_expires_at as "temporaryPasswordExpiresAt",
+             null::text as "companyStatus"
+        from accounts a
+        left join commerce_customers cc on cc.account_id = a.id
+       where a.company_id is null
+         and a.account_kind = 'customer'
+         and (
+           a.normalized_username = lower(btrim(${identifier}))
+           or a.normalized_email = lower(btrim(${identifier}))
+           or (
+             ${normalizedMobile ?? null}::text is not null
+             and a.normalized_mobile_number = ${normalizedMobile ?? null}
+           )
+         )
        limit 2
     `.execute(this.database);
     return result.rows.length === 1 ? result.rows[0] : undefined;
@@ -188,6 +234,7 @@ export class AuthenticationRepository {
              a.account_kind as kind
              ,a.force_password_change as "forcePasswordChange"
              ,s.profile_link_id as "profileLinkId",s.profile_type as "profileType",s.profile_id as "profileId"
+             ,c.name_en as "companyName",c.name_ar as "companyNameAr"
         from account_sessions s
         join accounts a on a.id = s.account_id
         left join companies c on c.id = a.company_id
@@ -225,6 +272,33 @@ export class AuthenticationRepository {
           and access_status='active' order by is_primary desc,created_at asc limit 2
     `.execute(this.database);
     return result.rows.length === 1 ? result.rows[0] : undefined;
+  }
+
+  /**
+   * The Driver a "Driver User" identity operates as, if any — a
+   * `company_user` account whose active `employee` profile link backs a
+   * `drivers.employee_id` record (see `OperationsService.currentEmployeeDriverId`,
+   * which `orders()`/`orderDetail()`/`operatorDashboardSummary()` already use
+   * to narrow an Operator-kind account's own view to just their Driver's
+   * Orders). Exposed here too so `/auth/me` can tell the client, authoritatively,
+   * that this Operator-kind account is really a Driver in practice — the
+   * client must never infer this from a display name or hardcode an account.
+   * Returns `undefined` for every other identity, including an ordinary
+   * office User whose linked Employee is not also a Driver.
+   */
+  public async linkedDriverId(
+    companyId: string | null,
+    profileType: "driver" | "employee" | "trader" | undefined,
+    profileId: string | undefined,
+  ): Promise<string | undefined> {
+    if (companyId === null || profileType !== "employee" || profileId === undefined) {
+      return undefined;
+    }
+    const result = await sql<{ id: string }>`
+      select id from drivers where employee_id = ${profileId}::uuid and company_id = ${companyId}::uuid
+      limit 1
+    `.execute(this.database);
+    return result.rows[0]?.id;
   }
 
   public async passwordHash(accountId: string): Promise<string | undefined> {

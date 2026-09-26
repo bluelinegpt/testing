@@ -12,12 +12,17 @@ export interface AccountingReportDocument {
 
 function escape(value: unknown): string {
   return String(value ?? "")
-    .replaceAll("&", "&amp;").replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;").replaceAll('"', "&quot;");
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
 }
 
 export function safeAccountingFilename(value: string): string {
-  return value.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/-+/g, "-").slice(0, 120);
+  return value
+    .replace(/[^A-Za-z0-9._-]+/g, "-")
+    .replace(/-+/g, "-")
+    .slice(0, 120);
 }
 
 export function accountingReportHtml(input: {
@@ -28,19 +33,26 @@ export function accountingReportHtml(input: {
 }): { readonly footer: string; readonly html: string } {
   const ar = input.language === "ar";
   const b = input.branding;
-  const company = ar ? (b.nameAr || b.nameEn) : b.nameEn;
-  const subtitle = ar ? (b.subtitleAr || b.subtitleEn) : b.subtitleEn;
+  const company = ar ? b.nameAr || b.nameEn : b.nameEn;
+  const subtitle = ar ? b.subtitleAr || b.subtitleEn : b.subtitleEn;
   const labels = ar
     ? { generated: "تاريخ الإنشاء", snapshot: "وقت اللقطة", warning: "تنبيه", page: "الصفحة" }
     : { generated: "Generated", snapshot: "Snapshot", warning: "Warning", page: "Page" };
   const filters = Object.entries(input.document.filters)
     .filter(([, value]) => value !== undefined && value !== "")
-    .map(([key, value]) => `<span><b>${escape(key)}:</b> <bdi>${escape(value)}</bdi></span>`).join("");
-  const rows = input.document.rows.map((row) =>
-    `<tr>${input.document.columns.map((column) =>
-      `<td><bdi>${escape(row[column])}</bdi></td>`).join("")}</tr>`).join("");
-  const warnings = input.document.warnings.map((warning) =>
-    `<div class="warning"><b>${labels.warning}:</b> ${escape(warning)}</div>`).join("");
+    .map(([key, value]) => `<span><b>${escape(key)}:</b> <bdi>${escape(value)}</bdi></span>`)
+    .join("");
+  const rows = input.document.rows
+    .map(
+      (row) =>
+        `<tr>${input.document.columns
+          .map((column) => `<td><bdi>${escape(row[column])}</bdi></td>`)
+          .join("")}</tr>`,
+    )
+    .join("");
+  const warnings = input.document.warnings
+    .map((warning) => `<div class="warning"><b>${labels.warning}:</b> ${escape(warning)}</div>`)
+    .join("");
   const html = `<!doctype html><html lang="${input.language}" dir="${ar ? "rtl" : "ltr"}"><head>
 <meta charset="utf-8"><style>
 @page{size:A4;margin:14mm 12mm 18mm}*{box-sizing:border-box}body{font-family:"Arial","Noto Sans Arabic",sans-serif;color:#172033;font-size:10px}

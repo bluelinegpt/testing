@@ -24,6 +24,7 @@ export function AreaFormDialog({
   api,
   area,
   defaultEmirateId,
+  emirates: suppliedEmirates,
   onClose,
   onSaved,
 }: {
@@ -32,6 +33,8 @@ export function AreaFormDialog({
   area?: CompanyArea | undefined;
   /** Prefills the Emirate when the parent form already chose one. */
   defaultEmirateId?: string | undefined;
+  /** Reuse an already-loaded selector list when opened inline from an Order. */
+  emirates?: readonly Emirate[] | undefined;
   onClose: () => void;
   onSaved: (area: CompanyArea) => void;
 }) {
@@ -39,17 +42,22 @@ export function AreaFormDialog({
   const locale = normalizeLocale(i18n.resolvedLanguage);
   const editing = area !== undefined;
 
-  const [emirates, setEmirates] = useState<readonly Emirate[]>([]);
+  const [emirates, setEmirates] = useState<readonly Emirate[]>(suppliedEmirates ?? []);
   const [emirateId, setEmirateId] = useState(area?.emirateId ?? defaultEmirateId ?? "");
   const [nameEn, setNameEn] = useState(area?.nameEn ?? "");
   const [nameAr, setNameAr] = useState(area?.nameAr ?? "");
   const [notes, setNotes] = useState(area?.notes ?? "");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [error, setError] = useState<string>();
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(suppliedEmirates === undefined);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
+    if (suppliedEmirates !== undefined) {
+      setEmirates(suppliedEmirates);
+      setLoading(false);
+      return;
+    }
     let active = true;
     void api
       .get<readonly Emirate[]>("configuration/emirates")
@@ -59,10 +67,9 @@ export function AreaFormDialog({
     return () => {
       active = false;
     };
-  }, [api, t]);
+  }, [api, suppliedEmirates, t]);
 
-  const emirateLabel = (emirate: Emirate) =>
-    locale === "ar" ? emirate.nameAr : emirate.nameEn;
+  const emirateLabel = (emirate: Emirate) => (locale === "ar" ? emirate.nameAr : emirate.nameEn);
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -118,56 +125,58 @@ export function AreaFormDialog({
         {/* The error sits outside the label so it cannot pollute the field's
             accessible name; aria-describedby still associates the two. */}
         <div className="field-group">
-        <label className="field required-field">
-          <span>{t("areas.emirate")}</span>
-          <select
-            aria-describedby={fieldErrors.emirateId === undefined ? undefined : "area-emirate-error"}
-            aria-invalid={fieldErrors.emirateId !== undefined}
-            disabled={loading || saving}
-            onChange={(event) => {
-              setEmirateId(event.target.value);
-              setFieldErrors((current) => clearField(current, "emirateId"));
-            }}
-            required
-            value={emirateId}
-          >
-            <option value="">{loading ? t("common.loading") : t("areas.selectEmirate")}</option>
-            {emirates.map((emirate) => (
-              <option key={emirate.id} value={emirate.id}>
-                {emirateLabel(emirate)}
-              </option>
-            ))}
-          </select>
-        </label>
-        {fieldErrors.emirateId === undefined ? null : (
-          <small className="field-error" id="area-emirate-error" role="alert">
-            {fieldErrors.emirateId}
-          </small>
-        )}
+          <label className="field required-field">
+            <span>{t("areas.emirate")}</span>
+            <select
+              aria-describedby={
+                fieldErrors.emirateId === undefined ? undefined : "area-emirate-error"
+              }
+              aria-invalid={fieldErrors.emirateId !== undefined}
+              disabled={loading || saving}
+              onChange={(event) => {
+                setEmirateId(event.target.value);
+                setFieldErrors((current) => clearField(current, "emirateId"));
+              }}
+              required
+              value={emirateId}
+            >
+              <option value="">{loading ? t("common.loading") : t("areas.selectEmirate")}</option>
+              {emirates.map((emirate) => (
+                <option key={emirate.id} value={emirate.id}>
+                  {emirateLabel(emirate)}
+                </option>
+              ))}
+            </select>
+          </label>
+          {fieldErrors.emirateId === undefined ? null : (
+            <small className="field-error" id="area-emirate-error" role="alert">
+              {fieldErrors.emirateId}
+            </small>
+          )}
         </div>
 
         <div className="field-group">
-        <label className="field required-field">
-          <span>{t("areas.nameEn")}</span>
-          <input
-            aria-describedby={fieldErrors.nameEn === undefined ? undefined : "area-name-error"}
-            aria-invalid={fieldErrors.nameEn !== undefined}
-            autoFocus
-            disabled={saving}
-            maxLength={160}
-            onChange={(event) => {
-              setNameEn(event.target.value);
-              setFieldErrors((current) => clearField(current, "nameEn"));
-            }}
-            required
-            value={nameEn}
-          />
-        </label>
-        {fieldErrors.nameEn === undefined ? null : (
-          <small className="field-error" id="area-name-error" role="alert">
-            {fieldErrors.nameEn}
-          </small>
-        )}
+          <label className="field required-field">
+            <span>{t("areas.nameEn")}</span>
+            <input
+              aria-describedby={fieldErrors.nameEn === undefined ? undefined : "area-name-error"}
+              aria-invalid={fieldErrors.nameEn !== undefined}
+              autoFocus
+              disabled={saving}
+              maxLength={160}
+              onChange={(event) => {
+                setNameEn(event.target.value);
+                setFieldErrors((current) => clearField(current, "nameEn"));
+              }}
+              required
+              value={nameEn}
+            />
+          </label>
+          {fieldErrors.nameEn === undefined ? null : (
+            <small className="field-error" id="area-name-error" role="alert">
+              {fieldErrors.nameEn}
+            </small>
+          )}
         </div>
 
         <label className="field">

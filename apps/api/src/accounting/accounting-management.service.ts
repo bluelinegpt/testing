@@ -356,6 +356,33 @@ export class AccountingManagementService {
             HttpStatus.NOT_FOUND,
           );
         }
+        // Segregation of Duties is written separately and only when the column
+        // exists, so saving Configuration still works on a database that has
+        // not yet applied 20260803110000_accounting_segregation_policy —
+        // naming the column in the statement above would make the whole save
+        // fail with `undefined_column` there.
+        if (input.segregationPolicy !== undefined) {
+          const column = await sql<{ present: boolean }>`
+            select exists(
+              select 1 from information_schema.columns
+               where table_schema='public' and table_name='accounting_configurations'
+                 and column_name='segregation_policy'
+            ) as present
+          `.execute(transaction);
+          if (column.rows[0]?.present === true) {
+            await sql`
+              update accounting_configurations
+                 set segregation_policy = ${input.segregationPolicy}
+               where company_id = ${companyId}::uuid
+            `.execute(transaction);
+          } else {
+            throw new ApplicationException(
+              "accounting_segregation_policy_unavailable",
+              "Segregation of Duties cannot be changed until the pending Accounting migration is applied",
+              HttpStatus.CONFLICT,
+            );
+          }
+        }
         await this.support.audit(transaction, {
           action: "accounting.configuration.updated",
           after: response,
@@ -440,10 +467,7 @@ export class AccountingManagementService {
           payload: { enable: true },
         });
         if (reservation.replayResponse !== undefined) return reservation.replayResponse;
-        await this.lockAccountConfigurationScope(
-          transaction,
-          this.support.context().companyId,
-        );
+        await this.lockAccountConfigurationScope(transaction, this.support.context().companyId);
         const readiness = await this.readiness(transaction);
         if (!readiness.ready) {
           throw new ApplicationException(
@@ -668,8 +692,10 @@ export class AccountingManagementService {
           HttpStatus.NOT_FOUND,
         );
       }
-      const blocking = Number(state.activeChildren) + Number(state.activeMappings)
-        + Number(state.configurationAssignments);
+      const blocking =
+        Number(state.activeChildren) +
+        Number(state.activeMappings) +
+        Number(state.configurationAssignments);
       return { ...state, canDeactivate: blocking === 0, blockingDependencies: blocking };
     };
     if (database !== undefined) return work(database);

@@ -18,6 +18,7 @@ const sample: DriverCollectionReportData = {
     collectionPaymentMethod: "cash",
     company: {
       hasLogo: true,
+      logoDataUri: "data:image/png;base64,c2FtcGxl",
       nameAr: "شركة الاختبار",
       nameEn: "Test Company",
       subtitleAr: null,
@@ -28,7 +29,9 @@ const sample: DriverCollectionReportData = {
     confirmedBy: "ops.user",
     createdAt: "2026-07-27T10:30:00.000Z",
     createdBy: "ops.user",
+    driverCode: "DRV-000001",
     driverName: "Test Driver",
+    driverNameAr: null,
     driverType: "outsourced",
     isReversal: false,
     notes: "End of day handover",
@@ -90,6 +93,8 @@ describe("buildDriverCollectionReportHtml", () => {
     expect(html).toContain("Route to Sharjah");
     expect(html).toContain("Test Company");
     expect(html).toContain("Delivery operations");
+    expect(html).toContain('class="company-logo"');
+    expect(html).toContain("data:image/png;base64,c2FtcGxl");
     // Signatures for Driver, Cashier/Operations User and Approver.
     expect(html).toContain("Driver");
     expect(html).toContain("Cashier/Operations User");

@@ -32,7 +32,11 @@ export function LegacyBusinessLinkSyncPanel({ api }: { readonly api: ApiClient }
     try {
       const result = await api.get<LegacyPreview>("users/business-links/legacy-preview");
       setPreview(result);
-      setSelected(result.candidates.filter((candidate) => candidate.eligible).map((candidate) => candidate.candidateId));
+      setSelected(
+        result.candidates
+          .filter((candidate) => candidate.eligible)
+          .map((candidate) => candidate.candidateId),
+      );
     } catch (cause) {
       setError(cause instanceof ApiError ? cause.message : t("access.legacy.loadFailed"));
     }
@@ -103,10 +107,14 @@ export function LegacyBusinessLinkSyncPanel({ api }: { readonly api: ApiClient }
                       />
                     </td>
                     <td>{t(`access.profile.${candidate.profileType}`)}</td>
-                    <td><bdi>{candidate.code}</bdi></td>
+                    <td>
+                      <bdi>{candidate.code}</bdi>
+                    </td>
                     <td>
                       {candidate.classifications
-                        .map((classification) => t(`access.legacy.classifications.${classification}`))
+                        .map((classification) =>
+                          t(`access.legacy.classifications.${classification}`),
+                        )
                         .join(", ")}
                     </td>
                   </tr>

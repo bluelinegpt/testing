@@ -1,0 +1,170 @@
+.site-template--has-banner .site-template__hero {
+  /* Shared by every Company Website template. Keep the banner prominent
+     without letting it consume the full first viewport on wide screens.
+     `!important` on the sizing properties is deliberate: several named
+     templates (e.g. `--premium`'s `min-height: 68vh`) style `.site-template__hero`
+     for the text-only, no-banner case at equal selector specificity, and a
+     plain declaration here loses that tie by source order alone -- which is
+     exactly what let Dana's uploaded banner render at ~68vh in production
+     instead of this compact height. min-height/height combine (the browser
+     uses whichever is larger), so min-height must be reset here too, not
+     just height.
+
+     Sizing is driven by WIDTH, not a fixed height: a Company's uploaded
+     banner is a wide marketing graphic, and forcing a fixed frame height
+     fights its aspect ratio -- either cropping into it (`cover`) or, once
+     the frame is taller than the image's own proportions call for
+     (`contain`), leaving empty gutters down the sides instead of filling
+     the same width as the rest of the page's content. Per acceptance
+     feedback the banner must line up with the Real-Time Tracking card
+     below it, so the frame uses the exact same centered column as
+     `.company-site-functions` (max-width 1180px + the same inline
+     padding), and height simply follows the image's own aspect ratio --
+     no height cap at all, because any cap re-introduces the side gutters
+     via `contain` the moment the image is proportionally taller than it. */
+  height: auto !important;
+  min-height: 0 !important;
+  /* Inline padding mirrors the WINNING `.company-site-functions` rule
+     (the later one in styles.css: fixed 1rem inline), so the banner
+     column below lines up with the tracking card to the pixel. */
+  padding: clamp(1rem, 2vw, 2rem) 1rem !important;
+  background-color: var(--site-secondary, #edf5f8);
+  display: block;
+  position: relative;
+  overflow: hidden;
+}
+
+.site-template__banner {
+  margin: 0 auto;
+  max-width: calc(1180px - 2rem);
+  position: relative;
+  width: 100%;
+}
+
+.site-template__banner > img {
+  border-radius: 18px;
+  display: block;
+  height: auto;
+  width: 100%;
+}
+
+/* Company-chosen banner size (branding.bannerSize in Website settings).
+   `standard` is the default above: the content column, height from the
+   image's own aspect ratio. */
+.site-template--banner-compact .site-template__banner > img {
+  max-height: clamp(220px, 22vw, 320px);
+  object-fit: contain;
+  object-position: center;
+}
+.site-template--banner-full .site-template__hero {
+  padding: 0 !important;
+}
+.site-template--banner-full .site-template__banner {
+  max-width: none;
+}
+.site-template--banner-full .site-template__banner > img {
+  border-radius: 0;
+}
+
+.site-template__banner--fade > img {
+  animation: website-banner-fade 600ms ease both;
+}
+.site-template__banner--slide > img {
+  animation: website-banner-slide 600ms ease both;
+}
+.site-template__banner--zoom > img {
+  animation: website-banner-zoom 800ms ease both;
+}
+
+.site-template__banner-controls {
+  align-items: center;
+  bottom: 1rem;
+  display: flex;
+  gap: 0.65rem;
+  justify-content: center;
+  left: 50%;
+  position: absolute;
+  transform: translateX(-50%);
+}
+.site-template__banner-controls > button {
+  align-items: center;
+  background: rgb(15 23 42 / 78%);
+  border: 1px solid rgb(255 255 255 / 80%);
+  border-radius: 50%;
+  color: #fff;
+  cursor: pointer;
+  display: flex;
+  font-size: 1.4rem;
+  height: 2.25rem;
+  justify-content: center;
+  width: 2.25rem;
+}
+.site-template__banner-controls > span {
+  display: flex;
+  gap: 0.45rem;
+}
+.site-template__banner-controls > span button {
+  background: rgb(255 255 255 / 65%);
+  border: 1px solid #fff;
+  border-radius: 999px;
+  cursor: pointer;
+  height: 0.7rem;
+  padding: 0;
+  width: 0.7rem;
+}
+.site-template__banner-controls > span button[aria-current="true"] {
+  background: var(--site-accent, #e2a93b);
+  width: 1.6rem;
+}
+
+@keyframes website-banner-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes website-banner-slide {
+  from {
+    opacity: 0.25;
+    transform: translateX(12%);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+@keyframes website-banner-zoom {
+  from {
+    opacity: 0.3;
+    transform: scale(1.08);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .site-template__banner > img {
+    animation: none;
+  }
+}
+
+@media (max-width: 680px) {
+  .site-template--has-banner .site-template__hero {
+    padding: 0.75rem 1rem !important;
+  }
+  .site-template__banner > img {
+    border-radius: 12px;
+  }
+  /* After the has-banner rule above so full-bleed stays edge-to-edge on
+     mobile too (same specificity, later source order wins). */
+  .site-template--banner-full .site-template__hero {
+    padding: 0 !important;
+  }
+  .site-template--banner-full .site-template__banner > img {
+    border-radius: 0;
+  }
+}

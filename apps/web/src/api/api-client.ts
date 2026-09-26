@@ -7,6 +7,7 @@ interface ApiErrorPayload {
     readonly code?: string;
     readonly details?: readonly string[];
     readonly message?: string;
+    readonly correlationId?: string;
   };
 }
 
@@ -16,6 +17,7 @@ export class ApiError extends Error {
     public readonly code: string,
     public readonly status: number,
     public readonly details?: readonly string[],
+    public readonly correlationId?: string,
   ) {
     super(message);
     this.name = "ApiError";
@@ -99,11 +101,19 @@ export class ApiClient {
     else input.signal?.addEventListener("abort", abortRequest, { once: true });
     const headers: Record<string, string> = { Accept: "application/pdf,image/png,image/jpeg,*/*" };
     if (this.accessToken !== undefined) headers.Authorization = `Bearer ${this.accessToken}`;
+    // Names the request as coming from this application. A cross-site form
+    // cannot set it, which is what makes the HttpOnly session cookie safe to
+    // rely on for state-changing calls.
+    headers["X-Blueline-Session"] = "cookie";
     if (input.body !== undefined) headers["Content-Type"] = "application/json";
     try {
       const response = await fetch(`${webConfiguration.apiBaseUrl}/${path.replace(/^\//, "")}`, {
         ...(input.body === undefined ? {} : { body: JSON.stringify(input.body) }),
         cache: "no-store",
+        // Carries the HttpOnly session cookie, which is what survives a
+        // reload, a pasted URL and a new tab. The token itself is never
+        // readable by page scripts.
+        credentials: "include",
         headers,
         method: input.method,
         signal: controller.signal,
@@ -117,9 +127,15 @@ export class ApiClient {
           payload?.error?.code ?? "request_failed",
           response.status,
           payload?.error?.details,
+          payload?.error?.correlationId,
         );
       }
       return await response.blob();
+    } catch (error) {
+      if (this.isAbortError(error)) {
+        throw new ApiError("The request timed out. Please try again.", "request_timeout", 408);
+      }
+      throw error;
     } finally {
       globalThis.clearTimeout(timeout);
       input.signal?.removeEventListener("abort", abortRequest);
@@ -145,6 +161,10 @@ export class ApiClient {
     const headers: Record<string, string> = { Accept: "application/json" };
     Object.assign(headers, input.headers);
     if (this.accessToken !== undefined) headers.Authorization = `Bearer ${this.accessToken}`;
+    // Names the request as coming from this application. A cross-site form
+    // cannot set it, which is what makes the HttpOnly session cookie safe to
+    // rely on for state-changing calls.
+    headers["X-Blueline-Session"] = "cookie";
     // FormData sets its own multipart Content-Type (with boundary); JSON bodies
     // are serialized and declared as application/json.
     if (input.body !== undefined && !isFormData) headers["Content-Type"] = "application/json";
@@ -157,6 +177,10 @@ export class ApiClient {
       const response = await fetch(`${webConfiguration.apiBaseUrl}/${path.replace(/^\//, "")}`, {
         ...body,
         cache: "no-store",
+        // Carries the HttpOnly session cookie, which is what survives a
+        // reload, a pasted URL and a new tab. The token itself is never
+        // readable by page scripts.
+        credentials: "include",
         headers,
         method: input.method,
         signal: controller.signal,
@@ -170,6 +194,7 @@ export class ApiClient {
           payload?.error?.code ?? "request_failed",
           response.status,
           payload?.error?.details,
+          payload?.error?.correlationId,
         );
       }
       if (response.status === 204) return undefined as TResponse;
@@ -180,6 +205,11 @@ export class ApiClient {
         throw new Error("The API returned an unsupported content type");
       }
       return (await response.json()) as TResponse;
+    } catch (error) {
+      if (this.isAbortError(error)) {
+        throw new ApiError("The request timed out. Please try again.", "request_timeout", 408);
+      }
+      throw error;
     } finally {
       globalThis.clearTimeout(timeout);
       input.signal?.removeEventListener("abort", abortRequest);
@@ -189,5 +219,13 @@ export class ApiClient {
   private isJson(contentType: string | null): boolean {
     const mediaType = contentType?.split(";", 1)[0]?.trim().toLowerCase();
     return mediaType === "application/json" || mediaType?.endsWith("+json") === true;
+  }
+
+  private isAbortError(error: unknown): boolean {
+    return (
+      (error instanceof DOMException && error.name === "AbortError") ||
+      (error instanceof Error && error.name === "AbortError") ||
+      (error instanceof Error && error.message.toLowerCase().includes("signal is aborted"))
+    );
   }
 }

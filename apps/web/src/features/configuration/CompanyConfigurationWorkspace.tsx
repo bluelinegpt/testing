@@ -2,7 +2,13 @@ import { type FormEvent, useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { ApiClient } from "../../api/api-client.js";
-import type { CompanyBankAccount, CompanySettings } from "../../api/contracts.js";
+import { ApiError } from "../../api/api-client.js";
+import type {
+  BusinessDayConfiguration,
+  BusinessDayWindow,
+  CompanyBankAccount,
+  CompanySettings,
+} from "../../api/contracts.js";
 import { PageHeader } from "../../components/PageHeader.js";
 import { AreaWorkspace } from "./AreaWorkspace.js";
 import { MyDisplayPreferences } from "./MyDisplayPreferences.js";
@@ -102,6 +108,9 @@ export function CompanyConfigurationWorkspace({
             onSaved={load}
           />
         )}
+        {view === "general" ? (
+          <BusinessCalendarPanel api={api} settings={settings} />
+        ) : null}
         {view === "general" ? <MyDisplayPreferences /> : null}
         {view === "areas" ? <AreaWorkspace api={api} /> : null}
         {view === "bank-accounts" ? (
@@ -291,6 +300,214 @@ function SettingsPanel({
       </form>
     </section>
   );
+}
+
+/**
+ * Business Calendar — the Company's business-day rule.
+ *
+ * Everything shown here is resolved by the backend. The browser never computes
+ * a window: it would build one from the viewer's own clock and timezone, and
+ * two people in different places would see different "today". The example
+ * window below is exactly the window a report will query.
+ */
+function BusinessCalendarPanel({
+  api,
+  settings,
+}: {
+  api: ApiClient;
+  settings: CompanySettings | undefined;
+}) {
+  const { t } = useTranslation();
+  const [configurations, setConfigurations] = useState<readonly BusinessDayConfiguration[]>([]);
+  const [window, setWindow] = useState<BusinessDayWindow>();
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string>();
+  const [notice, setNotice] = useState<string>();
+
+  const load = useCallback(async () => {
+    const rules = await api.get<readonly BusinessDayConfiguration[]>("configuration/business-day");
+    setConfigurations(rules);
+    const today = new Date().toISOString().slice(0, 10);
+    setWindow(
+      await api.get<BusinessDayWindow>(
+        `configuration/business-day/window?businessDateFrom=${today}`,
+      ),
+    );
+  }, [api]);
+
+  useEffect(() => {
+    void load().catch(() => setError(t("configuration.businessDay.loadFailed")));
+  }, [load, t]);
+
+  const current = configurations.find((rule) => rule.isCurrent);
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setSaving(true);
+    setError(undefined);
+    setNotice(undefined);
+    const form = new FormData(event.currentTarget);
+    try {
+      await api.post<BusinessDayConfiguration>("configuration/business-day", {
+        businessDayStart: String(form.get("businessDayStart") ?? "08:00"),
+        changeReason: String(form.get("changeReason") ?? ""),
+        effectiveFrom: String(form.get("effectiveFrom") ?? ""),
+        timezone: String(form.get("timezone") ?? "Asia/Dubai"),
+      });
+      setNotice(t("configuration.businessDay.saved"));
+      await load();
+    } catch (cause) {
+      setError(message(cause, t("configuration.businessDay.saveFailed")));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <section className="configuration-panel">
+      <h2>{t("configuration.businessDay.title")}</h2>
+      <p>{t("configuration.businessDay.explanation")}</p>
+      {error === undefined ? null : (
+        <div className="alert alert-error" role="alert">
+          {error}
+        </div>
+      )}
+      {notice === undefined ? null : <div className="alert alert-info">{notice}</div>}
+      {/* The display timezone and the business-day timezone are separate on
+          purpose — the business-day rule is effective-dated and must not be
+          rewritten when a display preference changes. Divergence is legitimate,
+          so this warns rather than blocks, and nothing is synchronised. */}
+      {current === undefined ||
+      settings === undefined ||
+      settings.timezone === current.timezone ? null : (
+        <div className="alert alert-warning" role="alert">
+          {t("configuration.businessDay.timezoneDiverged", {
+            businessDayTimezone: current.timezone,
+            displayTimezone: settings.timezone,
+          })}
+        </div>
+      )}
+
+      <dl className="detail-grid">
+        <div>
+          <dt>{t("configuration.businessDay.companyTimezone")}</dt>
+          <dd dir="ltr">{current?.timezone ?? "-"}</dd>
+        </div>
+        <div>
+          <dt>{t("configuration.businessDay.startTime")}</dt>
+          <dd dir="ltr">{current?.businessDayStart ?? "-"}</dd>
+        </div>
+        <div>
+          <dt>{t("configuration.businessDay.duration")}</dt>
+          <dd>{t("configuration.businessDay.durationValue")}</dd>
+        </div>
+        {window === undefined ? null : (
+          <div>
+            <dt>{t("configuration.businessDay.exampleWindow")}</dt>
+            {/* Codes, dates and times stay LTR even in Arabic. */}
+            <dd dir="ltr">
+              {window.businessDateFrom} {window.businessDayStart} → {window.displayEnd}
+            </dd>
+          </div>
+        )}
+      </dl>
+
+      {/* No Business Day End field: the end is always the next day at the same
+          start time, so an editable end could only create a gap or an overlap. */}
+      <form className="settings-form" onSubmit={(event) => void submit(event)}>
+        <label className="field compact-field">
+          <span>{t("configuration.businessDay.companyTimezone")}</span>
+          <input
+            defaultValue={current?.timezone ?? settings?.timezone ?? "Asia/Dubai"}
+            dir="ltr"
+            list="business-day-timezones"
+            maxLength={80}
+            name="timezone"
+            required
+          />
+          <datalist id="business-day-timezones">
+            {supportedTimezones.map((zone) => (
+              <option key={zone} value={zone} />
+            ))}
+          </datalist>
+        </label>
+        <label className="field compact-field">
+          <span>{t("configuration.businessDay.startTime")}</span>
+          <input
+            defaultValue={current?.businessDayStart ?? "08:00"}
+            dir="ltr"
+            name="businessDayStart"
+            required
+            type="time"
+          />
+        </label>
+        <label className="field compact-field">
+          <span>{t("configuration.businessDay.effectiveFrom")}</span>
+          <input dir="ltr" name="effectiveFrom" required type="date" />
+        </label>
+        <label className="field compact-field">
+          <span>{t("configuration.businessDay.changeReason")}</span>
+          <input maxLength={500} name="changeReason" required />
+        </label>
+        <button className="button button-primary" disabled={saving} type="submit">
+          {saving ? t("common.working") : t("common.save")}
+        </button>
+      </form>
+
+      <section className="stacked-section">
+        <h3>{t("configuration.businessDay.history")}</h3>
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>{t("configuration.businessDay.effectiveFrom")}</th>
+              <th>{t("configuration.businessDay.effectiveTo")}</th>
+              <th>{t("configuration.businessDay.companyTimezone")}</th>
+              <th>{t("configuration.businessDay.startTime")}</th>
+              <th>{t("configuration.businessDay.changeReason")}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {configurations.map((rule) => (
+              <tr key={rule.id}>
+                <td dir="ltr">
+                  {rule.effectiveFrom ?? t("configuration.businessDay.sinceAlways")}
+                </td>
+                <td dir="ltr">{rule.effectiveTo ?? t("configuration.businessDay.openEnded")}</td>
+                <td dir="ltr">{rule.timezone}</td>
+                <td dir="ltr">{rule.businessDayStart}</td>
+                <td>{rule.changeReason}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </section>
+    </section>
+  );
+}
+
+/**
+ * Offered as suggestions, not as the authority.
+ *
+ * The backend validates against the runtime's own IANA database, so a zone
+ * missing from this list is still accepted if it is real — the list exists to
+ * save typing, not to define what is legal.
+ */
+const supportedTimezones = [
+  "Asia/Dubai",
+  "Asia/Riyadh",
+  "Asia/Kuwait",
+  "Asia/Qatar",
+  "Asia/Bahrain",
+  "Asia/Muscat",
+  "Asia/Karachi",
+  "Asia/Kolkata",
+  "Europe/London",
+  "UTC",
+] as const;
+
+/** Prefer the API's own explanation; fall back only when there is none. */
+function message(error: unknown, fallback: string): string {
+  return error instanceof ApiError && error.message.trim() !== "" ? error.message : fallback;
 }
 
 function configurationTitleKey(view: ConfigurationView): string {

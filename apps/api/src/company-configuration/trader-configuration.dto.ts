@@ -24,9 +24,10 @@ export class CreateConfiguredTraderDto {
   @MaxLength(160)
   public readonly name!: string;
 
+  @IsOptional()
   @NormalizeUaeMobile()
   @Matches(/^9715[0-9]{8}$/, mobileOptions)
-  public readonly mobileNumber!: string;
+  public readonly mobileNumber?: string;
 
   @IsOptional()
   @NormalizeUaeMobile()

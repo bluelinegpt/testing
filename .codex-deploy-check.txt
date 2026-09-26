@@ -1,0 +1,7 @@
+branch=ui-v2.0
+exists=True
+last_commit=835441c fix(deploy): restore platform user deletion migration
+file_commit=
+ahead=0
+behind=0
+file_status=?? database/migrations/20260816200000_driver_earnings_interim_payments.ts

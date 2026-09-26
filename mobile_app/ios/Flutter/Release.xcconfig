@@ -1,0 +1,3 @@
+#include "Generated.xcconfig"
+PRODUCT_BUNDLE_IDENTIFIER=com.bluelinegpt.mobile
+APP_DISPLAY_NAME=BluelineGPT

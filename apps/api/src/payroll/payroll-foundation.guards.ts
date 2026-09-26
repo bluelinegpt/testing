@@ -14,7 +14,10 @@ import {
 const conflict = 409;
 const badRequest = 400;
 
-export function assertPayrollCompanyScope(expectedCompanyId: string, actualCompanyId: string): void {
+export function assertPayrollCompanyScope(
+  expectedCompanyId: string,
+  actualCompanyId: string,
+): void {
   if (expectedCompanyId !== actualCompanyId) {
     throw new ApplicationException(
       "payroll_company_mismatch",

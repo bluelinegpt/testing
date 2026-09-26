@@ -79,7 +79,7 @@ export class AccountingApi {
     return this.get<AccountingRecord>("dashboard/recent-activity", undefined, signal);
   }
   public accounts(filters?: Readonly<Record<string, unknown>>, signal?: AbortSignal) {
-    return this.get<AccountingPage>("accounts", filters, signal);
+    return this.get<readonly AccountingRecord[]>("accounts", filters, signal);
   }
   public accountHierarchy(signal?: AbortSignal) {
     return this.get<readonly AccountingRecord[]>("accounts/hierarchy", undefined, signal);

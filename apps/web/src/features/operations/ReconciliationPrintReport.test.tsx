@@ -7,7 +7,11 @@ import { ReconciliationPrintDocument } from "./ReconciliationPrintReport.js";
 
 const detail: OperationsDriverReconciliationDetail = {
   audit: [
-    { action: "driver_reconciliation.confirm", actor: "aisha.admin", occurredAt: "2026-07-19 14:54" },
+    {
+      action: "driver_reconciliation.confirm",
+      actor: "aisha.admin",
+      occurredAt: "2026-07-19 14:54",
+    },
   ],
   expenses: [
     {
@@ -135,7 +139,9 @@ describe("ReconciliationPrintDocument", () => {
     expect(within(payments).getByText("Bank Transfer")).toBeInTheDocument();
     // Bank reference is preserved verbatim.
     expect(within(payments).getByText("DEV-DEMO-TRF-0001")).toBeInTheDocument();
-    expect(within(payments).getByText("DEV-DEMO Bank — DEV-DEMO Collections Account")).toBeInTheDocument();
+    expect(
+      within(payments).getByText("DEV-DEMO Bank — DEV-DEMO Collections Account"),
+    ).toBeInTheDocument();
 
     const expenses = container.querySelector('[data-print="expense-lines"]') as HTMLElement;
     expect(within(expenses).getByText("Petrol")).toBeInTheDocument();
@@ -160,7 +166,7 @@ describe("ReconciliationPrintDocument", () => {
       <ReconciliationPrintDocument companyName="Blueline Demo Company" detail={detail} />,
     );
     // Heading is translated.
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("تقرير مطابقة نقدية السائق");
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("تقرير مطابقة نقدية المندوب");
     // References, Order numbers and bank references are untouched.
     expect(value(container, "reference")).toBe("REC-000001");
     expect(container.textContent).toContain("ORD-000031");

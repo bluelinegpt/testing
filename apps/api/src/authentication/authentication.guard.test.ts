@@ -46,9 +46,10 @@ describe("AuthenticationGuard", () => {
     const reflector = {
       getAllAndOverride: vi
         .fn()
-        .mockReturnValueOnce(false)
-        .mockReturnValueOnce(undefined)
-        .mockReturnValueOnce(["settlements.reverse"]),
+        .mockReturnValueOnce(false) // isPublic
+        .mockReturnValueOnce(undefined) // isOptional
+        .mockReturnValueOnce(undefined) // requiredKinds
+        .mockReturnValueOnce(["settlements.reverse"]), // requiredPermissions
     };
     const guard = new AuthenticationGuard(
       reflector as unknown as Reflector,
@@ -64,8 +65,9 @@ describe("AuthenticationGuard", () => {
     const reflector = {
       getAllAndOverride: vi
         .fn()
-        .mockReturnValueOnce(false)
-        .mockReturnValueOnce(["platform_administrator"]),
+        .mockReturnValueOnce(false) // isPublic
+        .mockReturnValueOnce(undefined) // isOptional
+        .mockReturnValueOnce(["platform_administrator"]), // requiredKinds
     };
     const guard = new AuthenticationGuard(
       reflector as unknown as Reflector,
@@ -101,6 +103,186 @@ describe("AuthenticationGuard", () => {
     );
     await expect(guard.canActivate(executionContext())).rejects.toMatchObject({
       errorCode: "password_change_required",
+    });
+  });
+
+  /**
+   * Cookie-authenticated requests.
+   *
+   * The cookie carries the SAME token the header always did and is validated by
+   * the same server-side session record, so the only new questions are whether
+   * it is accepted at all and whether it can be abused cross-site.
+   */
+  const cookieContext = (input: {
+    readonly cookie?: string;
+    readonly csrf?: string;
+    readonly method?: string;
+  }): ExecutionContext =>
+    ({
+      getClass: vi.fn(),
+      getHandler: vi.fn(),
+      switchToHttp: vi.fn().mockReturnValue({
+        getRequest: vi.fn().mockReturnValue({
+          headers: {
+            ...(input.cookie === undefined ? {} : { cookie: input.cookie }),
+            ...(input.csrf === undefined ? {} : { "x-blueline-session": input.csrf }),
+          },
+          method: input.method ?? "GET",
+        }),
+      }),
+    }) as unknown as ExecutionContext;
+
+  const guardFor = (authenticate: unknown) =>
+    new AuthenticationGuard(
+      { getAllAndOverride: vi.fn().mockReturnValueOnce(false) } as unknown as Reflector,
+      { authenticate } as unknown as AuthenticationService,
+      { enter: vi.fn() } as unknown as RequestSecurityContextStore,
+    );
+
+  const sessionCookie = `blueline_session=${"c".repeat(43)}`;
+
+  it("authenticates a read from the session cookie", async () => {
+    const authenticate = vi.fn().mockResolvedValue(identity);
+    await expect(
+      guardFor(authenticate).canActivate(cookieContext({ cookie: sessionCookie })),
+    ).resolves.toBe(true);
+    expect(authenticate).toHaveBeenCalledWith("c".repeat(43));
+  });
+
+  it("refuses a cookie-authenticated mutation without the session header", async () => {
+    // A cross-site form can make the browser send the cookie, but it cannot set
+    // a custom header — which is what this refusal relies on.
+    await expect(
+      guardFor(vi.fn().mockResolvedValue(identity)).canActivate(
+        cookieContext({ cookie: sessionCookie, method: "POST" }),
+      ),
+    ).rejects.toMatchObject({ errorCode: "csrf_header_required" });
+  });
+
+  it("accepts a cookie-authenticated mutation carrying the session header", async () => {
+    await expect(
+      guardFor(vi.fn().mockResolvedValue(identity)).canActivate(
+        cookieContext({ cookie: sessionCookie, csrf: "cookie", method: "POST" }),
+      ),
+    ).resolves.toBe(true);
+  });
+
+  it("does not require the header when a bearer token is used", async () => {
+    // Nothing attaches a bearer token automatically, so there is nothing to forge.
+    const context = {
+      getClass: vi.fn(),
+      getHandler: vi.fn(),
+      switchToHttp: vi.fn().mockReturnValue({
+        getRequest: vi.fn().mockReturnValue({
+          headers: { authorization: `Bearer ${"t".repeat(43)}` },
+          method: "POST",
+        }),
+      }),
+    } as unknown as ExecutionContext;
+    await expect(
+      guardFor(vi.fn().mockResolvedValue(identity)).canActivate(context),
+    ).resolves.toBe(true);
+  });
+
+  it("refuses when neither transport carries a session", async () => {
+    await expect(
+      guardFor(vi.fn()).canActivate(cookieContext({})),
+    ).rejects.toMatchObject({ errorCode: "authentication_required" });
+  });
+
+  it("lets an expired or revoked session fail through the session service", async () => {
+    // Expiry and revocation are the session record's decision, not the guard's;
+    // the cookie path must not bypass it.
+    const authenticate = vi.fn().mockRejectedValue(new Error("invalid_session"));
+    await expect(
+      guardFor(authenticate).canActivate(cookieContext({ cookie: sessionCookie })),
+    ).rejects.toThrow("invalid_session");
+  });
+
+  /**
+   * `@OptionalAuthentication()` -- Customer Commerce Prompt C2/C3's
+   * Checkout/Place-Order routes. Unlike `@Public()`, this path DOES attempt
+   * to resolve a session, but never rejects the request for a missing or
+   * invalid one -- see the decorator's own doc comment for why `@Public()`
+   * was the wrong tool here (it never even tries, so a logged-in Customer's
+   * saved address could never be resolved through it).
+   */
+  describe("@OptionalAuthentication()", () => {
+    const optionalReflector = (kindsResult: unknown = undefined) => ({
+      getAllAndOverride: vi
+        .fn()
+        .mockReturnValueOnce(false) // isPublic
+        .mockReturnValueOnce(true) // isOptional
+        .mockReturnValue(kindsResult),
+    });
+
+    it("resolves and enters context for a valid bearer token", async () => {
+      const store = { enter: vi.fn() };
+      const guard = new AuthenticationGuard(
+        optionalReflector() as unknown as Reflector,
+        { authenticate: vi.fn().mockResolvedValue(identity) } as unknown as AuthenticationService,
+        store as unknown as RequestSecurityContextStore,
+      );
+      await expect(guard.canActivate(executionContext())).resolves.toBe(true);
+      expect(store.enter).toHaveBeenCalledWith({
+        identity,
+        tenant: { companyId: identity.companyId, identityId: identity.identityId },
+      });
+    });
+
+    it("proceeds as anonymous, never rejecting, when no token is present", async () => {
+      const store = { enter: vi.fn() };
+      const guard = new AuthenticationGuard(
+        optionalReflector() as unknown as Reflector,
+        { authenticate: vi.fn() } as unknown as AuthenticationService,
+        store as unknown as RequestSecurityContextStore,
+      );
+      await expect(
+        guard.canActivate(cookieContext({}) as unknown as ExecutionContext),
+      ).resolves.toBe(true);
+      expect(store.enter).not.toHaveBeenCalled();
+    });
+
+    it("proceeds as anonymous when the session is invalid/expired, never rejecting", async () => {
+      const store = { enter: vi.fn() };
+      const guard = new AuthenticationGuard(
+        optionalReflector() as unknown as Reflector,
+        { authenticate: vi.fn().mockRejectedValue(new Error("invalid_session")) } as unknown as AuthenticationService,
+        store as unknown as RequestSecurityContextStore,
+      );
+      await expect(guard.canActivate(executionContext())).resolves.toBe(true);
+      expect(store.enter).not.toHaveBeenCalled();
+    });
+
+    it("proceeds as anonymous for a cookie missing the CSRF header, never rejecting", async () => {
+      const authenticate = vi.fn().mockResolvedValue(identity);
+      const store = { enter: vi.fn() };
+      const guard = new AuthenticationGuard(
+        optionalReflector() as unknown as Reflector,
+        { authenticate } as unknown as AuthenticationService,
+        store as unknown as RequestSecurityContextStore,
+      );
+      await expect(
+        guard.canActivate(cookieContext({ cookie: sessionCookie, method: "POST" })),
+      ).resolves.toBe(true);
+      expect(authenticate).not.toHaveBeenCalled();
+      expect(store.enter).not.toHaveBeenCalled();
+    });
+
+    it("resolves a valid session-cookie-plus-CSRF-header pair", async () => {
+      const store = { enter: vi.fn() };
+      const guard = new AuthenticationGuard(
+        optionalReflector() as unknown as Reflector,
+        { authenticate: vi.fn().mockResolvedValue(identity) } as unknown as AuthenticationService,
+        store as unknown as RequestSecurityContextStore,
+      );
+      await expect(
+        guard.canActivate(cookieContext({ cookie: sessionCookie, csrf: "cookie", method: "POST" })),
+      ).resolves.toBe(true);
+      expect(store.enter).toHaveBeenCalledWith({
+        identity,
+        tenant: { companyId: identity.companyId, identityId: identity.identityId },
+      });
     });
   });
 });

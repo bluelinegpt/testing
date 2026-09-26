@@ -6,20 +6,19 @@ import { ApiError, type ApiClient } from "../../api/api-client.js";
 import type {
   CompanyArea,
   CustomerOption,
-  OperationsDriver,
   OperationsOrder,
+  OperationsOrderDetail,
   OperationsOrderQuote,
   OperationsTraderOption,
   SearchPage,
 } from "../../api/contracts.js";
+
+type CatalogOption = { readonly id: string; readonly name: string };
 import { Modal } from "../../components/Modal.js";
-import { isUaeMobile } from "../../domain/uae-mobile.js";
+import { isUaeMobile, normalizeUaeMobile } from "../../domain/uae-mobile.js";
 import { SearchCombobox } from "../../components/SearchCombobox.js";
 import { AreaSelector } from "../configuration/AreaSelector.js";
-import {
-  PricingDialog,
-  TraderForm,
-} from "../configuration/TraderConfigurationWorkspace.js";
+import { PricingDialog, TraderForm } from "../configuration/TraderConfigurationWorkspace.js";
 import { CompanyBrandingContext } from "../../app/CompanyBrandingContext.js";
 import { formatCurrency } from "../../localization/formatters.js";
 import { normalizeLocale } from "../../localization/locale.js";
@@ -28,20 +27,27 @@ import { parseMoneyInput, parseNumericInput } from "../../utils/numeric-input.js
 
 export function CreateOrderDialog({
   api,
-  drivers,
+  edit,
   onClose,
   onSaved,
   permissions = [],
   searchDebounceMs,
 }: {
   api: ApiClient;
-  drivers: readonly OperationsDriver[];
+  /**
+   * Edit mode: pre-fills the form from the existing Order and submits a
+   * PATCH instead of a create. The Serial Number is shown read-only (it is
+   * immutable by database rule), and the free-order / order-type /
+   * payment-condition choices are locked to their creation values.
+   */
+  edit?: { orderId: string; orderNumber: string };
   onClose: () => void;
   onSaved: () => Promise<void>;
   permissions?: readonly string[];
   /** Test seam only: removes the real-time search debounce. Production uses the default. */
   searchDebounceMs?: number;
 }) {
+  const isEdit = edit !== undefined;
   const { i18n, t } = useTranslation();
   const locale = normalizeLocale(i18n.resolvedLanguage);
   // Bilingual business data (Trader/Emirate/Area names) follows the user's
@@ -57,7 +63,6 @@ export function CreateOrderDialog({
     [],
   );
   const [area, setArea] = useState<CompanyArea>();
-  const [driverId, setDriverId] = useState("");
   const [serialNumber, setSerialNumber] = useState("");
   const [referenceNumber, setReferenceNumber] = useState("");
   const [customerName, setCustomerName] = useState("");
@@ -86,6 +91,23 @@ export function CreateOrderDialog({
   const [quoteLoading, setQuoteLoading] = useState(false);
   const [quoteError, setQuoteError] = useState<string>();
   const [pricingMissing, setPricingMissing] = useState(false);
+  /* A deliberate free delivery. Kept as its own state rather than inferred from
+     a zero COD and a zero fee: those two numbers also describe a pricing gap,
+     and the operator's intent is what the backend stores and audits. */
+  const [isFreeOrder, setIsFreeOrder] = useState(false);
+  const [orderType, setOrderType] = useState<
+    "collect_order" | "delivery" | "gcc_international"
+  >("delivery");
+  const [destinationCountry, setDestinationCountry] = useState<CatalogOption>();
+  const [thirdPartyDeliveryCompany, setThirdPartyDeliveryCompany] = useState<CatalogOption>();
+  const [catalogError, setCatalogError] = useState<string>();
+  const [catalogKind, setCatalogKind] = useState<"country" | "carrier">();
+  const [catalogName, setCatalogName] = useState("");
+  const [catalogSaving, setCatalogSaving] = useState(false);
+  const [paymentCondition, setPaymentCondition] = useState<
+    "customer_pays_cod_and_fee" | "customer_pays_cod_trader_pays_fee"
+  >("customer_pays_cod_and_fee");
+  const [freeOrderReason, setFreeOrderReason] = useState("");
   // Inline "add pricing": create a reusable trader service price for this
   // Emirate/Area instead of pricing the single order manually.
   const [addPricingOpen, setAddPricingOpen] = useState(false);
@@ -98,6 +120,10 @@ export function CreateOrderDialog({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string>();
   const [createdOrder, setCreatedOrder] = useState<OperationsOrder>();
+  // Edit mode only: the loaded Order this dialog is editing. The form stays in
+  // a loading state until it arrives, so pre-filled values never flash empty.
+  const [editDetail, setEditDetail] = useState<OperationsOrderDetail>();
+  const [editLoadError, setEditLoadError] = useState<string>();
   const [identifierError, setIdentifierError] = useState<string>();
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const [fieldErrorOverrides, setFieldErrorOverrides] = useState<Record<string, string>>({});
@@ -121,8 +147,7 @@ export function CreateOrderDialog({
   const manualFeeInput = parseMoneyInput(manualFee, { required: true });
   const pricingFeeInput = parseMoneyInput(pricingFee, { required: true });
   const overrideValid =
-    !overrideEnabled ||
-    (overrideFee !== "" && overrideFeeInput.ok && overrideReason.trim() !== "");
+    !overrideEnabled || (overrideFee !== "" && overrideFeeInput.ok && overrideReason.trim() !== "");
 
   // One fee-entry path: an operator either overrides a configured price, or
   // enters a manual price when none is configured. Both send serviceFee + reason.
@@ -146,6 +171,7 @@ export function CreateOrderDialog({
     "codAmount",
     "additionalFees",
     "packageCount",
+    "freeOrderReason",
     "pricing",
     "overrideFee",
     "overrideReason",
@@ -159,20 +185,40 @@ export function CreateOrderDialog({
     validationErrors.serialNumber = t("operations.errors.serialRequired");
   else if (identifierError !== undefined) validationErrors.serialNumber = identifierError;
   if (trader === undefined) validationErrors.trader = t("operations.errors.traderRequired");
+  if (orderType === "gcc_international" && destinationCountry === undefined)
+    validationErrors.destinationCountry = "Select a destination country";
+  if (orderType === "gcc_international" && thirdPartyDeliveryCompany === undefined)
+    validationErrors.thirdPartyDeliveryCompany = "Select a carrier";
   // A Customer is captured by typing a Name directly (new) or selecting a saved
   // one; either way the Name must be present. No separate "select a Customer"
   // gate and no UAE mobile-format gate — those are handled inline/advisory.
-  if (customerName.trim() === "")
-    validationErrors.customerName = t("operations.errors.customerNameRequired");
-  if (mobile.trim() === "") validationErrors.mobile = t("operations.errors.mobileRequired");
-  if (area === undefined) validationErrors.area = t("operations.errors.areaRequired");
-  if (address.trim() === "") validationErrors.address = t("operations.errors.addressRequired");
+  if (
+    area === undefined &&
+    orderType !== "gcc_international" &&
+    (orderType !== "collect_order" || customerName.trim() !== "" || mobile.trim() !== "")
+  )
+    validationErrors.area = t("operations.errors.areaRequired");
+  /* Address is optional on every path. A NEW Customer captured without one gets
+     no saved address record at all, rather than a placeholder -- so there is no
+     longer an inline-create case that needs to ask for it. */
   if (!codInput.ok) validationErrors.codAmount = t("operations.errors.codInvalid");
   if (!additionalFeesInput.ok)
     validationErrors.additionalFees = t("operations.errors.additionalInvalid");
   if (!packageCountInput.ok || packageCountInput.value < 1)
     validationErrors.packageCount = t("operations.errors.packagesInvalid");
-  if (pricingMissing) {
+  if (isFreeOrder || orderType === "collect_order") {
+    /* Pricing is deliberately NOT validated here. A Free Order is an intentional
+       override, not a missing-pricing failure, so an unpriced Trader/Area must
+       not block it -- that blocker is exactly the problem this feature removes.
+       The backend skips resolution for the same reason. Edit mode never asks
+       for the free-order reason again: it was recorded at creation. */
+    if (!isEdit && isFreeOrder && freeOrderReason.trim() === "")
+      validationErrors.freeOrderReason = t("operations.errors.freeOrderReasonRequired");
+  } else if (isEdit) {
+    /* The Order already carries a resolved fee. A quote is a preview here;
+       its absence or failure must not block saving unrelated changes. When
+       the Trader or Area changed, the backend re-prices on save. */
+  } else if (pricingMissing) {
     if (!(manualFee !== "" && manualFeeInput.ok))
       validationErrors.pricing = t("operations.errors.manualFeeRequired");
   } else if (quote === undefined || quoteError !== undefined) {
@@ -196,6 +242,7 @@ export function CreateOrderDialog({
     additionalFees: "#order-additional",
     area: '[data-field="area"] select, [data-field="area"] input',
     codAmount: "#order-cod",
+    freeOrderReason: "#order-free-reason",
     customer: '[data-field="customer"] input',
     customerName: '[data-field="customer"] input',
     mobile: "#order-mobile",
@@ -228,16 +275,9 @@ export function CreateOrderDialog({
   const dirty =
     trader !== undefined ||
     area !== undefined ||
-    [
-      driverId,
-      serialNumber,
-      referenceNumber,
-      customerName,
-      mobile,
-      secondMobile,
-      address,
-      notes,
-    ].some(Boolean) ||
+    [serialNumber, referenceNumber, customerName, mobile, secondMobile, address, notes].some(
+      Boolean,
+    ) ||
     codAmount !== "0.00" ||
     additionalFees !== "0.00" ||
     packageCount !== "1";
@@ -315,10 +355,120 @@ export function CreateOrderDialog({
     [api],
   );
 
+  // Edit mode: load the Order and pre-fill every editable field. The Trader
+  // and Area options are synthesised from the detail's identifier columns so
+  // the pickers show the current values without a second lookup; picking a
+  // different one replaces them exactly as on create.
   useEffect(() => {
+    if (edit === undefined) return;
     let active = true;
     void api
-      .get<{ serialNumber: string }>("operations/orders/next-serial-number")
+      .get<OperationsOrderDetail>(
+        `operations/order-details/${encodeURIComponent(edit.orderNumber)}`,
+      )
+      .then((loaded) => {
+        if (!active) return;
+        setEditDetail(loaded);
+        setSerialNumber(loaded.serialNumber ?? loaded.orderNumber);
+        setReferenceNumber(loaded.referenceNumber ?? "");
+        setCustomerName(loaded.customerName);
+        setMobile(loaded.customerMobileNumber);
+        setSecondMobile(loaded.metadata.customerSecondMobileNumber ?? "");
+        setAddress(loaded.customerAddress);
+        setCodAmount(loaded.codAmount);
+        setAdditionalFees(loaded.additionalFees ?? "0.00");
+        setPackageCount(String(loaded.metadata.packageCount));
+        setNotes(loaded.metadata.notes ?? "");
+        setIsFreeOrder(loaded.isFreeOrder === true);
+        if (loaded.orderType !== undefined) setOrderType(loaded.orderType);
+        if (loaded.destinationCountryId && loaded.destinationCountryName) setDestinationCountry({ id: loaded.destinationCountryId, name: loaded.destinationCountryName });
+        if (loaded.thirdPartyDeliveryCompanyId && loaded.thirdPartyDeliveryCompanyName) setThirdPartyDeliveryCompany({ id: loaded.thirdPartyDeliveryCompanyId, name: loaded.thirdPartyDeliveryCompanyName });
+        if (
+          loaded.metadata.paymentCondition === "customer_pays_cod_and_fee" ||
+          loaded.metadata.paymentCondition === "customer_pays_cod_trader_pays_fee"
+        ) {
+          setPaymentCondition(loaded.metadata.paymentCondition);
+        }
+        // Edit mode: set a synthetic customer object so SearchCombobox displays
+        // the loaded customer name in the input field.
+        setCustomer({
+          address: loaded.customerAddress,
+          addressId: "",
+          areaCode: "",
+          areaId: loaded.areaId ?? "",
+          areaName: loaded.areaNameEn ?? loaded.areaName,
+          areaNameAr: loaded.areaNameAr ?? null,
+          code: "",
+          customerReference: null,
+          deliveryInstructions: null,
+          deliveryNotes: null,
+          email: null,
+          emirateId: loaded.emirateId ?? "",
+          emirateNameAr: loaded.emirateNameAr ?? "",
+          emirateNameEn: loaded.emirateNameEn ?? "",
+          id: "",
+          latitude: null,
+          locationLink: null,
+          longitude: null,
+          mobileNumber: loaded.customerMobileNumber,
+          name: loaded.customerName,
+          secondMobileNumber: loaded.metadata.customerSecondMobileNumber ?? null,
+        });
+        if (loaded.traderId !== undefined) {
+          setTrader({
+            code: "",
+            id: loaded.traderId,
+            mobileNumber: "",
+            nameAr: null,
+            nameEn: loaded.traderName,
+            pickupAreaId: null,
+            pickupAreaNameAr: null,
+            pickupAreaNameEn: null,
+            pickupEmirateId: null,
+            pickupEmirateNameAr: null,
+            pickupEmirateNameEn: null,
+            secondMobileNumber: null,
+          });
+        }
+        if (
+          loaded.areaId !== undefined &&
+          loaded.emirateId !== undefined &&
+          loaded.emirateId !== null
+        ) {
+          setArea({
+            code: "",
+            emirateCode: "",
+            emirateId: loaded.emirateId,
+            emirateNameAr: loaded.emirateNameAr ?? "",
+            emirateNameEn: loaded.emirateNameEn ?? "",
+            id: loaded.areaId,
+            isActive: true,
+            nameAr: loaded.areaNameAr ?? null,
+            nameEn: loaded.areaNameEn ?? loaded.areaName,
+            notes: null,
+            updatedAt: "",
+          });
+        }
+      })
+      .catch((requestError) => {
+        if (!active) return;
+        setEditLoadError(
+          requestError instanceof Error ? requestError.message : t("operations.detailLoadFailed"),
+        );
+      });
+    return () => {
+      active = false;
+    };
+  }, [api, edit, t]);
+
+  useEffect(() => {
+    // Edit mode keeps the Order's own Serial Number; never propose a new one.
+    if (isEdit) return;
+    let active = true;
+    void api
+      .get<{ serialNumber: string; serverGenerated?: boolean }>(
+        "operations/orders/next-serial-number",
+      )
       .then((result) => {
         if (!active) return;
         setSerialNumber((current) => (current.trim() === "" ? result.serialNumber : current));
@@ -327,10 +477,14 @@ export function CreateOrderDialog({
     return () => {
       active = false;
     };
-  }, [api]);
+  }, [api, isEdit]);
 
   useEffect(() => {
     setIdentifierError(undefined);
+    // The availability probe has no "excluding this Order" parameter, so in
+    // edit mode it would always flag the Order's own identifiers as taken.
+    // Uniqueness is still enforced server-side on save.
+    if (isEdit) return;
     if (serialNumber.trim() === "") return;
     let active = true;
     const timer = window.setTimeout(() => {
@@ -356,11 +510,18 @@ export function CreateOrderDialog({
       active = false;
       window.clearTimeout(timer);
     };
-  }, [api, referenceNumber, serialNumber, t]);
+  }, [api, isEdit, referenceNumber, serialNumber, t]);
 
   useEffect(() => {
     setQuote(undefined);
     setQuoteError(undefined);
+    // A Free Order is an approved business decision, not a pricing request.
+    // Stop any pending quote state immediately so it cannot disable submission
+    // or reintroduce an unresolved-pricing validation error.
+    if (isFreeOrder || orderType === "collect_order") {
+      setQuoteLoading(false);
+      return;
+    }
     if (
       trader === undefined ||
       area === undefined ||
@@ -377,7 +538,7 @@ export function CreateOrderDialog({
           areaId: area.id,
           additionalFees: additionalFeesInput.value,
           codAmount: codInput.value,
-          driverId: driverId || undefined,
+          paymentCondition,
           serviceFee: enteredFee,
           serviceFeeOverrideReason: enteredReason,
           traderId: trader.id,
@@ -415,9 +576,11 @@ export function CreateOrderDialog({
     area,
     additionalFees,
     codAmount,
-    driverId,
     enteredFee,
     enteredReason,
+    isFreeOrder,
+    orderType,
+    paymentCondition,
     overrideValid,
     requoteNonce,
     t,
@@ -476,10 +639,18 @@ export function CreateOrderDialog({
   };
 
   const requestClose = useCallback(() => {
-    if (createdOrder === undefined && dirty && !window.confirm(t("operations.discardOrderChanges")))
+    // Edit mode pre-fills every field, so `dirty` would always be true and the
+    // discard prompt would fire on every close; the previous Edit dialog never
+    // prompted either.
+    if (
+      !isEdit &&
+      createdOrder === undefined &&
+      dirty &&
+      !window.confirm(t("operations.discardOrderChanges"))
+    )
       return;
     onClose();
-  }, [createdOrder, dirty, onClose, t]);
+  }, [createdOrder, dirty, isEdit, onClose, t]);
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -490,18 +661,117 @@ export function CreateOrderDialog({
       focusField(firstError);
       return;
     }
-    if (submittingRef.current || trader === undefined || area === undefined) return;
+    if (submittingRef.current || trader === undefined) return;
     submittingRef.current = true;
     setSaving(true);
     setError(undefined);
     setFieldErrorOverrides({});
     try {
+      if (edit !== undefined && editDetail !== undefined) {
+        // Edit mode: send only what actually changed, exactly like the
+        // previous Edit dialog did — the backend treats absent fields as
+        // "keep". The Serial Number is immutable and never sent.
+        const payload: Record<string, unknown> = {};
+        const normalizedPrimaryMobile =
+          mobile.trim() === "" ? "" : (normalizeUaeMobile(mobile) ?? mobile.trim());
+        const currentPrimaryMobile =
+          editDetail.customerMobileNumber.trim() === ""
+            ? ""
+            : (normalizeUaeMobile(editDetail.customerMobileNumber) ??
+              editDetail.customerMobileNumber.trim());
+        const normalizedSecondMobile =
+          secondMobile.trim() === ""
+            ? ""
+            : (normalizeUaeMobile(secondMobile) ?? secondMobile.trim());
+        const currentSecondMobileRaw = editDetail.metadata.customerSecondMobileNumber ?? "";
+        const currentSecondMobile =
+          currentSecondMobileRaw.trim() === ""
+            ? ""
+            : (normalizeUaeMobile(currentSecondMobileRaw) ?? currentSecondMobileRaw.trim());
+        if (trader !== undefined && trader.id !== editDetail.traderId) {
+          payload.traderId = trader.id;
+        }
+        // Only include customer IDs if they have valid values. Empty UUIDs should
+        // never be sent to the API — omit them entirely instead.
+        if (customer !== undefined && customer.id && customer.addressId) {
+          payload.customerId = customer.id;
+          payload.customerAddressId = customer.addressId;
+        }
+        if (area !== undefined && area.id !== editDetail.areaId) {
+          payload.areaId = area.id;
+        }
+        const nextReference = referenceNumber.trim();
+        const currentReference = editDetail.referenceNumber ?? "";
+        if (nextReference !== currentReference) {
+          payload.referenceNumber = nextReference === "" ? null : nextReference;
+        }
+        if (customerName.trim() !== editDetail.customerName) {
+          payload.customerName = customerName.trim();
+        }
+        if (normalizedPrimaryMobile !== currentPrimaryMobile && normalizedPrimaryMobile !== "") {
+          payload.customerMobileNumber = normalizedPrimaryMobile;
+        }
+        if (normalizedSecondMobile !== currentSecondMobile) {
+          payload.customerSecondMobileNumber = normalizedSecondMobile;
+        }
+        if (address.trim() !== editDetail.customerAddress) {
+          payload.customerAddress = address.trim();
+        }
+        if (notes.trim() !== (editDetail.metadata.notes ?? "")) {
+          payload.notes = notes.trim();
+        }
+        if (packageCountInput.ok && packageCountInput.value !== editDetail.metadata.packageCount) {
+          payload.packageCount = packageCountInput.value;
+        }
+        if (!isFreeOrder) {
+          if (codInput.ok && codInput.value !== Number(editDetail.codAmount)) {
+            payload.codAmount = codInput.value;
+          }
+          if (
+            additionalFeesInput.ok &&
+            additionalFeesInput.value !== Number(editDetail.additionalFees ?? "0.00")
+          ) {
+            payload.additionalFees = additionalFeesInput.value;
+          }
+          if (enteredFee !== undefined && enteredFee !== Number(editDetail.serviceFee)) {
+            payload.serviceFee = enteredFee;
+            if (enteredReason !== undefined) {
+              payload.serviceFeeReason = enteredReason;
+            }
+          }
+        }
+        if (Object.keys(payload).length === 0) {
+          onClose();
+          return;
+        }
+        await api.patch(`operations/orders/${edit.orderId}`, payload);
+        await onSaved();
+        onClose();
+        return;
+      }
       const order = await api.post<OperationsOrder>(
         "operations/orders",
         {
-          additionalFees: additionalFeesInput.ok ? additionalFeesInput.value : 0,
-          areaId: area.id,
-          codAmount: codInput.ok ? codInput.value : 0,
+          additionalFees:
+            isFreeOrder || orderType === "collect_order"
+              ? 0
+              : additionalFeesInput.ok
+                ? additionalFeesInput.value
+                : 0,
+          ...(area === undefined ? {} : { areaId: area.id }),
+          codAmount:
+            isFreeOrder || orderType === "collect_order" ? 0 : codInput.ok ? codInput.value : 0,
+          // The backend forces both to zero regardless; sending them honestly
+          // keeps the request readable in a network log.
+          isFreeOrder,
+          orderType,
+          ...(orderType === "gcc_international" && destinationCountry
+            ? { destinationCountryId: destinationCountry.id, destinationCountryName: destinationCountry.name }
+            : {}),
+          ...(orderType === "gcc_international" && thirdPartyDeliveryCompany
+            ? { thirdPartyDeliveryCompanyId: thirdPartyDeliveryCompany.id, thirdPartyDeliveryCompanyName: thirdPartyDeliveryCompany.name }
+            : {}),
+          ...(isFreeOrder ? { freeOrderReason: freeOrderReason.trim() } : {}),
           customerAddress: address.trim(),
           customerAddressId: customer?.addressId,
           customerDeliveryNotes: customerDeliveryNotes.trim() || undefined,
@@ -511,26 +781,25 @@ export function CreateOrderDialog({
           customerLongitude: customer?.longitude == null ? undefined : Number(customer.longitude),
           // Mobile is sent exactly as typed (trimmed only). The API normalizes
           // recognisable UAE forms; it is not forced to a canonical shape here.
-          customerMobileNumber: mobile.trim(),
-          customerName: customerName.trim(),
-          customerSecondMobileNumber:
-            secondMobile.trim() === "" ? undefined : secondMobile.trim(),
-          driverId: driverId || undefined,
+          ...(customerName.trim() === "" ? {} : { customerName: customerName.trim() }),
+          ...(mobile.trim() === "" ? {} : { customerMobileNumber: mobile.trim() }),
+          customerSecondMobileNumber: secondMobile.trim() === "" ? undefined : secondMobile.trim(),
           notes: notes.trim() || undefined,
           packageCount: packageCountInput.ok ? packageCountInput.value : 0,
           referenceNumber: referenceNumber.trim() || undefined,
           serialNumber: serialNumber.trim(),
+          paymentCondition,
           serviceFee: enteredFee,
           serviceFeeOverrideReason: enteredReason,
           traderId: trader.id,
           // No existing Customer selected: create one atomically from the typed
           // Order details in the same transaction (no separate modal, no orphan).
-          ...(customer !== undefined
+          ...(customer !== undefined || customerName.trim() === "" || mobile.trim() === ""
             ? {}
             : {
                 inlineCustomer: {
                   address: address.trim(),
-                  areaId: area.id,
+                  areaId: area!.id,
                   mobileNumber: mobile.trim(),
                   name: customerName.trim(),
                   ...(secondMobile.trim() === ""
@@ -607,6 +876,14 @@ export function CreateOrderDialog({
         setError(t("operations.errors.sessionExpired"));
       } else if (code === "permission_denied" || code === "identity_kind_denied") {
         setError(t("operations.errors.permissionDenied"));
+      } else if (requestError instanceof ApiError && requestError.status >= 500) {
+        setError(
+          requestError.correlationId === undefined
+            ? t("operations.createOrderServerError")
+            : t("operations.createOrderServerErrorWithReference", {
+                reference: requestError.correlationId,
+              }),
+        );
       } else {
         // A safe, human-readable fallback; raw database/stack detail is never
         // surfaced (the server already returns a sanitized message).
@@ -629,10 +906,18 @@ export function CreateOrderDialog({
         className="order-modal"
         closeLabel={t("common.close")}
         onRequestClose={requestClose}
-        title={t("operations.createOrder")}
+        title={t(isEdit ? "operations.editOrder" : "operations.createOrder")}
         titleId="create-order-title"
       >
-        {createdOrder === undefined ? (
+        {isEdit && editDetail === undefined ? (
+          editLoadError === undefined ? (
+            <div className="loading-row">{t("common.loading")}</div>
+          ) : (
+            <div className="form-error" role="alert">
+              {editLoadError}
+            </div>
+          )
+        ) : createdOrder === undefined ? (
           <form
             className="order-form"
             noValidate
@@ -640,28 +925,6 @@ export function CreateOrderDialog({
             ref={formRef}
           >
             <div className="order-modal-scroll">
-              {showErrors && orderedErrorKeys.length > 0 ? (
-                <div className="validation-summary" ref={summaryRef} role="alert" tabIndex={-1}>
-                  <h3 id="order-validation-heading">{t("operations.errors.summaryHeading")}</h3>
-                  <ul>
-                    {orderedErrorKeys.map((key) => (
-                      <li key={key}>
-                        <button
-                          className="validation-summary-item"
-                          onClick={() => focusField(key)}
-                          type="button"
-                        >
-                          {errors[key]}
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ) : error === undefined ? null : (
-                <div className="alert alert-error" role="alert">
-                  {error}
-                </div>
-              )}
               <div className="order-form-columns">
                 <section className="order-form-group" aria-labelledby="order-customer-heading">
                   <div className="form-section-heading">
@@ -669,12 +932,17 @@ export function CreateOrderDialog({
                     <h3 id="order-customer-heading">{t("operations.orderCustomerInfo")}</h3>
                   </div>
                   <div className="form-grid">
-                    <label className="field required-field">
+                    <label
+                      className={orderType === "collect_order" ? "field" : "field required-field"}
+                    >
                       <span>{t("operations.serialNumber")}</span>
                       <input
                         aria-describedby={describedBy("serialNumber")}
                         aria-invalid={errorFor("serialNumber") !== undefined}
                         autoComplete="off"
+                        // Immutable once created (orders_manual_identifiers_immutable):
+                        // shown for context, never editable.
+                        disabled={isEdit}
                         id="order-serial"
                         maxLength={100}
                         onChange={(event) => {
@@ -694,6 +962,10 @@ export function CreateOrderDialog({
                         onChange={(event) => setReferenceNumber(event.target.value)}
                         value={referenceNumber}
                       />
+                    </label>
+                    <label className="field">
+                      <span>{t("operations.psystemSerial")}</span>
+                      <input readOnly value={t("operations.psystemSerialGenerated")} />
                     </label>
                   </div>
                   {errorFor("serialNumber") === undefined ? null : (
@@ -744,7 +1016,7 @@ export function CreateOrderDialog({
                       </small>
                     )}
                   </label>
-                  <label className="field required-field">
+                  <label className="field">
                     <span>{t("operations.customerName")}</span>
                     <div data-field="customer">
                       <SearchCombobox
@@ -779,6 +1051,7 @@ export function CreateOrderDialog({
                         }}
                         path="configuration/customers/search"
                         placeholder={t("operations.customerSearchOrType")}
+                        required={false}
                         value={customer}
                       />
                     </div>
@@ -794,7 +1067,7 @@ export function CreateOrderDialog({
                     )}
                   </label>
                   {customer !== undefined && customerAddresses.length > 1 ? (
-                    <label className="field required-field">
+                    <label className="field">
                       <span>{t("customerConfig.addresses")}</span>
                       <select
                         onChange={(event) => {
@@ -832,16 +1105,37 @@ export function CreateOrderDialog({
                       >
                         {customerAddresses
                           .filter((item) => Boolean(item.isActive))
-                          .map((item) => (
-                            <option key={String(item.id)} value={String(item.id)}>
-                              {String(item.label ?? item.address)}
-                            </option>
-                          ))}
+                          .map((item) => {
+                            // A saved address's street text is optional (an
+                            // Order created for a new Customer with only an
+                            // Area chosen legitimately leaves it blank — see
+                            // operations.service.ts's inline Customer
+                            // creation). `label ?? address` alone renders as
+                            // pure whitespace once both are "", since `??`
+                            // does not fall through on an empty string —
+                            // exactly what made two such addresses
+                            // indistinguishable and unreadable in this list.
+                            const label = item.label ? String(item.label) : "";
+                            const addressText = item.address ? String(item.address) : "";
+                            const primaryText =
+                              label ||
+                              addressText ||
+                              `${String(item.areaName ?? "")} — ${t("customerConfig.addressTextMissing")}`;
+                            const suffix = item.isDefault
+                              ? ` (${t("customerConfig.defaultAddress")})`
+                              : "";
+                            return (
+                              <option key={String(item.id)} value={String(item.id)}>
+                                {primaryText}
+                                {suffix}
+                              </option>
+                            );
+                          })}
                       </select>
                     </label>
                   ) : null}
                   <div className="form-grid">
-                    <label className="field required-field">
+                    <label className="field">
                       <span>{t("operations.mobile")}</span>
                       <input
                         aria-describedby={
@@ -861,7 +1155,7 @@ export function CreateOrderDialog({
                           clearServerError("mobile");
                         }}
                         placeholder={t("common.mobilePlaceholder")}
-                        required
+                        required={false}
                         value={mobile}
                       />
                       {errorFor("mobile") !== undefined ? (
@@ -902,17 +1196,31 @@ export function CreateOrderDialog({
                       ) : null}
                     </label>
                   </div>
-                  <div data-field="area">
+                  {orderType === "gcc_international" ? null : <div
+                    className={orderType === "collect_order" ? "field" : "required-field"}
+                    data-field="area"
+                  >
                     <AreaSelector
                       allowCreate={canCreateArea && customer === undefined}
                       api={api}
-                      disabled={customer !== undefined}
+                      arabicFirst={locale === "ar"}
+                      // A saved Customer's own address normally determines the
+                      // Area at creation time. Editing an existing Order is a
+                      // one-off correction, not a change to the Customer's
+                      // profile -- the Customer link and its address snapshot
+                      // stay intact (see the payload assembly below); only
+                      // THIS Order's Area is overridden, matching what the
+                      // server already accepts (a directly selected Area wins
+                      // over the Customer's own when the Customer itself did
+                      // not change).
+                      disabled={customer !== undefined && !isEdit}
                       onChange={(selected) => {
                         setArea(selected);
                         setOverrideEnabled(false);
                         clearServerError("area");
                       }}
                       {...(searchDebounceMs === undefined ? {} : { searchDebounceMs })}
+                      required={orderType !== "collect_order"}
                       value={area}
                     />
                     {errorFor("area") === undefined ? null : (
@@ -920,8 +1228,9 @@ export function CreateOrderDialog({
                         {errorFor("area")}
                       </small>
                     )}
-                  </div>
-                  <label className="field required-field field-grow">
+                  </div>}
+                  {/* Optional on every path -- never marked required. */}
+                  <label className="field field-grow">
                     <span>{t("operations.customerAddress")}</span>
                     <textarea
                       aria-describedby={describedBy("address")}
@@ -929,7 +1238,6 @@ export function CreateOrderDialog({
                       id="order-address"
                       maxLength={500}
                       onChange={(event) => setAddress(event.target.value)}
-                      required
                       rows={3}
                       value={address}
                     />
@@ -955,34 +1263,151 @@ export function CreateOrderDialog({
                     <h3 id="delivery-financial-heading">{t("operations.deliveryFinancialInfo")}</h3>
                   </div>
                   <div className="form-grid">
-                    <div className="field">
+                    <label className="field">
                       <span>{t("operations.orderType")}</span>
-                      <strong>{t("operations.internalDelivery")}</strong>
-                    </div>
-                    <div className="field">
-                      <span>{t("operations.paymentCondition")}</span>
-                      <strong>{t("operations.customerPaysCod")}</strong>
-                    </div>
-                  </div>
-                  <label className="field">
-                    <span>{t("operations.assignedDriver")}</span>
-                    <select onChange={(event) => setDriverId(event.target.value)} value={driverId}>
-                      <option value="">{t("operations.unassigned")}</option>
-                      {drivers
-                        .filter((driver) => driver.status === "active")
-                        .map((driver) => (
-                          <option key={driver.id} value={driver.id}>
-                            {driver.code} - {driver.name}
+                      <select
+                        // The order type, payment condition and free-order flag
+                        // define the Order's financial identity; they are fixed
+                        // at creation and shown read-only when editing.
+                        disabled={isEdit}
+                        value={orderType}
+                        onChange={(event) => {
+                          const next = event.target.value as
+                            | "collect_order"
+                            | "delivery"
+                            | "gcc_international";
+                          setOrderType(next);
+                          if (next === "collect_order") {
+                            setIsFreeOrder(false);
+                            setFreeOrderReason("");
+                            setCodAmount("0.00");
+                            setAdditionalFees("0.00");
+                            setPricingMissing(false);
+                            setQuoteError(undefined);
+                          }
+                        }}
+                      >
+                        <option value="delivery">{t("operations.internalDelivery")}</option>
+                        <option value="collect_order">{t("operations.collectOrder")}</option>
+                        <option value="gcc_international">GCC &amp; International</option>
+                      </select>
+                    </label>
+                    {orderType === "gcc_international" ? (
+                      <>
+                        <SearchCombobox<CatalogOption> api={api} {...(searchDebounceMs === undefined ? {} : { debounceMs: searchDebounceMs })} emptyText="No country found" getLabel={(option) => option.name} label="Destination country" onChange={setDestinationCountry} path="operations/destination-countries" placeholder="Search destination country" value={destinationCountry} />
+                        <button type="button" onClick={() => { setCatalogKind("country"); setCatalogName(""); setCatalogError(undefined); }}>Create country</button>
+                        <SearchCombobox<CatalogOption> api={api} {...(searchDebounceMs === undefined ? {} : { debounceMs: searchDebounceMs })} emptyText="No carrier found" getLabel={(option) => option.name} label="Third-party shipping company" onChange={setThirdPartyDeliveryCompany} path="operations/third-party-delivery-companies" placeholder="Search carrier" value={thirdPartyDeliveryCompany} />
+                        <button type="button" onClick={() => { setCatalogKind("carrier"); setCatalogName(""); setCatalogError(undefined); }}>Create carrier</button>
+                        {catalogError ? <div className="form-error">{catalogError}</div> : null}
+                      </>
+                    ) : null}
+                    {orderType === "collect_order" ? (
+                      <div className="field">
+                        <span>{t("operations.financialHandling")}</span>
+                        <strong>{t("operations.collectOrderFinancialHint")}</strong>
+                      </div>
+                    ) : (
+                      <label className="field">
+                        <span>{t("operations.paymentCondition")}</span>
+                        <select
+                          disabled={isEdit}
+                          value={paymentCondition}
+                          onChange={(event) => {
+                            const next = event.target.value as
+                              | "customer_pays_cod_and_fee"
+                              | "customer_pays_cod_trader_pays_fee";
+                            setPaymentCondition(next);
+                            // Trader-prepaid: the Trader already collected from the
+                            // Customer, so nothing is left for the Driver to collect —
+                            // the server pins this to zero regardless (see
+                            // operations.service.ts), zeroed here too so the on-screen
+                            // total never implies otherwise before saving.
+                            if (next === "customer_pays_cod_trader_pays_fee") {
+                              setCodAmount("0.00");
+                            }
+                          }}
+                        >
+                          <option value="customer_pays_cod_and_fee">
+                            {t("operations.paymentConditions.customer_pays_cod_and_fee")}
                           </option>
-                        ))}
-                    </select>
-                  </label>
+                          <option value="customer_pays_cod_trader_pays_fee">
+                            {t("operations.paymentConditions.customer_pays_cod_trader_pays_fee")}
+                          </option>
+                        </select>
+                      </label>
+                    )}
+                  </div>
+                  {/* Sits with the money, because that is what it changes. */}
+                  {orderType === "collect_order" ? null : (
+                    <div className="field free-order-toggle">
+                      <label className="checkbox-row">
+                        <input
+                          checked={isFreeOrder}
+                          disabled={isEdit}
+                          id="order-free"
+                          onChange={(event) => {
+                            const next = event.target.checked;
+                            setIsFreeOrder(next);
+                            if (next) {
+                              // Zero the money immediately so the operator never
+                              // types it, and drop the unresolved-pricing blocker:
+                              // this Order is priced by decision, not by lookup.
+                              setCodAmount("0.00");
+                              setAdditionalFees("0.00");
+                              setPricingMissing(false);
+                              setQuoteError(undefined);
+                              setQuoteLoading(false);
+                            } else {
+                              // Leaving Free clears the reason so it cannot be
+                              // submitted on an Order that is no longer free, and
+                              // hands pricing back to the normal flow rather than
+                              // restoring a stale fee.
+                              setFreeOrderReason("");
+                              setRequoteNonce((nonce) => nonce + 1);
+                            }
+                            clearServerError("freeOrderReason");
+                          }}
+                          type="checkbox"
+                        />
+                        <span>{t("operations.freeOrder")}</span>
+                      </label>
+                      {isFreeOrder && !isEdit ? (
+                        <>
+                          <small className="field-hint">{t("operations.freeOrderHint")}</small>
+                          <label className="field required-field">
+                            <span>{t("operations.freeOrderReason")}</span>
+                            <input
+                              aria-describedby={describedBy("freeOrderReason")}
+                              aria-invalid={errorFor("freeOrderReason") !== undefined}
+                              id="order-free-reason"
+                              maxLength={300}
+                              onChange={(event) => {
+                                setFreeOrderReason(event.target.value);
+                                clearServerError("freeOrderReason");
+                              }}
+                              value={freeOrderReason}
+                            />
+                            {errorFor("freeOrderReason") === undefined ? null : (
+                              <small className="field-error" id="order-freeOrderReason-error">
+                                {errorFor("freeOrderReason")}
+                              </small>
+                            )}
+                          </label>
+                        </>
+                      ) : null}
+                    </div>
+                  )}
                   <div className="form-grid">
                     <label className="field required-field">
                       <span>{t("operations.codAmount")}</span>
                       <input
                         aria-describedby={describedBy("codAmount")}
                         aria-invalid={errorFor("codAmount") !== undefined}
+                        disabled={
+                          isFreeOrder ||
+                          orderType === "collect_order" ||
+                          paymentCondition === "customer_pays_cod_trader_pays_fee"
+                        }
                         id="order-cod"
                         min="0"
                         onChange={(event) => {
@@ -1011,6 +1436,7 @@ export function CreateOrderDialog({
                       aria-describedby={describedBy("additionalFees")}
                       aria-invalid={errorFor("additionalFees") !== undefined}
                       id="order-additional"
+                      disabled={isFreeOrder || orderType === "collect_order"}
                       min="0"
                       onChange={(event) => setAdditionalFees(event.target.value)}
                       step="0.01"
@@ -1023,7 +1449,19 @@ export function CreateOrderDialog({
                       </small>
                     )}
                   </label>
-                  {pricingMissing ? (
+                  {isFreeOrder || orderType === "collect_order" ? (
+                    // No pricing UI at all while Free: nothing to resolve, and
+                    // nothing for the operator to override.
+                    <div className="fee-override" role="group">
+                      <p className="field-hint">
+                        {t(
+                          orderType === "collect_order"
+                            ? "operations.collectOrderFinancialHint"
+                            : "operations.freeOrderFeeLocked",
+                        )}
+                      </p>
+                    </div>
+                  ) : pricingMissing ? (
                     <div className="fee-override pricing-missing" role="group">
                       <p className="field-hint">{t("operations.pricingFailureMessage")}</p>
                       <div className="pricing-actions">
@@ -1103,9 +1541,7 @@ export function CreateOrderDialog({
                             </button>
                             <button
                               className="button button-primary"
-                              disabled={
-                                pricingSaving || pricingFee === "" || !pricingFeeInput.ok
-                              }
+                              disabled={pricingSaving || pricingFee === "" || !pricingFeeInput.ok}
                               onClick={() => void savePricing()}
                               type="button"
                             >
@@ -1246,62 +1682,92 @@ export function CreateOrderDialog({
                       value={notes}
                     />
                   </label>
-                  <div className="quote-panel" aria-live="polite">
-                    {quoteLoading ? (
-                      <strong className="quote-loading">{t("operations.pricingLoading")}</strong>
-                    ) : quoteError === undefined ? (
-                      <>
-                        <div>
-                          <span>{t("operations.codAmount")}</span>
-                          <strong>{money(quote?.codAmount ?? codAmount)}</strong>
-                        </div>
-                        <div>
-                          <span>{t("operations.serviceFee")}</span>
-                          <strong>{money(quote?.serviceFee)}</strong>
-                        </div>
-                        <div>
-                          <span>{t("operations.additionalFees")}</span>
-                          <strong>{money(quote?.additionalFees)}</strong>
-                        </div>
-                        {quote?.vatEnabled ? (
+                  {orderType === "collect_order" ? null : (
+                    <div className="quote-panel" aria-live="polite">
+                      {quoteLoading ? (
+                        <strong className="quote-loading">{t("operations.pricingLoading")}</strong>
+                      ) : quoteError === undefined ? (
+                        <>
                           <div>
-                            <span>{t("operations.vatAmount")}</span>
-                            <strong>{money(quote.vatAmount)}</strong>
+                            <span>{t("operations.codAmount")}</span>
+                            <strong>
+                              {money(quote?.codAmount ?? (codInput.ok ? codAmount : "0.00"))}
+                            </strong>
                           </div>
-                        ) : null}
+                          <div>
+                            <span>{t("operations.serviceFee")}</span>
+                            <strong>{money(quote?.serviceFee)}</strong>
+                          </div>
+                          <div>
+                            <span>{t("operations.additionalFees")}</span>
+                            <strong>{money(quote?.additionalFees)}</strong>
+                          </div>
+                          {quote?.vatEnabled ? (
+                            <div>
+                              <span>{t("operations.vatAmount")}</span>
+                              <strong>{money(quote.vatAmount)}</strong>
+                            </div>
+                          ) : null}
+                          <div>
+                            <span>{t("operations.totalDeductions")}</span>
+                            <strong>{money(quote?.totalDeductions)}</strong>
+                          </div>
+                          <div className={negativeTraderPayable ? "summary-invalid" : undefined}>
+                            <span>{t("operations.amountDueToTrader")}</span>
+                            <strong>{money(quote?.traderNetPayable)}</strong>
+                          </div>
+                          <div className="summary-total">
+                            <span>{t("operations.totalAmountToCollect")}</span>
+                            <strong>{money(quote?.customerAmountDue)}</strong>
+                          </div>
+                          {negativeTraderPayable ? (
+                            <small className="field-error">
+                              {t("operations.errors.deductionsExceedCod")}
+                            </small>
+                          ) : null}
+                          {quote?.vatEnabled ? (
+                            <small>
+                              {t("operations.vatRateApplied", {
+                                rate: Number(quote.vatRate).toFixed(2),
+                              })}
+                            </small>
+                          ) : null}
+                        </>
+                      ) : (
                         <div>
-                          <span>{t("operations.totalDeductions")}</span>
-                          <strong>{money(quote?.totalDeductions)}</strong>
+                          <small className="field-error">{quoteError}</small>
                         </div>
-                        <div className={negativeTraderPayable ? "summary-invalid" : undefined}>
-                          <span>{t("operations.amountDueToTrader")}</span>
-                          <strong>{money(quote?.traderNetPayable)}</strong>
-                        </div>
-                        <div className="summary-total">
-                          <span>{t("operations.totalAmountToCollect")}</span>
-                          <strong>{money(quote?.customerAmountDue)}</strong>
-                        </div>
-                        {negativeTraderPayable ? (
-                          <small className="field-error">
-                            {t("operations.errors.deductionsExceedCod")}
-                          </small>
-                        ) : null}
-                        {quote?.vatEnabled ? (
-                          <small>
-                            {t("operations.vatRateApplied", {
-                              rate: Number(quote.vatRate).toFixed(2),
-                            })}
-                          </small>
-                        ) : null}
-                      </>
-                    ) : (
-                      <div>
-                        <small className="field-error">{quoteError}</small>
-                      </div>
-                    )}
-                  </div>
+                      )}
+                    </div>
+                  )}
                 </section>
               </div>
+              {/* Sits at the END of the scrolling body, directly above the action
+                  bar, so the failure appears next to the button that caused it
+                  rather than a full form-length away at the top. `focusField`
+                  still scrolls to the offending field when an item is clicked. */}
+              {showErrors && orderedErrorKeys.length > 0 ? (
+                <div className="validation-summary" ref={summaryRef} role="alert" tabIndex={-1}>
+                  <h3 id="order-validation-heading">{t("operations.errors.summaryHeading")}</h3>
+                  <ul>
+                    {orderedErrorKeys.map((key) => (
+                      <li key={key}>
+                        <button
+                          className="validation-summary-item"
+                          onClick={() => focusField(key)}
+                          type="button"
+                        >
+                          {errors[key]}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : error === undefined ? null : (
+                <div className="alert alert-error" role="alert">
+                  {error}
+                </div>
+              )}
             </div>
             <footer className="order-action-bar">
               <div className="order-totals" aria-label={t("operations.orderSummary")}>
@@ -1320,10 +1786,16 @@ export function CreateOrderDialog({
                 </button>
                 <button
                   className="button button-primary"
-                  disabled={saving || quoteLoading}
+                  disabled={saving || (!isEdit && !isFreeOrder && quoteLoading)}
                   type="submit"
                 >
-                  {saving ? t("operations.creatingOrder") : t("operations.createOrder")}
+                  {isEdit
+                    ? saving
+                      ? t("common.saving")
+                      : t("common.save")
+                    : saving
+                      ? t("operations.creatingOrder")
+                      : t("operations.createOrder")}
                 </button>
               </div>
             </footer>
@@ -1336,6 +1808,9 @@ export function CreateOrderDialog({
             <h3>{t("operations.orderCreated")}</h3>
             <small>
               {t("operations.serialNumber")}: {createdOrder.serialNumber}
+            </small>
+            <small>
+              {t("operations.psystemSerial")}: {createdOrder.psystemSerial ?? "—"}
             </small>
             <button autoFocus className="button button-primary" onClick={onClose} type="button">
               {t("common.done")}
@@ -1372,14 +1847,21 @@ export function CreateOrderDialog({
             const created = createdTrader;
             setCreateTraderOpen(false);
             setCreatedTrader(undefined);
-            void selectCreatedTrader(created).then(() =>
-              setRequoteNonce((nonce) => nonce + 1),
-            );
+            void selectCreatedTrader(created).then(() => setRequoteNonce((nonce) => nonce + 1));
           }}
           primaryLabel={t("operations.savePricingAndUseTrader")}
           title={t("operations.pricingSetup")}
           trader={createdTrader}
         />
+      ) : null}
+      {catalogKind !== undefined ? (
+        <Modal closeLabel="Close" onRequestClose={() => setCatalogKind(undefined)} title={catalogKind === "country" ? "Create destination country" : "Create carrier"} titleId="international-catalog-dialog">
+          <form onSubmit={(event) => { event.preventDefault(); if (!catalogName.trim()) { setCatalogError("Enter a name"); return; } setCatalogSaving(true); setCatalogError(undefined); const path = catalogKind === "country" ? "operations/destination-countries" : "operations/third-party-delivery-companies"; void api.post<CatalogOption>(path, { name: catalogName }).then((created) => { if (catalogKind === "country") setDestinationCountry(created); else setThirdPartyDeliveryCompany(created); setCatalogKind(undefined); }).catch((reason: unknown) => setCatalogError(reason instanceof Error ? reason.message : "Could not create record")).finally(() => setCatalogSaving(false)); }}>
+            <label className="field required-field"><span>Name</span><input autoFocus value={catalogName} onChange={(event) => setCatalogName(event.target.value)} maxLength={160} /></label>
+            {catalogError ? <div className="form-error" role="alert">{catalogError}</div> : null}
+            <div className="modal-actions"><button className="button button-secondary" type="button" onClick={() => setCatalogKind(undefined)}>Cancel</button><button className="button button-primary" disabled={catalogSaving} type="submit">{catalogSaving ? "Saving…" : "Create"}</button></div>
+          </form>
+        </Modal>
       ) : null}
     </>
   );

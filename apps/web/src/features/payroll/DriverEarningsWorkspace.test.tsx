@@ -1,0 +1,424 @@
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+import { ApiError } from "../../api/api-client.js";
+import { i18nInstance } from "../../localization/i18n.js";
+import { DriverEarningsWorkspace } from "./DriverEarningsWorkspace.js";
+
+const driver = {
+  driverCode: "DRV-5",
+  driverId: "ahmad",
+  driverName: "Ahmad",
+  driverType: "employee",
+  employeeId: "e1",
+};
+const sources = ["ORD-000028", "ORD-000029", "ORD-000034"].map((orderNumber, index) => ({
+  amount: "2.00",
+  customer: `Customer ${index + 1}`,
+  deliveryDate: "2026-08-08",
+  driver: "Ahmad",
+  id: `earning-${index}`,
+  orderId: `order-${index}`,
+  orderNumber,
+  rate: "2.00",
+  referenceNumber: null,
+  serialDate: "2026-08-08",
+  serialNumber: String(index + 1),
+  trader: "Noon",
+}));
+const collectionSources = Array.from({ length: 5 }, (_, index) => ({
+  amount: "1.00",
+  area: "Dubai",
+  closeDate: "2026-08-08",
+  customer: `Collection Customer ${index + 1}`,
+  id: `collection-earning-${index}`,
+  orderId: `collection-order-${index}`,
+  orderNumber: `COL-${String(index + 1).padStart(6, "0")}`,
+  rate: "1.00",
+  referenceNumber: null,
+  serialDate: "2026-08-08",
+  serialNumber: String(index + 101),
+}));
+const locked = {
+  id: "period-1",
+  dateFrom: "2026-08-01",
+  dateTo: "2026-08-12",
+  deliveredOrders: 3,
+  collectedOrders: 5,
+  deliveryEarnings: "6.00",
+  collectionEarnings: "5.00",
+  collectionRate: "1.00",
+  totalEarnings: "11.00",
+  interimPaid: "0.00",
+  payrollPaid: "0.00",
+  outstanding: "11.00",
+  status: "unpaid",
+  deliverySources: sources.map(({ amount, ...source }) => ({ ...source, earned: amount })),
+};
+const monthlyItem = {
+  advanceOutstanding: "489.00",
+  advancePaid: "500.00",
+  advanceRecovery: "11.00",
+  allowances: "0.00",
+  basicSalary: "3000.00",
+  collectionEarnings: "5.00",
+  deductions: [],
+  deliveryEarnings: "6.00",
+  driverCode: "DRV-5",
+  driverEarningPayments: [],
+  driverEarnings: "11.00",
+  driverEarningsOutstanding: "0.00",
+  driverEarningsPaid: "11.00",
+  driverId: "ahmad",
+  driverName: "Ahmad",
+  employeeId: "e1",
+  grossEarned: "3011.00",
+  netSalary: "3000.00",
+  otherDeductions: "0.00",
+  otherEarnings: "0.00",
+  salaryAdvances: [],
+  salaryOutstanding: "0.00",
+  salaryPaid: "3000.00",
+  salaryPayments: [],
+  totalCashPaid: "3511.00",
+  totalDeductions: "11.00",
+};
+
+describe("DriverEarningsWorkspace period confirmation", () => {
+  beforeEach(async () => i18nInstance.changeLanguage("en"));
+
+  it("shows the selected month's collapsed Driver payment overview and report", async () => {
+    const get = vi.fn(async (path: string) => {
+      if (path.includes("monthly-payments"))
+        return {
+          items: [monthlyItem],
+          month: "2026-08",
+          totals: {
+            advancePaid: "500.00",
+            driverEarningsPaid: "11.00",
+            salaryPaid: "3000.00",
+            totalCashPaid: "3511.00",
+          },
+        };
+      if (path.includes("cash-accounts")) return [];
+      if (path.includes("/periods?")) return { items: [], nextAvailableStart: null };
+      return { items: [driver] };
+    });
+    render(<DriverEarningsWorkspace api={{ get, post: vi.fn() } as never} canPay />);
+
+    const driverRow = await screen.findByRole("button", { name: /DRV-5 — Ahmad/ });
+    expect(screen.queryByText("Basic salary")).not.toBeInTheDocument();
+    fireEvent.click(driverRow);
+    expect(screen.getByText("Basic salary")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "Driver payment report" }));
+    expect(screen.getByText("Monthly Driver Payment Report")).toBeInTheDocument();
+  });
+
+  it("restores the available Employee Driver on entry", async () => {
+    const get = vi.fn(async (path: string) =>
+      path.includes("cash-accounts")
+        ? []
+        : path.includes("/periods?")
+          ? { items: [], nextAvailableStart: null }
+          : { items: [driver] },
+    );
+    render(<DriverEarningsWorkspace api={{ get, post: vi.fn() } as never} canPay />);
+
+    expect(await screen.findByRole("combobox", { name: "Driver" })).toHaveValue("ahmad");
+    expect(screen.getByRole("button", { name: "Calculate Now" })).toBeEnabled();
+  });
+
+  it("calculates a date range that overlaps a confirmed period (per-order capture makes overlap safe)", async () => {
+    // Approved product decision (2026-08-31): periods claim ORDERS, not
+    // dates -- a recalculation over already-confirmed dates picks up only
+    // orders no earlier period included, so the client no longer blocks
+    // overlapping ranges.
+    const post = vi.fn(async () => ({
+      collectedOrders: 0,
+      collectionEarnings: "0.00",
+      collectionRate: "1.00",
+      collectionSources: [],
+      deliveredOrders: 6,
+      deliveryEarnings: "12.00",
+      deliverySources: sources,
+      totalEarnings: "12.00",
+    }));
+    const get = vi.fn(async (path: string) =>
+      path.includes("cash-accounts")
+        ? []
+        : path.includes("/periods?")
+          ? { items: [locked], nextAvailableStart: "2026-08-13" }
+          : { items: [driver] },
+    );
+    render(<DriverEarningsWorkspace api={{ get, post } as never} canPay />);
+    await screen.findByText("Period History");
+    fireEvent.change(await screen.findByLabelText("Date From"), {
+      target: { value: "2026-08-10" },
+    });
+    fireEvent.change(screen.getByLabelText("Date To"), { target: { value: "2026-08-15" } });
+    fireEvent.click(screen.getByRole("button", { name: "Calculate Now" }));
+
+    await screen.findByRole("button", { name: "Confirm & Lock Earnings" });
+    expect(post).toHaveBeenCalledWith("operations/payroll/driver-earnings/periods/preview", {
+      dateFrom: "2026-08-10",
+      dateTo: "2026-08-15",
+      driverId: "ahmad",
+    });
+  });
+
+  it("keeps payment hidden before earnings are confirmed", async () => {
+    const get = vi.fn(async (path: string) =>
+      path.includes("cash-accounts")
+        ? [{ id: "cash", name: "Cash" }]
+        : path.includes("/periods?")
+          ? { items: [], nextAvailableStart: null }
+          : { items: [driver] },
+    );
+    render(<DriverEarningsWorkspace api={{ get, post: vi.fn() } as never} canPay />);
+    fireEvent.change(await screen.findByRole("combobox", { name: "Driver" }), {
+      target: { value: "ahmad" },
+    });
+    expect(screen.queryByRole("button", { name: "Confirm payment" })).not.toBeInTheDocument();
+  });
+
+  it("confirms earnings without payment fields and reloads locked history", async () => {
+    let confirmed = false;
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const get = vi.fn(async (path: string) =>
+      path.includes("cash-accounts")
+        ? [{ id: "cash", name: "Cash" }]
+        : path.includes("/periods?")
+          ? {
+              items: confirmed ? [locked] : [],
+              nextAvailableStart: confirmed ? "2026-08-13" : null,
+            }
+          : { items: [driver] },
+    );
+    const post = vi.fn(async (path: string) => {
+      if (path.endsWith("/preview"))
+        return {
+          collectedOrders: 5,
+          collectionEarnings: "5.00",
+          collectionRate: "1.00",
+          collectionSources,
+          deliveredOrders: 3,
+          deliveryEarnings: "6.00",
+          deliverySources: sources,
+          totalEarnings: "11.00",
+        };
+      confirmed = true;
+      return { ...locked, periodId: locked.id };
+    });
+    render(<DriverEarningsWorkspace api={{ get, post } as never} canPay />);
+    fireEvent.change(await screen.findByRole("combobox", { name: "Driver" }), {
+      target: { value: "ahmad" },
+    });
+    expect(screen.queryByLabelText("Number of Collected Orders")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Date To"), { target: { value: "2026-08-29" } });
+    fireEvent.click(screen.getByRole("button", { name: "Calculate Now" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Confirm & Lock Earnings" }));
+    expect(await screen.findByText("Earning Period Confirmed")).toBeInTheDocument();
+    expect(post).toHaveBeenLastCalledWith("operations/payroll/driver-earnings/periods", {
+      dateFrom: expect.any(String),
+      dateTo: expect.any(String),
+      driverId: "ahmad",
+    });
+    expect(screen.getByText("Period History")).toBeInTheDocument();
+    expect(screen.getByText(/Period Outstanding/)).toHaveTextContent(/AED\s*11\.00/);
+    // The date pickers are no longer forced to nextAvailableStart after a
+    // confirmation (that forcing pushed Date From to a FUTURE date after a
+    // same-day confirm) -- they keep whatever the user chose.
+    const monthStart = new Date();
+    monthStart.setDate(1);
+    expect(screen.getByLabelText("Date From")).toHaveValue(
+      monthStart.toISOString().slice(0, 10),
+    );
+    expect(post).not.toHaveBeenCalledWith(
+      expect.stringContaining("employee/payments"),
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
+  it("restores candidate source traceability and reconciles the Ahmad preview", async () => {
+    const get = vi.fn(async (path: string) =>
+      path.includes("cash-accounts")
+        ? []
+        : path.includes("/periods?")
+          ? { items: [], nextAvailableStart: null }
+          : { items: [driver] },
+    );
+    const post = vi.fn(async () => ({
+      collectedOrders: 5,
+      collectionEarnings: "5.00",
+      collectionRate: "1.00",
+      collectionSources,
+      deliveredOrders: 3,
+      deliveryEarnings: "6.00",
+      deliverySources: sources,
+      totalEarnings: "11.00",
+    }));
+    render(<DriverEarningsWorkspace api={{ get, post } as never} canPay />);
+    fireEvent.change(await screen.findByRole("combobox", { name: "Driver" }), {
+      target: { value: "ahmad" },
+    });
+    expect(screen.queryByLabelText("Number of Collected Orders")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Date To"), { target: { value: "2026-08-29" } });
+    fireEvent.click(screen.getByRole("button", { name: "Calculate Now" }));
+    expect(await screen.findByText("Delivery Transactions to Include")).toBeInTheDocument();
+    for (const order of ["ORD-000028", "ORD-000029", "ORD-000034"])
+      expect(screen.getByRole("link", { name: order })).toHaveAttribute("href", `/orders/${order}`);
+    expect(screen.getByText("Collection Earning Detail")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        (_, element) =>
+          element?.tagName === "P" &&
+          element.textContent?.replace(/\s+/g, " ") === "Number of Collected Orders: 5",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        (_, element) =>
+          element?.tagName === "P" &&
+          /Collection Rate:.*AED\s*1\.00/.test(element.textContent ?? ""),
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText("COL-000001")).toBeInTheDocument();
+    expect(screen.getAllByText(/AED\s*6\.00/).length).toBeGreaterThanOrEqual(2);
+    expect(screen.queryByText(/driverEarnings\./)).not.toBeInTheDocument();
+  });
+
+  it("blocks confirmation when delivery details do not reconcile", async () => {
+    const get = vi.fn(async (path: string) =>
+      path.includes("cash-accounts")
+        ? []
+        : path.includes("/periods?")
+          ? { items: [], nextAvailableStart: null }
+          : { items: [driver] },
+    );
+    const post = vi.fn(async () => ({
+      collectedOrders: 5,
+      collectionEarnings: "5.00",
+      collectionRate: "1.00",
+      collectionSources,
+      deliveredOrders: 3,
+      deliveryEarnings: "6.00",
+      deliverySources: sources.slice(0, 2),
+      totalEarnings: "11.00",
+    }));
+    render(<DriverEarningsWorkspace api={{ get, post } as never} canPay />);
+    fireEvent.change(await screen.findByRole("combobox", { name: "Driver" }), {
+      target: { value: "ahmad" },
+    });
+    fireEvent.change(screen.getByLabelText("Date To"), { target: { value: "2026-08-29" } });
+    fireEvent.click(screen.getByRole("button", { name: "Calculate Now" }));
+    expect(await screen.findByRole("button", { name: "Confirm & Lock Earnings" })).toBeDisabled();
+    expect(screen.getByText(/details do not match/)).toBeInTheDocument();
+  });
+
+  it("includes today in the calculation without clamping to yesterday", async () => {
+    // Approved product decision (2026-08-31): same-day calculation is
+    // allowed -- orders already captured by a confirmed period are excluded
+    // per order, so nothing is double-paid and today needs no special
+    // treatment. The old behavior silently clamped Date To to yesterday.
+    const post = vi.fn(async () => ({
+      collectedOrders: 0,
+      collectionEarnings: "0.00",
+      collectionRate: "1.00",
+      collectionSources: [],
+      deliveredOrders: 6,
+      deliveryEarnings: "12.00",
+      deliverySources: sources,
+      totalEarnings: "12.00",
+    }));
+    const get = vi.fn(async (path: string) =>
+      path.includes("cash-accounts")
+        ? []
+        : path.includes("/periods?")
+          ? { items: [], nextAvailableStart: null }
+          : { items: [driver] },
+    );
+    render(<DriverEarningsWorkspace api={{ get, post } as never} canPay />);
+    await screen.findByRole("combobox", { name: "Driver" });
+    expect(
+      await screen.findByRole("columnheader", { name: "Collected Orders" }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Calculate Now" }));
+    await screen.findByRole("button", { name: "Confirm & Lock Earnings" });
+    // Default Date To is today; the request must carry it through unchanged.
+    const today = new Date().toISOString().slice(0, 10);
+    expect(post).toHaveBeenCalledWith("operations/payroll/driver-earnings/periods/preview", {
+      dateFrom: expect.any(String),
+      dateTo: today,
+      driverId: "ahmad",
+    });
+    expect(screen.queryByText(/adjusted through/i)).not.toBeInTheDocument();
+  });
+
+  it("loads a persisted locked period after selecting the Driver", async () => {
+    const get = vi.fn(async (path: string) =>
+      path.includes("cash-accounts")
+        ? [{ id: "cash", name: "Cash" }]
+        : path.includes("/periods?")
+          ? { items: [locked], nextAvailableStart: "2026-08-13" }
+          : { items: [driver] },
+    );
+    render(<DriverEarningsWorkspace api={{ get, post: vi.fn() } as never} canPay />);
+    fireEvent.change(await screen.findByRole("combobox", { name: "Driver" }), {
+      target: { value: "ahmad" },
+    });
+    await waitFor(() => expect(screen.getByText("Period History")).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "Confirm payment" })).toBeEnabled();
+    expect(screen.queryByText(/Delivery Earnings.*AED 6\.00/)).not.toBeInTheDocument();
+  });
+
+  it("shows the API conflict reason when an earnings payment is rejected", async () => {
+    const get = vi.fn(async (path: string) =>
+      path.includes("cash-accounts")
+        ? [{ id: "cash", name: "Main Cash" }]
+        : path.includes("/periods?")
+          ? { items: [locked], nextAvailableStart: "2026-08-13" }
+          : { items: [driver] },
+    );
+    const post = vi.fn(async () => {
+      throw new ApiError(
+        "This payment would take the account to -12.00. The balance cannot go below zero.",
+        "payment_balance_blocked",
+        409,
+      );
+    });
+    render(<DriverEarningsWorkspace api={{ get, post } as never} canPay />);
+
+    await screen.findByRole("button", { name: "Confirm payment" });
+    fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "11" } });
+    fireEvent.change(screen.getAllByLabelText("Cash account")[0]!, {
+      target: { value: "cash" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Confirm payment" }));
+
+    expect(
+      await screen.findByText(
+        "This payment would take the account to -12.00. The balance cannot go below zero.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("renders Arabic captions without raw keys", async () => {
+    await i18nInstance.changeLanguage("ar");
+    const get = vi.fn(async (path: string) =>
+      path.includes("cash-accounts")
+        ? []
+        : path.includes("/periods?")
+          ? { items: [], nextAvailableStart: null }
+          : { items: [driver] },
+    );
+    const { container } = render(
+      <DriverEarningsWorkspace api={{ get, post: vi.fn() } as never} canPay />,
+    );
+    fireEvent.change(await screen.findByRole("combobox", { name: "المندوب" }), {
+      target: { value: "ahmad" },
+    });
+    expect(await screen.findByText("احسب الآن")).toBeInTheDocument();
+    expect(container.textContent).not.toMatch(/driverEarnings\./);
+  });
+});

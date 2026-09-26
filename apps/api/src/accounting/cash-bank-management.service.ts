@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 
 import { HttpStatus, Inject, Injectable } from "@nestjs/common";
 import { Decimal } from "decimal.js";
-import { type Kysely, sql } from "kysely";
+import { type Kysely, type Transaction, sql } from "kysely";
 
 import { DATABASE } from "../infrastructure/database/database.tokens.js";
 import type { DatabaseSchema } from "../infrastructure/database/database.types.js";
@@ -10,6 +10,8 @@ import { KyselyTransactionManager } from "../infrastructure/database/transaction
 import { ApplicationException } from "../presentation/errors/application.exception.js";
 import type { AccountingEventType, CashBankMovementType } from "./accounting.constants.js";
 import { AccountingOperationSupport } from "./accounting-operation.support.js";
+import { BalanceEnforcementCoordinator } from "./balance-enforcement.coordinator.js";
+import type { BalanceEnforcementResult } from "./balance-enforcement.coordinator.js";
 import type {
   BankAccountMutationDto,
   CashAccountMutationDto,
@@ -37,7 +39,9 @@ interface MovementRecord {
   readonly version: string;
 }
 
-const eventTypeByMovement: Readonly<Record<Exclude<CashBankMovementType, "opening_balance">, AccountingEventType>> = {
+const eventTypeByMovement: Readonly<
+  Record<Exclude<CashBankMovementType, "opening_balance">, AccountingEventType>
+> = {
   bank_deposit: "bank_deposit_confirmed",
   bank_to_bank_transfer: "bank_to_bank_transfer_confirmed",
   bank_to_cash_transfer: "bank_to_cash_transfer_confirmed",
@@ -71,6 +75,8 @@ export class CashBankManagementService {
     private readonly transactions: KyselyTransactionManager,
     @Inject(AccountingOperationSupport)
     private readonly support: AccountingOperationSupport,
+    @Inject(BalanceEnforcementCoordinator)
+    private readonly balanceEnforcement: BalanceEnforcementCoordinator,
   ) {}
 
   public async cashAccounts(activeOnly = false) {
@@ -117,9 +123,7 @@ export class CashBankManagementService {
   }
 
   public async account(kind: "bank" | "cash", id: string) {
-    const rows = kind === "cash"
-      ? await this.cashAccounts(false)
-      : await this.bankAccounts(false);
+    const rows = kind === "cash" ? await this.cashAccounts(false) : await this.bankAccounts(false);
     const account = rows.find((row) => row.id === id);
     if (account === undefined) {
       throw new ApplicationException(
@@ -197,7 +201,8 @@ export class CashBankManagementService {
           and (${input.version ?? null}::bigint is null or version=${input.version ?? null}::bigint)
         returning id,version::text
       `.execute(transaction);
-      if (updated.rows[0] === undefined) this.conflict("accounting_cash_account_stale_or_not_found");
+      if (updated.rows[0] === undefined)
+        this.conflict("accounting_cash_account_stale_or_not_found");
       const response = updated.rows[0]!;
       await this.auditAndComplete(transaction, {
         action: "accounting.cash_account.updated",
@@ -268,12 +273,18 @@ export class CashBankManagementService {
       if (replay.replayResponse !== undefined) return replay.replayResponse;
       const { actorId, companyId } = this.support.context();
       await this.assertLinkedGl(transaction, input.linkedGlAccountId, "bank", input.effectiveFrom);
+      const hasAccountNumber = Object.prototype.hasOwnProperty.call(input, "accountNumber");
+      const accountNumber = nonempty(input.accountNumber);
+      const accountNumberMasked = accountNumber === null ? null : `***${accountNumber.slice(-4)}`;
+      const hasIban = Object.prototype.hasOwnProperty.call(input, "iban");
+      const iban = input.iban?.trim().toUpperCase() || null;
       const updated = await sql<{ id: string; version: string }>`
         update company_bank_accounts set
           account_name=${input.accountName.trim()},bank_name=${input.bankName.trim()},
-          branch_name=${nonempty(input.branchName)},account_number=${nonempty(input.accountNumber)},
-          account_number_masked=${input.accountNumber ? `***${input.accountNumber.slice(-4)}` : null},
-          iban=${input.iban?.trim().toUpperCase() || null},
+          branch_name=${nonempty(input.branchName)},
+          account_number=case when ${hasAccountNumber} then ${accountNumber} else account_number end,
+          account_number_masked=case when ${hasAccountNumber} then ${accountNumberMasked} else account_number_masked end,
+          iban=case when ${hasIban} then ${iban} else iban end,
           swift_code=${input.swiftCode?.trim().toUpperCase() || null},
           account_type=${input.accountType},linked_gl_account_id=${input.linkedGlAccountId}::uuid,
           effective_from=${input.effectiveFrom}::date,effective_to=${input.effectiveTo ?? null}::date,
@@ -283,7 +294,8 @@ export class CashBankManagementService {
           and (${input.version ?? null}::bigint is null or version=${input.version ?? null}::bigint)
         returning id,version::text
       `.execute(transaction);
-      if (updated.rows[0] === undefined) this.conflict("accounting_bank_account_stale_or_not_found");
+      if (updated.rows[0] === undefined)
+        this.conflict("accounting_bank_account_stale_or_not_found");
       const response = updated.rows[0]!;
       await this.auditAndComplete(transaction, {
         action: "accounting.bank_account.updated",
@@ -323,15 +335,16 @@ export class CashBankManagementService {
           dependencies.blockers,
         );
       }
-      const updated = kind === "cash"
-        ? await sql<{ id: string }>`
+      const updated =
+        kind === "cash"
+          ? await sql<{ id: string }>`
         update company_cash_accounts set is_active=${active},
           deactivated_by_account_id=case when ${active} then null else ${actorId}::uuid end,
           deactivated_at=case when ${active} then null else now() end,
           updated_by_account_id=${actorId}::uuid,updated_at=now(),version=version+1
         where id=${id}::uuid and company_id=${companyId}::uuid returning id
       `.execute(transaction)
-        : await sql<{ id: string }>`
+          : await sql<{ id: string }>`
         update company_bank_accounts set is_active=${active},
           deactivated_by_account_id=case when ${active} then null else ${actorId}::uuid end,
           deactivated_at=case when ${active} then null else now() end,
@@ -361,7 +374,10 @@ export class CashBankManagementService {
     this.support.assertPermission("accounting.manage");
     const amount = decimal(input.amount);
     const fee = decimal(input.feeAmount);
-    if (!amount.isPositive() || fee.isNegative()) {
+    // greaterThan(0): a Movement amount must be strictly positive, and
+    // Decimal.isPositive() is a sign check that accepts zero. Fee stays
+    // "not negative" — a zero fee is legitimate.
+    if (!amount.greaterThan(0) || fee.isNegative()) {
       this.conflict("accounting_cash_bank_movement_invalid_amount");
     }
     return this.transactions.execute(async (transaction) => {
@@ -418,7 +434,9 @@ export class CashBankManagementService {
     this.support.assertPermission("accounting.manage");
     const amount = decimal(input.amount);
     const fee = decimal(input.feeAmount);
-    if (!amount.isPositive() || fee.isNegative()) this.conflict("accounting_cash_bank_movement_invalid_amount");
+    // greaterThan(0): see createMovement — zero passes a sign check.
+    if (!amount.greaterThan(0) || fee.isNegative())
+      this.conflict("accounting_cash_bank_movement_invalid_amount");
     return this.transactions.execute(async (transaction) => {
       const replay = await this.support.reserveIdempotency(transaction, {
         idempotencyKey,
@@ -449,7 +467,8 @@ export class CashBankManagementService {
           and (${input.version ?? null}::bigint is null or version=${input.version ?? null}::bigint)
         returning id,version::text
       `.execute(transaction);
-      if (updated.rows[0] === undefined) this.conflict("accounting_cash_bank_movement_not_editable");
+      if (updated.rows[0] === undefined)
+        this.conflict("accounting_cash_bank_movement_not_editable");
       await this.linkAttachments(transaction, movementId, input.attachments ?? []);
       const response = updated.rows[0]!;
       await this.auditAndComplete(transaction, {
@@ -483,17 +502,50 @@ export class CashBankManagementService {
     movementId: string,
     note: string | undefined,
     idempotencyKey?: string,
+    balanceOverrideReason?: string,
   ) {
     this.support.assertPermission("accounting.approve");
     return this.transactions.execute(async (transaction) => {
+      // LOCK FIRST, then fingerprint what was locked.
+      //
+      // The reservation used to run before this, hashing only the Movement id,
+      // the note and the override reason. A draft can be edited between
+      // attempts -- `updateMovement` may change its amount, fee or either
+      // account -- so the same key re-sent after an edit hashed identically and
+      // replayed the ORIGINAL confirmation: the caller was told a Movement had
+      // been confirmed on terms that no longer existed.
+      //
+      // Reserving after the row lock closes that. The `for update` here also
+      // serialises two concurrent confirmations of the same Movement, so
+      // reserving second loses nothing: the second caller waits for the lock,
+      // then hashes the row as the first left it.
+      const movement = await this.lockMovement(transaction, movementId);
       const replay = await this.support.reserveIdempotency(transaction, {
         idempotencyKey,
         operation: "accounting.cash-bank-movement.confirm",
-        payload: { movementId, note: nonempty(note) },
+        // The financial state that was actually locked, not a reference to it.
+        // The override reason belongs here too: re-sending one key with a
+        // different reason asks for the Movement to be authorised on different
+        // grounds, which is a different request.
+        payload: {
+          amount: movement.amount,
+          balanceOverrideReason: nonempty(balanceOverrideReason),
+          destinationBankAccountId: movement.destinationBankAccountId,
+          destinationCashAccountId: movement.destinationCashAccountId,
+          feeAmount: movement.feeAmount,
+          movementId,
+          movementType: movement.movementType,
+          note: nonempty(note),
+          sourceBankAccountId: movement.sourceBankAccountId,
+          sourceCashAccountId: movement.sourceCashAccountId,
+        },
       });
+      // Returned before the draft-status check below: a genuine replay finds
+      // the Movement already `confirmed`, and must be answered rather than
+      // rejected as not-confirmable.
       if (replay.replayResponse !== undefined) return replay.replayResponse;
-      const movement = await this.lockMovement(transaction, movementId);
-      if (movement.status !== "draft") this.conflict("accounting_cash_bank_movement_not_confirmable");
+      if (movement.status !== "draft")
+        this.conflict("accounting_cash_bank_movement_not_confirmable");
       await this.enforceConfirmationSegregation(transaction, movement.createdBy);
       await this.lockFinancialAccounts(transaction, movement);
       const issues = await this.validationIssues(transaction, movement);
@@ -505,9 +557,28 @@ export class CashBankManagementService {
           issues,
         );
       }
-      await this.assertSourceBalance(transaction, movement);
+      // Balance control on the SOURCE account only.
+      //
+      // This REPLACES the former `assertSourceBalance` call at this point. The
+      // two could not both stand: that check read a Cash/Bank-module-only
+      // balance and refused anything below zero unconditionally, so a Company
+      // with a configured Bank overdraft, or an authorised override, would have
+      // been blocked by it before the policy was ever consulted -- making the
+      // policy dead on exactly the workflow where Bank sources are common.
+      //
+      // `assertSourceBalance` remains, unchanged, on the reversal path.
+      const enforcement = await this.enforceSourceBalance(
+        transaction,
+        movement,
+        balanceOverrideReason,
+      );
       const { actorId, companyId } = this.support.context();
-      const eventId = await this.enqueueEvent(transaction, movement, actorId, idempotencyKey ?? movementId);
+      const eventId = await this.enqueueEvent(
+        transaction,
+        movement,
+        actorId,
+        idempotencyKey ?? movementId,
+      );
       const snapshot = await this.movementSnapshot(transaction, movement);
       await sql`
         update cash_bank_movements set status='confirmed',
@@ -517,8 +588,30 @@ export class CashBankManagementService {
           updated_at=now(),version=version+1
         where id=${movementId}::uuid and company_id=${companyId}::uuid and status='draft'
       `.execute(transaction);
+      // Only now, with the Movement confirmed. Written earlier it would survive
+      // a rolled-back confirmation as an accusation about money that never
+      // moved.
+      if (enforcement?.requiresOverrideAudit === true) {
+        await this.balanceEnforcement.recordOverrides(transaction, {
+          actorId,
+          overrideReason: balanceOverrideReason ?? "",
+          result: enforcement,
+          sourceEntityId: movementId,
+          sourceReference: movement.movementNumber,
+          sourceType: "cash_bank_movement",
+        });
+      }
       const response = {
         accountingEventId: eventId,
+        // Advisory, never blocking: the balance this Movement was judged
+        // against excludes confirmed payments that never recorded which account
+        // funded them. Absent when the Movement has no source to judge.
+        ...(enforcement === null
+          ? {}
+          : {
+              balanceCoverage: enforcement.coverage,
+              balanceCoverageIncomplete: enforcement.balanceCoverageIncomplete,
+            }),
         id: movementId,
         movementNumber: movement.movementNumber,
         status: "confirmed",
@@ -537,7 +630,8 @@ export class CashBankManagementService {
 
   public async cancelMovement(movementId: string, reason: string, idempotencyKey?: string) {
     this.support.assertPermission("accounting.manage");
-    if (reason.trim().length === 0) this.conflict("accounting_cash_bank_cancellation_reason_required");
+    if (reason.trim().length === 0)
+      this.conflict("accounting_cash_bank_cancellation_reason_required");
     return this.transactions.execute(async (transaction) => {
       const replay = await this.support.reserveIdempotency(transaction, {
         idempotencyKey,
@@ -554,8 +648,13 @@ export class CashBankManagementService {
         where id=${movementId}::uuid and company_id=${companyId}::uuid and status='draft'
         returning movement_number as "movementNumber"
       `.execute(transaction);
-      if (updated.rows[0] === undefined) this.conflict("accounting_cash_bank_movement_not_cancellable");
-      const response = { id: movementId, movementNumber: updated.rows[0]!.movementNumber, status: "cancelled" };
+      if (updated.rows[0] === undefined)
+        this.conflict("accounting_cash_bank_movement_not_cancellable");
+      const response = {
+        id: movementId,
+        movementNumber: updated.rows[0]!.movementNumber,
+        status: "cancelled",
+      };
       await this.auditAndComplete(transaction, {
         action: "accounting.cash_bank_movement.cancelled",
         correlationId: idempotencyKey ?? movementId,
@@ -584,7 +683,8 @@ export class CashBankManagementService {
       });
       if (replay.replayResponse !== undefined) return replay.replayResponse;
       const original = await this.lockMovement(transaction, movementId);
-      if (original.status !== "confirmed") this.conflict("accounting_cash_bank_movement_not_reversible");
+      if (original.status !== "confirmed")
+        this.conflict("accounting_cash_bank_movement_not_reversible");
       await this.enforceMovementReversalSegregation(transaction, original);
       await this.assertOpenPeriod(transaction, reversalDate);
       await this.lockFinancialAccounts(transaction, original);
@@ -613,7 +713,8 @@ export class CashBankManagementService {
          where id=${await this.originalEventId(transaction, original)}::uuid
            and company_id=${companyId}::uuid for update
       `.execute(transaction);
-      if (originalEvent.rows[0] === undefined) this.conflict("accounting_cash_bank_original_event_missing");
+      if (originalEvent.rows[0] === undefined)
+        this.conflict("accounting_cash_bank_original_event_missing");
       const reversalEventId = await this.enqueueEvent(
         transaction,
         reversalRecord,
@@ -714,10 +815,18 @@ export class CashBankManagementService {
     if (result.rows[0] === undefined) this.conflict("accounting_cash_bank_linked_gl_invalid");
   }
 
-  private validMovementStructure(input: Pick<MovementRecord,
-    "movementType" | "sourceCashAccountId" | "sourceBankAccountId" |
-    "destinationCashAccountId" | "destinationBankAccountId" |
-    "classificationMappingKey" | "feeAmount">) {
+  private validMovementStructure(
+    input: Pick<
+      MovementRecord,
+      | "movementType"
+      | "sourceCashAccountId"
+      | "sourceBankAccountId"
+      | "destinationCashAccountId"
+      | "destinationBankAccountId"
+      | "classificationMappingKey"
+      | "feeAmount"
+    >,
+  ) {
     const fields = {
       db: input.destinationBankAccountId,
       dc: input.destinationCashAccountId,
@@ -725,22 +834,48 @@ export class CashBankManagementService {
       sc: input.sourceCashAccountId,
     };
     const valid: Readonly<Record<CashBankMovementType, boolean>> = {
-      bank_deposit: fields.db !== null && fields.dc === null && fields.sb === null && fields.sc === null,
-      bank_to_bank_transfer: fields.sb !== null && fields.db !== null && fields.sb !== fields.db && fields.sc === null && fields.dc === null,
-      bank_to_cash_transfer: fields.sb !== null && fields.dc !== null && fields.sc === null && fields.db === null,
-      bank_withdrawal: fields.sb !== null && fields.sc === null && fields.dc === null && fields.db === null,
-      cash_deposit: fields.dc !== null && fields.sc === null && fields.sb === null && fields.db === null,
-      cash_to_bank_transfer: fields.sc !== null && fields.db !== null && fields.sb === null && fields.dc === null,
-      cash_to_cash_transfer: fields.sc !== null && fields.dc !== null && fields.sc !== fields.dc && fields.sb === null && fields.db === null,
-      cash_withdrawal: fields.sc !== null && fields.sb === null && fields.dc === null && fields.db === null,
-      opening_balance: [fields.dc, fields.db].filter(Boolean).length === 1 && fields.sc === null && fields.sb === null,
+      bank_deposit:
+        fields.db !== null && fields.dc === null && fields.sb === null && fields.sc === null,
+      bank_to_bank_transfer:
+        fields.sb !== null &&
+        fields.db !== null &&
+        fields.sb !== fields.db &&
+        fields.sc === null &&
+        fields.dc === null,
+      bank_to_cash_transfer:
+        fields.sb !== null && fields.dc !== null && fields.sc === null && fields.db === null,
+      bank_withdrawal:
+        fields.sb !== null && fields.sc === null && fields.dc === null && fields.db === null,
+      cash_deposit:
+        fields.dc !== null && fields.sc === null && fields.sb === null && fields.db === null,
+      cash_to_bank_transfer:
+        fields.sc !== null && fields.db !== null && fields.sb === null && fields.dc === null,
+      cash_to_cash_transfer:
+        fields.sc !== null &&
+        fields.dc !== null &&
+        fields.sc !== fields.dc &&
+        fields.sb === null &&
+        fields.db === null,
+      cash_withdrawal:
+        fields.sc !== null && fields.sb === null && fields.dc === null && fields.db === null,
+      opening_balance:
+        [fields.dc, fields.db].filter(Boolean).length === 1 &&
+        fields.sc === null &&
+        fields.sb === null,
     };
-    const depositOrWithdrawal = ["cash_deposit","bank_deposit","cash_withdrawal","bank_withdrawal"].includes(input.movementType);
-    const feeHasSource = new Decimal(input.feeAmount).isZero()
-      || fields.sc !== null || fields.sb !== null;
-    return valid[input.movementType]
-      && feeHasSource
-      && (!depositOrWithdrawal || input.classificationMappingKey !== null);
+    const depositOrWithdrawal = [
+      "cash_deposit",
+      "bank_deposit",
+      "cash_withdrawal",
+      "bank_withdrawal",
+    ].includes(input.movementType);
+    const feeHasSource =
+      new Decimal(input.feeAmount).isZero() || fields.sc !== null || fields.sb !== null;
+    return (
+      valid[input.movementType] &&
+      feeHasSource &&
+      (!depositOrWithdrawal || input.classificationMappingKey !== null)
+    );
   }
 
   private paymentMethod(type: CashBankMovementType) {
@@ -761,7 +896,10 @@ export class CashBankManagementService {
     return `CBM-${String(result.rows[0]!.value).padStart(6, "0")}`;
   }
 
-  private async lockMovement(database: Kysely<DatabaseSchema>, id: string): Promise<MovementRecord> {
+  private async lockMovement(
+    database: Kysely<DatabaseSchema>,
+    id: string,
+  ): Promise<MovementRecord> {
     const { companyId } = this.support.context();
     const result = await sql<MovementRecord>`
       select id,movement_number as "movementNumber",movement_type as "movementType",
@@ -787,9 +925,13 @@ export class CashBankManagementService {
       movement.sourceBankAccountId,
       movement.destinationCashAccountId,
       movement.destinationBankAccountId,
-    ].filter((id): id is string => id !== null).sort();
+    ]
+      .filter((id): id is string => id !== null)
+      .sort();
     for (const id of ids) {
-      await sql`select pg_advisory_xact_lock(hashtextextended('cash-bank-account:'||${id},0))`.execute(database);
+      await sql`select pg_advisory_xact_lock(hashtextextended('cash-bank-account:'||${id},0))`.execute(
+        database,
+      );
     }
   }
 
@@ -823,7 +965,8 @@ export class CashBankManagementService {
         or ${movement.movementDate}::date<a.effective_from
         or ${movement.movementDate}::date>coalesce(a.effective_to,'infinity'::date)
     `.execute(database);
-    if (accounts.rows[0]?.invalid !== "0") issues.push("account_inactive_or_outside_effective_dates");
+    if (accounts.rows[0]?.invalid !== "0")
+      issues.push("account_inactive_or_outside_effective_dates");
     if (!movement.movementType.includes("_to_") && movement.movementType !== "opening_balance") {
       const mapping = await sql<{ count: string }>`
         select count(*)::text as count from account_mappings
@@ -861,6 +1004,72 @@ export class CashBankManagementService {
     );
   }
 
+  /**
+   * Balance control for the account a Movement takes money OUT of.
+   *
+   * ==========================================================================
+   * SOURCE ONLY, AND DECIDED BY THE ROW RATHER THAN THE TYPE
+   * ==========================================================================
+   *
+   * Which account loses funds is read from the Movement's own source columns,
+   * not from a list of movement types. The two cannot then disagree: a deposit
+   * carries no source and is skipped, a withdrawal carries one, and each
+   * transfer carries exactly the one its structure validation already
+   * enforced. A hard-coded type list would need editing every time a type is
+   * added, and would silently stop enforcing if someone forgot.
+   *
+   * The DESTINATION is never evaluated. Money arriving can only raise a
+   * balance, so checking it would block a transfer that fixes the very
+   * shortfall the policy is worried about -- and the destination leg of the
+   * posting is left exactly as it was.
+   *
+   * ==========================================================================
+   * AMOUNT PLUS FEE, BECAUSE THAT IS WHAT LEAVES
+   * ==========================================================================
+   *
+   * The deduction is `amount + fee_amount`, matching the source leg of
+   * `CashBankQueryService.balances()` (`-amount-fee_amount`) exactly. A fee is
+   * always taken from the source, so judging the amount alone would approve a
+   * Movement whose fee then takes the account past the floor -- the balance
+   * would disagree with the decision that permitted it by precisely the fee.
+   *
+   * Returns null when there is no source to judge, so the caller can tell
+   * "not applicable" from "checked and allowed".
+   */
+  private async enforceSourceBalance(
+    // `Transaction`, not `Kysely`, so the row locks the coordinator takes are
+    // held to commit. The other private helpers here predate that distinction
+    // and still take `Kysely`; this one does not need to.
+    database: Transaction<DatabaseSchema>,
+    movement: MovementRecord,
+    balanceOverrideReason: string | undefined,
+  ): Promise<BalanceEnforcementResult | null> {
+    if (movement.sourceCashAccountId === null && movement.sourceBankAccountId === null) {
+      return null;
+    }
+    const kind = movement.sourceCashAccountId === null ? "bank" : "cash";
+    const accountId = movement.sourceCashAccountId ?? movement.sourceBankAccountId!;
+    const deduction = new Decimal(movement.amount).plus(movement.feeAmount);
+    const { actorId } = this.support.context();
+    const result = await this.balanceEnforcement.evaluate(database, {
+      actorId,
+      actorPermissions: this.support.permissions(),
+      deductions: [{ accountId, amount: deduction.toFixed(2), kind }],
+      sourceReference: movement.movementNumber,
+      sourceType: "cash_bank_movement",
+      ...(balanceOverrideReason === undefined ? {} : { overrideReason: balanceOverrideReason }),
+    });
+    if (!result.allowed) {
+      throw new ApplicationException(
+        result.failureCode ?? "balance_would_go_negative",
+        result.failureReason ?? "This Movement is not permitted by the balance policy",
+        HttpStatus.CONFLICT,
+        this.balanceEnforcement.blockedDetails(result),
+      );
+    }
+    return result;
+  }
+
   private async assertSourceBalance(database: Kysely<DatabaseSchema>, movement: MovementRecord) {
     if (movement.sourceCashAccountId === null && movement.sourceBankAccountId === null) return;
     const available = new Decimal((await this.sourceBalanceFor(database, movement)) ?? "0");
@@ -870,7 +1079,7 @@ export class CashBankManagementService {
         "accounting_cash_bank_insufficient_balance",
         "The source Cash or Bank Account has insufficient available balance",
         HttpStatus.CONFLICT,
-        [{ available: available.toFixed(2), required: required.toFixed(2) }],
+        [`Available: ${available.toFixed(2)}; required: ${required.toFixed(2)}`],
       );
     }
   }
@@ -882,10 +1091,18 @@ export class CashBankManagementService {
     date?: string,
   ) {
     const { companyId } = this.support.context();
-    const source = kind === "cash" ? sql.ref("m.source_cash_account_id") : sql.ref("m.source_bank_account_id");
-    const destination = kind === "cash" ? sql.ref("m.destination_cash_account_id") : sql.ref("m.destination_bank_account_id");
-    const originalSource = kind === "cash" ? sql.ref("o.source_cash_account_id") : sql.ref("o.source_bank_account_id");
-    const originalDestination = kind === "cash" ? sql.ref("o.destination_cash_account_id") : sql.ref("o.destination_bank_account_id");
+    const source =
+      kind === "cash" ? sql.ref("m.source_cash_account_id") : sql.ref("m.source_bank_account_id");
+    const destination =
+      kind === "cash"
+        ? sql.ref("m.destination_cash_account_id")
+        : sql.ref("m.destination_bank_account_id");
+    const originalSource =
+      kind === "cash" ? sql.ref("o.source_cash_account_id") : sql.ref("o.source_bank_account_id");
+    const originalDestination =
+      kind === "cash"
+        ? sql.ref("o.destination_cash_account_id")
+        : sql.ref("o.destination_bank_account_id");
     const result = await sql<{ balance: string }>`
       with selected_account as (
         select linked_gl_account_id as gl_id from ${
@@ -931,10 +1148,14 @@ export class CashBankManagementService {
     reversalOfEventId?: string,
   ) {
     const { companyId } = this.support.context();
-    const eventType = reversalOfEventId === undefined
-      ? eventTypeByMovement[movement.movementType as Exclude<CashBankMovementType, "opening_balance">]
-      : "cash_bank_movement_reversed";
-    if (eventType === undefined) this.conflict("accounting_cash_bank_opening_balance_requires_approved_batch");
+    const eventType =
+      reversalOfEventId === undefined
+        ? eventTypeByMovement[
+            movement.movementType as Exclude<CashBankMovementType, "opening_balance">
+          ]
+        : "cash_bank_movement_reversed";
+    if (eventType === undefined)
+      this.conflict("accounting_cash_bank_opening_balance_requires_approved_batch");
     const identity = {
       accountingDate: movement.accountingDate,
       amount: movement.amount,
@@ -970,7 +1191,8 @@ export class CashBankManagementService {
          and source_entity_type='cash_bank_movement' and source_entity_id=${movement.id}::uuid
        for update
     `.execute(database);
-    if (existing.rows[0]?.eventHash !== hash) this.conflict("accounting_cash_bank_event_payload_mismatch");
+    if (existing.rows[0]?.eventHash !== hash)
+      this.conflict("accounting_cash_bank_event_payload_mismatch");
     return existing.rows[0]!.id;
   }
 
@@ -1008,9 +1230,16 @@ export class CashBankManagementService {
     return result.rows[0]!.id;
   }
 
-  private reverseShape(movement: MovementRecord): Pick<MovementRecord,
-    "movementType" | "sourceCashAccountId" | "sourceBankAccountId" |
-    "destinationCashAccountId" | "destinationBankAccountId"> {
+  private reverseShape(
+    movement: MovementRecord,
+  ): Pick<
+    MovementRecord,
+    | "movementType"
+    | "sourceCashAccountId"
+    | "sourceBankAccountId"
+    | "destinationCashAccountId"
+    | "destinationBankAccountId"
+  > {
     const reversedType: Readonly<Record<CashBankMovementType, CashBankMovementType>> = {
       bank_deposit: "bank_withdrawal",
       bank_to_bank_transfer: "bank_to_bank_transfer",
@@ -1031,11 +1260,14 @@ export class CashBankManagementService {
     };
   }
 
-  private async enforceConfirmationSegregation(database: Kysely<DatabaseSchema>, createdBy: string) {
+  private async enforceConfirmationSegregation(
+    database: Kysely<DatabaseSchema>,
+    createdBy: string,
+  ) {
     const { actorId } = this.support.context();
     if (
-      actorId === createdBy
-      && await this.support.hasAlternateAuthorizedActor(database, "accounting.approve")
+      actorId === createdBy &&
+      (await this.support.hasAlternateAuthorizedActor(database, "accounting.approve"))
     ) {
       this.conflict("accounting_cash_bank_segregation_blocked");
     }
@@ -1047,8 +1279,8 @@ export class CashBankManagementService {
   ) {
     const { actorId } = this.support.context();
     if (
-      (actorId === movement.createdBy || actorId === movement.confirmedBy)
-      && await this.support.hasAlternateAuthorizedActor(database, "accounting.reverse")
+      (actorId === movement.createdBy || actorId === movement.confirmedBy) &&
+      (await this.support.hasAlternateAuthorizedActor(database, "accounting.reverse"))
     ) {
       this.conflict("accounting_cash_bank_segregation_blocked");
     }
@@ -1061,20 +1293,25 @@ export class CashBankManagementService {
     lock: boolean,
   ) {
     const { companyId } = this.support.context();
-    const exists = kind === "cash"
-      ? await sql<{ id: string }>`
+    const exists =
+      kind === "cash"
+        ? await sql<{ id: string }>`
           select id from company_cash_accounts
            where id=${id}::uuid and company_id=${companyId}::uuid
            ${lock ? sql`for update` : sql``}
         `.execute(database)
-      : await sql<{ id: string }>`
+        : await sql<{ id: string }>`
           select id from company_bank_accounts
            where id=${id}::uuid and company_id=${companyId}::uuid
            ${lock ? sql`for update` : sql``}
         `.execute(database);
     if (exists.rows[0] === undefined) this.notFound(`accounting_${kind}_account_not_found`);
-    const sourceColumn = kind === "cash" ? sql.ref("source_cash_account_id") : sql.ref("source_bank_account_id");
-    const destinationColumn = kind === "cash" ? sql.ref("destination_cash_account_id") : sql.ref("destination_bank_account_id");
+    const sourceColumn =
+      kind === "cash" ? sql.ref("source_cash_account_id") : sql.ref("source_bank_account_id");
+    const destinationColumn =
+      kind === "cash"
+        ? sql.ref("destination_cash_account_id")
+        : sql.ref("destination_bank_account_id");
     const movement = await sql<{ pending: string; total: string }>`
       select count(*)::text as total,
         count(*) filter(where status='draft')::text as pending
@@ -1137,7 +1374,11 @@ export class CashBankManagementService {
       readonly idempotencyKey: string;
       readonly operation: string;
       readonly resourceType: string;
-      readonly response: { readonly id?: string; readonly originalMovementId?: string; readonly [key: string]: unknown };
+      readonly response: {
+        readonly id?: string;
+        readonly originalMovementId?: string;
+        readonly [key: string]: unknown;
+      };
     },
   ) {
     const subjectId = input.response.id ?? input.response.originalMovementId!;
@@ -1166,6 +1407,10 @@ export class CashBankManagementService {
   }
 
   private notFound(code: string): never {
-    throw new ApplicationException(code, "The Cash/Bank record was not found", HttpStatus.NOT_FOUND);
+    throw new ApplicationException(
+      code,
+      "The Cash/Bank record was not found",
+      HttpStatus.NOT_FOUND,
+    );
   }
 }

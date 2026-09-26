@@ -155,7 +155,9 @@ export class PayrollReportService {
   public async registerData(periodId: string): Promise<PayrollRegisterReportData> {
     this.support.assertPermission("payroll.view");
     const { companyId } = this.support.context();
-    const period = await sql<PayrollRegisterReportData["header"] & PayrollRegisterReportData["summary"]>`
+    const period = await sql<
+      PayrollRegisterReportData["header"] & PayrollRegisterReportData["summary"]
+    >`
       select p.period_reference as "periodReference",
              p.period_start::text as "periodStart", p.period_end::text as "periodEnd",
              p.status, calculator.username as "preparedBy", approver.username as "approvedBy",

@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 560" role="img" aria-labelledby="title desc">
+  <title id="title">Yousef, Tawseelhub AI Advisor</title>
+  <desc id="desc">Professional illustrated portrait of a friendly advisor in Tawseelhub colours.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#e9faf4"/><stop offset="1" stop-color="#b9ded3"/></linearGradient>
+    <linearGradient id="shirt" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#123f61"/><stop offset="1" stop-color="#0a263b"/></linearGradient>
+  </defs>
+  <rect width="480" height="560" rx="36" fill="url(#bg)"/>
+  <circle cx="390" cy="92" r="78" fill="#10b981" opacity=".12"/>
+  <circle cx="65" cy="450" r="105" fill="#f4b63d" opacity=".16"/>
+  <path d="M86 560c8-119 61-184 154-184s146 65 154 184" fill="url(#shirt)"/>
+  <path d="M184 351h112v79c-24 25-88 25-112 0z" fill="#bd7c54"/>
+  <ellipse cx="240" cy="236" rx="104" ry="132" fill="#ca8a60"/>
+  <path d="M139 222c-8-102 42-156 105-156 77 0 122 58 104 165l-22-28c-3-67-32-91-81-92-48 0-78 29-87 94z" fill="#172531"/>
+  <path d="M143 207c-19 1-24 22-16 44 6 18 18 27 31 24m179-68c19 1 24 22 16 44-6 18-18 27-31 24" fill="#ca8a60"/>
+  <ellipse cx="199" cy="237" rx="8" ry="6" fill="#172531"/><ellipse cx="281" cy="237" rx="8" ry="6" fill="#172531"/>
+  <path d="M211 295c18 15 40 15 58 0" fill="none" stroke="#713f32" stroke-linecap="round" stroke-width="7"/>
+  <path d="M181 212c14-8 29-9 42-2m34 0c13-7 29-6 42 2" fill="none" stroke="#172531" stroke-linecap="round" stroke-width="8"/>
+  <path d="M239 239l-8 34 18 3" fill="none" stroke="#a96147" stroke-linecap="round" stroke-width="5"/>
+  <path d="M153 250c8 84 43 122 87 122 46 0 81-41 87-122-12 75-39 91-87 91-46 0-73-17-87-91z" fill="#26333c" opacity=".92"/>
+  <path d="M184 366l56 51 56-51 26 23-82 99-82-99z" fill="#fff"/>
+  <g transform="translate(304 438)"><path d="M0 0h49l-12 14H20L5 31h22L14 46h-46l12-15H-1l16-17H-12z" fill="#2bd1a2"/><circle cx="50" cy="39" r="8" fill="#f4b63d"/></g>
+  <rect x="22" y="22" width="159" height="38" rx="19" fill="#0d2638" opacity=".92"/><text x="43" y="47" font-family="Arial,sans-serif" font-size="17" font-weight="700" fill="#fff">AI ADVISOR</text>
+</svg>

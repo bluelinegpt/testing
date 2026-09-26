@@ -69,16 +69,24 @@ const stableConstraintMessages = new Set([
   "accounting_cash_bank_gl_account_invalid",
 ]);
 
+/* Constraint codes whose generic "conflicts with financial integrity rules"
+   text left the User with no idea what to do next. Only codes listed here get a
+   specific message; every other stable code keeps the generic wording and its
+   own `errorCode` unchanged. */
+const stableConstraintExplanations: Readonly<Record<string, string>> = {
+  accounting_opening_balance_immutable:
+    "This opening balance has already been validated. Approve it or return it to Draft before making changes.",
+};
+
 export function mapAccountingDatabaseError(error: unknown): never {
   const message =
-    typeof error === "object" && error !== null && "message" in error
-      ? String(error.message)
-      : "";
+    typeof error === "object" && error !== null && "message" in error ? String(error.message) : "";
   const stableCode = [...stableConstraintMessages].find((code) => message.includes(code));
   if (stableCode !== undefined) {
     throw new ApplicationException(
       stableCode,
-      "The Accounting operation conflicts with the current financial integrity rules",
+      stableConstraintExplanations[stableCode] ??
+        "The Accounting operation conflicts with the current financial integrity rules",
       HttpStatus.CONFLICT,
     );
   }

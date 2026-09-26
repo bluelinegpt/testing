@@ -1,4 +1,4 @@
-export type IdentityKind = "platform_administrator" | "company_user" | "trader" | "driver";
+export type IdentityKind = "platform_administrator" | "company_user" | "trader" | "driver" | "customer";
 
 export interface IdentityContext {
   readonly identityId: string;
@@ -10,6 +10,8 @@ export interface IdentityContext {
   readonly profileLinkId?: string;
   readonly profileType?: "employee" | "driver" | "trader";
   readonly profileId?: string;
+  readonly companyName?: string;
+  readonly companyNameAr?: string;
 }
 
 export abstract class IdentityContextAccessor {

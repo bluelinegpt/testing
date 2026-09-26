@@ -1,0 +1,7 @@
+{
+  "ENVIRONMENT_NAME": "production",
+  "API_BASE_URL": "https://api.invalid.example/api/v1",
+  "REALTIME_URL": "wss://realtime.invalid.example",
+  "ENABLE_VERBOSE_LOGGING": false,
+  "ENABLE_MOCK_SERVICES": false
+}

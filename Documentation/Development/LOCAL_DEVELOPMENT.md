@@ -31,7 +31,15 @@ pnpm --filter @blueline/api dev
 
 The API fails clearly when mandatory configuration is absent. Readiness returns 503 when PostgreSQL is unavailable or credentials/schema are unresolved.
 
-## Web
+## Public Website
+
+```powershell
+pnpm --filter @blueline/public-web dev
+```
+
+Open `http://localhost:5174`.
+
+## Company Portal
 
 ```powershell
 pnpm --filter @blueline/web dev
@@ -43,7 +51,7 @@ run `pnpm --filter @blueline/api dev:bootstrap-company`. The command refuses to 
 `NODE_ENV=production`, creates one active development Company and administrator transactionally,
 and fails if the subdomain already exists.
 
-Open `http://localhost:5174`.
+Open `http://localhost:5177`.
 
 ## Database
 

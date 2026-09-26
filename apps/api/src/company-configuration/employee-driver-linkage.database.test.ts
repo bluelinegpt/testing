@@ -44,12 +44,16 @@ describe.skipIf(!runDatabaseTests)("Employee master and Driver linkage", () => {
             (${company}::uuid,'CUSTOMER_SERVICE','Customer Service',false)`.execute(transaction);
 
           const driverRole = (
-            await sql<{ id: string }>`select id from employee_roles where company_id=${company}::uuid and is_driver_role`.execute(
+            await sql<{
+              id: string;
+            }>`select id from employee_roles where company_id=${company}::uuid and is_driver_role`.execute(
               transaction,
             )
           ).rows[0]!.id;
           const csRole = (
-            await sql<{ id: string }>`select id from employee_roles where company_id=${company}::uuid and code='CUSTOMER_SERVICE'`.execute(
+            await sql<{
+              id: string;
+            }>`select id from employee_roles where company_id=${company}::uuid and code='CUSTOMER_SERVICE'`.execute(
               transaction,
             )
           ).rows[0]!.id;

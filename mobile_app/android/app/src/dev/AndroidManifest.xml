@@ -1,0 +1,4 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- HTTP is permitted only in the development flavor for local-LAN device testing. -->
+    <application android:usesCleartextTraffic="true" />
+</manifest>

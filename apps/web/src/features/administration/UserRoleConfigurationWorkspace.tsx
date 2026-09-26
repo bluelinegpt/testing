@@ -12,6 +12,7 @@ import {
   ShieldCheck,
   UnlockKeyhole,
   UserRoundCog,
+  X,
 } from "lucide-react";
 import { type FormEvent, useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -316,6 +317,7 @@ export function UserDetailsWorkspace({
   const [modal, setModal] = useState<
     "edit" | "roles" | "disable" | "lock" | "reset" | "force" | "revoke"
   >();
+  const [removingRole, setRemovingRole] = useState<{ id: string; name: string }>();
   const [temp, setTemp] = useState<{
     temporaryPassword: string;
     temporaryPasswordExpiresAt: string;
@@ -428,7 +430,11 @@ export function UserDetailsWorkspace({
       {tab === "overview" ? (
         <Overview onNavigate={onNavigate} user={user} />
       ) : tab === "access" ? (
-        <Access user={user} onAssign={() => setModal("roles")} />
+        <Access
+          user={user}
+          onAssign={() => setModal("roles")}
+          onRemoveRole={(role) => setRemovingRole(role)}
+        />
       ) : tab === "activity" ? (
         <Activity user={user} onForce={() => setModal("force")} onReset={() => setModal("reset")} />
       ) : tab === "sessions" ? (
@@ -461,6 +467,18 @@ export function UserDetailsWorkspace({
           onClose={() => setModal(undefined)}
           onSaved={async () => {
             setModal(undefined);
+            await load();
+          }}
+        />
+      ) : null}
+      {removingRole ? (
+        <RemoveRoleDialog
+          api={api}
+          role={removingRole}
+          user={user}
+          onClose={() => setRemovingRole(undefined)}
+          onRemoved={async () => {
+            setRemovingRole(undefined);
             await load();
           }}
         />
@@ -1000,17 +1018,19 @@ function UserForm({
               <option value="ar">العربية</option>
             </select>
           </label>
-          {!editing ? <label className="field">
-            <span>{t("userAdmin.linkEmployee")}</span>
-            <select value={employeeId} onChange={(e) => setEmployeeId(e.target.value)}>
-              <option value="">{t("userAdmin.noEmployee")}</option>
-              {employees.map((employee) => (
-                <option key={employee.id} value={employee.id}>
-                  {employee.code} - {employee.name}
-                </option>
-              ))}
-            </select>
-          </label> : null}
+          {!editing ? (
+            <label className="field">
+              <span>{t("userAdmin.linkEmployee")}</span>
+              <select value={employeeId} onChange={(e) => setEmployeeId(e.target.value)}>
+                <option value="">{t("userAdmin.noEmployee")}</option>
+                {employees.map((employee) => (
+                  <option key={employee.id} value={employee.id}>
+                    {employee.code} - {employee.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
         </div>
         {!editing ? (
           <>
@@ -1251,6 +1271,69 @@ function PermissionReadOnly({
     </div>
   );
 }
+/**
+ * Removing an assigned Role.
+ *
+ * Reuses the SAME endpoint `RoleAssignment` already uses to add roles --
+ * `PUT users/:accountId/roles` -- with the target Role's id simply left out
+ * of the set. That single endpoint already replaces the account's full Role
+ * set inside a transaction and already enforces everything this needs:
+ * Company scope, `users_roles.manage`, last-active-Company-Administrator
+ * ("The last active Company administrator cannot lose access"), self-lockout,
+ * and an audit trail (`company_user.role_removed`). There is no second
+ * role-management system here, only a focused, one-Role-at-a-time UI on top
+ * of the one that already exists.
+ */
+function RemoveRoleDialog({
+  api,
+  role,
+  user,
+  onClose,
+  onRemoved,
+}: {
+  api: ApiClient;
+  role: { id: string; name: string };
+  user: UserDetails;
+  onClose: () => void;
+  onRemoved: () => Promise<void>;
+}) {
+  const { t } = useTranslation();
+  const [error, setError] = useState<string>();
+  const [removing, setRemoving] = useState(false);
+  const remove = () => {
+    setRemoving(true);
+    setError(undefined);
+    const roleIds = user.roles.filter((r) => r.id !== role.id).map((r) => r.id);
+    void api
+      .put<void>(`users/${user.accountId}/roles`, { roleIds })
+      .then(onRemoved)
+      .catch((caught) => {
+        setError(caught instanceof ApiError ? caught.message : t("userAdmin.actionFailed"));
+        setRemoving(false);
+      });
+  };
+  return (
+    <Modal
+      className="modal-small"
+      closeLabel={t("common.close")}
+      onRequestClose={onClose}
+      title={t("userAdmin.removeRoleTitle")}
+      titleId="remove-role-title"
+    >
+      {error ? <div className="alert alert-error">{error}</div> : null}
+      <p>{t("userAdmin.removeRoleConfirm", { role: role.name, user: user.displayName })}</p>
+      <p className="field-hint">{t("userAdmin.removeRoleWarning")}</p>
+      <div className="modal-actions">
+        <button className="button button-secondary" onClick={onClose} type="button">
+          {t("common.cancel")}
+        </button>
+        <button className="button button-danger" disabled={removing} onClick={remove} type="button">
+          {t("userAdmin.removeRoleAction")}
+        </button>
+      </div>
+    </Modal>
+  );
+}
 function RoleAssignment({
   api,
   roles,
@@ -1292,7 +1375,13 @@ function RoleAssignment({
                 }
                 type="checkbox"
               />
-              <span>{role.name}</span>
+              <span className="role-assignment-option">
+                <strong>{role.name}</strong>
+                {role.description ? <small>{role.description}</small> : null}
+                <small>
+                  {role.permissions.length > 0 ? role.permissions.join(", ") : "No permissions"}
+                </small>
+              </span>
             </label>
           ))}
       </div>
@@ -1466,44 +1555,93 @@ function DuplicateRole({
 function Overview({ user, onNavigate }: { user: UserDetails; onNavigate: (path: string) => void }) {
   const { t } = useTranslation();
   return (
-    <><dl className="detail-grid">
-      <Detail label={t("userAdmin.username")} value={user.username} />
-      <Detail label={t("userAdmin.accountKind")} value={t(`userAdmin.accountKinds.${user.accountKind}`)} />
-      <Detail label={t("common.name")} value={user.displayName} />
-      <Detail label={t("userAdmin.email")} value={user.email} />
-      <Detail label={t("userAdmin.mobile")} value={user.mobileNumber} />
-      <Detail label={t("userAdmin.preferredLanguage")} value={user.preferredLanguage} />
-      <Detail
-        label={t("userAdmin.employee")}
-        value={
-          user.employeeName
-            ? `${user.employeeCode ?? ""} ${user.employeeName}`
-            : t("userAdmin.noEmployee")
-        }
-      />
-      <Detail label={t("userAdmin.createdAt")} value={dateTime(user.createdAt, "-")} />
-      <Detail label={t("userAdmin.updatedAt")} value={dateTime(user.updatedAt, "-")} />
-    </dl>
-    <section className="detail-section">
-      <h2>{t("access.linkedProfiles")}</h2>
-      {user.linkedProfiles.length===0?<p>{t("access.noLinkedUser")}</p>:<div className="table-scroll-x"><table>
-        <thead><tr><th>{t("access.columns.profile")}</th><th>{t("workforce.code")}</th>
-          <th>{t("common.name")}</th><th>{t("access.columns.status")}</th><th>{t("common.status")}</th>
-          <th>{t("access.linkCreated")}</th><th>{t("access.linkUpdated")}</th><th>{t("access.columns.actions")}</th></tr></thead>
-        <tbody>{user.linkedProfiles.map(profile=><tr key={profile.id}><td>{t(`access.profile.${profile.profileType}`)}</td>
-          <td><bdi>{profile.code??"—"}</bdi></td><td>{profile.name??"—"}</td>
-          <td>{t(`access.status.${profile.accessStatus}`)}</td><td>{profile.businessStatus??"—"}</td>
-          <td>{dateTime(profile.createdAt,"—")}</td><td>{dateTime(profile.updatedAt,"—")}</td>
-          <td><button type="button" onClick={()=>onNavigate(
-            profile.profileType==="trader"
-              ? `/configuration/traders/${encodeURIComponent(profile.code??profile.profileId)}`
-              : `/configuration/${profile.profileType}s/${encodeURIComponent(profile.code??profile.profileId)}`
-          )}>{t("access.openProfile")}</button></td></tr>)}</tbody>
-      </table></div>}
-    </section></>
+    <>
+      <dl className="detail-grid">
+        <Detail label={t("userAdmin.username")} value={user.username} />
+        <Detail
+          label={t("userAdmin.accountKind")}
+          value={t(`userAdmin.accountKinds.${user.accountKind}`)}
+        />
+        <Detail label={t("common.name")} value={user.displayName} />
+        <Detail label={t("userAdmin.email")} value={user.email} />
+        <Detail label={t("userAdmin.mobile")} value={user.mobileNumber} />
+        <Detail label={t("userAdmin.preferredLanguage")} value={user.preferredLanguage} />
+        <Detail
+          label={t("userAdmin.employee")}
+          value={
+            user.employeeName
+              ? `${user.employeeCode ?? ""} ${user.employeeName}`
+              : t("userAdmin.noEmployee")
+          }
+        />
+        <Detail label={t("userAdmin.driver")} value={user.driverCode ?? t("userAdmin.noDriver")} />
+        <Detail label={t("userAdmin.createdAt")} value={dateTime(user.createdAt, "-")} />
+        <Detail label={t("userAdmin.updatedAt")} value={dateTime(user.updatedAt, "-")} />
+      </dl>
+      <section className="detail-section">
+        <h2>{t("access.linkedProfiles")}</h2>
+        {user.linkedProfiles.length === 0 ? (
+          <p>{t("access.noLinkedUser")}</p>
+        ) : (
+          <div className="table-scroll-x">
+            <table>
+              <thead>
+                <tr>
+                  <th>{t("access.columns.profile")}</th>
+                  <th>{t("workforce.code")}</th>
+                  <th>{t("common.name")}</th>
+                  <th>{t("access.columns.status")}</th>
+                  <th>{t("common.status")}</th>
+                  <th>{t("access.linkCreated")}</th>
+                  <th>{t("access.linkUpdated")}</th>
+                  <th>{t("access.columns.actions")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {user.linkedProfiles.map((profile) => (
+                  <tr key={profile.id}>
+                    <td>{t(`access.profile.${profile.profileType}`)}</td>
+                    <td>
+                      <bdi>{profile.code ?? "—"}</bdi>
+                    </td>
+                    <td>{profile.name ?? "—"}</td>
+                    <td>{t(`access.status.${profile.accessStatus}`)}</td>
+                    <td>{profile.businessStatus ?? "—"}</td>
+                    <td>{dateTime(profile.createdAt, "—")}</td>
+                    <td>{dateTime(profile.updatedAt, "—")}</td>
+                    <td>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          onNavigate(
+                            profile.profileType === "trader"
+                              ? `/configuration/traders/${encodeURIComponent(profile.code ?? profile.profileId)}`
+                              : `/configuration/${profile.profileType}s/${encodeURIComponent(profile.code ?? profile.profileId)}`,
+                          )
+                        }
+                      >
+                        {t("access.openProfile")}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+    </>
   );
 }
-function Access({ user, onAssign }: { user: UserDetails; onAssign: () => void }) {
+function Access({
+  user,
+  onAssign,
+  onRemoveRole,
+}: {
+  user: UserDetails;
+  onAssign: () => void;
+  onRemoveRole: (role: { id: string; name: string }) => void;
+}) {
   const { t } = useTranslation();
   return (
     <div className="detail-section">
@@ -1517,8 +1655,26 @@ function Access({ user, onAssign }: { user: UserDetails; onAssign: () => void })
       </div>
       <div className="tag-list">
         {user.roles.map((role) => (
-          <span className="tag" key={role.id}>
+          <span className="tag tag-removable" key={role.id}>
             {role.name}
+            {user.accountKind === "company_user" ? (
+              <button
+                className="tag-remove-button"
+                // A User must always keep at least one active Role while
+                // active (`assertRoles` in `user-administration.service.ts`
+                // -- the same rule `RoleAssignment`'s own Save button already
+                // respects). The backend still enforces this and the other
+                // safeguards (last active Company Administrator, self-
+                // lockout) regardless; this only avoids an avoidable
+                // rejection for the one case knowable client-side.
+                disabled={user.status === "active" && user.roles.length <= 1}
+                onClick={() => onRemoveRole({ id: role.id, name: role.name })}
+                title={t("userAdmin.removeRole")}
+                type="button"
+              >
+                <X size={13} />
+              </button>
+            ) : null}
           </span>
         ))}
       </div>

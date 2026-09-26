@@ -16,6 +16,12 @@ import { KyselyTransactionManager } from "../infrastructure/database/transaction
 import { ApplicationException } from "../presentation/errors/application.exception.js";
 import { IdentityContextAccessor } from "../security/identity-context.js";
 import { TenantContextAccessor } from "../tenancy/tenant-context.js";
+import { BusinessDayService } from "../company-configuration/business-day.service.js";
+import {
+  type AppliedReportDateMode,
+  ReportDateModeService,
+} from "../company-configuration/report-date-mode.js";
+import { EmployeeCollectionEarningService } from "../payroll/employee-collection-earning.service.js";
 import { OutsourcedDriverFeeService } from "../payroll/outsourced-driver-fee.service.js";
 
 import { OperationsHistoryWriter } from "./operations-history.writer.js";
@@ -58,8 +64,15 @@ interface EligibleOrder {
   readonly driverReconciliationStatus: string;
   readonly id: string;
   readonly orderNumber: string;
+  readonly orderType: string;
   readonly traderId: string;
   readonly traderNetPayable: string;
+}
+
+export function internationalCollectionError(orderType: string): string | null {
+  return orderType === "gcc_international"
+    ? "International Orders are not eligible for Driver Collections"
+    : null;
 }
 
 export interface DriverReconciliationResult {
@@ -81,7 +94,19 @@ export interface DriverReconciliationResult {
   readonly reconciliationNumber: string;
 }
 
+/** The authoritative operational timestamp for this screen. */
+const BUSINESS_DATE_COLUMN = "r.confirmed_at";
+
 export interface Page<T> {
+  /**
+   * The Date Mode actually applied, resolved by the backend.
+   *
+   * Optional so existing callers are unaffected; present whenever the screen
+   * asked for a mode. Carries the window, the timezone, the authoritative
+   * timestamp and the two warning flags, so the caption above a total always
+   * describes the predicate that produced it.
+   */
+  readonly appliedDateMode?: AppliedReportDateMode;
   readonly items: readonly T[];
   readonly page: number;
   readonly pageSize: number;
@@ -148,6 +173,8 @@ export interface EligibleOrderRow {
   readonly deliveredAt: string | null;
   readonly id: string;
   readonly orderNumber: string;
+  readonly referenceNumber: string | null;
+  readonly serialNumber: string;
   readonly traderName: string;
 }
 
@@ -182,7 +209,10 @@ export interface DriverReconciliationPreview {
 }
 
 export interface ReconciliationListRow {
+  /** The reconciliation's own date-only field. NOT the Company Business Date. */
   readonly businessDate: string;
+  /** Company Business Date derived from confirmedAt. Null when unconfirmed. */
+  readonly confirmationBusinessDate?: string | null;
   readonly collectionPaymentMethod: "cash" | "visa" | null;
   readonly confirmedAt: string | null;
   readonly confirmedBy: string;
@@ -243,6 +273,7 @@ export interface DriverCollectionReportData {
     readonly collectionPaymentMethod: "cash" | "visa" | null;
     readonly company: {
       readonly hasLogo: boolean;
+      readonly logoDataUri?: string | null;
       readonly nameAr: string | null;
       readonly nameEn: string;
       readonly subtitleAr: string | null;
@@ -253,7 +284,17 @@ export interface DriverCollectionReportData {
     readonly confirmedBy: string;
     readonly createdAt: string;
     readonly createdBy: string;
+    /**
+     * Driver business Code (`d.code`), distinct from the id and the name.
+     *
+     * Nullable because the row type feeding it declares `string | null`
+     * (line 1945): the Driver join can leave it absent. Reported as absent
+     * rather than substituted with an empty Code.
+     */
+    readonly driverCode: string | null;
     readonly driverName: string;
+    /** Arabic Driver name. Nullable: `d.name_ar` is optional on the Driver. */
+    readonly driverNameAr: string | null;
     readonly driverType: "employee" | "outsourced";
     readonly linkedDriverFeePaymentId?: string | null;
     readonly linkedDriverFeePaymentNumber?: string | null;
@@ -313,12 +354,18 @@ export class DriverCashReconciliationService {
     @Inject(KyselyTransactionManager)
     private readonly transactions: KyselyTransactionManager,
     @Inject(TenantContextAccessor) private readonly tenants: TenantContextAccessor,
+    @Inject(ReportDateModeService) private readonly reportDateModes: ReportDateModeService,
+    @Inject(BusinessDayService) private readonly businessDays: BusinessDayService,
     @Inject(IdentityContextAccessor) private readonly identities: IdentityContextAccessor,
     @Inject(OperationsHistoryWriter) private readonly history: OperationsHistoryWriter,
     @Inject(CompanyProfileService) private readonly companyProfile: CompanyProfileService,
     @Inject(DriverCollectionPdfService) private readonly pdf: DriverCollectionPdfService,
     @Inject(OutsourcedDriverFeeService)
     private readonly outsourcedDriverFees: OutsourcedDriverFeeService,
+    // Fact capture only. This service prices nothing and touches no
+    // reconciliation figure; see the call site in `confirm`.
+    @Inject(EmployeeCollectionEarningService)
+    private readonly collectionEarnings: EmployeeCollectionEarningService,
   ) {}
 
   public async expenseTypes(): Promise<readonly ExpenseTypeOption[]> {
@@ -354,11 +401,12 @@ export class DriverCashReconciliationService {
       with eligible as (
         select assigned_driver_id as driver_id,
                count(*)::int as "pendingOrderCount",
-               coalesce(sum(amount_collected), 0)::text as "pendingCollectionTotal"
+               coalesce(sum(customer_amount_due), 0)::text as "pendingCollectionTotal"
           from orders
          where company_id = ${companyId}::uuid
            and delivery_status = 'delivered'
            and driver_reconciliation_status = 'pending'
+           and order_type <> 'gcc_international'
          group by assigned_driver_id
       )
       select d.id, d.code, d.name_en as name, d.mobile_number as "mobileNumber",
@@ -398,7 +446,7 @@ export class DriverCashReconciliationService {
     const direction = query.sortDirection === "asc" ? "asc" : "desc";
     const sortColumn =
       query.sortBy === "amountCollected"
-        ? "o.amount_collected"
+        ? "o.customer_amount_due"
         : query.sortBy === "orderNumber"
           ? "o.order_number"
           : "o.delivered_at";
@@ -414,6 +462,7 @@ export class DriverCashReconciliationService {
         and o.assigned_driver_id = ${query.driverId}::uuid
         and o.delivery_status = 'delivered'
         and o.driver_reconciliation_status = 'pending'
+        and o.order_type <> 'gcc_international'
         and (${search}::text is null
              or o.order_number ilike '%' || ${search} || '%'
              or o.serial_number ilike '%' || ${search} || '%'
@@ -441,9 +490,10 @@ export class DriverCashReconciliationService {
              or o.delivered_at::date <= ${query.deliveredTo ?? null}::date)
     `;
     const result = await sql<Omit<EligibleOrderRow, "cashStatusLabel"> & { total: number }>`
-      select o.id, o.order_number as "orderNumber", o.delivered_at::text as "deliveredAt",
+      select o.id, o.order_number as "orderNumber", o.serial_number as "serialNumber",
+             o.reference_number as "referenceNumber", o.delivered_at::text as "deliveredAt",
              o.customer_name as "customerName", t.name_en as "traderName",
-             a.name_en as "areaName", o.amount_collected::text as "amountCollected",
+             a.name_en as "areaName", o.customer_amount_due::text as "amountCollected",
              o.driver_reconciliation_status as "cashStatus",
              count(*) over()::int as total
         from orders o
@@ -455,7 +505,7 @@ export class DriverCashReconciliationService {
     `.execute(this.database);
     const totals = await sql<SelectionTotals>`
       select count(*)::int as "orderCount",
-             coalesce(sum(o.amount_collected), 0)::text as "collectionTotal"
+             coalesce(sum(o.customer_amount_due), 0)::text as "collectionTotal"
         from orders o
        where ${filters}
     `.execute(this.database);
@@ -746,10 +796,11 @@ export class DriverCashReconciliationService {
         const inserted = await sql<{ id: string }>`
           insert into driver_reconciliation_payments (
             company_id, reconciliation_id, payment_method, amount,
-            company_bank_account_id, bank_reference, created_by_account_id, payment_at
+            company_cash_account_id, company_bank_account_id, bank_reference, created_by_account_id, payment_at
           ) values (
             ${companyId}::uuid, ${reconciliationId}::uuid, ${payment.paymentMethod},
-            ${new Decimal(payment.amount).toFixed(2)}, ${payment.bankAccountId ?? null}::uuid,
+            ${new Decimal(payment.amount).toFixed(2)}, ${payment.paymentMethod === "cash" ? (payment.cashAccountId ?? null) : null}::uuid,
+            ${payment.paymentMethod === "bank_transfer" ? (payment.bankAccountId ?? null) : null}::uuid,
             ${payment.bankReference?.trim() || null}, ${identity.identityId}::uuid,
             coalesce(${payment.paymentDate ?? null}::date::timestamptz, now())
           ) returning id
@@ -759,7 +810,9 @@ export class DriverCashReconciliationService {
       }
       const feePayment = await this.outsourcedDriverFees.confirmCollectionOffset(transaction, {
         actorId: identity.identityId,
-        allocations: input.driverFeeAllocations,
+        ...(input.driverFeeAllocations === undefined
+          ? {}
+          : { allocations: input.driverFeeAllocations }),
         amount: selectedDriverFeeOffset,
         companyId,
         correlationId,
@@ -775,6 +828,22 @@ export class DriverCashReconciliationService {
                confirmed_at = now(), updated_at = now()
          where id = ${reconciliationId}::uuid and company_id = ${companyId}::uuid
       `.execute(transaction);
+      // The status transition above synchronously captures the authoritative
+      // Driver Collection Accounting Event. Each operational Cash/Bank
+      // Movement points to that Event instead of enqueueing duplicate facts.
+      const paymentsWithAccounts = await this.populatePaymentAccounts(
+        transaction,
+        companyId,
+        input.payments,
+      );
+      await this.createCollectionMovements(transaction, {
+        companyId,
+        payments: paymentsWithAccounts,
+        reconciliationId,
+        reconciliationNumber,
+        businessDate: header.rows[0]!.businessDate,
+        actorId: identity.identityId,
+      });
       // Only the Driver Cash Status changes. Delivery Status, Return Status,
       // Trader Settlement Status, pricing and customer snapshots are untouched.
       await sql`
@@ -804,6 +873,42 @@ export class DriverCashReconciliationService {
           )
         `.execute(transaction);
       }
+
+      /* Employee Driver collection earnings: capture the FACT, price nothing.
+         Runs only once the reconciliation is confirmed and every financial
+         decision above is already made, so it cannot influence COD, expenses,
+         totals, payments or the confirmation rules -- it only reads what those
+         produced. No rate is looked up here and no amount is written anywhere;
+         Payroll derives the money later from the effective rule. Outsourced
+         Drivers return null and are untouched, keeping the two compensation
+         models separate. */
+      await this.collectionEarnings.captureForConfirmedCollection(
+        transaction,
+        {
+          businessDate: header.rows[0]!.businessDate,
+          confirmedAt: new Date().toISOString(),
+          countsForCollectionEarning: input.countsForCollectionEarning === true,
+          driverId,
+          // The reconciliation's own Orders are authoritative whenever it has
+          // them; the manual count is only consulted when it has none.
+          manualOrderCount: input.manualCollectedOrderCount,
+          orderIds: orders.map((order) => ({ id: order.id, orderNumber: order.orderNumber })),
+          reconciliationId,
+        },
+        identity.identityId,
+      );
+      await this.outsourcedDriverFees.createForConfirmedCollection(
+        transaction,
+        {
+          businessDate: header.rows[0]!.businessDate,
+          countsForCollectionEarning: input.countsForCollectionEarning === true,
+          driverId,
+          orderCount: orders.length > 0 ? orders.length : (input.manualCollectedOrderCount ?? 0),
+          reconciliationId,
+        },
+        identity.identityId,
+        correlationId,
+      );
 
       const actorRole = await this.history.actorRole(transaction, companyId, identity.identityId);
       for (const order of orders) {
@@ -1193,8 +1298,8 @@ export class DriverCashReconciliationService {
   ): Promise<DriverReconciliationResult> {
     this.assertAnyPermission("reconciliations.create");
     const { companyId } = this.tenants.current();
-    const result = await sql<{ amountCollected: string }>`
-      select amount_collected::text as "amountCollected" from orders
+    const result = await sql<{ amountCollected: string; orderType: string }>`
+      select customer_amount_due::text as "amountCollected", order_type as "orderType" from orders
       where id = ${orderId}::uuid and company_id = ${companyId}::uuid
     `.execute(this.database);
     const order = result.rows[0];
@@ -1205,6 +1310,8 @@ export class DriverCashReconciliationService {
         HttpStatus.NOT_FOUND,
       );
     }
+    const collectionError = internationalCollectionError(order.orderType);
+    if (collectionError !== null) throw new ApplicationException("international_collection_forbidden", collectionError, HttpStatus.CONFLICT);
     const amount = new Decimal(order.amountCollected);
     const paymentMethod = payment.paymentMethod ?? "cash";
     // Bank fields are omitted entirely for Cash, which the payment validation requires.
@@ -1293,14 +1400,34 @@ export class DriverCashReconciliationService {
    * null`) — a reversal is exposed as a flag on the ORIGINAL reconciliation,
    * never as a row of its own.
    */
+
+  /**
+   * The Business Date predicate, or a no-op.
+   *
+   * Built by `ReportDateModeService` so this screen cannot develop its own idea
+   * of where a business day begins. Returns a match-everything predicate in
+   * Calendar Date mode, which is why the calendar filters alongside it need no
+   * conditional of their own.
+   */
+  private businessDatePredicate(
+    applied: AppliedReportDateMode | undefined,
+  ): ReturnType<typeof sql> {
+    if (applied === undefined || applied.dateMode !== "business_date") return sql`true`;
+    return this.reportDateModes.predicate(BUSINESS_DATE_COLUMN, applied);
+  }
+
   private reconciliationFilters(
     companyId: string,
     query: DriverCollectionsFilterDto,
+    applied?: AppliedReportDateMode,
   ): ReturnType<typeof sql> {
     const search = query.search?.trim() || null;
     return sql`
       r.company_id = ${companyId}::uuid
         and r.reversal_of_id is null
+        -- Business Date mode. Matches everything in every other mode, so the
+        -- existing calendar filters below are completely unaffected.
+        and ${this.businessDatePredicate(applied)}
         and (${query.driverId ?? null}::uuid is null
              or r.driver_id = ${query.driverId ?? null}::uuid)
         and (${query.driverType ?? null}::text is null
@@ -1330,6 +1457,37 @@ export class DriverCashReconciliationService {
                and exists (
                  select 1 from driver_reconciliations rv
                   where rv.company_id = r.company_id and rv.reversal_of_id = r.id
+               )
+             )
+        )
+        -- Driver Fee paid / unpaid.
+        --
+        -- "Paid" means a CONFIRMED Outsourced Driver Fee Payment is linked to
+        -- this Collection. A reversed fee payment is deliberately treated as
+        -- unpaid: the money came back, so the fee is outstanding again.
+        --
+        -- Only outsourced drivers accrue fees, so employee-driver Collections
+        -- match neither value and are excluded whenever this filter is set.
+        and (${query.driverFeeStatus ?? null}::text is null
+             or ${query.driverFeeStatus ?? null}::text = 'all'
+             or (
+               ${query.driverFeeStatus ?? null}::text = 'paid'
+               and d.driver_type = 'outsourced'
+               and exists (
+                 select 1 from outsourced_driver_fee_payments fp
+                  where fp.company_id = r.company_id
+                    and fp.linked_driver_reconciliation_id = r.id
+                    and fp.status = 'confirmed'
+               )
+             )
+             or (
+               ${query.driverFeeStatus ?? null}::text = 'unpaid'
+               and d.driver_type = 'outsourced'
+               and not exists (
+                 select 1 from outsourced_driver_fee_payments fp
+                  where fp.company_id = r.company_id
+                    and fp.linked_driver_reconciliation_id = r.id
+                    and fp.status = 'confirmed'
                )
              )
         )
@@ -1388,7 +1546,11 @@ export class DriverCashReconciliationService {
         : query.sortBy === "netAmountReceived"
           ? "r.net_amount_received"
           : "r.business_date";
-    const filters = this.reconciliationFilters(companyId, query);
+    // Resolved once per request: one configuration query, boundaries computed
+    // once, and the same object feeds the row query, the count that rides the
+    // same statement, and the caption returned to the caller.
+    const applied = await this.reportDateModes.resolve("driver-collection-activity", query);
+    const filters = this.reconciliationFilters(companyId, query, applied);
     const result = await sql<ReconciliationListRow & { total: number }>`
       select r.id, r.reconciliation_number as "reconciliationNumber",
              r.business_date::text as "businessDate",
@@ -1432,7 +1594,19 @@ export class DriverCashReconciliationService {
       ...row,
       statusLabel: reconciliationStatusLabel(row.status),
     }));
-    return this.page(items, page, pageSize);
+    // ONE configuration query for the whole page, then pure in-memory
+    // resolution. Calling businessDateOf per row would be an N+1; deriving
+    // the date in SQL would restate the rule in a second language.
+    const businessDates = await this.businessDays.businessDatesFor(
+      items.map((row) => row.confirmedAt),
+    );
+    const enriched = items.map((row) => ({
+      ...row,
+      // Null when no authoritative timestamp exists. Never guessed.
+      confirmationBusinessDate:
+        row.confirmedAt === null ? null : (businessDates.get(row.confirmedAt) ?? null),
+    }));
+    return { ...this.page(enriched, page, pageSize), appliedDateMode: applied };
   }
 
   /**
@@ -1457,6 +1631,7 @@ export class DriverCashReconciliationService {
         left join areas a on a.id = o.area_id and a.company_id = o.company_id
        where o.company_id = ${companyId}::uuid
          and o.delivery_status = 'delivered'
+         and o.order_type <> 'gcc_international'
          and o.driver_reconciliation_status = 'pending'
          and (${query.driverId ?? null}::uuid is null
               or o.assigned_driver_id = ${query.driverId ?? null}::uuid)
@@ -1755,7 +1930,10 @@ export class DriverCashReconciliationService {
       const traderRows = grouped.get(traderName)!;
       const gross = traderRows.reduce((sum, r) => sum.plus(r.amountToCollect), new Decimal(0));
       const companyFees = traderRows.reduce((sum, r) => sum.plus(r.companyFees), new Decimal(0));
-      const traderPayable = traderRows.reduce((sum, r) => sum.plus(r.traderPayable), new Decimal(0));
+      const traderPayable = traderRows.reduce(
+        (sum, r) => sum.plus(r.traderPayable),
+        new Decimal(0),
+      );
       return {
         companyFees: companyFees.toFixed(2),
         gross: gross.toFixed(2),
@@ -1846,7 +2024,9 @@ export class DriverCashReconciliationService {
         confirmedBy: string;
         createdAt: string;
         createdBy: string;
+        driverCode: string | null;
         driverName: string;
+        driverNameAr: string | null;
         driverType: "employee" | "outsourced";
         driverPayableDeduction: string;
         isReversal: boolean;
@@ -1869,6 +2049,7 @@ export class DriverCashReconciliationService {
                r.notes,
                (r.reversal_of_id is not null) as "isReversal",
                d.name_en as "driverName", d.driver_type as "driverType",
+               d.code as "driverCode", d.name_ar as "driverNameAr",
                coalesce(creator.username, ${legacyUnknown}) as "createdBy",
                coalesce(confirmer.username, ${legacyUnknown}) as "confirmedBy",
                fee_payment.id as "linkedDriverFeePaymentId",
@@ -1917,15 +2098,21 @@ export class DriverCashReconciliationService {
         driverReconciliationStatus: string;
         emirateName: string | null;
         paymentMethod: "cash" | "visa" | null;
+        orderNumber: string;
         referenceNumber: string | null;
         serialNumber: string;
         serviceFee: string;
         totalDeductions: string;
+        traderCode: string | null;
         traderName: string;
         traderPayable: string;
         vatAmount: string;
       }>`
-        select coalesce(o.serial_number, o.order_number) as "serialNumber",
+        -- Order NUMBER and Trader CODE are the values the detail routes
+        -- consume; the Serial Number and Trader Name stay as the values the
+        -- User reads. Additive: no existing field changes.
+        select o.order_number as "orderNumber", t.code as "traderCode",
+               coalesce(o.serial_number, o.order_number) as "serialNumber",
                o.reference_number as "referenceNumber",
                o.delivered_at::text as "deliveryDate",
                coalesce(t.name_ar, t.name_en) as "traderName",
@@ -2029,7 +2216,9 @@ export class DriverCashReconciliationService {
         confirmedBy: header.confirmedBy,
         createdAt: header.createdAt,
         createdBy: header.createdBy,
+        driverCode: header.driverCode,
         driverName: header.driverName,
+        driverNameAr: header.driverNameAr,
         driverType: header.driverType,
         linkedDriverFeePaymentId: header.linkedDriverFeePaymentId,
         linkedDriverFeePaymentNumber: header.linkedDriverFeePaymentNumber,
@@ -2053,10 +2242,12 @@ export class DriverCashReconciliationService {
         driverReconciliationStatusLabel: driverCashStatusLabel(row.driverReconciliationStatus),
         emirateName: row.emirateName,
         paymentMethod: row.paymentMethod,
+        orderNumber: row.orderNumber,
         referenceNumber: row.referenceNumber,
         serialNumber: row.serialNumber,
         serviceFee: new Decimal(row.serviceFee).toFixed(2),
         totalDeductions: new Decimal(row.totalDeductions).toFixed(2),
+        traderCode: row.traderCode,
         traderName: row.traderName,
         traderPayable: new Decimal(row.traderPayable).toFixed(2),
         vatAmount: new Decimal(row.vatAmount).toFixed(2),
@@ -2092,6 +2283,19 @@ export class DriverCashReconciliationService {
     const { companyId } = this.tenants.current();
     const identity = this.identities.current();
     const data = await this.reportData(reconciliationId);
+    const logoDataUri = data.header.company.hasLogo
+      ? await this.companyProfile
+          .logoContent()
+          .then((logo) => `data:${logo.mediaType};base64,${logo.bytes.toString("base64")}`)
+          .catch(() => null)
+      : null;
+    const pdfData: DriverCollectionReportData = {
+      ...data,
+      header: {
+        ...data.header,
+        company: { ...data.header.company, logoDataUri },
+      },
+    };
     const generatedAt = new Intl.DateTimeFormat("en-GB", {
       day: "2-digit",
       hour: "2-digit",
@@ -2100,7 +2304,7 @@ export class DriverCashReconciliationService {
       timeZone: "Asia/Dubai",
       year: "numeric",
     }).format(new Date());
-    const html = buildDriverCollectionReportHtml(data, language, `${generatedAt} (UAE)`);
+    const html = buildDriverCollectionReportHtml(pdfData, language, `${generatedAt} (UAE)`);
     const footerTemplate =
       language === "ar"
         ? `<div style="font-size:9px;width:100%;text-align:center;color:#666;direction:rtl;">الصفحة <span class="pageNumber"></span> من <span class="totalPages"></span></div>`
@@ -2134,8 +2338,7 @@ export class DriverCashReconciliationService {
     page: number;
     pageSize: number;
   } {
-    const page =
-      Number.isInteger(query.page) && (query.page ?? 0) > 0 ? (query.page ?? 1) : 1;
+    const page = Number.isInteger(query.page) && (query.page ?? 0) > 0 ? (query.page ?? 1) : 1;
     const requested = query.pageSize ?? defaultPageSize;
     const pageSize = reconciliationPageSizes.includes(
       requested as (typeof reconciliationPageSizes)[number],
@@ -2330,9 +2533,10 @@ export class DriverCashReconciliationService {
       if (ids.length === 0) return [];
       const result = await sql<EligibleOrder>`
         select id, order_number as "orderNumber", assigned_driver_id as "assignedDriverId",
+               order_type as "orderType",
                delivery_status as "deliveryStatus",
                driver_reconciliation_status as "driverReconciliationStatus",
-               amount_collected::text as "amountCollected",
+               customer_amount_due::text as "amountCollected",
                customer_amount_due::text as "customerAmountDue",
                trader_id as "traderId",
                trader_net_payable::text as "traderNetPayable"
@@ -2342,6 +2546,10 @@ export class DriverCashReconciliationService {
         order by id
         ${sql.raw(lock ? "for update" : "")}
       `.execute(database);
+      const international = result.rows.find((row) => row.orderType === "gcc_international");
+      if (international !== undefined) {
+        throw new ApplicationException("international_collection_forbidden", internationalCollectionError(international.orderType)!, HttpStatus.CONFLICT);
+      }
       return result.rows;
     }
     // Filter selection is constrained to reconciliation-eligible Orders in SQL so
@@ -2350,13 +2558,14 @@ export class DriverCashReconciliationService {
       select o.id, o.order_number as "orderNumber", o.assigned_driver_id as "assignedDriverId",
              o.delivery_status as "deliveryStatus",
              o.driver_reconciliation_status as "driverReconciliationStatus",
-             o.amount_collected::text as "amountCollected",
+             o.customer_amount_due::text as "amountCollected",
              o.customer_amount_due::text as "customerAmountDue",
              o.trader_id as "traderId",
              o.trader_net_payable::text as "traderNetPayable"
       from orders o
       where o.company_id = ${companyId}::uuid
         and o.delivery_status = 'delivered'
+        and o.order_type <> 'gcc_international'
         and o.driver_reconciliation_status = 'pending'
         and (${input.driverId ?? null}::uuid is null
           or o.assigned_driver_id = ${input.driverId ?? null}::uuid)
@@ -2445,13 +2654,14 @@ export class DriverCashReconciliationService {
         }
         continue;
       }
-      if (payment.bankAccountId === undefined || !payment.bankReference?.trim()) {
+      if (payment.bankAccountId === undefined || payment.bankAccountId === null) {
         throw new ApplicationException(
           "bank_payment_details_required",
-          "Bank Account and Bank Reference are required for Bank Transfer",
+          "Bank Account is required for Bank Transfer",
           HttpStatus.BAD_REQUEST,
         );
       }
+      // bank_reference is optional - if provided, it will be validated by database unique constraint
       const bank = await sql<{ id: string }>`
         select id from company_bank_accounts
         where id = ${payment.bankAccountId}::uuid and company_id = ${companyId}::uuid and is_active
@@ -2519,6 +2729,202 @@ export class DriverCashReconciliationService {
       );
     }
     return row;
+  }
+
+  /**
+   * Auto-populate payment accounts based on payment method.
+   *
+   * For cash payments: uses company's primary main_cash account
+   * For bank payments: uses company's primary active bank account
+   *
+   * This ensures movements are always created with the correct funding account,
+   * even if the frontend didn't explicitly specify one.
+   */
+  private async populatePaymentAccounts(
+    transaction: Kysely<DatabaseSchema>,
+    companyId: string,
+    payments: readonly FinancialPaymentDto[],
+  ): Promise<
+    Array<
+      FinancialPaymentDto & {
+        readonly cashAccountId?: string;
+        readonly bankAccountId?: string;
+      }
+    >
+  > {
+    // Get default cash and bank accounts for this company
+    const [cashAccounts, bankAccounts] = await Promise.all([
+      sql<{ id: string }>`
+        select id from company_cash_accounts
+         where company_id=${companyId}::uuid and is_active
+           and cash_account_type='main_cash'
+         order by created_at asc
+         limit 1
+      `.execute(transaction),
+      sql<{ id: string }>`
+        select id from company_bank_accounts
+         where company_id=${companyId}::uuid and is_active
+         order by created_at asc
+         limit 1
+      `.execute(transaction),
+    ]);
+
+    const defaultCashAccountId = cashAccounts.rows[0]?.id;
+    const defaultBankAccountId = bankAccounts.rows[0]?.id;
+
+    // Populate payment accounts based on payment method
+    return payments.map((payment) => {
+      if (payment.paymentMethod === "cash" && !payment.cashAccountId && defaultCashAccountId) {
+        return { ...payment, cashAccountId: defaultCashAccountId };
+      }
+      if (
+        payment.paymentMethod === "bank_transfer" &&
+        !payment.bankAccountId &&
+        defaultBankAccountId
+      ) {
+        return { ...payment, bankAccountId: defaultBankAccountId };
+      }
+      return payment;
+    });
+  }
+
+  /**
+   * Create and confirm cash/bank movements for driver collection payments.
+   *
+   * When a Driver Collection is confirmed, a corresponding movement is recorded
+   * for each payment to track where the collected cash/bank deposit went.
+   *
+   * PHASE 2: Auto-generate cash/bank movements from confirmed Driver Collections.
+   * This fixes the audit trail gap where collections were recorded in accounting
+   * but no operational cash movements were recorded.
+   */
+  private async createCollectionMovements(
+    transaction: Kysely<DatabaseSchema>,
+    options: {
+      readonly companyId: string;
+      readonly payments: readonly FinancialPaymentDto[];
+      readonly reconciliationId: string;
+      readonly reconciliationNumber: string;
+      readonly businessDate: string;
+      readonly actorId: string;
+    },
+  ): Promise<void> {
+    // Resolve the owning Accounting Event exactly once for this confirmation.
+    // The event is captured synchronously by the driver_reconciliations status
+    // trigger, keyed uniquely on (company, event_type, source type, source id,
+    // version) — so this lookup is deterministic: at most one row can exist.
+    // Companies without accounting_enabled deliberately record no Accounting
+    // Events at all, so for them the movement's accounting_event_id stays null.
+    const ownership = await sql<{
+      eventId: string | null;
+      accountingEnabled: boolean;
+    }>`
+      select
+        (
+          select e.id from accounting_events e
+          where e.company_id = ${options.companyId}::uuid
+            and e.source_entity_type = 'driver_reconciliation'
+            and e.source_entity_id = ${options.reconciliationId}::uuid
+            and e.event_type = 'driver_collection_confirmed'
+        ) as "eventId",
+        exists (
+          select 1 from accounting_configurations c
+          where c.company_id = ${options.companyId}::uuid
+            and c.accounting_enabled
+        ) as "accountingEnabled"
+    `.execute(transaction);
+    const ownerEventId = ownership.rows[0]?.eventId ?? null;
+    if (ownerEventId === null && ownership.rows[0]?.accountingEnabled === true) {
+      throw new ApplicationException(
+        "driver_collection_cash_movement_not_created",
+        "The Driver Collection Cash/Bank Movement could not be linked to Accounting",
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+
+    for (const payment of options.payments) {
+      if (!payment.paymentMethod) continue;
+
+      const isCash = payment.paymentMethod === "cash";
+      const isBank = payment.paymentMethod === "bank_transfer";
+
+      if (!isCash && !isBank) continue;
+
+      // Determine movement type and funding account
+      const movementType = isCash ? "cash_deposit" : "bank_deposit";
+
+      // For deposits: money comes IN TO company's cash/bank account
+      // Source is NULL (external source: driver, customer, bank)
+      // Destination is the company's cash/bank account receiving the money
+      const destinationCashAccountId = isCash ? payment.cashAccountId : null;
+      const destinationBankAccountId = isBank ? payment.bankAccountId : null;
+      const sourceCashAccountId = null; // Deposits have no company source account
+      const sourceBankAccountId = null;
+
+      // Generate unique movement number
+      const movementNumber = await this.history.nextReferenceNumber(
+        transaction,
+        options.companyId,
+        "cash_bank_movement",
+        "CBM",
+      );
+
+      // Create confirmed movement
+      // Note: driver_reconciliation_payments uses "bank_transfer", but cash_bank_movements uses "visa"
+      const paymentMethodForMovement = isCash ? "cash" : "visa";
+      const idempotencyKey = `${options.reconciliationNumber}_${movementNumber}`;
+      await sql`
+        insert into cash_bank_movements (
+          id,
+          company_id,
+          movement_number,
+          movement_type,
+          movement_date,
+          accounting_date,
+          source_cash_account_id,
+          source_bank_account_id,
+          destination_cash_account_id,
+          destination_bank_account_id,
+          amount,
+          fee_amount,
+          payment_method,
+          reference_number,
+          description,
+          status,
+          correlation_id,
+          idempotency_identity,
+          accounting_event_id,
+          confirmed_by_account_id,
+          confirmed_at,
+          created_by_account_id,
+          created_at
+        ) values (
+          ${randomUUID()}::uuid,
+          ${options.companyId}::uuid,
+          ${movementNumber},
+          ${movementType},
+          ${options.businessDate}::date,
+          ${options.businessDate}::date,
+          ${sourceCashAccountId}::uuid,
+          ${sourceBankAccountId}::uuid,
+          ${destinationCashAccountId ?? null}::uuid,
+          ${destinationBankAccountId ?? null}::uuid,
+          ${new Decimal(payment.amount ?? 0).toFixed(2)}::numeric,
+          '0'::numeric,
+          ${paymentMethodForMovement},
+          ${options.reconciliationNumber},
+          ${"Driver collection " + options.reconciliationNumber},
+          'confirmed',
+          ${options.reconciliationId},
+          ${idempotencyKey},
+          ${ownerEventId}::uuid,
+          ${options.actorId}::uuid,
+          now(),
+          ${options.actorId}::uuid,
+          now()
+        )
+      `.execute(transaction);
+    }
   }
 
   private assertAnyPermission(permission: string | readonly string[]): void {

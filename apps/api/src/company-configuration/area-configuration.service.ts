@@ -171,6 +171,58 @@ export class AreaConfigurationService {
     };
   }
 
+  /**
+   * The same typeahead query as `search()`, for a caller with no authenticated
+   * tenant context -- the public Store Checkout Area picker (Tawseelhub
+   * pre-production fix: Checkout Emirate + searchable Area). `companyId` here
+   * is never client-supplied; the caller resolves it server-side from the
+   * Store slug (its eligible Delivery Company), never from a request field.
+   */
+  public async searchForCompany(
+    companyId: string,
+    query: AreaSearchQueryDto,
+  ): Promise<AreaSearchPage> {
+    const limit = Math.min(Math.max(Number(query.limit) || 20, 1), 50);
+    const offset = Math.max(Number(query.offset) || 0, 0);
+    const search = query.search?.trim() ?? "";
+    const emirateId = query.emirateId ?? null;
+    const activeOnly = query.activeOnly ?? true;
+
+    const result = await sql<ConfiguredArea & { total: string }>`
+      select a.id,
+             a.code,
+             a.name_en as "nameEn",
+             a.name_ar as "nameAr",
+             a.notes,
+             a.is_active as "isActive",
+             a.updated_at as "updatedAt",
+             e.id as "emirateId",
+             e.code as "emirateCode",
+             e.name_en as "emirateNameEn",
+             e.name_ar as "emirateNameAr",
+             count(*) over () as total
+        from areas a
+        join emirates e on e.id = a.emirate_id
+       where a.company_id = ${companyId}::uuid
+         and (${emirateId}::uuid is null or a.emirate_id = ${emirateId}::uuid)
+         and (not ${activeOnly}::boolean or a.is_active)
+         and (${search} = ''
+              or a.name_en ilike '%' || ${search} || '%'
+              or coalesce(a.name_ar, '') ilike '%' || ${search} || '%'
+              or a.code ilike '%' || ${search} || '%')
+       order by e.display_order, lower(btrim(a.name_en)), a.code
+       limit ${limit + 1} offset ${offset}
+    `.execute(this.database);
+
+    const hasMore = result.rows.length > limit;
+    const rows = hasMore ? result.rows.slice(0, limit) : result.rows;
+    return {
+      hasMore,
+      items: rows.map((row) => this.toArea(row)),
+      total: Number(result.rows[0]?.total ?? 0),
+    };
+  }
+
   public async get(areaId: string): Promise<ConfiguredArea> {
     const area = await this.findArea(this.database, areaId);
     if (area === undefined) throw this.notFound();
@@ -245,14 +297,12 @@ export class AreaConfigurationService {
 
       const nameEn = input.nameEn === undefined ? before.nameEn : input.nameEn.trim();
       if (nameEn.length === 0) throw this.emptyName();
-      const nameAr =
-        input.nameAr === undefined ? before.nameAr : (input.nameAr.trim() || null);
-      const notes = input.notes === undefined ? before.notes : (input.notes.trim() || null);
+      const nameAr = input.nameAr === undefined ? before.nameAr : input.nameAr.trim() || null;
+      const notes = input.notes === undefined ? before.notes : input.notes.trim() || null;
       const emirateId = input.emirateId ?? before.emirateId;
 
       if (emirateId !== before.emirateId) {
         await this.assertEmirateExists(transaction, emirateId);
-        await this.assertEmirateChangeIsSafe(transaction, areaId, companyId);
       }
 
       try {
@@ -346,7 +396,8 @@ export class AreaConfigurationService {
   }
 
   private async findArea(
-    database: Kysely<DatabaseSchema> | Parameters<Parameters<KyselyTransactionManager["execute"]>[0]>[0],
+    database:
+      Kysely<DatabaseSchema> | Parameters<Parameters<KyselyTransactionManager["execute"]>[0]>[0],
     areaId: string,
   ): Promise<ConfiguredArea | undefined> {
     const { companyId } = this.tenants.current();
@@ -381,41 +432,6 @@ export class AreaConfigurationService {
         "emirate_not_found",
         "The selected Emirate does not exist",
         HttpStatus.BAD_REQUEST,
-      );
-    }
-  }
-
-  /**
-   * Moving an Area between Emirates would reinterpret every record already
-   * filed under it, so it is refused once the Area is in use. Renaming stays
-   * allowed because it does not change which Emirate the data belongs to.
-   */
-  private async assertEmirateChangeIsSafe(
-    transaction: Parameters<Parameters<KyselyTransactionManager["execute"]>[0]>[0],
-    areaId: string,
-    companyId: string,
-  ): Promise<void> {
-    const result = await sql<{ references: string }>`
-      select (
-        (select count(*) from customer_addresses where area_id = ${areaId}::uuid
-           and company_id = ${companyId}::uuid) +
-        (select count(*) from traders where pickup_area_id = ${areaId}::uuid
-           and company_id = ${companyId}::uuid) +
-        (select count(*) from trader_area_prices where area_id = ${areaId}::uuid
-           and company_id = ${companyId}::uuid) +
-        (select count(*) from employees where area_id = ${areaId}::uuid
-           and company_id = ${companyId}::uuid) +
-        (select count(*) from drivers where area_id = ${areaId}::uuid
-           and company_id = ${companyId}::uuid)
-      )::text as "references"
-    `.execute(transaction);
-    if (Number(result.rows[0]?.references ?? 0) > 0) {
-      throw new ApplicationException(
-        "area_emirate_change_blocked",
-        "This Area is already used by Traders, Customers, pricing or Orders. " +
-          "Changing its Emirate would make those records inconsistent. " +
-          "Disable this Area and create a new one under the correct Emirate instead.",
-        HttpStatus.CONFLICT,
       );
     }
   }

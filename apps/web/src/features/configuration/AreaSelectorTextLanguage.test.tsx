@@ -66,4 +66,20 @@ describe("AreaSelector Text Language", () => {
     expect(await screen.findByRole("option", { name: "Dubai" })).toBeInTheDocument();
     expect(screen.queryByRole("option", { name: "دبي" })).not.toBeInTheDocument();
   });
+
+  it("uses Arabic Emirate names when an Arabic workflow explicitly requests Arabic first", async () => {
+    const api = makeApi("en");
+    render(
+      <CompanyBrandingProvider api={api as unknown as ApiClient}>
+        <AreaSelector
+          api={api as unknown as ApiClient}
+          arabicFirst
+          onChange={vi.fn()}
+          value={undefined}
+        />
+      </CompanyBrandingProvider>,
+    );
+    expect(await screen.findByRole("option", { name: "دبي" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "Dubai" })).not.toBeInTheDocument();
+  });
 });

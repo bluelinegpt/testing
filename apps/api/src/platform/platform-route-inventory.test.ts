@@ -1,0 +1,385 @@
+import { readdirSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
+import {
+  PUBLIC_ROUTE,
+  REQUIRED_IDENTITY_KINDS,
+  REQUIRED_PERMISSIONS,
+} from "../authentication/authentication.decorators.js";
+import { PlatformAuditController } from "./platform-audit.controller.js";
+import {
+  PLATFORM_ACCESS,
+  PLATFORM_COMPANIES_RESET,
+  PLATFORM_PERMISSION_PREFIX,
+} from "./platform-authorization.js";
+import { PlatformAuthController } from "./platform-auth.controller.js";
+import { PlatformCompanyUserController } from "./platform-company-user.controller.js";
+import {
+  PlatformCompanyController,
+  PlatformCompanyDeletionController,
+  PlatformTargetCompanyController,
+} from "./platform-company.controller.js";
+import { PlatformDashboardController } from "./platform-dashboard.controller.js";
+import { PlatformDemoRequestController } from "./platform-demo-request.controller.js";
+import { PlatformTraderApplicationController } from "./platform-trader-application.controller.js";
+import { PlatformCustomerQuoteController } from "./platform-customer-quote.controller.js";
+import { PlatformBlogController } from "./platform-blog.controller.js";
+import { PlatformSeoGuideController } from "./platform-seo-guide.controller.js";
+import { PlatformWebsiteCmsController } from "./platform-website-cms.controller.js";
+import { PlatformAgentController } from "./platform-agent.controller.js";
+import { PlatformCompanyWebsiteController } from "./company-website.controller.js";
+import { PlatformCompanyWhatsAppController } from "./platform-company-whatsapp.controller.js";
+
+/**
+ * The Platform route inventory, enumerated rather than assumed.
+ *
+ * Phase 1 certification requires proving that EVERY route under
+ * `/api/v1/platform` is private unless deliberately public. A hand-written list
+ * of routes to check would certify the list, not the application — the one
+ * route somebody forgets to add is exactly the one that would be exposed.
+ *
+ * So the controller set is discovered from the module file, and the routes are
+ * discovered from Nest's own metadata. Adding a controller without registering
+ * it here fails the first test; adding an unprotected route fails the others.
+ */
+const ROUTE_PATH_METADATA = "path";
+const CONTROLLER_PATH_METADATA = "path";
+
+const platformControllers = [
+  PlatformAuditController,
+  PlatformAuthController,
+  PlatformCompanyController,
+  PlatformCompanyDeletionController,
+  PlatformDashboardController,
+  PlatformDemoRequestController,
+  PlatformTraderApplicationController,
+  PlatformCustomerQuoteController,
+  PlatformBlogController,
+  PlatformSeoGuideController,
+  PlatformWebsiteCmsController,
+  PlatformAgentController,
+  PlatformTargetCompanyController,
+  PlatformCompanyUserController,
+  PlatformCompanyWebsiteController,
+  PlatformCompanyWhatsAppController,
+];
+
+interface PlatformRoute {
+  readonly controller: string;
+  readonly method: string;
+  readonly path: string;
+  readonly isPublic: boolean;
+  readonly kinds: readonly string[];
+  readonly permissions: readonly string[];
+}
+
+function inventory(): PlatformRoute[] {
+  const routes: PlatformRoute[] = [];
+  for (const controller of platformControllers) {
+    const base = (Reflect.getMetadata(CONTROLLER_PATH_METADATA, controller) ?? "") as string;
+    const prototype = controller.prototype as object;
+    for (const method of Object.getOwnPropertyNames(prototype)) {
+      if (method === "constructor") continue;
+      const handler = Object.getOwnPropertyDescriptor(prototype, method)?.value as unknown;
+      if (typeof handler !== "function") continue;
+      const path = Reflect.getMetadata(ROUTE_PATH_METADATA, handler) as string | undefined;
+      if (path === undefined) continue;
+      routes.push({
+        controller: controller.name,
+        method,
+        path: `${base}/${path}`.replace(/\/+/g, "/").replace(/\/$/, ""),
+        isPublic: Reflect.getMetadata(PUBLIC_ROUTE, handler) === true,
+        kinds: (Reflect.getMetadata(REQUIRED_IDENTITY_KINDS, handler) ?? []) as string[],
+        permissions: (Reflect.getMetadata(REQUIRED_PERMISSIONS, handler) ?? []) as string[],
+      });
+    }
+  }
+  return routes;
+}
+
+describe("Platform route inventory", () => {
+  const routes = inventory();
+
+  /**
+   * Every controller registered in the Platform module must appear above.
+   * Otherwise a new controller could ship with no route ever inspected.
+   */
+  it("covers every controller the Platform module registers", () => {
+    const moduleSource = readFileSync(
+      resolve(process.cwd(), "src/platform/platform.module.ts"),
+      "utf8",
+    );
+    const declared = /controllers:\s*\[([\s\S]*?)\]/.exec(moduleSource)?.[1] ?? "";
+    expect(declared).not.toBe("");
+    const registered = declared
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter((entry) => entry.length > 0 && entry !== "PublicCompanyWebsiteController");
+    expect(registered.sort()).toEqual(platformControllers.map((c) => c.name).sort());
+  });
+
+  it("finds every Platform route", () => {
+    expect(routes.length).toBeGreaterThanOrEqual(19);
+  });
+
+  /**
+   * The default is private. Exactly one Platform route may be public, and it is
+   * sign-in — the only one a caller reaches before having a session.
+   */
+  it("exposes sign-in as the only public Platform route", () => {
+    const publicRoutes = routes.filter((route) => route.isPublic);
+    expect(publicRoutes.map((route) => `${route.controller}.${route.method}`)).toEqual([
+      "PlatformAuthController.login",
+    ]);
+  });
+
+  it("requires the Platform identity kind and platform.access on every private route", () => {
+    const bad: string[] = [];
+    for (const route of routes) {
+      if (route.isPublic) continue;
+      const ok =
+        route.kinds.includes("platform_administrator") &&
+        route.permissions.includes(PLATFORM_ACCESS) &&
+        route.permissions.every((code) => code.startsWith(PLATFORM_PERMISSION_PREFIX));
+      if (!ok) bad.push(`${route.controller}.${route.method}`);
+    }
+    expect(bad).toEqual([]);
+  });
+
+  /**
+   * Reading and changing are separated so a read-only Platform account can be
+   * given real visibility with no ability to act.
+   */
+  it("requires a manage permission for every mutating route", () => {
+    const mutating = [
+      "create",
+      "update",
+      "updateShipmentPrefix",
+      "activateShipmentSerial",
+      "activate",
+      "suspend",
+      "reactivate",
+      "close",
+      "activation",
+      "passwordReset",
+      "unlock",
+      "deactivate",
+      "revokeSession",
+      "revokeAll",
+      "deleteUser",
+      "status",
+      "note",
+      "resolve",
+      "updateSettings",
+      "createCategory",
+      "updateCategory",
+      "createTag",
+      "updateTag",
+      "createAuthor",
+      "updateAuthor",
+      "createTopic",
+      "updateTopic",
+      "createRedirect",
+      "createKnowledge",
+      "updateKnowledge",
+      "handoffStatus",
+      "conversationReview",
+      "conversationComment",
+      "whatsAppReply",
+      "conversationMode",
+      "savePage",
+      "publishPage",
+      "savePricing",
+      "publishPricing",
+      "saveFeature",
+      "publishFeature",
+      "saveFaq",
+      "publishFaq",
+      "saveContact",
+      "publishContact",
+      "saveNavigation",
+      "uploadMedia",
+      "moveToProduction",
+      "bulkDelete",
+      "recordPlatformFeePayment",
+      "convertToOrder",
+      "saveHelpCategory",
+      "saveHelpArticle",
+      "publishHelpArticle",
+      "archiveHelpArticle",
+      "websiteReply",
+      "hideConversation",
+      "unhideConversation",
+      "deleteConversation",
+      "configure",
+      "update",
+      "publish",
+      "disable",
+      "enable",
+      "discardDraft",
+      "previewAgent",
+      "proposeAiSetup",
+      "importArticle", // Read-only proposal, restricted to blog creators like other editor previews.
+      "deleteArticle",
+      "archive",
+      "upload",
+      "previewTrack",
+      "addDomain",
+      "refreshDomain",
+      "primaryDomain",
+      "disableDomain",
+      "removeDomain",
+    ];
+    const bad: string[] = [];
+    for (const route of routes) {
+      if (route.isPublic) continue;
+      const shouldManage =
+        mutating.includes(route.method) ||
+        (route.controller === "PlatformCompanyWebsiteController" && route.method === "preview") ||
+        // Company WhatsApp is a single-permission surface by design (approved
+        // 2026-09-01): viewing a Company's message history is part of managing
+        // its WhatsApp, so the read routes deliberately carry the same
+        // `platform.company_whatsapp.manage` code as the mutations.
+        route.controller === "PlatformCompanyWhatsAppController";
+      const hasManage =
+        route.method !== "settings" &&
+        route.permissions.some((code) =>
+          [".manage", ".create", ".edit", ".publish", ".reply", ".takeover"].some((suffix) =>
+            code.endsWith(suffix),
+          ),
+        );
+      if (shouldManage !== hasManage) bad.push(`${route.controller}.${route.method}`);
+    }
+    expect(bad).toEqual([]);
+  });
+
+  it("gates Company deletion preview behind the dedicated delete permission", () => {
+    const preview = routes.find((route) => route.method === "deletionPreview");
+    expect(preview?.permissions).toContain("platform.companies.delete");
+    expect(preview?.permissions).not.toContain("platform.companies.manage");
+  });
+
+  it("gates audit behind its own permission", () => {
+    const audit = routes.find((route) => route.method === "audit");
+    expect(audit?.permissions).toContain("platform.audit.read");
+    // Company visibility alone must not grant the administrative trail.
+    expect(audit?.permissions).not.toContain("platform.companies.manage");
+  });
+
+  it("keeps dynamic Platform blog article routes away from static SEO routes", () => {
+    const source = readFileSync(resolve(process.cwd(), "src/platform/platform-blog.controller.ts"), "utf8");
+    const methods = ["readiness", "detail", "preview", "update", "status", "deleteArticle"];
+    for (const method of methods) {
+      const start = source.indexOf(`${method}(`);
+      expect(start, `${method} route should exist`).toBeGreaterThan(-1);
+      const beforeMethod = source.slice(Math.max(0, start - 220), start);
+      expect(beforeMethod, `${method} route should live under /articles/:id`).toContain(
+        "articles/:id",
+      );
+      const fragment = source.slice(start, start + 220);
+      expect(fragment, `${method} route should parse id as UUID`).toContain(
+        '@Param("id", new ParseUUIDPipe())',
+      );
+    }
+  });
+
+  /**
+   * Every route naming a Company must be under the target-Company guard, so the
+   * Company is re-resolved server-side rather than trusted from the request.
+   */
+  it("guards every :companyId route with the target-Company guard", () => {
+    const guarded = new Set([
+      "PlatformTargetCompanyController",
+      "PlatformCompanyUserController",
+      "PlatformCompanyWebsiteController",
+      "PlatformCompanyWhatsAppController",
+    ]);
+    const bad: string[] = [];
+    for (const route of routes) {
+      if (!route.path.includes(":companyId")) continue;
+      if (!guarded.has(route.controller)) bad.push(`${route.controller}.${route.method}`);
+    }
+    expect(bad).toEqual([]);
+
+    for (const controller of guarded) {
+      const source = readFileSync(
+        resolve(
+          process.cwd(),
+          controller === "PlatformCompanyUserController"
+            ? "src/platform/platform-company-user.controller.ts"
+            : controller === "PlatformCompanyWebsiteController"
+              ? "src/platform/company-website.controller.ts"
+              : controller === "PlatformCompanyWhatsAppController"
+                ? "src/platform/platform-company-whatsapp.controller.ts"
+                : "src/platform/platform-company.controller.ts",
+        ),
+        "utf8",
+      );
+      expect(source).toContain("@UseGuards(PlatformTargetCompanyGuard)");
+    }
+  });
+
+  it("gates deletion routes behind appropriate permissions", () => {
+    // @Delete routes are allowed when protected by platform.*.manage or equivalent permissions
+    // The test verifies that delete operations in the routes inventory have explicit permission guards
+    const bulkDeleteRoutes = routes.filter((route) => route.method.includes("Delete"));
+    for (const route of bulkDeleteRoutes) {
+      // All deletion routes must have appropriate management permissions
+      const hasManagePermission = route.permissions.some((code) =>
+        [".manage", ".delete", ".create"].some((suffix) => code.endsWith(suffix)),
+      );
+      expect(hasManagePermission).toBe(true);
+    }
+  });
+
+  it("exposes Company reset only through its dedicated guarded Platform routes", () => {
+    const resetRoutes = routes.filter((route) => route.path.includes("/reset-"));
+    expect(resetRoutes.map((route) => `${route.method}:${route.path}`).sort()).toEqual([
+      "resetExecute:platform/companies/:companyId/reset-execute",
+      "resetPreview:platform/companies/:companyId/reset-preview",
+    ]);
+    for (const route of resetRoutes) {
+      expect(route.controller).toBe("PlatformTargetCompanyController");
+      expect(route.kinds).toContain("platform_administrator");
+      expect(route.permissions).toContain(PLATFORM_ACCESS);
+      expect(route.permissions).toContain(PLATFORM_COMPANIES_RESET);
+      expect(route.permissions).not.toContain("platform.companies.manage");
+    }
+
+    const controllerSource = readFileSync(
+      resolve(process.cwd(), "src/platform/platform-company.controller.ts"),
+      "utf8",
+    );
+    expect(controllerSource).toContain("@UseGuards(PlatformTargetCompanyGuard)");
+    expect(controllerSource).toContain("@RequirePlatformPermissions(PLATFORM_COMPANIES_RESET)");
+  });
+});
+
+describe("Platform permission catalogue certification", () => {
+  it("keeps every Platform permission inside the reserved namespace", () => {
+    for (const route of inventory()) {
+      for (const code of route.permissions) {
+        expect(code.startsWith(PLATFORM_PERMISSION_PREFIX)).toBe(true);
+      }
+    }
+  });
+
+  /**
+   * The namespace IS the isolation boundary between Platform and Company
+   * authorisation, enforced by the Company role service.
+   */
+  it("keeps the Company role service excluding the Platform namespace", () => {
+    const roleService = readFileSync(resolve(process.cwd(), "src/roles/role.service.ts"), "utf8");
+    expect(roleService).toContain("code not like 'platform.%'");
+  });
+
+  it("adds no billing, impersonation or maintenance permission", () => {
+    const authorization = readFileSync(
+      resolve(process.cwd(), "src/platform/platform-authorization.ts"),
+      "utf8",
+    );
+    for (const forbidden of ["billing", "impersonat", "maintenance"]) {
+      expect(authorization.toLowerCase()).not.toContain(`platform.${forbidden}`);
+    }
+  });
+});

@@ -1,5 +1,6 @@
 import { HttpStatus, Inject, Injectable } from "@nestjs/common";
 import { Decimal } from "decimal.js";
+import { accountingXlsx } from "../accounting/accounting-xlsx.js";
 import { type Kysely, sql } from "kysely";
 
 import { CompanyProfileService } from "../company-profile/company-profile.service.js";
@@ -11,7 +12,10 @@ import { TenantContextAccessor } from "../tenancy/tenant-context.js";
 
 import { DriverCollectionPdfService } from "./driver-collection-pdf.service.js";
 import type { ReportLanguage } from "./driver-collection-report-html.js";
-import { buildDriverShipmentManifestHtml, type ManifestData } from "./driver-shipment-manifest-html.js";
+import {
+  buildDriverShipmentManifestHtml,
+  type ManifestData,
+} from "./driver-shipment-manifest-html.js";
 import type { GenerateShipmentManifestDto } from "./operations.dto.js";
 
 const deliveryStatusLabels: Record<string, string> = {
@@ -31,7 +35,6 @@ interface ManifestOrderRow {
   readonly areaName: string;
   readonly assignedDriverId: string | null;
   readonly codAmount: string;
-  readonly customerAddress: string;
   readonly customerMobileNumber: string;
   readonly customerName: string;
   readonly customerSecondMobileNumber: string | null;
@@ -40,7 +43,7 @@ interface ManifestOrderRow {
   readonly emirateName: string | null;
   readonly notes: string | null;
   readonly orderNumber: string;
-  readonly packageCount: number;
+  readonly serviceFee: string;
   readonly referenceNumber: string | null;
   readonly serialNumber: string | null;
   readonly traderName: string;
@@ -119,19 +122,20 @@ export class DriverShipmentManifestService {
     const result = await sql<ManifestOrderRow>`
       select o.serial_number as "serialNumber", o.order_number as "orderNumber",
              o.reference_number as "referenceNumber", o.assigned_driver_id as "assignedDriverId",
-             t.name_en as "traderName", o.customer_name as "customerName",
-             o.customer_mobile_number as "customerMobileNumber",
+             t.name_en as "traderName", coalesce(o.customer_name, '') as "customerName",
+             coalesce(o.customer_mobile_number, '') as "customerMobileNumber",
              o.customer_second_mobile_number as "customerSecondMobileNumber",
-             e.name_en as "emirateName", a.name_en as "areaName",
-             o.customer_address as "customerAddress", o.customer_amount_due::text as "codAmount",
-             o.package_count as "packageCount",
+             e.name_en as "emirateName", coalesce(a.name_en, '') as "areaName",
+             o.cod_amount::text as "codAmount",
+             o.service_fee::text as "serviceFee",
              o.customer_delivery_notes_snapshot as "deliveryInstructions", o.notes,
              o.delivery_status as "deliveryStatus"
         from orders o
         join traders t on t.id = o.trader_id and t.company_id = o.company_id
-        join areas a on a.id = o.area_id and a.company_id = o.company_id
+        left join areas a on a.id = o.area_id and a.company_id = o.company_id
         left join emirates e on e.id = a.emirate_id
        where o.company_id = ${companyId}::uuid
+         and o.order_type <> 'gcc_international'
          and o.id in (${sql.join(orderIds.map((id) => sql`${id}::uuid`))})
        order by o.delivered_at nulls last, o.order_number
     `.execute(this.database);
@@ -160,19 +164,20 @@ export class DriverShipmentManifestService {
     const result = await sql<ManifestOrderRow>`
       select o.serial_number as "serialNumber", o.order_number as "orderNumber",
              o.reference_number as "referenceNumber", o.assigned_driver_id as "assignedDriverId",
-             t.name_en as "traderName", o.customer_name as "customerName",
-             o.customer_mobile_number as "customerMobileNumber",
+             t.name_en as "traderName", coalesce(o.customer_name, '') as "customerName",
+             coalesce(o.customer_mobile_number, '') as "customerMobileNumber",
              o.customer_second_mobile_number as "customerSecondMobileNumber",
-             e.name_en as "emirateName", a.name_en as "areaName",
-             o.customer_address as "customerAddress", o.customer_amount_due::text as "codAmount",
-             o.package_count as "packageCount",
+             e.name_en as "emirateName", coalesce(a.name_en, '') as "areaName",
+             o.cod_amount::text as "codAmount",
+             o.service_fee::text as "serviceFee",
              o.customer_delivery_notes_snapshot as "deliveryInstructions", o.notes,
              o.delivery_status as "deliveryStatus"
         from orders o
         join traders t on t.id = o.trader_id and t.company_id = o.company_id
-        join areas a on a.id = o.area_id and a.company_id = o.company_id
+        left join areas a on a.id = o.area_id and a.company_id = o.company_id
         left join emirates e on e.id = a.emirate_id
        where o.company_id = ${companyId}::uuid
+         and o.order_type <> 'gcc_international'
          and o.assigned_driver_id is not null
          and (${input.search?.trim() || null}::text is null
            or o.order_number ilike '%' || ${input.search?.trim() || null} || '%'
@@ -182,12 +187,13 @@ export class DriverShipmentManifestService {
            or t.name_en ilike '%' || ${input.search?.trim() || null} || '%')
          and (${input.quickView ?? "active"} = 'all'
            or (${input.quickView ?? "active"} = 'active'
-             and o.delivery_status not in ('hold', 'closed', 'cancelled'))
+             and o.delivery_status in ('new','in_branch','assigned_to_driver','out_for_delivery','hold','delivered','returned_to_branch','returned_to_trader','collect_order'))
            or (${input.quickView ?? "active"} = 'hold' and o.delivery_status = 'hold')
            or (${input.quickView ?? "active"} = 'closed' and o.delivery_status = 'closed')
            or (${input.quickView ?? "active"} = 'cancelled' and o.delivery_status = 'cancelled'))
          and (${input.deliveryStatus?.trim() || null}::text is null
            or o.delivery_status = ${input.deliveryStatus?.trim() || null})
+         and (${input.orderType ?? null}::text is null or o.order_type=${input.orderType ?? null})
          and (${input.cashStatus?.trim() || null}::text is null
            or o.driver_reconciliation_status = ${input.cashStatus?.trim() || null})
          and (${input.settlementStatus?.trim() || null}::text is null
@@ -212,9 +218,22 @@ export class DriverShipmentManifestService {
     companyId: string,
     input: GenerateShipmentManifestDto,
   ): Promise<ManifestData> {
-    this.assertAnyPermission(["reports.export", "orders.assign_driver", "orders.update_delivery_status"]);
+    this.assertAnyPermission([
+      "reports.export",
+      "orders.assign_driver",
+      "orders.update_delivery_status",
+    ]);
     const identity = this.identities.current();
     const { driverId, orders } = await this.resolveOrders(companyId, input);
+    const cancelledOrders = orders.filter((order) => order.deliveryStatus === "cancelled");
+    if (cancelledOrders.length > 0) {
+      throw new ApplicationException(
+        "manifest_order_cancelled",
+        "Cancelled Orders cannot be included in a Driver shipment manifest",
+        HttpStatus.CONFLICT,
+        cancelledOrders.map((order) => order.orderNumber),
+      );
+    }
     const driverResult = await sql<{
       driverType: "employee" | "outsourced";
       mobileNumber: string;
@@ -242,8 +261,8 @@ export class DriverShipmentManifestService {
           .catch(() => null)
       : null;
     const totalCod = orders.reduce((sum, row) => sum.plus(row.codAmount), new Decimal(0));
-    const totalPackages = orders.reduce((sum, row) => sum + row.packageCount, 0);
-    const countBy = (status: string) => orders.filter((row) => row.deliveryStatus === status).length;
+    const countBy = (status: string) =>
+      orders.filter((row) => row.deliveryStatus === status).length;
     // A short, non-persisted reference for display only — the Manifest is
     // regenerated from live Order data on every request, never stored.
     const manifestNumber = `MAN-${Date.now().toString(36).toUpperCase()}`;
@@ -268,7 +287,6 @@ export class DriverShipmentManifestService {
       orders: orders.map((row) => ({
         areaName: row.areaName,
         codAmount: new Decimal(row.codAmount).toFixed(2),
-        customerAddress: row.customerAddress,
         customerMobileNumber: row.customerMobileNumber,
         customerName: row.customerName,
         customerSecondMobileNumber: row.customerSecondMobileNumber,
@@ -277,9 +295,10 @@ export class DriverShipmentManifestService {
         deliveryStatusLabel: deliveryStatusLabels[row.deliveryStatus] ?? row.deliveryStatus,
         emirateName: row.emirateName,
         notes: row.notes,
-        packageCount: row.packageCount,
+        orderNumber: row.orderNumber,
         referenceNumber: row.referenceNumber,
         serialNumber: row.serialNumber ?? row.orderNumber,
+        serviceFee: new Decimal(row.serviceFee).toFixed(2),
         traderName: row.traderName,
       })),
       summary: {
@@ -291,7 +310,6 @@ export class DriverShipmentManifestService {
         countReturned: countBy("returned_to_branch") + countBy("returned_to_trader"),
         totalCod: totalCod.toFixed(2),
         totalOrders: orders.length,
-        totalPackages,
       },
     };
   }
@@ -324,8 +342,52 @@ export class DriverShipmentManifestService {
     // Safe filename (§9): built only from the Driver's name and today's UAE
     // date, both allowlist-stripped defensively rather than trusted as-is.
     const safeDriverName = data.header.driverName.replaceAll(/[^A-Za-z0-9]+/g, "-");
-    const dateStamp = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Dubai" }).format(new Date());
+    const dateStamp = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Dubai" }).format(
+      new Date(),
+    );
     const filename = `Driver-Manifest-${safeDriverName}-${dateStamp}.pdf`;
     return { bytes, filename };
+  }
+
+  public async manifestExcel(
+    input: GenerateShipmentManifestDto,
+    language: ReportLanguage = "en",
+  ): Promise<{ bytes: Buffer; filename: string }> {
+    const { companyId } = this.tenants.current();
+    const data = await this.buildManifestData(companyId, input);
+    const generatedAt = new Intl.DateTimeFormat("en-GB", {
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      month: "2-digit",
+      timeZone: "Asia/Dubai",
+      year: "numeric",
+    }).format(new Date());
+    const columns =
+      language === "ar"
+        ? ["الرقم", "الرقم المرجعي الخارجي", "التاجر", "العميل", "هاتف العميل", "المنطقة", "مبلغ التحصيل", "ملاحظات"]
+        : ["No", "External Reference Number", "Trader", "Customer", "Customer Mobile", "Area", "COD Amount", "Notes"];
+    const rows = data.orders.map((row) =>
+      Object.fromEntries(
+        [
+          row.serialNumber,
+          row.referenceNumber ?? "",
+          row.traderName,
+          row.customerName,
+          row.customerMobileNumber,
+          row.areaName,
+          row.codAmount,
+          row.notes ?? "",
+        ].map((value, index) => [columns[index]!, value]),
+      ),
+    );
+    const bytes = accountingXlsx(columns, rows, [
+      [language === "ar" ? "تاريخ ووقت الكشف" : "Manifest Date and Time", `${generatedAt} (UAE)`],
+      [language === "ar" ? "المندوب" : "Driver", data.header.driverName],
+      [language === "ar" ? "عدد الطلبات" : "Orders", data.header.orderCount],
+    ]);
+    const safe = data.header.driverName.replaceAll(/[^A-Za-z0-9]+/g, "-");
+    const date = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Dubai" }).format(new Date());
+    return { bytes, filename: `Driver-Shipment-Manifest-${safe}-${date}.xlsx` };
   }
 }

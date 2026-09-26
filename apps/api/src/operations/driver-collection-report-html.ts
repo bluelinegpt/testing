@@ -314,7 +314,9 @@ export function buildDriverCollectionReportHtml(
   const header =
     `<header class="report-header">` +
     `<div class="company-block">` +
-    (data.header.company.hasLogo ? `<div class="logo-placeholder"></div>` : "") +
+    (data.header.company.logoDataUri == null
+      ? ""
+      : `<img class="company-logo" alt="" src="${escapeHtml(data.header.company.logoDataUri)}">`) +
     `<div class="company-identity">` +
     `<div class="company-name">${escapeHtml(data.header.company.nameEn)}` +
     (data.header.company.nameAr === null ? "" : ` / ${escapeHtml(data.header.company.nameAr)}`) +
@@ -336,12 +338,17 @@ export function buildDriverCollectionReportHtml(
     headerMeta(labels.status, statusLabel(labels, data.header.status)) +
     headerMeta(labels.driver, data.header.driverName) +
     headerMeta(labels.driverType, driverTypeLabel(labels, data.header.driverType)) +
-    headerMeta(labels.paymentMethod, paymentMethodLabel(labels, data.header.collectionPaymentMethod)) +
+    headerMeta(
+      labels.paymentMethod,
+      paymentMethodLabel(labels, data.header.collectionPaymentMethod),
+    ) +
     headerMeta(labels.businessDate, data.header.businessDate) +
     headerMeta(labels.createdDate, data.header.createdAt.slice(0, 16).replace("T", " ")) +
     headerMeta(
       labels.confirmedDate,
-      data.header.confirmedAt === null ? "" : data.header.confirmedAt.slice(0, 16).replace("T", " "),
+      data.header.confirmedAt === null
+        ? ""
+        : data.header.confirmedAt.slice(0, 16).replace("T", " "),
     ) +
     headerMeta(labels.createdBy, data.header.createdBy) +
     headerMeta(labels.confirmedBy, data.header.confirmedBy) +
@@ -380,7 +387,7 @@ export function buildDriverCollectionReportHtml(
     body { font-family: "Segoe UI", Tahoma, Arial, sans-serif; color: #111; margin: 0; font-size: 11px; }
     .report-header { border-bottom: 2px solid #333; margin-bottom: 10px; padding-bottom: 8px; }
     .company-block { display: flex; align-items: center; gap: 10px; }
-    .logo-placeholder { width: 40px; height: 40px; border: 1px solid #ccc; border-radius: 4px; }
+    .company-logo { width: 52px; height: 52px; object-fit: contain; }
     .company-name { font-size: 16px; font-weight: 800; }
     .company-subtitle, .company-telephone { font-size: 11px; color: #444; }
     .report-title { font-size: 18px; margin: 8px 0 6px; }

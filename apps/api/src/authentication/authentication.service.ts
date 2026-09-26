@@ -39,6 +39,43 @@ export class AuthenticationService {
     this.sessionTtlMinutes = config.get("auth.sessionTtlMinutes", { infer: true });
   }
 
+  /**
+   * Deployment Blocker 1 corrective: every `login*` entry point below reads
+   * `input.identifier`/`input.password` before the shared `login()` gate
+   * (`.trim()`, `normalizeUaeMobile()`) -- if either is ever anything other
+   * than a real, non-empty string, that is a `TypeError` thrown from deep
+   * inside this service, which the caller has no way to turn into a normal
+   * 4xx (it is not an `ApplicationException`).
+   *
+   * In the compiled production build the global `ValidationPipe`
+   * (`create-application.ts`) already rejects a malformed `LoginDto` before
+   * a request ever reaches here -- confirmed directly: `class-validator`
+   * against `CompanyLoginDto` correctly produces `identifier must be a
+   * string` for exactly this input. Under the local `tsx watch` dev
+   * runtime, decorator metadata for this specific multi-parameter-decorator
+   * route (`@Body()` + `@Ip()` + `@Req()` + `@Res()`) was NOT reliably
+   * reaching `ValidationPipe`, so malformed requests were reaching this
+   * service unvalidated during local development -- reproduced with a raw
+   * request missing `identifier` entirely.
+   *
+   * This guard makes the crash impossible regardless of whether the
+   * upstream pipe ran, is a normal `ApplicationException` (safe 401,
+   * excluded from Platform Error Handler crash capture like any other
+   * `invalid_credentials`), and is IDENTICAL to a wrong-password response --
+   * a malformed login attempt reveals nothing that a wrong password
+   * wouldn't (§19: no account enumeration, no distinguishing signal).
+   */
+  private assertLoginInputShape(input: { readonly identifier: unknown; readonly password: unknown }): void {
+    if (
+      typeof input.identifier !== "string" ||
+      input.identifier.trim() === "" ||
+      typeof input.password !== "string" ||
+      input.password === ""
+    ) {
+      throw this.invalidCredentials();
+    }
+  }
+
   public async loginCompany(input: {
     companySubdomain: string | undefined;
     createdIp?: string | undefined;
@@ -46,6 +83,7 @@ export class AuthenticationService {
     password: string;
     userAgent?: string | undefined;
   }): Promise<LoginResult> {
+    this.assertLoginInputShape(input);
     // An unresolvable host yields no account, which falls through to the same
     // generic invalid-credentials failure as a wrong username or password.
     // Reporting "unknown Company" here would leak which hosts are tenants.
@@ -66,7 +104,32 @@ export class AuthenticationService {
     password: string;
     userAgent?: string | undefined;
   }): Promise<LoginResult> {
+    this.assertLoginInputShape(input);
     const account = await this.repository.findPlatformAccount(input.identifier.trim());
+    return this.login(account, input);
+  }
+
+  /**
+   * Sign-in for a marketplace Customer account (`account_kind = 'customer'`,
+   * `company_id: null`). Shares the exact same private `login()` — lockout,
+   * password verification, session creation — every other kind uses, so
+   * lockout/session behaviour can never drift between Company, Platform and
+   * Customer sign-in. The only Customer-specific step is identifier lookup
+   * (`findCustomerAccount`, no Company/subdomain involved).
+   *
+   * Shared Commerce Foundation Prompt 3A.
+   */
+  public async loginCustomer(input: {
+    createdIp?: string | undefined;
+    identifier: string;
+    password: string;
+    userAgent?: string | undefined;
+  }): Promise<LoginResult> {
+    this.assertLoginInputShape(input);
+    const account = await this.repository.findCustomerAccount(
+      input.identifier.trim(),
+      normalizeUaeMobile(input.identifier),
+    );
     return this.login(account, input);
   }
 
@@ -90,6 +153,8 @@ export class AuthenticationService {
       ...(session.profileLinkId === null ? {} : { profileLinkId: session.profileLinkId }),
       ...(session.profileType === null ? {} : { profileType: session.profileType }),
       ...(session.profileId === null ? {} : { profileId: session.profileId }),
+      ...(session.companyName === null ? {} : { companyName: session.companyName }),
+      ...(session.companyNameAr === null ? {} : { companyNameAr: session.companyNameAr }),
     };
   }
 
@@ -153,7 +218,22 @@ export class AuthenticationService {
     ) {
       throw this.invalidCredentials();
     }
-    if (account.accountStatus !== "active" || account.companyStatus === "disabled") {
+    // A Company account may sign in only while its Company is ACTIVE.
+    //
+    // This used to read `companyStatus === "disabled"`, which was correct while
+    // `active` and `disabled` were the only two states. With `draft` and
+    // `suspended` added, that test would have let a suspended Company keep
+    // signing in — the one thing suspension exists to stop — and would have let
+    // a half-onboarded draft tenant in as well.
+    //
+    // Session VALIDATION already required `c.status = 'active'`, so existing
+    // sessions died the moment a Company was suspended; only the sign-in path
+    // was permissive. `companyStatus` is null for a Platform Administrator,
+    // who belongs to no Company, so the check is scoped to Company accounts.
+    if (
+      account.accountStatus !== "active" ||
+      (account.companyId !== null && account.companyStatus !== "active")
+    ) {
       throw this.invalidCredentials();
     }
 

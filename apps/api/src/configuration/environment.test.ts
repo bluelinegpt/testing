@@ -23,6 +23,8 @@ describe("environment configuration", () => {
     expect(result.database.connectionTimeoutMs).toBe(5000);
     expect(result.database.queryTimeoutMs).toBe(10000);
     expect(result.database.url).toContain("blueline_test");
+    expect(result.companyDeletion.timeoutMs).toBe(300_000);
+    expect(result.companyDeletion.backupRoot).toContain("company-deletion");
   });
 
   it("rejects missing database configuration", () => {
@@ -56,6 +58,15 @@ describe("environment configuration", () => {
         DATABASE_URL: process.env.DATABASE_URL,
       }),
     ).toThrow("DATABASE_CONNECTION_TIMEOUT_MS");
+  });
+
+  it("rejects an unsafe Company deletion backup timeout", () => {
+    expect(() =>
+      validateEnvironment({
+        COMPANY_DELETION_BACKUP_TIMEOUT_MS: "9999",
+        DATABASE_URL: process.env.DATABASE_URL,
+      }),
+    ).toThrow("COMPANY_DELETION_BACKUP_TIMEOUT_MS");
   });
 
   it("accepts secure production origins and PostgreSQL TLS", () => {

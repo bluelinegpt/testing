@@ -9,7 +9,6 @@ import { OperationsHistoryWriter } from "../operations/operations-history.writer
 import { ApplicationException } from "../presentation/errors/application.exception.js";
 import type { ResolvedOperationalLine } from "./account-mapping.resolver.js";
 import { AccountMappingResolver } from "./account-mapping.resolver.js";
-import type { AccountingFinancialComponent } from "./accounting.contracts.js";
 import type {
   OperationalAccountingEventRecord,
   OperationalJournalFacts,
@@ -48,10 +47,7 @@ export class OperationalJournalPostingService {
     event: OperationalAccountingEventRecord,
   ): Promise<{ readonly journalId: string; readonly journalNumber: string }> {
     if (event.reversalOfEventId !== null) return this.reverse(database, event);
-    if (
-      event.eventType.endsWith("_reversed")
-      || event.eventType === "order_recognition_reversed"
-    ) {
+    if (event.eventType.endsWith("_reversed") || event.eventType === "order_recognition_reversed") {
       throw new ApplicationException(
         "accounting_event_original_not_posted",
         "No Posted original Accounting Event exists for this operational reversal",
@@ -214,7 +210,9 @@ export class OperationalJournalPostingService {
        order by line_number
     `.execute(database);
     await sql`update journal_entries set status='balanced',version=version+1
-               where id=${journalId}::uuid and company_id=${event.companyId}::uuid`.execute(database);
+               where id=${journalId}::uuid and company_id=${event.companyId}::uuid`.execute(
+      database,
+    );
     await sql`
       update journal_entries
          set status='approved',approved_by_account_id=${actorId}::uuid,
@@ -237,10 +235,20 @@ export class OperationalJournalPostingService {
              updated_by_account_id=${actorId}::uuid,updated_at=now(),version=version+1
        where id=${original.journalId}::uuid and company_id=${event.companyId}::uuid
     `.execute(database);
+    // Two separate executions, not one semicolon-joined template: a `sql`
+    // template that carries bound parameters is sent through the extended
+    // query protocol, which accepts exactly ONE command per statement.
+    // Combining both updates raised `42601 — cannot insert multiple commands
+    // into a prepared statement`, which rolled back the whole reversal after
+    // the Journal, its inverted lines and the original Journal update had all
+    // succeeded. Both statements still run inside the caller's transaction, so
+    // atomicity is unchanged.
     await sql`
       update accounting_events
          set processing_status='reversed',reversal_journal_id=${journalId}::uuid
-       where id=${event.reversalOfEventId}::uuid and company_id=${event.companyId}::uuid;
+       where id=${event.reversalOfEventId}::uuid and company_id=${event.companyId}::uuid
+    `.execute(database);
+    await sql`
       update accounting_events
          set processing_status='posted',journal_id=${journalId}::uuid,
              validated_at=coalesce(validated_at,now()),processed_at=now(),
@@ -287,14 +295,14 @@ export class OperationalJournalPostingService {
       );
     }
     const period = result.rows[0]!;
-    if (!["open","reopened"].includes(period.fiscalYearStatus)) {
+    if (!["open", "reopened"].includes(period.fiscalYearStatus)) {
       throw new ApplicationException(
         "accounting_event_fiscal_year_closed",
         "The Fiscal Year is not open for automatic posting",
         HttpStatus.CONFLICT,
       );
     }
-    if (!["open","reopened"].includes(period.fiscalPeriodStatus)) {
+    if (!["open", "reopened"].includes(period.fiscalPeriodStatus)) {
       throw new ApplicationException(
         period.fiscalPeriodStatus === "soft_closed"
           ? "accounting_event_period_soft_closed"
@@ -408,7 +416,9 @@ export class OperationalJournalPostingService {
     const credit = lines
       .filter((line) => line.component.entryIntent === "credit")
       .reduce((sum, line) => sum.plus(line.amount), new Decimal(0));
-    if (lines.length < 2 || !debit.isPositive() || !debit.equals(credit)) {
+    // greaterThan(0): an all-zero Journal is not "balanced" in any useful
+    // sense, but Decimal.isPositive() accepts zero and would let it through.
+    if (lines.length < 2 || !debit.greaterThan(0) || !debit.equals(credit)) {
       throw new ApplicationException(
         "accounting_event_not_balanced",
         "The authoritative operational components do not form a balanced Journal",
@@ -439,16 +449,18 @@ export class OperationalJournalPostingService {
     facts: OperationalJournalFacts,
   ): string {
     return createHash("sha256")
-      .update(canonicalJson({
-        accountingDate: facts.accountingDate,
-        companyId: event.companyId,
-        components: facts.components,
-        eventType: event.eventType,
-        eventVersion: event.eventVersion,
-        sourceEntityId: event.sourceEntityId,
-        sourceEntityType: event.sourceEntityType,
-        sourceReference: facts.sourceReference,
-      }))
+      .update(
+        canonicalJson({
+          accountingDate: facts.accountingDate,
+          companyId: event.companyId,
+          components: facts.components,
+          eventType: event.eventType,
+          eventVersion: event.eventVersion,
+          sourceEntityId: event.sourceEntityId,
+          sourceEntityType: event.sourceEntityType,
+          sourceReference: facts.sourceReference,
+        }),
+      )
       .digest("hex");
   }
 
@@ -475,6 +487,6 @@ export class OperationalJournalPostingService {
       returning (next_value-1)::text as "nextValue",prefix
     `.execute(database);
     const row = result.rows[0]!;
-    return `${row.prefix}-${row.nextValue.padStart(6,"0")}`;
+    return `${row.prefix}-${row.nextValue.padStart(6, "0")}`;
   }
 }

@@ -11,19 +11,19 @@ functional testing. No further code changes until consolidated feedback arrives.
 
 ### 1.1 CreateOrderDialog full-suite flake
 
-| Field | Value |
-| --- | --- |
-| Status | **Open observation — currently not reproducible** |
+| Field                      | Value                                                                      |
+| -------------------------- | -------------------------------------------------------------------------- |
+| Status                     | **Open observation — currently not reproducible**                          |
 | Full-suite diagnostic runs | **25 consecutive passes** (min 40,716 ms / max 51,872 ms / mean 43,937 ms) |
-| Suspected cause | Scheduler starvation under heavy host contention |
-| Confidence | **Unconfirmed** |
-| Instrumentation | **Retained** to capture the next failure |
+| Suspected cause            | Scheduler starvation under heavy host contention                           |
+| Confidence                 | **Unconfirmed**                                                            |
+| Instrumentation            | **Retained** to capture the next failure                                   |
 
 **The original flake is NOT claimed as resolved.**
 
 Failure signature (from preserved logs): trader listbox open, zero options,
 `No Traders found`, and **no** `Loading…` text. Because `setLoading(true)` runs
-*inside* the debounce callback, its absence means the callback had not executed
+_inside_ the debounce callback, its absence means the callback had not executed
 and the request was never issued — consistent with a `setTimeout(0)` starved
 past the 1000 ms `findByRole` window. On an idle machine that same gap measures
 ~507 ms, so the margin is thin. This is an inference, not evidence.
@@ -68,10 +68,12 @@ The repository has **no commits**; all paths are untracked, so `git diff` shows
 nothing. Files created or modified during the reconciliation phase:
 
 ### Database
+
 - `database/migrations/20260718020000_driver_cash_reconciliation_integrity.ts`
 - `database/migrations/20260718030000_reconciliation_expense_types.ts`
 
 ### API
+
 - `apps/api/src/operations/driver-cash-reconciliation.service.ts` (authoritative service)
 - `apps/api/src/operations/operations-history.writer.ts`
 - `apps/api/src/operations/reconciliation-status.ts`
@@ -83,6 +85,7 @@ nothing. Files created or modified during the reconciliation phase:
   `concurrency-isolation.test.ts`
 
 ### Web
+
 - `apps/web/src/features/operations/DriverReconciliationWorkspace.tsx`
 - `apps/web/src/features/operations/ReconciliationPrintReport.tsx`
 - `apps/web/src/features/operations/DriverCashStatus.tsx`
@@ -95,6 +98,7 @@ nothing. Files created or modified during the reconciliation phase:
   `CreateOrderDialog.test.tsx` (**contains retained diagnostics**)
 
 ### Tooling
+
 - `scripts/repeat-suite.mjs` (self-describing failure header, separate stderr capture)
 
 ---
@@ -114,19 +118,20 @@ nothing. Files created or modified during the reconciliation phase:
 
 ## 4. Test and repeat-run results
 
-| Check | Result |
-| --- | --- |
-| Full web suite | **65 passed / 18 files** |
-| Print report focused tests | **4 passed** |
-| Web typecheck | **0 errors** |
-| API typecheck | **0 errors** |
-| Lint | **clean** |
-| Web build | **succeeds** (chunk-size warning only) |
-| CreateOrderDialog isolated | **20/20** (min 9,368 / max 12,922 / mean 11,210 ms) |
-| Full suite, diagnostic | **25/25** (min 40,716 / max 51,872 / mean 43,937 ms) |
-| New failure logs | **0** |
+| Check                      | Result                                               |
+| -------------------------- | ---------------------------------------------------- |
+| Full web suite             | **65 passed / 18 files**                             |
+| Print report focused tests | **4 passed**                                         |
+| Web typecheck              | **0 errors**                                         |
+| API typecheck              | **0 errors**                                         |
+| Lint                       | **clean**                                            |
+| Web build                  | **succeeds** (chunk-size warning only)               |
+| CreateOrderDialog isolated | **20/20** (min 9,368 / max 12,922 / mean 11,210 ms)  |
+| Full suite, diagnostic     | **25/25** (min 40,716 / max 51,872 / mean 43,937 ms) |
+| New failure logs           | **0**                                                |
 
 Mutation checks with real teeth:
+
 - Print tests fail when the `data-print` attribute collision is reintroduced
 - SearchCombobox regression test fails when the `aborted` guard is removed
 - Diagnostic dump verified to fire on a forced failure
@@ -135,14 +140,14 @@ Mutation checks with real teeth:
 
 ## 5. Open Stage 6 defects
 
-| ID | Description | Status |
-| --- | --- | --- |
-| DEF-17 | Real Company identity in print report | **Open** — fallback in place |
-| DEF-09 | Early Other-description validation (`aria-invalid`, `aria-describedby`) | Open |
-| DEF-13 | View Details must navigate to the exact created record | Open |
-| DEF-15 | Map server domain values to translation keys (Arabic) | Open |
-| DEF-16 | Field-linked errors, page-level error summary, focus movement | Open |
-| Scenario 5 | Filter-change selection behaviour | Open |
+| ID         | Description                                                             | Status                       |
+| ---------- | ----------------------------------------------------------------------- | ---------------------------- |
+| DEF-17     | Real Company identity in print report                                   | **Open** — fallback in place |
+| DEF-09     | Early Other-description validation (`aria-invalid`, `aria-describedby`) | Open                         |
+| DEF-13     | View Details must navigate to the exact created record                  | Open                         |
+| DEF-15     | Map server domain values to translation keys (Arabic)                   | Open                         |
+| DEF-16     | Field-linked errors, page-level error summary, focus movement           | Open                         |
+| Scenario 5 | Filter-change selection behaviour                                       | Open                         |
 
 Deferred to later phases: login without Company selection / `GET /auth/companies`
 exposure (DEF-05); admin override for all transitions with audit attribution;
@@ -180,29 +185,29 @@ exists yet.**
 
 Verified read-only on 2026-07-19 against the development database.
 
-| Metric | Value |
-| --- | --- |
-| Companies | 1 |
-| Orders | 32 |
+| Metric    | Value |
+| --------- | ----- |
+| Companies | 1     |
+| Orders    | 32    |
 
 ### REC-000001
 
-| Field | Value |
-| --- | --- |
-| Status | `confirmed` |
-| Gross collections | 102.25 |
+| Field                        | Value                          |
+| ---------------------------- | ------------------------------ |
+| Status                       | `confirmed`                    |
+| Gross collections            | 102.25                         |
 | **Driver payable deduction** | **0.00** (approved rule holds) |
-| Reconciliation expenses | 14.75 |
-| Net amount received | 87.50 |
-| Business date | 2026-07-18 |
-| Orders covered | 2 |
+| Reconciliation expenses      | 14.75                          |
+| Net amount received          | 87.50                          |
+| Business date                | 2026-07-18                     |
+| Orders covered               | 2                              |
 
 ### Remaining Pending Collection orders
 
 | `driver_reconciliation_status` | `delivery_status` | Orders | Amount collected |
-| --- | --- | --- | --- |
-| `pending` | `delivered` | **30** | **1,685.75** |
-| `reconciled` | `delivered` | 2 | 102.25 |
+| ------------------------------ | ----------------- | ------ | ---------------- |
+| `pending`                      | `delivered`       | **30** | **1,685.75**     |
+| `reconciled`                   | `delivered`       | 2      | 102.25           |
 
 **30 delivered orders totalling AED 1,685.75 remain available for reconciliation
 testing.**

@@ -50,7 +50,9 @@ describe.skipIf(!runDatabaseTests)("Customer configuration database protections"
           );
           await sql`insert into areas(id,company_id,emirate_id,code,name_en) values
             (${areaA}::uuid,${companyA}::uuid,(select id from emirates where code='DXB'),'AREA-000001','Dubai'),
-            (${areaB}::uuid,${companyB}::uuid,(select id from emirates where code='DXB'),'AREA-000001','Sharjah')`.execute(transaction);
+            (${areaB}::uuid,${companyB}::uuid,(select id from emirates where code='DXB'),'AREA-000001','Sharjah')`.execute(
+            transaction,
+          );
           await sql`insert into customers(id,company_id,code,name,mobile_number,created_by_account_id)
             values(${customerId}::uuid,${companyA}::uuid,'CUS-000001','Customer Test','971501234567',${actorA}::uuid)`.execute(
             transaction,

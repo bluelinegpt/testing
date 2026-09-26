@@ -1,8 +1,10 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Headers,
+  HttpCode,
   HttpStatus,
   Inject,
   Param,
@@ -14,6 +16,7 @@ import {
   Res,
 } from "@nestjs/common";
 import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
+import { Throttle } from "@nestjs/throttler";
 import type { Request, Response } from "express";
 
 import {
@@ -31,6 +34,8 @@ import {
   type OperationsOrderFilters,
   type OperationsOrder,
   type OperationsOrderPage,
+  type OperationsDriverDashboardSummary,
+  type OperationsOperatorDashboardSummary,
   type OperationsOverview,
   type OperationsOrderQuote,
   type OperationsOrderImportResult,
@@ -40,6 +45,8 @@ import {
   OperationsService,
   type PortalOrder,
   type TraderPortalArea,
+  type TraderPortalDashboard,
+  type TraderPortalOrderPage,
   type TraderPortalProfile,
   type PublicOrderTracking,
   type OperationsTraderSettlementDetail,
@@ -48,6 +55,12 @@ import {
   type OperationsTraderOption,
   type SearchPage,
 } from "./operations.service.js";
+import { LookupTrackingDto, VerifyTrackingDto } from "./public-tracking.dto.js";
+import {
+  type PublicTrackingLookupOutcome,
+  type PublicTrackingVerifyOutcome,
+  PublicTrackingService,
+} from "./public-tracking.service.js";
 import {
   DriverCashReconciliationService,
   type DriverCollectionReportData,
@@ -87,12 +100,15 @@ import {
 // eslint-disable-next-line @typescript-eslint/consistent-type-imports
 import {
   ChangeOrderStatusDto,
+  ChangeInternationalCarrierStatusDto,
   BulkAssignDriverDto,
   BulkChangeOrderStatusDto,
+  BulkChangeInternationalCarrierStatusDto,
   BulkSettleTraderDto,
   ConfirmTraderSettlementReceiptDto,
   CreateDriverReconciliationDto,
   CreateDriverDto,
+  CreateInternationalCatalogEntryDto,
   CreateTraderSettlementDto,
   DriverCollectionsSummaryQueryDto,
   DriverSearchQueryDto,
@@ -105,18 +121,21 @@ import {
   CreateTraderDto,
   FinancialPaymentDto,
   ImportOrdersCsvDto,
+  ImportTraderPortalOrdersCsvDto,
   OrderIdentifierAvailabilityQueryDto,
   OrderQuoteDto,
   RegisterInternationalShipmentDto,
   RegisterOrderAttachmentDto,
   OrderSelectionDto,
   ReverseDriverReconciliationDto,
+  ReactivateHoldOrdersDto,
   TraderSettlementEligibleOrdersQueryDto,
   TraderSettlementListQueryDto,
   TraderSettlementSummaryQueryDto,
   TraderAccountStatementQueryDto,
   UpdateOrderDto,
   GenerateShipmentManifestDto,
+  UpdateTraderPortalProfileDto,
 } from "./operations.dto.js";
 
 @ApiTags("operations")
@@ -151,6 +170,7 @@ export class OperationsController {
   @ApiOperation({ summary: "List recent orders for the authenticated Company" })
   @RequireAnyPermission(
     "orders.edit_before_processing",
+    "orders.driver_self_service",
     "orders.assign_driver",
     "orders.update_delivery_status",
     "reconciliations.create",
@@ -163,14 +183,30 @@ export class OperationsController {
   public orders(
     @Query("search") search?: string,
     @Query("deliveryStatus") deliveryStatus?: string,
+    @Query("internationalCarrierStatus") internationalCarrierStatus?: string,
+    @Query("orderType") orderType?: "collect_order" | "delivery" | "gcc_international",
+    @Query("thirdPartyDeliveryCompanyName") thirdPartyDeliveryCompanyName?: string,
+    @Query("destinationCountryName") destinationCountryName?: string,
     @Query("cashStatus") cashStatus?: string,
     @Query("settlementStatus") settlementStatus?: string,
+    @Query("workflowStep")
+    workflowStep?: "complete" | "collect_from_driver" | "collect_from_trader" | "settle_trader",
     @Query("traderId") traderId?: string,
     @Query("driverId") driverId?: string,
     @Query("areaId") areaId?: string,
+    @Query("emirateId") emirateId?: string,
+    @Query("referenceNumber") referenceNumber?: string,
+    @Query("serialNumber") serialNumber?: string,
     @Query("dateFrom") dateFrom?: string,
     @Query("dateTo") dateTo?: string,
-    @Query("quickView") quickView?: "active" | "all" | "cancelled" | "closed" | "hold",
+    @Query("quickView")
+    quickView?: "active" | "all" | "cancelled" | "closed" | "hold" | "accountant",
+    @Query("deliveredOnly") deliveredOnly?: string,
+    @Query("deliveryDateFrom") deliveryDateFrom?: string,
+    @Query("deliveryDateTo") deliveryDateTo?: string,
+    @Query("dateMode") dateMode?: string,
+    @Query("businessDateFrom") businessDateFrom?: string,
+    @Query("businessDateTo") businessDateTo?: string,
     @Query("page") page?: string,
     @Query("pageSize") pageSize?: string,
     @Query("sortBy") sortBy?: "amountToCollect" | "createdAt" | "orderDate" | "orderNumber",
@@ -181,18 +217,57 @@ export class OperationsController {
       dateFrom,
       dateTo,
       deliveryStatus,
+      internationalCarrierStatus,
+      orderType,
+      thirdPartyDeliveryCompanyName,
+      destinationCountryName,
       driverId,
       areaId,
+      emirateId,
+      referenceNumber,
       search,
+      serialNumber,
       quickView,
+      // Delivery Activity. `dateFrom`/`dateTo` above still mean Order Date.
+      deliveredOnly: deliveredOnly === "true",
+      deliveryDateFrom,
+      deliveryDateTo,
+      dateMode,
+      businessDateFrom,
+      businessDateTo,
       page: Number(page),
       pageSize: Number(pageSize) as 25 | 50 | 100,
       sortBy,
       sortDirection,
       settlementStatus,
+      workflowStep,
       traderId,
     };
     return this.operations.orders(filters);
+  }
+
+  // Deliberately narrower than `overview`: no financial totals (COD, revenue,
+  // profit) are computed or returned here, so the same operational
+  // permissions that unlock the Orders list are enough — an Operator scoped
+  // to dispatch-only permissions must never need `reports.financial.view`
+  // just to see how many Orders are New today (Prompt 12B).
+  @ApiOperation({
+    summary: "Operational Order counts for the authenticated Company (no financials)",
+  })
+  @RequireAnyPermission(
+    "orders.edit_before_processing",
+    "orders.driver_self_service",
+    "orders.assign_driver",
+    "orders.update_delivery_status",
+    "reconciliations.create",
+    "reconciliations.reverse",
+    "settlements.create",
+    "settlements.reverse",
+    "users_roles.manage",
+  )
+  @Get("orders/dashboard-summary")
+  public orderDashboardSummary(): Promise<OperationsOperatorDashboardSummary> {
+    return this.operations.operatorDashboardSummary();
   }
 
   @RequireAnyPermission("orders.assign_driver", "users_roles.manage")
@@ -262,9 +337,14 @@ export class OperationsController {
     @Query("deliveryStatus") deliveryStatus?: string,
     @Query("cashStatus") cashStatus?: string,
     @Query("settlementStatus") settlementStatus?: string,
+    @Query("workflowStep")
+    workflowStep?: "complete" | "collect_from_driver" | "collect_from_trader" | "settle_trader",
     @Query("traderId") traderId?: string,
     @Query("driverId") driverId?: string,
     @Query("areaId") areaId?: string,
+    @Query("emirateId") emirateId?: string,
+    @Query("referenceNumber") referenceNumber?: string,
+    @Query("serialNumber") serialNumber?: string,
     @Query("dateFrom") dateFrom?: string,
     @Query("dateTo") dateTo?: string,
   ): Promise<OperationsExportFile> {
@@ -275,8 +355,12 @@ export class OperationsController {
       deliveryStatus,
       driverId,
       areaId,
+      emirateId,
+      referenceNumber,
       search,
+      serialNumber,
       settlementStatus,
+      workflowStep,
       traderId,
     });
   }
@@ -321,6 +405,23 @@ export class OperationsController {
     return this.operations.billingSummary();
   }
 
+  // Viewing detail requires the same operational access as the list — any
+  // account that can see an Order in the list must be able to open it.
+  // (Previously fell back to the class-level `users_roles.manage` default
+  // only, silently blocking an Operator scoped to `orders.assign_driver`/
+  // `orders.update_delivery_status` from opening an Order they can already
+  // list — Prompt 12B.)
+  @RequireAnyPermission(
+    "orders.edit_before_processing",
+    "orders.driver_self_service",
+    "orders.assign_driver",
+    "orders.update_delivery_status",
+    "reconciliations.create",
+    "reconciliations.reverse",
+    "settlements.create",
+    "settlements.reverse",
+    "users_roles.manage",
+  )
   @ApiOperation({ summary: "Show one order with status timeline" })
   @Get("orders/:orderId")
   public orderDetail(
@@ -329,6 +430,17 @@ export class OperationsController {
     return this.operations.orderDetail(orderId);
   }
 
+  @RequireAnyPermission(
+    "orders.edit_before_processing",
+    "orders.driver_self_service",
+    "orders.assign_driver",
+    "orders.update_delivery_status",
+    "reconciliations.create",
+    "reconciliations.reverse",
+    "settlements.create",
+    "settlements.reverse",
+    "users_roles.manage",
+  )
   @ApiOperation({ summary: "Show one Order by its Company-scoped Order Number" })
   @Get("order-details/:orderNumber")
   public orderDetailByNumber(
@@ -426,6 +538,65 @@ export class OperationsController {
     return this.operations.drivers();
   }
 
+  @RequireAnyPermission("orders.update_delivery_status", "users_roles.manage")
+  @ApiOperation({ summary: "Advance selected International orders through carrier stages" })
+  @Post("orders/bulk-carrier-status")
+  public bulkCarrierStatus(@Body() input: BulkChangeInternationalCarrierStatusDto, @Req() request: Request): Promise<BulkActionResult> {
+    return this.ordersWorkflow.bulkChangeInternationalCarrierStatus(input, this.correlationId(request));
+  }
+
+  @ApiOperation({ summary: "List active third-party delivery companies" })
+  @RequireAnyPermission("orders.create", "users_roles.manage")
+  @Get("third-party-delivery-companies")
+  public thirdPartyDeliveryCompanies(@Query("search") search?: string): Promise<{ items: readonly { id: string; name: string }[]; total: number; hasMore: boolean }> {
+    return this.operations.thirdPartyDeliveryCompanies(search);
+  }
+
+  @ApiOperation({ summary: "Create a third-party delivery company" })
+  @RequireAnyPermission("company_profile.manage", "users_roles.manage")
+  @Post("third-party-delivery-companies")
+  public createThirdPartyDeliveryCompany(@Body() input: CreateInternationalCatalogEntryDto): Promise<{ id: string; name: string }> {
+    return this.operations.createThirdPartyDeliveryCompany(input.name);
+  }
+
+  @Patch("third-party-delivery-companies/:id/deactivate")
+  @RequireAnyPermission("company_profile.manage", "users_roles.manage")
+  public deactivateThirdPartyDeliveryCompany(@Param("id", new ParseUUIDPipe()) id: string, @Req() request: Request) {
+    return this.operations.deactivateThirdPartyDeliveryCompany(id, this.correlationId(request));
+  }
+
+  @Delete("third-party-delivery-companies/:id")
+  @RequireAnyPermission("company_profile.manage", "users_roles.manage")
+  public deleteThirdPartyDeliveryCompany(@Param("id", new ParseUUIDPipe()) id: string, @Req() request: Request) {
+    return this.operations.deleteThirdPartyDeliveryCompany(id, this.correlationId(request));
+  }
+
+  @ApiOperation({ summary: "List active destination countries" })
+  @RequireAnyPermission("orders.create", "users_roles.manage")
+  @Get("destination-countries")
+  public destinationCountries(@Query("search") search?: string): Promise<{ items: readonly { id: string; name: string }[]; total: number; hasMore: boolean }> {
+    return this.operations.destinationCountries(search);
+  }
+
+  @ApiOperation({ summary: "Create a destination country" })
+  @RequireAnyPermission("company_profile.manage", "users_roles.manage")
+  @Post("destination-countries")
+  public createDestinationCountry(@Body() input: CreateInternationalCatalogEntryDto): Promise<{ id: string; name: string }> {
+    return this.operations.createDestinationCountry(input.name);
+  }
+
+  @Patch("destination-countries/:id/deactivate")
+  @RequireAnyPermission("company_profile.manage", "users_roles.manage")
+  public deactivateDestinationCountry(@Param("id", new ParseUUIDPipe()) id: string, @Req() request: Request) {
+    return this.operations.deactivateDestinationCountry(id, this.correlationId(request));
+  }
+
+  @Delete("destination-countries/:id")
+  @RequireAnyPermission("company_profile.manage", "users_roles.manage")
+  public deleteDestinationCountry(@Param("id", new ParseUUIDPipe()) id: string, @Req() request: Request) {
+    return this.operations.deleteDestinationCountry(id, this.correlationId(request));
+  }
+
   @ApiOperation({ summary: "List delivered orders with pending driver cash" })
   @Get("cash/pending")
   public pendingCashOrders(): Promise<readonly OperationsPendingCashOrder[]> {
@@ -480,7 +651,9 @@ export class OperationsController {
     return this.reconciliations.details(reconciliationId);
   }
 
-  @ApiOperation({ summary: "Read-only print data for the Driver collection document (grouped by Trader)" })
+  @ApiOperation({
+    summary: "Read-only print data for the Driver collection document (grouped by Trader)",
+  })
   @Get("cash/reconciliations/:reconciliationId/print-data")
   public driverReconciliationPrintData(
     @Param("reconciliationId", new ParseUUIDPipe()) reconciliationId: string,
@@ -531,7 +704,9 @@ export class OperationsController {
     summary: "Server-authoritative data for the Driver Shipment Manifest, from selected Orders",
   })
   @Post("cash/driver-shipment-manifest/data")
-  public driverShipmentManifestData(@Body() input: GenerateShipmentManifestDto): Promise<ManifestData> {
+  public driverShipmentManifestData(
+    @Body() input: GenerateShipmentManifestDto,
+  ): Promise<ManifestData> {
     return this.manifest.manifestData(input);
   }
 
@@ -555,6 +730,37 @@ export class OperationsController {
     response.setHeader("X-Content-Type-Options", "nosniff");
     response.setHeader("Cache-Control", "private, max-age=0, must-revalidate");
     response.send(bytes);
+  }
+
+  @RequireAnyPermission("orders.update_delivery_status", "users_roles.manage")
+  @Post("orders/hold-reactivation")
+  public reactivateHoldOrders(@Body() input: ReactivateHoldOrdersDto, @Req() request: Request) {
+    return this.ordersWorkflow.reactivateHoldOrders(input, this.correlationId(request));
+  }
+
+  @RequireAnyPermission(
+    "reports.export",
+    "orders.assign_driver",
+    "orders.update_delivery_status",
+    "users_roles.manage",
+  )
+  @Post("cash/driver-shipment-manifest/xlsx")
+  public async driverShipmentManifestExcel(
+    @Body() input: GenerateShipmentManifestDto,
+    @Query("language") requestedLanguage: string | undefined,
+    @Res() response: Response,
+  ): Promise<void> {
+    const report = await this.manifest.manifestExcel(
+      input,
+      requestedLanguage === "ar" ? "ar" : "en",
+    );
+    response.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
+    response.setHeader("Content-Disposition", `attachment; filename="${report.filename}"`);
+    response.setHeader("X-Content-Type-Options", "nosniff");
+    response.send(report.bytes);
   }
 
   @RequireAnyPermission("reconciliations.reverse", "users_roles.manage")
@@ -646,6 +852,21 @@ export class OperationsController {
     return this.operations.updateOrder(orderId, input, this.correlationId(request));
   }
 
+  // No permission requirement at the guard layer (deliberately empty, NOT
+  // omitted — omitting it would fall back to the class-level
+  // `users_roles.manage` default, which is MORE restrictive and would break
+  // every ordinary Operator holding just `orders.update_delivery_status`).
+  // Authorization is fully decided inside `OperationsService.changeOrderStatus`
+  // instead, mirroring the driver-portal route's own established pattern
+  // (`@RequireIdentityKinds("driver")` alone, ownership checked in the
+  // service) — this lets a "Driver User" (a `company_user` whose linked
+  // Employee backs a Driver record) reach this SAME endpoint and change
+  // status on their OWN assigned Order without needing the broader Operator
+  // permission, exactly like a genuine `driver`-kind identity needs none.
+  // A plain Operator's existing behavior is completely unchanged: the
+  // service still requires `orders.update_delivery_status`/`users_roles.manage`
+  // for anyone who isn't acting on their own Driver-linked Order.
+  @RequireAnyPermission()
   @ApiOperation({ summary: "Change an order delivery status" })
   @Patch("orders/:orderId/status")
   public changeOrderStatus(
@@ -654,6 +875,17 @@ export class OperationsController {
     @Req() request: Request,
   ): Promise<OperationsOrder> {
     return this.operations.changeOrderStatus(orderId, input, this.correlationId(request));
+  }
+
+  @RequireAnyPermission("orders.update_delivery_status", "users_roles.manage")
+  @ApiOperation({ summary: "Advance an International order through its carrier handoff stages" })
+  @Patch("orders/:orderId/carrier-status")
+  public changeInternationalCarrierStatus(
+    @Param("orderId", new ParseUUIDPipe()) orderId: string,
+    @Body() input: ChangeInternationalCarrierStatusDto,
+    @Req() request: Request,
+  ): Promise<OperationsOrder> {
+    return this.operations.changeInternationalCarrierStatus(orderId, input, this.correlationId(request));
   }
 
   @RequireAnyPermission("reconciliations.create", "users_roles.manage")
@@ -687,6 +919,7 @@ export class OperationsController {
     return this.operations.settleOrderTrader(orderId, input, this.correlationId(request));
   }
 
+  @RequireAnyPermission("settlements.create", "users_roles.manage")
   @ApiOperation({ summary: "Preview a money-out settlement for the selected orders" })
   @Post("settlements/selected/preview")
   public bulkSettlePreview(@Body() input: BulkSettleTraderDto) {
@@ -872,7 +1105,11 @@ export class OperationsController {
     readonly reversalSettlementNumber: string;
     readonly settlementId: string;
   }> {
-    return this.traderSettlementService.reverse(settlementId, input.reason, this.correlationId(request));
+    return this.traderSettlementService.reverse(
+      settlementId,
+      input.reason,
+      this.correlationId(request),
+    );
   }
 
   private correlationId(request: Request): string {
@@ -883,13 +1120,43 @@ export class OperationsController {
 @ApiTags("public-tracking")
 @Controller("public/tracking")
 export class PublicTrackingController {
-  public constructor(@Inject(OperationsService) private readonly operations: OperationsService) {}
+  public constructor(
+    @Inject(OperationsService) private readonly operations: OperationsService,
+    @Inject(PublicTrackingService) private readonly publicTracking: PublicTrackingService,
+  ) {}
 
   @Public()
-  @ApiOperation({ summary: "Show customer-safe public order tracking" })
+  @ApiOperation({ summary: "Show customer-safe public order tracking for a shared tracking link" })
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
   @Get(":token")
   public tracking(@Param("token") token: string): Promise<PublicOrderTracking> {
     return this.operations.publicTracking(token);
+  }
+
+  // Central `tawseelhub.com/track` flow -- Airway Bill first, mobile
+  // verification only when the Airway Bill is ambiguous across Tawseelhub.
+  // POST (not GET) so neither the Airway Bill, the verification token, nor
+  // the mobile number ever end up in access logs or browser history.
+  @Public()
+  @ApiOperation({ summary: "Look up public shipment tracking by Airway Bill / Tracking Number" })
+  @Throttle({ default: { limit: 15, ttl: 60_000 } })
+  @HttpCode(HttpStatus.OK)
+  @Post("lookup")
+  public lookup(@Body() input: LookupTrackingDto): Promise<PublicTrackingLookupOutcome> {
+    return this.publicTracking.lookupByAirwayBill(input.airwayBill, input.language);
+  }
+
+  @Public()
+  @ApiOperation({ summary: "Verify an ambiguous Airway Bill match by customer mobile number" })
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @HttpCode(HttpStatus.OK)
+  @Post("verify")
+  public verify(@Body() input: VerifyTrackingDto): Promise<PublicTrackingVerifyOutcome> {
+    return this.publicTracking.verifyAmbiguousShipment(
+      input.verificationToken,
+      input.mobile,
+      input.language,
+    );
   }
 }
 
@@ -907,6 +1174,22 @@ export class PortalController {
   }
 
   @RequireIdentityKinds("trader")
+  @ApiOperation({ summary: "Update the authenticated Trader's own editable profile fields" })
+  @Patch("trader/profile")
+  public updateTraderProfile(
+    @Body() body: UpdateTraderPortalProfileDto,
+  ): Promise<TraderPortalProfile> {
+    return this.operations.updateTraderPortalProfile(body);
+  }
+
+  @RequireIdentityKinds("trader")
+  @ApiOperation({ summary: "Show the authenticated Trader's Dashboard summary" })
+  @Get("trader/dashboard")
+  public traderDashboard(): Promise<TraderPortalDashboard> {
+    return this.operations.traderPortalDashboard();
+  }
+
+  @RequireIdentityKinds("trader")
   @ApiOperation({ summary: "List active delivery Areas available to the authenticated Trader" })
   @Get("trader/areas")
   public traderAreas(): Promise<readonly TraderPortalArea[]> {
@@ -918,6 +1201,94 @@ export class PortalController {
   @Get("trader/orders")
   public traderOrders(): Promise<readonly PortalOrder[]> {
     return this.operations.traderPortalOrders();
+  }
+
+  /**
+   * The searchable, paginated Trader Orders list (Trader Workspace Prompt
+   * 3T-B, §4/§45). `traderId` is deliberately absent from the query params —
+   * there is no client input that could name a different Trader here, unlike
+   * the Company `orders()` endpoint above which legitimately filters by any
+   * Trader in the Company.
+   */
+  @RequireIdentityKinds("trader")
+  @ApiOperation({ summary: "Search the authenticated Trader's own Orders, paginated" })
+  @Get("trader/orders/search")
+  public traderOrdersSearch(
+    @Query("search") search?: string,
+    @Query("deliveryStatus") deliveryStatus?: string,
+    @Query("referenceNumber") referenceNumber?: string,
+    @Query("dateFrom") dateFrom?: string,
+    @Query("dateTo") dateTo?: string,
+    @Query("quickView") quickView?: "active" | "all" | "cancelled" | "closed" | "hold",
+    @Query("page") page?: string,
+    @Query("pageSize") pageSize?: string,
+    @Query("sortBy") sortBy?: "amountToCollect" | "createdAt" | "orderDate" | "orderNumber",
+    @Query("sortDirection") sortDirection?: "asc" | "desc",
+  ): Promise<TraderPortalOrderPage> {
+    return this.operations.traderPortalOrdersPage({
+      dateFrom,
+      dateTo,
+      deliveryStatus,
+      page: Number(page),
+      pageSize: Number(pageSize) as 25 | 50 | 100,
+      quickView,
+      referenceNumber,
+      search,
+      sortBy,
+      sortDirection,
+    });
+  }
+
+  /**
+   * The same Trader's Orders, aggregated across every Delivery Company its
+   * Trader Commerce identity is linked to (Trader Portal Prompt 3T-C, Part
+   * C) -- "one common Trader Order history" instead of the single session
+   * Company `traderOrdersSearch` above is limited to. Read-only; see
+   * `traderPortalOrdersPageAllCompanies` for why this is a separate method
+   * rather than a parameter on the existing one.
+   */
+  @RequireIdentityKinds("trader")
+  @ApiOperation({
+    summary: "Search the authenticated Trader's Orders across all Delivery Companies",
+  })
+  @Get("trader/orders/search/all-companies")
+  public traderOrdersSearchAllCompanies(
+    @Query("search") search?: string,
+    @Query("dateFrom") dateFrom?: string,
+    @Query("dateTo") dateTo?: string,
+    @Query("deliveryCompanyId") deliveryCompanyId?: string,
+    @Query("quickView") quickView?: "active" | "all" | "cancelled" | "closed" | "hold",
+    @Query("page") page?: string,
+    @Query("pageSize") pageSize?: string,
+  ): Promise<TraderPortalOrderPage> {
+    return this.operations.traderPortalOrdersPageAllCompanies({
+      dateFrom,
+      dateTo,
+      deliveryCompanyId,
+      page: Number(page),
+      pageSize: Number(pageSize) as 25 | 50 | 100,
+      quickView,
+      search,
+    });
+  }
+
+  @RequireIdentityKinds("trader")
+  @ApiOperation({ summary: "List Delivery Companies the authenticated Trader is linked to" })
+  @Get("trader/orders/companies")
+  public traderOrdersCompanies(): Promise<
+    readonly { readonly id: string; readonly isOwn: boolean; readonly name: string }[]
+  > {
+    return this.operations.traderPortalLinkedDeliveryCompanies();
+  }
+
+  @RequireIdentityKinds("trader")
+  @ApiOperation({ summary: "Import several Orders owned by the authenticated Trader from CSV" })
+  @Post("trader/orders/import-csv")
+  public importTraderOrdersCsv(
+    @Body() input: ImportTraderPortalOrdersCsvDto,
+    @Req() request: Request,
+  ): Promise<OperationsOrderImportResult> {
+    return this.operations.createTraderPortalOrdersImport(input, this.correlationId(request));
   }
 
   @RequireIdentityKinds("trader")
@@ -943,11 +1314,14 @@ export class PortalController {
     @Body() input: UpdateOrderDto,
     @Req() request: Request,
   ): Promise<unknown> {
-    return this.operations.updateTraderPortalOrder(
-      orderId,
-      input,
-      this.correlationId(request),
-    );
+    return this.operations.updateTraderPortalOrder(orderId, input, this.correlationId(request));
+  }
+
+  @RequireIdentityKinds("driver")
+  @ApiOperation({ summary: "Dashboard summary scoped to the authenticated Driver only" })
+  @Get("driver/dashboard-summary")
+  public driverDashboardSummary(): Promise<OperationsDriverDashboardSummary> {
+    return this.operations.driverDashboardSummary();
   }
 
   @RequireIdentityKinds("driver")
@@ -958,17 +1332,26 @@ export class PortalController {
   }
 
   @RequireIdentityKinds("driver")
+  @ApiOperation({ summary: "Read-only status history for one assigned Order, loaded on demand" })
+  @Get("driver/orders/:orderId/history")
+  public driverOrderHistory(@Param("orderId", new ParseUUIDPipe()) orderId: string) {
+    return this.operations.driverPortalOrderHistory(orderId);
+  }
+
+  @RequireIdentityKinds("driver")
   @ApiOperation({ summary: "Update one assigned Driver portal order status" })
   @Patch("driver/orders/:orderId/status")
   public changeDriverOrderStatus(
     @Param("orderId", new ParseUUIDPipe()) orderId: string,
     @Body() input: ChangeOrderStatusDto,
     @Req() request: Request,
+    @Headers("x-idempotency-key") idempotencyKey: string | undefined,
   ): Promise<PortalOrder> {
     return this.operations.changeDriverPortalOrderStatus(
       orderId,
       input,
       this.correlationId(request),
+      idempotencyKey,
     );
   }
 

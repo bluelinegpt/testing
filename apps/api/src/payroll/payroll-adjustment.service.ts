@@ -39,21 +39,24 @@ export class PayrollAdjustmentService {
     const { actorId, companyId } = this.support.context();
     const amount = new Decimal(input.amount).toDecimalPlaces(2);
     return this.transactions.execute(async (transaction) => {
-      const reservation = await this.support.reserveIdempotency<PayrollAdjustmentResult>(transaction, {
-        companyId,
-        idempotencyKey,
-        operation: payrollIdempotencyOperations.adjustmentCreate,
-        payload: {
-          adjustmentType: input.adjustmentType,
-          amount: amount.toFixed(2),
-          direction: input.direction,
-          employeeId: input.employeeId ?? "",
-          lineId,
-          notes: input.notes?.trim() ?? "",
-          reason: input.reason.trim(),
-          sourceReference: input.sourceReference?.trim() ?? "",
+      const reservation = await this.support.reserveIdempotency<PayrollAdjustmentResult>(
+        transaction,
+        {
+          companyId,
+          idempotencyKey,
+          operation: payrollIdempotencyOperations.adjustmentCreate,
+          payload: {
+            adjustmentType: input.adjustmentType,
+            amount: amount.toFixed(2),
+            direction: input.direction,
+            employeeId: input.employeeId ?? "",
+            lineId,
+            notes: input.notes?.trim() ?? "",
+            reason: input.reason.trim(),
+            sourceReference: input.sourceReference?.trim() ?? "",
+          },
         },
-      });
+      );
       if (reservation.replayResponse !== undefined) return reservation.replayResponse;
       if (reservation.replayResourceId !== undefined) {
         return this.result(transaction, companyId, reservation.replayResourceId);
@@ -163,12 +166,15 @@ export class PayrollAdjustmentService {
     }
     const { actorId, companyId } = this.support.context();
     return this.transactions.execute(async (transaction) => {
-      const reservation = await this.support.reserveIdempotency<PayrollAdjustmentResult>(transaction, {
-        companyId,
-        idempotencyKey,
-        operation: payrollIdempotencyOperations.adjustmentReversal,
-        payload: { adjustmentId, reason: reason.trim() },
-      });
+      const reservation = await this.support.reserveIdempotency<PayrollAdjustmentResult>(
+        transaction,
+        {
+          companyId,
+          idempotencyKey,
+          operation: payrollIdempotencyOperations.adjustmentReversal,
+          payload: { adjustmentId, reason: reason.trim() },
+        },
+      );
       if (reservation.replayResponse !== undefined) return reservation.replayResponse;
       if (reservation.replayResourceId !== undefined) {
         return this.result(transaction, companyId, reservation.replayResourceId);

@@ -22,6 +22,15 @@ import { type TenantContext, TenantContextAccessor } from "../tenancy/tenant-con
 import { DriverCashReconciliationService } from "./driver-cash-reconciliation.service.js";
 import { DriverCollectionPdfService } from "./driver-collection-pdf.service.js";
 import { OperationsHistoryWriter } from "./operations-history.writer.js";
+import { BusinessDayService } from "../company-configuration/business-day.service.js";
+import { ReportDateModeService } from "../company-configuration/report-date-mode.js";
+import {
+  createBusinessDayServiceStub,
+  createCalendarDateReportModeServiceStub,
+} from "../test/business-day-stubs.js";
+import { OutsourcedDriverFeeService } from "../payroll/outsourced-driver-fee.service.js";
+import { EmployeeCollectionEarningService } from "../payroll/employee-collection-earning.service.js";
+import { PushOutboxWriter } from "../push/push-outbox-writer.service.js";
 import { OrdersWorkflowService } from "./orders-workflow.service.js";
 
 const runDatabaseTests = process.env.RUN_HISTORY_DATABASE === "true";
@@ -94,6 +103,12 @@ describe.skipIf(!runDatabaseTests)("OperationsHistoryWriter consumers", () => {
           tenants as unknown as TenantContextAccessor,
           identities as unknown as IdentityContextAccessor,
           history,
+          undefined as never,
+          // Employee delivery-earning accrual: not exercised by this history
+          // regression (its orders use rule-less drivers), a null return is
+          // the ordinary outcome anyway.
+          { accrueForDelivery: async () => null } as never,
+          new PushOutboxWriter(),
         );
 
         const makeCompany = async (label: string) => {
@@ -169,9 +184,12 @@ describe.skipIf(!runDatabaseTests)("OperationsHistoryWriter consumers", () => {
           options: {
             readonly amountCollected?: number;
             readonly deliveryStatus?: string;
+            readonly customerAmountDue?: number;
             readonly driverId?: string;
             readonly reconciliationStatus?: string;
+            readonly serialNumber?: string;
             readonly settlementStatus?: string;
+            readonly traderNetPayable?: number;
           } = {},
         ): Promise<string> => {
           const orderId = randomUUID();
@@ -179,23 +197,29 @@ describe.skipIf(!runDatabaseTests)("OperationsHistoryWriter consumers", () => {
           await sql`
             insert into orders (
               id, company_id, order_number, order_date, trader_id, area_id,
+              serial_number, serial_number_normalized,
               created_by_account_id, assigned_driver_id, customer_name,
               customer_mobile_number, customer_address, package_count, payment_condition,
               amount_collected, customer_amount_due, driver_cost,
               trader_gross_payable, trader_paid_service_fee, trader_deductions,
               trader_charges, trader_adjustments, trader_net_payable,
               delivery_status, driver_reconciliation_status, trader_settlement_status,
-              pricing_provenance_status, final_service_fee_snapshot, customer_provenance_status
+              pricing_provenance_status, final_service_fee_snapshot, customer_provenance_status,
+              service_fee_override_reason
             ) values (
               ${orderId}::uuid, ${company.companyId}::uuid, ${`HIS-${suffix}`}, current_date,
-              ${company.traderId}::uuid, ${company.areaId}::uuid, ${company.accountId}::uuid,
+              ${company.traderId}::uuid, ${company.areaId}::uuid,
+              ${options.serialNumber ?? null}, ${options.serialNumber?.normalize("NFKC").trim().replace(/\s+/gu, " ").toLocaleLowerCase("en-US") ?? null},
+              ${company.accountId}::uuid,
               ${options.driverId ?? null}::uuid,
               'Customer', '971500000004', 'Address', 1, 'customer_pays_cod_and_fee',
-              ${options.amountCollected ?? 0}, 100, 0, 100, 0, 0, 0, 0, 100,
+              ${options.amountCollected ?? 0}, ${options.customerAmountDue ?? 100}, 0,
+              ${options.traderNetPayable ?? 100}, 0, 0, 0, 0, ${options.traderNetPayable ?? 100},
               ${options.deliveryStatus ?? "new"},
               ${options.reconciliationStatus ?? "not_applicable"},
               ${options.settlementStatus ?? "not_eligible"},
-              'legacy_unattributed', 0, 'legacy_unattributed'
+              'legacy_unattributed', 0, 'legacy_unattributed',
+              'Configured Trader/Area price is zero'
             )
           `.execute(transaction);
           return orderId;
@@ -416,6 +440,35 @@ describe.skipIf(!runDatabaseTests)("OperationsHistoryWriter consumers", () => {
           ).rows[0]?.status,
         ).toBe("out_for_delivery");
 
+        const redispatchOrder = await makeOrder(companyA, {
+          deliveryStatus: "out_for_delivery",
+          driverId: companyA.driverId,
+        });
+        await workflow.bulkChangeStatus(
+          {
+            orderIds: [redispatchOrder],
+            reason: "Customer was unavailable",
+            selectionMode: "ids",
+            targetStatus: "in_branch",
+          },
+          randomUUID(),
+        );
+        const redispatched = await workflow.bulkChangeStatus(
+          {
+            orderIds: [redispatchOrder],
+            selectionMode: "ids",
+            targetStatus: "out_for_delivery",
+          },
+          randomUUID(),
+        );
+        expect(redispatched.processedCount).toBe(1);
+        expect(
+          (
+            await sql<{ status: string }>`
+              select delivery_status as status from orders where id = ${redispatchOrder}::uuid
+            `.execute(transaction)
+          ).rows[0]?.status,
+        ).toBe("out_for_delivery");
         const returnedOrder = await makeOrder(companyA);
         await workflow.bulkChangeStatus(
           {
@@ -462,6 +515,89 @@ describe.skipIf(!runDatabaseTests)("OperationsHistoryWriter consumers", () => {
           randomUUID(),
         );
         expect(closedAfterPayment.processedCount).toBe(1);
+
+        // A customer-paid fee Order can have AED 0 payable to the Trader. Once
+        // Driver Cash is reconciled, it should close directly and normalize the
+        // Trader settlement status instead of blocking on an impossible settlement.
+        const zeroTraderPayableOrder = await makeOrder(companyA, {
+          amountCollected: 15,
+          customerAmountDue: 15,
+          deliveryStatus: "delivered",
+          driverId: companyA.driverId,
+          reconciliationStatus: "reconciled",
+          settlementStatus: "unsettled",
+          traderNetPayable: 0,
+        });
+        const closedZeroPayable = await workflow.bulkChangeStatus(
+          {
+            orderIds: [zeroTraderPayableOrder],
+            selectionMode: "ids",
+            targetStatus: "closed",
+          },
+          randomUUID(),
+        );
+        expect(closedZeroPayable.processedCount).toBe(1);
+        expect(
+          (
+            await sql<{ settlementStatus: string; status: string }>`
+              select delivery_status as status, trader_settlement_status as "settlementStatus"
+              from orders where id = ${zeroTraderPayableOrder}::uuid
+            `.execute(transaction)
+          ).rows[0],
+        ).toEqual({ settlementStatus: "not_eligible", status: "closed" });
+
+        // --- Hold reactivation: three rows, transactional rollback and history ---
+        const heldOrders = await Promise.all([
+          makeOrder(companyA, { deliveryStatus: "hold", driverId: companyA.driverId, serialNumber: "OLD 101" }),
+          makeOrder(companyA, { deliveryStatus: "hold", serialNumber: "OLD 102" }),
+          makeOrder(companyA, { deliveryStatus: "hold", driverId: companyA.driverId, serialNumber: "OLD 103" }),
+        ]);
+        const reactivationDate = "2026-08-17";
+        await expect(
+          workflow.reactivateHoldOrders(
+            {
+              orders: heldOrders.map((orderId, index) => ({
+                orderId,
+                newSerialDate: reactivationDate,
+                newSerialNumber: `NEW ${index + 101}`,
+                newStatus: index === 1 ? "out_for_delivery" : "in_branch",
+              })),
+            },
+            randomUUID(),
+          ),
+        ).rejects.toMatchObject({ errorCode: "hold_reactivation_driver_required" });
+        const rolledBack = await sql<{ count: number }>`select count(*)::int count from orders
+          where id in (${sql.join(heldOrders.map((id) => sql`${id}::uuid`))})
+            and delivery_status='hold' and serial_number like 'OLD %'`.execute(transaction);
+        expect(rolledBack.rows[0]?.count).toBe(3);
+
+        const reactivated = await workflow.reactivateHoldOrders(
+          {
+            orders: heldOrders.map((orderId, index) => ({
+              orderId,
+              newSerialDate: reactivationDate,
+              newSerialNumber: ` New   ${index + 101} `,
+              newStatus: "in_branch",
+            })),
+          },
+          `corr-${randomUUID()}`,
+        );
+        expect(reactivated.processedCount).toBe(3);
+        const serialHistory = await sql<{
+          newSerial: string; oldSerial: string; reason: string;
+        }>`select new_serial_number "newSerial",old_serial_number "oldSerial",reason
+          from order_serial_history where order_id in (${sql.join(heldOrders.map((id) => sql`${id}::uuid`))})
+          order by old_serial_number`.execute(transaction);
+        expect(serialHistory.rows).toEqual([
+          { newSerial: " New   101 ", oldSerial: "OLD 101", reason: "Hold Reactivation" },
+          { newSerial: " New   102 ", oldSerial: "OLD 102", reason: "Hold Reactivation" },
+          { newSerial: " New   103 ", oldSerial: "OLD 103", reason: "Hold Reactivation" },
+        ]);
+        const reactivatedRows = await sql<{ count: number }>`select count(*)::int count from orders
+          where id in (${sql.join(heldOrders.map((id) => sql`${id}::uuid`))})
+            and delivery_status='in_branch' and order_date=${reactivationDate}::date
+            and serial_number_normalized like 'new %'`.execute(transaction);
+        expect(reactivatedRows.rows[0]?.count).toBe(3);
 
         // --- Company isolation ---------------------------------------------
         const companyBOrder = await makeOrder(companyB);
@@ -549,11 +685,38 @@ describe.skipIf(!runDatabaseTests)("OperationsHistoryWriter consumers", () => {
         { provide: IdentityContextAccessor, useValue: { current: () => identity } },
         { provide: FileStoragePort, useValue: {} },
         { provide: ConfigService, useValue: { get: () => "local" } },
+        { provide: PushOutboxWriter, useValue: {} },
+        { provide: EmployeeCollectionEarningService, useValue: {} },
         KyselyTransactionManager,
         OperationsHistoryWriter,
         OrdersWorkflowService,
         CompanyProfileService,
         { provide: DriverCollectionPdfService, useValue: {} },
+        // Both consumers below gained an OutsourcedDriverFeeService dependency
+        // after this suite was written, so the container could no longer build
+        // them. Provided as a stub, not mocked over: the services under test
+        // remain the real classes, which is what this test asserts about.
+        // Calendar/business-day collaborators, using the repository's own
+        // canonical stubs rather than ad hoc objects.
+        { provide: ReportDateModeService, useValue: createCalendarDateReportModeServiceStub() },
+        { provide: BusinessDayService, useValue: createBusinessDayServiceStub() },
+        {
+          provide: OutsourcedDriverFeeService,
+          useValue: {
+            collectionOffsetProposal: () =>
+              Promise.resolve({
+                allocations: [],
+                eligibleAccrualCount: 0,
+                oldestFirstProposal: [],
+                remainingDriverOutstanding: "0.00",
+                requestedOffset: "0.00",
+                safeMaximumOffset: "0.00",
+                totalOutstanding: "0.00",
+              }),
+            confirmCollectionOffset: () => Promise.resolve(null),
+            reverseCollectionOffset: () => Promise.resolve(null),
+          },
+        },
         DriverCashReconciliationService,
       ],
     }).compile();

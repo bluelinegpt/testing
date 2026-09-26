@@ -39,7 +39,15 @@ export class FiscalCalendarService {
     `.execute(database);
   }
 
-  private async generatePeriodsInTransaction(
+  /**
+   * Public so a caller that already owns a transaction can generate periods
+   * inside it -- Year-End execution creates the next year and its periods as
+   * part of one all-or-nothing operation, and calling the outer
+   * `generateFiscalPeriods` would open a second, independently committing
+   * transaction. The permission assertion stays with the outer entry points;
+   * an in-transaction caller has already asserted its own.
+   */
+  public async generatePeriodsInTransaction(
     transaction: Kysely<DatabaseSchema>,
     input: { fiscalYearId: string; periodCodePrefix?: string },
   ) {
@@ -113,10 +121,7 @@ export class FiscalCalendarService {
     return result.rows;
   }
 
-  public async createFiscalYear(
-    input: CreateFiscalYearDto,
-    idempotencyKey: string | undefined,
-  ) {
+  public async createFiscalYear(input: CreateFiscalYearDto, idempotencyKey: string | undefined) {
     this.support.assertPermission("accounting.periods.manage");
     try {
       return await this.transactions.execute(async (transaction) => {
@@ -306,14 +311,16 @@ export class FiscalCalendarService {
         ["draft_opening_balances", Number(row.draftOpeningBalances)],
         ["validated_opening_balances", Number(row.validatedOpeningBalances)],
         ["approved_opening_balances", Number(row.approvedOpeningBalances)],
-      ].filter(([, count]) => Number(count) > 0).map(([code, count]) => ({ code, count }));
+      ]
+        .filter(([, count]) => Number(count) > 0)
+        .map(([code, count]) => ({ code, count }));
       return {
         ...row,
         activePostingOperations: 0,
         blockingIssues: closeBlocking,
         canClose: closeBlocking.length === 0,
-        canReopen: ["closed","soft_closed"].includes(String(row.status)),
-        canSoftClose: ["open","reopened"].includes(String(row.status)),
+        canReopen: ["closed", "soft_closed"].includes(String(row.status)),
+        canSoftClose: ["open", "reopened"].includes(String(row.status)),
         warnings: [],
       };
     };
@@ -441,8 +448,10 @@ export class FiscalCalendarService {
             HttpStatus.CONFLICT,
           );
         }
-        if (["open","reopened"].includes(target)
-            && !["open","reopened"].includes(current.fiscalYearStatus)) {
+        if (
+          ["open", "reopened"].includes(target) &&
+          !["open", "reopened"].includes(current.fiscalYearStatus)
+        ) {
           throw new ApplicationException(
             "accounting_fiscal_year_closed",
             "The Fiscal Year is not open",

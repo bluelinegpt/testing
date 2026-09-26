@@ -1,0 +1,34 @@
+{
+  "name": "@blueline/public-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "start": "node serve.mjs",
+    "build": "tsc -b && vite build && vite build --ssr src/entry-server.tsx --outDir dist-ssr && node scripts/prerender.mjs && node -e \"require('fs').rmSync('dist-ssr',{recursive:true,force:true})\"",
+    "typecheck": "tsc -b --pretty false",
+    "test": "vitest run",
+    "test:prerender": "node scripts/verify-prerender-output.mjs",
+    "test:server": "node --test --test-isolation=none serve.node-test.mjs",
+    "audit:performance": "node scripts/performance-budget.mjs",
+    "certify:seo": "node scripts/seo-certification.mjs"
+  },
+  "dependencies": {
+    "@heygen/liveavatar-web-sdk": "0.0.18",
+    "@vitejs/plugin-react": "^6.0.3",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "react-router-dom": "^7.18.1",
+    "vite": "^8.1.4"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@types/node": "^26.1.1",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
+  }
+}

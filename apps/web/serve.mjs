@@ -1,12 +1,74 @@
 import { createReadStream, existsSync, statSync } from "node:fs";
-import { createServer } from "node:http";
+import { createServer, request as httpRequest } from "node:http";
+import { request as httpsRequest } from "node:https";
 import { extname, isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
+
+import {
+  classifyCompanyAppHost,
+  isValidExternalWebsiteHost,
+  parseLegacyTenantRedirects,
+} from "./tenant-host.mjs";
 
 const port = Number.parseInt(process.env.WEB_PORT ?? "8080", 10);
 const publicDirectory = resolve(process.env.WEB_ROOT ?? "dist");
+/**
+ * Same-origin API proxy, mirroring `apps/platform-web/serve.mjs`. The session
+ * cookie is HttpOnly `SameSite=Lax` by design, so the API must be reachable
+ * under the portal's own origin — exactly what the Vite dev server already
+ * does locally. Two headers matter on the way through:
+ *   - Host is rewritten to the API's own name, because hosting routers
+ *     direct requests by Host and would refuse the portal's.
+ *   - `x-blueline-tenant-host` carries the ORIGINAL host, because that is
+ *     how the API tells WHICH Company portal (`danaapp.tawseelhub.com`,
+ *     `xyzapp.tawseelhub.com`, ...) a sign-in belongs to.
+ * Set API_PROXY_TARGET to the API service origin and build the SPA with the
+ * relative VITE_API_BASE_URL=/api/v1.
+ */
+const apiProxyTarget = process.env.API_PROXY_TARGET;
+const proxyTargetUrl = apiProxyTarget === undefined ? undefined : new URL(apiProxyTarget);
+const tenantHostSuffix = process.env.WEB_TENANT_HOST_SUFFIX;
+const allowCustomDomains = process.env.WEB_ALLOW_CUSTOM_DOMAINS === "true";
+const legacyTenantRedirects = parseLegacyTenantRedirects(process.env.WEB_LEGACY_TENANT_REDIRECTS);
+
+function proxyApi(request, response, upstreamPath = request.url) {
+  const makeRequest = proxyTargetUrl.protocol === "https:" ? httpsRequest : httpRequest;
+  const upstream = makeRequest(
+    {
+      headers: {
+        ...request.headers,
+        host: proxyTargetUrl.host,
+        "x-blueline-tenant-host": request.headers.host ?? "",
+        "x-forwarded-proto": "https",
+      },
+      hostname: proxyTargetUrl.hostname,
+      method: request.method,
+      path: upstreamPath,
+      port: proxyTargetUrl.port === "" ? undefined : Number(proxyTargetUrl.port),
+    },
+    (upstreamResponse) => {
+      response.writeHead(upstreamResponse.statusCode ?? 502, upstreamResponse.headers);
+      upstreamResponse.pipe(response);
+    },
+  );
+  upstream.on("error", () => {
+    if (!response.headersSent) response.writeHead(502, { "Content-Type": "application/json" });
+    response.end('{"error":{"code":"bad_gateway","message":"API upstream unreachable"}}');
+  });
+  request.pipe(upstream);
+}
 const connectSources = process.env.WEB_CONNECT_SRC ?? "'self' https:";
 if (/[;\r\n]/.test(connectSources)) {
   throw new Error("WEB_CONNECT_SRC contains invalid CSP characters");
+}
+// Only authenticated Platform origins may embed the Company Web renderer,
+// and only when the explicit draft-preview query flag is present. The Render
+// test origin is included because it is the deployed Platform Administration
+// host used to review drafts before production publication.
+const draftPreviewAncestors =
+  process.env.WEB_DRAFT_PREVIEW_ANCESTORS ??
+  "'self' https://platform.tawseelhub.com https://bluelinegpt-platform-test.onrender.com http://127.0.0.1:5176 http://localhost:5176";
+if (/[;\r\n]/.test(draftPreviewAncestors)) {
+  throw new Error("WEB_DRAFT_PREVIEW_ANCESTORS contains invalid CSP characters");
 }
 const contentTypes = new Map([
   [".css", "text/css; charset=utf-8"],
@@ -19,14 +81,22 @@ const contentTypes = new Map([
   [".webp", "image/webp"],
 ]);
 
-function addSecurityHeaders(response) {
+function addSecurityHeaders(response, requestUrl = "/") {
+  const isDraftPreview =
+    new URL(requestUrl, "http://localhost").searchParams.get("websiteDraftPreview") === "1";
   response.setHeader(
     "Content-Security-Policy",
-    `default-src 'self'; connect-src ${connectSources}; img-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'`,
+    // img-src includes blob:, not just 'self' data:: every private asset
+    // (Company logo, Trader Store product images, website media) is fetched
+    // through an authenticated endpoint and rendered via
+    // URL.createObjectURL(blob) -- there's no public URL for any of these by
+    // design. This is the CSP that actually governs those <img> renders (the
+    // document's own header, not the API's), so it must allow blob: too.
+    `default-src 'self'; connect-src ${connectSources}; img-src 'self' data: blob:; object-src 'none'; base-uri 'self'; frame-ancestors ${isDraftPreview ? draftPreviewAncestors : "'none'"}`,
   );
   response.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
   response.setHeader("X-Content-Type-Options", "nosniff");
-  response.setHeader("X-Frame-Options", "DENY");
+  if (!isDraftPreview) response.setHeader("X-Frame-Options", "DENY");
 }
 
 function resolveAsset(requestUrl) {
@@ -44,7 +114,41 @@ function resolveAsset(requestUrl) {
 }
 
 const server = createServer((request, response) => {
-  addSecurityHeaders(response);
+  const host = request.headers.host;
+  const legacyRedirect =
+    host === undefined ? undefined : legacyTenantRedirects.get(host.split(":")[0].toLowerCase());
+  if (legacyRedirect !== undefined) {
+    response.writeHead(307, {
+      "Cache-Control": "no-store",
+      Location: `${legacyRedirect}${request.url ?? "/"}`,
+    });
+    response.end();
+    return;
+  }
+  const hostOutcome = classifyCompanyAppHost(host, tenantHostSuffix);
+  if (
+    hostOutcome === "rejected" &&
+    !(allowCustomDomains && isValidExternalWebsiteHost(host, tenantHostSuffix))
+  ) {
+    addSecurityHeaders(response, request.url);
+    response.writeHead(404, { "Cache-Control": "no-store", "Content-Type": "application/json" });
+    response.end(
+      '{"error":{"code":"company_app_host_not_configured","message":"This hostname is not configured for the Delivery Company application."}}',
+    );
+    return;
+  }
+  if (proxyTargetUrl !== undefined && (request.url ?? "").startsWith("/api/")) {
+    proxyApi(request, response);
+    return;
+  }
+  if (
+    proxyTargetUrl !== undefined &&
+    (request.url === "/sitemap.xml" || request.url?.startsWith("/sitemap.xml?"))
+  ) {
+    proxyApi(request, response, "/api/v1/public/company-website/sitemap.xml");
+    return;
+  }
+  addSecurityHeaders(response, request.url);
   if (request.url === "/healthz") {
     response.writeHead(200, { "Cache-Control": "no-store", "Content-Type": "application/json" });
     response.end('{"status":"ok"}');

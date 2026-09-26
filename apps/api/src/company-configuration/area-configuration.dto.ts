@@ -1,3 +1,4 @@
+import { Transform } from "class-transformer";
 import {
   IsBoolean,
   IsIn,
@@ -77,11 +78,13 @@ export class AreaListQueryDto {
   public status?: "all" | "active" | "disabled";
 
   @IsOptional()
+  @Transform(({ value }: { value: unknown }) => (value === undefined ? value : Number(value)))
   @IsInt()
   @Min(1)
   public page?: number;
 
   @IsOptional()
+  @Transform(({ value }: { value: unknown }) => (value === undefined ? value : Number(value)))
   @IsInt()
   @IsIn([...areaPageSizes])
   public pageSize?: number;
@@ -102,16 +105,21 @@ export class AreaSearchQueryDto {
    * historical record pass false so a disabled Area still resolves.
    */
   @IsOptional()
+  @Transform(({ value }: { value: unknown }) =>
+    value === "true" ? true : value === "false" ? false : value,
+  )
   @IsBoolean()
   public activeOnly?: boolean;
 
   @IsOptional()
+  @Transform(({ value }: { value: unknown }) => (value === undefined ? value : Number(value)))
   @IsInt()
   @Min(1)
   @Max(50)
   public limit?: number;
 
   @IsOptional()
+  @Transform(({ value }: { value: unknown }) => (value === undefined ? value : Number(value)))
   @IsInt()
   @Min(0)
   public offset?: number;

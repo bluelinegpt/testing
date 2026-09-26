@@ -73,8 +73,8 @@ describe.skipIf(!runConcurrencyTests)("driver cash reconciliation concurrency", 
         )
       `.execute(transaction);
       await sql`
-        insert into company_bank_accounts (id, company_id, bank_name, account_name)
-        values (${bankAccountId}::uuid, ${companyId}::uuid, 'Race Bank', 'Race Account')
+        insert into company_bank_accounts (id, company_id, bank_account_code, bank_name, account_name)
+        values (${bankAccountId}::uuid, ${companyId}::uuid, ${`RACE-${suffix}`}, 'Race Bank', 'Race Account')
       `.execute(transaction);
       await sql`
         insert into expense_types (company_id, code, name_en, display_name)
@@ -138,8 +138,14 @@ describe.skipIf(!runConcurrencyTests)("driver cash reconciliation concurrency", 
           trader_gross_payable, trader_paid_service_fee, trader_deductions,
           trader_charges, trader_adjustments, trader_net_payable,
           delivery_status, driver_reconciliation_status, trader_settlement_status,
+          -- A zero Service Fee is lawful only with a recorded reason
+          -- (orders_zero_service_fee_reason_check, added by
+          -- 20260805100000_order_service_fee_override_reason). These fixtures
+          -- configure no Trader/Area pricing, so the honest reason is the
+          -- repository's own configured-zero marker. Amounts are unchanged, so
+          -- every assertion in this suite still measures what it always did.
           delivered_at, pricing_provenance_status, final_service_fee_snapshot,
-          customer_provenance_status
+          customer_provenance_status, service_fee_override_reason
         ) values (
           ${orderId}::uuid, ${fixture.companyId}::uuid, ${`CON-${suffix}`}, current_date,
           ${traderId}::uuid, ${areaId}::uuid, ${fixture.accountId}::uuid,
@@ -147,7 +153,8 @@ describe.skipIf(!runConcurrencyTests)("driver cash reconciliation concurrency", 
           'Customer', '971500000004', 'Address', 1, 'customer_pays_cod_and_fee',
           ${collected}, ${collected}, 7.5, ${collected}, 0, 0, 0, 0, ${collected},
           'assigned_to_driver', 'not_applicable', 'not_eligible', null,
-          'legacy_unattributed', 0, 'legacy_unattributed'
+          'legacy_unattributed', 0, 'legacy_unattributed',
+          'Configured Trader/Area price is zero'
         )
       `.execute(transaction);
       await sql`

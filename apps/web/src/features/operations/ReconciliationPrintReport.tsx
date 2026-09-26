@@ -41,7 +41,9 @@ export function ReconciliationPrintDocument({
   return (
     <article aria-label={t("operations.printReportTitle")} className="print-document">
       <header className="print-document-header">
-        <p className="print-company" data-print="company">{companyName}</p>
+        <p className="print-company" data-print="company">
+          {companyName}
+        </p>
         <h1>{t("operations.printReportTitle")}</h1>
         <dl className="print-meta">
           <div>

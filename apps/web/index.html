@@ -1,10 +1,16 @@
 <!doctype html>
-<html lang="en" dir="ltr">
+<!-- en-AE, not bare "en": native <input type="date"> fields render
+     dd/mm/yyyy vs mm/dd/yyyy based on this attribute, and React overwrites
+     it with the same tag once it mounts (see htmlLangForLocale in
+     src/localization/locale.ts) -- kept here too so date inputs read
+     correctly even in the instant before that. -->
+<html lang="en-AE" dir="ltr">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#f4f7f8" />
-    <title>BluelineGPT</title>
+    <link rel="icon" type="image/png" href="/favicon.png" />
+    <title>TawseelHub</title>
   </head>
   <body>
     <div id="root"></div>

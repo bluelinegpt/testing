@@ -25,10 +25,7 @@ export class AccountingController {
 
   @ApiOperation({ summary: "Read the active Company's Chart of Accounts" })
   @Get("accounts")
-  public accounts(
-    @Query("activeOnly") activeOnly?: string,
-    @Query("search") search?: string,
-  ) {
+  public accounts(@Query("activeOnly") activeOnly?: string, @Query("search") search?: string) {
     return this.queries.accounts({
       ...(activeOnly === undefined ? {} : { activeOnly }),
       ...(search === undefined ? {} : { search }),

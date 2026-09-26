@@ -61,4 +61,3 @@ export interface AccountingMappingAreaReadiness {
   readonly ready: boolean;
   readonly requiredMappingKeys: readonly string[];
 }
-

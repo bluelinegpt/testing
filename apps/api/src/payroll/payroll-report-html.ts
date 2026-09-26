@@ -200,8 +200,7 @@ function meta(items: readonly [string, string | null][]): string {
 function summary(items: readonly [string, string][]): string {
   return `<section class="summary">${items
     .map(
-      ([label, value]) =>
-        `<div><span>${escapeHtml(label)}</span><strong>${value}</strong></div>`,
+      ([label, value]) => `<div><span>${escapeHtml(label)}</span><strong>${value}</strong></div>`,
     )
     .join("")}</section>`;
 }
@@ -256,10 +255,7 @@ function document(
   );
 }
 
-export function buildPayslipHtml(
-  data: PayslipReportData,
-  language: PayrollReportLanguage,
-): string {
+export function buildPayslipHtml(data: PayslipReportData, language: PayrollReportLanguage): string {
   const l = labels[language];
   const earningAdjustments = data.adjustments.filter((item) => item.direction === "earning");
   const deductions = data.adjustments.filter((item) => item.direction === "deduction");
@@ -290,7 +286,12 @@ export function buildPayslipHtml(
       [l.payrollPeriod, data.header.periodReference],
       [l.payrollMonth, data.header.payrollMonth],
       [l.payslipReference, data.header.payslipReference],
-      [l.employee, language === "ar" ? (data.header.employeeNameAr ?? data.header.employeeName) : data.header.employeeName],
+      [
+        l.employee,
+        language === "ar"
+          ? (data.header.employeeNameAr ?? data.header.employeeName)
+          : data.header.employeeName,
+      ],
       [l.employeeNumber, data.header.employeeNumber],
       [l.employmentType, data.header.employmentType],
       [l.department, data.header.department],
@@ -313,10 +314,13 @@ export function buildPayslipHtml(
       [l.outstanding, money(data.header.outstanding)],
       [l.paymentDate, data.payment.paymentDate],
       [l.voucher, data.payment.cashVoucherReference],
-      [l.acknowledgement, data.payment.acknowledgementType === null
-        ? null
-        : (statusLabels[language][data.payment.acknowledgementType] ??
-          data.payment.acknowledgementType.replaceAll("_", " "))],
+      [
+        l.acknowledgement,
+        data.payment.acknowledgementType === null
+          ? null
+          : (statusLabels[language][data.payment.acknowledgementType] ??
+            data.payment.acknowledgementType.replaceAll("_", " ")),
+      ],
       [l.paidBy, data.payment.paidBy],
       [l.notes, data.payment.notes],
       [l.preparedBy, data.header.preparedBy],
@@ -336,17 +340,35 @@ export function buildPayrollRegisterHtml(
       (line, index) =>
         `<tr><td>${index + 1}</td><td>${escapeHtml(line.employeeNumber)}</td>` +
         `<td>${escapeHtml(line.employeeName)}</td><td>${escapeHtml(line.employmentType)}</td>` +
-        [line.basicSalary, line.allowances, line.driverCommission, line.earningAdjustments,
-          line.deductions, line.netSalary, line.paid, line.outstanding]
+        [
+          line.basicSalary,
+          line.allowances,
+          line.driverCommission,
+          line.earningAdjustments,
+          line.deductions,
+          line.netSalary,
+          line.paid,
+          line.outstanding,
+        ]
           .map((value) => `<td class="num">${money(value)}</td>`)
           .join("") +
         `<td>${status(line.status, language)}</td></tr>`,
     )
     .join("");
   const headings = [
-    l.line, l.employeeNumber, l.employee, l.employmentType, l.basicSalary, l.allowances,
-    l.driverCommission, l.earningAdjustments, l.deductions, l.netSalary, l.paid,
-    l.outstanding, l.status,
+    l.line,
+    l.employeeNumber,
+    l.employee,
+    l.employmentType,
+    l.basicSalary,
+    l.allowances,
+    l.driverCommission,
+    l.earningAdjustments,
+    l.deductions,
+    l.netSalary,
+    l.paid,
+    l.outstanding,
+    l.status,
   ];
   const body =
     companyHeader(data.company, l.payrollRegister, language) +
@@ -406,17 +428,28 @@ export function buildPayrollPaymentReportHtml(
       [l.totalPayment, money(data.header.totalAmount)],
       [l.voucher, data.header.cashVoucherReference],
       [l.externalReference, data.header.externalReference],
-      [l.acknowledgement, statusLabels[language][data.header.acknowledgementType] ??
-        data.header.acknowledgementType.replaceAll("_", " ")],
+      [
+        l.acknowledgement,
+        statusLabels[language][data.header.acknowledgementType] ??
+          data.header.acknowledgementType.replaceAll("_", " "),
+      ],
       [l.status, status(data.header.status, language)],
       [l.paidBy, data.header.paidBy],
       [l.generatedAt, data.generatedAt],
     ]) +
     reversal +
     `<table><thead><tr>${[
-      l.line, l.employeeNumber, l.employee, l.netSalary, l.previouslyPaid,
-      l.amountPaidNow, l.remainingOutstanding, l.status,
-    ].map((item) => `<th>${escapeHtml(item)}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table>` +
+      l.line,
+      l.employeeNumber,
+      l.employee,
+      l.netSalary,
+      l.previouslyPaid,
+      l.amountPaidNow,
+      l.remainingOutstanding,
+      l.status,
+    ]
+      .map((item) => `<th>${escapeHtml(item)}</th>`)
+      .join("")}</tr></thead><tbody>${rows}</tbody></table>` +
     summary([
       [l.employeeCount, String(data.summary.employeeCount)],
       [l.totalPayment, money(data.summary.totalPayment)],

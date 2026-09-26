@@ -166,7 +166,19 @@ export class TraderAccountStatementService {
                o.notes
           from orders o
          where o.company_id = ${companyId}::uuid and o.trader_id = ${traderId}::uuid
-           and o.delivery_status = 'delivered'
+           -- 'closed' is the terminal state a delivered Order reaches once its
+           -- Driver cash is reconciled and its Trader Settlement is complete
+           -- (see changeOrderStatus's delivered -> closed transition). It
+           -- must stay visible here or a fully-settled Order silently drops
+           -- out of this statement's payable/opening-balance math while the
+           -- Settlement payment that paid it is still counted independently
+           -- -- producing a phantom negative Closing Balance for a Trader who
+           -- in fact owes nothing.
+           and o.delivery_status in ('delivered', 'closed')
+           -- A delivered parcel is still provisional until its Driver cash is
+           -- reconciled. Do not present that provisional amount as money owed
+           -- by the Company; it may still enter a return workflow.
+           and o.driver_reconciliation_status in ('reconciled', 'not_applicable')
            and (o.delivered_at at time zone 'Asia/Dubai')::date between ${from}::date and ${to}::date
         union all
         select s.id, 'payment'::text, s.business_date::text, s.created_at::text, 2,
@@ -218,7 +230,10 @@ export class TraderAccountStatementService {
                coalesce(sum(o.trader_outstanding_balance), 0)::text as "outstandingAmount"
           from orders o
          where o.company_id = ${companyId}::uuid and o.trader_id = ${traderId}::uuid
-           and o.delivery_status = 'delivered'
+           -- Same reason as the source query above: 'closed' is a delivered
+           -- Order's own terminal state, not a different lifecycle.
+           and o.delivery_status in ('delivered', 'closed')
+           and o.driver_reconciliation_status in ('reconciled', 'not_applicable')
            and (o.delivered_at at time zone 'Asia/Dubai')::date between ${from}::date and ${to}::date
       `.execute(this.database)
     ).rows[0];
@@ -307,7 +322,9 @@ export class TraderAccountStatementService {
       settlements.push({ ...settlement, allocations });
     }
     const reversedSettlementNumbers = new Set(
-      settlements.filter((settlement) => settlement.isReversed).map((settlement) => settlement.settlementNumber),
+      settlements
+        .filter((settlement) => settlement.isReversed)
+        .map((settlement) => settlement.settlementNumber),
     );
     let running = new Decimal(opening);
     let payable = new Decimal(0);
@@ -350,28 +367,29 @@ export class TraderAccountStatementService {
         type: row.type,
       };
     });
-    const transactions = allTransactions.filter(
-      (row) => {
-        if (query.reversedOnly === true && row.type !== "reversal") return false;
-        if (query.paidOnly === true && !["payment", "reversal"].includes(row.type)) return false;
-        if (query.outstandingOnly === true && (row.type !== "order" || !row.isOutstanding)) return false;
-        if (
-          query.settlementStatus === "reversed" &&
-          row.type !== "reversal" &&
-          !(row.type === "payment" && reversedSettlementNumbers.has(row.reference))
-        ) return false;
-        if (
-          query.settlementStatus === "confirmed" &&
-          (row.type === "reversal" ||
-            (row.type === "payment" && reversedSettlementNumbers.has(row.reference)))
-        ) return false;
-        return (
-          query.transactionType === undefined ||
-          query.transactionType === "all" ||
-          row.type === query.transactionType
-        );
-      },
-    );
+    const transactions = allTransactions.filter((row) => {
+      if (query.reversedOnly === true && row.type !== "reversal") return false;
+      if (query.paidOnly === true && !["payment", "reversal"].includes(row.type)) return false;
+      if (query.outstandingOnly === true && (row.type !== "order" || !row.isOutstanding))
+        return false;
+      if (
+        query.settlementStatus === "reversed" &&
+        row.type !== "reversal" &&
+        !(row.type === "payment" && reversedSettlementNumbers.has(row.reference))
+      )
+        return false;
+      if (
+        query.settlementStatus === "confirmed" &&
+        (row.type === "reversal" ||
+          (row.type === "payment" && reversedSettlementNumbers.has(row.reference)))
+      )
+        return false;
+      return (
+        query.transactionType === undefined ||
+        query.transactionType === "all" ||
+        row.type === query.transactionType
+      );
+    });
     const branding = await this.companyProfile.branding();
     const logoDataUri = branding.hasLogo
       ? await this.companyProfile
@@ -383,12 +401,11 @@ export class TraderAccountStatementService {
       .toISOString()
       .slice(0, 10);
     const outstandingAtEnd = await this.balanceBefore(companyId, traderId, dayAfterTo);
-    const warnings =
-      this.money(outstandingAtEnd).equals(this.money(running))
-        ? []
-        : [
-            `Data-integrity warning: event closing balance ${this.money(running).toFixed(2)} does not match the as-of outstanding balance ${this.money(outstandingAtEnd).toFixed(2)}.`,
-          ];
+    const warnings = this.money(outstandingAtEnd).equals(this.money(running))
+      ? []
+      : [
+          `Data-integrity warning: event closing balance ${this.money(running).toFixed(2)} does not match the as-of outstanding balance ${this.money(outstandingAtEnd).toFixed(2)}.`,
+        ];
     return {
       company: { logoDataUri, nameAr: branding.nameAr, nameEn: branding.nameEn },
       generatedAt: new Intl.DateTimeFormat("en-GB", {
@@ -462,7 +479,10 @@ export class TraderAccountStatementService {
         select (
           coalesce((select sum(o.trader_net_payable) from orders o
             where o.company_id = ${companyId}::uuid and o.trader_id = ${traderId}::uuid
-              and o.delivery_status = 'delivered'
+              -- Same reason as statement()'s own source query: a Closed
+              -- Order still owes/owed its Trader payable history.
+              and o.delivery_status in ('delivered', 'closed')
+              and o.driver_reconciliation_status in ('reconciled', 'not_applicable')
               and (o.delivered_at at time zone 'Asia/Dubai')::date < ${from}::date), 0)
           - coalesce((select sum(p.amount) from trader_settlements s
               join trader_settlement_payments p on p.settlement_id = s.id and p.company_id = s.company_id
@@ -511,7 +531,11 @@ export class TraderAccountStatementService {
     const permissions = this.identities.current().permissions;
     const required = Array.isArray(permission) ? permission : [permission];
     if (!permissions.has("users_roles.manage") && !required.some((key) => permissions.has(key))) {
-      throw new ApplicationException("permission_denied", "Permission denied", HttpStatus.FORBIDDEN);
+      throw new ApplicationException(
+        "permission_denied",
+        "Permission denied",
+        HttpStatus.FORBIDDEN,
+      );
     }
   }
 }

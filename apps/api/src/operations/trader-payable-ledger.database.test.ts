@@ -71,13 +71,13 @@ describe.skipIf(!runDatabaseTests)("Trader payable ledger schema", () => {
           // A delivered Order that owes the Trader AED 100.00. Legacy provenance keeps the seed
           // minimal (no Customer/pricing rows) while satisfying every orders CHECK.
           await sql`insert into orders(
-              id, company_id, order_number, order_date, trader_id, area_id, created_by_account_id,
+              service_fee_override_reason, id, company_id, order_number, order_date, trader_id, area_id, created_by_account_id,
               customer_name, customer_mobile_number, customer_address, package_count, payment_condition,
               final_service_fee_snapshot, customer_provenance_status, pricing_provenance_status,
               trader_gross_payable, trader_net_payable,
               delivery_status, driver_reconciliation_status, trader_settlement_status, return_status
             ) values(
-              ${order}::uuid, ${company}::uuid, 'ORD-LEDGER-1', current_date, ${trader}::uuid, ${area}::uuid, ${actor}::uuid,
+              'Zero configured Service Fee (fixture)', ${order}::uuid, ${company}::uuid, 'ORD-LEDGER-1', current_date, ${trader}::uuid, ${area}::uuid, ${actor}::uuid,
               'Ledger Customer', '971509999999', 'Ledger address', 1, 'customer_pays_cod_and_fee',
               0, 'legacy_unattributed', 'legacy_unattributed',
               100, 100,
@@ -106,7 +106,9 @@ describe.skipIf(!runDatabaseTests)("Trader payable ledger schema", () => {
                 where id = ${order}::uuid`.execute(transaction);
           const outstanding = async () =>
             (
-              await sql<{ v: string }>`select trader_outstanding_balance::text as v from orders where id = ${order}::uuid`.execute(
+              await sql<{
+                v: string;
+              }>`select trader_outstanding_balance::text as v from orders where id = ${order}::uuid`.execute(
                 transaction,
               )
             ).rows[0]!.v;
@@ -180,13 +182,13 @@ describe.skipIf(!runDatabaseTests)("Trader payable ledger schema", () => {
             transaction,
           );
           await sql`insert into orders(
-              id, company_id, order_number, order_date, trader_id, area_id, created_by_account_id,
+              service_fee_override_reason, id, company_id, order_number, order_date, trader_id, area_id, created_by_account_id,
               customer_name, customer_mobile_number, customer_address, package_count, payment_condition,
               final_service_fee_snapshot, customer_provenance_status, pricing_provenance_status,
               trader_gross_payable, trader_net_payable,
               delivery_status, driver_reconciliation_status, trader_settlement_status, return_status
             ) values(
-              ${order}::uuid, ${company}::uuid, 'ORD-TRIGGER-1', current_date, ${trader}::uuid, ${area}::uuid, ${actor}::uuid,
+              'Zero configured Service Fee (fixture)', ${order}::uuid, ${company}::uuid, 'ORD-TRIGGER-1', current_date, ${trader}::uuid, ${area}::uuid, ${actor}::uuid,
               'Trigger Customer', '971509999999', 'Trigger address', 1, 'customer_pays_cod_and_fee',
               0, 'legacy_unattributed', 'legacy_unattributed',
               100, 100,
@@ -230,7 +232,9 @@ describe.skipIf(!runDatabaseTests)("Trader payable ledger schema", () => {
           // ("Trader settlement contains an ineligible or wrong-Trader Order")
           // because the old trigger demanded trader_settlement_status = 'unsettled'
           // exactly. It must now succeed.
-          await expect(confirmSettlement(settlementTwo, "SET-TRIGGER-002", 40)).resolves.toBeUndefined();
+          await expect(
+            confirmSettlement(settlementTwo, "SET-TRIGGER-002", 40),
+          ).resolves.toBeUndefined();
 
           const confirmed = await sql<{ status: string }>`
             select status from trader_settlements where id = ${settlementTwo}::uuid

@@ -1,0 +1,343 @@
+ M .github/workflows/ci.yml
+ M .gitignore
+ M Documentation/CLAUDE_CODE_HANDOVER.md
+ M Documentation/PostgreSQL_Schema_Audit_2026-07-15.md
+ M Documentation/STAGE_6_CHECKPOINT_2026-07-19.md
+ M apps/api/package.json
+ M apps/api/src/accounting/account-mapping.resolver.ts
+ M apps/api/src/accounting/accounting-error.mapper.ts
+ M apps/api/src/accounting/accounting-event-query.service.ts
+ M apps/api/src/accounting/accounting-event.processor.ts
+ M apps/api/src/accounting/accounting-foundation.repository.ts
+ M apps/api/src/accounting/accounting-foundation.service.ts
+ M apps/api/src/accounting/accounting-integration.controller.ts
+ M apps/api/src/accounting/accounting-integration.dto.ts
+ M apps/api/src/accounting/accounting-management.controller.ts
+ M apps/api/src/accounting/accounting-management.service.ts
+ M apps/api/src/accounting/accounting-operation.support.ts
+ M apps/api/src/accounting/accounting-ownership.matrix.ts
+ M apps/api/src/accounting/accounting-query.service.ts
+ M apps/api/src/accounting/accounting-report-export.service.ts
+ M apps/api/src/accounting/accounting-report-html.ts
+ M apps/api/src/accounting/accounting-report.controller.ts
+ M apps/api/src/accounting/accounting-report.dto.ts
+ M apps/api/src/accounting/accounting-report.service.ts
+ M apps/api/src/accounting/accounting-setup.constants.ts
+ M apps/api/src/accounting/accounting-setup.controller.ts
+ M apps/api/src/accounting/accounting-setup.dto.ts
+ M apps/api/src/accounting/accounting-setup.service.ts
+ M apps/api/src/accounting/accounting-xlsx.ts
+ M apps/api/src/accounting/accounting.constants.ts
+ M apps/api/src/accounting/accounting.contracts.ts
+ M apps/api/src/accounting/accounting.controller.ts
+ M apps/api/src/accounting/accounting.dto.ts
+ M apps/api/src/accounting/accounting.guards.ts
+ M apps/api/src/accounting/accounting.module.ts
+ M apps/api/src/accounting/automatic-posting.service.ts
+ M apps/api/src/accounting/cash-bank-management.service.ts
+ M apps/api/src/accounting/cash-bank-query.service.ts
+ M apps/api/src/accounting/cash-bank.controller.ts
+ M apps/api/src/accounting/cash-bank.dto.ts
+ M apps/api/src/accounting/fiscal-calendar.service.ts
+ M apps/api/src/accounting/general-expense-accounting-event.writer.ts
+ M apps/api/src/accounting/general-expense-payment.service.ts
+ M apps/api/src/accounting/general-expense-query.service.ts
+ M apps/api/src/accounting/general-expense.controller.ts
+ M apps/api/src/accounting/general-expense.dto.ts
+ M apps/api/src/accounting/general-expense.service.ts
+ M apps/api/src/accounting/manual-journal.controller.ts
+ M apps/api/src/accounting/manual-journal.service.ts
+ M apps/api/src/accounting/opening-balance.controller.ts
+ M apps/api/src/accounting/opening-balance.service.ts
+ M apps/api/src/accounting/operational-journal-posting.service.ts
+ M apps/api/src/accounting/operational-source.loader.ts
+ M apps/api/src/app.module.ts
+ M apps/api/src/authentication/authentication.module.ts
+ M apps/api/src/authentication/authentication.service.test.ts
+ M apps/api/src/bootstrap/create-application.ts
+ M apps/api/src/company-configuration/area-configuration.controller.ts
+ M apps/api/src/company-configuration/area-configuration.database.test.ts
+ M apps/api/src/company-configuration/area-configuration.service.ts
+ M apps/api/src/company-configuration/company-configuration.controller.ts
+ M apps/api/src/company-configuration/company-configuration.dto.ts
+ M apps/api/src/company-configuration/company-configuration.module.ts
+ M apps/api/src/company-configuration/company-configuration.service.ts
+ M apps/api/src/company-configuration/customer-configuration.database.test.ts
+ M apps/api/src/company-configuration/customer-configuration.dto.ts
+ M apps/api/src/company-configuration/employee-driver-linkage.database.test.ts
+ M apps/api/src/company-configuration/trader-configuration.controller.ts
+ M apps/api/src/company-configuration/trader-configuration.database.test.ts
+ M apps/api/src/company-configuration/trader-configuration.dto.test.ts
+ M apps/api/src/company-configuration/trader-configuration.dto.ts
+ M apps/api/src/company-configuration/trader-configuration.service.ts
+ M apps/api/src/company-configuration/trader-service-pricing.database.test.ts
+ M apps/api/src/company-configuration/workforce-configuration.controller.ts
+ M apps/api/src/company-configuration/workforce-configuration.dto.ts
+ M apps/api/src/company-configuration/workforce-configuration.service.ts
+ M apps/api/src/company-profile/account-preferences.controller.ts
+ M apps/api/src/company-profile/account-preferences.service.ts
+ M apps/api/src/company-profile/company-profile.database.test.ts
+ M apps/api/src/company-profile/company-profile.service.ts
+ M apps/api/src/files/image-signature.ts
+ M apps/api/src/infrastructure/database/database.types.ts
+ M apps/api/src/infrastructure/database/integrity.database.test.ts
+ M apps/api/src/infrastructure/database/verify-schema.ts
+ M apps/api/src/operations/concurrency-harness.ts
+ M apps/api/src/operations/concurrency-isolation.test.ts
+ M apps/api/src/operations/driver-cash-reconciliation.concurrency.test.ts
+ M apps/api/src/operations/driver-cash-reconciliation.database.test.ts
+ M apps/api/src/operations/driver-cash-reconciliation.service.ts
+ M apps/api/src/operations/driver-collection-pdf.service.test.ts
+ M apps/api/src/operations/driver-collection-report-html.test.ts
+ M apps/api/src/operations/driver-collection-report-html.ts
+ M apps/api/src/operations/driver-shipment-manifest-html.test.ts
+ M apps/api/src/operations/driver-shipment-manifest-html.ts
+ M apps/api/src/operations/driver-shipment-manifest-pdf.test.ts
+ M apps/api/src/operations/driver-shipment-manifest.service.ts
+ M apps/api/src/operations/operations-history.regression.test.ts
+ M apps/api/src/operations/operations-history.writer.ts
+ M apps/api/src/operations/operations.controller.ts
+ M apps/api/src/operations/operations.dto.ts
+ M apps/api/src/operations/operations.module.ts
+ M apps/api/src/operations/operations.service.ts
+ M apps/api/src/operations/order-financial-model.test.ts
+ M apps/api/src/operations/reconciliation-http.database.test.ts
+ M apps/api/src/operations/trader-account-statement.service.ts
+ M apps/api/src/operations/trader-payable-ledger.database.test.ts
+ M apps/api/src/operations/trader-receivable-report-html.ts
+ M apps/api/src/operations/trader-receivable.controller.ts
+ M apps/api/src/operations/trader-receivable.service.ts
+ M apps/api/src/operations/trader-settlement-http.database.test.ts
+ M apps/api/src/operations/trader-settlement-pdf.test.ts
+ M apps/api/src/operations/trader-settlement-report-html.test.ts
+ M apps/api/src/operations/trader-settlement-report-html.ts
+ M apps/api/src/operations/trader-settlement.database.test.ts
+ M apps/api/src/operations/trader-settlement.service.ts
+ M apps/api/src/payroll/outsourced-driver-fee-foundation.repository.ts
+ M apps/api/src/payroll/outsourced-driver-fee-foundation.ts
+ M apps/api/src/payroll/outsourced-driver-fee-report-html.ts
+ M apps/api/src/payroll/outsourced-driver-fee-report.service.ts
+ M apps/api/src/payroll/outsourced-driver-fee.dto.ts
+ M apps/api/src/payroll/outsourced-driver-fee.service.ts
+ M apps/api/src/payroll/payroll-adjustment.service.ts
+ M apps/api/src/payroll/payroll-calculation.service.ts
+ M apps/api/src/payroll/payroll-foundation.guards.ts
+ M apps/api/src/payroll/payroll-operation.support.ts
+ M apps/api/src/payroll/payroll-operational.repository.ts
+ M apps/api/src/payroll/payroll-payment.service.ts
+ M apps/api/src/payroll/payroll-period.service.ts
+ M apps/api/src/payroll/payroll-query.service.ts
+ M apps/api/src/payroll/payroll-report-html.ts
+ M apps/api/src/payroll/payroll-report.service.ts
+ M apps/api/src/payroll/payroll.controller.ts
+ M apps/api/src/payroll/payroll.dto.ts
+ M apps/api/src/platform/reconciliation-demo-seed.database.test.ts
+ M apps/api/src/platform/reconciliation-demo-seed.ts
+ M apps/api/src/platform/run-development-company-bootstrap.ts
+ M apps/api/src/platform/run-reconciliation-demo-seed.ts
+ M apps/api/src/platform/run-uae-area-import.ts
+ M apps/api/src/platform/uae-area-import.ts
+ M apps/api/src/shared/uae-mobile.ts
+ M apps/api/src/tenancy/company-host-resolver.test.ts
+ M apps/api/src/tenancy/company-host-resolver.ts
+ M apps/api/src/users/user-administration.module.ts
+ M apps/api/src/users/user-administration.service.ts
+ M apps/api/src/users/user-business-access.controller.ts
+ M apps/api/src/users/user-business-access.dto.ts
+ M apps/api/src/users/user-business-access.service.ts
+ M apps/api/vitest.config.ts
+ M apps/mobile/README.md
+ M apps/web/src/api/contracts.ts
+ M apps/web/src/app/App.test.tsx
+ M apps/web/src/app/App.tsx
+ M apps/web/src/app/CompanyAppShell.test.tsx
+ M apps/web/src/app/CompanyAppShell.tsx
+ M apps/web/src/app/CompanyBrandingContext.tsx
+ M apps/web/src/app/CompanyWorkspace.tsx
+ M apps/web/src/app/WorkflowErrorBoundary.tsx
+ M apps/web/src/app/company-access.ts
+ M apps/web/src/components/SearchCombobox.test.tsx
+ M apps/web/src/components/SearchCombobox.tsx
+ M apps/web/src/features/accounting/AccountingComponents.tsx
+ M apps/web/src/features/accounting/AccountingOperationsPages.tsx
+ M apps/web/src/features/accounting/AccountingReportsWorkspace.tsx
+ M apps/web/src/features/accounting/AccountingResourcePage.tsx
+ M apps/web/src/features/accounting/AccountingSetupWizard.tsx
+ M apps/web/src/features/accounting/AccountingWorkspace.tsx
+ M apps/web/src/features/accounting/ExpensePaymentsPage.tsx
+ M apps/web/src/features/accounting/accounting-api.ts
+ M apps/web/src/features/accounting/accounting-types.ts
+ M apps/web/src/features/administration/BusinessAccessPanel.tsx
+ M apps/web/src/features/administration/LegacyBusinessLinkSyncPanel.tsx
+ M apps/web/src/features/administration/UserRoleConfigurationWorkspace.tsx
+ M apps/web/src/features/authentication/PasswordChangeView.tsx
+ M apps/web/src/features/configuration/AreaFormDialog.test.tsx
+ M apps/web/src/features/configuration/AreaFormDialog.tsx
+ M apps/web/src/features/configuration/AreaSelector.test.tsx
+ M apps/web/src/features/configuration/AreaWorkspace.tsx
+ M apps/web/src/features/configuration/CompanyConfigurationWorkspace.tsx
+ M apps/web/src/features/configuration/CompanyProfileWorkspace.test.tsx
+ M apps/web/src/features/configuration/CompanyProfileWorkspace.tsx
+ M apps/web/src/features/configuration/CustomerConfigurationWorkspace.tsx
+ M apps/web/src/features/configuration/TraderConfigurationWorkspace.tsx
+ M apps/web/src/features/configuration/WorkforceConfigurationWorkspace.tsx
+ M apps/web/src/features/dashboard/DashboardWorkspace.tsx
+ M apps/web/src/features/operations/CreateOrderDialog.test.tsx
+ M apps/web/src/features/operations/CreateOrderDialog.tsx
+ M apps/web/src/features/operations/DriverCollectionsWorkspace.test.tsx
+ M apps/web/src/features/operations/DriverCollectionsWorkspace.tsx
+ M apps/web/src/features/operations/EditOrder.test.tsx
+ M apps/web/src/features/operations/OperationsWorkspace.tsx
+ M apps/web/src/features/operations/OrderAuditTrail.test.tsx
+ M apps/web/src/features/operations/OrdersModuleWorkspace.test.tsx
+ M apps/web/src/features/operations/OrdersModuleWorkspace.tsx
+ M apps/web/src/features/operations/ReconciliationPrintReport.test.tsx
+ M apps/web/src/features/operations/ReconciliationPrintReport.tsx
+ M apps/web/src/features/operations/TraderReceivablesWorkspace.tsx
+ M apps/web/src/features/operations/TraderSettlementsWorkspace.test.tsx
+ M apps/web/src/features/operations/TraderSettlementsWorkspace.tsx
+ M apps/web/src/features/operations/reconciliation-pdf.ts
+ M apps/web/src/features/operations/useIdempotencyKey.ts
+ M apps/web/src/features/payroll/OutsourcedDriverFeesWorkspace.tsx
+ M apps/web/src/features/payroll/PayrollWorkspace.tsx
+ M apps/web/src/features/portal/PortalWorkspace.tsx
+ M apps/web/src/localization/resources/ar.ts
+ M apps/web/src/localization/resources/en.ts
+ M apps/web/src/styles.css
+ M apps/web/src/utils/numeric-input.ts
+ M database/migrations/20260801180000_trader_portal_accounts_on_demand.ts
+ M database/seeds/uae-areas.json
+ M eslint.config.mjs
+ M pnpm-lock.yaml
+ M scripts/check-secrets.mjs
+?? .tmp-opening-balance-payload.json
+?? COMMUNICATION_BACKEND_CONTRACTS.md
+?? Documentation/ALDana/
+?? Documentation/Accounting/ACCOUNTING_BATCH_OPERATIONS.md
+?? Documentation/Accounting/ACCOUNTING_DASHBOARD.md
+?? Documentation/Accounting/ACCOUNTING_EVENT_LIFECYCLE.md
+?? Documentation/Accounting/ACCOUNTING_EVENT_REPROCESS.md
+?? Documentation/Accounting/ACCOUNTING_LISTS_AND_FILTERS.md
+?? Documentation/Accounting/ACCOUNTING_PERIOD_CLOSING.md
+?? Documentation/Accounting/ACCOUNTING_RELATED_RECORDS.md
+?? Documentation/Accounting/ACCOUNTING_UI_LAYOUT_STANDARD.md
+?? Documentation/Accounting/HISTORICAL_ACCOUNTING_RECOVERY.md
+?? Documentation/Company/
+?? Documentation/Operations/MOBILE_RELEASE_AND_OPERATIONS_RUNBOOK.md
+?? Documentation/Operations/MOBILE_USER_GUIDE_EN_AR.md
+?? Documentation/Orders/
+?? Documentation/Planning/MOBILE_INTEGRATION_PROMPT_11A_BASELINE_REPORT.md
+?? Documentation/Planning/MOBILE_INTEGRATION_PROMPT_11B_BASELINE_CLOSURE_REPORT.md
+?? Documentation/Planning/MOBILE_INTEGRATION_PROMPT_11C_FINAL_BASELINE_REPORT.md
+?? Documentation/Planning/MOBILE_INTEGRATION_PROMPT_11_REMEDIATION_REPORT.md
+?? Documentation/Planning/MOBILE_INTEGRATION_PROMPT_12A_INTERIM_BLOCKER_REPORT.md
+?? Documentation/Planning/MOBILE_INTEGRATION_PROMPT_12_COMMUNICATION_BACKEND_REPORT.md
+?? Documentation/Planning/MOBILE_PROMPT_10_FINAL_CERTIFICATION_REPORT.md
+?? Documentation/Planning/MOBILE_PROMPT_1_COMPLETION_REPORT.md
+?? Documentation/Planning/MOBILE_PROMPT_2_COMPLETION_REPORT.md
+?? Documentation/Planning/MOBILE_PROMPT_3_COMPLETION_REPORT.md
+?? Documentation/Planning/MOBILE_PROMPT_4_COMPLETION_REPORT.md
+?? Documentation/Planning/MOBILE_PROMPT_5_COMPLETION_REPORT.md
+?? Documentation/Planning/MOBILE_PROMPT_6_COMPLETION_REPORT.md
+?? Documentation/Planning/MOBILE_PROMPT_7_COMPLETION_REPORT.md
+?? Documentation/Planning/MOBILE_PROMPT_8_COMPLETION_REPORT.md
+?? Documentation/Planning/MOBILE_PROMPT_9_COMPLETION_REPORT.md
+?? Documentation/Testing/BACKEND_WEB_BASELINE_TESTING.md
+?? RELIABILITY_BACKEND_CONTRACTS.md
+?? apps/api/src/accounting/accounting-batch.constants.ts
+?? apps/api/src/accounting/accounting-batch.controller.ts
+?? apps/api/src/accounting/accounting-batch.dto.ts
+?? apps/api/src/accounting/accounting-batch.service.ts
+?? apps/api/src/accounting/accounting-closing-readiness.database.test.ts
+?? apps/api/src/accounting/accounting-closing-readiness.service.ts
+?? apps/api/src/accounting/accounting-closing.controller.ts
+?? apps/api/src/accounting/accounting-closing.dto.ts
+?? apps/api/src/accounting/accounting-closing.service.ts
+?? apps/api/src/accounting/accounting-closing.templates.ts
+?? apps/api/src/accounting/accounting-dashboard.controller.ts
+?? apps/api/src/accounting/accounting-dashboard.dto.ts
+?? apps/api/src/accounting/accounting-dashboard.service.ts
+?? apps/api/src/accounting/accounting-recovery.controller.ts
+?? apps/api/src/accounting/accounting-recovery.dto.ts
+?? apps/api/src/accounting/accounting-recovery.service.ts
+?? apps/api/src/accounting/accounting-reprocess-precheck.service.ts
+?? apps/api/src/accounting/accounting-year-end.service.ts
+?? apps/api/src/accounting/balance-control.controller.ts
+?? apps/api/src/accounting/balance-control.service.ts
+?? apps/api/src/accounting/balance-enforcement.coordinator.test.ts
+?? apps/api/src/accounting/balance-enforcement.coordinator.ts
+?? apps/api/src/accounting/balance-enforcement.database.test.ts
+?? apps/api/src/accounting/daily-cash-activity-csv.ts
+?? apps/api/src/accounting/daily-cash-activity.controller.ts
+?? apps/api/src/accounting/daily-cash-activity.dto.ts
+?? apps/api/src/accounting/daily-cash-activity.service.ts
+?? apps/api/src/accounting/funding-account-balance.service.ts
+?? apps/api/src/accounting/funding-account-lock.service.ts
+?? apps/api/src/accounting/payment-funding-account.service.ts
+?? apps/api/src/accounting/payment-position-csv.ts
+?? apps/api/src/accounting/payment-position.controller.ts
+?? apps/api/src/accounting/payment-position.dto.ts
+?? apps/api/src/accounting/payment-position.service.ts
+?? apps/api/src/communication/
+?? apps/api/src/company-configuration/business-day-report-sources.ts
+?? apps/api/src/company-configuration/business-day.service.ts
+?? apps/api/src/company-configuration/report-date-mode.ts
+?? apps/api/src/operations/order-accounting-classification.ts
+?? apps/api/src/payroll/employee-delivery-earning.service.ts
+?? apps/api/src/payroll/outsourced-driver-fee-balance-enforcement.database.test.ts
+?? apps/api/src/payroll/payroll-balance-enforcement.database.test.ts
+?? apps/api/src/test/
+?? apps/web/src/app/SessionAccessContext.tsx
+?? apps/web/src/app/use-route-detail.ts
+?? apps/web/src/features/accounting/AccountingDashboardPage.tsx
+?? apps/web/src/features/accounting/AccountingEventLifecyclePanels.tsx
+?? apps/web/src/features/accounting/AccountingListControls.tsx
+?? apps/web/src/features/accounting/AccountingRelatedPanel.tsx
+?? apps/web/src/features/accounting/AutomaticPostingPage.tsx
+?? apps/web/src/features/accounting/BatchOperationsPage.tsx
+?? apps/web/src/features/accounting/CashBankMovementsPage.tsx
+?? apps/web/src/features/accounting/ClosingWorkflowsPage.tsx
+?? apps/web/src/features/accounting/DailyCashActivityPage.tsx
+?? apps/web/src/features/accounting/HistoricalRecoveryPage.tsx
+?? apps/web/src/features/accounting/PaymentPositionPage.tsx
+?? apps/web/src/features/accounting/RelatedRecords.tsx
+?? apps/web/src/features/accounting/accounting-event-lifecycle.ts
+?? apps/web/src/features/accounting/accounting-focus.ts
+?? apps/web/src/features/accounting/accounting-labels.ts
+?? apps/web/src/features/accounting/accounting-related.ts
+?? apps/web/src/features/accounting/accounting-routes.ts
+?? apps/web/src/features/accounting/use-list-state.ts
+?? apps/web/src/features/communication/
+?? apps/web/src/features/configuration/BalanceControlsPanel.tsx
+?? apps/web/src/features/operations/BusinessDateFilterControls.tsx
+?? apps/web/src/features/operations/OperationalReference.tsx
+?? apps/web/src/features/operations/order-accounting-policy.ts
+?? apps/web/src/storefront/
+?? database/migrations/20260801200000_outsourced_driver_fee_trigger_branch_fix.ts
+?? database/migrations/20260802120000_communication_backend.ts
+?? database/migrations/20260802130000_communication_transport_customer_permissions.ts
+?? database/migrations/20260803100000_general_expense_reference_types.ts
+?? database/migrations/20260803110000_accounting_segregation_policy.ts
+?? database/migrations/20260804100000_journal_entries_cash_bank_source.ts
+?? database/migrations/20260804110000_operational_event_capture_without_area_gate.ts
+?? database/migrations/20260805100000_order_service_fee_override_reason.ts
+?? database/migrations/20260805110000_order_capture_skips_zero_value_orders.ts
+?? database/migrations/20260805120000_company_business_day_configuration.ts
+?? database/migrations/20260805130000_operational_confirmation_timestamps.ts
+?? database/migrations/20260805140000_employee_delivery_earnings.ts
+?? database/migrations/20260805150000_payroll_delivered_order_earnings.ts
+?? database/migrations/20260805160000_daily_cash_activity_indexes.ts
+?? database/migrations/20260805170000_payment_position_indexes.ts
+?? database/migrations/20260805180000_balance_control_policy.ts
+?? database/migrations/20260805190000_accounting_period_closing.ts
+?? database/migrations/20260805200000_payment_funding_accounts.ts
+?? database/migrations/20260805210000_drop_general_expense_header_accounts.ts
+?? database/migrations/20260805220000_trader_settlement_cash_account.ts
+?? database/migrations/20260805230000_company_cash_account_gl_unique.ts
+?? database/migrations/20260805240000_general_expense_row_cash_account.ts
+?? database/migrations/20260805250000_balance_override_audit_unique.ts
+?? database/migrations/20260805260000_payroll_foundation_guard_table_dispatch.ts
+?? database/migrations/20260805270000_accounting_batch_operations.ts
+?? database/migrations/20260805280000_historical_recovery_batch_support.ts
+?? mobile_app/
+?? ws.tmp.txt

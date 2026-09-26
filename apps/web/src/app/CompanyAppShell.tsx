@@ -5,11 +5,12 @@ import {
   FileBarChart,
   Landmark,
   Gauge,
-  Languages,
   LogOut,
   Menu,
+  MessageSquare,
   PanelLeftClose,
   PanelLeftOpen,
+  QrCode,
   Settings,
   ShieldCheck,
   Store,
@@ -19,21 +20,26 @@ import {
 } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { NavLink, useLocation } from "react-router-dom";
+import { NavLink, useLocation, useNavigate } from "react-router-dom";
 
 import type { LoginResponse } from "../api/contracts.js";
+import { MobileAppQrPanel } from "../components/MobileAppQrPanel.js";
+import { VersionBadge } from "../components/VersionBadge.js";
 import { normalizeLocale, storeLocale, type SupportedLocale } from "../localization/locale.js";
+import type { ThemePreference } from "../theme/theme-preference.js";
 import { useCompanyBranding } from "./CompanyBrandingContext.js";
 import { canAccessCompanyPath, firstAuthorizedCompanyPath } from "./company-access.js";
 
 function brandInitials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
   if (parts.length === 0) return "•";
-  return ((parts[0]?.[0] ?? "") + (parts.length > 1 ? (parts.at(-1)?.[0] ?? "") : "")).toUpperCase();
+  return (
+    (parts[0]?.[0] ?? "") + (parts.length > 1 ? (parts.at(-1)?.[0] ?? "") : "")
+  ).toUpperCase();
 }
 
 type MenuGroupId =
-  "orders" | "traders" | "drivers" | "accounting" | "configuration" | "administration";
+  "orders" | "traders" | "drivers" | "accounting" | "configuration" | "administration" | "reports";
 
 interface MenuItem {
   readonly icon?: LucideIcon;
@@ -61,7 +67,9 @@ const routeTitles: Readonly<Record<string, string>> = {
   "/reports": "nav.reports",
   "/accounting": "nav.accounting",
   "/configuration/company-profile": "nav.companyProfile",
+  "/configuration/storefront": "storefront.title",
   "/configuration/general": "nav.generalSettings",
+  "/configuration/ai-agent": "nav.websiteAgent",
   "/configuration/traders": "nav.tradersList",
   "/configuration/customers": "nav.customers",
   "/configuration/areas": "nav.areas",
@@ -71,7 +79,9 @@ const routeTitles: Readonly<Record<string, string>> = {
   "/configuration/drivers": "workforce.drivers",
   "/configuration/users": "nav.users",
   "/configuration/roles": "nav.roles",
+  "/configuration/whatsapp": "nav.whatsapp",
   "/support": "nav.supportCases",
+  "/communication": "nav.communicationCenter",
   "/no-access": "shell.noAccessTitle",
 };
 
@@ -79,6 +89,12 @@ const languages = [
   { code: "en", label: "English" },
   { code: "ar", label: "العربية" },
 ] as const;
+
+const themeOptions: readonly { code: ThemePreference; labelKey: string }[] = [
+  { code: "light", labelKey: "theme.light" },
+  { code: "dark", labelKey: "theme.dark" },
+  { code: "system", labelKey: "theme.system" },
+];
 
 export function CompanyAppShell({
   children,
@@ -97,9 +113,32 @@ export function CompanyAppShell({
   const signedInDisplayName = session.identity.displayName?.trim() || session.identity.username;
   const [collapsed, setCollapsed] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [mobileQrOpen, setMobileQrOpen] = useState(false);
+  const [mobileCode, setMobileCode] = useState<string>();
+
+  // Fetched lazily the first time the QR panel opens; the code never changes,
+  // so one fetch serves the whole session. Cookie-authenticated like every
+  // other request from this shell.
+  useEffect(() => {
+    if (!mobileQrOpen || mobileCode !== undefined) return;
+    let active = true;
+    fetch("/api/v1/company-profile", {
+      credentials: "include",
+      headers: { Accept: "application/json", "X-Blueline-Session": "cookie" },
+    })
+      .then((response) => (response.ok ? response.json() : undefined))
+      .then((profile: { mobileCode?: string } | undefined) => {
+        if (active && profile?.mobileCode !== undefined) setMobileCode(profile.mobileCode);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [mobileQrOpen, mobileCode]);
   const [expandedGroup, setExpandedGroup] = useState<MenuGroupId | undefined>(() =>
     groupForPath(location.pathname),
   );
+  const navigate = useNavigate();
   const drawerRef = useRef<HTMLElement>(null);
   const mainRef = useRef<HTMLElement>(null);
   const homePath = firstAuthorizedCompanyPath(session.identity.permissions);
@@ -122,10 +161,7 @@ export function CompanyAppShell({
             icon: Store,
             id: "traders",
             label: t("nav.traders"),
-            items: [
-              { label: t("nav.traderSettlements"), path: "/trader-settlements" },
-              { label: t("nav.traderReceivables"), path: "/trader-receivables" },
-            ],
+            items: [{ label: t("nav.traderSettlements"), path: "/trader-settlements" }],
           },
           {
             icon: Truck,
@@ -141,12 +177,30 @@ export function CompanyAppShell({
               { label: t("accounting.sections.overview"), path: "/accounting" },
               { label: t("nav.cashManagement"), path: "/cash-management" },
               { label: t("nav.payroll"), path: "/payroll" },
-              { label: t("accounting.sections.chart-of-accounts"), path: "/accounting/chart-of-accounts" },
+              {
+                label: t("accounting.sections.chart-of-accounts"),
+                path: "/accounting/chart-of-accounts",
+              },
+              {
+                label: t("accounting.sections.cash-accounts"),
+                path: "/accounting/cash-accounts",
+              },
+              {
+                label: t("accounting.sections.bank-accounts"),
+                path: "/accounting/bank-accounts",
+              },
               { label: t("accounting.sections.journals"), path: "/accounting/journals" },
               { label: t("accounting.sections.events"), path: "/accounting/events" },
+              { label: t("nav.traderReceivables"), path: "/trader-receivables" },
               { label: t("accounting.sections.expenses"), path: "/accounting/expenses" },
-              { label: t("accounting.sections.cash-bank-movements"), path: "/accounting/cash-bank-movements" },
-              { label: t("accounting.sections.reconciliation"), path: "/accounting/reconciliation" },
+              {
+                label: t("accounting.sections.cash-bank-movements"),
+                path: "/accounting/cash-bank-movements",
+              },
+              {
+                label: t("accounting.sections.reconciliation"),
+                path: "/accounting/reconciliation",
+              },
             ],
           },
           {
@@ -155,7 +209,9 @@ export function CompanyAppShell({
             label: t("nav.configuration"),
             items: [
               { label: t("nav.companyProfile"), path: "/configuration/company-profile" },
+              { label: t("storefront.title"), path: "/configuration/storefront" },
               { label: t("nav.generalSettings"), path: "/configuration/general" },
+              { label: t("nav.websiteAgent"), path: "/configuration/ai-agent" },
               { label: t("nav.tradersList"), path: "/configuration/traders" },
               { label: t("nav.customers"), path: "/configuration/customers" },
               { label: t("nav.areas"), path: "/configuration/areas" },
@@ -164,13 +220,33 @@ export function CompanyAppShell({
               { label: t("workforce.employees"), path: "/configuration/employees" },
               { label: t("nav.users"), path: "/configuration/users" },
               { label: t("nav.roles"), path: "/configuration/roles" },
+              { label: t("nav.whatsapp"), path: "/configuration/whatsapp" },
             ],
           },
           {
             icon: ShieldCheck,
             id: "administration",
             label: t("nav.administration"),
-            items: [{ label: t("nav.supportCases"), path: "/support" }],
+            items: [
+              { icon: MessageSquare, label: t("nav.communicationCenter"), path: "/communication" },
+              { label: t("nav.supportCases"), path: "/support" },
+              {
+                label: t("nav.deploymentStatus"),
+                path: "/administration/deployment-status",
+              },
+            ],
+          },
+          {
+            icon: FileBarChart,
+            id: "reports",
+            label: t("nav.reports"),
+            items: [
+              { label: t("nav.ordersExport"), path: "/reports" },
+              {
+                label: t("nav.dailyOperationsSummary"),
+                path: "/reports/daily-operations-summary",
+              },
+            ],
           },
         ] satisfies readonly MenuGroup[]
       )
@@ -234,6 +310,10 @@ export function CompanyAppShell({
     storeLocale(locale, globalThis.localStorage);
   };
 
+  const changeTheme = async (theme: ThemePreference) => {
+    await branding.setThemePreference(theme);
+  };
+
   return (
     <div
       className={`company-shell${collapsed ? " company-shell-collapsed" : ""}${drawerOpen ? " drawer-is-open" : ""}`}
@@ -295,58 +375,50 @@ export function CompanyAppShell({
               expanded={expandedGroup === group.id}
               group={group}
               key={group.id}
-              onToggle={() =>
-                setExpandedGroup((current) => (current === group.id ? undefined : group.id))
-              }
+              onToggle={() => {
+                if (group.id === "orders") void navigate("/orders");
+                setExpandedGroup((current) => (current === group.id ? undefined : group.id));
+              }}
               pathname={location.pathname}
             />
           ))}
-          {canAccessCompanyPath("/reports", session.identity.permissions) ? (
-            <NavLink className="nav-direct-link" to="/reports">
-              <FileBarChart aria-hidden="true" size={19} />
-              <span>{t("nav.reports")}</span>
-            </NavLink>
-          ) : null}
           {groups.slice(4).map((group) => (
             <NavigationGroup
               expanded={expandedGroup === group.id}
               group={group}
               key={group.id}
-              onToggle={() =>
-                setExpandedGroup((current) => (current === group.id ? undefined : group.id))
-              }
+              onToggle={() => {
+                if (group.id === "orders") void navigate("/orders");
+                setExpandedGroup((current) => (current === group.id ? undefined : group.id));
+              }}
               pathname={location.pathname}
             />
           ))}
         </nav>
 
         <div className="sidebar-footer">
-          <div className="sidebar-language" aria-label={t("language.label")} role="group">
-            <Languages aria-hidden="true" size={18} />
-            {languages.map((language) => (
-              <button
-                aria-pressed={currentLanguage === language.code}
-                key={language.code}
-                onClick={() => void changeLanguage(language.code)}
-                type="button"
-              >
-                {language.label}
-              </button>
-            ))}
-          </div>
-          <div className="sidebar-user">
-            <CircleUserRound aria-hidden="true" size={22} />
-            <span className="sidebar-user-copy">
-              <small>{t("shell.signedInAs")}</small>
-              <strong title={session.identity.username}>{signedInDisplayName}</strong>
-            </span>
-            <button aria-label={t("auth.logout")} onClick={() => void onLogout()} type="button">
-              <LogOut aria-hidden="true" size={18} />
-            </button>
-          </div>
+          <button
+            className="sidebar-logout-button"
+            onClick={() => setMobileQrOpen(true)}
+            type="button"
+          >
+            <QrCode aria-hidden="true" size={18} />
+            <span>{t("shell.mobileAppQr")}</span>
+          </button>
+          <button className="sidebar-logout-button" onClick={() => void onLogout()} type="button">
+            <LogOut aria-hidden="true" size={18} />
+            <span>{t("auth.logout")}</span>
+          </button>
           <p className="powered-by">{t("shell.poweredBy")}</p>
         </div>
       </aside>
+      {mobileQrOpen ? (
+        <MobileAppQrPanel
+          code={mobileCode}
+          companyName={companyName}
+          onRequestClose={() => setMobileQrOpen(false)}
+        />
+      ) : null}
 
       <div className="company-main-column">
         <header className="company-top-header">
@@ -364,11 +436,40 @@ export function CompanyAppShell({
           </button>
           <div className="top-header-title">
             <span title={companyName}>{companyName}</span>
-            <strong>{pageTitle}</strong>
+            <span className="top-header-title-row">
+              <strong>{pageTitle}</strong>
+              <VersionBadge inline />
+            </span>
           </div>
-          <div className="top-header-user">
-            <CircleUserRound aria-hidden="true" size={20} />
-            <span title={session.identity.username}>{signedInDisplayName}</span>
+          <div className="top-header-controls">
+            <div className="top-header-language" aria-label={t("language.label")} role="group">
+              {languages.map((language) => (
+                <button
+                  aria-pressed={currentLanguage === language.code}
+                  key={language.code}
+                  onClick={() => void changeLanguage(language.code)}
+                  type="button"
+                >
+                  {language.label}
+                </button>
+              ))}
+            </div>
+            <div className="theme-control" aria-label={t("theme.label")} role="group">
+              {themeOptions.map((theme) => (
+                <button
+                  aria-pressed={branding.themePreference === theme.code}
+                  key={theme.code}
+                  onClick={() => void changeTheme(theme.code)}
+                  type="button"
+                >
+                  {t(theme.labelKey)}
+                </button>
+              ))}
+            </div>
+            <div className="top-header-user">
+              <CircleUserRound aria-hidden="true" size={20} />
+              <span title={session.identity.username}>{signedInDisplayName}</span>
+            </div>
           </div>
         </header>
         <main className="company-content" id="main-content" ref={mainRef} tabIndex={-1}>
@@ -419,12 +520,16 @@ function NavigationGroup({
 
 function groupForPath(pathname: string): MenuGroupId | undefined {
   if (pathname.startsWith("/orders")) return "orders";
-  if (pathname === "/trader-settlements" || pathname === "/trader-receivables") return "traders";
+  if (pathname === "/trader-settlements") return "traders";
+  if (pathname === "/trader-receivables" || pathname.startsWith("/trader-receivables/"))
+    return "accounting";
   if (pathname === "/drivers" || pathname === "/driver-cash-reconciliation") return "drivers";
   if (pathname === "/cash-management" || pathname === "/payroll") return "accounting";
   if (pathname.startsWith("/accounting")) return "accounting";
   if (pathname.startsWith("/configuration")) return "configuration";
+  if (pathname.startsWith("/administration")) return "administration";
   if (["/support"].includes(normalizePath(pathname))) return "administration";
+  if (pathname.startsWith("/reports")) return "reports";
   return undefined;
 }
 

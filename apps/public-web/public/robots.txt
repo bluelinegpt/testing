@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /
+Disallow: /send-a-package/quote/
+Disallow: /ar/send-a-package/quote/
+Disallow: /api/
+Disallow: /website/
+
+Sitemap: https://tawseelhub.com/sitemap.xml

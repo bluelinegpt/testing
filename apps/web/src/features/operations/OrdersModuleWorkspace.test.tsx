@@ -1,12 +1,26 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import type { ReactElement } from "react";
+import { MemoryRouter } from "react-router-dom";
+
+/**
+ * The workspaces under test now read their list state from the URL via
+ * `useListState` -> `useSearchParams`, which requires a Router in context.
+ *
+ * A real `MemoryRouter` is used rather than mocking the hooks: mocking would
+ * hide the very behaviour the URL-state migration introduced, and these suites
+ * would stop proving that the screens mount at all. The default entry is "/",
+ * which carries no search parameters, so every existing assumption about
+ * starting filters, page and sort is unchanged.
+ */
+function renderWithRouter(ui: ReactElement, initialEntries: readonly string[] = ["/"]) {
+  return render(<MemoryRouter initialEntries={[...initialEntries]}>{ui}</MemoryRouter>);
+}
+
 import { vi } from "vitest";
 
 import type { ApiClient } from "../../api/api-client.js";
 import { i18nInstance } from "../../localization/i18n.js";
-import { formatCurrency } from "../../localization/formatters.js";
 import { OrdersModuleWorkspace } from "./OrdersModuleWorkspace.js";
-
-const aed = (value: string) => formatCurrency(value, "AED", "en");
 
 const order = {
   amountCollected: "0.00",
@@ -49,8 +63,80 @@ const heldOrder = {
   serialNumber: "SER-000002",
 };
 
+const internationalOrder = {
+  ...order,
+  id: "10000000-0000-4000-8000-000000000003",
+  orderNumber: "ORD-INT-000003",
+  orderType: "gcc_international",
+  internationalCarrierStatus: "ready_for_carrier",
+};
+
 describe("OrdersModuleWorkspace", () => {
   beforeEach(async () => i18nInstance.changeLanguage("en"));
+
+  it("displays the International carrier stage and sends its server-side filter", async () => {
+    const api = {
+      get: vi.fn((path: string) => {
+        if (path.startsWith("operations/orders?")) {
+          return Promise.resolve({ filteredCount: 1, items: [internationalOrder], matchingCount: 1, page: 1, pageSize: 25, totalCount: 1, tabTotalCount: 1 });
+        }
+        if (path.startsWith("configuration/areas")) return Promise.resolve({ items: [], page: 1, pageSize: 100, total: 0 });
+        return Promise.resolve([]);
+      }),
+      post: vi.fn().mockResolvedValue({}),
+    };
+    renderWithRouter(<OrdersModuleWorkspace api={api as unknown as ApiClient} onNavigate={vi.fn()} permissions={["users_roles.manage"]} />);
+    const serialCell = await screen.findByText("SER-000001");
+    const orderRow = serialCell.closest("tr");
+    expect(orderRow).not.toBeNull();
+    expect(within(orderRow as HTMLElement).getByText("Ready for Carrier")).toBeInTheDocument();
+    expect(screen.getByText("Carrier stage")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Carrier stage"), { target: { value: "ready_for_carrier" } });
+    await waitFor(() => expect(api.get).toHaveBeenCalledWith(expect.stringContaining("internationalCarrierStatus=ready_for_carrier")));
+  });
+
+  it("shows mixed bulk carrier eligibility and requires partial processing before submission", async () => {
+    const domesticOrder = { ...order, id: "10000000-0000-4000-8000-000000000004", serialNumber: "SER-000004", orderNumber: "ORD-DOM-000004" };
+    const api = {
+      get: vi.fn((path: string) => {
+        if (path.startsWith("operations/orders?")) return Promise.resolve({ filteredCount: 2, items: [internationalOrder, domesticOrder], matchingCount: 2, page: 1, pageSize: 25, totalCount: 2, tabTotalCount: 2 });
+        if (path.startsWith("configuration/areas")) return Promise.resolve({ items: [], page: 1, pageSize: 100, total: 0 });
+        return Promise.resolve([]);
+      }),
+      post: vi.fn().mockResolvedValue({}),
+    };
+    renderWithRouter(<OrdersModuleWorkspace api={api as unknown as ApiClient} onNavigate={vi.fn()} permissions={["users_roles.manage"]} />);
+    await screen.findByText("SER-000004");
+    fireEvent.click(screen.getByLabelText("Select Order SER-000001"));
+    fireEvent.click(screen.getByLabelText("Select Order SER-000004"));
+    fireEvent.click(screen.getByRole("button", { name: "Update carrier stage" }));
+    expect(await screen.findByText("Eligible: 1. Ineligible: 1.")).toBeInTheDocument();
+    expect(screen.getByText(/Domestic orders cannot use carrier stages/)).toBeInTheDocument();
+    const confirm = screen.getByRole("button", { name: "Confirm" });
+    expect(confirm).toBeDisabled();
+    fireEvent.click(screen.getByRole("checkbox", { name: /Change the orders that can make this move/ }));
+    expect(confirm).toBeEnabled();
+    fireEvent.click(confirm);
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith("operations/orders/bulk-carrier-status", expect.objectContaining({ allowPartial: true, targetStatus: "handed_to_carrier" })));
+  });
+
+  it("uses Arabic labels for carrier-stage display and bulk actions", async () => {
+    await i18nInstance.changeLanguage("ar");
+    const api = {
+      get: vi.fn((path: string) => {
+        if (path.startsWith("operations/orders?")) return Promise.resolve({ filteredCount: 1, items: [internationalOrder], matchingCount: 1, page: 1, pageSize: 25, totalCount: 1, tabTotalCount: 1 });
+        if (path.startsWith("configuration/areas")) return Promise.resolve({ items: [], page: 1, pageSize: 100, total: 0 });
+        return Promise.resolve([]);
+      }),
+      post: vi.fn().mockResolvedValue({}),
+    };
+    renderWithRouter(<OrdersModuleWorkspace api={api as unknown as ApiClient} onNavigate={vi.fn()} permissions={["users_roles.manage"]} />);
+    const serialCell = await screen.findByText("SER-000001");
+    const orderRow = serialCell.closest("tr");
+    expect(orderRow).not.toBeNull();
+    expect(screen.getByText("مرحلة شركة الشحن")).toBeInTheDocument();
+    expect(within(orderRow as HTMLElement).getByText("جاهز لشركة الشحن")).toBeInTheDocument();
+  });
 
   it("uses Active Orders server paging and supports selection across matching results", async () => {
     const api = {
@@ -59,9 +145,11 @@ describe("OrdersModuleWorkspace", () => {
           return Promise.resolve({
             filteredCount: 40,
             items: [order],
+            matchingCount: 40,
             page: 1,
             pageSize: 25,
-            totalCount: 50,
+            totalCount: 40,
+            tabTotalCount: 40,
           });
         }
         // Areas are paginated; every other collection is still a plain array.
@@ -78,7 +166,7 @@ describe("OrdersModuleWorkspace", () => {
       }),
     };
     const onNavigate = vi.fn();
-    render(
+    renderWithRouter(
       <OrdersModuleWorkspace
         api={api as unknown as ApiClient}
         onNavigate={onNavigate}
@@ -89,6 +177,7 @@ describe("OrdersModuleWorkspace", () => {
     await screen.findByText("SER-000001");
     expect(api.get).toHaveBeenCalledWith(expect.stringContaining("quickView=active"));
     expect(api.get).toHaveBeenCalledWith(expect.stringContaining("pageSize=25"));
+    expect(screen.getByText("40 Active Orders")).toBeInTheDocument();
 
     fireEvent.click(screen.getByLabelText("Select all Orders on this page"));
     fireEvent.click(screen.getByRole("button", { name: "Select all 40 matching Orders" }));
@@ -100,6 +189,282 @@ describe("OrdersModuleWorkspace", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "SER-000001" }));
     expect(onNavigate).toHaveBeenCalledWith("/orders/ORD-000001");
+  });
+
+  it("shows matching and tab-scoped totals when a narrowing filter is applied", async () => {
+    const api = {
+      get: vi.fn((path: string) => {
+        if (path.startsWith("operations/orders?")) {
+          const filtered = path.includes("search=Aisha");
+          return Promise.resolve({
+            filteredCount: filtered ? 6 : 10,
+            items: [order],
+            matchingCount: filtered ? 6 : 10,
+            page: 1,
+            pageSize: 25,
+            totalCount: 10,
+            tabTotalCount: 10,
+          });
+        }
+        if (path.startsWith("configuration/areas")) {
+          return Promise.resolve({ items: [], page: 1, pageSize: 100, total: 0 });
+        }
+        return Promise.resolve([]);
+      }),
+      post: vi.fn().mockResolvedValue({}),
+    };
+
+    renderWithRouter(
+      <OrdersModuleWorkspace
+        api={api as unknown as ApiClient}
+        onNavigate={vi.fn()}
+        permissions={["users_roles.manage"]}
+      />,
+    );
+
+    expect(await screen.findByText("10 Active Orders")).toBeInTheDocument();
+    const search = screen.getByRole("textbox", { name: "Search orders" });
+    fireEvent.change(search, { target: { value: "Aisha" } });
+    fireEvent.keyDown(search, { key: "Enter" });
+
+    expect(await screen.findByText("6 matching of 10 Active Orders")).toBeInTheDocument();
+  });
+
+  it("uses the matching total, not the tab total, to enable server pagination", async () => {
+    const api = {
+      get: vi.fn((path: string) => {
+        if (path.startsWith("operations/orders?")) {
+          const secondPage = path.includes("page=2");
+          return Promise.resolve({
+            filteredCount: 30,
+            items: [order],
+            matchingCount: 30,
+            page: secondPage ? 2 : 1,
+            pageSize: 25,
+            totalCount: 100,
+            tabTotalCount: 100,
+          });
+        }
+        if (path.startsWith("configuration/areas")) {
+          return Promise.resolve({ items: [], page: 1, pageSize: 100, total: 0 });
+        }
+        return Promise.resolve([]);
+      }),
+      post: vi.fn().mockResolvedValue({}),
+    };
+
+    renderWithRouter(
+      <OrdersModuleWorkspace
+        api={api as unknown as ApiClient}
+        onNavigate={vi.fn()}
+        permissions={["users_roles.manage"]}
+      />,
+    );
+
+    await screen.findByText("100 Active Orders");
+    fireEvent.click(screen.getByRole("button", { name: "Next page" }));
+    await waitFor(() =>
+      expect(api.get).toHaveBeenCalledWith(expect.stringContaining("page=2")),
+    );
+  });
+
+  it("enables Close order and hides Trader settlements for a delivered Free Order", async () => {
+    const freeOrder = {
+      ...order,
+      accountingRequired: false,
+      accountingState: "accounting_event_missing",
+      assignedDriverId: "20000000-0000-4000-8000-000000000001",
+      assignedDriverMobile: "971501234568",
+      assignedDriverName: "Ahmed",
+      codAmount: "0.00",
+      customerAmountDue: "0.00",
+      deliveryStatus: "delivered",
+      driverReconciliationStatus: "not_applicable",
+      id: "10000000-0000-4000-8000-000000000007",
+      orderNumber: "ORD-000007",
+      serialNumber: "7",
+      serviceFee: "0.00",
+      totalDeductions: "0.00",
+      traderNetPayable: "0.00",
+      traderSettlementStatus: "unsettled",
+      workflowGuidance: {
+        completionBlockerCode: null,
+        isFinanciallyComplete: true,
+        nextActionCode: "close_order",
+        nextActionParams: {
+          openDialog: "change_status",
+          orderId: "10000000-0000-4000-8000-000000000007",
+          orderNumber: "ORD-000007",
+          returnTo: "/orders",
+          suggestedStatus: "closed",
+        },
+        nextActionRoute: "/orders",
+        waitingFor: "no_accounting_required",
+        workflowState: "no_accounting_required",
+      },
+    };
+    const api = {
+      get: vi.fn((path: string) => {
+        if (path.startsWith("operations/orders?")) {
+          return Promise.resolve({
+            filteredCount: 1,
+            items: [freeOrder],
+            page: 1,
+            pageSize: 25,
+            totalCount: 1,
+          });
+        }
+        if (path.startsWith("configuration/areas")) {
+          return Promise.resolve({ items: [], page: 1, pageSize: 100, total: 0 });
+        }
+        return Promise.resolve([]);
+      }),
+      post: vi.fn().mockResolvedValue({}),
+    };
+    renderWithRouter(
+      <OrdersModuleWorkspace
+        api={api as unknown as ApiClient}
+        onNavigate={vi.fn()}
+        permissions={["users_roles.manage"]}
+      />,
+    );
+
+    await screen.findByText("7");
+    fireEvent.click(screen.getByRole("button", { name: "Order actions" }));
+
+    expect(screen.queryByRole("button", { name: "Trader settlements" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Close order" })).toBeEnabled();
+  });
+
+  it("prints the Driver Shipment Manifest with a clean selected-order payload", async () => {
+    const api = {
+      get: vi.fn((path: string) => {
+        if (path.startsWith("operations/orders?")) {
+          return Promise.resolve({
+            filteredCount: 1,
+            items: [heldOrder],
+            page: 1,
+            pageSize: 25,
+            totalCount: 1,
+          });
+        }
+        if (path.startsWith("configuration/areas")) {
+          return Promise.resolve({ items: [], page: 1, pageSize: 100, total: 0 });
+        }
+        return Promise.resolve([]);
+      }),
+      post: vi.fn((path: string) => {
+        if (path === "operations/orders/selection-summary") {
+          return Promise.resolve({
+            eligibleCount: 1,
+            ineligible: [],
+            selectedAmountToCollect: "110.00",
+            selectedCount: 1,
+          });
+        }
+        if (path === "operations/cash/driver-shipment-manifest/data") {
+          return Promise.resolve({
+            header: { driverMobile: "971501234568", driverName: "Ahmed", orderCount: 1 },
+            summary: { totalCod: "100.00", totalOrders: 1, totalPackages: 1 },
+          });
+        }
+        return Promise.resolve({});
+      }),
+    };
+    renderWithRouter(
+      <OrdersModuleWorkspace
+        api={api as unknown as ApiClient}
+        onNavigate={vi.fn()}
+        permissions={["users_roles.manage"]}
+      />,
+    );
+
+    fireEvent.click(await screen.findByLabelText("Select Order SER-000002"));
+    fireEvent.click(screen.getByRole("button", { name: "Print Driver Shipment Manifest" }));
+
+    await screen.findByRole("dialog", { name: "Print Driver Shipment Manifest" });
+    await waitFor(() =>
+      expect(api.post).toHaveBeenCalledWith("operations/cash/driver-shipment-manifest/data", {
+        orderIds: [heldOrder.id],
+        selectionMode: "ids",
+      }),
+    );
+  });
+
+  it("previews bulk driver assignment with a clean selected-order payload", async () => {
+    const api = {
+      get: vi.fn((path: string) => {
+        if (path.startsWith("operations/orders?")) {
+          return Promise.resolve({
+            filteredCount: 1,
+            items: [heldOrder],
+            page: 1,
+            pageSize: 25,
+            totalCount: 1,
+          });
+        }
+        if (path.startsWith("operations/drivers")) {
+          return Promise.resolve([
+            {
+              activeOrders: 0,
+              code: "DRV-000006",
+              deliveredOrders: 0,
+              id: "20000000-0000-4000-8000-000000000006",
+              mobileNumber: "971501234569",
+              name: "Kareem",
+              pendingCashOrders: 0,
+              status: "active",
+              type: "employee",
+            },
+          ]);
+        }
+        if (path.startsWith("configuration/areas")) {
+          return Promise.resolve({ items: [], page: 1, pageSize: 100, total: 0 });
+        }
+        return Promise.resolve([]);
+      }),
+      post: vi.fn((path: string) => {
+        if (path === "operations/orders/selection-summary") {
+          return Promise.resolve({
+            eligibleCount: 1,
+            ineligible: [],
+            selectedAmountToCollect: "110.00",
+            selectedCount: 1,
+          });
+        }
+        if (path === "operations/orders/bulk-assign/preview") {
+          return Promise.resolve({
+            eligibleCount: 1,
+            ineligible: [],
+            selectedAmountToCollect: "110.00",
+            selectedCount: 1,
+          });
+        }
+        return Promise.resolve({});
+      }),
+    };
+    renderWithRouter(
+      <OrdersModuleWorkspace
+        api={api as unknown as ApiClient}
+        onNavigate={vi.fn()}
+        permissions={["users_roles.manage"]}
+      />,
+    );
+
+    fireEvent.click(await screen.findByLabelText("Select Order SER-000002"));
+    fireEvent.click(screen.getByRole("button", { name: "Assign driver" }));
+    const dialog = within(await screen.findByRole("dialog", { name: "Assign driver" }));
+    fireEvent.change(dialog.getByLabelText("Driver"), {
+      target: { value: "20000000-0000-4000-8000-000000000006" },
+    });
+
+    await waitFor(() =>
+      expect(api.post).toHaveBeenCalledWith("operations/orders/bulk-assign/preview", {
+        driverIdToAssign: "20000000-0000-4000-8000-000000000006",
+        orderIds: [heldOrder.id],
+        selectionMode: "ids",
+      }),
+    );
   });
 
   it("drives a new order to Item in branch from the per-row action menu", async () => {
@@ -122,7 +487,7 @@ describe("OrdersModuleWorkspace", () => {
       patch: vi.fn().mockResolvedValue({}),
       post: vi.fn().mockResolvedValue({}),
     };
-    render(
+    renderWithRouter(
       <OrdersModuleWorkspace
         api={api as unknown as ApiClient}
         onNavigate={vi.fn()}
@@ -134,9 +499,7 @@ describe("OrdersModuleWorkspace", () => {
     // Delivery Status and Financial Status (Driver Collection / Trader Settlement)
     // are separate columns — never merged into one general "Status" (§3).
     expect(screen.getByRole("columnheader", { name: "Delivery status" })).toBeVisible();
-    expect(
-      screen.getByRole("columnheader", { name: "Collection / Settlement" }),
-    ).toBeVisible();
+    expect(screen.getByRole("columnheader", { name: "Collection / Settlement" })).toBeVisible();
     expect(screen.queryByRole("columnheader", { name: "Stage" })).not.toBeInTheDocument();
     expect(screen.queryByRole("columnheader", { name: "Status" })).not.toBeInTheDocument();
     expect(screen.getAllByText("New").length).toBeGreaterThanOrEqual(1);
@@ -144,12 +507,239 @@ describe("OrdersModuleWorkspace", () => {
     fireEvent.click(screen.getByRole("button", { name: "Order actions" }));
     fireEvent.click(screen.getByRole("button", { name: "Mark item in branch" }));
 
+    // The transition now CONFIRMS before it writes. It used to PATCH straight
+    // from the menu, which left a smart next action nothing to open and no safe
+    // way to suggest a status.
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog).toBeInTheDocument();
+    expect(api.patch).not.toHaveBeenCalled();
+    // The menu's choice arrives as the suggested value.
+    expect((within(dialog).getByRole("combobox") as HTMLSelectElement).value).toBe("in_branch");
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Confirm" }));
+
     await waitFor(() =>
       expect(api.patch).toHaveBeenCalledWith(
         `operations/orders/${order.id}/status`,
         expect.objectContaining({ status: "in_branch" }),
       ),
     );
+  });
+
+  it("opens Change Status directly from a smart next-action deep link", async () => {
+    // The screenshot case, end to end: the popover's primary action lands here
+    // and the dialog opens on the right Order with `delivered` suggested.
+    const delivered = { ...order, deliveryStatus: "out_for_delivery" };
+    const api = {
+      get: vi.fn((path: string) => {
+        if (path.startsWith("operations/orders?")) {
+          return Promise.resolve({
+            filteredCount: 1,
+            items: [delivered],
+            page: 1,
+            pageSize: 25,
+            totalCount: 1,
+          });
+        }
+        if (path.startsWith("configuration/areas")) {
+          return Promise.resolve({ items: [], page: 1, pageSize: 100, total: 0 });
+        }
+        return Promise.resolve([]);
+      }),
+      patch: vi.fn().mockResolvedValue({}),
+      post: vi.fn().mockResolvedValue({}),
+    };
+    globalThis.history.replaceState(
+      {},
+      "",
+      `/orders?orderId=${order.id}&suggestedStatus=delivered&openDialog=change_status&returnTo=%2Forders`,
+    );
+    renderWithRouter(
+      <OrdersModuleWorkspace
+        api={api as unknown as ApiClient}
+        onNavigate={vi.fn()}
+        permissions={["users_roles.manage"]}
+      />,
+    );
+
+    const dialog = await screen.findByRole("dialog");
+    expect((within(dialog).getByRole("combobox") as HTMLSelectElement).value).toBe("delivered");
+    // Nothing is written by arriving.
+    expect(api.patch).not.toHaveBeenCalled();
+    // And the instruction is gone, so a refresh cannot reopen it.
+    expect(globalThis.location.search).not.toContain("openDialog");
+    expect(globalThis.location.search).toContain("returnTo");
+  });
+
+  it("does not reopen Change Status with the next transition after confirming one", async () => {
+    /* The reported defect. Arriving from "Change Status to Out for Delivery"
+       opened the dialog correctly; confirming it wrote the status, reloaded the
+       list, and then opened the dialog a SECOND time offering "Mark delivered"
+       -- as if a further change had been requested. Nobody asked for it, and on
+       a screen full of money that reads like the first change failed.
+
+       The cause was the deep-link request being rebuilt on every render while
+       the guard meant to retire it (`consumedDeepLink`) was never set, so the
+       effect refired on the reload it had itself caused. */
+    const assigned = {
+      ...order,
+      assignedDriverId: "20000000-0000-4000-8000-000000000001",
+      assignedDriverName: "Driver 2",
+      deliveryStatus: "assigned_to_driver",
+    };
+    // The list reflects the write, exactly as the real reload does -- which is
+    // what made the replayed dialog offer the following status rather than the
+    // same one.
+    let status = "assigned_to_driver";
+    const api = {
+      get: vi.fn((path: string) => {
+        if (path.startsWith("operations/orders?")) {
+          return Promise.resolve({
+            filteredCount: 1,
+            items: [{ ...assigned, deliveryStatus: status }],
+            page: 1,
+            pageSize: 25,
+            totalCount: 1,
+          });
+        }
+        if (path.startsWith("configuration/areas")) {
+          return Promise.resolve({ items: [], page: 1, pageSize: 100, total: 0 });
+        }
+        return Promise.resolve([]);
+      }),
+      patch: vi.fn().mockImplementation(() => {
+        status = "out_for_delivery";
+        return Promise.resolve({});
+      }),
+      post: vi.fn().mockResolvedValue({}),
+    };
+    globalThis.history.replaceState(
+      {},
+      "",
+      `/orders?orderId=${order.id}&suggestedStatus=out_for_delivery&openDialog=change_status`,
+    );
+    renderWithRouter(
+      <OrdersModuleWorkspace
+        api={api as unknown as ApiClient}
+        onNavigate={vi.fn()}
+        permissions={["users_roles.manage"]}
+      />,
+    );
+
+    const dialog = await screen.findByRole("dialog");
+    expect((within(dialog).getByRole("combobox") as HTMLSelectElement).value).toBe(
+      "out_for_delivery",
+    );
+    fireEvent.click(within(dialog).getByRole("button", { name: "Confirm" }));
+
+    await waitFor(() =>
+      expect(api.patch).toHaveBeenCalledWith(
+        `operations/orders/${order.id}/status`,
+        expect.objectContaining({ status: "out_for_delivery" }),
+      ),
+    );
+
+    /* The reload has happened and the row now reads out_for_delivery. Matched
+       against the row's status badge specifically: the phrase also appears as a
+       Delivery Status filter option, which is present from first paint and would
+       make this pass without any reload at all. */
+    await waitFor(() =>
+      expect(
+        within(screen.getByRole("table")).getAllByText("Out for delivery").length,
+      ).toBeGreaterThan(0),
+    );
+    /* ...and no second dialog came with it. Given time to appear first: the
+       replay happens in an effect after the reload commits, so asserting the
+       instant the row text changes can beat the bug to the DOM. */
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    // Only the one transition was ever written.
+    expect(api.patch).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens the existing ReasonDialog for a return deep link", async () => {
+    // Return and Cancel REQUIRE a reason, so they route to ReasonDialog rather
+    // than to the plain status confirmation.
+    const outForDelivery = { ...order, deliveryStatus: "out_for_delivery" };
+    const api = {
+      get: vi.fn((path: string) => {
+        if (path.startsWith("operations/orders?")) {
+          return Promise.resolve({
+            filteredCount: 1,
+            items: [outForDelivery],
+            page: 1,
+            pageSize: 25,
+            totalCount: 1,
+          });
+        }
+        if (path.startsWith("configuration/areas")) {
+          return Promise.resolve({ items: [], page: 1, pageSize: 100, total: 0 });
+        }
+        return Promise.resolve([]);
+      }),
+      patch: vi.fn().mockResolvedValue({}),
+      post: vi.fn().mockResolvedValue({}),
+    };
+    globalThis.history.replaceState(
+      {},
+      "",
+      `/orders?orderId=${order.id}&suggestedStatus=returned_to_branch&openDialog=change_status&returnTo=%2Forders`,
+    );
+    renderWithRouter(
+      <OrdersModuleWorkspace
+        api={api as unknown as ApiClient}
+        onNavigate={vi.fn()}
+        permissions={["users_roles.manage"]}
+      />,
+    );
+
+    const dialog = await screen.findByRole("dialog");
+    // A reason prompt, not the status dropdown.
+    expect(within(dialog).queryByRole("combobox")).toBeNull();
+    // Nothing is written by arriving.
+    expect(api.patch).not.toHaveBeenCalled();
+    expect(globalThis.location.search).not.toContain("openDialog");
+  });
+
+  it("does not force an action the Order is no longer eligible for", async () => {
+    // A delivered Order cannot be returned to branch; the row menu would not
+    // offer it, so the deep link must not either.
+    const delivered = { ...order, deliveryStatus: "delivered" };
+    const api = {
+      get: vi.fn((path: string) => {
+        if (path.startsWith("operations/orders?")) {
+          return Promise.resolve({
+            filteredCount: 1,
+            items: [delivered],
+            page: 1,
+            pageSize: 25,
+            totalCount: 1,
+          });
+        }
+        if (path.startsWith("configuration/areas")) {
+          return Promise.resolve({ items: [], page: 1, pageSize: 100, total: 0 });
+        }
+        return Promise.resolve([]);
+      }),
+      patch: vi.fn().mockResolvedValue({}),
+      post: vi.fn().mockResolvedValue({}),
+    };
+    globalThis.history.replaceState(
+      {},
+      "",
+      `/orders?orderId=${order.id}&suggestedStatus=returned_to_branch&openDialog=change_status`,
+    );
+    renderWithRouter(
+      <OrdersModuleWorkspace
+        api={api as unknown as ApiClient}
+        onNavigate={vi.fn()}
+        permissions={["users_roles.manage"]}
+      />,
+    );
+
+    expect(await screen.findByText(/no longer eligible for this action/i)).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(api.patch).not.toHaveBeenCalled();
   });
 
   it("groups the visible page and selects only within one group", async () => {
@@ -185,7 +775,7 @@ describe("OrdersModuleWorkspace", () => {
         selectedCount: 1,
       }),
     };
-    render(
+    renderWithRouter(
       <OrdersModuleWorkspace
         api={api as unknown as ApiClient}
         onNavigate={vi.fn()}
@@ -194,7 +784,8 @@ describe("OrdersModuleWorkspace", () => {
     );
 
     await screen.findByText("SER-000001");
-    fireEvent.change(screen.getByLabelText("Grouping"), { target: { value: "status" } });
+    fireEvent.click(screen.getByRole("button", { name: "Grouping" }));
+    fireEvent.click(screen.getByLabelText("Status"));
 
     const holdGroupSelection = screen.getByLabelText("Select visible Orders in Hold");
     fireEvent.click(holdGroupSelection);
@@ -211,17 +802,13 @@ describe("OrdersModuleWorkspace", () => {
       ),
     );
 
-    fireEvent.click(
-      screen.getByRole("button", { name: /Hold.*1 visible Orders.*1 selected/ }),
-    );
-    expect(screen.queryByText("SER-000002")).not.toBeInTheDocument();
+    expect(screen.getByText("SER-000002")).toBeVisible();
     expect(holdGroupSelection).toBeChecked();
 
-    fireEvent.change(screen.getByLabelText("Grouping"), { target: { value: "driver" } });
-    expect(
-      screen.getByRole("button", { name: /Ahmed.*1 visible Orders.*1 selected/ }),
-    ).toBeVisible();
-    expect(screen.getByRole("button", { name: /Unassigned.*1 visible Orders/ })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: /Grouping/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Driver" }));
+    expect(screen.getByLabelText("Select visible Orders in Ahmed")).toBeVisible();
+    expect(screen.getByLabelText("Select visible Orders in Unassigned")).toBeVisible();
   });
 
   it("shows the Hold tab count and intentionally absent Reference Numbers", async () => {
@@ -243,7 +830,7 @@ describe("OrdersModuleWorkspace", () => {
       }),
       post: vi.fn().mockResolvedValue({}),
     };
-    render(
+    renderWithRouter(
       <OrdersModuleWorkspace
         api={api as unknown as ApiClient}
         onNavigate={vi.fn()}
@@ -256,6 +843,48 @@ describe("OrdersModuleWorkspace", () => {
     expect(screen.getByText("Not provided")).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Order actions" }));
     expect(screen.getByRole("button", { name: "Send out for delivery" })).toBeVisible();
+  });
+
+  it("reactivates three selected Hold Orders in one editable table", async () => {
+    const heldOrders = [heldOrder, {
+      ...heldOrder, id: "10000000-0000-4000-8000-000000000003", orderNumber: "ORD-000003", serialNumber: "SER-000003",
+    }, {
+      ...heldOrder, id: "10000000-0000-4000-8000-000000000004", orderNumber: "ORD-000004", serialNumber: "SER-000004",
+    }];
+    const api = {
+      get: vi.fn((path: string) => {
+        if (path === "operations/orders/next-serial-number") return Promise.resolve({ serialNumber: "500" });
+        if (path.startsWith("operations/orders?")) return Promise.resolve({
+          filteredCount: 3, items: heldOrders, matchingCount: 3, page: 1, pageSize: 25, totalCount: 3, tabTotalCount: 3,
+        });
+        if (path.startsWith("configuration/areas")) return Promise.resolve({ items: [], page: 1, pageSize: 100, total: 0 });
+        return Promise.resolve([]);
+      }),
+      post: vi.fn().mockResolvedValue({ processedCount: 3 }),
+    };
+    renderWithRouter(
+      <OrdersModuleWorkspace api={api as unknown as ApiClient} onNavigate={vi.fn()} permissions={["users_roles.manage"]} />,
+      ["/orders?quickView=hold"],
+    );
+    await screen.findByText("SER-000004");
+    fireEvent.click(screen.getByLabelText("Select all Orders on this page"));
+    fireEvent.click(screen.getByRole("button", { name: "Reactivate Hold Orders" }));
+    const dialog = screen.getByRole("dialog", { name: "Reactivate Hold Orders" });
+    expect(within(dialog).getByText("ORD-000002")).toBeVisible();
+    expect(within(dialog).getByText("ORD-000003")).toBeVisible();
+    expect(within(dialog).getByText("ORD-000004")).toBeVisible();
+    await waitFor(() => expect(within(dialog).getAllByRole("textbox").map(input => (input as HTMLInputElement).value)).toEqual(["500", "501", "502"]));
+    fireEvent.change(within(dialog).getAllByRole("textbox")[0]!, { target: { value: "  New   500  " } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Continue" }));
+    expect(within(dialog).getByText("Selected Orders: 3")).toBeVisible();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Confirm & Update" }));
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith("operations/orders/hold-reactivation", {
+      orders: expect.arrayContaining([
+        expect.objectContaining({ newSerialNumber: "  New   500  ", orderId: heldOrder.id }),
+        expect.objectContaining({ newSerialNumber: "501" }),
+        expect.objectContaining({ newSerialNumber: "502" }),
+      ]),
+    }));
   });
 
   it("uses a searchable Emirate-aware Area filter without internal Area codes", async () => {
@@ -298,7 +927,7 @@ describe("OrdersModuleWorkspace", () => {
       }),
       post: vi.fn().mockResolvedValue({}),
     };
-    render(
+    renderWithRouter(
       <OrdersModuleWorkspace
         api={api as unknown as ApiClient}
         onNavigate={vi.fn()}
@@ -317,58 +946,168 @@ describe("OrdersModuleWorkspace", () => {
   });
 });
 
-describe("CollectMoneyDialog financial formulas", () => {
+/**
+ * Consolidated "Collect from Driver" -- there is exactly ONE Driver
+ * Collection workflow (the Driver Collections screen's own New Collection),
+ * and every entry point on the Orders list now navigates into it instead of
+ * opening a second, duplicate summary dialog. Orders never decides
+ * eligibility itself: it only carries the Driver/Order ids it already knows
+ * as context, and the destination screen re-validates against the live
+ * backend (§4 in the consolidation report).
+ */
+/**
+ * A Driver User holding only `orders.driver_self_service` (Driver Order
+ * Status Permission fix) -- sees exactly the narrow Driver transition set on
+ * their own row, never Assign Driver, Cancel, or any office/financial
+ * action, matching `OperationsService.changeOrderStatus`'s own
+ * `driverTransitions` map exactly.
+ */
+describe("Driver self-service row actions", () => {
   beforeEach(async () => i18nInstance.changeLanguage("en"));
 
-  const driver = {
-    activeOrders: 1,
-    code: "DRV-000001",
-    deliveredOrders: 1,
-    id: "20000000-0000-4000-8000-000000000001",
-    mobileNumber: "971501234568",
-    name: "Shoala",
-    pendingCashOrders: 1,
-    status: "active",
-    type: "employee",
-  };
+  it("shows the allowed status action for Assigned to Driver, and hides Assign Driver / Cancel", async () => {
+    const assignedOrder = {
+      ...order,
+      assignedDriverId: "20000000-0000-4000-8000-000000000001",
+      assignedDriverMobile: "971501234568",
+      assignedDriverName: "D123",
+      deliveryStatus: "assigned_to_driver",
+    };
+    const api = {
+      get: vi.fn((path: string) => {
+        if (path.startsWith("operations/orders?")) {
+          return Promise.resolve({
+            filteredCount: 1,
+            items: [assignedOrder],
+            page: 1,
+            pageSize: 25,
+            totalCount: 1,
+          });
+        }
+        if (path.startsWith("configuration/areas")) {
+          return Promise.resolve({ items: [], page: 1, pageSize: 100, total: 0 });
+        }
+        return Promise.resolve([]);
+      }),
+      post: vi.fn().mockResolvedValue({}),
+    };
+    renderWithRouter(
+      <OrdersModuleWorkspace
+        api={api as unknown as ApiClient}
+        onNavigate={vi.fn()}
+        permissions={["orders.driver_self_service"]}
+      />,
+    );
 
-  // Customer Amount to Collect = 200, Company Fees = 25, Amount Due to Trader = 175
-  // — the exact figures from the reported defect.
-  const deliveredOrder = {
+    await screen.findByText("SER-000001");
+    fireEvent.click(screen.getByRole("button", { name: "Order actions" }));
+    expect(screen.getByRole("button", { name: "Send out for delivery" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Assign driver" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Cancel order" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Move to Hold" })).not.toBeInTheDocument();
+  });
+
+  it("shows Hold, Deliver and Return to branch for Out for Delivery, and hides every office/financial action", async () => {
+    const outForDeliveryOrder = {
+      ...order,
+      assignedDriverId: "20000000-0000-4000-8000-000000000001",
+      assignedDriverMobile: "971501234568",
+      assignedDriverName: "D123",
+      deliveryStatus: "out_for_delivery",
+    };
+    const api = {
+      get: vi.fn((path: string) => {
+        if (path.startsWith("operations/orders?")) {
+          return Promise.resolve({
+            filteredCount: 1,
+            items: [outForDeliveryOrder],
+            page: 1,
+            pageSize: 25,
+            totalCount: 1,
+          });
+        }
+        if (path.startsWith("configuration/areas")) {
+          return Promise.resolve({ items: [], page: 1, pageSize: 100, total: 0 });
+        }
+        return Promise.resolve([]);
+      }),
+      post: vi.fn().mockResolvedValue({}),
+    };
+    renderWithRouter(
+      <OrdersModuleWorkspace
+        api={api as unknown as ApiClient}
+        onNavigate={vi.fn()}
+        permissions={["orders.driver_self_service"]}
+      />,
+    );
+
+    await screen.findByText("SER-000001");
+    fireEvent.click(screen.getByRole("button", { name: "Order actions" }));
+    expect(screen.getByRole("button", { name: "Mark delivered" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Move to Hold" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Return to branch" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Assign driver" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Cancel order" })).not.toBeInTheDocument();
+  });
+
+  it("does not offer any status action for an unassigned New Order (no office permission)", async () => {
+    const api = {
+      get: vi.fn((path: string) => {
+        if (path.startsWith("operations/orders?")) {
+          return Promise.resolve({
+            filteredCount: 1,
+            items: [order],
+            page: 1,
+            pageSize: 25,
+            totalCount: 1,
+          });
+        }
+        if (path.startsWith("configuration/areas")) {
+          return Promise.resolve({ items: [], page: 1, pageSize: 100, total: 0 });
+        }
+        return Promise.resolve([]);
+      }),
+      post: vi.fn().mockResolvedValue({}),
+    };
+    renderWithRouter(
+      <OrdersModuleWorkspace
+        api={api as unknown as ApiClient}
+        onNavigate={vi.fn()}
+        permissions={["orders.driver_self_service"]}
+      />,
+    );
+
+    await screen.findByText("SER-000001");
+    fireEvent.click(screen.getByRole("button", { name: "Order actions" }));
+    expect(screen.queryByRole("button", { name: "Mark item in branch" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Assign driver" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Cancel order" })).not.toBeInTheDocument();
+  });
+});
+
+describe("Collect from Driver — consolidated into one workflow", () => {
+  beforeEach(async () => i18nInstance.changeLanguage("en"));
+
+  const collectableOrder = {
     ...order,
-    assignedDriverId: driver.id,
-    assignedDriverMobile: driver.mobileNumber,
-    assignedDriverName: driver.name,
-    codAmount: "200.00",
-    customerAmountDue: "200.00",
+    assignedDriverId: "20000000-0000-4000-8000-000000000006",
+    assignedDriverMobile: "971501234569",
+    assignedDriverName: "Kareem",
     deliveryStatus: "delivered",
     driverReconciliationStatus: "pending",
     id: "10000000-0000-4000-8000-000000000010",
     orderNumber: "ORD-000010",
     serialNumber: "SER-000010",
-    totalDeductions: "25.00",
-    traderNetPayable: "175.00",
   };
-
-  const secondDeliveredOrder = {
-    ...deliveredOrder,
-    codAmount: "150.00",
-    customerAmountDue: "150.00",
+  const secondCollectableOrder = {
+    ...collectableOrder,
     id: "10000000-0000-4000-8000-000000000011",
     orderNumber: "ORD-000011",
     serialNumber: "SER-000011",
-    totalDeductions: "25.00",
-    traderNetPayable: "125.00",
   };
 
-  interface CollectPreviewBody {
-    readonly expenses?: readonly unknown[];
-  }
-
-  function setup(
-    orders: readonly (typeof deliveredOrder)[],
-    previewByBody: (body: CollectPreviewBody) => unknown,
-  ) {
+  function setup(orders: readonly (typeof collectableOrder)[]) {
+    const onNavigate = vi.fn();
     const api = {
       get: vi.fn((path: string) => {
         if (path.startsWith("operations/orders?")) {
@@ -380,255 +1119,62 @@ describe("CollectMoneyDialog financial formulas", () => {
             totalCount: orders.length,
           });
         }
-        if (path.startsWith("operations/drivers")) {
-          return Promise.resolve([driver]);
-        }
-        if (path.startsWith("operations/cash/expense-types")) {
-          return Promise.resolve([{ id: "expense-fuel", name: "Fuel" }]);
-        }
         if (path.startsWith("configuration/areas")) {
           return Promise.resolve({ items: [], page: 1, pageSize: 100, total: 0 });
         }
         return Promise.resolve([]);
       }),
-      post: vi.fn((path: string, body?: unknown) => {
-        if (path === "operations/orders/selection-summary") {
-          return Promise.resolve({
-            eligibleCount: orders.length,
-            ineligible: [],
-            selectedAmountToCollect: "0.00",
-            selectedCount: orders.length,
-          });
-        }
-        if (path === "operations/cash/reconciliations/preview") {
-          return Promise.resolve(previewByBody(body as CollectPreviewBody));
-        }
-        return Promise.resolve({});
-      }),
+      post: vi.fn().mockResolvedValue({}),
     };
-    render(
+    renderWithRouter(
       <OrdersModuleWorkspace
         api={api as unknown as ApiClient}
-        onNavigate={vi.fn()}
+        onNavigate={onNavigate}
         permissions={["users_roles.manage"]}
       />,
     );
-    return { api };
+    return { api, onNavigate };
   }
 
-  async function openDialogWithAllOrders(orders: readonly (typeof deliveredOrder)[]) {
-    for (const item of orders) {
-      fireEvent.click(
-        await screen.findByRole("checkbox", { name: `Select Order ${item.serialNumber}` }),
-      );
-    }
-    fireEvent.click(await screen.findByRole("button", { name: "Collect money from driver" }));
-    const dialog = within(await screen.findByRole("dialog"));
-    // The dialog first renders a loading state while the preview request is in
-    // flight (debounced); wait for the resolved content before returning.
-    await dialog.findByLabelText("Actual Amount Received");
-    return dialog;
-  }
+  it("bulk 'Collect money from driver' navigates straight to New Collection with the Driver and selected Orders, opening no dialog here", async () => {
+    const { onNavigate } = setup([collectableOrder, secondCollectableOrder]);
 
-  it("binds Gross Collections, Company Fees, Amount Due to Trader and Net Expected from the server preview — one Order", async () => {
-    setup([deliveredOrder], () =>
-      Promise.resolve({
-        companyFees: "25.00",
-        difference: "-200.00",
-        driverId: driver.id,
-        expenseTotal: "0.00",
-        grossCollections: "200.00",
-        netAmountExpected: "200.00",
-        orderCount: 1,
-        paymentTotal: "0.00",
-        traderCount: 1,
-        traderPayable: "175.00",
-        warnings: [],
-      }),
-    );
-    const dialog = await openDialogWithAllOrders([deliveredOrder]);
+    fireEvent.click(await screen.findByLabelText("Select Order SER-000010"));
+    fireEvent.click(screen.getByLabelText("Select Order SER-000011"));
+    fireEvent.click(screen.getByRole("button", { name: "Collect money from driver" }));
 
-    expect(
-      (await dialog.findByText("Gross Customer Collections")).nextElementSibling?.textContent,
-    ).toBe(aed("200.00"));
-    expect(dialog.getByText("Company fees").nextElementSibling?.textContent).toBe(aed("25.00"));
-    expect(dialog.getByText("Amount due to Trader").nextElementSibling?.textContent).toBe(
-      aed("175.00"),
-    );
-    expect(
-      dialog.getAllByText("Driver-level expenses")[0]?.nextElementSibling?.textContent,
-    ).toBe(aed("0.00"));
-    expect(dialog.getByText("Net Expected from Driver").nextElementSibling?.textContent).toBe(
-      aed("200.00"),
-    );
-  });
-
-  it("sums Gross Collections, Company Fees and Amount Due to Trader across multiple Orders", async () => {
-    setup([deliveredOrder, secondDeliveredOrder], () =>
-      Promise.resolve({
-        companyFees: "50.00",
-        difference: "-350.00",
-        driverId: driver.id,
-        expenseTotal: "0.00",
-        grossCollections: "350.00",
-        netAmountExpected: "350.00",
-        orderCount: 2,
-        paymentTotal: "0.00",
-        traderCount: 1,
-        traderPayable: "300.00",
-        warnings: [],
-      }),
-    );
-    const dialog = await openDialogWithAllOrders([deliveredOrder, secondDeliveredOrder]);
-
-    expect(
-      (await dialog.findByText("Gross Customer Collections")).nextElementSibling?.textContent,
-    ).toBe(aed("350.00"));
-    expect(dialog.getByText("Company fees").nextElementSibling?.textContent).toBe(aed("50.00"));
-    expect(dialog.getByText("Amount due to Trader").nextElementSibling?.textContent).toBe(
-      aed("300.00"),
-    );
-    expect(dialog.getByText("Net Expected from Driver").nextElementSibling?.textContent).toBe(
-      aed("350.00"),
-    );
-  });
-
-  it("shows a negative Difference before Actual Amount Received is entered, and blocks confirmation", async () => {
-    setup([deliveredOrder], () =>
-      Promise.resolve({
-        companyFees: "25.00",
-        difference: "-200.00",
-        driverId: driver.id,
-        expenseTotal: "0.00",
-        grossCollections: "200.00",
-        netAmountExpected: "200.00",
-        orderCount: 1,
-        paymentTotal: "0.00",
-        traderCount: 1,
-        traderPayable: "175.00",
-        warnings: [],
-      }),
-    );
-    const dialog = await openDialogWithAllOrders([deliveredOrder]);
-
-    // Actual Amount Received is never pre-filled from Net Expected (§ formula fix).
-    const actualReceived = dialog.getByLabelText("Actual Amount Received") as HTMLInputElement;
-    expect(actualReceived.value).toBe("");
-    expect(dialog.getByText("Difference").nextElementSibling?.textContent).toBe(aed("-200.00"));
-    expect(dialog.getByRole("button", { name: "Collect money from driver" })).toBeDisabled();
-  });
-
-  it("shows a zero Difference and enables confirmation once the exact amount is entered", async () => {
-    setup([deliveredOrder], () =>
-      Promise.resolve({
-        companyFees: "25.00",
-        difference: "-200.00",
-        driverId: driver.id,
-        expenseTotal: "0.00",
-        grossCollections: "200.00",
-        netAmountExpected: "200.00",
-        orderCount: 1,
-        paymentTotal: "0.00",
-        traderCount: 1,
-        traderPayable: "175.00",
-        warnings: [],
-      }),
-    );
-    const dialog = await openDialogWithAllOrders([deliveredOrder]);
-
-    fireEvent.change(dialog.getByLabelText("Actual Amount Received"), {
-      target: { value: "200" },
-    });
-    await waitFor(() =>
-      expect(dialog.getByText("Difference").nextElementSibling?.textContent).toBe(aed("0.00")),
-    );
-    expect(dialog.getByRole("button", { name: "Collect money from driver" })).toBeEnabled();
-  });
-
-  it("blocks confirmation when Actual Amount Received leaves a non-zero Difference", async () => {
-    setup([deliveredOrder], () =>
-      Promise.resolve({
-        companyFees: "25.00",
-        difference: "-200.00",
-        driverId: driver.id,
-        expenseTotal: "0.00",
-        grossCollections: "200.00",
-        netAmountExpected: "200.00",
-        orderCount: 1,
-        paymentTotal: "0.00",
-        traderCount: 1,
-        traderPayable: "175.00",
-        warnings: [],
-      }),
-    );
-    const dialog = await openDialogWithAllOrders([deliveredOrder]);
-
-    fireEvent.change(dialog.getByLabelText("Actual Amount Received"), {
-      target: { value: "50" },
-    });
-    await waitFor(() =>
-      expect(dialog.getByText("Difference").nextElementSibling?.textContent).toBe(aed("-150.00")),
-    );
-    expect(dialog.getByRole("button", { name: "Collect money from driver" })).toBeDisabled();
-  });
-
-  it("reduces Net Expected by Driver Expenses only — Company Fees and Trader payable are unaffected", async () => {
-    const { api } = setup([deliveredOrder], (body: { expenses?: readonly unknown[] }) =>
-      Promise.resolve(
-        (body.expenses?.length ?? 0) > 0
-          ? {
-              // A 20.00 Driver Expense reduces Net Expected from 200 to 180; Company Fees
-              // and Amount Due to Trader are computed straight from the Orders and never
-              // move because of expenses (§ formula fix).
-              companyFees: "25.00",
-              difference: "-180.00",
-              driverId: driver.id,
-              expenseTotal: "20.00",
-              grossCollections: "200.00",
-              netAmountExpected: "180.00",
-              orderCount: 1,
-              paymentTotal: "0.00",
-              traderCount: 1,
-              traderPayable: "175.00",
-              warnings: [],
-            }
-          : {
-              companyFees: "25.00",
-              difference: "-200.00",
-              driverId: driver.id,
-              expenseTotal: "0.00",
-              grossCollections: "200.00",
-              netAmountExpected: "200.00",
-              orderCount: 1,
-              paymentTotal: "0.00",
-              traderCount: 1,
-              traderPayable: "175.00",
-              warnings: [],
-            },
+    expect(onNavigate).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /^\/drivers\?openDialog=collect_money&returnTo=%2Forders&driverId=20000000-0000-4000-8000-000000000006&orderIds=10000000-0000-4000-8000-000000000010%2C10000000-0000-4000-8000-000000000011$/,
       ),
     );
-    const dialog = await openDialogWithAllOrders([deliveredOrder]);
-    void api;
+    // Nothing opened here -- the old duplicate summary dialog is gone.
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
 
-    fireEvent.click(dialog.getByRole("button", { name: "Add expense" }));
-    const comboboxes = dialog.getAllByRole("combobox");
-    const typeSelect = comboboxes[comboboxes.length - 1];
-    if (typeSelect === undefined) throw new Error("Expected an expense type <select>");
-    fireEvent.change(typeSelect, { target: { value: "expense-fuel" } });
-    const amountInput = dialog.getByPlaceholderText("0.00");
-    fireEvent.change(amountInput, { target: { value: "20" } });
-    const reasonInput = dialog.getByPlaceholderText(/reason/i);
-    fireEvent.change(reasonInput, { target: { value: "Fuel" } });
+  it("the per-row 'Collect from Driver' action navigates with just that one Order, opening no dialog here", async () => {
+    const { onNavigate } = setup([collectableOrder]);
 
-    await waitFor(() =>
-      expect(dialog.getByText("Net Expected from Driver").nextElementSibling?.textContent).toBe(
-        aed("180.00"),
-      ),
+    await screen.findByText("SER-000010");
+    fireEvent.click(screen.getByRole("button", { name: "Order actions" }));
+    expect(screen.queryByRole("button", { name: "Close order" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Collect money from driver" }));
+
+    expect(onNavigate).toHaveBeenCalledWith(
+      "/drivers?openDialog=collect_money&returnTo=%2Forders&driverId=20000000-0000-4000-8000-000000000006&orderIds=10000000-0000-4000-8000-000000000010",
     );
-    // Company Fees and Amount Due to Trader never move because of Driver Expenses.
-    expect(dialog.getByText("Company fees").nextElementSibling?.textContent).toBe(aed("25.00"));
-    expect(dialog.getByText("Amount due to Trader").nextElementSibling?.textContent).toBe(
-      aed("175.00"),
-    );
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("never renders the old duplicate Collect Money summary dialog from any entry point", async () => {
+    setup([collectableOrder]);
+    await screen.findByText("SER-000010");
+    fireEvent.click(screen.getByLabelText("Select Order SER-000010"));
+
+    // Neither entry point's fields (Traders Represented, Net Expected, ...)
+    // exist anywhere in this screen any more.
+    expect(screen.queryByText("Traders Represented")).not.toBeInTheDocument();
+    expect(screen.queryByText("Net Expected")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Actual Amount Received")).not.toBeInTheDocument();
   });
 });

@@ -9,6 +9,9 @@ import { OrderDetailsWorkspace } from "./OrdersModuleWorkspace.js";
 const detail: OperationsOrderDetail = {
   amountCollected: "0.00",
   areaName: "Dubai - Deira",
+  areaId: "area-1",
+  areaNameEn: "Deira",
+  areaNameAr: "الديرة",
   assignedDriverId: null,
   assignedDriverMobile: null,
   assignedDriverName: null,
@@ -21,6 +24,9 @@ const detail: OperationsOrderDetail = {
   customerName: "Aisha",
   deliveryStatus: "in_branch",
   driverReconciliationStatus: "not_applicable",
+  emirateId: "emirate-1",
+  emirateNameEn: "Dubai",
+  emirateNameAr: "دبي",
   events: [],
   history: [],
   id: "10000000-0000-4000-8000-000000000001",
@@ -42,9 +48,15 @@ const detail: OperationsOrderDetail = {
   orderDate: "2026-07-20",
   orderNumber: "ORD-000001",
   orderProfit: "10.00",
+  outsourcedDriverFeeAmount: "0.00",
+  outsourcedDriverFeeOutstanding: "0.00",
+  outsourcedDriverFeePaid: "0.00",
+  outsourcedDriverFeePaymentNumbers: "",
+  outsourcedDriverFeeStatus: "not_applicable",
   returnStatus: "not_applicable",
   serviceFee: "10.00",
   totalDeductions: "10.00",
+  traderId: "trader-1",
   traderNetPayable: "90.00",
   traderName: "Test Trader",
   traderSettlementStatus: "not_eligible",
@@ -58,10 +70,31 @@ describe("Edit order", () => {
     const api = {
       get: vi.fn().mockResolvedValue(detail),
       patch: vi.fn().mockResolvedValue({}),
+      post: vi.fn().mockResolvedValue({
+        additionalFees: "0.00",
+        additionalFeeVatAmount: "0.00",
+        codAmount: "100.00",
+        companyRevenue: "10.00",
+        configuredServiceFee: "10.00",
+        customerAmountDue: "110.00",
+        orderProfit: "10.00",
+        overrideApplied: false,
+        pricingProvenance: "resolved",
+        pricingRuleId: "pricing-rule-1",
+        serviceFee: "10.00",
+        serviceFeeVatAmount: "0.00",
+        totalDeductions: "10.00",
+        traderNetPayable: "90.00",
+        vatAmount: "0.00",
+        vatEnabled: false,
+        vatPriceMode: null,
+        vatRate: "0.00",
+      }),
     };
     render(
       <OrderDetailsWorkspace
         api={api as unknown as ApiClient}
+        companyId="00000000-0000-4000-8000-000000000001"
         onBack={vi.fn()}
         orderNumber="ORD-000001"
       />,
@@ -72,7 +105,14 @@ describe("Edit order", () => {
     fireEvent.click(editButton);
 
     // The dialog prefills from the order detail.
-    const nameInput = await screen.findByDisplayValue("Aisha");
+    await waitFor(
+      () => {
+        const input = screen.getByDisplayValue("Aisha");
+        expect(input).toBeInTheDocument();
+      },
+      { timeout: 3000 },
+    );
+    const nameInput = screen.getByDisplayValue("Aisha");
     fireEvent.change(nameInput, { target: { value: "Aisha Khan" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
@@ -90,6 +130,7 @@ describe("Edit order", () => {
     render(
       <OrderDetailsWorkspace
         api={api as unknown as ApiClient}
+        companyId="00000000-0000-4000-8000-000000000001"
         onBack={vi.fn()}
         orderNumber="ORD-000001"
       />,

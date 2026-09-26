@@ -7,14 +7,20 @@ import { HealthService } from "./health.service.js";
 describe("HealthService", () => {
   it("reports liveness without exposing dependencies", () => {
     const database = { check: vi.fn() } as unknown as DatabaseHealthService;
-    expect(new HealthService(database).live()).toEqual({ status: "ok" });
+    expect(new HealthService(database).live()).toEqual({
+      status: "ok",
+      version: expect.any(String),
+    });
   });
 
   it("reports readiness when PostgreSQL responds", async () => {
     const database = {
       check: vi.fn().mockResolvedValue(undefined),
     } as unknown as DatabaseHealthService;
-    await expect(new HealthService(database).ready()).resolves.toEqual({ status: "ok" });
+    await expect(new HealthService(database).ready()).resolves.toEqual({
+      status: "ok",
+      version: expect.any(String),
+    });
   });
 
   it("returns a safe unavailable response when PostgreSQL fails", async () => {

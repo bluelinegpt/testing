@@ -43,11 +43,7 @@ describe("AreaFormDialog", () => {
   it("requires an Emirate and a name before submitting", async () => {
     const api = createApi();
     render(
-      <AreaFormDialog
-        api={api as unknown as ApiClient}
-        onClose={vi.fn()}
-        onSaved={vi.fn()}
-      />,
+      <AreaFormDialog api={api as unknown as ApiClient} onClose={vi.fn()} onSaved={vi.fn()} />,
     );
     await screen.findByRole("option", { name: "Dubai" });
 
@@ -96,9 +92,28 @@ describe("AreaFormDialog", () => {
     expect(screen.queryByLabelText("Area Code")).not.toBeInTheDocument();
   });
 
+  it("reuses supplied Emirates when opened inline instead of loading them again", async () => {
+    const api = createApi();
+    render(
+      <AreaFormDialog
+        api={api as unknown as ApiClient}
+        defaultEmirateId={dubaiId}
+        emirates={emirates}
+        onClose={vi.fn()}
+        onSaved={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("option", { name: "Dubai" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Emirate")).toHaveValue(dubaiId);
+    expect(api.get).not.toHaveBeenCalled();
+  });
+
   it("shows the duplicate rule against the name field", async () => {
     const api = createApi({
-      post: vi.fn().mockRejectedValue(Object.assign(new Error("conflict"), { code: "area_exists" })),
+      post: vi
+        .fn()
+        .mockRejectedValue(Object.assign(new Error("conflict"), { code: "area_exists" })),
     });
     render(
       <AreaFormDialog api={api as unknown as ApiClient} onClose={vi.fn()} onSaved={vi.fn()} />,

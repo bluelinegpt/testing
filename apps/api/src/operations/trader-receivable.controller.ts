@@ -14,7 +14,10 @@ import {
 import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
 import type { Request, Response } from "express";
 
-import { RequireAnyPermission, RequireIdentityKinds } from "../authentication/authentication.decorators.js";
+import {
+  RequireAnyPermission,
+  RequireIdentityKinds,
+} from "../authentication/authentication.decorators.js";
 // Runtime class values are required for Nest validation metadata.
 // eslint-disable-next-line @typescript-eslint/consistent-type-imports
 import {
@@ -63,7 +66,9 @@ export class TraderReceivableController {
   ) {}
 
   @RequireAnyPermission("trader_receivables.create", "users_roles.manage")
-  @ApiOperation({ summary: "Server-authoritative summary cards for Trader receivables/collections" })
+  @ApiOperation({
+    summary: "Server-authoritative summary cards for Trader receivables/collections",
+  })
   @Get("summary")
   public summary(
     @Query() query: TraderCollectionSummaryQueryDto,
@@ -113,7 +118,11 @@ export class TraderReceivableController {
     @Headers("x-idempotency-key") idempotencyKey: string | undefined,
     @Req() request: Request,
   ): Promise<CreateTraderReceivableResult> {
-    return this.traderReceivables.createReceivable(input, this.correlationId(request), idempotencyKey);
+    return this.traderReceivables.createReceivable(
+      input,
+      this.correlationId(request),
+      idempotencyKey,
+    );
   }
 
   @RequireAnyPermission("trader_receivables.create", "users_roles.manage")
@@ -133,7 +142,11 @@ export class TraderReceivableController {
     @Body() input: CancelTraderReceivableDto,
     @Req() request: Request,
   ): Promise<{ readonly receivableId: string; readonly status: string }> {
-    return this.traderReceivables.cancelReceivable(receivableId, input, this.correlationId(request));
+    return this.traderReceivables.cancelReceivable(
+      receivableId,
+      input,
+      this.correlationId(request),
+    );
   }
 
   @RequireAnyPermission("trader_receivables.create", "users_roles.manage")
@@ -144,7 +157,11 @@ export class TraderReceivableController {
     @Headers("x-idempotency-key") idempotencyKey: string | undefined,
     @Req() request: Request,
   ): Promise<CreateTraderCollectionResult> {
-    return this.traderReceivables.confirmCollection(input, this.correlationId(request), idempotencyKey);
+    return this.traderReceivables.confirmCollection(
+      input,
+      this.correlationId(request),
+      idempotencyKey,
+    );
   }
 
   @RequireAnyPermission("trader_receivables.create", "users_roles.manage")

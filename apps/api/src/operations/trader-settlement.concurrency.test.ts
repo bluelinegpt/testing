@@ -94,14 +94,22 @@ describe.skipIf(!runConcurrencyTests)("trader settlement concurrency", () => {
           customer_name, customer_mobile_number, customer_address, package_count, payment_condition,
           final_service_fee_snapshot, customer_provenance_status, pricing_provenance_status,
           trader_gross_payable, trader_net_payable,
-          delivery_status, driver_reconciliation_status, trader_settlement_status, return_status
+          -- A zero Service Fee is lawful only with a recorded reason
+          -- (orders_zero_service_fee_reason_check, added by
+          -- 20260805100000_order_service_fee_override_reason). These fixtures
+          -- configure no Trader/Area pricing, so the honest reason is the
+          -- repository's own configured-zero marker. Amounts are unchanged, so
+          -- every assertion in this suite still measures what it always did.
+          delivery_status, driver_reconciliation_status, trader_settlement_status, return_status,
+          service_fee_override_reason
         ) values (
           ${orderId}::uuid, ${fixture.companyId}::uuid, ${`SETCON-${suffix}`}, current_date,
           ${fixture.traderId}::uuid, ${areaId}::uuid, ${fixture.accountId}::uuid,
           'Concurrency Customer', '971509999999', 'Concurrency address', 1,
           'customer_pays_cod_and_fee', 0, 'legacy_unattributed', 'legacy_unattributed',
           ${netPayable}, ${netPayable},
-          'delivered', 'reconciled', 'unsettled', 'not_applicable'
+          'delivered', 'reconciled', 'unsettled', 'not_applicable',
+          'Configured Trader/Area price is zero'
         )
       `.execute(transaction);
       await sql`set constraints all immediate`.execute(transaction);

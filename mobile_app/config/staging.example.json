@@ -1,0 +1,7 @@
+{
+  "ENVIRONMENT_NAME": "staging",
+  "API_BASE_URL": "https://api.staging.invalid.example/api/v1",
+  "REALTIME_URL": "wss://realtime.staging.invalid.example",
+  "ENABLE_VERBOSE_LOGGING": false,
+  "ENABLE_MOCK_SERVICES": false
+}

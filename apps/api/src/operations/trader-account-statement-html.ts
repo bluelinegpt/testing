@@ -50,7 +50,7 @@ export function buildTraderAccountStatementHtml(
         <td>${line.lineNumber}</td>
         <td>${escapeHtml(line.date)}</td>
         <td>${escapeHtml(line.reference)}</td>
-        <td>${escapeHtml(line.description)}</td>
+        <td>${escapeHtml(ar ? (line.type === "order" ? "طلب مسلّم" : line.type === "payment" ? "دفعة للتاجر" : "عكس دفعة للتاجر") : line.description)}</td>
         <td class="money">${escapeHtml(line.debit)}</td>
         <td class="money">${escapeHtml(line.credit)}</td>
         <td class="money">${escapeHtml(line.runningBalance)}</td>
@@ -71,23 +71,23 @@ export function buildTraderAccountStatementHtml(
 <html lang="${language}" dir="${ar ? "rtl" : "ltr"}">
 <head><meta charset="utf-8"><style>
 @page{size:A4;margin:14mm 12mm 18mm}*{box-sizing:border-box}body{font-family:Arial,"Noto Sans Arabic",sans-serif;color:#182033;font-size:10px}
-h1{font-size:22px;margin:0 0 4px}h2{font-size:13px;margin:14px 0 5px}.muted{color:#667085}.header{display:flex;justify-content:space-between;border-bottom:2px solid #3158e8;padding-bottom:10px;margin-bottom:12px}.brand{display:flex;gap:9px}.logo{width:48px;height:48px;object-fit:contain}
+h1{font-size:22px;margin:0 0 4px}h2{font-size:13px;margin:14px 0 5px}.muted{color:#667085}.header{display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #3158e8;padding-bottom:10px;margin-bottom:12px}.brand{display:flex;align-items:center;gap:9px}.logo{width:48px;height:48px;object-fit:contain}.trader-line{font-size:15px;font-weight:700}
 .cards{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:12px 0}.card{border:1px solid #d9dfeb;border-radius:6px;padding:8px}.card strong{display:block;font-size:14px;margin-top:4px}
 table{width:100%;border-collapse:collapse;table-layout:fixed}thead{display:table-header-group}th{background:#eef2ff;text-align:${ar ? "right" : "left"};padding:6px;border:1px solid #d9dfeb}td{padding:6px;border:1px solid #e2e6ef;vertical-align:top;overflow-wrap:anywhere}.money{text-align:end;font-variant-numeric:tabular-nums}
 .warning{margin-top:10px;padding:8px;background:#fff7e6;border:1px solid #f4c66a}.footer-note{margin-top:10px;color:#667085}.settlement{break-inside:avoid;margin-top:14px}
 </style></head>
 <body>
-  <section class="header"><div class="brand">${data.company.logoDataUri === null ? "" : `<img class="logo" alt="" src="${escapeHtml(data.company.logoDataUri)}">`}<div><h1>${labels.title}</h1><div>${escapeHtml(data.trader.number)} · ${escapeHtml(ar ? data.trader.nameAr || data.trader.nameEn : data.trader.nameEn)}</div></div></div>
+  <section class="header"><div class="brand">${data.company.logoDataUri === null ? "" : `<img class="logo" alt="" src="${escapeHtml(data.company.logoDataUri)}">`}<div><h1>${labels.title}</h1><div class="trader-line">${escapeHtml(data.trader.number)} · ${escapeHtml(ar ? data.trader.nameAr || data.trader.nameEn : data.trader.nameEn)}</div></div></div>
   <div><strong>${escapeHtml(ar ? data.company.nameAr || data.company.nameEn : data.company.nameEn)}</strong><br>${labels.from}: ${escapeHtml(data.period.from)}<br>${labels.to}: ${escapeHtml(data.period.to)}</div></section>
   <section class="cards">
-    <div class="card">${labels.opening}<strong>AED ${escapeHtml(data.summary.openingBalance)}</strong></div>
-    <div class="card">${labels.debit}<strong>AED ${escapeHtml(data.summary.totalPayable)}</strong></div>
-    <div class="card">${labels.credit}<strong>AED ${escapeHtml(data.summary.netPayments)}</strong></div>
+    <div class="card">${ar ? "غير المدفوع للتاجر" : "Unpaid to Trader"}<strong>AED ${escapeHtml(data.summary.outstandingAmount)}</strong></div>
+    <div class="card">${ar ? "المدفوع للتاجر" : "Paid to Trader"}<strong>AED ${escapeHtml(data.summary.netPayments)}</strong></div>
+    <div class="card">${ar ? "المستحق المؤكد من الطلبات المحصّلة" : "Confirmed Payable from Collected Orders"}<strong>AED ${escapeHtml(data.summary.totalPayable)}</strong></div>
   </section>
   <section class="cards">
-    <div class="card">${ar ? "الدفع عند الاستلام" : "COD collected"}<strong>AED ${escapeHtml(data.summary.codCollected)}</strong></div>
-    <div class="card">${ar ? "رسوم الخدمة" : "Service fees"}<strong>AED ${escapeHtml(data.summary.serviceFeesDeducted)}</strong></div>
-    <div class="card">${ar ? "المبلغ المستحق" : "Outstanding"}<strong>AED ${escapeHtml(data.summary.outstandingAmount)}</strong></div>
+    <div class="card">${labels.opening}<strong>AED ${escapeHtml(data.summary.openingBalance)}</strong></div>
+    <div class="card">${ar ? "قيمة الدفع عند الاستلام للطلبات المؤكد تحصيلها" : "COD from Collection-Confirmed Orders"}<strong>AED ${escapeHtml(data.summary.codCollected)}</strong><span class="muted">${ar ? "لا يشمل الطلبات بانتظار التحصيل من المندوب" : "Excludes orders awaiting Driver Collection"}</span></div>
+    <div class="card">${ar ? "رسوم الخدمة المخصومة من مستحق التاجر" : "Service Fees Deducted from Trader Payable"}<strong>AED ${escapeHtml(data.summary.serviceFeesDeducted)}</strong><span class="muted">${ar ? "رسوم الطلبات المؤكد تحصيلها فقط" : "Collection-confirmed orders only"}</span></div>
   </section>
   <table><thead><tr><th>#</th><th>${labels.date}</th><th>${labels.transaction}</th><th>${labels.description}</th><th>${labels.debit}</th><th>${labels.credit}</th><th>${labels.balance}</th></tr></thead>
   <tbody>${rows}</tbody></table>

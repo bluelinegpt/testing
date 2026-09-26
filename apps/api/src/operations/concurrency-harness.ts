@@ -1,4 +1,8 @@
 import { randomUUID } from "node:crypto";
+import {
+  createBusinessDayServiceStub,
+  createCalendarDateReportModeServiceStub,
+} from "../test/business-day-stubs.js";
 import { promises as fileSystem } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -21,6 +25,9 @@ import type { TenantContext, TenantContextAccessor } from "../tenancy/tenant-con
 
 import { DriverCashReconciliationService } from "./driver-cash-reconciliation.service.js";
 import type { DriverCollectionPdfService } from "./driver-collection-pdf.service.js";
+import { PaymentFundingAccountService } from "../accounting/payment-funding-account.service.js";
+import { permissiveBalanceEnforcement } from "../test/balance-enforcement-stub.js";
+import { EmployeeCollectionEarningService } from "../payroll/employee-collection-earning.service.js";
 import { OperationsHistoryWriter } from "./operations-history.writer.js";
 import { TraderSettlementService } from "./trader-settlement.service.js";
 
@@ -270,19 +277,55 @@ export function createCaller(
     database,
     transactions,
     tenants as unknown as TenantContextAccessor,
+    createCalendarDateReportModeServiceStub(),
+    createBusinessDayServiceStub(),
     identities as unknown as IdentityContextAccessor,
     new OperationsHistoryWriter(),
     companyProfile,
     {} as unknown as DriverCollectionPdfService,
+    // Outsourced Driver Fee collection-offset dependency, stubbed with the
+    // SAME shape the sibling database suite uses. It was `undefined as never`,
+    // which type-checked but threw the moment reconciliation asked for a fee
+    // offset — these scenarios exercise reconciliation CONCURRENCY, and a
+    // Driver with no accruals legitimately has nothing to offset, so a
+    // zero-offset answer is the accurate one rather than a convenient one.
+    {
+      collectionOffsetProposal: () =>
+        Promise.resolve({
+          allocations: [],
+          eligibleAccrualCount: 0,
+          oldestFirstProposal: [],
+          remainingDriverOutstanding: "0.00",
+          requestedOffset: "0.00",
+          safeMaximumOffset: "0.00",
+          totalOutstanding: "0.00",
+        }),
+      confirmCollectionOffset: () => Promise.resolve(null),
+      reverseCollectionOffset: () => Promise.resolve(null),
+    } as never,
+    // Collection-fact capture. The real service, not a stub: these suites
+    // must prove confirmation still behaves with it wired in.
+    new EmployeeCollectionEarningService(tenants as unknown as TenantContextAccessor),
   );
   const traderSettlementService = new TraderSettlementService(
     database,
     transactions,
     tenants as unknown as TenantContextAccessor,
+    {
+      resolve: async (accountId: string) => ({
+        accountId, kind: "cash", name: "Harness Cash Account",
+      }),
+    } as unknown as PaymentFundingAccountService,
+    createCalendarDateReportModeServiceStub(),
+    createBusinessDayServiceStub(),
     identities as unknown as IdentityContextAccessor,
     new OperationsHistoryWriter(),
     companyProfile,
     {} as unknown as DriverCollectionPdfService,
+    // Always-allow stub. This harness exercises settlement CONCURRENCY, not
+    // balance policy; a stub that enforced would change what these scenarios
+    // test, and a stub that blocked would fail them for the wrong reason.
+    permissiveBalanceEnforcement(),
   );
   return {
     database,
