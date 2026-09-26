@@ -2660,6 +2660,8 @@ export function OrderDetailsWorkspace({
     permissions.includes("users_roles.manage");
   const canViewSettlementDetail =
     permissions.includes("settlements.create") || permissions.includes("users_roles.manage");
+  const canSettle =
+    permissions.includes("settlements.create") || permissions.includes("users_roles.manage");
   const canReverseSettlement =
     permissions.includes("settlements.reverse") || permissions.includes("users_roles.manage");
   const isOfficeStatusUser =

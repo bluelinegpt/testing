@@ -317,6 +317,7 @@ export function OrderWorkflowIndicator({
     }
     if (
       orderNumber !== undefined &&
+      guidance.nextActionRoute !== null &&
       ["/drivers", "/trader-settlements"].includes(guidance.nextActionRoute)
     ) {
       // Operational actions return to Order Search. The operator can process
