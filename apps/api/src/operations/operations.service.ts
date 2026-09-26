@@ -3973,7 +3973,7 @@ export class OperationsService {
           ${latitude ?? null},${longitude ?? null},${notes},${customerRow?.code ?? null},
           ${customerRow?.customerReference ?? null},${customerAddressRow?.areaCode ?? null},${customerAddressRow?.areaNameEn ?? null},
           ${customerAddressRow?.areaNameAr ?? null},${customerAddressRow === undefined ? null : customerAddressRow.areaNameAr === null},
-          ${customerLocationLink},${customerDeliveryNotes},${customerOmitted ? "not_applicable" : "resolved"},
+          ${customerLocationLink},${customerDeliveryNotes},${resolvedCustomer === undefined ? "not_applicable" : "resolved"},
           ${packageCount}, ${input.paymentCondition ?? "customer_pays_cod_and_fee"},
           ${financials.codAmount.toFixed(2)}, ${financials.serviceFee.toFixed(2)},
           ${financials.serviceFeeNetAmount.toFixed(2)},${financials.serviceFeeVatAmount.toFixed(2)},

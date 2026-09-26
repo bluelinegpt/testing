@@ -20,10 +20,10 @@
       "path": "apps/api",
       "renderService": "bluelinegpt-api-test",
       "status": "needs_deploy",
-      "localCommit": "8282c1e",
+      "localCommit": "ca2b004",
       "localCommitDate": "2026-09-26",
-      "lastChangeDescription": "Keeps renamed International migrations compatible with legacy ledgers",
-      "lastChangeBy": "codex",
+      "lastChangeDescription": "fix: validate legacy international migration aliases",
+      "lastChangeBy": "human",
       "confirmedLiveCommit": "e3de371",
       "confirmedLiveAt": "2026-09-01"
     },

@@ -59,7 +59,7 @@ export async function up(database: Kysely<MigrationDatabase>): Promise<void> {
       references third_party_delivery_companies(id, company_id) on delete restrict;
     create index destination_countries_company_active_name_idx
       on destination_countries (company_id, is_active, normalized_name);
-    create index orders_company_destination_country_idx
+    create index orders_company_destination_country_id_idx
       on orders (company_id, destination_country_id);
     create index orders_company_third_party_delivery_company_idx
       on orders (company_id, third_party_delivery_company_id);
@@ -92,7 +92,7 @@ export async function down(database: Kysely<MigrationDatabase>): Promise<void> {
     alter table orders drop constraint if exists orders_order_type_check;
     alter table orders add constraint orders_order_type_check
       check (order_type in ('delivery', 'collect_order'));
-    drop index if exists orders_company_destination_country_idx;
+    drop index if exists orders_company_destination_country_id_idx;
     drop index if exists orders_company_third_party_delivery_company_idx;
     drop index if exists destination_countries_company_active_name_idx;
     alter table orders drop column if exists destination_country_id;

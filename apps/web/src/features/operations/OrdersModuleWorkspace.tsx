@@ -305,6 +305,8 @@ export function OrdersModuleWorkspace({
   const [drivers, setDrivers] = useState<readonly OperationsDriver[]>([]);
   const [traders, setTraders] = useState<readonly OperationsTrader[]>([]);
   const [areas, setAreas] = useState<readonly CompanyArea[]>([]);
+  const [carrierFilterOptions, setCarrierFilterOptions] = useState<readonly { id: string; name: string }[]>([]);
+  const [countryFilterOptions, setCountryFilterOptions] = useState<readonly { id: string; name: string }[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [grouping, setGrouping] = useState<OrderGrouping>("");
   const matchingCount = data?.matchingCount ?? data?.filteredCount ?? 0;
@@ -381,10 +383,12 @@ export function OrdersModuleWorkspace({
   useEffect(() => {
     let active = true;
     void (async () => {
-      const [holdOrders, loadedDrivers, loadedTraders] = await Promise.allSettled([
+      const [holdOrders, loadedDrivers, loadedTraders, loadedCarriers, loadedCountries] = await Promise.allSettled([
         api.get<OperationsOrderPage>("operations/orders?page=1&pageSize=25&quickView=hold"),
         api.get<readonly OperationsDriver[]>("operations/drivers"),
         api.get<readonly OperationsTrader[]>("operations/traders"),
+        api.get<SearchPage<{ id: string; name: string }>>("operations/third-party-delivery-companies"),
+        api.get<SearchPage<{ id: string; name: string }>>("operations/destination-countries"),
       ]);
       if (!active) return;
       if (holdOrders.status === "fulfilled") {
@@ -396,6 +400,12 @@ export function OrdersModuleWorkspace({
       // Active only, exactly as before the split.
       if (loadedTraders.status === "fulfilled") {
         setTraders(loadedTraders.value.filter((trader) => trader.status === "active"));
+      }
+      if (loadedCarriers.status === "fulfilled") {
+        setCarrierFilterOptions(Array.isArray(loadedCarriers.value) ? loadedCarriers.value : loadedCarriers.value.items ?? []);
+      }
+      if (loadedCountries.status === "fulfilled") {
+        setCountryFilterOptions(Array.isArray(loadedCountries.value) ? loadedCountries.value : loadedCountries.value.items ?? []);
       }
 
       // Load areas for each emirate to build area-emirate mapping
@@ -794,7 +804,7 @@ export function OrdersModuleWorkspace({
   const renderOrderRow = (order: OperationsOrder) => {
     const checked = orderSelected(order.id);
     return (
-      <tr key={order.id}>
+      <tr className={order.orderType === "gcc_international" ? "international-order-row" : undefined} key={order.id}>
         <td>
           {canSelectOrders ? (
             <input
@@ -1193,17 +1203,33 @@ export function OrdersModuleWorkspace({
               <option value="handed_to_carrier">{t("operations.internationalCarrierStatuses.handed_to_carrier")}</option>
               <option value="in_transit">{t("operations.internationalCarrierStatuses.in_transit")}</option>
             </FilterSelect>
-            <label className="filter-select">
+            <label className="filter-select filter-combobox-field international-country-filter">
               <span className="sr-only">Third-party shipping company</span>
-              <input
+              <FilterCombobox
+                emptyText="No carriers found"
+                label="Carrier"
+                onChange={(value) => {
+                  const option = (carrierFilterOptions ?? []).find((candidate) => candidate.id === value);
+                  updateFilters({ thirdPartyDeliveryCompanyName: option?.name ?? "" });
+                }}
+                options={(carrierFilterOptions ?? []).map((carrier) => ({ id: carrier.id, label: carrier.name }))}
                 placeholder="Carrier"
-                value={filters.thirdPartyDeliveryCompanyName}
-                onChange={(event) => updateFilters({ thirdPartyDeliveryCompanyName: event.target.value })}
+                value={(carrierFilterOptions ?? []).find((carrier) => carrier.name === filters.thirdPartyDeliveryCompanyName)?.id ?? ""}
               />
             </label>
-            <label className="filter-select">
+            <label className="filter-select filter-combobox-field international-country-filter">
               <span className="sr-only">Destination country</span>
-              <input placeholder="Country" value={filters.destinationCountryName} onChange={(event) => updateFilters({ destinationCountryName: event.target.value })} />
+              <FilterCombobox
+                emptyText="No countries found"
+                label="Country"
+                onChange={(value) => {
+                  const option = (countryFilterOptions ?? []).find((candidate) => candidate.id === value);
+                  updateFilters({ destinationCountryName: option?.name ?? "" });
+                }}
+                options={(countryFilterOptions ?? []).map((country) => ({ id: country.id, label: country.name }))}
+                placeholder="Country"
+                value={(countryFilterOptions ?? []).find((country) => country.name === filters.destinationCountryName)?.id ?? ""}
+              />
             </label>
             <div className="filter-grouping-multi-select" id="grouping-popover-anchor">
               <button

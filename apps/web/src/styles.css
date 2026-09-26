@@ -956,6 +956,17 @@
   width: 100%;
   box-sizing: border-box;
 }
+.orders-filter-bar .international-country-filter input,
+.orders-filter-bar .international-country-filter .search-combobox > input {
+  border-color: #c62828;
+  color: #b42318;
+  background: #fff;
+}
+.orders-filter-bar .international-country-filter input::placeholder,
+.orders-filter-bar .international-country-filter .search-combobox > input::placeholder {
+  color: #b42318;
+  opacity: 1;
+}
 /* Matches the height and framing of the <select> controls beside it, so the
    Trader and Driver filters do not read as a different kind of control. */
 .filter-combobox-field .search-combobox > input {
@@ -1170,6 +1181,13 @@
 }
 .orders-table tbody tr:hover {
   background: var(--surface-subtle);
+}
+.orders-table tbody tr.international-order-row {
+  background: #fff1f1;
+  box-shadow: inset 4px 0 0 #c62828;
+}
+.orders-table tbody tr.international-order-row:hover {
+  background: #ffe4e4;
 }
 /* The first column is a checkbox and the last is a compact actions button, so
    they don't need the wide default minimums used by content-heavy tables. */

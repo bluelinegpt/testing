@@ -206,7 +206,10 @@ export function CreateOrderDialog({
     validationErrors.additionalFees = t("operations.errors.additionalInvalid");
   if (!packageCountInput.ok || packageCountInput.value < 1)
     validationErrors.packageCount = t("operations.errors.packagesInvalid");
-  if (isFreeOrder || orderType === "collect_order") {
+  if (orderType === "gcc_international") {
+    if (!(manualFee !== "" && manualFeeInput.ok))
+      validationErrors.pricing = "Enter a delivery/service fee";
+  } else if (isFreeOrder || orderType === "collect_order") {
     /* Pricing is deliberately NOT validated here. A Free Order is an intentional
        override, not a missing-pricing failure, so an unpriced Trader/Area must
        not block it -- that blocker is exactly the problem this feature removes.
@@ -518,7 +521,7 @@ export function CreateOrderDialog({
     // A Free Order is an approved business decision, not a pricing request.
     // Stop any pending quote state immediately so it cannot disable submission
     // or reintroduce an unresolved-pricing validation error.
-    if (isFreeOrder || orderType === "collect_order") {
+    if (isFreeOrder || orderType === "collect_order" || orderType === "gcc_international") {
       setQuoteLoading(false);
       return;
     }
@@ -802,7 +805,7 @@ export function CreateOrderDialog({
             : {
                 inlineCustomer: {
                   address: address.trim(),
-                  areaId: area!.id,
+                  ...(area === undefined ? {} : { areaId: area.id }),
                   mobileNumber: mobile.trim(),
                   name: customerName.trim(),
                   ...(secondMobile.trim() === ""
@@ -879,6 +882,11 @@ export function CreateOrderDialog({
         setError(t("operations.errors.sessionExpired"));
       } else if (code === "permission_denied" || code === "identity_kind_denied") {
         setError(t("operations.errors.permissionDenied"));
+      } else if (requestError instanceof ApiError && requestError.status === 409) {
+        // Do not overwrite the operator's value for an unknown conflict. A
+        // 409 may represent idempotency, workflow, or another business rule;
+        // only the structured serial-conflict codes may change this field.
+        setError(requestError.message);
       } else if (requestError instanceof ApiError && requestError.status >= 500) {
         setError(
           requestError.correlationId === undefined
@@ -901,6 +909,18 @@ export function CreateOrderDialog({
   };
 
   const money = (value: string | undefined) => formatCurrency(value ?? "0", "AED", locale);
+  const internationalFee = manualFeeInput.ok ? manualFeeInput.value : 0;
+  const internationalCod = codInput.ok ? codInput.value : 0;
+  const internationalCustomerTotal = (
+    paymentCondition === "customer_pays_cod_and_fee"
+      ? internationalCod + internationalFee
+      : internationalCod
+  ).toFixed(2);
+  const internationalTraderDue = (
+    paymentCondition === "customer_pays_cod_trader_pays_fee"
+      ? internationalCod - internationalFee
+      : internationalCod
+  ).toFixed(2);
   const negativeTraderPayable = quote !== undefined && Number(quote.traderNetPayable) < 0;
 
   return (
@@ -1286,6 +1306,12 @@ export function CreateOrderDialog({
                             setPricingMissing(false);
                             setQuoteError(undefined);
                           }
+                          if (next === "gcc_international") {
+                            setAdditionalFees("0.00");
+                            setQuote(undefined);
+                            setQuoteError(undefined);
+                            setPricingMissing(false);
+                          }
                         }}
                       >
                         <option value="delivery">{t("operations.internalDelivery")}</option>
@@ -1293,15 +1319,6 @@ export function CreateOrderDialog({
                         <option value="gcc_international">GCC &amp; International</option>
                       </select>
                     </label>
-                    {orderType === "gcc_international" ? (
-                      <>
-                        <SearchCombobox<CatalogOption> api={api} {...(searchDebounceMs === undefined ? {} : { debounceMs: searchDebounceMs })} emptyText="No country found" getLabel={(option) => option.name} label="Destination country" onChange={setDestinationCountry} path="operations/destination-countries" placeholder="Search destination country" value={destinationCountry} />
-                        <button type="button" onClick={() => { setCatalogKind("country"); setCatalogName(""); setCatalogError(undefined); }}>Create country</button>
-                        <SearchCombobox<CatalogOption> api={api} {...(searchDebounceMs === undefined ? {} : { debounceMs: searchDebounceMs })} emptyText="No carrier found" getLabel={(option) => option.name} label="Third-party shipping company" onChange={setThirdPartyDeliveryCompany} path="operations/third-party-delivery-companies" placeholder="Search carrier" value={thirdPartyDeliveryCompany} />
-                        <button type="button" onClick={() => { setCatalogKind("carrier"); setCatalogName(""); setCatalogError(undefined); }}>Create carrier</button>
-                        {catalogError ? <div className="form-error">{catalogError}</div> : null}
-                      </>
-                    ) : null}
                     {orderType === "collect_order" ? (
                       <div className="field">
                         <span>{t("operations.financialHandling")}</span>
@@ -1329,8 +1346,21 @@ export function CreateOrderDialog({
                       </label>
                     )}
                   </div>
+                  {orderType === "gcc_international" ? (
+                    <div className="form-grid international-catalog-grid">
+                      <div className="field catalog-field">
+                        <SearchCombobox<CatalogOption> api={api} {...(searchDebounceMs === undefined ? {} : { debounceMs: searchDebounceMs })} emptyText="No country found" getLabel={(option) => option.name} label="Destination country" onChange={setDestinationCountry} path="operations/destination-countries" placeholder="Search destination country" value={destinationCountry} />
+                        <button className="button button-secondary catalog-create-button" type="button" onClick={() => { setCatalogKind("country"); setCatalogName(""); setCatalogError(undefined); }}>Create country</button>
+                      </div>
+                      <div className="field catalog-field">
+                        <SearchCombobox<CatalogOption> api={api} {...(searchDebounceMs === undefined ? {} : { debounceMs: searchDebounceMs })} emptyText="No carrier found" getLabel={(option) => option.name} label="Third-party shipping company" onChange={setThirdPartyDeliveryCompany} path="operations/third-party-delivery-companies" placeholder="Search carrier" value={thirdPartyDeliveryCompany} />
+                        <button className="button button-secondary catalog-create-button" type="button" onClick={() => { setCatalogKind("carrier"); setCatalogName(""); setCatalogError(undefined); }}>Create carrier</button>
+                      </div>
+                      {catalogError ? <div className="form-error form-span-2">{catalogError}</div> : null}
+                    </div>
+                  ) : null}
                   {/* Sits with the money, because that is what it changes. */}
-                  {orderType === "collect_order" ? null : (
+                  {orderType === "collect_order" || orderType === "gcc_international" ? null : (
                     <div className="field free-order-toggle">
                       <label className="checkbox-row">
                         <input
@@ -1415,12 +1445,31 @@ export function CreateOrderDialog({
                         </small>
                       )}
                     </label>
-                    <label className="field">
-                      <span>{t("operations.serviceFee")}</span>
-                      <input readOnly value={quote?.configuredServiceFee ?? ""} />
+                    <label className="field required-field">
+                      <span>{orderType === "gcc_international" ? "Delivery / service fee" : t("operations.serviceFee")}</span>
+                      {orderType === "gcc_international" ? (
+                        <>
+                          <input
+                            aria-describedby={describedBy("pricing")}
+                            aria-invalid={errorFor("pricing") !== undefined}
+                            id="order-manual-fee"
+                            min="0"
+                            onChange={(event) => setManualFee(event.target.value)}
+                            required
+                            step="0.01"
+                            type="number"
+                            value={manualFee}
+                          />
+                          {errorFor("pricing") === undefined ? null : (
+                            <small className="field-error" id="order-pricing-error">
+                              {errorFor("pricing")}
+                            </small>
+                          )}
+                        </>
+                      ) : <input readOnly value={quote?.configuredServiceFee ?? ""} />}
                     </label>
                   </div>
-                  <label className="field">
+                  {orderType === "gcc_international" ? null : <label className="field">
                     <span>{t("operations.additionalFees")}</span>
                     <input
                       aria-describedby={describedBy("additionalFees")}
@@ -1438,8 +1487,8 @@ export function CreateOrderDialog({
                         {errorFor("additionalFees")}
                       </small>
                     )}
-                  </label>
-                  {isFreeOrder || orderType === "collect_order" ? (
+                  </label>}
+                  {orderType === "gcc_international" ? null : isFreeOrder || orderType === "collect_order" ? (
                     // No pricing UI at all while Free: nothing to resolve, and
                     // nothing for the operator to override.
                     <div className="fee-override" role="group">
@@ -1575,7 +1624,7 @@ export function CreateOrderDialog({
                       )}
                     </div>
                   ) : null}
-                  {canOverrideFee && !pricingMissing ? (
+                  {canOverrideFee && !pricingMissing && orderType !== "gcc_international" ? (
                     <div className="fee-override service-fee-override">
                       <label className="checkbox-field">
                         <input
@@ -1674,7 +1723,30 @@ export function CreateOrderDialog({
                   </label>
                   {orderType === "collect_order" ? null : (
                     <div className="quote-panel" aria-live="polite">
-                      {quoteLoading ? (
+                      {orderType === "gcc_international" ? (
+                        <>
+                          <div>
+                            <span>{t("operations.codAmount")}</span>
+                            <strong>{money(internationalCod.toFixed(2))}</strong>
+                          </div>
+                          <div>
+                            <span>Delivery / service fee</span>
+                            <strong>{money(internationalFee.toFixed(2))}</strong>
+                          </div>
+                          <div>
+                            <span>{t("operations.additionalFees")}</span>
+                            <strong>{money("0.00")}</strong>
+                          </div>
+                          <div>
+                            <span>{t("operations.amountDueToTrader")}</span>
+                            <strong>{money(internationalTraderDue)}</strong>
+                          </div>
+                          <div className="summary-total">
+                            <span>{t("operations.totalAmountToCollect")}</span>
+                            <strong>{money(internationalCustomerTotal)}</strong>
+                          </div>
+                        </>
+                      ) : quoteLoading ? (
                         <strong className="quote-loading">{t("operations.pricingLoading")}</strong>
                       ) : quoteError === undefined ? (
                         <>
@@ -1763,11 +1835,11 @@ export function CreateOrderDialog({
               <div className="order-totals" aria-label={t("operations.orderSummary")}>
                 <span className="total-due">
                   <small>{t("operations.totalAmountToCollect")}</small>
-                  <strong>{money(quote?.customerAmountDue)}</strong>
+                  <strong>{money(orderType === "gcc_international" ? internationalCustomerTotal : quote?.customerAmountDue)}</strong>
                 </span>
                 <span className={negativeTraderPayable ? "summary-invalid" : undefined}>
                   <small>{t("operations.amountDueToTrader")}</small>
-                  <strong>{money(quote?.traderNetPayable)}</strong>
+                  <strong>{money(orderType === "gcc_international" ? internationalTraderDue : quote?.traderNetPayable)}</strong>
                 </span>
               </div>
               <div className="modal-actions order-actions">

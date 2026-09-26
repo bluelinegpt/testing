@@ -398,7 +398,7 @@ describe("TraderSettlementsWorkspace", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Traders New Settlement" }));
     fireEvent.click(await screen.findByRole("button", { name: /Test Trader/ }));
     await screen.findByText("SER-1");
-    fireEvent.change(screen.getByLabelText("Payment Amount"), { target: { value: "100" } });
+    fireEvent.change(screen.getByLabelText("Gross Order Payable (+)"), { target: { value: "100" } });
     await waitFor(() =>
       expect(
         postCalls.some(
@@ -416,7 +416,7 @@ describe("TraderSettlementsWorkspace", () => {
     const dialog = within(await screen.findByRole("dialog"));
     fireEvent.click(await dialog.findByRole("button", { name: /Test Trader/ }));
     await waitFor(() => expect(dialog.getAllByText("SER-1").length).toBeGreaterThan(0));
-    fireEvent.change(dialog.getByLabelText("Payment Amount"), { target: { value: "100" } });
+    fireEvent.change(dialog.getByLabelText("Gross Order Payable (+)"), { target: { value: "100" } });
     await dialog.findByText("Outstanding Before");
     const allocationInput = (await dialog.findByDisplayValue("100.00")) as HTMLInputElement;
     fireEvent.change(allocationInput, { target: { value: "60" } });
@@ -428,7 +428,7 @@ describe("TraderSettlementsWorkspace", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Traders New Settlement" }));
     fireEvent.click(await screen.findByRole("button", { name: /Test Trader/ }));
     await screen.findByText("SER-1");
-    fireEvent.change(screen.getByLabelText("Payment Amount"), { target: { value: "100" } });
+    fireEvent.change(screen.getByLabelText("Gross Order Payable (+)"), { target: { value: "100" } });
     await screen.findByText("Outstanding Before");
     const allocationInput = (await screen.findByDisplayValue("100.00")) as HTMLInputElement;
     fireEvent.change(allocationInput, { target: { value: "60" } });
@@ -446,7 +446,7 @@ describe("TraderSettlementsWorkspace", () => {
     const dialog = within(await screen.findByRole("dialog"));
     fireEvent.click(await dialog.findByRole("button", { name: /Test Trader/ }));
     await waitFor(() => expect(dialog.getAllByText("SER-1").length).toBeGreaterThan(0));
-    fireEvent.change(dialog.getByLabelText("Payment Amount"), { target: { value: "100" } });
+    fireEvent.change(dialog.getByLabelText("Gross Order Payable (+)"), { target: { value: "100" } });
     fireEvent.change(dialog.getByLabelText("Payment Method"), {
       target: { value: "bank_transfer" },
     });
@@ -466,7 +466,7 @@ describe("TraderSettlementsWorkspace", () => {
     const dialog = within(await screen.findByRole("dialog"));
     fireEvent.click(await dialog.findByRole("button", { name: /Test Trader/ }));
     await waitFor(() => expect(dialog.getAllByText("SER-1").length).toBeGreaterThan(0));
-    fireEvent.change(dialog.getByLabelText("Payment Amount"), { target: { value: "100" } });
+    fireEvent.change(dialog.getByLabelText("Gross Order Payable (+)"), { target: { value: "100" } });
     await dialog.findByText("Outstanding Before");
     // A cash settlement must name the Cash account funding it.
     fireEvent.change(dialog.getByLabelText("Cash Account"), {
@@ -495,7 +495,7 @@ describe("TraderSettlementsWorkspace", () => {
     const dialog = within(await screen.findByRole("dialog"));
     fireEvent.click(await dialog.findByRole("button", { name: /Test Trader/ }));
     await waitFor(() => expect(dialog.getAllByText("SER-1").length).toBeGreaterThan(0));
-    fireEvent.change(dialog.getByLabelText("Payment Amount"), { target: { value: "100" } });
+    fireEvent.change(dialog.getByLabelText("Gross Order Payable (+)"), { target: { value: "100" } });
     await dialog.findByText("Outstanding Before");
     const allocationInput = (await dialog.findByDisplayValue("100.00")) as HTMLInputElement;
     fireEvent.change(allocationInput, { target: { value: "40" } });
@@ -588,7 +588,7 @@ describe("TraderSettlementsWorkspace", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Traders New Settlement" }));
     fireEvent.click(await screen.findByRole("button", { name: /Test Trader/ }));
     await screen.findByText("SER-1");
-    fireEvent.change(screen.getByLabelText("Payment Amount"), { target: { value: "100" } });
+    fireEvent.change(screen.getByLabelText("Gross Order Payable (+)"), { target: { value: "100" } });
     await screen.findByText("Outstanding Before");
     fireEvent.change(screen.getByLabelText("Cash Account"), {
       target: { value: "cash-company-1" },
@@ -919,7 +919,7 @@ describe("new_settlement Order preselection", () => {
     await dialog.findByText("SER-0");
     await waitFor(() => expect(dialog.getAllByText("SER-1").length).toBeGreaterThan(0));
 
-    await waitFor(() => expect(dialog.getByLabelText("Payment Amount")).toHaveDisplayValue(""));
+    await waitFor(() => expect(dialog.getByLabelText("Gross Order Payable (+)")).toHaveDisplayValue(""));
     const ordersTable = dialog.getAllByRole("table")[0]!;
     const rowCheckboxes = within(ordersTable)
       .getAllByRole("checkbox")
@@ -1064,7 +1064,7 @@ describe("new_settlement Order preselection", () => {
     const payTheSecondOrderOnly = async () => {
       const dialog = await openWithTwoOrders();
       for (const box of rowCheckboxes(dialog)) fireEvent.click(box);
-      fireEvent.change(dialog.getByLabelText("Payment Amount"), { target: { value: "50" } });
+      fireEvent.change(dialog.getByLabelText("Gross Order Payable (+)"), { target: { value: "50" } });
       /* Wait for the SERVER's proposal to land, not merely for the table.
          `manualOverride` is measured against that proposal, so editing before it
          arrives means editing nothing and the override never registers. */
