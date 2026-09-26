@@ -191,6 +191,14 @@ describe.skipIf(!runHttpTests)("trader settlement HTTP boundary", () => {
           const traderA = await createTrader(admin.companyId, admin.accountId, "a");
           const traderB = await createTrader(adminB.companyId, adminB.accountId, "b");
 
+          // The legacy bulk-settlement preview is still an authenticated route:
+          // a UI preview must not disclose another Company's settlement
+          // eligibility to a User who cannot create settlements.
+          const previewBody = { selectionMode: "ids", orderIds: [] };
+          await post(unprivileged.token, "/operations/settlements/selected/preview", previewBody).expect(403);
+          const authorizedPreview = await post(settlementUser.token, "/operations/settlements/selected/preview", previewBody);
+          expect([200, 201]).toContain(authorizedPreview.status);
+
           const cashGlAccountId = randomUUID();
           const companyCashAccountId = randomUUID();
           await sql`
@@ -254,6 +262,11 @@ describe.skipIf(!runHttpTests)("trader settlement HTTP boundary", () => {
           `.execute(transaction);
 
           let orderSequence = 0;
+          await sql`
+            insert into emirates (code, name_en, name_ar, display_order)
+            values ('DXB', 'Dubai', 'دبي', 1)
+            on conflict (code) do nothing
+          `.execute(transaction);
           const createOrder = async (
             companyId: string,
             creatorAccountId: string,

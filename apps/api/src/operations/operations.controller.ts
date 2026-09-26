@@ -919,6 +919,7 @@ export class OperationsController {
     return this.operations.settleOrderTrader(orderId, input, this.correlationId(request));
   }
 
+  @RequireAnyPermission("settlements.create", "users_roles.manage")
   @ApiOperation({ summary: "Preview a money-out settlement for the selected orders" })
   @Post("settlements/selected/preview")
   public bulkSettlePreview(@Body() input: BulkSettleTraderDto) {
