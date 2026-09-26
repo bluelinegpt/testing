@@ -42,6 +42,13 @@ const legacyAssignmentMigration = await sql<{ exists: boolean }>`
   ) as "exists"
 `.execute(database);
 const hasLegacyAssignmentMigration = legacyAssignmentMigration.rows[0]?.exists === true;
+const legacyHistoricalClassificationMigration = await sql<{ exists: boolean }>`
+  select exists (
+    select 1 from kysely_migration
+    where name = '20260964000000_resolve_historical_accounting_event_classification'
+  ) as "exists"
+`.execute(database);
+const hasLegacyHistoricalClassificationMigration = legacyHistoricalClassificationMigration.rows[0]?.exists === true;
 const legacyInternationalOrderFoundationMigration = await sql<{ exists: boolean }>`
   select exists (select 1 from kysely_migration where name = '20260973000000_gcc_international_order_type') as "exists"
 `.execute(database);
@@ -96,6 +103,23 @@ const provider: MigrationProvider = {
         },
       };
       delete migrations["20260902012500_collect_order_assignment_customer_optional"];
+    }
+    /**
+     * The historical accounting classification migration was renamed twice
+     * after one environment had already recorded the original timestamp.
+     * Keep the recorded name available as a virtual no-op for that existing
+     * database, while fresh databases run the current file normally.
+     */
+    if (hasLegacyHistoricalClassificationMigration) {
+      migrations["20260964000000_resolve_historical_accounting_event_classification"] ??= {
+        async up(db) {
+          await sql`select 1`.execute(db);
+        },
+        async down(db) {
+          await sql`select 1`.execute(db);
+        },
+      };
+      delete migrations["20260972500000_resolve_historical_accounting_event_classification"];
     }
     if (hasLegacyInternationalOrderFoundationMigration) {
       migrations["20260973000000_gcc_international_order_type"] ??= {

@@ -163,6 +163,17 @@ describe("International order carrier and country persistence", () => {
           ]);
           expect(concurrentResults.every((result) => result.status >= 400 && result.status < 500)).toBe(true);
           expect((await sql<{ count: number }>`select count(*)::int as count from order_events where order_id=${orderId}::uuid and event_type='order.international_carrier_status_change'`.execute(transaction)).rows[0]?.count).toBe(eventCountBeforeConcurrent);
+          const delivered = await carrierStatus("delivered").expect(200);
+          expect(delivered.body.deliveryStatus).toBe("delivered");
+          expect((await sql`select delivery_status,international_carrier_status,driver_reconciliation_status,trader_settlement_status,amount_collected from orders where id=${orderId}::uuid`.execute(transaction)).rows[0]).toMatchObject({
+            delivery_status: "delivered",
+            international_carrier_status: "in_transit",
+            driver_reconciliation_status: "not_applicable",
+            trader_settlement_status: "unsettled",
+            amount_collected: "999.00",
+          });
+          expect((await sql`select event_type,field_name,previous_value,new_value from order_events where order_id=${orderId}::uuid and event_type='order.delivered'`.execute(transaction)).rows).toHaveLength(1);
+          await sql`update orders set delivery_status='new', delivered_at=null, operational_completed_at=null, amount_collected=0, trader_settlement_status='unsettled' where id=${orderId}::uuid`.execute(transaction);
           expect((await sql`select area_id from orders where id=${orderId}::uuid`.execute(transaction)).rows[0]).toEqual({ area_id: null });
           expect((await sql`select name,mobile_number from customers where id=${customerId}::uuid`.execute(transaction)).rows[0]).toEqual(customerBeforeInternational.rows[0]);
           const before = await sql`select destination_country_id,third_party_delivery_company_id from orders where id=${orderId}::uuid`.execute(transaction);

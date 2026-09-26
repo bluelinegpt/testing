@@ -6,11 +6,6 @@ type MigrationDatabase = Record<string, never>;
 export async function up(database: Kysely<MigrationDatabase>): Promise<void> {
   await sql`
     alter table orders add column if not exists international_carrier_status text;
-    update orders
-       set international_carrier_status = 'ready_for_carrier'
-     where order_type = 'gcc_international'
-       and delivery_status not in ('delivered', 'returned_to_branch', 'returned_to_trader', 'cancelled', 'closed')
-       and international_carrier_status is null;
     create or replace function set_international_carrier_status() returns trigger language plpgsql as $$
     begin
       if new.order_type = 'gcc_international' and new.international_carrier_status is null then
@@ -33,6 +28,11 @@ export async function up(database: Kysely<MigrationDatabase>): Promise<void> {
     create index if not exists orders_company_international_carrier_status_idx
       on orders (company_id, international_carrier_status)
       where order_type = 'gcc_international';
+    update orders
+       set international_carrier_status = 'ready_for_carrier'
+     where order_type = 'gcc_international'
+       and delivery_status not in ('delivered', 'returned_to_branch', 'returned_to_trader', 'cancelled', 'closed')
+       and international_carrier_status is null;
   `.execute(database);
 }
 

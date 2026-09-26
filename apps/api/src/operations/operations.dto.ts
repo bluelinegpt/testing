@@ -956,8 +956,8 @@ export class BulkChangeInternationalCarrierStatusDto extends OrderSelectionDto {
 }
 
 export class ChangeInternationalCarrierStatusDto {
-  @IsIn(["ready_for_carrier", "handed_to_carrier", "in_transit"])
-  public readonly status!: "ready_for_carrier" | "handed_to_carrier" | "in_transit";
+  @IsIn(["ready_for_carrier", "handed_to_carrier", "in_transit", "delivered"])
+  public readonly status!: "ready_for_carrier" | "handed_to_carrier" | "in_transit" | "delivered";
 }
 
 export class CreateInternationalCatalogEntryDto {

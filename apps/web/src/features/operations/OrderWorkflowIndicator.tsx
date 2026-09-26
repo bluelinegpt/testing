@@ -147,12 +147,19 @@ function positionPanel(trigger: DOMRect, panel: DOMRect): PanelPosition {
 
 export function OrderWorkflowIndicator({
   guidance,
+  internationalCarrierStatus,
   statuses,
   permissions,
   onNavigate,
   orderNumber,
 }: {
   readonly guidance: OrderWorkflowGuidance;
+  readonly internationalCarrierStatus?:
+    | "ready_for_carrier"
+    | "handed_to_carrier"
+    | "in_transit"
+    | null
+    | undefined;
   readonly onNavigate: (path: string) => void;
   /** Used only by the secondary View Order control. */
   readonly orderNumber?: string | undefined;
@@ -166,6 +173,18 @@ export function OrderWorkflowIndicator({
   };
 }) {
   const { t } = useTranslation();
+  const internationalNextAction =
+    internationalCarrierStatus === "ready_for_carrier"
+      ? "handToCarrier"
+      : internationalCarrierStatus === "handed_to_carrier"
+        ? "startCarrierTransit"
+        : internationalCarrierStatus === "in_transit"
+          ? "deliverInternational"
+        : null;
+  const isInternational = internationalCarrierStatus !== undefined;
+  const nextActionCode = isInternational ? (internationalNextAction ?? "none") : guidance.nextActionCode;
+  const nextActionRoute = isInternational ? null : guidance.nextActionRoute;
+  const actionLabelKey = isInternational ? "operations.actions" : "orderWorkflow.action";
   const [open, setOpen] = useState(false);
   // A click pins the panel open. Hover remains a lightweight preview, while
   // the pinned form stays available as the pointer travels to its actions.
@@ -276,14 +295,15 @@ export function OrderWorkflowIndicator({
 
   const tone = stateTone[guidance.workflowState] ?? "gray";
   const Icon = stateIcon[tone];
-  const label = t(`orderWorkflow.state.${guidance.workflowState}`);
-  const canAct =
-    guidance.nextActionRoute !== null && allowed(permissions, guidance.nextActionCode);
+  const label = isInternational && internationalCarrierStatus !== null
+    ? t(`operations.internationalCarrierStatuses.${internationalCarrierStatus}`)
+    : t(`orderWorkflow.state.${guidance.workflowState}`);
+  const canAct = nextActionRoute !== null && allowed(permissions, nextActionCode);
 
   const actionHref = () => {
-    if (guidance.nextActionRoute === null) return null;
+    if (nextActionRoute === null) return null;
     const params = new URLSearchParams(guidance.nextActionParams);
-    if (guidance.nextActionCode === "collect_trader_receivable") {
+    if (nextActionCode === "collect_trader_receivable") {
       const receivableId = params.get("receivableId");
       if (receivableId !== null && receivableId.trim() !== "") {
         // The Order action is an instruction to collect money, not to inspect
@@ -305,7 +325,7 @@ export function OrderWorkflowIndicator({
       params.set("returnTo", "/orders");
     }
     const query = params.toString();
-    return query === "" ? guidance.nextActionRoute : `${guidance.nextActionRoute}?${query}`;
+    return query === "" ? nextActionRoute : `${nextActionRoute}?${query}`;
   };
 
   return (
@@ -331,7 +351,7 @@ export function OrderWorkflowIndicator({
         aria-controls={panelId}
         aria-expanded={open}
         aria-label={
-          canAct ? `${label} — ${t(`orderWorkflow.action.${guidance.nextActionCode}`)}` : label
+          canAct ? `${label} — ${t(`${actionLabelKey}.${nextActionCode}`)}` : label
         }
         className={`order-workflow-chip order-workflow-${tone}`}
         onClick={(event) => {
@@ -437,7 +457,7 @@ export function OrderWorkflowIndicator({
           {/* The NEXT STEP is the strongest line in the panel. "Waiting for"
               describes a state; an operator needs the instruction, so when an
               action exists it is what they read first. */}
-          {guidance.nextActionCode === "none" ? (
+          {nextActionCode === "none" ? (
             <p className="order-workflow-waiting">
               <strong>{t("orderWorkflow.waitingForLabel")}</strong>{" "}
               {t(`orderWorkflow.waitingFor.${guidance.waitingFor}`)}
@@ -447,18 +467,20 @@ export function OrderWorkflowIndicator({
               <span className="order-workflow-nextstep-label">
                 {t("orderWorkflow.nextStepLabel")}
               </span>
-              <strong>{t(`orderWorkflow.action.${guidance.nextActionCode}`)}</strong>
+              <strong>{t(`${actionLabelKey}.${nextActionCode}`)}</strong>
             </p>
           )}
 
-          <p className="order-workflow-why">
-            {guidance.completionBlockerCode === null
-              ? t(`orderWorkflow.why.${guidance.workflowState}`)
-              : t(`orderWorkflow.blocker.${guidance.completionBlockerCode}`)}
-          </p>
+          {isInternational ? null : (
+            <p className="order-workflow-why">
+              {guidance.completionBlockerCode === null
+                ? t(`orderWorkflow.why.${guidance.workflowState}`)
+                : t(`orderWorkflow.blocker.${guidance.completionBlockerCode}`)}
+            </p>
+          )}
 
           <div className="order-workflow-actions">
-            {guidance.nextActionRoute === null ? null : canAct ? (
+            {nextActionRoute === null ? null : canAct ? (
               <button
                 className="order-workflow-action"
                 onClick={() => {
@@ -469,7 +491,7 @@ export function OrderWorkflowIndicator({
                 }}
                 type="button"
               >
-                {t(`orderWorkflow.action.${guidance.nextActionCode}`)}
+                {t(`${actionLabelKey}.${nextActionCode}`)}
               </button>
             ) : (
               <p className="order-workflow-denied" role="status">

@@ -69,6 +69,15 @@ const internationalOrder = {
   orderNumber: "ORD-INT-000003",
   orderType: "gcc_international",
   internationalCarrierStatus: "ready_for_carrier",
+  workflowGuidance: {
+    completionBlockerCode: "awaiting_driver_assignment",
+    isFinanciallyComplete: false,
+    nextActionCode: "assign_driver",
+    nextActionParams: {},
+    nextActionRoute: "/orders",
+    waitingFor: "driver_assignment",
+    workflowState: "awaiting_driver_assignment",
+  },
 };
 
 describe("OrdersModuleWorkspace", () => {
@@ -220,6 +229,15 @@ describe("OrdersModuleWorkspace", () => {
     expect(orderRow).not.toBeNull();
     expect(within(orderRow as HTMLElement).getByText("Ready for Carrier")).toBeInTheDocument();
     expect(screen.getByText("Carrier stage")).toBeInTheDocument();
+    const workflow = within(orderRow as HTMLElement).getByRole("button", {
+      name: /needs a driver|ready for carrier/i,
+    });
+    fireEvent.click(workflow);
+    expect(await screen.findByText("Hand to Carrier")).toBeInTheDocument();
+    expect(screen.queryByText("Assign driver")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Order actions" }));
+    expect(await screen.findByRole("button", { name: "Hand to Carrier" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Assign driver" })).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Carrier stage"), { target: { value: "ready_for_carrier" } });
     await waitFor(() => expect(api.get).toHaveBeenCalledWith(expect.stringContaining("internationalCarrierStatus=ready_for_carrier")));
   });

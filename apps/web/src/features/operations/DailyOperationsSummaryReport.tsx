@@ -89,6 +89,16 @@ interface TraderCollectionRow {
   readonly traderName: string;
 }
 
+interface TraderFeeDeductionRow {
+  readonly amount: string;
+  readonly businessDate: string;
+  readonly calendarDate: string;
+  readonly orderSerialNumber: string | null;
+  readonly receivableNumber: string;
+  readonly settlementNumber: string;
+  readonly traderName: string;
+}
+
 interface TraderReceivableDueRow {
   readonly amountCollected: string;
   readonly businessDate: string;
@@ -144,11 +154,13 @@ interface ReportData {
   readonly totalOrders: number;
   readonly totalTraderPayments?: string;
   readonly totalTraderCollections?: string;
+  readonly totalTraderFeeDeductions?: string;
   readonly totalTraderPayables?: string;
   readonly totalTraderReceivables?: string;
   readonly traderPayables?: readonly TraderPayableDueRow[];
   readonly traderPayments?: readonly TraderPaymentRow[];
   readonly traderCollections?: readonly TraderCollectionRow[];
+  readonly traderFeeDeductions?: readonly TraderFeeDeductionRow[];
   readonly traderReceivables?: readonly TraderReceivableDueRow[];
 }
 
@@ -391,6 +403,8 @@ export function DailyOperationsSummaryReport({
   const totalTraderPayments = report?.totalTraderPayments ?? "0.00";
   const traderCollections = report?.traderCollections ?? [];
   const totalTraderCollections = report?.totalTraderCollections ?? "0.00";
+  const traderFeeDeductions = report?.traderFeeDeductions ?? [];
+  const totalTraderFeeDeductions = report?.totalTraderFeeDeductions ?? "0.00";
   const traderPayables = report?.traderPayables ?? [];
   const totalTraderPayables = report?.totalTraderPayables ?? "0.00";
   const traderReceivables = report?.traderReceivables ?? [];
@@ -949,6 +963,43 @@ const netLabel =
                         <strong>{money(totalTraderCollections)}</strong>
                       </td>
                     </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </section>
+          ) : null}
+          {showTraderCollections ? (
+            <section className="detail-section">
+              <h2>{t("reports.dailyOperationsSummary.traderFeeDeductions")}</h2>
+              <p className="muted-text">{t("reports.dailyOperationsSummary.traderFeeDeductionsHelp")}</p>
+              <div className="table-frame">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>{t("configuration.businessDay.businessDate")}</th>
+                      <th>{t("configuration.businessDay.calendarDate")}</th>
+                      <th>{t("operations.trader")}</th>
+                      <th>{t("orders.serialNumber")}</th>
+                      <th>{t("traderReceivables.columnReceivableNumber")}</th>
+                      <th>{t("operations.amount")}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {traderFeeDeductions.length === 0 ? (
+                      <tr><td colSpan={6}>{t("reports.dailyOperationsSummary.noData")}</td></tr>
+                    ) : traderFeeDeductions.map((row) => (
+                      <tr key={`${row.settlementNumber}-${row.receivableNumber}`}>
+                        <td>{row.businessDate}</td>
+                        <td>{row.calendarDate}</td>
+                        <td>{row.traderName}</td>
+                        <td>{row.orderSerialNumber ?? "—"}</td>
+                        <td>{row.receivableNumber}</td>
+                        <td>{money(row.amount)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr><td colSpan={5}><strong>{t("reports.dailyOperationsSummary.totalTraderFeeDeductions")}</strong></td><td><strong>{money(totalTraderFeeDeductions)}</strong></td></tr>
                   </tfoot>
                 </table>
               </div>

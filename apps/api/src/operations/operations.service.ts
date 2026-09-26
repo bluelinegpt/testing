@@ -5514,6 +5514,13 @@ export class OperationsService {
       if (order === undefined) {
         throw new ApplicationException("order_not_found", "Order not found", HttpStatus.NOT_FOUND);
       }
+      if (order.orderType === "gcc_international" && status === "delivered") {
+        throw new ApplicationException(
+          "international_delivery_requires_carrier_confirmation",
+          "International Orders must be marked Delivered through the carrier confirmation workflow",
+          HttpStatus.CONFLICT,
+        );
+      }
       // Prompt 16 Section O/P: the Order changed while the caller was
       // offline in a way its queued action did not anticipate — reject
       // rather than silently overwrite newer server state. Excludes the
@@ -6400,6 +6407,11 @@ export class OperationsService {
              o.is_free_order as "isFreeOrder",
              o.order_type as "orderType",
              t.name_en as "traderName",
+             o.international_carrier_status as "internationalCarrierStatus",
+             o.destination_country_id as "destinationCountryId",
+             coalesce(dc.name, o.destination_country_name) as "destinationCountryName",
+             o.third_party_delivery_company_id as "thirdPartyDeliveryCompanyId",
+             coalesce(pc.name, o.third_party_delivery_company_name) as "thirdPartyDeliveryCompanyName",
              a.name_en as "areaNameEn",
              a.name_ar as "areaNameAr",
              coalesce(o.customer_area_name_ar_snapshot,a.name_ar,
@@ -6450,6 +6462,8 @@ export class OperationsService {
       join traders t on t.id = o.trader_id and t.company_id = o.company_id
       left join areas a on a.id = o.area_id and a.company_id = o.company_id
       left join emirates e on e.id = a.emirate_id
+      left join destination_countries dc on dc.id = o.destination_country_id and dc.company_id = o.company_id
+      left join third_party_delivery_companies pc on pc.id = o.third_party_delivery_company_id and pc.company_id = o.company_id
       left join drivers d on d.id = o.assigned_driver_id and d.company_id = o.company_id
       left join outsourced_driver_fee_accruals fee
         on fee.order_id = o.id and fee.company_id = o.company_id
@@ -6583,6 +6597,27 @@ export class OperationsService {
       const row = current.rows[0];
       if (row === undefined) throw new ApplicationException("order_not_found", "Order not found", HttpStatus.NOT_FOUND);
       if (row.orderType !== "gcc_international") throw new ApplicationException("international_carrier_status_not_allowed", "Carrier status applies only to International orders", HttpStatus.CONFLICT);
+      if (input.status === "delivered") {
+        if (row.status !== "in_transit") {
+          throw new ApplicationException("international_carrier_status_transition_invalid", "Only an International order in transit can be marked Delivered", HttpStatus.CONFLICT);
+        }
+        const delivery = await sql<{ deliveryStatus: string; customerAmountDue: string; isFreeOrder: boolean; traderNetPayable: string }>`
+          select delivery_status as "deliveryStatus", customer_amount_due::text as "customerAmountDue", is_free_order as "isFreeOrder", trader_net_payable::text as "traderNetPayable"
+            from orders where id = ${orderId}::uuid and company_id = ${companyId}::uuid for update
+        `.execute(transaction);
+        const order = delivery.rows[0];
+        if (order === undefined) throw new ApplicationException("order_not_found", "Order not found", HttpStatus.NOT_FOUND);
+        const amountDue = Number(order.customerAmountDue);
+        const noPaymentDue = Number(order.traderNetPayable) <= 0;
+        const settlementStatus = noPaymentDue ? "not_eligible" : "unsettled";
+        await sql`update orders set delivery_status='delivered', amount_collected=${amountDue}, driver_reconciliation_status='not_applicable', trader_settlement_status=${settlementStatus}, return_status='not_applicable', delivered_at=now(), operational_completed_at=coalesce(operational_completed_at, now()), updated_at=now(), version=version+1 where id=${orderId}::uuid and company_id=${companyId}::uuid`.execute(transaction);
+        await this.history.statusHistory(transaction, { actorId: identity.identityId, companyId, from: order.deliveryStatus, orderId, reason: null, statusDimension: "delivery", to: "delivered" });
+        const actorRole = await this.history.actorRole(transaction, companyId, identity.identityId);
+        await this.history.orderEvent(transaction, { actorId: identity.identityId, actorRole, category: "status_change", companyId, correlationId, eventType: "order.delivered", fieldName: "delivery_status", newValue: "delivered", orderId, previousValue: order.deliveryStatus, reason: null, source: "web_portal" });
+        await this.audit(transaction, { action: "order.delivery_status_change", actorId: identity.identityId, after: { from: order.deliveryStatus, to: "delivered", internationalCarrierConfirmation: true }, companyId, correlationId, subjectId: orderId, subjectType: "order" });
+        await this.pushOutbox.writeOrderStatusChanged(transaction, { companyId, orderId, newStatus: "delivered", correlationId });
+        return;
+      }
       const transitions: Record<string, string[]> = { ready_for_carrier: ["handed_to_carrier"], handed_to_carrier: ["in_transit"], in_transit: [] };
       if (!(transitions[row.status ?? "ready_for_carrier"] ?? []).includes(input.status)) {
         throw new ApplicationException("international_carrier_status_transition_invalid", "Invalid International carrier status transition", HttpStatus.CONFLICT);

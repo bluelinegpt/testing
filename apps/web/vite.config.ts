@@ -73,7 +73,7 @@ export default defineConfig({
             proxyRequest.setHeader("x-blueline-tenant-host", request.headers.host ?? "");
           });
         },
-        target: "http://127.0.0.1:3000",
+        target: process.env.VITE_API_PROXY_TARGET ?? "http://127.0.0.1:3000",
         ws: true,
       },
     },

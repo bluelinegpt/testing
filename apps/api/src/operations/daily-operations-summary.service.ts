@@ -147,6 +147,16 @@ export interface TraderCollectionRow {
   readonly traderName: string;
 }
 
+export interface TraderFeeDeductionRow {
+  readonly amount: string;
+  readonly businessDate: string;
+  readonly calendarDate: string;
+  readonly orderSerialNumber: string | null;
+  readonly receivableNumber: string;
+  readonly settlementNumber: string;
+  readonly traderName: string;
+}
+
 export interface TraderReceivableDueRow {
   readonly amountCollected: string;
   readonly businessDate: string;
@@ -223,11 +233,13 @@ export interface DailyOperationsSummaryReport {
   readonly totalOrders: number;
   readonly totalTraderPayments: string;
   readonly totalTraderCollections: string;
+  readonly totalTraderFeeDeductions?: string;
   readonly totalTraderPayables: string;
   readonly totalTraderReceivables: string;
   readonly traderPayables: readonly TraderPayableDueRow[];
   readonly traderPayments: readonly TraderPaymentRow[];
   readonly traderCollections: readonly TraderCollectionRow[];
+  readonly traderFeeDeductions?: readonly TraderFeeDeductionRow[];
   readonly traderReceivables: readonly TraderReceivableDueRow[];
 }
 
@@ -306,7 +318,7 @@ export class DailyOperationsSummaryService {
     const driverId = query.driverId ?? null;
     const driverType = query.driverType ?? null;
 
-    const [driverRows, expenseRows, traderPaymentRows, traderCollectionRows, traderReceivableRows, traderPayableRows] = await Promise.all([
+    const [driverRows, expenseRows, traderPaymentRows, traderCollectionRows, traderReceivableRows, traderFeeDeductionRows, traderPayableRows] = await Promise.all([
       sql<DriverDeliverySummaryRow>`
         with reportable_orders as (
           select o.*, coalesce(cash.confirmed_at, o.delivered_at) as report_activity_at
@@ -528,6 +540,29 @@ export class DailyOperationsSummaryService {
            )
          order by r.business_date desc, r.receivable_number
       `.execute(this.database),
+      sql<TraderFeeDeductionRow & { paymentAt: string }>`
+        select x.amount_allocated::text as amount,
+                s.business_date::text as "businessDate",
+                p.payment_at::text as "paymentAt",
+                o.serial_number as "orderSerialNumber",
+                r.receivable_number as "receivableNumber",
+                s.settlement_number as "settlementNumber",
+                t.name_en as "traderName"
+           from trader_settlement_receivable_offsets x
+           join trader_settlements s on s.id=x.settlement_id and s.company_id=x.company_id
+           join trader_receivables r on r.id=x.receivable_id and r.company_id=x.company_id
+           join trader_settlement_payments p on p.settlement_id=s.id and p.company_id=s.company_id
+           left join orders o on o.company_id=r.company_id and r.source_type='service_charge'
+                            and o.order_number=r.source_reference
+           join traders t on t.id=s.trader_id and t.company_id=s.company_id
+          where x.company_id=${companyId}::uuid and s.status='confirmed'
+            and (
+              (${dateMode}::text='business_day' and s.business_date >= ${query.dateFrom}::date and s.business_date <= ${query.dateTo}::date)
+              or (${dateMode}::text='calendar_day' and p.payment_at >= ${window.startUtc}::timestamptz and p.payment_at < ${window.endUtc}::timestamptz)
+            )
+          order by s.business_date desc, p.payment_at desc, s.settlement_number, r.receivable_number
+      `
+        .execute(this.database),
       sql<
         Omit<TraderPayableDueRow, "businessDate" | "calendarDate"> & {
           deliveredAt: string;
@@ -610,6 +645,18 @@ export class DailyOperationsSummaryService {
       reference: row.reference,
       traderName: row.traderName,
     }));
+    const traderFeeDeductionCalendarDates = await this.businessDays.calendarDatesFor(
+      traderFeeDeductionRows.rows.map((row) => row.paymentAt),
+    );
+    const traderFeeDeductions = traderFeeDeductionRows.rows.map((row) => ({
+      amount: row.amount,
+      businessDate: row.businessDate,
+      calendarDate: traderFeeDeductionCalendarDates.get(row.paymentAt) ?? row.paymentAt.slice(0, 10),
+      orderSerialNumber: row.orderSerialNumber,
+      receivableNumber: row.receivableNumber,
+      settlementNumber: row.settlementNumber,
+      traderName: row.traderName,
+    }));
     const totalOrders = driverSummary.reduce((total, row) => total + row.deliveredOrders, 0);
     const totalDeliveryIncome = sumMoney(driverSummary.map((row) => row.deliveryIncome));
     const totalExpenses = sumMoney(expenses.map((row) => row.amount));
@@ -632,6 +679,7 @@ export class DailyOperationsSummaryService {
     }));
     const totalTraderPayments = sumMoney(traderPayments.map((row) => row.amount));
     const totalTraderCollections = sumMoney(traderCollections.map((row) => row.amount));
+    const totalTraderFeeDeductions = sumMoney(traderFeeDeductions.map((row) => row.amount));
     const totalTraderPayables = sumMoney(traderPayables.map((row) => row.outstandingAmount));
     const totalTraderReceivables = sumMoney(traderReceivables.map((row) => row.outstandingAmount));
     const netResult = (Number(totalDeliveryIncome) - Number(totalExpenses)).toFixed(2);
@@ -663,11 +711,13 @@ export class DailyOperationsSummaryService {
       totalOrders,
       totalTraderPayments,
       totalTraderCollections,
+      totalTraderFeeDeductions,
       totalTraderPayables,
       totalTraderReceivables,
       traderPayables,
       traderPayments,
       traderCollections,
+      traderFeeDeductions,
       traderReceivables,
     };
   }

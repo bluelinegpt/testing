@@ -1548,6 +1548,7 @@ function NewSettlementDialog({
 
   // Step 3 — Payment Details.
   const [amount, setAmount] = useState("");
+  const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentDate, setPaymentDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [paymentMethod, setPaymentMethod] = useState<"bank_transfer" | "cash">("cash");
   const [companyBanks, setCompanyBanks] = useState<readonly CompanyBankAccount[]>([]);
@@ -1753,6 +1754,7 @@ function NewSettlementDialog({
     setSelectedOrderRows({ [row.id]: row });
     setAllocations([{ amount: "0.00", orderId: row.id }]);
     setAmount("");
+    setPaymentAmount("");
     setProposal(undefined);
     setProposalError(undefined);
     setOverrideConfirmed(false);
@@ -1802,6 +1804,7 @@ function NewSettlementDialog({
     }
     setTrader(next);
     setAmount("");
+    setPaymentAmount("");
     setProposal(undefined);
     setAllocations([]);
     setSelectedOrderRows({});
@@ -2570,12 +2573,6 @@ function NewSettlementDialog({
                       {t("traderSettlements.availableFeeDeductions")}
                       <strong>-{money(listedReceivableTotal.toFixed(2))}</strong>
                     </span>
-                    {amount.trim() === "" ? null : (
-                      <span className="eligible-orders-selected">
-                        {t("traderSettlements.netPaymentToTrader")}
-                        <strong>{money(netPayment.toFixed(2))}</strong>
-                      </span>
-                    )}
                   </div>
                 )}
                 {ordersTotal <= 50 ? null : (

@@ -498,6 +498,9 @@ export function OrdersModuleWorkspace({
   const selectedCount = allMatching
     ? Math.max(0, matchingCount - excludedIds.size)
     : selectedIds.size;
+  const selectedHasInternational = bulkSelectedOrders.some(
+    (order) => order.orderType === "gcc_international",
+  );
 
   useEffect(() => {
     if (selectedCount === 0) {
@@ -1371,13 +1374,13 @@ export function OrdersModuleWorkspace({
                 </span>
               </div>
               <div className="bulk-actions">
-                {canAssignDriver ? (
+                {canAssignDriver && !selectedHasInternational ? (
                   <button onClick={() => setBulkAction("assign")} type="button">
                     <Truck aria-hidden="true" size={17} />
                     {t("operations.assignDriver")}
                   </button>
                 ) : null}
-                {canReconcile ? (
+                {canReconcile && !selectedHasInternational ? (
                   <button
                     onClick={() =>
                       onNavigate(
@@ -1399,7 +1402,7 @@ export function OrdersModuleWorkspace({
                     {t("operations.actions.moneyOut")}
                   </button>
                 ) : null}
-                {canUpdateStatus ? (
+                {canUpdateStatus && !selectedHasInternational ? (
                   <button onClick={() => setBulkAction("status")} type="button">
                     <MoreHorizontal aria-hidden="true" size={17} />
                     {t("operations.changeStatus")}
@@ -2670,12 +2673,14 @@ export function OrderDetailsWorkspace({
     !isOfficeStatusUser && permissions.includes("orders.driver_self_service");
   const canHold =
     isOfficeStatusUser || (isDriverSelfServiceUser && detail.deliveryStatus === "out_for_delivery");
-  const nextCarrierStatus = detail.orderType === "gcc_international"
+  const nextCarrierStatus = detail.orderType === "gcc_international" && detail.deliveryStatus !== "delivered"
     ? detail.internationalCarrierStatus === "ready_for_carrier"
       ? "handed_to_carrier"
       : detail.internationalCarrierStatus === "handed_to_carrier"
         ? "in_transit"
-        : undefined
+        : detail.internationalCarrierStatus === "in_transit"
+          ? "delivered"
+          : undefined
     : undefined;
   const updateCarrierStatus = async () => {
     if (nextCarrierStatus === undefined) return;
@@ -2726,6 +2731,18 @@ export function OrderDetailsWorkspace({
           {nextCarrierStatus !== undefined && isOfficeStatusUser ? (
             <button className="button button-secondary" disabled={statusBusy} onClick={() => void updateCarrierStatus()} type="button">
               {statusBusy ? t("common.working") : t(`operations.internationalCarrierActions.${nextCarrierStatus}`)}
+            </button>
+          ) : null}
+          {detail.orderType === "gcc_international" &&
+          detail.deliveryStatus === "delivered" &&
+          detail.traderSettlementStatus === "unsettled" &&
+          canSettle ? (
+            <button
+              className="button button-secondary"
+              onClick={() => onNavigate?.(`/trader-settlements?openDialog=new_settlement&orderId=${encodeURIComponent(detail.id)}`)}
+              type="button"
+            >
+              {t("operations.actions.moneyOut")}
             </button>
           ) : null}
           {["new", "assigned_to_driver", "out_for_delivery"].includes(detail.deliveryStatus) &&
@@ -2815,6 +2832,19 @@ export function OrderDetailsWorkspace({
               detail.referenceNumber ?? t("operations.notProvided"),
             ],
             [t("operations.orderDate"), formatDate(detail.orderDate, locale)],
+            ...(detail.orderType === "gcc_international"
+              ? [
+                  [t("operations.orderType"), t("operations.internationalOrderType")] as const,
+                  [t("operations.destinationCountry"), detail.destinationCountryName ?? t("operations.notProvided")] as const,
+                  [t("operations.carrier"), detail.thirdPartyDeliveryCompanyName ?? t("operations.notProvided")] as const,
+                  [
+                    t("operations.internationalCarrierStage"),
+                    detail.internationalCarrierStatus
+                      ? t(`operations.internationalCarrierStatuses.${detail.internationalCarrierStatus}`)
+                      : t("operations.notProvided"),
+                  ] as const,
+                ]
+              : []),
             [t("operations.areaField"), detail.areaName],
             [t("operations.packages"), String(detail.metadata.packageCount)],
             [
@@ -2834,15 +2864,17 @@ export function OrderDetailsWorkspace({
             [t("operations.customerAddress"), detail.customerAddress],
           ]}
         />
-        <DetailSection
-          title={t("operations.driverAndAssignment")}
-          rows={[
-            [
-              t("operations.assignedDriver"),
-              detail.assignedDriverName ?? t("operations.unassigned"),
-            ],
-          ]}
-        />
+        {detail.orderType === "gcc_international" ? null : (
+          <DetailSection
+            title={t("operations.driverAndAssignment")}
+            rows={[
+              [
+                t("operations.assignedDriver"),
+                detail.assignedDriverName ?? t("operations.unassigned"),
+              ],
+            ]}
+          />
+        )}
         <DetailSection
           title={t("operations.financialDetails")}
           rows={[
@@ -4168,7 +4200,10 @@ function FinancialStatusCell({
             return: order.returnStatus ?? null,
             settlement: order.traderSettlementStatus,
           }}
-        />
+          {...(order.orderType === "gcc_international" && order.deliveryStatus !== "delivered"
+            ? { internationalCarrierStatus: order.internationalCarrierStatus }
+            : {})}
+          />
       )}
       <span>
         <span className="financial-status-label">{t("operations.driverCashShortLabel")}: </span>
@@ -4213,7 +4248,8 @@ type RowAction =
   | "close"
   | "cancel"
   | "handToCarrier"
-  | "startCarrierTransit";
+  | "startCarrierTransit"
+  | "deliverInternational";
 
 /** Target status -> the reason-carrying action that reaches it. Derived from
     `actionTargetStatus` below so the two can never drift apart. */
@@ -4274,8 +4310,15 @@ function traderSettlementActionApplicable(order: OperationsOrder): boolean {
 
 function availableActions(order: OperationsOrder): readonly RowAction[] {
   if (order.orderType === "gcc_international") {
+    if (order.deliveryStatus === "delivered") {
+      if (traderSettlementActionApplicable(order) && order.traderSettlementStatus === "unsettled") {
+        return ["moneyOut"];
+      }
+      return closeEligible(order) ? ["close"] : [];
+    }
     if (order.internationalCarrierStatus === "ready_for_carrier") return ["handToCarrier"];
     if (order.internationalCarrierStatus === "handed_to_carrier") return ["startCarrierTransit"];
+    if (order.internationalCarrierStatus === "in_transit") return ["deliverInternational"];
     return [];
   }
   const recon = order.driverReconciliationStatus;
@@ -4498,7 +4541,7 @@ function OrderRowActions({
     }
   };
 
-  const patchCarrierStatus = async (status: "handed_to_carrier" | "in_transit") => {
+  const patchCarrierStatus = async (status: "handed_to_carrier" | "in_transit" | "delivered") => {
     setBusy(true);
     setError(undefined);
     try {
@@ -4606,6 +4649,10 @@ function OrderRowActions({
     }
     if (action === "startCarrierTransit") {
       void patchCarrierStatus("in_transit");
+      return;
+    }
+    if (action === "deliverInternational") {
+      void patchCarrierStatus("delivered");
       return;
     }
     if (action === "assignDriver") {
