@@ -89,7 +89,7 @@ type QuickView = "active" | "all" | "hold" | "cancelled" | "closed" | "delivery"
 /** Quick views the backend actually understands. */
 const backendQuickViews = new Set(["active", "all", "hold", "cancelled", "closed", "accountant"]);
 type OrderGrouping = "" | ("area" | "trader" | "driver" | "status")[];
-type BulkAction = "assign" | "manifest" | "reactivate" | "status";
+type BulkAction = "assign" | "carrier" | "manifest" | "reactivate" | "status";
 
 interface OrderFilters {
   areaId: string;
@@ -100,6 +100,7 @@ interface OrderFilters {
   dateFrom: string;
   dateTo: string;
   deliveryStatus: string;
+  internationalCarrierStatus: string;
   driverId: string;
   orderType: string;
   thirdPartyDeliveryCompanyName: string;
@@ -137,6 +138,7 @@ const bulkSelectionFilterKeys = [
   "dateFrom",
   "dateTo",
   "deliveryStatus",
+  "internationalCarrierStatus",
   "driverId",
   "orderType",
   "thirdPartyDeliveryCompanyName",
@@ -198,6 +200,7 @@ const initialFilters: OrderFilters = {
   dateFrom: "",
   dateTo: "",
   deliveryStatus: "",
+  internationalCarrierStatus: "",
   driverId: "",
   orderType: "",
   thirdPartyDeliveryCompanyName: "",
@@ -838,6 +841,11 @@ export function OrdersModuleWorkspace({
         <td className="money-cell">{formatCurrency(order.customerAmountDue, "AED", locale)}</td>
         <td>
           <DeliveryStatusBadge order={order} />
+          {order.orderType === "gcc_international" && order.internationalCarrierStatus ? (
+            <span className="cell-secondary carrier-stage-label">
+              {t(`operations.internationalCarrierStatuses.${order.internationalCarrierStatus}`)}
+            </span>
+          ) : null}
         </td>
         <td>
           <OrderAccountingBadge order={order} />
@@ -1175,6 +1183,16 @@ export function OrdersModuleWorkspace({
               <option value="collect_order">{t("operations.collectOrder")}</option>
               <option value="gcc_international">GCC &amp; International</option>
             </FilterSelect>
+            <FilterSelect
+              label={t("operations.internationalCarrierStage")}
+              onChange={(value) => updateFilters({ internationalCarrierStatus: value })}
+              value={filters.internationalCarrierStatus}
+            >
+              <option value="">{t("operations.allInternationalCarrierStages")}</option>
+              <option value="ready_for_carrier">{t("operations.internationalCarrierStatuses.ready_for_carrier")}</option>
+              <option value="handed_to_carrier">{t("operations.internationalCarrierStatuses.handed_to_carrier")}</option>
+              <option value="in_transit">{t("operations.internationalCarrierStatuses.in_transit")}</option>
+            </FilterSelect>
             <label className="filter-select">
               <span className="sr-only">Third-party shipping company</span>
               <input
@@ -1359,6 +1377,11 @@ export function OrdersModuleWorkspace({
                   <button onClick={() => setBulkAction("status")} type="button">
                     <MoreHorizontal aria-hidden="true" size={17} />
                     {t("operations.changeStatus")}
+                  </button>
+                ) : null}
+                {canUpdateStatus && bulkSelectedOrders.some((order) => order.orderType === "gcc_international") ? (
+                  <button onClick={() => setBulkAction("carrier")} type="button">
+                    {t("operations.internationalCarrierBulkAction")}
                   </button>
                 ) : null}
                 {canManifest ? (
@@ -1546,6 +1569,19 @@ export function OrdersModuleWorkspace({
             clearSelection();
             await load();
           }}
+        />
+      ) : null}
+      {bulkAction === "carrier" ? (
+        <BulkCarrierStatusDialog
+          api={api}
+          onClose={() => setBulkAction(undefined)}
+          onComplete={async () => {
+            setBulkAction(undefined);
+            clearSelection();
+            await load();
+          }}
+          orders={bulkSelectedOrders}
+          selection={selection}
         />
       ) : null}
       {bulkAction === "manifest" ? (
@@ -2598,6 +2634,26 @@ export function OrderDetailsWorkspace({
     !isOfficeStatusUser && permissions.includes("orders.driver_self_service");
   const canHold =
     isOfficeStatusUser || (isDriverSelfServiceUser && detail.deliveryStatus === "out_for_delivery");
+  const nextCarrierStatus = detail.orderType === "gcc_international"
+    ? detail.internationalCarrierStatus === "ready_for_carrier"
+      ? "handed_to_carrier"
+      : detail.internationalCarrierStatus === "handed_to_carrier"
+        ? "in_transit"
+        : undefined
+    : undefined;
+  const updateCarrierStatus = async () => {
+    if (nextCarrierStatus === undefined) return;
+    setStatusBusy(true);
+    setError(undefined);
+    try {
+      await api.patch(`operations/orders/${detail.id}/carrier-status`, { status: nextCarrierStatus });
+      await load();
+    } catch (requestError) {
+      setError(message(requestError, t("operations.internationalCarrierStatusUpdateFailed")));
+    } finally {
+      setStatusBusy(false);
+    }
+  };
   return (
     <>
       <div className="order-detail-header">
@@ -2626,6 +2682,16 @@ export function OrderDetailsWorkspace({
           </div>
         </div>
         <div className="order-detail-actions">
+          {detail.orderType === "gcc_international" && detail.internationalCarrierStatus ? (
+            <span className="status-badge international-carrier-stage">
+              {t(`operations.internationalCarrierStatuses.${detail.internationalCarrierStatus}`)}
+            </span>
+          ) : null}
+          {nextCarrierStatus !== undefined && isOfficeStatusUser ? (
+            <button className="button button-secondary" disabled={statusBusy} onClick={() => void updateCarrierStatus()} type="button">
+              {statusBusy ? t("common.working") : t(`operations.internationalCarrierActions.${nextCarrierStatus}`)}
+            </button>
+          ) : null}
           {["new", "assigned_to_driver", "out_for_delivery"].includes(detail.deliveryStatus) &&
           canHold ? (
             <button
@@ -3285,6 +3351,52 @@ function AssignDriverDialog({
       </div>
     </Modal>
   );
+}
+
+function BulkCarrierStatusDialog({
+  api,
+  onClose,
+  onComplete,
+  orders,
+  selection,
+}: {
+  api: ApiClient;
+  onClose: () => void;
+  onComplete: () => Promise<void>;
+  orders: readonly OperationsOrder[];
+  selection: SelectionPayload;
+}) {
+  const { t } = useTranslation();
+  const [targetStatus, setTargetStatus] = useState<"handed_to_carrier" | "in_transit">("handed_to_carrier");
+  const [partial, setPartial] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string>();
+  const previous = targetStatus === "handed_to_carrier" ? "ready_for_carrier" : "handed_to_carrier";
+  const eligible = orders.filter((order) => order.orderType === "gcc_international" && order.internationalCarrierStatus === previous);
+  const ineligible = orders.filter((order) => !eligible.includes(order));
+  const reason = (order: OperationsOrder) => order.orderType !== "gcc_international"
+    ? t("operations.internationalCarrierDomesticIneligible")
+    : t("operations.internationalCarrierPreviousStageRequired", { stage: t(`operations.internationalCarrierStatuses.${previous}`) });
+  const submit = async () => {
+    setSaving(true);
+    setError(undefined);
+    try {
+      await api.post("operations/orders/bulk-carrier-status", { ...selection, allowPartial: partial, targetStatus });
+      await onComplete();
+    } catch (requestError) {
+      setError(message(requestError, t("operations.internationalCarrierStatusUpdateFailed")));
+    } finally {
+      setSaving(false);
+    }
+  };
+  return <Modal closeLabel={t("common.close")} onRequestClose={onClose} title={t("operations.internationalCarrierBulkAction")} titleId="bulk-carrier-status-title">
+    <label className="field"><span>{t("operations.internationalCarrierTargetStage")}</span><select value={targetStatus} onChange={(event) => setTargetStatus(event.target.value as typeof targetStatus)}><option value="handed_to_carrier">{t("operations.internationalCarrierActions.handed_to_carrier")}</option><option value="in_transit">{t("operations.internationalCarrierActions.in_transit")}</option></select></label>
+    <p>{t("operations.internationalCarrierBulkSummary", { eligible: eligible.length, ineligible: ineligible.length })}</p>
+    {ineligible.length > 0 ? <ul>{ineligible.map((order) => <li key={order.id}>{order.orderNumber}: {reason(order)}</li>)}</ul> : null}
+    <label className="checkbox-field"><input checked={partial} onChange={(event) => setPartial(event.target.checked)} type="checkbox" /><span>{t("operations.processEligibleOnly")}</span></label>
+    {error ? <div className="alert alert-error">{error}</div> : null}
+    <div className="modal-actions"><button className="button button-secondary" onClick={onClose} type="button">{t("common.cancel")}</button><button className="button button-primary" disabled={saving || (ineligible.length > 0 && !partial) || eligible.length === 0} onClick={() => void submit()} type="button">{saving ? t("common.working") : t("common.confirm")}</button></div>
+  </Modal>;
 }
 
 function BulkStatusDialog({
@@ -4018,7 +4130,9 @@ type RowAction =
   | "viewCollection"
   | "moneyOut"
   | "close"
-  | "cancel";
+  | "cancel"
+  | "handToCarrier"
+  | "startCarrierTransit";
 
 /** Target status -> the reason-carrying action that reaches it. Derived from
     `actionTargetStatus` below so the two can never drift apart. */
@@ -4078,6 +4192,11 @@ function traderSettlementActionApplicable(order: OperationsOrder): boolean {
 }
 
 function availableActions(order: OperationsOrder): readonly RowAction[] {
+  if (order.orderType === "gcc_international") {
+    if (order.internationalCarrierStatus === "ready_for_carrier") return ["handToCarrier"];
+    if (order.internationalCarrierStatus === "handed_to_carrier") return ["startCarrierTransit"];
+    return [];
+  }
   const recon = order.driverReconciliationStatus;
   const settle = order.traderSettlementStatus;
   const cashDone = ["reconciled", "not_applicable"].includes(recon);
@@ -4298,6 +4417,20 @@ function OrderRowActions({
     }
   };
 
+  const patchCarrierStatus = async (status: "handed_to_carrier" | "in_transit") => {
+    setBusy(true);
+    setError(undefined);
+    try {
+      await api.patch(`operations/orders/${order.id}/carrier-status`, { status });
+      setOpen(false);
+      await onChanged();
+    } catch (requestError) {
+      setError(message(requestError, t("operations.internationalCarrierStatusUpdateFailed")));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const openViewCollection = async () => {
     setViewCollectionBusy(true);
     setError(undefined);
@@ -4386,6 +4519,14 @@ function OrderRowActions({
 
   const perform = (action: RowAction) => {
     setError(undefined);
+    if (action === "handToCarrier") {
+      void patchCarrierStatus("handed_to_carrier");
+      return;
+    }
+    if (action === "startCarrierTransit") {
+      void patchCarrierStatus("in_transit");
+      return;
+    }
     if (action === "assignDriver") {
       setOpen(false);
       setAssignOpen(true);

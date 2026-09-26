@@ -475,6 +475,7 @@ export interface OperationsOrder {
   readonly customerMobileNumber: string;
   readonly customerName: string;
   readonly deliveryStatus: string;
+  readonly internationalCarrierStatus?: "ready_for_carrier" | "handed_to_carrier" | "in_transit" | null;
   readonly driverReconciliationStatus: string;
   readonly id: string;
   readonly orderDate: string;

@@ -2189,6 +2189,23 @@ export const arabicTranslations = {
     deliveryFee: "رسوم التوصيل",
     deliveryPhoto: "صورة التسليم",
     deliveryStatus: "حالة التوصيل",
+    internationalCarrierStatuses: {
+      ready_for_carrier: "جاهز لشركة الشحن",
+      handed_to_carrier: "تم التسليم لشركة الشحن",
+      in_transit: "قيد النقل",
+    },
+    internationalCarrierActions: {
+      handed_to_carrier: "تسليم لشركة الشحن",
+      in_transit: "بدء النقل",
+    },
+    internationalCarrierStatusUpdateFailed: "تعذر تحديث مرحلة شركة الشحن.",
+    internationalCarrierBulkAction: "تحديث مرحلة شركة الشحن",
+    internationalCarrierTargetStage: "مرحلة شركة الشحن المستهدفة",
+    internationalCarrierStage: "مرحلة شركة الشحن",
+    allInternationalCarrierStages: "كل مراحل شركة الشحن",
+    internationalCarrierBulkSummary: "المؤهلة: {{eligible}}. غير المؤهلة: {{ineligible}}.",
+    internationalCarrierDomesticIneligible: "الطلبات المحلية لا تستخدم مراحل شركة الشحن.",
+    internationalCarrierPreviousStageRequired: "يجب أن تكون المرحلة السابقة {{stage}}.",
     financialStatusColumn: "التحصيل / التسوية",
     workflowStep: "خطوة العمل",
     workflowStepFilters: {

@@ -100,8 +100,10 @@ import {
 // eslint-disable-next-line @typescript-eslint/consistent-type-imports
 import {
   ChangeOrderStatusDto,
+  ChangeInternationalCarrierStatusDto,
   BulkAssignDriverDto,
   BulkChangeOrderStatusDto,
+  BulkChangeInternationalCarrierStatusDto,
   BulkSettleTraderDto,
   ConfirmTraderSettlementReceiptDto,
   CreateDriverReconciliationDto,
@@ -181,6 +183,7 @@ export class OperationsController {
   public orders(
     @Query("search") search?: string,
     @Query("deliveryStatus") deliveryStatus?: string,
+    @Query("internationalCarrierStatus") internationalCarrierStatus?: string,
     @Query("orderType") orderType?: "collect_order" | "delivery" | "gcc_international",
     @Query("thirdPartyDeliveryCompanyName") thirdPartyDeliveryCompanyName?: string,
     @Query("destinationCountryName") destinationCountryName?: string,
@@ -214,6 +217,7 @@ export class OperationsController {
       dateFrom,
       dateTo,
       deliveryStatus,
+      internationalCarrierStatus,
       orderType,
       thirdPartyDeliveryCompanyName,
       destinationCountryName,
@@ -532,6 +536,13 @@ export class OperationsController {
   @Get("drivers")
   public drivers(): Promise<readonly OperationsDriver[]> {
     return this.operations.drivers();
+  }
+
+  @RequireAnyPermission("orders.update_delivery_status", "users_roles.manage")
+  @ApiOperation({ summary: "Advance selected International orders through carrier stages" })
+  @Post("orders/bulk-carrier-status")
+  public bulkCarrierStatus(@Body() input: BulkChangeInternationalCarrierStatusDto, @Req() request: Request): Promise<BulkActionResult> {
+    return this.ordersWorkflow.bulkChangeInternationalCarrierStatus(input, this.correlationId(request));
   }
 
   @ApiOperation({ summary: "List active third-party delivery companies" })
@@ -864,6 +875,17 @@ export class OperationsController {
     @Req() request: Request,
   ): Promise<OperationsOrder> {
     return this.operations.changeOrderStatus(orderId, input, this.correlationId(request));
+  }
+
+  @RequireAnyPermission("orders.update_delivery_status", "users_roles.manage")
+  @ApiOperation({ summary: "Advance an International order through its carrier handoff stages" })
+  @Patch("orders/:orderId/carrier-status")
+  public changeInternationalCarrierStatus(
+    @Param("orderId", new ParseUUIDPipe()) orderId: string,
+    @Body() input: ChangeInternationalCarrierStatusDto,
+    @Req() request: Request,
+  ): Promise<OperationsOrder> {
+    return this.operations.changeInternationalCarrierStatus(orderId, input, this.correlationId(request));
   }
 
   @RequireAnyPermission("reconciliations.create", "users_roles.manage")
