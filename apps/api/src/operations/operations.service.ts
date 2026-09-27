@@ -1204,6 +1204,7 @@ export class OperationsService {
              o.trader_settlement_status as "traderSettlementStatus",
              case
                when d.id is null or d.driver_type <> 'outsourced' then 'not_required'
+               when fee.id is null and o.delivery_status in ('closed', 'cancelled') then 'not_required'
                when o.delivery_status <> 'delivered' then 'pending_delivery'
                when fee.id is null then 'missing_accrual'
                when fee.status = 'accrued' then 'unpaid'
@@ -6442,6 +6443,7 @@ export class OperationsService {
              o.trader_settlement_status as "traderSettlementStatus",
              case
                when d.id is null or d.driver_type <> 'outsourced' then 'not_required'
+               when fee.id is null and o.delivery_status in ('closed', 'cancelled') then 'not_required'
                when o.delivery_status <> 'delivered' then 'pending_delivery'
                when fee.id is null then 'missing_accrual'
                when fee.status = 'accrued' then 'unpaid'

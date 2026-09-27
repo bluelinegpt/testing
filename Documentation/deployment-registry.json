@@ -32,7 +32,7 @@
       "displayName": "Main app",
       "path": "apps/web",
       "renderService": "bluelinegpt-web-test",
-      "status": "needs_deploy",
+      "status": "pushed_awaiting_confirmation",
       "localCommit": "ebc537f",
       "localCommitDate": "2026-09-27",
       "lastChangeDescription": "fix web build errors",

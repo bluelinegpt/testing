@@ -13,6 +13,7 @@ import {
 } from "@nestjs/common";
 import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
 import type { Request, Response } from "express";
+import { PDFDocument } from "pdf-lib";
 
 import {
   RequireAnyPermission,
@@ -45,6 +46,7 @@ import {
   type TraderReceivableSummary,
   type TraderWithBalance,
 } from "./trader-receivable.service.js";
+import { TraderSettlementService } from "./trader-settlement.service.js";
 
 /**
  * Trader Receivable / Collect Money from Trader — the reverse money-flow
@@ -63,7 +65,59 @@ import {
 export class TraderReceivableController {
   public constructor(
     @Inject(TraderReceivableService) private readonly traderReceivables: TraderReceivableService,
+    @Inject(TraderSettlementService) private readonly traderSettlements: TraderSettlementService,
   ) {}
+
+  @RequireAnyPermission("trader_receivables.create", "settlements.create", "reports.export", "users_roles.manage")
+  @ApiOperation({ summary: "Merge existing Trader collection and settlement PDFs for selected Orders" })
+  @Post("bulk-report/pdf")
+  public async bulkReportPdf(
+    @Body() input: { orderIds: string[] },
+    @Query("language") language: string | undefined,
+    @Req() request: Request,
+    @Res() response: Response,
+  ): Promise<void> {
+    const ids = [...new Set(input.orderIds)].slice(0, 100);
+    const documents: Buffer[] = [];
+    const settlementIds = new Set<string>();
+    const collectionIds = new Set<string>();
+    for (const orderId of ids) {
+      const settlement = await this.traderSettlements.settlementForOrder(orderId);
+      if (settlement !== null && !settlementIds.has(settlement.settlementId)) {
+        const report = await this.traderSettlements.settlementPdf(
+          settlement.settlementId,
+          language === "ar" ? "ar" : "en",
+          String(request.id ?? request.headers["x-correlation-id"] ?? "unknown"),
+        );
+        documents.push(report.bytes);
+        settlementIds.add(settlement.settlementId);
+      }
+      const collection = await this.traderReceivables.collectionForOrder(orderId);
+      if (collection !== undefined && !collectionIds.has(collection.collectionId)) {
+        const report = await this.traderReceivables.collectionPdf(
+          collection.collectionId,
+          language === "ar" ? "ar" : "en",
+          String(request.id ?? request.headers["x-correlation-id"] ?? "unknown"),
+        );
+        documents.push(report.bytes);
+        collectionIds.add(collection.collectionId);
+      }
+    }
+    if (documents.length === 0) {
+      response.status(HttpStatus.NO_CONTENT).send();
+      return;
+    }
+    const merged = await PDFDocument.create();
+    for (const bytes of documents) {
+      const source = await PDFDocument.load(bytes);
+      const pages = await merged.copyPages(source, source.getPageIndices());
+      pages.forEach((page) => merged.addPage(page));
+    }
+    response.setHeader("Content-Type", "application/pdf");
+    response.setHeader("Content-Disposition", 'inline; filename="Trader-Reports.pdf"');
+    response.setHeader("X-Content-Type-Options", "nosniff");
+    response.send(Buffer.from(await merged.save()));
+  }
 
   @RequireAnyPermission("trader_receivables.create", "users_roles.manage")
   @ApiOperation({
@@ -173,6 +227,15 @@ export class TraderReceivableController {
     @Param("collectionId", new ParseUUIDPipe()) collectionId: string,
   ): Promise<TraderCollectionDetail> {
     return this.traderReceivables.detail(collectionId);
+  }
+
+  @RequireAnyPermission("trader_receivables.create", "reports.export", "users_roles.manage")
+  @ApiOperation({ summary: "Resolve the confirmed Trader collection linked to one Order" })
+  @Get("collections-for-order/:orderId")
+  public collectionForOrder(
+    @Param("orderId", new ParseUUIDPipe()) orderId: string,
+  ): Promise<{ collectionId: string; collectionNumber: string } | undefined> {
+    return this.traderReceivables.collectionForOrder(orderId);
   }
 
   @RequireAnyPermission("trader_receivables.create", "reports.export", "users_roles.manage")

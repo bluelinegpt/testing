@@ -90,6 +90,9 @@ export interface TraderEligibleOrderRow {
   readonly deliveryDate: string | null;
   readonly emirateName: string | null;
   readonly id: string;
+  readonly orderNumber: string;
+  readonly orderType: "collect_order" | "delivery" | "gcc_international";
+  readonly customerMobileNumber: string;
   readonly originalAmountDueToTrader: string;
   readonly outstandingBalance: string;
   readonly previouslyPaid: string;
@@ -181,6 +184,8 @@ export interface TraderSettlementDetailOrder {
   readonly deliveryDate: string | null;
   readonly emirateName: string | null;
   readonly orderNumber: string;
+  readonly orderType: "collect_order" | "delivery" | "gcc_international";
+  readonly customerMobileNumber: string;
   readonly orderSettlementStatus: string;
   readonly originalTraderPayable: string;
   readonly previouslyPaid: string;
@@ -368,9 +373,12 @@ export class TraderSettlementService {
         and o.trader_outstanding_balance > 0
     `;
     const result = await sql<Omit<TraderEligibleOrderRow, never> & { total: number }>`
-      select o.id, coalesce(o.serial_number, o.order_number) as "serialNumber",
+      select o.id, o.order_number as "orderNumber", o.order_type as "orderType",
+             o.customer_mobile_number as "customerMobileNumber",
+             coalesce(o.serial_number, o.order_number) as "serialNumber",
+             o.order_number as "orderNumber", o.order_type as "orderType",
              o.reference_number as "referenceNumber", o.delivered_at::text as "deliveryDate",
-             o.customer_name as "customerName",
+             o.customer_name as "customerName", o.customer_mobile_number as "customerMobileNumber",
              coalesce(e.name_en, null) as "emirateName",
              coalesce(o.customer_area_name_snapshot, a.name_en, '') as "areaName",
              o.cod_amount::text as "codAmount", o.service_fee::text as "serviceFee",
@@ -2035,6 +2043,8 @@ export class TraderSettlementService {
         serialNumber: string;
         serviceFee: string;
         orderNumber: string;
+        orderType: "collect_order" | "delivery" | "gcc_international";
+        customerMobileNumber: string;
         totalDeductions: string;
         traderNetPayable: string;
         traderPaidAmount: string;
@@ -2042,10 +2052,10 @@ export class TraderSettlementService {
       }>`
         -- Order NUMBER as well as the Serial Number: the Serial is what the
         -- User reads, the Number is what the Order detail route consumes.
-        select o.order_number as "orderNumber",
+        select o.order_number as "orderNumber", o.order_type as "orderType",
                coalesce(o.serial_number, o.order_number) as "serialNumber",
                o.reference_number as "referenceNumber", o.delivered_at::text as "deliveryDate",
-               o.customer_name as "customerName", e.name_en as "emirateName",
+               o.customer_name as "customerName", o.customer_mobile_number as "customerMobileNumber", e.name_en as "emirateName",
                coalesce(o.customer_area_name_snapshot, a.name_en, '') as "areaName",
                o.cod_amount::text as "codAmount", o.service_fee::text as "serviceFee",
                coalesce(o.additional_fees, 0)::text as "additionalFees",
@@ -2078,6 +2088,8 @@ export class TraderSettlementService {
       referenceNumber: row.referenceNumber,
       remainingOutstanding: new Decimal(row.outstandingBalance).toFixed(2),
       orderNumber: row.orderNumber,
+      orderType: row.orderType,
+      customerMobileNumber: row.customerMobileNumber,
       serialNumber: row.serialNumber,
       serviceFee: new Decimal(row.serviceFee).toFixed(2),
       totalDeductions: new Decimal(row.totalDeductions).toFixed(2),

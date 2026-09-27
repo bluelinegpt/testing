@@ -36,6 +36,9 @@ interface Labels {
   readonly notes: string;
   readonly numberOfOrders: string;
   readonly orderSerial: string;
+  readonly orderNumber: string;
+  readonly orderType: string;
+  readonly customerMobile: string;
   readonly originalTraderPayable: string;
   readonly receivableDeductions: string;
   readonly receivableNumber: string;
@@ -100,6 +103,9 @@ const LABELS: Record<ReportLanguage, Labels> = {
     notes: "ملاحظات",
     numberOfOrders: "عدد الطلبات",
     orderSerial: "الرقم التسلسلي للطلب",
+    orderNumber: "رقم الطلب",
+    orderType: "نوع الطلب",
+    customerMobile: "هاتف العميل",
     originalTraderPayable: "المستحق الأصلي للتاجر",
     receivableDeductions: "رسوم مستحقة على التاجر (-)",
     receivableNumber: "رقم المبلغ المستحق",
@@ -162,6 +168,9 @@ const LABELS: Record<ReportLanguage, Labels> = {
     notes: "Notes",
     numberOfOrders: "Number of Orders",
     orderSerial: "Order Serial Number",
+    orderNumber: "Order Number",
+    orderType: "Order Type",
+    customerMobile: "Customer Mobile",
     originalTraderPayable: "Original Trader Payable",
     receivableDeductions: "Company Fee Deductions (-)",
     receivableNumber: "Receivable Number",
@@ -270,9 +279,12 @@ export function buildTraderSettlementStatementHtml(
         "<tr>" +
         `<td class="num">${index + 1}</td>` +
         `<td class="mono">${escapeHtml(order.serialNumber)}</td>` +
+        `<td class="mono">${escapeHtml(order.orderNumber)}</td>` +
+        `<td>${escapeHtml(order.orderType)}</td>` +
         `<td class="mono">${order.referenceNumber === null ? "" : escapeHtml(order.referenceNumber)}</td>` +
         `<td>${dateOnly(order.deliveryDate)}</td>` +
         `<td>${escapeHtml(order.customerName)}</td>` +
+        `<td>${escapeHtml(order.customerMobileNumber)}</td>` +
         `<td>${order.emirateName === null ? "" : escapeHtml(order.emirateName)}</td>` +
         `<td>${escapeHtml(order.areaName)}</td>` +
         `<td class="num">${money(order.codAmount)}</td>` +
@@ -290,9 +302,12 @@ export function buildTraderSettlementStatementHtml(
     [
       labels.lineNumber,
       labels.orderSerial,
+      labels.orderNumber,
+      labels.orderType,
       labels.externalReference,
       labels.deliveryDate,
       labels.customer,
+      labels.customerMobile,
       labels.emirate,
       labels.area,
       labels.cod,

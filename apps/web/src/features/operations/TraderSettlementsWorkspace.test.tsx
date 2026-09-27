@@ -382,15 +382,13 @@ describe("TraderSettlementsWorkspace", () => {
     fireEvent.change(screen.getByLabelText("Gross Order Payable (+)"), {
       target: { value: "100.00" },
     });
-    await waitFor(() =>
-      expect(
-        screen.getByRole("checkbox", { name: "Deduct fee linked to Order SER-0" }),
-      ).toBeChecked(),
-    );
+    expect(
+      screen.getByRole("checkbox", { name: "Deduct fee linked to Order SER-0" }),
+    ).not.toBeChecked();
     const totals = [...document.querySelectorAll(".eligible-orders-totals")].find((element) =>
       element.textContent?.includes("Net Payment to Trader"),
     );
-    expect(totals?.textContent).toContain("82.00");
+    expect(totals?.textContent).toContain("100.00");
   });
 
   it("calls the oldest-first allocation proposal endpoint when a Payment Amount is entered", async () => {

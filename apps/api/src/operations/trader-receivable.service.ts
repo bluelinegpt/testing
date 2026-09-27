@@ -135,6 +135,10 @@ export interface TraderReceivableEligibleRow {
   readonly businessDate: string;
   readonly id: string;
   readonly orderSerialNumber: string | null;
+  readonly orderNumber: string | null;
+  readonly orderType: "collect_order" | "delivery" | "gcc_international" | null;
+  readonly customerName: string | null;
+  readonly customerMobileNumber: string | null;
   readonly originalAmountDue: string;
   readonly outstandingAmount: string;
   readonly previouslyCollected: string;
@@ -229,6 +233,10 @@ export interface TraderCollectionAllocationDetail {
   readonly amountCollectedNow: string;
   /** Identifier the Receivable detail route consumes; never displayed. */
   readonly receivableId: string;
+  readonly orderNumber: string | null;
+  readonly orderType: "collect_order" | "delivery" | "gcc_international" | null;
+  readonly customerName: string | null;
+  readonly customerMobileNumber: string | null;
   readonly businessDate: string;
   readonly originalAmountDue: string;
   readonly previouslyCollected: string;
@@ -680,7 +688,9 @@ export class TraderReceivableService {
       select r.id, r.receivable_number as "receivableNumber", r.trader_id as "traderId",
              t.name_en as "traderName",
              r.business_date::text as "businessDate", r.source_type as "sourceType",
-             r.source_reference as "sourceReference", ord.serial_number as "orderSerialNumber", r.reason,
+             r.source_reference as "sourceReference", ord.serial_number as "orderSerialNumber",
+             ord.order_number as "orderNumber", ord.order_type as "orderType",
+             ord.customer_name as "customerName", ord.customer_mobile_number as "customerMobileNumber", r.reason,
              r.original_amount_due::text as "originalAmountDue",
              r.amount_collected::text as "previouslyCollected",
              r.outstanding_amount::text as "outstandingAmount", r.status,
@@ -1391,6 +1401,31 @@ export class TraderReceivableService {
     return { bytes, filename };
   }
 
+  public async collectionForOrder(
+    orderId: string,
+  ): Promise<{ collectionId: string; collectionNumber: string } | undefined> {
+    this.assertAnyPermission(["trader_receivables.create", "reports.export"]);
+    const { companyId } = this.tenants.current();
+    const result = await sql<{ collectionId: string; collectionNumber: string }>`
+      select c.id as "collectionId", c.collection_number as "collectionNumber"
+        from orders ord
+        join trader_receivables r
+          on r.company_id = ord.company_id
+         and r.source_reference = ord.order_number
+         and r.source_type = 'service_charge'
+        join trader_collection_allocations alloc
+          on alloc.company_id = r.company_id and alloc.receivable_id = r.id
+        join trader_collections c
+          on c.company_id = alloc.company_id and c.id = alloc.collection_id
+       where ord.company_id = ${companyId}::uuid
+         and ord.id = ${orderId}::uuid
+         and c.status = 'confirmed'
+       order by c.confirmed_at desc, c.created_at desc
+       limit 1
+    `.execute(this.database);
+    return result.rows[0];
+  }
+
   /**
    * Traders currently owing the Company money (§11), sorted by highest
    * outstanding balance first — server-aggregated, never derived by the
@@ -1908,6 +1943,10 @@ export class TraderReceivableService {
         receivableStatus: string;
         reason: string;
         receivableId: string;
+        orderNumber: string | null;
+        orderType: "collect_order" | "delivery" | "gcc_international" | null;
+        customerName: string | null;
+        customerMobileNumber: string | null;
         sourceReference: string | null;
         sourceType: string;
       }>`
@@ -1916,11 +1955,15 @@ export class TraderReceivableService {
         select r.id as "receivableId",
                r.receivable_number as "receivableNumber", r.source_type as "sourceType",
                r.source_reference as "sourceReference", r.business_date::text as "businessDate",
+               ord.order_number as "orderNumber", ord.order_type as "orderType",
+               ord.customer_name as "customerName", ord.customer_mobile_number as "customerMobileNumber",
                r.reason, r.original_amount_due::text as "originalAmountDue",
                r.outstanding_amount::text as "outstandingAmount", r.status as "receivableStatus",
                alloc.amount_allocated as "amountAllocated"
           from trader_collection_allocations alloc
           join trader_receivables r on r.id = alloc.receivable_id and r.company_id = alloc.company_id
+          left join orders ord on ord.company_id = r.company_id
+            and r.source_type = 'service_charge' and ord.order_number = r.source_reference
          where alloc.collection_id = ${collectionId}::uuid and alloc.company_id = ${companyId}::uuid
          order by r.receivable_number
       `.execute(this.database)
@@ -1928,6 +1971,10 @@ export class TraderReceivableService {
     const lines: TraderCollectionAllocationDetail[] = rows.map((row) => ({
       amountCollectedNow: new Decimal(row.amountAllocated).toFixed(2),
       receivableId: row.receivableId,
+      orderNumber: row.orderNumber,
+      orderType: row.orderType,
+      customerName: row.customerName,
+      customerMobileNumber: row.customerMobileNumber,
       businessDate: row.businessDate,
       originalAmountDue: new Decimal(row.originalAmountDue).toFixed(2),
       previouslyCollected: new Decimal(row.originalAmountDue)

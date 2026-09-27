@@ -22,6 +22,13 @@ export function useReconciliationPdfActions(api: ApiClient) {
     body?: unknown,
   ): Promise<unknown> => {
     setBusy(mode);
+    // Open the tab synchronously while the click is still active. Waiting for
+    // the API response before calling window.open makes browsers treat it as
+    // a popup and silently leave the user on the Orders screen.
+    const reportWindow =
+      mode === "preview" || mode === "print"
+        ? window.open("about:blank", "_blank")
+        : null;
     try {
       const blob =
         body === undefined ? await api.getBinary(path) : await api.postBinary(path, body);
@@ -32,9 +39,15 @@ export function useReconciliationPdfActions(api: ApiClient) {
         link.download = filename;
         link.click();
       } else {
-        const reportWindow = window.open(url, "_blank", "noopener,noreferrer");
         if (mode === "print" && reportWindow !== null) {
+          reportWindow.location.href = url;
           reportWindow.addEventListener("load", () => reportWindow.print());
+        } else if (reportWindow !== null) {
+          reportWindow.location.href = url;
+        } else {
+          // If the browser still blocks the tab, show the PDF in the current
+          // tab rather than silently returning to the Orders screen.
+          window.location.href = url;
         }
       }
       window.setTimeout(() => URL.revokeObjectURL(url), 60000);

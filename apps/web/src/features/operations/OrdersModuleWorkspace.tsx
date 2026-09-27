@@ -1,7 +1,7 @@
 import {
   ArrowLeft,
-  Banknote,
   CheckSquare,
+  FileText,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -239,6 +239,7 @@ export function OrdersModuleWorkspace({
 }) {
   const { i18n, t } = useTranslation();
   const locale = normalizeLocale(i18n.resolvedLanguage);
+  const traderReportPdf = useReconciliationPdfActions(api);
   // Business-data display follows the user's Search-and-Display preference,
   // falling back to the UI language when no branding provider is present.
   const branding = useContext(CompanyBrandingContext);
@@ -338,6 +339,23 @@ export function OrdersModuleWorkspace({
   const [fastEntryOpen, setFastEntryOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
+  const [rowStatusColors, setRowStatusColors] = useState(() => {
+    try {
+      return window.localStorage.getItem("blueline.orders.rowStatusColors") !== "off";
+    } catch {
+      return true;
+    }
+  });
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        "blueline.orders.rowStatusColors",
+        rowStatusColors ? "on" : "off",
+      );
+    } catch {
+      // Storage may be unavailable in private browsing; the UI still works.
+    }
+  }, [rowStatusColors]);
 
   const query = useMemo(() => {
     const parameters = new URLSearchParams({
@@ -609,6 +627,44 @@ export function OrdersModuleWorkspace({
   const canUpdateStatus = isAdministrator || permissions.includes("orders.update_delivery_status");
   const canReconcile = isAdministrator || permissions.includes("reconciliations.create");
   const canSettle = isAdministrator || permissions.includes("settlements.create");
+  const selectedReportOrder = bulkSelectedOrders.length === 1 ? bulkSelectedOrders[0] : undefined;
+  const canOpenTraderCollectionReport =
+    selectedReportOrder !== undefined &&
+    Number(selectedReportOrder.traderReceivableOutstanding ?? 0) <= 0 &&
+    selectedReportOrder.traderReceivableId !== null &&
+    selectedReportOrder.traderReceivableId !== undefined;
+  const canOpenTraderSettlementReport =
+    selectedReportOrder !== undefined &&
+    Number(selectedReportOrder.traderNetPayable ?? 0) > 0 &&
+    !["not_eligible", "unsettled"].includes(selectedReportOrder.traderSettlementStatus);
+  const openTraderReport = async (kind: "collection" | "settlement") => {
+    if (selectedReportOrder === undefined) return;
+    if (kind === "collection" && canOpenTraderCollectionReport) {
+      const link = await api.get<{ collectionId: string; collectionNumber: string } | undefined>(
+        `operations/trader-receivables/collections-for-order/${selectedReportOrder.id}`,
+      );
+      if (link !== undefined) {
+        await traderReportPdf.run(
+          `operations/trader-receivables/collections/${link.collectionId}/pdf?language=${locale}`,
+          `Trader-Collection-${link.collectionNumber}.pdf`,
+          "preview",
+        );
+      }
+      return;
+    }
+    if (kind === "settlement" && canOpenTraderSettlementReport) {
+      const link = await api.get<{ settlementId: string; settlementNumber: string } | undefined>(
+        `operations/orders/${selectedReportOrder.id}/trader-settlement`,
+      );
+      if (link !== undefined) {
+        await traderReportPdf.run(
+          `operations/settlements/payments/${link.settlementId}/pdf?language=${locale}`,
+          `Trader-Settlement-${link.settlementNumber}.pdf`,
+          "preview",
+        );
+      }
+    }
+  };
   const canManifest =
     isAdministrator || permissions.includes("reports.export") || canAssignDriver || canUpdateStatus;
   const canSelectOrders = canAssignDriver || canUpdateStatus || canReconcile || canSettle;
@@ -806,8 +862,27 @@ export function OrdersModuleWorkspace({
     setCollapsedGroups((current) => toggleSet(current, key));
   const renderOrderRow = (order: OperationsOrder) => {
     const checked = orderSelected(order.id);
+    const rowStatusClass = rowStatusColors
+      ? order.orderType === "gcc_international"
+        ? "order-row-status-international"
+        : order.deliveryStatus === "cancelled"
+          ? "order-row-status-cancelled"
+          : order.deliveryStatus === "closed"
+            ? "order-row-status-closed"
+            : order.deliveryStatus === "delivered"
+              ? "order-row-status-delivered"
+              : order.deliveryStatus === "hold"
+                ? "order-row-status-hold"
+                : order.workflowGuidance?.nextActionCode === "collect_from_trader"
+                  ? "order-row-status-collect"
+                  : order.workflowGuidance?.nextActionCode === "settle_trader"
+                    ? "order-row-status-pay"
+                    : "order-row-status-new"
+      : order.orderType === "gcc_international"
+        ? "international-order-row"
+        : undefined;
     return (
-      <tr className={order.orderType === "gcc_international" ? "international-order-row" : undefined} key={order.id}>
+      <tr className={rowStatusClass} key={order.id}>
         <td>
           {canSelectOrders ? (
             <input
@@ -826,8 +901,11 @@ export function OrdersModuleWorkspace({
             onClick={() => onNavigate(`/orders/${encodeURIComponent(order.orderNumber)}`)}
             type="button"
           >
-            {order.serialNumber ?? t("operations.legacyIdentifier")}
+            {order.orderNumber}
           </button>
+          {order.serialNumber === null ? null : (
+            <span className="cell-secondary">{t("operations.serialNumber")}: {order.serialNumber}</span>
+          )}
           <span className="cell-secondary">{formatDate(order.orderDate, locale)}</span>
         </td>
         <td className="mono">{order.psystemSerial ?? "—"}</td>
@@ -1057,6 +1135,14 @@ export function OrdersModuleWorkspace({
         ) : null}
         <>
           <div className="orders-filter-bar">
+            <label className="row-status-color-toggle">
+              <input
+                checked={rowStatusColors}
+                onChange={(event) => setRowStatusColors(event.target.checked)}
+                type="checkbox"
+              />
+              {t("operations.rowStatusColors")}
+            </label>
             {/* One field for every identifier an operator has to hand. The
               separate Reference Number input that used to sit beside this was
               removed with the unified search: the backend now matches Order
@@ -1396,12 +1482,48 @@ export function OrdersModuleWorkspace({
                     {t("operations.actions.collectMoney")}
                   </button>
                 ) : null}
-                {canSettle ? (
-                  <button onClick={() => onNavigate("/trader-settlements")} type="button">
-                    <Banknote aria-hidden="true" size={17} />
-                    {t("operations.actions.moneyOut")}
-                  </button>
-                ) : null}
+                <button
+                  disabled={bulkSelectedOrders.length < 2}
+                  onClick={() =>
+                    void traderReportPdf.run(
+                      `operations/trader-receivables/bulk-report/pdf?language=${locale}`,
+                      "Trader-Reports.pdf",
+                      "preview",
+                      { orderIds: bulkSelectedOrders.map((order) => order.id) },
+                    )
+                  }
+                  title={t("operations.traderBulkReportHint")}
+                  type="button"
+                >
+                  <FileText aria-hidden="true" size={17} />
+                  {t("operations.actions.traderBulkReport")}
+                </button>
+                <button
+                  disabled={!canOpenTraderCollectionReport}
+                  onClick={() => void openTraderReport("collection")}
+                  title={
+                    bulkSelectedOrders.length !== 1
+                      ? t("operations.traderReportSelectOne")
+                      : t("operations.traderCollectionReportUnavailable")
+                  }
+                  type="button"
+                >
+                  <FileText aria-hidden="true" size={17} />
+                  {t("operations.actions.traderCollectionReport")}
+                </button>
+                <button
+                  disabled={!canOpenTraderSettlementReport}
+                  onClick={() => void openTraderReport("settlement")}
+                  title={
+                    bulkSelectedOrders.length !== 1
+                      ? t("operations.traderReportSelectOne")
+                      : t("operations.traderSettlementReportUnavailable")
+                  }
+                  type="button"
+                >
+                  <FileText aria-hidden="true" size={17} />
+                  {t("operations.actions.traderSettlementReport")}
+                </button>
                 {canUpdateStatus && !selectedHasInternational ? (
                   <button onClick={() => setBulkAction("status")} type="button">
                     <MoreHorizontal aria-hidden="true" size={17} />
@@ -1459,7 +1581,7 @@ export function OrdersModuleWorkspace({
                       <span className="sr-only">{t("operations.groupSelection")}</span>
                     )}
                   </th>
-                  <th>{t("operations.serialNumber")}</th>
+                  <th>{t("operations.orderNumber")}</th>
                   <th>{t("operations.psystemSerial")}</th>
                   <th>{t("operations.referenceNumber")}</th>
                   <th>{t("operations.trader")}</th>
@@ -2662,6 +2784,19 @@ export function OrderDetailsWorkspace({
     permissions.includes("settlements.create") || permissions.includes("users_roles.manage");
   const canSettle =
     permissions.includes("settlements.create") || permissions.includes("users_roles.manage");
+  const financialStatus = (() => {
+    const amountToCollect = Number(detail.customerAmountDue ?? 0);
+    const amountDueToTrader = Number(detail.traderNetPayable ?? 0);
+    const isFree = detail.isFreeOrder === true ||
+      (amountToCollect === 0 && amountDueToTrader === 0 &&
+        Number(detail.codAmount ?? 0) === 0 && Number(detail.serviceFee ?? 0) === 0 &&
+        Number(detail.totalDeductions ?? 0) === 0 && Number(detail.vatAmount ?? 0) === 0);
+    if (isFree) return "free" as const;
+    if (amountToCollect > 0 && amountDueToTrader > 0) return "both" as const;
+    if (amountToCollect > 0) return "collect" as const;
+    if (amountDueToTrader > 0) return "pay" as const;
+    return "none" as const;
+  })();
   const canReverseSettlement =
     permissions.includes("settlements.reverse") || permissions.includes("users_roles.manage");
   const isOfficeStatusUser =
@@ -2823,6 +2958,16 @@ export function OrderDetailsWorkspace({
         <span>{t("operations.currentOrderStatus")}</span>
         <DeliveryStatusBadge large order={detail} />
       </div>
+      <section className={`order-financial-banner order-financial-banner-${financialStatus}`} role="status">
+        <strong>{t(`operations.financialBanner.${financialStatus}.title`)}</strong>
+        <span>{t(`operations.financialBanner.${financialStatus}.description`)}</span>
+        <small>
+          {t("operations.financialBanner.amounts", {
+            collect: money(detail.customerAmountDue, locale),
+            pay: money(detail.traderNetPayable, locale),
+          })}
+        </small>
+      </section>
       <main className="order-detail-layout">
         <DetailSection
           title={t("operations.orderOverview")}
@@ -4219,6 +4364,25 @@ function FinancialStatusCell({
           {t(`statuses.${order.traderSettlementStatus}`)}
         </span>
       )}
+      {order.traderReceivableStatus === "collected" ? (
+        <span data-trader-receivable-status="collected">
+          <span className="financial-status-label">
+            {t("operations.moneyCollectedLabel")}: {" "}
+          </span>
+          {t("operations.moneyCollectedFromTrader")}
+        </span>
+      ) : null}
+      {Number(order.codAmount ?? 0) === 0 &&
+      Number(order.serviceFee ?? 0) === 0 &&
+      Number(order.totalDeductions ?? 0) === 0 &&
+      Number(order.vatAmount ?? 0) === 0 &&
+      Number(order.customerAmountDue ?? 0) === 0 &&
+      Number(order.traderNetPayable ?? 0) === 0 ? (
+        <span data-financial-status="free-order">
+          <span className="financial-status-label">{t("operations.freeOrderLabel")}: </span>
+          {t("operations.freeOrderComment")}
+        </span>
+      ) : null}
       {order.outsourcedDriverFeeStatus === "not_required" ? null : (
         <span data-outsourced-driver-fee-status={order.outsourcedDriverFeeStatus}>
           <span className="financial-status-label">

@@ -47,6 +47,10 @@ interface TraderReceivableEligibleRow {
   readonly businessDate: string;
   readonly id: string;
   readonly orderSerialNumber?: string | null;
+  readonly orderNumber?: string | null;
+  readonly orderType?: "collect_order" | "delivery" | "gcc_international" | null;
+  readonly customerName?: string | null;
+  readonly customerMobileNumber?: string | null;
   readonly originalAmountDue: string;
   readonly outstandingAmount: string;
   readonly previouslyCollected: string;
@@ -2507,7 +2511,11 @@ function CollectMoneyDialog({
                           />
                         </th>
                         <th scope="col">{t("traderReceivables.columnReceivableNumber")}</th>
+                        <th scope="col">{t("operations.orderNumber")}</th>
                         <th scope="col">{t("traderReceivables.columnOrderSerialNumber")}</th>
+                        <th scope="col">{t("operations.orderType")}</th>
+                        <th scope="col">{t("operations.customer")}</th>
+                        <th scope="col">{t("userAdmin.mobile")}</th>
                         <th scope="col">{t("traderReceivables.columnBusinessDate")}</th>
                         <th scope="col">{t("traderReceivables.columnSourceType")}</th>
                         <th scope="col">{t("traderReceivables.columnSourceReference")}</th>
@@ -2532,7 +2540,11 @@ function CollectMoneyDialog({
                             />
                           </td>
                           <td className="mono">{row.receivableNumber}</td>
+                          <td className="mono">{row.orderNumber ?? row.sourceReference ?? "-"}</td>
                           <td className="mono">{row.orderSerialNumber ?? "-"}</td>
+                          <td>{row.orderType ?? "-"}</td>
+                          <td>{row.customerName ?? "-"}</td>
+                          <td>{row.customerMobileNumber ?? "-"}</td>
                           <td>{row.businessDate.slice(0, 10)}</td>
                           <td>{sourceTypeLabel(t, row.sourceType)}</td>
                           <td className="mono">{row.sourceReference ?? "-"}</td>
@@ -2545,7 +2557,7 @@ function CollectMoneyDialog({
                       ))}
                       {outstandingRows.length === 0 && outstandingError === undefined ? (
                         <tr>
-                          <td className="empty-state" colSpan={11}>
+                          <td className="empty-state" colSpan={15}>
                             {t("traderReceivables.noEligibleReceivables")}
                           </td>
                         </tr>

@@ -1442,6 +1442,34 @@
   border-radius: 6px;
   overflow: hidden;
 }
+.row-status-color-toggle { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
+.orders-table tr.order-row-status-international td { background: #fee2e2; color: #991b1b; }
+.orders-table tr.order-row-status-cancelled td { background: #fef2f2; color: #991b1b; }
+.orders-table tr.order-row-status-closed td { background: #f3f4f6; }
+.orders-table tr.order-row-status-delivered td { background: #ecfdf5; }
+.orders-table tr.order-row-status-hold td { background: #fffbeb; }
+.orders-table tr.order-row-status-collect td { background: #fff7ed; }
+.orders-table tr.order-row-status-pay td { background: #eff6ff; }
+.orders-table tr.order-row-status-new td { background: #f5f7ff; }
+.order-financial-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 16px;
+  margin-top: 14px;
+  padding: 14px 18px;
+  border: 1px solid var(--shell-border);
+  border-left: 5px solid var(--shell-accent);
+  border-radius: 6px;
+  background: var(--shell-surface);
+}
+.order-financial-banner strong { font-size: 15px; }
+.order-financial-banner span { color: var(--shell-muted); }
+.order-financial-banner small { flex-basis: 100%; color: var(--shell-muted); }
+.order-financial-banner-free { border-left-color: #16803c; background: #f0fbf3; }
+.order-financial-banner-pay { border-left-color: #2563eb; }
+.order-financial-banner-collect { border-left-color: #d97706; }
+.order-financial-banner-both { border-left-color: #7c3aed; }
 .order-detail-section {
   min-width: 0;
   padding: 20px;

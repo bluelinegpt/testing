@@ -43,7 +43,10 @@ interface Labels {
   readonly reversalNotice: string;
   readonly reversalReason: string;
   readonly reversedBy: string;
-  readonly sourceReference: string;
+  readonly orderNumber: string;
+  readonly orderType: string;
+  readonly customerName: string;
+  readonly customerMobile: string;
   readonly sourceType: string;
   readonly status: string;
   readonly statusCancelled: string;
@@ -95,7 +98,10 @@ const LABELS: Record<ReportLanguage, Labels> = {
     reversalNotice: "تم عكس هذا التحصيل",
     reversalReason: "سبب العكس",
     reversedBy: "تم العكس بواسطة",
-    sourceReference: "المرجع",
+    orderNumber: "رقم الطلب",
+    orderType: "نوع الطلب",
+    customerName: "اسم العميل",
+    customerMobile: "هاتف العميل",
     sourceType: "نوع المصدر",
     status: "الحالة",
     statusCancelled: "ملغى",
@@ -145,7 +151,10 @@ const LABELS: Record<ReportLanguage, Labels> = {
     reversalNotice: "This collection has been reversed.",
     reversalReason: "Reversal Reason",
     reversedBy: "Reversed By",
-    sourceReference: "Source Reference",
+    orderNumber: "Order Number",
+    orderType: "Order Type",
+    customerName: "Customer Name",
+    customerMobile: "Customer Mobile",
     sourceType: "Source Type",
     status: "Status",
     statusCancelled: "Cancelled",
@@ -254,7 +263,10 @@ export function buildTraderPaymentReceiptHtml(
         `<td class="num">${index + 1}</td>` +
         `<td class="mono">${escapeHtml(line.receivableNumber)}</td>` +
         `<td>${escapeHtml(sourceTypeLabel(labels, line.sourceType))}</td>` +
-        `<td class="mono">${line.sourceReference === null ? "" : escapeHtml(line.sourceReference)}</td>` +
+        `<td class="mono">${line.orderNumber === null ? "" : escapeHtml(line.orderNumber)}</td>` +
+        `<td>${line.orderType === null ? "" : escapeHtml(line.orderType)}</td>` +
+        `<td>${line.customerName === null ? "" : escapeHtml(line.customerName)}</td>` +
+        `<td>${line.customerMobileNumber === null ? "" : escapeHtml(line.customerMobileNumber)}</td>` +
         `<td>${dateOnly(line.businessDate)}</td>` +
         `<td>${escapeHtml(line.reason)}</td>` +
         `<td class="num">${money(line.originalAmountDue)}</td>` +
@@ -271,7 +283,10 @@ export function buildTraderPaymentReceiptHtml(
       labels.lineNumber,
       labels.receivableNumber,
       labels.sourceType,
-      labels.sourceReference,
+      labels.orderNumber,
+      labels.orderType,
+      labels.customerName,
+      labels.customerMobile,
       labels.businessDate,
       labels.reason,
       labels.originalAmountDue,

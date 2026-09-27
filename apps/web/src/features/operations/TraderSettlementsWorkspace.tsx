@@ -68,6 +68,8 @@ interface TraderEligibleOrderRow {
   readonly customerName: string;
   readonly deliveryDate: string | null;
   readonly orderNumber: string;
+  readonly orderType: "collect_order" | "delivery" | "gcc_international";
+  readonly customerMobileNumber: string;
   readonly emirateName: string | null;
   readonly id: string;
   readonly originalAmountDueToTrader: string;
@@ -114,6 +116,10 @@ interface TraderReceivableEligibleRow {
   readonly businessDate: string;
   readonly id: string;
   readonly orderSerialNumber?: string | null;
+  readonly orderNumber?: string | null;
+  readonly orderType?: "collect_order" | "delivery" | "gcc_international" | null;
+  readonly customerName?: string | null;
+  readonly customerMobileNumber?: string | null;
   readonly originalAmountDue: string;
   readonly outstandingAmount: string;
   readonly previouslyCollected: string;
@@ -1536,7 +1542,7 @@ function NewSettlementDialog({
   const ordersPageCount = ordersTotal === 0 ? 1 : Math.ceil(ordersTotal / 50);
 
   // Optional Company-fee deductions owed by this Trader. These are loaded
-  // oldest-first and selected by default up to the gross Order payable.
+  // oldest-first but remain unchecked until the User explicitly selects them.
   const [eligibleReceivables, setEligibleReceivables] = useState<
     readonly TraderReceivableEligibleRow[]
   >([]);
@@ -1927,18 +1933,10 @@ function NewSettlementDialog({
   }, 0);
   const requestedAmount = amountInput.ok ? amountInput.value : 0;
   useEffect(() => {
-    if (receivableOffsetsCustomized) return;
-    let remaining = Math.max(0, requestedAmount - 0.01);
-    const defaults: { amount: string; receivableId: string }[] = [];
-    for (const receivable of eligibleReceivables) {
-      if (remaining <= 0.005) break;
-      const applied = Math.min(remaining, safeMoneyValue(receivable.outstandingAmount));
-      if (applied > 0.005) {
-        defaults.push({ amount: applied.toFixed(2), receivableId: receivable.id });
-        remaining -= applied;
-      }
-    }
-    setReceivableOffsets(defaults);
+    // Fee deductions are never auto-applied. The operator must tick each fee
+    // row deliberately; this prevents an unrelated older receivable from
+    // silently reducing the payment to the selected Trader orders.
+    if (!receivableOffsetsCustomized) setReceivableOffsets([]);
   }, [eligibleReceivables, receivableOffsetsCustomized, requestedAmount]);
   const receivableById = new Map(eligibleReceivables.map((row) => [row.id, row]));
   const receivableOffsetTotal = receivableOffsets.reduce(
@@ -2398,7 +2396,9 @@ function NewSettlementDialog({
                             type="checkbox"
                           />
                         </th>
+                        <th scope="col">{t("operations.orderNumber")}</th>
                         <th scope="col">{t("traderSettlements.filterOrderSerialNumber")}</th>
+                        <th scope="col">{t("operations.orderType")}</th>
                         <th scope="col">{t("traderSettlements.filterExternalReference")}</th>
                         <th scope="col">{t("traderSettlements.filterDeliveryDateFrom")}</th>
                         <th scope="col">{t("common.name")}</th>
@@ -2446,12 +2446,14 @@ function NewSettlementDialog({
                               type="checkbox"
                             />
                           </td>
+                          <td className="mono">{order.orderNumber}</td>
                           <td className="mono">{order.serialNumber}</td>
+                          <td>{order.orderType}</td>
                           <td className="mono">{order.referenceNumber ?? "-"}</td>
                           <td>
                             {order.deliveryDate === null ? "-" : order.deliveryDate.slice(0, 10)}
                           </td>
-                          <td>{order.customerName}</td>
+                          <td>{order.customerName}<span className="cell-secondary">{order.customerMobileNumber}</span></td>
                           <td>{t("traderSettlements.orderPayablePlus")}</td>
                           <td>{money(order.originalAmountDueToTrader)}</td>
                           <td>{money(order.previouslyPaid)}</td>
@@ -2495,14 +2497,12 @@ function NewSettlementDialog({
                                 type="checkbox"
                               />
                             </td>
-                            <td className="mono">
-                              {receivable.orderSerialNumber ??
-                                receivable.sourceReference ??
-                                receivable.receivableNumber}
-                            </td>
+                            <td className="mono">{receivable.orderNumber ?? receivable.sourceReference ?? "-"}</td>
+                            <td className="mono">{receivable.orderSerialNumber ?? "-"}</td>
+                            <td>{receivable.orderType ?? "-"}</td>
                             <td className="mono">{receivable.receivableNumber}</td>
                             <td>{receivable.businessDate.slice(0, 10)}</td>
-                            <td>{receivable.reason}</td>
+                            <td>{receivable.customerName ?? receivable.reason}<span className="cell-secondary">{receivable.customerMobileNumber ?? ""}</span></td>
                             <td>{t("traderSettlements.feeDeductionMinus")}</td>
                             <td className="numeric">-{money(receivable.originalAmountDue)}</td>
                             <td>{money(receivable.previouslyCollected)}</td>
@@ -2536,7 +2536,7 @@ function NewSettlementDialog({
                       })}
                       {eligibleOrders.length === 0 && eligibleReceivables.length === 0 ? (
                         <tr>
-                          <td className="empty-state" colSpan={10}>
+                          <td className="empty-state" colSpan={12}>
                             {t("traderSettlements.noEligibleOrders")}
                           </td>
                         </tr>
