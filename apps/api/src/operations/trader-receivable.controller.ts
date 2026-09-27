@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Headers,
+  HttpStatus,
   Inject,
   Param,
   ParseUUIDPipe,
