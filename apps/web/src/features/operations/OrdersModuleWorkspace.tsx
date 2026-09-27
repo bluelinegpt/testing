@@ -2791,6 +2791,7 @@ export function OrderDetailsWorkspace({
       (amountToCollect === 0 && amountDueToTrader === 0 &&
         Number(detail.codAmount ?? 0) === 0 && Number(detail.serviceFee ?? 0) === 0 &&
         Number(detail.totalDeductions ?? 0) === 0 && Number(detail.vatAmount ?? 0) === 0);
+    if (detail.traderReceivableStatus === "collected") return "collected" as const;
     if (isFree) return "free" as const;
     if (amountToCollect > 0 && amountDueToTrader > 0) return "both" as const;
     if (amountToCollect > 0) return "collect" as const;

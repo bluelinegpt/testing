@@ -2427,6 +2427,7 @@ export const englishTranslations = {
     financialBanner: {
       free: { title: "Free Order — No Payment or Collection Required", description: "This order has no COD, service fee, additional fees, or VAT." },
       none: { title: "No Payment or Collection Required", description: "This order has no outstanding financial action." },
+      collected: { title: "Money Collected from Trader", description: "The Trader’s amount was collected in full. No balance remains." },
       pay: { title: "Payment Required — Pay Trader", description: "The order has an outstanding amount due to the Trader." },
       collect: { title: "Collection Required — Collect from Trader", description: "The order has an outstanding amount to collect from the Trader." },
       both: { title: "Payment and Collection Required", description: "This order has amounts payable to and collectible from the Trader." },

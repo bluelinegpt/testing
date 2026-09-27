@@ -1467,6 +1467,7 @@
 .order-financial-banner span { color: var(--shell-muted); }
 .order-financial-banner small { flex-basis: 100%; color: var(--shell-muted); }
 .order-financial-banner-free { border-left-color: #16803c; background: #f0fbf3; }
+.order-financial-banner-collected { border-left-color: #16803c; background: #f0fbf3; }
 .order-financial-banner-pay { border-left-color: #2563eb; }
 .order-financial-banner-collect { border-left-color: #d97706; }
 .order-financial-banner-both { border-left-color: #7c3aed; }
