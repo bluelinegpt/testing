@@ -20,9 +20,9 @@
       "path": "apps/api",
       "renderService": "bluelinegpt-api-test",
       "status": "pushed_awaiting_confirmation",
-      "localCommit": "90d0a93",
+      "localCommit": "418d478",
       "localCommitDate": "2026-09-28",
-      "lastChangeDescription": "fix: create trader receivable when editing payment condition",
+      "lastChangeDescription": "feat: add guarded trader receivable repair action",
       "lastChangeBy": "codex",
       "confirmedLiveCommit": "e3de371",
       "confirmedLiveAt": "2026-09-01"
@@ -33,9 +33,9 @@
       "path": "apps/web",
       "renderService": "bluelinegpt-web-test",
       "status": "pushed_awaiting_confirmation",
-      "localCommit": "f48c2d0",
+      "localCommit": "418d478",
       "localCommitDate": "2026-09-28",
-      "lastChangeDescription": "feat: allow read-only edit for delivered orders",
+      "lastChangeDescription": "feat: add guarded trader receivable repair action",
       "lastChangeBy": "codex",
       "confirmedLiveCommit": "9666706",
       "confirmedLiveAt": "2026-09-01"
