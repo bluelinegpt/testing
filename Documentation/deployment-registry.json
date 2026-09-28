@@ -20,9 +20,9 @@
       "path": "apps/api",
       "renderService": "bluelinegpt-api-test",
       "status": "pushed_awaiting_confirmation",
-      "localCommit": "a14ff5d",
+      "localCommit": "90d0a93",
       "localCommitDate": "2026-09-28",
-      "lastChangeDescription": "feat: support 200 order rows and persist page size",
+      "lastChangeDescription": "fix: create trader receivable when editing payment condition",
       "lastChangeBy": "codex",
       "confirmedLiveCommit": "e3de371",
       "confirmedLiveAt": "2026-09-01"
