@@ -33,9 +33,9 @@
       "path": "apps/web",
       "renderService": "bluelinegpt-web-test",
       "status": "pushed_awaiting_confirmation",
-      "localCommit": "72621e8",
+      "localCommit": "c3b2908",
       "localCommitDate": "2026-09-28",
-      "lastChangeDescription": "fix: resolve emirate groups from area ids",
+      "lastChangeDescription": "fix: group orders by emirate ids",
       "lastChangeBy": "codex",
       "confirmedLiveCommit": "9666706",
       "confirmedLiveAt": "2026-09-01"
