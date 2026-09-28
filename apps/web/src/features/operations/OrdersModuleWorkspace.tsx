@@ -777,7 +777,7 @@ export function OrdersModuleWorkspace({
     setCollapsedGroups(new Set());
   };
 
-  const toggleGroupingDimension = (dimension: "area" | "trader" | "driver" | "status") => {
+  const toggleGroupingDimension = (dimension: "area" | "emirate" | "trader" | "driver" | "status") => {
     const current = Array.isArray(grouping) ? grouping : [];
     const updated = current.includes(dimension)
       ? current.filter((d) => d !== dimension)
@@ -1507,7 +1507,7 @@ export function OrdersModuleWorkspace({
                       onNavigate(
                         selectedTraderReceivableId !== undefined
                           ? `/trader-receivables?collectReceivableId=${encodeURIComponent(selectedTraderReceivableId)}&returnTo=%2Forders`
-                          : `/trader-receivables?collectTraderId=${encodeURIComponent(traderReceivableTraderId!)}&returnTo=%2Forders`,
+                          : `/trader-receivables?collectTraderId=${encodeURIComponent(String(traderReceivableTraderId))}&returnTo=%2Forders`,
                       )
                     }
                     type="button"
