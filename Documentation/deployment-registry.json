@@ -19,10 +19,10 @@
       "displayName": "API",
       "path": "apps/api",
       "renderService": "bluelinegpt-api-test",
-      "status": "pushed_awaiting_confirmation",
-      "localCommit": "4cd3dd7",
+      "status": "needs_deploy",
+      "localCommit": "e4c24bd",
       "localCommitDate": "2026-09-28",
-      "lastChangeDescription": "fix: label trader settlement report as invoice",
+      "lastChangeDescription": "fix: include order customer details on trader invoice deductions",
       "lastChangeBy": "codex",
       "confirmedLiveCommit": "e3de371",
       "confirmedLiveAt": "2026-09-01"
