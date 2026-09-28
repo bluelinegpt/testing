@@ -154,7 +154,7 @@ export interface OperationsOrderFilters {
   readonly businessDateFrom?: string | undefined;
   readonly businessDateTo?: string | undefined;
   readonly page?: number | undefined;
-  readonly pageSize?: 25 | 50 | 100 | undefined;
+  readonly pageSize?: 25 | 50 | 100 | 200 | undefined;
   readonly sortBy?: "amountToCollect" | "createdAt" | "orderDate" | "orderNumber" | undefined;
   readonly sortDirection?: "asc" | "desc" | undefined;
   readonly traderId?: string | undefined;
@@ -168,7 +168,7 @@ export interface OperationsOrderPage {
   readonly matchingCount: number;
   readonly items: readonly OperationsOrder[];
   readonly page: number;
-  readonly pageSize: 25 | 50 | 100;
+  readonly pageSize: 25 | 50 | 100 | 200;
   readonly totalCount: number;
   /** Rows in the selected tab before optional filters are applied. */
   readonly tabTotalCount: number;
@@ -460,7 +460,7 @@ export interface TraderPortalOrderPage {
   readonly filteredCount: number;
   readonly items: readonly TraderPortalOrderSummary[];
   readonly page: number;
-  readonly pageSize: 25 | 50 | 100;
+  readonly pageSize: 25 | 50 | 100 | 200;
   readonly totalCount: number;
 }
 
@@ -1047,7 +1047,7 @@ export class OperationsService {
     const { applied, deliveredOnly } = delivery;
     const page =
       Number.isInteger(filters.page) && (filters.page ?? 0) > 0 ? (filters.page ?? 1) : 1;
-    const pageSize = ([25, 50, 100] as const).includes(filters.pageSize ?? 25)
+    const pageSize = ([25, 50, 100, 200] as const).includes(filters.pageSize ?? 25)
       ? (filters.pageSize ?? 25)
       : 25;
     const offset = (page - 1) * pageSize;
@@ -2739,7 +2739,7 @@ export class OperationsService {
     const quickView = filters.quickView ?? "active";
     const page =
       Number.isInteger(filters.page) && (filters.page ?? 0) > 0 ? (filters.page ?? 1) : 1;
-    const pageSize = ([25, 50, 100] as const).includes(filters.pageSize ?? 25)
+    const pageSize = ([25, 50, 100, 200] as const).includes(filters.pageSize ?? 25)
       ? (filters.pageSize ?? 25)
       : 25;
     const offset = (page - 1) * pageSize;

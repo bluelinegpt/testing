@@ -524,7 +524,7 @@ export interface OperationsOrderPage {
   readonly matchingCount?: number;
   readonly items: readonly OperationsOrder[];
   readonly page: number;
-  readonly pageSize: 25 | 50 | 100;
+  readonly pageSize: 25 | 50 | 100 | 200;
   readonly totalCount: number;
   readonly tabTotalCount?: number;
 }

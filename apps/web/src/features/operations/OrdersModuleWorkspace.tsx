@@ -1689,11 +1689,11 @@ export function OrdersModuleWorkspace({
               <span>{t("operations.pageSize")}</span>
               <select
                 onChange={(event) => {
-                  setPageSize(Number(event.target.value) as 25 | 50 | 100);
+                  setPageSize(Number(event.target.value) as 25 | 50 | 100 | 200);
                 }}
                 value={pageSize}
               >
-                {[25, 50, 100].map((size) => (
+                {[25, 50, 100, 200].map((size) => (
                   <option key={size}>{size}</option>
                 ))}
               </select>

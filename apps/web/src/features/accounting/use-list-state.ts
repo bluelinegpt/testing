@@ -17,7 +17,7 @@ import { useSearchParams } from "react-router-dom";
  * the screen default rather than throwing or sending a rejected request.
  */
 
-export const listPageSizes = [25, 50, 100] as const;
+export const listPageSizes = [25, 50, 100, 200] as const;
 export type ListPageSize = (typeof listPageSizes)[number];
 
 export interface ListState {
