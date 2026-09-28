@@ -726,10 +726,15 @@ export function OrdersModuleWorkspace({
     // Build emirate code to name lookup
     const emirateCodeToName = new Map<string, string>();
     for (const emirate of emirates) {
+      const mapping = {
+        code: emirate.code.toUpperCase(),
+        name: localizeName(locale, { ar: emirate.nameAr, en: emirate.nameEn }),
+      };
       emirateCodeToName.set(
         emirate.code.toUpperCase(),
-        localizeName(locale, { ar: emirate.nameAr, en: emirate.nameEn }),
+        mapping.name,
       );
+      map.set(emirate.id, mapping);
     }
 
     // Map all areas to their emirates
@@ -5306,6 +5311,7 @@ function groupVisibleOrders(
         });
         if (emirateName) return emirateName;
         return (
+          areaEmirateMap?.get(order.emirateId ?? "")?.name ??
           areaEmirateMap?.get(order.areaId ?? "")?.name ??
           areaEmirateMap?.get(order.areaName ?? "")?.name ??
           t("operations.unknown")
