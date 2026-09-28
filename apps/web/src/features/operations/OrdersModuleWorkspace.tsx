@@ -1505,7 +1505,7 @@ export function OrdersModuleWorkspace({
                   <button
                     onClick={() =>
                       onNavigate(
-                        selectedTraderReceivableId !== undefined
+                        selectedTraderReceivableId !== undefined && selectedTraderReceivableId !== null
                           ? `/trader-receivables?collectReceivableId=${encodeURIComponent(selectedTraderReceivableId)}&returnTo=%2Forders`
                           : `/trader-receivables?collectTraderId=${encodeURIComponent(String(traderReceivableTraderId))}&returnTo=%2Forders`,
                       )
