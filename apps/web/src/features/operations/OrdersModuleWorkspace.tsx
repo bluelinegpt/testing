@@ -751,6 +751,7 @@ export function OrdersModuleWorkspace({
       if (area.nameAr) {
         map.set(area.nameAr, mapping);
       }
+      map.set(area.id, mapping);
     }
 
     console.log("areaEmirateMap built:", {
@@ -5304,7 +5305,11 @@ function groupVisibleOrders(
           en: order.emirateNameEn,
         });
         if (emirateName) return emirateName;
-        return areaEmirateMap?.get(order.areaName ?? "")?.name ?? t("operations.unknown");
+        return (
+          areaEmirateMap?.get(order.areaId ?? "")?.name ??
+          areaEmirateMap?.get(order.areaName ?? "")?.name ??
+          t("operations.unknown")
+        );
       }
       case "trader":
         return order.traderName ?? t("operations.unknown");
@@ -5322,7 +5327,7 @@ function groupVisibleOrders(
       case "area":
         return `area:${order.areaId ?? order.areaName ?? "unknown"}`;
       case "emirate":
-        return `emirate:${order.emirateId ?? order.emirateNameEn ?? order.emirateNameAr ?? areaEmirateMap?.get(order.areaName ?? "")?.code ?? "unknown"}`;
+        return `emirate:${order.emirateId ?? order.emirateNameEn ?? order.emirateNameAr ?? areaEmirateMap?.get(order.areaId ?? "")?.code ?? areaEmirateMap?.get(order.areaName ?? "")?.code ?? "unknown"}`;
       case "trader":
         return `trader:${order.traderName ?? "unknown"}`;
       case "driver":
