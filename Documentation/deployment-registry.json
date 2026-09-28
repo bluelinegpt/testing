@@ -33,9 +33,9 @@
       "path": "apps/web",
       "renderService": "bluelinegpt-web-test",
       "status": "pushed_awaiting_confirmation",
-      "localCommit": "6f274e9",
+      "localCommit": "dcdcd6c",
       "localCommitDate": "2026-09-28",
-      "lastChangeDescription": "fix: keep current order status beside label",
+      "lastChangeDescription": "feat: allow read-only editing of closed orders",
       "lastChangeBy": "codex",
       "confirmedLiveCommit": "9666706",
       "confirmedLiveAt": "2026-09-01"
