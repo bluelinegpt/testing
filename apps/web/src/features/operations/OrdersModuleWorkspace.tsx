@@ -2634,7 +2634,6 @@ export function OrderDetailsWorkspace({
   const [holdOpen, setHoldOpen] = useState(false);
   const [reopenDeliveryOpen, setReopenDeliveryOpen] = useState(false);
   const [statusBusy, setStatusBusy] = useState(false);
-  const [repairReceivableBusy, setRepairReceivableBusy] = useState(false);
   const [error, setError] = useState<string>();
   const [viewCollectionId, setViewCollectionId] = useState<string>();
   const [collectionError, setCollectionError] = useState<string>();
@@ -2932,17 +2931,6 @@ export function OrderDetailsWorkspace({
       setStatusBusy(false);
     }
   };
-  const repairTraderReceivable = async () => {
-    setRepairReceivableBusy(true);
-    try {
-      await api.post(`operations/orders/${detail.id}/repair-trader-receivable`, {});
-      await load();
-    } catch (requestError) {
-      setError(message(requestError, t("operations.workflowFailed")));
-    } finally {
-      setRepairReceivableBusy(false);
-    }
-  };
   return (
     <>
       <div className="order-detail-header">
@@ -3021,14 +3009,6 @@ export function OrderDetailsWorkspace({
               type="button"
             >
               {t("operations.reopenDelivery")}
-            </button>
-          ) : null}
-          {permissions.includes("users_roles.manage") &&
-          detail.metadata.paymentCondition === "customer_pays_cod_trader_pays_fee" &&
-          detail.traderReceivableId == null &&
-          Number(detail.serviceFee) > 0 ? (
-            <button className="button button-secondary" disabled={repairReceivableBusy} onClick={() => void repairTraderReceivable()} type="button">
-              {repairReceivableBusy ? t("common.working") : "Fix Trader receivable"}
             </button>
           ) : null}
           <button
