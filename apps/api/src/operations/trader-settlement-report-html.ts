@@ -92,7 +92,7 @@ const LABELS: Record<ReportLanguage, Labels> = {
     customer: "العميل",
     deliveryDate: "تاريخ التسليم",
     emirate: "الإمارة",
-    externalReference: "الرقم المرجعي الخارجي",
+    externalReference: "الرقم المرجعي",
     generatedAt: "تاريخ ووقت إنشاء التقرير",
     grossOrderPayable: "إجمالي مستحقات الطلبات (+)",
     lineNumber: "#",
@@ -112,7 +112,7 @@ const LABELS: Record<ReportLanguage, Labels> = {
     receivableDeductions: "رسوم مستحقة على التاجر (-)",
     receivableNumber: "رقم المبلغ المستحق",
     receivableReason: "السبب",
-    receivableSource: "المرجع / الطلب",
+    receivableSource: "رقم الطلب",
     paymentDate: "تاريخ الدفعة",
     paymentMethod: "طريقة الدفع",
     paymentMethodBankTransfer: "تحويل بنكي",
@@ -158,7 +158,7 @@ const LABELS: Record<ReportLanguage, Labels> = {
     customer: "Customer",
     deliveryDate: "Delivery Date",
     emirate: "Emirate",
-    externalReference: "External Reference Number",
+    externalReference: "Reference Number",
     generatedAt: "Generated Date and Time",
     grossOrderPayable: "Gross Order Payable (+)",
     lineNumber: "#",
@@ -178,7 +178,7 @@ const LABELS: Record<ReportLanguage, Labels> = {
     receivableDeductions: "Company Fee Deductions (-)",
     receivableNumber: "Receivable Number",
     receivableReason: "Reason",
-    receivableSource: "Reference / Order",
+    receivableSource: "Order Number",
     paymentDate: "Payment Date",
     paymentMethod: "Payment Method",
     paymentMethodBankTransfer: "Bank Transfer",
@@ -281,7 +281,6 @@ export function buildTraderSettlementStatementHtml(
       (order, index) =>
         "<tr>" +
         `<td class="num">${index + 1}</td>` +
-        `<td class="mono">${escapeHtml(order.serialNumber)}</td>` +
         `<td class="mono">${escapeHtml(order.orderNumber)}</td>` +
         `<td>${escapeHtml(order.orderType)}</td>` +
         `<td class="mono">${order.referenceNumber === null ? "" : escapeHtml(order.referenceNumber)}</td>` +
@@ -304,7 +303,6 @@ export function buildTraderSettlementStatementHtml(
     `<table class="grid"><thead><tr>` +
     [
       labels.lineNumber,
-      labels.orderSerial,
       labels.orderNumber,
       labels.orderType,
       labels.externalReference,
@@ -333,7 +331,7 @@ export function buildTraderSettlementStatementHtml(
         `<td class="mono">${escapeHtml(line.receivableNumber)}</td>` +
         `<td>${dateOnly(line.businessDate)}</td>` +
         `<td class="mono">${escapeHtml(line.orderNumber ?? line.sourceReference ?? "")}</td>` +
-        `<td class="mono">${escapeHtml(line.orderSerialNumber ?? "")}</td>` +
+        `<td class="mono">${escapeHtml(line.referenceNumber ?? "")}</td>` +
         `<td>${escapeHtml(line.customerName ?? "")}</td>` +
         `<td class="mono">${escapeHtml(line.customerMobileNumber ?? "")}</td>` +
         `<td>${escapeHtml(line.reason)}</td>` +
@@ -351,7 +349,7 @@ export function buildTraderSettlementStatementHtml(
           labels.receivableNumber,
           labels.paymentDate,
           labels.receivableSource,
-          labels.orderSerial,
+          labels.externalReference,
           labels.customerName,
           labels.customerMobile,
           labels.receivableReason,
@@ -417,6 +415,10 @@ export function buildTraderSettlementStatementHtml(
     `<h1 class="report-title">${escapeHtml(labels.title)}</h1>` +
     `<div class="meta-grid">` +
     headerMeta(labels.settlementNumber, header.settlementNumber) +
+    headerMeta(
+      labels.externalReference,
+      [...new Set(data.orders.map((order) => order.referenceNumber).filter((value): value is string => value !== null && value !== ""))].join(", "),
+    ) +
     headerMeta(labels.status, settlementStatusLabel(labels, header.status)) +
     headerMeta(labels.trader, header.traderName) +
     headerMeta(labels.paymentDate, header.paymentDate) +

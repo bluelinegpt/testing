@@ -204,6 +204,7 @@ export interface TraderSettlementReceivableOffset {
   readonly customerName: string | null;
   readonly orderSerialNumber: string | null;
   readonly orderNumber: string | null;
+  readonly referenceNumber: string | null;
   readonly reason: string;
   readonly receivableNumber: string;
   readonly sourceReference: string | null;
@@ -2161,6 +2162,7 @@ export class TraderSettlementService {
              r.business_date::text as "businessDate", r.receivable_number as "receivableNumber",
              r.source_type as "sourceType", r.source_reference as "sourceReference", r.reason,
              o.serial_number as "orderSerialNumber", o.order_number as "orderNumber",
+             o.reference_number as "referenceNumber",
              o.customer_name as "customerName", o.customer_mobile_number as "customerMobileNumber"
         from trader_settlement_receivable_offsets x
         join trader_receivables r on r.id=x.receivable_id and r.company_id=x.company_id
