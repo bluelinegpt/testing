@@ -14,6 +14,7 @@ import { CompanyConfigurationWorkspace } from "../features/configuration/Company
 import { WebsiteAgentConversationsWorkspace } from "../features/configuration/WebsiteAgentConversationsWorkspace.js";
 import { WhatsAppConfigurationWorkspace } from "../features/configuration/WhatsAppConfigurationWorkspace.js";
 import { CompanyProfileWorkspace } from "../features/configuration/CompanyProfileWorkspace.js";
+import { OrderMaintenanceWorkspace } from "../features/configuration/OrderMaintenanceWorkspace.js";
 import { ProductCatalogueWorkspace } from "../features/storefront/ProductCatalogueWorkspace.js";
 import { StorefrontConfigurationWorkspace } from "../features/storefront/StorefrontConfigurationWorkspace.js";
 import {
@@ -300,6 +301,8 @@ export function CompanyWorkspace({
     );
   } else if (path === "/configuration/ai-agent") {
     content = <WebsiteAgentConversationsWorkspace api={api} />;
+  } else if (path === "/configuration/maintenance") {
+    content = <OrderMaintenanceWorkspace api={api} />;
   } else if (path === "/configuration/whatsapp") {
     content = (
       <WhatsAppConfigurationWorkspace api={api} permissions={session.identity.permissions} />

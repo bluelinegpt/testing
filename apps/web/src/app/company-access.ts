@@ -86,6 +86,7 @@ const routePermissions: Readonly<Record<string, readonly string[]>> = {
   ],
   "/configuration/general": [manage],
   "/configuration/ai-agent": [manage],
+  "/configuration/maintenance": [manage],
   "/configuration/traders": [manage],
   "/configuration/customers": [manage],
   "/configuration/areas": [manage],

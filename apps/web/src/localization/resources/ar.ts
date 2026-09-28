@@ -1234,6 +1234,7 @@ export const arabicTranslations = {
     finance: "المالية",
     generalSettings: "الإعدادات العامة",
     websiteAgent: "الوكيل الذكي",
+    maintenance: "الصيانة",
     importOrders: "استيراد الطلبات",
     orders: "الطلبات",
     ordersExport: "تصدير الطلبات",

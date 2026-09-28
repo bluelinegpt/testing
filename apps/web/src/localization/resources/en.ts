@@ -1256,6 +1256,7 @@ export const englishTranslations = {
     finance: "Finance",
     generalSettings: "General settings",
     websiteAgent: "AI Agent",
+    maintenance: "Maintenance",
     importOrders: "Import orders",
     orders: "Orders",
     ordersExport: "Orders Export",
