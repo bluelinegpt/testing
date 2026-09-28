@@ -33,9 +33,9 @@
       "path": "apps/web",
       "renderService": "bluelinegpt-web-test",
       "status": "pushed_awaiting_confirmation",
-      "localCommit": "cb475bf",
+      "localCommit": "72621e8",
       "localCommitDate": "2026-09-28",
-      "lastChangeDescription": "fix: remove sticky toolbar gap",
+      "lastChangeDescription": "fix: resolve emirate groups from area ids",
       "lastChangeBy": "codex",
       "confirmedLiveCommit": "9666706",
       "confirmedLiveAt": "2026-09-01"
