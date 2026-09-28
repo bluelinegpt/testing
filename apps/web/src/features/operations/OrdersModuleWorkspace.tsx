@@ -5298,11 +5298,14 @@ function groupVisibleOrders(
         }
         return localizedAreaName;
       }
-      case "emirate":
-        return localizeName(locale, {
+      case "emirate": {
+        const emirateName = localizeName(locale, {
           ar: order.emirateNameAr,
           en: order.emirateNameEn,
-        }) || t("operations.unknown");
+        });
+        if (emirateName) return emirateName;
+        return areaEmirateMap?.get(order.areaName ?? "")?.name ?? t("operations.unknown");
+      }
       case "trader":
         return order.traderName ?? t("operations.unknown");
       case "driver":
@@ -5319,7 +5322,7 @@ function groupVisibleOrders(
       case "area":
         return `area:${order.areaId ?? order.areaName ?? "unknown"}`;
       case "emirate":
-        return `emirate:${order.emirateId ?? order.emirateNameEn ?? order.emirateNameAr ?? "unknown"}`;
+        return `emirate:${order.emirateId ?? order.emirateNameEn ?? order.emirateNameAr ?? areaEmirateMap?.get(order.areaName ?? "")?.code ?? "unknown"}`;
       case "trader":
         return `trader:${order.traderName ?? "unknown"}`;
       case "driver":
