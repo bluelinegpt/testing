@@ -33,9 +33,9 @@
       "path": "apps/web",
       "renderService": "bluelinegpt-web-test",
       "status": "pushed_awaiting_confirmation",
-      "localCommit": "dcdcd6c",
+      "localCommit": "46811ed",
       "localCommitDate": "2026-09-28",
-      "lastChangeDescription": "feat: allow read-only editing of closed orders",
+      "lastChangeDescription": "fix: enable scrolling in read-only order form",
       "lastChangeBy": "codex",
       "confirmedLiveCommit": "9666706",
       "confirmedLiveAt": "2026-09-01"
