@@ -88,7 +88,7 @@ type QuickView = "active" | "all" | "hold" | "cancelled" | "closed" | "delivery"
 
 /** Quick views the backend actually understands. */
 const backendQuickViews = new Set(["active", "all", "hold", "cancelled", "closed", "accountant"]);
-type OrderGrouping = "" | ("area" | "trader" | "driver" | "status")[];
+type OrderGrouping = "" | ("area" | "emirate" | "trader" | "driver" | "status")[];
 type BulkAction = "assign" | "carrier" | "manifest" | "reactivate" | "status";
 
 interface OrderFilters {
@@ -628,6 +628,15 @@ export function OrdersModuleWorkspace({
   const canReconcile = isAdministrator || permissions.includes("reconciliations.create");
   const canSettle = isAdministrator || permissions.includes("settlements.create");
   const selectedReportOrder = bulkSelectedOrders.length === 1 ? bulkSelectedOrders[0] : undefined;
+  const traderReceivableOrders = bulkSelectedOrders.filter(
+    (order) => Number(order.traderReceivableOutstanding ?? 0) > 0 && order.traderId,
+  );
+  const traderReceivableTraderId = traderReceivableOrders[0]?.traderId;
+  const selectedTraderReceivableId =
+    traderReceivableOrders.length === 1 ? traderReceivableOrders[0]?.traderReceivableId : undefined;
+  const canCollectSelectedTraderReceivables =
+    traderReceivableOrders.length > 0 &&
+    traderReceivableOrders.every((order) => order.traderId === traderReceivableTraderId);
   const canOpenTraderCollectionReport =
     selectedReportOrder !== undefined &&
     Number(selectedReportOrder.traderReceivableOutstanding ?? 0) <= 0 &&
@@ -1343,6 +1352,8 @@ export function OrdersModuleWorkspace({
                           .map((d) =>
                             d === "area"
                               ? t("operations.groupByArea", { defaultValue: "Area" })
+                              : d === "emirate"
+                                ? t("operations.groupByEmirate", { defaultValue: "Emirate" })
                               : d === "trader"
                                 ? t("operations.groupByTrader", { defaultValue: "Trader" })
                                 : d === "driver"
@@ -1362,6 +1373,14 @@ export function OrdersModuleWorkspace({
                 style={{ display: "none" }}
                 onClick={(e) => e.stopPropagation()}
               >
+                <label className="grouping-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={Array.isArray(grouping) && grouping.includes("emirate")}
+                    onChange={() => toggleGroupingDimension("emirate")}
+                  />
+                  {t("operations.groupingEmirate")}
+                </label>
                 <label className="grouping-checkbox">
                   <input
                     type="checkbox"
@@ -1480,6 +1499,21 @@ export function OrdersModuleWorkspace({
                   >
                     <HandCoins aria-hidden="true" size={17} />
                     {t("operations.actions.collectMoney")}
+                  </button>
+                ) : null}
+                {canCollectSelectedTraderReceivables ? (
+                  <button
+                    onClick={() =>
+                      onNavigate(
+                        selectedTraderReceivableId !== undefined
+                          ? `/trader-receivables?collectReceivableId=${encodeURIComponent(selectedTraderReceivableId)}&returnTo=%2Forders`
+                          : `/trader-receivables?collectTraderId=${encodeURIComponent(traderReceivableTraderId!)}&returnTo=%2Forders`,
+                      )
+                    }
+                    type="button"
+                  >
+                    <HandCoins aria-hidden="true" size={17} />
+                    {t("operations.actions.collectFromTrader")}
                   </button>
                 ) : null}
                 <button
@@ -2606,6 +2640,14 @@ export function OrderDetailsWorkspace({
     reconciliationNumber: string;
     statusLabel: string;
   }>();
+  const [traderCollectionSummary, setTraderCollectionSummary] = useState<{
+    collectionId: string;
+    collectionNumber: string;
+    amountReceivedNow: string;
+    paymentDate: string;
+    paymentMethod: "cash" | "bank_transfer";
+    traderName: string;
+  }>();
   const [viewSettlementId, setViewSettlementId] = useState<string>();
   const [settlementError, setSettlementError] = useState<string>();
   const [settlementSummary, setSettlementSummary] = useState<{
@@ -2621,6 +2663,7 @@ export function OrderDetailsWorkspace({
   }>();
   const pdf = useReconciliationPdfActions(api);
   const settlementPdf = useReconciliationPdfActions(api);
+  const traderCollectionPdf = useReconciliationPdfActions(api);
   const [pdfError, setPdfError] = useState<string>();
   const load = useCallback(async () => {
     setError(undefined);
@@ -2683,6 +2726,46 @@ export function OrderDetailsWorkspace({
       active = false;
     };
   }, [api, detail, t]);
+
+  useEffect(() => {
+    if (detail === undefined || detail.traderReceivableStatus !== "collected") {
+      setTraderCollectionSummary(undefined);
+      return;
+    }
+    let active = true;
+    void api
+      .get<{ collectionId: string; collectionNumber: string } | undefined>(
+        `operations/trader-receivables/collections-for-order/${detail.id}`,
+      )
+      .then((link) => {
+        if (!active || link === undefined) return undefined;
+        return api
+          .get<{
+            header: {
+              collectionNumber: string;
+              paymentDate: string;
+              paymentMethod: "cash" | "bank_transfer";
+              traderName: string;
+            };
+            summary: { amountReceivedNow: string };
+          }>(`operations/trader-receivables/collections/${link.collectionId}/report-data`)
+          .then((data) => {
+            if (!active) return;
+            setTraderCollectionSummary({
+              amountReceivedNow: data.summary.amountReceivedNow,
+              collectionId: link.collectionId,
+              collectionNumber: data.header.collectionNumber,
+              paymentDate: data.header.paymentDate,
+              paymentMethod: data.header.paymentMethod,
+              traderName: data.header.traderName,
+            });
+          });
+      })
+      .catch(() => active && setTraderCollectionSummary(undefined));
+    return () => {
+      active = false;
+    };
+  }, [api, detail]);
 
   useEffect(() => {
     if (
@@ -2760,6 +2843,15 @@ export function OrderDetailsWorkspace({
     if (requestError !== undefined) {
       setPdfError(message(requestError, t("operations.pdfGenerationFailed")));
     }
+  };
+  const openConfirmedTraderCollectionPdf = async (mode: PdfAction) => {
+    if (traderCollectionSummary === undefined) return;
+    setPdfError(undefined);
+    await traderCollectionPdf.run(
+      `operations/trader-receivables/collections/${traderCollectionSummary.collectionId}/pdf?language=${reportLanguage}`,
+      `Trader-Collection-${traderCollectionSummary.collectionNumber}.pdf`,
+      mode,
+    );
   };
   if (error !== undefined)
     return (
@@ -3308,6 +3400,22 @@ export function OrderDetailsWorkspace({
                   </button>
                 </>
               )}
+            </div>
+          </section>
+        )}
+        {traderCollectionSummary === undefined ? null : (
+          <section className="order-detail-section">
+            <h2>{t("operations.traderCollectionDetail")}</h2>
+            <dl>
+              <div><dt>{t("operations.collectionNumber")}</dt><dd>{traderCollectionSummary.collectionNumber}</dd></div>
+              <div><dt>{t("operations.trader")}</dt><dd>{traderCollectionSummary.traderName}</dd></div>
+              <div><dt>{t("operations.paymentDate")}</dt><dd>{traderCollectionSummary.paymentDate}</dd></div>
+              <div><dt>{t("operations.amountCollected")}</dt><dd>{money(traderCollectionSummary.amountReceivedNow, locale)}</dd></div>
+            </dl>
+            <div className="modal-actions">
+              <button onClick={() => void openConfirmedTraderCollectionPdf("preview")} type="button">{t("operations.previewReport")}</button>
+              <button onClick={() => void openConfirmedTraderCollectionPdf("print")} type="button">{t("common.print")}</button>
+              <button onClick={() => void openConfirmedTraderCollectionPdf("download")} type="button">{t("operations.downloadPdf")}</button>
             </div>
           </section>
         )}
@@ -5190,6 +5298,11 @@ function groupVisibleOrders(
         }
         return localizedAreaName;
       }
+      case "emirate":
+        return localizeName(locale, {
+          ar: order.emirateNameAr,
+          en: order.emirateNameEn,
+        }) || t("operations.unknown");
       case "trader":
         return order.traderName ?? t("operations.unknown");
       case "driver":
@@ -5205,6 +5318,8 @@ function groupVisibleOrders(
     switch (dimension) {
       case "area":
         return `area:${order.areaId ?? order.areaName ?? "unknown"}`;
+      case "emirate":
+        return `emirate:${order.emirateId ?? order.emirateNameEn ?? order.emirateNameAr ?? "unknown"}`;
       case "trader":
         return `trader:${order.traderName ?? "unknown"}`;
       case "driver":

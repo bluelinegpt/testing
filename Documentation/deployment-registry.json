@@ -33,10 +33,10 @@
       "path": "apps/web",
       "renderService": "bluelinegpt-web-test",
       "status": "pushed_awaiting_confirmation",
-      "localCommit": "cee6e63",
+      "localCommit": "d026a26",
       "localCommitDate": "2026-09-28",
-      "lastChangeDescription": "feat: improve trader reports and order status visibility",
-      "lastChangeBy": "codex",
+      "lastChangeDescription": "fix: show collected trader balance clearly",
+      "lastChangeBy": "human",
       "confirmedLiveCommit": "9666706",
       "confirmedLiveAt": "2026-09-01"
     },

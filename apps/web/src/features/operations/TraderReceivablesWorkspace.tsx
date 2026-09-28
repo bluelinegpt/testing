@@ -2017,6 +2017,22 @@ function CollectMoneyDialog({
     syncSelectedReceivables([target]);
     setInitialReceivableSelectionApplied(true);
   }, [initialReceivableId, initialReceivableSelectionApplied, outstandingRows]);
+
+  useEffect(() => {
+    if (
+      initialTraderId === undefined ||
+      initialReceivableId !== undefined ||
+      initialReceivableSelectionApplied ||
+      outstandingRows.length === 0
+    ) return;
+    setSelectedReceivables(new Map(outstandingRows.map((row) => [row.id, row])));
+    setAmount(
+      outstandingRows
+        .reduce((total, row) => total + Number(row.outstandingAmount), 0)
+        .toFixed(2),
+    );
+    setInitialReceivableSelectionApplied(true);
+  }, [initialTraderId, initialReceivableId, initialReceivableSelectionApplied, outstandingRows]);
   const toggleReceivable = (row: TraderReceivableEligibleRow, checked: boolean) => {
     setSelectedReceivables((current) => {
       const next = new Map(current);
