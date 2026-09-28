@@ -2369,6 +2369,7 @@ export const arabicTranslations = {
     groupingArea: "المنطقة",
     groupingTrader: "التاجر",
     groupingDriver: "المندوب",
+    unknown: "غير معروف",
     groupingStatus: "الحالة",
     groupByArea: "تجميع حسب المنطقة",
     groupByTrader: "تجميع حسب التاجر",

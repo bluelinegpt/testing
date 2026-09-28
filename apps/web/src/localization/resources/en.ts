@@ -2378,6 +2378,7 @@ export const englishTranslations = {
     driverRequiredForDispatch:
       "A Driver must be assigned before this Order can be moved Out for Delivery.",
     grouping: "Grouping",
+    unknown: "Unknown",
     groupingArea: "Area",
     groupingTrader: "Trader",
     groupingDriver: "Driver",
