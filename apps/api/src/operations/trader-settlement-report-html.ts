@@ -39,6 +39,7 @@ interface Labels {
   readonly orderNumber: string;
   readonly orderType: string;
   readonly customerMobile: string;
+  readonly customerName: string;
   readonly originalTraderPayable: string;
   readonly receivableDeductions: string;
   readonly receivableNumber: string;
@@ -106,6 +107,7 @@ const LABELS: Record<ReportLanguage, Labels> = {
     orderNumber: "رقم الطلب",
     orderType: "نوع الطلب",
     customerMobile: "هاتف العميل",
+    customerName: "اسم العميل",
     originalTraderPayable: "المستحق الأصلي للتاجر",
     receivableDeductions: "رسوم مستحقة على التاجر (-)",
     receivableNumber: "رقم المبلغ المستحق",
@@ -171,6 +173,7 @@ const LABELS: Record<ReportLanguage, Labels> = {
     orderNumber: "Order Number",
     orderType: "Order Type",
     customerMobile: "Customer Mobile",
+    customerName: "Customer Name",
     originalTraderPayable: "Original Trader Payable",
     receivableDeductions: "Company Fee Deductions (-)",
     receivableNumber: "Receivable Number",
@@ -329,7 +332,10 @@ export function buildTraderSettlementStatementHtml(
         `<td class="num">${index + 1}</td>` +
         `<td class="mono">${escapeHtml(line.receivableNumber)}</td>` +
         `<td>${dateOnly(line.businessDate)}</td>` +
-        `<td class="mono">${escapeHtml(line.orderSerialNumber ?? line.sourceReference ?? "")}</td>` +
+        `<td class="mono">${escapeHtml(line.orderNumber ?? line.sourceReference ?? "")}</td>` +
+        `<td class="mono">${escapeHtml(line.orderSerialNumber ?? "")}</td>` +
+        `<td>${escapeHtml(line.customerName ?? "")}</td>` +
+        `<td class="mono">${escapeHtml(line.customerMobileNumber ?? "")}</td>` +
         `<td>${escapeHtml(line.reason)}</td>` +
         `<td class="num negative">-${money(line.amountApplied)}</td>` +
         "</tr>",
@@ -345,6 +351,9 @@ export function buildTraderSettlementStatementHtml(
           labels.receivableNumber,
           labels.paymentDate,
           labels.receivableSource,
+          labels.orderSerial,
+          labels.customerName,
+          labels.customerMobile,
           labels.receivableReason,
           labels.receivableDeductions,
         ]
