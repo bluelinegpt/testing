@@ -33,9 +33,9 @@
       "path": "apps/web",
       "renderService": "bluelinegpt-web-test",
       "status": "pushed_awaiting_confirmation",
-      "localCommit": "9dd6cec",
+      "localCommit": "f25d57a",
       "localCommitDate": "2026-09-28",
-      "lastChangeDescription": "fix: repair bulk toolbar css",
+      "lastChangeDescription": "fix: keep order actions visible and group emirates",
       "lastChangeBy": "codex",
       "confirmedLiveCommit": "9666706",
       "confirmedLiveAt": "2026-09-01"
