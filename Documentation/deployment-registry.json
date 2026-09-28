@@ -20,9 +20,9 @@
       "path": "apps/api",
       "renderService": "bluelinegpt-api-test",
       "status": "pushed_awaiting_confirmation",
-      "localCommit": "418d478",
+      "localCommit": "4cd3dd7",
       "localCommitDate": "2026-09-28",
-      "lastChangeDescription": "feat: add guarded trader receivable repair action",
+      "lastChangeDescription": "fix: label trader settlement report as invoice",
       "lastChangeBy": "codex",
       "confirmedLiveCommit": "e3de371",
       "confirmedLiveAt": "2026-09-01"
