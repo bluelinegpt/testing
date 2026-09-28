@@ -1169,6 +1169,9 @@ export class OperationsService {
              t.name_en as "traderName",
              a.name_en as "areaNameEn",
              a.name_ar as "areaNameAr",
+             a.emirate_id as "emirateId",
+             e.name_en as "emirateNameEn",
+             e.name_ar as "emirateNameAr",
              coalesce(o.customer_area_name_ar_snapshot,a.name_ar,
                       o.customer_area_name_snapshot,a.name_en) as "areaName",
              o.assigned_driver_id as "assignedDriverId",
@@ -1240,6 +1243,7 @@ export class OperationsService {
       from orders o
       join traders t on t.id = o.trader_id and t.company_id = o.company_id
       left join areas a on a.id = o.area_id and a.company_id = o.company_id
+      left join emirates e on e.id = a.emirate_id
       left join drivers d on d.id = o.assigned_driver_id and d.company_id = o.company_id
       left join destination_countries dc on dc.id = o.destination_country_id and dc.company_id = o.company_id
       left join third_party_delivery_companies pc on pc.id = o.third_party_delivery_company_id and pc.company_id = o.company_id
