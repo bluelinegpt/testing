@@ -23,7 +23,7 @@
       "localCommit": "0eb1db6",
       "localCommitDate": "2026-09-28",
       "lastChangeDescription": "fix: import API HTTP status for bulk reports",
-      "lastChangeBy": "human",
+      "lastChangeBy": "codex",
       "confirmedLiveCommit": "e3de371",
       "confirmedLiveAt": "2026-09-01"
     },
@@ -33,9 +33,9 @@
       "path": "apps/web",
       "renderService": "bluelinegpt-web-test",
       "status": "pushed_awaiting_confirmation",
-      "localCommit": "735175a",
+      "localCommit": "16960c8",
       "localCommitDate": "2026-09-28",
-      "lastChangeDescription": "fix: resolve web build typing errors",
+      "lastChangeDescription": "fix: guard nullable trader receivable id",
       "lastChangeBy": "human",
       "confirmedLiveCommit": "9666706",
       "confirmedLiveAt": "2026-09-01"
