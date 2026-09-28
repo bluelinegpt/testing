@@ -33,9 +33,9 @@
       "path": "apps/web",
       "renderService": "bluelinegpt-web-test",
       "status": "pushed_awaiting_confirmation",
-      "localCommit": "d026a26",
+      "localCommit": "ec837d0",
       "localCommitDate": "2026-09-28",
-      "lastChangeDescription": "fix: show collected trader balance clearly",
+      "lastChangeDescription": "fix: keep collection actions visible and target order",
       "lastChangeBy": "human",
       "confirmedLiveCommit": "9666706",
       "confirmedLiveAt": "2026-09-01"
