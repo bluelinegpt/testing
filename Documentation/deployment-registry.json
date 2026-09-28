@@ -33,9 +33,9 @@
       "path": "apps/web",
       "renderService": "bluelinegpt-web-test",
       "status": "pushed_awaiting_confirmation",
-      "localCommit": "868d873",
+      "localCommit": "cb475bf",
       "localCommitDate": "2026-09-28",
-      "lastChangeDescription": "fix: translate unknown order group",
+      "lastChangeDescription": "fix: remove sticky toolbar gap",
       "lastChangeBy": "codex",
       "confirmedLiveCommit": "9666706",
       "confirmedLiveAt": "2026-09-01"
