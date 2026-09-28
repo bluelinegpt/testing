@@ -32,6 +32,7 @@ export function CreateOrderDialog({
   onSaved,
   permissions = [],
   searchDebounceMs,
+  readOnly = false,
 }: {
   api: ApiClient;
   /**
@@ -44,6 +45,8 @@ export function CreateOrderDialog({
   onClose: () => void;
   onSaved: () => Promise<void>;
   permissions?: readonly string[];
+  /** Closed Orders may be inspected without allowing any mutation. */
+  readOnly?: boolean;
   /** Test seam only: removes the real-time search debounce. Production uses the default. */
   searchDebounceMs?: number;
 }) {
@@ -657,6 +660,7 @@ export function CreateOrderDialog({
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (readOnly) return;
     setSubmitAttempted(true);
     const firstError = fieldOrder.find((key) => validationErrors[key] !== undefined);
     if (firstError !== undefined) {
@@ -947,6 +951,7 @@ export function CreateOrderDialog({
             onSubmit={(event) => void submit(event)}
             ref={formRef}
           >
+            <fieldset disabled={readOnly}>
             <div className="order-modal-scroll">
               <div className="order-form-columns">
                 <section className="order-form-group" aria-labelledby="order-customer-heading">
@@ -1831,6 +1836,7 @@ export function CreateOrderDialog({
                 </div>
               )}
             </div>
+            </fieldset>
             <footer className="order-action-bar">
               <div className="order-totals" aria-label={t("operations.orderSummary")}>
                 <span className="total-due">
@@ -1848,7 +1854,7 @@ export function CreateOrderDialog({
                 </button>
                 <button
                   className="button button-primary"
-                  disabled={saving || (!isEdit && !isFreeOrder && quoteLoading)}
+                  disabled={readOnly || saving || (!isEdit && !isFreeOrder && quoteLoading)}
                   type="submit"
                 >
                   {isEdit
