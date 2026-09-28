@@ -2991,7 +2991,7 @@ export function OrderDetailsWorkspace({
               {t("operations.actions.hold")}
             </button>
           ) : null}
-          {!isDriverSelfServiceUser && (canEditOrder(detail.deliveryStatus) || detail.deliveryStatus === "closed") ? (
+          {!isDriverSelfServiceUser && (canEditOrder(detail.deliveryStatus) || detail.deliveryStatus === "closed" || detail.deliveryStatus === "delivered") ? (
             <button
               className="button button-secondary"
               onClick={() => setEditOpen(true)}
@@ -3534,7 +3534,7 @@ export function OrderDetailsWorkspace({
             await load();
           }}
           permissions={permissions}
-          readOnly={detail.deliveryStatus === "closed"}
+          readOnly={detail.deliveryStatus === "closed" || detail.deliveryStatus === "delivered"}
         />
       ) : null}
       {holdOpen ? (
@@ -5014,7 +5014,7 @@ function OrderRowActions({
             >
               {t("operations.viewDetails")}
             </button>
-            {!isDriverSelfServiceUser && (canEditOrder(order.deliveryStatus) || order.deliveryStatus === "closed") ? (
+            {!isDriverSelfServiceUser && (canEditOrder(order.deliveryStatus) || order.deliveryStatus === "closed" || order.deliveryStatus === "delivered") ? (
               <button
                 className="button button-secondary"
                 onClick={() => {
@@ -5109,7 +5109,7 @@ function OrderRowActions({
             await onChanged();
           }}
           permissions={permissions}
-          readOnly={order.deliveryStatus === "closed"}
+          readOnly={order.deliveryStatus === "closed" || order.deliveryStatus === "delivered"}
         />
       ) : null}
       {viewCollectionId === undefined ? null : (
