@@ -857,6 +857,15 @@ export class OperationsController {
   }
 
   @RequireAnyPermission("users_roles.manage")
+  @Post("orders/:orderId/repair-trader-receivable")
+  public repairTraderReceivable(
+    @Param("orderId", new ParseUUIDPipe()) orderId: string,
+    @Req() request: Request,
+  ): Promise<{ created: boolean; amount: string }> {
+    return this.operations.repairTraderReceivable(orderId, this.correlationId(request));
+  }
+
+  @RequireAnyPermission("users_roles.manage")
   @ApiOperation({
     summary: "Administratively reopen a Delivered Order and reverse linked Driver financials",
   })
