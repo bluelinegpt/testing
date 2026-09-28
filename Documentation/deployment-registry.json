@@ -33,9 +33,9 @@
       "path": "apps/web",
       "renderService": "bluelinegpt-web-test",
       "status": "pushed_awaiting_confirmation",
-      "localCommit": "114924b",
+      "localCommit": "bfa86b2",
       "localCommitDate": "2026-09-28",
-      "lastChangeDescription": "chore: remove trader receivable repair button",
+      "lastChangeDescription": "feat: add order maintenance repair screen",
       "lastChangeBy": "codex",
       "confirmedLiveCommit": "9666706",
       "confirmedLiveAt": "2026-09-01"
