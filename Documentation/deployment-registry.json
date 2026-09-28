@@ -33,9 +33,9 @@
       "path": "apps/web",
       "renderService": "bluelinegpt-web-test",
       "status": "pushed_awaiting_confirmation",
-      "localCommit": "a14ff5d",
+      "localCommit": "6f274e9",
       "localCommitDate": "2026-09-28",
-      "lastChangeDescription": "feat: support 200 order rows and persist page size",
+      "lastChangeDescription": "fix: keep current order status beside label",
       "lastChangeBy": "codex",
       "confirmedLiveCommit": "9666706",
       "confirmedLiveAt": "2026-09-01"
