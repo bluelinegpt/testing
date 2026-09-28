@@ -7726,10 +7726,13 @@ export class OperationsService {
     const traderNetPayable = input.prospective
       ? Decimal.max(signedTraderPosition, 0)
       : Decimal.max(input.codAmount.minus(input.serviceFee), 0);
-    const traderReceivableDue =
-      input.prospective && !customerPaysFee
-        ? Decimal.max(signedTraderPosition.negated(), 0)
-        : new Decimal(0);
+    // A Trader receivable is required both when creating an Order and when an
+    // edit changes the payment condition to "Trader pays fee". Previously the
+    // `prospective` guard made every edit calculate AED 0 here, so the update
+    // path never created the receivable even though the fee remained payable.
+    const traderReceivableDue = !customerPaysFee
+      ? Decimal.max(signedTraderPosition.negated(), 0)
+      : new Decimal(0);
     return {
       additionalFees: this.money(additionalFees),
       additionalFeeVatAmount: this.money(additionalFeeVatAmount),
