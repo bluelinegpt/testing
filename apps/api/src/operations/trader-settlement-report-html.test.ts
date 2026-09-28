@@ -84,7 +84,7 @@ describe("buildTraderSettlementStatementHtml", () => {
     const html = buildTraderSettlementStatementHtml(sample, "en");
     expect(html).toContain('dir="ltr"');
     expect(html).toContain('lang="en"');
-    expect(html).toContain("Trader Settlement Statement");
+    expect(html).toContain("Trader Invoice");
     expect(html).toContain("SET-000123");
     expect(html).toContain("SER-1");
     expect(html).toContain("REF-1");
@@ -114,7 +114,7 @@ describe("buildTraderSettlementStatementHtml", () => {
     const html = buildTraderSettlementStatementHtml(sample, "ar");
     expect(html).toContain('dir="rtl"');
     expect(html).toContain('lang="ar"');
-    expect(html).toContain("كشف تسوية التاجر");
+    expect(html).toContain("فاتورة التاجر");
     expect(html).toContain("شركة الاختبار");
     expect(html).toContain("SER-1");
     expect(html).toContain("REF-1");
