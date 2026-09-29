@@ -2565,6 +2565,9 @@ td:last-child {
   width: min(1600px, calc(100vw - 32px));
   max-height: calc(100vh - 32px);
 }
+.new-trader-settlement-modal {
+  width: min(1700px, calc(100vw - 24px));
+}
 
 /* Narrow screens: use the full viewport rather than leaving a margin that
    squeezes the content further. */
@@ -3647,6 +3650,22 @@ tr.row-highlighted {
   padding: 8px 4px 0;
   font-size: 0.92rem;
   color: var(--text-muted);
+}
+.eligible-orders-toolbar {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 10px 0 4px;
+}
+.eligible-orders-toolbar .field-inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}
+.eligible-orders-toolbar .field-inline span {
+  white-space: nowrap;
 }
 .eligible-orders-totals strong {
   margin-inline-start: 6px;

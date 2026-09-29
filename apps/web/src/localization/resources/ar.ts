@@ -3942,6 +3942,7 @@ export const arabicTranslations = {
     availableFeeDeductions: "الرسوم المتاحة للخصم (-)",
     applyFeeDeduction: "خصم الرسم المرتبط بالطلب {{number}}",
     noEligibleOrders: "لا توجد طلبات مؤهلة لهذا التاجر.",
+    eligibleOrdersCount: "طلبات مؤهلة",
     // See the English file: `selectAllOrders` is already used below.
     selectAllEligibleOrders: "تحديد كل الطلبات المعروضة",
     // Arabic takes all six plural categories, as `coverageExcluded` above does.

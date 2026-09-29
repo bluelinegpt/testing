@@ -1216,7 +1216,7 @@ export class DriverCollectionsSummaryQueryDto extends DriverCollectionsFilterDto
 // creation, Money Sent/Received, reversal, list/summary/detail/report-data.
 // ---------------------------------------------------------------------------
 
-export const traderSettlementPageSizes = [25, 50, 100] as const;
+export const traderSettlementPageSizes = [25, 50, 100, 200] as const;
 
 // The per-Order trader_settlement_status domain (unchanged from the existing schema).
 const traderOrderSettlementStatuses = [

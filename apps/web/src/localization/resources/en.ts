@@ -4000,6 +4000,7 @@ export const englishTranslations = {
     availableFeeDeductions: "Available fee deductions (-)",
     applyFeeDeduction: "Deduct fee linked to Order {{number}}",
     noEligibleOrders: "No eligible Orders for this Trader.",
+    eligibleOrdersCount: "eligible Orders",
     // NOT `selectAllOrders`: that key already exists further down this same
     // object for the Allocation step's button, and a duplicate key silently
     // takes the later value.

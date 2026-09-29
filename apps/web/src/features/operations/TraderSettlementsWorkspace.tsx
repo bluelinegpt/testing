@@ -1537,9 +1537,10 @@ function NewSettlementDialog({
     () => initialOrderId === undefined,
   );
   const [ordersPage, setOrdersPage] = useState(1);
+  const [ordersPageSize, setOrdersPageSize] = useState<25 | 50 | 100 | 200>(200);
   const eligibleOrders = eligibleOrdersPage?.items ?? [];
   const ordersTotal = eligibleOrdersPage?.total ?? 0;
-  const ordersPageCount = ordersTotal === 0 ? 1 : Math.ceil(ordersTotal / 50);
+  const ordersPageCount = ordersTotal === 0 ? 1 : Math.ceil(ordersTotal / ordersPageSize);
 
   // Optional Company-fee deductions owed by this Trader. These are loaded
   // oldest-first but remain unchecked until the User explicitly selects them.
@@ -1686,14 +1687,14 @@ function NewSettlementDialog({
     const params = filterQuery(orderFilters);
     params.set("traderId", trader.id);
     params.set("page", String(ordersPage));
-    params.set("pageSize", "50");
+    params.set("pageSize", String(ordersPageSize));
     void api
       .get<PagedResponse<TraderEligibleOrderRow>>(
         `operations/settlements/payments/eligible-orders?${params.toString()}`,
       )
       .then(setEligibleOrdersPage)
       .catch(() => setOrdersError(t("common.loadFailed")));
-  }, [api, trader, orderFilters, ordersPage, t]);
+  }, [api, trader, orderFilters, ordersPage, ordersPageSize, t]);
 
   useEffect(() => loadOrders(), [loadOrders]);
 
@@ -2109,7 +2110,7 @@ function NewSettlementDialog({
 
   return (
     <Modal
-      className="modal-wide"
+      className="modal-extra-wide new-trader-settlement-modal"
       closeLabel={t("common.close")}
       onRequestClose={onClose}
       title={t("traderSettlements.newSettlement")}
@@ -2380,6 +2381,27 @@ function NewSettlementDialog({
                     </div>
                   </div>
                 </details>
+                <div className="eligible-orders-toolbar">
+                  <label className="field field-inline">
+                    <span>{t("common.pageSize")}</span>
+                    <select
+                      onChange={(event) => {
+                        setOrdersPage(1);
+                        setOrdersPageSize(Number(event.target.value) as 25 | 50 | 100 | 200);
+                      }}
+                      value={ordersPageSize}
+                    >
+                      {[25, 50, 100, 200].map((size) => (
+                        <option key={size} value={size}>
+                          {size}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <span className="field-hint">
+                    {ordersTotal} {t("traderSettlements.eligibleOrdersCount")}
+                  </span>
+                </div>
                 <div className="table-scroll-x">
                   <table>
                     <thead>
@@ -2575,7 +2597,7 @@ function NewSettlementDialog({
                     </span>
                   </div>
                 )}
-                {ordersTotal <= 50 ? null : (
+                {ordersTotal <= ordersPageSize ? null : (
                   <nav aria-label={t("common.pagination")} className="pagination">
                     <button
                       disabled={ordersPage <= 1}
