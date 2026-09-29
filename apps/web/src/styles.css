@@ -2566,7 +2566,14 @@ td:last-child {
   max-height: calc(100vh - 32px);
 }
 .new-trader-settlement-modal {
-  width: min(1700px, calc(100vw - 24px));
+  width: 100vw;
+  height: 100vh;
+  max-width: none;
+  max-height: none;
+  border-radius: 0;
+}
+.modal-backdrop:has(> .new-trader-settlement-modal) {
+  padding: 0;
 }
 
 /* Narrow screens: use the full viewport rather than leaving a margin that
