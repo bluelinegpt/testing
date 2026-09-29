@@ -33,9 +33,9 @@
       "path": "apps/web",
       "renderService": "bluelinegpt-web-test",
       "status": "needs_deploy",
-      "localCommit": "1a71a2d",
+      "localCommit": "9577ceb",
       "localCommitDate": "2026-09-29",
-      "lastChangeDescription": "fix: make trader settlement dialog full screen",
+      "lastChangeDescription": "fix: make new collection dialog full screen",
       "lastChangeBy": "codex",
       "confirmedLiveCommit": "9666706",
       "confirmedLiveAt": "2026-09-01"
