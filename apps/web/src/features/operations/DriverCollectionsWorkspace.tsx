@@ -1327,7 +1327,7 @@ function CreateDriverCollectionDialog({
 
   return (
     <Modal
-      className="order-modal"
+      className="order-modal new-driver-collection-modal"
       closeLabel={t("common.close")}
       onRequestClose={onClose}
       title={t("operations.newCollection")}
