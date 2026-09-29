@@ -3850,6 +3850,10 @@ tr.row-highlighted {
   max-height: none;
   border-radius: 0;
 }
+.eligible-collection-orders-table {
+  max-height: 560px;
+  overflow: auto;
+}
 .order-form > fieldset {
   min-width: 0;
   min-height: 0;

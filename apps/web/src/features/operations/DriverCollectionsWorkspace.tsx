@@ -1511,7 +1511,7 @@ function CreateDriverCollectionDialog({
                     <div className="alert alert-error">{ordersError}</div>
                   )}
                   {/* Ten columns overflow the modal width; scroll instead of clipping. */}
-                  <div className="table-scroll-x">
+                  <div className="table-scroll-x eligible-collection-orders-table">
                     <table>
                       <thead>
                         <tr>
