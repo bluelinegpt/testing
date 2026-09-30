@@ -1527,6 +1527,9 @@ function NewSettlementDialog({
   const [traderSearch, setTraderSearch] = useState("");
   const [traders, setTraders] = useState<readonly OperationsTrader[]>([]);
   const [trader, setTrader] = useState<OperationsTrader>();
+  const [draftId, setDraftId] = useState<string | undefined>(draftIdProp);
+  const [loadedDraft, setLoadedDraft] = useState<TraderSettlementDraftRow>();
+  const [draftReadOnly, setDraftReadOnly] = useState(false);
 
   // Step 2 — Eligible Orders (loaded once a Trader is selected).
   const [eligibleOrdersPage, setEligibleOrdersPage] =
@@ -2227,6 +2230,12 @@ function NewSettlementDialog({
         </div>
       ) : (
         <form onSubmit={(event) => void (event.preventDefault(), confirm())}>
+          <fieldset disabled={draftReadOnly}>
+          {draftNotice === undefined ? null : (
+            <div className="alert alert-info" role="status">
+              {draftNotice}
+            </div>
+          )}
           {confirmError === undefined ? null : (
             <div className="alert alert-error" role="alert">
               {confirmError}
