@@ -112,6 +112,16 @@ interface CreateTraderSettlementResult {
   readonly traderName: string;
 }
 
+interface TraderSettlementDraftRow {
+  readonly id: string;
+  readonly traderId: string;
+  readonly payload: Record<string, unknown>;
+  readonly status: "draft" | "confirmed";
+  readonly confirmedSettlementId: string | null;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
 interface TraderReceivableEligibleRow {
   readonly businessDate: string;
   readonly id: string;
@@ -843,10 +853,12 @@ export function TraderSettlementsWorkspace({
 
           onClose={() => {
             setNewSettlementOpen(false);
+            setDraftToEdit(undefined);
             returnToOrigin();
           }}
           onCreated={(settlementId) => {
             setNewSettlementOpen(false);
+            setDraftToEdit(undefined);
             if (returnToOrigin()) return;
             refresh();
             openDetail(settlementId);
@@ -1502,6 +1514,7 @@ function FilterBar({
 
 function NewSettlementDialog({
   api,
+  draftId: draftIdProp,
   initialTraderId,
   initialOrderId,
   onOriginatingOrderIneligible,
@@ -1667,10 +1680,43 @@ function NewSettlementDialog({
 
   const [saving, setSaving] = useState(false);
   const [confirmError, setConfirmError] = useState<string>();
+  const [draftNotice, setDraftNotice] = useState<string>();
   const [confirmed, setConfirmed] = useState<CreateTraderSettlementResult>();
   const idempotency = useIdempotencyKey();
   const pdf = useReconciliationPdfActions(api);
   const [pdfError, setPdfError] = useState<string>();
+
+  useEffect(() => {
+    setDraftId(draftIdProp);
+    if (draftIdProp === undefined) {
+      setLoadedDraft(undefined);
+      setDraftReadOnly(false);
+      return;
+    }
+    void api.get<TraderSettlementDraftRow & { payload: Record<string, any> }>(`operations/settlements/drafts/${draftIdProp}`)
+      .then((draft) => { setLoadedDraft(draft); setDraftReadOnly(draft.status === "confirmed" || draft.confirmedSettlementId !== null); })
+      .catch(() => setConfirmError(t("traderSettlements.draftLoadFailed")));
+  }, [api, draftIdProp, t]);
+
+  useEffect(() => {
+    if (loadedDraft === undefined || traders.length === 0) return;
+    const payload = loadedDraft.payload as any;
+    const selected = traders.find((row) => row.id === payload.traderId);
+    if (selected === undefined) return;
+    setTrader(selected);
+    setAmount(String(payload.amount ?? ""));
+    setPaymentAmount(String(payload.amount ?? ""));
+    setPaymentDate(String(payload.paymentDate ?? new Date().toISOString().slice(0, 10)));
+    setPaymentMethod(payload.paymentMethod === "bank_transfer" ? "bank_transfer" : "cash");
+    setCashAccountId(String(payload.cashAccountId ?? ""));
+    setSourceBankId(String(payload.bankAccountId ?? ""));
+    setBeneficiaryBankId(String(payload.traderBankAccountId ?? ""));
+    setBankReference(String(payload.bankReference ?? ""));
+    setNotes(String(payload.notes ?? ""));
+    setAllocations(Array.isArray(payload.allocations) ? payload.allocations : []);
+    setReceivableOffsets(Array.isArray(payload.receivableOffsets) ? payload.receivableOffsets : []);
+    setReceivableOffsetsCustomized(Array.isArray(payload.receivableOffsets) && payload.receivableOffsets.length > 0);
+  }, [loadedDraft, traders]);
 
   useEffect(() => {
     void api
