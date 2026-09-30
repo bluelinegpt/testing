@@ -1540,7 +1540,9 @@ function NewSettlementDialog({
     () => initialOrderId === undefined,
   );
   const [ordersPage, setOrdersPage] = useState(1);
-  const [ordersPageSize, setOrdersPageSize] = useState<25 | 50 | 100 | 200>(200);
+  // Render may still be serving the API contract that accepts up to 100.
+  // Keep the UI request within that contract; pagination still exposes all rows.
+  const [ordersPageSize, setOrdersPageSize] = useState<25 | 50 | 100>(100);
   const eligibleOrders = eligibleOrdersPage?.items ?? [];
   const ordersTotal = eligibleOrdersPage?.total ?? 0;
   const ordersPageCount = ordersTotal === 0 ? 1 : Math.ceil(ordersTotal / ordersPageSize);
@@ -2396,11 +2398,11 @@ function NewSettlementDialog({
                     <select
                       onChange={(event) => {
                         setOrdersPage(1);
-                        setOrdersPageSize(Number(event.target.value) as 25 | 50 | 100 | 200);
+                        setOrdersPageSize(Number(event.target.value) as 25 | 50 | 100);
                       }}
                       value={ordersPageSize}
                     >
-                      {[25, 50, 100, 200].map((size) => (
+                      {[25, 50, 100].map((size) => (
                         <option key={size} value={size}>
                           {size}
                         </option>
@@ -3022,6 +3024,7 @@ function NewSettlementDialog({
               )}
             </>
           )}
+          </fieldset>
         </form>
       )}
     </Modal>
