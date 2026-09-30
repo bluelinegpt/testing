@@ -428,6 +428,7 @@ export function TraderSettlementsWorkspace({
      makes, so a Trader from another Company simply returns nothing here. */
   const [listError, setListError] = useState<string>();
   const [newSettlementOpen, setNewSettlementOpen] = useState(false);
+  const [draftToEdit, setDraftToEdit] = useState<string>();
   const [addReceivableOpen, setAddReceivableOpen] = useState(false);
   const [collectFromTraderOpen, setCollectFromTraderOpen] = useState(false);
   /* A smart next action from the Orders list can ask this screen to open New
@@ -1524,6 +1525,7 @@ function NewSettlementDialog({
   reportLanguage,
 }: {
   api: ApiClient;
+  draftId?: string | undefined;
   /** Originating Order from a smart next action, selected once it loads. */
   initialOrderId?: string | undefined;
   initialTraderId?: string | undefined;
