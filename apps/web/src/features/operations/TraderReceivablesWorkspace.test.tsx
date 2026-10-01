@@ -74,7 +74,13 @@ function setup(
       if (path === "operations/trader-receivables/summary") {
         return Promise.resolve(summary);
       }
-      if (path.startsWith("operations/trader-receivables/eligible")) {
+      // Two different list endpoints. `eligible` is the Collection wizard's,
+      // restricted server-side to outstanding/partially_collected; `receivables`
+      // is the ledger the Receivables tab reads, which returns every status.
+      if (
+        path.startsWith("operations/trader-receivables/eligible") ||
+        path.startsWith("operations/trader-receivables/receivables")
+      ) {
         return Promise.resolve({ items: [receivableRow], page: 1, pageSize: 25, total: 1 });
       }
       // The Collection detail dialog opens on its own when a Collection route is
@@ -136,7 +142,7 @@ describe("TraderReceivablesWorkspace", () => {
     expect(
       await screen.findByRole("heading", { level: 1, name: "Trader Receivables" }),
     ).toBeInTheDocument();
-    expect(tab("Outstanding Receivables")).toBeInTheDocument();
+    expect(tab("Receivables")).toBeInTheDocument();
     expect(tab("Collections")).toBeInTheDocument();
   });
 
@@ -145,10 +151,10 @@ describe("TraderReceivablesWorkspace", () => {
     expect(await screen.findByText("RCV-000001")).toBeInTheDocument();
   });
 
-  it("defaults to the Outstanding Receivables tab with no route input", async () => {
+  it("defaults to the Receivables tab with no route input", async () => {
     setup();
     await screen.findByRole("heading", { level: 1, name: "Trader Receivables" });
-    expect(tab("Outstanding Receivables")).toHaveAttribute("aria-pressed", "true");
+    expect(tab("Receivables")).toHaveAttribute("aria-pressed", "true");
     expect(tab("Collections")).toHaveAttribute("aria-pressed", "false");
   });
 
@@ -158,7 +164,7 @@ describe("TraderReceivablesWorkspace", () => {
     setup({ collectionDetailId: "collection-1" });
     await screen.findByRole("heading", { level: 1, name: "Trader Receivables" });
     expect(tab("Collections")).toHaveAttribute("aria-pressed", "true");
-    expect(tab("Outstanding Receivables")).toHaveAttribute("aria-pressed", "false");
+    expect(tab("Receivables")).toHaveAttribute("aria-pressed", "false");
   });
 
   it("opens on the Collections tab when the initial query carries a Collection filter", async () => {

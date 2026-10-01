@@ -3696,7 +3696,9 @@ export const englishTranslations = {
     detailLoadFailed: "Could not load this information. Try again.",
 
     // Tabs
-    tabOutstandingReceivables: "Outstanding Receivables",
+    // This tab lists every Receivable, not only the outstanding ones, so the
+    // old "Outstanding Receivables" label would now be a lie.
+    tabOutstandingReceivables: "Receivables",
     tabCollections: "Collections",
 
     // Header actions
@@ -3760,7 +3762,12 @@ export const englishTranslations = {
     // Row actions / empty states
     actionView: "View",
     actionCollectMoney: "Collect Money",
-    actionCancel: "Cancel",
+    // Never just "Cancel": in the detail dialog this button sits beside Close,
+    // where "Cancel" reads as "dismiss this dialog" rather than "cancel the
+    // Receivable".
+    actionCancel: "Cancel Receivable",
+    columnClearedBy: "Cleared By",
+    cancelledBy: "Cancelled By",
     actionPreviewReceipt: "Preview Receipt",
     actionPrint: "Print",
     actionDownloadPdf: "Download PDF",

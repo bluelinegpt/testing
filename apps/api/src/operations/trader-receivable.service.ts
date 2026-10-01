@@ -114,6 +114,7 @@ export interface TraderReceivableDetail {
   readonly traderNameAr?: string | null;
   readonly businessDate: string;
   readonly cancelledAt: string | null;
+  readonly cancelledBy: string | null;
   readonly cancelledReason: string | null;
   readonly collections: readonly TraderReceivableCollectionHistoryLine[];
   readonly createdAt: string;
@@ -149,6 +150,21 @@ export interface TraderReceivableEligibleRow {
   readonly status: string;
   readonly traderId: string;
   readonly traderName: string;
+}
+
+/**
+ * One row of the Receivables ledger: every Receivable whatever its status,
+ * plus how a cleared one was cleared.
+ *
+ * A Receivable settled by netting inside a Trader Settlement writes no
+ * Collection row, so before this existed it appeared on neither the
+ * Outstanding tab (no longer outstanding) nor the Collections tab (no
+ * Collection) -- the clearing Settlement Number is the only trace of it
+ * anywhere on this screen.
+ */
+export interface TraderReceivableLedgerRow extends TraderReceivableEligibleRow {
+  readonly clearedByCollectionNumbers: string | null;
+  readonly clearedBySettlementNumbers: string | null;
 }
 
 export interface TraderAllocationProposalLine {
@@ -597,12 +613,32 @@ export class TraderReceivableService {
       row.status !== "cancelled"
         ? undefined
         : (
-            await sql<{ occurredAt: string; reason: string | null }>`
-              select occurred_at::text as "occurredAt", after_data ->> 'reason' as reason
-                from audit_events
-               where company_id = ${companyId}::uuid and subject_type = 'trader_receivable'
-                 and subject_id = ${receivableId} and action = 'trader_receivable.cancel'
-               order by occurred_at desc limit 1
+            await sql<{
+              cancelledBy: string | null;
+              occurredAt: string;
+              reason: string | null;
+            }>`
+              select a.occurred_at::text as "occurredAt",
+                     a.after_data ->> 'reason' as reason,
+                     actor.username as "cancelledBy"
+                from audit_events a
+                left join accounts actor
+                  on actor.id = a.actor_account_id and actor.company_id = a.company_id
+               where a.company_id = ${companyId}::uuid
+                 and a.subject_type = 'trader_receivable'
+                 and a.subject_id = ${receivableId}
+                 -- BOTH cancel paths. The first is the Cancel Receivable
+                 -- button on this screen; the second is the automatic
+                 -- cancellation when an Order's payment condition changes so
+                 -- the Trader no longer owes the fee. Matching only the first
+                 -- left every order-driven cancellation showing a blank
+                 -- cancelled date and reason, which reads as a missing audit
+                 -- trail when the audit row was there all along.
+                 and a.action in (
+                   'trader_receivable.cancel',
+                   'trader_receivable.cancel_from_order'
+                 )
+               order by a.occurred_at desc limit 1
             `.execute(this.database)
           ).rows[0];
     const originalAmountDue = row.originalAmountDue;
@@ -630,6 +666,7 @@ export class TraderReceivableService {
       amountCollected: row.amountCollected,
       businessDate: row.businessDate,
       cancelledAt: cancellation?.occurredAt ?? null,
+      cancelledBy: cancellation?.cancelledBy ?? null,
       cancelledReason: cancellation?.reason ?? null,
       collections,
       createdAt: row.createdAt,
@@ -702,6 +739,87 @@ export class TraderReceivableService {
           and ord.order_number = r.source_reference
        where ${filters}
        order by ${sql.raw(sortColumn)} ${sql.raw(direction)}, r.receivable_number ${sql.raw(direction)}
+       limit ${limit} offset ${offset}
+    `.execute(this.database);
+    return this.page(result.rows, page, pageSize);
+  }
+
+  /**
+   * Every Trader receivable, whatever its status, with how a cleared one was
+   * cleared. Read-only, and deliberately separate from `eligibleReceivables`
+   * above rather than loosening it: a Collection may only ever draw from
+   * `outstanding`/`partially_collected`, so that restriction stays exactly as
+   * it is for the Collection and settlement wizards.
+   *
+   * This exists because the restriction left cleared Receivables unreachable.
+   * One cleared by a Collection is at least visible on the Collections tab;
+   * one cleared by netting inside a Trader Settlement writes no Collection row
+   * at all, so it was visible nowhere. The two correlated subqueries below
+   * name whichever Settlements or Collections touched the Receivable, which is
+   * the only route back from a cleared Receivable to the document that cleared
+   * it. Both are left unfiltered by status on purpose: a reversed Settlement
+   * restored the balance and is still part of this Receivable's history.
+   */
+  public async receivablesLedger(
+    query: TraderReceivableEligibleQueryDto,
+  ): Promise<Page<TraderReceivableLedgerRow>> {
+    this.assertAnyPermission(["trader_receivables.create", "settlements.create"]);
+    const { companyId } = this.tenants.current();
+    const { limit, offset, page, pageSize } = this.pagination(query);
+    const direction = query.sortDirection === "desc" ? "desc" : "asc";
+    const sortColumn =
+      query.sortBy === "receivableNumber"
+        ? "r.receivable_number"
+        : query.sortBy === "outstandingAmount"
+          ? "r.outstanding_amount"
+          : "r.business_date";
+    const result = await sql<TraderReceivableLedgerRow & { total: number }>`
+      select r.id, r.receivable_number as "receivableNumber", r.trader_id as "traderId",
+             t.name_en as "traderName",
+             r.business_date::text as "businessDate", r.source_type as "sourceType",
+             r.source_reference as "sourceReference", ord.serial_number as "orderSerialNumber",
+             ord.order_number as "orderNumber", ord.order_type as "orderType",
+             ord.customer_name as "customerName",
+             ord.customer_mobile_number as "customerMobileNumber", r.reason,
+             r.original_amount_due::text as "originalAmountDue",
+             r.amount_collected::text as "previouslyCollected",
+             r.outstanding_amount::text as "outstandingAmount", r.status,
+             (select string_agg(distinct col.collection_number, ', ')
+                from trader_collection_allocations alloc
+                join trader_collections col
+                  on col.id = alloc.collection_id and col.company_id = alloc.company_id
+               where alloc.receivable_id = r.id
+                 and alloc.company_id = r.company_id) as "clearedByCollectionNumbers",
+             (select string_agg(distinct setl.settlement_number, ', ')
+                from trader_settlement_receivable_offsets offset_line
+                join trader_settlements setl
+                  on setl.id = offset_line.settlement_id
+                 and setl.company_id = offset_line.company_id
+               where offset_line.receivable_id = r.id
+                 and offset_line.company_id = r.company_id) as "clearedBySettlementNumbers",
+             count(*) over()::int as total
+        from trader_receivables r
+        join traders t on t.id = r.trader_id and t.company_id = r.company_id
+        left join orders ord on ord.company_id = r.company_id
+          and r.source_type = 'service_charge'
+          and ord.order_number = r.source_reference
+       where r.company_id = ${companyId}::uuid
+         and (${query.traderId ?? null}::uuid is null
+              or r.trader_id = ${query.traderId ?? null}::uuid)
+         and (${query.receivableNumber ?? null}::text is null
+              or r.receivable_number ilike '%' || ${query.receivableNumber ?? null} || '%')
+         and (${query.sourceType ?? null}::text is null
+              or r.source_type = ${query.sourceType ?? null}::text)
+         and (${query.sourceReference ?? null}::text is null
+              or r.source_reference ilike '%' || ${query.sourceReference ?? null} || '%')
+         and (${query.status ?? null}::text is null or r.status = ${query.status ?? null}::text)
+         and (${query.businessDateFrom ?? null}::date is null
+              or r.business_date >= ${query.businessDateFrom ?? null}::date)
+         and (${query.businessDateTo ?? null}::date is null
+              or r.business_date <= ${query.businessDateTo ?? null}::date)
+         and (${query.outstandingOnly === true} = false or r.outstanding_amount > 0)
+       order by ${sql.raw(sortColumn)} ${sql.raw(direction)},
+                r.receivable_number ${sql.raw(direction)}
        limit ${limit} offset ${offset}
     `.execute(this.database);
     return this.page(result.rows, page, pageSize);
@@ -1926,6 +2044,13 @@ export class TraderReceivableService {
                  select sum(r.outstanding_amount)
                    from trader_receivables r
                   where r.company_id = c.company_id and r.trader_id = c.trader_id
+                    -- outstanding_amount is GENERATED ALWAYS AS
+                    -- (original_amount_due - amount_collected), so a cancelled
+                    -- Receivable keeps reporting its full original amount for
+                    -- ever. Without this filter that amount was being added to
+                    -- the Trader's balance on every Collection receipt. Every
+                    -- sibling sum in this file already filters the same way.
+                    and r.status in ('outstanding', 'partially_collected')
                ), 0)::text as "traderOutstandingBalance"
           from trader_collections c
          where c.id = ${collectionId}::uuid and c.company_id = ${companyId}::uuid

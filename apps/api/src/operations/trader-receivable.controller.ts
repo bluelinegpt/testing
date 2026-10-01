@@ -44,6 +44,7 @@ import {
   TraderReceivableService,
   type TraderReceivableDetail,
   type TraderReceivableEligibleRow,
+  type TraderReceivableLedgerRow,
   type TraderReceivableSummary,
   type TraderWithBalance,
 } from "./trader-receivable.service.js";
@@ -147,6 +148,23 @@ export class TraderReceivableController {
     @Query() query: TraderReceivableEligibleQueryDto,
   ): Promise<Page<TraderReceivableEligibleRow>> {
     return this.traderReceivables.eligibleReceivables(query);
+  }
+
+  /**
+   * Distinct from `eligible` above, which only ever returns the two statuses a
+   * Collection may draw from. This one returns every Receivable and names the
+   * Settlement or Collection that cleared it -- without it, a Receivable
+   * cleared by settlement netting is reachable from no screen in the product.
+   */
+  @RequireAnyPermission("trader_receivables.create", "users_roles.manage")
+  @ApiOperation({
+    summary: "Every Trader receivable regardless of status, with how it was cleared",
+  })
+  @Get("receivables")
+  public receivablesLedger(
+    @Query() query: TraderReceivableEligibleQueryDto,
+  ): Promise<Page<TraderReceivableLedgerRow>> {
+    return this.traderReceivables.receivablesLedger(query);
   }
 
   @RequireAnyPermission("trader_receivables.create", "users_roles.manage")

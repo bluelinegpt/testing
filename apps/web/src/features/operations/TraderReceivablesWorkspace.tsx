@@ -44,6 +44,14 @@ interface TraderWithBalance {
 }
 
 interface TraderReceivableEligibleRow {
+  /**
+   * Set only by the Receivables ledger endpoint, which — unlike `eligible` —
+   * returns cleared rows too. A Receivable cleared by netting inside a Trader
+   * Settlement writes no Collection, so the Settlement Number here is the only
+   * route back to the document that cleared it.
+   */
+  readonly clearedByCollectionNumbers?: string | null;
+  readonly clearedBySettlementNumbers?: string | null;
   readonly businessDate: string;
   readonly id: string;
   readonly orderSerialNumber?: string | null;
@@ -152,6 +160,7 @@ interface TraderReceivableDetail {
   readonly amountCollected: string;
   readonly businessDate: string;
   readonly cancelledAt: string | null;
+  readonly cancelledBy: string | null;
   readonly cancelledReason: string | null;
   readonly collections: readonly TraderReceivableCollectionHistoryLine[];
   readonly createdAt: string;
@@ -463,8 +472,13 @@ export function TraderReceivablesWorkspace({
     params.set("page", String(receivablePage));
     params.set("pageSize", String(receivablePageSize));
     void api
+      // The ledger, NOT `eligible`. `eligible` is restricted server-side to
+      // outstanding/partially_collected for the Collection wizard, which left
+      // every cleared Receivable — 41 of 44 at the time this was found —
+      // visible on no screen at all, because one cleared by settlement netting
+      // never reaches the Collections tab either.
       .get<PagedResponse<TraderReceivableEligibleRow>>(
-        `operations/trader-receivables/eligible?${params.toString()}`,
+        `operations/trader-receivables/receivables?${params.toString()}`,
       )
       .then(setReceivableListPage)
       .catch(() => setReceivableListError(t("traderReceivables.detailLoadFailed")));
@@ -663,6 +677,7 @@ export function TraderReceivablesWorkspace({
                     <th scope="col">{t("traderReceivables.columnPreviouslyCollected")}</th>
                     <th scope="col">{t("traderReceivables.columnOutstandingAmount")}</th>
                     <th scope="col">{t("traderReceivables.columnStatus")}</th>
+                    <th scope="col">{t("traderReceivables.columnClearedBy")}</th>
                     <th scope="col">
                       <span className="sr-only">{t("common.actions")}</span>
                     </th>
@@ -689,13 +704,26 @@ export function TraderReceivablesWorkspace({
                       <td>{money(row.previouslyCollected)}</td>
                       <td>{money(row.outstandingAmount)}</td>
                       <td>{receivableStatusLabel(t, row.status)}</td>
+                      <td className="mono">
+                        {/* Settlement first: that is the path with no other
+                            trace anywhere on this screen. */}
+                        {row.clearedBySettlementNumbers ??
+                          row.clearedByCollectionNumbers ??
+                          "-"}
+                      </td>
                       <td className="row-actions">
                         <button onClick={() => openReceivable(row.id)} type="button">
                           {t("traderReceivables.actionView")}
                         </button>
-                        <button onClick={() => openCollectMoney(row.traderId, row.id)} type="button">
-                          {t("traderReceivables.actionCollectMoney")}
-                        </button>
+                        {/* The list now includes cleared and cancelled rows, so
+                            Collect Money has to be gated the same way Cancel
+                            always was -- the API refuses it for any other
+                            status and the button would only ever error. */}
+                        {row.status !== "outstanding" && row.status !== "partially_collected" ? null : (
+                          <button onClick={() => openCollectMoney(row.traderId, row.id)} type="button">
+                            {t("traderReceivables.actionCollectMoney")}
+                          </button>
+                        )}
                         {row.status !== "outstanding" ? null : (
                           <button onClick={() => setCancelTarget(row)} type="button">
                             {t("traderReceivables.actionCancel")}
@@ -706,7 +734,7 @@ export function TraderReceivablesWorkspace({
                   ))}
                   {receivableRows.length === 0 ? (
                     <tr>
-                      <td className="empty-state" colSpan={11}>
+                      <td className="empty-state" colSpan={12}>
                         {t("traderReceivables.noReceivables")}
                       </td>
                     </tr>
@@ -1717,6 +1745,12 @@ function ReceivableDetailDialog({
               <div className="detail-line">
                 <dt>{t("traderReceivables.cancelledDate")}</dt>
                 <dd>{detail.cancelledAt.slice(0, 16).replace("T", " ")}</dd>
+              </div>
+            )}
+            {detail.cancelledBy === null ? null : (
+              <div className="detail-line">
+                <dt>{t("traderReceivables.cancelledBy")}</dt>
+                <dd>{detail.cancelledBy}</dd>
               </div>
             )}
             {detail.cancelledReason === null ? null : (

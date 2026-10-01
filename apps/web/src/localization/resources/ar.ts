@@ -3641,7 +3641,7 @@ export const arabicTranslations = {
     detailLoadFailed: "تعذر تحميل هذه المعلومات. حاول مرة أخرى.",
 
     // Tabs
-    tabOutstandingReceivables: "المبالغ المستحقة",
+    tabOutstandingReceivables: "الذمم المدينة",
     tabCollections: "التحصيلات",
 
     // Header actions
@@ -3705,7 +3705,9 @@ export const arabicTranslations = {
     // Row actions / empty states
     actionView: "عرض",
     actionCollectMoney: "تحصيل مبلغ",
-    actionCancel: "إلغاء",
+    actionCancel: "إلغاء الذمة المدينة",
+    columnClearedBy: "تمت التسوية بواسطة",
+    cancelledBy: "ألغاه",
     actionPreviewReceipt: "معاينة الإيصال",
     actionPrint: "طباعة",
     actionDownloadPdf: "تنزيل PDF",

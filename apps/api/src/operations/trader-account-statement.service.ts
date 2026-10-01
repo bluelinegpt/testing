@@ -299,7 +299,14 @@ export class TraderAccountStatementService {
           left join orders linked on linked.company_id = r.company_id
             and r.source_type = 'service_charge' and linked.order_number = r.source_reference
          where a.company_id = ${companyId}::uuid and a.subject_type = 'trader_receivable'
-           and a.action = 'trader_receivable.cancel'
+           -- Both cancel paths. Matching only the direct one left every
+           -- cancellation driven by an Order's payment condition out of the
+           -- statement entirely, so the Trader's statement silently lost
+           -- movements that had definitely happened.
+           and a.action in (
+             'trader_receivable.cancel',
+             'trader_receivable.cancel_from_order'
+           )
            and r.trader_id = ${traderId}::uuid
            and (a.occurred_at at time zone 'Asia/Dubai')::date between ${from}::date and ${to}::date
         order by date, "createdAt", sequence, id

@@ -5385,10 +5385,26 @@ export class OperationsService {
       if (order.paymentCondition !== "customer_pays_cod_trader_pays_fee") {
         throw new ApplicationException("trader_receivable_not_required", "This Order is not configured for Trader-paid fees", HttpStatus.CONFLICT);
       }
+      // ANY existing Receivable for this Order blocks the repair, cancelled and
+      // reversed ones included.
+      //
+      // This deliberately no longer excludes `cancelled`. A Receivable is
+      // cancelled when the Order's money changes so the Trader stops owing the
+      // fee -- the payment condition stays 'customer_pays_cod_trader_pays_fee'
+      // throughout, so the guard above does NOT catch that case. Excluding
+      // cancelled rows here therefore made this button create a SECOND
+      // Receivable and re-bill the Trader a fee that had been deliberately
+      // cancelled, silently and with no confirmation. There is no unique index
+      // on (company_id, source_type, source_reference), and the insert takes a
+      // fresh receivable_number, so the `on conflict do nothing` downstream
+      // could never have stopped it either.
+      //
+      // Repair exists for legacy Orders that never had a Receivable at all.
+      // An Order whose Receivable was cancelled is not that case.
       const existing = await sql<{ id: string }>`
         select id from trader_receivables
          where company_id=${companyId}::uuid and source_type='service_charge'
-           and source_reference=${order.orderNumber} and status not in ('cancelled','reversed')
+           and source_reference=${order.orderNumber}
          limit 1 for update
       `.execute(transaction);
       if (existing.rows[0] !== undefined) return { created: false, amount: order.serviceFee };
