@@ -108,6 +108,13 @@ export interface TraderReceivableCollectionHistoryLine {
   readonly status: "confirmed" | "reversed";
 }
 
+export interface TraderReceivableSettlementOffsetHistoryLine {
+  readonly amountOffset: string;
+  readonly offsetDate: string;
+  readonly settlementId: string;
+  readonly settlementNumber: string;
+}
+
 export interface TraderReceivableDetail {
   readonly amountCollected: string;
   readonly traderCode?: string | null;
@@ -117,6 +124,10 @@ export interface TraderReceivableDetail {
   readonly cancelledBy: string | null;
   readonly cancelledReason: string | null;
   readonly collections: readonly TraderReceivableCollectionHistoryLine[];
+  readonly physicalCollectionAmount: string;
+  readonly settlementOffsetAmount: string;
+  readonly settlementOffsets: readonly TraderReceivableSettlementOffsetHistoryLine[];
+  readonly totalSettledAmount: string;
   readonly createdAt: string;
   readonly createdBy: string;
   readonly notes: string | null;
@@ -679,6 +690,30 @@ export class TraderReceivableService {
          order by c.created_at, alloc.id
       `.execute(this.database)
     ).rows;
+    const settlementOffsets = (
+      await sql<TraderReceivableSettlementOffsetHistoryLine>`
+        select x.amount_allocated::text as "amountOffset",
+               s.business_date::text as "offsetDate",
+               s.id as "settlementId",
+               s.settlement_number as "settlementNumber"
+          from trader_settlement_receivable_offsets x
+          join trader_settlements s
+            on s.id = x.settlement_id and s.company_id = x.company_id
+         where x.receivable_id = ${receivableId}::uuid
+           and x.company_id = ${companyId}::uuid
+         order by s.business_date, s.settlement_number, x.created_at
+      `.execute(this.database)
+    ).rows;
+    const physicalCollectionAmount = collections
+      .filter((line) => line.status === "confirmed")
+      .reduce((total, line) => total.plus(line.amountCollected), new Decimal(0))
+      .toFixed(2);
+    const settlementOffsetAmount = settlementOffsets
+      .reduce((total, line) => total.plus(line.amountOffset), new Decimal(0))
+      .toFixed(2);
+    const totalSettledAmount = new Decimal(physicalCollectionAmount)
+      .plus(settlementOffsetAmount)
+      .toFixed(2);
     return {
       amountCollected: row.amountCollected,
       businessDate: row.businessDate,
@@ -686,6 +721,10 @@ export class TraderReceivableService {
       cancelledBy: cancellation?.cancelledBy ?? null,
       cancelledReason: cancellation?.reason ?? null,
       collections,
+      physicalCollectionAmount,
+      settlementOffsetAmount,
+      settlementOffsets,
+      totalSettledAmount,
       createdAt: row.createdAt,
       createdBy: row.createdBy,
       notes: row.notes,

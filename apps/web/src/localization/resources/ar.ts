@@ -3673,6 +3673,9 @@ export const arabicTranslations = {
     columnReason: "السبب",
     columnOriginalAmountDue: "المبلغ المستحق الأصلي",
     columnPreviouslyCollected: "محصل سابقاً",
+    physicalCollections: "التحصيلات النقدية",
+    settlementOffsets: "التسويات بالخصم من المستحقات",
+    totalSettled: "إجمالي المسدد",
     columnOutstandingAmount: "المبلغ المتبقي",
     columnStatus: "الحالة",
     columnCollectionNumber: "رقم التحصيل",
@@ -3831,6 +3834,11 @@ export const arabicTranslations = {
     cancelledReason: "سبب الإلغاء",
     collectionHistory: "سجل التحصيلات",
     noCollectionHistory: "لم يتم تطبيق أي تحصيل على هذا المستحق بعد.",
+    settlementOffsetHistory: "سجل التسويات بالخصم",
+    noSettlementOffsetHistory: "لم يتم تطبيق أي تسويات بالخصم على هذا المستحق بعد.",
+    columnSettlementNumber: "التسوية",
+    columnOffsetDate: "تاريخ التسوية",
+    amountOffset: "مبلغ الخصم",
 
     // Collection detail
     collectionDetailTitle: "تفاصيل تحصيل التاجر",

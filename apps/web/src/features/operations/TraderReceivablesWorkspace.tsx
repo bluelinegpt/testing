@@ -156,6 +156,13 @@ interface TraderReceivableCollectionHistoryLine {
   readonly status: "confirmed" | "reversed";
 }
 
+interface TraderReceivableSettlementOffsetHistoryLine {
+  readonly amountOffset: string;
+  readonly offsetDate: string;
+  readonly settlementId: string;
+  readonly settlementNumber: string;
+}
+
 interface TraderReceivableDetail {
   readonly amountCollected: string;
   readonly businessDate: string;
@@ -163,6 +170,10 @@ interface TraderReceivableDetail {
   readonly cancelledBy: string | null;
   readonly cancelledReason: string | null;
   readonly collections: readonly TraderReceivableCollectionHistoryLine[];
+  readonly physicalCollectionAmount: string;
+  readonly settlementOffsetAmount: string;
+  readonly settlementOffsets: readonly TraderReceivableSettlementOffsetHistoryLine[];
+  readonly totalSettledAmount: string;
   readonly createdAt: string;
   readonly createdBy: string;
   readonly notes: string | null;
@@ -261,7 +272,10 @@ const receivableStatuses = [
 const emptyReceivableFilters = {
   businessDateFrom: "",
   businessDateTo: "",
-  outstandingOnly: false,
+  // The operational queue should show receivables that still need action.
+  // Fully settled records remain searchable through the status/reference
+  // filters without being removed from the ledger or detail view.
+  outstandingOnly: true,
   receivableNumber: "",
   sourceReference: "",
   sourceType: "",
@@ -1753,8 +1767,16 @@ function ReceivableDetailDialog({
               <dd>{money(detail.originalAmountDue)}</dd>
             </div>
             <div className="detail-line">
-              <dt>{t("traderReceivables.columnPreviouslyCollected")}</dt>
-              <dd>{money(detail.amountCollected)}</dd>
+              <dt>{t("traderReceivables.physicalCollections")}</dt>
+              <dd>{money(detail.physicalCollectionAmount)}</dd>
+            </div>
+            <div className="detail-line">
+              <dt>{t("traderReceivables.settlementOffsets")}</dt>
+              <dd>{money(detail.settlementOffsetAmount)}</dd>
+            </div>
+            <div className="detail-line">
+              <dt>{t("traderReceivables.totalSettled")}</dt>
+              <dd>{money(detail.totalSettledAmount)}</dd>
             </div>
             <div className="detail-line">
               <dt>{t("traderReceivables.columnOutstandingAmount")}</dt>
@@ -1852,6 +1874,42 @@ function ReceivableDetailDialog({
                               : "traderReceivables.statusConfirmed",
                           )}
                         </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+
+          <section aria-labelledby="receivable-settlement-offset-history-heading">
+            <h3 id="receivable-settlement-offset-history-heading">
+              {t("traderReceivables.settlementOffsetHistory")}
+            </h3>
+            {detail.settlementOffsets.length === 0 ? (
+              <p className="empty-state">{t("traderReceivables.noSettlementOffsetHistory")}</p>
+            ) : (
+              <div className="table-scroll-x">
+                <table>
+                  <thead>
+                    <tr>
+                      <th scope="col">{t("traderReceivables.columnSettlementNumber")}</th>
+                      <th scope="col">{t("traderReceivables.columnOffsetDate")}</th>
+                      <th scope="col">{t("traderReceivables.amountOffset")}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {detail.settlementOffsets.map((line) => (
+                      <tr key={`${line.settlementId}-${line.offsetDate}`}>
+                        <td className="mono">
+                          <OperationalReference
+                            identifier={line.settlementId}
+                            reference={line.settlementNumber}
+                            type="trader_settlement"
+                          />
+                        </td>
+                        <td>{line.offsetDate.slice(0, 10)}</td>
+                        <td>{money(line.amountOffset)}</td>
                       </tr>
                     ))}
                   </tbody>

@@ -3729,6 +3729,9 @@ export const englishTranslations = {
     columnReason: "Reason",
     columnOriginalAmountDue: "Original Amount Due",
     columnPreviouslyCollected: "Previously Collected",
+    physicalCollections: "Physical Collections",
+    settlementOffsets: "Settlement Offsets",
+    totalSettled: "Total Settled",
     columnOutstandingAmount: "Outstanding Amount",
     columnStatus: "Status",
     columnCollectionNumber: "Collection Number",
@@ -3891,6 +3894,11 @@ export const englishTranslations = {
     cancelledReason: "Cancellation Reason",
     collectionHistory: "Collection History",
     noCollectionHistory: "No collections have been applied to this receivable yet.",
+    settlementOffsetHistory: "Settlement Offset History",
+    noSettlementOffsetHistory: "No settlement offsets have been applied to this receivable.",
+    columnSettlementNumber: "Settlement",
+    columnOffsetDate: "Settlement Date",
+    amountOffset: "Offset Amount",
 
     // Collection detail
     collectionDetailTitle: "Trader Collection Detail",
