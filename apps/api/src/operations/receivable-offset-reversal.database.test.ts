@@ -14,9 +14,9 @@ import {
 } from "../accounting/operational-source.loader.js";
 import { configuration } from "../configuration/environment.js";
 import type { DatabaseSchema } from "../infrastructure/database/database.types.js";
-import type {
+import {
   KyselyTransactionManager,
-  TransactionWork,
+  type TransactionWork,
 } from "../infrastructure/database/transaction-manager.js";
 import type { IdentityContextAccessor } from "../security/identity-context.js";
 import type { TenantContextAccessor } from "../tenancy/tenant-context.js";
@@ -74,8 +74,6 @@ interface Fixture {
   readonly payableGl: string;
   readonly cashGl: string;
   readonly feeOrderId: string;
-  readonly unusedOrderId: string;
-  readonly unusedReceivableId: string;
   readonly payableOrderId: string;
   readonly reversedReceivableId: string;
   readonly otherReceivableId: string;
@@ -95,8 +93,6 @@ async function seed(transaction: Transaction<DatabaseSchema>): Promise<Fixture> 
   const traderId = randomUUID();
   const areaId = randomUUID();
   const feeOrderId = randomUUID();
-  const unusedOrderId = randomUUID();
-  const unusedReceivableId = randomUUID();
   const payableOrderId = randomUUID();
   const reversedReceivableId = randomUUID();
   const otherReceivableId = randomUUID();
@@ -111,6 +107,20 @@ async function seed(transaction: Transaction<DatabaseSchema>): Promise<Fixture> 
     values(${actorId}::uuid,${companyId}::uuid,'company_user',${`rcvrev.${actorId}`},'x')`.execute(
     transaction,
   );
+  // An active User must hold an active Role (a deferred constraint, checked
+  // at COMMIT -- only the committed rollback fixture reaches it).
+  const roleId = randomUUID();
+  await sql`insert into roles(id,company_id,code,name,is_system)
+    values(${roleId}::uuid,${companyId}::uuid,${`rcvrev_${tag}`},'Receivable reversal test',false)`.execute(
+    transaction,
+  );
+  await sql`insert into permissions(code,description)
+    values('trader_receivables.reverse','Reverse a confirmed Trader collection')
+    on conflict (code) do nothing`.execute(transaction);
+  await sql`insert into role_permissions(role_id,permission_code)
+    values(${roleId}::uuid,'trader_receivables.reverse')`.execute(transaction);
+  await sql`insert into account_roles(account_id,role_id,company_id)
+    values(${actorId}::uuid,${roleId}::uuid,${companyId}::uuid)`.execute(transaction);
   await sql`insert into accounting_configurations(
       company_id, accounting_enabled, automatic_posting_enabled, automatic_posting_areas,
       automatic_posting_enabled_by_account_id, automatic_posting_enabled_at
@@ -187,34 +197,6 @@ async function seed(transaction: Transaction<DatabaseSchema>): Promise<Fixture> 
     settlementStatus: "not_eligible",
     traderId,
   });
-  // A clean, outstanding receivable with no financial dependencies. The
-  // maintenance path may physically delete this class only.
-  await insertOrder(transaction, {
-    actorId,
-    areaId,
-    companyId,
-    id: unusedOrderId,
-    orderNumber: `ORD-${tag}-UNUSED`,
-    paymentCondition: "customer_pays_cod_trader_pays_fee",
-    cod: "0.00",
-    serviceFee: "18.00",
-    traderGross: "0.00",
-    traderNet: "0.00",
-    settlementStatus: "not_eligible",
-    traderId,
-  });
-  await sql`insert into trader_receivables(
-      id,company_id,receivable_number,trader_id,source_type,source_reference,business_date,
-      original_amount_due,amount_collected,status,reason,created_by_account_id
-    ) values(${unusedReceivableId}::uuid,${companyId}::uuid,${`RCV-${tag}-UNUSED`},${traderId}::uuid,
-      'service_charge',${`ORD-${tag}-UNUSED`},'2026-10-01'::date,18,0,'outstanding',
-      'Unused test receivable',${actorId}::uuid)`.execute(transaction);
-  // The normal insert trigger captures recognition. Remove that synthetic
-  // event so this fixture represents the explicitly allowed zero-dependency
-  // branch of the maintenance operation.
-  await sql`delete from accounting_events
-    where company_id=${companyId}::uuid and source_entity_type='trader_receivable'
-      and source_entity_id=${unusedReceivableId}::uuid`.execute(transaction);
   // The Order the Settlement actually pays out on.
   await insertOrder(transaction, {
     actorId,
@@ -276,8 +258,6 @@ async function seed(transaction: Transaction<DatabaseSchema>): Promise<Fixture> 
     cashGl,
     companyId,
     feeOrderId,
-    unusedOrderId,
-    unusedReceivableId,
     otherReceivableId,
     payableGl,
     payableOrderId,
@@ -509,19 +489,6 @@ describe.skipIf(!runDatabaseTests)("Receivable-scoped settlement-offset reversal
         traderNetPositionChange: "0.00",
         untouchedOffsetCount: 1,
       });
-      const unusedMaintenance = buildMaintenanceService(transaction, fixture);
-      const unusedPreview = await unusedMaintenance.receivableResetPreview(fixture.unusedOrderId);
-      expect(unusedPreview.action).toBe("physical_delete");
-      await unusedMaintenance.resetTraderReceivable(
-        fixture.unusedOrderId,
-        "Remove unused test receivable",
-        "corr-unused-delete",
-      );
-      const unusedAfter = await sql<{ count: number }>`
-        select count(*)::int as count from trader_receivables
-         where company_id=${fixture.companyId}::uuid and id=${fixture.unusedReceivableId}::uuid
-      `.execute(transaction);
-      expect(unusedAfter.rows[0]!.count).toBe(0);
       expect(await untouchable(transaction, fixture)).toEqual(before);
     });
   });
@@ -562,55 +529,55 @@ describe.skipIf(!runDatabaseTests)("Receivable-scoped settlement-offset reversal
     });
   });
 
-  it("reverses ONE receivable, credits the Trader, posts balanced, and touches nothing else", async () => {
+  it("certifies the PROCESSED Delete / Reset through OrderMaintenanceService: financial reset, never a delete", async () => {
     await inRolledBackTransaction(async (transaction) => {
       const fixture = await seed(transaction);
       await postPending(transaction, fixture.companyId);
+
+      // ---- BEFORE ---------------------------------------------------------
       const before = await untouchable(transaction, fixture);
+      const recognitionBefore = await recognitionJournal(transaction, fixture);
+      expect(recognitionBefore.journal).not.toBeNull();
+      const countsBefore = await counts(transaction, fixture);
+      expect(countsBefore).toMatchObject({
+        collections: 0,
+        credits: 0,
+        creditEvents: 0,
+        receivableReversedEvents: 0,
+      });
       const balancesBefore = await balances(transaction, fixture);
-      const collectionsBefore = await sql<{ count: number }>`
-        select count(*)::int as count from trader_collections where company_id=${fixture.companyId}::uuid
-      `.execute(transaction);
+      const orderBefore = await orderState(transaction, fixture.feeOrderId);
+      expect(orderBefore).toMatchObject({
+        deliveryStatus: "delivered",
+        traderSettlementStatus: "not_eligible",
+      });
 
       const maintenance = buildMaintenanceService(transaction, fixture);
-      const previewBefore = await maintenance.receivableResetPreview(fixture.feeOrderId);
-      expect(previewBefore.action).toBe("financial_reset");
+      const preview = await maintenance.receivableResetPreview(fixture.feeOrderId);
+      expect(preview).toMatchObject({
+        action: "financial_reset",
+        offsetCount: 1,
+        physicalDeletePossible: false,
+        receivableId: fixture.reversedReceivableId,
+        requiredPermission: "trader_receivables.reverse",
+      });
+
+      // ---- EXECUTE through the production maintenance path ---------------
       const result = await maintenance.resetTraderReceivable(
         fixture.feeOrderId,
         "Fee taken before delivery",
-        "corr-reverse-1",
+        "corr-reset-1",
       );
       expect(result).toMatchObject({
-        receivableId: fixture.reversedReceivableId,
         action: "financial_reset",
         physicalDeletePossible: false,
+        receivableId: fixture.reversedReceivableId,
+        receivableStatus: "reversed",
+        traderCreditCount: 1,
       });
+      await postPending(transaction, fixture.companyId);
 
-      // Idempotent: a retry returns the same Credit and writes nothing new.
-      const retry = await maintenance.resetTraderReceivable(
-        fixture.feeOrderId,
-        "retry",
-        "corr-reverse-2",
-      );
-      expect(retry.action).toBe("financial_reset");
-
-      const credits = await sql<{
-        amount: string;
-        status: string;
-        sourceType: string;
-        count: number;
-      }>`
-        select amount::text, status, source_type as "sourceType", count(*) over ()::int as count
-          from trader_credits
-         where company_id=${fixture.companyId}::uuid and source_receivable_id=${fixture.reversedReceivableId}::uuid
-      `.execute(transaction);
-      expect(credits.rows).toHaveLength(1);
-      expect(credits.rows[0]).toMatchObject({
-        amount: "18.00",
-        sourceType: "receivable_offset_reversal",
-        status: "open",
-      });
-
+      // ---- TARGET RECEIVABLE: reset, NOT deleted, history kept ----------
       const receivable = await sql<{
         status: string;
         amountCollected: string;
@@ -619,77 +586,580 @@ describe.skipIf(!runDatabaseTests)("Receivable-scoped settlement-offset reversal
         select status, amount_collected::text as "amountCollected", outstanding_amount::text as outstanding
           from trader_receivables where id=${fixture.reversedReceivableId}::uuid
       `.execute(transaction);
-      expect(receivable.rows[0]).toEqual({
-        amountCollected: "18.00",
-        outstanding: "0.00",
-        status: "reversed",
-      });
-
-      // Exactly one Credit Event and one recognition reversal, both in the
-      // trader_receivables area; nothing settlement-scoped was enqueued.
-      const events = await sql<{ eventType: string; area: string; count: number }>`
-        select event_type as "eventType", operational_area as area, count(*)::int as count
-          from accounting_events
-         where company_id=${fixture.companyId}::uuid and processing_status='received'
-         group by event_type, operational_area order by event_type
-      `.execute(transaction);
-      expect(events.rows).toEqual([
-        { area: "trader_receivables", count: 1, eventType: "trader_credit_issued" },
-        { area: "trader_receivables", count: 1, eventType: "trader_receivable_reversed" },
+      expect(receivable.rows).toEqual([
+        { amountCollected: "18.00", outstanding: "0.00", status: "reversed" },
       ]);
-
-      expect(await postPending(transaction, fixture.companyId)).toEqual(
-        expect.arrayContaining(["trader_credit_issued", "trader_receivable_reversed"]),
-      );
-
-      // The Credit's own Journal: DR AR 18 / CR Trader payable 18, with the
-      // Trader on both lines, balanced, and nothing on cash.
-      const creditJournal = await sql<{
-        account: string;
-        debit: string;
-        credit: string;
-        traderId: string | null;
-      }>`
-        select a.code as account, jl.debit::text, jl.credit::text, jl.trader_id as "traderId"
-          from accounting_events e
-          join journal_entries j on j.id=e.journal_id and j.company_id=e.company_id
-          join journal_lines jl on jl.journal_entry_id=j.id and jl.company_id=j.company_id
-          join chart_of_accounts a on a.id=jl.account_id and a.company_id=jl.company_id
-         where e.company_id=${fixture.companyId}::uuid and e.event_type='trader_credit_issued'
-           and e.processing_status='posted' and j.status='posted'
-         order by jl.line_number
+      const audit = await sql<{ count: number }>`
+        select count(*)::int as count from audit_events
+         where company_id=${fixture.companyId}::uuid and action='trader_receivable.reverse_offset'
+           and subject_id::text=${fixture.reversedReceivableId}
       `.execute(transaction);
-      expect(creditJournal.rows).toEqual([
-        { account: "1200", credit: "0.00", debit: "18.00", traderId: fixture.traderId },
-        { account: "2010", credit: "18.00", debit: "0.00", traderId: fixture.traderId },
-      ]);
+      expect(audit.rows[0]!.count).toBe(1);
+      const deletes = await sql<{ count: number }>`
+        select count(*)::int as count from audit_events
+         where company_id=${fixture.companyId}::uuid and action='trader_receivable.physical_delete'
+      `.execute(transaction);
+      expect(deletes.rows[0]!.count).toBe(0);
 
-      const balancesAfter = await balances(transaction, fixture);
-      expect(balancesAfter.debit).toBe(balancesAfter.credit);
-      // No cash moved.
-      expect(balancesAfter.cash).toBe(balancesBefore.cash);
-      // AR: recognition +18 +10, offsets -18 -10, recognition reversal -18,
-      // Credit +18 => 0. Without the Credit it would be -18; without the
-      // offsets having posted it would be +18.
-      expect(balancesAfter.ar).toBe("0.00");
-      // The Company now owes the Trader exactly the 18 it short-paid.
-      expect((Number(balancesAfter.payable) - Number(balancesBefore.payable)).toFixed(2)).toBe(
-        "18.00",
-      );
-
-      // Nothing else moved: Settlement header, payment, order lines, BOTH
-      // offset rows, both Orders, the other Receivable, and the Settlement's
-      // posted Journal are byte-for-byte what they were.
+      // ---- SETTLEMENT / OFFSETS / ORDERS / settlement journal: unchanged --
       expect(await untouchable(transaction, fixture)).toEqual(before);
-      const collectionsAfter = await sql<{ count: number }>`
-        select count(*)::int as count from trader_collections where company_id=${fixture.companyId}::uuid
-      `.execute(transaction);
-      expect(collectionsAfter.rows[0]!.count).toBe(collectionsBefore.rows[0]!.count);
       const reversalSettlements = await sql<{ count: number }>`
         select count(*)::int as count from trader_settlements
          where company_id=${fixture.companyId}::uuid and reversal_of_id is not null
       `.execute(transaction);
       expect(reversalSettlements.rows[0]!.count).toBe(0);
+
+      // ---- ORDER ---------------------------------------------------------
+      expect(await orderState(transaction, fixture.feeOrderId)).toEqual(orderBefore);
+
+      // ---- ACCOUNTING ----------------------------------------------------
+      // Original recognition journal preserved: same journal, same lines; it is
+      // only MARKED reversed by its own reversal journal.
+      const recognitionAfter = await recognitionJournal(transaction, fixture);
+      expect(recognitionAfter.journal!.journalNumber).toBe(
+        recognitionBefore.journal!.journalNumber,
+      );
+      expect(recognitionAfter.lines).toEqual(recognitionBefore.lines);
+      expect(recognitionAfter.journal!.status).toBe("reversed");
+
+      const countsAfter = await counts(transaction, fixture);
+      expect(countsAfter).toMatchObject({
+        collections: 0,
+        creditEvents: 1,
+        credits: 1,
+        receivableReversedEvents: 1,
+      });
+      expect(countsAfter.journals).toBe(countsBefore.journals + 2);
+
+      // trader_receivable_reversed: Posted, linked to the original, balanced.
+      const reversalJournal = await eventJournal(
+        transaction,
+        fixture,
+        "trader_receivable_reversed",
+      );
+      expect(reversalJournal.status).toBe("posted");
+      // Exact mirror of the recognition (DR AR 18 / CR fee revenue 18).
+      expect(reversalJournal.lines).toEqual([
+        { account: "1200", credit: "18.00", debit: "0.00", traderId: fixture.traderId },
+        { account: "4020", credit: "0.00", debit: "18.00", traderId: fixture.traderId },
+      ]);
+
+      // Trader Credit: exactly one, AED 18.
+      const credits = await sql<{ amount: string; status: string; sourceType: string }>`
+        select amount::text, status, source_type as "sourceType" from trader_credits
+         where company_id=${fixture.companyId}::uuid and source_receivable_id=${fixture.reversedReceivableId}::uuid
+      `.execute(transaction);
+      expect(credits.rows).toEqual([
+        { amount: "18.00", sourceType: "receivable_offset_reversal", status: "open" },
+      ]);
+
+      // trader_credit_issued: Posted, DR order_cod_receivable 18 / CR trader_payable 18,
+      // trader_id on both lines (required on the trader_payable control line).
+      const creditJournal = await eventJournal(transaction, fixture, "trader_credit_issued");
+      expect(creditJournal.status).toBe("posted");
+      expect(creditJournal.lines).toEqual([
+        { account: "1200", credit: "0.00", debit: "18.00", traderId: fixture.traderId },
+        { account: "2010", credit: "18.00", debit: "0.00", traderId: fixture.traderId },
+      ]);
+      expect(creditJournal.mappingKeys).toEqual(["order_cod_receivable", "trader_payable"]);
+
+      // GL chain: balanced overall, AR back to zero, payable +18, no cash.
+      const balancesAfter = await balances(transaction, fixture);
+      expect(balancesAfter.debit).toBe(balancesAfter.credit);
+      expect(balancesAfter.ar).toBe("0.00");
+      expect(balancesAfter.cash).toBe(balancesBefore.cash);
+      expect((Number(balancesAfter.payable) - Number(balancesBefore.payable)).toFixed(2)).toBe(
+        "18.00",
+      );
+
+      // ---- SECOND Delete / Reset: idempotent ------------------------------
+      const second = await maintenance.resetTraderReceivable(
+        fixture.feeOrderId,
+        "second attempt",
+        "corr-reset-2",
+      );
+      expect(second).toMatchObject({
+        action: "financial_reset",
+        receivableId: fixture.reversedReceivableId,
+        receivableStatus: "reversed",
+        traderCreditCount: 1,
+      });
+      expect(await postPending(transaction, fixture.companyId)).toEqual([]);
+      expect(await counts(transaction, fixture)).toEqual(countsAfter);
+      expect(await untouchable(transaction, fixture)).toEqual(before);
+      expect(await orderState(transaction, fixture.feeOrderId)).toEqual(orderBefore);
+      expect(await balances(transaction, fixture)).toEqual(balancesAfter);
+    });
+  });
+
+  it("refuses a processed reset to users_roles.manage alone and writes nothing", async () => {
+    await inRolledBackTransaction(async (transaction) => {
+      const fixture = await seed(transaction);
+      await postPending(transaction, fixture.companyId);
+      const before = await untouchable(transaction, fixture);
+      const countsBefore = await counts(transaction, fixture);
+      const manageOnly = buildMaintenanceService(transaction, fixture, ["users_roles.manage"]);
+      expect((await manageOnly.receivableResetPreview(fixture.feeOrderId)).requiredPermission).toBe(
+        "trader_receivables.reverse",
+      );
+      await expect(
+        manageOnly.resetTraderReceivable(fixture.feeOrderId, "manage only", "c-manage"),
+      ).rejects.toMatchObject({ errorCode: "permission_denied" });
+      // The reversal service itself does not accept manage-only either.
+      await expect(
+        buildService(transaction, fixture, ["users_roles.manage"]).execute(
+          fixture.reversedReceivableId,
+          "manage only",
+          "c-manage-2",
+        ),
+      ).rejects.toMatchObject({ errorCode: "permission_denied" });
+      // Reverse-only is sufficient for the processed path.
+      const reverseOnly = buildMaintenanceService(transaction, fixture, [
+        "trader_receivables.reverse",
+      ]);
+      await expect(
+        reverseOnly.resetTraderReceivable(fixture.feeOrderId, "reverse only", "c-reverse"),
+      ).resolves.toMatchObject({ action: "financial_reset", receivableStatus: "reversed" });
+      // ...and the manage-only refusal above wrote nothing.
+      expect(countsBefore.credits).toBe(0);
+      expect(await untouchable(transaction, fixture)).toEqual(before);
+    });
+  });
+
+  it("refuses to physically delete a processed receivable whose only dependency is an Accounting Event", async () => {
+    await inRolledBackTransaction(async (transaction) => {
+      const fixture = await seed(transaction);
+      // An outstanding Receivable in an Accounting-enabled Company: its insert
+      // captured a recognition Event, so it is NOT unused.
+      const orderId = randomUUID();
+      const receivableId = randomUUID();
+      await insertOrder(transaction, {
+        actorId: fixture.actorId,
+        areaId: await areaOf(transaction, fixture.companyId),
+        companyId: fixture.companyId,
+        id: orderId,
+        orderNumber: `ORD-${orderId.slice(0, 8)}-EVT`,
+        paymentCondition: "customer_pays_cod_trader_pays_fee",
+        cod: "0.00",
+        serviceFee: "18.00",
+        traderGross: "0.00",
+        traderNet: "0.00",
+        settlementStatus: "not_eligible",
+        traderId: fixture.traderId,
+      });
+      await insertReceivable(
+        transaction,
+        fixture.companyId,
+        fixture.traderId,
+        fixture.actorId,
+        receivableId,
+        `ORD-${orderId.slice(0, 8)}-EVT`,
+      );
+      const maintenance = buildMaintenanceService(transaction, fixture);
+      const preview = await maintenance.receivableResetPreview(orderId);
+      expect(preview).toMatchObject({
+        accountingEventCount: 1,
+        action: "financial_reset",
+        physicalDeletePossible: false,
+      });
+      await expect(
+        maintenance.resetTraderReceivable(orderId, "try delete", "c-evt"),
+      ).rejects.toMatchObject({
+        errorCode: "trader_receivable_reset_unsupported",
+      });
+      expect(await receivableExists(transaction, receivableId)).toBe(true);
     });
   });
 });
+
+describe.skipIf(!runDatabaseTests)("Delete / Reset: UNUSED receivable", () => {
+  it("physically deletes a receivable with ZERO financial dependencies, with users_roles.manage", async () => {
+    await inRolledBackTransaction(async (transaction) => {
+      const unused = await seedUnused(transaction);
+      const maintenance = buildMaintenanceService(transaction, unused.fixture, [
+        "users_roles.manage",
+      ]);
+      const preview = await maintenance.receivableResetPreview(unused.orderId);
+      expect(preview).toMatchObject({
+        accountingEventCount: 0,
+        action: "physical_delete",
+        amountCollected: "0.00",
+        collectionCount: 0,
+        journalCount: 0,
+        offsetCount: 0,
+        physicalDeletePossible: true,
+        requiredPermission: "users_roles.manage",
+        traderCreditCount: 0,
+      });
+      // The financial permission does not authorize a destructive delete.
+      await expect(
+        buildMaintenanceService(transaction, unused.fixture, [
+          "trader_receivables.reverse",
+        ]).resetTraderReceivable(unused.orderId, "reverse only", "c-u0"),
+      ).rejects.toMatchObject({ errorCode: "permission_denied" });
+      expect(await receivableExists(transaction, unused.receivableId)).toBe(true);
+
+      await maintenance.resetTraderReceivable(unused.orderId, "Created in error", "c-u1");
+      expect(await receivableExists(transaction, unused.receivableId)).toBe(false);
+      const audit = await sql<{ count: number }>`
+        select count(*)::int as count from audit_events
+         where company_id=${unused.fixture.companyId}::uuid and action='trader_receivable.physical_delete'
+           and subject_id::text=${unused.receivableId}
+      `.execute(transaction);
+      expect(audit.rows[0]!.count).toBe(1);
+      const credits = await sql<{ count: number }>`
+        select count(*)::int as count from trader_credits where company_id=${unused.fixture.companyId}::uuid
+      `.execute(transaction);
+      expect(credits.rows[0]!.count).toBe(0);
+    });
+  });
+
+  it("zero-dependency guard: a single Trader Credit naming the receivable blocks the delete", async () => {
+    await inRolledBackTransaction(async (transaction) => {
+      const unused = await seedUnused(transaction);
+      await sql`
+        insert into trader_credits(company_id,credit_number,trader_id,business_date,amount,reason,
+          source_type,source_receivable_id,created_by_account_id)
+        values(${unused.fixture.companyId}::uuid,'TCR-GUARD',${unused.fixture.traderId}::uuid,current_date,
+          5,'guard','manual_adjustment',${unused.receivableId}::uuid,${unused.fixture.actorId}::uuid)
+      `.execute(transaction);
+      const maintenance = buildMaintenanceService(transaction, unused.fixture);
+      const preview = await maintenance.receivableResetPreview(unused.orderId);
+      expect(preview).toMatchObject({
+        action: "financial_reset",
+        physicalDeletePossible: false,
+        traderCreditCount: 1,
+      });
+      await expect(
+        maintenance.resetTraderReceivable(unused.orderId, "try delete", "c-g1"),
+      ).rejects.toMatchObject({
+        errorCode: "trader_receivable_reset_unsupported",
+      });
+      expect(await receivableExists(transaction, unused.receivableId)).toBe(true);
+    });
+  });
+
+  it("zero-dependency guard: money applied to the receivable blocks the delete", async () => {
+    await inRolledBackTransaction(async (transaction) => {
+      const unused = await seedUnused(transaction);
+      await sql`update trader_receivables set amount_collected=5, status='partially_collected'
+                 where id=${unused.receivableId}::uuid`.execute(transaction);
+      const maintenance = buildMaintenanceService(transaction, unused.fixture);
+      expect(await maintenance.receivableResetPreview(unused.orderId)).toMatchObject({
+        action: "financial_reset",
+        amountCollected: "5.00",
+      });
+      await expect(
+        maintenance.resetTraderReceivable(unused.orderId, "try delete", "c-g2"),
+      ).rejects.toMatchObject({
+        errorCode: "trader_receivable_reset_unsupported",
+      });
+      expect(await receivableExists(transaction, unused.receivableId)).toBe(true);
+    });
+  });
+});
+
+describe.skipIf(!runDatabaseTests)("Delete / Reset: forced failure before commit", () => {
+  /**
+   * Runs on COMMITTED fixture data with the REAL KyselyTransactionManager, so
+   * the boundary under test is the production one (`database.transaction()`),
+   * not a test savepoint. The failure is injected at the last step inside the
+   * reversal transaction -- the audit write, after the Receivable update, the
+   * Credit insert, the Credit number reservation and the Event enqueue have
+   * all executed -- and is observed from INSIDE that transaction first, so the
+   * test proves work had started and was then rolled back. The fixture
+   * Company is left in the disposable database (it is uniquely named and its
+   * financial rows are immutable by design).
+   */
+  it("leaves no partial Receivable, Credit, Event, Journal, Settlement, offset or Order change", async () => {
+    const database = openDatabase();
+    try {
+      const fixture = await database.transaction().execute((t) => seed(t));
+      await database.transaction().execute((t) => postPending(t, fixture.companyId));
+      const snapshot = (t: Transaction<DatabaseSchema>) =>
+        Promise.all([
+          untouchable(t, fixture),
+          counts(t, fixture),
+          orderState(t, fixture.feeOrderId),
+          sql<
+            Record<string, unknown>
+          >`select to_jsonb(r) as row from trader_receivables r where r.id=${fixture.reversedReceivableId}::uuid`
+            .execute(t)
+            .then((r) => r.rows),
+          sql<
+            Record<string, unknown>
+          >`select coalesce(jsonb_agg(to_jsonb(c)),'[]'::jsonb) as rows from company_reference_counters c where c.company_id=${fixture.companyId}::uuid`
+            .execute(t)
+            .then((r) => r.rows),
+        ]);
+      const before = await database.transaction().execute(snapshot);
+
+      const observed: { receivableStatus?: string; credits?: number; creditEvents?: number } = {};
+      class FailingAuditWriter extends OperationsHistoryWriter {
+        public override async audit(
+          db: Kysely<DatabaseSchema>,
+          input: Parameters<OperationsHistoryWriter["audit"]>[1],
+        ): Promise<void> {
+          if (input.action === "trader_receivable.reverse_offset") {
+            const inside = await sql<{ status: string; credits: number; events: number }>`
+              select r.status,
+                (select count(*)::int from trader_credits c where c.source_receivable_id=r.id) as credits,
+                (select count(*)::int from accounting_events e where e.company_id=r.company_id
+                   and e.event_type='trader_credit_issued') as events
+                from trader_receivables r where r.id=${fixture.reversedReceivableId}::uuid
+            `.execute(db);
+            observed.receivableStatus = inside.rows[0]!.status;
+            observed.credits = inside.rows[0]!.credits;
+            observed.creditEvents = inside.rows[0]!.events;
+            throw new Error("forced failure before commit");
+          }
+          return super.audit(db, input);
+        }
+      }
+      const identity = new FixedIdentity(
+        fixture.companyId,
+        fixture.actorId,
+        new Set(["users_roles.manage", "trader_receivables.reverse"]),
+      );
+      const tenants = {
+        current: () => ({ companyId: fixture.companyId, identityId: fixture.actorId }),
+      } as unknown as TenantContextAccessor;
+      const manager = new KyselyTransactionManager(database);
+      const maintenance = new OrderMaintenanceService(
+        database,
+        tenants,
+        identity as unknown as IdentityContextAccessor,
+        manager,
+        new OperationsHistoryWriter(),
+        new ReceivableOffsetReversalService(
+          database,
+          manager,
+          tenants,
+          identity as unknown as IdentityContextAccessor,
+          new FailingAuditWriter(),
+        ),
+      );
+      await expect(
+        maintenance.resetTraderReceivable(fixture.feeOrderId, "forced failure", "corr-rollback"),
+      ).rejects.toThrow("forced failure before commit");
+
+      // The work HAD started inside the transaction...
+      expect(observed).toEqual({ creditEvents: 1, credits: 1, receivableStatus: "reversed" });
+      // ...and none of it survived.
+      expect(await database.transaction().execute(snapshot)).toEqual(before);
+    } finally {
+      await database.destroy();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Helpers for the maintenance certification
+// ---------------------------------------------------------------------------
+
+function openDatabase(): Kysely<DatabaseSchema> {
+  const databaseUrl =
+    process.env.BLUELINE_DISABLE_DOTENV === "1"
+      ? process.env.DATABASE_URL
+      : (loadEnvironment({ path: resolve(process.cwd(), "../../.env") }),
+        configuration().database.url);
+  if (!databaseUrl) throw new Error("DATABASE_URL is required");
+  const parsedUrl = new URL(databaseUrl);
+  if (!["127.0.0.1", "localhost", "::1"].includes(parsedUrl.hostname)) {
+    throw new Error("Receivable reversal database tests must target a local database");
+  }
+  return new Kysely<DatabaseSchema>({
+    dialect: new PostgresDialect({ pool: new Pool({ connectionString: databaseUrl, max: 2 }) }),
+  });
+}
+
+async function counts(transaction: Transaction<DatabaseSchema>, fixture: Fixture) {
+  const rows = await sql<{
+    collections: number;
+    credits: number;
+    creditEvents: number;
+    receivableReversedEvents: number;
+    journals: number;
+    events: number;
+  }>`
+    select
+      (select count(*)::int from trader_collections where company_id=${fixture.companyId}::uuid) as collections,
+      (select count(*)::int from trader_credits where company_id=${fixture.companyId}::uuid) as credits,
+      (select count(*)::int from accounting_events where company_id=${fixture.companyId}::uuid
+         and event_type='trader_credit_issued') as "creditEvents",
+      (select count(*)::int from accounting_events where company_id=${fixture.companyId}::uuid
+         and event_type='trader_receivable_reversed') as "receivableReversedEvents",
+      (select count(*)::int from journal_entries where company_id=${fixture.companyId}::uuid) as journals,
+      (select count(*)::int from accounting_events where company_id=${fixture.companyId}::uuid) as events
+  `.execute(transaction);
+  return rows.rows[0]!;
+}
+
+async function orderState(transaction: Transaction<DatabaseSchema>, orderId: string) {
+  const rows = await sql<{
+    deliveryStatus: string;
+    deliveredAt: string;
+    traderSettlementStatus: string;
+    row: unknown;
+  }>`
+    select delivery_status as "deliveryStatus", delivered_at::text as "deliveredAt",
+           trader_settlement_status as "traderSettlementStatus", to_jsonb(o) as row
+      from orders o where o.id=${orderId}::uuid
+  `.execute(transaction);
+  return rows.rows[0]!;
+}
+
+async function recognitionJournal(transaction: Transaction<DatabaseSchema>, fixture: Fixture) {
+  const journal = await sql<{ id: string; journalNumber: string; status: string }>`
+    select j.id, j.journal_number as "journalNumber", j.status
+      from accounting_events e
+      join journal_entries j on j.id=e.journal_id and j.company_id=e.company_id
+     where e.company_id=${fixture.companyId}::uuid and e.event_type='trader_receivable_recognized'
+       and e.source_entity_id=${fixture.reversedReceivableId}::uuid
+  `.execute(transaction);
+  const row = journal.rows[0] ?? null;
+  const lines =
+    row === null
+      ? []
+      : (
+          await sql<Record<string, unknown>>`
+            select line_number, account_id, debit::text, credit::text, trader_id, subledger_id
+              from journal_lines where journal_entry_id=${row.id}::uuid order by line_number
+          `.execute(transaction)
+        ).rows;
+  return { journal: row, lines };
+}
+
+async function eventJournal(
+  transaction: Transaction<DatabaseSchema>,
+  fixture: Fixture,
+  eventType: "trader_credit_issued" | "trader_receivable_reversed",
+) {
+  const events = await sql<{ journalId: string; processingStatus: string }>`
+    select journal_id as "journalId", processing_status as "processingStatus"
+      from accounting_events
+     where company_id=${fixture.companyId}::uuid and event_type=${eventType}
+  `.execute(transaction);
+  expect(events.rows).toHaveLength(1);
+  expect(events.rows[0]!.processingStatus).toBe("posted");
+  const journalId = events.rows[0]!.journalId;
+  const journal = await sql<{ status: string }>`
+    select status from journal_entries where id=${journalId}::uuid
+  `.execute(transaction);
+  const lines = await sql<{
+    account: string;
+    debit: string;
+    credit: string;
+    traderId: string | null;
+  }>`
+    select a.code as account, jl.debit::text, jl.credit::text, jl.trader_id as "traderId"
+      from journal_lines jl join chart_of_accounts a on a.id=jl.account_id and a.company_id=jl.company_id
+     where jl.journal_entry_id=${journalId}::uuid order by jl.line_number
+  `.execute(transaction);
+  const components = await sql<{ mappingKey: string }>`
+    select c.mapping_key as "mappingKey" from accounting_event_components c
+      join accounting_events e on e.id=c.accounting_event_id and e.company_id=c.company_id
+     where e.company_id=${fixture.companyId}::uuid and e.event_type=${eventType}
+     order by c.component_number
+  `.execute(transaction);
+  return {
+    lines: lines.rows,
+    mappingKeys: components.rows.map((row) => row.mappingKey),
+    status: journal.rows[0]!.status,
+  };
+}
+
+async function areaOf(
+  transaction: Transaction<DatabaseSchema>,
+  companyId: string,
+): Promise<string> {
+  const rows = await sql<{ id: string }>`
+    select id from areas where company_id=${companyId}::uuid limit 1
+  `.execute(transaction);
+  return rows.rows[0]!.id;
+}
+
+async function insertReceivable(
+  transaction: Transaction<DatabaseSchema>,
+  companyId: string,
+  traderId: string,
+  actorId: string,
+  id: string,
+  orderNumber: string,
+): Promise<void> {
+  await sql`insert into trader_receivables(
+      id,company_id,receivable_number,trader_id,source_type,source_reference,business_date,
+      original_amount_due,amount_collected,status,reason,created_by_account_id
+    ) values(${id}::uuid,${companyId}::uuid,${`RCV-${id.slice(0, 8)}`},${traderId}::uuid,'service_charge',
+      ${orderNumber},'2026-10-01'::date,18,0,'outstanding','Trader-paid delivery fee',${actorId}::uuid)`.execute(
+    transaction,
+  );
+}
+
+async function receivableExists(
+  transaction: Transaction<DatabaseSchema>,
+  id: string,
+): Promise<boolean> {
+  const rows = await sql<{ found: boolean }>`
+    select exists(select 1 from trader_receivables where id=${id}::uuid) as found
+  `.execute(transaction);
+  return rows.rows[0]!.found;
+}
+
+/**
+ * A genuinely unused Receivable: its Company has NOT activated Accounting, so
+ * no recognition Event is captured, and nothing has been collected, offset,
+ * credited or journalled against it.
+ */
+async function seedUnused(transaction: Transaction<DatabaseSchema>) {
+  const companyId = randomUUID();
+  const actorId = randomUUID();
+  const traderId = randomUUID();
+  const areaId = randomUUID();
+  const orderId = randomUUID();
+  const receivableId = randomUUID();
+  const tag = companyId.slice(0, 8);
+  await sql`insert into companies(id,code,subdomain,name_en,status,activated_at)
+    values(${companyId}::uuid,${`RCVDEL-${tag}`},${`rcvdel-${tag}`},'Unused receivable test','active',now())`.execute(
+    transaction,
+  );
+  await sql`insert into accounts(id,company_id,account_kind,username,password_hash)
+    values(${actorId}::uuid,${companyId}::uuid,'company_user',${`rcvdel.${actorId}`},'x')`.execute(
+    transaction,
+  );
+  await sql`insert into emirates (code,name_en,name_ar,display_order)
+    values ('DXB','Dubai','دبي',1) on conflict (code) do nothing`.execute(transaction);
+  await sql`insert into traders(id,company_id,code,name_en,mobile_number)
+    values(${traderId}::uuid,${companyId}::uuid,${`T-${tag}`},'Unused Trader','971500000030')`.execute(
+    transaction,
+  );
+  await sql`insert into areas(id,company_id,emirate_id,code,name_en)
+    values(${areaId}::uuid,${companyId}::uuid,(select id from emirates where code='DXB'),${`A-${tag}`},'Area')`.execute(
+    transaction,
+  );
+  const orderNumber = `ORD-${tag}-UNUSED`;
+  await insertOrder(transaction, {
+    actorId,
+    areaId,
+    companyId,
+    id: orderId,
+    orderNumber,
+    paymentCondition: "customer_pays_cod_trader_pays_fee",
+    cod: "0.00",
+    serviceFee: "18.00",
+    traderGross: "0.00",
+    traderNet: "0.00",
+    settlementStatus: "not_eligible",
+    traderId,
+  });
+  await insertReceivable(transaction, companyId, traderId, actorId, receivableId, orderNumber);
+  const events = await sql<{ count: number }>`
+    select count(*)::int as count from accounting_events where company_id=${companyId}::uuid
+  `.execute(transaction);
+  expect(events.rows[0]!.count).toBe(0);
+  return {
+    fixture: { actorId, companyId, traderId } as unknown as Fixture,
+    orderId,
+    receivableId,
+  };
+}

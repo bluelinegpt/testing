@@ -337,7 +337,7 @@ export class TraderReceivableController {
    * settlement-scoped reversal (`operations/settlements/payments/:id/reverse`).
    * Idempotent: a retry returns the Credit already issued.
    */
-  @RequireAnyPermission("trader_receivables.reverse", "users_roles.manage")
+  @RequireAnyPermission("trader_receivables.reverse")
   @ApiOperation({ summary: "Reverse ONE Trader receivable cleared by a settlement offset" })
   @Post(":receivableId/reverse")
   public reverseReceivableOffset(

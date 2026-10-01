@@ -382,6 +382,9 @@ export function TraderReceivablesWorkspace({
   const isAdministrator = permissions.includes("users_roles.manage");
   const canManage = isAdministrator || permissions.includes("trader_receivables.create");
   const canReverse = isAdministrator || permissions.includes("trader_receivables.reverse");
+  // Reversing a settlement-offset Receivable is a financial reversal: the API
+  // demands `trader_receivables.reverse` itself, with no administrator override.
+  const canReverseReceivableOffset = permissions.includes("trader_receivables.reverse");
   const canViewReport = canManage || permissions.includes("reports.export");
   const directCollectQuery = useMemo(() => {
     const params = new URLSearchParams(window.location.search);
@@ -990,7 +993,7 @@ export function TraderReceivablesWorkspace({
       {receivableDetailId === undefined ? null : (
         <ReceivableDetailDialog
           api={api}
-          canReverse={canReverse}
+          canReverse={canReverseReceivableOffset}
           onClose={() => closeReceivable()}
           onCollectMoney={(traderId) => {
             closeReceivable();
@@ -1973,7 +1976,7 @@ function ReceivableDetailDialog({
   receivableId,
 }: {
   api: ApiClient;
-  /** `trader_receivables.reverse` (or administrator) -- the API demands the same. */
+  /** `trader_receivables.reverse` itself -- the API demands the same, no admin override. */
   canReverse: boolean;
   onClose: () => void;
   onCollectMoney: (traderId: string) => void;

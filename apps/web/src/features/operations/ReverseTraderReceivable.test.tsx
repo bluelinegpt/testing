@@ -215,6 +215,12 @@ describe("Reverse Trader Receivable", () => {
     expect(posts).toHaveLength(0);
   });
 
+  it("is not offered to an administrator who lacks the reverse permission", async () => {
+    setup({ permissions: ["users_roles.manage"] });
+    expect(await screen.findByText("RCV-000047", { selector: "dd" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Reverse Trader Receivable" })).toBeNull();
+  });
+
   it("is not offered without the reverse permission", async () => {
     setup({ permissions: ["trader_receivables.create"] });
     expect(await screen.findByText("RCV-000047", { selector: "dd" })).toBeInTheDocument();

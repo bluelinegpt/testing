@@ -145,7 +145,7 @@ export class ReceivableOffsetReversalService {
    * one SELECT, no lock, no write.
    */
   public async preview(receivableId: string): Promise<ReceivableOffsetReversalPreview> {
-    this.assertPermission();
+    this.assertPermission(false);
     const { companyId } = this.tenants.current();
     const row = await this.load(this.database, companyId, receivableId, false);
     const refusal = refuseReversal(row);
@@ -183,7 +183,7 @@ export class ReceivableOffsetReversalService {
     reason: string,
     correlationId: string,
   ): Promise<ReceivableOffsetReversalResult> {
-    this.assertPermission();
+    this.assertPermission(true);
     const trimmedReason = reason.trim();
     if (trimmedReason === "") {
       throw new ApplicationException(
@@ -466,14 +466,16 @@ export class ReceivableOffsetReversalService {
     return row;
   }
 
-  private assertPermission(): void {
-    const identity = this.identities.current();
-    if (
-      // Same permissions the controller route demands. This is a reversal,
-      // so `trader_receivables.reverse` -- not `.create` -- is what grants it.
-      !identity.permissions.has("trader_receivables.reverse") &&
-      !identity.permissions.has("users_roles.manage")
-    ) {
+  /**
+   * Executing is a financial reversal and requires `trader_receivables.reverse`
+   * itself -- `users_roles.manage` alone does NOT authorize it. Previewing is
+   * read-only and is also open to `users_roles.manage`.
+   */
+  private assertPermission(executing: boolean): void {
+    const permissions = this.identities.current().permissions;
+    const allowed = permissions.has("trader_receivables.reverse") ||
+      (!executing && permissions.has("users_roles.manage"));
+    if (!allowed) {
       throw new ApplicationException(
         "permission_denied",
         "The authenticated account does not have permission for this operation",

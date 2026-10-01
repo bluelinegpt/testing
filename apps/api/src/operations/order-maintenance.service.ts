@@ -1,6 +1,6 @@
 import { HttpStatus, Inject, Injectable } from "@nestjs/common";
 import { Decimal } from "decimal.js";
-import { type Kysely, sql } from "kysely";
+import { type Kysely, sql, type Transaction } from "kysely";
 
 import { DATABASE } from "../infrastructure/database/database.tokens.js";
 import type { DatabaseSchema } from "../infrastructure/database/database.types.js";
@@ -129,17 +129,54 @@ export interface OrderMaintenanceReport {
   readonly diagnostic: string;
 }
 
-export interface TraderReceivableResetPreview {
+/**
+ * Every financial fact that can hang off a Trader Receivable. A Receivable may
+ * be PHYSICALLY deleted only when every one of these is zero -- otherwise it
+ * has financial history, and Delete / Reset must take the financial reversal
+ * path, which preserves that history.
+ */
+export interface TraderReceivableDependencies {
+  /** `trader_collection_allocations` -- physical Trader Collections. */
+  readonly collectionCount: number;
+  /** `trader_settlement_receivable_offsets` -- Settlement netting. */
+  readonly offsetCount: number;
+  /** `accounting_events` whose source is this Receivable. */
+  readonly accountingEventCount: number;
+  /** Journals sourced from, or journal lines sub-ledgered to, this Receivable. */
+  readonly journalCount: number;
+  /** `trader_credits` that name this Receivable (any status). */
+  readonly traderCreditCount: number;
+  /** `amount_collected` > 0: money has been applied to it by any route. */
+  readonly amountCollected: string;
+}
+
+export interface TraderReceivableResetPreview extends TraderReceivableDependencies {
   readonly receivableId: string;
   readonly receivableNumber: string;
+  readonly receivableStatus: string;
   readonly orderId: string;
   readonly orderNumber: string;
   readonly amount: string;
-  readonly collectionCount: number;
-  readonly offsetCount: number;
-  readonly accountingEventCount: number;
   readonly physicalDeletePossible: boolean;
   readonly action: "physical_delete" | "financial_reset";
+  /**
+   * Permission the backend will demand to EXECUTE this action. A processed
+   * Receivable is a financial reversal and needs `trader_receivables.reverse`
+   * specifically; the broad maintenance permission does not substitute.
+   */
+  readonly requiredPermission: "users_roles.manage" | "trader_receivables.reverse";
+}
+
+/** Zero financial dependencies of any kind -- the ONLY case a DELETE is allowed. */
+export function hasNoFinancialDependencies(row: TraderReceivableDependencies): boolean {
+  return (
+    row.collectionCount === 0 &&
+    row.offsetCount === 0 &&
+    row.accountingEventCount === 0 &&
+    row.journalCount === 0 &&
+    row.traderCreditCount === 0 &&
+    new Decimal(row.amountCollected).isZero()
+  );
 }
 
 @Injectable()
@@ -153,61 +190,168 @@ export class OrderMaintenanceService {
     @Inject(ReceivableOffsetReversalService) private readonly offsetReversals: ReceivableOffsetReversalService,
   ) {}
 
+  /**
+   * Delete / Reset Trader Receivable -- preview. Read-only.
+   *
+   * Reports which of the two paths the action will take:
+   *   - `physical_delete`  only for a Receivable with ZERO financial
+   *     dependencies (see `hasNoFinancialDependencies`);
+   *   - `financial_reset`  for anything else, executed by the receivable-scoped
+   *     settlement-offset reversal, which never deletes and never touches the
+   *     Settlement.
+   */
   public async receivableResetPreview(orderId: string): Promise<TraderReceivableResetPreview> {
-    this.assertAnyPermission(["users_roles.manage"]);
+    this.assertAnyPermission(["users_roles.manage", "trader_receivables.reverse"]);
     const { companyId } = this.tenants.current();
-    const row = await this.resetRow(this.database, companyId, orderId, false);
-    const physicalDeletePossible = row.collectionCount === 0 && row.offsetCount === 0 && row.accountingEventCount === 0;
-    return { ...row, physicalDeletePossible, action: physicalDeletePossible ? "physical_delete" : "financial_reset" };
+    return this.classify(await this.resetRow(this.database, companyId, orderId, false));
   }
 
-  public async resetTraderReceivable(orderId: string, reason: string, correlationId: string): Promise<TraderReceivableResetPreview> {
+  /**
+   * Delete / Reset Trader Receivable -- execute.
+   *
+   * The path is decided from the database, never from the caller:
+   *
+   *   PROCESSED (any financial dependency) -> requires
+   *     `trader_receivables.reverse` (the maintenance permission alone is NOT
+   *     enough) and delegates to `ReceivableOffsetReversalService.execute`,
+   *     which runs in its own transaction: Receivable -> `reversed`,
+   *     compensating Trader Credit, `trader_credit_issued` enqueued, audit.
+   *     Nothing is deleted. Only the settlement-offset case is supported; any
+   *     other processed shape is refused rather than guessed at.
+   *
+   *   UNUSED (zero dependencies) -> requires `users_roles.manage`, and the
+   *     zero-dependency check is RE-RUN under a row lock inside the delete's
+   *     own transaction, so a dependency created between preview and execute
+   *     turns the delete into a refusal, not a destroyed history.
+   */
+  public async resetTraderReceivable(
+    orderId: string,
+    reason: string,
+    correlationId: string,
+  ): Promise<TraderReceivableResetPreview> {
     const trimmedReason = reason.trim();
-    if (!trimmedReason) throw new ApplicationException("trader_receivable_reset_reason_required", "A reason is required", HttpStatus.BAD_REQUEST);
-    const { companyId } = this.tenants.current();
-    const row = await this.resetRow(this.database, companyId, orderId, false);
-    const physicalDeletePossible = row.collectionCount === 0 && row.offsetCount === 0 && row.accountingEventCount === 0;
-    // A processed receivable is a financial reversal, even though the same
-    // maintenance endpoint also supports deleting an unused draft.  Do not
-    // let the broad maintenance permission bypass the financial permission.
-    if (physicalDeletePossible) {
-      this.assertAnyPermission(["users_roles.manage"]);
-    } else {
-      this.assertPermission("trader_receivables.reverse");
+    if (!trimmedReason) {
+      throw new ApplicationException(
+        "trader_receivable_reset_reason_required",
+        "A reason is required",
+        HttpStatus.BAD_REQUEST,
+      );
     }
-    if (!physicalDeletePossible) {
-      if (row.offsetCount === 0) throw new ApplicationException("trader_receivable_reset_unsupported", "This processed receivable has no supported reset path", HttpStatus.CONFLICT);
+    const { companyId } = this.tenants.current();
+    const row = this.classify(await this.resetRow(this.database, companyId, orderId, false));
+    this.assertExactPermission(row.requiredPermission);
+
+    if (row.action === "financial_reset") {
+      if (row.offsetCount === 0) {
+        throw new ApplicationException(
+          "trader_receivable_reset_unsupported",
+          "This processed receivable has no supported reset path",
+          HttpStatus.CONFLICT,
+        );
+      }
       // Receivable-scoped: the Order is derived server-side from the Receivable.
       await this.offsetReversals.execute(row.receivableId, trimmedReason, correlationId);
-      return this.receivableResetPreview(orderId);
+      return this.classify(await this.resetRow(this.database, companyId, orderId, false));
     }
+
     const identity = this.identities.current();
     return this.transactions.execute(async (tx) => {
-      const locked = await this.resetRow(tx, companyId, orderId, true);
-      if (locked.collectionCount !== 0 || locked.offsetCount !== 0 || locked.accountingEventCount !== 0) {
-        throw new ApplicationException("trader_receivable_reset_race", "The receivable changed; preview it again", HttpStatus.CONFLICT);
+      const locked = this.classify(await this.resetRow(tx, companyId, orderId, true));
+      if (locked.receivableId !== row.receivableId || locked.action !== "physical_delete") {
+        throw new ApplicationException(
+          "trader_receivable_reset_race",
+          "The receivable changed; preview it again",
+          HttpStatus.CONFLICT,
+        );
       }
-      await sql`delete from trader_receivables where company_id = ${companyId}::uuid and id = ${locked.receivableId}::uuid`.execute(tx);
-      await this.historyWriter.audit(tx, { action: "trader_receivable.physical_delete", actorId: identity.identityId, after: { reason: trimmedReason, receivableNumber: locked.receivableNumber }, companyId, correlationId, subjectId: locked.receivableId, subjectType: "trader_receivable" });
+      await sql`
+        delete from trader_receivables
+         where company_id = ${companyId}::uuid and id = ${locked.receivableId}::uuid
+      `.execute(tx);
+      await this.historyWriter.audit(tx, {
+        action: "trader_receivable.physical_delete",
+        actorId: identity.identityId,
+        after: { reason: trimmedReason, receivableNumber: locked.receivableNumber },
+        companyId,
+        correlationId,
+        subjectId: locked.receivableId,
+        subjectType: "trader_receivable",
+      });
       return locked;
     });
   }
 
-  private async resetRow(database: Kysely<DatabaseSchema> | import("kysely").Transaction<DatabaseSchema>, companyId: string, orderId: string, forUpdate: boolean): Promise<TraderReceivableResetPreview> {
-    const lock = forUpdate ? sql` for update` : sql``;
-    const result = await sql<TraderReceivableResetPreview>`
-      select r.id as "receivableId", r.receivable_number as "receivableNumber", r.original_amount_due::text as amount,
+  private classify(
+    row: Omit<TraderReceivableResetPreview, "action" | "physicalDeletePossible" | "requiredPermission">,
+  ): TraderReceivableResetPreview {
+    const physicalDeletePossible = hasNoFinancialDependencies(row);
+    return {
+      ...row,
+      action: physicalDeletePossible ? "physical_delete" : "financial_reset",
+      physicalDeletePossible,
+      requiredPermission: physicalDeletePossible ? "users_roles.manage" : "trader_receivables.reverse",
+    };
+  }
+
+  private async resetRow(
+    database: Kysely<DatabaseSchema> | Transaction<DatabaseSchema>,
+    companyId: string,
+    orderId: string,
+    forUpdate: boolean,
+  ): Promise<Omit<TraderReceivableResetPreview, "action" | "physicalDeletePossible" | "requiredPermission">> {
+    const result = await sql<
+      Omit<TraderReceivableResetPreview, "action" | "physicalDeletePossible" | "requiredPermission">
+    >`
+      select r.id as "receivableId", r.receivable_number as "receivableNumber",
+             r.status as "receivableStatus", r.original_amount_due::text as amount,
+             r.amount_collected::text as "amountCollected",
              o.id as "orderId", o.order_number as "orderNumber",
-             (select count(*)::int from trader_collection_allocations a where a.company_id=r.company_id and a.receivable_id=r.id) as "collectionCount",
-             (select count(*)::int from trader_settlement_receivable_offsets x where x.company_id=r.company_id and x.receivable_id=r.id) as "offsetCount",
-             (select count(*)::int from accounting_events e where e.company_id=r.company_id and e.source_entity_id=r.id and e.source_entity_type='trader_receivable') as "accountingEventCount"
-        from trader_receivables r join orders o on o.company_id=r.company_id and o.order_number=r.source_reference
-       where r.company_id=${companyId}::uuid and o.company_id=${companyId}::uuid and o.id=${orderId}::uuid and r.source_reference=o.order_number
-       order by r.created_at desc limit 1${lock}
+             (select count(*)::int from trader_collection_allocations a
+               where a.company_id=r.company_id and a.receivable_id=r.id) as "collectionCount",
+             (select count(*)::int from trader_settlement_receivable_offsets x
+               where x.company_id=r.company_id and x.receivable_id=r.id) as "offsetCount",
+             (select count(*)::int from accounting_events e
+               where e.company_id=r.company_id and e.source_entity_type='trader_receivable'
+                 and e.source_entity_id=r.id) as "accountingEventCount",
+             (select count(*)::int from journal_entries j
+               where j.company_id=r.company_id
+                 and ((j.source_entity_type='trader_receivable' and j.source_entity_id=r.id)
+                   or exists(select 1 from journal_lines l
+                              where l.company_id=j.company_id and l.journal_entry_id=j.id
+                                and l.subledger_id=r.id))) as "journalCount",
+             (select count(*)::int from trader_credits c
+               where c.company_id=r.company_id and c.source_receivable_id=r.id) as "traderCreditCount"
+        from trader_receivables r
+        join orders o on o.company_id=r.company_id and o.order_number=r.source_reference
+       where r.company_id=${companyId}::uuid and o.id=${orderId}::uuid
+       order by r.created_at desc
+       limit 1
+       ${forUpdate ? sql`for update of r` : sql``}
     `.execute(database);
     const row = result.rows[0];
-    if (!row) throw new ApplicationException("trader_receivable_not_found", "Trader receivable not found", HttpStatus.NOT_FOUND);
+    if (!row) {
+      throw new ApplicationException(
+        "trader_receivable_not_found",
+        "Trader receivable not found",
+        HttpStatus.NOT_FOUND,
+      );
+    }
     return row;
+  }
+
+  /**
+   * Exactly this permission. Unlike `assertAnyPermission`, `users_roles.manage`
+   * is NOT an implicit override here: a financial reversal needs the financial
+   * permission.
+   */
+  private assertExactPermission(permission: string): void {
+    if (!this.identities.current().permissions.has(permission)) {
+      throw new ApplicationException(
+        "permission_denied",
+        "The authenticated account does not have permission for this operation",
+        HttpStatus.FORBIDDEN,
+      );
+    }
   }
 
   /**
@@ -761,16 +905,6 @@ export class OrderMaintenanceService {
       !permissions.has("users_roles.manage") &&
       !required.some((candidate) => permissions.has(candidate))
     ) {
-      throw new ApplicationException(
-        "permission_denied",
-        "The authenticated account does not have permission for this operation",
-        HttpStatus.FORBIDDEN,
-      );
-    }
-  }
-
-  private assertPermission(permission: string): void {
-    if (!this.identities.current().permissions.has(permission)) {
       throw new ApplicationException(
         "permission_denied",
         "The authenticated account does not have permission for this operation",

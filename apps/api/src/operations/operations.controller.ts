@@ -168,14 +168,17 @@ export class OperationsController {
     private readonly orderMaintenance: OrderMaintenanceService,
   ) {}
 
-  @RequireAnyPermission("users_roles.manage")
+  // Either permission reaches the route; the SERVICE decides which one the
+  // actual path needs (unused delete: users_roles.manage; processed financial
+  // reset: trader_receivables.reverse, with no manage override).
+  @RequireAnyPermission("users_roles.manage", "trader_receivables.reverse")
   @ApiOperation({ summary: "Preview Delete / Reset Trader Receivable maintenance action" })
   @Get("orders/:orderId/trader-receivable-reset-preview")
   public traderReceivableResetPreview(@Param("orderId", new ParseUUIDPipe()) orderId: string): Promise<TraderReceivableResetPreview> {
     return this.orderMaintenance.receivableResetPreview(orderId);
   }
 
-  @RequireAnyPermission("users_roles.manage")
+  @RequireAnyPermission("users_roles.manage", "trader_receivables.reverse")
   @ApiOperation({ summary: "Delete unused or financially reset a Trader Receivable" })
   @Post("orders/:orderId/reset-trader-receivable")
   public resetTraderReceivable(
