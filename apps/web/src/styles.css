@@ -1965,6 +1965,202 @@ textarea:focus-visible {
   white-space: pre-line;
 }
 
+/* Counterparts to .alert-error above. `.alert-info` previously existed only
+   under `.accounting-workspace`, so an informational alert anywhere else
+   rendered as unstyled text and was simply not noticed. Built from the theme
+   tokens so light and dark are both covered, with hairline borders rather than
+   shadows. */
+.alert-info {
+  color: var(--primary-color);
+  background: var(--primary-subtle);
+  border: 1px solid color-mix(in srgb, var(--primary-color) 30%, transparent);
+  white-space: pre-line;
+}
+.alert-warning {
+  color: var(--warning-color);
+  background: var(--warning-subtle);
+  border: 1px solid color-mix(in srgb, var(--warning-color) 35%, transparent);
+  white-space: pre-line;
+}
+.alert-success {
+  color: var(--success-color);
+  background: var(--success-subtle);
+  border: 1px solid color-mix(in srgb, var(--success-color) 30%, transparent);
+  white-space: pre-line;
+}
+
+/* ---------------------------------------------------------------------------
+   Saved settlement drafts
+   ---------------------------------------------------------------------------
+   Work in progress, not history: a card of its own so it reads as a shelf of
+   unfinished settlements sitting above the settlements list, rather than a
+   second table competing with it.
+
+   Refined Navy throughout — hairline borders instead of shadows, weights at
+   400/500, tinted semantic pills. Every colour is a token, so dark mode needs
+   no separate rules, and spacing uses logical properties so the Arabic layout
+   mirrors without further work.
+   --------------------------------------------------------------------------- */
+.settlement-drafts {
+  margin-block-end: var(--space-6);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  background: var(--surface-color);
+  overflow: hidden;
+}
+.settlement-drafts__header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
+  padding: var(--space-4) var(--space-5);
+  border-block-end: 1px solid var(--border-color);
+  background: var(--surface-subtle);
+}
+.settlement-drafts__title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+/* The count sits with the title rather than in it, so the heading stays a
+   heading and the number can change without reflowing the words. */
+.settlement-drafts__count {
+  display: inline-flex;
+  align-items: center;
+  min-width: 22px;
+  height: 22px;
+  padding-inline: 7px;
+  border-radius: 999px;
+  background: var(--primary-subtle);
+  color: var(--primary-strong);
+  font-size: 12px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.settlement-drafts__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-inline-start: auto;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 400;
+  cursor: pointer;
+}
+.settlement-drafts__body {
+  overflow-x: auto;
+}
+.settlement-drafts table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.settlement-drafts th {
+  padding: var(--space-3) var(--space-5);
+  border-block-end: 1px solid var(--border-color);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-align: start;
+  white-space: nowrap;
+}
+.settlement-drafts td {
+  padding: var(--space-4) var(--space-5);
+  border-block-end: 1px solid var(--border-color);
+  font-weight: 400;
+  vertical-align: middle;
+}
+.settlement-drafts tbody tr:last-child td {
+  border-block-end: 0;
+}
+.settlement-drafts tbody tr:hover {
+  background: var(--surface-subtle);
+}
+.settlement-drafts__trader {
+  font-weight: 500;
+  color: var(--text-primary);
+}
+/* Figures line up across rows and can be compared down the column. */
+.settlement-drafts__numeric {
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.settlement-drafts__amount {
+  font-weight: 500;
+  color: var(--text-primary);
+}
+.settlement-drafts__muted {
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.settlement-draft-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+/* A dot carries the state at a glance; the colour is never the only signal,
+   because the word is right beside it. */
+.settlement-draft-status::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentcolor;
+}
+.settlement-draft-status--draft {
+  background: var(--warning-subtle);
+  color: var(--warning-color);
+}
+.settlement-draft-status--confirmed {
+  background: var(--success-subtle);
+  color: var(--success-color);
+}
+.settlement-drafts__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  justify-content: flex-end;
+}
+.settlement-drafts__actions button {
+  padding: 5px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--surface-color);
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.settlement-drafts__actions button:hover:not(:disabled) {
+  border-color: var(--primary-color);
+  color: var(--primary-strong);
+  background: var(--primary-subtle);
+}
+/* Destructive, so it reads as destructive on hover — but quietly at rest, to
+   keep it from competing with Edit on every row. */
+.settlement-drafts__actions .is-destructive:hover:not(:disabled) {
+  border-color: var(--danger-color);
+  color: var(--danger-color);
+  background: var(--danger-subtle);
+}
+.settlement-drafts__actions button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.settlement-drafts__empty {
+  padding: var(--space-6) var(--space-5);
+  color: var(--text-muted);
+  text-align: center;
+}
+
 .admin-layout {
   min-height: calc(100vh - 64px);
   display: grid;

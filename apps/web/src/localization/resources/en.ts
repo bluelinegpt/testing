@@ -3921,6 +3921,31 @@ export const englishTranslations = {
     pageTitle: "Trader Settlements",
     pageSubtitle: "Manage money sent to Traders — full and partial payments, receipts, reversals.",
     newSettlement: "Traders New Settlement",
+    savedDrafts: "Saved settlement drafts",
+    draftStatus: "Draft status",
+    statusDraft: "Draft",
+    editDraft: "Edit draft",
+    viewDraft: "View draft",
+    noSavedDrafts: "No saved settlement drafts.",
+    updatedAt: "Updated",
+    saveDraft: "Save Draft",
+    draftSaved: "Draft saved. No financial posting was made.",
+    draftSavedAndClosed:
+      "Draft saved for {{trader}}. No financial posting was made — it is listed below until you confirm it.",
+    draftSaveFailed: "The settlement draft could not be saved.",
+    draftLoadFailed: "The settlement draft could not be loaded.",
+    draftTrader: "Trader",
+    draftAmount: "Net Amount",
+    draftOrderCount: "Orders",
+    deleteDraft: "Delete",
+    deleteDraftWarning:
+      "Delete the saved draft for {{trader}} ({{amount}})? Nothing has been posted, but the saved selection and amounts will be lost.",
+    deleteDraftFailed: "The settlement draft could not be deleted.",
+    includeConfirmedDrafts: "Include confirmed drafts",
+    existingDraftOpened:
+      "{{trader}} already has a saved draft, so it has been opened here. A Trader can have only one draft at a time.",
+    draftAlreadyOpen:
+      "This Trader already has a saved draft. Open it from the Saved settlement drafts list instead of starting another.",
     // Summary cards
     summaryEligiblePayable: "Eligible Trader Payable",
     summaryUnsettled: "Unsettled Amount",

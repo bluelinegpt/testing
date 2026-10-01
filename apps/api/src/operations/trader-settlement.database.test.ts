@@ -31,6 +31,14 @@ import type { CreateTraderSettlementDto } from "./operations.dto.js";
 import { TraderSettlementService } from "./trader-settlement.service.js";
 
 const runDatabaseTests = process.env.RUN_SETTLEMENT_DATABASE === "true";
+const databaseUrl = process.env.DATABASE_URL;
+if (runDatabaseTests) {
+  if (databaseUrl === undefined) throw new Error("RUN_SETTLEMENT_DATABASE requires an explicit DATABASE_URL");
+  const parsed = new URL(databaseUrl);
+  if (parsed.hostname !== "127.0.0.1" || parsed.port !== "55432" || parsed.pathname !== "/blueline_stage1_drafts_schema_20260929") {
+    throw new Error("Settlement database tests require the verified disposable 127.0.0.1:55432 database");
+  }
+}
 const rollbackMarker = Symbol("rollback trader settlement test");
 
 class SavepointTransactionManager {
@@ -93,7 +101,9 @@ interface CompanyFixture {
 
 describe.skipIf(!runDatabaseTests)("trader settlement", () => {
   it("enforces eligibility, allocation, payment, Money Received, reversal, idempotency and reporting", async () => {
-    loadEnvironment({ path: resolve(process.cwd(), "../../.env") });
+    if (process.env.BLUELINE_DISABLE_DOTENV !== "1") {
+      loadEnvironment({ path: resolve(process.cwd(), "../../.env") });
+    }
     const settings = configuration();
     const pool = new Pool({ connectionString: settings.database.url, max: 1 });
     const database = new Kysely<DatabaseSchema>({ dialect: new PostgresDialect({ pool }) });
@@ -101,6 +111,16 @@ describe.skipIf(!runDatabaseTests)("trader settlement", () => {
     try {
       await database.transaction().execute(async (transaction) => {
         const manager = new SavepointTransactionManager(transaction);
+        await sql`
+          insert into permissions (code, description)
+          values ('users_roles.manage', 'Test permission for settlement integration fixtures')
+          on conflict (code) do nothing
+        `.execute(transaction);
+        await sql`
+          insert into emirates (code, name_en, name_ar, display_order)
+          values ('DXB', 'Dubai', 'دبي', 1)
+          on conflict (code) do nothing
+        `.execute(transaction);
         const tenants = new StubTenantAccessor({ companyId: "", identityId: "" });
         const identities = new StubIdentityAccessor({
           companyId: null,
@@ -342,8 +362,57 @@ describe.skipIf(!runDatabaseTests)("trader settlement", () => {
 
         useCompany(companyA);
 
+        // Stage 1: drafts persist intent only. These assertions deliberately
+        // snapshot the financial surfaces before and after create/edit.
+        const draftFinancialState = async (): Promise<Record<string, string>> => {
+          const result = await sql<{ key: string; value: string }>`
+            select 'accounting_events' as key, count(*)::text as value from accounting_events
+            union all select 'cash_movements', count(*)::text from cash_bank_movements
+            union all select 'orders_paid', coalesce(sum(trader_paid_amount), 0)::text from orders
+            union all select 'receivables_collected', coalesce(sum(amount_collected), 0)::text from trader_receivables
+            union all select 'collection_transactions', count(*)::text from trader_collections
+          `.execute(transaction);
+          return Object.fromEntries(result.rows.map((row) => [row.key, row.value]));
+        };
+        const draftBefore = await draftFinancialState();
+        const draftInput = basePayment(companyA.traderId, [{ amount: 25, orderId: randomUUID() }]);
+        const draft = await service.createDraft(draftInput);
+        expect(draft.payload).toEqual(draftInput);
+        expect((await service.draft(draft.id)).payload).toEqual(draftInput);
+        const editedInput = { ...draftInput, amount: 30, notes: "draft edit" };
+        await service.updateDraft(draft.id, editedInput);
+        expect((await service.draft(draft.id)).payload).toEqual(editedInput);
+        expect(await draftFinancialState()).toEqual(draftBefore);
+        await expect(service.draft(draft.id)).resolves.toMatchObject({ traderId: companyA.traderId });
+
+        const savedPermissions = identities.current().permissions;
+        identities.set({ ...identities.current(), permissions: new Set() });
+        await expect(service.createDraft(draftInput)).rejects.toMatchObject({ errorCode: "permission_denied" });
+        identities.set({ ...identities.current(), permissions: savedPermissions });
+        await expect(service.createDraft({ ...draftInput, traderId: randomUUID() })).rejects.toMatchObject({ errorCode: "trader_not_found" });
+        useCompany(companyB);
+        await expect(service.draft(draft.id)).rejects.toMatchObject({ errorCode: "trader_settlement_draft_not_found" });
+        useCompany(companyA);
+
         // --- §23 Eligibility --------------------------------------------------
         const eligibleOrder = await createOrder(companyA, { netPayable: 100 });
+        const confirmationOrder = await createOrder(companyA, { netPayable: 25 });
+        const confirmationDraft = await service.createDraft(
+          basePayment(companyA.traderId, [{ amount: 25, orderId: confirmationOrder.id }]),
+        );
+        const confirmed = await service.confirmDraft(confirmationDraft.id, randomUUID());
+        expect(confirmed.orderCount).toBe(1);
+        const linkedDraft = await sql<{ settlementId: string | null }>`
+          select confirmed_settlement_id as "settlementId"
+            from trader_settlement_drafts where id=${confirmationDraft.id}::uuid
+        `.execute(transaction);
+        expect(linkedDraft.rows[0]?.settlementId).toBe(confirmed.settlementId);
+        await expect(
+          service.confirmDraft(confirmationDraft.id, randomUUID()),
+        ).rejects.toMatchObject({ errorCode: "trader_settlement_draft_already_confirmed" });
+        await expect(
+          service.updateDraft(confirmationDraft.id, basePayment(companyA.traderId, [{ amount: 25, orderId: confirmationOrder.id }])),
+        ).rejects.toMatchObject({ errorCode: "trader_settlement_draft_not_editable" });
         const eligible = await service.eligibleOrders({
           page: 1,
           pageSize: 25,

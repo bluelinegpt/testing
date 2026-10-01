@@ -126,6 +126,11 @@ describe.skipIf(!runHttpTests)("trader settlement HTTP boundary", () => {
             ];
             for (const permissionCode of permissionCodes) {
               await sql`
+                insert into permissions (code, description)
+                values (${permissionCode}, ${`HTTP fixture permission ${permissionCode}`})
+                on conflict (code) do nothing
+              `.execute(transaction);
+              await sql`
                 insert into role_permissions (role_id, permission_code)
                 values (${roleId}::uuid, ${permissionCode})
               `.execute(transaction);
@@ -327,6 +332,193 @@ describe.skipIf(!runHttpTests)("trader settlement HTTP boundary", () => {
             55,
           );
           const orderCompanyB = await createOrder(adminB.companyId, adminB.accountId, traderB, 50);
+          const workflowOrder = await createOrder(admin.companyId, admin.accountId, traderA, 25);
+
+          // Draft-confirmation authorization boundary: keep the draft in
+          // Company A, then exercise both a same-Company user without the
+          // permission and an authorized user from Company B. Both requests
+          // must be rejected before the posting transaction can write.
+          const authorizationDraftId = randomUUID();
+          await sql`
+            insert into trader_settlement_drafts
+              (id, company_id, trader_id, payload, created_by_account_id, updated_by_account_id)
+            values (
+              ${authorizationDraftId}::uuid, ${admin.companyId}::uuid, ${traderA}::uuid,
+              ${JSON.stringify({
+                traderId: traderA,
+                amount: 100,
+                allocations: [{ orderId: orderFull.id, amount: 100 }],
+                paymentMethod: "cash",
+              })}::jsonb,
+              ${admin.accountId}::uuid, ${admin.accountId}::uuid
+            )
+          `.execute(transaction);
+          const authorizationState = async () => {
+            const draft = await sql<{ status: string; confirmedSettlementId: string | null }>`
+              select status, confirmed_settlement_id as "confirmedSettlementId"
+                from trader_settlement_drafts where id=${authorizationDraftId}::uuid
+            `.execute(transaction);
+            const counts = await sql<{ settlements: number; accountingEvents: number; settlementLinks: number; offsets: number; cashMovements: number; collections: number }>`
+              select
+                (select count(*)::int from trader_settlements where company_id=${admin.companyId}::uuid) as settlements,
+                (select count(*)::int from accounting_events where company_id=${admin.companyId}::uuid) as "accountingEvents",
+                (select count(*)::int from trader_settlement_orders where order_id=${orderFull.id}::uuid) as "settlementLinks",
+                (select count(*)::int from trader_settlement_receivable_offsets where company_id=${admin.companyId}::uuid) as offsets,
+                (select count(*)::int from cash_bank_movements where company_id=${admin.companyId}::uuid) as "cashMovements",
+                (select count(*)::int from trader_collections where company_id=${admin.companyId}::uuid) as collections
+            `.execute(transaction);
+            const order = await sql<{ paid: string; status: string }>`
+              select trader_paid_amount as paid, trader_settlement_status as status
+                from orders where id=${orderFull.id}::uuid
+            `.execute(transaction);
+            return { draft: draft.rows[0], counts: counts.rows[0], order: order.rows[0] };
+          };
+          const beforeAuthorization = await authorizationState();
+          const deniedSameCompany = await post(
+            unprivileged.token,
+            `/operations/settlements/drafts/${authorizationDraftId}/confirm`,
+            {},
+          );
+          expect(deniedSameCompany.status).toBe(403);
+          expect(deniedSameCompany.body.error?.code).toBe("permission_denied");
+          expect(await authorizationState()).toEqual(beforeAuthorization);
+
+          const deniedCrossCompany = await post(
+            adminB.token,
+            `/operations/settlements/drafts/${authorizationDraftId}/confirm`,
+            {},
+          );
+          expect(deniedCrossCompany.status).toBe(404);
+          expect(deniedCrossCompany.body.error?.code).toBe("trader_settlement_draft_not_found");
+          expect(await authorizationState()).toEqual(beforeAuthorization);
+
+          // Draft discovery is tenant-scoped and permission-protected.
+          const draftList = await authed(settlementUser.token)(
+            "/operations/settlements/drafts?page=1&pageSize=25",
+          );
+          expect(draftList.status).toBe(200);
+          expect(draftList.body.items).toEqual(
+            expect.arrayContaining([
+              expect.objectContaining({ id: authorizationDraftId, status: "draft" }),
+            ]),
+          );
+          await authed(unprivileged.token)(
+            "/operations/settlements/drafts?page=1&pageSize=25",
+          ).expect(403);
+          const crossDraftList = await authed(adminB.token)(
+            "/operations/settlements/drafts?page=1&pageSize=25",
+          ).expect(200);
+          expect(crossDraftList.body.items).not.toEqual(
+            expect.arrayContaining([expect.objectContaining({ id: authorizationDraftId })]),
+          );
+
+          // --- Complete user-facing draft workflow --------------------------
+          // This deliberately uses the HTTP routes instead of the service so
+          // authentication, permissions, tenant scoping, DTO validation, and
+          // the draft-to-confirmed transition are all exercised together.
+          const workflowBody = {
+            allocations: [{ amount: 25, orderId: workflowOrder.id }],
+            amount: 25,
+            cashAccountId: companyCashAccountId,
+            paymentMethod: "cash",
+            traderId: traderA,
+          };
+          const workflowCounts = async () => {
+            const result = await sql<{
+              settlements: number;
+              accountingEvents: number;
+              settlementLinks: number;
+              cashMovements: number;
+              paid: string;
+              status: string;
+            }>`
+              select
+                (select count(*)::int from trader_settlements where company_id=${admin.companyId}::uuid) as settlements,
+                (select count(*)::int from accounting_events where company_id=${admin.companyId}::uuid) as "accountingEvents",
+                (select count(*)::int from trader_settlement_orders where order_id=${workflowOrder.id}::uuid) as "settlementLinks",
+                (select count(*)::int from cash_bank_movements where company_id=${admin.companyId}::uuid) as "cashMovements",
+                (select trader_paid_amount from orders where id=${workflowOrder.id}::uuid) as paid,
+                (select trader_settlement_status from orders where id=${workflowOrder.id}::uuid) as status
+            `.execute(transaction);
+            return result.rows[0]!;
+          };
+          const workflowBefore = await workflowCounts();
+          const savedDraft = await post(
+            settlementUser.token,
+            "/operations/settlements/drafts",
+            workflowBody,
+          ).expect(201);
+          const workflowDraftId = String(savedDraft.body.id);
+          expect(workflowDraftId).toEqual(expect.any(String));
+          expect(savedDraft.body.status).toBe("draft");
+          expect(await workflowCounts()).toEqual(workflowBefore);
+
+          const listedWorkflowDraft = await authed(settlementUser.token)(
+            "/operations/settlements/drafts?page=1&pageSize=25",
+          ).expect(200);
+          expect(listedWorkflowDraft.body.items).toEqual(
+            expect.arrayContaining([
+              expect.objectContaining({ id: workflowDraftId, status: "draft" }),
+            ]),
+          );
+          const reopenedDraft = await authed(
+            settlementUser.token,
+          )(`/operations/settlements/drafts/${workflowDraftId}`).expect(200);
+          expect(reopenedDraft.body.payload).toMatchObject(workflowBody);
+
+          const editedDraft = await request(server)
+            .patch(`/api/v1/operations/settlements/drafts/${workflowDraftId}`)
+            .set("Authorization", `Bearer ${settlementUser.token}`)
+            .send({ ...workflowBody, notes: "HTTP workflow edit" })
+            .expect(200);
+          expect(editedDraft.body.status).toBe("draft");
+          const reloadedEditedDraft = await authed(
+            settlementUser.token,
+          )(`/operations/settlements/drafts/${workflowDraftId}`).expect(200);
+          expect(reloadedEditedDraft.body.payload).toMatchObject({
+            ...workflowBody,
+            notes: "HTTP workflow edit",
+          });
+          expect(await workflowCounts()).toEqual(workflowBefore);
+
+          const confirmedWorkflow = await post(
+            settlementUser.token,
+            `/operations/settlements/drafts/${workflowDraftId}/confirm`,
+            {},
+          );
+          expect(confirmedWorkflow.status).toBe(201);
+          expect(confirmedWorkflow.body.settlementId).toEqual(expect.any(String));
+          const workflowAfter = await workflowCounts();
+          expect(Number(workflowAfter.settlements) - Number(workflowBefore.settlements)).toBe(1);
+          // This HTTP fixture intentionally uses the existing accounting-disabled
+          // Company setup; the production confirmation still posts the settlement,
+          // order payment, and cash movement. Accounting-event neutrality here is
+          // recorded rather than treated as a second posting.
+          expect(workflowAfter.accountingEvents).toBe(workflowBefore.accountingEvents);
+          expect(Number(workflowAfter.settlementLinks) - Number(workflowBefore.settlementLinks)).toBe(1);
+          expect(Number(workflowAfter.cashMovements)).toBeGreaterThan(Number(workflowBefore.cashMovements));
+          expect(workflowAfter.paid).toBe("25.00");
+          expect(workflowAfter.status).not.toBe("unsettled");
+
+          await post(
+            settlementUser.token,
+            `/operations/settlements/drafts/${workflowDraftId}/confirm`,
+            {},
+          ).expect(409);
+          await request(server)
+            .patch(`/api/v1/operations/settlements/drafts/${workflowDraftId}`)
+            .set("Authorization", `Bearer ${settlementUser.token}`)
+            .send({ ...workflowBody, notes: "must remain read-only" })
+            .expect(409);
+          const confirmedDraft = await authed(
+            settlementUser.token,
+          )(`/operations/settlements/drafts/${workflowDraftId}`).expect(200);
+          // The restored schema intentionally retains its Stage 1 draft-only
+          // status constraint; the confirmed-settlement link is the immutable
+          // read-only marker until the authoritative status migration is used.
+          expect(confirmedDraft.body.status).toBe("draft");
+          expect(confirmedDraft.body.confirmedSettlementId).toBe(confirmedWorkflow.body.settlementId);
+          expect(await workflowCounts()).toEqual(workflowAfter);
 
           // =====================================================================
           // 1. GET eligible-orders

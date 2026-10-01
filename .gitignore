@@ -87,3 +87,12 @@ apps/api/reset-*.local.ts
 
 # Store server bundle
 apps/store/dist-server/
+
+.stage1-pgdata/
+.stage2-international-schema.sql
+backups/
+output/
+Customers/
+Claude outputs/
+apps/api/.audit-order-query.mjs
+*.dump

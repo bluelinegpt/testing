@@ -26,6 +26,13 @@ import type { TenantContext, TenantContextAccessor } from "../tenancy/tenant-con
 import { DriverCashReconciliationService } from "./driver-cash-reconciliation.service.js";
 import type { DriverCollectionPdfService } from "./driver-collection-pdf.service.js";
 import { PaymentFundingAccountService } from "../accounting/payment-funding-account.service.js";
+import { AccountingOperationSupport } from "../accounting/accounting-operation.support.js";
+import { BalanceControlService } from "../accounting/balance-control.service.js";
+import { BalanceEnforcementCoordinator } from "../accounting/balance-enforcement.coordinator.js";
+import { CashBankQueryService } from "../accounting/cash-bank-query.service.js";
+import { FundingAccountBalanceService } from "../accounting/funding-account-balance.service.js";
+import { FundingAccountLockService } from "../accounting/funding-account-lock.service.js";
+import { GeneralExpenseQueryService } from "../accounting/general-expense-query.service.js";
 import { permissiveBalanceEnforcement } from "../test/balance-enforcement-stub.js";
 import { EmployeeCollectionEarningService } from "../payroll/employee-collection-earning.service.js";
 import { OperationsHistoryWriter } from "./operations-history.writer.js";
@@ -239,7 +246,7 @@ export function createCaller(
   connectionString: string,
   companyId: string,
   accountId: string,
-  options: { readonly lockTimeoutMs?: number } = {},
+  options: { readonly lockTimeoutMs?: number; readonly useProductionBalanceEnforcement?: boolean } = {},
 ): Caller {
   // The search_path already rides on the connection string; a lock timeout is
   // applied per statement so a hung wait surfaces as a failure, never a hang.
@@ -262,6 +269,7 @@ export function createCaller(
       "reconciliations.reverse",
       "settlements.create",
       "settlements.reverse",
+      "accounting.view",
     ]),
     sessionId: randomUUID(),
   });
@@ -307,6 +315,18 @@ export function createCaller(
     // must prove confirmation still behaves with it wired in.
     new EmployeeCollectionEarningService(tenants as unknown as TenantContextAccessor),
   );
+  const accountingSupport = new AccountingOperationSupport(tenants, identities, new OperationsHistoryWriter());
+  const productionBalanceEnforcement = options.useProductionBalanceEnforcement
+    ? new BalanceEnforcementCoordinator(
+        new FundingAccountLockService(tenants),
+        new FundingAccountBalanceService(
+          new CashBankQueryService(database, accountingSupport, new GeneralExpenseQueryService(database, accountingSupport)),
+          tenants,
+        ),
+        new BalanceControlService(database, transactions, tenants, identities),
+        tenants,
+      )
+    : undefined;
   const traderSettlementService = new TraderSettlementService(
     database,
     transactions,
@@ -325,7 +345,7 @@ export function createCaller(
     // Always-allow stub. This harness exercises settlement CONCURRENCY, not
     // balance policy; a stub that enforced would change what these scenarios
     // test, and a stub that blocked would fail them for the wrong reason.
-    permissiveBalanceEnforcement(),
+    productionBalanceEnforcement ?? permissiveBalanceEnforcement(),
   );
   return {
     database,

@@ -95,6 +95,7 @@ import {
   type TraderSettlementListRow,
   type TraderSettlementReportData,
   type TraderSettlementSummary,
+  type TraderSettlementDraft,
 } from "./trader-settlement.service.js";
 // Runtime class values are required for Nest validation metadata.
 // eslint-disable-next-line @typescript-eslint/consistent-type-imports
@@ -133,6 +134,7 @@ import {
   TraderSettlementEligibleOrdersQueryDto,
   TraderSettlementListQueryDto,
   TraderSettlementSummaryQueryDto,
+  TraderSettlementDraftListQueryDto,
   TraderAccountStatementQueryDto,
   UpdateOrderDto,
   GenerateShipmentManifestDto,
@@ -798,15 +800,6 @@ export class OperationsController {
     return this.operations.traderSettlements();
   }
 
-  @RequireAnyPermission("settlements.create", "reports.export", "users_roles.manage")
-  @ApiOperation({ summary: "Show one trader settlement with orders and payments" })
-  @Get("settlements/:settlementId")
-  public traderSettlementDetail(
-    @Param("settlementId", new ParseUUIDPipe()) settlementId: string,
-  ): Promise<OperationsTraderSettlementDetail> {
-    return this.operations.traderSettlementDetail(settlementId);
-  }
-
   @ApiOperation({ summary: "Create an active trader in the authenticated Company" })
   @Post("traders")
   public createTrader(
@@ -1011,6 +1004,83 @@ export class OperationsController {
     @Body() input: ProposeTraderAllocationDto,
   ): Promise<TraderAllocationProposal> {
     return this.traderSettlementService.proposeAllocation(input);
+  }
+
+  @RequireAnyPermission("settlements.create", "users_roles.manage")
+  @ApiOperation({ summary: "Save a financially inert Trader settlement draft" })
+  @Post("settlements/drafts")
+  public createTraderSettlementDraft(
+    @Body() input: CreateTraderSettlementDto,
+  ): Promise<TraderSettlementDraft> {
+    return this.traderSettlementService.createDraft(input);
+  }
+
+  @RequireAnyPermission("settlements.create", "users_roles.manage")
+  @ApiOperation({ summary: "List Trader settlement drafts" })
+  @Get("settlements/drafts")
+  public listTraderSettlementDrafts(
+    @Query() query: TraderSettlementDraftListQueryDto,
+  ) {
+    return this.traderSettlementService.drafts(query);
+  }
+
+  // Declared BEFORE `settlements/drafts/:draftId`: Nest matches in declaration
+  // order, so the parameterised route would otherwise capture "open" and the
+  // UUID pipe would reject it.
+  @RequireAnyPermission("settlements.create", "users_roles.manage")
+  @ApiOperation({ summary: "The Trader's open settlement draft, if any" })
+  @Get("settlements/drafts/open")
+  public openTraderSettlementDraft(
+    @Query("traderId", new ParseUUIDPipe()) traderId: string,
+  ): Promise<TraderSettlementDraft | null> {
+    return this.traderSettlementService.openDraftForTrader(traderId);
+  }
+
+  @RequireAnyPermission("settlements.create", "users_roles.manage")
+  @ApiOperation({ summary: "Read a Trader settlement draft" })
+  @Get("settlements/drafts/:draftId")
+  public getTraderSettlementDraft(
+    @Param("draftId", new ParseUUIDPipe()) draftId: string,
+  ): Promise<TraderSettlementDraft> {
+    return this.traderSettlementService.draft(draftId);
+  }
+
+  @RequireAnyPermission("settlements.create", "users_roles.manage")
+  @ApiOperation({ summary: "Edit a financially inert Trader settlement draft" })
+  @Patch("settlements/drafts/:draftId")
+  public updateTraderSettlementDraft(
+    @Param("draftId", new ParseUUIDPipe()) draftId: string,
+    @Body() input: CreateTraderSettlementDto,
+  ): Promise<TraderSettlementDraft> {
+    return this.traderSettlementService.updateDraft(draftId, input);
+  }
+
+  @RequireAnyPermission("settlements.create", "users_roles.manage")
+  @ApiOperation({ summary: "Discard an unconfirmed Trader settlement draft" })
+  @Delete("settlements/drafts/:draftId")
+  public deleteTraderSettlementDraft(
+    @Param("draftId", new ParseUUIDPipe()) draftId: string,
+  ): Promise<{ readonly id: string }> {
+    return this.traderSettlementService.deleteDraft(draftId);
+  }
+
+  @RequireAnyPermission("settlements.create", "users_roles.manage")
+  @ApiOperation({ summary: "Confirm Money Sent to Trader for a saved draft" })
+  @Post("settlements/drafts/:draftId/confirm")
+  public confirmTraderSettlementDraft(
+    @Param("draftId", new ParseUUIDPipe()) draftId: string,
+    @Req() request: Request,
+  ): Promise<CreateTraderSettlementResult> {
+    return this.traderSettlementService.confirmDraft(draftId, this.correlationId(request));
+  }
+
+  @RequireAnyPermission("settlements.create", "reports.export", "users_roles.manage")
+  @ApiOperation({ summary: "Show one trader settlement with orders and payments" })
+  @Get("settlements/:settlementId")
+  public traderSettlementDetail(
+    @Param("settlementId", new ParseUUIDPipe()) settlementId: string,
+  ): Promise<OperationsTraderSettlementDetail> {
+    return this.operations.traderSettlementDetail(settlementId);
   }
 
   @RequireAnyPermission("settlements.create", "users_roles.manage")

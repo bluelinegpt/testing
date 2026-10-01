@@ -47,9 +47,11 @@ const sample: TraderSettlementReportData = {
       areaName: "Deira",
       codAmount: "110.00",
       customerName: "Test Customer",
+      customerMobileNumber: "971500000001",
       deliveryDate: "2026-07-20T09:00:00.000Z",
       emirateName: "Dubai",
       orderNumber: "ORD-000001",
+      orderType: "delivery",
       orderSettlementStatus: "money_sent_to_trader",
       originalTraderPayable: "100.00",
       previouslyPaid: "0.00",
@@ -86,7 +88,7 @@ describe("buildTraderSettlementStatementHtml", () => {
     expect(html).toContain('lang="en"');
     expect(html).toContain("Trader Invoice");
     expect(html).toContain("SET-000123");
-    expect(html).toContain("SER-1");
+    expect(html).toContain("ORD-000001");
     expect(html).toContain("REF-1");
     expect(html).toContain("REF-BANK-1");
     expect(html).toContain("Test Trader");
@@ -116,7 +118,7 @@ describe("buildTraderSettlementStatementHtml", () => {
     expect(html).toContain('lang="ar"');
     expect(html).toContain("فاتورة التاجر");
     expect(html).toContain("شركة الاختبار");
-    expect(html).toContain("SER-1");
+    expect(html).toContain("ORD-000001");
     expect(html).toContain("REF-1");
     expect(html).toContain("AED 100.00");
   });
@@ -177,7 +179,11 @@ describe("buildTraderSettlementStatementHtml", () => {
         {
           amountApplied: "25.00",
           businessDate: "2026-07-19",
+          customerMobileNumber: null,
+          customerName: null,
           orderSerialNumber: "SER-FEE-1",
+          orderNumber: "ORD-FEE-1",
+          referenceNumber: null,
           reason: "Service fee owed by Trader",
           receivableNumber: "RCV-000123",
           sourceReference: "ORD-FEE-1",
@@ -193,7 +199,7 @@ describe("buildTraderSettlementStatementHtml", () => {
     };
     const html = buildTraderSettlementStatementHtml(withDeduction, "en");
     expect(html).toContain("RCV-000123");
-    expect(html).toContain("SER-FEE-1");
+    expect(html).toContain("ORD-FEE-1");
     expect(html).toContain("Service fee owed by Trader");
     expect(html).toContain("-AED 25.00");
     expect(html).toContain("AED 75.00");
@@ -222,7 +228,7 @@ describe("buildTraderSettlementStatementHtml", () => {
       header: { ...sample.header, reversedBySettlementNumber: "SET-000200", status: "reversed" },
     };
     const html = buildTraderSettlementStatementHtml(reversed, "en");
-    expect(html).toContain("This settlement has been reversed.");
+    expect(html).toContain("This invoice has been reversed.");
     expect(html).toContain("SET-000200");
   });
 

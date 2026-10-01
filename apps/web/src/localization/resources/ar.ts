@@ -3864,6 +3864,31 @@ export const arabicTranslations = {
     pageTitle: "تسويات التاجر",
     pageSubtitle: "إدارة الأموال المرسلة للتجار — دفعات كاملة وجزئية، إيصالات، وعكوس.",
     newSettlement: "تسوية التجار الجديدة",
+    savedDrafts: "مسودات تسويات التجار المحفوظة",
+    draftStatus: "حالة المسودة",
+    statusDraft: "مسودة",
+    editDraft: "تعديل المسودة",
+    viewDraft: "عرض المسودة",
+    noSavedDrafts: "لا توجد مسودات تسويات محفوظة.",
+    updatedAt: "آخر تحديث",
+    saveDraft: "حفظ المسودة",
+    draftSaved: "تم حفظ المسودة. لم يتم ترحيل أي حركة مالية.",
+    draftSavedAndClosed:
+      "تم حفظ مسودة {{trader}}. لم يتم ترحيل أي حركة مالية — ستبقى مدرجة أدناه حتى تقوم بتأكيدها.",
+    draftSaveFailed: "تعذر حفظ مسودة التسوية.",
+    draftLoadFailed: "تعذر تحميل مسودة التسوية.",
+    draftTrader: "التاجر",
+    draftAmount: "صافي المبلغ",
+    draftOrderCount: "عدد الطلبات",
+    deleteDraft: "حذف",
+    deleteDraftWarning:
+      "حذف المسودة المحفوظة للتاجر {{trader}} ({{amount}})؟ لم يتم ترحيل أي حركة مالية، لكن الطلبات والمبالغ المحفوظة ستفقد.",
+    deleteDraftFailed: "تعذر حذف مسودة التسوية.",
+    includeConfirmedDrafts: "إظهار المسودات المؤكدة",
+    existingDraftOpened:
+      "لدى {{trader}} مسودة محفوظة بالفعل، وقد تم فتحها هنا. لا يمكن أن يكون للتاجر أكثر من مسودة واحدة في الوقت نفسه.",
+    draftAlreadyOpen:
+      "لدى هذا التاجر مسودة محفوظة بالفعل. افتحها من قائمة مسودات التسويات المحفوظة بدلًا من إنشاء مسودة جديدة.",
     // Summary cards
     summaryEligiblePayable: "المستحق للتجار المؤهل",
     summaryUnsettled: "المبلغ غير المسوى",

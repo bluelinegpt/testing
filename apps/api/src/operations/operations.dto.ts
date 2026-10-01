@@ -1552,6 +1552,32 @@ export class TraderSettlementListQueryDto extends TraderSettlementFilterDto {
   public readonly sortBy?: (typeof traderSettlementListSorts)[number];
 }
 
+export class TraderSettlementDraftListQueryDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(1)
+  public readonly page?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsIn(traderSettlementPageSizes)
+  public readonly pageSize?: (typeof traderSettlementPageSizes)[number];
+
+  @IsOptional()
+  @IsUUID()
+  public readonly traderId?: string;
+
+  /**
+   * Which drafts to list. The service defaults this to `draft` — a confirmed
+   * draft is kept as the record of what was confirmed, not as work in progress,
+   * so it is listed only when explicitly asked for.
+   */
+  @IsOptional()
+  @IsIn(["draft", "confirmed", "all"])
+  public readonly status?: "draft" | "confirmed" | "all";
+}
+
 // Summary-cards endpoint (§16): no pagination, same filter vocabulary as the list.
 export class TraderSettlementSummaryQueryDto extends TraderSettlementFilterDto {}
 

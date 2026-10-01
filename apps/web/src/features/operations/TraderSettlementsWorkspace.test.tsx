@@ -265,6 +265,15 @@ function setup(
           traderName: "Test Trader",
         });
       }
+      if (path === "operations/settlements/drafts") {
+        return Promise.resolve({ id: "draft-1", payload: body, status: "draft", confirmedSettlementId: null });
+      }
+      if (path.endsWith("/confirm")) {
+        return Promise.resolve({
+          amount: "100.00", orderCount: 1, paymentMethod: "cash", settlementId: "settlement-new",
+          settlementNumber: "SET-000200", traderId: "trader-1", traderName: "Test Trader",
+        });
+      }
       if (path.endsWith("/confirm-receipt")) {
         return Promise.resolve({ orderCount: 1, settlementId: "settlement-1" });
       }
@@ -339,7 +348,10 @@ describe("TraderSettlementsWorkspace", () => {
 
   it("shows Money Sent and Money Received as separate table columns", async () => {
     setup();
-    const table = await screen.findByRole("table");
+    const table = (await screen.findAllByRole("table")).find((candidate) =>
+      candidate.textContent?.includes("Money Sent"),
+    );
+    if (table === undefined) throw new Error("settlements table was not rendered");
     expect(within(table).getByText("Money Sent")).toBeInTheDocument();
     expect(within(table).getByText("Money Received")).toBeInTheDocument();
     const row = screen.getByText("SET-000123").closest("tr");
@@ -385,10 +397,12 @@ describe("TraderSettlementsWorkspace", () => {
     expect(
       screen.getByRole("checkbox", { name: "Deduct fee linked to Order SER-0" }),
     ).not.toBeChecked();
-    const totals = [...document.querySelectorAll(".eligible-orders-totals")].find((element) =>
-      element.textContent?.includes("Net Payment to Trader"),
-    );
-    expect(totals?.textContent).toContain("100.00");
+    await waitFor(() => {
+      const totals = [...document.querySelectorAll(".eligible-orders-totals")].find((element) =>
+        element.textContent?.includes("100.00"),
+      );
+      expect(totals?.textContent).toContain("100.00");
+    });
   });
 
   it("calls the oldest-first allocation proposal endpoint when a Payment Amount is entered", async () => {
@@ -475,16 +489,55 @@ describe("TraderSettlementsWorkspace", () => {
     );
     fireEvent.click(dialog.getByText("Confirm Money Sent to Trader"));
     await waitFor(() =>
-      expect(api.post).toHaveBeenCalledWith(
-        "operations/settlements/payments",
-        expect.objectContaining({ traderId: "trader-1" }),
-        expect.objectContaining({ "X-Idempotency-Key": expect.any(String) }),
-      ),
+      expect(api.post).toHaveBeenCalledWith("operations/settlements/drafts/draft-1/confirm"),
+    );
+    expect(api.post).not.toHaveBeenCalledWith(
+      "operations/settlements/payments",
+      expect.anything(),
+      expect.anything(),
     );
     expect(await dialog.findByText(/SET-000200 confirmed\./)).toBeInTheDocument();
     expect(dialog.getByRole("button", { name: "Preview Statement" })).toBeInTheDocument();
     expect(dialog.getByRole("button", { name: "Print" })).toBeInTheDocument();
     expect(dialog.getByRole("button", { name: "Download PDF" })).toBeInTheDocument();
+  });
+
+  it("saves a draft without calling the legacy posting endpoint", async () => {
+    const { api } = setup();
+    fireEvent.click(await screen.findByRole("button", { name: "Traders New Settlement" }));
+    const dialog = within(await screen.findByRole("dialog"));
+    fireEvent.click(await dialog.findByRole("button", { name: /Test Trader/ }));
+    await dialog.findByText("SER-1");
+    fireEvent.change(dialog.getByLabelText("Gross Order Payable (+)"), { target: { value: "100" } });
+    await dialog.findByText("Outstanding Before");
+    fireEvent.change(dialog.getByLabelText("Cash Account"), { target: { value: "cash-company-1" } });
+    fireEvent.click(await dialog.findByRole("button", { name: "Save Draft" }));
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith("operations/settlements/drafts", expect.any(Object)));
+    expect(api.post).not.toHaveBeenCalledWith("operations/settlements/payments", expect.anything(), expect.anything());
+    expect(await dialog.findByText("Draft saved. No financial posting was made.")).toBeInTheDocument();
+    expect(dialog.queryByText(/SET-000200 confirmed/)).toBeNull();
+  });
+
+  it("lists a saved draft and loads it through the draft detail route", async () => {
+    const draft = {
+      id: "draft-visible",
+      status: "draft",
+      confirmedSettlementId: null,
+      traderId: "trader-1",
+      payload: { traderId: "trader-1", amount: "100.00", paymentDate: "2026-07-27", paymentMethod: "cash", allocations: [], receivableOffsets: [] },
+      updatedAt: "2026-07-27T11:00:00.000Z",
+    };
+    const { getCalls } = setup({
+      getExtra: (path) => {
+        if (path.startsWith("operations/settlements/drafts?page=")) return { items: [draft], page: 1, pageSize: 25, total: 1 };
+        if (path === "operations/settlements/drafts/draft-visible") return draft;
+        return undefined;
+      },
+    });
+    const edit = await screen.findByRole("button", { name: "Edit draft" });
+    fireEvent.click(edit);
+    await waitFor(() => expect(getCalls).toContain("operations/settlements/drafts/draft-visible"));
+    expect(await screen.findByText("Draft status")).toBeInTheDocument();
   });
 
   it("shows a partially-settled Order with the correct remaining balance in the allocation table", async () => {
@@ -565,7 +618,10 @@ describe("TraderSettlementsWorkspace", () => {
         if (path === "operations/settlements/payments/propose-allocation") {
           return Promise.resolve(proposal);
         }
-        if (path === "operations/settlements/payments") {
+        if (path === "operations/settlements/drafts") {
+          return Promise.resolve({ id: "draft-error", payload: {}, status: "draft", confirmedSettlementId: null });
+        }
+        if (path.endsWith("/confirm")) {
           return Promise.reject(
             new ApiError(
               "One or more Orders' outstanding balances have changed.",

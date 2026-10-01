@@ -112,12 +112,38 @@ interface CreateTraderSettlementResult {
   readonly traderName: string;
 }
 
+/**
+ * The stored draft payload — the same shape the create-settlement endpoint
+ * accepts, every field optional because a draft is read back from JSON that
+ * was written by an older build of this screen.
+ *
+ * Typed rather than `Record<string, unknown>` so the rehydration below reads
+ * real fields instead of casting: the cast is what let a renamed field fail
+ * silently at runtime.
+ */
+interface TraderSettlementDraftPayload {
+  readonly allocations?: readonly { amount: string; orderId: string }[];
+  readonly amount?: number | string;
+  readonly bankAccountId?: string;
+  readonly bankReference?: string;
+  readonly cashAccountId?: string;
+  readonly notes?: string;
+  readonly paymentDate?: string;
+  readonly paymentMethod?: string;
+  readonly receivableOffsets?: readonly { amount: string; receivableId: string }[];
+  readonly traderBankAccountId?: string;
+  readonly traderId?: string;
+}
+
 interface TraderSettlementDraftRow {
   readonly id: string;
   readonly traderId: string;
-  readonly payload: Record<string, unknown>;
+  readonly traderName: string;
+  readonly payload: TraderSettlementDraftPayload;
   readonly status: "draft" | "confirmed";
   readonly confirmedSettlementId: string | null;
+  readonly amount: string;
+  readonly orderCount: number;
   readonly createdAt: string;
   readonly updatedAt: string;
 }
@@ -421,6 +447,7 @@ export function TraderSettlementsWorkspace({
     [list.filters, presetTraderId],
   );
   const [listPage, setListPage] = useState<PagedResponse<TraderSettlementListRow>>();
+  const [drafts, setDrafts] = useState<PagedResponse<TraderSettlementDraftRow>>();
   /* Opened only for a request this screen owns, and only when a Trader was
      actually supplied: a New Settlement dialog with no Trader is worse than no
      dialog, because it looks like the context was lost rather than absent. The
@@ -429,6 +456,11 @@ export function TraderSettlementsWorkspace({
   const [listError, setListError] = useState<string>();
   const [newSettlementOpen, setNewSettlementOpen] = useState(false);
   const [draftToEdit, setDraftToEdit] = useState<string>();
+  /* Confirmed drafts are kept forever as the record of what was confirmed, so
+     the list shows open ones by default and this reveals the rest on demand. */
+  const [showConfirmedDrafts, setShowConfirmedDrafts] = useState(false);
+  const [draftBusyId, setDraftBusyId] = useState<string>();
+  const [draftError, setDraftError] = useState<string>();
   const [addReceivableOpen, setAddReceivableOpen] = useState(false);
   const [collectFromTraderOpen, setCollectFromTraderOpen] = useState(false);
   /* A smart next action from the Orders list can ask this screen to open New
@@ -568,13 +600,61 @@ export function TraderSettlementsWorkspace({
       )
       .then(setListPage)
       .catch(() => setListError(t("traderSettlements.detailLoadFailed")));
-  }, [api, canManage, filters, list.sortBy, list.sortDirection, page, pageSize, t]);
+    void api
+      .get<PagedResponse<TraderSettlementDraftRow>>(
+        `operations/settlements/drafts?page=1&pageSize=25&status=${
+          showConfirmedDrafts ? "all" : "draft"
+        }`,
+      )
+      .then(setDrafts)
+      .catch(() => setDrafts(undefined));
+  }, [
+    api,
+    canManage,
+    filters,
+    list.sortBy,
+    list.sortDirection,
+    page,
+    pageSize,
+    showConfirmedDrafts,
+    t,
+  ]);
 
   useEffect(() => refresh(), [refresh]);
 
   const rows = listPage?.items ?? [];
   const total = listPage?.total ?? 0;
   const pageCount = total === 0 ? 1 : Math.ceil(total / pageSize);
+
+  /**
+   * Discard an unconfirmed draft.
+   *
+   * Nothing financial is undone here — an open draft has posted nothing — but
+   * the stored intent is gone for good, so it is confirmed first. The backend
+   * refuses a confirmed draft independently; this only hides the button.
+   */
+  const deleteDraft = async (draft: TraderSettlementDraftRow) => {
+    if (
+      !window.confirm(
+        t("traderSettlements.deleteDraftWarning", {
+          amount: money(draft.amount),
+          trader: draft.traderName,
+        }),
+      )
+    ) {
+      return;
+    }
+    setDraftBusyId(draft.id);
+    setDraftError(undefined);
+    try {
+      await api.delete<{ readonly id: string }>(`operations/settlements/drafts/${draft.id}`);
+      refresh();
+    } catch (error) {
+      setDraftError(message(error, t("traderSettlements.deleteDraftFailed")));
+    } finally {
+      setDraftBusyId(undefined);
+    }
+  };
 
   const openRowPdf = async (row: TraderSettlementListRow, mode: PdfAction) => {
     setPdfError(undefined);
@@ -628,7 +708,7 @@ export function TraderSettlementsWorkspace({
           <>
             <button
               className="button button-primary"
-              onClick={() => setNewSettlementOpen(true)}
+              onClick={() => { setDraftToEdit(undefined); setNewSettlementOpen(true); }}
               type="button"
             >
               {t("traderSettlements.newSettlement")}
@@ -684,6 +764,103 @@ export function TraderSettlementsWorkspace({
       )}
 
       {summary === undefined ? null : <SummaryCards summary={summary} />}
+
+      <section
+        aria-labelledby="trader-settlement-drafts-heading"
+        className="settlement-drafts"
+      >
+        <div className="settlement-drafts__header">
+          <h2 className="settlement-drafts__title" id="trader-settlement-drafts-heading">
+            {t("traderSettlements.savedDrafts")}
+          </h2>
+          {(drafts?.items ?? []).length === 0 ? null : (
+            <span className="settlement-drafts__count">{drafts?.total ?? 0}</span>
+          )}
+          <label className="settlement-drafts__toggle">
+            <input
+              checked={showConfirmedDrafts}
+              onChange={(event) => setShowConfirmedDrafts(event.target.checked)}
+              type="checkbox"
+            />
+            {t("traderSettlements.includeConfirmedDrafts")}
+          </label>
+        </div>
+        {draftError === undefined ? null : (
+          <div className="alert alert-error" role="alert">
+            {draftError}
+          </div>
+        )}
+        {(drafts?.items ?? []).length === 0 ? (
+          <p className="settlement-drafts__empty">{t("traderSettlements.noSavedDrafts")}</p>
+        ) : (
+          <div className="settlement-drafts__body">
+            <table>
+              <thead>
+                <tr>
+                  <th>{t("traderSettlements.draftTrader")}</th>
+                  <th className="settlement-drafts__numeric">
+                    {t("traderSettlements.draftAmount")}
+                  </th>
+                  <th className="settlement-drafts__numeric">
+                    {t("traderSettlements.draftOrderCount")}
+                  </th>
+                  <th>{t("traderSettlements.draftStatus")}</th>
+                  <th>{t("traderSettlements.updatedAt")}</th>
+                  <th className="settlement-drafts__numeric">{t("common.actions")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(drafts?.items ?? []).map((draft) => (
+                  <tr key={draft.id}>
+                    <td className="settlement-drafts__trader">{draft.traderName}</td>
+                    <td className="settlement-drafts__numeric settlement-drafts__amount">
+                      {money(draft.amount)}
+                    </td>
+                    <td className="settlement-drafts__numeric settlement-drafts__muted">
+                      {draft.orderCount}
+                    </td>
+                    <td>
+                      <span
+                        className={`settlement-draft-status settlement-draft-status--${draft.status}`}
+                      >
+                        {draft.status === "draft"
+                          ? t("traderSettlements.statusDraft")
+                          : t("traderSettlements.statusConfirmed")}
+                      </span>
+                    </td>
+                    <td className="settlement-drafts__muted">{draft.updatedAt.slice(0, 10)}</td>
+                    <td>
+                      <div className="settlement-drafts__actions">
+                        <button
+                          onClick={() => {
+                            setDraftToEdit(draft.id);
+                            setNewSettlementOpen(true);
+                          }}
+                          type="button"
+                        >
+                          {draft.status === "draft"
+                            ? t("traderSettlements.editDraft")
+                            : t("traderSettlements.viewDraft")}
+                        </button>
+                        {draft.status === "draft" ? (
+                          <button
+                            className="is-destructive"
+                            disabled={draftBusyId === draft.id}
+                            onClick={() => void deleteDraft(draft)}
+                            type="button"
+                          >
+                            {t("traderSettlements.deleteDraft")}
+                          </button>
+                        ) : null}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
 
       <FilterBar api={api} filters={filters} onChange={applyFilter} onClear={clearFilters} />
       {/* Date Mode sits beside the list rather than inside the filter bar:
@@ -844,6 +1021,7 @@ export function TraderSettlementsWorkspace({
       {!newSettlementOpen ? null : (
         <NewSettlementDialog
           api={api}
+          draftId={draftToEdit}
           {...((deepLinkTraderId ?? presetTraderId) === undefined
             ? {}
             : { initialTraderId: deepLinkTraderId ?? presetTraderId })}
@@ -855,7 +1033,11 @@ export function TraderSettlementsWorkspace({
           onClose={() => {
             setNewSettlementOpen(false);
             setDraftToEdit(undefined);
-            returnToOrigin();
+            if (returnToOrigin()) return;
+            // A draft may have been saved, edited or started before closing, so
+            // the Saved drafts table behind this dialog is now out of date.
+            // Confirming already refreshed via onCreated; closing did not.
+            refresh();
           }}
           onCreated={(settlementId) => {
             setNewSettlementOpen(false);
@@ -864,10 +1046,20 @@ export function TraderSettlementsWorkspace({
             refresh();
             openDetail(settlementId);
           }}
+          onDraftSaved={(traderName) => {
+            setNewSettlementOpen(false);
+            setDraftToEdit(undefined);
+            // Deliberately does NOT return to a deep-link origin: the draft
+            // lives on this screen and is what the person comes back to.
+            setReceiptNotice(t("traderSettlements.draftSavedAndClosed", { trader: traderName }));
+            refresh();
+          }}
           onOpenAccountStatement={(traderId) => {
             setNewSettlementOpen(false);
             setStatementTraderId(traderId);
             setStatementOpen(true);
+            // Same reason as onClose: this leaves the dialog too.
+            refresh();
           }}
           reportLanguage={reportLanguage}
         />
@@ -1521,6 +1713,7 @@ function NewSettlementDialog({
   onOriginatingOrderIneligible,
   onClose,
   onCreated,
+  onDraftSaved,
   onOpenAccountStatement,
   reportLanguage,
 }: {
@@ -1533,6 +1726,11 @@ function NewSettlementDialog({
   onOriginatingOrderIneligible?: (() => void) | undefined;
   onClose: () => void;
   onCreated: (settlementId: string) => void;
+  /**
+   * Saving a draft finishes the task: the dialog closes and the Trader
+   * Settlements screen says so, where the saved draft is now listed.
+   */
+  onDraftSaved: (traderName: string) => void;
   onOpenAccountStatement: (traderId: string) => void;
   reportLanguage: "ar" | "en";
 }) {
@@ -1628,6 +1826,23 @@ function NewSettlementDialog({
   const [selectedOrderRows, setSelectedOrderRows] = useState<
     Readonly<Record<string, TraderEligibleOrderRow>>
   >({});
+  /*
+   * Who owns the choice of Orders.
+   *
+   * True: the server's oldest-first allocator picks them, and re-picks whenever
+   * the amount changes — the right default for a fresh settlement.
+   * False: the operator picked them (ticking an Order, Select All, or reopening
+   * a saved draft), so the amount is spread across exactly that set and the
+   * allocator is not consulted. Apply Oldest-First and Clear Selection hand
+   * ownership back.
+   */
+  const [autoAllocate, setAutoAllocate] = useState(true);
+  /*
+   * The current allocations, readable from the amount effect without making
+   * that effect re-run every time a line is edited. It is only used to decide
+   * whether a redistribution is needed at all, never to derive what is rendered.
+   */
+  const allocationsRef = useRef<readonly { amount: string; orderId: string }[]>([]);
   const [overrideConfirmed, setOverrideConfirmed] = useState(false);
   const [originatingOrderDefaultActive, setOriginatingOrderDefaultActive] = useState(
     () => initialOrderId !== undefined,
@@ -1695,14 +1910,18 @@ function NewSettlementDialog({
       setDraftReadOnly(false);
       return;
     }
-    void api.get<TraderSettlementDraftRow & { payload: Record<string, any> }>(`operations/settlements/drafts/${draftIdProp}`)
-      .then((draft) => { setLoadedDraft(draft); setDraftReadOnly(draft.status === "confirmed" || draft.confirmedSettlementId !== null); })
+    void api
+      .get<TraderSettlementDraftRow>(`operations/settlements/drafts/${draftIdProp}`)
+      .then((draft) => {
+        setLoadedDraft(draft);
+        setDraftReadOnly(draft.status === "confirmed" || draft.confirmedSettlementId !== null);
+      })
       .catch(() => setConfirmError(t("traderSettlements.draftLoadFailed")));
   }, [api, draftIdProp, t]);
 
   useEffect(() => {
     if (loadedDraft === undefined || traders.length === 0) return;
-    const payload = loadedDraft.payload as any;
+    const payload = loadedDraft.payload;
     const selected = traders.find((row) => row.id === payload.traderId);
     if (selected === undefined) return;
     setTrader(selected);
@@ -1715,10 +1934,38 @@ function NewSettlementDialog({
     setBeneficiaryBankId(String(payload.traderBankAccountId ?? ""));
     setBankReference(String(payload.bankReference ?? ""));
     setNotes(String(payload.notes ?? ""));
-    setAllocations(Array.isArray(payload.allocations) ? payload.allocations : []);
-    setReceivableOffsets(Array.isArray(payload.receivableOffsets) ? payload.receivableOffsets : []);
-    setReceivableOffsetsCustomized(Array.isArray(payload.receivableOffsets) && payload.receivableOffsets.length > 0);
+    setAllocations(payload.allocations ?? []);
+    // The Orders saved in a draft are the operator's choice, exactly as if they
+    // had ticked them. Without this the amount restored above would immediately
+    // re-fire the allocator and replace the draft's own Orders with its picks.
+    setAutoAllocate(false);
+    setReceivableOffsets(payload.receivableOffsets ?? []);
+    setReceivableOffsetsCustomized((payload.receivableOffsets ?? []).length > 0);
   }, [loadedDraft, traders]);
+
+  /*
+   * Match a reopened draft's saved Orders to their eligible rows as soon as the
+   * list arrives, so the allocation table can show outstanding balances for
+   * them and the amount can be redistributed across them if it is edited.
+   */
+  useEffect(() => {
+    if (loadedDraft === undefined) return;
+    const draftOrderIds = new Set(
+      (loadedDraft.payload.allocations ?? []).map((line) => line.orderId),
+    );
+    if (draftOrderIds.size === 0) return;
+    setSelectedOrderRows((current) => {
+      let changed = false;
+      const next = { ...current };
+      for (const order of eligibleOrders) {
+        if (draftOrderIds.has(order.id) && next[order.id] === undefined) {
+          next[order.id] = order;
+          changed = true;
+        }
+      }
+      return changed ? next : current;
+    });
+  }, [eligibleOrders, loadedDraft]);
 
   useEffect(() => {
     void api
@@ -1862,12 +2109,41 @@ function NewSettlementDialog({
     if (allocations.length > 0 && trader !== undefined && trader.id !== next.id) {
       if (!window.confirm(t("traderSettlements.changeTraderWarning"))) return;
     }
+    /*
+     * A Trader may hold only one open draft, so if this one already has work in
+     * progress there is nothing to be gained by presenting a blank form that
+     * could not be saved. Reopen the existing draft instead and say so.
+     *
+     * Only when starting fresh: while already editing a draft, changing Trader
+     * is a deliberate move of THIS draft, and the save guard reports the clash.
+     */
+    if (draftId === undefined) {
+      void api
+        .get<TraderSettlementDraftRow | null>(
+          `operations/settlements/drafts/open?traderId=${encodeURIComponent(next.id)}`,
+        )
+        .then((existing) => {
+          if (existing === null) return;
+          setDraftId(existing.id);
+          setLoadedDraft(existing);
+          setDraftNotice(
+            t("traderSettlements.existingDraftOpened", { trader: existing.traderName }),
+          );
+        })
+        .catch(() => {
+          // A failed lookup must not block starting a settlement; the save
+          // guard still refuses a second draft, with its own message.
+        });
+    }
     setTrader(next);
     setAmount("");
     setPaymentAmount("");
     setProposal(undefined);
     setAllocations([]);
     setSelectedOrderRows({});
+    // A different Trader means a different set of Orders: the allocator leads
+    // again until this operator picks for themselves.
+    setAutoAllocate(true);
     setReceivableOffsets([]);
     setReceivableOffsetsCustomized(false);
     setOverrideConfirmed(false);
@@ -1893,6 +2169,59 @@ function NewSettlementDialog({
       setAllocations([
         { amount: money(Math.min(parsed.value, outstanding)), orderId: originatingOrder.id },
       ]);
+      setOverrideConfirmed(false);
+      return;
+    }
+    /*
+     * Once the operator has chosen the Orders — by ticking them, by Select All,
+     * or by reopening a saved draft — the amount is spread across THOSE Orders
+     * and no others. Asking the server to re-propose here is what used to throw
+     * the selection away: type the exact total of two ticked Orders and the
+     * oldest-first allocator would hand back a different set, silently
+     * replacing what had just been chosen.
+     *
+     * Apply Oldest-First and Clear Selection hand control back to the server.
+     */
+    if (!autoAllocate) {
+      setProposal(undefined);
+      setProposalError(undefined);
+      const selected = Object.values(selectedOrderRows);
+      // A reopened draft holds its Orders before the eligible rows have loaded.
+      // Leave its saved allocations alone until there is something to spread over.
+      if (selected.length === 0) return;
+      if (amount.trim() === "" || !parsed.ok || !(parsed.value > 0)) return;
+      /*
+       * Only redistribute when something actually needs it. If the existing
+       * lines already cover exactly the selected Orders and already add up to
+       * the requested amount, leave them alone — that is what preserves a
+       * reopened draft's own split, and any per-line amount typed by hand.
+       */
+      const current = allocationsRef.current;
+      const coversSelection =
+        current.length === selected.length &&
+        selected.every((order) => current.some((line) => line.orderId === order.id));
+      const currentTotal = current.reduce(
+        (sum, line) => sum + safeMoneyValue(line.amount),
+        0,
+      );
+      if (coversSelection && Math.abs(currentTotal - parsed.value) < 0.005) return;
+      // Oldest first WITHIN the selection: same rule the server applies, minus
+      // the freedom to pick different Orders. Undated Orders sort last.
+      const ordered = [...selected].sort((left, right) => {
+        const leftDate = left.deliveryDate ?? "9999-12-31";
+        const rightDate = right.deliveryDate ?? "9999-12-31";
+        return leftDate === rightDate
+          ? left.orderNumber.localeCompare(right.orderNumber)
+          : leftDate.localeCompare(rightDate);
+      });
+      let remaining = parsed.value;
+      setAllocations(
+        ordered.map((order) => {
+          const take = Math.min(remaining, safeMoneyValue(order.outstandingBalance));
+          remaining = Math.max(0, remaining - take);
+          return { amount: money(Math.max(0, take)), orderId: order.id };
+        }),
+      );
       setOverrideConfirmed(false);
       return;
     }
@@ -1930,7 +2259,17 @@ function NewSettlementDialog({
       active = false;
       window.clearTimeout(timer);
     };
-  }, [api, amount, initialOrderId, originatingOrderDefaultActive, originatingOrderRow, trader, t]);
+  }, [
+    api,
+    amount,
+    autoAllocate,
+    initialOrderId,
+    originatingOrderDefaultActive,
+    originatingOrderRow,
+    selectedOrderRows,
+    trader,
+    t,
+  ]);
 
   // Delivery date is display-only, for the allocation table's Delivery Date
   // column — the proposal/allocation endpoints don't return it. Looked up
@@ -1957,6 +2296,11 @@ function NewSettlementDialog({
       return current.map((line) => (line.orderId === orderId ? { ...line, amount: value } : line));
     });
   };
+
+  // Kept in step with the state it mirrors; see the ref's declaration.
+  useEffect(() => {
+    allocationsRef.current = allocations;
+  }, [allocations]);
 
   const allocationDisplayLines = useMemo(() => {
     const lines = new Map(
@@ -2074,54 +2418,65 @@ function NewSettlementDialog({
       ? cashAccountId !== ""
       : sourceBankId !== "" && beneficiaryBankId !== "" && bankReference.trim() !== "");
 
-  const fingerprint = JSON.stringify({
-    allocations: [...activeAllocations].sort((left, right) =>
-      left.orderId.localeCompare(right.orderId),
-    ),
-    amount: money(netPayment),
-    bankReference: bankReference.trim(),
-    beneficiaryBankId,
-    cashAccountId,
-    notes: notes.trim(),
+  const draftPayload = () => ({
+    allocations: activeAllocations.map((line) => ({ amount: safeMoneyValue(line.amount), orderId: line.orderId })),
+    amount: safeMoneyValue(netPayment),
+    ...(paymentMethod === "bank_transfer"
+      ? { bankAccountId: sourceBankId, bankReference: bankReference.trim(), traderBankAccountId: beneficiaryBankId }
+      : { cashAccountId }),
+    notes: notes.trim() === "" ? undefined : notes.trim(),
     paymentDate,
     paymentMethod,
-    receivableOffsets: [...receivableOffsets].sort((left, right) =>
-      left.receivableId.localeCompare(right.receivableId),
-    ),
-    sourceBankId,
-    traderId: trader?.id,
+    receivableOffsets: receivableOffsets.map((line) => ({ amount: safeMoneyValue(line.amount), receivableId: line.receivableId })),
+    traderId: trader!.id,
   });
+
+  const persistDraft = async (): Promise<TraderSettlementDraftRow> => {
+    const payload = draftPayload();
+    return draftId === undefined
+      ? api.post<TraderSettlementDraftRow>("operations/settlements/drafts", payload)
+      : api.patch<TraderSettlementDraftRow>(
+          `operations/settlements/drafts/${draftId}`,
+          payload,
+        );
+  };
+
+  const saveDraft = async () => {
+    if (!canProceedToReview || saving || trader === undefined || draftReadOnly) return;
+    setSaving(true);
+    setConfirmError(undefined);
+    try {
+      const saved = await persistDraft();
+      setDraftId(saved.id);
+      setLoadedDraft(saved);
+      setConfirmError(undefined);
+      // Saving a draft is the end of the task, not a checkpoint within it: hand
+      // back to the Trader Settlements screen, which lists what was just saved.
+      onDraftSaved(saved.traderName);
+      return;
+    } catch (error) {
+      // One draft per Trader is a rule the operator will meet often enough to
+      // deserve their own language; the backend's wording is English-only.
+      setConfirmError(
+        error instanceof ApiError && error.code === "trader_settlement_draft_already_open"
+          ? t("traderSettlements.draftAlreadyOpen")
+          : message(error, t("traderSettlements.draftSaveFailed")),
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const confirm = async () => {
     if (!canProceedToReview || saving || trader === undefined) return;
     setSaving(true);
     setConfirmError(undefined);
+    setDraftNotice(undefined);
     try {
+      const saved = await persistDraft();
+      setDraftId(saved.id);
       const result = await api.post<CreateTraderSettlementResult>(
-        "operations/settlements/payments",
-        {
-          allocations: activeAllocations.map((line) => ({
-            amount: safeMoneyValue(line.amount),
-            orderId: line.orderId,
-          })),
-          amount: safeMoneyValue(netPayment),
-          ...(paymentMethod === "bank_transfer"
-            ? {
-                bankAccountId: sourceBankId,
-                bankReference: bankReference.trim(),
-                traderBankAccountId: beneficiaryBankId,
-              }
-            : { cashAccountId }),
-          notes: notes.trim() === "" ? undefined : notes.trim(),
-          paymentDate,
-          paymentMethod,
-          receivableOffsets: receivableOffsets.map((line) => ({
-            amount: safeMoneyValue(line.amount),
-            receivableId: line.receivableId,
-          })),
-          traderId: trader.id,
-        },
-        { "X-Idempotency-Key": idempotency.keyFor(fingerprint) },
+        `operations/settlements/drafts/${saved.id}/confirm`,
       );
       setConfirmed(result);
       idempotency.reset();
@@ -2503,6 +2858,10 @@ function NewSettlementDialog({
                               onChange={(event) => {
                                 setOriginatingOrderDefaultActive(false);
                                 setOverrideConfirmed(false);
+                                // Ticking is a deliberate choice of Orders: from
+                                // here the amount is spread across the ticked
+                                // set, not re-proposed by the server.
+                                setAutoAllocate(false);
                                 if (event.target.checked) {
                                   setSelectedOrderRows((current) => ({
                                     ...current,
@@ -2830,6 +3189,8 @@ function NewSettlementDialog({
                     <button
                       onClick={() => {
                         setOriginatingOrderDefaultActive(false);
+                        // Hands the choice of Orders back to the server allocator.
+                        setAutoAllocate(true);
                         setAllocations(
                           (proposal?.allocations ?? []).map((line) => ({
                             amount: line.allocatedAmount,
@@ -2846,6 +3207,7 @@ function NewSettlementDialog({
                     <button
                       onClick={() => {
                         setOriginatingOrderDefaultActive(false);
+                        setAutoAllocate(false);
                         setSelectedOrderRows((current) => ({
                           ...current,
                           ...Object.fromEntries(eligibleOrders.map((order) => [order.id, order])),
@@ -2865,6 +3227,8 @@ function NewSettlementDialog({
                     <button
                       onClick={() => {
                         setOriginatingOrderDefaultActive(false);
+                        // Back to a blank slate, allocator included.
+                        setAutoAllocate(true);
                         setAllocations([]);
                         setSelectedOrderRows({});
                         setOverrideConfirmed(false);
@@ -3060,11 +3424,28 @@ function NewSettlementDialog({
                       <dd>{money(remainingAfter)}</dd>
                     </div>
                   </dl>
+                  {/* These also render at the top of this
+                      dialog, but Save Draft and Confirm are down here at the end
+                      of a long form — a result shown only at the top is a result
+                      nobody sees. Repeated next to the buttons that produce it. */}
+                  {draftNotice === undefined ? null : (
+                    <div className="alert alert-info" role="status">
+                      {draftNotice}
+                    </div>
+                  )}
+                  {confirmError === undefined ? null : (
+                    <div className="alert alert-error" role="alert">
+                      {confirmError}
+                    </div>
+                  )}
                   <div className="modal-actions">
                     <button className="button button-secondary" onClick={onClose} type="button">
                       {t("common.cancel")}
                     </button>
-                    <button className="button button-primary" disabled={saving} type="submit">
+                    <button className="button button-secondary" disabled={saving || draftReadOnly} onClick={() => void saveDraft()} type="button">
+                      {saving ? t("common.saving") : t("traderSettlements.saveDraft")}
+                    </button>
+                    <button className="button button-primary" disabled={saving || draftReadOnly} type="submit">
                       {saving ? t("common.saving") : t("traderSettlements.confirmMoneySent")}
                     </button>
                   </div>

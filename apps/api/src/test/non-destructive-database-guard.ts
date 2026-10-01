@@ -10,6 +10,7 @@ const databaseTestFlags = [
   "RUN_RECONCILIATION_DATABASE",
   "RUN_RECONCILIATION_HTTP",
   "RUN_SETTLEMENT_DATABASE",
+  "RUN_SETTLEMENT_FIXTURE_DATABASE",
   "RUN_SETTLEMENT_HTTP",
 ] as const;
 
@@ -34,10 +35,19 @@ export function assertNonDestructiveDatabaseTestPreflight(environment = process.
     throw new Error("Database tests require a PostgreSQL DATABASE_URL.");
   }
   const databaseName = parsed.pathname.replace(/^\//, "");
-  if (databaseName !== "blueline") {
-    throw new Error("Non-destructive Prompt 11C database tests must target blueline.");
+  const disposableDatabase = environment.BLUELINE_ALLOW_DISPOSABLE_DATABASE === "1";
+  const expectedDisposableName = environment.BLUELINE_DISPOSABLE_DB_NAME;
+  const expectedDisposablePort = environment.BLUELINE_DISPOSABLE_DB_PORT ?? "55432";
+  if (
+    databaseName !== "blueline" &&
+    !(disposableDatabase && expectedDisposableName === databaseName && parsed.port === expectedDisposablePort)
+  ) {
+    throw new Error("Database tests must target blueline or the explicitly verified disposable database.");
   }
   const host = parsed.hostname.toLowerCase();
+  if (disposableDatabase && databaseName === expectedDisposableName && (host !== "127.0.0.1" || parsed.port !== expectedDisposablePort)) {
+    throw new Error("Disposable database tests must target the verified local host and port.");
+  }
   if (!["localhost", "127.0.0.1", "::1"].includes(host)) {
     throw new Error("Non-destructive Prompt 11C database tests must target local PostgreSQL.");
   }

@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 
 import { HttpStatus, Inject, Injectable } from "@nestjs/common";
 import { Decimal } from "decimal.js";
-import { type Kysely, sql } from "kysely";
+import { type Kysely, sql, type Transaction } from "kysely";
 
 import { DATABASE } from "../infrastructure/database/database.tokens.js";
 import type { DatabaseSchema } from "../infrastructure/database/database.types.js";
@@ -31,6 +31,7 @@ import type {
   TraderSettlementEligibleOrdersQueryDto,
   TraderSettlementFilterDto,
   TraderSettlementListQueryDto,
+  TraderSettlementDraftListQueryDto,
   TraderSettlementSummaryQueryDto,
 } from "./operations.dto.js";
 import {
@@ -39,6 +40,26 @@ import {
 } from "./trader-settlement-report-html.js";
 
 const defaultPageSize = 25;
+
+/**
+ * The one projection every draft read uses, so a list row and a single read can
+ * never disagree about what a draft is.
+ *
+ * `amount` and `orderCount` are derived from the stored payload instead of
+ * being held in their own columns — the payload is the record of intent, and a
+ * duplicated column could drift from it. `jsonb_typeof` guards the array length
+ * so a malformed payload returns zero rather than raising.
+ */
+const draftProjection = sql`
+  d.id, d.trader_id as "traderId", t.name_en as "traderName", d.payload, d.status,
+  d.confirmed_settlement_id as "confirmedSettlementId",
+  round(coalesce((d.payload->>'amount')::numeric, 0), 2)::text as "amount",
+  case when jsonb_typeof(d.payload->'allocations') = 'array'
+       then jsonb_array_length(d.payload->'allocations')
+       else 0 end::int as "orderCount",
+  d.created_at::text as "createdAt", d.updated_at::text as "updatedAt"
+`;
+
 const idempotencyKeyPattern = /^[A-Za-z0-9._:-]{16,128}$/;
 const idempotencyOperationCreate = "trader_settlements.create";
 const idempotencyOperationReceipt = "trader_settlements.money_received";
@@ -294,6 +315,34 @@ export interface TraderSettlementReportData {
   readonly summary: TraderSettlementSummaryTotals;
 }
 
+export type TraderSettlementDraftStatus = "draft" | "confirmed";
+
+/**
+ * A saved draft as the screens need it.
+ *
+ * `amount` and `orderCount` are read back out of the stored payload rather than
+ * kept in their own columns: the payload is the record of intent, and a
+ * duplicated column could drift from it. `traderName` is joined for display —
+ * a list of drafts is unusable without it.
+ */
+export interface TraderSettlementDraft {
+  readonly id: string;
+  readonly traderId: string;
+  readonly traderName: string;
+  readonly payload: CreateTraderSettlementDto;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly status: TraderSettlementDraftStatus;
+  readonly confirmedSettlementId: string | null;
+  readonly amount: string;
+  readonly orderCount: number;
+}
+
+export interface TraderSettlementDraftListRow extends TraderSettlementDraft {
+  readonly total?: number;
+}
+
+
 /**
  * The authoritative Trader Settlement service (Phase 4 Checkpoint 4).
  *
@@ -322,6 +371,251 @@ export class TraderSettlementService {
     @Inject(BalanceEnforcementCoordinator)
     private readonly balanceEnforcement: BalanceEnforcementCoordinator,
   ) {}
+
+  /** Stage 1 only: persist intent without touching any financial table. */
+  public async createDraft(input: CreateTraderSettlementDto): Promise<TraderSettlementDraft> {
+    return this.saveDraft(undefined, input);
+  }
+
+  public async updateDraft(
+    draftId: string,
+    input: CreateTraderSettlementDto,
+  ): Promise<TraderSettlementDraft> {
+    return this.saveDraft(draftId, input);
+  }
+
+  /**
+   * The Trader's open draft, if they have one.
+   *
+   * A Trader may have at most one (migration 20260980000000), so this is how
+   * the screen answers "is there already work in progress for this Trader?" and
+   * reopens it instead of starting a second one that could not be saved.
+   */
+  public async openDraftForTrader(traderId: string): Promise<TraderSettlementDraft | null> {
+    this.assertAnyPermission("settlements.create");
+    const { companyId } = this.tenants.current();
+    const row = (
+      await sql<TraderSettlementDraft>`
+        select ${draftProjection}
+          from trader_settlement_drafts d
+          join traders t on t.id = d.trader_id and t.company_id = d.company_id
+         where d.company_id=${companyId}::uuid
+           and d.trader_id=${traderId}::uuid
+           and d.status='draft'
+      `.execute(this.database)
+    ).rows[0];
+    return row ?? null;
+  }
+
+  public async draft(draftId: string): Promise<TraderSettlementDraft> {
+    this.assertAnyPermission("settlements.create");
+    const { companyId } = this.tenants.current();
+    const row = (
+      await sql<TraderSettlementDraft>`
+        select ${draftProjection}
+          from trader_settlement_drafts d
+          join traders t on t.id = d.trader_id and t.company_id = d.company_id
+         where d.id=${draftId}::uuid and d.company_id=${companyId}::uuid
+      `.execute(this.database)
+    ).rows[0];
+    if (row === undefined) {
+      throw new ApplicationException(
+        "trader_settlement_draft_not_found",
+        "Trader settlement draft not found",
+        HttpStatus.NOT_FOUND,
+      );
+    }
+    return row;
+  }
+
+  /**
+   * Saved drafts, newest first.
+   *
+   * Defaults to OPEN drafts only. A confirmed draft is kept forever as the
+   * record of what was confirmed, but it is not work in progress and listing it
+   * alongside editable drafts is what made this screen unreadable — pass
+   * `status` explicitly to see them.
+   */
+  public async drafts(
+    query: TraderSettlementDraftListQueryDto,
+  ): Promise<Page<TraderSettlementDraftListRow>> {
+    this.assertAnyPermission("settlements.create");
+    const { companyId } = this.tenants.current();
+    const page = Math.max(1, query.page ?? 1);
+    const pageSize = query.pageSize ?? defaultPageSize;
+    const offset = (page - 1) * pageSize;
+    const status = query.status ?? "draft";
+    const rows = await sql<TraderSettlementDraftListRow>`
+      select ${draftProjection}, count(*) over()::int as total
+        from trader_settlement_drafts d
+        join traders t on t.id = d.trader_id and t.company_id = d.company_id
+       where d.company_id=${companyId}::uuid
+         and (${status}::text = 'all' or d.status = ${status}::text)
+         and (${query.traderId ?? null}::uuid is null
+              or d.trader_id=${query.traderId ?? null}::uuid)
+       order by d.updated_at desc, d.id desc
+       limit ${pageSize} offset ${offset}
+    `.execute(this.database);
+    return this.page(rows.rows, page, pageSize);
+  }
+
+  /**
+   * Discard an open draft.
+   *
+   * A confirmed draft is never deletable: it is the stored intent behind a
+   * posted settlement, and the settlement's own reversal path — not deletion —
+   * is how a confirmed payment is undone. The check and the delete share one
+   * transaction and one `for update`, so a concurrent confirmation cannot slip
+   * between them.
+   */
+  public async deleteDraft(draftId: string): Promise<{ readonly id: string }> {
+    this.assertAnyPermission("settlements.create");
+    const { companyId } = this.tenants.current();
+    return this.transactions.execute(async (transaction) => {
+      const existing = (
+        await sql<{ confirmedSettlementId: string | null; id: string }>`
+          select id, confirmed_settlement_id as "confirmedSettlementId"
+            from trader_settlement_drafts
+           where id=${draftId}::uuid and company_id=${companyId}::uuid
+           for update
+        `.execute(transaction)
+      ).rows[0];
+      if (existing === undefined) {
+        throw new ApplicationException(
+          "trader_settlement_draft_not_found",
+          "Trader settlement draft not found",
+          HttpStatus.NOT_FOUND,
+        );
+      }
+      if (existing.confirmedSettlementId !== null) {
+        throw new ApplicationException(
+          "trader_settlement_draft_not_deletable",
+          "A confirmed settlement draft cannot be deleted. Reverse the settlement instead.",
+          HttpStatus.CONFLICT,
+        );
+      }
+      await sql`
+        delete from trader_settlement_drafts
+         where id=${draftId}::uuid and company_id=${companyId}::uuid
+           and confirmed_settlement_id is null
+      `.execute(transaction);
+      return { id: draftId };
+    });
+  }
+
+  /**
+   * Create or replace one draft.
+   *
+   * The whole thing runs in a transaction: the editability check takes a real
+   * row lock that lasts until the upsert commits, so two concurrent edits can
+   * no longer both pass the check, and a draft cannot be edited underneath a
+   * confirmation that is already in flight.
+   *
+   * Nothing here touches a financial table.
+   *
+   * A Trader may hold at most one open draft. That is enforced by a partial
+   * unique index (migration 20260980000000); the check below exists to turn the
+   * constraint violation into an answerable message naming the draft to open.
+   */
+  private async saveDraft(
+    draftId: string | undefined,
+    input: CreateTraderSettlementDto,
+  ): Promise<TraderSettlementDraft> {
+    this.assertAnyPermission("settlements.create");
+    const { companyId } = this.tenants.current();
+    const identity = this.identities.current();
+    return this.transactions.execute(async (transaction) => {
+      const trader = (
+        await sql<{ id: string }>`
+          select id from traders
+           where id=${input.traderId}::uuid and company_id=${companyId}::uuid
+        `.execute(transaction)
+      ).rows[0];
+      if (trader === undefined) {
+        throw new ApplicationException(
+          "trader_not_found",
+          "Trader not found",
+          HttpStatus.NOT_FOUND,
+        );
+      }
+      if (draftId !== undefined) {
+        const existing = (
+          await sql<{ confirmedSettlementId: string | null; id: string; status: string }>`
+            select id, status, confirmed_settlement_id as "confirmedSettlementId"
+              from trader_settlement_drafts
+             where id=${draftId}::uuid and company_id=${companyId}::uuid
+             for update
+          `.execute(transaction)
+        ).rows[0];
+        if (existing === undefined) {
+          throw new ApplicationException(
+            "trader_settlement_draft_not_found",
+            "Trader settlement draft not found",
+            HttpStatus.NOT_FOUND,
+          );
+        }
+        if (existing.status !== "draft" || existing.confirmedSettlementId !== null) {
+          throw new ApplicationException(
+            "trader_settlement_draft_not_editable",
+            "Only draft settlements can be edited",
+            HttpStatus.CONFLICT,
+          );
+        }
+      }
+      /*
+       * One open draft per Trader. Checked here so the caller gets the existing
+       * draft's id back and can simply open it; the unique index is what
+       * actually guarantees it, including against a concurrent second create.
+       *
+       * This also covers an edit that MOVES a draft to a Trader who already has
+       * one, which is why it is not limited to the create path.
+       */
+      const clash = (
+        await sql<{ id: string }>`
+          select id from trader_settlement_drafts
+           where company_id=${companyId}::uuid
+             and trader_id=${input.traderId}::uuid
+             and status='draft'
+             and (${draftId ?? null}::uuid is null or id <> ${draftId ?? null}::uuid)
+        `.execute(transaction)
+      ).rows[0];
+      if (clash !== undefined) {
+        throw new ApplicationException(
+          "trader_settlement_draft_already_open",
+          "This Trader already has a saved draft. Open it instead of starting another.",
+          HttpStatus.CONFLICT,
+          [clash.id],
+        );
+      }
+      const payload = JSON.stringify(input);
+      const saved = (
+        await sql<{ id: string }>`
+          insert into trader_settlement_drafts(
+            id, company_id, trader_id, payload, created_by_account_id, updated_by_account_id
+          ) values(
+            coalesce(${draftId ?? null}::uuid, gen_random_uuid()), ${companyId}::uuid,
+            ${input.traderId}::uuid, ${payload}::jsonb, ${identity.identityId}::uuid,
+            ${identity.identityId}::uuid
+          )
+          on conflict (id, company_id) do update set
+            trader_id=excluded.trader_id, payload=excluded.payload,
+            updated_by_account_id=excluded.updated_by_account_id, updated_at=now()
+          returning id
+        `.execute(transaction)
+      ).rows[0];
+      if (saved === undefined) throw new Error("Trader settlement draft was not saved");
+      const row = (
+        await sql<TraderSettlementDraft>`
+          select ${draftProjection}
+            from trader_settlement_drafts d
+            join traders t on t.id = d.trader_id and t.company_id = d.company_id
+           where d.id=${saved.id}::uuid and d.company_id=${companyId}::uuid
+        `.execute(transaction)
+      ).rows[0];
+      if (row === undefined) throw new Error("Trader settlement draft was not saved");
+      return row;
+    });
+  }
 
   /**
    * Eligible Orders for one Trader (§4/§5). No Order is hidden by omission: an
@@ -472,6 +766,7 @@ export class TraderSettlementService {
     input: CreateTraderSettlementDto,
     correlationId: string,
     idempotencyKey?: string,
+    transactionContext?: Transaction<DatabaseSchema>,
   ): Promise<CreateTraderSettlementResult> {
     this.assertAnyPermission("settlements.create");
     const { companyId } = this.tenants.current();
@@ -486,7 +781,7 @@ export class TraderSettlementService {
     }
     const requestHash = this.materialFingerprint(input);
 
-    return this.transactions.execute(async (transaction) => {
+    const execute = async (transaction: Transaction<DatabaseSchema>) => {
       const reserved = await sql<{ id: string }>`
         insert into idempotency_records (
           company_id, operation, idempotency_key, request_hash, expires_at
@@ -1024,6 +1319,48 @@ export class TraderSettlementService {
         traderId: input.traderId,
         traderName,
       };
+    };
+    return transactionContext === undefined
+      ? this.transactions.execute(execute)
+      : execute(transactionContext);
+  }
+
+  /** Stage 2: confirm one saved draft and post it atomically. */
+  public async confirmDraft(
+    draftId: string,
+    correlationId: string,
+  ): Promise<CreateTraderSettlementResult> {
+    this.assertAnyPermission("settlements.create");
+    const { companyId } = this.tenants.current();
+    return this.transactions.execute(async (transaction) => {
+      const row = (await sql<{ payload: CreateTraderSettlementDto; settlementId: string | null }>`
+        select payload, confirmed_settlement_id as "settlementId"
+          from trader_settlement_drafts
+         where id=${draftId}::uuid and company_id=${companyId}::uuid
+         for update
+      `.execute(transaction)).rows[0];
+      if (row === undefined) {
+        throw new ApplicationException("trader_settlement_draft_not_found", "Trader settlement draft not found", HttpStatus.NOT_FOUND);
+      }
+      if (row.settlementId !== null) {
+        throw new ApplicationException("trader_settlement_draft_already_confirmed", "This Trader settlement draft was already confirmed", HttpStatus.CONFLICT);
+      }
+      const result = await this.createPayment(
+        row.payload,
+        correlationId,
+        `draft-${draftId}`,
+        transaction,
+      );
+      // `status` and `confirmed_settlement_id` move together: migration
+      // 20260979000000 adds a check that they can never disagree.
+      await sql`
+        update trader_settlement_drafts
+           set status='confirmed', confirmed_settlement_id=${result.settlementId}::uuid,
+               confirmed_at=now(), updated_at=now()
+         where id=${draftId}::uuid and company_id=${companyId}::uuid
+           and confirmed_settlement_id is null
+      `.execute(transaction);
+      return result;
     });
   }
 
