@@ -658,6 +658,21 @@ export function OrdersModuleWorkspace({
           `Trader-Collection-${link.collectionNumber}.pdf`,
           "preview",
         );
+        return;
+      }
+      /* No Collection exists for this Order. That does NOT mean the Trader
+         never paid: a Receivable cleared by netting inside a Trader Settlement
+         writes a settlement offset and no `trader_collections` row at all, and
+         `collections-for-order` joins through `trader_collection_allocations`,
+         so it finds nothing. This button was enabled (a Receivable exists and
+         is fully collected) and then did nothing whatsoever when clicked.
+         Open the Receivable itself instead -- from there the Cleared By column
+         and the detail dialog name the Settlement that cleared it. */
+      if (
+        selectedReportOrder.traderReceivableId !== null &&
+        selectedReportOrder.traderReceivableId !== undefined
+      ) {
+        onNavigate(`/trader-receivables/${selectedReportOrder.traderReceivableId}`);
       }
       return;
     }
@@ -3198,6 +3213,44 @@ export function OrderDetailsWorkspace({
                 ]),
             [t("operations.driverCashStatus"), cashStatusLabel(detail.driverReconciliationStatus)],
             [t("operations.settlementStatus"), t(`statuses.${detail.traderSettlementStatus}`)],
+            /* The Trader Receivable raised against this Order. It was absent
+               from this panel entirely, which is why a fee the Trader had
+               already paid looked like it had gone missing: nothing here named
+               the Receivable, and a Receivable cleared by settlement netting
+               appears on no other screen either. The number links straight to
+               it rather than only naming it. */
+            ...(detail.traderReceivableNumber == null ||
+            detail.traderReceivableNumber.trim() === ""
+              ? []
+              : [
+                  [
+                    t("operations.traderReceivableColumn"),
+                    <span className="detail-inline" key="trader-receivable">
+                      {detail.traderReceivableId == null || onNavigate === undefined ? (
+                        detail.traderReceivableNumber
+                      ) : (
+                        <button
+                          className="link-button"
+                          onClick={() =>
+                            onNavigate(`/trader-receivables/${detail.traderReceivableId}`)
+                          }
+                          type="button"
+                        >
+                          {detail.traderReceivableNumber}
+                        </button>
+                      )}
+                      {detail.traderReceivableStatus == null
+                        ? null
+                        : ` — ${t(
+                            `traderReceivables.status${
+                              detail.traderReceivableStatus.charAt(0).toUpperCase() +
+                              detail.traderReceivableStatus.slice(1).replace(/_(.)/g, (_, c: string) => c.toUpperCase())
+                            }`,
+                            { defaultValue: detail.traderReceivableStatus },
+                          )}`}
+                    </span>,
+                  ] as const,
+                ]),
             [
               t("operations.outsourcedDriverFeeStatus"),
               t(`operations.outsourcedDriverFeeStatuses.${detail.outsourcedDriverFeeStatus}`, {
@@ -5182,7 +5235,9 @@ function DetailSection({
   rows,
   title,
 }: {
-  rows: readonly (readonly [string, string])[];
+  // ReactNode, not string: a row may carry a link (the Trader Receivable
+  // number opens its own screen) rather than plain text.
+  rows: readonly (readonly [string, React.ReactNode])[];
   title: string;
 }) {
   return (

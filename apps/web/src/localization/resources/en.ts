@@ -1753,6 +1753,7 @@ export const englishTranslations = {
       awaiting_trader_receipt_confirmation: "Confirm receipt",
       awaiting_accounting_posting: "Accounting pending",
       no_accounting_required: "No Accounting Required",
+      awaiting_order_close: "Delivered",
       complete: "Complete",
       blocked: "Blocked",
     },
@@ -1768,6 +1769,7 @@ export const englishTranslations = {
       awaiting_trader_receipt_confirmation: "the Trader to confirm they received the money.",
       awaiting_accounting_posting: "the Accounting posting.",
       no_accounting_required: "nothing. This Order does not reach the ledger.",
+      awaiting_order_close: "this Order to be closed.",
       complete: "nothing. This Order is complete.",
       blocked: "review. Something needs a person to look at it.",
     },
@@ -1791,6 +1793,8 @@ export const englishTranslations = {
         "Delivery and money are complete. The Accounting entry is still expected.",
       no_accounting_required:
         "This Order has no COD, Service Fee, Additional Fees or VAT, so no Accounting Event is raised.",
+      awaiting_order_close:
+        "Delivered and every money leg is resolved. The Order stays open until someone closes it.",
       complete: "Delivery, Driver cash, Trader settlement and Accounting are all resolved.",
       blocked: "This Order needs review before it can continue.",
     },
@@ -2308,6 +2312,7 @@ export const englishTranslations = {
     settlementConfirmFailed: "The trader settlement could not be completed.",
     settlements: "Settlements",
     settlementStatus: "Settlement status",
+    traderReceivableColumn: "Trader Receivable",
     shipmentSaveFailed: "The international shipment could not be saved.",
     freeOrder: "Free Order",
     freeOrderReason: "Free Order Reason",

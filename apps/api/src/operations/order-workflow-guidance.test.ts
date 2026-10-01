@@ -192,7 +192,7 @@ describe("the money chain after delivery", () => {
       traderReceivableStatus: "collected",
       traderSettlementStatus: "not_eligible",
     });
-    expect(guidance.workflowState).toBe("complete");
+    expect(guidance.workflowState).toBe("awaiting_order_close");
     // Every money leg is resolved, but `delivered` is not `closed` yet -- an
     // explicit close is still due, Free Order or not.
     expect(guidance.nextActionCode).toBe("close_order");
@@ -210,7 +210,7 @@ describe("the money chain after delivery", () => {
       traderReceivableStatus: "collected",
       traderSettlementStatus: "not_eligible",
     });
-    expect(guidance.workflowState).toBe("complete");
+    expect(guidance.workflowState).toBe("awaiting_order_close");
     expect(guidance.nextActionCode).toBe("close_order");
     expect(guidance.completionBlockerCode).toBeNull();
     expect(guidance.isFinanciallyComplete).toBe(true);
@@ -234,7 +234,7 @@ describe("accounting", () => {
       driverReconciliationStatus: "reconciled",
       traderSettlementStatus: "money_received_by_trader",
     });
-    expect(guidance.workflowState).toBe("complete");
+    expect(guidance.workflowState).toBe("awaiting_order_close");
     // No accounting Event is ever suggested -- but the Order is still sitting
     // at `delivered`, so it still needs an explicit Close.
     expect(guidance.nextActionCode).toBe("close_order");
@@ -384,7 +384,7 @@ describe("accounting state from the ledger", () => {
 
   it("completes the Order when the Event and its Journal have both posted", () => {
     const guidance = derive({ ...settled, accountingState: "journal_posted" });
-    expect(guidance.workflowState).toBe("complete");
+    expect(guidance.workflowState).toBe("awaiting_order_close");
     expect(guidance.isFinanciallyComplete).toBe(true);
     // The ledger is finished, but `delivered` still needs an explicit Close.
     expect(guidance.nextActionCode).toBe("close_order");
@@ -468,7 +468,7 @@ describe("accounting state from the ledger", () => {
       accountingState: "journal_posted",
     });
     expect(guidance.workflowState).not.toBe("no_accounting_required");
-    expect(guidance.workflowState).toBe("complete");
+    expect(guidance.workflowState).toBe("awaiting_order_close");
   });
 
   it("offers no Accounting action at all when the Order never reaches the ledger", () => {
@@ -478,7 +478,7 @@ describe("accounting state from the ledger", () => {
       // Even if a stale ledger state were present, No Accounting Required wins.
       accountingState: "accounting_event_missing",
     });
-    expect(guidance.workflowState).toBe("complete");
+    expect(guidance.workflowState).toBe("awaiting_order_close");
     // No Accounting action is offered -- but Close Order still is, since the
     // Order has not reached `closed` yet.
     expect(guidance.nextActionCode).toBe("close_order");
@@ -643,7 +643,7 @@ describe("smart next action", () => {
       isFreeOrder: true,
       traderSettlementStatus: "not_eligible",
     });
-    expect(g.workflowState).toBe("complete");
+    expect(g.workflowState).toBe("awaiting_order_close");
     expect(g.isFinanciallyComplete).toBe(true);
     expect(g.nextActionCode).toBe("close_order");
     expect(g.nextActionRoute).toBe("/orders");
@@ -682,7 +682,7 @@ describe("smart next action", () => {
     });
     expect(g.nextActionCode).toBe("close_order");
     expect(g.nextActionCode).not.toBe("pay_trader");
-    expect(g.workflowState).toBe("complete");
+    expect(g.workflowState).toBe("awaiting_order_close");
   });
 
   it("asks for receipt confirmation once payment has gone out", () => {

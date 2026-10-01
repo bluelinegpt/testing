@@ -46,6 +46,9 @@ const stateTone: Readonly<Record<string, "blue" | "amber" | "green" | "red" | "g
   awaiting_accounting_posting: "amber",
   awaiting_delivery: "blue",
   awaiting_driver_assignment: "blue",
+  // Blue, not green: the money is settled but a person still has to close the
+  // Order. Green here would say "finished" about something that is not.
+  awaiting_order_close: "blue",
   awaiting_collect_order_completion: "blue",
   awaiting_driver_collection: "amber",
   awaiting_return_processing: "amber",

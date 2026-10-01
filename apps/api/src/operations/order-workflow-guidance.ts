@@ -51,6 +51,15 @@ export type OrderWorkflowState =
   | "awaiting_trader_receipt_confirmation"
   | "awaiting_accounting_posting"
   | "no_accounting_required"
+  /**
+   * Every money leg is resolved but the Order is still `delivered`, not
+   * `closed`. Previously this case reported `complete` while simultaneously
+   * offering "Close Order" as its next action -- the badge said the Order was
+   * finished and the action said it was not. `complete` is now reserved for an
+   * Order that genuinely needs nothing, so closing stays a deliberate human
+   * step rather than something the badge claims has already happened.
+   */
+  | "awaiting_order_close"
   | "complete"
   | "blocked";
 
@@ -503,7 +512,7 @@ export function deriveOrderWorkflowGuidance(input: OrderWorkflowInput): OrderWor
     // reporting it as "complete" with nothing to do would leave it stuck.
     // This applied only to Free Orders until it was noticed that a normal,
     // fully-settled Order gets exactly the same silent dead end.
-    return deliveryStatus === "delivered" ? closeOrder("complete") : complete("complete");
+    return deliveryStatus === "delivered" ? closeOrder("awaiting_order_close") : complete("complete");
   }
 
   if (settlementComplete.has(traderSettlementStatus) || noTraderPaymentDue) {
@@ -559,7 +568,7 @@ export function deriveOrderWorkflowGuidance(input: OrderWorkflowInput): OrderWor
         // collection and settlement already complete the Order is complete.
         // `delivered` still needs a person to close it; only `closed` is
         // truly done, regardless of Free Order status.
-        return deliveryStatus === "delivered" ? closeOrder("complete") : complete("complete");
+        return deliveryStatus === "delivered" ? closeOrder("awaiting_order_close") : complete("complete");
       case "journal_pending":
         return {
           completionBlockerCode: null,
@@ -589,7 +598,7 @@ export function deriveOrderWorkflowGuidance(input: OrderWorkflowInput): OrderWor
 
   // Fallback: every money leg this function checks is already resolved.
   // `delivered` still needs an explicit close; `closed` needs nothing further.
-  return deliveryStatus === "delivered" ? closeOrder("complete") : complete("complete");
+  return deliveryStatus === "delivered" ? closeOrder("awaiting_order_close") : complete("complete");
 
   function blocked(
     code: OrderCompletionBlockerCode,
