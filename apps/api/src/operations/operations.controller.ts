@@ -119,6 +119,7 @@ import {
   ReopenDeliveredOrderDto,
   ReverseTraderSettlementDto,
   ReverseTraderSettlementReceiptDto,
+  ReverseTraderCollectionDto,
   CreateOrderDto,
   CreateTraderPortalOrderDto,
   CreateTraderDto,
@@ -142,6 +143,7 @@ import {
   UpdateTraderPortalProfileDto,
 } from "./operations.dto.js";
 import { OrderDeliveryReopenService } from "./order-delivery-reopen.service.js";
+import { OrderMaintenanceService, type TraderReceivableResetPreview } from "./order-maintenance.service.js";
 
 @ApiTags("operations")
 @ApiBearerAuth()
@@ -162,7 +164,27 @@ export class OperationsController {
     private readonly traderAccountStatementService: TraderAccountStatementService,
     @Inject(OrderDeliveryReopenService)
     private readonly deliveryReopen: OrderDeliveryReopenService,
+    @Inject(OrderMaintenanceService)
+    private readonly orderMaintenance: OrderMaintenanceService,
   ) {}
+
+  @RequireAnyPermission("users_roles.manage")
+  @ApiOperation({ summary: "Preview Delete / Reset Trader Receivable maintenance action" })
+  @Get("orders/:orderId/trader-receivable-reset-preview")
+  public traderReceivableResetPreview(@Param("orderId", new ParseUUIDPipe()) orderId: string): Promise<TraderReceivableResetPreview> {
+    return this.orderMaintenance.receivableResetPreview(orderId);
+  }
+
+  @RequireAnyPermission("users_roles.manage")
+  @ApiOperation({ summary: "Delete unused or financially reset a Trader Receivable" })
+  @Post("orders/:orderId/reset-trader-receivable")
+  public resetTraderReceivable(
+    @Param("orderId", new ParseUUIDPipe()) orderId: string,
+    @Body() input: ReverseTraderCollectionDto,
+    @Req() request: Request,
+  ): Promise<TraderReceivableResetPreview> {
+    return this.orderMaintenance.resetTraderReceivable(orderId, input.reason, this.correlationId(request));
+  }
 
   @ApiOperation({ summary: "Show operational totals for the authenticated Company" })
   @RequireAnyPermission("reports.financial.view", "users_roles.manage")

@@ -990,6 +990,7 @@ export function TraderReceivablesWorkspace({
       {receivableDetailId === undefined ? null : (
         <ReceivableDetailDialog
           api={api}
+          canReverse={canReverse}
           onClose={() => closeReceivable()}
           onCollectMoney={(traderId) => {
             closeReceivable();
@@ -1639,16 +1640,341 @@ function CancelReceivableDialog({
 }
 
 // ---------------------------------------------------------------------------
+// Reverse ONE Trader Receivable cleared by a Settlement offset
+// ---------------------------------------------------------------------------
+
+/** `GET operations/trader-receivables/:receivableId/reversal-preview`. */
+interface ReceivableReversalPreview {
+  readonly receivableId: string;
+  readonly receivableNumber: string;
+  readonly orderNumber: string;
+  readonly orderStatus: string;
+  readonly orderSettlementStatus: string;
+  readonly offsetAmount: string;
+  readonly settlementNumber: string;
+  readonly settlementStatus: string;
+  readonly settlementOffsetCount: number;
+  readonly untouchedOffsetCount: number;
+  readonly physicalCollectionCount: number;
+  readonly traderCompensation: string;
+  readonly physicalCashMovement: string;
+  readonly traderNetPositionChange: string;
+  readonly executionAvailable: boolean;
+  readonly blockedReason: string | null;
+}
+
+/** `POST operations/trader-receivables/:receivableId/reverse`. */
+interface ReceivableReversalResult {
+  readonly alreadyReversed: boolean;
+  readonly creditAmount: string;
+  readonly creditNumber: string;
+  readonly receivableNumber: string;
+  readonly settlementNumber: string;
+}
+
+/**
+ * Preview -> Reason -> Confirmation -> Execute -> Refresh.
+ *
+ * Every request is scoped to ONE Receivable id:
+ *   GET  operations/trader-receivables/:receivableId/reversal-preview
+ *   POST operations/trader-receivables/:receivableId/reverse   { reason }
+ *
+ * It never calls `operations/settlements/payments/:settlementId/reverse`.
+ * That route reverses a whole Settlement -- on SET-000007 every offset and
+ * the payment to the Trader -- and must not be reachable from a dialog that
+ * names one Receivable and one amount. Whether the reversal may run at all is
+ * the server's decision (`executionAvailable`); this dialog only reports it.
+ */
+function ReverseTraderReceivableDialog({
+  api,
+  onClose,
+  onReversed,
+  receivableId,
+  receivableNumber,
+}: {
+  api: ApiClient;
+  onClose: () => void;
+  onReversed: (summary: string) => void;
+  receivableId: string;
+  receivableNumber: string;
+}) {
+  const { t } = useTranslation();
+  const [step, setStep] = useState<"preview" | "reason" | "confirm" | "done">("preview");
+  const [preview, setPreview] = useState<ReceivableReversalPreview>();
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string>();
+  const [result, setResult] = useState<string>();
+
+  useEffect(() => {
+    let active = true;
+    setError(undefined);
+    void api
+      .get<ReceivableReversalPreview>(
+        `operations/trader-receivables/${encodeURIComponent(receivableId)}/reversal-preview`,
+      )
+      .then((loaded) => {
+        if (active) setPreview(loaded);
+      })
+      .catch((caught: unknown) => {
+        if (active) setError(message(caught, t("traderReceivables.reversePreviewFailed")));
+      });
+    return () => {
+      active = false;
+    };
+  }, [api, receivableId, t]);
+
+  const execute = async () => {
+    if (preview === undefined || busy || reason.trim() === "") return;
+    setBusy(true);
+    setError(undefined);
+    try {
+      const response = await api.post<ReceivableReversalResult>(
+        `operations/trader-receivables/${encodeURIComponent(receivableId)}/reverse`,
+        { reason: reason.trim() },
+      );
+      const summary = t(
+        response.alreadyReversed
+          ? "traderReceivables.reverseAlreadyReversed"
+          : "traderReceivables.reverseSucceeded",
+        {
+          amount: money(response.creditAmount),
+          credit: response.creditNumber,
+          receivable: response.receivableNumber,
+          settlement: response.settlementNumber,
+        },
+      );
+      setResult(summary);
+      setStep("done");
+      onReversed(summary);
+    } catch (caught) {
+      setError(message(caught, t("traderReceivables.reverseFailed")));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const summaryLines =
+    preview === undefined ? null : (
+      <dl className="reconciliation-summary">
+        <div className="detail-line">
+          <dt>{t("traderReceivables.columnReceivableNumber")}</dt>
+          <dd>{preview.receivableNumber}</dd>
+        </div>
+        <div className="detail-line">
+          <dt>{t("traderReceivables.reverseOffsetAmount")}</dt>
+          <dd>{money(preview.offsetAmount)}</dd>
+        </div>
+        <div className="detail-line">
+          <dt>{t("traderReceivables.reverseTraderCredit")}</dt>
+          <dd>{money(preview.traderCompensation)}</dd>
+        </div>
+        <div className="detail-line">
+          <dt>{t("traderReceivables.reverseCashMovement")}</dt>
+          <dd>{money(preview.physicalCashMovement)}</dd>
+        </div>
+        <div className="detail-line">
+          <dt>{t("traderReceivables.reverseNetPosition")}</dt>
+          <dd>{money(preview.traderNetPositionChange)}</dd>
+        </div>
+        <div className="detail-line">
+          <dt>{t("traderReceivables.reverseSettlement")}</dt>
+          <dd>
+            {t("traderReceivables.reverseSettlementUnchanged", {
+              number: preview.settlementNumber,
+              status: preview.settlementStatus,
+            })}
+          </dd>
+        </div>
+        <div className="detail-line">
+          <dt>{t("traderReceivables.reverseOtherOffsets")}</dt>
+          <dd>
+            {t("traderReceivables.reverseOtherOffsetsUnchanged", {
+              count: preview.untouchedOffsetCount,
+            })}
+          </dd>
+        </div>
+        <div className="detail-line">
+          <dt>{t("traderReceivables.reverseOrder")}</dt>
+          <dd>
+            {preview.orderNumber} —{" "}
+            {t("traderReceivables.reverseOrderUnchanged", { status: preview.orderStatus })}
+          </dd>
+        </div>
+        <div className="detail-line">
+          <dt>{t("traderReceivables.reverseOrderSettlementStatus")}</dt>
+          <dd>
+            {t("traderReceivables.reverseOrderUnchanged", {
+              status: preview.orderSettlementStatus,
+            })}
+          </dd>
+        </div>
+      </dl>
+    );
+
+  return (
+    <Modal
+      className="modal-wide"
+      closeLabel={t("common.close")}
+      onRequestClose={onClose}
+      title={t("traderReceivables.reverseReceivableTitle")}
+      titleId="reverse-receivable-title"
+    >
+      <p className="field-hint">
+        {step === "preview" ? <strong>{t("traderReceivables.reverseStepPreview")}</strong> : t("traderReceivables.reverseStepPreview")}
+        {" · "}
+        {step === "reason" ? <strong>{t("traderReceivables.reverseStepReason")}</strong> : t("traderReceivables.reverseStepReason")}
+        {" · "}
+        {step === "confirm" ? <strong>{t("traderReceivables.reverseStepConfirm")}</strong> : t("traderReceivables.reverseStepConfirm")}
+      </p>
+      {error === undefined ? null : (
+        <div className="alert alert-error" role="alert">
+          {error}
+        </div>
+      )}
+      {preview === undefined ? (
+        error === undefined ? (
+          <div className="loading-row">{t("traderReceivables.reverseLoadingPreview")}</div>
+        ) : (
+          <div className="modal-actions">
+            <button className="button button-secondary" onClick={onClose} type="button">
+              {t("common.close")}
+            </button>
+          </div>
+        )
+      ) : step === "done" ? (
+        <div className="reconciliation-success" role="status">
+          <p>{result}</p>
+          <div className="modal-actions">
+            <button className="button button-primary" onClick={onClose} type="button">
+              {t("common.close")}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <>
+          {summaryLines}
+          {!preview.executionAvailable ? (
+            <>
+              <div className="alert alert-info" role="status">
+                {t("traderReceivables.reverseBlocked", {
+                  reason: preview.blockedReason ?? "",
+                })}
+              </div>
+              <div className="modal-actions">
+                <button className="button button-secondary" onClick={onClose} type="button">
+                  {t("common.close")}
+                </button>
+              </div>
+            </>
+          ) : step === "preview" ? (
+            <>
+              <p className="field-hint">{t("traderReceivables.reverseExplanation")}</p>
+              <div className="modal-actions">
+                <button className="button button-secondary" onClick={onClose} type="button">
+                  {t("common.cancel")}
+                </button>
+                <button
+                  className="button button-primary"
+                  onClick={() => setStep("reason")}
+                  type="button"
+                >
+                  {t("common.continue")}
+                </button>
+              </div>
+            </>
+          ) : step === "reason" ? (
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (reason.trim() === "") {
+                  setError(t("traderReceivables.reverseReceivableReasonRequired"));
+                  return;
+                }
+                setError(undefined);
+                setStep("confirm");
+              }}
+            >
+              <label className="field required-field">
+                <span>{t("traderReceivables.reverseReasonLabel")}</span>
+                <textarea
+                  maxLength={500}
+                  onChange={(event) => setReason(event.target.value)}
+                  value={reason}
+                />
+              </label>
+              <div className="modal-actions">
+                <button
+                  className="button button-secondary"
+                  onClick={() => setStep("preview")}
+                  type="button"
+                >
+                  {t("common.back")}
+                </button>
+                <button
+                  className="button button-primary"
+                  disabled={reason.trim() === ""}
+                  type="submit"
+                >
+                  {t("common.continue")}
+                </button>
+              </div>
+            </form>
+          ) : (
+            <>
+              <p>
+                <strong>
+                  {t("traderReceivables.reverseConfirmPrompt", {
+                    amount: money(preview.traderCompensation),
+                    receivable: preview.receivableNumber || receivableNumber,
+                  })}
+                </strong>
+              </p>
+              <p className="field-hint">
+                {t("traderReceivables.reverseReasonLabel")}: {reason.trim()}
+              </p>
+              <div className="modal-actions">
+                <button
+                  className="button button-secondary"
+                  disabled={busy}
+                  onClick={() => setStep("reason")}
+                  type="button"
+                >
+                  {t("common.back")}
+                </button>
+                <button
+                  className="button button-primary"
+                  disabled={busy}
+                  onClick={() => void execute()}
+                  type="button"
+                >
+                  {busy
+                    ? t("traderReceivables.reverseWorking")
+                    : t("traderReceivables.reverseConfirmAction")}
+                </button>
+              </div>
+            </>
+          )}
+        </>
+      )}
+    </Modal>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Receivable detail
 // ---------------------------------------------------------------------------
 
 function ReceivableDetailDialog({
   api,
+  canReverse,
   onClose,
   onCollectMoney,
   receivableId,
 }: {
   api: ApiClient;
+  /** `trader_receivables.reverse` (or administrator) -- the API demands the same. */
+  canReverse: boolean;
   onClose: () => void;
   onCollectMoney: (traderId: string) => void;
   receivableId: string;
@@ -1658,7 +1984,7 @@ function ReceivableDetailDialog({
   const [detail, setDetail] = useState<TraderReceivableDetail>();
   const [error, setError] = useState<string>();
   const [cancelOpen, setCancelOpen] = useState(false);
-  const [reverseBusy, setReverseBusy] = useState(false);
+  const [reverseOpen, setReverseOpen] = useState(false);
   const [reverseMessage, setReverseMessage] = useState<string>();
 
   const load = useCallback(() => {
@@ -1672,45 +1998,6 @@ function ReceivableDetailDialog({
   useEffect(() => load(), [load]);
 
   const collectible = detail?.status === "outstanding" || detail?.status === "partially_collected";
-  const reverseOffset = async () => {
-    if (detail === undefined) return;
-    if (detail.collections.length > 0) {
-      setReverseMessage("This receivable was cleared through a Trader Collection and must be reversed through the collection reversal workflow.");
-      return;
-    }
-    if (detail.sourceOrderId === null) {
-      setReverseMessage("No settlement offset is available for this receivable.");
-      return;
-    }
-    setReverseMessage(undefined);
-    setReverseBusy(true);
-    try {
-      const preview = await api.get<{
-        readonly orderNumber: string;
-        readonly orderStatus: string;
-        readonly offsetAmount: string;
-        readonly settlementId: string;
-        readonly settlementNumber: string;
-        readonly physicalCollectionCount: number;
-      }>(`operations/trader-receivables/receivables/${detail.receivableId}/reversal-preview?orderId=${encodeURIComponent(detail.sourceOrderId)}`);
-      if (preview.physicalCollectionCount !== 0) {
-        setReverseMessage("This receivable was cleared through a Trader Collection and must be reversed through the collection reversal workflow.");
-        return;
-      }
-      const confirmed = window.confirm(
-        `Reverse Trader Receivable\n\nReceivable: ${detail.receivableNumber}\nOrder: ${preview.orderNumber}\nAmount: AED ${preview.offsetAmount}\nCleared By: Trader Settlement Offset\nPhysical Collection: None\nSettlement: ${preview.settlementNumber}\n\nThis will restore the amount as outstanding.\nThe order status will not be changed.`,
-      );
-      if (!confirmed) return;
-      const reason = window.prompt("Reversal Reason");
-      if (!reason?.trim()) return;
-      await api.post(`operations/settlements/payments/${preview.settlementId}/reverse`, { reason: reason.trim() });
-      setReverseMessage("Reversal successful");
-      load();
-    } catch (caught) {
-      setReverseMessage(caught instanceof ApiError ? caught.message : "The receivable reversal failed.");
-    } finally { setReverseBusy(false); }
-  };
-
   return (
     <Modal
       className="modal-wide"
@@ -1941,15 +2228,40 @@ function ReceivableDetailDialog({
             <button className="button button-secondary" onClick={onClose} type="button">
               {t("common.close")}
             </button>
-            {!['cancelled', 'reversed'].includes(detail.status) ? (
-              <button disabled={reverseBusy} onClick={() => void reverseOffset()} type="button">
-                {reverseBusy ? "Reversing…" : "Reverse"}
+            {/* Offered only for a Receivable actually cleared by a Settlement
+                offset and not already terminal. The dialog it opens is
+                receivable-scoped end to end -- it never calls the
+                settlement-scoped reversal. Whether it may RUN is decided by
+                the server's preview, not by this condition. */}
+            {canReverse &&
+            detail.settlementOffsets.length > 0 &&
+            !["cancelled", "reversed"].includes(detail.status) ? (
+              <button
+                onClick={() => {
+                  setReverseMessage(undefined);
+                  setReverseOpen(true);
+                }}
+                type="button"
+              >
+                {t("traderReceivables.reverseReceivableAction")}
               </button>
             ) : null}
           </div>
         </>
       )}
 
+      {!reverseOpen || detail === undefined ? null : (
+        <ReverseTraderReceivableDialog
+          api={api}
+          onClose={() => setReverseOpen(false)}
+          onReversed={(summary) => {
+            setReverseMessage(summary);
+            load();
+          }}
+          receivableId={detail.receivableId}
+          receivableNumber={detail.receivableNumber}
+        />
+      )}
       {!cancelOpen || detail === undefined ? null : (
         <CancelReceivableDialog
           api={api}

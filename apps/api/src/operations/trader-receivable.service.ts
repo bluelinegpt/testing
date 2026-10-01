@@ -19,6 +19,7 @@ import {
 import { CompanyProfileService } from "../company-profile/company-profile.service.js";
 import { DriverCollectionPdfService } from "./driver-collection-pdf.service.js";
 import { OperationsHistoryWriter } from "./operations-history.writer.js";
+import { assessOffsetReversal } from "./receivable-offset-reversal-guard.js";
 import { traderReceivablePageSizes } from "./operations.dto.js";
 import type {
   CancelTraderReceivableDto,
@@ -144,6 +145,18 @@ export interface TraderReceivableDetail {
   readonly traderName: string;
 }
 
+/**
+ * Read-only preview of the single offset that cleared one Receivable.
+ *
+ * `executionAvailable` is deliberately part of the payload, matching the
+ * Accounting recovery preview's `metadata.executionAvailable`: there is NO
+ * receivable-scoped reversal operation in this system, and a caller must be
+ * able to learn that from the preview rather than discover it by firing the
+ * wrong mutation. The only reversal that exists is settlement-scoped, and on a
+ * Settlement holding several offsets it unwinds EVERY one of them plus the
+ * payment to the Trader -- so it is never a valid way to act on one
+ * Receivable. `settlementOffsetCount` is what makes that visible.
+ */
 export interface TraderReceivableReversalPreview {
   readonly orderNumber: string;
   readonly orderStatus: string;
@@ -153,6 +166,12 @@ export interface TraderReceivableReversalPreview {
   readonly settlementId: string;
   readonly settlementNumber: string;
   readonly physicalCollectionCount: number;
+  /** Offsets carried by the clearing Settlement, this one included. */
+  readonly settlementOffsetCount: number;
+  /** Always false: no receivable-scoped reversal operation exists. */
+  readonly executionAvailable: boolean;
+  /** Why execution is unavailable, for display. */
+  readonly blockedReason: string;
 }
 
 export interface TraderReceivableEligibleRow {
@@ -752,13 +771,18 @@ export class TraderReceivableService {
     this.assertAnyPermission("trader_receivables.create");
     const { companyId } = this.tenants.current();
     const row = (
-      await sql<TraderReceivableReversalPreview>`
+      await sql<Omit<TraderReceivableReversalPreview, "executionAvailable" | "blockedReason">>`
         select o.order_number as "orderNumber", o.delivery_status as "orderStatus",
                r.id as "receivableId", r.receivable_number as "receivableNumber",
                x.amount_allocated::text as "offsetAmount",
                s.id as "settlementId", s.settlement_number as "settlementNumber",
                (select count(*)::int from trader_collection_allocations ca
-                 where ca.company_id = r.company_id and ca.receivable_id = r.id) as "physicalCollectionCount"
+                 where ca.company_id = r.company_id and ca.receivable_id = r.id) as "physicalCollectionCount",
+               -- Counted over the SETTLEMENT, not this Receivable: it is what
+               -- the settlement-scoped reversal would actually unwind.
+               (select count(*)::int from trader_settlement_receivable_offsets sibling
+                 where sibling.company_id = s.company_id
+                   and sibling.settlement_id = s.id) as "settlementOffsetCount"
           from trader_receivables r
           join trader_settlement_receivable_offsets x
             on x.company_id = r.company_id and x.receivable_id = r.id
@@ -786,7 +810,18 @@ export class TraderReceivableService {
         HttpStatus.CONFLICT,
       );
     }
-    return row;
+    // The verdict is computed, not stored: a Settlement can gain offsets after
+    // this Receivable's own offset was written, so the count and the reason
+    // have to be read at preview time.
+    const verdict = assessOffsetReversal({
+      physicalCollectionCount: row.physicalCollectionCount,
+      settlementOffsetCount: row.settlementOffsetCount,
+    });
+    return {
+      ...row,
+      blockedReason: verdict.blockedReason,
+      executionAvailable: verdict.executionAvailable,
+    };
   }
 
   /**

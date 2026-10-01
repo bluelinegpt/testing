@@ -54,6 +54,8 @@ import { TraderReceivableController } from "./trader-receivable.controller.js";
 import { TraderReceivableService } from "./trader-receivable.service.js";
 import { TraderAccountStatementService } from "./trader-account-statement.service.js";
 import { TraderSettlementService } from "./trader-settlement.service.js";
+import { ReceivableOffsetReversalService } from "./receivable-offset-reversal.service.js";
+import { OrderMaintenanceService } from "./order-maintenance.service.js";
 
 @Module({
   // CompanyConfigurationModule exports BusinessDayService and
@@ -112,6 +114,8 @@ import { TraderSettlementService } from "./trader-settlement.service.js";
     TraderReceivableService,
     TraderAccountStatementService,
     TraderSettlementService,
+    ReceivableOffsetReversalService,
+    OrderMaintenanceService,
   ],
   // Customer Commerce Prompt C4: `OperationsService` is the single
   // authoritative Delivery Order creation path (`createOrder`). Exporting it

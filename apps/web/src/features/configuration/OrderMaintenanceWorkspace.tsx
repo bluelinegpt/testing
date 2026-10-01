@@ -2,18 +2,60 @@ import { useState } from "react";
 import { ApiError, type ApiClient } from "../../api/api-client.js";
 import type { OperationsOrder, OperationsOrderPage } from "../../api/contracts.js";
 
+/**
+ * Order Maintenance -- repairs an Order's financial records without touching
+ * normal Order data.
+ *
+ * Two actions were removed from this screen on 2 Oct 2026 and must not come
+ * back in the shape they had:
+ *
+ *   - "Reverse Trader settlement" showed a Receivable-scoped dialog naming one
+ *     Order and one amount, then POSTed to
+ *     `operations/settlements/payments/{settlementId}/reverse`. That mutation
+ *     takes no Receivable id and is scoped to the whole Settlement, so on
+ *     `SET-000007` it would have unwound AED 108.00 across six offsets and the
+ *     payment to the Trader while the dialog said AED 18.00. There is no
+ *     receivable-scoped reversal operation to call instead -- see
+ *     `receivable-offset-reversal-guard.ts` for why one cannot simply be
+ *     written. The preview is kept, read-only, because knowing which
+ *     Settlement cleared a Receivable is genuinely useful.
+ *
+ *   - "Set Delivered & Collect from Trader" PATCHed the delivery status and
+ *     then PATCHed the payment condition (which can itself raise a Receivable)
+ *     behind a single confirm, in two separate requests with no transaction. A
+ *     failure after the first left the Order delivered under the old
+ *     condition. Delivery status belongs to the Orders workflow, which records
+ *     who changed it and why.
+ */
 export function OrderMaintenanceWorkspace({ api }: { api: ApiClient }) {
   const [search, setSearch] = useState("");
   const [result, setResult] = useState<OperationsOrderPage>();
   const [selectedId, setSelectedId] = useState<string>();
   const [message, setMessage] = useState<string>();
+  const [offsetInfo, setOffsetInfo] = useState<string>();
   const [busy, setBusy] = useState(false);
-  const [reversing, setReversing] = useState(false);
+  const [inspecting, setInspecting] = useState(false);
+  const reset = async () => {
+    if (!selectedId) return;
+    setBusy(true);
+    try {
+      const preview = await api.get<{ action: string; receivableNumber: string; amount: string; physicalDeletePossible: boolean }>(`operations/orders/${selectedId}/trader-receivable-reset-preview`);
+      const action = preview.action === "physical_delete" ? "Physical Delete" : "Financial Reset / Archive";
+      if (!window.confirm(`${action}: ${preview.receivableNumber} — AED ${preview.amount}. Continue?`)) return;
+      const reason = window.prompt("Reason (required):")?.trim();
+      if (!reason) { setMessage("A reason is required."); return; }
+      await api.post(`operations/orders/${selectedId}/reset-trader-receivable`, { reason });
+      setMessage(`${action} completed for ${preview.receivableNumber}.`);
+      await find();
+    } catch (error) { showError(error, "Trader receivable reset failed."); }
+    finally { setBusy(false); }
+  };
   const showError = (error: unknown, fallback: string) => {
     setMessage(error instanceof ApiError ? `${error.message} (${error.code})` : fallback);
   };
   const find = async () => {
     setMessage(undefined);
+    setOffsetInfo(undefined);
     setResult(await api.get<OperationsOrderPage>(`operations/orders?page=1&pageSize=25&quickView=all&search=${encodeURIComponent(search)}`));
   };
   const repair = async () => {
@@ -25,48 +67,45 @@ export function OrderMaintenanceWorkspace({ api }: { api: ApiClient }) {
       await find();
     } finally { setBusy(false); }
   };
-  const reverseSettlement = async (order: OperationsOrder) => {
+  /**
+   * Read-only. Reports how the Receivable was settled and, when it was settled
+   * by a Settlement offset, why that cannot be reversed from here. Issues one
+   * GET and no mutation of any kind.
+   */
+  const inspectOffset = async (order: OperationsOrder) => {
     setMessage(undefined);
-    const detail = await api.get<{
-      readonly confirmableSettlementId?: string | null;
-      readonly confirmableSettlementCount?: number;
-    }>(`operations/orders/${order.id}`);
-    if (!detail.confirmableSettlementId) {
-      setMessage("No reversible confirmed Trader settlement was found for this order.");
+    setOffsetInfo(undefined);
+    if (!order.traderReceivableId) {
+      setMessage("No Trader receivable is linked to this order.");
       return;
     }
-    const reason = window.prompt("Reason for reversing the Trader settlement:");
-    if (!reason?.trim()) return;
-    setReversing(true);
+    setInspecting(true);
     try {
-      const response = await api.post<{ readonly reversalSettlementNumber: string }>(
-        `operations/settlements/payments/${detail.confirmableSettlementId}/reverse`,
-        { reason: reason.trim() },
+      const preview = await api.get<{
+        readonly orderNumber: string;
+        readonly orderStatus: string;
+        readonly receivableNumber: string;
+        readonly offsetAmount: string;
+        readonly settlementNumber: string;
+        readonly physicalCollectionCount: number;
+        readonly settlementOffsetCount: number;
+        readonly executionAvailable: boolean;
+        readonly blockedReason: string | null;
+      }>(`operations/trader-receivables/${encodeURIComponent(order.traderReceivableId)}/reversal-preview`);
+      const settledBy = preview.physicalCollectionCount > 0
+        ? `physical collection (${preview.physicalCollectionCount})`
+        : "settlement offset";
+      setOffsetInfo(
+        `${preview.receivableNumber} — AED ${preview.offsetAmount} — settled by ${settledBy} in ${preview.settlementNumber}, ` +
+        `which carries ${preview.settlementOffsetCount} receivable offset(s). ` +
+        `Order ${preview.orderNumber} is ${preview.orderStatus}. ` +
+        (preview.executionAvailable
+          ? "It can be reversed from the Trader Receivable's detail (Reverse Trader Receivable)."
+          : `Reversal unavailable: ${preview.blockedReason ?? ""}`),
       );
-      setMessage(`Settlement reversed: ${response.reversalSettlementNumber}`);
-      await find();
     } catch (error) {
-      showError(error, "The Trader settlement could not be reversed.");
-    } finally { setReversing(false); }
-  };
-  const setDeliveredAndCollectFromTrader = async () => {
-    if (!selectedId) return;
-    if (!window.confirm("Set this order to Delivered and Collect from Trader?")) return;
-    setMessage(undefined);
-    setBusy(true);
-    try {
-      await api.patch<OperationsOrder>(`operations/orders/${selectedId}/status`, {
-        status: "delivered",
-        reason: "Approved order maintenance correction",
-      });
-      await api.patch<OperationsOrder>(`operations/orders/${selectedId}`, {
-        paymentCondition: "customer_pays_cod_trader_pays_fee",
-      });
-      setMessage("Order set to Delivered and Collect from Trader.");
-      await find();
-    } catch (error) {
-      showError(error, "The order correction could not be completed.");
-    } finally { setBusy(false); }
+      showError(error, "The Trader receivable settlement could not be read.");
+    } finally { setInspecting(false); }
   };
   return <main className="workspace configuration-workspace">
     <header className="workspace-header"><div><span className="eyebrow">Configuration</span><h1>Order Maintenance</h1><p>Repair approved order financial records without changing normal order data.</p></div></header>
@@ -75,15 +114,14 @@ export function OrderMaintenanceWorkspace({ api }: { api: ApiClient }) {
       <button className="button button-primary" type="button" onClick={() => void find()}>Find order</button>
       {result?.items.map((order) => <button className={`maintenance-order ${selectedId === order.id ? "selected" : ""}`} key={order.id} type="button" onClick={() => setSelectedId(order.id)}>{order.orderNumber} — serial {order.serialNumber ?? "-"} — {order.customerName} — AED {order.serviceFee}</button>)}
       {selectedId ? <div className="maintenance-actions">
-        <button className="button button-secondary" disabled={busy || reversing} type="button" onClick={() => void repair()}>{busy ? "Working…" : "Repair Trader receivable"}</button>
-        <button className="button button-danger" disabled={busy || reversing} type="button" onClick={() => {
+        <button className="button button-secondary" disabled={busy || inspecting} type="button" onClick={() => void repair()}>{busy ? "Working…" : "Repair Trader receivable"}</button>
+        <button className="button button-danger" disabled={busy || inspecting} type="button" onClick={() => void reset()}>{busy ? "Working…" : "Delete / Reset Trader receivable"}</button>
+        <button className="button button-secondary" disabled={busy || inspecting} type="button" onClick={() => {
           const order = result?.items.find((item) => item.id === selectedId);
-          if (order) void reverseSettlement(order);
-        }}>{reversing ? "Reversing…" : "Reverse Trader settlement"}</button>
-        <button className="button button-secondary" disabled={busy || reversing} type="button" onClick={() => void setDeliveredAndCollectFromTrader()}>
-          Set Delivered &amp; Collect from Trader
-        </button>
+          if (order) void inspectOffset(order);
+        }}>{inspecting ? "Reading…" : "How was the Trader fee settled?"}</button>
       </div> : null}
+      {offsetInfo ? <p role="status">{offsetInfo}</p> : null}
       {message ? <p role="status">{message}</p> : null}
     </section>
   </main>;

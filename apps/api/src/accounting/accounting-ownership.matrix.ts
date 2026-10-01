@@ -113,6 +113,13 @@ export const accountingPostingOwnershipMatrix: readonly AccountingPostingOwnersh
     reversal: true,
   },
   {
+    area: "trader_receivables",
+    eventType: "trader_credit_issued",
+    journalSource: "trader_receivable",
+    movementOwner: "trader_receivables",
+    reversal: false,
+  },
+  {
     area: "employee_payroll",
     eventType: "employee_variable_earnings_interim_paid",
     journalSource: "employee_payroll",

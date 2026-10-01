@@ -128,6 +128,7 @@ export const accountingEventTypes = [
   "trader_receivable_reversed",
   "trader_receivable_payment_received",
   "trader_receivable_payment_reversed",
+  "trader_credit_issued",
   "trader_settlement_confirmed",
   "trader_settlement_reversed",
   "driver_collection_confirmed",

@@ -413,6 +413,9 @@ export const accountingSetupMappingsByArea = {
     "additional_fee_revenue",
     "trader_settlement_cash",
     "trader_settlement_bank",
+    // `trader_credit_issued` credits it. Listed so Automatic Posting readiness
+    // for this area checks the mapping its Events actually resolve.
+    "trader_payable",
   ],
   trader_settlements: ["trader_payable", "trader_settlement_cash", "trader_settlement_bank"],
   driver_collections: [

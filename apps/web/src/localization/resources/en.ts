@@ -3826,6 +3826,40 @@ export const englishTranslations = {
     confirmCancel: "Cancel Receivable",
     receivableCancelled: "Trader receivable {{number}} cancelled.",
 
+    // Reverse Trader Receivable (one settlement-offset Receivable)
+    reverseReceivableAction: "Reverse Trader Receivable",
+    reverseReceivableTitle: "Reverse Trader Receivable",
+    reverseStepPreview: "1. Preview",
+    reverseStepReason: "2. Reason",
+    reverseStepConfirm: "3. Confirm",
+    reverseLoadingPreview: "Reading what this reversal will do…",
+    reversePreviewFailed: "The reversal preview could not be loaded.",
+    reverseBlocked: "This receivable cannot be reversed: {{reason}}",
+    reverseOrder: "Order",
+    reverseOrderUnchanged: "{{status}} — unchanged",
+    reverseOrderSettlementStatus: "Order settlement status",
+    reverseSettlement: "Clearing settlement",
+    reverseSettlementUnchanged: "{{number}} ({{status}}) — remains unchanged",
+    reverseOffsetAmount: "Offset being reversed",
+    reverseOtherOffsets: "Other offsets on this settlement",
+    reverseOtherOffsetsUnchanged: "{{count}} — untouched",
+    reverseTraderCredit: "Trader Credit to be issued",
+    reverseCashMovement: "Cash movement",
+    reverseNetPosition: "Trader net position change",
+    reverseExplanation:
+      "The fee was collected by paying the Trader less in the settlement. This reverses only this receivable and issues a Trader Credit for the same amount. The settlement, its payment, its other offsets and the order are not changed, and no cash moves.",
+    reverseReasonLabel: "Reversal reason",
+    reverseReceivableReasonRequired: "A reversal reason is required.",
+    reverseConfirmPrompt:
+      "Reverse {{receivable}} for AED {{amount}} and issue a Trader Credit of AED {{amount}}?",
+    reverseConfirmAction: "Confirm reversal",
+    reverseWorking: "Reversing…",
+    reverseFailed: "The receivable reversal failed.",
+    reverseSucceeded:
+      "{{receivable}} reversed. Trader Credit {{credit}} for AED {{amount}} issued; settlement {{settlement}} and the order are unchanged.",
+    reverseAlreadyReversed:
+      "{{receivable}} was already reversed. Trader Credit {{credit}} for AED {{amount}} is the existing credit.",
+
     // Collect Money from Trader workflow
     collectMoneyTitle: "Collect Money from Trader",
     stepSelectTrader: "Select Trader",

@@ -28,6 +28,7 @@ import {
   CreateTraderReceivableDto,
   ProposeTraderReceivableAllocationDto,
   ReverseTraderCollectionDto,
+  ReverseTraderReceivableDto,
   TraderCollectionListQueryDto,
   TraderCollectionSummaryQueryDto,
   TraderReceivableEligibleQueryDto,
@@ -45,11 +46,15 @@ import {
   type TraderReceivableDetail,
   type TraderReceivableEligibleRow,
   type TraderReceivableLedgerRow,
-  type TraderReceivableReversalPreview,
   type TraderReceivableSummary,
   type TraderWithBalance,
 } from "./trader-receivable.service.js";
 import { TraderSettlementService } from "./trader-settlement.service.js";
+import {
+  ReceivableOffsetReversalService,
+  type ReceivableOffsetReversalPreview,
+  type ReceivableOffsetReversalResult,
+} from "./receivable-offset-reversal.service.js";
 
 /**
  * Trader Receivable / Collect Money from Trader — the reverse money-flow
@@ -69,6 +74,7 @@ export class TraderReceivableController {
   public constructor(
     @Inject(TraderReceivableService) private readonly traderReceivables: TraderReceivableService,
     @Inject(TraderSettlementService) private readonly traderSettlements: TraderSettlementService,
+    @Inject(ReceivableOffsetReversalService) private readonly offsetReversals: ReceivableOffsetReversalService,
   ) {}
 
   @RequireAnyPermission("trader_receivables.create", "settlements.create", "reports.export", "users_roles.manage")
@@ -211,16 +217,6 @@ export class TraderReceivableController {
   }
 
   @RequireAnyPermission("trader_receivables.create", "users_roles.manage")
-  @ApiOperation({ summary: "Preview a settlement-backed Trader receivable offset reversal" })
-  @Get("receivables/:receivableId/reversal-preview")
-  public receivableReversalPreview(
-    @Param("receivableId", new ParseUUIDPipe()) receivableId: string,
-    @Query("orderId", new ParseUUIDPipe()) orderId: string,
-  ): Promise<TraderReceivableReversalPreview> {
-    return this.traderReceivables.reversalPreview(receivableId, orderId);
-  }
-
-  @RequireAnyPermission("trader_receivables.create", "users_roles.manage")
   @ApiOperation({ summary: "Cancel a Trader receivable before anything has been collected" })
   @Post("receivables/:receivableId/cancel")
   public cancelReceivable(
@@ -312,6 +308,44 @@ export class TraderReceivableController {
       input.reason,
       this.correlationId(request),
     );
+  }
+
+  /**
+   * Receivable-scoped offset reversal: preview. Read-only.
+   *
+   * Scoped by the RECEIVABLE id alone -- the Order is derived server-side from
+   * the Receivable, so a caller cannot pair a Receivable with someone else's
+   * Order. Declared after every static route on this controller so a literal
+   * segment (`summary`, `eligible`, `receivables`, `collections`, ...) is
+   * always matched first, and the UUID pipe rejects anything else.
+   */
+  @RequireAnyPermission("trader_receivables.reverse", "users_roles.manage")
+  @ApiOperation({ summary: "Preview reversing ONE Trader receivable cleared by a settlement offset" })
+  @Get(":receivableId/reversal-preview")
+  public receivableReversalPreview(
+    @Param("receivableId", new ParseUUIDPipe()) receivableId: string,
+  ): Promise<ReceivableOffsetReversalPreview> {
+    return this.offsetReversals.preview(receivableId);
+  }
+
+  /**
+   * Receivable-scoped offset reversal: execute. Requires a reason.
+   *
+   * Marks the ONE Receivable `reversed` and issues a compensating Trader
+   * Credit for the offset amount. Never writes the Settlement, its payment,
+   * any offset row, the Order, or a physical Collection, and never calls the
+   * settlement-scoped reversal (`operations/settlements/payments/:id/reverse`).
+   * Idempotent: a retry returns the Credit already issued.
+   */
+  @RequireAnyPermission("trader_receivables.reverse", "users_roles.manage")
+  @ApiOperation({ summary: "Reverse ONE Trader receivable cleared by a settlement offset" })
+  @Post(":receivableId/reverse")
+  public reverseReceivableOffset(
+    @Param("receivableId", new ParseUUIDPipe()) receivableId: string,
+    @Body() input: ReverseTraderReceivableDto,
+    @Req() request: Request,
+  ): Promise<ReceivableOffsetReversalResult> {
+    return this.offsetReversals.execute(receivableId, input.reason, this.correlationId(request));
   }
 
   private correlationId(request: Request): string {

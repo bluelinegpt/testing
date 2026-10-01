@@ -3767,6 +3767,40 @@ export const arabicTranslations = {
     confirmCancel: "إلغاء المستحق",
     receivableCancelled: "تم إلغاء المستحق {{number}}.",
 
+    // Reverse Trader Receivable (one settlement-offset Receivable)
+    reverseReceivableAction: "عكس مستحق التاجر",
+    reverseReceivableTitle: "عكس مستحق التاجر",
+    reverseStepPreview: "1. المعاينة",
+    reverseStepReason: "2. السبب",
+    reverseStepConfirm: "3. التأكيد",
+    reverseLoadingPreview: "جارٍ قراءة ما سيقوم به هذا العكس…",
+    reversePreviewFailed: "تعذر تحميل معاينة العكس.",
+    reverseBlocked: "لا يمكن عكس هذا المستحق: {{reason}}",
+    reverseOrder: "الطلب",
+    reverseOrderUnchanged: "{{status}} — بدون تغيير",
+    reverseOrderSettlementStatus: "حالة تسوية الطلب",
+    reverseSettlement: "التسوية المقاصّة",
+    reverseSettlementUnchanged: "{{number}} ({{status}}) — تبقى بدون تغيير",
+    reverseOffsetAmount: "المقاصة التي سيتم عكسها",
+    reverseOtherOffsets: "المقاصات الأخرى في هذه التسوية",
+    reverseOtherOffsetsUnchanged: "{{count}} — بدون تغيير",
+    reverseTraderCredit: "رصيد دائن للتاجر سيتم إصداره",
+    reverseCashMovement: "حركة النقد",
+    reverseNetPosition: "التغير في صافي مركز التاجر",
+    reverseExplanation:
+      "تم تحصيل الرسوم بدفع مبلغ أقل للتاجر في التسوية. يعكس هذا الإجراء هذا المستحق فقط ويصدر رصيداً دائناً للتاجر بنفس المبلغ. لا تتغير التسوية أو دفعتها أو مقاصاتها الأخرى أو الطلب، ولا يتحرك أي نقد.",
+    reverseReasonLabel: "سبب العكس",
+    reverseReceivableReasonRequired: "سبب العكس مطلوب.",
+    reverseConfirmPrompt:
+      "عكس {{receivable}} بمبلغ {{amount}} درهم وإصدار رصيد دائن للتاجر بمبلغ {{amount}} درهم؟",
+    reverseConfirmAction: "تأكيد العكس",
+    reverseWorking: "جارٍ العكس…",
+    reverseFailed: "فشل عكس المستحق.",
+    reverseSucceeded:
+      "تم عكس {{receivable}}. صدر رصيد دائن للتاجر {{credit}} بمبلغ {{amount}} درهم؛ التسوية {{settlement}} والطلب بدون تغيير.",
+    reverseAlreadyReversed:
+      "تم عكس {{receivable}} مسبقاً. الرصيد الدائن {{credit}} بمبلغ {{amount}} درهم هو الرصيد القائم.",
+
     // Collect Money from Trader workflow
     collectMoneyTitle: "تحصيل مبلغ من التاجر",
     stepSelectTrader: "اختيار التاجر",

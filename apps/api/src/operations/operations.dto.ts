@@ -1801,6 +1801,19 @@ export class ReverseTraderCollectionDto {
   public readonly reason!: string;
 }
 
+/**
+ * Body of `POST operations/trader-receivables/:receivableId/reverse`. The
+ * reason is mandatory: it is written to the compensating Trader Credit and to
+ * the audit record, and the Credit's own check constraint rejects a blank one.
+ */
+export class ReverseTraderReceivableDto {
+  @IsString()
+  @MinLength(1)
+  @MaxLength(500)
+  @TrimText()
+  public readonly reason!: string;
+}
+
 export class TraderCollectionFilterDto {
   @IsOptional()
   @IsIn(["calendar_date", "business_date"])

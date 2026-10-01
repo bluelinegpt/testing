@@ -91,6 +91,8 @@ export class OperationalSourceLoader {
         return this.traderReceivable(database, event);
       case "trader_receivable_payment_received":
         return this.traderCollection(database, event);
+      case "trader_credit_issued":
+        return this.traderCredit(database, event);
       case "trader_settlement_confirmed":
         return this.traderSettlement(database, event);
       case "driver_collection_confirmed":
@@ -515,6 +517,94 @@ export class OperationalSourceLoader {
       journalSource: "trader_receivable",
       metadata: { ...dimensions, paymentMethod: row.paymentMethod },
       sourceReference: row.collectionNumber,
+    };
+  }
+
+  /**
+   * `trader_credit_issued` -- the compensating Trader Credit written when ONE
+   * settlement-offset Receivable is reversed without touching its Settlement.
+   *
+   *   DR order_cod_receivable   clears the residual the offset's AR credit
+   *                             leaves once the recognition is reversed
+   *   CR trader_payable         the amount the Company now owes the Trader
+   *
+   * Both mapping keys ALREADY EXIST and carry control-account requirements in
+   * `AccountMappingResolver`. `cod_receivable` is the COMPONENT type (the same
+   * one every Receivable/offset leg uses); it is never a mapping key -- an
+   * invented `cod_receivable` mapping key is what kept Settlement journals out
+   * of the General Ledger in Sept 2026.
+   *
+   * The Trader travels on both legs (`traderId` + the `trader` subledger, the
+   * same dimensions the Settlement's offset leg uses) because
+   * `validate_accounting_journal_line()` rejects a `trader_payable` control
+   * line without `trader_id`. Without it this Event fails on every attempt.
+   */
+  private async traderCredit(
+    database: Kysely<DatabaseSchema>,
+    event: OperationalAccountingEventRecord,
+  ): Promise<OperationalJournalFacts> {
+    const result = await sql<{
+      amount: string;
+      businessDate: string;
+      creditNumber: string;
+      reason: string;
+      sourceOrderId: string | null;
+      sourceReceivableId: string | null;
+      sourceSettlementId: string | null;
+      status: string;
+      traderId: string;
+    }>`
+      select credit_number as "creditNumber", business_date::text as "businessDate",
+             amount::text, reason, status, trader_id as "traderId",
+             source_receivable_id as "sourceReceivableId",
+             source_order_id as "sourceOrderId",
+             source_settlement_id as "sourceSettlementId"
+        from trader_credits
+       where id=${event.sourceEntityId}::uuid and company_id=${event.companyId}::uuid
+       for share
+    `.execute(database);
+    const row = result.rows[0];
+    if (row === undefined || row.status === "cancelled") {
+      this.invalidSource("accounting_trader_credit_not_recognizable");
+    }
+    const dimensions = {
+      sourceEntityId: event.sourceEntityId,
+      sourceEntityType: "trader_credit",
+      sourceReference: row.creditNumber,
+      subledgerId: row.traderId,
+      subledgerType: "trader",
+      traderId: row.traderId,
+      ...(row.sourceReceivableId === null ? {} : { traderReceivableId: row.sourceReceivableId }),
+    };
+    return {
+      accountingDate: row.businessDate,
+      components: present([
+        component(
+          "cod_receivable",
+          row.amount,
+          "debit",
+          "order_cod_receivable",
+          dimensions,
+          `Trader Credit ${row.creditNumber}: ${row.reason}`,
+        ),
+        component(
+          "trader_payable",
+          row.amount,
+          "credit",
+          "trader_payable",
+          dimensions,
+          `Trader Credit ${row.creditNumber}: ${row.reason}`,
+        ),
+      ]),
+      description: `Trader Credit ${row.creditNumber}`,
+      journalSource: "trader_receivable",
+      metadata: {
+        ...dimensions,
+        creditNumber: row.creditNumber,
+        sourceOrderId: row.sourceOrderId,
+        sourceSettlementId: row.sourceSettlementId,
+      },
+      sourceReference: row.creditNumber,
     };
   }
 
