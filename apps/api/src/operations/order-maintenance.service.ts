@@ -334,9 +334,43 @@ export class OrderMaintenanceService {
         "trader_receivable_not_found",
         "Trader receivable not found",
         HttpStatus.NOT_FOUND,
+        undefined,
+        await this.notFoundDiagnostics(database, companyId, orderId),
+        true,
       );
     }
     return row;
+  }
+
+  private async notFoundDiagnostics(
+    database: Kysely<DatabaseSchema> | Transaction<DatabaseSchema>,
+    companyId: string,
+    orderId: string,
+  ): Promise<Readonly<Record<string, boolean | number | string | null>>> {
+    const orderResult = await sql<{ id: string; orderNumber: string; companyId: string }>`
+      select id, order_number as "orderNumber", company_id as "companyId"
+        from orders where id=${orderId}::uuid
+    `.execute(database);
+    const order = orderResult.rows[0];
+    if (!order) return {
+      orderUuid: orderId, requestCompanyId: companyId, orderFound: false,
+      orderId: null, orderNumber: null, orderCompanyId: null,
+      receivableMatchCount: 0, referenceMatchCount: 0, companyReferenceMatchCount: 0,
+    };
+    const counts = await sql<{ referenceMatchCount: number; companyReferenceMatchCount: number }>`
+      select
+        (select count(*)::int from trader_receivables where source_reference=${order.orderNumber}) as "referenceMatchCount",
+        (select count(*)::int from trader_receivables
+          where company_id=${companyId}::uuid and source_reference=${order.orderNumber}) as "companyReferenceMatchCount"
+    `.execute(database);
+    const row = counts.rows[0]!;
+    return {
+      orderUuid: orderId, requestCompanyId: companyId, orderFound: true,
+      orderId: order.id, orderNumber: order.orderNumber, orderCompanyId: order.companyId,
+      receivableMatchCount: row.companyReferenceMatchCount,
+      referenceMatchCount: row.referenceMatchCount,
+      companyReferenceMatchCount: row.companyReferenceMatchCount,
+    };
   }
 
   /**

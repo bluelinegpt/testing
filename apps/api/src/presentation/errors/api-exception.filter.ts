@@ -73,6 +73,9 @@ export class ApiExceptionFilter implements ExceptionFilter {
         correlationId,
         message: safeMessage,
         ...(details === undefined ? {} : { details }),
+        ...(exception instanceof ApplicationException && exception.exposeDiagnostics && exception.diagnostics !== undefined
+          ? { diagnostics: exception.diagnostics }
+          : {}),
       },
     };
 
