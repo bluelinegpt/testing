@@ -20,9 +20,9 @@
       "path": "apps/api",
       "renderService": "bluelinegpt-api-test",
       "status": "needs_deploy",
-      "localCommit": "000bb51",
+      "localCommit": "f3a65d8",
       "localCommitDate": "2026-10-01",
-      "lastChangeDescription": "feat: add trader receivable offset reversal",
+      "lastChangeDescription": "fix: distinguish trader receivable settlement offsets",
       "lastChangeBy": "human",
       "confirmedLiveCommit": "f1d5271",
       "confirmedLiveAt": "2026-10-01"
@@ -33,9 +33,9 @@
       "path": "apps/web",
       "renderService": "bluelinegpt-web-test",
       "status": "needs_deploy",
-      "localCommit": "000bb51",
+      "localCommit": "f3a65d8",
       "localCommitDate": "2026-10-01",
-      "lastChangeDescription": "feat: add trader receivable offset reversal",
+      "lastChangeDescription": "fix: distinguish trader receivable settlement offsets",
       "lastChangeBy": "human",
       "confirmedLiveCommit": "f1d5271",
       "confirmedLiveAt": "2026-10-01"
