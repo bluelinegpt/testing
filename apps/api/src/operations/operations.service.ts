@@ -5370,10 +5370,11 @@ export class OperationsService {
       if (order.paymentCondition !== "customer_pays_cod_trader_pays_fee") {
         throw new ApplicationException("trader_receivable_not_required", "This Order is not configured for Trader-paid fees", HttpStatus.CONFLICT);
       }
-      // ANY existing Receivable for this Order blocks the repair, cancelled and
-      // reversed ones included.
+      // Any usable Receivable for this Order blocks the repair. A reversed
+      // Receivable is historical output of the financial reset path and must
+      // not be reactivated or prevent a fresh active Receivable.
       //
-      // This deliberately no longer excludes `cancelled`. A Receivable is
+      // This deliberately continues to include `cancelled`. A Receivable is
       // cancelled when the Order's money changes so the Trader stops owing the
       // fee -- the payment condition stays 'customer_pays_cod_trader_pays_fee'
       // throughout, so the guard above does NOT catch that case. Excluding
@@ -5384,12 +5385,13 @@ export class OperationsService {
       // fresh receivable_number, so the `on conflict do nothing` downstream
       // could never have stopped it either.
       //
-      // Repair exists for legacy Orders that never had a Receivable at all.
-      // An Order whose Receivable was cancelled is not that case.
+      // Repair exists for legacy Orders that never had an active Receivable,
+      // or whose only historical Receivable was intentionally reversed.
       const existing = await sql<{ id: string }>`
         select id from trader_receivables
          where company_id=${companyId}::uuid and source_type='service_charge'
            and source_reference=${order.orderNumber}
+           and status <> 'reversed'
          limit 1 for update
       `.execute(transaction);
       if (existing.rows[0] !== undefined) return { created: false, amount: order.serviceFee };
