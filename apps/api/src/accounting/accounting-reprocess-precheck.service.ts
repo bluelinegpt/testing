@@ -201,20 +201,129 @@ export class AccountingReprocessPrecheckService {
       });
     }
 
-    // Reversal Events replay a stored original rather than loading a source;
-    // their dry run is a different question and is not answered here.
-    if (event.reversalOfEventId !== null || event.eventType.endsWith("_reversed")) {
-      blockers.push({
-        code: "accounting_event_reversal_not_precheckable",
-        message: "Reversal Events replay their original Journal and have no forward precheck",
-      });
-    }
-
-    // The posting pipeline's own first steps, stopped before the first write.
     let facts: OperationalJournalFacts | undefined;
     let lines: readonly ResolvedOperationalLine[] = [];
     let period: { fiscalPeriodId: string; fiscalPeriodStatus: string } | undefined;
-    if (event.reversalOfEventId === null && !event.eventType.endsWith("_reversed")) {
+    const isReversal = event.reversalOfEventId !== null || event.eventType.endsWith("_reversed");
+    if (isReversal) {
+      // Reversal Events do not load an operational source. Their authoritative
+      // dry run is the original posted Journal they will invert.
+      const originalResult = await sql<{
+        eventId: string;
+        eventStatus: string;
+        journalId: string | null;
+        journalStatus: string | null;
+        accountingDate: string | null;
+      }>`
+        select original.id as "eventId",
+               original.processing_status as "eventStatus",
+               original.journal_id as "journalId",
+               journal.status as "journalStatus",
+               journal.business_date::text as "accountingDate"
+          from accounting_events original
+          left join journal_entries journal
+            on journal.id=original.journal_id and journal.company_id=original.company_id
+         where original.id=${event.reversalOfEventId ?? "00000000-0000-0000-0000-000000000000"}::uuid
+           and original.company_id=${companyId}::uuid
+      `.execute(this.database);
+      const original = originalResult.rows[0];
+      if (original === undefined) {
+        blockers.push({
+          code: "accounting_event_original_not_found",
+          message: "The original Accounting Event was not found in this Company",
+        });
+      } else {
+        if (original.eventStatus !== "posted") {
+          blockers.push({
+            code: "accounting_event_original_not_posted",
+            message: "The original Accounting Event is not posted",
+          });
+        }
+        if (original.journalId === null || original.journalStatus !== "posted") {
+          blockers.push({
+            code: "accounting_event_original_journal_not_posted",
+            message: "The original Accounting Journal is not posted",
+          });
+        }
+        const alreadyReversed = await sql<{ id: string }>`
+          select id
+            from journal_entries
+           where company_id=${companyId}::uuid
+             and reversal_of_id=${original.journalId ?? "00000000-0000-0000-0000-000000000000"}::uuid
+             and status in ('approved','posted')
+           limit 1
+        `.execute(this.database);
+        if (alreadyReversed.rows[0] !== undefined) {
+          blockers.push({
+            code: "accounting_event_original_already_reversed",
+            message: "The original Accounting Journal already has a reversal",
+          });
+        }
+        if (original.journalId !== null && original.journalStatus === "posted") {
+          const originalLines = await sql<{
+            accountCode: string;
+            accountId: string;
+            accountNameAr: string | null;
+            accountNameEn: string;
+            amount: string;
+            entryIntent: "debit" | "credit";
+          }>`
+            select account.code as "accountCode", account.id as "accountId",
+                   account.name_ar as "accountNameAr", account.name_en as "accountNameEn",
+                   case when line.credit > 0 then line.credit else line.debit end as amount,
+                   case when line.credit > 0 then 'debit' else 'credit' end as "entryIntent"
+              from journal_lines line
+              join financial_accounts account
+                on account.id=line.account_id and account.company_id=line.company_id
+             where line.company_id=${companyId}::uuid
+               and line.journal_entry_id=${original.journalId}::uuid
+             order by line.line_number
+          `.execute(this.database);
+          const journalDebit = originalLines.rows
+            .filter((line) => line.entryIntent === "debit")
+            .reduce((sum, line) => sum.plus(line.amount), new Decimal(0));
+          const journalCredit = originalLines.rows
+            .filter((line) => line.entryIntent === "credit")
+            .reduce((sum, line) => sum.plus(line.amount), new Decimal(0));
+          const debitResult = await sql<{ total: string }>`
+            select coalesce(sum(debit),0)::text as total
+              from journal_lines
+             where company_id=${companyId}::uuid and journal_entry_id=${original.journalId}::uuid
+          `.execute(this.database);
+          const debit = new Decimal(debitResult.rows[0]?.total ?? "0");
+          if (!debit.greaterThan(0) || !journalDebit.equals(journalCredit)) {
+            blockers.push({
+              code: "accounting_event_original_not_balanced",
+              message: "The original Accounting Journal is not balanced",
+            });
+          }
+          lines = originalLines.rows.map((line) => ({
+            accountCode: line.accountCode,
+            accountId: line.accountId,
+            accountNameAr: line.accountNameAr,
+            accountNameEn: line.accountNameEn,
+            amount: line.amount,
+            component: {
+              amount: line.amount,
+              componentType: "trader_settlement",
+              entryIntent: line.entryIntent,
+              mappingKey: "original_journal",
+            },
+          }));
+        }
+        if (original.accountingDate !== null) {
+          period = await this.periodFor(companyId, event.effectiveAccountingDate ?? original.accountingDate, blockers);
+        } else {
+          blockers.push({
+            code: "accounting_event_accounting_date_missing",
+            message: "The reversal has no valid Accounting Date",
+          });
+        }
+      }
+    }
+
+    // The posting pipeline's own first steps, stopped before the first write.
+    if (!isReversal) {
       const record: OperationalAccountingEventRecord = {
         actorId: null,
         companyId,
@@ -450,6 +559,11 @@ export class AccountingReprocessPrecheckService {
       event_no_accounting_required: "The source has no financial components to post",
       event_journal_already_exists: "A Journal already exists for this Accounting Event",
       event_reversed: "The Accounting Event was reversed",
+      accounting_event_original_not_found: "The original Accounting Event was not found in this Company",
+      accounting_event_original_not_posted: "The original Accounting Event is not posted",
+      accounting_event_original_journal_not_posted: "The original Accounting Journal is not posted",
+      accounting_event_original_already_reversed: "The original Accounting Journal already has a reversal",
+      accounting_event_original_not_balanced: "The original Accounting Journal is not balanced",
       event_status_not_reprocessable: "This Accounting Event status cannot be reprocessed",
       operational_area_disabled: "The operational area is disabled",
       source_record_missing: "The underlying source record no longer exists",
