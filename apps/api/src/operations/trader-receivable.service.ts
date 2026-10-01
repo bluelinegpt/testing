@@ -691,6 +691,23 @@ export class TraderReceivableService {
    * Eligible receivables (§3), paginated: always restricted server-side to
    * `outstanding` / `partially_collected` — a caller-supplied `status` filter
    * outside that pair simply narrows to zero rows rather than being trusted.
+   *
+   * An Order-linked delivery fee is ALSO withheld until its Order has actually
+   * been delivered and is still Trader-pays. Until 1 Oct 2026 the only test
+   * here was the Receivable's own status, so the settlement screen offered the
+   * fee for an Order that was still in a Driver's hands: on that day 12 of 17
+   * fees on offer (AED 216.00) belonged to undelivered Orders, and a settlement
+   * the day before had taken AED 108.00 for six parcels that only arrived that
+   * evening. "Outstanding" says the Trader will owe it; it never said the
+   * Company had earned it.
+   *
+   * `delivered_at` rather than `delivery_status`, because it is the only field
+   * that is true solely after a real delivery: a returned Order never sets it,
+   * and reopening a delivered Order clears it -- so a fee leaves this list
+   * again the moment its Order is reopened.
+   *
+   * Receivables not raised against an Order -- overpayment recovery, refund
+   * due, damage recovery -- have no delivery to wait for and are unaffected.
    */
   public async eligibleReceivables(
     query: TraderReceivableEligibleQueryDto,
@@ -720,6 +737,17 @@ export class TraderReceivableService {
         and (${query.businessDateTo ?? null}::date is null
              or r.business_date <= ${query.businessDateTo ?? null}::date)
         and (${query.outstandingOnly === true} = false or r.outstanding_amount > 0)
+        and (
+          r.source_type <> 'service_charge'
+          or ${query.includeUndelivered === true}
+          or exists (
+            select 1 from orders delivered_order
+             where delivered_order.company_id = r.company_id
+               and delivered_order.order_number = r.source_reference
+               and delivered_order.delivered_at is not null
+               and delivered_order.payment_condition = 'customer_pays_cod_trader_pays_fee'
+          )
+        )
     `;
     const result = await sql<TraderReceivableEligibleRow & { total: number }>`
       select r.id, r.receivable_number as "receivableNumber", r.trader_id as "traderId",

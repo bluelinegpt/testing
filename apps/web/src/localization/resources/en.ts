@@ -4083,7 +4083,7 @@ export const englishTranslations = {
     allocationTotalMismatch: "The total allocated amount must equal the Payment Amount.",
     invalidAmount: "Enter a valid amount with no more than two decimal places.",
     receivableDeductionsHelp:
-      "Outstanding fees are selected oldest-first. Uncheck or edit a line if it should not be deducted from this settlement.",
+      "Only fees for delivered Orders are listed, oldest first. A fee appears here once its Order is delivered. Tick a line to deduct it from this settlement, or edit the amount.",
     receivableNumber: "Receivable Number",
     receivableBusinessDate: "Business Date",
     receivableReference: "Reference / Order",

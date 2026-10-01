@@ -892,6 +892,7 @@ export class TraderSettlementService {
           : (
               await sql<{
                 amountCollected: string;
+                deliveryEarned: boolean;
                 id: string;
                 originalAmountDue: string;
                 receivableNumber: string;
@@ -900,7 +901,21 @@ export class TraderSettlementService {
               }>`
               select id,trader_id as "traderId",receivable_number as "receivableNumber",
                      original_amount_due::text as "originalAmountDue",
-                     amount_collected::text as "amountCollected",status
+                     amount_collected::text as "amountCollected",status,
+                     /* Has the Company actually earned this fee yet? The list
+                        the operator chose from already excludes undelivered
+                        Orders, but a page left open while an Order is reopened
+                        would still post a fee that is no longer earned, so the
+                        same test is repeated here where the money moves. */
+                     (source_type <> 'service_charge'
+                        or exists (
+                          select 1 from orders earned_order
+                           where earned_order.company_id = trader_receivables.company_id
+                             and earned_order.order_number = trader_receivables.source_reference
+                             and earned_order.delivered_at is not null
+                             and earned_order.payment_condition
+                                   = 'customer_pays_cod_trader_pays_fee'
+                        )) as "deliveryEarned"
                 from trader_receivables
                where company_id=${companyId}::uuid
                  and id in (${sql.join(receivableIds.map((id) => sql`${id}::uuid`))})
@@ -930,6 +945,18 @@ export class TraderSettlementService {
           throw new ApplicationException(
             "settlement_offset_receivable_ineligible",
             "A selected Trader fee is no longer eligible for deduction",
+            HttpStatus.CONFLICT,
+            [receivable.receivableNumber],
+          );
+        }
+        /* Separate code and message from the check above: "not earned yet" is
+           a different thing from "not eligible", and an operator who is told
+           the Order has not been delivered knows to wait rather than to go
+           looking for what is wrong with the Receivable. */
+        if (amount.greaterThan(0) && !receivable.deliveryEarned) {
+          throw new ApplicationException(
+            "settlement_offset_order_not_delivered",
+            "A selected Trader fee belongs to an Order that has not been delivered yet",
             HttpStatus.CONFLICT,
             [receivable.receivableNumber],
           );

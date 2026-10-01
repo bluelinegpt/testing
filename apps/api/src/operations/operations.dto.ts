@@ -1710,6 +1710,18 @@ export class TraderReceivableEligibleQueryDto {
   @Type(() => Boolean)
   @IsBoolean()
   public readonly outstandingOnly?: boolean;
+
+  /**
+   * Include Order-linked delivery fees whose Order has not been delivered yet.
+   * Defaults to false, and no screen sets it: the settlement wizard must never
+   * offer a fee the Company has not earned. It exists so that capability can be
+   * exposed later without another API change, and so the restriction stays one
+   * explicit flag rather than something each caller has to know to re-create.
+   */
+  @IsOptional()
+  @Type(() => Boolean)
+  @IsBoolean()
+  public readonly includeUndelivered?: boolean;
 }
 
 // Oldest-first allocation proposal: read-only, writes nothing.

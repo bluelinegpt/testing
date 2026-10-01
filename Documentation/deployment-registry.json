@@ -19,13 +19,13 @@
       "displayName": "API",
       "path": "apps/api",
       "renderService": "bluelinegpt-api-test",
-      "status": "pushed_awaiting_confirmation",
-      "localCommit": "39106e2",
-      "localCommitDate": "2026-09-29",
-      "lastChangeDescription": "feat: expand trader settlement order review",
+      "status": "needs_deploy",
+      "localCommit": "907df5f",
+      "localCommitDate": "2026-10-01",
+      "lastChangeDescription": "fix: hide unearned trader settlement fees",
       "lastChangeBy": "codex",
-      "confirmedLiveCommit": "e3de371",
-      "confirmedLiveAt": "2026-09-01"
+      "confirmedLiveCommit": "f1d5271",
+      "confirmedLiveAt": "2026-10-01"
     },
     {
       "id": "web",
@@ -33,12 +33,12 @@
       "path": "apps/web",
       "renderService": "bluelinegpt-web-test",
       "status": "needs_deploy",
-      "localCommit": "b681a41",
-      "localCommitDate": "2026-09-29",
-      "lastChangeDescription": "fix: show more collection orders at once",
+      "localCommit": "907df5f",
+      "localCommitDate": "2026-10-01",
+      "lastChangeDescription": "fix: hide unearned trader settlement fees",
       "lastChangeBy": "codex",
-      "confirmedLiveCommit": "9666706",
-      "confirmedLiveAt": "2026-09-01"
+      "confirmedLiveCommit": "f1d5271",
+      "confirmedLiveAt": "2026-10-01"
     },
     {
       "id": "platform-web",
