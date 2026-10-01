@@ -35,6 +35,13 @@ export function OrderMaintenanceWorkspace({ api }: { api: ApiClient }) {
   const [offsetInfo, setOffsetInfo] = useState<string>();
   const [busy, setBusy] = useState(false);
   const [inspecting, setInspecting] = useState(false);
+  const [verification, setVerification] = useState<{
+    classification: string; reason: string; order: Record<string, string | null>;
+    traderOwes: string; receivables: Record<string, string | null>[];
+    physicalCollectionAmount: string; settlementOffsetAmount: string;
+    settlementNumbers: string[]; journals: Record<string, string | null>[];
+    recommendedAction: string;
+  }>();
   const reset = async () => {
     if (!selectedId) return;
     setBusy(true);
@@ -47,6 +54,7 @@ export function OrderMaintenanceWorkspace({ api }: { api: ApiClient }) {
       await api.post(`operations/orders/${selectedId}/reset-trader-receivable`, { reason });
       setMessage(`${action} completed for ${preview.receivableNumber}.`);
       await find();
+      await verify(selectedId);
     } catch (error) { showError(error, "Trader receivable reset failed."); }
     finally { setBusy(false); }
   };
@@ -65,7 +73,13 @@ export function OrderMaintenanceWorkspace({ api }: { api: ApiClient }) {
       const response = await api.post<{ created: boolean; amount: string }>(`operations/orders/${selectedId}/repair-trader-receivable`, {});
       setMessage(response.created ? `Trader receivable created: AED ${response.amount}` : "No repair was needed.");
       await find();
+      await verify(selectedId);
     } finally { setBusy(false); }
+  };
+  const verify = async (orderId: string) => {
+    try {
+      setVerification(await api.get(`operations/orders/${orderId}/financial-verification`));
+    } catch (error) { showError(error, "Financial verification failed."); }
   };
   /**
    * Read-only. Reports how the Receivable was settled and, when it was settled
@@ -112,10 +126,23 @@ export function OrderMaintenanceWorkspace({ api }: { api: ApiClient }) {
     <section className="configuration-panel">
       <label>Search order number, serial number, or reference<input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="ORD-000007" /></label>
       <button className="button button-primary" type="button" onClick={() => void find()}>Find order</button>
-      {result?.items.map((order) => <button className={`maintenance-order ${selectedId === order.id ? "selected" : ""}`} key={order.id} type="button" onClick={() => setSelectedId(order.id)}>{order.orderNumber} — serial {order.serialNumber ?? "-"} — {order.customerName} — AED {order.serviceFee}</button>)}
+      {result?.items.map((order) => <button className={`maintenance-order ${selectedId === order.id ? "selected" : ""}`} key={order.id} type="button" onClick={() => { setSelectedId(order.id); void verify(order.id); }}>{order.orderNumber} — serial {order.serialNumber ?? "-"} — {order.customerName} — AED {order.serviceFee}</button>)}
+      {verification ? <section className="configuration-panel" aria-label="Financial Verification">
+        <h2>Financial Verification</h2>
+        <p><strong>{verification.classification}</strong></p>
+        <p>{verification.reason}</p>
+        <p>Order: {verification.order.orderNumber} ({verification.order.orderId}) — Serial: {verification.order.serialNumber ?? "-"}</p>
+        <p>Trader: {verification.order.trader ?? "-"} — Delivery: {verification.order.deliveryStatus}</p>
+        <p>Trader owes: AED {verification.traderOwes}</p>
+        {verification.receivables.map((r) => <p key={r.id}>Receivable {r.receivableNumber}: AED {r.amount}, status {r.status}, outstanding AED {r.outstanding}</p>)}
+        <p>Physical collections: AED {verification.physicalCollectionAmount}</p>
+        <p>Settlement offsets: AED {verification.settlementOffsetAmount} ({verification.settlementNumbers.join(", ") || "none"})</p>
+        <p>Journals: {verification.journals.map((j) => j.journalNumber ?? "none").join(", ") || "none"}</p>
+        <p>Recommended action: {verification.recommendedAction}</p>
+      </section> : null}
       {selectedId ? <div className="maintenance-actions">
-        <button className="button button-secondary" disabled={busy || inspecting} type="button" onClick={() => void repair()}>{busy ? "Working…" : "Repair Trader receivable"}</button>
-        <button className="button button-danger" disabled={busy || inspecting} type="button" onClick={() => void reset()}>{busy ? "Working…" : "Delete / Reset Trader receivable"}</button>
+        <button className="button button-secondary" disabled={busy || inspecting || !verification || !["repair", "reset_then_repair"].includes(verification.recommendedAction)} type="button" onClick={() => void repair()}>{busy ? "Working…" : "Repair Trader receivable"}</button>
+        <button className="button button-danger" disabled={busy || inspecting || !verification || verification.recommendedAction !== "reset_then_repair"} type="button" onClick={() => void reset()}>{busy ? "Working…" : "Delete / Reset Trader receivable"}</button>
         <button className="button button-secondary" disabled={busy || inspecting} type="button" onClick={() => {
           const order = result?.items.find((item) => item.id === selectedId);
           if (order) void inspectOffset(order);

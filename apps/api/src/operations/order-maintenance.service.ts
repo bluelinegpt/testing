@@ -167,6 +167,28 @@ export interface TraderReceivableResetPreview extends TraderReceivableDependenci
   readonly requiredPermission: "users_roles.manage" | "trader_receivables.reverse";
 }
 
+export type FinancialVerificationClassification =
+  | "HEALTHY_ACTIVE_RECEIVABLE"
+  | "OFFSET_SETTLED_WITHOUT_PHYSICAL_COLLECTION"
+  | "REVERSED_NEEDS_REPAIR"
+  | "ALREADY_PHYSICALLY_COLLECTED"
+  | "MISSING_RECEIVABLE"
+  | "NO_TRADER_RECEIVABLE_REQUIRED"
+  | "NEEDS_REVIEW";
+
+export interface FinancialVerification {
+  readonly classification: FinancialVerificationClassification;
+  readonly reason: string;
+  readonly order: Readonly<Record<string, string | null>>;
+  readonly traderOwes: string;
+  readonly receivables: readonly Readonly<Record<string, string | null>>[];
+  readonly physicalCollectionAmount: string;
+  readonly settlementOffsetAmount: string;
+  readonly settlementNumbers: readonly string[];
+  readonly journals: readonly Readonly<Record<string, string | null>>[];
+  readonly recommendedAction: "none" | "repair" | "reset_then_repair";
+}
+
 /** Zero financial dependencies of any kind -- the ONLY case a DELETE is allowed. */
 export function hasNoFinancialDependencies(row: TraderReceivableDependencies): boolean {
   return (
@@ -206,6 +228,72 @@ export class OrderMaintenanceService {
     return this.classify(await this.resetRow(this.database, companyId, orderId, false));
   }
 
+  /** Read-only financial verification for one already company-scoped Order. */
+  public async financialVerification(orderId: string): Promise<FinancialVerification> {
+    const { companyId } = this.tenants.current();
+    const orderResult = await sql<Record<string, string | null>>`
+      select o.id::text as "orderId", o.order_number as "orderNumber",
+             o.serial_number as "serialNumber", o.delivery_status as "deliveryStatus",
+             o.service_fee::text as "serviceFee", o.payment_condition as "paymentCondition",
+             o.trader_id::text as "traderId", t.name_en as trader,
+             o.delivered_at::text as "deliveredAt"
+        from orders o left join traders t on t.id=o.trader_id and t.company_id=o.company_id
+       where o.company_id=${companyId}::uuid and o.id=${orderId}::uuid
+    `.execute(this.database);
+    const order = orderResult.rows[0];
+    if (!order) throw new ApplicationException("order_not_found", "Order not found", HttpStatus.NOT_FOUND);
+    const receivableResult = await sql<Record<string, string | null>>`
+      select r.id::text as id, r.receivable_number as "receivableNumber",
+             r.original_amount_due::text as amount, r.outstanding_amount::text as outstanding,
+             r.amount_collected::text as "amountCollected", r.status,
+             coalesce((select sum(a.amount_allocated) from trader_collection_allocations a
+               join trader_collections c on c.id=a.collection_id and c.company_id=a.company_id
+              where a.company_id=r.company_id and a.receivable_id=r.id and c.status='confirmed'),0)::text as "physicalAmount",
+             coalesce((select sum(x.amount_allocated) from trader_settlement_receivable_offsets x
+               join trader_settlements s on s.id=x.settlement_id and s.company_id=x.company_id
+              where x.company_id=r.company_id and x.receivable_id=r.id and s.status='confirmed'),0)::text as "offsetAmount"
+        from trader_receivables r
+       where r.company_id=${companyId}::uuid and r.source_type='service_charge'
+         and r.source_reference=${order.orderNumber}
+       order by r.created_at
+    `.execute(this.database);
+    const receivables = receivableResult.rows;
+    const physical = receivables.reduce((sum, row) => sum + Number(row.physicalAmount ?? 0), 0);
+    const offset = receivables.reduce((sum, row) => sum + Number(row.offsetAmount ?? 0), 0);
+    const settlementResult = await sql<{ settlementNumber: string }>`
+      select distinct s.settlement_number as "settlementNumber"
+        from trader_settlement_receivable_offsets x
+        join trader_settlements s on s.id=x.settlement_id and s.company_id=x.company_id
+       where x.company_id=${companyId}::uuid and x.receivable_id in
+         (select id from trader_receivables where company_id=${companyId}::uuid and source_reference=${order.orderNumber})
+         and s.status='confirmed'
+       order by s.settlement_number
+    `.execute(this.database);
+    const journals = await sql<Record<string, string | null>>`
+      select distinct j.journal_number as "journalNumber", j.status,
+             e.event_type as "eventType", r.receivable_number as "receivableNumber"
+        from trader_receivables r
+        join accounting_events e on e.company_id=r.company_id and e.source_entity_type='trader_receivable' and e.source_entity_id=r.id
+        left join journal_entries j on j.company_id=e.company_id and j.accounting_event_id=e.id
+       where r.company_id=${companyId}::uuid and r.source_type='service_charge'
+         and r.source_reference=${order.orderNumber}
+       order by r.receivable_number, e.event_type
+    `.execute(this.database);
+    const owes = Number(order.serviceFee ?? 0) > 0 && order.paymentCondition === "customer_pays_cod_trader_pays_fee";
+    const active = receivables.filter((r) => r.status !== "reversed" && r.status !== "cancelled");
+    let classification: FinancialVerificationClassification;
+    let reason: string;
+    let recommendedAction: FinancialVerification["recommendedAction"] = "none";
+    if (!owes) { classification = "NO_TRADER_RECEIVABLE_REQUIRED"; reason = "The current order rules do not require a Trader receivable."; }
+    else if (active.some((r) => Number(r.physicalAmount ?? 0) >= Number(r.amount ?? 0))) { classification = "ALREADY_PHYSICALLY_COLLECTED"; reason = "Trader payment already physically collected."; }
+    else if (active.some((r) => Number(r.outstanding ?? 0) > 0)) { classification = "HEALTHY_ACTIVE_RECEIVABLE"; reason = "Receivable is active — Collect from Trader."; }
+    else if (active.length > 0 && offset > 0 && physical === 0) { classification = "OFFSET_SETTLED_WITHOUT_PHYSICAL_COLLECTION"; reason = "Receivable was settled by settlement offset without a physical Trader collection."; recommendedAction = "reset_then_repair"; }
+    else if (receivables.length > 0 && active.length === 0) { classification = "REVERSED_NEEDS_REPAIR"; reason = "Historical receivable is already reversed. Repair Trader Receivable is required."; recommendedAction = "repair"; }
+    else if (receivables.length === 0) { classification = "MISSING_RECEIVABLE"; reason = "Trader Receivable is missing."; recommendedAction = "repair"; }
+    else { classification = "NEEDS_REVIEW"; reason = "The receivable and clearing records are inconsistent."; }
+    return { classification, reason, order, traderOwes: Number(order.serviceFee ?? 0).toFixed(2), receivables, physicalCollectionAmount: physical.toFixed(2), settlementOffsetAmount: offset.toFixed(2), settlementNumbers: settlementResult.rows.map((r) => r.settlementNumber), journals: journals.rows, recommendedAction };
+  }
+
   /**
    * Delete / Reset Trader Receivable -- execute.
    *
@@ -240,45 +328,38 @@ export class OrderMaintenanceService {
     const { companyId } = this.tenants.current();
     const row = this.classify(await this.resetRow(this.database, companyId, orderId, false));
     this.assertExactPermission(row.requiredPermission);
-
-    if (row.action === "financial_reset") {
-      if (row.offsetCount === 0) {
-        throw new ApplicationException(
-          "trader_receivable_reset_unsupported",
-          "This processed receivable has no supported reset path",
-          HttpStatus.CONFLICT,
-        );
-      }
-      // Receivable-scoped: the Order is derived server-side from the Receivable.
-      await this.offsetReversals.execute(row.receivableId, trimmedReason, correlationId);
-      return this.classify(await this.resetRow(this.database, companyId, orderId, false));
-    }
-
-    const identity = this.identities.current();
     return this.transactions.execute(async (tx) => {
-      const locked = this.classify(await this.resetRow(tx, companyId, orderId, true));
-      if (locked.receivableId !== row.receivableId || locked.action !== "physical_delete") {
-        throw new ApplicationException(
-          "trader_receivable_reset_race",
-          "The receivable changed; preview it again",
-          HttpStatus.CONFLICT,
-        );
-      }
-      await sql`
-        delete from trader_receivables
-         where company_id = ${companyId}::uuid and id = ${locked.receivableId}::uuid
-      `.execute(tx);
-      await this.historyWriter.audit(tx, {
-        action: "trader_receivable.physical_delete",
-        actorId: identity.identityId,
-        after: { reason: trimmedReason, receivableNumber: locked.receivableNumber },
-        companyId,
-        correlationId,
-        subjectId: locked.receivableId,
-        subjectType: "trader_receivable",
-      });
-      return locked;
+      return this.resetTraderReceivableInTransaction(tx, companyId, orderId, trimmedReason, correlationId, row);
     });
+  }
+
+  public async resetTraderReceivableInTransaction(
+    tx: Transaction<DatabaseSchema>,
+    companyId: string,
+    orderId: string,
+    reason: string,
+    correlationId: string,
+    preview?: TraderReceivableResetPreview,
+  ): Promise<TraderReceivableResetPreview> {
+    const locked = this.classify(await this.resetRow(tx, companyId, orderId, true));
+    if (preview !== undefined && (locked.receivableId !== preview.receivableId || locked.action !== preview.action)) {
+      throw new ApplicationException("trader_receivable_reset_race", "The receivable changed; preview it again", HttpStatus.CONFLICT);
+    }
+    if (locked.action === "financial_reset") {
+      if (locked.offsetCount === 0) {
+        throw new ApplicationException("trader_receivable_reset_unsupported", "This processed receivable has no supported reset path", HttpStatus.CONFLICT);
+      }
+      await this.offsetReversals.executeInTransaction(tx, locked.receivableId, reason, correlationId);
+      return this.classify(await this.resetRow(tx, companyId, orderId, false));
+    }
+    const identity = this.identities.current();
+    await sql`delete from trader_receivables where company_id=${companyId}::uuid and id=${locked.receivableId}::uuid`.execute(tx);
+    await this.historyWriter.audit(tx, {
+      action: "trader_receivable.physical_delete", actorId: identity.identityId,
+      after: { reason, receivableNumber: locked.receivableNumber }, companyId,
+      correlationId, subjectId: locked.receivableId, subjectType: "trader_receivable",
+    });
+    return locked;
   }
 
   private classify(

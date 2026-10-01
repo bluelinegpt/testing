@@ -179,6 +179,12 @@ export class OperationsController {
   }
 
   @RequireAnyPermission("users_roles.manage", "trader_receivables.reverse")
+  @Get("orders/:orderId/financial-verification")
+  public financialVerification(@Param("orderId", new ParseUUIDPipe()) orderId: string) {
+    return this.orderMaintenance.financialVerification(orderId);
+  }
+
+  @RequireAnyPermission("users_roles.manage", "trader_receivables.reverse")
   @ApiOperation({ summary: "Delete unused or financially reset a Trader Receivable" })
   @Post("orders/:orderId/reset-trader-receivable")
   public resetTraderReceivable(

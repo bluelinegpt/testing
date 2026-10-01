@@ -5357,19 +5357,29 @@ export class OperationsService {
 
   /** Create the missing Trader receivable for an already-created legacy Order. */
   public async repairTraderReceivable(orderId: string, correlationId: string): Promise<{ created: boolean; amount: string }> {
-    const identity = this.identities.current();
     const { companyId } = this.tenants.current();
-    return this.transactions.execute(async (transaction) => {
+    return this.transactions.execute((transaction) =>
+      this.repairTraderReceivableInTransaction(transaction, companyId, orderId, correlationId),
+    );
+  }
+
+  public async repairTraderReceivableInTransaction(
+    transaction: Parameters<Parameters<KyselyTransactionManager["execute"]>[0]>[0],
+    companyId: string,
+    orderId: string,
+    correlationId: string,
+  ): Promise<{ created: boolean; amount: string }> {
+    const identity = this.identities.current();
       const result = await sql<{ orderNumber: string; traderId: string; paymentCondition: string; serviceFee: string }>`
         select order_number as "orderNumber", trader_id as "traderId",
                payment_condition as "paymentCondition", service_fee::text as "serviceFee"
           from orders where id=${orderId}::uuid and company_id=${companyId}::uuid for update
       `.execute(transaction);
-      const order = result.rows[0];
-      if (order === undefined) throw new ApplicationException("order_not_found", "Order not found", HttpStatus.NOT_FOUND);
-      if (order.paymentCondition !== "customer_pays_cod_trader_pays_fee") {
+    const order = result.rows[0];
+    if (order === undefined) throw new ApplicationException("order_not_found", "Order not found", HttpStatus.NOT_FOUND);
+    if (order.paymentCondition !== "customer_pays_cod_trader_pays_fee") {
         throw new ApplicationException("trader_receivable_not_required", "This Order is not configured for Trader-paid fees", HttpStatus.CONFLICT);
-      }
+    }
       // Any usable Receivable for this Order blocks the repair. A reversed
       // Receivable is historical output of the financial reset path and must
       // not be reactivated or prevent a fresh active Receivable.
@@ -5387,20 +5397,19 @@ export class OperationsService {
       //
       // Repair exists for legacy Orders that never had an active Receivable,
       // or whose only historical Receivable was intentionally reversed.
-      const existing = await sql<{ id: string }>`
+    const existing = await sql<{ id: string }>`
         select id from trader_receivables
          where company_id=${companyId}::uuid and source_type='service_charge'
            and source_reference=${order.orderNumber}
            and status <> 'reversed'
          limit 1 for update
-      `.execute(transaction);
-      if (existing.rows[0] !== undefined) return { created: false, amount: order.serviceFee };
-      await this.createOrderTraderReceivableIfNeeded(transaction, {
+    `.execute(transaction);
+    if (existing.rows[0] !== undefined) return { created: false, amount: order.serviceFee };
+    await this.createOrderTraderReceivableIfNeeded(transaction, {
         actorAccountId: identity.identityId, amountDue: new Decimal(order.serviceFee), companyId,
         correlationId, orderId, orderNumber: order.orderNumber, traderId: order.traderId,
-      });
-      return { created: true, amount: order.serviceFee };
     });
+    return { created: true, amount: order.serviceFee };
   }
 
   public async changeOrderStatus(

@@ -183,6 +183,17 @@ export class ReceivableOffsetReversalService {
     reason: string,
     correlationId: string,
   ): Promise<ReceivableOffsetReversalResult> {
+    return this.transactions.execute((transaction) =>
+      this.executeInTransaction(transaction, receivableId, reason, correlationId),
+    );
+  }
+
+  public async executeInTransaction(
+    transaction: Transaction<DatabaseSchema>,
+    receivableId: string,
+    reason: string,
+    correlationId: string,
+  ): Promise<ReceivableOffsetReversalResult> {
     this.assertPermission(true);
     const trimmedReason = reason.trim();
     if (trimmedReason === "") {
@@ -194,13 +205,12 @@ export class ReceivableOffsetReversalService {
     }
     const { companyId } = this.tenants.current();
     const identity = this.identities.current();
-    return this.transactions.execute(async (transaction) => {
-      const row = await this.load(transaction, companyId, receivableId, true);
+    const row = await this.load(transaction, companyId, receivableId, true);
 
       // A retry on an already-reversed Receivable is a no-op, not an error:
       // the caller asked for a state that already holds. The live Credit is
       // returned so the response is identical to the first call's.
-      if (["reversed", "cancelled"].includes(row.receivableStatus)) {
+    if (["reversed", "cancelled"].includes(row.receivableStatus)) {
         const existing = await this.liveCredit(transaction, companyId, row.receivableId);
         if (existing !== undefined) {
           return {
@@ -220,29 +230,29 @@ export class ReceivableOffsetReversalService {
         }
       }
 
-      const refusal = refuseReversal(row);
+    const refusal = refuseReversal(row);
       if (refusal !== null) {
         throw new ApplicationException(refusal, this.describe(refusal), HttpStatus.CONFLICT);
       }
 
-      const plan = planReversal(row);
-      const posting = planCompensationPosting(row);
+    const plan = planReversal(row);
+    const posting = planCompensationPosting(row);
 
       // The Receivable goes terminal. `amount_collected` is NOT reset: it was
       // collected, and leaving it keeps outstanding_amount at zero.
-      await sql`
+    await sql`
         update trader_receivables
            set status = ${plan.receivableStatus}, updated_at = now()
          where company_id = ${companyId}::uuid and id = ${row.receivableId}::uuid
       `.execute(transaction);
 
-      const creditNumber = await this.history.nextReferenceNumber(
+    const creditNumber = await this.history.nextReferenceNumber(
         transaction,
         companyId,
         "trader_credit",
         "TCR",
       );
-      const credit = await sql<{ id: string }>`
+    const credit = await sql<{ id: string }>`
         insert into trader_credits (
           company_id, credit_number, trader_id, business_date, amount, reason,
           source_type, source_receivable_id, source_order_id, source_settlement_id,
@@ -256,7 +266,7 @@ export class ReceivableOffsetReversalService {
         )
         returning id
       `.execute(transaction);
-      const creditId = credit.rows[0]?.id;
+    const creditId = credit.rows[0]?.id;
       if (creditId === undefined) {
         // Unreachable unless trader_credits_one_live_per_receivable fired,
         // which is itself the guarantee we want -- surface it rather than
@@ -290,7 +300,7 @@ export class ReceivableOffsetReversalService {
       // database already does, and it attributed the reversal to the Order
       // rather than the Receivable, so the two events would have reversed
       // different Journals.
-      await this.enqueueCreditPosting(transaction, companyId, creditId, creditNumber);
+    await this.enqueueCreditPosting(transaction, companyId, creditId, creditNumber);
 
       // `orders.trader_settlement_status` is deliberately NOT written here.
       // It is a pure function of the Order's payable TO the Trader
@@ -305,7 +315,7 @@ export class ReceivableOffsetReversalService {
       // An earlier draft of this service did exactly that, purely to make a
       // later Order reopen possible. Reopening is its own audited operation
       // and stays separate.
-      await this.history.audit(transaction, {
+    await this.history.audit(transaction, {
         action: "trader_receivable.reverse_offset",
         actorId: identity.identityId,
         after: {
@@ -326,7 +336,7 @@ export class ReceivableOffsetReversalService {
         subjectType: "trader_receivable",
       });
 
-      return {
+    return {
         alreadyReversed: false,
         creditAmount: plan.creditAmount,
         creditId,
@@ -339,8 +349,7 @@ export class ReceivableOffsetReversalService {
         receivableStatus: plan.receivableStatus,
         settlementNumber: row.settlementNumber,
         settlementStatus: row.settlementStatus,
-      };
-    });
+    };
   }
 
   /**
