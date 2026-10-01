@@ -624,7 +624,7 @@ export class OperationalSourceLoader {
             "cod_receivable",
             offset.amount,
             "credit",
-            "cod_receivable",
+            "order_cod_receivable",
             { ...base, traderReceivableId: offset.receivableId },
             `Trader fee offset ${offset.receivableNumber} in ${row.settlementNumber}`,
           ),
