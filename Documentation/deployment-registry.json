@@ -33,9 +33,9 @@
       "path": "apps/web",
       "renderService": "bluelinegpt-web-test",
       "status": "pushed_awaiting_confirmation",
-      "localCommit": "92db409",
+      "localCommit": "ea1b9e2",
       "localCommitDate": "2026-10-01",
-      "lastChangeDescription": "fix: add order maintenance settlement correction actions",
+      "lastChangeDescription": "fix: show maintenance correction errors",
       "lastChangeBy": "human",
       "confirmedLiveCommit": "f1d5271",
       "confirmedLiveAt": "2026-10-01"
