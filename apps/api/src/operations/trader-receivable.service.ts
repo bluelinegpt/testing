@@ -603,11 +603,10 @@ export class TraderReceivableService {
                t.name_en as "traderName", t.code as "traderCode",
                t.name_ar as "traderNameAr", r.source_type as "sourceType",
                r.source_reference as "sourceReference", r.business_date::text as "businessDate",
-               (select case when count(distinct tso.order_id) = 1 then min(tso.order_id::text) end
-                  from trader_settlement_receivable_offsets x
-                  join trader_settlement_orders tso
-                    on tso.company_id = x.company_id and tso.settlement_id = x.settlement_id
-                 where x.company_id = r.company_id and x.receivable_id = r.id) as "sourceOrderId",
+               (select case when count(distinct source_order.id) = 1 then min(source_order.id::text) end
+                  from orders source_order
+                 where source_order.company_id = r.company_id
+                   and source_order.order_number = r.source_reference) as "sourceOrderId",
                r.original_amount_due::text as "originalAmountDue",
                r.amount_collected::text as "amountCollected",
                r.outstanding_amount::text as "outstandingAmount", r.status, r.reason, r.notes,
