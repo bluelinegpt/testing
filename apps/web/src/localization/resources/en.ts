@@ -4161,6 +4161,12 @@ export const englishTranslations = {
     receivedNotes: "Notes",
     moneyReceivedConfirmed: "Money Received by Trader confirmed.",
     moneyReceivedAlready: "Money Received has already been confirmed for this settlement.",
+    actionReverseMoneyReceived: "Reverse Money Received",
+    reverseMoneyReceivedTitle: "Reverse Money Received",
+    reverseMoneyReceivedReasonRequired: "A reason is required to reverse Money Received.",
+    reverseMoneyReceivedWarning:
+      "This restores the Trader Settlement status to Money Sent. The delivery status, receivables, collections, offsets, and accounting journals are not changed.",
+    reverseMoneyReceivedSuccess: "Money Received was reversed. You may now reverse the settlement separately if needed.",
     // Reversal
     reverseSettlementTitle: "Reverse Trader Settlement",
     reverseReasonRequired: "A reason is required to reverse this settlement.",

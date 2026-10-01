@@ -4101,6 +4101,12 @@ export const arabicTranslations = {
     receivedNotes: "ملاحظات",
     moneyReceivedConfirmed: "تم تأكيد استلام التاجر للمبلغ.",
     moneyReceivedAlready: "تم تأكيد استلام المبلغ لهذه التسوية بالفعل.",
+    actionReverseMoneyReceived: "عكس استلام المبلغ",
+    reverseMoneyReceivedTitle: "عكس استلام المبلغ",
+    reverseMoneyReceivedReasonRequired: "سبب عكس استلام المبلغ مطلوب.",
+    reverseMoneyReceivedWarning:
+      "سيعيد هذا حالة تسوية التاجر إلى تم إرسال المبلغ. لن تتغير حالة التسليم أو الذمم المدينة أو التحصيلات أو المقابلات أو قيود المحاسبة.",
+    reverseMoneyReceivedSuccess: "تم عكس استلام المبلغ. يمكنك الآن عكس التسوية بشكل منفصل عند الحاجة.",
     // Reversal
     reverseSettlementTitle: "عكس تسوية التاجر",
     reverseReasonRequired: "السبب مطلوب لعكس هذه التسوية.",

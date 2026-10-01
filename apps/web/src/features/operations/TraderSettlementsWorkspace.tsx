@@ -3710,6 +3710,92 @@ function ReverseSettlementDialog({
   );
 }
 
+function ReverseMoneyReceivedDialog({
+  api,
+  onClose,
+  onReversed,
+  settlement,
+}: {
+  api: ApiClient;
+  onClose: () => void;
+  onReversed: () => void;
+  settlement: TraderSettlementListRow;
+}) {
+  const { t } = useTranslation();
+  const [reason, setReason] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string>();
+  const [reversed, setReversed] = useState(false);
+
+  const reverse = async () => {
+    if (reason.trim() === "") {
+      setError(t("traderSettlements.reverseMoneyReceivedReasonRequired"));
+      return;
+    }
+    setSaving(true);
+    setError(undefined);
+    try {
+      await api.post(
+        `operations/settlements/payments/${settlement.settlementId}/reverse-receipt`,
+        { reason: reason.trim() },
+      );
+      onReversed();
+      setReversed(true);
+    } catch (submitError) {
+      setError(message(submitError, t("traderSettlements.settlementFailed")));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal
+      closeLabel={t("common.close")}
+      onRequestClose={onClose}
+      title={t("traderSettlements.reverseMoneyReceivedTitle")}
+      titleId="reverse-money-received-title"
+    >
+      {error === undefined ? null : <div className="alert alert-error" role="alert">{error}</div>}
+      {reversed ? (
+        <div className="reconciliation-success" role="status">
+          <p>{t("traderSettlements.reverseMoneyReceivedSuccess")}</p>
+          <button className="button button-primary" onClick={onClose} type="button">
+            {t("common.close")}
+          </button>
+        </div>
+      ) : (
+        <>
+          <p className="field-hint">{t("traderSettlements.reverseMoneyReceivedWarning")}</p>
+          <dl className="reconciliation-summary">
+            <div className="detail-line">
+              <dt>{t("traderSettlements.columnSettlementNumber")}</dt>
+              <dd>{settlement.settlementNumber}</dd>
+            </div>
+            <div className="detail-line">
+              <dt>{t("traderSettlements.filterTrader")}</dt>
+              <dd>{settlement.traderName}</dd>
+            </div>
+          </dl>
+          <form onSubmit={(event) => void (event.preventDefault(), reverse())}>
+            <label className="field required-field">
+              <span>{t("common.reason")}</span>
+              <textarea onChange={(event) => setReason(event.target.value)} value={reason} />
+            </label>
+            <div className="modal-actions">
+              <button className="button button-secondary" onClick={onClose} type="button">
+                {t("common.cancel")}
+              </button>
+              <button className="button button-primary" disabled={saving} type="submit">
+                {saving ? t("common.saving") : t("traderSettlements.actionReverseMoneyReceived")}
+              </button>
+            </div>
+          </form>
+        </>
+      )}
+    </Modal>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Settlement detail
 // ---------------------------------------------------------------------------
@@ -3737,6 +3823,7 @@ export function SettlementDetailDialog({
   const [detail, setDetail] = useState<TraderSettlementDetail>();
   const [error, setError] = useState<string>();
   const [receiptOpen, setReceiptOpen] = useState(false);
+  const [reverseReceiptOpen, setReverseReceiptOpen] = useState(false);
   const [reverseOpen, setReverseOpen] = useState(false);
   const pdf = useReconciliationPdfActions(api);
   const [pdfError, setPdfError] = useState<string>();
@@ -4103,6 +4190,11 @@ export function SettlementDetailDialog({
                 {t("traderSettlements.actionConfirmMoneyReceived")}
               </button>
             )}
+            {!canReverse || detail.status === "reversed" || !moneyReceivedConfirmed ? null : (
+              <button onClick={() => setReverseReceiptOpen(true)} type="button">
+                {t("traderSettlements.actionReverseMoneyReceived")}
+              </button>
+            )}
             {!canReverse || detail.status === "reversed" || moneyReceivedConfirmed ? null : (
               <button onClick={() => setReverseOpen(true)} type="button">
                 {t("traderSettlements.actionReverse")}
@@ -4152,6 +4244,36 @@ export function SettlementDetailDialog({
           onReversed={() => {
             setReverseOpen(false);
             onReversed();
+          }}
+          settlement={{
+            confirmedBy: detail.confirmedBy,
+            createdBy: detail.createdBy,
+            isReversed: detail.status === "reversed",
+            moneyReceivedAt: detail.moneyReceivedDate,
+            moneyReceivedConfirmed,
+            moneySentAt: detail.moneySentAt,
+            orderCount: detail.summary.orderCount,
+            paymentAmount: detail.summary.amountPaidNow,
+            paymentDate: detail.paymentDate,
+            paymentMethod: detail.paymentMethod,
+            paymentReference: detail.paymentReference,
+            previouslyPaid: detail.summary.previouslyPaid,
+            remainingOutstanding: detail.summary.remainingOutstanding,
+            settlementId: detail.settlementId,
+            settlementNumber: detail.settlementNumber,
+            status: detail.status,
+            traderName: detail.traderName,
+          }}
+        />
+      )}
+
+      {!reverseReceiptOpen || detail === undefined ? null : (
+        <ReverseMoneyReceivedDialog
+          api={api}
+          onClose={() => setReverseReceiptOpen(false)}
+          onReversed={() => {
+            setReverseReceiptOpen(false);
+            load();
           }}
           settlement={{
             confirmedBy: detail.confirmedBy,

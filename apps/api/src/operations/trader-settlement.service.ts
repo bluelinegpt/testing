@@ -33,6 +33,7 @@ import type {
   TraderSettlementListQueryDto,
   TraderSettlementDraftListQueryDto,
   TraderSettlementSummaryQueryDto,
+  ReverseTraderSettlementReceiptDto,
 } from "./operations.dto.js";
 import {
   buildTraderSettlementStatementHtml,
@@ -64,6 +65,7 @@ const idempotencyKeyPattern = /^[A-Za-z0-9._:-]{16,128}$/;
 const idempotencyOperationCreate = "trader_settlements.create";
 const idempotencyOperationReceipt = "trader_settlements.money_received";
 const receiptConfirmedAction = "trader_settlement.receipt_confirmed";
+const receiptConfirmationReversedAction = "trader_settlement.receipt_confirmation_reversed";
 
 interface EligibleTraderOrder {
   readonly deliveredAt: string | null;
@@ -1655,6 +1657,129 @@ export class TraderSettlementService {
     );
   }
 
+  public async reverseMoneyReceived(
+    settlementId: string,
+    input: ReverseTraderSettlementReceiptDto,
+    correlationId: string,
+  ): Promise<{ readonly orderCount: number; readonly settlementId: string }> {
+    this.assertAnyPermission("settlements.reverse");
+    const companyId = this.tenants.current().companyId;
+    const identity = this.identities.current();
+    const reason = input.reason.trim();
+    if (reason === "") {
+      throw new ApplicationException(
+        "settlement_receipt_reversal_reason_required",
+        "A reason is required",
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    return this.transactions.execute(async (transaction) => {
+      const settlement = (await sql<{ id: string; status: string; reversalOfId: string | null }>`
+        select id, status, reversal_of_id as "reversalOfId"
+          from trader_settlements
+         where id=${settlementId}::uuid and company_id=${companyId}::uuid
+         for update
+      `.execute(transaction)).rows[0];
+      if (settlement === undefined) {
+        throw new ApplicationException(
+          "settlement_not_found",
+          "Trader settlement not found",
+          HttpStatus.NOT_FOUND,
+        );
+      }
+      if (settlement.status !== "confirmed" || settlement.reversalOfId !== null) {
+        throw new ApplicationException(
+          "settlement_receipt_reversal_invalid",
+          "Only an original confirmed settlement can reverse Money Received",
+          HttpStatus.CONFLICT,
+        );
+      }
+      const receipt = (await sql<{ id: string }>`
+        select id from audit_events
+         where company_id=${companyId}::uuid and subject_type='trader_settlement'
+           and subject_id=${settlementId} and action=${receiptConfirmedAction}
+         limit 1
+      `.execute(transaction)).rows[0];
+      if (receipt === undefined) {
+        throw new ApplicationException(
+          "settlement_receipt_not_confirmed",
+          "Money Received has not been confirmed",
+          HttpStatus.CONFLICT,
+        );
+      }
+      const alreadyReversed = (await sql<{ id: string }>`
+        select id from audit_events
+         where company_id=${companyId}::uuid and subject_type='trader_settlement'
+           and subject_id=${settlementId} and action=${receiptConfirmationReversedAction}
+         limit 1
+      `.execute(transaction)).rows[0];
+      if (alreadyReversed !== undefined) {
+        throw new ApplicationException(
+          "settlement_receipt_already_reversed",
+          "Money Received has already been reversed",
+          HttpStatus.CONFLICT,
+        );
+      }
+      const links = (await sql<{ orderId: string; orderNumber: string; status: string }>`
+        select o.id as "orderId", o.order_number as "orderNumber", o.trader_settlement_status as status
+          from order_events e
+          join orders o on o.id=e.order_id and o.company_id=e.company_id
+         where e.company_id=${companyId}::uuid and e.related_settlement_id=${settlementId}::uuid
+           and e.event_type='trader_settlement.money_received'
+         group by o.id, o.order_number, o.trader_settlement_status
+         for update of o
+      `.execute(transaction)).rows;
+      if (links.length === 0) {
+        throw new ApplicationException(
+          "settlement_receipt_reversal_missing_order_effects",
+          "Money Received reversal cannot proceed because its Order effects could not be identified",
+          HttpStatus.CONFLICT,
+        );
+      }
+      if (links.some((link) => link.status !== "money_received_by_trader")) {
+        throw new ApplicationException(
+          "settlement_receipt_reversal_stale",
+          "An affected Order is no longer in Money Received state",
+          HttpStatus.CONFLICT,
+        );
+      }
+      const actorRole = await this.history.actorRole(transaction, companyId, identity.identityId);
+      for (const link of links) {
+        await sql`
+          update orders
+             set trader_settlement_status = 'money_sent_to_trader', updated_at = now(), version = version + 1
+           where id = ${link.orderId}::uuid and company_id = ${companyId}::uuid
+        `.execute(transaction);
+        await this.history.statusHistory(transaction, { actorId: identity.identityId, companyId, from: "money_received_by_trader", orderId: link.orderId, statusDimension: "trader_settlement", to: "money_sent_to_trader", reason });
+        await this.history.orderEvent(transaction, {
+          actorId: identity.identityId,
+          actorRole,
+          category: "financial_change",
+          companyId,
+          correlationId,
+          eventType: "trader_settlement.money_received_reversed",
+          fieldName: "trader_settlement_status",
+          newValue: "money_sent_to_trader",
+          orderId: link.orderId,
+          previousValue: "money_received_by_trader",
+          relatedSettlementId: settlementId,
+          reason,
+          source: "web_portal",
+        });
+      }
+      await this.history.audit(transaction, {
+        action: receiptConfirmationReversedAction,
+        actorId: identity.identityId,
+        after: { reason, orderCount: links.length, restoredOrderIds: links.map((link) => link.orderId) },
+        companyId,
+        correlationId,
+        subjectId: settlementId,
+        subjectType: "trader_settlement",
+      });
+      return { orderCount: links.length, settlementId };
+    });
+  }
+
   /** Execute settlement reversal inside a caller-owned transaction. */
   public async reverseInTransaction(
     transaction: Transaction<DatabaseSchema>,
@@ -1736,7 +1861,16 @@ export class TraderSettlementService {
            limit 1
         `.execute(transaction)
       ).rows[0];
-      if (moneyReceived !== undefined) {
+      const moneyReceivedReversal = moneyReceived === undefined ? undefined : (
+        await sql<{ id: string }>`
+          select id from audit_events
+           where company_id = ${companyId}::uuid and subject_type = 'trader_settlement'
+             and subject_id = ${settlementId}
+             and action = ${receiptConfirmationReversedAction}
+           limit 1
+        `.execute(transaction)
+      ).rows[0];
+      if (moneyReceived !== undefined && moneyReceivedReversal === undefined) {
         throw new ApplicationException(
           "settlement_reversal_blocked_by_receipt",
           "Cannot reverse: Money Received has already been confirmed for this settlement",
@@ -2328,12 +2462,19 @@ export class TraderSettlementService {
     }
     const receipt = (
       await sql<{ notes: string | null; occurredAt: string; reference: string | null }>`
-        select occurred_at::text as "occurredAt",
-               after_data ->> 'notes' as notes, after_data ->> 'reference' as reference
-          from audit_events
-         where company_id = ${companyId}::uuid and subject_type = 'trader_settlement'
-           and subject_id = ${settlementId} and action = ${receiptConfirmedAction}
-         order by occurred_at limit 1
+        select confirmed.occurred_at::text as "occurredAt",
+               confirmed.after_data ->> 'notes' as notes, confirmed.after_data ->> 'reference' as reference
+          from audit_events confirmed
+         where confirmed.company_id = ${companyId}::uuid and confirmed.subject_type = 'trader_settlement'
+           and confirmed.subject_id = ${settlementId} and confirmed.action = ${receiptConfirmedAction}
+           and not exists (
+             select 1 from audit_events reversed
+              where reversed.company_id = confirmed.company_id
+                and reversed.subject_type = 'trader_settlement'
+                and reversed.subject_id = confirmed.subject_id
+                and reversed.action = ${receiptConfirmationReversedAction}
+           )
+         order by confirmed.occurred_at limit 1
       `.execute(this.database)
     ).rows[0];
     // `trader_settlements` has no `notes` column; the create-time note lives on

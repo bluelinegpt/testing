@@ -118,6 +118,7 @@ import {
   ReconciliationListQueryDto,
   ReopenDeliveredOrderDto,
   ReverseTraderSettlementDto,
+  ReverseTraderSettlementReceiptDto,
   CreateOrderDto,
   CreateTraderPortalOrderDto,
   CreateTraderDto,
@@ -1204,6 +1205,21 @@ export class OperationsController {
     return this.traderSettlementService.reverse(
       settlementId,
       input.reason,
+      this.correlationId(request),
+    );
+  }
+
+  @RequireAnyPermission("settlements.reverse", "users_roles.manage")
+  @ApiOperation({ summary: "Reverse a confirmed Trader Money Received acknowledgement" })
+  @Post("settlements/payments/:settlementId/reverse-receipt")
+  public reverseTraderSettlementReceipt(
+    @Param("settlementId", new ParseUUIDPipe()) settlementId: string,
+    @Body() input: ReverseTraderSettlementReceiptDto,
+    @Req() request: Request,
+  ): Promise<{ readonly orderCount: number; readonly settlementId: string }> {
+    return this.traderSettlementService.reverseMoneyReceived(
+      settlementId,
+      input,
       this.correlationId(request),
     );
   }

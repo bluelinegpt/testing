@@ -1460,6 +1460,14 @@ export class ReverseTraderSettlementDto {
   public readonly reason!: string;
 }
 
+export class ReverseTraderSettlementReceiptDto {
+  @IsString()
+  @MinLength(1)
+  @MaxLength(500)
+  @TrimText()
+  public readonly reason!: string;
+}
+
 export class TraderSettlementFilterDto {
   @IsOptional()
   @IsIn(["calendar_date", "business_date"])
