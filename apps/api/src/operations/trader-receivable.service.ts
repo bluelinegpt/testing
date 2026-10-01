@@ -603,7 +603,7 @@ export class TraderReceivableService {
                t.name_en as "traderName", t.code as "traderCode",
                t.name_ar as "traderNameAr", r.source_type as "sourceType",
                r.source_reference as "sourceReference", r.business_date::text as "businessDate",
-               (select case when count(distinct tso.order_id) = 1 then min(tso.order_id)::text end
+               (select case when count(distinct tso.order_id) = 1 then min(tso.order_id::text) end
                   from trader_settlement_receivable_offsets x
                   join trader_settlement_orders tso
                     on tso.company_id = x.company_id and tso.settlement_id = x.settlement_id
