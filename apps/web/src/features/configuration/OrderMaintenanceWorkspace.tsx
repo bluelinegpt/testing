@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { ApiClient } from "../../api/api-client.js";
+import { ApiError, type ApiClient } from "../../api/api-client.js";
 import type { OperationsOrder, OperationsOrderPage } from "../../api/contracts.js";
 
 export function OrderMaintenanceWorkspace({ api }: { api: ApiClient }) {
@@ -9,6 +9,9 @@ export function OrderMaintenanceWorkspace({ api }: { api: ApiClient }) {
   const [message, setMessage] = useState<string>();
   const [busy, setBusy] = useState(false);
   const [reversing, setReversing] = useState(false);
+  const showError = (error: unknown, fallback: string) => {
+    setMessage(error instanceof ApiError ? `${error.message} (${error.code})` : fallback);
+  };
   const find = async () => {
     setMessage(undefined);
     setResult(await api.get<OperationsOrderPage>(`operations/orders?page=1&pageSize=25&quickView=all&search=${encodeURIComponent(search)}`));
@@ -42,6 +45,8 @@ export function OrderMaintenanceWorkspace({ api }: { api: ApiClient }) {
       );
       setMessage(`Settlement reversed: ${response.reversalSettlementNumber}`);
       await find();
+    } catch (error) {
+      showError(error, "The Trader settlement could not be reversed.");
     } finally { setReversing(false); }
   };
   const setDeliveredAndCollectFromTrader = async () => {
@@ -59,6 +64,8 @@ export function OrderMaintenanceWorkspace({ api }: { api: ApiClient }) {
       });
       setMessage("Order set to Delivered and Collect from Trader.");
       await find();
+    } catch (error) {
+      showError(error, "The order correction could not be completed.");
     } finally { setBusy(false); }
   };
   return <main className="workspace configuration-workspace">
