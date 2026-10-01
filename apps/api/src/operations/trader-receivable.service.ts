@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 
 import { HttpStatus, Inject, Injectable } from "@nestjs/common";
 import { Decimal } from "decimal.js";
-import { type Kysely, sql } from "kysely";
+import { type Kysely, sql, type Transaction } from "kysely";
 
 import { DATABASE } from "../infrastructure/database/database.tokens.js";
 import type { DatabaseSchema } from "../infrastructure/database/database.types.js";
@@ -126,10 +126,22 @@ export interface TraderReceivableDetail {
   readonly receivableId: string;
   readonly receivableNumber: string;
   readonly sourceReference: string | null;
+  readonly sourceOrderId: string | null;
   readonly sourceType: string;
   readonly status: string;
   readonly traderId: string;
   readonly traderName: string;
+}
+
+export interface TraderReceivableReversalPreview {
+  readonly orderNumber: string;
+  readonly orderStatus: string;
+  readonly receivableId: string;
+  readonly receivableNumber: string;
+  readonly offsetAmount: string;
+  readonly settlementId: string;
+  readonly settlementNumber: string;
+  readonly physicalCollectionCount: number;
 }
 
 export interface TraderReceivableEligibleRow {
@@ -579,6 +591,7 @@ export class TraderReceivableService {
         reason: string;
         receivableNumber: string;
         sourceReference: string | null;
+        sourceOrderId: string | null;
         sourceType: string;
         status: string;
         traderId: string;
@@ -590,6 +603,11 @@ export class TraderReceivableService {
                t.name_en as "traderName", t.code as "traderCode",
                t.name_ar as "traderNameAr", r.source_type as "sourceType",
                r.source_reference as "sourceReference", r.business_date::text as "businessDate",
+               (select case when count(distinct tso.order_id) = 1 then min(tso.order_id)::text end
+                  from trader_settlement_receivable_offsets x
+                  join trader_settlement_orders tso
+                    on tso.company_id = x.company_id and tso.settlement_id = x.settlement_id
+                 where x.company_id = r.company_id and x.receivable_id = r.id) as "sourceOrderId",
                r.original_amount_due::text as "originalAmountDue",
                r.amount_collected::text as "amountCollected",
                r.outstanding_amount::text as "outstandingAmount", r.status, r.reason, r.notes,
@@ -678,6 +696,7 @@ export class TraderReceivableService {
       receivableId,
       receivableNumber: row.receivableNumber,
       sourceReference: row.sourceReference,
+      sourceOrderId: row.sourceOrderId,
       sourceType: row.sourceType,
       status: row.status,
       traderId: row.traderId,
@@ -685,6 +704,51 @@ export class TraderReceivableService {
       traderName: row.traderName,
       traderNameAr: row.traderNameAr,
     };
+  }
+
+  /** Read-only preview for reversing a settlement-backed receivable offset. */
+  public async reversalPreview(
+    receivableId: string,
+    orderId: string,
+  ): Promise<TraderReceivableReversalPreview> {
+    this.assertAnyPermission("trader_receivables.create");
+    const { companyId } = this.tenants.current();
+    const row = (
+      await sql<TraderReceivableReversalPreview>`
+        select o.order_number as "orderNumber", o.delivery_status as "orderStatus",
+               r.id as "receivableId", r.receivable_number as "receivableNumber",
+               x.amount_allocated::text as "offsetAmount",
+               s.id as "settlementId", s.settlement_number as "settlementNumber",
+               (select count(*)::int from trader_collection_allocations ca
+                 where ca.company_id = r.company_id and ca.receivable_id = r.id) as "physicalCollectionCount"
+          from trader_receivables r
+          join trader_settlement_receivable_offsets x
+            on x.company_id = r.company_id and x.receivable_id = r.id
+          join trader_settlements s
+            on s.company_id = x.company_id and s.id = x.settlement_id
+          join orders o
+            on o.company_id = r.company_id and o.order_number = r.source_reference
+         where r.company_id = ${companyId}::uuid
+           and r.id = ${receivableId}::uuid
+           and o.id = ${orderId}::uuid
+           and r.source_type = 'service_charge'
+           and r.status in ('collected', 'partially_collected')
+           and not exists (
+             select 1 from trader_settlements reversal
+              where reversal.company_id = s.company_id and reversal.reversal_of_id = s.id
+           )
+         order by x.created_at
+         limit 1
+      `.execute(this.database)
+    ).rows[0];
+    if (row === undefined) {
+      throw new ApplicationException(
+        "trader_receivable_offset_not_reversible",
+        "No active settlement offset is available for this receivable",
+        HttpStatus.CONFLICT,
+      );
+    }
+    return row;
   }
 
   /**
@@ -926,6 +990,18 @@ export class TraderReceivableService {
     correlationId: string,
     idempotencyKey?: string,
   ): Promise<CreateTraderCollectionResult> {
+    return this.transactions.execute((transaction) =>
+      this.confirmCollectionInTransaction(transaction, input, correlationId, idempotencyKey),
+    );
+  }
+
+  /** Execute collection confirmation inside a caller-owned transaction. */
+  public async confirmCollectionInTransaction(
+    transaction: Transaction<DatabaseSchema>,
+    input: CreateTraderCollectionDto,
+    correlationId: string,
+    idempotencyKey?: string,
+  ): Promise<CreateTraderCollectionResult> {
     this.assertAnyPermission("trader_receivables.create");
     const { companyId } = this.tenants.current();
     const identity = this.identities.current();
@@ -939,7 +1015,7 @@ export class TraderReceivableService {
     }
     const requestHash = this.collectionFingerprint(input);
 
-    return this.transactions.execute(async (transaction) => {
+    {
       // 1. Reserve the idempotency key before touching any row.
       const reserved = await sql<{ id: string }>`
         insert into idempotency_records (
@@ -1170,7 +1246,7 @@ export class TraderReceivableService {
         traderId: input.traderId,
         traderName: trader.nameEn,
       };
-    });
+    }
   }
 
   /**

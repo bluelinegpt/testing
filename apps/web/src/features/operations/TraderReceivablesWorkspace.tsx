@@ -172,6 +172,7 @@ interface TraderReceivableDetail {
   readonly receivableId: string;
   readonly receivableNumber: string;
   readonly sourceReference: string | null;
+  readonly sourceOrderId: string | null;
   readonly sourceType: string;
   readonly status: string;
   readonly traderId: string;
@@ -1643,6 +1644,8 @@ function ReceivableDetailDialog({
   const [detail, setDetail] = useState<TraderReceivableDetail>();
   const [error, setError] = useState<string>();
   const [cancelOpen, setCancelOpen] = useState(false);
+  const [reverseBusy, setReverseBusy] = useState(false);
+  const [reverseMessage, setReverseMessage] = useState<string>();
 
   const load = useCallback(() => {
     setError(undefined);
@@ -1655,6 +1658,44 @@ function ReceivableDetailDialog({
   useEffect(() => load(), [load]);
 
   const collectible = detail?.status === "outstanding" || detail?.status === "partially_collected";
+  const reverseOffset = async () => {
+    if (detail === undefined) return;
+    if (detail.collections.length > 0) {
+      setReverseMessage("This receivable was cleared through a Trader Collection and must be reversed through the collection reversal workflow.");
+      return;
+    }
+    if (detail.sourceOrderId === null) {
+      setReverseMessage("No settlement offset is available for this receivable.");
+      return;
+    }
+    setReverseMessage(undefined);
+    setReverseBusy(true);
+    try {
+      const preview = await api.get<{
+        readonly orderNumber: string;
+        readonly orderStatus: string;
+        readonly offsetAmount: string;
+        readonly settlementId: string;
+        readonly settlementNumber: string;
+        readonly physicalCollectionCount: number;
+      }>(`operations/trader-receivables/receivables/${detail.receivableId}/reversal-preview?orderId=${encodeURIComponent(detail.sourceOrderId)}`);
+      if (preview.physicalCollectionCount !== 0) {
+        setReverseMessage("This receivable was cleared through a Trader Collection and must be reversed through the collection reversal workflow.");
+        return;
+      }
+      const confirmed = window.confirm(
+        `Reverse Trader Receivable\n\nReceivable: ${detail.receivableNumber}\nOrder: ${preview.orderNumber}\nAmount: AED ${preview.offsetAmount}\nCleared By: Trader Settlement Offset\nPhysical Collection: None\nSettlement: ${preview.settlementNumber}\n\nThis will restore the amount as outstanding.\nThe order status will not be changed.`,
+      );
+      if (!confirmed) return;
+      const reason = window.prompt("Reversal Reason");
+      if (!reason?.trim()) return;
+      await api.post(`operations/settlements/payments/${preview.settlementId}/reverse`, { reason: reason.trim() });
+      setReverseMessage("Reversal successful");
+      load();
+    } catch (caught) {
+      setReverseMessage(caught instanceof ApiError ? caught.message : "The receivable reversal failed.");
+    } finally { setReverseBusy(false); }
+  };
 
   return (
     <Modal
@@ -1828,6 +1869,7 @@ function ReceivableDetailDialog({
           />
 
           <div className="modal-actions">
+            {reverseMessage === undefined ? null : <div className="alert alert-info" role="status">{reverseMessage}</div>}
             {!collectible ? null : (
               <button onClick={() => onCollectMoney(detail.traderId)} type="button">
                 {t("traderReceivables.actionCollectMoney")}
@@ -1841,6 +1883,11 @@ function ReceivableDetailDialog({
             <button className="button button-secondary" onClick={onClose} type="button">
               {t("common.close")}
             </button>
+            {!['cancelled', 'reversed'].includes(detail.status) ? (
+              <button disabled={reverseBusy} onClick={() => void reverseOffset()} type="button">
+                {reverseBusy ? "Reversing…" : "Reverse"}
+              </button>
+            ) : null}
           </div>
         </>
       )}

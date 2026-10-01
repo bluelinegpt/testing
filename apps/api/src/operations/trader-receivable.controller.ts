@@ -45,6 +45,7 @@ import {
   type TraderReceivableDetail,
   type TraderReceivableEligibleRow,
   type TraderReceivableLedgerRow,
+  type TraderReceivableReversalPreview,
   type TraderReceivableSummary,
   type TraderWithBalance,
 } from "./trader-receivable.service.js";
@@ -207,6 +208,16 @@ export class TraderReceivableController {
     @Param("receivableId", new ParseUUIDPipe()) receivableId: string,
   ): Promise<TraderReceivableDetail> {
     return this.traderReceivables.receivableDetail(receivableId);
+  }
+
+  @RequireAnyPermission("trader_receivables.create", "users_roles.manage")
+  @ApiOperation({ summary: "Preview a settlement-backed Trader receivable offset reversal" })
+  @Get("receivables/:receivableId/reversal-preview")
+  public receivableReversalPreview(
+    @Param("receivableId", new ParseUUIDPipe()) receivableId: string,
+    @Query("orderId", new ParseUUIDPipe()) orderId: string,
+  ): Promise<TraderReceivableReversalPreview> {
+    return this.traderReceivables.reversalPreview(receivableId, orderId);
   }
 
   @RequireAnyPermission("trader_receivables.create", "users_roles.manage")

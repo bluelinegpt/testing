@@ -1650,6 +1650,23 @@ export class TraderSettlementService {
     readonly reversalSettlementNumber: string;
     readonly settlementId: string;
   }> {
+    return this.transactions.execute((transaction) =>
+      this.reverseInTransaction(transaction, settlementId, reason, correlationId),
+    );
+  }
+
+  /** Execute settlement reversal inside a caller-owned transaction. */
+  public async reverseInTransaction(
+    transaction: Transaction<DatabaseSchema>,
+    settlementId: string,
+    reason: string,
+    correlationId: string,
+  ): Promise<{
+    readonly orderCount: number;
+    readonly reversalSettlementId: string;
+    readonly reversalSettlementNumber: string;
+    readonly settlementId: string;
+  }> {
     this.assertAnyPermission("settlements.reverse");
     const { companyId } = this.tenants.current();
     const identity = this.identities.current();
@@ -1661,7 +1678,7 @@ export class TraderSettlementService {
         HttpStatus.BAD_REQUEST,
       );
     }
-    return this.transactions.execute(async (transaction) => {
+    {
       const original = (
         await sql<{
           reversalOfId: string | null;
@@ -1883,7 +1900,7 @@ export class TraderSettlementService {
         reversalSettlementNumber: reversalNumber,
         settlementId,
       };
-    });
+    }
   }
 
   public async list(query: TraderSettlementListQueryDto): Promise<Page<TraderSettlementListRow>> {
