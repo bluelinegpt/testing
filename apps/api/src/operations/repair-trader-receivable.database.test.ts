@@ -42,6 +42,7 @@ async function seedFixture(database: Kysely<DatabaseSchema>) {
     areaId: randomUUID(),
     orderId: randomUUID(),
     historicalReceivableId: randomUUID(),
+    cancelledReceivableId: randomUUID(),
   };
   const orderNumber = `ORD-REPAIR-${ids.orderId.slice(0, 8)}`;
   const reference = `RCV-REPAIR-${ids.historicalReceivableId.slice(0, 8)}`;
@@ -97,6 +98,16 @@ async function seedFixture(database: Kysely<DatabaseSchema>) {
       ${ids.traderId}::uuid, 'service_charge', ${orderNumber}, current_date, 18, 0,
       'reversed', 'Historical reset fixture', 'Synthetic test record', ${ids.actorId}::uuid
     )`.execute(tx);
+    await sql`insert into trader_receivables(
+      id, company_id, receivable_number, trader_id, source_type, source_reference,
+      business_date, original_amount_due, amount_collected, status, reason,
+      notes, created_by_account_id
+    ) values (
+      ${ids.cancelledReceivableId}::uuid, ${ids.companyId}::uuid,
+      ${`RCV-CANCELLED-${ids.cancelledReceivableId.slice(0, 8)}`}, ${ids.traderId}::uuid,
+      'service_charge', ${orderNumber}, current_date, 18, 0,
+      'cancelled', 'Historical cancellation fixture', 'Synthetic test record', ${ids.actorId}::uuid
+    )`.execute(tx);
   });
   return { ...ids, orderNumber };
 }
@@ -123,13 +134,14 @@ async function counts(database: Kysely<DatabaseSchema>, fixture: { companyId: st
   const rows = await sql<{ active: string; events: string }>`
     select
       (select count(*) from trader_receivables where company_id=${fixture.companyId}::uuid
-        and source_type='service_charge' and source_reference=${fixture.orderNumber} and status <> 'reversed')::text as active,
+        and source_type='service_charge' and source_reference=${fixture.orderNumber}
+        and status not in ('reversed', 'cancelled'))::text as active,
       (select count(*) from accounting_events where company_id=${fixture.companyId}::uuid
         and source_entity_type='trader_receivable'
         and source_entity_id in (
           select id from trader_receivables where company_id=${fixture.companyId}::uuid
             and source_type='service_charge' and source_reference=${fixture.orderNumber}
-            and status <> 'reversed'
+            and status not in ('reversed', 'cancelled')
         )
         and event_type='trader_receivable_recognized')::text as events
   `.execute(database);

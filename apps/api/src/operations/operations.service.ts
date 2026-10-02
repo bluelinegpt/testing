@@ -5401,7 +5401,7 @@ export class OperationsService {
         select id from trader_receivables
          where company_id=${companyId}::uuid and source_type='service_charge'
            and source_reference=${order.orderNumber}
-           and status <> 'reversed'
+           and status not in ('reversed', 'cancelled')
          limit 1 for update
     `.execute(transaction);
     if (existing.rows[0] !== undefined) return { created: false, amount: order.serviceFee };

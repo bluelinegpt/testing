@@ -6,6 +6,6 @@ describe("Repair Trader Receivable duplicate guard", () => {
     const source = readFileSync(new URL("./operations.service.ts", import.meta.url), "utf8");
     expect(source).toContain("source_type='service_charge'");
     expect(source).toContain("source_reference=\${order.orderNumber}");
-    expect(source).toContain("status <> 'reversed'");
+    expect(source).toContain("status not in ('reversed', 'cancelled')");
   });
 });
