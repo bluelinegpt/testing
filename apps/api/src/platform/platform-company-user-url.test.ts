@@ -15,13 +15,13 @@ describe("Company account setup URL", () => {
     );
   });
 
-  it("leaves the existing non-local hostname convention unchanged", () => {
+  it("uses the tenant Company Portal hostname in production", () => {
     expect(
       companyAccountSetupUrl({
         subdomain: "lahza",
         tenantHostSuffix: "tawseelhub.com",
         token: "safe-token",
       }),
-    ).toBe("https://lahza.tawseelhub.com/account-setup?token=safe-token");
+    ).toBe("https://lahzaapp.tawseelhub.com/account-setup?token=safe-token");
   });
 });

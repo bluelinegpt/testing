@@ -779,7 +779,7 @@ export function companyAccountSetupUrl(input: {
     suffix === "localhost"
       ? `http://${input.subdomain}app.localhost:5177`
       : suffix
-        ? `https://${input.subdomain}.${suffix}`
+        ? `https://${input.subdomain}app.${suffix}`
         : configuredOrigin && configuredOrigin !== ""
           ? configuredOrigin
           : `http://${input.subdomain}app.localhost:5177`;
