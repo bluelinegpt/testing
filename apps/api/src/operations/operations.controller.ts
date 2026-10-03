@@ -467,11 +467,13 @@ export class OperationsController {
     @Query("dateTo") dateTo: string | undefined,
     @Query("traderId") traderId: string | undefined,
     @Query("statuses") statuses: string | undefined,
+    @Query("language") language: string | undefined,
     @Req() request: Request,
     @Res() response: Response,
   ): Promise<void> {
     const correlationId = this.correlationId(request);
     try {
+    const reportLanguage = language === "ar" ? "ar" : "en";
       const filters: OrdersReportFilters = {
       ...(dateFrom === undefined ? {} : { dateFrom }),
       ...(dateTo === undefined ? {} : { dateTo }),
@@ -493,32 +495,45 @@ export class OperationsController {
         if (!(error instanceof ApplicationException) || error.errorCode !== "logo_not_found") throw error;
       }
     }
-    const columns = ["Order Number", "Date", "Trader Name", "Customer", "Customer Mobile", "Emirates", "Area", "COD", "Fee", "Status"] as const;
+    const arabic = reportLanguage === "ar";
+    const columns: readonly [string, string, string, string, string, string, string, string, string, string] = arabic
+      ? ["رقم الطلب", "التاريخ", "اسم التاجر", "العميل", "جوال العميل", "الإمارة", "المنطقة", "الدفع عند الاستلام", "الرسوم", "الحالة"]
+      : ["Order Number", "Date", "Trader Name", "Customer", "Customer Mobile", "Emirates", "Area", "COD", "Fee", "Status"];
+    const statusLabels: Record<string, string> = arabic
+      ? { new: "جديد", in_branch: "الصنف في الفرع", assigned_to_driver: "معين للمندوب", out_for_delivery: "خرج للتوصيل", hold: "معلّق", delivered: "تم التسليم", returned_to_branch: "عاد إلى الفرع", returned_to_trader: "عاد إلى التاجر", cancelled: "ملغى", closed: "مغلق", collect_order: "احضار طلب" }
+      : { new: "New", in_branch: "Item in branch", assigned_to_driver: "Assigned to driver", out_for_delivery: "Out for delivery", hold: "Hold", delivered: "Delivered", returned_to_branch: "Returned to branch", returned_to_trader: "Returned to trader", cancelled: "Cancelled", closed: "Closed", collect_order: "Collect Order" };
+    const formatDateTime = (value: Date): string => new Intl.DateTimeFormat(arabic ? "ar-AE" : "en-AE", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Dubai" }).format(value);
+    const filterLabels = arabic
+      ? { from: "من تاريخ", to: "إلى تاريخ", trader: "التاجر", statuses: "الحالات", total: "الإجمالي" }
+      : { from: "From", to: "To", trader: "Trader", statuses: "Statuses", total: "Total" };
+    const selectedTraderName = traderId === undefined ? undefined : (await this.operations.traders()).find((item) => item.id === traderId)?.name;
     const filtersForDocument = {
-      From: dateFrom ?? "All",
-      To: dateTo ?? "All",
-      Trader: traderId ?? "All Traders",
-      Statuses: statuses === undefined || statuses === "" || statuses.split(",").length === 11 ? "All Statuses" : statuses,
-      Total: String(first.totalCount),
+      [filterLabels.from]: dateFrom ?? (arabic ? "الكل" : "All"),
+      [filterLabels.to]: dateTo ?? (arabic ? "الكل" : "All"),
+      [filterLabels.trader]: selectedTraderName ?? (arabic ? "جميع التجار" : "All Traders"),
+      [filterLabels.statuses]: statuses === undefined || statuses === "" || statuses.split(",").length === 11
+        ? (arabic ? "كل الحالات" : "All Statuses")
+        : statuses.split(",").map((status) => statusLabels[status] ?? status).join(arabic ? "، " : ", "),
+      [filterLabels.total]: String(first.totalCount),
     };
     const document = {
       columns,
       filters: filtersForDocument,
-      generatedAt: new Date().toISOString(),
-      snapshotAt: new Date().toISOString(),
+      generatedAt: formatDateTime(new Date()),
+      snapshotAt: formatDateTime(new Date()),
       title: "Orders List / قائمة الطلبات",
       warnings: [],
       landscape: true,
       rows: rows.map((row) => ({
-        "Order Number": row.orderNumber, Date: row.date, "Trader Name": row.traderName,
-        Customer: row.customer, "Customer Mobile": row.customerMobile, Emirates: row.emirates,
-        Area: row.area, COD: row.cod, Fee: row.fee, Status: row.status,
+        [columns[0]]: row.orderNumber, [columns[1]]: row.date, [columns[2]]: arabic ? row.traderNameAr || row.traderName : row.traderName,
+        [columns[3]]: row.customer, [columns[4]]: row.customerMobile, [columns[5]]: arabic ? row.emiratesAr || row.emirates : row.emirates,
+        [columns[6]]: arabic ? row.areaAr || row.area : row.area, [columns[7]]: row.cod, [columns[8]]: row.fee, [columns[9]]: statusLabels[row.status] ?? row.status,
       })),
     };
     const rendered = accountingReportHtml({
       branding,
       document,
-      language: "en",
+      language: reportLanguage,
       ...(logoDataUrl === undefined ? {} : { logoDataUrl }),
     });
     const bytes = await this.pdf.renderPdf(rendered.html, rendered.footer);

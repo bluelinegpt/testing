@@ -195,10 +195,13 @@ export interface OrdersReportRow {
   readonly orderNumber: string;
   readonly date: string;
   readonly traderName: string;
+  readonly traderNameAr?: string | null;
   readonly customer: string;
   readonly customerMobile: string;
   readonly emirates: string;
+  readonly emiratesAr?: string | null;
   readonly area: string;
+  readonly areaAr?: string | null;
   readonly cod: string;
   readonly fee: string;
   readonly status: string;
@@ -1785,10 +1788,10 @@ export class OperationsService {
     const rows = await sql<OrdersReportRow>`
       select o.order_number as "orderNumber",
              (o.created_at at time zone ${timezone})::date::text as date,
-             t.name_en as "traderName", o.customer_name as customer,
+             t.name_en as "traderName", t.name_ar as "traderNameAr", o.customer_name as customer,
              o.customer_mobile_number as "customerMobile",
-             coalesce(e.name_en, '—') as emirates,
-             coalesce(a.name_en, '—') as area,
+             coalesce(e.name_en, '—') as emirates, e.name_ar as "emiratesAr",
+             coalesce(a.name_en, '—') as area, a.name_ar as "areaAr",
              o.cod_amount::text as cod, o.service_fee::text as fee,
              o.delivery_status as status
       ${base}

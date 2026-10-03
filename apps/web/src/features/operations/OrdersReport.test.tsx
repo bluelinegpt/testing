@@ -17,9 +17,10 @@ describe("Orders Report UI contract", () => {
 
   it("uses the same serialized filters for the report and complete Excel export", () => {
     expect(source).toContain("operations/reports/orders?");
-    expect(source).toContain("operations/reports/orders.xlsx?");
+    expect(source).toContain("operations/reports/orders.${format}?");
     expect(source).toContain("p.delete(\"page\")");
     expect(source).toContain("p.delete(\"pageSize\")");
+    expect(source).toContain('p.set("language", normalizeLocale(i18n.resolvedLanguage))');
     for (const column of ["orderNumber", "date", "traderName", "customer", "customerMobile", "emirates", "area", "cod", "fee", "status"]) {
       expect(source).toContain(`\"${column}\"`);
     }

@@ -3,20 +3,21 @@ import { useTranslation } from "react-i18next";
 import type { ApiClient } from "../../api/api-client.js";
 import { ApiError } from "../../api/api-client.js";
 import type { OperationsTrader } from "../../api/contracts.js";
+import { normalizeLocale } from "../../localization/locale.js";
 
 const statuses = ["new", "in_branch", "assigned_to_driver", "out_for_delivery", "hold", "delivered", "returned_to_branch", "returned_to_trader", "cancelled", "closed", "collect_order"] as const;
 type Row = { orderNumber:string; date:string; traderName:string; customer:string; customerMobile:string; emirates:string; area:string; cod:string; fee:string; status:string };
 type Page = { items: Row[]; page: number; pageSize: number; totalCount: number };
 
 export function OrdersReport({ api }: { api: ApiClient }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [from, setFrom] = useState(""); const [to, setTo] = useState(""); const [trader, setTrader] = useState("");
   const [selected, setSelected] = useState<string[]>([]); const [page, setPage] = useState(1); const [data, setData] = useState<Page>();
   const [traders, setTraders] = useState<readonly OperationsTrader[]>([]); const [loading, setLoading] = useState(false); const [error, setError] = useState(false); const [exporting, setExporting] = useState(false); const [exportError, setExportError] = useState<string | null>(null);
   const query = useMemo(() => { const p = new URLSearchParams(); if (from) p.set("dateFrom", from); if (to) p.set("dateTo", to); if (trader) p.set("traderId", trader); if (selected.length) p.set("statuses", selected.join(",")); p.set("page", String(page)); p.set("pageSize", "25"); return p.toString(); }, [from,to,trader,selected,page]);
   useEffect(() => { void api.get<readonly OperationsTrader[]>("operations/traders").then(setTraders).catch(() => setError(true)); }, [api]);
   useEffect(() => { setLoading(true); setError(false); void api.get<Page>(`operations/reports/orders?${query}`).then(setData).catch(() => setError(true)).finally(() => setLoading(false)); }, [api, query]);
-  const exportFile = async (format: "xlsx" | "pdf") => { if (exporting) return; setExporting(true); setExportError(null); try { const p = new URLSearchParams(query); p.delete("page"); p.delete("pageSize"); const blob = await api.getBinary(`operations/reports/orders.${format}?${p}`); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href=url; a.download=`orders-report.${format}`; a.click(); URL.revokeObjectURL(url); } catch (error) { const detail = error instanceof ApiError && error.correlationId ? ` (${error.correlationId})` : ""; setExportError(`${error instanceof Error ? error.message : t("reports.orders.exportFailed")}${detail}`); } finally { setExporting(false); } };
+  const exportFile = async (format: "xlsx" | "pdf") => { if (exporting) return; setExporting(true); setExportError(null); try { const p = new URLSearchParams(query); p.delete("page"); p.delete("pageSize"); if (format === "pdf") p.set("language", normalizeLocale(i18n.resolvedLanguage)); const blob = await api.getBinary(`operations/reports/orders.${format}?${p}`); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href=url; a.download=`orders-report.${format}`; a.click(); URL.revokeObjectURL(url); } catch (error) { const detail = error instanceof ApiError && error.correlationId ? ` (${error.correlationId})` : ""; setExportError(`${error instanceof Error ? error.message : t("reports.orders.exportFailed")}${detail}`); } finally { setExporting(false); } };
   const toggle = (status: string) => setSelected((current) => current.includes(status) ? current.filter((v) => v !== status) : [...current, status]);
   const pages = Math.max(1, Math.ceil((data?.totalCount ?? 0) / 25));
   return <section className="reports-panel" aria-label={t("reports.orders.title")}>

@@ -23,5 +23,11 @@ describe("Orders Report contract", () => {
     expect(service).toContain('"Customer Mobile"');
     expect(controller).toContain('@Get("reports/orders")');
     expect(controller).toContain('@Get("reports/orders.xlsx")');
+    expect(controller).toContain('@Get("reports/orders.pdf")');
+    expect(controller).toContain('@Query("language") language: string | undefined');
+    expect(controller).toContain('language: reportLanguage');
+    expect(controller).toContain("رقم الطلب");
+    expect(controller).toContain("جديد");
+    expect(controller).toContain("جميع التجار");
   });
 });
