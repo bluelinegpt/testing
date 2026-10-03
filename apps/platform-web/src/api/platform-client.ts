@@ -736,6 +736,9 @@ export interface CompanyResetUser {
   readonly accountKind: string;
   readonly username: string;
   readonly displayName: string;
+  readonly status: string;
+  readonly retentionReason: string | null;
+  readonly retentionReferences: readonly { readonly table: string; readonly column: string; readonly rows: number; readonly onDelete: string }[];
   readonly sharedIdentity: boolean;
   readonly sharedReferences: readonly string[];
 }

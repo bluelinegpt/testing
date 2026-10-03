@@ -1116,7 +1116,8 @@ export function CompanyDetailPage(): ReactElement {
                                   void runUsersResetSelection(ids);
                                 }}
                                 type="checkbox"
-                              /> {user.displayName} ({user.username}) — {user.accountKind}
+                              /> {user.displayName} ({user.username}) — {user.accountKind} — {user.status}
+                              {user.retentionReason ? <span> — {user.retentionReason}</span> : null}
                             </label>
                           ))}
                         </div>
@@ -1128,14 +1129,14 @@ export function CompanyDetailPage(): ReactElement {
                       {usersResetPreview === undefined ? null : (
                         <div>
                           <p><strong>Selected:</strong> {usersResetPreview.selectedUsers.length}</p>
-                          <p><strong>Accounts to delete:</strong> {usersResetPreview.accountsToDelete.length}</p>
+                          <p><strong>Physical account deletion:</strong> {usersResetPreview.accountsToDelete.length}</p>
                           {usersResetPreview.accountsToDelete.map((user) => (
-                            <p key={user.accountId}>{user.displayName} ({user.username}) — {user.accountKind}</p>
+                            <p key={user.accountId}>{user.displayName} ({user.username}) — {user.accountKind} — {user.status}</p>
                           ))}
-                          <p><strong>Identities retained for history or other-company access:</strong> {usersResetPreview.identitiesRetained.length}</p>
+                          <p><strong>Target-company access removal only; identity retained for history or other-company access:</strong> {usersResetPreview.identitiesRetained.length}</p>
                           {usersResetPreview.identitiesRetained.map((user) => (
                             <p key={user.accountId}>
-                              {user.displayName} ({user.username}) — {user.reason === "preserved_history" ? "preserved history" : "other-company access"}
+                              {user.displayName} ({user.username}) — {user.accountKind} — {user.status} — {user.reason === "preserved_history" ? (user.retentionReason ?? "preserved history") : "Other-company access is retained; only this Company's access is removed."}
                               {user.references.length ? ` — ${user.references.map((ref) => `${ref.table}.${ref.column} (${ref.rows}; ${ref.onDelete})`).join(", ")}` : ""}
                             </p>
                           ))}

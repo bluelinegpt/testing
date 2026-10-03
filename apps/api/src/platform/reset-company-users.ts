@@ -10,6 +10,9 @@ export interface ResetCompanyUser {
   readonly accountKind: string;
   readonly username: string;
   readonly displayName: string;
+  readonly status: string;
+  readonly retentionReason: string | null;
+  readonly retentionReferences: readonly ResetCompanyUserReference[];
   /** Another Company still has a membership, role, profile link, or session. */
   readonly sharedIdentity: boolean;
   readonly sharedReferences: readonly string[];
@@ -179,19 +182,111 @@ export async function getResetCompanyUserPlan(
       username: string;
       displayName: string;
       status: string;
+      retentionAction: string | null;
+      retentionReason: string | null;
+      retentionReferences: ResetCompanyUserReference[] | null;
       isAdmin: boolean;
       sharedIdentity: boolean;
       sharedReferences: string[];
     }>(
       `select a.id as "accountId", a.account_kind as "accountKind", a.username,
-              coalesce(nullif(btrim(cu.display_name), ''), nullif(btrim(cu.name_en), ''), a.username)
+              coalesce(nullif(btrim(cu.display_name), ''), nullif(btrim(cu.name_en), ''),
+                       nullif(btrim(retained_employee.name_en), ''), a.username)
               as "displayName",
               a.status,
+              reset_evidence.action as "retentionAction",
+              reset_evidence.reason as "retentionReason",
+              reset_evidence.references as "retentionReferences",
               ${ADMIN_ROLE_EXISTS} as "isAdmin",
               ${SHARED_IDENTITY_EXISTS} as "sharedIdentity",
               ${SHARED_IDENTITY_REFERENCES} as "sharedReferences"
          from accounts a
          left join company_users cu on cu.account_id = a.id and cu.company_id = $1
+         left join lateral (
+           select e.name_en
+             from employees e
+            where e.company_id = a.company_id
+              and (e.mobile_number = a.username or e.mobile_number = a.normalized_mobile_number)
+            order by e.is_active desc, e.employee_number
+            limit 1
+         ) retained_employee on true
+         left join lateral (
+           select proof.action, proof.reason, proof.references, proof.occurred_at
+             from (
+               select event.action,
+                      'A previous Users Only Reset removed this Company access but retained the identity for historical references.'::text as reason,
+                      (
+                        select retained->'references'
+                          from jsonb_array_elements(
+                            case
+                              when jsonb_typeof(event.after_data->'retainedIdentities') = 'array'
+                                then event.after_data->'retainedIdentities'
+                              when jsonb_typeof(event.after_data #> '{cleanup,retainedIdentities}') = 'array'
+                                then event.after_data #> '{cleanup,retainedIdentities}'
+                              else '[]'::jsonb
+                            end
+                          ) retained
+                         where retained->>'accountId' = a.id::text
+                           and retained->>'reason' in ('preserved_history', 'other_company_access')
+                         limit 1
+                      ) as references,
+                      event.occurred_at
+                 from audit_events event
+                where event.company_id = a.company_id
+                  and event.action = 'platform.company.users_reset'
+                  and exists (
+                    select 1
+                      from jsonb_array_elements(
+                        case
+                          when jsonb_typeof(event.after_data->'retainedIdentities') = 'array'
+                            then event.after_data->'retainedIdentities'
+                          when jsonb_typeof(event.after_data #> '{cleanup,retainedIdentities}') = 'array'
+                            then event.after_data #> '{cleanup,retainedIdentities}'
+                          else '[]'::jsonb
+                        end
+                      ) retained
+                     where retained->>'accountId' = a.id::text
+                       and retained->>'reason' in ('preserved_history', 'other_company_access')
+                  )
+               union all
+               select event.action,
+                      'A previous full demo-data reset disabled this Company-owned identity; it was retained for historical references.'::text,
+                      (
+                        select retained->'references'
+                          from jsonb_array_elements(
+                            case
+                              when jsonb_typeof(event.after_data #> '{userCleanup,retainedIdentities}') = 'array'
+                                then event.after_data #> '{userCleanup,retainedIdentities}'
+                              else '[]'::jsonb
+                            end
+                          ) retained
+                         where retained->>'accountId' = a.id::text
+                         limit 1
+                      ),
+                      event.occurred_at
+                 from audit_events event
+                where event.company_id = a.company_id
+                  and event.action = 'platform.company.data_reset'
+                  and a.status = 'disabled'
+                  and (
+                    event.occurred_at = a.updated_at
+                    or exists (
+                      select 1
+                        from jsonb_array_elements(
+                          case
+                            when jsonb_typeof(event.after_data #> '{userCleanup,retainedIdentities}') = 'array'
+                              then event.after_data #> '{userCleanup,retainedIdentities}'
+                            else '[]'::jsonb
+                          end
+                        ) retained
+                       where retained->>'accountId' = a.id::text
+                         and retained->>'reason' in ('preserved_history', 'other_company_access')
+                    )
+                  )
+             ) proof
+            order by proof.occurred_at desc
+            limit 1
+         ) reset_evidence on true
         where a.company_id = $1
           and a.account_kind <> 'platform_administrator'
           and (
@@ -206,31 +301,66 @@ export async function getResetCompanyUserPlan(
                         where session_row.company_id = a.company_id and session_row.account_id = a.id)
             or exists (select 1 from password_reset_tokens reset_token
                         where reset_token.company_id = a.company_id and reset_token.account_id = a.id)
+            or reset_evidence.action is not null
           )
-        order by lower(coalesce(cu.display_name, cu.name_en, a.username)), a.id
+        order by lower(coalesce(cu.display_name, cu.name_en, retained_employee.name_en, a.username)), a.id
         ${lockAccounts ? "for update of a" : ""}`,
       [companyId],
     )
   ).rows;
 
+  const usersWithRetention = await Promise.all(users.map(async (user) => {
+    if (user.retentionAction === null) return user;
+    if (user.sharedIdentity) {
+      const sharedReferences = user.sharedReferences.map((reference) => {
+        const [table, column] = reference.split(".");
+        return { table: table ?? reference, column: column ?? "", rows: 1, onDelete: "other-company access preserved" };
+      });
+      return {
+        ...user,
+        retentionReason: `Identity retained because another Company still has access (${user.sharedReferences.join(", ")}).`,
+        retentionReferences: sharedReferences,
+      };
+    }
+    // Audit evidence establishes why an otherwise detached identity belongs
+    // in this Company's selective-reset list. Reinspect current FK references
+    // to show today's precise retention reason, without taking locks in this
+    // read-only preview transaction.
+    const inspection = await inspectResetCompanyUserAccount(client, companyId, user.accountId, false);
+    const references = inspection.blockingReferences;
+    return {
+      ...user,
+      retentionReason: references.length > 0
+        ? `Identity retained because preserved history still references it (${references.map((reference) => `${reference.table}.${reference.column}: ${reference.rows} row(s), ${reference.onDelete}`).join("; ")}).`
+        : user.retentionReason,
+      retentionReferences: references.length > 0 ? references : (user.retentionReferences ?? []),
+    };
+  }));
+
   return {
-    usersToRemove: users
+    usersToRemove: usersWithRetention
       .filter((user) => !user.isAdmin)
-      .map(({ accountId, accountKind, username, displayName, sharedIdentity, sharedReferences }) => ({
+      .map(({ accountId, accountKind, username, displayName, status, retentionReason, retentionReferences, sharedIdentity, sharedReferences }) => ({
         accountId,
         accountKind,
         username,
         displayName,
+        status,
+        retentionReason,
+        retentionReferences: retentionReferences ?? [],
         sharedIdentity,
         sharedReferences,
       })),
-    adminUsersPreserved: users
+    adminUsersPreserved: usersWithRetention
       .filter((user) => user.isAdmin)
-      .map(({ accountId, accountKind, username, displayName, sharedIdentity, sharedReferences }) => ({
+      .map(({ accountId, accountKind, username, displayName, status, retentionReason, retentionReferences, sharedIdentity, sharedReferences }) => ({
         accountId,
         accountKind,
         username,
         displayName,
+        status,
+        retentionReason,
+        retentionReferences: retentionReferences ?? [],
         sharedIdentity,
         sharedReferences,
       })),

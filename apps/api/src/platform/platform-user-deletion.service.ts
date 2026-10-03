@@ -141,6 +141,7 @@ export async function inspectResetCompanyUserAccount(
   client: pg.PoolClient,
   companyId: string,
   accountId: string,
+  lockAccount = true,
 ): Promise<{
   readonly exists: boolean;
   readonly isAdmin: boolean;
@@ -154,7 +155,7 @@ export async function inspectResetCompanyUserAccount(
   const account = (
     await client.query<{ id: string }>(
       "select id from accounts where id = $2 and company_id = $1 " +
-        "and account_kind <> 'platform_administrator' for update",
+        "and account_kind <> 'platform_administrator'" + (lockAccount ? " for update" : ""),
       [companyId, accountId],
     )
   ).rows[0];

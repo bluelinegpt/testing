@@ -617,6 +617,58 @@ describe.skipIf(!runDatabaseTests)("reset execution engine against a real databa
     }
   }, 120_000);
 
+  it("lists a previously reset disabled employee identity with the exact history retention reason", async () => {
+    const client = await pool.connect();
+    await client.query("begin");
+    try {
+      const alpha = await seedCompany(client, "PRIOR-RESET");
+      const beta = await seedCompany(client, "PRIOR-RESET-OTHER");
+      await client.query("set constraints all immediate");
+      const employeeId = randomUUID();
+      const username = `9715${alpha.company.slice(0, 6)}001`;
+      const accountId = randomUUID();
+      await client.query(
+        "insert into employees (id, company_id, employee_number, name_en, mobile_number) values ($1,$2,'EMP-000015','Mohamed',$3)",
+        [employeeId, alpha.company, username],
+      );
+      await client.query(
+        "insert into accounts (id, company_id, account_kind, username, normalized_username, normalized_mobile_number, password_hash, status) " +
+          "values ($1,$2,'company_user',$3,$3,$3,'x','disabled')",
+        [accountId, alpha.company, username],
+      );
+      await client.query(
+        "insert into audit_events (company_id, actor_account_id, action, subject_type, subject_id, correlation_id) " +
+          "values ($1,$2,'employee.user.history','employee',$3,$4)",
+        [alpha.company, accountId, employeeId, `history-${alpha.company}`],
+      );
+      await client.query(
+        "insert into audit_events (company_id, actor_account_id, action, subject_type, subject_id, after_data, correlation_id) " +
+          "values ($1::uuid,$2::uuid,'platform.company.users_reset','company',$1::uuid::text,$3::jsonb,$4)",
+        [alpha.company, alpha.adminAccount, JSON.stringify({ retainedIdentities: [{ accountId, reason: "preserved_history", references: [{ table: "audit_events", column: "actor_account_id", rows: 1, onDelete: "RESTRICT" }] }] }), `prior-reset-${alpha.company}`],
+      );
+
+      const plan = await getResetCompanyUserPlan(client, alpha.company);
+      const mohamed = plan.usersToRemove.find((user) => user.accountId === accountId);
+      expect(mohamed).toMatchObject({
+        displayName: "Mohamed",
+        status: "disabled",
+        retentionReason: expect.stringContaining("audit_events.actor_account_id"),
+        retentionReferences: [{ table: "audit_events", column: "actor_account_id", rows: 1, onDelete: "RESTRICT" }],
+      });
+      expect(plan.adminUsersPreserved.map((user) => user.accountId)).toContain(alpha.adminAccount);
+      expect(plan.usersToRemove.map((user) => user.accountId)).not.toContain(beta.account);
+
+      const preview = await previewResetCompanyUsers(client, alpha.company, [accountId]);
+      expect(preview.accountsToDelete).toEqual([]);
+      expect(preview.identitiesRetained).toMatchObject([{ accountId, reason: "preserved_history" }]);
+      const otherCompany = await client.query("select count(*)::text as n from company_users where company_id=$1 and account_id=$2", [beta.company, beta.account]);
+      expect(otherCompany.rows[0]?.n).toBe("1");
+    } finally {
+      await client.query("rollback");
+      client.release();
+    }
+  }, 120_000);
+
   it("selectively resets multiple account kinds and rejects an Admin even when submitted directly", async () => {
     const client = await pool.connect();
     await client.query("begin");
