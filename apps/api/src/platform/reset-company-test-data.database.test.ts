@@ -23,7 +23,11 @@ const runDatabaseTests = process.env.RUN_RESET_DATABASE === "true";
 interface Fixture {
   company: string;
   account: string;
+  historyAccountB: string;
+  historyAccountC: string;
   adminAccount: string;
+  traderPortalAccountA: string;
+  traderPortalAccountB: string;
   adminRole: string;
   adminSecondaryRole: string;
   memberRole: string;
@@ -45,7 +49,11 @@ async function seedCompany(client: pg.PoolClient, label: string): Promise<Fixtur
   const fixture: Fixture = {
     company: randomUUID(),
     account: randomUUID(),
+    historyAccountB: randomUUID(),
+    historyAccountC: randomUUID(),
     adminAccount: randomUUID(),
+    traderPortalAccountA: randomUUID(),
+    traderPortalAccountB: randomUUID(),
     adminRole: randomUUID(),
     adminSecondaryRole: randomUUID(),
     memberRole: randomUUID(),
@@ -86,15 +94,44 @@ async function seedCompany(client: pg.PoolClient, label: string): Promise<Fixtur
   );
   await client.query(
     "insert into accounts (id, company_id, account_kind, username, normalized_username, " +
+      "password_hash, status) values " +
+      "($1, $3, 'company_user', $4, $4, 'x', 'disabled'), " +
+      "($2, $3, 'company_user', $5, $5, 'x', 'disabled')",
+    [
+      fixture.historyAccountB,
+      fixture.historyAccountC,
+      fixture.company,
+      `reset-history-b-${label}-${suffix}`,
+      `reset-history-c-${label}-${suffix}`,
+    ],
+  );
+  await client.query(
+    "insert into accounts (id, company_id, account_kind, username, normalized_username, " +
       "password_hash, status) values ($1, $2, 'company_user', $3, $3, 'x', 'disabled')",
     [fixture.adminAccount, fixture.company, `reset-admin-${label}-${suffix}`],
+  );
+  // Trader Portal identities have a different account kind and no company_users
+  // row. Both are active before reset, matching the accounts the previous
+  // company_user-only cleanup accidentally left behind.
+  await client.query(
+    "insert into accounts (id, company_id, account_kind, username, normalized_username, " +
+      "password_hash, status) values " +
+      "($1, $3, 'trader', $4, $4, 'x', 'active'), ($2, $3, 'trader', $5, $5, 'x', 'active')",
+    [
+      fixture.traderPortalAccountA,
+      fixture.traderPortalAccountB,
+      fixture.company,
+      `reset-trader-a-${suffix}`,
+      `reset-trader-b-${suffix}`,
+    ],
   );
   // This non-Admin Company user deliberately has no Employee row: user
   // selection must come from Company account/role assignments, not Employees.
   await client.query(
     "insert into company_users (company_id, account_id, name_en, display_name) " +
-      "values ($1, $2, 'Reset Member', 'Reset Member'), ($1, $3, 'Reset Admin', 'Reset Admin')",
-    [fixture.company, fixture.account, fixture.adminAccount],
+      "values ($1, $2, 'Reset Member A', 'Reset Member A'), ($1, $3, 'Reset Admin', 'Reset Admin'), " +
+      "($1, $4, 'Reset Member B', 'Reset Member B'), ($1, $5, 'Reset Member C', 'Reset Member C')",
+    [fixture.company, fixture.account, fixture.adminAccount, fixture.historyAccountB, fixture.historyAccountC],
   );
   await client.query(
     "insert into roles (id, company_id, code, name, is_system, is_active) values " +
@@ -110,18 +147,24 @@ async function seedCompany(client: pg.PoolClient, label: string): Promise<Fixtur
   );
   await client.query(
     "insert into account_roles (account_id, role_id, company_id) values " +
-      "($1, $2, $3), ($4, $5, $3), ($4, $6, $3)",
-    [fixture.account, fixture.memberRole, fixture.company, fixture.adminAccount, fixture.adminRole, fixture.adminSecondaryRole],
+      "($1, $2, $3), ($4, $5, $3), ($4, $6, $3), ($7, $2, $3), ($8, $2, $3)",
+    [fixture.account, fixture.memberRole, fixture.company, fixture.adminAccount, fixture.adminRole, fixture.adminSecondaryRole, fixture.historyAccountB, fixture.historyAccountC],
   );
   await client.query(
     "insert into account_sessions (company_id, account_id, token_hash, expires_at) " +
       "values ($1, $2, $3, now() + interval '1 day'), " +
-      "($1, $4, $5, now() + interval '1 day')",
+      "($1, $4, $5, now() + interval '1 day'), " +
+      "($1, $6, $7, now() + interval '1 day'), " +
+      "($1, $8, $9, now() + interval '1 day')",
     [
       fixture.company,
       fixture.account,
       randomUUID().replace(/-/g, "") + randomUUID().replace(/-/g, ""),
       fixture.adminAccount,
+      randomUUID().replace(/-/g, "") + randomUUID().replace(/-/g, ""),
+      fixture.historyAccountB,
+      randomUUID().replace(/-/g, "") + randomUUID().replace(/-/g, ""),
+      fixture.historyAccountC,
       randomUUID().replace(/-/g, "") + randomUUID().replace(/-/g, ""),
     ],
   );
@@ -147,14 +190,68 @@ async function seedCompany(client: pg.PoolClient, label: string): Promise<Fixtur
     [fixture.period, fixture.company, fixture.fiscalYear, `P-${suffix}`],
   );
   await client.query(
-    "insert into audit_events (id, company_id, action, subject_type, correlation_id) " +
-      "values ($1, $2, 'reset.fixture', 'test', $3)",
-    [randomUUID(), fixture.company, suffix],
+    "insert into audit_events " +
+      "(id, company_id, action, subject_type, correlation_id, actor_account_id) " +
+      "values ($1, $2, 'reset.fixture', 'test', $3, null), " +
+      "($4, $2, 'reset.member.audit', 'test', $5, $6), " +
+      "($7, $2, 'reset.member.audit', 'test', $8, $9), " +
+      "($10, $2, 'reset.member.audit', 'test', $11, $12)",
+    [
+      randomUUID(), fixture.company, suffix,
+      randomUUID(), `member-a-${suffix}`, fixture.account,
+      randomUUID(), `member-b-${suffix}`, fixture.historyAccountB,
+      randomUUID(), `member-c-${suffix}`, fixture.historyAccountC,
+    ],
   );
 
   await client.query(
     "insert into traders (id, company_id, code, name_en, mobile_number) values ($1, $2, $3, $4, $5)",
     [fixture.trader, fixture.company, `T-${suffix}`, `Trader ${label}`, "971500000001"],
+  );
+  const portalTraderA = randomUUID();
+  const portalTraderB = randomUUID();
+  await client.query(
+    "insert into traders (id, company_id, code, name_en, mobile_number) values " +
+      "($1, $3, $4, 'Portal Trader A', '971500000011'), " +
+      "($2, $3, $5, 'Portal Trader B', '971500000012')",
+    [portalTraderA, portalTraderB, fixture.company, `TPA-${suffix}`, `TPB-${suffix}`],
+  );
+  const portalLinkA = randomUUID();
+  const portalLinkB = randomUUID();
+  const portalSessionA = randomUUID().replace(/-/g, "") + randomUUID().replace(/-/g, "");
+  const portalSessionB = randomUUID().replace(/-/g, "") + randomUUID().replace(/-/g, "");
+  await client.query(
+    "insert into user_business_links " +
+      "(id, company_id, account_id, entity_type, entity_id, access_status, is_primary, created_by_account_id) " +
+      "values ($1, $3, $4, 'trader', $5, 'active', true, $6), " +
+      "($2, $3, $7, 'trader', $8, 'active', true, $6)",
+    [
+      portalLinkA,
+      portalLinkB,
+      fixture.company,
+      fixture.traderPortalAccountA,
+      portalTraderA,
+      fixture.adminAccount,
+      fixture.traderPortalAccountB,
+      portalTraderB,
+    ],
+  );
+  await client.query(
+    "insert into account_sessions " +
+      "(company_id, account_id, token_hash, expires_at, profile_link_id, profile_type, profile_id) " +
+      "values ($1, $2, $3, now() + interval '1 day', $4, 'trader', $5), " +
+      "($1, $6, $7, now() + interval '1 day', $8, 'trader', $9)",
+    [
+      fixture.company,
+      fixture.traderPortalAccountA,
+      portalSessionA,
+      portalLinkA,
+      portalTraderA,
+      fixture.traderPortalAccountB,
+      portalSessionB,
+      portalLinkB,
+      portalTraderB,
+    ],
   );
   await client.query(
     "insert into customers (id, company_id, code, name, mobile_number, created_by_account_id) " +
@@ -370,7 +467,20 @@ describe.skipIf(!runDatabaseTests)("reset execution engine against a real databa
       }
 
       const alphaUsers = await getResetCompanyUserPlan(client, alpha.company);
-      expect(alphaUsers.usersToRemove.map((user) => user.accountId)).toContain(alpha.account);
+      expect(alphaUsers.usersToRemove.map((user) => user.accountId)).toEqual(
+        expect.arrayContaining([alpha.account, alpha.historyAccountB, alpha.historyAccountC]),
+      );
+      expect(alphaUsers.usersToRemove.map((user) => user.accountId)).toContain(
+        alpha.traderPortalAccountA,
+      );
+      expect(alphaUsers.usersToRemove.map((user) => user.accountId)).toContain(
+        alpha.traderPortalAccountB,
+      );
+      expect(
+        alphaUsers.usersToRemove
+          .filter((user) => user.accountKind === "trader")
+          .map((user) => user.accountId),
+      ).toEqual(expect.arrayContaining([alpha.traderPortalAccountA, alpha.traderPortalAccountB]));
       expect(alphaUsers.adminUsersPreserved.map((user) => user.accountId)).toEqual([
         alpha.adminAccount,
       ]);
@@ -383,12 +493,13 @@ describe.skipIf(!runDatabaseTests)("reset execution engine against a real databa
       const summary = await runReset(client, alpha.company, () => undefined);
       expect(summary.totalRemoved).toBeGreaterThan(0);
       expect(summary.userCleanup).toMatchObject({
-        companyUsersRemoved: 1,
-        roleAssignmentsRemoved: 1,
-        sessionsRevoked: 1,
-        accountsDeleted: 1,
+        companyUsersRemoved: 3,
+        roleAssignmentsRemoved: 3,
+        businessAccessLinksRemoved: 2,
+        sessionsRevoked: 5,
+        accountsDeleted: 2,
         sharedIdentitiesPreserved: 0,
-        historyReferencedIdentitiesPreserved: 0,
+        historyReferencedIdentitiesPreserved: 3,
       });
       const userRemovalOrder = summary.removed.map((entry) => entry.table);
       expect(userRemovalOrder.indexOf("account_sessions")).toBeLessThan(
@@ -430,11 +541,81 @@ describe.skipIf(!runDatabaseTests)("reset execution engine against a real databa
         [alpha.account, alpha.company],
       );
       expect(removedMember.rows[0]).toEqual({
-        account_count: "0",
+        account_count: "1",
         membership_count: "0",
         roles_count: "0",
         sessions_count: "0",
       });
+      const retainedMember = await client.query(
+        "select status from accounts where id = $1 and company_id = $2",
+        [alpha.account, alpha.company],
+      );
+      expect(retainedMember.rows[0]?.status).toBe("disabled");
+      for (const retainedId of [alpha.account, alpha.historyAccountB, alpha.historyAccountC]) {
+        expect(
+          summary.userCleanup.retainedIdentities.find((user) => user.accountId === retainedId)
+            ?.references,
+        ).toContainEqual(
+          expect.objectContaining({
+            table: "audit_events",
+            column: "actor_account_id",
+            rows: 1,
+            onDelete: "RESTRICT",
+          }),
+        );
+      }
+      // The retained audit anchor is not usable for sign-in: the login service
+      // rejects non-active accountStatus, and the session-authentication query
+      // can no longer find any unrevoked session for this account.
+      const retainedAuthState = await client.query(
+        "select a.status, " +
+          "(select count(*) from account_sessions s where s.account_id=a.id and s.company_id=$2 " +
+          "and s.revoked_at is null and s.expires_at>now()) as active_sessions, " +
+          "(select count(*) from account_sessions s join accounts sa on sa.id=s.account_id " +
+          "left join companies c on c.id=sa.company_id " +
+          "where s.account_id=a.id and s.revoked_at is null and s.expires_at>now() " +
+          "and sa.status='active' and (sa.company_id is null or c.status='active')) as authenticatable_sessions " +
+          "from accounts a where a.id=$1",
+        [alpha.account, alpha.company],
+      );
+      expect(retainedAuthState.rows[0]).toEqual({
+        status: "disabled",
+        active_sessions: "0",
+        authenticatable_sessions: "0",
+      });
+
+      // The two active Trader Portal accounts are included despite having no
+      // company_users row, and their logins, sessions, and profile grants go.
+      const removedTraderPortals = await client.query(
+        "select a.id, a.status, " +
+          "(select count(*) from user_business_links l where l.account_id=a.id and l.company_id=$2) as links, " +
+          "(select count(*) from account_sessions s where s.account_id=a.id and s.company_id=$2) as sessions " +
+          "from accounts a where a.id = any($1::uuid[]) order by a.id",
+        [[alpha.traderPortalAccountA, alpha.traderPortalAccountB], alpha.company],
+      );
+      expect(removedTraderPortals.rows).toEqual([]);
+      const removedTraderPortalAccess = await client.query(
+        "select " +
+          "(select count(*) from user_business_links where account_id=any($1::uuid[]) and company_id=$2) as links, " +
+          "(select count(*) from account_sessions where account_id=any($1::uuid[]) and company_id=$2) as sessions",
+        [[alpha.traderPortalAccountA, alpha.traderPortalAccountB], alpha.company],
+      );
+      expect(removedTraderPortalAccess.rows[0]).toEqual({ links: "0", sessions: "0" });
+
+      // History-only anchors have no current Company membership, role grant,
+      // or portal link, so the operational Users list does not include them.
+      const resetAccountsStillOperational = await client.query(
+        "select a.id from accounts a where a.company_id=$1 and a.id=any($2::uuid[]) and (" +
+          "exists (select 1 from company_users cu where cu.company_id=a.company_id and cu.account_id=a.id) " +
+          "or exists (select 1 from account_roles ar where ar.company_id=a.company_id and ar.account_id=a.id) " +
+          "or exists (select 1 from user_business_links l where l.company_id=a.company_id and l.account_id=a.id " +
+          "and l.access_status in ('invited','active','suspended')))",
+        [
+          alpha.company,
+          [alpha.account, alpha.historyAccountB, alpha.historyAccountC, alpha.traderPortalAccountA, alpha.traderPortalAccountB],
+        ],
+      );
+      expect(resetAccountsStillOperational.rows).toEqual([]);
 
       // Admin preservation is based on the assigned role, even when the same
       // user has several roles; the profile, both grants, and session survive.

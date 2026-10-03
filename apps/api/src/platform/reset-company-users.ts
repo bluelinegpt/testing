@@ -4,10 +4,28 @@ import { deleteResetCompanyUserAccount } from "./platform-user-deletion.service.
 
 export interface ResetCompanyUser {
   readonly accountId: string;
+  readonly accountKind: string;
   readonly username: string;
   readonly displayName: string;
   /** Another Company still has a membership, role, profile link, or session. */
   readonly sharedIdentity: boolean;
+  readonly sharedReferences: readonly string[];
+}
+
+export interface ResetCompanyUserReference {
+  readonly table: string;
+  readonly column: string;
+  readonly rows: number;
+  readonly onDelete: string;
+}
+
+export interface ResetCompanyUserRetainedIdentity {
+  readonly accountId: string;
+  readonly accountKind: string;
+  readonly username: string;
+  readonly displayName: string;
+  readonly reason: "other_company_access" | "preserved_history";
+  readonly references: readonly ResetCompanyUserReference[];
 }
 
 export interface ResetCompanyUserPlan {
@@ -24,6 +42,7 @@ export interface ResetCompanyUserCleanup {
   accountsDeleted: number;
   sharedIdentitiesPreserved: number;
   historyReferencedIdentitiesPreserved: number;
+  readonly retainedIdentities: ResetCompanyUserRetainedIdentity[];
 }
 
 /** Preserved tables that intentionally lose only non-Admin target-Company user rows. */
@@ -71,6 +90,24 @@ const SHARED_IDENTITY_EXISTS = `(
              where other_token.account_id = a.id and other_token.company_id <> $1)
 )`;
 
+const SHARED_IDENTITY_REFERENCES = `array_remove(array[
+  case when exists (select 1 from company_users other_user
+                     where other_user.account_id = a.id and other_user.company_id <> $1)
+    then 'company_users.account_id' end,
+  case when exists (select 1 from account_roles other_role
+                     where other_role.account_id = a.id and other_role.company_id <> $1)
+    then 'account_roles.account_id' end,
+  case when exists (select 1 from user_business_links other_link
+                     where other_link.account_id = a.id and other_link.company_id <> $1)
+    then 'user_business_links.account_id' end,
+  case when exists (select 1 from account_sessions other_session
+                     where other_session.account_id = a.id and other_session.company_id <> $1)
+    then 'account_sessions.account_id' end,
+  case when exists (select 1 from password_reset_tokens other_token
+                     where other_token.account_id = a.id and other_token.company_id <> $1)
+    then 'password_reset_tokens.account_id' end
+], null)::text[]`;
+
 export async function getResetCompanyUserPlan(
   client: pg.PoolClient,
   companyId: string,
@@ -79,20 +116,38 @@ export async function getResetCompanyUserPlan(
   const users = (
     await client.query<{
       accountId: string;
+      accountKind: string;
       username: string;
       displayName: string;
+      status: string;
       isAdmin: boolean;
       sharedIdentity: boolean;
+      sharedReferences: string[];
     }>(
-      `select a.id as "accountId", a.username,
+      `select a.id as "accountId", a.account_kind as "accountKind", a.username,
               coalesce(nullif(btrim(cu.display_name), ''), nullif(btrim(cu.name_en), ''), a.username)
-                as "displayName",
+              as "displayName",
+              a.status,
               ${ADMIN_ROLE_EXISTS} as "isAdmin",
-              ${SHARED_IDENTITY_EXISTS} as "sharedIdentity"
+              ${SHARED_IDENTITY_EXISTS} as "sharedIdentity",
+              ${SHARED_IDENTITY_REFERENCES} as "sharedReferences"
          from accounts a
          left join company_users cu on cu.account_id = a.id and cu.company_id = $1
-        where a.account_kind = 'company_user'
-          and (a.company_id = $1 or cu.id is not null)
+        where a.company_id = $1
+          and a.account_kind <> 'platform_administrator'
+          and (
+            a.status = 'active'
+            or exists (select 1 from company_users membership
+                        where membership.company_id = a.company_id and membership.account_id = a.id)
+            or exists (select 1 from account_roles assignment
+                        where assignment.company_id = a.company_id and assignment.account_id = a.id)
+            or exists (select 1 from user_business_links access_link
+                        where access_link.company_id = a.company_id and access_link.account_id = a.id)
+            or exists (select 1 from account_sessions session_row
+                        where session_row.company_id = a.company_id and session_row.account_id = a.id)
+            or exists (select 1 from password_reset_tokens reset_token
+                        where reset_token.company_id = a.company_id and reset_token.account_id = a.id)
+          )
         order by lower(coalesce(cu.display_name, cu.name_en, a.username)), a.id
         ${lockAccounts ? "for update of a" : ""}`,
       [companyId],
@@ -102,19 +157,23 @@ export async function getResetCompanyUserPlan(
   return {
     usersToRemove: users
       .filter((user) => !user.isAdmin)
-      .map(({ accountId, username, displayName, sharedIdentity }) => ({
+      .map(({ accountId, accountKind, username, displayName, sharedIdentity, sharedReferences }) => ({
         accountId,
+        accountKind,
         username,
         displayName,
         sharedIdentity,
+        sharedReferences,
       })),
     adminUsersPreserved: users
       .filter((user) => user.isAdmin)
-      .map(({ accountId, username, displayName, sharedIdentity }) => ({
+      .map(({ accountId, accountKind, username, displayName, sharedIdentity, sharedReferences }) => ({
         accountId,
+        accountKind,
         username,
         displayName,
         sharedIdentity,
+        sharedReferences,
       })),
   };
 }
@@ -133,19 +192,21 @@ export async function removeResetCompanyUsers(
     accountsDeleted: 0,
     sharedIdentitiesPreserved: 0,
     historyReferencedIdentitiesPreserved: 0,
+    retainedIdentities: [],
   };
 
   const candidates: { user: ResetCompanyUser; sharedIdentity: boolean }[] = [];
   for (const user of plan.usersToRemove) {
     // Recheck before mutation. The caller holds a row lock on every candidate
     // account for the duration of the reset transaction.
-    const admin = (
-      await client.query<{ isAdmin: boolean }>(
-        `select ${ADMIN_ROLE_EXISTS} as "isAdmin" from accounts a where a.id = $2`,
+    const accountState = (
+      await client.query<{ isAdmin: boolean; status: string }>(
+        `select ${ADMIN_ROLE_EXISTS} as "isAdmin", a.status from accounts a where a.id = $2`,
         [companyId, user.accountId],
       )
-    ).rows[0]?.isAdmin;
-    if (admin === true) {
+    ).rows[0];
+    if (accountState === undefined) continue;
+    if (accountState.isAdmin) {
       throw new Error(
         `Refusing to reset — user ${user.accountId} gained an Admin role after the preview plan.`,
       );
@@ -173,14 +234,15 @@ export async function removeResetCompanyUsers(
       [companyId, user.accountId],
     );
 
-    if (sharedIdentity !== true) {
+    if (sharedIdentity !== true && accountState.status !== "disabled") {
       // Satisfy the deferred active-user/role invariant before removing the
       // target Company assignments. A shared identity's account status is
       // preserved so this reset cannot disable access for another Company.
       await client.query(
         "update accounts set status = 'disabled', deactivated_at = coalesce(deactivated_at, now()), " +
-          "updated_at = now(), version = version + 1 where id = $1 and account_kind = 'company_user'",
-        [user.accountId],
+          "updated_at = now(), version = version + 1 where id = $1 and company_id = $2 " +
+          "and account_kind <> 'platform_administrator'",
+        [user.accountId, companyId],
       );
     }
 
@@ -207,12 +269,37 @@ export async function removeResetCompanyUsers(
   for (const { user, sharedIdentity } of candidates) {
     if (sharedIdentity) {
       counts.sharedIdentitiesPreserved += 1;
+      counts.retainedIdentities.push({
+        accountId: user.accountId,
+        accountKind: user.accountKind,
+        username: user.username,
+        displayName: user.displayName,
+        reason: "other_company_access",
+        references: user.sharedReferences.map((reference) => {
+          const [table, column] = reference.split(".");
+          return {
+            table: table ?? reference,
+            column: column ?? "",
+            rows: 1,
+            onDelete: "other-company access preserved",
+          };
+        }),
+      });
       continue;
     }
-    if (await deleteResetCompanyUserAccount(client, companyId, user.accountId)) {
+    const deletion = await deleteResetCompanyUserAccount(client, companyId, user.accountId);
+    if (deletion.deleted) {
       counts.accountsDeleted += 1;
     } else {
       counts.historyReferencedIdentitiesPreserved += 1;
+      counts.retainedIdentities.push({
+        accountId: user.accountId,
+        accountKind: user.accountKind,
+        username: user.username,
+        displayName: user.displayName,
+        reason: "preserved_history",
+        references: deletion.blockingReferences,
+      });
     }
   }
 

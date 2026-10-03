@@ -83,6 +83,19 @@ export class UserAdministrationService {
     };
     const orderBy = sortColumns[input.sort ?? "name"] ?? "coalesce(cu.display_name,a.username)";
     const direction = input.direction === "desc" ? "desc" : "asc";
+    // Keep only identities that still belong to this Company's operational
+    // Users workspace. A reset may retain a disabled account row as an audit
+    // anchor, but removes its Company memberships, role grants and portal
+    // access links; that history-only identity must not remain listed here.
+    const hasCompanyAccess = sql`and (
+      exists (select 1 from company_users membership
+               where membership.company_id=a.company_id and membership.account_id=a.id)
+      or exists (select 1 from account_roles assignment
+                  where assignment.company_id=a.company_id and assignment.account_id=a.id)
+      or exists (select 1 from user_business_links access_link
+                  where access_link.company_id=a.company_id and access_link.account_id=a.id
+                    and access_link.access_status in ('invited','active','suspended'))
+    )`;
     const filters = sql`
       ${
         search === undefined
@@ -112,7 +125,7 @@ export class UserAdministrationService {
           and linked_trader.id=profile_link.entity_id and linked_trader.company_id=profile_link.company_id
         left join drivers linked_driver on profile_link.entity_type='driver'
           and linked_driver.id=profile_link.entity_id and linked_driver.company_id=profile_link.company_id
-       where a.company_id = ${companyId}::uuid and a.account_kind<>'platform_user' ${filters}
+       where a.company_id = ${companyId}::uuid and a.account_kind<>'platform_user' ${hasCompanyAccess} ${filters}
     `.execute(this.database);
     const result = await sql<CompanyUserSummary>`
       select a.id as "accountId", a.account_kind as "accountKind",a.username,
@@ -136,7 +149,7 @@ export class UserAdministrationService {
           and linked_driver.id=profile_link.entity_id and linked_driver.company_id=profile_link.company_id
         left join account_roles ar on ar.account_id = a.id and ar.company_id = a.company_id
         left join roles r on r.id = ar.role_id
-       where a.company_id = ${companyId}::uuid and a.account_kind<>'platform_user' ${filters}
+       where a.company_id = ${companyId}::uuid and a.account_kind<>'platform_user' ${hasCompanyAccess} ${filters}
        group by a.id, cu.id, e.id, linked_trader.id, linked_driver.id
        order by ${sql.raw(orderBy)} ${sql.raw(direction)}, a.id
        limit ${input.pageSize} offset ${offset}

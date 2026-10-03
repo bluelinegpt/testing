@@ -100,15 +100,23 @@ export async function deleteResetCompanyUserAccount(
   client: pg.PoolClient,
   companyId: string,
   accountId: string,
-): Promise<boolean> {
+): Promise<{
+  readonly deleted: boolean;
+  readonly blockingReferences: readonly {
+    readonly table: string;
+    readonly column: string;
+    readonly rows: number;
+    readonly onDelete: string;
+  }[];
+}> {
   const account = (
     await client.query<{ id: string }>(
       "select id from accounts where id = $2 and company_id = $1 " +
-        "and account_kind = 'company_user' for update",
+        "and account_kind <> 'platform_administrator' for update",
       [companyId, accountId],
     )
   ).rows[0];
-  if (account === undefined) return false;
+  if (account === undefined) return { deleted: false, blockingReferences: [] };
 
   const admin = (
     await client.query<{ isAdmin: boolean }>(
@@ -127,20 +135,47 @@ export async function deleteResetCompanyUserAccount(
   }
 
   const references = (
-    await client.query<{ tableName: string; columnName: string }>(
-      "select child.relname as \"tableName\", attribute.attname as \"columnName\" " +
+    await client.query<{
+      constraintName: string;
+      tableName: string;
+      columnName: string;
+      deleteAction: string;
+      allColumnsNullable: boolean;
+    }>(
+      "select constraint_row.conname as \"constraintName\", " +
+        "child.relname as \"tableName\", " +
+        "child_attribute.attname as \"columnName\", " +
+        "constraint_row.confdeltype as \"deleteAction\", " +
+        "bool_and(not child_attribute.attnotnull) as \"allColumnsNullable\" " +
         "from pg_constraint constraint_row " +
         "join pg_class child on child.oid = constraint_row.conrelid " +
         "join pg_namespace child_schema on child_schema.oid = child.relnamespace " +
-        "join unnest(constraint_row.conkey) as key_column(attnum) on true " +
-        "join pg_attribute attribute on attribute.attrelid = child.oid " +
-        "and attribute.attnum = key_column.attnum " +
+        "join unnest(constraint_row.conkey, constraint_row.confkey) " +
+        "with ordinality as key_column(child_attnum, parent_attnum, ordinal) on true " +
+        "join pg_attribute child_attribute on child_attribute.attrelid = child.oid " +
+        "and child_attribute.attnum = key_column.child_attnum " +
+        "join pg_attribute referenced_attribute on referenced_attribute.attrelid = " +
+        "constraint_row.confrelid and referenced_attribute.attnum = key_column.parent_attnum " +
         "where constraint_row.contype = 'f' " +
         "and constraint_row.confrelid = 'public.accounts'::regclass " +
         "and child_schema.nspname = 'public' " +
-        "order by child.relname, attribute.attname",
+        "group by constraint_row.oid, child.relname, child_attribute.attname, " +
+        "constraint_row.confdeltype order by child.relname, child_attribute.attname",
     )
   ).rows;
+  const blockingReferences: {
+    table: string;
+    column: string;
+    rows: number;
+    onDelete: string;
+  }[] = [];
+  const deleteActionLabels: Readonly<Record<string, string>> = {
+    a: "NO ACTION",
+    r: "RESTRICT",
+    c: "CASCADE",
+    n: "SET NULL",
+    d: "SET DEFAULT",
+  };
   for (const reference of references) {
     // Catalog identifiers are quoted before interpolation. A self-reference
     // on the row being deleted disappears with that row; references from any
@@ -151,8 +186,7 @@ export async function deleteResetCompanyUserAccount(
       }
       return `"${identifier}"`;
     };
-    const selfRowFilter =
-      reference.tableName === "accounts" ? ` and ${quote("id")} <> $2` : "";
+    const selfRowFilter = reference.tableName === "accounts" ? ` and ${quote("id")} <> $2` : "";
     const count = Number(
       (
         await client.query<{ n: string }>(
@@ -162,15 +196,31 @@ export async function deleteResetCompanyUserAccount(
         )
       ).rows[0]?.n ?? 0,
     );
-    if (count > 0) return false;
+    // ON DELETE SET NULL preserves the history row while detaching only its
+    // nullable account reference. Other delete actions (especially RESTRICT)
+    // remain hard blockers; the identity must remain as a disabled anchor.
+    const canSafelyNullReference =
+      reference.deleteAction === "n" && reference.allColumnsNullable;
+    if (count > 0 && !canSafelyNullReference) {
+      blockingReferences.push({
+        table: reference.tableName,
+        column: reference.columnName,
+        rows: count,
+        onDelete: deleteActionLabels[reference.deleteAction] ?? "UNKNOWN",
+      });
+    }
+  }
+  if (blockingReferences.length > 0) {
+    return { deleted: false, blockingReferences };
   }
 
   await client.query("set local blueline.platform_user_delete = 'on'");
   const removed = await client.query(
-    "delete from accounts where id = $2 and company_id = $1 and account_kind = 'company_user'",
+    "delete from accounts where id = $2 and company_id = $1 " +
+      "and account_kind <> 'platform_administrator'",
     [companyId, accountId],
   );
-  return (removed.rowCount ?? 0) === 1;
+  return { deleted: (removed.rowCount ?? 0) === 1, blockingReferences: [] };
 }
 
 export interface BlockingDependency {

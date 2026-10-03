@@ -733,9 +733,11 @@ export interface CompanyResetTableCount {
 
 export interface CompanyResetUser {
   readonly accountId: string;
+  readonly accountKind: string;
   readonly username: string;
   readonly displayName: string;
   readonly sharedIdentity: boolean;
+  readonly sharedReferences: readonly string[];
 }
 
 export interface CompanyResetPreview {
@@ -770,6 +772,19 @@ export interface CompanyResetResult {
     readonly accountsDeleted: number;
     readonly sharedIdentitiesPreserved: number;
     readonly historyReferencedIdentitiesPreserved: number;
+    readonly retainedIdentities: readonly {
+      readonly accountId: string;
+      readonly accountKind: string;
+      readonly username: string;
+      readonly displayName: string;
+      readonly reason: "other_company_access" | "preserved_history";
+      readonly references: readonly {
+        readonly table: string;
+        readonly column: string;
+        readonly rows: number;
+        readonly onDelete: string;
+      }[];
+    }[];
   };
 }
 

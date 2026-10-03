@@ -141,6 +141,20 @@ describe("AuthenticationService", () => {
     ).rejects.toMatchObject({ errorCode: "invalid_credentials", status: 401 });
   });
 
+  it("rejects a correctly authenticated identity disabled by a Company reset", async () => {
+    const { repository, service } = createService({
+      account: { ...account, accountStatus: "disabled" },
+    });
+    await expect(
+      service.loginCompany({
+        companySubdomain: "acme",
+        password: "valid-password",
+        identifier: "operator",
+      }),
+    ).rejects.toMatchObject({ errorCode: "invalid_credentials", status: 401 });
+    expect(repository.createSession).not.toHaveBeenCalled();
+  });
+
   it("rejects a valid account when its selected Company is disabled", async () => {
     const { service } = createService({
       account: { ...account, companyStatus: "disabled" },

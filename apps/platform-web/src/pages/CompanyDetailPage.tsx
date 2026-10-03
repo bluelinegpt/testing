@@ -1003,11 +1003,12 @@ export function CompanyDetailPage(): ReactElement {
                 <p className="platform-muted">
                   This Company is in <strong>{company.environment}</strong>. Its transactional data
                   — orders, settlements, reconciliations, accounting entries, payments, expenses,
-                  customers, traders, drivers, employees and non-Admin Company users — can be reset
-                  for training. Users assigned an Admin role, the Company profile, chart of accounts
-                  and configuration are preserved. Non-Admin access and sessions are removed; shared
-                  or historically referenced login identities are retained where required. Once the
-                  Company moves to production, resetting becomes permanently unavailable.
+                  customers, traders, drivers, employees and all non-Admin Company accounts —
+                  including Trader and Driver Portal accounts — can be reset for training. Any
+                  account with an assigned Admin role, the Company profile, chart of accounts and
+                  configuration are preserved. Non-Admin company access and sessions are removed;
+                  identities referenced by preserved history are retained only as disabled records.
+                  Once the Company moves to production, resetting becomes permanently unavailable.
                 </p>
                 {canReset ? (
                   <>
@@ -1035,7 +1036,7 @@ export function CompanyDetailPage(): ReactElement {
                           </p>
                         ))}
                         <section aria-label="Company user reset preview">
-                          <h5>Company users</h5>
+                          <h5>Company accounts</h5>
                           <p>
                             <strong>Users to remove:</strong> {resetPreview.usersToRemove.length}
                           </p>
@@ -1044,7 +1045,7 @@ export function CompanyDetailPage(): ReactElement {
                           ) : (
                             resetPreview.usersToRemove.map((user) => (
                               <p key={user.accountId}>
-                                {user.displayName} ({user.username})
+                                {user.displayName} ({user.username}) — {user.accountKind}
                                 {user.sharedIdentity
                                   ? " — shared identity; other-Company access will be preserved"
                                   : ""}
@@ -1060,7 +1061,7 @@ export function CompanyDetailPage(): ReactElement {
                           ) : (
                             resetPreview.adminUsersPreserved.map((user) => (
                               <p key={user.accountId}>
-                                {user.displayName} ({user.username}) — all Company access preserved
+                                {user.displayName} ({user.username}) — {user.accountKind}; all Company access preserved
                               </p>
                             ))
                           )}
@@ -1111,10 +1112,13 @@ export function CompanyDetailPage(): ReactElement {
                           <strong>Backup:</strong> {resetResult.backupFile}
                         </p>
                         <p>
-                          <strong>Company users removed:</strong>{" "}
-                          {resetResult.userCleanup.companyUsersRemoved.toLocaleString()}. Admin users
-                          were preserved; {resetResult.userCleanup.accountsDeleted.toLocaleString()}{" "}
-                          non-Admin login account(s) deleted.
+                          <strong>Non-Admin accounts deleted:</strong>{" "}
+                          {resetResult.userCleanup.accountsDeleted.toLocaleString()}. Admin-role
+                          accounts were preserved; {resetResult.userCleanup.companyUsersRemoved.toLocaleString()}{" "}
+                          Company user memberships, {resetResult.userCleanup.roleAssignmentsRemoved.toLocaleString()}{" "}
+                          role assignments, {resetResult.userCleanup.businessAccessLinksRemoved.toLocaleString()}{" "}
+                          portal access links and {resetResult.userCleanup.sessionsRevoked.toLocaleString()}{" "}
+                          sessions were removed.
                         </p>
                         {resetResult.userCleanup.sharedIdentitiesPreserved > 0 ||
                         resetResult.userCleanup.historyReferencedIdentitiesPreserved > 0 ? (
@@ -1125,6 +1129,19 @@ export function CompanyDetailPage(): ReactElement {
                             identity/identities referenced by preserved history were retained safely.
                           </p>
                         ) : null}
+                        {resetResult.userCleanup.retainedIdentities.map((user) => (
+                          <p key={user.accountId}>
+                            Retained identity {user.displayName} ({user.username}, {user.accountKind})
+                            {user.reason === "preserved_history"
+                              ? " — disabled; target-Company access removed"
+                              : " — target-Company access removed; other-Company access preserved"}
+                            {user.references.length > 0
+                              ? ` — preserved references: ${user.references
+                                  .map((reference) => `${reference.table}.${reference.column} (${reference.rows}; ${reference.onDelete === "other-company access preserved" ? reference.onDelete : `FK ON DELETE ${reference.onDelete}`})`)
+                                  .join(", ")}`
+                              : " — other-company access is preserved"}
+                          </p>
+                        ))}
                       </div>
                     )}
                     {resetError === undefined ? null : (
