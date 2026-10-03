@@ -182,7 +182,32 @@ export interface ResetSummary {
   suspendedTriggers: { table: string; trigger: string }[];
   cycleBreaks: { table: string; columns: string[]; rows: number }[];
   preservedVerified: number;
+  fiscalCalendar: {
+    fiscalYearsPreserved: number;
+    periodsPreserved: number;
+    fiscalYearsOpened: number;
+    periodsOpened: number;
+    fiscalYearStatusesBefore: Record<string, number>;
+    periodStatusesBefore: Record<string, number>;
+  };
   userCleanup: Awaited<ReturnType<typeof removeResetCompanyUsers>>;
+}
+
+async function statusCountsForCompany(
+  client: pg.PoolClient,
+  table: "fiscal_years" | "accounting_periods",
+  companyId: string,
+): Promise<Record<string, number>> {
+  const result = await client.query<{ status: string; count: string }>(
+    `select status, count(*)::bigint as count from ${quoteIdentifier(table)} ` +
+      "where company_id = $1 group by status",
+    [companyId],
+  );
+  return Object.fromEntries(result.rows.map((row) => [row.status, Number(row.count)]));
+}
+
+function statusCountTotal(statuses: Record<string, number>): number {
+  return Object.values(statuses).reduce((total, count) => total + count, 0);
 }
 
 export interface ResetLogger {
@@ -394,6 +419,34 @@ export async function runReset(
       `identity anchor(s) for other-Company access or preserved references`,
   );
 
+  // Fiscal calendars are Company configuration, not disposable demo data.
+  // Reopen their existing rows in this same transaction after removing the
+  // reset's operational/accounting history. Posting eligibility checks both
+  // statuses, so a Company can use its preserved periods immediately.
+  const fiscalYearStatusesBefore = await statusCountsForCompany(client, "fiscal_years", companyId);
+  const periodStatusesBefore = await statusCountsForCompany(client, "accounting_periods", companyId);
+  const fiscalYearsOpened = await client.query(
+    "update fiscal_years set status = 'open' where company_id = $1 and status is distinct from 'open'",
+    [companyId],
+  );
+  const periodsOpened = await client.query(
+    "update accounting_periods set status = 'open' where company_id = $1 and status is distinct from 'open'",
+    [companyId],
+  );
+  const fiscalCalendar = {
+    fiscalYearsPreserved: statusCountTotal(fiscalYearStatusesBefore),
+    periodsPreserved: statusCountTotal(periodStatusesBefore),
+    fiscalYearsOpened: fiscalYearsOpened.rowCount ?? 0,
+    periodsOpened: periodsOpened.rowCount ?? 0,
+    fiscalYearStatusesBefore,
+    periodStatusesBefore,
+  };
+  log(
+    `Preserved ${fiscalCalendar.fiscalYearsPreserved} fiscal year(s) and ` +
+      `${fiscalCalendar.periodsPreserved} period(s); opened ` +
+      `${fiscalCalendar.fiscalYearsOpened} fiscal year(s) and ${fiscalCalendar.periodsOpened} period(s)`,
+  );
+
   // Step 9. Restore every suspended guard.
   for (const entry of suspend) {
     await client.query(
@@ -471,6 +524,7 @@ export async function runReset(
     suspendedTriggers: suspend,
     cycleBreaks,
     preservedVerified,
+    fiscalCalendar,
     userCleanup,
   };
 }

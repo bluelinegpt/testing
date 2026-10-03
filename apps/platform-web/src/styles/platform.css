@@ -98,6 +98,32 @@
   box-sizing: border-box;
 }
 
+.platform-reset-progress {
+  align-items: center;
+  cursor: progress;
+  display: flex;
+  gap: 0.55rem;
+  margin: 0.75rem 0;
+  min-height: 1.5rem;
+}
+
+.platform-reset-progress__spinner {
+  animation: platform-reset-spin 0.8s linear infinite;
+  border: 2px solid var(--platform-border);
+  border-radius: 50%;
+  border-top-color: var(--platform-accent);
+  display: inline-block;
+  flex: 0 0 1rem;
+  height: 1rem;
+  width: 1rem;
+}
+
+@keyframes platform-reset-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 body {
   margin: 0;
   background: var(--platform-surface);

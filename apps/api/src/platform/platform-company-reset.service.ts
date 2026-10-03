@@ -66,6 +66,14 @@ export interface CompanyResetPreview {
   readonly confirmation: string;
   readonly tables: readonly CompanyResetTableCount[];
   readonly totalRows: number;
+  readonly fiscalCalendar: {
+    readonly fiscalYearsPreserved: number;
+    readonly periodsPreserved: number;
+    readonly fiscalYearsToOpen: number;
+    readonly periodsToOpen: number;
+    readonly fiscalYearStatuses: Readonly<Record<string, number>>;
+    readonly periodStatuses: Readonly<Record<string, number>>;
+  };
   readonly usersToRemove: readonly {
     readonly accountId: string;
     readonly accountKind: string;
@@ -90,6 +98,14 @@ export interface CompanyResetResult {
   readonly totalRemoved: number;
   readonly preservedVerified: number;
   readonly backupFile: string;
+  readonly fiscalCalendar: {
+    readonly fiscalYearsPreserved: number;
+    readonly periodsPreserved: number;
+    readonly fiscalYearsOpened: number;
+    readonly periodsOpened: number;
+    readonly fiscalYearStatusesBefore: Readonly<Record<string, number>>;
+    readonly periodStatusesBefore: Readonly<Record<string, number>>;
+  };
   readonly userCleanup: {
     readonly companyUsersRemoved: number;
     readonly employeesUnlinked: number;
@@ -172,6 +188,7 @@ export class PlatformCompanyResetService {
           blockers.push(`Unbroken foreign-key cycle among: ${readiness.cycle.join(", ")}`);
         }
         const users = await getResetCompanyUserPlan(client, companyId);
+        const fiscalCalendar = await this.fiscalCalendarPreview(client, companyId);
 
         const tables = reports
           .filter((report) => report.classification === "PURGE" && (report.rows ?? 0) > 0)
@@ -185,6 +202,7 @@ export class PlatformCompanyResetService {
           confirmation: `RESET ${company.code}`,
           tables,
           totalRows: tables.reduce((total, entry) => total + entry.rows, 0),
+          fiscalCalendar,
           usersToRemove: users.usersToRemove,
           adminUsersPreserved: users.adminUsersPreserved,
         };
@@ -340,6 +358,7 @@ export class PlatformCompanyResetService {
             totalRemoved: summary.totalRemoved,
             tablesCleared: removed.length,
             backupFile: basename(backupFile),
+            fiscalCalendar: summary.fiscalCalendar,
           },
         });
         await client.query("commit");
@@ -350,6 +369,7 @@ export class PlatformCompanyResetService {
           totalRemoved: summary.totalRemoved,
           preservedVerified: summary.preservedVerified,
           backupFile: basename(backupFile),
+          fiscalCalendar: summary.fiscalCalendar,
           userCleanup: summary.userCleanup,
         };
       } catch (error) {
@@ -366,6 +386,44 @@ export class PlatformCompanyResetService {
       name: company.name_en,
       status: company.status,
       environment: company.environment,
+    };
+  }
+
+  private async fiscalCalendarPreview(
+    client: pg.PoolClient,
+    companyId: string,
+  ): Promise<CompanyResetPreview["fiscalCalendar"]> {
+    const [years, periods] = await Promise.all([
+      client.query<{ status: string; count: string }>(
+        "select status, count(*)::bigint as count from fiscal_years " +
+          "where company_id = $1 group by status",
+        [companyId],
+      ),
+      client.query<{ status: string; count: string }>(
+        "select status, count(*)::bigint as count from accounting_periods " +
+          "where company_id = $1 group by status",
+        [companyId],
+      ),
+    ]);
+    const fiscalYearStatuses = Object.fromEntries(
+      years.rows.map((row) => [row.status, Number(row.count)]),
+    );
+    const periodStatuses = Object.fromEntries(
+      periods.rows.map((row) => [row.status, Number(row.count)]),
+    );
+    const total = (statuses: Readonly<Record<string, number>>) =>
+      Object.values(statuses).reduce((sum, count) => sum + count, 0);
+    return {
+      fiscalYearsPreserved: total(fiscalYearStatuses),
+      periodsPreserved: total(periodStatuses),
+      fiscalYearsToOpen: Object.entries(fiscalYearStatuses)
+        .filter(([status]) => status !== "open")
+        .reduce((sum, [, count]) => sum + count, 0),
+      periodsToOpen: Object.entries(periodStatuses)
+        .filter(([status]) => status !== "open")
+        .reduce((sum, [, count]) => sum + count, 0),
+      fiscalYearStatuses,
+      periodStatuses,
     };
   }
 

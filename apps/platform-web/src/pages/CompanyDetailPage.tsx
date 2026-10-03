@@ -32,6 +32,8 @@ type CompanyDetailTab =
   | "audit"
   | "lifecycle";
 
+type ResetBusyOperation = "loading-users" | "preparing-preview" | "reset-in-progress";
+
 /**
  * One Company: overview, profile, accounting setup, readiness and lifecycle.
  *
@@ -56,6 +58,8 @@ export function CompanyDetailPage(): ReactElement {
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [failed, setFailed] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [resetBusyOperation, setResetBusyOperation] = useState<ResetBusyOperation | undefined>();
+  const [resetCompletionMessage, setResetCompletionMessage] = useState<string | undefined>();
   const [error, setError] = useState<string | undefined>(undefined);
   const [deletionEligibility, setDeletionEligibility] = useState<
     CompanyDeletionEligibility | undefined
@@ -92,6 +96,13 @@ export function CompanyDetailPage(): ReactElement {
   const [productionError, setProductionError] = useState<string | undefined>(undefined);
   const [shipmentPrefix, setShipmentPrefix] = useState("");
   const [activeTab, setActiveTab] = useState<CompanyDetailTab>("information");
+  const resetBusyText = resetBusyOperation === "loading-users"
+    ? "Loading users…"
+    : resetBusyOperation === "preparing-preview"
+      ? "Preparing preview…"
+      : resetBusyOperation === "reset-in-progress"
+        ? "Reset in progress…"
+        : undefined;
 
   const load = useCallback(async () => {
     setFailed(false);
@@ -367,16 +378,24 @@ export function CompanyDetailPage(): ReactElement {
 
   async function runResetPreview(): Promise<void> {
     setBusy(true);
+    setResetBusyOperation("preparing-preview");
+    setResetCompletionMessage(undefined);
     setResetError(undefined);
     setResetResult(undefined);
     setResetConfirmation("");
     try {
-      setResetPreview(await platformApi.companyResetPreview(companyId));
+      const preview = await platformApi.companyResetPreview(companyId);
+      setResetPreview(preview);
+      setResetCompletionMessage(
+        `Done — preview ready: ${preview.totalRows.toLocaleString()} transactional row(s); ` +
+          `${preview.fiscalCalendar.fiscalYearsToOpen} fiscal year(s) and ${preview.fiscalCalendar.periodsToOpen} period(s) will be opened.`,
+      );
     } catch (failure) {
       setResetError(
         failure instanceof PlatformApiError ? failure.message : "Unable to run the reset preview.",
       );
     } finally {
+      setResetBusyOperation(undefined);
       setBusy(false);
     }
   }
@@ -384,7 +403,10 @@ export function CompanyDetailPage(): ReactElement {
   async function executeReset(): Promise<void> {
     if (resetPreview === undefined) return;
     setBusy(true);
+    setResetBusyOperation("reset-in-progress");
+    setResetCompletionMessage(undefined);
     setResetError(undefined);
+    setResetResult(undefined);
     try {
       const result = await platformApi.resetCompanyData(companyId, resetConfirmation);
       setResetResult(result);
@@ -398,6 +420,7 @@ export function CompanyDetailPage(): ReactElement {
           : "The reset failed and was rolled back.",
       );
     } finally {
+      setResetBusyOperation(undefined);
       setBusy(false);
     }
   }
@@ -408,11 +431,18 @@ export function CompanyDetailPage(): ReactElement {
     setUsersResetError(undefined);
     setUsersResetResult(undefined);
     setUsersResetPreview(undefined);
+    setResetCompletionMessage(undefined);
     if (accountIds.length === 0) return;
     setBusy(true);
+    setResetBusyOperation("preparing-preview");
     try {
       const preview = await platformApi.previewCompanyUsersReset(companyId, accountIds);
       setUsersResetPreview(preview);
+      setResetCompletionMessage(
+        `Done — preview ready for ${preview.selectedUsers.length} selected user(s): ` +
+          `${preview.accountsToDelete.length} account(s) will be deleted and ` +
+          `${preview.identitiesRetained.length} identity/identities retained for history or shared access.`,
+      );
       setUsersResetCandidates((current) => {
         const byId = new Map(current.map((user) => [user.accountId, user]));
         for (const user of [...preview.selectedUsers, ...preview.adminUsersPreserved]) byId.set(user.accountId, user);
@@ -421,12 +451,15 @@ export function CompanyDetailPage(): ReactElement {
     } catch (failure) {
       setUsersResetError(failure instanceof PlatformApiError ? failure.message : "Unable to preview selected users.");
     } finally {
+      setResetBusyOperation(undefined);
       setBusy(false);
     }
   }
 
   async function runUsersResetList(): Promise<void> {
     setBusy(true);
+    setResetBusyOperation("loading-users");
+    setResetCompletionMessage(undefined);
     setUsersResetError(undefined);
     setUsersResetResult(undefined);
     setUsersResetSelected([]);
@@ -436,9 +469,14 @@ export function CompanyDetailPage(): ReactElement {
       setUsersResetCandidates(eligible.usersToRemove);
       setUsersResetAdmins(eligible.adminUsersPreserved);
       setUsersResetBlockers(eligible.blockers);
+      setResetCompletionMessage(
+        `Done — loaded ${eligible.usersToRemove.length} eligible user(s); ` +
+          `${eligible.adminUsersPreserved.length} Admin account(s) protected.`,
+      );
     } catch (failure) {
       setUsersResetError(failure instanceof PlatformApiError ? failure.message : "Unable to load eligible users.");
     } finally {
+      setResetBusyOperation(undefined);
       setBusy(false);
     }
   }
@@ -446,7 +484,10 @@ export function CompanyDetailPage(): ReactElement {
   async function executeUsersReset(): Promise<void> {
     if (usersResetPreview === undefined || usersResetSelected.length === 0) return;
     setBusy(true);
+    setResetBusyOperation("reset-in-progress");
+    setResetCompletionMessage(undefined);
     setUsersResetError(undefined);
+    setUsersResetResult(undefined);
     try {
       const result = await platformApi.resetCompanyUsers(companyId, usersResetSelected, usersResetConfirmation);
       setUsersResetResult(result);
@@ -461,6 +502,8 @@ export function CompanyDetailPage(): ReactElement {
     } catch (failure) {
       setUsersResetError(failure instanceof PlatformApiError ? failure.message : "The selected-user reset failed and was rolled back.");
     } finally {
+      setResetBusyOperation(undefined);
+      setResetCompletionMessage(undefined);
       setBusy(false);
     }
   }
@@ -1072,8 +1115,20 @@ export function CompanyDetailPage(): ReactElement {
               </form>
             </dialog>
             {company.environment !== "production" ? (
-              <section aria-labelledby="company-maintenance-heading">
+              <section
+                aria-labelledby="company-maintenance-heading"
+                style={{ cursor: resetBusyOperation === undefined ? undefined : "progress" }}
+              >
                 <h4 id="company-maintenance-heading">Training data &amp; environment</h4>
+                {resetBusyText === undefined ? null : (
+                  <p className="platform-reset-progress" role="status" aria-live="polite">
+                    <span className="platform-reset-progress__spinner" aria-hidden="true" />
+                    {resetBusyText}
+                  </p>
+                )}
+                {resetBusyText === undefined && resetCompletionMessage !== undefined ? (
+                  <p role="status" aria-live="polite">{resetCompletionMessage}</p>
+                ) : null}
                 <p className="platform-muted">
                   This Company is in <strong>{company.environment}</strong>. Its transactional data
                   — orders, settlements, reconciliations, accounting entries, payments, expenses,
@@ -1092,7 +1147,7 @@ export function CompanyDetailPage(): ReactElement {
                         Select only the non-Admin Company or Trader Portal accounts to remove. Other company data and unselected users are preserved; identities required by shared access or history remain without target-company access.
                       </p>
                       <button className="platform-button platform-button--quiet" disabled={busy} onClick={() => void runUsersResetList()} type="button">
-                        Load Users for Selective Reset
+                        {resetBusyOperation === "loading-users" ? "Loading users…" : "Load Users for Selective Reset"}
                       </button>
                       {usersResetCandidates.length > 0 ? (
                         <div aria-label="Eligible users for selective reset">
@@ -1151,7 +1206,7 @@ export function CompanyDetailPage(): ReactElement {
                                 <input autoComplete="off" id="users-reset-confirmation" onChange={(event) => setUsersResetConfirmation(event.target.value)} value={usersResetConfirmation} />
                               </label>
                               <button className="platform-button" disabled={busy || usersResetConfirmation !== usersResetPreview.confirmation} onClick={() => void executeUsersReset()} type="button">
-                                Reset Selected Users
+                                {resetBusyOperation === "reset-in-progress" ? "Reset in progress…" : "Reset Selected Users"}
                               </button>
                             </>
                           ) : null}
@@ -1159,7 +1214,7 @@ export function CompanyDetailPage(): ReactElement {
                       )}
                       {usersResetResult === undefined ? null : (
                         <div role="status">
-                          <p><strong>Selected-user reset complete.</strong> {usersResetResult.cleanup.accountsDeleted} account(s) deleted; {usersResetResult.cleanup.sessionsRevoked} Company session(s) revoked; {usersResetResult.cleanup.employeesUnlinked} Employee profile(s) unlinked for later account creation; {usersResetResult.cleanup.retainedIdentities.length} identity/identities retained safely.</p>
+                          <p><strong>Done — Users Only reset succeeded.</strong> {usersResetResult.cleanup.accountsDeleted} account(s) deleted; {usersResetResult.cleanup.sessionsRevoked} Company session(s) revoked; {usersResetResult.cleanup.employeesUnlinked} Employee profile(s) unlinked for later account creation; {usersResetResult.cleanup.retainedIdentities.length} identity/identities retained safely.</p>
                           {usersResetResult.cleanup.retainedIdentities.map((user) => (
                             <p key={user.accountId}>Retained {user.displayName} ({user.username}) — {user.reason}; Company access removed. {user.references.map((ref) => `${ref.table}.${ref.column} (${ref.rows})`).join(", ")}</p>
                           ))}
@@ -1173,7 +1228,7 @@ export function CompanyDetailPage(): ReactElement {
                       onClick={() => void runResetPreview()}
                       type="button"
                     >
-                      Preview Data Reset
+                      {resetBusyOperation === "preparing-preview" ? "Preparing preview…" : "Preview Data Reset"}
                     </button>
                     {resetPreview === undefined ? null : (
                       <div className="platform-review">
@@ -1184,6 +1239,11 @@ export function CompanyDetailPage(): ReactElement {
                           {" across "}
                           {resetPreview.tables.length} table(s). A full-database backup is taken
                           automatically before anything is removed.
+                        </p>
+                        <p>
+                          <strong>Fiscal calendar:</strong> preserve {resetPreview.fiscalCalendar.fiscalYearsPreserved} fiscal year(s)
+                          and {resetPreview.fiscalCalendar.periodsPreserved} period(s); open {resetPreview.fiscalCalendar.fiscalYearsToOpen}
+                          fiscal year(s) and {resetPreview.fiscalCalendar.periodsToOpen} period(s). IDs, dates, numbering and fiscal-year links remain unchanged.
                         </p>
                         {resetPreview.tables.map((entry) => (
                           <p key={entry.table}>
@@ -1248,7 +1308,7 @@ export function CompanyDetailPage(): ReactElement {
                               onClick={() => void executeReset()}
                               type="button"
                             >
-                              Reset Company Data
+                              {resetBusyOperation === "reset-in-progress" ? "Reset in progress…" : "Reset Company Data"}
                             </button>
                           </>
                         ) : null}
@@ -1257,11 +1317,16 @@ export function CompanyDetailPage(): ReactElement {
                     {resetResult === undefined ? null : (
                       <div className="platform-review" role="status">
                         <p>
-                          <strong>Reset complete.</strong>{" "}
+                          <strong>Done — Full company reset succeeded.</strong>{" "}
                           {resetResult.totalRemoved.toLocaleString()}
                           {" row(s) removed across "}
                           {resetResult.removed.length} table(s). {resetResult.preservedVerified}
                           {" preserved table(s) verified unchanged."}
+                        </p>
+                        <p>
+                          <strong>Fiscal calendar:</strong> {resetResult.fiscalCalendar.fiscalYearsPreserved} fiscal year(s)
+                          and {resetResult.fiscalCalendar.periodsPreserved} period(s) preserved; opened {resetResult.fiscalCalendar.fiscalYearsOpened}
+                          fiscal year(s) and {resetResult.fiscalCalendar.periodsOpened} period(s).
                         </p>
                         <p>
                           <strong>Backup:</strong> {resetResult.backupFile}

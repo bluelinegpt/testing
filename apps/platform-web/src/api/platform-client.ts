@@ -756,6 +756,14 @@ export interface CompanyResetPreview {
   readonly confirmation: string;
   readonly tables: readonly CompanyResetTableCount[];
   readonly totalRows: number;
+  readonly fiscalCalendar: {
+    readonly fiscalYearsPreserved: number;
+    readonly periodsPreserved: number;
+    readonly fiscalYearsToOpen: number;
+    readonly periodsToOpen: number;
+    readonly fiscalYearStatuses: Readonly<Record<string, number>>;
+    readonly periodStatuses: Readonly<Record<string, number>>;
+  };
   readonly usersToRemove: readonly CompanyResetUser[];
   readonly adminUsersPreserved: readonly CompanyResetUser[];
 }
@@ -766,6 +774,14 @@ export interface CompanyResetResult {
   readonly totalRemoved: number;
   readonly preservedVerified: number;
   readonly backupFile: string;
+  readonly fiscalCalendar: {
+    readonly fiscalYearsPreserved: number;
+    readonly periodsPreserved: number;
+    readonly fiscalYearsOpened: number;
+    readonly periodsOpened: number;
+    readonly fiscalYearStatusesBefore: Readonly<Record<string, number>>;
+    readonly periodStatusesBefore: Readonly<Record<string, number>>;
+  };
   readonly userCleanup: {
     readonly companyUsersRemoved: number;
     readonly employeesUnlinked: number;

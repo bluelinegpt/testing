@@ -584,6 +584,8 @@ describe.skipIf(!runDatabaseTests)("reset execution engine against a real databa
       const alpha = await seedCompany(client, "SELECT-ONE");
       const beta = await seedCompany(client, "SELECT-ONE-OTHER");
       await client.query("set constraints all immediate");
+      await client.query("update fiscal_years set status='closed' where id=$1", [alpha.fiscalYear]);
+      await client.query("update accounting_periods set status='soft_closed' where id=$1", [alpha.period]);
       const preview = await previewResetCompanyUsers(client, alpha.company, [alpha.account]);
       expect(preview.selectedUsers.map((user) => user.accountId)).toEqual([alpha.account]);
       expect(preview.adminUsersPreserved).toEqual([]);
@@ -611,6 +613,13 @@ describe.skipIf(!runDatabaseTests)("reset execution engine against a real databa
       ]);
       expect(unselected.rows[0]?.n).toBe("5");
       expect(await countFor(client, "orders", beta.company)).toBe(1);
+      const targetFiscalState = await client.query(
+        "select y.status as fiscal_year_status, p.status as period_status " +
+          "from fiscal_years y join accounting_periods p on p.fiscal_year_id=y.id " +
+          "where y.id=$1 and p.id=$2 and y.company_id=$3 and p.company_id=$3",
+        [alpha.fiscalYear, alpha.period, alpha.company],
+      );
+      expect(targetFiscalState.rows[0]).toEqual({ fiscal_year_status: "closed", period_status: "soft_closed" });
     } finally {
       await client.query("rollback");
       client.release();
@@ -735,6 +744,10 @@ describe.skipIf(!runDatabaseTests)("reset execution engine against a real databa
       const alpha = await seedCompany(client, "A");
       const beta = await seedCompany(client, "B");
       const platform = await seedPlatformData(client);
+      await client.query("update fiscal_years set status='closed' where id=$1", [alpha.fiscalYear]);
+      await client.query("update accounting_periods set status='soft_closed' where id=$1", [alpha.period]);
+      await client.query("update fiscal_years set status='closed' where id=$1", [beta.fiscalYear]);
+      await client.query("update accounting_periods set status='future' where id=$1", [beta.period]);
       // Seeding queues deferred trigger events, and PostgreSQL refuses `alter table` while
       // any are pending. Real runs begin the transaction with the reset, so this only
       // affects the fixture; flushing here reproduces that clean starting state.
@@ -792,6 +805,14 @@ describe.skipIf(!runDatabaseTests)("reset execution engine against a real databa
 
       const summary = await runReset(client, alpha.company, () => undefined);
       expect(summary.totalRemoved).toBeGreaterThan(0);
+      expect(summary.fiscalCalendar).toEqual({
+        fiscalYearsPreserved: 1,
+        periodsPreserved: 1,
+        fiscalYearsOpened: 1,
+        periodsOpened: 1,
+        fiscalYearStatusesBefore: { closed: 1 },
+        periodStatusesBefore: { soft_closed: 1 },
+      });
       expect(summary.userCleanup).toMatchObject({
         companyUsersRemoved: 3,
         roleAssignmentsRemoved: 3,
@@ -828,6 +849,35 @@ describe.skipIf(!runDatabaseTests)("reset execution engine against a real databa
           0,
         );
       }
+      const reopenedCalendar = await client.query(
+        "select y.id as fiscal_year_id, y.fiscal_year_code, y.start_date::text, y.end_date::text, " +
+          "y.status as fiscal_year_status, p.id as period_id, p.period_start::text, p.period_end::text, " +
+          "p.fiscal_year_id as period_fiscal_year_id, p.period_number, p.period_code, p.status as period_status " +
+          "from fiscal_years y join accounting_periods p on p.fiscal_year_id=y.id " +
+          "where y.id=$1 and p.id=$2 and y.company_id=$3 and p.company_id=$3",
+        [alpha.fiscalYear, alpha.period, alpha.company],
+      );
+      expect(reopenedCalendar.rows[0]).toEqual({
+        fiscal_year_id: alpha.fiscalYear,
+        fiscal_year_code: `FY-${alpha.company.slice(0, 8)}`,
+        start_date: "2026-01-01",
+        end_date: "2026-12-31",
+        fiscal_year_status: "open",
+        period_id: alpha.period,
+        period_start: "2026-01-01",
+        period_end: "2026-01-31",
+        period_fiscal_year_id: alpha.fiscalYear,
+        period_number: 1,
+        period_code: `P-${alpha.company.slice(0, 8)}`,
+        period_status: "open",
+      });
+      const otherCalendar = await client.query(
+        "select y.status as fiscal_year_status, p.status as period_status " +
+          "from fiscal_years y join accounting_periods p on p.fiscal_year_id=y.id " +
+          "where y.id=$1 and p.id=$2 and y.company_id=$3 and p.company_id=$3",
+        [beta.fiscalYear, beta.period, beta.company],
+      );
+      expect(otherCalendar.rows[0]).toEqual({ fiscal_year_status: "closed", period_status: "future" });
       // The other Company is completely untouched.
       for (const table of [...removedTables, ...preservedTables]) {
         expect(await countFor(client, table, beta.company), `${table} isolated`).toBeGreaterThan(0);
