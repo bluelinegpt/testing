@@ -8,6 +8,7 @@ export interface AccountingReportDocument {
   readonly snapshotAt: string;
   readonly title: string;
   readonly warnings: readonly string[];
+  readonly landscape?: boolean;
 }
 
 function escape(value: unknown): string {
@@ -55,7 +56,7 @@ export function accountingReportHtml(input: {
     .join("");
   const html = `<!doctype html><html lang="${input.language}" dir="${ar ? "rtl" : "ltr"}"><head>
 <meta charset="utf-8"><style>
-@page{size:A4;margin:14mm 12mm 18mm}*{box-sizing:border-box}body{font-family:"Arial","Noto Sans Arabic",sans-serif;color:#172033;font-size:10px}
+@page{size:A4 ${input.document.landscape === true ? "landscape" : "portrait"};margin:14mm 12mm 18mm}*{box-sizing:border-box}body{font-family:"Arial","Noto Sans Arabic",sans-serif;color:#172033;font-size:10px}
 header{display:flex;align-items:center;gap:12px;border-bottom:2px solid #3756d9;padding-bottom:8px;margin-bottom:12px}header img{max-width:72px;max-height:52px}
 h1{font-size:19px;margin:0}.company{font-size:14px;font-weight:700}.subtitle{color:#596579}.meta,.filters{display:flex;gap:12px;flex-wrap:wrap;margin:7px 0}
 .warning{background:#fff4d6;border:1px solid #e3b341;padding:6px;margin:4px 0}table{width:100%;border-collapse:collapse;margin-top:9px;page-break-inside:auto}

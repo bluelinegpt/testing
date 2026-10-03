@@ -1260,6 +1260,7 @@ export const englishTranslations = {
     importOrders: "Import orders",
     orders: "Orders",
     ordersExport: "Orders Export",
+    ordersReport: "Orders Report",
     ordersList: "All orders",
     payroll: "Payroll",
     reports: "Reports",
@@ -1452,6 +1453,22 @@ export const englishTranslations = {
     title: "Deployment status",
   },
   reports: {
+    orders: {
+      title: "Orders Report",
+      subtitle: "Filter orders by creation date, trader, and status.",
+      export: "Export Excel",
+      exportPdf: "Export PDF",
+      allStatuses: "All Statuses",
+      exportFailed: "The report could not be exported. Please try again.",
+      from: "From date",
+      to: "To date",
+      trader: "Trader",
+      allTraders: "All traders",
+      status: "Status",
+      empty: "No matching orders.",
+      total: "{{count}} matching orders",
+      columns: { orderNumber: "Order Number", date: "Date", traderName: "Trader Name", customer: "Customer", customerMobile: "Customer Mobile", emirates: "Emirates", area: "Area", cod: "COD", fee: "Fee", status: "Status" },
+    },
     dailyOperationsSummary: {
       breakEven: "Break-even / Zero",
       businessDateUnavailable:

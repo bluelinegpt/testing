@@ -7,6 +7,7 @@ import {
   HttpCode,
   HttpStatus,
   Inject,
+  Logger,
   Param,
   ParseUUIDPipe,
   Patch,
@@ -18,6 +19,9 @@ import {
 import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
 import { Throttle } from "@nestjs/throttler";
 import type { Request, Response } from "express";
+import { CompanyProfileService } from "../company-profile/company-profile.service.js";
+import { accountingReportHtml } from "../accounting/accounting-report-html.js";
+import { ApplicationException } from "../presentation/errors/application.exception.js";
 
 import {
   Public,
@@ -34,6 +38,8 @@ import {
   type OperationsOrderFilters,
   type OperationsOrder,
   type OperationsOrderPage,
+  type OrdersReportFilters,
+  type OrdersReportPage,
   type OperationsDriverDashboardSummary,
   type OperationsOperatorDashboardSummary,
   type OperationsOverview,
@@ -54,6 +60,7 @@ import {
   type OperationsTrader,
   type OperationsTraderOption,
   type SearchPage,
+  type OrdersReportExcelFile,
 } from "./operations.service.js";
 import { LookupTrackingDto, VerifyTrackingDto } from "./public-tracking.dto.js";
 import {
@@ -144,6 +151,7 @@ import {
 } from "./operations.dto.js";
 import { OrderDeliveryReopenService } from "./order-delivery-reopen.service.js";
 import { OrderMaintenanceService, type TraderReceivableResetPreview } from "./order-maintenance.service.js";
+import { DriverCollectionPdfService } from "./driver-collection-pdf.service.js";
 
 @ApiTags("operations")
 @ApiBearerAuth()
@@ -151,6 +159,7 @@ import { OrderMaintenanceService, type TraderReceivableResetPreview } from "./or
 @RequireAnyPermission("users_roles.manage")
 @Controller("operations")
 export class OperationsController {
+  private readonly logger = new Logger(OperationsController.name);
   public constructor(
     @Inject(OperationsService) private readonly operations: OperationsService,
     @Inject(OrdersWorkflowService) private readonly ordersWorkflow: OrdersWorkflowService,
@@ -166,6 +175,10 @@ export class OperationsController {
     private readonly deliveryReopen: OrderDeliveryReopenService,
     @Inject(OrderMaintenanceService)
     private readonly orderMaintenance: OrderMaintenanceService,
+    @Inject(DriverCollectionPdfService)
+    private readonly pdf: DriverCollectionPdfService,
+    @Inject(CompanyProfileService)
+    private readonly companyProfile: CompanyProfileService,
   ) {}
 
   // Either permission reaches the route; the SERVICE decides which one the
@@ -401,6 +414,125 @@ export class OperationsController {
       workflowStep,
       traderId,
     });
+  }
+
+  @RequireAnyPermission("reports.export", "users_roles.manage", "orders.edit_before_processing")
+  @ApiOperation({ summary: "List Company Orders Report rows" })
+  @Get("reports/orders")
+  public ordersReport(
+    @Query("dateFrom") dateFrom?: string,
+    @Query("dateTo") dateTo?: string,
+    @Query("traderId") traderId?: string,
+    @Query("statuses") statuses?: string,
+    @Query("page") page?: string,
+    @Query("pageSize") pageSize?: string,
+  ): Promise<OrdersReportPage> {
+    const filters: OrdersReportFilters = {
+      ...(dateFrom === undefined ? {} : { dateFrom }),
+      ...(dateTo === undefined ? {} : { dateTo }),
+      ...(traderId === undefined ? {} : { traderId }),
+      statuses: statuses === undefined || statuses === "" ? [] : statuses.split(","),
+      page: Number(page), pageSize: Number(pageSize),
+    };
+    return this.operations.ordersReport(filters);
+  }
+
+  @RequireAnyPermission("reports.export", "users_roles.manage")
+  @ApiOperation({ summary: "Export the complete filtered Company Orders Report as Excel" })
+  @Get("reports/orders.xlsx")
+  public async ordersReportExcel(
+    @Query("dateFrom") dateFrom: string | undefined,
+    @Query("dateTo") dateTo: string | undefined,
+    @Query("traderId") traderId: string | undefined,
+    @Query("statuses") statuses: string | undefined,
+    @Res() response: Response,
+  ): Promise<void> {
+    const report: OrdersReportExcelFile = await this.operations.ordersReportExcel({
+      ...(dateFrom === undefined ? {} : { dateFrom }),
+      ...(dateTo === undefined ? {} : { dateTo }),
+      ...(traderId === undefined ? {} : { traderId }),
+      statuses: statuses === undefined || statuses === "" ? [] : statuses.split(","),
+    });
+    response.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    response.setHeader("Content-Disposition", `attachment; filename="${report.filename}"`);
+    response.setHeader("X-Content-Type-Options", "nosniff");
+    response.send(report.bytes);
+  }
+
+  @RequireAnyPermission("reports.export", "users_roles.manage")
+  @ApiOperation({ summary: "Export the complete filtered Company Orders Report as PDF" })
+  @Get("reports/orders.pdf")
+  public async ordersReportPdf(
+    @Query("dateFrom") dateFrom: string | undefined,
+    @Query("dateTo") dateTo: string | undefined,
+    @Query("traderId") traderId: string | undefined,
+    @Query("statuses") statuses: string | undefined,
+    @Req() request: Request,
+    @Res() response: Response,
+  ): Promise<void> {
+    const correlationId = this.correlationId(request);
+    try {
+      const filters: OrdersReportFilters = {
+      ...(dateFrom === undefined ? {} : { dateFrom }),
+      ...(dateTo === undefined ? {} : { dateTo }),
+      ...(traderId === undefined ? {} : { traderId }),
+      statuses: statuses === undefined || statuses === "" ? [] : statuses.split(","),
+      };
+    const first = await this.operations.ordersReport({ ...filters, page: 1, pageSize: 200 });
+    const rows = [...first.items];
+    for (let page = 2; page <= Math.ceil(first.totalCount / first.pageSize); page += 1) {
+      rows.push(...(await this.operations.ordersReport({ ...filters, page, pageSize: 200 })).items);
+    }
+    const branding = await this.companyProfile.branding();
+    let logoDataUrl: string | undefined;
+    if (branding.hasLogo) {
+      try {
+        const logo = await this.companyProfile.logoContent();
+        logoDataUrl = `data:${logo.mediaType};base64,${logo.bytes.toString("base64")}`;
+      } catch (error) {
+        if (!(error instanceof ApplicationException) || error.errorCode !== "logo_not_found") throw error;
+      }
+    }
+    const columns = ["Order Number", "Date", "Trader Name", "Customer", "Customer Mobile", "Emirates", "Area", "COD", "Fee", "Status"] as const;
+    const filtersForDocument = {
+      From: dateFrom ?? "All",
+      To: dateTo ?? "All",
+      Trader: traderId ?? "All Traders",
+      Statuses: statuses === undefined || statuses === "" || statuses.split(",").length === 11 ? "All Statuses" : statuses,
+      Total: String(first.totalCount),
+    };
+    const document = {
+      columns,
+      filters: filtersForDocument,
+      generatedAt: new Date().toISOString(),
+      snapshotAt: new Date().toISOString(),
+      title: "Orders List / قائمة الطلبات",
+      warnings: [],
+      landscape: true,
+      rows: rows.map((row) => ({
+        "Order Number": row.orderNumber, Date: row.date, "Trader Name": row.traderName,
+        Customer: row.customer, "Customer Mobile": row.customerMobile, Emirates: row.emirates,
+        Area: row.area, COD: row.cod, Fee: row.fee, Status: row.status,
+      })),
+    };
+    const rendered = accountingReportHtml({
+      branding,
+      document,
+      language: "en",
+      ...(logoDataUrl === undefined ? {} : { logoDataUrl }),
+    });
+    const bytes = await this.pdf.renderPdf(rendered.html, rendered.footer);
+    response.setHeader("Content-Type", "application/pdf");
+    response.setHeader("Content-Disposition", 'attachment; filename="orders-report.pdf"');
+    response.setHeader("X-Content-Type-Options", "nosniff");
+      response.send(bytes);
+    } catch (error) {
+      this.logger.error(
+        `orders.pdf failed correlationId=${correlationId} stage=export`,
+        error instanceof Error ? error.stack : String(error),
+      );
+      throw error;
+    }
   }
 
   @ApiOperation({ summary: "Calculate an order financial preview using Company VAT settings" })

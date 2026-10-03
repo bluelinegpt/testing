@@ -1238,6 +1238,7 @@ export const arabicTranslations = {
     importOrders: "استيراد الطلبات",
     orders: "الطلبات",
     ordersExport: "تصدير الطلبات",
+    ordersReport: "تقرير الطلبات",
     ordersList: "جميع الطلبات",
     reports: "التقارير",
     roles: "الأدوار والصلاحيات",
@@ -1428,6 +1429,22 @@ export const arabicTranslations = {
     title: "حالة النشر",
   },
   reports: {
+    orders: {
+      title: "تقرير الطلبات",
+      subtitle: "تصفية الطلبات حسب تاريخ الإنشاء والتاجر والحالة.",
+      export: "تصدير Excel",
+      exportPdf: "تصدير PDF",
+      allStatuses: "كل الحالات",
+      exportFailed: "تعذر تصدير التقرير. حاول مرة أخرى.",
+      from: "من تاريخ",
+      to: "إلى تاريخ",
+      trader: "التاجر",
+      allTraders: "جميع التجار",
+      status: "الحالة",
+      empty: "لا توجد طلبات مطابقة.",
+      total: "{{count}} طلب مطابق",
+      columns: { orderNumber: "رقم الطلب", date: "التاريخ", traderName: "اسم التاجر", customer: "العميل", customerMobile: "هاتف العميل", emirates: "الإمارة", area: "المنطقة", cod: "الدفع عند الاستلام", fee: "الرسوم", status: "الحالة" },
+    },
     dailyOperationsSummary: {
       breakEven: "تعادل / صفر",
       businessDateUnavailable:

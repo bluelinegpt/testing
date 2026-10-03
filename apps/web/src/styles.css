@@ -2312,6 +2312,15 @@ textarea:focus-visible {
   margin-top: 3px;
   color: #60737a;
 }
+.report-export-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.orders-report-filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+.orders-report-filters label { min-width: 0; }
+.orders-report-filters input, .orders-report-filters select { width: 100%; min-width: 0; }
+.orders-report-statuses { display: flex; flex-wrap: wrap; gap: 8px 14px; min-width: 0; }
+.orders-report-statuses label { white-space: nowrap; }
+@media (max-width: 760px) {
+  .report-actions { align-items: flex-start; flex-direction: column; }
+}
 .report-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));

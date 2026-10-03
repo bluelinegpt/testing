@@ -37,6 +37,7 @@ import { IdentityContextAccessor } from "../security/identity-context.js";
 import { TenantContextAccessor } from "../tenancy/tenant-context.js";
 import { EmployeeDeliveryEarningService } from "../payroll/employee-delivery-earning.service.js";
 import { OutsourcedDriverFeeService } from "../payroll/outsourced-driver-fee.service.js";
+import { accountingXlsx } from "../accounting/accounting-xlsx.js";
 import type {
   BulkSettleTraderDto,
   ChangeOrderStatusDto,
@@ -179,6 +180,40 @@ export interface OperationsOrderPage {
   readonly totalCount: number;
   /** Rows in the selected tab before optional filters are applied. */
   readonly tabTotalCount: number;
+}
+
+export interface OrdersReportFilters {
+  readonly dateFrom?: string;
+  readonly dateTo?: string;
+  readonly traderId?: string;
+  readonly statuses?: readonly string[];
+  readonly page?: number;
+  readonly pageSize?: number;
+}
+
+export interface OrdersReportRow {
+  readonly orderNumber: string;
+  readonly date: string;
+  readonly traderName: string;
+  readonly customer: string;
+  readonly customerMobile: string;
+  readonly emirates: string;
+  readonly area: string;
+  readonly cod: string;
+  readonly fee: string;
+  readonly status: string;
+}
+
+export interface OrdersReportPage {
+  readonly items: readonly OrdersReportRow[];
+  readonly page: number;
+  readonly pageSize: number;
+  readonly totalCount: number;
+}
+
+export interface OrdersReportExcelFile {
+  readonly bytes: Buffer;
+  readonly filename: string;
 }
 
 export interface OperationsOrderQuote {
@@ -1710,6 +1745,72 @@ export class OperationsService {
       contentType: "text/csv",
       filename: `blueline-orders-${new Date().toISOString().slice(0, 10)}.csv`,
     };
+  }
+
+  /** Company-scoped Orders Report. List and Excel use this same query shape. */
+  public async ordersReport(filters: OrdersReportFilters = {}): Promise<OrdersReportPage> {
+    const { companyId } = this.tenants.current();
+    const statuses = filters.statuses?.filter(Boolean) ?? [];
+    const allowedStatuses = [
+      "new", "in_branch", "assigned_to_driver", "out_for_delivery", "hold",
+      "delivered", "returned_to_branch", "returned_to_trader", "cancelled", "closed", "collect_order",
+    ];
+    if (statuses.some((status) => !allowedStatuses.includes(status))) {
+      throw new ApplicationException("invalid_order_status_filter", "Invalid order status filter", HttpStatus.BAD_REQUEST);
+    }
+    const dateFrom = filters.dateFrom === undefined ? null : this.optionalDate(filters.dateFrom);
+    const dateTo = filters.dateTo === undefined ? null : this.optionalDate(filters.dateTo);
+    if (dateFrom !== null && dateTo !== null && dateFrom > dateTo) {
+      throw new ApplicationException("invalid_date_range", "Invalid date range", HttpStatus.BAD_REQUEST);
+    }
+    const traderId = filters.traderId === undefined ? null : this.optionalUuidFilter(filters.traderId);
+    const page = Number.isInteger(filters.page) && (filters.page ?? 0) > 0 ? filters.page! : 1;
+    const pageSize = Math.min(200, Math.max(1, Number(filters.pageSize) || 25));
+    const timezone = await this.companyTimezone();
+    const statusPredicate = statuses.length === 0
+      ? sql`true`
+      : sql`o.delivery_status in (${sql.join(statuses)})`;
+    const base = sql`
+      from orders o
+      join traders t on t.id=o.trader_id and t.company_id=o.company_id
+      left join areas a on a.id=o.area_id and a.company_id=o.company_id
+      left join emirates e on e.id=a.emirate_id
+      where o.company_id=${companyId}::uuid
+        and (${dateFrom}::date is null or (o.created_at at time zone ${timezone})::date >= ${dateFrom}::date)
+        and (${dateTo}::date is null or (o.created_at at time zone ${timezone})::date <= ${dateTo}::date)
+        and (${traderId}::uuid is null or o.trader_id=${traderId}::uuid)
+        and ${statusPredicate}
+    `;
+    const count = await sql<{ count: number }>`select count(*)::int ${base}`.execute(this.database);
+    const rows = await sql<OrdersReportRow>`
+      select o.order_number as "orderNumber",
+             (o.created_at at time zone ${timezone})::date::text as date,
+             t.name_en as "traderName", o.customer_name as customer,
+             o.customer_mobile_number as "customerMobile",
+             coalesce(e.name_en, '—') as emirates,
+             coalesce(a.name_en, '—') as area,
+             o.cod_amount::text as cod, o.service_fee::text as fee,
+             o.delivery_status as status
+      ${base}
+      order by o.created_at desc, o.id desc
+      limit ${pageSize} offset ${(page - 1) * pageSize}
+    `.execute(this.database);
+    return { items: rows.rows, page, pageSize, totalCount: count.rows[0]?.count ?? 0 };
+  }
+
+  public async ordersReportExcel(filters: OrdersReportFilters = {}): Promise<OrdersReportExcelFile> {
+    const report = await this.ordersReport({ ...filters, page: 1, pageSize: 200 });
+    const all: OrdersReportRow[] = [...report.items];
+    for (let page = 2; page <= Math.ceil(report.totalCount / report.pageSize); page += 1) {
+      all.push(...(await this.ordersReport({ ...filters, page, pageSize: 200 })).items);
+    }
+    const columns = ["Order Number", "Date", "Trader Name", "Customer", "Customer Mobile", "Emirates", "Area", "COD", "Fee", "Status"] as const;
+    const rows = all.map((row) => ({
+      "Order Number": row.orderNumber, Date: row.date, "Trader Name": row.traderName,
+      Customer: row.customer, "Customer Mobile": row.customerMobile, Emirates: row.emirates,
+      Area: row.area, COD: row.cod, Fee: row.fee, Status: row.status,
+    }));
+    return { bytes: accountingXlsx(columns, rows), filename: `orders-report-${new Date().toISOString().slice(0, 10)}.xlsx` };
   }
 
   public async billingSummary(): Promise<OperationsBillingSummary> {

@@ -287,7 +287,21 @@ export class CompanyProfileService {
         HttpStatus.NOT_FOUND,
       );
     }
-    const bytes = await this.storage.readPrivate(companyId, meta.storageKey);
+    let bytes: Uint8Array;
+    try {
+      bytes = await this.storage.readPrivate(companyId, meta.storageKey);
+    } catch (error) {
+      // A stale database pointer is equivalent to an absent optional logo.
+      // Preserve all other storage failures for the API error boundary.
+      if (error instanceof Error && (error as NodeJS.ErrnoException).code === "ENOENT") {
+        throw new ApplicationException(
+          "logo_not_found",
+          "No Company logo is available",
+          HttpStatus.NOT_FOUND,
+        );
+      }
+      throw error;
+    }
     return {
       bytes: Buffer.from(bytes),
       fileName: meta.originalFilename,

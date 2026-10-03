@@ -34,6 +34,7 @@ import {
   type DashboardDrillDown,
 } from "../features/dashboard/DashboardWorkspace.js";
 import { DailyOperationsSummaryReport } from "../features/operations/DailyOperationsSummaryReport.js";
+import { OrdersReport } from "../features/operations/OrdersReport.js";
 import { DriverCollectionsWorkspace } from "../features/operations/DriverCollectionsWorkspace.js";
 import { PayrollWorkspace } from "../features/payroll/PayrollWorkspace.js";
 import { AccountingWorkspace } from "../features/accounting/AccountingWorkspace.js";
@@ -232,6 +233,8 @@ export function CompanyWorkspace({
         permissions={session.identity.permissions}
       />
     );
+  } else if (path === "/reports/orders") {
+    content = <OrdersReport api={api} />;
   } else if (path === "/reports/daily-operations-summary") {
     content = (
       <DailyOperationsSummaryReport api={api} onNavigate={(target) => void navigate(target)} />
