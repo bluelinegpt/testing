@@ -1,6 +1,12 @@
 import type pg from "pg";
 
 import {
+  getResetCompanyUserPlan,
+  removeResetCompanyUsers,
+  RESET_USER_MUTABLE_TABLES,
+} from "./reset-company-users.js";
+
+import {
   CYCLE_BREAKS,
   PRESERVE_TABLES,
   PURGE_TABLES,
@@ -22,9 +28,10 @@ import {
  * including trigger suspension, is transactional in PostgreSQL, so a rollback restores the
  * database and the triggers together with no repair step.
  *
- * Isolation: every statement carries `where company_id = $1`. The engine refuses to run if
- * any table in the removal set is not directly Company-scoped, so no statement can ever be
- * global.
+ * Isolation: transactional removal statements carry `where company_id = $1`. The engine
+ * refuses to run if any manifest table is not directly Company-scoped. The separate
+ * selective-user phase requires a target-company account/membership and deletes only that
+ * Company's access rows; global identity deletion is allowed only after its FK safety scan.
  */
 
 /**
@@ -175,6 +182,7 @@ export interface ResetSummary {
   suspendedTriggers: { table: string; trigger: string }[];
   cycleBreaks: { table: string; columns: string[]; rows: number }[];
   preservedVerified: number;
+  userCleanup: Awaited<ReturnType<typeof removeResetCompanyUsers>>;
 }
 
 export interface ResetLogger {
@@ -194,7 +202,7 @@ export async function runReset(
 ): Promise<ResetSummary> {
   const company = (
     await client.query<{ code: string; environment: string }>(
-      "select code, environment from companies where id = $1",
+      "select code, environment from companies where id = $1 for update",
       [companyId],
     )
   ).rows[0];
@@ -224,6 +232,11 @@ export async function runReset(
   if (cycle.length > 0) {
     throw new Error(`Refusing to reset — unbroken foreign-key cycle: ${cycle.join(", ")}`);
   }
+
+  // Lock candidate identities only after the existing schema/readiness gates
+  // have passed. This serializes against Company-user creation, whose FK
+  // references must acquire a conflicting lock on the Company/account rows.
+  const userPlan = await getResetCompanyUserPlan(client, companyId, true);
 
   const purgeReports = reports.filter((report) => report.classification === "PURGE");
   const preserveReports = reports.filter((report) => report.classification === "PRESERVE");
@@ -300,7 +313,9 @@ export async function runReset(
   }
 
   const preservedBefore = new Map(
-    preserveReports.map((report) => [report.table, report.rows ?? 0]),
+    preserveReports
+      .filter((report) => !RESET_USER_MUTABLE_TABLES.has(report.table))
+      .map((report) => [report.table, report.rows ?? 0]),
   );
 
   // Step 7d. Suspend, inside the transaction only.
@@ -355,6 +370,29 @@ export async function runReset(
   }
   log(`Removed ${totalRemoved} row(s) across ${order.length} table(s)`);
 
+  // Company users are a selective reset action rather than a whole-table
+  // purge: assigned Admins stay intact, while all other target-company access
+  // is removed. This runs after disposable operational rows so historical
+  // references in those rows no longer block safe identity deletion.
+  const userCleanup = await removeResetCompanyUsers(client, companyId, userPlan);
+  const userRemovedRows: { table: string; rows: number }[] = [
+    { table: "account_sessions", rows: userCleanup.sessionsRevoked },
+    { table: "password_reset_tokens", rows: userCleanup.passwordResetTokensRevoked },
+    { table: "user_business_links", rows: userCleanup.businessAccessLinksRemoved },
+    { table: "account_roles", rows: userCleanup.roleAssignmentsRemoved },
+    { table: "company_users", rows: userCleanup.companyUsersRemoved },
+    { table: "accounts", rows: userCleanup.accountsDeleted },
+  ].filter((entry) => entry.rows > 0);
+  removed.push(...userRemovedRows);
+  const userRowsRemoved = userRemovedRows.reduce((total, entry) => total + entry.rows, 0);
+  totalRemoved += userRowsRemoved;
+  log(
+    `Removed ${userCleanup.companyUsersRemoved} non-Admin Company user membership(s); ` +
+      `deleted ${userCleanup.accountsDeleted} account(s), retained ` +
+      `${userCleanup.sharedIdentitiesPreserved + userCleanup.historyReferencedIdentitiesPreserved} ` +
+      `identity anchor(s) for other-Company access or preserved references`,
+  );
+
   // Step 9. Restore every suspended guard.
   for (const entry of suspend) {
     await client.query(
@@ -403,7 +441,7 @@ export async function runReset(
   // Step 11. Preserved configuration must be untouched.
   const changed: string[] = [];
   for (const report of preserveReports) {
-    if (report.scope !== "company") {
+    if (report.scope !== "company" || RESET_USER_MUTABLE_TABLES.has(report.table)) {
       continue;
     }
     const statement = buildCountStatement(report.table, report.ownership);
@@ -421,14 +459,18 @@ export async function runReset(
   if (changed.length > 0) {
     throw new Error(`Refusing to commit — preserved configuration changed: ${changed.join(", ")}`);
   }
-  log(`Verified ${preserveReports.length} preserved table(s) unchanged`);
+  const preservedVerified = preserveReports.filter(
+    (report) => !RESET_USER_MUTABLE_TABLES.has(report.table),
+  ).length;
+  log(`Verified ${preservedVerified} preserved table(s) unchanged`);
 
   return {
     removed,
     totalRemoved,
     suspendedTriggers: suspend,
     cycleBreaks,
-    preservedVerified: preserveReports.length,
+    preservedVerified,
+    userCleanup,
   };
 }
 

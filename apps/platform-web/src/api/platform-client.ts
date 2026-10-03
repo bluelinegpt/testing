@@ -731,6 +731,13 @@ export interface CompanyResetTableCount {
   readonly rows: number;
 }
 
+export interface CompanyResetUser {
+  readonly accountId: string;
+  readonly username: string;
+  readonly displayName: string;
+  readonly sharedIdentity: boolean;
+}
+
 export interface CompanyResetPreview {
   readonly company: {
     readonly id: string;
@@ -744,6 +751,8 @@ export interface CompanyResetPreview {
   readonly confirmation: string;
   readonly tables: readonly CompanyResetTableCount[];
   readonly totalRows: number;
+  readonly usersToRemove: readonly CompanyResetUser[];
+  readonly adminUsersPreserved: readonly CompanyResetUser[];
 }
 
 export interface CompanyResetResult {
@@ -752,6 +761,16 @@ export interface CompanyResetResult {
   readonly totalRemoved: number;
   readonly preservedVerified: number;
   readonly backupFile: string;
+  readonly userCleanup: {
+    readonly companyUsersRemoved: number;
+    readonly roleAssignmentsRemoved: number;
+    readonly businessAccessLinksRemoved: number;
+    readonly sessionsRevoked: number;
+    readonly passwordResetTokensRevoked: number;
+    readonly accountsDeleted: number;
+    readonly sharedIdentitiesPreserved: number;
+    readonly historyReferencedIdentitiesPreserved: number;
+  };
 }
 
 export interface AccountingSetupSummary {

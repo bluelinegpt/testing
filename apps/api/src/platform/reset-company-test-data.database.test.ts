@@ -6,6 +6,7 @@ import pg from "pg";
 import { beforeAll, describe, expect, it } from "vitest";
 
 import { runReset } from "./reset-company-test-data.engine.js";
+import { getResetCompanyUserPlan } from "./reset-company-users.js";
 
 /**
  * Real-database proof for the reset execution engine.
@@ -22,6 +23,10 @@ const runDatabaseTests = process.env.RUN_RESET_DATABASE === "true";
 interface Fixture {
   company: string;
   account: string;
+  adminAccount: string;
+  adminRole: string;
+  adminSecondaryRole: string;
+  memberRole: string;
   area: string;
   trader: string;
   customer: string;
@@ -40,6 +45,10 @@ async function seedCompany(client: pg.PoolClient, label: string): Promise<Fixtur
   const fixture: Fixture = {
     company: randomUUID(),
     account: randomUUID(),
+    adminAccount: randomUUID(),
+    adminRole: randomUUID(),
+    adminSecondaryRole: randomUUID(),
+    memberRole: randomUUID(),
     area: randomUUID(),
     trader: randomUUID(),
     customer: randomUUID(),
@@ -74,6 +83,47 @@ async function seedCompany(client: pg.PoolClient, label: string): Promise<Fixtur
     "insert into accounts (id, company_id, account_kind, username, normalized_username, " +
       "password_hash, status) values ($1, $2, 'company_user', $3, $3, 'x', 'disabled')",
     [fixture.account, fixture.company, `reset-${label}-${suffix}`],
+  );
+  await client.query(
+    "insert into accounts (id, company_id, account_kind, username, normalized_username, " +
+      "password_hash, status) values ($1, $2, 'company_user', $3, $3, 'x', 'disabled')",
+    [fixture.adminAccount, fixture.company, `reset-admin-${label}-${suffix}`],
+  );
+  // This non-Admin Company user deliberately has no Employee row: user
+  // selection must come from Company account/role assignments, not Employees.
+  await client.query(
+    "insert into company_users (company_id, account_id, name_en, display_name) " +
+      "values ($1, $2, 'Reset Member', 'Reset Member'), ($1, $3, 'Reset Admin', 'Reset Admin')",
+    [fixture.company, fixture.account, fixture.adminAccount],
+  );
+  await client.query(
+    "insert into roles (id, company_id, code, name, is_system, is_active) values " +
+      "($1, $4, 'company_admin', 'Company Administrator', true, true), " +
+      "($2, $4, 'reset_admin_extra', 'Admin extra role', false, true), " +
+      "($3, $4, 'reset_member', 'Reset member', false, true)",
+    [fixture.adminRole, fixture.adminSecondaryRole, fixture.memberRole, fixture.company],
+  );
+  await client.query(
+    "insert into role_permissions (role_id, permission_code) values " +
+      "($1, 'users_roles.manage'), ($2, 'orders.create'), ($3, 'orders.create')",
+    [fixture.adminRole, fixture.adminSecondaryRole, fixture.memberRole],
+  );
+  await client.query(
+    "insert into account_roles (account_id, role_id, company_id) values " +
+      "($1, $2, $3), ($4, $5, $3), ($4, $6, $3)",
+    [fixture.account, fixture.memberRole, fixture.company, fixture.adminAccount, fixture.adminRole, fixture.adminSecondaryRole],
+  );
+  await client.query(
+    "insert into account_sessions (company_id, account_id, token_hash, expires_at) " +
+      "values ($1, $2, $3, now() + interval '1 day'), " +
+      "($1, $4, $5, now() + interval '1 day')",
+    [
+      fixture.company,
+      fixture.account,
+      randomUUID().replace(/-/g, "") + randomUUID().replace(/-/g, ""),
+      fixture.adminAccount,
+      randomUUID().replace(/-/g, "") + randomUUID().replace(/-/g, ""),
+    ],
   );
   await client.query("insert into company_settings (company_id) values ($1)", [fixture.company]);
   await client.query(
@@ -319,8 +369,37 @@ describe.skipIf(!runDatabaseTests)("reset execution engine against a real databa
         expect(await countFor(client, table, alpha.company), `${table} seeded`).toBeGreaterThan(0);
       }
 
+      const alphaUsers = await getResetCompanyUserPlan(client, alpha.company);
+      expect(alphaUsers.usersToRemove.map((user) => user.accountId)).toContain(alpha.account);
+      expect(alphaUsers.adminUsersPreserved.map((user) => user.accountId)).toEqual([
+        alpha.adminAccount,
+      ]);
+      const memberEmployee = await client.query(
+        "select 1 from employees where company_id = $1 and company_user_id = $2",
+        [alpha.company, alpha.account],
+      );
+      expect(memberEmployee.rowCount, "fixture user has no Employee record").toBe(0);
+
       const summary = await runReset(client, alpha.company, () => undefined);
       expect(summary.totalRemoved).toBeGreaterThan(0);
+      expect(summary.userCleanup).toMatchObject({
+        companyUsersRemoved: 1,
+        roleAssignmentsRemoved: 1,
+        sessionsRevoked: 1,
+        accountsDeleted: 1,
+        sharedIdentitiesPreserved: 0,
+        historyReferencedIdentitiesPreserved: 0,
+      });
+      const userRemovalOrder = summary.removed.map((entry) => entry.table);
+      expect(userRemovalOrder.indexOf("account_sessions")).toBeLessThan(
+        userRemovalOrder.indexOf("account_roles"),
+      );
+      expect(userRemovalOrder.indexOf("account_roles")).toBeLessThan(
+        userRemovalOrder.indexOf("company_users"),
+      );
+      expect(userRemovalOrder.indexOf("company_users")).toBeLessThan(
+        userRemovalOrder.indexOf("accounts"),
+      );
       const findingIndex = summary.removed.findIndex(
         (entry) => entry.table === "order_maintenance_findings",
       );
@@ -342,6 +421,51 @@ describe.skipIf(!runDatabaseTests)("reset execution engine against a real databa
       for (const table of [...removedTables, ...preservedTables]) {
         expect(await countFor(client, table, beta.company), `${table} isolated`).toBeGreaterThan(0);
       }
+
+      const removedMember = await client.query(
+        "select (select count(*) from accounts where id = $1) as account_count, " +
+          "(select count(*) from company_users where account_id = $1 and company_id = $2) as membership_count, " +
+          "(select count(*) from account_roles where account_id = $1 and company_id = $2) as roles_count, " +
+          "(select count(*) from account_sessions where account_id = $1 and company_id = $2) as sessions_count",
+        [alpha.account, alpha.company],
+      );
+      expect(removedMember.rows[0]).toEqual({
+        account_count: "0",
+        membership_count: "0",
+        roles_count: "0",
+        sessions_count: "0",
+      });
+
+      // Admin preservation is based on the assigned role, even when the same
+      // user has several roles; the profile, both grants, and session survive.
+      const preservedAdmin = await client.query(
+        "select (select count(*) from accounts where id = $1) as account_count, " +
+          "(select count(*) from company_users where account_id = $1 and company_id = $2) as membership_count, " +
+          "(select count(*) from account_roles where account_id = $1 and company_id = $2) as roles_count, " +
+          "(select count(*) from account_sessions where account_id = $1 and company_id = $2 and revoked_at is null) as sessions_count",
+        [alpha.adminAccount, alpha.company],
+      );
+      expect(preservedAdmin.rows[0]).toEqual({
+        account_count: "1",
+        membership_count: "1",
+        roles_count: "2",
+        sessions_count: "1",
+      });
+
+      // A different Company's non-Admin user, roles, and session remain intact.
+      const otherCompanyUser = await client.query(
+        "select (select count(*) from accounts where id = $1) as account_count, " +
+          "(select count(*) from company_users where account_id = $1 and company_id = $2) as membership_count, " +
+          "(select count(*) from account_roles where account_id = $1 and company_id = $2) as roles_count, " +
+          "(select count(*) from account_sessions where account_id = $1 and company_id = $2 and revoked_at is null) as sessions_count",
+        [beta.account, beta.company],
+      );
+      expect(otherCompanyUser.rows[0]).toEqual({
+        account_count: "1",
+        membership_count: "1",
+        roles_count: "1",
+        sessions_count: "1",
+      });
 
       // Platform-wide content and telemetry are not company reset data. Verify
       // every synthetic global row remains after resetting alpha.

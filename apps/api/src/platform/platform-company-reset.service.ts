@@ -15,6 +15,7 @@ import {
   computeBlockers,
   introspectSchema,
 } from "./reset-company-test-data.manifest.js";
+import { getResetCompanyUserPlan } from "./reset-company-users.js";
 
 /**
  * Platform-portal front end for the Company test-data reset.
@@ -61,6 +62,18 @@ export interface CompanyResetPreview {
   readonly confirmation: string;
   readonly tables: readonly CompanyResetTableCount[];
   readonly totalRows: number;
+  readonly usersToRemove: readonly {
+    readonly accountId: string;
+    readonly username: string;
+    readonly displayName: string;
+    readonly sharedIdentity: boolean;
+  }[];
+  readonly adminUsersPreserved: readonly {
+    readonly accountId: string;
+    readonly username: string;
+    readonly displayName: string;
+    readonly sharedIdentity: boolean;
+  }[];
 }
 
 export interface CompanyResetResult {
@@ -69,6 +82,16 @@ export interface CompanyResetResult {
   readonly totalRemoved: number;
   readonly preservedVerified: number;
   readonly backupFile: string;
+  readonly userCleanup: {
+    readonly companyUsersRemoved: number;
+    readonly roleAssignmentsRemoved: number;
+    readonly businessAccessLinksRemoved: number;
+    readonly sessionsRevoked: number;
+    readonly passwordResetTokensRevoked: number;
+    readonly accountsDeleted: number;
+    readonly sharedIdentitiesPreserved: number;
+    readonly historyReferencedIdentitiesPreserved: number;
+  };
 }
 
 interface CompanyRow {
@@ -107,6 +130,7 @@ export class PlatformCompanyResetService {
         if (readiness.cycle.length > 0) {
           blockers.push(`Unbroken foreign-key cycle among: ${readiness.cycle.join(", ")}`);
         }
+        const users = await getResetCompanyUserPlan(client, companyId);
 
         const tables = reports
           .filter((report) => report.classification === "PURGE" && (report.rows ?? 0) > 0)
@@ -120,6 +144,8 @@ export class PlatformCompanyResetService {
           confirmation: `RESET ${company.code}`,
           tables,
           totalRows: tables.reduce((total, entry) => total + entry.rows, 0),
+          usersToRemove: users.usersToRemove,
+          adminUsersPreserved: users.adminUsersPreserved,
         };
       } finally {
         await client.query("rollback");
@@ -191,6 +217,7 @@ export class PlatformCompanyResetService {
           totalRemoved: summary.totalRemoved,
           preservedVerified: summary.preservedVerified,
           backupFile: basename(backupFile),
+          userCleanup: summary.userCleanup,
         };
       } catch (error) {
         await client.query("rollback");

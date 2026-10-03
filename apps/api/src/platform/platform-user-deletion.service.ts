@@ -1,5 +1,6 @@
 import { HttpStatus, Inject, Injectable } from "@nestjs/common";
 import { type Kysely, type Transaction, sql } from "kysely";
+import type pg from "pg";
 
 import { DATABASE } from "../infrastructure/database/database.tokens.js";
 import type { DatabaseSchema } from "../infrastructure/database/database.types.js";
@@ -82,6 +83,94 @@ const dependencyCategories: readonly { match: RegExp; category: string }[] = [
 
 function categoryOf(table: string): string {
   return dependencyCategories.find((entry) => entry.match.test(table))?.category ?? "Other records";
+}
+
+/**
+ * Reset-only physical account deletion, after the reset has already removed
+ * the target Company's disposable operational rows and target-scoped access.
+ *
+ * The account guard's transaction-local exception is intentionally kept in
+ * this one central account-deletion module. Before using it, this helper
+ * rechecks the actual assigned Company roles and discovers every remaining
+ * public-schema FK to the account. Any surviving reference (audit/config,
+ * another Company, an assignment granted by this user, etc.) keeps the account
+ * as a disabled historical identity instead of weakening the FK/safety rules.
+ */
+export async function deleteResetCompanyUserAccount(
+  client: pg.PoolClient,
+  companyId: string,
+  accountId: string,
+): Promise<boolean> {
+  const account = (
+    await client.query<{ id: string }>(
+      "select id from accounts where id = $2 and company_id = $1 " +
+        "and account_kind = 'company_user' for update",
+      [companyId, accountId],
+    )
+  ).rows[0];
+  if (account === undefined) return false;
+
+  const admin = (
+    await client.query<{ isAdmin: boolean }>(
+      "select exists (" +
+        "select 1 from account_roles ar join roles r on r.id = ar.role_id " +
+        "left join role_permissions rp on rp.role_id = r.id " +
+        "where ar.account_id = $2 and ar.company_id = $1 " +
+        "and r.company_id = $1 " +
+        "and (lower(r.code) = 'company_admin' or rp.permission_code = 'users_roles.manage')" +
+        ") as \"isAdmin\"",
+      [companyId, accountId],
+    )
+  ).rows[0]?.isAdmin;
+  if (admin === true) {
+    throw new Error(`Refusing to delete ${accountId}: it has an assigned Admin role.`);
+  }
+
+  const references = (
+    await client.query<{ tableName: string; columnName: string }>(
+      "select child.relname as \"tableName\", attribute.attname as \"columnName\" " +
+        "from pg_constraint constraint_row " +
+        "join pg_class child on child.oid = constraint_row.conrelid " +
+        "join pg_namespace child_schema on child_schema.oid = child.relnamespace " +
+        "join unnest(constraint_row.conkey) as key_column(attnum) on true " +
+        "join pg_attribute attribute on attribute.attrelid = child.oid " +
+        "and attribute.attnum = key_column.attnum " +
+        "where constraint_row.contype = 'f' " +
+        "and constraint_row.confrelid = 'public.accounts'::regclass " +
+        "and child_schema.nspname = 'public' " +
+        "order by child.relname, attribute.attname",
+    )
+  ).rows;
+  for (const reference of references) {
+    // Catalog identifiers are quoted before interpolation. A self-reference
+    // on the row being deleted disappears with that row; references from any
+    // other account remain a hard blocker.
+    const quote = (identifier: string): string => {
+      if (!/^[a-z_][a-z0-9_]*$/i.test(identifier)) {
+        throw new Error(`Unexpected database identifier '${identifier}'`);
+      }
+      return `"${identifier}"`;
+    };
+    const selfRowFilter =
+      reference.tableName === "accounts" ? ` and ${quote("id")} <> $2` : "";
+    const count = Number(
+      (
+        await client.query<{ n: string }>(
+          `select count(*)::bigint as n from public.${quote(reference.tableName)} ` +
+            `where ${quote(reference.columnName)} = $1${selfRowFilter}`,
+          selfRowFilter === "" ? [accountId] : [accountId, accountId],
+        )
+      ).rows[0]?.n ?? 0,
+    );
+    if (count > 0) return false;
+  }
+
+  await client.query("set local blueline.platform_user_delete = 'on'");
+  const removed = await client.query(
+    "delete from accounts where id = $2 and company_id = $1 and account_kind = 'company_user'",
+    [companyId, accountId],
+  );
+  return (removed.rowCount ?? 0) === 1;
 }
 
 export interface BlockingDependency {

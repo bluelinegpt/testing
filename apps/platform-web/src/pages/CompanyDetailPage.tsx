@@ -1003,9 +1003,11 @@ export function CompanyDetailPage(): ReactElement {
                 <p className="platform-muted">
                   This Company is in <strong>{company.environment}</strong>. Its transactional data
                   — orders, settlements, reconciliations, accounting entries, payments, expenses,
-                  customers, traders, drivers and employees — can be reset for training. The Company
-                  profile, its users, chart of accounts and configuration are always preserved. Once
-                  the Company moves to production, resetting becomes permanently unavailable.
+                  customers, traders, drivers, employees and non-Admin Company users — can be reset
+                  for training. Users assigned an Admin role, the Company profile, chart of accounts
+                  and configuration are preserved. Non-Admin access and sessions are removed; shared
+                  or historically referenced login identities are retained where required. Once the
+                  Company moves to production, resetting becomes permanently unavailable.
                 </p>
                 {canReset ? (
                   <>
@@ -1021,7 +1023,8 @@ export function CompanyDetailPage(): ReactElement {
                       <div className="platform-review">
                         <p role="status">READY FOR RESET: {resetPreview.eligible ? "YES" : "NO"}</p>
                         <p>
-                          <strong>Rows to remove:</strong> {resetPreview.totalRows.toLocaleString()}
+                          <strong>Transactional rows to remove:</strong>{" "}
+                          {resetPreview.totalRows.toLocaleString()}
                           {" across "}
                           {resetPreview.tables.length} table(s). A full-database backup is taken
                           automatically before anything is removed.
@@ -1031,6 +1034,42 @@ export function CompanyDetailPage(): ReactElement {
                             {entry.table}: {entry.rows.toLocaleString()}
                           </p>
                         ))}
+                        <section aria-label="Company user reset preview">
+                          <h5>Company users</h5>
+                          <p>
+                            <strong>Users to remove:</strong> {resetPreview.usersToRemove.length}
+                          </p>
+                          {resetPreview.usersToRemove.length === 0 ? (
+                            <p>No non-Admin Company users will be removed.</p>
+                          ) : (
+                            resetPreview.usersToRemove.map((user) => (
+                              <p key={user.accountId}>
+                                {user.displayName} ({user.username})
+                                {user.sharedIdentity
+                                  ? " — shared identity; other-Company access will be preserved"
+                                  : ""}
+                              </p>
+                            ))
+                          )}
+                          <p>
+                            <strong>Admin users preserved:</strong>{" "}
+                            {resetPreview.adminUsersPreserved.length}
+                          </p>
+                          {resetPreview.adminUsersPreserved.length === 0 ? (
+                            <p>No assigned Admin users were found.</p>
+                          ) : (
+                            resetPreview.adminUsersPreserved.map((user) => (
+                              <p key={user.accountId}>
+                                {user.displayName} ({user.username}) — all Company access preserved
+                              </p>
+                            ))
+                          )}
+                          <p className="platform-muted">
+                            Admin status is determined from assigned Company roles. A login identity
+                            referenced by preserved history is retained but disabled after its
+                            Company access is removed.
+                          </p>
+                        </section>
                         {resetPreview.blockers.map((blocker) => (
                           <p className="platform-warning" key={blocker}>
                             {blocker}
@@ -1071,6 +1110,21 @@ export function CompanyDetailPage(): ReactElement {
                         <p>
                           <strong>Backup:</strong> {resetResult.backupFile}
                         </p>
+                        <p>
+                          <strong>Company users removed:</strong>{" "}
+                          {resetResult.userCleanup.companyUsersRemoved.toLocaleString()}. Admin users
+                          were preserved; {resetResult.userCleanup.accountsDeleted.toLocaleString()}{" "}
+                          non-Admin login account(s) deleted.
+                        </p>
+                        {resetResult.userCleanup.sharedIdentitiesPreserved > 0 ||
+                        resetResult.userCleanup.historyReferencedIdentitiesPreserved > 0 ? (
+                          <p>
+                            {resetResult.userCleanup.sharedIdentitiesPreserved.toLocaleString()}{" "}
+                            shared identity/identities and{" "}
+                            {resetResult.userCleanup.historyReferencedIdentitiesPreserved.toLocaleString()}{" "}
+                            identity/identities referenced by preserved history were retained safely.
+                          </p>
+                        ) : null}
                       </div>
                     )}
                     {resetError === undefined ? null : (
