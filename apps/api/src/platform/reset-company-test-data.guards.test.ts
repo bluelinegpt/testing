@@ -9,6 +9,7 @@ import {
 import {
   CONDITIONAL_TABLES,
   CYCLE_BREAKS,
+  GLOBAL_TABLES,
   LEGACY_COMPATIBILITY_EDGES,
   PRESERVE_TABLES,
   PURGE_TABLES,
@@ -16,6 +17,7 @@ import {
   dependencyOrder,
   isLegacyCompatibilityEdge,
   quoteIdentifier,
+  resolveOwnership,
   type ForeignKey,
 } from "./reset-company-test-data.manifest.js";
 
@@ -134,6 +136,39 @@ describe("manifest invariants", () => {
   it("includes the approved business masters in the removal set", () => {
     for (const table of ["customers", "customer_addresses", "traders", "drivers", "employees"]) {
       expect(PURGE_TABLES.has(table), `${table} was approved for removal`).toBe(true);
+    }
+  });
+
+  it("removes Company-scoped order-maintenance findings with Orders", () => {
+    expect(PURGE_TABLES.has("order_maintenance_findings")).toBe(true);
+    expect(PRESERVE_TABLES.has("order_maintenance_findings")).toBe(false);
+    const dependency = dependencyOrder(
+      ["orders", "order_maintenance_findings"],
+      [
+        {
+          child: "order_maintenance_findings",
+          parent: "orders",
+          childColumns: ["order_id", "company_id"],
+          parentColumns: ["id", "company_id"],
+        },
+      ],
+    );
+    expect(dependency.cycle).toEqual([]);
+    expect(dependency.order).toEqual(["order_maintenance_findings", "orders"]);
+  });
+
+  it("preserves the reviewed platform-wide tables and resolves them as global", () => {
+    const tables = [
+      "platform_agent_live_avatar_usage",
+      "platform_blog_article_categories",
+      "platform_blog_article_relations",
+      "platform_public_not_found_paths",
+    ];
+    for (const table of tables) {
+      expect(PRESERVE_TABLES.has(table), `${table} must be preserved`).toBe(true);
+      expect(PURGE_TABLES.has(table), `${table} must not be deleted`).toBe(false);
+      expect(GLOBAL_TABLES.has(table), `${table} has no Company ownership`).toBe(true);
+      expect(resolveOwnership(table, new Set(), []).kind).toBe("global");
     }
   });
 

@@ -27,6 +27,7 @@ interface Fixture {
   customer: string;
   driver: string;
   order: string;
+  finding: string;
   conversation: string;
   message: string;
   event: string;
@@ -44,6 +45,7 @@ async function seedCompany(client: pg.PoolClient, label: string): Promise<Fixtur
     customer: randomUUID(),
     driver: randomUUID(),
     order: randomUUID(),
+    finding: randomUUID(),
     conversation: randomUUID(),
     message: randomUUID(),
     event: randomUUID(),
@@ -73,6 +75,7 @@ async function seedCompany(client: pg.PoolClient, label: string): Promise<Fixtur
       "password_hash, status) values ($1, $2, 'company_user', $3, $3, 'x', 'disabled')",
     [fixture.account, fixture.company, `reset-${label}-${suffix}`],
   );
+  await client.query("insert into company_settings (company_id) values ($1)", [fixture.company]);
   await client.query(
     "insert into areas (id, company_id, code, name_en, emirate_id) values ($1, $2, $3, 'Area', $4)",
     [fixture.area, fixture.company, `A-${suffix}`, emirate.id],
@@ -141,6 +144,12 @@ async function seedCompany(client: pg.PoolClient, label: string): Promise<Fixtur
       "changed_by_account_id) values ($1, $2, $3, 'delivery', 'new', $4)",
     [randomUUID(), fixture.company, fixture.order, fixture.account],
   );
+  await client.query(
+    "insert into order_maintenance_findings " +
+      "(id, company_id, order_id, order_number, check_code, severity, evidence) " +
+      "values ($1, $2, $3, $4, 'reset_fixture', 'warning', '{}'::jsonb)",
+    [fixture.finding, fixture.company, fixture.order, `ORD-${suffix}`],
+  );
 
   // Communication cycle: conversations.last_message_id <-> messages.conversation_id
   await client.query(
@@ -189,6 +198,73 @@ async function seedCompany(client: pg.PoolClient, label: string): Promise<Fixtur
   return fixture;
 }
 
+interface PlatformFixture {
+  avatarUsage: string;
+  article: string;
+  category: string;
+  notFoundPath: string;
+  relatedArticle: string;
+}
+
+async function seedPlatformData(client: pg.PoolClient): Promise<PlatformFixture> {
+  const fixture = {
+    avatarUsage: randomUUID(),
+    article: randomUUID(),
+    category: randomUUID(),
+    notFoundPath: `/reset-fixture/${randomUUID()}`,
+    relatedArticle: randomUUID(),
+  };
+  const suffix = randomUUID().slice(0, 8);
+  const author = (
+    await client.query<{ id: string }>("select id from platform_blog_authors limit 1")
+  ).rows[0];
+  if (author === undefined) {
+    throw new Error("No Platform Blog author present; cannot seed preserved-data fixture");
+  }
+
+  const conversation = randomUUID();
+  await client.query(
+    "insert into platform_agent_conversations " +
+      "(id, reference_number, public_session_token_hash, channel) " +
+      "values ($1, $2, $3, 'website')",
+    [conversation, `RST-${suffix}`, `reset-platform-${randomUUID()}`],
+  );
+  await client.query(
+    "insert into platform_agent_live_avatar_usage (id, conversation_id, provider, language) " +
+      "values ($1, $2, 'reset-test', 'en')",
+    [fixture.avatarUsage, conversation],
+  );
+  await client.query(
+    "insert into platform_blog_categories (id, name, slug, language) " +
+      "values ($1, 'Reset fixture', $2, 'en')",
+    [fixture.category, `reset-fixture-${suffix}`],
+  );
+  for (const [id, slug] of [
+    [fixture.article, `reset-fixture-${suffix}-one`],
+    [fixture.relatedArticle, `reset-fixture-${suffix}-two`],
+  ]) {
+    await client.query(
+      "insert into platform_blog_articles " +
+        "(id, slug, language, title, excerpt, author_id, category_id) " +
+        "values ($1, $2, 'en', 'Reset fixture', 'Reset fixture', $3, $4)",
+      [id, slug, author.id, fixture.category],
+    );
+  }
+  await client.query(
+    "insert into platform_blog_article_categories (article_id, category_id) values ($1, $2)",
+    [fixture.article, fixture.category],
+  );
+  await client.query(
+    "insert into platform_blog_article_relations " +
+      "(article_id, related_article_id, relation_type) values ($1, $2, 'editorial')",
+    [fixture.article, fixture.relatedArticle],
+  );
+  await client.query("insert into platform_public_not_found_paths (path) values ($1)", [
+    fixture.notFoundPath,
+  ]);
+  return fixture;
+}
+
 async function countFor(client: pg.PoolClient, table: string, company: string): Promise<number> {
   const result = await client.query<{ n: string }>(
     `select count(*)::bigint as n from ${table} where company_id = $1`,
@@ -211,12 +287,14 @@ describe.skipIf(!runDatabaseTests)("reset execution engine against a real databa
     try {
       const alpha = await seedCompany(client, "A");
       const beta = await seedCompany(client, "B");
+      const platform = await seedPlatformData(client);
       // Seeding queues deferred trigger events, and PostgreSQL refuses `alter table` while
       // any are pending. Real runs begin the transaction with the reset, so this only
       // affects the fixture; flushing here reproduces that clean starting state.
       await client.query("set constraints all immediate");
 
       const removedTables = [
+        "order_maintenance_findings",
         "orders",
         "order_status_history",
         "customers",
@@ -229,6 +307,7 @@ describe.skipIf(!runDatabaseTests)("reset execution engine against a real databa
       ];
       const preservedTables = [
         "accounts",
+        "company_settings",
         "areas",
         "chart_of_accounts",
         "fiscal_years",
@@ -242,6 +321,12 @@ describe.skipIf(!runDatabaseTests)("reset execution engine against a real databa
 
       const summary = await runReset(client, alpha.company, () => undefined);
       expect(summary.totalRemoved).toBeGreaterThan(0);
+      const findingIndex = summary.removed.findIndex(
+        (entry) => entry.table === "order_maintenance_findings",
+      );
+      const orderIndex = summary.removed.findIndex((entry) => entry.table === "orders");
+      expect(findingIndex).toBeGreaterThanOrEqual(0);
+      expect(findingIndex).toBeLessThan(orderIndex);
 
       // Transactional state and business masters are gone for the reset Company.
       for (const table of removedTables) {
@@ -257,6 +342,32 @@ describe.skipIf(!runDatabaseTests)("reset execution engine against a real databa
       for (const table of [...removedTables, ...preservedTables]) {
         expect(await countFor(client, table, beta.company), `${table} isolated`).toBeGreaterThan(0);
       }
+
+      // Platform-wide content and telemetry are not company reset data. Verify
+      // every synthetic global row remains after resetting alpha.
+      const preservedPlatformRows = await client.query<{ table_name: string; n: string }>(
+        "select 'platform_agent_live_avatar_usage' as table_name, count(*)::text as n " +
+          "from platform_agent_live_avatar_usage where id = $1 " +
+          "union all select 'platform_blog_article_categories', count(*)::text " +
+          "from platform_blog_article_categories where article_id = $2 and category_id = $3 " +
+          "union all select 'platform_blog_article_relations', count(*)::text " +
+          "from platform_blog_article_relations where article_id = $2 and related_article_id = $4 " +
+          "union all select 'platform_public_not_found_paths', count(*)::text " +
+          "from platform_public_not_found_paths where path = $5",
+        [
+          platform.avatarUsage,
+          platform.article,
+          platform.category,
+          platform.relatedArticle,
+          platform.notFoundPath,
+        ],
+      );
+      expect(preservedPlatformRows.rows).toEqual([
+        { table_name: "platform_agent_live_avatar_usage", n: "1" },
+        { table_name: "platform_blog_article_categories", n: "1" },
+        { table_name: "platform_blog_article_relations", n: "1" },
+        { table_name: "platform_public_not_found_paths", n: "1" },
+      ]);
 
       // Both cycles were broken and both sides removed.
       expect(summary.cycleBreaks.map((entry) => entry.table).sort()).toEqual([
