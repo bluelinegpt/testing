@@ -1,6 +1,9 @@
 import type pg from "pg";
 
-import { deleteResetCompanyUserAccount } from "./platform-user-deletion.service.js";
+import {
+  deleteResetCompanyUserAccount,
+  inspectResetCompanyUserAccount,
+} from "./platform-user-deletion.service.js";
 
 export interface ResetCompanyUser {
   readonly accountId: string;
@@ -33,8 +36,64 @@ export interface ResetCompanyUserPlan {
   readonly adminUsersPreserved: readonly ResetCompanyUser[];
 }
 
+export interface ResetCompanyUserPreview {
+  readonly selectedUsers: readonly ResetCompanyUser[];
+  readonly accountsToDelete: readonly ResetCompanyUser[];
+  readonly identitiesRetained: readonly ResetCompanyUserRetainedIdentity[];
+  readonly adminUsersPreserved: readonly ResetCompanyUser[];
+}
+
+export async function previewResetCompanyUsers(
+  client: pg.PoolClient,
+  companyId: string,
+  accountIds: readonly string[],
+): Promise<ResetCompanyUserPreview> {
+  const plan = await getResetCompanyUserPlan(client, companyId);
+  const selectedIds = new Set(accountIds);
+  if (selectedIds.size !== accountIds.length || selectedIds.size === 0) {
+    throw new Error("Select at least one unique non-Admin Company user.");
+  }
+  const adminUsersPreserved = plan.adminUsersPreserved.filter((user) => selectedIds.has(user.accountId));
+  if (adminUsersPreserved.length > 0) {
+    throw new Error("Admin users cannot be selected for Users Only Reset.");
+  }
+  const selectedUsers = plan.usersToRemove.filter((user) => selectedIds.has(user.accountId));
+  if (selectedUsers.length !== selectedIds.size) {
+    throw new Error("One or more selected accounts are not eligible for this Company reset.");
+  }
+
+  const accountsToDelete: ResetCompanyUser[] = [];
+  const identitiesRetained: ResetCompanyUserRetainedIdentity[] = [];
+  for (const user of selectedUsers) {
+    if (user.sharedIdentity) {
+      identitiesRetained.push({
+        ...user,
+        reason: "other_company_access",
+        references: user.sharedReferences.map((reference) => {
+          const [table, column] = reference.split(".");
+          return { table: table ?? reference, column: column ?? "", rows: 1, onDelete: "other-company access preserved" };
+        }),
+      });
+      continue;
+    }
+    const inspection = await inspectResetCompanyUserAccount(client, companyId, user.accountId);
+    if (!inspection.exists || inspection.isAdmin) {
+      throw new Error(inspection.isAdmin
+        ? "Admin users cannot be selected for Users Only Reset."
+        : "One or more selected accounts are not eligible for this Company reset.");
+    }
+    if (inspection.blockingReferences.length > 0) {
+      identitiesRetained.push({ ...user, reason: "preserved_history", references: inspection.blockingReferences });
+    } else {
+      accountsToDelete.push(user);
+    }
+  }
+  return { selectedUsers, accountsToDelete, identitiesRetained, adminUsersPreserved };
+}
+
 export interface ResetCompanyUserCleanup {
   companyUsersRemoved: number;
+  employeesUnlinked: number;
   roleAssignmentsRemoved: number;
   businessAccessLinksRemoved: number;
   sessionsRevoked: number;
@@ -185,6 +244,7 @@ export async function removeResetCompanyUsers(
 ): Promise<ResetCompanyUserCleanup> {
   const counts: ResetCompanyUserCleanup = {
     companyUsersRemoved: 0,
+    employeesUnlinked: 0,
     roleAssignmentsRemoved: 0,
     businessAccessLinksRemoved: 0,
     sessionsRevoked: 0,
@@ -201,7 +261,7 @@ export async function removeResetCompanyUsers(
     // account for the duration of the reset transaction.
     const accountState = (
       await client.query<{ isAdmin: boolean; status: string }>(
-        `select ${ADMIN_ROLE_EXISTS} as "isAdmin", a.status from accounts a where a.id = $2`,
+        `select ${ADMIN_ROLE_EXISTS} as "isAdmin", a.status from accounts a where a.id = $2 and a.company_id = $1 and a.account_kind <> 'platform_administrator' for update`,
         [companyId, user.accountId],
       )
     ).rows[0];
@@ -234,6 +294,17 @@ export async function removeResetCompanyUsers(
       [companyId, user.accountId],
     );
 
+    // Employee profiles are retained by Users Only Reset. Detach only the
+    // selected login relationship before deleting its Company User membership
+    // so the Employee can be linked to a freshly credentialed account later.
+    // Employee compensation, salary, and payroll data are not changed.
+    const employees = await client.query(
+      "update employees set company_user_id = null, updated_at = now(), version = version + 1 " +
+        "where company_id = $1 and company_user_id in " +
+        "(select id from company_users where company_id = $1 and account_id = $2)",
+      [companyId, user.accountId],
+    );
+
     if (sharedIdentity !== true && accountState.status !== "disabled") {
       // Satisfy the deferred active-user/role invariant before removing the
       // target Company assignments. A shared identity's account status is
@@ -256,6 +327,7 @@ export async function removeResetCompanyUsers(
     );
 
     counts.companyUsersRemoved += memberships.rowCount ?? 0;
+    counts.employeesUnlinked += employees.rowCount ?? 0;
     counts.roleAssignmentsRemoved += assignments.rowCount ?? 0;
     counts.businessAccessLinksRemoved += links.rowCount ?? 0;
     counts.sessionsRevoked += sessions.rowCount ?? 0;

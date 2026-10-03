@@ -1,6 +1,9 @@
 import { Transform, Type } from "class-transformer";
 import {
   IsEmail,
+  ArrayMaxSize,
+  ArrayNotEmpty,
+  ArrayUnique,
   IsIn,
   IsInt,
   IsOptional,
@@ -292,6 +295,21 @@ export class ResetCompanyDataDto {
   @Transform(trim)
   @IsString()
   @Length(7, 80)
+  public confirmation!: string;
+}
+
+export class ResetCompanyUsersPreviewDto {
+  @ArrayNotEmpty()
+  @ArrayUnique()
+  @ArrayMaxSize(500)
+  @IsUUID("4", { each: true })
+  public accountIds!: string[];
+}
+
+export class ResetCompanyUsersDataDto extends ResetCompanyUsersPreviewDto {
+  @Transform(trim)
+  @IsString()
+  @Length(12, 100)
   public confirmation!: string;
 }
 

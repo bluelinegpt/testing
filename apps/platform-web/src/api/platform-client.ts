@@ -765,6 +765,7 @@ export interface CompanyResetResult {
   readonly backupFile: string;
   readonly userCleanup: {
     readonly companyUsersRemoved: number;
+    readonly employeesUnlinked: number;
     readonly roleAssignmentsRemoved: number;
     readonly businessAccessLinksRemoved: number;
     readonly sessionsRevoked: number;
@@ -786,6 +787,35 @@ export interface CompanyResetResult {
       }[];
     }[];
   };
+}
+
+export interface CompanyUsersResetPreview {
+  readonly company: { readonly id: string; readonly code: string; readonly name: string; readonly environment: string };
+  readonly eligible: boolean;
+  readonly blockers: readonly string[];
+  readonly confirmation: string;
+  readonly selectedUsers: readonly CompanyResetUser[];
+  readonly accountsToDelete: readonly CompanyResetUser[];
+  readonly identitiesRetained: readonly (CompanyResetUser & {
+    readonly reason: "other_company_access" | "preserved_history";
+    readonly references: readonly { readonly table: string; readonly column: string; readonly rows: number; readonly onDelete: string }[];
+  })[];
+  readonly adminUsersPreserved: readonly CompanyResetUser[];
+}
+
+export interface CompanyUsersResetEligible {
+  readonly company: CompanyUsersResetPreview["company"];
+  readonly eligible: boolean;
+  readonly blockers: readonly string[];
+  readonly usersToRemove: readonly CompanyResetUser[];
+  readonly adminUsersPreserved: readonly CompanyResetUser[];
+}
+
+export interface CompanyUsersResetResult {
+  readonly company: { readonly id: string; readonly code: string; readonly name: string };
+  readonly backupFile: string;
+  readonly selectedCount: number;
+  readonly cleanup: CompanyResetResult["userCleanup"];
 }
 
 export interface AccountingSetupSummary {
@@ -1833,6 +1863,28 @@ export const platformApi = {
       { body: { confirmation }, method: "POST", timeoutMs: 310_000 },
     );
     if (result === undefined) throw new PlatformApiError("Empty reset response", "empty", 500);
+    return result;
+  },
+
+  async previewCompanyUsersReset(companyId: string, accountIds: readonly string[]): Promise<CompanyUsersResetPreview> {
+    const result = await request<CompanyUsersResetPreview>(`platform/companies/${companyId}/users-reset-preview`, {
+      body: { accountIds }, method: "POST",
+    });
+    if (result === undefined) throw new PlatformApiError("Empty users reset preview response", "empty", 500);
+    return result;
+  },
+
+  async eligibleCompanyUsersReset(companyId: string): Promise<CompanyUsersResetEligible> {
+    const result = await request<CompanyUsersResetEligible>(`platform/companies/${companyId}/users-reset-eligible`, { method: "GET" });
+    if (result === undefined) throw new PlatformApiError("Empty eligible users response", "empty", 500);
+    return result;
+  },
+
+  async resetCompanyUsers(companyId: string, accountIds: readonly string[], confirmation: string): Promise<CompanyUsersResetResult> {
+    const result = await request<CompanyUsersResetResult>(`platform/companies/${companyId}/users-reset-execute`, {
+      body: { accountIds, confirmation }, method: "POST", timeoutMs: 310_000,
+    });
+    if (result === undefined) throw new PlatformApiError("Empty users reset response", "empty", 500);
     return result;
   },
 

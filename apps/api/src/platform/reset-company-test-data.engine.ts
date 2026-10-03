@@ -379,6 +379,7 @@ export async function runReset(
     { table: "account_sessions", rows: userCleanup.sessionsRevoked },
     { table: "password_reset_tokens", rows: userCleanup.passwordResetTokensRevoked },
     { table: "user_business_links", rows: userCleanup.businessAccessLinksRemoved },
+    { table: "employees (user link)", rows: userCleanup.employeesUnlinked },
     { table: "account_roles", rows: userCleanup.roleAssignmentsRemoved },
     { table: "company_users", rows: userCleanup.companyUsersRemoved },
     { table: "accounts", rows: userCleanup.accountsDeleted },

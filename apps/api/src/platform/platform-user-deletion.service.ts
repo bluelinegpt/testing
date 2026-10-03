@@ -67,6 +67,19 @@ const deletableReferences = new Set([
   "company_users.account_id",
 ]);
 
+// Users Only Reset removes these target-company access rows before attempting
+// identity deletion. Excluding them from its preview avoids describing normal
+// credentials/memberships as preserved business history. Other-company access
+// is detected separately by reset-company-users.ts and remains protected.
+const resetRemovedAccessReferences = new Set([
+  "account_sessions.account_id",
+  "password_reset_tokens.account_id",
+  "account_roles.account_id",
+  "company_users.account_id",
+  "user_business_links.account_id",
+  "employees.company_user_id",
+]);
+
 /** Human-facing grouping, so the UI can say what kind of history exists. */
 const dependencyCategories: readonly { match: RegExp; category: string }[] = [
   { match: /^orders?|^order_/, category: "Orders" },
@@ -109,6 +122,35 @@ export async function deleteResetCompanyUserAccount(
     readonly onDelete: string;
   }[];
 }> {
+  const inspection = await inspectResetCompanyUserAccount(client, companyId, accountId);
+  if (inspection.blockingReferences.length > 0) {
+    return { deleted: false, blockingReferences: inspection.blockingReferences };
+  }
+
+  await client.query("set local blueline.platform_user_delete = 'on'");
+  const removed = await client.query(
+    "delete from accounts where id = $2 and company_id = $1 " +
+      "and account_kind <> 'platform_administrator'",
+    [companyId, accountId],
+  );
+  return { deleted: (removed.rowCount ?? 0) === 1, blockingReferences: [] };
+}
+
+/** Read-only counterpart used by selective reset previews. */
+export async function inspectResetCompanyUserAccount(
+  client: pg.PoolClient,
+  companyId: string,
+  accountId: string,
+): Promise<{
+  readonly exists: boolean;
+  readonly isAdmin: boolean;
+  readonly blockingReferences: readonly {
+    readonly table: string;
+    readonly column: string;
+    readonly rows: number;
+    readonly onDelete: string;
+  }[];
+}> {
   const account = (
     await client.query<{ id: string }>(
       "select id from accounts where id = $2 and company_id = $1 " +
@@ -116,7 +158,7 @@ export async function deleteResetCompanyUserAccount(
       [companyId, accountId],
     )
   ).rows[0];
-  if (account === undefined) return { deleted: false, blockingReferences: [] };
+  if (account === undefined) return { exists: false, isAdmin: false, blockingReferences: [] };
 
   const admin = (
     await client.query<{ isAdmin: boolean }>(
@@ -131,7 +173,7 @@ export async function deleteResetCompanyUserAccount(
     )
   ).rows[0]?.isAdmin;
   if (admin === true) {
-    throw new Error(`Refusing to delete ${accountId}: it has an assigned Admin role.`);
+    return { exists: true, isAdmin: true, blockingReferences: [] };
   }
 
   const references = (
@@ -177,6 +219,7 @@ export async function deleteResetCompanyUserAccount(
     d: "SET DEFAULT",
   };
   for (const reference of references) {
+    if (resetRemovedAccessReferences.has(`${reference.tableName}.${reference.columnName}`)) continue;
     // Catalog identifiers are quoted before interpolation. A self-reference
     // on the row being deleted disappears with that row; references from any
     // other account remain a hard blocker.
@@ -211,16 +254,9 @@ export async function deleteResetCompanyUserAccount(
     }
   }
   if (blockingReferences.length > 0) {
-    return { deleted: false, blockingReferences };
+    return { exists: true, isAdmin: false, blockingReferences };
   }
-
-  await client.query("set local blueline.platform_user_delete = 'on'");
-  const removed = await client.query(
-    "delete from accounts where id = $2 and company_id = $1 " +
-      "and account_kind <> 'platform_administrator'",
-    [companyId, accountId],
-  );
-  return { deleted: (removed.rowCount ?? 0) === 1, blockingReferences: [] };
+  return { exists: true, isAdmin: false, blockingReferences: [] };
 }
 
 export interface BlockingDependency {

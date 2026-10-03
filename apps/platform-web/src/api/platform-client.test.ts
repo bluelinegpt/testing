@@ -4,6 +4,25 @@ import { platformApi, platformApiErrorMessage } from "./platform-client.js";
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Platform API user-facing errors", () => {
+  it("uses selected-only Users Only Reset endpoints and sends the selected account IDs", async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ usersToRemove: [], adminUsersPreserved: [] }) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ selectedUsers: [], accountsToDelete: [], identitiesRetained: [] }) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ selectedCount: 1 }) });
+    vi.stubGlobal("fetch", fetcher);
+    const selected = ["a57ca990-42c8-4153-a880-abdb775c6dc1"];
+    await platformApi.eligibleCompanyUsersReset("company-id");
+    await platformApi.previewCompanyUsersReset("company-id", selected);
+    await platformApi.resetCompanyUsers("company-id", selected, "RESET USERS CMP-000003");
+    expect(fetcher.mock.calls.map((call) => String(call[0]))).toEqual([
+      expect.stringContaining("/users-reset-eligible"),
+      expect.stringContaining("/users-reset-preview"),
+      expect.stringContaining("/users-reset-execute"),
+    ]);
+    expect(JSON.parse(fetcher.mock.calls[1]![1].body)).toEqual({ accountIds: selected });
+    expect(JSON.parse(fetcher.mock.calls[2]![1].body)).toEqual({ accountIds: selected, confirmation: "RESET USERS CMP-000003" });
+  });
+
   it("shows specific validation failures instead of hiding the rejected field",async()=>{
     vi.stubGlobal("fetch",vi.fn().mockResolvedValue({ok:false,status:400,headers:new Headers({"content-type":"application/json"}),json:async()=>({error:{message:"Request validation failed.",details:["title must be longer than or equal to 5 characters"]}})}));
     await expect(platformApi.updateBlogArticle("article",{})).rejects.toThrow("title must be longer");

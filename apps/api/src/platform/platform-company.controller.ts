@@ -38,6 +38,8 @@ import {
   CreateCompanyDto,
   LifecycleActionDto,
   ResetCompanyDataDto,
+  ResetCompanyUsersDataDto,
+  ResetCompanyUsersPreviewDto,
   SuspendCompanyDto,
   UpdateCompanyProfileDto,
   UpdateShipmentPrefixDto,
@@ -352,6 +354,39 @@ export class PlatformTargetCompanyController {
     @Req() request: Request,
   ): Promise<object> {
     return this.reset.execute(companyId, input.confirmation, this.actor(request));
+  }
+
+  @ApiBearerAuth()
+  @ApiOperation({ summary: "List non-Admin Company and Trader Portal accounts eligible for selective reset" })
+  @RequirePlatformPermissions(PLATFORM_COMPANIES_RESET)
+  @Get("users-reset-eligible")
+  public usersResetEligible(@Param("companyId") companyId: string): Promise<object> {
+    return this.reset.usersResetEligible(companyId);
+  }
+
+  @ApiBearerAuth()
+  @ApiOperation({ summary: "Preview a selected set of non-Admin Company accounts for reset" })
+  @RequirePlatformPermissions(PLATFORM_COMPANIES_RESET)
+  @HttpCode(200)
+  @Post("users-reset-preview")
+  public usersResetPreview(
+    @Param("companyId") companyId: string,
+    @Body() input: ResetCompanyUsersPreviewDto,
+  ): Promise<object> {
+    return this.reset.previewUsers(companyId, input.accountIds);
+  }
+
+  @ApiBearerAuth()
+  @ApiOperation({ summary: "Reset only the selected non-Admin Company accounts" })
+  @RequirePlatformPermissions(PLATFORM_COMPANIES_RESET)
+  @HttpCode(200)
+  @Post("users-reset-execute")
+  public usersResetExecute(
+    @Param("companyId") companyId: string,
+    @Body() input: ResetCompanyUsersDataDto,
+    @Req() request: Request,
+  ): Promise<object> {
+    return this.reset.executeUsers(companyId, input.accountIds, input.confirmation, this.actor(request));
   }
 
   /**

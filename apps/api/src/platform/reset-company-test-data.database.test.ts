@@ -2,11 +2,24 @@ import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 
 import { config as loadEnvironment } from "dotenv";
+import { Kysely, PostgresDialect, type Transaction } from "kysely";
 import pg from "pg";
 import { beforeAll, describe, expect, it } from "vitest";
 
 import { runReset } from "./reset-company-test-data.engine.js";
-import { getResetCompanyUserPlan } from "./reset-company-users.js";
+import type { DatabaseSchema } from "../infrastructure/database/database.types.js";
+import { AuthenticationRepository } from "../authentication/authentication.repository.js";
+import { AuthenticationService } from "../authentication/authentication.service.js";
+import { PasswordHasher } from "../authentication/password-hasher.js";
+import { SessionTokenService } from "../authentication/session-token.service.js";
+import { TemporaryPasswordService } from "../authentication/temporary-password.service.js";
+import { DriverRoleProvisioningService } from "../users/driver-role-provisioning.service.js";
+import { UserBusinessAccessService } from "../users/user-business-access.service.js";
+import {
+  getResetCompanyUserPlan,
+  previewResetCompanyUsers,
+  removeResetCompanyUsers,
+} from "./reset-company-users.js";
 
 /**
  * Real-database proof for the reset execution engine.
@@ -427,6 +440,241 @@ describe.skipIf(!runDatabaseTests)("reset execution engine against a real databa
     loadEnvironment({ path: resolve(process.cwd(), "../../.env") });
     pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 1 });
   });
+
+  it("resets then recreates an Employee User with the same mobile username and selected permissions", async () => {
+    const client = await pool.connect();
+    const sameConnectionPool = {
+      connect: async () => ({ query: client.query.bind(client), release: () => undefined }),
+      end: async () => undefined,
+    } as unknown as pg.Pool;
+    const database = new Kysely<DatabaseSchema>({ dialect: new PostgresDialect({ pool: sameConnectionPool }) });
+    const rollbackMarker = new Error("rollback reset-retained Employee user test");
+    try {
+      await expect(database.transaction().execute(async (transaction) => {
+        const alpha = await seedCompany(client, "RECREATE");
+        const suffix = alpha.company.slice(0, 8);
+        const employeeId = randomUUID();
+        const username = "971521937766";
+        await client.query(
+          "insert into employees (id, company_id, employee_number, name_en, mobile_number) " +
+            "values ($1, $2, 'EMP-000015', 'Mahmoud', $3)",
+          [employeeId, alpha.company, username],
+        );
+        await client.query("set constraints all immediate");
+
+        const passwordHasher = new PasswordHasher();
+        const driverRoles = new DriverRoleProvisioningService(database);
+        const userBusinessAccess = new UserBusinessAccessService(
+          { execute: async (work: (tx: unknown) => unknown) => work(transaction) } as never,
+          { current: () => ({ companyId: alpha.company }) } as never,
+          { current: () => ({ identityId: alpha.adminAccount, permissions: new Set(["users_roles.manage"]) }) } as never,
+          passwordHasher,
+          new TemporaryPasswordService(),
+          driverRoles,
+        );
+        const createInput = {
+          displayName: "Mahmoud",
+          mobileNumber: username,
+          preferredLanguage: "en" as const,
+          roleIds: [alpha.memberRole],
+          username,
+        };
+        const initial = await userBusinessAccess.createAndLink(
+          "employee", employeeId, createInput, `idem-${randomUUID()}`, randomUUID(),
+        );
+        const retainedAccountId = String(initial.accountId);
+        await client.query(
+          "insert into audit_events (company_id, actor_account_id, action, subject_type, subject_id, correlation_id) " +
+            "values ($1, $2, 'employee.user.history', 'employee', $3, $4)",
+          [alpha.company, retainedAccountId, employeeId, `history-${suffix}`],
+        );
+        const oldSessionHash = randomUUID().replace(/-/g, "") + randomUUID().replace(/-/g, "");
+        await client.query(
+          "insert into account_sessions (company_id, account_id, token_hash, expires_at) " +
+            "values ($1, $2, $3, now() + interval '1 day')",
+          [alpha.company, retainedAccountId, oldSessionHash],
+        );
+        const oldResetTokenHash = randomUUID().replace(/-/g, "") + randomUUID().replace(/-/g, "");
+        await client.query(
+          "insert into password_reset_tokens (company_id, account_id, token_hash, expires_at) " +
+            "values ($1, $2, $3, now() + interval '1 day')",
+          [alpha.company, retainedAccountId, oldResetTokenHash],
+        );
+
+        const plan = await getResetCompanyUserPlan(client, alpha.company, true);
+        const selectedUser = plan.usersToRemove.find((user) => user.accountId === retainedAccountId);
+        expect(selectedUser).toBeDefined();
+        const cleanup = await removeResetCompanyUsers(client, alpha.company, {
+          usersToRemove: [selectedUser!],
+          adminUsersPreserved: [],
+        });
+        expect(cleanup).toMatchObject({
+          employeesUnlinked: 1,
+          companyUsersRemoved: 1,
+          sessionsRevoked: 1,
+          passwordResetTokensRevoked: 1,
+          accountsDeleted: 0,
+          historyReferencedIdentitiesPreserved: 1,
+        });
+        const afterReset = await client.query(
+          "select a.status, e.company_user_id from accounts a join employees e on e.company_id=a.company_id " +
+            "where a.id=$1 and e.id=$2",
+          [retainedAccountId, employeeId],
+        );
+        expect(afterReset.rows[0]).toMatchObject({ status: "disabled", company_user_id: null });
+
+        // The reset's own append-only audit event shares the exact transaction
+        // timestamp with the account deactivation, proving this is reset-retained.
+        await client.query(
+          "insert into audit_events (company_id, actor_account_id, action, subject_type, subject_id, after_data, correlation_id) " +
+            "values ($1, $2, 'platform.company.users_reset', 'company', $3, $4::jsonb, $5)",
+          [alpha.company, alpha.adminAccount, alpha.company, JSON.stringify({ retained: cleanup.retainedIdentities }), `reset-${suffix}`],
+        );
+
+        const restored = await userBusinessAccess.createAndLink(
+          "employee", employeeId, createInput, `idem-${randomUUID()}`, randomUUID(),
+        );
+        expect(restored.accountId).toBe(retainedAccountId);
+        expect(restored.temporaryPassword).not.toBe(initial.temporaryPassword);
+        expect(await passwordHasher.verify(String(initial.temporaryPassword),
+          (await client.query<{ password_hash: string }>("select password_hash from accounts where id=$1", [retainedAccountId])).rows[0]?.password_hash,
+        )).toBe(false);
+
+        const access = await client.query(
+          "select a.status, a.force_password_change, a.temporary_password_expires_at, " +
+            "(select count(*)::text from account_roles ar where ar.account_id=a.id and ar.company_id=a.company_id) roles, " +
+            "(select count(*)::text from user_business_links l where l.account_id=a.id and l.company_id=a.company_id and l.access_status='active') active_links, " +
+            "(select count(*)::text from account_sessions s where s.account_id=a.id and s.token_hash=$2) stale_session, " +
+            "(select count(*)::text from password_reset_tokens t where t.account_id=a.id and t.token_hash=$3) stale_token, " +
+            "e.company_user_id from accounts a join employees e on e.company_id=a.company_id " +
+            "where a.id=$1 and e.id=$4",
+          [retainedAccountId, oldSessionHash, oldResetTokenHash, employeeId],
+        );
+        expect(access.rows[0]).toMatchObject({
+          status: "active", force_password_change: true, roles: "1", active_links: "1",
+          stale_session: "0", stale_token: "0",
+        });
+        expect(access.rows[0]?.company_user_id).not.toBeNull();
+
+        const authentication = new AuthenticationService(
+          new AuthenticationRepository(database), passwordHasher, new SessionTokenService(),
+          { get: (key: string) => key === "auth.lockoutMinutes" ? 15 : 60 } as never,
+        );
+        const company = await client.query<{ subdomain: string }>("select subdomain from companies where id=$1", [alpha.company]);
+        const login = await authentication.loginCompany({
+          companySubdomain: company.rows[0]!.subdomain,
+          identifier: username,
+          password: String(restored.temporaryPassword),
+        });
+        expect(login.identity).toMatchObject({ id: retainedAccountId, forcePasswordChange: true, permissions: ["orders.create"] });
+        const identity = await authentication.authenticate(login.accessToken);
+        expect(identity).toMatchObject({ identityId: retainedAccountId, companyId: alpha.company, profileType: "employee", profileId: employeeId });
+        throw rollbackMarker;
+      })).rejects.toBe(rollbackMarker);
+    } finally {
+      await database.destroy();
+      client.release();
+    }
+  }, 120_000);
+
+  it("selectively resets one non-Admin Company user and preserves every other user and company data", async () => {
+    const client = await pool.connect();
+    await client.query("begin");
+    try {
+      const alpha = await seedCompany(client, "SELECT-ONE");
+      const beta = await seedCompany(client, "SELECT-ONE-OTHER");
+      await client.query("set constraints all immediate");
+      const preview = await previewResetCompanyUsers(client, alpha.company, [alpha.account]);
+      expect(preview.selectedUsers.map((user) => user.accountId)).toEqual([alpha.account]);
+      expect(preview.adminUsersPreserved).toEqual([]);
+      expect(preview.identitiesRetained).toHaveLength(1);
+      expect(preview.identitiesRetained[0]?.reason).toBe("preserved_history");
+      expect(preview.accountsToDelete).toEqual([]);
+
+      const cleanup = await removeResetCompanyUsers(client, alpha.company, {
+        usersToRemove: preview.selectedUsers,
+        adminUsersPreserved: [],
+      });
+      expect(cleanup.historyReferencedIdentitiesPreserved).toBe(1);
+      const selected = await client.query(
+        "select a.status, (select count(*) from company_users cu where cu.company_id=$2 and cu.account_id=a.id) as memberships, " +
+          "(select count(*) from account_roles ar where ar.company_id=$2 and ar.account_id=a.id) as roles, " +
+          "(select count(*) from account_sessions s where s.company_id=$2 and s.account_id=a.id) as sessions " +
+          "from accounts a where a.id=$1 and a.company_id=$2",
+        [alpha.account, alpha.company],
+      );
+      expect(selected.rows[0]).toMatchObject({ status: "disabled", memberships: "0", roles: "0", sessions: "0" });
+      expect(await countFor(client, "company_settings", alpha.company)).toBe(1);
+      expect(await countFor(client, "orders", alpha.company)).toBe(1);
+      const unselected = await client.query("select count(*)::text as n from accounts where id = any($1::uuid[])", [
+        [alpha.historyAccountB, alpha.historyAccountC, alpha.adminAccount, alpha.traderPortalAccountA, alpha.traderPortalAccountB],
+      ]);
+      expect(unselected.rows[0]?.n).toBe("5");
+      expect(await countFor(client, "orders", beta.company)).toBe(1);
+    } finally {
+      await client.query("rollback");
+      client.release();
+    }
+  }, 120_000);
+
+  it("selectively resets multiple account kinds and rejects an Admin even when submitted directly", async () => {
+    const client = await pool.connect();
+    await client.query("begin");
+    try {
+      const alpha = await seedCompany(client, "SELECT-MANY");
+      const beta = await seedCompany(client, "SELECT-MANY-OTHER");
+      await client.query("set constraints all immediate");
+      await expect(previewResetCompanyUsers(client, alpha.company, [alpha.adminAccount])).rejects.toThrow(/Admin users cannot be selected/);
+
+      const stalePlan = await getResetCompanyUserPlan(client, alpha.company);
+      const formerlyEligible = stalePlan.usersToRemove.find((user) => user.accountId === alpha.historyAccountC);
+      expect(formerlyEligible).toBeDefined();
+      await client.query("insert into account_roles (account_id, role_id, company_id) values ($1, $2, $3)", [
+        alpha.historyAccountC, alpha.adminRole, alpha.company,
+      ]);
+      await expect(removeResetCompanyUsers(client, alpha.company, {
+        usersToRemove: [formerlyEligible!],
+        adminUsersPreserved: [],
+      })).rejects.toThrow(/gained an Admin role/);
+      const newlyAdminAccess = await client.query(
+        "select count(*)::text as n from company_users where account_id=$1 and company_id=$2",
+        [alpha.historyAccountC, alpha.company],
+      );
+      expect(newlyAdminAccess.rows[0]?.n).toBe("1");
+
+      const selectedIds = [alpha.historyAccountB, alpha.traderPortalAccountA];
+      const preview = await previewResetCompanyUsers(client, alpha.company, selectedIds);
+      expect(preview.selectedUsers.map((user) => user.accountId).sort()).toEqual([...selectedIds].sort());
+      expect(preview.selectedUsers.map((user) => user.accountKind)).toContain("trader");
+      expect(preview.accountsToDelete.map((user) => user.accountId)).toContain(alpha.traderPortalAccountA);
+      const cleanup = await removeResetCompanyUsers(client, alpha.company, {
+        usersToRemove: preview.selectedUsers,
+        adminUsersPreserved: [],
+      });
+      expect(cleanup.companyUsersRemoved).toBe(1);
+      expect(cleanup.businessAccessLinksRemoved).toBe(1);
+      expect(cleanup.sessionsRevoked).toBeGreaterThanOrEqual(1);
+      expect(cleanup.historyReferencedIdentitiesPreserved).toBe(1);
+      expect(cleanup.accountsDeleted).toBe(1);
+      expect(cleanup.retainedIdentities).toHaveLength(1);
+      const selectedAccess = await client.query(
+        "select count(*)::text as n from user_business_links where company_id=$1 and account_id=any($2::uuid[]) " +
+          "union all select count(*)::text from account_sessions where company_id=$1 and account_id=any($2::uuid[]) " +
+          "union all select count(*)::text from account_roles where company_id=$1 and account_id=any($2::uuid[]) " +
+          "union all select count(*)::text from company_users where company_id=$1 and account_id=any($2::uuid[])",
+        [alpha.company, selectedIds],
+      );
+      expect(selectedAccess.rows.map((row) => row.n)).toEqual(["0", "0", "0", "0"]);
+      expect(await countFor(client, "orders", alpha.company)).toBe(1);
+      const otherCompanyRows = await client.query(
+        "select count(*)::text as n from accounts where id=any($1::uuid[])", [[beta.account, beta.adminAccount]],
+      );
+      expect(otherCompanyRows.rows[0]?.n).toBe("2");
+    } finally {
+      await client.query("rollback");
+      client.release();
+    }
+  }, 120_000);
 
   it("resets one Company completely and leaves the other untouched", async () => {
     const client = await pool.connect();

@@ -511,16 +511,58 @@ export class UserBusinessAccessService {
           type === "employee"
             ? null
             : await this.availableOptionalMobileNumber(transaction, payload.mobileNumber);
+        const resetRetainedAccount =
+          type === "employee"
+            ? await this.findResetRetainedEmployeeAccount(transaction, entityId, payload.username)
+            : undefined;
         await this.assertIdentifiersAvailable(transaction, {
           ...payload,
           email: null,
           mobileNumber: null,
+          ...(resetRetainedAccount === undefined ? {} : { excludeAccountId: resetRetainedAccount.id }),
         });
         if (type === "employee") await this.assertRoles(transaction, roleIds);
 
         let accountId: string;
-        try {
-          const account =
+        if (resetRetainedAccount !== undefined) {
+          accountId = resetRetainedAccount.id;
+          await sql`
+            update account_sessions set revoked_at=coalesce(revoked_at,now())
+             where account_id=${accountId}::uuid and company_id=${companyId}::uuid
+               and revoked_at is null
+          `.execute(transaction);
+          await sql`
+            update password_reset_tokens set revoked_at=coalesce(revoked_at,now())
+             where account_id=${accountId}::uuid and company_id=${companyId}::uuid
+               and used_at is null and revoked_at is null
+          `.execute(transaction);
+          await sql`
+            delete from account_roles where account_id=${accountId}::uuid and company_id=${companyId}::uuid
+          `.execute(transaction);
+          const restored = await sql`
+            update accounts
+               set password_hash=${passwordHash},status='disabled',force_password_change=true,
+                   temporary_password_expires_at=now()+interval '24 hours',password_changed_at=null,
+                   failed_login_attempts=0,last_failed_login_at=null,locked_until=null,
+                   updated_at=now(),version=version+1
+             where id=${accountId}::uuid and company_id=${companyId}::uuid
+               and account_kind='company_user' and status='disabled'
+               and exists (select 1 from audit_events reset_event
+                 where reset_event.company_id=${companyId}::uuid
+                   and reset_event.action in ('platform.company.data_reset','platform.company.users_reset')
+                   and reset_event.occurred_at=(select a.updated_at from accounts a where a.id=${accountId}::uuid))
+            returning id
+          `.execute(transaction);
+          if (restored.rows.length !== 1) {
+            throw new ApplicationException(
+              "employee_reset_retained_user_changed",
+              "The retained account changed and can no longer be safely restored. Refresh and try again.",
+              HttpStatus.CONFLICT,
+            );
+          }
+        } else {
+          try {
+            const account =
             type === "employee"
               ? await sql<{ id: string }>`
               insert into accounts(
@@ -528,7 +570,7 @@ export class UserBusinessAccessService {
                 preferred_language,force_password_change,temporary_password_expires_at
               ) values(
                 ${companyId}::uuid,${expectedKind},${payload.username},${passwordHash},
-                'active',${input.preferredLanguage},true,now()+interval '24 hours'
+                'disabled',${input.preferredLanguage},true,now()+interval '24 hours'
               ) returning id
             `.execute(transaction)
               : await sql<{ id: string }>`
@@ -541,9 +583,10 @@ export class UserBusinessAccessService {
                 true,now()+interval '24 hours'
               ) returning id
             `.execute(transaction);
-          accountId = account.rows[0]!.id;
-        } catch (error) {
-          throw this.translateDatabaseConflict(error, type);
+            accountId = account.rows[0]!.id;
+          } catch (error) {
+            throw this.translateDatabaseConflict(error, type);
+          }
         }
 
         if (type === "employee") {
@@ -566,6 +609,17 @@ export class UserBusinessAccessService {
             insert into account_roles(account_id,role_id,company_id,assigned_by_account_id)
             values(${accountId}::uuid,${roleId}::uuid,${companyId}::uuid,${actorId}::uuid)
           `.execute(transaction);
+          }
+          {
+            // Keep both new and reset-retained identities disabled until the
+            // newly selected role exists; this satisfies even immediate
+            // checks of the active-account/role invariant.
+            await sql`
+              update accounts
+                 set status='active',deactivated_at=null,updated_at=now(),version=version+1
+               where id=${accountId}::uuid and company_id=${companyId}::uuid
+                 and account_kind='company_user' and status='disabled'
+            `.execute(transaction);
           }
         }
 
@@ -594,6 +648,7 @@ export class UserBusinessAccessService {
             optionalMobileOmitted: payload.mobileNumber !== null && accountMobileNumber === null,
             preferredLanguage: input.preferredLanguage,
             profileType: type,
+            resetRetainedIdentityRestored: resetRetainedAccount !== undefined,
             roleIds,
             username: payload.username,
           },
@@ -1272,13 +1327,14 @@ export class UserBusinessAccessService {
 
   private async assertIdentifiersAvailable(
     database: DatabaseExecutor,
-    input: { email: string | null; mobileNumber: string | null; username: string },
+    input: { email: string | null; mobileNumber: string | null; username: string; excludeAccountId?: string },
   ): Promise<void> {
     const { companyId } = this.tenants.current();
     const conflict = await sql<{ email: boolean; mobile: boolean; username: boolean }>`
       select exists(
         select 1 from accounts where company_id=${companyId}::uuid
           and lower(username)=lower(${input.username})
+          and (${input.excludeAccountId ?? null}::uuid is null or id <> ${input.excludeAccountId ?? null}::uuid)
       ) as username,
       ${
         input.email === null
@@ -1315,6 +1371,50 @@ export class UserBusinessAccessService {
         "This mobile number is already in use",
         HttpStatus.CONFLICT,
       );
+  }
+
+  /**
+   * A reset-retained identity is proven by the reset's append-only audit event:
+   * reset and account updates share one PostgreSQL transaction timestamp.
+   * The account must also be disabled, unassigned, unlinked, target-company
+   * only, and not attached to another active Employee.
+   */
+  private async findResetRetainedEmployeeAccount(
+    database: DatabaseExecutor,
+    employeeId: string,
+    username: string,
+  ): Promise<{ id: string } | undefined> {
+    const { companyId } = this.tenants.current();
+    const result = await sql<{ id: string }>`
+      select a.id
+        from accounts a
+       where a.company_id=${companyId}::uuid
+         and a.account_kind='company_user'
+         and a.normalized_username=lower(btrim(${username}))
+         and a.status='disabled' and a.deactivated_at is not null
+         and exists (select 1 from audit_events reset_event
+           where reset_event.company_id=a.company_id
+             and reset_event.action in ('platform.company.data_reset','platform.company.users_reset')
+             and reset_event.occurred_at=a.updated_at)
+         and not exists (select 1 from company_users cu where cu.account_id=a.id)
+         and not exists (select 1 from account_roles ar where ar.account_id=a.id)
+         and not exists (select 1 from user_business_links link
+           where link.account_id=a.id and link.company_id<>a.company_id)
+         and not exists (select 1 from user_business_links link
+           where link.account_id=a.id and link.company_id=a.company_id
+             and link.access_status in ('invited','active','suspended'))
+         and not exists (select 1 from account_sessions session
+           where session.account_id=a.id and session.company_id<>a.company_id)
+         and not exists (select 1 from password_reset_tokens token
+           where token.account_id=a.id and token.company_id<>a.company_id)
+         and not exists (select 1 from employees linked
+           join company_users cu on cu.id=linked.company_user_id and cu.company_id=linked.company_id
+          where cu.account_id=a.id and linked.id<>${employeeId}::uuid
+            and linked.is_active and linked.ended_on is null)
+       limit 1
+       for update of a
+    `.execute(database);
+    return result.rows[0];
   }
 
   private async availableOptionalEmail(

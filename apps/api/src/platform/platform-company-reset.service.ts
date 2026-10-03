@@ -15,7 +15,11 @@ import {
   computeBlockers,
   introspectSchema,
 } from "./reset-company-test-data.manifest.js";
-import { getResetCompanyUserPlan } from "./reset-company-users.js";
+import {
+  getResetCompanyUserPlan,
+  previewResetCompanyUsers,
+  removeResetCompanyUsers,
+} from "./reset-company-users.js";
 
 /**
  * Platform-portal front end for the Company test-data reset.
@@ -88,6 +92,7 @@ export interface CompanyResetResult {
   readonly backupFile: string;
   readonly userCleanup: {
     readonly companyUsersRemoved: number;
+    readonly employeesUnlinked: number;
     readonly roleAssignmentsRemoved: number;
     readonly businessAccessLinksRemoved: number;
     readonly sessionsRevoked: number;
@@ -109,6 +114,25 @@ export interface CompanyResetResult {
       }[];
     }[];
   };
+}
+
+export interface CompanyUsersResetPreview {
+  readonly company: { readonly id: string; readonly code: string; readonly name: string; readonly environment: string };
+  readonly eligible: boolean;
+  readonly blockers: readonly string[];
+  readonly confirmation: string;
+  readonly selectedUsers: readonly unknown[];
+  readonly accountsToDelete: readonly unknown[];
+  readonly identitiesRetained: readonly unknown[];
+  readonly adminUsersPreserved: readonly unknown[];
+}
+
+export interface CompanyUsersResetEligible {
+  readonly company: { readonly id: string; readonly code: string; readonly name: string; readonly environment: string };
+  readonly eligible: boolean;
+  readonly blockers: readonly string[];
+  readonly usersToRemove: readonly unknown[];
+  readonly adminUsersPreserved: readonly unknown[];
 }
 
 interface CompanyRow {
@@ -166,6 +190,98 @@ export class PlatformCompanyResetService {
         };
       } finally {
         await client.query("rollback");
+      }
+    });
+  }
+
+  public previewUsers(companyId: string, accountIds: readonly string[]): Promise<CompanyUsersResetPreview> {
+    return this.withClient(async (client) => {
+      await client.query("begin transaction read only");
+      try {
+        const company = await this.loadCompany(client, companyId);
+        const blockers = company.environment === "production" ? [PRODUCTION_BLOCKER] : [];
+        const users = await this.previewSelectedUsers(client, companyId, accountIds);
+        return {
+          company: { id: company.id, code: company.code, name: company.name_en, environment: company.environment },
+          eligible: blockers.length === 0,
+          blockers,
+          confirmation: `RESET USERS ${company.code}`,
+          ...users,
+        };
+      } finally {
+        await client.query("rollback");
+      }
+    });
+  }
+
+  public usersResetEligible(companyId: string): Promise<CompanyUsersResetEligible> {
+    return this.withClient(async (client) => {
+      await client.query("begin transaction read only");
+      try {
+        const company = await this.loadCompany(client, companyId);
+        const blockers = company.environment === "production" ? [PRODUCTION_BLOCKER] : [];
+        const plan = await getResetCompanyUserPlan(client, companyId);
+        return {
+          company: { id: company.id, code: company.code, name: company.name_en, environment: company.environment },
+          eligible: blockers.length === 0,
+          blockers,
+          ...plan,
+        };
+      } finally {
+        await client.query("rollback");
+      }
+    });
+  }
+
+  public executeUsers(
+    companyId: string,
+    accountIds: readonly string[],
+    confirmation: string,
+    actor: { accountId: string; correlationId: string },
+  ): Promise<object> {
+    return this.withClient(async (client) => {
+      const company = await this.loadCompany(client, companyId);
+      this.refuseProduction(company);
+      if (confirmation !== `RESET USERS ${company.code}`) {
+        throw new ApplicationException("company_users_reset_confirmation_mismatch", `Type RESET USERS ${company.code} to confirm`, HttpStatus.BAD_REQUEST);
+      }
+      if (accountIds.length === 0 || new Set(accountIds).size !== accountIds.length) {
+        throw new ApplicationException("company_users_reset_selection_invalid", "Select one or more unique non-Admin users.", HttpStatus.BAD_REQUEST);
+      }
+
+      const backupFile = await this.takeBackup(companyId);
+      await client.query("begin");
+      try {
+        await client.query("select pg_advisory_xact_lock(hashtextextended('platform-company-reset', 0))");
+        await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [companyId]);
+        const locked = (await client.query<CompanyRow>(
+          "select id, code, name_en, status, environment from companies where id = $1 for update", [companyId],
+        )).rows[0];
+        if (locked === undefined) throw this.notFound();
+        this.refuseProduction(locked);
+        const selected = await client.query<{ id: string }>(
+          "select id from accounts where company_id = $1 and id = any($2::uuid[]) for update", [companyId, accountIds],
+        );
+        if (selected.rowCount !== accountIds.length) {
+          throw new ApplicationException("company_users_reset_selection_invalid", "One or more selected users no longer belong to this Company.", HttpStatus.CONFLICT);
+        }
+        const preview = await this.previewSelectedUsers(client, companyId, accountIds);
+        if (preview.adminUsersPreserved.length > 0) {
+          throw new ApplicationException("company_users_reset_admin_protected", "A selected user now has an Admin role. Refresh the list and select users again.", HttpStatus.CONFLICT);
+        }
+        const cleanup = await removeResetCompanyUsers(client, companyId, {
+          usersToRemove: preview.selectedUsers as Awaited<ReturnType<typeof getResetCompanyUserPlan>>["usersToRemove"],
+          adminUsersPreserved: [],
+        });
+        await this.auditUsersReset(client, { companyId, actorAccountId: actor.accountId, correlationId: actor.correlationId,
+          before: { selectedAccountIds: accountIds, selectedCount: accountIds.length },
+          after: { ...cleanup, backupFile: basename(backupFile) },
+        });
+        await client.query("commit");
+        return { company: { id: locked.id, code: locked.code, name: locked.name_en }, backupFile: basename(backupFile), selectedCount: accountIds.length, cleanup };
+      } catch (error) {
+        await client.query("rollback");
+        throw error;
       }
     });
   }
@@ -253,6 +369,20 @@ export class PlatformCompanyResetService {
     };
   }
 
+  private async previewSelectedUsers(client: pg.PoolClient, companyId: string, accountIds: readonly string[]) {
+    try {
+      return await previewResetCompanyUsers(client, companyId, accountIds);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Selected users are not eligible for reset.";
+      const isAdmin = message.toLowerCase().includes("admin");
+      throw new ApplicationException(
+        isAdmin ? "company_users_reset_admin_protected" : "company_users_reset_selection_invalid",
+        message,
+        HttpStatus.CONFLICT,
+      );
+    }
+  }
+
   private refuseProduction(company: CompanyRow): void {
     if (company.environment === "production") {
       throw new ApplicationException(
@@ -306,6 +436,17 @@ export class PlatformCompanyResetService {
         JSON.stringify(redactSensitive(input.after)),
         input.correlationId,
       ],
+    );
+  }
+
+  private async auditUsersReset(
+    client: pg.PoolClient,
+    input: { companyId: string; actorAccountId: string; correlationId: string; before: Record<string, unknown>; after: Record<string, unknown> },
+  ): Promise<void> {
+    await client.query(
+      `insert into audit_events (company_id, actor_account_id, action, subject_type, subject_id, before_data, after_data, correlation_id, actor_role, source, result, source_application)
+       values ($1::uuid, $2::uuid, 'platform.company.users_reset', 'company', $1::text, $3::jsonb, $4::jsonb, $5, 'platform_administrator', 'platform_portal', 'success', 'platform-web')`,
+      [input.companyId, input.actorAccountId, JSON.stringify(redactSensitive(input.before)), JSON.stringify(redactSensitive(input.after)), input.correlationId],
     );
   }
 

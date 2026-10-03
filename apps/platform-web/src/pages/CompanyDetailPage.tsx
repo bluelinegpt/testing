@@ -13,6 +13,9 @@ import {
   type CompanyDeletionBackup,
   type CompanyResetPreview,
   type CompanyResetResult,
+  type CompanyUsersResetPreview,
+  type CompanyUsersResetResult,
+  type CompanyUsersResetEligible,
   type ReadinessSummary,
 } from "../api/platform-client.js";
 import { usePlatformSession } from "../app/PlatformSession.js";
@@ -77,6 +80,14 @@ export function CompanyDetailPage(): ReactElement {
   const [resetConfirmation, setResetConfirmation] = useState("");
   const [resetResult, setResetResult] = useState<CompanyResetResult | undefined>(undefined);
   const [resetError, setResetError] = useState<string | undefined>(undefined);
+  const [usersResetCandidates, setUsersResetCandidates] = useState<CompanyResetPreview["usersToRemove"]>([]);
+  const [usersResetAdmins, setUsersResetAdmins] = useState<CompanyUsersResetEligible["adminUsersPreserved"]>([]);
+  const [usersResetBlockers, setUsersResetBlockers] = useState<readonly string[]>([]);
+  const [usersResetPreview, setUsersResetPreview] = useState<CompanyUsersResetPreview | undefined>(undefined);
+  const [usersResetSelected, setUsersResetSelected] = useState<string[]>([]);
+  const [usersResetConfirmation, setUsersResetConfirmation] = useState("");
+  const [usersResetResult, setUsersResetResult] = useState<CompanyUsersResetResult | undefined>(undefined);
+  const [usersResetError, setUsersResetError] = useState<string | undefined>(undefined);
   const [productionConfirmation, setProductionConfirmation] = useState("");
   const [productionError, setProductionError] = useState<string | undefined>(undefined);
   const [shipmentPrefix, setShipmentPrefix] = useState("");
@@ -386,6 +397,69 @@ export function CompanyDetailPage(): ReactElement {
           ? failure.message
           : "The reset failed and was rolled back.",
       );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function runUsersResetSelection(accountIds: string[]): Promise<void> {
+    setUsersResetSelected(accountIds);
+    setUsersResetConfirmation("");
+    setUsersResetError(undefined);
+    setUsersResetResult(undefined);
+    setUsersResetPreview(undefined);
+    if (accountIds.length === 0) return;
+    setBusy(true);
+    try {
+      const preview = await platformApi.previewCompanyUsersReset(companyId, accountIds);
+      setUsersResetPreview(preview);
+      setUsersResetCandidates((current) => {
+        const byId = new Map(current.map((user) => [user.accountId, user]));
+        for (const user of [...preview.selectedUsers, ...preview.adminUsersPreserved]) byId.set(user.accountId, user);
+        return [...byId.values()];
+      });
+    } catch (failure) {
+      setUsersResetError(failure instanceof PlatformApiError ? failure.message : "Unable to preview selected users.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function runUsersResetList(): Promise<void> {
+    setBusy(true);
+    setUsersResetError(undefined);
+    setUsersResetResult(undefined);
+    setUsersResetSelected([]);
+    setUsersResetPreview(undefined);
+    try {
+      const eligible = await platformApi.eligibleCompanyUsersReset(companyId);
+      setUsersResetCandidates(eligible.usersToRemove);
+      setUsersResetAdmins(eligible.adminUsersPreserved);
+      setUsersResetBlockers(eligible.blockers);
+    } catch (failure) {
+      setUsersResetError(failure instanceof PlatformApiError ? failure.message : "Unable to load eligible users.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function executeUsersReset(): Promise<void> {
+    if (usersResetPreview === undefined || usersResetSelected.length === 0) return;
+    setBusy(true);
+    setUsersResetError(undefined);
+    try {
+      const result = await platformApi.resetCompanyUsers(companyId, usersResetSelected, usersResetConfirmation);
+      setUsersResetResult(result);
+      setUsersResetPreview(undefined);
+      setUsersResetSelected([]);
+      setUsersResetConfirmation("");
+      const eligible = await platformApi.eligibleCompanyUsersReset(companyId);
+      setUsersResetCandidates(eligible.usersToRemove);
+      setUsersResetAdmins(eligible.adminUsersPreserved);
+      setUsersResetBlockers(eligible.blockers);
+      await load();
+    } catch (failure) {
+      setUsersResetError(failure instanceof PlatformApiError ? failure.message : "The selected-user reset failed and was rolled back.");
     } finally {
       setBusy(false);
     }
@@ -1012,6 +1086,86 @@ export function CompanyDetailPage(): ReactElement {
                 </p>
                 {canReset ? (
                   <>
+                    <section aria-labelledby="users-only-reset-heading" className="platform-review">
+                      <h5 id="users-only-reset-heading">Users Only Reset</h5>
+                      <p className="platform-muted">
+                        Select only the non-Admin Company or Trader Portal accounts to remove. Other company data and unselected users are preserved; identities required by shared access or history remain without target-company access.
+                      </p>
+                      <button className="platform-button platform-button--quiet" disabled={busy} onClick={() => void runUsersResetList()} type="button">
+                        Load Users for Selective Reset
+                      </button>
+                      {usersResetCandidates.length > 0 ? (
+                        <div aria-label="Eligible users for selective reset">
+                          <label>
+                            <input
+                              checked={usersResetSelected.length === usersResetCandidates.length && usersResetCandidates.length > 0}
+                              disabled={busy}
+                              onChange={(event) => void runUsersResetSelection(event.target.checked ? usersResetCandidates.map((user) => user.accountId) : [])}
+                              type="checkbox"
+                            /> Select All eligible users
+                          </label>
+                          {usersResetCandidates.map((user) => (
+                            <label key={user.accountId} style={{ display: "block" }}>
+                              <input
+                                checked={usersResetSelected.includes(user.accountId)}
+                                disabled={busy}
+                                onChange={(event) => {
+                                  const ids = event.target.checked
+                                    ? [...usersResetSelected, user.accountId]
+                                    : usersResetSelected.filter((id) => id !== user.accountId);
+                                  void runUsersResetSelection(ids);
+                                }}
+                                type="checkbox"
+                              /> {user.displayName} ({user.username}) — {user.accountKind}
+                            </label>
+                          ))}
+                        </div>
+                      ) : null}
+                      {usersResetAdmins.map((user) => (
+                        <p key={user.accountId}>Admin protected — not selectable: {user.displayName} ({user.username}) — {user.accountKind}</p>
+                      ))}
+                      {usersResetBlockers.map((blocker) => <p className="platform-warning" key={blocker}>{blocker}</p>)}
+                      {usersResetPreview === undefined ? null : (
+                        <div>
+                          <p><strong>Selected:</strong> {usersResetPreview.selectedUsers.length}</p>
+                          <p><strong>Accounts to delete:</strong> {usersResetPreview.accountsToDelete.length}</p>
+                          {usersResetPreview.accountsToDelete.map((user) => (
+                            <p key={user.accountId}>{user.displayName} ({user.username}) — {user.accountKind}</p>
+                          ))}
+                          <p><strong>Identities retained for history or other-company access:</strong> {usersResetPreview.identitiesRetained.length}</p>
+                          {usersResetPreview.identitiesRetained.map((user) => (
+                            <p key={user.accountId}>
+                              {user.displayName} ({user.username}) — {user.reason === "preserved_history" ? "preserved history" : "other-company access"}
+                              {user.references.length ? ` — ${user.references.map((ref) => `${ref.table}.${ref.column} (${ref.rows}; ${ref.onDelete})`).join(", ")}` : ""}
+                            </p>
+                          ))}
+                          {usersResetPreview.adminUsersPreserved.map((user) => (
+                            <p key={user.accountId}>Admin protected and not selectable: {user.displayName} ({user.username})</p>
+                          ))}
+                          {usersResetPreview.blockers.map((blocker) => <p className="platform-warning" key={blocker}>{blocker}</p>)}
+                          {usersResetPreview.eligible ? (
+                            <>
+                              <label className="platform-field" htmlFor="users-reset-confirmation">
+                                <span>Type {usersResetPreview.confirmation} to confirm</span>
+                                <input autoComplete="off" id="users-reset-confirmation" onChange={(event) => setUsersResetConfirmation(event.target.value)} value={usersResetConfirmation} />
+                              </label>
+                              <button className="platform-button" disabled={busy || usersResetConfirmation !== usersResetPreview.confirmation} onClick={() => void executeUsersReset()} type="button">
+                                Reset Selected Users
+                              </button>
+                            </>
+                          ) : null}
+                        </div>
+                      )}
+                      {usersResetResult === undefined ? null : (
+                        <div role="status">
+                          <p><strong>Selected-user reset complete.</strong> {usersResetResult.cleanup.accountsDeleted} account(s) deleted; {usersResetResult.cleanup.sessionsRevoked} Company session(s) revoked; {usersResetResult.cleanup.employeesUnlinked} Employee profile(s) unlinked for later account creation; {usersResetResult.cleanup.retainedIdentities.length} identity/identities retained safely.</p>
+                          {usersResetResult.cleanup.retainedIdentities.map((user) => (
+                            <p key={user.accountId}>Retained {user.displayName} ({user.username}) — {user.reason}; Company access removed. {user.references.map((ref) => `${ref.table}.${ref.column} (${ref.rows})`).join(", ")}</p>
+                          ))}
+                        </div>
+                      )}
+                      {usersResetError === undefined ? null : <p className="platform-login__error" role="alert">{usersResetError}</p>}
+                    </section>
                     <button
                       className="platform-button platform-button--quiet"
                       disabled={busy}
