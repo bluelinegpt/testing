@@ -243,7 +243,7 @@ export function CompanyAppShell({
             id: "reports",
             label: t("nav.reports"),
             items: [
-              { label: t("nav.ordersExport"), path: "/reports" },
+              { label: t("nav.ordersReport"), path: "/reports/orders" },
               {
                 label: t("nav.dailyOperationsSummary"),
                 path: "/reports/daily-operations-summary",
