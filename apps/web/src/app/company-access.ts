@@ -67,6 +67,7 @@ const routePermissions: Readonly<Record<string, readonly string[]>> = {
     "settlements.reverse",
   ],
   "/reports": [manage, "reports.financial.view", "reports.export"],
+  "/reports/orders": [manage, "reports.export"],
   "/reports/daily-operations-summary": [manage, "reports.financial.view", "reports.export"],
   "/configuration/company-profile": ["company_profile.manage"],
   // Registered here or the route is unreachable: an unlisted path is denied
