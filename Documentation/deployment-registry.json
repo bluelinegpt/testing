@@ -20,9 +20,9 @@
       "path": "apps/api",
       "renderService": "bluelinegpt-api-test",
       "status": "pushed_awaiting_confirmation",
-      "localCommit": "91ea643",
+      "localCommit": "e2cc1022",
       "localCommitDate": "2026-10-03",
-      "lastChangeDescription": "fix: include reset-retained users in selective reset",
+      "lastChangeDescription": "feat: preserve fiscal periods after demo reset",
       "lastChangeBy": "codex",
       "confirmedLiveCommit": "f1d5271",
       "confirmedLiveAt": "2026-10-01"
@@ -46,9 +46,9 @@
       "path": "apps/platform-web",
       "renderService": "bluelinegpt-platform-test",
       "status": "pushed_awaiting_confirmation",
-      "localCommit": "91ea643",
+      "localCommit": "e2cc1022",
       "localCommitDate": "2026-10-03",
-      "lastChangeDescription": "fix: include reset-retained users in selective reset",
+      "lastChangeDescription": "feat: preserve fiscal periods after demo reset",
       "lastChangeBy": "codex",
       "confirmedLiveCommit": "aee8bb0",
       "confirmedLiveAt": "2026-08-31"
