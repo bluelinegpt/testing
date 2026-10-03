@@ -31,6 +31,7 @@ export function accountingReportHtml(input: {
   readonly document: AccountingReportDocument;
   readonly language: "en" | "ar";
   readonly logoDataUrl?: string;
+  readonly showTelephone?: boolean;
 }): { readonly footer: string; readonly html: string } {
   const ar = input.language === "ar";
   const b = input.branding;
@@ -64,7 +65,7 @@ thead{display:table-header-group}tr{page-break-inside:avoid}th,td{border:1px sol
 th{background:#eef2ff;font-weight:700}bdi{direction:ltr;unicode-bidi:isolate}footer{display:none}
 </style></head><body><header>${input.logoDataUrl === undefined ? "" : `<img src="${input.logoDataUrl}" alt="">`}
 <div><div class="company">${escape(company)}</div>${subtitle === null ? "" : `<div class="subtitle">${escape(subtitle)}</div>`}<h1>${escape(input.document.title)}</h1></div></header>
-<div class="meta"><span>${labels.generated}: <bdi>${escape(input.document.generatedAt)}</bdi></span><span>${labels.snapshot}: <bdi>${escape(input.document.snapshotAt)}</bdi></span>${b.telephone === null ? "" : `<span><bdi>${escape(b.telephone)}</bdi></span>`}</div>
+<div class="meta"><span>${labels.generated}: <bdi>${escape(input.document.generatedAt)}</bdi></span><span>${labels.snapshot}: <bdi>${escape(input.document.snapshotAt)}</bdi></span>${input.showTelephone !== false && b.telephone !== null ? `<span><bdi>${escape(b.telephone)}</bdi></span>` : ""}</div>
 <div class="filters">${filters}</div>${warnings}<table><thead><tr>${input.document.columns.map((column) => `<th>${escape(column)}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table></body></html>`;
   const footer = `<div style="width:100%;font-size:8px;color:#667085;padding:0 12mm;text-align:center"><span>${escape(company)} · ${labels.page} <span class="pageNumber"></span>/<span class="totalPages"></span></span></div>`;
   return { footer, html };

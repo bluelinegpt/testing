@@ -534,6 +534,7 @@ export class OperationsController {
       branding,
       document,
       language: reportLanguage,
+      showTelephone: false,
       ...(logoDataUrl === undefined ? {} : { logoDataUrl }),
     });
     const bytes = await this.pdf.renderPdf(rendered.html, rendered.footer);

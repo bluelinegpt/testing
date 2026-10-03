@@ -29,5 +29,6 @@ describe("Orders Report contract", () => {
     expect(controller).toContain("رقم الطلب");
     expect(controller).toContain("جديد");
     expect(controller).toContain("جميع التجار");
+    expect(controller).toContain("showTelephone: false");
   });
 });
