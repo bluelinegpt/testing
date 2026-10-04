@@ -324,43 +324,27 @@ export function buildTraderSettlementStatementHtml(
     ]
       .map((label) => `<th>${escapeHtml(label)}</th>`)
       .join("") +
-    `</tr></thead><tbody>${orderRows}</tbody></table>`;
+    `</tr></thead><tbody>${orderRows}`;
 
   const deductionRows = data.receivableOffsets
     .map(
       (line, index) =>
         "<tr>" +
         `<td class="num">${index + 1}</td>` +
+        `<td class="mono">${escapeHtml(line.orderNumber ?? line.sourceReference ?? "")}</td>` +
+        `<td>${escapeHtml(labels.receivableReason)}</td>` +
         `<td class="mono">${escapeHtml(line.receivableNumber)}</td>` +
         `<td>${dateOnly(line.businessDate)}</td>` +
-        `<td class="mono">${escapeHtml(line.orderNumber ?? line.sourceReference ?? "")}</td>` +
-        `<td class="mono">${escapeHtml(line.referenceNumber ?? "")}</td>` +
         `<td>${escapeHtml(line.customerName ?? "")}</td>` +
         `<td class="mono">${escapeHtml(line.customerMobileNumber ?? "")}</td>` +
-        `<td>${escapeHtml(line.reason)}</td>` +
+        `<td></td><td></td>` +
         `<td class="num negative">-${money(line.amountApplied)}</td>` +
+        `<td class="num"></td><td class="num"></td><td class="num"></td>` +
+        `<td>${escapeHtml(line.reason)}</td>` +
         "</tr>",
     )
     .join("");
-  const deductionTable =
-    data.receivableOffsets.length === 0
-      ? ""
-        : `<h3 class="subsection-title">${escapeHtml(labels.receivableDeductions)}</h3>` +
-        `<table class="grid"><thead><tr>` +
-        [
-          labels.lineNumber,
-          labels.receivableNumber,
-          labels.paymentDate,
-          labels.receivableSource,
-          labels.externalReference,
-          labels.customerName,
-          labels.customerMobile,
-          labels.receivableReason,
-          labels.receivableDeductions,
-        ]
-          .map((label) => `<th>${escapeHtml(label)}</th>`)
-          .join("") +
-        `</tr></thead><tbody>${deductionRows}</tbody></table>`;
+  const combinedRows = deductionRows;
 
   const headerMeta = (label: string, value: string) =>
     `<div class="meta-item"><span class="meta-label">${escapeHtml(label)}</span>` +
@@ -476,9 +460,10 @@ export function buildTraderSettlementStatementHtml(
 
   const summaryLine = (label: string, value: string) =>
     `<div class="summary-line"><span>${escapeHtml(label)}</span><span>${value}</span></div>`;
+  const totalDetailRows = data.orders.length + data.receivableOffsets.length;
   const summary =
     `<section class="summary-section">` +
-    `<h2 class="section-title">${escapeHtml(labels.numberOfOrders)}: ${data.summary.orderCount}</h2>` +
+    `<h2 class="section-title">${escapeHtml(labels.numberOfOrders)}: ${totalDetailRows}</h2>` +
     summaryLine(labels.cod, money(data.summary.totalCod)) +
     summaryLine(labels.serviceFee, money(data.summary.totalServiceFees)) +
     summaryLine(labels.originalTraderPayable, money(data.summary.totalOriginalTraderPayable)) +
@@ -543,7 +528,7 @@ export function buildTraderSettlementStatementHtml(
     noticeSection +
     `<h2 class="section-title">${escapeHtml(labels.financialDetails)}</h2>` +
     orderTable +
-    deductionTable +
+    combinedRows + `</tbody></table>` +
     summary +
     signatures +
     `</body></html>`
