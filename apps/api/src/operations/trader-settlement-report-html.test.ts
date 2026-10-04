@@ -188,7 +188,7 @@ describe("buildTraderSettlementStatementHtml", () => {
           customerName: null,
           orderSerialNumber: "SER-FEE-1",
           orderNumber: "ORD-FEE-1",
-          referenceNumber: null,
+          referenceNumber: "1706",
           reason: "Service fee owed by Trader",
           receivableNumber: "RCV-000123",
           sourceReference: "ORD-FEE-1",
@@ -205,7 +205,8 @@ describe("buildTraderSettlementStatementHtml", () => {
     const html = buildTraderSettlementStatementHtml(withDeduction, "en");
     expect(html).not.toContain("RCV-000123");
     expect(html).toContain("ORD-FEE-1");
-    expect(html).toContain("SER-FEE-1");
+    expect(html).toContain("1706");
+    expect(html).not.toContain("SER-FEE-1");
     expect(html).not.toContain("Service fee owed by Trader");
     expect(html).toContain("-AED 25.00");
     expect(html).toContain("AED 75.00");
