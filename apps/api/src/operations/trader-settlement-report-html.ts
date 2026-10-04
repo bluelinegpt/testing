@@ -331,9 +331,9 @@ export function buildTraderSettlementStatementHtml(
         `<td>${dateOnly(line.businessDate)}</td>` +
         `<td>${escapeHtml(line.customerName ?? "")}</td>` +
         `<td class="mono">${escapeHtml(line.customerMobileNumber ?? "")}</td>` +
-        `<td>—</td><td>—</td><td class="num">—</td>` +
+        `<td></td><td></td><td class="num"></td>` +
         `<td class="num negative">-${tableMoney(line.amountApplied)}</td>` +
-        `<td class="num">—</td>` +
+        `<td class="num"></td>` +
         `<td></td>` +
         "</tr>",
     )
