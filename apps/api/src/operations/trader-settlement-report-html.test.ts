@@ -95,8 +95,8 @@ describe("buildTraderSettlementStatementHtml", () => {
     expect(html).toContain("Test Customer");
     expect(html).toContain("Dubai");
     expect(html).toContain("Deira");
-    expect(html).toContain("AED 100.00");
-    expect(html).toContain("AED 110.00");
+    expect(html).toContain("100.00");
+    expect(html).toContain("110.00");
     expect(html).toContain("Test Company");
     expect(html).toContain("Delivery operations");
     // Bank section: source bank shows only bank/account name (no digits at
@@ -130,7 +130,7 @@ describe("buildTraderSettlementStatementHtml", () => {
     expect(html).toContain("شركة الاختبار");
     expect(html).toContain("ORD-000001");
     expect(html).toContain("REF-1");
-    expect(html).toContain("AED 100.00");
+    expect(html).toContain("100.00");
   });
 
   it("falls back to the other language's Company subtitle when the requested one is missing", () => {
@@ -178,7 +178,7 @@ describe("buildTraderSettlementStatementHtml", () => {
       summary: { ...sample.summary, amountPaidNow: "60.00", remainingOutstanding: "40.00" },
     };
     const html = buildTraderSettlementStatementHtml(partial, "en");
-    expect(html).toContain("AED 60.00");
+    expect(html).toContain("60.00");
   });
 
   it("shows Trader fee deductions as negative lines and the net payment", () => {
@@ -212,7 +212,7 @@ describe("buildTraderSettlementStatementHtml", () => {
     expect(html).toContain("1706");
     expect(html).not.toContain("SER-FEE-1");
     expect(html).not.toContain("Service fee owed by Trader");
-    expect(html).toContain("-AED 25.00");
+    expect(html).toContain("-25.00");
     expect(html).toContain("AED 75.00");
     const summary = html.slice(
       html.indexOf('<section class="summary-section">'),

@@ -231,6 +231,10 @@ function money(value: string): string {
   return `AED ${escapeHtml(value)}`;
 }
 
+function tableMoney(value: string): string {
+  return escapeHtml(value);
+}
+
 function paymentMethodLabel(labels: Labels, method: "bank_transfer" | "cash"): string {
   return method === "bank_transfer" ? labels.paymentMethodBankTransfer : labels.paymentMethodCash;
 }
@@ -292,9 +296,9 @@ export function buildTraderSettlementStatementHtml(
         `<td>${escapeHtml(order.customerMobileNumber)}</td>` +
         `<td>${order.emirateName === null ? "" : escapeHtml(order.emirateName)}</td>` +
         `<td>${escapeHtml(order.areaName)}</td>` +
-        `<td class="num">${money(order.codAmount)}</td>` +
-        `<td class="num">${money(order.serviceFee)}</td>` +
-        `<td class="num">${money(order.amountPaidNow)}</td>` +
+        `<td class="num">${tableMoney(order.codAmount)}</td>` +
+        `<td class="num">${tableMoney(order.serviceFee)}</td>` +
+        `<td class="num">${tableMoney(order.amountPaidNow)}</td>` +
         "</tr>",
     )
     .join("");
@@ -323,13 +327,12 @@ export function buildTraderSettlementStatementHtml(
         "<tr>" +
         `<td class="num">${data.orders.length + index + 1}</td>` +
         `<td class="mono">${escapeHtml(line.orderNumber ?? line.sourceReference ?? "")}</td>` +
-        `<td></td>` +
         `<td class="mono">${escapeHtml(line.referenceNumber ?? "")}</td>` +
         `<td>${dateOnly(line.businessDate)}</td>` +
         `<td>${escapeHtml(line.customerName ?? "")}</td>` +
         `<td class="mono">${escapeHtml(line.customerMobileNumber ?? "")}</td>` +
-        `<td></td><td></td>` +
-        `<td class="num negative">-${money(line.amountApplied)}</td>` +
+        `<td></td><td></td><td></td>` +
+        `<td class="num negative">-${tableMoney(line.amountApplied)}</td>` +
         `<td class="num"></td>` +
         `<td></td>` +
         "</tr>",
