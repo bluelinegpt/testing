@@ -1956,17 +1956,18 @@ export function DriverCollectionDetailDialog({
       title={t("operations.collectionDetail")}
       titleId="collection-detail-title"
     >
-      {error === undefined ? null : (
-        <div className="alert alert-error" role="alert">
-          {error}
-        </div>
-      )}
-      {data === undefined ? (
-        error === undefined ? (
-          <div className="loading-row">{t("common.loading")}</div>
-        ) : null
-      ) : (
-        <>
+      <div className="order-modal-scroll">
+        {error === undefined ? null : (
+          <div className="alert alert-error" role="alert">
+            {error}
+          </div>
+        )}
+        {data === undefined ? (
+          error === undefined ? (
+            <div className="loading-row">{t("common.loading")}</div>
+          ) : null
+        ) : (
+          <>
           <dl className="reconciliation-summary">
             <div className="detail-line">
               <dt>{t("operations.reconciliationNumber")}</dt>
@@ -2259,8 +2260,9 @@ export function DriverCollectionDetailDialog({
               {t("common.close")}
             </button>
           </div>
-        </>
-      )}
+          </>
+        )}
+      </div>
 
       {!reverseOpen || data === undefined ? null : (
         <ReverseCollectionDialog

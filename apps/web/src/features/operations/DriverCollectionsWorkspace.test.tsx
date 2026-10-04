@@ -18,7 +18,10 @@ function renderWithRouter(ui: ReactElement, initialEntries: readonly string[] = 
 
 import type { ApiClient } from "../../api/api-client.js";
 import { i18nInstance } from "../../localization/i18n.js";
-import { DriverCollectionsWorkspace } from "./DriverCollectionsWorkspace.js";
+import {
+  DriverCollectionDetailDialog,
+  DriverCollectionsWorkspace,
+} from "./DriverCollectionsWorkspace.js";
 
 const summary = {
   actualAmountReceived: "500.00",
@@ -140,6 +143,82 @@ function setup(overrides: { readonly getExtra?: (path: string) => unknown } = {}
 describe("DriverCollectionsWorkspace", () => {
   beforeEach(async () => {
     await i18nInstance.changeLanguage("en");
+  });
+
+  it("keeps every reconciliation order reachable in the detail dialog scroll area", async () => {
+    const reportData = {
+      expenses: [],
+      header: {
+        businessDate: "2026-10-04",
+        collectionPaymentMethod: "cash",
+        confirmedAt: "2026-10-04T08:00:00.000Z",
+        confirmedBy: "operator",
+        createdAt: "2026-10-04T07:00:00.000Z",
+        createdBy: "operator",
+        driverCode: "DRV-1",
+        driverName: "Test Driver",
+        driverNameAr: null,
+        driverType: "outsourced",
+        isReversal: false,
+        linkedDriverFeePaymentId: null,
+        linkedDriverFeePaymentNumber: null,
+        linkedDriverFeePaymentStatus: null,
+        notes: null,
+        reconciliationNumber: "REC-000032",
+        reversedByReconciliationNumber: null,
+        reversesReconciliationNumber: null,
+        status: "confirmed",
+        statusLabel: "Confirmed",
+      },
+      orders: Array.from({ length: 14 }, (_, index) => ({
+        additionalFees: "0.00",
+        areaName: "Dubai",
+        codAmount: "200.00",
+        customerAmountToCollect: "200.00",
+        customerName: `Customer ${index + 1}`,
+        deliveryDate: "2026-10-04",
+        driverReconciliationStatus: "reconciled",
+        driverReconciliationStatusLabel: "Collected",
+        emirateName: "Dubai",
+        orderNumber: `ORD-${index + 1}`,
+        paymentMethod: "cash",
+        referenceNumber: null,
+        serialNumber: `SER-${index + 1}`,
+        serviceFee: "0.00",
+        totalDeductions: "0.00",
+        traderCode: "TRD-1",
+        traderName: "Test Trader",
+        traderPayable: "200.00",
+        vatAmount: "0.00",
+      })),
+      summary: {
+        actualReceived: "2800.00",
+        cashTotal: "2800.00",
+        difference: "0.00",
+        driverFeeOffset: "0.00",
+        driverExpenses: "0.00",
+        grossCollections: "2800.00",
+        netExpected: "2800.00",
+        orderCount: 14,
+        visaTotal: "0.00",
+      },
+    };
+    const api = { get: vi.fn().mockResolvedValue(reportData) };
+
+    renderWithRouter(
+      <DriverCollectionDetailDialog
+        api={api as unknown as ApiClient}
+        onClose={vi.fn()}
+        onReversed={vi.fn()}
+        reconciliationId="rec-1"
+      />,
+    );
+
+    const lastOrder = await screen.findByText("SER-14");
+    const dialog = screen.getByRole("dialog");
+    const scrollArea = dialog.querySelector(".order-modal-scroll");
+    expect(scrollArea).toContainElement(lastOrder);
+    expect(within(scrollArea as HTMLElement).getAllByRole("row")).toHaveLength(15);
   });
 
   it("shows the renamed Driver Collections title, not the old Drivers list", async () => {
