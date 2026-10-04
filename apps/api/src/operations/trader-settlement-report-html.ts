@@ -466,7 +466,6 @@ export function buildTraderSettlementStatementHtml(
     `<h2 class="section-title">${escapeHtml(labels.numberOfOrders)}: ${totalDetailRows}</h2>` +
     summaryLine(labels.cod, money(data.summary.totalCod)) +
     summaryLine(labels.serviceFee, money(data.summary.totalServiceFees)) +
-    summaryLine(labels.originalTraderPayable, money(data.summary.totalOriginalTraderPayable)) +
     summaryLine(labels.amountPaidNow, money(data.summary.netPayment)) +
     `</section>`;
 
