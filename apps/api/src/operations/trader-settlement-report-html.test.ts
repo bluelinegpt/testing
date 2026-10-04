@@ -205,6 +205,7 @@ describe("buildTraderSettlementStatementHtml", () => {
     const html = buildTraderSettlementStatementHtml(withDeduction, "en");
     expect(html).not.toContain("RCV-000123");
     expect(html).toContain("ORD-FEE-1");
+    expect(html).toContain("SER-FEE-1");
     expect(html).not.toContain("Service fee owed by Trader");
     expect(html).toContain("-AED 25.00");
     expect(html).toContain("AED 75.00");
