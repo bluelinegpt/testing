@@ -25,6 +25,7 @@ interface Labels {
   readonly deliveryDate: string;
   readonly emirate: string;
   readonly externalReference: string;
+  readonly financialDetails: string;
   readonly generatedAt: string;
   readonly grossOrderPayable: string;
   readonly lineNumber: string;
@@ -93,6 +94,7 @@ const LABELS: Record<ReportLanguage, Labels> = {
     deliveryDate: "تاريخ التسليم",
     emirate: "الإمارة",
     externalReference: "الرقم المرجعي",
+    financialDetails: "التفاصيل المالية",
     generatedAt: "تاريخ ووقت إنشاء التقرير",
     grossOrderPayable: "إجمالي مستحقات الطلبات (+)",
     lineNumber: "#",
@@ -159,6 +161,7 @@ const LABELS: Record<ReportLanguage, Labels> = {
     deliveryDate: "Delivery Date",
     emirate: "Emirate",
     externalReference: "Reference Number",
+    financialDetails: "Financial Details",
     generatedAt: "Generated Date and Time",
     grossOrderPayable: "Gross Order Payable (+)",
     lineNumber: "#",
@@ -342,7 +345,7 @@ export function buildTraderSettlementStatementHtml(
   const deductionTable =
     data.receivableOffsets.length === 0
       ? ""
-      : `<h2 class="section-title">${escapeHtml(labels.receivableDeductions)}</h2>` +
+        : `<h3 class="subsection-title">${escapeHtml(labels.receivableDeductions)}</h3>` +
         `<table class="grid"><thead><tr>` +
         [
           labels.lineNumber,
@@ -515,7 +518,8 @@ export function buildTraderSettlementStatementHtml(
     .notice { font-size: 11px; padding: 4px 8px; margin-bottom: 4px; border-inline-start: 3px solid; }
     .notice-positive { background: #eef8f0; border-color: #2e7d32; }
     .notice-negative { background: #fdeeee; border-color: #c62828; }
-    .section-title { font-size: 13px; margin: 14px 0 6px; }
+     .section-title { font-size: 13px; margin: 14px 0 6px; }
+     .subsection-title { font-size: 11px; margin: 8px 0 4px; }
     table.grid { width: 100%; border-collapse: collapse; font-size: 10px; margin-bottom: 10px; }
     table.grid th, table.grid td { border: 1px solid #999; padding: 3px 5px; text-align: start; }
     table.grid thead { display: table-header-group; }
@@ -537,6 +541,7 @@ export function buildTraderSettlementStatementHtml(
     `<style>${style}</style></head><body>` +
     reportHeader +
     noticeSection +
+    `<h2 class="section-title">${escapeHtml(labels.financialDetails)}</h2>` +
     orderTable +
     deductionTable +
     summary +

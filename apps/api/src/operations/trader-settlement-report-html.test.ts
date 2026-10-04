@@ -120,6 +120,7 @@ describe("buildTraderSettlementStatementHtml", () => {
     expect(html).toContain("شركة الاختبار");
     expect(html).not.toContain("Test Company / شركة الاختبار");
     expect(html.slice(0, html.indexOf("<table"))).not.toContain("الرقم المرجعي");
+    expect(html).toContain("التفاصيل المالية");
     expect(html).toContain("شركة الاختبار");
     expect(html).toContain("ORD-000001");
     expect(html).toContain("REF-1");
