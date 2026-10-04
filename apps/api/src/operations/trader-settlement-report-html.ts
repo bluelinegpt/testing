@@ -398,9 +398,7 @@ export function buildTraderSettlementStatementHtml(
       ? ""
       : `<img class="company-logo" alt="" src="${escapeHtml(header.company.logoDataUri)}">`) +
     `<div class="company-identity">` +
-    `<div class="company-name">${escapeHtml(header.company.nameEn)}` +
-    (header.company.nameAr === null ? "" : ` / ${escapeHtml(header.company.nameAr)}`) +
-    `</div>` +
+    `<div class="company-name">${escapeHtml(language === "ar" ? (header.company.nameAr ?? header.company.nameEn) : header.company.nameEn)}</div>` +
     (header.company.subtitleEn === null && header.company.subtitleAr === null
       ? ""
       : `<div class="company-subtitle">${escapeHtml(
@@ -415,10 +413,6 @@ export function buildTraderSettlementStatementHtml(
     `<h1 class="report-title">${escapeHtml(labels.title)}</h1>` +
     `<div class="meta-grid">` +
     headerMeta(labels.settlementNumber, header.settlementNumber) +
-    headerMeta(
-      labels.externalReference,
-      [...new Set(data.orders.map((order) => order.referenceNumber).filter((value): value is string => value !== null && value !== ""))].join(", "),
-    ) +
     headerMeta(labels.status, settlementStatusLabel(labels, header.status)) +
     headerMeta(labels.trader, header.traderName) +
     headerMeta(labels.paymentDate, header.paymentDate) +
