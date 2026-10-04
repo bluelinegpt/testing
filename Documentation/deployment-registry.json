@@ -32,7 +32,7 @@
       "displayName": "Main app",
       "path": "apps/web",
       "renderService": "bluelinegpt-web-test",
-      "status": "needs_deploy",
+      "status": "pushed_awaiting_confirmation",
       "localCommit": "b8788953",
       "localCommitDate": "2026-10-04",
       "lastChangeDescription": "fix: scroll Driver Collection details",
