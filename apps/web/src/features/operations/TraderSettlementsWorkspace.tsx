@@ -213,6 +213,7 @@ interface TraderSettlementSummaryTotals {
 interface TraderSettlementReceivableOffset {
   readonly amountApplied: string;
   readonly businessDate: string;
+  readonly referenceNumber?: string | null;
   readonly orderSerialNumber: string | null;
   readonly reason: string;
   readonly receivableNumber: string;
@@ -4077,7 +4078,7 @@ export function SettlementDetailDialog({
                         <td className="mono">{offset.receivableNumber}</td>
                         <td>{offset.businessDate}</td>
                         <td className="mono">
-                          {offset.orderSerialNumber ?? offset.sourceReference ?? "-"}
+                          {offset.referenceNumber ?? offset.sourceReference ?? "-"}
                         </td>
                         <td>{offset.reason}</td>
                         <td>-{money(offset.amountApplied)}</td>

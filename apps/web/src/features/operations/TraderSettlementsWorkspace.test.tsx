@@ -85,6 +85,7 @@ const eligibleTraderFee = {
   businessDate: "2026-07-21",
   id: "receivable-1",
   orderSerialNumber: "SER-0",
+  referenceNumber: "1706",
   originalAmountDue: "18.00",
   outstandingAmount: "18.00",
   previouslyCollected: "0.00",
