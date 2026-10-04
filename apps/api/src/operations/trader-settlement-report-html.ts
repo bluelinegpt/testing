@@ -332,15 +332,15 @@ export function buildTraderSettlementStatementHtml(
         "<tr>" +
         `<td class="num">${data.orders.length + index + 1}</td>` +
         `<td class="mono">${escapeHtml(line.orderNumber ?? line.sourceReference ?? "")}</td>` +
-        `<td>${escapeHtml(labels.receivableReason)}</td>` +
-        `<td class="mono">${escapeHtml(line.receivableNumber)}</td>` +
+        `<td></td>` +
+        `<td class="mono"></td>` +
         `<td>${dateOnly(line.businessDate)}</td>` +
         `<td>${escapeHtml(line.customerName ?? "")}</td>` +
         `<td class="mono">${escapeHtml(line.customerMobileNumber ?? "")}</td>` +
         `<td></td><td></td>` +
         `<td class="num negative">-${money(line.amountApplied)}</td>` +
         `<td class="num"></td><td class="num"></td><td class="num"></td>` +
-        `<td>${escapeHtml(line.reason)}</td>` +
+        `<td></td>` +
         "</tr>",
     )
     .join("");
@@ -467,11 +467,7 @@ export function buildTraderSettlementStatementHtml(
     summaryLine(labels.cod, money(data.summary.totalCod)) +
     summaryLine(labels.serviceFee, money(data.summary.totalServiceFees)) +
     summaryLine(labels.originalTraderPayable, money(data.summary.totalOriginalTraderPayable)) +
-    summaryLine(labels.previouslyPaid, money(data.summary.previouslyPaid)) +
-    summaryLine(labels.grossOrderPayable, money(data.summary.grossOrderPayable)) +
-    summaryLine(labels.receivableDeductions, `-${money(data.summary.traderFeeDeductions)}`) +
     summaryLine(labels.amountPaidNow, money(data.summary.netPayment)) +
-    summaryLine(labels.remainingOutstanding, money(data.summary.remainingOutstanding)) +
     `</section>`;
 
   const signatures =
