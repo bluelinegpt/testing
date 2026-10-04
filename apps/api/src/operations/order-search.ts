@@ -81,6 +81,12 @@ export function unifiedOrderSearchPredicate(term: string | null | undefined): Ra
     sql<boolean>`o.order_number = ${trimmed}`,
     sql<boolean>`o.order_number like ${trimmed + "%"}`,
     sql<boolean>`o.order_number like ${trimmed.toUpperCase() + "%"}`,
+    // Operators commonly type the numeric suffix without the visible ORD-
+    // prefix. Keep that shorthand scoped to numeric input so it cannot turn
+    // arbitrary text into a broad order-number scan.
+    ...( /^\d+$/u.test(trimmed)
+      ? [sql<boolean>`o.order_number = ${"ORD-" + trimmed}`]
+      : []),
     // Serial: exact, then prefix. Shares the Reference normalisation because the
     // writer normalises both through `normalizeOrderIdentifier` -- lower-cased,
     // NFKC, trimmed, spaces collapsed, leading zeros and '-', '_', '/' intact.
