@@ -83,6 +83,85 @@ const internationalOrder = {
 describe("OrdersModuleWorkspace", () => {
   beforeEach(async () => i18nInstance.changeLanguage("en"));
 
+  it("restores Orders state after navigation and remembers Clear Filters for the same user/company", async () => {
+    localStorage.clear();
+    const api = {
+      get: vi.fn((path: string) => {
+        if (path.startsWith("operations/orders?")) {
+          return Promise.resolve({
+            filteredCount: 100,
+            items: [],
+            matchingCount: 100,
+            page: 3,
+            pageSize: 50,
+            tabTotalCount: 100,
+            totalCount: 100,
+          });
+        }
+        if (path.startsWith("configuration/emirates")) return Promise.resolve([]);
+        if (path.startsWith("configuration/areas")) {
+          return Promise.resolve({ hasMore: false, items: [], total: 0 });
+        }
+        if (path.startsWith("operations/third-party-delivery-companies") || path.startsWith("operations/destination-countries")) {
+          return Promise.resolve({ hasMore: false, items: [], total: 0 });
+        }
+        return Promise.resolve([]);
+      }),
+      post: vi.fn().mockResolvedValue({}),
+    };
+    const persistenceScope = { companyId: "company-1", userId: "user-1" };
+    const renderOrders = (entry: string) =>
+      renderWithRouter(
+        <OrdersModuleWorkspace
+          api={api as unknown as ApiClient}
+          onNavigate={vi.fn()}
+          permissions={[]}
+          persistenceScope={persistenceScope}
+        />,
+        [entry],
+      );
+
+    const original = renderOrders(
+      "/orders?quickView=all&search=7555&page=3&pageSize=50&sort=orderNumber&direction=asc",
+    );
+    await waitFor(() => expect(api.get).toHaveBeenCalledWith(expect.stringContaining("search=7555")));
+    expect(api.get).toHaveBeenCalledWith(expect.stringContaining("quickView=all"));
+    expect(api.get).toHaveBeenCalledWith(expect.stringContaining("page=3"));
+    expect(api.get).toHaveBeenCalledWith(expect.stringContaining("pageSize=50"));
+    expect(api.get).toHaveBeenCalledWith(expect.stringContaining("sortBy=orderNumber"));
+    expect(api.get).toHaveBeenCalledWith(expect.stringContaining("sortDirection=asc"));
+    original.unmount();
+
+    api.get.mockClear();
+    const returned = renderOrders("/orders");
+    await waitFor(() => expect(api.get).toHaveBeenCalledWith(expect.stringContaining("search=7555")));
+    expect(api.get).toHaveBeenCalledWith(expect.stringContaining("quickView=all"));
+    expect(api.get).toHaveBeenCalledWith(expect.stringContaining("page=3"));
+    expect(api.get).toHaveBeenCalledWith(expect.stringContaining("pageSize=50"));
+    expect(api.get).toHaveBeenCalledWith(expect.stringContaining("sortBy=orderNumber"));
+    expect(api.get).toHaveBeenCalledWith(expect.stringContaining("sortDirection=asc"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+    await waitFor(() =>
+      expect(api.get).toHaveBeenCalledWith(
+        expect.stringContaining("quickView=all"),
+      ),
+    );
+    returned.unmount();
+
+    api.get.mockClear();
+    renderOrders("/orders");
+    await waitFor(() => expect(api.get).toHaveBeenCalledWith(expect.stringContaining("quickView=all")));
+    const restoredRequest = api.get.mock.calls
+      .map(([path]) => String(path))
+      .find((path) => path.startsWith("operations/orders?") && path.includes("quickView=all"));
+    expect(restoredRequest).toContain("pageSize=50");
+    expect(restoredRequest).toContain("sortBy=orderNumber");
+    expect(restoredRequest).toContain("sortDirection=asc");
+    expect(restoredRequest).not.toContain("search=7555");
+    expect(restoredRequest).not.toContain("page=3");
+  });
+
   it("lets an administrator reopen a Delivered Order through the dedicated action", async () => {
     const deliveredOrder = {
       ...order,

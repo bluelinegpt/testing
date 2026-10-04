@@ -174,6 +174,7 @@ export function CompanyWorkspace({
         api={api}
         onNavigate={(target) => void navigate(target)}
         permissions={session.identity.permissions}
+        persistenceScope={{ companyId: session.identity.companyId, userId: session.identity.id }}
       />
     );
   } else if (path === "/drivers" || path.startsWith("/drivers/collections/")) {

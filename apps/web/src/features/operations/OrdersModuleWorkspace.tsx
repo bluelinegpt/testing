@@ -52,6 +52,7 @@ import {
   type WorkflowDeepLink,
   type WorkflowDialog,
 } from "./use-workflow-deep-link.js";
+import { useLocation, useNavigate } from "react-router-dom";
 import { PageHeader } from "../../components/PageHeader.js";
 import { FilterCombobox } from "../../components/FilterCombobox.js";
 import { SearchCombobox } from "../../components/SearchCombobox.js";
@@ -78,6 +79,15 @@ import { DriverCollectionDetailDialog } from "./DriverCollectionsWorkspace.js";
 import { openOrderWaybill, OrderBarcode } from "./OperationsWorkspace.js";
 import { type PdfAction, useReconciliationPdfActions } from "./reconciliation-pdf.js";
 import { SettlementDetailDialog } from "./TraderSettlementsWorkspace.js";
+import {
+  hasOrdersListState,
+  ordersListStateStorageKey,
+  removeOrdersListSearch,
+  readOrdersListSnapshot,
+  restoreOrdersListSearch,
+  writeOrdersListSnapshot,
+  type OrdersGroupingDimension,
+} from "./orders-list-state-storage.js";
 
 /**
  * `delivery` is a FRONTEND-ONLY view. It is never sent as `quickView`: the
@@ -88,7 +98,7 @@ type QuickView = "active" | "all" | "hold" | "cancelled" | "closed" | "delivery"
 
 /** Quick views the backend actually understands. */
 const backendQuickViews = new Set(["active", "all", "hold", "cancelled", "closed", "accountant"]);
-type OrderGrouping = "" | ("area" | "emirate" | "trader" | "driver" | "status")[];
+type OrderGrouping = "" | OrdersGroupingDimension[];
 type BulkAction = "assign" | "carrier" | "manifest" | "reactivate" | "status";
 
 interface OrderFilters {
@@ -232,12 +242,16 @@ export function OrdersModuleWorkspace({
   api,
   onNavigate,
   permissions,
+  persistenceScope,
 }: {
   api: ApiClient;
   onNavigate: (path: string) => void;
   permissions: readonly string[];
+  persistenceScope?: { readonly companyId: string; readonly userId: string };
 }) {
   const { i18n, t } = useTranslation();
+  const location = useLocation();
+  const navigate = useNavigate();
   const locale = normalizeLocale(i18n.resolvedLanguage);
   const traderReportPdf = useReconciliationPdfActions(api);
   // Business-data display follows the user's Search-and-Display preference,
@@ -300,7 +314,10 @@ export function OrdersModuleWorkspace({
      `ThrottlerException: Too Many Requests`; a debounce reduced that but still
      fired searches nobody asked for, on half-typed terms. Enter makes the
      search an explicit act. */
-  const [searchText, setSearchText] = useState("");
+  // Seed the draft box from the URL-backed filter. Starting empty briefly
+  // makes the "clearing the box applies at once" effect erase a restored
+  // search before the input has a chance to sync from `filters.search`.
+  const [searchText, setSearchText] = useState(filters.search);
   const [serialSearchText, setSerialSearchText] = useState("");
   const [filterArea, setFilterArea] = useState<CompanyArea>();
   const [drivers, setDrivers] = useState<readonly OperationsDriver[]>([]);
@@ -310,6 +327,12 @@ export function OrdersModuleWorkspace({
   const [countryFilterOptions, setCountryFilterOptions] = useState<readonly { id: string; name: string }[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [grouping, setGrouping] = useState<OrderGrouping>("");
+  const persistenceKey = persistenceScope === undefined
+    ? null
+    : ordersListStateStorageKey(persistenceScope.companyId, persistenceScope.userId);
+  const [restoredPersistenceKey, setRestoredPersistenceKey] = useState<string | null>(null);
+  const previousPersistenceKey = useRef(persistenceKey);
+  const listStateRestored = persistenceKey === null || restoredPersistenceKey === persistenceKey;
   const matchingCount = data?.matchingCount ?? data?.filteredCount ?? 0;
   const tabTotalCount = data?.tabTotalCount ?? data?.totalCount ?? 0;
   const hasNarrowingFilters = [
@@ -362,6 +385,11 @@ export function OrdersModuleWorkspace({
       page: String(page),
       pageSize: String(pageSize),
     });
+    // Orders keeps sort state in the shared list URL convention (`sort` and
+    // `direction`), while the API contract names these `sortBy` and
+    // `sortDirection`.
+    if (list.sortBy !== "orderDate") parameters.set("sortBy", list.sortBy);
+    if (list.sortDirection !== "desc") parameters.set("sortDirection", list.sortDirection);
     // Delivery Activity is carried by `deliveredOnly`, never by `quickView`.
     // Sending an unknown quick view would fall through to the Active predicate
     // and quietly return the wrong Orders.
@@ -372,7 +400,60 @@ export function OrdersModuleWorkspace({
       if (key !== "quickView" && value !== "") parameters.set(key, value);
     }
     return parameters.toString();
-  }, [filters, page, pageSize]);
+  }, [filters, list.sortBy, list.sortDirection, page, pageSize]);
+
+  useEffect(() => {
+    if (persistenceKey === null) return;
+    if (previousPersistenceKey.current !== persistenceKey) {
+      previousPersistenceKey.current = persistenceKey;
+      setRestoredPersistenceKey(null);
+      const cleanSearch = removeOrdersListSearch(location.search);
+      if (cleanSearch !== location.search) {
+        navigate({ pathname: location.pathname, search: cleanSearch, hash: location.hash }, { replace: true });
+      }
+      return;
+    }
+    if (restoredPersistenceKey === persistenceKey) return;
+
+    let snapshot;
+    try {
+      snapshot = readOrdersListSnapshot(window.localStorage, persistenceKey);
+    } catch {
+      snapshot = undefined;
+    }
+    const currentParameters = new URLSearchParams(location.search);
+    if (hasOrdersListState(currentParameters)) {
+      setGrouping(snapshot?.grouping.length ? [...snapshot.grouping] : "");
+      if (snapshot?.search !== undefined && snapshot.search !== "") {
+        const restoredSearch = restoreOrdersListSearch(location.search, snapshot.search);
+        if (restoredSearch !== location.search) {
+          navigate({ pathname: location.pathname, search: restoredSearch, hash: location.hash }, { replace: true });
+          return;
+        }
+      }
+      setRestoredPersistenceKey(persistenceKey);
+      return;
+    }
+    if (snapshot?.search !== undefined && snapshot.search !== "") {
+      const restoredSearch = restoreOrdersListSearch(location.search, snapshot.search);
+      if (restoredSearch !== location.search) {
+        setGrouping(snapshot.grouping.length ? [...snapshot.grouping] : "");
+        navigate({ pathname: location.pathname, search: restoredSearch, hash: location.hash }, { replace: true });
+        return;
+      }
+    }
+    setGrouping(snapshot?.grouping.length ? [...snapshot.grouping] : "");
+    setRestoredPersistenceKey(persistenceKey);
+  }, [location.hash, location.pathname, location.search, navigate, persistenceKey, restoredPersistenceKey]);
+
+  useEffect(() => {
+    if (persistenceKey === null || !listStateRestored) return;
+    try {
+      writeOrdersListSnapshot(window.localStorage, persistenceKey, location.search, grouping || []);
+    } catch {
+      // Orders remains usable when storage is blocked by browser settings.
+    }
+  }, [grouping, listStateRestored, location.search, persistenceKey]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -394,7 +475,9 @@ export function OrdersModuleWorkspace({
     }
   }, [api, query, t]);
 
-  useEffect(() => void load(), [load]);
+  useEffect(() => {
+    if (listStateRestored) void load();
+  }, [listStateRestored, load]);
 
   // Reference data that no filter changes: fetched once per mount rather than
   // with every list reload.
