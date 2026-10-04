@@ -227,13 +227,35 @@ function escapeHtml(value: string): string {
     .replaceAll("'", "&#39;");
 }
 
+/**
+ * A summary amount. Isolated as a left-to-right run for the same bidi reason
+ * as `tableMoney`; the currency is carried by the column heading rather than
+ * repeated on every line.
+ */
 function money(value: string): string {
-  return `AED ${escapeHtml(value)}`;
+  return `<bdi dir="ltr">${escapeHtml(value)}</bdi>`;
 }
 
-function tableMoney(value: string): string {
-  return escapeHtml(value);
+/**
+ * A money cell's contents, isolated from the surrounding right-to-left text.
+ *
+ * The document is `dir="rtl"`. An amount is a left-to-right run, and its sign,
+ * decimal separator and any brackets are bidi-NEUTRAL characters: left
+ * unisolated they get reordered to the far side of the number, which is why
+ * `-18.00` printed as `18.00-` on every Trader invoice. `<bdi dir="ltr">` pins
+ * the run; `tabular-nums` in the stylesheet stacks the decimal points down the
+ * column.
+ *
+ * `negative` emits the real minus sign U+2212 rather than hyphen-minus, which
+ * is narrower than a digit and so breaks that tabular alignment.
+ */
+function tableMoney(value: string, negative = false): string {
+  return `<bdi dir="ltr">${negative ? "−" : ""}${escapeHtml(value)}</bdi>`;
 }
+
+/** Placeholders, so a column with nothing in it still reads as a column. */
+const EMPTY_CELL = `<span class="muted">&mdash;</span>`;
+const ZERO_CELL = `<bdi dir="ltr" class="muted">0.00</bdi>`;
 
 function paymentMethodLabel(labels: Labels, method: "bank_transfer" | "cash"): string {
   return method === "bank_transfer" ? labels.paymentMethodBankTransfer : labels.paymentMethodCash;
@@ -317,7 +339,13 @@ export function buildTraderSettlementStatementHtml(
       labels.serviceFee,
       labels.amountPaidNow,
     ]
-      .map((label) => `<th>${escapeHtml(label)}</th>`)
+      // The three money headers take `num` too, so a header and the figures
+      // beneath it resolve to the SAME edge. They previously disagreed:
+      // `text-align: end` on the cells resolves to LEFT under dir="rtl" while
+      // the plain headers used `start`, i.e. right.
+      .map((label, index) =>
+        index >= 8 ? `<th class="num">${escapeHtml(label)}</th>` : `<th>${escapeHtml(label)}</th>`,
+      )
       .join("") +
     `</tr></thead><tbody>${orderRows}`;
 
@@ -331,10 +359,15 @@ export function buildTraderSettlementStatementHtml(
         `<td>${dateOnly(line.businessDate)}</td>` +
         `<td>${escapeHtml(line.customerName ?? "")}</td>` +
         `<td class="mono">${escapeHtml(line.customerMobileNumber ?? "")}</td>` +
-        `<td></td><td></td><td class="num"></td>` +
-        `<td class="num negative">-${tableMoney(line.amountApplied)}</td>` +
-        `<td class="num"></td>` +
-        `<td></td>` +
+        `<td>${EMPTY_CELL}</td><td>${EMPTY_CELL}</td><td class="num">${ZERO_CELL}</td>` +
+        `<td class="num negative">${tableMoney(line.amountApplied, true)}</td>` +
+        `<td class="num">${ZERO_CELL}</td>` +
+        // NOTE: exactly ELEVEN cells, matching the header. There was a twelfth
+        // empty <td> here, so every deduction row was one cell wider than the
+        // head and the order rows. The table then laid out TWELVE columns, the
+        // extra one measuring 13px, which squeezed every real column and left
+        // a sliver only these rows occupied -- the misalignment visible on
+        // SET-000011.
         "</tr>",
     )
     .join("");
@@ -483,10 +516,18 @@ export function buildTraderSettlementStatementHtml(
     .company-name { font-size: 16px; font-weight: 800; }
     .company-subtitle, .company-telephone { font-size: 11px; color: #444; }
     .report-title { font-size: 18px; margin: 8px 0 6px; }
-    .meta-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px 16px; font-size: 11px; }
-    .meta-item { display: flex; justify-content: space-between; border-bottom: 1px dotted #ccc; padding: 2px 0; }
+    .meta-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 18px; font-size: 11px; }
+    /* Two tracks per item rather than space-between: with three columns of
+       differing label widths, space-between pushed every value hard against
+       its own far edge, so the values never formed a column. */
+    .meta-item { display: grid; grid-template-columns: minmax(84px, 42%) 1fr; gap: 8px;
+      align-items: baseline; min-height: 21px; border-bottom: 1px dotted #ccc; padding: 3px 0; }
     .meta-label { color: #555; }
-    .meta-value { font-weight: 600; }
+    /* plaintext, not a fixed direction: these values are a mix of Arabic
+       names, reference codes and timestamps, and each should take its own
+       first-strong direction. Without it "00:17, 05/10/2026 (UAE)" rendered
+       as "(UAE) 05/10/2026 ,00:17". */
+    .meta-value { font-weight: 600; unicode-bidi: plaintext; }
     .bank-section { margin-top: 8px; display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px 16px; font-size: 11px; }
     .bank-item { display: flex; justify-content: space-between; border-bottom: 1px dotted #ccc; padding: 2px 0; }
     .bank-label { color: #555; }
@@ -501,11 +542,18 @@ export function buildTraderSettlementStatementHtml(
     table.grid th, table.grid td { border: 1px solid #999; padding: 3px 5px; text-align: start; }
     table.grid thead { display: table-header-group; }
     table.grid thead th { background: #f0f0f0; }
-    table.grid td.num, table.grid th.num { text-align: end; white-space: nowrap; }
+    /* "start", not "end": under dir="rtl" "end" resolves to the LEFT edge, so
+       the figures sat on the opposite side of the cell from their own header.
+       tabular-nums stacks the decimal points down the column. */
+    table.grid td.num, table.grid th.num { text-align: start; white-space: nowrap;
+      font-variant-numeric: tabular-nums; }
     .negative { color: #a32626; }
+    .muted { color: #8a8a8a; }
     .mono { font-variant-numeric: tabular-nums; }
     .summary-section { margin-top: 12px; max-width: 360px; }
-    .summary-line { display: flex; justify-content: space-between; border-bottom: 1px solid #ddd; padding: 4px 0; font-size: 12px; }
+    .summary-line { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: baseline;
+      border-bottom: 1px solid #ddd; padding: 4px 0; font-size: 12px; }
+    .summary-line > span:last-child { font-variant-numeric: tabular-nums; }
     .signatures { display: flex; justify-content: space-between; gap: 24px; margin-top: 48px; }
     .sign-box { flex: 1; text-align: center; font-size: 11px; }
     .sign-line { border-top: 1px solid #333; margin-bottom: 6px; height: 40px; }
