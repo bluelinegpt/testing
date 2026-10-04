@@ -215,6 +215,11 @@ describe("buildTraderSettlementStatementHtml", () => {
     expect(html).not.toContain("Service fee owed by Trader");
     expect(html).toContain("-AED 25.00");
     expect(html).toContain("AED 75.00");
+    const summary = html.slice(
+      html.indexOf('<section class="summary-section">'),
+      html.indexOf('<div class="signatures">'),
+    );
+    expect(summary).toContain("AED 35.00");
   });
 
   it("shows a Money Received notice with reference and notes when confirmed", () => {

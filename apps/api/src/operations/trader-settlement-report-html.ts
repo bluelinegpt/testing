@@ -1,4 +1,5 @@
 import type { TraderSettlementReportData } from "./trader-settlement.service.js";
+import { Decimal } from "decimal.js";
 
 /**
  * Pure HTML document builder for the Trader Settlement Statement (Phase 4
@@ -465,7 +466,10 @@ export function buildTraderSettlementStatementHtml(
     `<section class="summary-section">` +
     `<h2 class="section-title">${escapeHtml(labels.numberOfOrders)}: ${totalDetailRows}</h2>` +
     summaryLine(labels.cod, money(data.summary.totalCod)) +
-    summaryLine(labels.serviceFee, money(data.summary.totalServiceFees)) +
+    summaryLine(
+      labels.serviceFee,
+      money(new Decimal(data.summary.totalServiceFees).plus(data.summary.traderFeeDeductions).toFixed(2)),
+    ) +
     summaryLine(labels.amountPaidNow, money(data.summary.netPayment)) +
     `</section>`;
 
