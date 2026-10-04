@@ -5315,14 +5315,10 @@ export class OperationsService {
                company_revenue = ${financial.companyRevenue}::numeric,
                trader_gross_payable = ${financial.codAmount}::numeric,
                trader_paid_service_fee = case when ${isProspective}
-                 then ${financials.serviceFeeNetAmount
-                   .plus(financials.serviceFeeVatAmount)
-                   .toFixed(2)}::numeric
+                 then ${financials.traderPaidServiceFee.toFixed(2)}::numeric
                  else ${financial.serviceFee}::numeric end,
                trader_deductions = case when ${isProspective}
-                 then ${financials.additionalFees
-                   .plus(financials.additionalFeeVatAmount)
-                   .toFixed(2)}::numeric
+                 then ${financials.traderDeductions.toFixed(2)}::numeric
                  else trader_deductions end,
                trader_net_payable = ${financial.traderNetPayable}::numeric,
                order_profit = ${financial.orderProfit}::numeric,
