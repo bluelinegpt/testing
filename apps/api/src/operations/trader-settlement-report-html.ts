@@ -333,7 +333,7 @@ export function buildTraderSettlementStatementHtml(
         `<td class="num">${data.orders.length + index + 1}</td>` +
         `<td class="mono">${escapeHtml(line.orderNumber ?? line.sourceReference ?? "")}</td>` +
         `<td></td>` +
-        `<td class="mono">${escapeHtml(line.orderSerialNumber)}</td>` +
+        `<td class="mono">${escapeHtml(line.orderSerialNumber ?? "")}</td>` +
         `<td>${dateOnly(line.businessDate)}</td>` +
         `<td>${escapeHtml(line.customerName ?? "")}</td>` +
         `<td class="mono">${escapeHtml(line.customerMobileNumber ?? "")}</td>` +
