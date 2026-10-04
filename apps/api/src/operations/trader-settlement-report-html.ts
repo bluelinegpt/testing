@@ -286,7 +286,6 @@ export function buildTraderSettlementStatementHtml(
         "<tr>" +
         `<td class="num">${index + 1}</td>` +
         `<td class="mono">${escapeHtml(order.orderNumber)}</td>` +
-        `<td>${escapeHtml(order.orderType)}</td>` +
         `<td class="mono">${order.referenceNumber === null ? "" : escapeHtml(order.referenceNumber)}</td>` +
         `<td>${dateOnly(order.deliveryDate)}</td>` +
         `<td>${escapeHtml(order.customerName)}</td>` +
@@ -295,11 +294,7 @@ export function buildTraderSettlementStatementHtml(
         `<td>${escapeHtml(order.areaName)}</td>` +
         `<td class="num">${money(order.codAmount)}</td>` +
         `<td class="num">${money(order.serviceFee)}</td>` +
-        `<td class="num">${money(order.originalTraderPayable)}</td>` +
-        `<td class="num">${money(order.previouslyPaid)}</td>` +
         `<td class="num">${money(order.amountPaidNow)}</td>` +
-        `<td class="num">${money(order.remainingOutstanding)}</td>` +
-        `<td>${escapeHtml(orderStatusLabel(labels, order.orderSettlementStatus))}</td>` +
         "</tr>",
     )
     .join("");
@@ -308,7 +303,6 @@ export function buildTraderSettlementStatementHtml(
     [
       labels.lineNumber,
       labels.orderNumber,
-      labels.orderType,
       labels.externalReference,
       labels.deliveryDate,
       labels.customer,
@@ -317,11 +311,7 @@ export function buildTraderSettlementStatementHtml(
       labels.area,
       labels.cod,
       labels.serviceFee,
-      labels.originalTraderPayable,
-      labels.previouslyPaid,
       labels.amountPaidNow,
-      labels.remainingOutstanding,
-      labels.settlementStatus,
     ]
       .map((label) => `<th>${escapeHtml(label)}</th>`)
       .join("") +
@@ -340,7 +330,7 @@ export function buildTraderSettlementStatementHtml(
         `<td class="mono">${escapeHtml(line.customerMobileNumber ?? "")}</td>` +
         `<td></td><td></td>` +
         `<td class="num negative">-${money(line.amountApplied)}</td>` +
-        `<td class="num"></td><td class="num"></td><td class="num"></td>` +
+        `<td class="num"></td>` +
         `<td></td>` +
         "</tr>",
     )

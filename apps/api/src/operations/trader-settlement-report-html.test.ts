@@ -179,7 +179,6 @@ describe("buildTraderSettlementStatementHtml", () => {
     };
     const html = buildTraderSettlementStatementHtml(partial, "en");
     expect(html).toContain("AED 60.00");
-    expect(html).toContain("AED 40.00");
   });
 
   it("shows Trader fee deductions as negative lines and the net payment", () => {
