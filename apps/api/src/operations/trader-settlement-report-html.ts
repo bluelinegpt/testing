@@ -330,7 +330,7 @@ export function buildTraderSettlementStatementHtml(
     .map(
       (line, index) =>
         "<tr>" +
-        `<td class="num">${index + 1}</td>` +
+        `<td class="num">${data.orders.length + index + 1}</td>` +
         `<td class="mono">${escapeHtml(line.orderNumber ?? line.sourceReference ?? "")}</td>` +
         `<td>${escapeHtml(labels.receivableReason)}</td>` +
         `<td class="mono">${escapeHtml(line.receivableNumber)}</td>` +
