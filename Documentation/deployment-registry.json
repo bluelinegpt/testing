@@ -20,9 +20,9 @@
       "path": "apps/api",
       "renderService": "bluelinegpt-api-test",
       "status": "pushed_awaiting_confirmation",
-      "localCommit": "40381b14",
+      "localCommit": "512d3631",
       "localCommitDate": "2026-10-05",
-      "lastChangeDescription": "fix: show order and reference in trader statements",
+      "lastChangeDescription": "feat: add employee and driver management permissions",
       "lastChangeBy": "human",
       "confirmedLiveCommit": "f1d5271",
       "confirmedLiveAt": "2026-10-01"
