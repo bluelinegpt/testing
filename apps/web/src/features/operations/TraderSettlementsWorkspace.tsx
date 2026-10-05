@@ -1894,6 +1894,9 @@ function NewSettlementDialog({
   /** Ticks or clears every listed Order at once, one state change per list. */
   const toggleAllListedOrders = (checked: boolean) => {
     setOriginatingOrderDefaultActive(false);
+    setAutoAllocate(false);
+    setProposal(undefined);
+    setProposalError(undefined);
     setOverrideConfirmed(false);
     const listedIds = new Set(eligibleOrders.map((order) => order.id));
     if (checked) {

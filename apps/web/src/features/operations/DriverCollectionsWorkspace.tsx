@@ -1147,6 +1147,20 @@ function CreateDriverCollectionDialog({
       return next;
     });
 
+  const listedOrderIds = (ordersPage?.items ?? []).map((order) => order.id);
+  const allListedSelected =
+    listedOrderIds.length > 0 && listedOrderIds.every((id) => selectedIds.has(id));
+  const toggleAllListedOrders = (checked: boolean) => {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      for (const id of listedOrderIds) {
+        if (checked) next.add(id);
+        else next.delete(id);
+      }
+      return next;
+    });
+  };
+
   const filledExpenses = expenses.filter((row) => row.expenseTypeId !== "" && row.amount !== "");
   const cleanExpenses = useMemo(
     () =>
@@ -1524,7 +1538,13 @@ function CreateDriverCollectionDialog({
                       <thead>
                         <tr>
                           <th scope="col">
-                            <span className="sr-only">{t("common.select")}</span>
+                            <input
+                              aria-label={t("common.select")}
+                              checked={allListedSelected}
+                              disabled={listedOrderIds.length === 0}
+                              onChange={(event) => toggleAllListedOrders(event.target.checked)}
+                              type="checkbox"
+                            />
                           </th>
                           <th scope="col">{t("operations.serialNumber")}</th>
                           <th scope="col">{t("operations.orderNumber")}</th>
