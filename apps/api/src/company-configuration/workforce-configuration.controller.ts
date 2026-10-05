@@ -52,7 +52,6 @@ import {
 @ApiTags("workforce-configuration")
 @ApiBearerAuth()
 @RequireIdentityKinds("company_user")
-@RequireAnyPermission("users_roles.manage")
 @Controller("configuration")
 export class WorkforceConfigurationController {
   public constructor(
@@ -64,6 +63,7 @@ export class WorkforceConfigurationController {
   ) {}
 
   @Get("employees")
+  @RequireAnyPermission("employees.view", "employees.create", "employees.edit", "users_roles.manage")
   @ApiOperation({ summary: "List Company Employees" })
   public employees(
     @Query() query: Record<string, string>,
@@ -72,6 +72,7 @@ export class WorkforceConfigurationController {
   }
 
   @Post("employees")
+  @RequireAnyPermission("employees.create", "users_roles.manage")
   public createEmployee(
     @Body() input: SaveEmployeeDto,
     @Req() request: Request,
@@ -80,11 +81,13 @@ export class WorkforceConfigurationController {
   }
 
   @Get("employees/:code")
+  @RequireAnyPermission("employees.view", "employees.create", "employees.edit", "users_roles.manage")
   public employee(@Param("code") code: string): Promise<Record<string, unknown>> {
     return this.workforce.employee(code);
   }
 
   @Patch("employees/:employeeId")
+  @RequireAnyPermission("employees.edit", "users_roles.manage")
   public updateEmployee(
     @Param("employeeId", new ParseUUIDPipe()) employeeId: string,
     @Body() input: SaveEmployeeDto,
@@ -94,6 +97,7 @@ export class WorkforceConfigurationController {
   }
 
   @Patch("employees/:employeeId/status")
+  @RequireAnyPermission("employees.edit", "users_roles.manage")
   public employeeStatus(
     @Param("employeeId", new ParseUUIDPipe()) employeeId: string,
     @Body() input: ChangeWorkforceStatusDto,
@@ -114,6 +118,7 @@ export class WorkforceConfigurationController {
    * its prior values into the audit event.
    */
   @Get("employees/:employeeId/variable-earnings")
+  @RequireAnyPermission("employees.view", "employees.create", "employees.edit", "users_roles.manage")
   @ApiOperation({ summary: "Delivery and collection earning rules for one Employee" })
   public variableEarnings(
     @Param("employeeId", new ParseUUIDPipe()) employeeId: string,
@@ -122,6 +127,7 @@ export class WorkforceConfigurationController {
   }
 
   @Post("employees/:employeeId/variable-earnings/delivery")
+  @RequireAnyPermission("employees.edit", "users_roles.manage")
   public setDeliveryEarningRule(
     @Param("employeeId", new ParseUUIDPipe()) employeeId: string,
     @Body() input: SaveDeliveryEarningRuleDto,
@@ -135,6 +141,7 @@ export class WorkforceConfigurationController {
   }
 
   @Post("employees/:employeeId/variable-earnings/collection")
+  @RequireAnyPermission("employees.edit", "users_roles.manage")
   public setCollectionEarningRule(
     @Param("employeeId", new ParseUUIDPipe()) employeeId: string,
     @Body() input: SaveCollectionEarningRuleDto,
@@ -148,6 +155,7 @@ export class WorkforceConfigurationController {
   }
 
   @Post("employees/:employeeId/documents")
+  @RequireAnyPermission("employees.edit", "users_roles.manage")
   public employeeDocument(
     @Param("employeeId", new ParseUUIDPipe()) employeeId: string,
     @Body() input: CreateHrDocumentDto,
@@ -162,12 +170,14 @@ export class WorkforceConfigurationController {
   }
 
   @Get("drivers")
+  @RequireAnyPermission("drivers.view", "drivers.create", "drivers.edit", "users_roles.manage")
   @ApiOperation({ summary: "List Company Drivers" })
   public drivers(@Query() query: Record<string, string>): Promise<WorkforcePage<DriverSummary>> {
     return this.workforce.drivers(query);
   }
 
   @Post("drivers")
+  @RequireAnyPermission("drivers.create", "users_roles.manage")
   public createDriver(
     @Body() input: SaveDriverDto,
     @Req() request: Request,
@@ -176,11 +186,13 @@ export class WorkforceConfigurationController {
   }
 
   @Get("drivers/:code")
+  @RequireAnyPermission("drivers.view", "drivers.create", "drivers.edit", "users_roles.manage")
   public driver(@Param("code") code: string): Promise<Record<string, unknown>> {
     return this.workforce.driver(code);
   }
 
   @Patch("drivers/:driverId")
+  @RequireAnyPermission("drivers.edit", "users_roles.manage")
   public updateDriver(
     @Param("driverId", new ParseUUIDPipe()) driverId: string,
     @Body() input: SaveDriverDto,
@@ -190,6 +202,7 @@ export class WorkforceConfigurationController {
   }
 
   @Patch("drivers/:driverId/status")
+  @RequireAnyPermission("drivers.edit", "users_roles.manage")
   public driverStatus(
     @Param("driverId", new ParseUUIDPipe()) driverId: string,
     @Body() input: ChangeWorkforceStatusDto,
@@ -205,6 +218,7 @@ export class WorkforceConfigurationController {
   }
 
   @Post("drivers/:driverId/documents")
+  @RequireAnyPermission("drivers.edit", "users_roles.manage")
   public driverDocument(
     @Param("driverId", new ParseUUIDPipe()) driverId: string,
     @Body() input: CreateHrDocumentDto,
@@ -214,6 +228,7 @@ export class WorkforceConfigurationController {
   }
 
   @Post("drivers/:driverId/commission-rules")
+  @RequireAnyPermission("drivers.edit", "users_roles.manage")
   public commissionRule(
     @Param("driverId", new ParseUUIDPipe()) driverId: string,
     @Body() input: CreateCommissionRuleDto,
@@ -223,6 +238,7 @@ export class WorkforceConfigurationController {
   }
 
   @Post("drivers/:driverId/commission-calculations")
+  @RequireAnyPermission("drivers.edit", "users_roles.manage")
   public calculateCommission(
     @Param("driverId", new ParseUUIDPipe()) driverId: string,
     @Body() input: RunCommissionCalculationDto,
