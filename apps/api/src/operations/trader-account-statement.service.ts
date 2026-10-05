@@ -29,6 +29,7 @@ interface StatementSourceRow {
   readonly isOutstanding: boolean;
   readonly notes: string | null;
   readonly orderNumber: string | null;
+  readonly referenceNumber: string | null;
   readonly paymentReference: string | null;
   readonly reference: string;
   readonly settlementNumber: string | null;
@@ -61,6 +62,7 @@ export interface TraderAccountStatementLine {
   readonly lineNumber: number;
   readonly notes: string | null;
   readonly orderNumber: string | null;
+  readonly referenceNumber: string | null;
   readonly paymentReference: string | null;
   readonly reference: string;
   readonly settlementNumber: string | null;
@@ -175,7 +177,8 @@ export class TraderAccountStatementService {
                ('Delivered Order · ' || coalesce(o.customer_name, '')) as description,
                o.trader_net_payable::text as amount,
                (o.trader_outstanding_balance > 0) as "isOutstanding",
-               o.order_number as "orderNumber", coalesce(o.serial_number, o.order_number) as "serialNumber",
+               o.order_number as "orderNumber", o.reference_number as "referenceNumber",
+               coalesce(o.serial_number, o.order_number) as "serialNumber",
                o.reference_number as "paymentReference", o.cod_amount::text as "codAmount",
                o.service_fee::text as "serviceFee", coalesce(o.additional_fees, 0)::text as "additionalFee",
                o.trader_net_payable::text as "traderPayable", '0.00'::text as "settlementAmount",
@@ -201,7 +204,7 @@ export class TraderAccountStatementService {
         union all
         select s.id, 'payment'::text, s.business_date::text, s.created_at::text, 2,
                s.settlement_number, 'Trader payment', p.amount::text, false,
-               null::text, null::text, p.bank_reference, '0.00'::text, '0.00'::text,
+               null::text, null::text, null::text, p.bank_reference, '0.00'::text, '0.00'::text,
                '0.00'::text, '0.00'::text, p.amount::text, '0.00'::text,
                s.status, null::text, (-p.amount)::text,
                s.settlement_number as "settlementNumber"
@@ -215,7 +218,7 @@ export class TraderAccountStatementService {
         select r.id, 'reversal'::text, r.business_date::text, r.created_at::text, 3,
                r.settlement_number, ('Reversal of ' || original.settlement_number),
                coalesce(p.amount, 0)::text, false,
-               null::text, null::text, p.bank_reference, '0.00'::text, '0.00'::text,
+               null::text, null::text, null::text, p.bank_reference, '0.00'::text, '0.00'::text,
                '0.00'::text, '0.00'::text, '0.00'::text, coalesce(p.amount, 0)::text,
                'reversed'::text, null::text, coalesce(p.amount, 0)::text,
                r.settlement_number as "settlementNumber"
@@ -234,7 +237,7 @@ export class TraderAccountStatementService {
                 || case when linked.id is null then '' else ' · Order '
                      || coalesce(linked.serial_number, linked.order_number) || ' (' || linked.order_number || ')' end),
                r.original_amount_due::text, (r.outstanding_amount > 0),
-               linked.order_number, coalesce(linked.serial_number, linked.order_number),
+               linked.order_number, null::text, coalesce(linked.serial_number, linked.order_number),
                null::text, '0.00'::text, '0.00'::text, '0.00'::text, '0.00'::text,
                '0.00'::text, '0.00'::text, r.status, r.notes, (-r.original_amount_due)::text,
                null::text as "settlementNumber"
@@ -250,7 +253,7 @@ export class TraderAccountStatementService {
                  || case when linked.id is null then '' else ' · Order '
                      || coalesce(linked.serial_number, linked.order_number) || ' (' || linked.order_number || ')' end,
                alloc.amount_allocated::text, false,
-               linked.order_number, coalesce(linked.serial_number, linked.order_number),
+               linked.order_number, null::text, coalesce(linked.serial_number, linked.order_number),
                c.payment_reference, '0.00'::text, '0.00'::text, '0.00'::text, '0.00'::text,
                '0.00'::text, '0.00'::text, c.status, c.notes, alloc.amount_allocated::text,
                c.collection_number as "settlementNumber"
@@ -269,7 +272,7 @@ export class TraderAccountStatementService {
                  || case when linked.id is null then '' else ' · Order '
                      || coalesce(linked.serial_number, linked.order_number) || ' (' || linked.order_number || ')' end,
                alloc.amount_allocated::text, false,
-               linked.order_number, coalesce(linked.serial_number, linked.order_number),
+               linked.order_number, null::text, coalesce(linked.serial_number, linked.order_number),
                c.payment_reference, '0.00'::text, '0.00'::text, '0.00'::text, '0.00'::text,
                '0.00'::text, '0.00'::text, 'reversed'::text, c.reversal_reason, (-alloc.amount_allocated)::text,
                c.collection_number as "settlementNumber"
@@ -289,7 +292,7 @@ export class TraderAccountStatementService {
                  || case when linked.id is null then '' else ' · Order '
                      || coalesce(linked.serial_number, linked.order_number) || ' (' || linked.order_number || ')' end,
                r.original_amount_due::text, false,
-               linked.order_number, coalesce(linked.serial_number, linked.order_number),
+               linked.order_number, null::text, coalesce(linked.serial_number, linked.order_number),
                null::text, '0.00'::text, '0.00'::text, '0.00'::text, '0.00'::text,
                '0.00'::text,
                '0.00'::text, 'cancelled'::text, a.after_data ->> 'reason',
@@ -466,6 +469,7 @@ export class TraderAccountStatementService {
         lineNumber: index + 1,
         notes: row.notes,
         orderNumber: row.orderNumber,
+        referenceNumber: row.referenceNumber,
         paymentReference: row.paymentReference,
         reference: row.reference,
         runningBalance: this.money(running).toFixed(2),

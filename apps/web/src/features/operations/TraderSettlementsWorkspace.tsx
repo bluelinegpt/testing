@@ -286,6 +286,8 @@ interface TraderAccountStatement {
     readonly id: string;
     readonly lineNumber: number;
     readonly reference: string;
+    readonly orderNumber: string | null;
+    readonly referenceNumber: string | null;
     readonly runningBalance: string;
     readonly type:
       | "order"
@@ -1157,6 +1159,7 @@ function TraderAccountStatementDialog({
   reportLanguage: "ar" | "en";
 }) {
   const { t } = useTranslation();
+  const session = useSessionAccess();
   const now = new Date();
   const [traders, setTraders] = useState<readonly OperationsTrader[]>([]);
   const [traderId, setTraderId] = useState(initialTraderId ?? "");
@@ -1455,7 +1458,8 @@ function TraderAccountStatementDialog({
                 <tr>
                   <th>#</th>
                   <th>{t("common.date")}</th>
-                  <th>{t("common.reference")}</th>
+                  <th>{t("traderSettlements.statementOrderNumber", "Order No")}</th>
+                  <th>{t("traderSettlements.statementReferenceNumber", "Reference No")}</th>
                   <th>{t("traderSettlements.statementDescription")}</th>
                   <th>{t("traderSettlements.statementDebit")}</th>
                   <th>{t("traderSettlements.statementCredit")}</th>
@@ -1467,7 +1471,24 @@ function TraderAccountStatementDialog({
                   <tr key={`${line.type}-${line.id}`}>
                     <td>{line.lineNumber}</td>
                     <td>{line.date}</td>
-                    <td className="mono">{line.reference}</td>
+                    <td>
+                      {line.orderNumber === null ? (
+                        <span className="mono">—</span>
+                      ) : (
+                        <button
+                          className="link-button mono"
+                          onClick={() =>
+                            session?.navigate(`/orders/${encodeURIComponent(line.orderNumber)}`)
+                          }
+                          type="button"
+                        >
+                          {line.orderNumber}
+                        </button>
+                      )}
+                    </td>
+                    <td className="mono">
+                      {line.referenceNumber ?? (line.orderNumber === null ? line.reference : "")}
+                    </td>
                     <td>{line.description}</td>
                     <td>{money(line.debit)}</td>
                     <td>{money(line.credit)}</td>
