@@ -305,6 +305,7 @@ export function buildTraderSettlementStatementHtml(
   const labels = LABELS[language];
   const dir = language === "ar" ? "rtl" : "ltr";
   const header = data.header;
+  const isFahdAlMalikiCompany = data.companyId === "2f0703c3-2b3b-45ef-a6ab-de9b3694c0a1";
 
   const orderRows = data.orders
     .map(
@@ -373,9 +374,9 @@ export function buildTraderSettlementStatementHtml(
     .join("");
   const combinedRows = deductionRows;
 
-  const headerMeta = (label: string, value: string) =>
+  const headerMeta = (label: string, value: string, valueClass = "") =>
     `<div class="meta-item"><span class="meta-label">${escapeHtml(label)}</span>` +
-    `<span class="meta-value">${escapeHtml(value)}</span></div>`;
+    `<span class="meta-value ${valueClass}">${escapeHtml(value)}</span></div>`;
 
   const bankLine = (label: string, bankName: string, accountName: string, masked: string | null) =>
     `<div class="bank-item"><span class="bank-label">${escapeHtml(label)}</span>` +
@@ -407,7 +408,7 @@ export function buildTraderSettlementStatementHtml(
 
   const reportHeader =
     `<header class="report-header">` +
-    `<div class="company-block">` +
+    `<div class="company-block${isFahdAlMalikiCompany ? " company-block-special" : ""}">` +
     (header.company.logoDataUri == null
       ? ""
       : `<img class="company-logo" alt="" src="${escapeHtml(header.company.logoDataUri)}">`) +
@@ -424,11 +425,11 @@ export function buildTraderSettlementStatementHtml(
       ? ""
       : `<div class="company-telephone">${escapeHtml(header.company.telephone)}</div>`) +
     `</div></div>` +
-    `<h1 class="report-title">${escapeHtml(labels.title)}</h1>` +
+    `<h1 class="report-title${isFahdAlMalikiCompany ? " target-company-title" : ""}">${escapeHtml(labels.title)}</h1>` +
     `<div class="meta-grid">` +
     headerMeta(labels.settlementNumber, header.settlementNumber) +
     headerMeta(labels.status, settlementStatusLabel(labels, header.status)) +
-    headerMeta(labels.trader, header.traderName) +
+    headerMeta(labels.trader, header.traderName, isFahdAlMalikiCompany ? "target-trader-name" : "") +
     headerMeta(labels.paymentDate, header.paymentDate) +
     headerMeta(labels.paymentMethod, paymentMethodLabel(labels, header.paymentMethod)) +
     headerMeta(labels.paymentReference, header.paymentReference ?? "") +
@@ -512,10 +513,12 @@ export function buildTraderSettlementStatementHtml(
     body { font-family: "Segoe UI", Tahoma, Arial, sans-serif; color: #111; margin: 0; font-size: 11px; }
     .report-header { border-bottom: 2px solid #333; margin-bottom: 10px; padding-bottom: 8px; }
     .company-block { display: flex; align-items: center; gap: 10px; }
+    .company-block-special { flex-direction: column; justify-content: center; text-align: center; gap: 4px; }
     .company-logo { width: 52px; height: 52px; object-fit: contain; }
     .company-name { font-size: 16px; font-weight: 800; }
     .company-subtitle, .company-telephone { font-size: 11px; color: #444; }
     .report-title { font-size: 18px; margin: 8px 0 6px; }
+    .target-company-title, .target-trader-name { color: #b42318; }
     .meta-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 18px; font-size: 11px; }
     /* Two tracks per item rather than space-between: with three columns of
        differing label widths, space-between pushed every value hard against

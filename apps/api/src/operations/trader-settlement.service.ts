@@ -280,6 +280,8 @@ export interface TraderSettlementDetail {
 }
 
 export interface TraderSettlementReportData {
+  /** Company identity is used for company-scoped report presentation rules. */
+  readonly companyId?: string;
   readonly header: {
     readonly beneficiaryBank: MaskedBankSnapshot | null;
     readonly company: {
@@ -2286,6 +2288,7 @@ export class TraderSettlementService {
       year: "numeric",
     }).format(new Date());
     return {
+      companyId,
       header: {
         beneficiaryBank: header.beneficiaryBank,
         company: {
