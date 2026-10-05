@@ -220,6 +220,7 @@ export function CompanyAppShell({
               { label: t("nav.bankAccounts"), path: "/configuration/bank-accounts" },
               { label: t("nav.vatSettings"), path: "/configuration/vat" },
               { label: t("workforce.employees"), path: "/configuration/employees" },
+              { label: t("workforce.drivers"), path: "/configuration/drivers" },
               { label: t("nav.users"), path: "/configuration/users" },
               { label: t("nav.roles"), path: "/configuration/roles" },
               { label: t("nav.whatsapp"), path: "/configuration/whatsapp" },
