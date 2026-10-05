@@ -1433,8 +1433,12 @@ function CreateDriverCollectionDialog({
                     {drivers.map((option) => (
                       <li key={option.id}>
                         <button onClick={() => chooseDriver(option)} type="button">
-                          {/* Driver Name and Type only — no internal Driver code (§6). */}
-                          {option.name} — {t(`statuses.${option.driverType}`)}
+                          <span>
+                            {option.name} — {t(`statuses.${option.driverType}`)}
+                          </span>
+                          <span className="cell-secondary">
+                            {money(option.pendingCollectionTotal)} · {option.pendingOrderCount} {t("operations.summaryPendingOrders")}
+                          </span>
                         </button>
                       </li>
                     ))}
@@ -1510,6 +1514,10 @@ function CreateDriverCollectionDialog({
                   {ordersError === undefined ? null : (
                     <div className="alert alert-error">{ordersError}</div>
                   )}
+                  <div className="detail-line detail-line-total">
+                    <span>{t("operations.selectedCollections")}</span>
+                    <strong>{money(preview?.grossCollections ?? "0.00")}</strong>
+                  </div>
                   {/* Ten columns overflow the modal width; scroll instead of clipping. */}
                   <div className="table-scroll-x eligible-collection-orders-table">
                     <table>
@@ -1532,7 +1540,11 @@ function CreateDriverCollectionDialog({
                       </thead>
                       <tbody>
                         {(ordersPage?.items ?? []).map((order) => (
-                          <tr key={order.id}>
+                          <tr
+                            className="selectable-row"
+                            key={order.id}
+                            onClick={() => toggleOrder(order.id)}
+                          >
                             <td>
                               <input
                                 aria-label={t("operations.selectOrder", {
@@ -1540,6 +1552,7 @@ function CreateDriverCollectionDialog({
                                 })}
                                 checked={selectedIds.has(order.id)}
                                 onChange={() => toggleOrder(order.id)}
+                                onClick={(event) => event.stopPropagation()}
                                 type="checkbox"
                               />
                             </td>
