@@ -1467,34 +1467,37 @@ function TraderAccountStatementDialog({
                 </tr>
               </thead>
               <tbody>
-                {statement.transactions.map((line) => (
+                {statement.transactions.map((line) => {
+                  const orderNumber = line.orderNumber;
+                  return (
                   <tr key={`${line.type}-${line.id}`}>
                     <td>{line.lineNumber}</td>
                     <td>{line.date}</td>
                     <td>
-                      {line.orderNumber === null ? (
+                      {orderNumber === null ? (
                         <span className="mono">—</span>
                       ) : (
                         <button
                           className="link-button mono"
                           onClick={() =>
-                            session?.navigate(`/orders/${encodeURIComponent(line.orderNumber)}`)
+                            session?.navigate(`/orders/${encodeURIComponent(orderNumber)}`)
                           }
                           type="button"
                         >
-                          {line.orderNumber}
+                          {orderNumber}
                         </button>
                       )}
                     </td>
                     <td className="mono">
-                      {line.referenceNumber ?? (line.orderNumber === null ? line.reference : "")}
+                      {line.referenceNumber ?? (orderNumber === null ? line.reference : "")}
                     </td>
                     <td>{line.description}</td>
                     <td>{money(line.debit)}</td>
                     <td>{money(line.credit)}</td>
                     <td>{money(line.runningBalance)}</td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
