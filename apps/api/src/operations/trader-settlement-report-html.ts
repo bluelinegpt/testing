@@ -360,7 +360,7 @@ export function buildTraderSettlementStatementHtml(
         `<td>${dateOnly(line.businessDate)}</td>` +
         `<td>${escapeHtml(line.customerName ?? "")}</td>` +
         `<td class="mono">${escapeHtml(line.customerMobileNumber ?? "")}</td>` +
-        `<td>${EMPTY_CELL}</td><td>${EMPTY_CELL}</td><td class="num">${ZERO_CELL}</td>` +
+        `<td>${escapeHtml(line.emirateName ?? "")}</td><td>${escapeHtml(line.areaName ?? "")}</td><td class="num">${ZERO_CELL}</td>` +
         `<td class="num negative">${tableMoney(line.amountApplied, true)}</td>` +
         `<td class="num">${ZERO_CELL}</td>` +
         // NOTE: exactly ELEVEN cells, matching the header. There was a twelfth

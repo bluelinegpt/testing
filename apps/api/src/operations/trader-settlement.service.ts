@@ -232,6 +232,8 @@ export interface TraderSettlementReceivableOffset {
   readonly receivableNumber: string;
   readonly sourceReference: string | null;
   readonly sourceType: string;
+  readonly emirateName?: string | null;
+  readonly areaName?: string | null;
 }
 
 interface TraderSettlementSummaryTotals {
@@ -2688,11 +2690,14 @@ export class TraderSettlementService {
              r.source_type as "sourceType", r.source_reference as "sourceReference", r.reason,
              o.serial_number as "orderSerialNumber", o.order_number as "orderNumber",
              o.reference_number as "referenceNumber",
-             o.customer_name as "customerName", o.customer_mobile_number as "customerMobileNumber"
+             o.customer_name as "customerName", o.customer_mobile_number as "customerMobileNumber",
+             e.name_en as "emirateName", coalesce(o.customer_area_name_snapshot, a.name_en, '') as "areaName"
         from trader_settlement_receivable_offsets x
         join trader_receivables r on r.id=x.receivable_id and r.company_id=x.company_id
         left join orders o on o.company_id=r.company_id
           and r.source_type='service_charge' and o.order_number=r.source_reference
+        left join areas a on a.id=o.area_id and a.company_id=o.company_id
+        left join emirates e on e.id=a.emirate_id
        where x.company_id=${companyId}::uuid and x.settlement_id=${settlementId}::uuid
        order by r.business_date, r.receivable_number
     `.execute(this.database);
