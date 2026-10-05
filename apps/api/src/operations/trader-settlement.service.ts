@@ -206,6 +206,8 @@ export interface TraderSettlementDetailOrder {
   readonly customerName: string;
   readonly deliveryDate: string | null;
   readonly emirateName: string | null;
+  readonly areaNameAr?: string | null;
+  readonly emirateNameAr?: string | null;
   readonly orderNumber: string;
   readonly orderType: "collect_order" | "delivery" | "gcc_international";
   readonly customerMobileNumber: string;
@@ -234,6 +236,8 @@ export interface TraderSettlementReceivableOffset {
   readonly sourceType: string;
   readonly emirateName?: string | null;
   readonly areaName?: string | null;
+  readonly emirateNameAr?: string | null;
+  readonly areaNameAr?: string | null;
 }
 
 interface TraderSettlementSummaryTotals {
@@ -2568,6 +2572,8 @@ export class TraderSettlementService {
         customerName: string;
         deliveryDate: string | null;
         emirateName: string | null;
+        areaNameAr: string | null;
+        emirateNameAr: string | null;
         orderSettlementStatus: string;
         outstandingBalance: string;
         referenceNumber: string | null;
@@ -2588,6 +2594,7 @@ export class TraderSettlementService {
                o.reference_number as "referenceNumber", o.delivered_at::text as "deliveryDate",
                o.customer_name as "customerName", o.customer_mobile_number as "customerMobileNumber", e.name_en as "emirateName",
                coalesce(o.customer_area_name_snapshot, a.name_en, '') as "areaName",
+               a.name_ar as "areaNameAr", e.name_ar as "emirateNameAr",
                o.cod_amount::text as "codAmount", o.service_fee::text as "serviceFee",
                coalesce(o.additional_fees, 0)::text as "additionalFees",
                coalesce(o.vat_amount, 0)::text as "vatAmount",
@@ -2613,6 +2620,8 @@ export class TraderSettlementService {
       customerName: row.customerName,
       deliveryDate: row.deliveryDate,
       emirateName: row.emirateName,
+      areaNameAr: row.areaNameAr,
+      emirateNameAr: row.emirateNameAr,
       orderSettlementStatus: row.orderSettlementStatus,
       originalTraderPayable: new Decimal(row.traderNetPayable).toFixed(2),
       previouslyPaid: new Decimal(row.traderPaidAmount).minus(row.allocatedAmount).toFixed(2),
@@ -2691,7 +2700,8 @@ export class TraderSettlementService {
              o.serial_number as "orderSerialNumber", o.order_number as "orderNumber",
              o.reference_number as "referenceNumber",
              o.customer_name as "customerName", o.customer_mobile_number as "customerMobileNumber",
-             e.name_en as "emirateName", coalesce(o.customer_area_name_snapshot, a.name_en, '') as "areaName"
+             e.name_en as "emirateName", coalesce(o.customer_area_name_snapshot, a.name_en, '') as "areaName",
+             e.name_ar as "emirateNameAr", a.name_ar as "areaNameAr"
         from trader_settlement_receivable_offsets x
         join trader_receivables r on r.id=x.receivable_id and r.company_id=x.company_id
         left join orders o on o.company_id=r.company_id
