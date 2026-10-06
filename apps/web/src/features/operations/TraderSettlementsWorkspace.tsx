@@ -12,7 +12,18 @@ import {
 } from "./BusinessDateFilterControls.js";
 
 import { ApiError, type ApiClient } from "../../api/api-client.js";
-import type { CompanyBankAccount, OperationsTrader, PagedResponse } from "../../api/contracts.js";
+import type {
+  CompanyArea,
+  CompanyBankAccount,
+  Emirate,
+  OperationsDriver,
+  OperationsTrader,
+  PagedResponse,
+} from "../../api/contracts.js";
+import { FilterCombobox } from "../../components/FilterCombobox.js";
+import { SearchCombobox } from "../../components/SearchCombobox.js";
+import { localizeName } from "../../localization/localize-name.js";
+import { listPasteHandler } from "./search-list-input.js";
 import { useRouteDetail } from "../../app/use-route-detail.js";
 import { OperationalReference } from "./OperationalReference.js";
 import { AccountingRelatedPanel } from "../accounting/AccountingRelatedPanel.js";
@@ -308,9 +319,13 @@ const settlementDialogs: readonly WorkflowDialog[] = ["new_settlement", "confirm
 
 const emptyFilters = {
   ...businessDateFilterDefaults,
+  areaId: "",
   deliveredFrom: "",
   deliveredTo: "",
+  driverId: "",
+  emirateId: "",
   moneyReceivedStatus: "",
+  orderNumber: "",
   orderSerialNumber: "",
   outstandingOnly: false,
   paymentDateFrom: "",
@@ -1558,6 +1573,11 @@ function SummaryCards({ summary }: { summary: TraderSettlementSummary }) {
           </div>
         ))}
       </div>
+      {/* Which totals the filters narrow: said plainly, so a filtered list is
+        never read against totals that are wider than it. */}
+      <p className="field-hint" data-testid="trader-settlements-summary-scope">
+        {t("traderSettlements.summaryScopeNote")}
+      </p>
     </>
   );
 }
@@ -1573,31 +1593,124 @@ function FilterBar({
   onChange: (change: Partial<Filters>) => void;
   onClear: () => void;
 }) {
-  const { t } = useTranslation();
+  const { i18n, t } = useTranslation();
+  const textLanguage = normalizeLocale(i18n.language);
   const [traders, setTraders] = useState<readonly OperationsTrader[]>([]);
+  const [drivers, setDrivers] = useState<readonly OperationsDriver[]>([]);
+  const [emirates, setEmirates] = useState<readonly Emirate[]>([]);
+  const [area, setArea] = useState<CompanyArea>();
   useEffect(() => {
     void api
       .get<readonly OperationsTrader[]>("operations/traders")
-      .then(setTraders)
+      .then((loaded) => setTraders(Array.isArray(loaded) ? loaded : []))
       .catch(() => setTraders([]));
+    void api
+      .get<readonly OperationsDriver[]>("operations/drivers")
+      .then((loaded) => setDrivers(Array.isArray(loaded) ? loaded : []))
+      .catch(() => setDrivers([]));
+    void api
+      .get<readonly Emirate[]>("configuration/emirates")
+      .then((loaded) => setEmirates(Array.isArray(loaded) ? loaded : []))
+      .catch(() => setEmirates([]));
   }, [api]);
+  // Clear Filters (or any outside reset) empties the Area the box shows.
+  useEffect(() => {
+    if (filters.areaId === "") setArea(undefined);
+  }, [filters.areaId]);
 
   return (
     <section aria-label={t("traderSettlements.pageTitle")}>
       <div className="compact-filters">
-        <label className="field">
+        <label className="field filter-combobox-field">
           <span>{t("traderSettlements.filterTrader")}</span>
-          <select
-            onChange={(event) => onChange({ traderId: event.target.value })}
+          <FilterCombobox
+            emptyText={t("operations.noTradersFound")}
+            label={t("traderSettlements.filterTrader")}
+            onChange={(value) => onChange({ traderId: value })}
+            options={traders.map((trader) => ({
+              id: trader.id,
+              label: trader.name,
+              searchText: trader.code,
+            }))}
             value={filters.traderId}
+          />
+        </label>
+        <label className="field filter-combobox-field">
+          <span>{t("traderSettlements.filterDriver")}</span>
+          <FilterCombobox
+            emptyText={t("operations.noDriversFound")}
+            label={t("traderSettlements.filterDriver")}
+            onChange={(value) => onChange({ driverId: value })}
+            options={drivers.map((driver) => ({
+              id: driver.id,
+              label: driver.name,
+              searchText: driver.code,
+            }))}
+            value={filters.driverId}
+          />
+        </label>
+        <label className="field">
+          <span>{t("traderSettlements.filterOrderNumber")}</span>
+          <input
+            dir="ltr"
+            onChange={(event) => onChange({ orderNumber: event.target.value })}
+            onPaste={listPasteHandler((value) => onChange({ orderNumber: value }))}
+            placeholder={t("traderSettlements.listSearchPlaceholder")}
+            title={t("traderSettlements.listSearchHint")}
+            type="search"
+            value={filters.orderNumber}
+          />
+        </label>
+        <label className="field">
+          <span>{t("traderSettlements.filterExternalReference")}</span>
+          <input
+            dir="ltr"
+            onChange={(event) => onChange({ referenceNumber: event.target.value })}
+            onPaste={listPasteHandler((value) => onChange({ referenceNumber: value }))}
+            placeholder={t("traderSettlements.listSearchPlaceholder")}
+            title={t("traderSettlements.listSearchHint")}
+            type="search"
+            value={filters.referenceNumber}
+          />
+        </label>
+        <label className="field">
+          <span>{t("traderSettlements.filterEmirate")}</span>
+          <select
+            onChange={(event) => {
+              // The Area belongs to the previous Emirate, so it is cleared too.
+              setArea(undefined);
+              onChange({ areaId: "", emirateId: event.target.value });
+            }}
+            value={filters.emirateId}
           >
             <option value="">{t("common.all")}</option>
-            {traders.map((trader) => (
-              <option key={trader.id} value={trader.id}>
-                {trader.name}
+            {emirates.map((emirate) => (
+              <option key={emirate.id} value={emirate.id}>
+                {localizeName(textLanguage, { ar: emirate.nameAr, en: emirate.nameEn })}
               </option>
             ))}
           </select>
+        </label>
+        <label className="field">
+          <span>{t("traderSettlements.filterArea")}</span>
+          {filters.emirateId === "" ? (
+            <input disabled placeholder={t("areas.selectEmirateFirst")} readOnly value="" />
+          ) : (
+            <SearchCombobox<CompanyArea>
+              api={api}
+              emptyText={t("areas.noneFound")}
+              getLabel={(option) => localizeName(textLanguage, { ar: option.nameAr, en: option.nameEn })}
+              key={filters.emirateId}
+              label={t("traderSettlements.filterArea")}
+              onChange={(option) => {
+                setArea(option);
+                onChange({ areaId: option?.id ?? "" });
+              }}
+              path={`configuration/areas/search?emirateId=${encodeURIComponent(filters.emirateId)}&activeOnly=true`}
+              placeholder={t("areas.searchPlaceholder")}
+              value={area}
+            />
+          )}
         </label>
         <label className="field">
           <span>{t("traderSettlements.filterSettlementNumber")}</span>
@@ -1671,14 +1784,6 @@ function FilterBar({
               onChange={(event) => onChange({ orderSerialNumber: event.target.value })}
               type="search"
               value={filters.orderSerialNumber}
-            />
-          </label>
-          <label className="field">
-            <span>{t("traderSettlements.filterExternalReference")}</span>
-            <input
-              onChange={(event) => onChange({ referenceNumber: event.target.value })}
-              type="search"
-              value={filters.referenceNumber}
             />
           </label>
           <label className="field">

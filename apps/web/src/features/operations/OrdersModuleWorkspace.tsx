@@ -73,6 +73,7 @@ import {
   showsAccountingRelatedRecords,
 } from "./order-accounting-policy.js";
 import { CreateOrderDialog } from "./CreateOrderDialog.js";
+import { listPasteHandler } from "./search-list-input.js";
 import { DriverCashStatusLabel, useDriverCashStatusLabel } from "./DriverCashStatus.js";
 import { OrderWorkflowIndicator } from "./OrderWorkflowIndicator.js";
 import { DriverCollectionDetailDialog } from "./DriverCollectionsWorkspace.js";
@@ -1267,6 +1268,9 @@ export function OrdersModuleWorkspace({
               <span className="sr-only">{t("operations.searchOrders")}</span>
               <input
                 onChange={(event) => setSearchText(event.target.value)}
+                // A column of Order / Reference Numbers pasted from Excel stays
+                // a comma list instead of being glued into one value.
+                onPaste={listPasteHandler(setSearchText)}
                 onKeyDown={(event) => {
                   if (event.key !== "Enter") return;
                   // The box is not inside a form, but preventDefault keeps this
@@ -1275,6 +1279,7 @@ export function OrdersModuleWorkspace({
                   updateFilters({ search: searchText });
                 }}
                 placeholder={t("operations.searchOrdersPlaceholder")}
+                title={t("operations.searchOrdersListHint")}
                 value={searchText}
               />
             </label>

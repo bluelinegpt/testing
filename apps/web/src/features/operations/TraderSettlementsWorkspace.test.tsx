@@ -341,7 +341,11 @@ describe("TraderSettlementsWorkspace", () => {
     const { getCalls } = setup();
     await screen.findByText("SET-000123");
     getCalls.length = 0;
-    fireEvent.change(screen.getByLabelText("Trader"), { target: { value: "trader-1" } });
+    // The Trader filter is a searchable combobox (type, then pick).
+    const traderBox = screen.getByRole("combobox", { name: "Trader" });
+    fireEvent.focus(traderBox);
+    fireEvent.change(traderBox, { target: { value: "Test" } });
+    fireEvent.click(await screen.findByRole("option", { name: "Test Trader" }));
     await waitFor(() =>
       expect(getCalls.some((call) => call.includes("traderId=trader-1"))).toBe(true),
     );

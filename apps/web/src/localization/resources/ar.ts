@@ -2333,6 +2333,8 @@ export const arabicTranslations = {
     searchOrders: "البحث في الطلبات",
     searchOrdersPlaceholder:
       "ابحث برقم الطلب أو التسلسلي أو المرجعي أو اسم العميل أو الهاتف — اضغط Enter",
+    searchOrdersListHint:
+      "لعدة أرقام طلبات أو أرقام مرجعية افصل بينها بفواصل (أو الصق عموداً من Excel) للبحث عن تطابق تام، بحد أقصى 200 قيمة.",
     searchSerialNumber: "البحث بالرقم التسلسلي",
     searchSerialNumberPlaceholder: "الرقم التسلسلي فقط — اضغط Enter",
     selectArea: "اختر منطقة",
@@ -3976,7 +3978,16 @@ export const arabicTranslations = {
     filterPaymentReference: "مرجع الدفعة",
     moreFilters: "المزيد من الفلاتر",
     filterOrderSerialNumber: "الرقم التسلسلي للطلب",
-    filterExternalReference: "الرقم المرجعي الخارجي",
+    filterExternalReference: "الرقم المرجعي للطلب",
+    filterOrderNumber: "رقم الطلب",
+    filterDriver: "السائق",
+    filterEmirate: "الإمارة",
+    filterArea: "المنطقة",
+    listSearchPlaceholder: "مثال: 2383، 1523، 2447",
+    listSearchHint:
+      "قيمة واحدة تبحث عن تطابق جزئي. عدة قيم مفصولة بفواصل (أو ملصقة من Excel) تبحث عن تطابق تام، بحد أقصى 200 قيمة.",
+    summaryScopeNote:
+      "المبالغ المرسلة والمبالغ المستلمة تتبع جميع الفلاتر. المستحق والمؤهل وغير المسوّى والمسوّى جزئياً والمتبقي وعدد الطلبات المؤهلة والتجار ذوو الأرصدة المستحقة تتبع فلتر التاجر وتاريخ التسليم فقط. الدفعات المعكوسة تشمل الشركة بالكامل.",
     filterDeliveryDateFrom: "تاريخ التسليم من",
     filterDeliveryDateTo: "تاريخ التسليم إلى",
     filterMoneyReceivedStatus: "حالة استلام التاجر للمبلغ",
@@ -4160,8 +4171,8 @@ export const arabicTranslations = {
     receivedNotes: "ملاحظات",
     moneyReceivedConfirmed: "تم تأكيد استلام التاجر للمبلغ.",
     moneyReceivedAlready: "تم تأكيد استلام المبلغ لهذه التسوية بالفعل.",
-    actionReverseMoneyReceived: "عكس استلام المبلغ",
-    reverseMoneyReceivedTitle: "عكس استلام المبلغ",
+    actionReverseMoneyReceived: "إلغاء الفاتورة",
+    reverseMoneyReceivedTitle: "إلغاء الفاتورة",
     reverseMoneyReceivedReasonRequired: "سبب عكس استلام المبلغ مطلوب.",
     reverseMoneyReceivedWarning:
       "سيعيد هذا حالة تسوية التاجر إلى تم إرسال المبلغ. لن تتغير حالة التسليم أو الذمم المدينة أو التحصيلات أو المقابلات أو قيود المحاسبة.",

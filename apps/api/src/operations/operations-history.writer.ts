@@ -15,6 +15,23 @@ export interface StatusHistoryInput {
   readonly orderId: string;
   readonly reason?: string | null;
   readonly statusDimension?: string;
+  /**
+   * Suppress the Trader WhatsApp hook for THIS row only. Defaults to false, so
+   * every existing call site keeps notifying exactly as before.
+   *
+   * For an internal correction that moves `delivery_status` without anything
+   * having happened to the parcel. `reverseInTransaction`'s unclose is the
+   * case: reversing a Settlement puts an Order back from `closed` to
+   * `delivered`, and `delivered` is notifiable, so SET-000017's reversal would
+   * have sent the Trader 31 "تم التسليم / Delivered" messages for Orders
+   * delivered days earlier. The history row must still be written -- those 31
+   * Orders left `closed` with no transition recorded anywhere, which is most of
+   * why the case was so hard to find -- so the row and the notification are
+   * decided separately.
+   *
+   * Not for suppressing a genuine operational status change.
+   */
+  readonly suppressTraderNotification?: boolean;
   readonly to: string;
 }
 
@@ -104,7 +121,11 @@ export class OperationsHistoryWriter {
     `.execute(database);
     const event = inserted.rows[0];
     if (event === undefined) throw new Error("order_status_history_insert_failed");
-    if ((input.statusDimension ?? "delivery") === "delivery" && this.whatsappOutbox !== undefined) {
+    if (
+      (input.statusDimension ?? "delivery") === "delivery" &&
+      input.suppressTraderNotification !== true &&
+      this.whatsappOutbox !== undefined
+    ) {
       await this.whatsappOutbox.writeOrderStatusChanged(database, {
         companyId: input.companyId,
         occurredAt: event.occurredAt,

@@ -2343,6 +2343,8 @@ export const englishTranslations = {
     // looks like it failed.
     searchOrdersPlaceholder:
       "Search by Order No., Serial No., Reference No., Customer Name, or Mobile — press Enter",
+    searchOrdersListHint:
+      "Several Order or Reference Numbers? Separate them with commas (or paste a column from Excel) to find exact matches, up to 200.",
     searchSerialNumber: "Search by serial number",
     searchSerialNumberPlaceholder: "Serial No. only — press Enter",
     selectArea: "Select an area",
@@ -4037,7 +4039,16 @@ export const englishTranslations = {
     filterPaymentReference: "Payment Reference",
     moreFilters: "More Filters",
     filterOrderSerialNumber: "Order Serial Number",
-    filterExternalReference: "External Reference Number",
+    filterExternalReference: "Order Reference Number",
+    filterOrderNumber: "Order Number",
+    filterDriver: "Driver",
+    filterEmirate: "Emirate",
+    filterArea: "Area",
+    listSearchPlaceholder: "e.g. 2383, 1523, 2447",
+    listSearchHint:
+      "One value finds partial matches. Several values separated by commas (or pasted from Excel) find exact matches, up to 200.",
+    summaryScopeNote:
+      "Money Sent and Money Received follow all filters. Eligible, Unsettled, Partially Settled, Remaining Outstanding, Eligible Orders and Traders with Outstanding Balance follow only the Trader and Delivery Date filters. Reversed Payments covers the whole Company.",
     filterDeliveryDateFrom: "Delivery Date From",
     filterDeliveryDateTo: "Delivery Date To",
     filterMoneyReceivedStatus: "Money Received Status",

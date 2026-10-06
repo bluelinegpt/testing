@@ -1,6 +1,7 @@
 import { type RawBuilder, sql } from "kysely";
 
 import { normalizeUaeMobile } from "../shared/uae-mobile.js";
+import { isSearchList, orderNumberCandidates, splitSearchList } from "./search-list.js";
 
 /**
  * The one predicate behind the single Order search field.
@@ -72,6 +73,20 @@ function looksLikeMobile(term: string): boolean {
 export function unifiedOrderSearchPredicate(term: string | null | undefined): RawBuilder<boolean> {
   const trimmed = term?.trim() ?? "";
   if (trimmed === "") return sql<boolean>`true`;
+
+  // A LIST ("2383, 1523, 2447", or one value per line): an Order matches when
+  // its Order Number or Reference Number EXACTLY equals any value. Each arm is
+  // an `= any(array)` on an indexed column, so a 200-value list is still one
+  // indexed probe per arm, never 200 ORs. A single term (no separator) keeps
+  // the behaviour below unchanged.
+  if (isSearchList(trimmed)) {
+    const values = splitSearchList(trimmed);
+    if (values.length === 0) return sql<boolean>`true`;
+    const orderNumbers = values.flatMap(orderNumberCandidates);
+    const references = values.map(normalizeReferenceTerm);
+    return sql<boolean>`(o.order_number = any(${orderNumbers}::text[])
+      or o.reference_number_normalized = any(${references}::text[]))`;
+  }
 
   const reference = normalizeReferenceTerm(trimmed);
   const branches: RawBuilder<boolean>[] = [

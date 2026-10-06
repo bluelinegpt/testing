@@ -1495,10 +1495,36 @@ export class TraderSettlementFilterDto {
   @MaxLength(160)
   public readonly orderSerialNumber?: string;
 
+  /**
+   * Order Reference Number of a linked Order. One value: partial match (as
+   * before). A comma / line separated list: exact match on any value (up to
+   * SEARCH_LIST_LIMIT values, hence the length).
+   */
   @IsOptional()
   @IsString()
-  @MaxLength(160)
+  @MaxLength(8000)
   public readonly referenceNumber?: string;
+
+  /** Order Number of a linked Order: one value (partial) or a list (exact). */
+  @IsOptional()
+  @IsString()
+  @MaxLength(8000)
+  public readonly orderNumber?: string;
+
+  /** The assigned Driver of a linked Order. */
+  @IsOptional()
+  @IsUUID()
+  public readonly driverId?: string;
+
+  /** Emirate of a linked Order's Area. */
+  @IsOptional()
+  @IsUUID()
+  public readonly emirateId?: string;
+
+  /** Area of a linked Order. */
+  @IsOptional()
+  @IsUUID()
+  public readonly areaId?: string;
 
   @IsOptional()
   @Matches(/^\d{4}-\d{2}-\d{2}$/)

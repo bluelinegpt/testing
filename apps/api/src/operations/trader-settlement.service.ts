@@ -21,8 +21,12 @@ import {
 
 import { CompanyProfileService } from "../company-profile/company-profile.service.js";
 import { DriverCollectionPdfService } from "./driver-collection-pdf.service.js";
+import { restoredDeliveryStatus, reversalInvalidatesClose } from "./order-close-eligibility.js";
+import { expectedReceivableStatus } from "./trader-receivable-reconciliation.js";
 import { OperationsHistoryWriter } from "./operations-history.writer.js";
 import { traderSettlementPageSizes } from "./operations.dto.js";
+import { normalizeReferenceTerm } from "./order-search.js";
+import { isSearchList, orderNumberCandidates, splitSearchList } from "./search-list.js";
 import type {
   ConfirmTraderSettlementReceiptDto,
   CreateTraderSettlementDto,
@@ -1119,11 +1123,13 @@ export class TraderSettlementService {
           )
         `.execute(transaction);
         const newCollected = this.money(new Decimal(receivable.amountCollected).plus(amount));
-        const fullyCollected = newCollected.greaterThanOrEqualTo(receivable.originalAmountDue);
+        // THE domain status rule (trader-receivable-reconciliation.ts), shared
+        // with Trader Collections and with every health / repair reader.
+        const newStatus = expectedReceivableStatus(newCollected, receivable.originalAmountDue);
         await sql`
           update trader_receivables
              set amount_collected=${newCollected.toNumber()},
-                 status=${fullyCollected ? "collected" : "partially_collected"},updated_at=now()
+                 status=${newStatus},updated_at=now()
            where company_id=${companyId}::uuid and id=${receivable.id}::uuid
         `.execute(transaction);
       }
@@ -1889,6 +1895,7 @@ export class TraderSettlementService {
       const links = (
         await sql<{
           allocatedAmount: string;
+          deliveryStatus: string;
           orderId: string;
           settlementStatus: string;
           traderNetPayable: string;
@@ -1896,6 +1903,9 @@ export class TraderSettlementService {
         }>`
           select o.id as "orderId", link.allocated_amount as "allocatedAmount",
                  o.trader_settlement_status as "settlementStatus",
+                 -- Needed to undo a close this reversal invalidates; see the
+                 -- unclose block below and order-close-eligibility.ts.
+                 o.delivery_status as "deliveryStatus",
                  o.trader_paid_amount::text as "traderPaidAmount",
                  o.trader_net_payable::text as "traderNetPayable"
             from trader_settlement_orders link
@@ -1920,10 +1930,18 @@ export class TraderSettlementService {
                 amountCollected: string;
                 originalAmountDue: string;
                 receivableId: string;
+                receivableNumber: string;
+                receivableStatus: string;
+                liveCreditNumber: string | null;
               }>`
                 select x.receivable_id as "receivableId",x.amount_allocated::text as "amountAllocated",
                        r.amount_collected::text as "amountCollected",
-                       r.original_amount_due::text as "originalAmountDue"
+                       r.original_amount_due::text as "originalAmountDue",
+                       r.receivable_number as "receivableNumber",
+                       r.status as "receivableStatus",
+                       (select c.credit_number from trader_credits c
+                         where c.company_id=r.company_id and c.source_receivable_id=r.id
+                           and c.status<>'cancelled' limit 1) as "liveCreditNumber"
                   from trader_settlement_receivable_offsets x
                   join trader_receivables r on r.id=x.receivable_id and r.company_id=x.company_id
                  where x.company_id=${companyId}::uuid and x.settlement_id=${settlementId}::uuid
@@ -1931,6 +1949,28 @@ export class TraderSettlementService {
               `.execute(transaction)
             ).rows
           : [];
+
+      // A Receivable on this Settlement that was already reversed on its own
+      // (ReceivableOffsetReversalService) has compensated the Trader with a
+      // Trader Credit. Restoring it here would hand the fee back a SECOND time
+      // (Credit + restored outstanding) and overwrite a terminal status. The
+      // full reversal is refused instead; nothing is written.
+      const individuallyReversed = offsets.filter(
+        (offset) => offset.receivableStatus === "reversed",
+      );
+      if (individuallyReversed.length > 0) {
+        throw new ApplicationException(
+          "trader_settlement_reversal_blocked_by_receivable_reversal",
+          `Settlement ${original.settlementNumber} cannot be reversed in full: Receivable ${individuallyReversed
+            .map((offset) =>
+              offset.liveCreditNumber === null
+                ? offset.receivableNumber
+                : `${offset.receivableNumber} (Trader Credit ${offset.liveCreditNumber})`,
+            )
+            .join(", ")} was already reversed individually and the Trader compensated.`,
+          HttpStatus.CONFLICT,
+        );
+      }
 
       const reversalNumber = await this.history.nextReferenceNumber(
         transaction,
@@ -2003,17 +2043,106 @@ export class TraderSettlementService {
           relatedSettlementId: reversalId,
           source: "web_portal",
         });
+
+        // UNDO THE CLOSE THIS REVERSAL INVALIDATED.
+        //
+        // An Order reaches `closed` only once Driver cash, Trader settlement
+        // and Return processing are all complete. The write above has just
+        // destroyed the settlement leg of that condition, so an Order that was
+        // closed on the strength of it is now in a state it could never legally
+        // have entered -- and because every settlement path requires
+        // `delivered` (five query sites in this file plus
+        // `validate_trader_settlement_confirmation()`), it can never be settled
+        // again either. SET-000017 is the case: 31 Orders, AED 8,676, settled
+        // 01:13:24, closed 01:15:17, reversed 01:30:57, and the Trader could not
+        // be paid.
+        //
+        // Deliberately narrow: ONLY `delivery_status` and `closed_at`. The
+        // close preserved `driver_reconciliation_status`, `amount_collected`,
+        // `return_status`, `delivered_at` and `operational_completed_at`
+        // untouched, so their pre-close values are still correct and this
+        // reverses the single field the close actually changed. That is the
+        // opposite of `reopenDeliveredOrder`, which resets all of them because
+        // it undoes the DELIVERY, not the close.
+        if (
+          reversalInvalidatesClose({
+            deliveryStatus: link.deliveryStatus,
+            settlementStatusAfterReversal: newStatus,
+            traderNetPayable: link.traderNetPayable,
+          })
+        ) {
+          // The close gate accepts three predecessors, so restore the one this
+          // Order actually came from. All 31 SET-000017 Orders came from
+          // `delivered`, so a hardcoded value would look correct today and
+          // silently mis-restore the first `returned_to_trader` Order reversed.
+          const priorStatus = restoredDeliveryStatus(
+            (
+              await sql<{ fromStatus: string | null }>`
+                select from_status as "fromStatus"
+                  from order_status_history
+                 where company_id = ${companyId}::uuid and order_id = ${link.orderId}::uuid
+                   and status_dimension = 'delivery' and to_status = 'closed'
+                 order by occurred_at desc
+                 limit 1
+              `.execute(transaction)
+            ).rows[0]?.fromStatus,
+          );
+          await sql`
+            update orders set delivery_status = ${priorStatus}, closed_at = null,
+                              updated_at = now(), version = version + 1
+             where id = ${link.orderId}::uuid and company_id = ${companyId}::uuid
+          `.execute(transaction);
+          // Recorded, not silent. The 31 stranded Orders left `closed` with no
+          // delivery-dimension transition anywhere, which is most of why the
+          // case took a day to find.
+          await this.history.statusHistory(transaction, {
+            actorId: identity.identityId,
+            companyId,
+            from: link.deliveryStatus,
+            orderId: link.orderId,
+            reason: trimmedReason,
+            statusDimension: "delivery",
+            // The row yes, the WhatsApp no. `delivered` and
+            // `returned_to_trader` are both Trader-notifiable, so without this
+            // SET-000017's reversal would have sent the Trader 31 "Delivered"
+            // messages for Orders delivered days earlier. Nothing happened to
+            // the parcel; this is a bookkeeping correction.
+            suppressTraderNotification: true,
+            to: priorStatus,
+          });
+          await this.history.orderEvent(transaction, {
+            actorId: identity.identityId,
+            actorRole,
+            category: "status_change",
+            companyId,
+            correlationId,
+            eventType: "order.delivery_unclosed",
+            fieldName: "delivery_status",
+            newValue: {
+              reversalSettlementNumber: reversalNumber,
+              reversedSettlementNumber: original.settlementNumber,
+              status: priorStatus,
+            },
+            orderId: link.orderId,
+            previousValue: link.deliveryStatus,
+            reason: trimmedReason,
+            relatedSettlementId: reversalId,
+            source: "web_portal",
+          });
+        }
       }
       for (const offset of offsets) {
+        // HISTORY STAYS HISTORY (Repair Center Phase 3, Prompt 4): a cancelled
+        // receivable is never re-derived (a reversed one already refuses the
+        // whole reversal above). The offset row stays as history and stops
+        // counting with its reversed Settlement.
+        if (offset.receivableStatus === "cancelled") continue;
         const restoredCollected = Decimal.max(
           0,
           new Decimal(offset.amountCollected).minus(offset.amountAllocated),
         );
-        const restoredStatus = restoredCollected.lessThanOrEqualTo(0)
-          ? "outstanding"
-          : restoredCollected.lessThan(offset.originalAmountDue)
-            ? "partially_collected"
-            : "collected";
+        // THE domain status rule (trader-receivable-reconciliation.ts).
+        const restoredStatus = expectedReceivableStatus(restoredCollected, offset.originalAmountDue);
         await sql`
           update trader_receivables
              set amount_collected=${this.money(restoredCollected).toNumber()},
@@ -2183,7 +2312,10 @@ export class TraderSettlementService {
         count(*) filter (where s.reversal_of_id is not null)::int as "reversedPayments"
         from trader_settlements s
         join traders t on t.id = s.trader_id and t.company_id = s.company_id
-       where ${filters} or s.reversal_of_id is not null
+       -- Parenthesised and Company-scoped: without the brackets the OR made
+       -- "reversed payments" count every Company's reversals (AND binds tighter).
+       where (${filters})
+          or (s.company_id = ${companyId}::uuid and s.reversal_of_id is not null)
     `.execute(this.database);
     const orderRow = orderTotals.rows[0] ?? {
       eligibleOrders: 0,
@@ -2760,6 +2892,35 @@ export class TraderSettlementService {
     query: TraderSettlementFilterDto,
     applied?: AppliedReportDateMode,
   ): ReturnType<typeof sql> {
+    const given = (value: string | undefined): value is string =>
+      value !== undefined && value !== null && value.trim() !== "";
+    // Order Number / Order Reference Number of a LINKED Order: one value is a
+    // partial match (the Reference filter's behaviour so far); a comma / line
+    // separated list is an EXACT match on any value.
+    const referenceMatch = !given(query.referenceNumber)
+      ? sql`true`
+      : isSearchList(query.referenceNumber)
+        ? sql`o.reference_number_normalized = any(${splitSearchList(query.referenceNumber).map(normalizeReferenceTerm)}::text[])`
+        : sql`o.reference_number ilike '%' || ${query.referenceNumber.trim()} || '%'`;
+    const orderNumberMatch = !given(query.orderNumber)
+      ? sql`true`
+      : isSearchList(query.orderNumber)
+        ? sql`o.order_number = any(${splitSearchList(query.orderNumber).flatMap(orderNumberCandidates)}::text[])`
+        : sql`(o.order_number ilike '%' || ${query.orderNumber.trim()} || '%'
+               or o.order_number = any(${orderNumberCandidates(query.orderNumber.trim())}::text[]))`;
+    // Any Order-level filter means "a settlement with at least one linked Order
+    // matching ALL of them" (one EXISTS, so a settlement is listed once however
+    // many of its Orders match).
+    const orderFiltered =
+      given(query.orderSerialNumber) ||
+      given(query.referenceNumber) ||
+      given(query.orderNumber) ||
+      given(query.driverId) ||
+      given(query.emirateId) ||
+      given(query.areaId) ||
+      given(query.deliveredFrom) ||
+      given(query.deliveredTo) ||
+      query.outstandingOnly === true;
     return sql`
       s.company_id = ${companyId}::uuid
         and s.reversal_of_id is null
@@ -2808,11 +2969,7 @@ export class TraderSettlementService {
                 and p.bank_reference ilike '%' || ${query.paymentReference ?? null} || '%'
         ))
         and (
-          (${query.orderSerialNumber ?? null}::text is null
-           and ${query.referenceNumber ?? null}::text is null
-           and ${query.deliveredFrom ?? null}::date is null
-           and ${query.deliveredTo ?? null}::date is null
-           and ${query.outstandingOnly !== true})
+          ${!orderFiltered}
           or exists (
             select 1
               from trader_settlement_orders link
@@ -2821,8 +2978,17 @@ export class TraderSettlementService {
                and (${query.orderSerialNumber ?? null}::text is null
                     or coalesce(o.serial_number, o.order_number)
                        ilike '%' || ${query.orderSerialNumber ?? null} || '%')
-               and (${query.referenceNumber ?? null}::text is null
-                    or o.reference_number ilike '%' || ${query.referenceNumber ?? null} || '%')
+               and ${referenceMatch}
+               and ${orderNumberMatch}
+               and (${given(query.driverId) ? query.driverId : null}::uuid is null
+                    or o.assigned_driver_id = ${given(query.driverId) ? query.driverId : null}::uuid)
+               and (${given(query.areaId) ? query.areaId : null}::uuid is null
+                    or o.area_id = ${given(query.areaId) ? query.areaId : null}::uuid)
+               and (${given(query.emirateId) ? query.emirateId : null}::uuid is null or exists (
+                    select 1 from areas area_row
+                     where area_row.id = o.area_id and area_row.company_id = o.company_id
+                       and area_row.emirate_id = ${given(query.emirateId) ? query.emirateId : null}::uuid
+               ))
                and (${query.deliveredFrom ?? null}::date is null
                     or o.delivered_at::date >= ${query.deliveredFrom ?? null}::date)
                and (${query.deliveredTo ?? null}::date is null
@@ -3256,6 +3422,7 @@ export class TraderSettlementService {
         correlation_id,
         idempotency_identity,
         accounting_event_id,
+        generated_by_source_type,
         confirmed_by_account_id,
         confirmed_at,
         created_by_account_id,
@@ -3280,6 +3447,9 @@ export class TraderSettlementService {
         ${options.settlementId},
         ${idempotencyKey},
         ${ownerEventId}::uuid,
+        -- Accounting OFF: no owning Event, so mark the trail as generated
+        -- (see migration 20260984000000). ON rows are unchanged.
+        ${ownerEventId === null ? "trader_settlement" : null},
         ${options.actorId}::uuid,
         now(),
         ${options.actorId}::uuid,
