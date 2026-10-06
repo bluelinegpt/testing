@@ -57,7 +57,12 @@ export function CreateOrderDialog({
   // Search-and-Display preference, independent of the UI language.
   const branding = useContext(CompanyBrandingContext);
   const textLanguage = branding?.textLanguage ?? locale;
-  const canCreateArea = permissions.includes("users_roles.manage");
+  // Areas are Order master data, not user administration: whoever may create
+  // an Order needs to add a missing Area inline. POST configuration/areas has
+  // always accepted orders.create, so this check was stricter than the API it
+  // guards and hid a button that would have worked.
+  const canCreateArea =
+    permissions.includes("orders.create") || permissions.includes("users_roles.manage");
   const canManageTraders = permissions.includes("users_roles.manage");
   const canOverrideFee = permissions.includes("orders.override_service_fee");
   const [trader, setTrader] = useState<OperationsTraderOption>();
@@ -1509,7 +1514,7 @@ export function CreateOrderDialog({
                     <div className="fee-override pricing-missing" role="group">
                       <p className="field-hint">{t("operations.pricingFailureMessage")}</p>
                       <div className="pricing-actions">
-                        {canCreateArea && !addPricingOpen ? (
+                        {canManageTraders && !addPricingOpen ? (
                           <button
                             className="button button-secondary"
                             onClick={() => {
