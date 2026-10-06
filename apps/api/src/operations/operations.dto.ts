@@ -1249,10 +1249,21 @@ export class TraderSettlementEligibleOrdersQueryDto extends PaginationQueryDto {
   @MaxLength(160)
   public readonly serialNumber?: string;
 
+  // 8000, not 160: a comma list pasted from Excel carries up to 200 values, and
+  // the settlement list filters already use this limit for the same reason.
   @IsOptional()
   @IsString()
-  @MaxLength(160)
+  @MaxLength(8000)
   public readonly referenceNumber?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(8000)
+  public readonly orderNumber?: string;
+
+  @IsOptional()
+  @IsUUID()
+  public readonly driverId?: string;
 
   @IsOptional()
   @IsUUID()

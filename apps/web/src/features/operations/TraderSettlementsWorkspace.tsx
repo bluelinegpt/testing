@@ -30,7 +30,6 @@ import { AccountingRelatedPanel } from "../accounting/AccountingRelatedPanel.js"
 import { Modal } from "../../components/Modal.js";
 import { PageHeader } from "../../components/PageHeader.js";
 import { formatMoneyValue, parseMoneyInput, safeMoneyValue } from "../../utils/numeric-input.js";
-import { AreaSelector } from "../configuration/AreaSelector.js";
 
 import { type PdfAction, useReconciliationPdfActions } from "./reconciliation-pdf.js";
 import { useWorkflowDeepLink, type WorkflowDialog } from "./use-workflow-deep-link.js";
@@ -379,7 +378,9 @@ const emptyEligibleOrderFilters = {
   areaId: "",
   deliveredFrom: "",
   deliveredTo: "",
+  driverId: "",
   emirateId: "",
+  orderNumber: "",
   outstandingOnly: true,
   referenceNumber: "",
   serialNumber: "",
@@ -1864,7 +1865,8 @@ function NewSettlementDialog({
   onOpenAccountStatement: (traderId: string) => void;
   reportLanguage: "ar" | "en";
 }) {
-  const { t } = useTranslation();
+  const { i18n, t } = useTranslation();
+  const textLanguage = normalizeLocale(i18n.language);
 
   // Step 1 — Trader.
   const [traderSearch, setTraderSearch] = useState("");
@@ -1879,6 +1881,31 @@ function NewSettlementDialog({
     useState<PagedResponse<TraderEligibleOrderRow>>();
   const [ordersError, setOrdersError] = useState<string>();
   const [orderFilters, setOrderFilters] = useState<EligibleOrderFilters>(emptyEligibleOrderFilters);
+  // Emirate / Area / Driver for the Eligible Orders filter. The Emirate list is
+  // loaded here rather than shared with FilterBar: the two are separate
+  // components, and this panel opens inside the New Settlement dialog.
+  //
+  // Why this exists at all: the Emirate filter used to be an AreaSelector whose
+  // onChange only fires when an AREA is chosen, so picking an Emirate alone sent
+  // emirateId: "" and filtered nothing. The API has always supported emirateId;
+  // the control was the problem.
+  const [eligibleEmirates, setEligibleEmirates] = useState<readonly Emirate[]>([]);
+  const [eligibleDrivers, setEligibleDrivers] = useState<readonly OperationsDriver[]>([]);
+  const [eligibleArea, setEligibleArea] = useState<CompanyArea>();
+  useEffect(() => {
+    void api
+      .get<readonly Emirate[]>("configuration/emirates")
+      .then((loaded) => setEligibleEmirates(Array.isArray(loaded) ? loaded : []))
+      .catch(() => setEligibleEmirates([]));
+    void api
+      .get<readonly OperationsDriver[]>("operations/drivers")
+      .then((loaded) => setEligibleDrivers(Array.isArray(loaded) ? loaded : []))
+      .catch(() => setEligibleDrivers([]));
+  }, [api]);
+  // Clear Filters (or any outside reset) empties the Area the box shows.
+  useEffect(() => {
+    if (orderFilters.areaId === "") setEligibleArea(undefined);
+  }, [orderFilters.areaId]);
   const [eligibleFiltersOpen, setEligibleFiltersOpen] = useState(
     () => initialOrderId === undefined,
   );
@@ -2850,13 +2877,47 @@ function NewSettlementDialog({
                       />
                     </label>
                     <label className="field">
+                      <span>{t("traderSettlements.filterOrderNumber")}</span>
+                      <input
+                        dir="ltr"
+                        onChange={(event) => applyOrderFilter({ orderNumber: event.target.value })}
+                        onPaste={listPasteHandler((value) =>
+                          applyOrderFilter({ orderNumber: value }),
+                        )}
+                        placeholder={t("traderSettlements.listSearchPlaceholder")}
+                        title={t("traderSettlements.listSearchHint")}
+                        type="search"
+                        value={orderFilters.orderNumber}
+                      />
+                    </label>
+                    <label className="field">
                       <span>{t("traderSettlements.filterExternalReference")}</span>
                       <input
+                        dir="ltr"
                         onChange={(event) =>
                           applyOrderFilter({ referenceNumber: event.target.value })
                         }
+                        onPaste={listPasteHandler((value) =>
+                          applyOrderFilter({ referenceNumber: value }),
+                        )}
+                        placeholder={t("traderSettlements.listSearchPlaceholder")}
+                        title={t("traderSettlements.listSearchHint")}
                         type="search"
                         value={orderFilters.referenceNumber}
+                      />
+                    </label>
+                    <label className="field filter-combobox-field">
+                      <span>{t("traderSettlements.filterDriver")}</span>
+                      <FilterCombobox
+                        emptyText={t("operations.noDriversFound")}
+                        label={t("traderSettlements.filterDriver")}
+                        onChange={(value) => applyOrderFilter({ driverId: value })}
+                        options={eligibleDrivers.map((driver) => ({
+                          id: driver.id,
+                          label: driver.name,
+                          searchText: driver.code,
+                        }))}
+                        value={orderFilters.driverId}
                       />
                     </label>
                     <label className="field">
@@ -2877,20 +2938,56 @@ function NewSettlementDialog({
                         value={orderFilters.deliveredTo}
                       />
                     </label>
-                    <div className="field" data-field="area">
-                      <span>{t("areas.emirate")}</span>
-                      <AreaSelector
-                        allowCreate={false}
-                        api={api}
-                        onChange={(area) =>
-                          applyOrderFilter({
-                            areaId: area?.id ?? "",
-                            emirateId: area?.emirateId ?? "",
-                          })
-                        }
-                        value={undefined}
-                      />
-                    </div>
+                    <label className="field">
+                      <span>{t("traderSettlements.filterEmirate")}</span>
+                      <select
+                        onChange={(event) => {
+                          // The Area belongs to the previous Emirate, so it is
+                          // cleared too.
+                          setEligibleArea(undefined);
+                          applyOrderFilter({ areaId: "", emirateId: event.target.value });
+                        }}
+                        value={orderFilters.emirateId}
+                      >
+                        <option value="">{t("common.all")}</option>
+                        {eligibleEmirates.map((emirate) => (
+                          <option key={emirate.id} value={emirate.id}>
+                            {localizeName(textLanguage, {
+                              ar: emirate.nameAr,
+                              en: emirate.nameEn,
+                            })}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="field">
+                      <span>{t("traderSettlements.filterArea")}</span>
+                      {orderFilters.emirateId === "" ? (
+                        <input
+                          disabled
+                          placeholder={t("areas.selectEmirateFirst")}
+                          readOnly
+                          value=""
+                        />
+                      ) : (
+                        <SearchCombobox<CompanyArea>
+                          api={api}
+                          emptyText={t("areas.noneFound")}
+                          getLabel={(option) =>
+                            localizeName(textLanguage, { ar: option.nameAr, en: option.nameEn })
+                          }
+                          key={orderFilters.emirateId}
+                          label={t("traderSettlements.filterArea")}
+                          onChange={(option) => {
+                            setEligibleArea(option);
+                            applyOrderFilter({ areaId: option?.id ?? "" });
+                          }}
+                          path={`configuration/areas/search?emirateId=${encodeURIComponent(orderFilters.emirateId)}&activeOnly=true`}
+                          placeholder={t("areas.searchPlaceholder")}
+                          value={eligibleArea}
+                        />
+                      )}
+                    </label>
                     <label className="field">
                       <span>{t("traderSettlements.filterSettlementStatus")}</span>
                       <select
@@ -2970,6 +3067,8 @@ function NewSettlementDialog({
                         <th scope="col">{t("operations.orderType")}</th>
                         <th scope="col">{t("traderSettlements.filterExternalReference")}</th>
                         <th scope="col">{t("traderSettlements.filterDeliveryDateFrom")}</th>
+                        <th scope="col">{t("traderSettlements.filterEmirate")}</th>
+                        <th scope="col">{t("traderSettlements.filterArea")}</th>
                         <th scope="col">{t("common.name")}</th>
                         <th scope="col">{t("traderSettlements.settlementItemType")}</th>
                         <th scope="col">{t("traderSettlements.columnOriginalAmountDue")}</th>
@@ -3026,6 +3125,8 @@ function NewSettlementDialog({
                           <td>
                             {order.deliveryDate === null ? "-" : order.deliveryDate.slice(0, 10)}
                           </td>
+                          <td>{order.emirateName ?? "-"}</td>
+                          <td>{order.areaName === "" ? "-" : order.areaName}</td>
                           <td>{order.customerName}<span className="cell-secondary">{order.customerMobileNumber}</span></td>
                           <td>{t("traderSettlements.orderPayablePlus")}</td>
                           <td>{money(order.originalAmountDueToTrader)}</td>

@@ -653,6 +653,23 @@ export class TraderSettlementService {
         : query.sortBy === "outstandingBalance"
           ? "o.trader_outstanding_balance"
           : "o.delivered_at";
+    // Order Number / Reference Number behave exactly as they do on the
+    // Settlements list (settlementFilters): ONE value is a partial match, a
+    // comma / Arabic-comma / newline separated list is an EXACT match on any of
+    // them. Pasting a column out of Excel is the case this exists for.
+    const given = (value: string | undefined): value is string =>
+      value !== undefined && value !== null && value.trim() !== "";
+    const referenceMatch = !given(query.referenceNumber)
+      ? sql`true`
+      : isSearchList(query.referenceNumber)
+        ? sql`o.reference_number_normalized = any(${splitSearchList(query.referenceNumber).map(normalizeReferenceTerm)}::text[])`
+        : sql`o.reference_number ilike '%' || ${query.referenceNumber.trim()} || '%'`;
+    const orderNumberMatch = !given(query.orderNumber)
+      ? sql`true`
+      : isSearchList(query.orderNumber)
+        ? sql`o.order_number = any(${splitSearchList(query.orderNumber).flatMap(orderNumberCandidates)}::text[])`
+        : sql`(o.order_number ilike '%' || ${query.orderNumber.trim()} || '%'
+               or o.order_number = any(${orderNumberCandidates(query.orderNumber.trim())}::text[]))`;
     const filters = sql`
       o.company_id = ${companyId}::uuid
         and o.trader_id = ${query.traderId}::uuid
@@ -668,8 +685,10 @@ export class TraderSettlementService {
         and (${query.serialNumber ?? null}::text is null
              or coalesce(o.serial_number, o.order_number)
                 ilike '%' || ${query.serialNumber ?? null} || '%')
-        and (${query.referenceNumber ?? null}::text is null
-             or o.reference_number ilike '%' || ${query.referenceNumber ?? null} || '%')
+        and ${referenceMatch}
+        and ${orderNumberMatch}
+        and (${given(query.driverId) ? query.driverId : null}::uuid is null
+             or o.assigned_driver_id = ${given(query.driverId) ? query.driverId : null}::uuid)
         and (${query.emirateId ?? null}::uuid is null or exists (
              select 1 from areas a
               where a.id = o.area_id and a.company_id = o.company_id
