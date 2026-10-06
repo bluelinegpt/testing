@@ -970,6 +970,7 @@ export const englishTranslations = {
     continue: "Continue",
     pagination: "Pagination",
     pageOf: "Page {{page}} of {{pageCount}}",
+    pageSize: "Rows per page",
     totalRows: "{{total}} total",
     tryAgain: "Try again",
     print: "Print",

@@ -958,6 +958,7 @@ export const arabicTranslations = {
     continue: "متابعة",
     pagination: "ترقيم الصفحات",
     pageOf: "صفحة {{page}} من {{pageCount}}",
+    pageSize: "عدد الصفوف",
     totalRows: "{{total}} الإجمالي",
     tryAgain: "المحاولة مرة أخرى",
     print: "طباعة",
