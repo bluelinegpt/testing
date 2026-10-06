@@ -3359,7 +3359,16 @@ export class OperationsService {
     };
   }
 
-  public async drivers(): Promise<readonly OperationsDriver[]> {
+  /**
+   * `includeInactive` is for FILTER dropdowns, never for assignment.
+   *
+   * The default stays active-only, because assigning work to a disabled Driver
+   * is a mistake. But a filter is the opposite case: a Driver who left still
+   * has delivered Orders waiting to be settled, and on 6 Oct 2026 the two
+   * Drivers holding the most unsettled Orders for AL Fahd Al Maliky (19 and 17)
+   * were both disabled — so the Settlement filter could not reach them at all.
+   */
+  public async drivers(includeInactive = false): Promise<readonly OperationsDriver[]> {
     const { companyId } = this.tenants.current();
     const result = await sql<OperationsDriver>`
       select d.id,
@@ -3374,7 +3383,7 @@ export class OperationsService {
       from drivers d
       left join orders o on o.assigned_driver_id = d.id and o.company_id = d.company_id
       where d.company_id = ${companyId}::uuid
-        and d.account_status = 'active'
+        and (${includeInactive} or d.account_status = 'active')
       group by d.id
       order by lower(d.name_en), d.code
       limit 100

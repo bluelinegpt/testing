@@ -175,7 +175,9 @@ export interface TraderReceivableReversalPreview {
 }
 
 export interface TraderReceivableEligibleRow {
+  readonly areaName: string | null;
   readonly businessDate: string;
+  readonly emirateName: string | null;
   readonly id: string;
   readonly orderSerialNumber: string | null;
   readonly orderNumber: string | null;
@@ -885,6 +887,19 @@ export class TraderReceivableService {
                and delivered_order.payment_condition = 'customer_pays_cod_trader_pays_fee'
           )
         )
+        -- Emirate / Area / Driver of the Receivable's own Order, so the
+        -- Settlement wizard can narrow fee deductions by the same filters it
+        -- narrows Orders by. ord is LEFT joined, so a Receivable with no Order
+        -- matches none of these -- which is right: it has no Emirate to be in.
+        and (${query.emirateId ?? null}::uuid is null or exists (
+             select 1 from areas receivable_area
+              where receivable_area.id = ord.area_id
+                and receivable_area.company_id = ord.company_id
+                and receivable_area.emirate_id = ${query.emirateId ?? null}::uuid
+        ))
+        and (${query.areaId ?? null}::uuid is null or ord.area_id = ${query.areaId ?? null}::uuid)
+        and (${query.driverId ?? null}::uuid is null
+             or ord.assigned_driver_id = ${query.driverId ?? null}::uuid)
     `;
     const result = await sql<TraderReceivableEligibleRow & { total: number }>`
       select r.id, r.receivable_number as "receivableNumber", r.trader_id as "traderId",
@@ -893,6 +908,8 @@ export class TraderReceivableService {
              r.source_reference as "sourceReference", ord.serial_number as "orderSerialNumber",
              ord.order_number as "orderNumber", ord.order_type as "orderType",
              ord.customer_name as "customerName", ord.customer_mobile_number as "customerMobileNumber", r.reason,
+             receivable_emirate.name_en as "emirateName",
+             coalesce(ord.customer_area_name_snapshot, receivable_area.name_en) as "areaName",
              r.original_amount_due::text as "originalAmountDue",
              r.amount_collected::text as "previouslyCollected",
              r.outstanding_amount::text as "outstandingAmount", r.status,
@@ -902,6 +919,9 @@ export class TraderReceivableService {
         left join orders ord on ord.company_id = r.company_id
           and r.source_type = 'service_charge'
           and ord.order_number = r.source_reference
+        left join areas receivable_area on receivable_area.id = ord.area_id
+          and receivable_area.company_id = ord.company_id
+        left join emirates receivable_emirate on receivable_emirate.id = receivable_area.emirate_id
        where ${filters}
        order by ${sql.raw(sortColumn)} ${sql.raw(direction)}, r.receivable_number ${sql.raw(direction)}
        limit ${limit} offset ${offset}

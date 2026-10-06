@@ -2131,6 +2131,12 @@ export const arabicTranslations = {
     collectSkippedOrders:
       "تعذّر تضمين {{count}} من الطلبات المحددة — تم تحصيلها بالفعل أو لم تعد مؤهلة لهذا المندوب.",
     manifestPreviewFailed: "تعذّر إنشاء كشف شحنات المندوب.",
+    // Kept alongside manifestTotalAmountToCollect: the committed
+    // OrdersModuleWorkspace still calls manifestTotalCod, because the
+    // component rename and its API field (totalCod ->
+    // totalCustomerAmountToCollect) are not committed yet. Removing this
+    // key left the Arabic Driver Shipment Manifest total unlabelled.
+    manifestTotalCod: "إجمالي التحصيل عند الاستلام",
     manifestTotalAmountToCollect: "إجمالي المبلغ المطلوب تحصيله",
     manifestTotalPackages: "إجمالي الطرود",
     collectionConfirmed: "تم تأكيد التحصيل {{number}}.",

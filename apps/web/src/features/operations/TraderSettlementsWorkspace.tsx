@@ -159,7 +159,9 @@ interface TraderSettlementDraftRow {
 }
 
 interface TraderReceivableEligibleRow {
+  readonly areaName?: string | null;
   readonly businessDate: string;
+  readonly emirateName?: string | null;
   readonly id: string;
   readonly orderSerialNumber?: string | null;
   readonly orderNumber?: string | null;
@@ -1606,7 +1608,9 @@ function FilterBar({
       .then((loaded) => setTraders(Array.isArray(loaded) ? loaded : []))
       .catch(() => setTraders([]));
     void api
-      .get<readonly OperationsDriver[]>("operations/drivers")
+      // Inactive Drivers included: a departed Driver still has delivered
+      // Orders waiting to be settled, and filtering must be able to reach them.
+      .get<readonly OperationsDriver[]>("operations/drivers?includeInactive=true")
       .then((loaded) => setDrivers(Array.isArray(loaded) ? loaded : []))
       .catch(() => setDrivers([]));
     void api
@@ -1898,7 +1902,9 @@ function NewSettlementDialog({
       .then((loaded) => setEligibleEmirates(Array.isArray(loaded) ? loaded : []))
       .catch(() => setEligibleEmirates([]));
     void api
-      .get<readonly OperationsDriver[]>("operations/drivers")
+      // Inactive Drivers included: a departed Driver still has delivered
+      // Orders waiting to be settled, and filtering must be able to reach them.
+      .get<readonly OperationsDriver[]>("operations/drivers?includeInactive=true")
       .then((loaded) => setEligibleDrivers(Array.isArray(loaded) ? loaded : []))
       .catch(() => setEligibleDrivers([]));
   }, [api]);
@@ -2020,10 +2026,18 @@ function NewSettlementDialog({
     (total, receivable) => total + safeMoneyValue(receivable.outstandingAmount),
     0,
   );
+  // The header tick covers EVERY listed line, Orders and fee deductions alike.
+  // It used to count only Orders, so with fee rows present it read "all
+  // selected" while leaving them untouched — the state in the screenshot that
+  // prompted this: header ticked, two fee rows unticked.
   const allListedSelected =
-    eligibleOrders.length > 0 && selectedEligibleOrders.length === eligibleOrders.length;
+    eligibleOrders.length + eligibleReceivables.length > 0 &&
+    selectedEligibleOrders.length === eligibleOrders.length &&
+    eligibleReceivables.every((receivable) =>
+      receivableOffsets.some((line) => line.receivableId === receivable.id),
+    );
 
-  /** Ticks or clears every listed Order at once, one state change per list. */
+  /** Ticks or clears every listed line at once, one state change per list. */
   const toggleAllListedOrders = (checked: boolean) => {
     setOriginatingOrderDefaultActive(false);
     setAutoAllocate(false);
@@ -2031,6 +2045,24 @@ function NewSettlementDialog({
     setProposalError(undefined);
     setOverrideConfirmed(false);
     const listedIds = new Set(eligibleOrders.map((order) => order.id));
+    // Fee deductions follow the same tick. Marking them customised keeps the
+    // automatic re-proposal from wiping a choice the User just made by hand.
+    setReceivableOffsetsCustomized(true);
+    setReceivableOffsets((current) =>
+      checked
+        ? [
+            ...current,
+            ...eligibleReceivables
+              .filter((receivable) => !current.some((line) => line.receivableId === receivable.id))
+              .map((receivable) => ({
+                amount: receivable.outstandingAmount,
+                receivableId: receivable.id,
+              })),
+          ]
+        : current.filter(
+            (line) => !eligibleReceivables.some((receivable) => receivable.id === line.receivableId),
+          ),
+    );
     if (checked) {
       setSelectedOrderRows((current) => {
         const next = { ...current };
@@ -2168,7 +2200,14 @@ function NewSettlementDialog({
     const controller = new AbortController();
     setReceivablesError(undefined);
     const loadReceivables = async () => {
-      const base = `operations/trader-receivables/eligible?traderId=${trader.id}&outstandingOnly=true&sortBy=businessDate&sortDirection=asc&pageSize=100`;
+      // The Order-level filters apply to fee deductions too: one Emirate choice
+      // narrows the whole table, not just its top half.
+      const scope = new URLSearchParams();
+      if (orderFilters.emirateId !== "") scope.set("emirateId", orderFilters.emirateId);
+      if (orderFilters.areaId !== "") scope.set("areaId", orderFilters.areaId);
+      if (orderFilters.driverId !== "") scope.set("driverId", orderFilters.driverId);
+      const scopeQuery = scope.toString() === "" ? "" : `&${scope.toString()}`;
+      const base = `operations/trader-receivables/eligible?traderId=${trader.id}&outstandingOnly=true&sortBy=businessDate&sortDirection=asc&pageSize=100${scopeQuery}`;
       const first = await api.get<PagedResponse<TraderReceivableEligibleRow>>(
         `${base}&page=1`,
         controller.signal,
@@ -2196,7 +2235,10 @@ function NewSettlementDialog({
         }
       });
     return () => controller.abort();
-  }, [api, trader, t]);
+    // The three Order filters are dependencies: without them the fee deductions
+    // keep the result of whatever filter was in force when the Trader was
+    // chosen, and changing Emirate silently reloads only half the table.
+  }, [api, trader, t, orderFilters.emirateId, orderFilters.areaId, orderFilters.driverId]);
   /* Select the originating Order once, from the eligible list the backend just
      returned.
 
@@ -2227,9 +2269,30 @@ function NewSettlementDialog({
     setOverrideConfirmed(false);
   }, [eligibleOrders, eligibleOrdersPage, initialOrderId, onOriginatingOrderIneligible]);
 
+  /**
+   * Changing ANY filter clears the whole selection.
+   *
+   * Without this, a line ticked under one filter stays selected after the
+   * filter hides it, and the settlement is confirmed carrying Orders and fee
+   * deductions the User can no longer see. The totals move while the table
+   * appears unchanged, which is the worst version of the problem: money is
+   * wrong and nothing on screen says so.
+   *
+   * Paging is deliberately NOT a filter — page 2 of the same result set keeps
+   * the selection, because those lines are still part of what was chosen.
+   */
   const applyOrderFilter = (change: Partial<EligibleOrderFilters>) => {
     setOrdersPage(1);
     setOrderFilters((current) => ({ ...current, ...change }));
+    setAllocations([]);
+    setSelectedOrderRows({});
+    setReceivableOffsets([]);
+    setReceivableOffsetsCustomized(false);
+    setProposal(undefined);
+    setProposalError(undefined);
+    setOverrideConfirmed(false);
+    setAutoAllocate(false);
+    setOriginatingOrderDefaultActive(false);
   };
   const clearOrderFilters = () => {
     setOrdersPage(1);
@@ -3176,6 +3239,12 @@ function NewSettlementDialog({
                             <td>{receivable.orderType ?? "-"}</td>
                             <td className="mono">{receivable.receivableNumber}</td>
                             <td>{receivable.businessDate.slice(0, 10)}</td>
+                            {/* Emirate and Area: the Order rows carry them, so
+                                these two cells must exist here or every later
+                                cell in a fee row lands under the wrong header.
+                                Null when the Receivable has no Order. */}
+                            <td>{receivable.emirateName ?? "-"}</td>
+                            <td>{receivable.areaName ?? "-"}</td>
                             <td>{receivable.customerName ?? receivable.reason}<span className="cell-secondary">{receivable.customerMobileNumber ?? ""}</span></td>
                             <td>{t("traderSettlements.feeDeductionMinus")}</td>
                             <td className="numeric">-{money(receivable.originalAmountDue)}</td>

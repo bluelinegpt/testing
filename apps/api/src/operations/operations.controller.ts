@@ -720,8 +720,12 @@ export class OperationsController {
     "users_roles.manage",
   )
   @Get("drivers")
-  public drivers(): Promise<readonly OperationsDriver[]> {
-    return this.operations.drivers();
+  public drivers(
+    // Opt-in, so assignment dropdowns keep getting active Drivers only. Filter
+    // dropdowns pass it, because a departed Driver still has Orders to settle.
+    @Query("includeInactive") includeInactive?: string,
+  ): Promise<readonly OperationsDriver[]> {
+    return this.operations.drivers(includeInactive === "true");
   }
 
   @RequireAnyPermission("orders.update_delivery_status", "users_roles.manage")

@@ -1725,6 +1725,21 @@ export class TraderReceivableEligibleQueryDto {
   @IsUUID()
   public readonly traderId?: string;
 
+  // Emirate / Area / Driver of the Receivable's own Order. The Settlement
+  // wizard passes the same values it passes to the Eligible Orders query, so
+  // one filter narrows both halves of the table.
+  @IsOptional()
+  @IsUUID()
+  public readonly emirateId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  public readonly areaId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  public readonly driverId?: string;
+
   @IsOptional()
   @IsString()
   @MaxLength(160)
