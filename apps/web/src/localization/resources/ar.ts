@@ -2131,7 +2131,7 @@ export const arabicTranslations = {
     collectSkippedOrders:
       "تعذّر تضمين {{count}} من الطلبات المحددة — تم تحصيلها بالفعل أو لم تعد مؤهلة لهذا المندوب.",
     manifestPreviewFailed: "تعذّر إنشاء كشف شحنات المندوب.",
-    manifestTotalCod: "إجمالي التحصيل عند الاستلام",
+    manifestTotalAmountToCollect: "إجمالي المبلغ المطلوب تحصيله",
     manifestTotalPackages: "إجمالي الطرود",
     collectionConfirmed: "تم تأكيد التحصيل {{number}}.",
     addNewArea: "إضافة منطقة جديدة",
@@ -3891,6 +3891,9 @@ export const arabicTranslations = {
     noSettlementOffsetHistory: "لم يتم تطبيق أي تسويات بالخصم على هذا المستحق بعد.",
     columnSettlementNumber: "التسوية",
     columnOffsetDate: "تاريخ التسوية",
+    columnOffsetState: "الحالة",
+    offsetEffective: "سارية",
+    offsetHistoricalReversed: "تاريخية — تم عكس التسوية",
     amountOffset: "مبلغ الخصم",
 
     // Collection detail
@@ -4019,7 +4022,7 @@ export const arabicTranslations = {
     actionPrint: "طباعة",
     actionDownloadPdf: "تحميل PDF",
     actionConfirmMoneyReceived: "تأكيد استلام التاجر للمبلغ",
-    actionReverse: "عكس",
+    actionReverse: "إلغاء الفاتورة",
     // Workflow steps
     stepSelectTrader: "اختيار التاجر",
     stepEligibleOrders: "الطلبات المؤهلة",
