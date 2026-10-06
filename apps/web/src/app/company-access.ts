@@ -90,7 +90,10 @@ const routePermissions: Readonly<Record<string, readonly string[]>> = {
   "/configuration/maintenance": [manage],
   "/configuration/traders": [manage],
   "/configuration/customers": [manage],
-  "/configuration/areas": [manage],
+  // Areas are Order master data, not user administration: anyone who may
+  // create an Order needs the Area list and the ability to add a missing
+  // Area. The API grants every Area endpoint to the same pair.
+  "/configuration/areas": [manage, "orders.create"],
   "/configuration/bank-accounts": [manage],
   "/configuration/vat": [manage],
   "/configuration/employees": [

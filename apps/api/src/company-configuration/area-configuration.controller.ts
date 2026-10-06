@@ -43,6 +43,14 @@ import {
  * administrators as Traders, Customers and bank accounts, and every sibling
  * configuration controller already uses this code. Introducing a granular
  * permission would require editing every existing Role to restore access.
+ *
+ * Every Area endpoint is therefore open to `orders.create` OR
+ * `users_roles.manage`. Areas are the master data an Order is entered
+ * against, so whoever may create an Order needs to see the Area list and,
+ * when a new Area appears, add it -- without also being granted Company
+ * user and Role administration, which `users_roles.manage` alone would mean.
+ * The Emirate master, the typeahead and Area creation already worked this
+ * way; the list, read, update and status endpoints now match them.
  */
 @ApiTags("configuration")
 @ApiBearerAuth()
@@ -63,6 +71,8 @@ export class AreaConfigurationController {
   }
 
   @ApiOperation({ summary: "List Areas with search, Emirate and status filters" })
+  @RequirePermissions()
+  @RequireAnyPermission("orders.create", "users_roles.manage")
   @Get("areas")
   public list(@Query() query: AreaListQueryDto): Promise<AreaPage> {
     return this.areas.list(query);
@@ -77,6 +87,8 @@ export class AreaConfigurationController {
   }
 
   @ApiOperation({ summary: "Return one Area" })
+  @RequirePermissions()
+  @RequireAnyPermission("orders.create", "users_roles.manage")
   @Get("areas/:areaId")
   public get(@Param("areaId", ParseUUIDPipe) areaId: string): Promise<ConfiguredArea> {
     return this.areas.get(areaId);
@@ -91,6 +103,8 @@ export class AreaConfigurationController {
   }
 
   @ApiOperation({ summary: "Update an Area" })
+  @RequirePermissions()
+  @RequireAnyPermission("orders.create", "users_roles.manage")
   @Patch("areas/:areaId")
   public update(
     @Param("areaId", ParseUUIDPipe) areaId: string,
@@ -101,6 +115,8 @@ export class AreaConfigurationController {
   }
 
   @ApiOperation({ summary: "Enable or disable an Area" })
+  @RequirePermissions()
+  @RequireAnyPermission("orders.create", "users_roles.manage")
   @Patch("areas/:areaId/status")
   public setStatus(
     @Param("areaId", ParseUUIDPipe) areaId: string,

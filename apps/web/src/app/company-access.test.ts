@@ -64,6 +64,21 @@ describe("Company permission routing", () => {
     ).toBe(false);
   });
 
+  it("opens Areas to Order creators but not to a Driver User", () => {
+    // Areas are the master data an Order is entered against, so whoever may
+    // create an Order needs the screen -- without Company user/Role admin.
+    expect(canAccessCompanyPath("/configuration/areas", ["orders.create"])).toBe(true);
+    expect(canAccessCompanyPath("/configuration/areas", ["users_roles.manage"])).toBe(true);
+    // A Driver User holds no orders.create, so Areas stays closed to them,
+    // as do the sibling configuration screens for an Order creator.
+    expect(
+      canAccessCompanyPath("/configuration/areas", ["orders.driver_self_service"]),
+    ).toBe(false);
+    expect(canAccessCompanyPath("/configuration/customers", ["orders.create"])).toBe(false);
+    expect(canAccessCompanyPath("/configuration/users", ["orders.create"])).toBe(false);
+    expect(canAccessCompanyPath("/configuration/areas", [])).toBe(false);
+  });
+
   it("protects User and Role detail routes with the administration permission", () => {
     expect(
       canAccessCompanyPath("/configuration/users/10000000-0000-4000-8000-000000000001", [
