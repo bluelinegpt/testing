@@ -1444,7 +1444,9 @@ function CreateDriverCollectionDialog({
                     />
                   </label>
                   <ul className="option-list">
-                    {drivers.map((option) => (
+                    {drivers
+                      .filter((option) => Number(option.pendingCollectionTotal) > 0)
+                      .map((option) => (
                       <li key={option.id}>
                         <button onClick={() => chooseDriver(option)} type="button">
                           <span>
@@ -1456,7 +1458,7 @@ function CreateDriverCollectionDialog({
                         </button>
                       </li>
                     ))}
-                    {drivers.length === 0 ? (
+                    {drivers.filter((option) => Number(option.pendingCollectionTotal) > 0).length === 0 ? (
                       <li className="empty-state">{t("operations.noDrivers")}</li>
                     ) : null}
                   </ul>
