@@ -9,8 +9,11 @@ import { Pool } from "pg";
 
 import { configuration } from "../../configuration/environment.js";
 import type { DatabaseSchema } from "./database.types.js";
+import { LEGACY_MIGRATION_ALIASES, recordedLegacyMigrationNames } from "./migration-compatibility.js";
 
-loadEnvironment({ path: resolve(process.cwd(), "../../.env") });
+if (process.env.BLUELINE_DISABLE_DOTENV !== "1") {
+  loadEnvironment({ path: resolve(process.cwd(), "../../.env") });
+}
 
 const settings = configuration();
 // Source workspaces keep migrations at the repository root. The production
@@ -29,34 +32,28 @@ const pool = new Pool({
   query_timeout: settings.database.queryTimeoutMs,
 });
 const database = new Kysely<DatabaseSchema>({ dialect: new PostgresDialect({ pool }) });
+// Kysely normally creates this ledger inside Migrator.migrateToLatest(), but
+// the compatibility checks below need to inspect it first on a fresh database.
+// Create only the standard ledger shape so fresh disposable databases can be
+// bootstrapped without consulting any application tables.
+await sql`
+  create table if not exists kysely_migration (
+    name varchar(255) primary key,
+    timestamp timestamptz not null,
+    executed_at timestamptz not null default now()
+  )
+`.execute(database);
 const fileMigrationProvider = new FileMigrationProvider({
   fs: fileSystem,
   import: (modulePath) => import(pathToFileURL(modulePath).href),
   migrationFolder,
   path: { join: (...parts: string[]) => resolve(...parts) },
 });
-const legacyAssignmentMigration = await sql<{ exists: boolean }>`
-  select exists (
-    select 1 from kysely_migration
-    where name = '20260902012000_collect_order_assignment_customer_optional'
-  ) as "exists"
-`.execute(database);
-const hasLegacyAssignmentMigration = legacyAssignmentMigration.rows[0]?.exists === true;
-const legacyHistoricalClassificationMigration = await sql<{ exists: boolean }>`
-  select exists (
-    select 1 from kysely_migration
-    where name = '20260964000000_resolve_historical_accounting_event_classification'
-  ) as "exists"
-`.execute(database);
-const hasLegacyHistoricalClassificationMigration = legacyHistoricalClassificationMigration.rows[0]?.exists === true;
-const legacyInternationalOrderFoundationMigration = await sql<{ exists: boolean }>`
-  select exists (select 1 from kysely_migration where name = '20260973000000_gcc_international_order_type') as "exists"
-`.execute(database);
-const hasLegacyInternationalOrderFoundationMigration = legacyInternationalOrderFoundationMigration.rows[0]?.exists === true;
-const legacyInternationalCarrierMigration = await sql<{ exists: boolean }>`
-  select exists (select 1 from kysely_migration where name = '20260974000000_international_carrier_status') as "exists"
-`.execute(database);
-const hasLegacyInternationalCarrierMigration = legacyInternationalCarrierMigration.rows[0]?.exists === true;
+const legacyNames = await recordedLegacyMigrationNames(database);
+const hasLegacyAssignmentMigration = legacyNames.has(LEGACY_MIGRATION_ALIASES[0].legacyName);
+const hasLegacyHistoricalClassificationMigration = legacyNames.has(LEGACY_MIGRATION_ALIASES[1].legacyName);
+const hasLegacyInternationalOrderFoundationMigration = legacyNames.has(LEGACY_MIGRATION_ALIASES[2].legacyName);
+const hasLegacyInternationalCarrierMigration = legacyNames.has(LEGACY_MIGRATION_ALIASES[3].legacyName);
 const legacyInternationalOrderSchema = await sql<{ exists: boolean }>`
   select exists (
     select 1 from information_schema.columns
@@ -141,6 +138,7 @@ const provider: MigrationProvider = {
 const migrator = new Migrator({
   db: database,
   provider,
+  allowUnorderedMigrations: true,
 });
 
 try {

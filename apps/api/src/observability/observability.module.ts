@@ -4,6 +4,7 @@ import { AuthenticationModule } from "../authentication/authentication.module.js
 import { ClientErrorReportController } from "./client-error-report.controller.js";
 import { ClientErrorReportService } from "./client-error-report.service.js";
 import { IntegrityCheckService } from "./integrity-check.service.js";
+import { MigrationStateService } from "./migration-state.service.js";
 import { PlatformErrorReportController } from "./platform-error-report.controller.js";
 import { PlatformIntegrityController } from "./platform-integrity.controller.js";
 
@@ -29,6 +30,6 @@ import { PlatformIntegrityController } from "./platform-integrity.controller.js"
   ],
   exports: [ClientErrorReportService],
   imports: [AuthenticationModule],
-  providers: [ClientErrorReportService, IntegrityCheckService],
+  providers: [ClientErrorReportService, IntegrityCheckService, MigrationStateService],
 })
 export class ObservabilityModule {}

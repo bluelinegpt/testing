@@ -4,6 +4,7 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
 import { PLATFORM_INTEGRITY_READ, RequirePlatformPermissions } from "../platform/platform-authorization.js";
 import type { IntegrityFinding } from "./integrity-check.service.js";
 import { IntegrityCheckService } from "./integrity-check.service.js";
+import { MigrationStateService } from "./migration-state.service.js";
 // Imported as a value, not a type: `emitDecoratorMetadata` can only record a
 // DTO class for the global ValidationPipe when the symbol survives to
 // runtime, so this query contract is actually validated.
@@ -22,7 +23,16 @@ import { RunIntegrityChecksQueryDto } from "./integrity-check.dto.js";
 export class PlatformIntegrityController {
   public constructor(
     @Inject(IntegrityCheckService) private readonly checks: IntegrityCheckService,
+    @Inject(MigrationStateService) private readonly migrations: MigrationStateService,
   ) {}
+
+  @ApiBearerAuth()
+  @ApiOperation({ summary: "Read the migration ledger and legacy-name compatibility state" })
+  @RequirePlatformPermissions(PLATFORM_INTEGRITY_READ)
+  @Get("migrations")
+  public migrationState() {
+    return this.migrations.state();
+  }
 
   @ApiBearerAuth()
   @ApiOperation({ summary: "Run every integrity check, across all Companies or one" })
