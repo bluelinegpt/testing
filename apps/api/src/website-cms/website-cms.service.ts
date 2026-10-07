@@ -37,6 +37,33 @@ export type LocalizedSitemapEntry = {
   alternates: Array<{ locale: string; path: string }>;
   xDefault: string | null;
 };
+/**
+ * Public pages whose content lives in the website code (apps/public-web)
+ * rather than in platform_website_pages, so they have no database row and
+ * would otherwise never appear in the sitemap. Each is published in English
+ * and Arabic (/ar/...).
+ *
+ * `lastModified` is the date that page's content last changed. Update it in
+ * the same commit whenever you change one of these pages' copy -- never set
+ * it to the build or deploy date. When a page also has a database row
+ * (platform_website_pages), the database date wins.
+ *
+ * Deliberately excluded: /track (noindex), quote result pages, RSS feeds and
+ * redirects.
+ */
+export const STATIC_PUBLIC_PAGES: ReadonlyArray<{ path: string; lastModified: string }> = [
+  { path: "/about", lastModified: "2026-09-05" },
+  { path: "/contact", lastModified: "2026-09-05" },
+  { path: "/integrations", lastModified: "2026-09-05" },
+  { path: "/faq", lastModified: "2026-08-31" },
+  { path: "/request-demo", lastModified: "2026-08-20" },
+  { path: "/traders/register", lastModified: "2026-09-20" },
+  { path: "/privacy", lastModified: "2026-09-22" },
+  { path: "/terms", lastModified: "2026-09-22" },
+];
+/** Paths that must never be listed: noindex/private pages, feeds, redirects. */
+export const SITEMAP_EXCLUDED_PATH =
+  /^(\/ar)?(\/track|\/send-a-package\/quote|\/guides)(\/|$)|\.(xml|xsl|txt)$/;
 export function renderLocalizedSitemap(origin: string, entries: LocalizedSitemapEntry[]) {
   const escape = (value: string) =>
     value
@@ -434,7 +461,19 @@ export class WebsiteCmsService {
         and robots_index = true
     `.execute(this.db)
     ).rows;
+    const staticPages: LocalizedEntry[] = STATIC_PUBLIC_PAGES.flatMap(({ path, lastModified }) =>
+      (["en", "ar"] as const).map((locale) => ({
+        key: `static:${path}`,
+        locale,
+        path,
+        updated_at: new Date(`${lastModified}T00:00:00.000Z`),
+      })),
+    );
+    // Static pages first: the de-duplication below keeps the last entry per
+    // path, so a database row for the same page (with its real updated_at)
+    // takes precedence.
     const rows = [
+      ...staticPages,
       ...pages,
       ...navigation,
       ...blog,
@@ -447,7 +486,7 @@ export class WebsiteCmsService {
     ];
     const localizedPath = (row: LocalizedEntry) =>
       row.locale === "ar" ? (row.path === "/" ? "/ar" : `/ar${row.path}`) : row.path;
-    const excluded = /^(\/ar)?(\/track|\/send-a-package\/quote)(\/|$)/;
+    const excluded = SITEMAP_EXCLUDED_PATH;
     const groups = new Map<string, LocalizedEntry[]>();
     for (const row of rows) {
       const path = localizedPath(row);
