@@ -20,7 +20,7 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
 import { Throttle } from "@nestjs/throttler";
 import type { Request, Response } from "express";
 import { CompanyProfileService } from "../company-profile/company-profile.service.js";
-import { accountingReportHtml } from "../accounting/accounting-report-html.js";
+import { accountingReportHtml, LABEL_SPAN } from "../accounting/accounting-report-html.js";
 import { ApplicationException } from "../presentation/errors/application.exception.js";
 
 import {
@@ -424,14 +424,18 @@ export class OperationsController {
     @Query("dateTo") dateTo?: string,
     @Query("traderId") traderId?: string,
     @Query("statuses") statuses?: string,
+    @Query("references") references?: string,
     @Query("page") page?: string,
     @Query("pageSize") pageSize?: string,
+    @Query() query: Readonly<Record<string, unknown>> = {},
   ): Promise<OrdersReportPage> {
     const filters: OrdersReportFilters = {
       ...(dateFrom === undefined ? {} : { dateFrom }),
       ...(dateTo === undefined ? {} : { dateTo }),
       ...(traderId === undefined ? {} : { traderId }),
       statuses: statuses === undefined || statuses === "" ? [] : statuses.split(","),
+      referenceNumbers: splitReferenceNumbers(references),
+      ...extraOrdersReportFilters(query),
       page: Number(page), pageSize: Number(pageSize),
     };
     return this.operations.ordersReport(filters);
@@ -445,6 +449,8 @@ export class OperationsController {
     @Query("dateTo") dateTo: string | undefined,
     @Query("traderId") traderId: string | undefined,
     @Query("statuses") statuses: string | undefined,
+    @Query("references") references: string | undefined,
+    @Query() query: Readonly<Record<string, unknown>>,
     @Res() response: Response,
   ): Promise<void> {
     const report: OrdersReportExcelFile = await this.operations.ordersReportExcel({
@@ -452,6 +458,8 @@ export class OperationsController {
       ...(dateTo === undefined ? {} : { dateTo }),
       ...(traderId === undefined ? {} : { traderId }),
       statuses: statuses === undefined || statuses === "" ? [] : statuses.split(","),
+      referenceNumbers: splitReferenceNumbers(references),
+      ...extraOrdersReportFilters(query),
     });
     response.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
     response.setHeader("Content-Disposition", `attachment; filename="${report.filename}"`);
@@ -467,7 +475,9 @@ export class OperationsController {
     @Query("dateTo") dateTo: string | undefined,
     @Query("traderId") traderId: string | undefined,
     @Query("statuses") statuses: string | undefined,
+    @Query("references") references: string | undefined,
     @Query("language") language: string | undefined,
+    @Query() query: Readonly<Record<string, unknown>>,
     @Req() request: Request,
     @Res() response: Response,
   ): Promise<void> {
@@ -479,6 +489,8 @@ export class OperationsController {
       ...(dateTo === undefined ? {} : { dateTo }),
       ...(traderId === undefined ? {} : { traderId }),
       statuses: statuses === undefined || statuses === "" ? [] : statuses.split(","),
+      referenceNumbers: splitReferenceNumbers(references),
+      ...extraOrdersReportFilters(query),
       };
     const first = await this.operations.ordersReport({ ...filters, page: 1, pageSize: 200 });
     const rows = [...first.items];
@@ -496,45 +508,72 @@ export class OperationsController {
       }
     }
     const arabic = reportLanguage === "ar";
-    const columns: readonly [string, string, string, string, string, string, string, string, string, string, string, string, string, string] = arabic
-      ? ["رقم الطلب", "التاريخ", "اسم التاجر", "العميل", "جوال العميل", "الإمارة", "المنطقة", "الدفع عند الاستلام", "الرسوم", "مبلغ التاجر", "مدفوع للتاجر", "محصّل من التاجر", "الرصيد", "الحالة"]
-      : ["Order Number", "Date", "Trader Name", "Customer", "Customer Mobile", "Emirates", "Area", "COD", "Fee", "Trader Amount", "Paid to Trader", "Collected from Trader", "Balance", "Status"];
+    const labels = arabic
+      ? { orderDate: "تاريخ الطلب", deliveryDate: "تاريخ التسليم", traderName: "اسم التاجر", customer: "العميل", customerMobile: "جوال العميل", emirates: "الإمارة", area: "المنطقة", cod: "الدفع عند الاستلام", fee: "الرسوم", traderAmount: "مبلغ التاجر", paidToTrader: "مدفوع للتاجر", collectedFromTrader: "محصّل من التاجر", balance: "الرصيد", status: "الحالة" }
+      : { orderDate: "Order Date", deliveryDate: "Delivery Date", traderName: "Trader Name", customer: "Customer", customerMobile: "Customer Mobile", emirates: "Emirates", area: "Area", cod: "COD", fee: "Fee", traderAmount: "Trader Amount", paidToTrader: "Paid to Trader", collectedFromTrader: "Collected from Trader", balance: "Balance", status: "Status" };
     const statusLabels: Record<string, string> = arabic
       ? { new: "جديد", in_branch: "الصنف في الفرع", assigned_to_driver: "معين للمندوب", out_for_delivery: "خرج للتوصيل", hold: "معلّق", delivered: "تم التسليم", returned_to_branch: "عاد إلى الفرع", returned_to_trader: "عاد إلى التاجر", cancelled: "ملغى", closed: "مغلق", collect_order: "احضار طلب" }
       : { new: "New", in_branch: "Item in branch", assigned_to_driver: "Assigned to driver", out_for_delivery: "Out for delivery", hold: "Hold", delivered: "Delivered", returned_to_branch: "Returned to branch", returned_to_trader: "Returned to trader", cancelled: "Cancelled", closed: "Closed", collect_order: "Collect Order" };
     const formatDateTime = (value: Date): string => new Intl.DateTimeFormat(arabic ? "ar-AE" : "en-AE", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Dubai" }).format(value);
     const filterLabels = arabic
-      ? { from: "من تاريخ", to: "إلى تاريخ", trader: "التاجر", statuses: "الحالات", total: "الإجمالي" }
-      : { from: "From", to: "To", trader: "Trader", statuses: "Statuses", total: "Total" };
-    const selectedTraderName = traderId === undefined ? undefined : (await this.operations.traders()).find((item) => item.id === traderId)?.name;
+      ? { from: "من تاريخ الطلب", to: "إلى تاريخ الطلب", trader: "التاجر", statuses: "الحالات", references: "أرقام المرجع", total: "الإجمالي", deliveryFrom: "التسليم من", deliveryTo: "التسليم إلى", emirate: "الإمارة", area: "المنطقة", driver: "المندوب", customer: "العميل", balance: "الرصيد", settlement: "التسوية" }
+      : { from: "From order date", to: "To order date", trader: "Trader", statuses: "Statuses", references: "References", total: "Total", deliveryFrom: "Delivered from", deliveryTo: "Delivered to", emirate: "Emirate", area: "Area", driver: "Driver", customer: "Customer", balance: "Balance", settlement: "Settlement" };
+    const referenceList = splitReferenceNumbers(references);
+    const selectedTrader = traderId === undefined ? undefined : (await this.operations.traders()).find((item) => item.id === traderId);
+    const selectedTraderName = selectedTrader === undefined
+      ? undefined
+      : (arabic ? first.items[0]?.traderNameAr || selectedTrader.name : selectedTrader.name);
+    // One Trader selected: its name is shown once at the top (in red) and the
+    // Trader Name column is dropped, giving that width to the other columns.
+    const singleTrader = selectedTraderName !== undefined;
+    const columns: readonly string[] = [
+      labels.orderDate, labels.deliveryDate, ...(singleTrader ? [] : [labels.traderName]),
+      labels.customer, labels.customerMobile, labels.emirates, labels.area, labels.cod, labels.fee,
+      labels.traderAmount, labels.paidToTrader, labels.collectedFromTrader, labels.balance, labels.status,
+    ];
+    const columnWidths: Record<string, number> = {
+      [labels.orderDate]: 7, [labels.deliveryDate]: 7, [labels.traderName]: 9, [labels.customer]: 11,
+      [labels.customerMobile]: 8.5, [labels.emirates]: 9, [labels.area]: 12, [labels.cod]: 5.5, [labels.fee]: 4.5,
+      [labels.traderAmount]: 6, [labels.paidToTrader]: 6, [labels.collectedFromTrader]: 7, [labels.balance]: 5.5, [labels.status]: 8,
+    };
+    // Summary rows: their label spans every column before COD.
+    const summaryLabelSpan = columns.indexOf(labels.cod);
     const filtersForDocument = {
       [filterLabels.from]: dateFrom ?? (arabic ? "الكل" : "All"),
       [filterLabels.to]: dateTo ?? (arabic ? "الكل" : "All"),
-      [filterLabels.trader]: selectedTraderName ?? (arabic ? "جميع التجار" : "All Traders"),
+      ...(singleTrader ? {} : { [filterLabels.trader]: arabic ? "جميع التجار" : "All Traders" }),
       [filterLabels.statuses]: statuses === undefined || statuses === "" || statuses.split(",").length === 11
         ? (arabic ? "كل الحالات" : "All Statuses")
         : statuses.split(",").map((status) => statusLabels[status] ?? status).join(arabic ? "، " : ", "),
+      ...(referenceList.length === 0 ? {} : { [filterLabels.references]: referenceList.join(", ") }),
+      ...(await this.ordersReportFilterLabels(filters, arabic, filterLabels, first.items[0])),
       [filterLabels.total]: String(first.totalCount),
     };
     const document = {
       columns,
+      columnWidths,
+      noWrapColumns: [labels.orderDate, labels.deliveryDate, labels.customerMobile],
+      ...(singleTrader ? { highlight: { label: filterLabels.trader, value: selectedTraderName } } : {}),
       filters: filtersForDocument,
       generatedAt: formatDateTime(new Date()),
       snapshotAt: formatDateTime(new Date()),
       title: "Orders List / قائمة الطلبات",
       warnings: [],
       landscape: true,
-      rows: rows.map((row) => ({
-        [columns[0]]: row.orderNumber, [columns[1]]: row.date, [columns[2]]: arabic ? row.traderNameAr || row.traderName : row.traderName,
-        [columns[3]]: row.customer, [columns[4]]: row.customerMobile, [columns[5]]: arabic ? row.emiratesAr || row.emirates : row.emirates,
-        [columns[6]]: arabic ? row.areaAr || row.area : row.area, [columns[7]]: row.cod, [columns[8]]: row.fee,
-        [columns[9]]: row.traderAmount, [columns[10]]: row.paidToTrader, [columns[11]]: row.collectedFromTrader,
-        [columns[12]]: row.balance, [columns[13]]: statusLabels[row.status] ?? row.status,
+      rows: rows.map((row): Record<string, string | number> => ({
+        [labels.orderDate]: row.orderDate, [labels.deliveryDate]: row.deliveryDate ?? "",
+        ...(singleTrader ? {} : { [labels.traderName]: arabic ? row.traderNameAr || row.traderName : row.traderName }),
+        [labels.customer]: row.customer, [labels.customerMobile]: row.customerMobile,
+        [labels.emirates]: arabic ? row.emiratesAr || row.emirates : row.emirates,
+        [labels.area]: arabic ? row.areaAr || row.area : row.area, [labels.cod]: row.cod, [labels.fee]: row.fee,
+        [labels.traderAmount]: row.traderAmount, [labels.paidToTrader]: row.paidToTrader, [labels.collectedFromTrader]: row.collectedFromTrader,
+        [labels.balance]: row.balance, [labels.status]: statusLabels[row.status] ?? row.status,
       })).concat([{
         // Totals of the whole filtered report, as the last row.
-        [columns[0]]: filterLabels.total, [columns[7]]: first.totals.cod, [columns[8]]: first.totals.fee,
-        [columns[9]]: first.totals.traderAmount, [columns[10]]: first.totals.paidToTrader,
-        [columns[11]]: first.totals.collectedFromTrader, [columns[12]]: first.totals.balance,
+        [LABEL_SPAN]: summaryLabelSpan,
+        [labels.orderDate]: filterLabels.total, [labels.cod]: first.totals.cod, [labels.fee]: first.totals.fee,
+        [labels.traderAmount]: first.totals.traderAmount, [labels.paidToTrader]: first.totals.paidToTrader,
+        [labels.collectedFromTrader]: first.totals.collectedFromTrader, [labels.balance]: first.totals.balance,
       }]),
     };
     const rendered = accountingReportHtml({
@@ -556,6 +595,42 @@ export class OperationsController {
       );
       throw error;
     }
+  }
+
+  /** Human-readable values of the extra Orders Report filters, for the PDF filter line. */
+  private async ordersReportFilterLabels(
+    filters: OrdersReportFilters,
+    arabic: boolean,
+    labels: Readonly<Record<"deliveryFrom" | "deliveryTo" | "emirate" | "area" | "driver" | "customer" | "balance" | "settlement", string>>,
+    firstRow: OrdersReportPage["items"][number] | undefined,
+  ): Promise<Record<string, string>> {
+    const result: Record<string, string> = {};
+    if (filters.deliveryFrom) result[labels.deliveryFrom] = filters.deliveryFrom;
+    if (filters.deliveryTo) result[labels.deliveryTo] = filters.deliveryTo;
+    // Every row shares the filtered Emirate, so the first row names it.
+    if (filters.emirateId) result[labels.emirate] = firstRow === undefined ? "—" : (arabic ? firstRow.emiratesAr || firstRow.emirates : firstRow.emirates);
+    if (filters.area) result[labels.area] = filters.area;
+    if (filters.driverId) {
+      const driver = (await this.operations.drivers(true)).find((item) => item.id === filters.driverId);
+      result[labels.driver] = driver?.name ?? "—";
+    }
+    if (filters.customer) result[labels.customer] = filters.customer;
+    const balanceNames: Record<string, readonly [string, string]> = {
+      due_to_trader: ["Due to Trader", "مستحق للتاجر"],
+      due_from_trader: ["Due from Trader", "مستحق من التاجر"],
+      settled: ["Settled (zero)", "مسدد (صفر)"],
+    };
+    const balanceName = filters.balanceType === undefined ? undefined : balanceNames[filters.balanceType];
+    if (balanceName !== undefined) result[labels.balance] = balanceName[arabic ? 1 : 0];
+    const settlementNames: Record<string, readonly [string, string]> = {
+      unsettled: ["Not settled", "غير مسوّى"],
+      money_sent_to_trader: ["Money sent to Trader", "تم إرسال المبلغ للتاجر"],
+      money_received_by_trader: ["Money received by Trader", "استلم التاجر المبلغ"],
+      not_eligible: ["Not eligible", "غير مؤهل"],
+    };
+    const settlementName = filters.settlementStatus === undefined ? undefined : settlementNames[filters.settlementStatus];
+    if (settlementName !== undefined) result[labels.settlement] = settlementName[arabic ? 1 : 0];
+    return result;
   }
 
   @ApiOperation({ summary: "Calculate an order financial preview using Company VAT settings" })
@@ -1121,12 +1196,35 @@ export class OperationsController {
   @RequireAnyPermission("settlements.create", "reports.export", "users_roles.manage")
   @ApiOperation({ summary: "Confirm trader settlement for one order" })
   @Post("orders/:orderId/settle-trader")
-  public settleOrderTrader(
+  public async settleOrderTrader(
     @Param("orderId", new ParseUUIDPipe()) orderId: string,
     @Body() input: FinancialPaymentDto,
     @Req() request: Request,
   ): Promise<OperationsOrder> {
-    return this.operations.settleOrderTrader(orderId, input, this.correlationId(request));
+    // Legacy route, kept for compatibility. The Settlement is created by the
+    // canonical TraderSettlementService (see
+    // OperationsService.legacySettlementTarget for why).
+    const target = await this.operations.legacySettlementTarget(orderId);
+    const amount = Number(target.outstanding);
+    await this.traderSettlementService.createPayment(
+      {
+        allocations: [{ amount, orderId }],
+        amount,
+        ...(input.bankAccountId === undefined ? {} : { bankAccountId: input.bankAccountId }),
+        ...(input.bankReference === undefined ? {} : { bankReference: input.bankReference }),
+        ...(input.cashAccountId === undefined ? {} : { cashAccountId: input.cashAccountId }),
+        paymentMethod: input.paymentMethod ?? "cash",
+        ...(input.traderBankAccountId === undefined
+          ? {}
+          : { traderBankAccountId: input.traderBankAccountId }),
+        traderId: target.traderId,
+      } as CreateTraderSettlementDto,
+      this.correlationId(request),
+      // One key per Order version: a retry of the same request replays, a new
+      // settlement after a reversal (the Order's version has moved) does not.
+      `legacy-settle-order.${orderId}.v${target.version}`,
+    );
+    return this.operations.orderSummary(orderId);
   }
 
   @RequireAnyPermission("settlements.create", "users_roles.manage")
@@ -1660,4 +1758,25 @@ export class PortalController {
   private correlationId(request: Request): string {
     return String(request.id ?? request.headers["x-correlation-id"] ?? "unknown");
   }
+}
+
+/** Reference Numbers typed as a list: split on commas (English or Arabic), semicolons or new lines. */
+function splitReferenceNumbers(value: string | undefined): string[] {
+  if (value === undefined) return [];
+  return value.split(/[,،;\n\r]+/u).map((item) => item.trim()).filter((item) => item.length > 0);
+}
+
+/** The Orders Report filters beyond dates, Trader, statuses and references, read from the raw query. */
+function extraOrdersReportFilters(query: Readonly<Record<string, unknown>>): Partial<OrdersReportFilters> {
+  const text = (key: string): string | undefined => {
+    const value = query[key];
+    return typeof value === "string" && value.trim() !== "" ? value.trim() : undefined;
+  };
+  const keys = ["deliveryFrom", "deliveryTo", "emirateId", "area", "driverId", "customer", "balanceType", "settlementStatus"] as const;
+  const result: { -readonly [K in (typeof keys)[number]]?: string } = {};
+  for (const key of keys) {
+    const value = text(key);
+    if (value !== undefined) result[key] = value;
+  }
+  return result;
 }

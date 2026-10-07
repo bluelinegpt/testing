@@ -23,6 +23,7 @@ import {
   type OrderFinancials,
   type VatPolicy,
 } from "./order-financial-model.js";
+import { closeSettlementComplete } from "./order-close-eligibility.js";
 import { deriveOrderWorkflowGuidance } from "./order-workflow-guidance.js";
 import { driverWorkPredicate } from "./driver-work-visibility.js";
 import type { DatabaseSchema } from "../infrastructure/database/database.types.js";
@@ -188,13 +189,32 @@ export interface OrdersReportFilters {
   readonly dateTo?: string;
   readonly traderId?: string;
   readonly statuses?: readonly string[];
+  /** Exact Reference Numbers (any of them); matched on the normalised column. */
+  readonly referenceNumbers?: readonly string[];
+  /** Company-local delivery date range (`delivered_at`). */
+  readonly deliveryFrom?: string;
+  readonly deliveryTo?: string;
+  readonly emirateId?: string;
+  /** Area name contains (English or Arabic). */
+  readonly area?: string;
+  readonly driverId?: string;
+  /** Customer name contains, or mobile digits contain. */
+  readonly customer?: string;
+  /** Sign of the Order's balance: due to the Trader, due from the Trader, or settled (zero). */
+  readonly balanceType?: string;
+  /** `orders.trader_settlement_status`. */
+  readonly settlementStatus?: string;
   readonly page?: number;
   readonly pageSize?: number;
 }
 
 export interface OrdersReportRow {
+  /** Kept on the row for traceability/keys; not shown as a report column. */
   readonly orderNumber: string;
-  readonly date: string;
+  /** The Order's business date (`order_date`); filtered and sorted on this. */
+  readonly orderDate: string;
+  /** Company-local date of `delivered_at`; null until the Order is delivered. */
+  readonly deliveryDate: string | null;
   readonly traderName: string;
   readonly traderNameAr?: string | null;
   readonly customer: string;
@@ -208,14 +228,15 @@ export interface OrdersReportRow {
   /**
    * The Order's signed position with the Trader: what it owes the Trader
    * (`trader_net_payable`) minus the fees the Trader owes for it (its
-   * service-charge Trader Receivables). Negative when fees exceed COD.
+   * service-charge Trader Receivables), always shown as a positive number
+   * (business decision 2026-10-08: no minus signs on this report).
    */
   readonly traderAmount: string;
   /** Paid to the Trader for this Order through Trader Settlements. */
   readonly paidToTrader: string;
   /** Recovered from the Trader against this Order's receivables (collected or offset). */
   readonly collectedFromTrader: string;
-  /** traderAmount - paidToTrader + collectedFromTrader: + still due to, - still due from the Trader. */
+  /** |traderAmount - paidToTrader + collectedFromTrader|, always shown as a positive number. */
   readonly balance: string;
   readonly status: string;
 }
@@ -1067,24 +1088,42 @@ export class OperationsService {
           and workflow_event.processing_status = 'failed'
       )
     `;
+    /* A delivery can be closed operationally while money is still outstanding.
+       It must remain in the Active queue until every required cash, Trader
+       settlement, receivable, and accounting step is complete. Otherwise an
+       operator sees an apparently finished Order only under All Orders and can
+       miss the required next action. */
+    const financiallyPendingClosedPredicate = sql`
+      o.delivery_status = 'closed'
+      and (
+        (o.driver_reconciliation_status = 'pending' and o.customer_amount_due > 0)
+        or (
+          o.driver_reconciliation_status in ('reconciled', 'not_applicable')
+          and o.trader_net_payable > 0
+          and o.trader_settlement_status in ('unsettled', 'partially_settled', 'money_sent_to_trader')
+        )
+        or ${openTraderReceivablePredicate}
+        or ${failedAccountingPredicate}
+      )
+    `;
     const workflowStepPredicate = sql`
       (${workflowStep}::text is null
         or (${workflowStep} = 'collect_from_driver'
-          and o.delivery_status = 'delivered'
+          and o.delivery_status in ('delivered', 'closed')
           and o.driver_reconciliation_status = 'pending'
           and o.customer_amount_due > 0)
         or (${workflowStep} = 'collect_from_trader' and ${openTraderReceivablePredicate})
         or (${workflowStep} = 'settle_trader'
-          and o.delivery_status = 'delivered'
+          and o.delivery_status in ('delivered', 'closed')
           and o.driver_reconciliation_status in ('reconciled', 'not_applicable')
           and o.trader_net_payable > 0
           and o.trader_settlement_status in ('unsettled', 'partially_settled'))
         or (${workflowStep} = 'complete'
           and o.delivery_status in ('delivered', 'closed', 'returned_to_trader', 'cancelled')
-          and not (o.delivery_status = 'delivered'
+          and not (o.delivery_status in ('delivered', 'closed')
             and o.driver_reconciliation_status = 'pending'
             and o.customer_amount_due > 0)
-          and not (o.delivery_status = 'delivered'
+          and not (o.delivery_status in ('delivered', 'closed')
             and o.driver_reconciliation_status in ('reconciled', 'not_applicable')
             and o.trader_net_payable > 0
             and o.trader_settlement_status in ('unsettled', 'partially_settled', 'money_sent_to_trader'))
@@ -1124,12 +1163,15 @@ export class OperationsService {
     const serialSortKey = "nullif(regexp_replace(o.serial_number,'[^0-9]','','g'),'')::bigint";
     const quickViewPredicate = sql`
       (${quickView} = 'all'
-        or (${quickView} = 'active' and o.delivery_status in ('new','in_branch','assigned_to_driver','out_for_delivery','hold','delivered','returned_to_branch','returned_to_trader','collect_order'))
-        or (${quickView} = 'closed' and o.delivery_status = 'closed')
+        or (${quickView} = 'active' and (
+          o.delivery_status in ('new','in_branch','assigned_to_driver','out_for_delivery','hold','delivered','returned_to_branch','returned_to_trader','collect_order')
+          or ${financiallyPendingClosedPredicate}
+        ))
+        or (${quickView} = 'closed' and o.delivery_status = 'closed' and not ${financiallyPendingClosedPredicate})
         or (${quickView} = 'hold' and o.delivery_status = 'hold')
         or (${quickView} = 'cancelled' and o.delivery_status = 'cancelled')
         or (${quickView} = 'accountant'
-          and o.delivery_status = 'delivered'
+          and o.delivery_status in ('delivered', 'closed')
           and (
             o.driver_reconciliation_status = 'pending'
             or (
@@ -1802,11 +1844,59 @@ export class OperationsService {
       throw new ApplicationException("invalid_date_range", "Invalid date range", HttpStatus.BAD_REQUEST);
     }
     const traderId = filters.traderId === undefined ? null : this.optionalUuidFilter(filters.traderId);
+    const referenceNumbers = [...new Set(
+      (filters.referenceNumbers ?? [])
+        .map((value) => value.trim())
+        .filter((value) => value.length > 0)
+        .map((value) => this.normalizeOrderIdentifier(value)),
+    )];
+    if (referenceNumbers.length > 500) {
+      throw new ApplicationException("too_many_reference_numbers", "Enter at most 500 reference numbers", HttpStatus.BAD_REQUEST);
+    }
+    const referencePredicate = referenceNumbers.length === 0
+      ? sql`true`
+      : sql`o.reference_number_normalized in (${sql.join(referenceNumbers)})`;
+    const deliveryFrom = filters.deliveryFrom === undefined ? null : this.optionalDate(filters.deliveryFrom);
+    const deliveryTo = filters.deliveryTo === undefined ? null : this.optionalDate(filters.deliveryTo);
+    if (deliveryFrom !== null && deliveryTo !== null && deliveryFrom > deliveryTo) {
+      throw new ApplicationException("invalid_date_range", "Invalid date range", HttpStatus.BAD_REQUEST);
+    }
+    const emirateId = filters.emirateId === undefined ? null : this.optionalUuidFilter(filters.emirateId);
+    const driverId = filters.driverId === undefined ? null : this.optionalUuidFilter(filters.driverId);
+    const likeTerm = (value: string | undefined): string | null => {
+      const trimmed = value?.normalize("NFKC").trim() ?? "";
+      return trimmed === "" ? null : `%${trimmed.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+    };
+    const areaTerm = likeTerm(filters.area);
+    const customerTerm = likeTerm(filters.customer);
+    const customerDigits = (filters.customer ?? "").replace(/\D/g, "");
+    const customerDigitsTerm = customerDigits.length >= 3 ? `%${customerDigits}%` : null;
+    const balanceType = filters.balanceType === undefined || filters.balanceType === "" ? null : filters.balanceType;
+    if (balanceType !== null && !["due_to_trader", "due_from_trader", "settled"].includes(balanceType)) {
+      throw new ApplicationException("invalid_balance_type_filter", "Invalid balance filter", HttpStatus.BAD_REQUEST);
+    }
+    const settlementStatus = filters.settlementStatus === undefined || filters.settlementStatus === "" ? null : filters.settlementStatus;
+    if (settlementStatus !== null && !["unsettled", "money_sent_to_trader", "money_received_by_trader", "not_eligible"].includes(settlementStatus)) {
+      throw new ApplicationException("invalid_settlement_status_filter", "Invalid settlement filter", HttpStatus.BAD_REQUEST);
+    }
     const page = Number.isInteger(filters.page) && (filters.page ?? 0) > 0 ? filters.page! : 1;
     const pageSize = Math.min(200, Math.max(1, Number(filters.pageSize) || 25));
     const timezone = await this.companyTimezone();
+    // The report is filtered and sorted on the Order Date (`order_date`), never
+    // on the creation time or the delivery date.
+    const orderDate = sql`coalesce(o.order_date, (o.created_at at time zone ${timezone})::date)`;
     const traderAmount = sql`(coalesce(o.trader_net_payable, 0) - trader_owes.due)`;
     const paidToTrader = sql`coalesce(o.trader_paid_amount, 0)`;
+    // Signed balance: + still due to the Trader, - still due from the Trader.
+    // Used for the balance filter; the report itself shows it without sign.
+    const signedBalance = sql`(${traderAmount} - ${paidToTrader} + trader_owes.collected)`;
+    const balancePredicate = balanceType === "due_to_trader"
+      ? sql`${signedBalance} > 0`
+      : balanceType === "due_from_trader"
+        ? sql`${signedBalance} < 0`
+        : balanceType === "settled"
+          ? sql`${signedBalance} = 0`
+          : sql`true`;
     const statusPredicate = statuses.length === 0
       ? sql`true`
       : sql`o.delivery_status in (${sql.join(statuses)})`;
@@ -1828,10 +1918,22 @@ export class OperationsService {
            and r.status not in ('cancelled', 'reversed')
       ) trader_owes on true
       where o.company_id=${companyId}::uuid
-        and (${dateFrom}::date is null or (o.created_at at time zone ${timezone})::date >= ${dateFrom}::date)
-        and (${dateTo}::date is null or (o.created_at at time zone ${timezone})::date <= ${dateTo}::date)
+        and (${dateFrom}::date is null or ${orderDate} >= ${dateFrom}::date)
+        and (${dateTo}::date is null or ${orderDate} <= ${dateTo}::date)
         and (${traderId}::uuid is null or o.trader_id=${traderId}::uuid)
         and ${statusPredicate}
+        and ${referencePredicate}
+        and (${deliveryFrom}::date is null or (o.delivered_at at time zone ${timezone})::date >= ${deliveryFrom}::date)
+        and (${deliveryTo}::date is null or (o.delivered_at at time zone ${timezone})::date <= ${deliveryTo}::date)
+        and (${emirateId}::uuid is null or a.emirate_id = ${emirateId}::uuid)
+        and (${areaTerm}::text is null or a.name_en ilike ${areaTerm}::text or a.name_ar ilike ${areaTerm}::text)
+        and (${driverId}::uuid is null or o.assigned_driver_id = ${driverId}::uuid)
+        and (${customerTerm}::text is null
+             or o.customer_name ilike ${customerTerm}::text
+             or (${customerDigitsTerm}::text is not null
+                 and regexp_replace(coalesce(o.customer_mobile_number, ''), '[^0-9]', '', 'g') like ${customerDigitsTerm}::text))
+        and (${settlementStatus}::text is null or o.trader_settlement_status = ${settlementStatus}::text)
+        and ${balancePredicate}
     `;
     // Count and totals come from the same filtered set as the rows, before
     // paging, so the totals always describe the whole report.
@@ -1839,27 +1941,31 @@ export class OperationsService {
       select count(*)::int as count,
              coalesce(sum(o.cod_amount), 0)::numeric(18,2)::text as cod,
              coalesce(sum(o.service_fee), 0)::numeric(18,2)::text as fee,
-             coalesce(sum(${traderAmount}), 0)::numeric(18,2)::text as "traderAmount",
+             coalesce(sum(abs(${traderAmount})), 0)::numeric(18,2)::text as "traderAmount",
              coalesce(sum(${paidToTrader}), 0)::numeric(18,2)::text as "paidToTrader",
              coalesce(sum(trader_owes.collected), 0)::numeric(18,2)::text as "collectedFromTrader",
-             coalesce(sum(${traderAmount} - ${paidToTrader} + trader_owes.collected), 0)::numeric(18,2)::text as balance
+             -- No minus signs on this report (business decision 2026-10-08): every
+             -- Trader Amount and Balance is shown as a positive number and the
+             -- single total is the plain sum of what is shown.
+             coalesce(sum(abs(${signedBalance})), 0)::numeric(18,2)::text as balance
       ${base}
     `.execute(this.database);
     const rows = await sql<OrdersReportRow>`
       select o.order_number as "orderNumber",
-             (o.created_at at time zone ${timezone})::date::text as date,
+             ${orderDate}::text as "orderDate",
+             (o.delivered_at at time zone ${timezone})::date::text as "deliveryDate",
              t.name_en as "traderName", t.name_ar as "traderNameAr", o.customer_name as customer,
              o.customer_mobile_number as "customerMobile",
              coalesce(e.name_en, '—') as emirates, e.name_ar as "emiratesAr",
              coalesce(a.name_en, '—') as area, a.name_ar as "areaAr",
              o.cod_amount::text as cod, o.service_fee::text as fee,
-             ${traderAmount}::numeric(18,2)::text as "traderAmount",
+             abs(${traderAmount})::numeric(18,2)::text as "traderAmount",
              ${paidToTrader}::numeric(18,2)::text as "paidToTrader",
              trader_owes.collected::numeric(18,2)::text as "collectedFromTrader",
-             (${traderAmount} - ${paidToTrader} + trader_owes.collected)::numeric(18,2)::text as balance,
+             abs(${signedBalance})::numeric(18,2)::text as balance,
              o.delivery_status as status
       ${base}
-      order by o.created_at desc, o.id desc
+      order by ${orderDate} asc, o.created_at asc, o.id asc
       limit ${pageSize} offset ${(page - 1) * pageSize}
     `.execute(this.database);
     const totalsRow = summary.rows[0];
@@ -1885,9 +1991,9 @@ export class OperationsService {
     for (let page = 2; page <= Math.ceil(report.totalCount / report.pageSize); page += 1) {
       all.push(...(await this.ordersReport({ ...filters, page, pageSize: 200 })).items);
     }
-    const columns = ["Order Number", "Date", "Trader Name", "Customer", "Customer Mobile", "Emirates", "Area", "COD", "Fee", "Trader Amount", "Paid to Trader", "Collected from Trader", "Balance", "Status"] as const;
+    const columns = ["Order Date", "Delivery Date", "Trader Name", "Customer", "Customer Mobile", "Emirates", "Area", "COD", "Fee", "Trader Amount", "Paid to Trader", "Collected from Trader", "Balance", "Status"] as const;
     const rows: Record<string, string>[] = all.map((row) => ({
-      "Order Number": row.orderNumber, Date: row.date, "Trader Name": row.traderName,
+      "Order Date": row.orderDate, "Delivery Date": row.deliveryDate ?? "", "Trader Name": row.traderName,
       Customer: row.customer, "Customer Mobile": row.customerMobile, Emirates: row.emirates,
       Area: row.area, COD: row.cod, Fee: row.fee, "Trader Amount": row.traderAmount,
       "Paid to Trader": row.paidToTrader, "Collected from Trader": row.collectedFromTrader, Balance: row.balance,
@@ -1895,7 +2001,7 @@ export class OperationsService {
     }));
     // Totals of the whole filtered report, as the last row.
     rows.push({
-      "Order Number": "Total", COD: report.totals.cod, Fee: report.totals.fee,
+      "Order Date": "Total", COD: report.totals.cod, Fee: report.totals.fee,
       "Trader Amount": report.totals.traderAmount, "Paid to Trader": report.totals.paidToTrader,
       "Collected from Trader": report.totals.collectedFromTrader, Balance: report.totals.balance,
     });
@@ -5561,6 +5667,14 @@ export class OperationsService {
     companyId: string,
     orderId: string,
     correlationId: string,
+    /**
+     * Platform Repair Center (Phase 2 Prompt 3) only. A Platform administrator
+     * is not a Company account, so it can never be the Company-scoped creator
+     * of the Receivable: the Repair Center passes `{ actorAccountId: null }`
+     * and records the Platform actor in its own repair audit. Every existing
+     * caller omits this and keeps the current identity, unchanged.
+     */
+    actor?: { readonly actorAccountId: null; readonly actorRole: string },
   ): Promise<{ created: boolean; amount: string }> {
     const identity = this.identities.current();
       const result = await sql<{ orderNumber: string; traderId: string; paymentCondition: string; serviceFee: string }>`
@@ -5599,7 +5713,9 @@ export class OperationsService {
     `.execute(transaction);
     if (existing.rows[0] !== undefined) return { created: false, amount: order.serviceFee };
     await this.createOrderTraderReceivableIfNeeded(transaction, {
-        actorAccountId: identity.identityId, amountDue: new Decimal(order.serviceFee), companyId,
+        actorAccountId: actor === undefined ? identity.identityId : actor.actorAccountId,
+        ...(actor === undefined ? {} : { actorRole: actor.actorRole }),
+        amountDue: new Decimal(order.serviceFee), companyId,
         correlationId, orderId, orderNumber: order.orderNumber, traderId: order.traderId,
     });
     return { created: true, amount: order.serviceFee };
@@ -5866,10 +5982,14 @@ export class OperationsService {
         const cashComplete = ["reconciled", "not_applicable"].includes(
           order.driverReconciliationStatus,
         );
-        const settlementComplete =
-          ["money_sent_to_trader", "money_received_by_trader", "not_eligible"].includes(
-            order.settlementStatus,
-          ) || Number(order.traderNetPayable) <= 0;
+        // Shared with `reverseInTransaction`, which must undo a close the
+        // moment it invalidates this condition. Two inline copies of the list
+        // is how 31 Orders ended up `closed` and unsettleable (SET-000017) --
+        // see order-close-eligibility.ts.
+        const settlementComplete = closeSettlementComplete({
+          settlementStatus: order.settlementStatus,
+          traderNetPayable: order.traderNetPayable,
+        });
         const returnComplete =
           order.deliveryStatus !== "returned_to_trader" ||
           order.returnStatus === "returned_to_trader";
@@ -6132,161 +6252,74 @@ export class OperationsService {
     return this.orderById(companyId, orderId, outerTransaction);
   }
 
-  public async settleOrderTrader(
-    orderId: string,
-    input: FinancialPaymentDto = {},
-    correlationId: string,
-  ): Promise<OperationsOrder> {
+  /**
+   * The legacy single-Order settle route (`POST orders/:orderId/settle-trader`).
+   *
+   * It used to write its own Settlement header (`service_fee_deductions` = the
+   * fee, no `allocated_amount`). Since the Settlement confirmation model of
+   * 2026-07-28 (migrations 20260729100000 and 20260974000000) that shape is
+   * refused by `validate_trader_settlement_confirmation` -- "Trader settlement
+   * header totals do not match allocations and receivable offsets" -- so the
+   * route could no longer confirm anything, and no first-party client has
+   * called it since the web caller was removed the same day.
+   *
+   * The route is kept, but the Settlement is now created by the canonical
+   * `TraderSettlementService.createPayment` (the controller calls it): one
+   * implementation, one accounting behaviour, the cash account recorded, the
+   * balance policy applied. This method only resolves and validates the
+   * target exactly as the legacy route did.
+   */
+  public async legacySettlementTarget(orderId: string): Promise<{
+    readonly traderId: string;
+    readonly outstanding: string;
+    readonly version: string;
+  }> {
     const { companyId } = this.tenants.current();
-    const identity = this.identities.current();
-    await this.transactions.execute(async (transaction) => {
-      const current = await sql<{
-        deductions: string;
-        grossPayable: string;
-        netPayable: string;
-        serviceFee: string;
-        settlementStatus: string;
-        traderAdjustments: string;
-        traderCharges: string;
-        traderId: string;
-      }>`
-        select trader_id as "traderId",
-               trader_gross_payable::text as "grossPayable",
-               trader_paid_service_fee::text as "serviceFee",
-               trader_deductions::text as deductions,
-               trader_charges::text as "traderCharges",
-               trader_adjustments::text as "traderAdjustments",
-               trader_net_payable::text as "netPayable",
-               trader_settlement_status as "settlementStatus"
+    const current = await sql<{
+      traderId: string;
+      netPayable: string;
+      paidAmount: string;
+      settlementStatus: string;
+      version: string;
+    }>`
+      select trader_id as "traderId", trader_net_payable::text as "netPayable",
+             coalesce(trader_paid_amount, 0)::text as "paidAmount",
+             trader_settlement_status as "settlementStatus", version::text
         from orders
-        where id = ${orderId}::uuid
-          and company_id = ${companyId}::uuid
-          and delivery_status = 'delivered'
-          and driver_reconciliation_status in ('reconciled', 'not_applicable')
-        for update
-      `.execute(transaction);
-      const order = current.rows[0];
-      if (order === undefined) {
-        throw new ApplicationException(
-          "order_not_settleable",
-          "Only delivered orders with reconciled driver cash can be settled",
-          HttpStatus.CONFLICT,
-        );
-      }
-      if (order.settlementStatus !== "unsettled") {
-        throw new ApplicationException(
-          "settlement_not_pending",
-          "Only unsettled trader orders can be settled",
-          HttpStatus.CONFLICT,
-        );
-      }
-
-      const grossPayable = Number(order.grossPayable);
-      const serviceFee = Number(order.serviceFee);
-      const deductions = Number(order.deductions);
-      const charges = Number(order.traderCharges);
-      const adjustments = Number(order.traderAdjustments);
-      const netPayable = Number(order.netPayable);
-      const payment = await this.resolveFinancialPayment(transaction, companyId, input);
-      const beneficiary =
-        payment.method === "bank_transfer"
-          ? await this.resolveTraderBeneficiary(
-              transaction,
-              companyId,
-              order.traderId,
-              input.traderBankAccountId,
-            )
-          : null;
-      const settlementNumber = await this.nextReferenceNumber(
-        transaction,
-        companyId,
-        "settlement",
-        "SET",
+       where id = ${orderId}::uuid
+         and company_id = ${companyId}::uuid
+         and delivery_status = 'delivered'
+         and driver_reconciliation_status in ('reconciled', 'not_applicable')
+    `.execute(this.database);
+    const order = current.rows[0];
+    if (order === undefined) {
+      throw new ApplicationException(
+        "order_not_settleable",
+        "Only delivered orders with reconciled driver cash can be settled",
+        HttpStatus.CONFLICT,
       );
-      const settlement = await sql<{ id: string }>`
-        insert into trader_settlements (
-          company_id, settlement_number, trader_id, business_date,
-          gross_payable, service_fee_deductions, other_deductions, charges,
-          adjustments, net_payable, status, created_by_account_id
-        ) values (
-          ${companyId}::uuid, ${settlementNumber}, ${order.traderId}::uuid,
-          current_date, ${grossPayable}, ${serviceFee}, ${deductions}, ${charges},
-          ${adjustments}, ${netPayable}, 'draft', ${identity.identityId}::uuid
-        )
-        returning id
-      `.execute(transaction);
-      const settlementId = settlement.rows[0]?.id;
-      if (settlementId === undefined) {
-        throw new Error("Trader settlement creation did not return an identifier");
-      }
-      await sql`
-        insert into trader_settlement_orders (
-          company_id, settlement_id, order_id, gross_payable,
-          deductions_and_charges, adjustments, net_payable
-        ) values (
-          ${companyId}::uuid, ${settlementId}::uuid, ${orderId}::uuid, ${grossPayable},
-          ${serviceFee + deductions + charges}, ${adjustments}, ${netPayable}
-        )
-      `.execute(transaction);
-      if (netPayable > 0) {
-        await sql`
-          insert into trader_settlement_payments (
-            company_id, settlement_id, payment_method, amount, company_bank_account_id,
-            bank_reference, created_by_account_id, payment_at,
-            trader_bank_account_id, trader_bank_account_snapshot
-          ) values (
-            ${companyId}::uuid, ${settlementId}::uuid, ${payment.method}, ${netPayable},
-            ${payment.bankAccountId}::uuid, ${payment.bankReference},
-            ${identity.identityId}::uuid, now(), ${beneficiary?.id ?? null}::uuid,
-            ${beneficiary === null ? null : JSON.stringify(beneficiary.snapshot)}::jsonb
-          )
-        `.execute(transaction);
-      }
-      await sql`
-        update trader_settlements
-           set status = 'confirmed',
-               confirmed_by_account_id = ${identity.identityId}::uuid,
-               confirmed_at = now(),
-               updated_at = now()
-         where id = ${settlementId}::uuid and company_id = ${companyId}::uuid
-      `.execute(transaction);
-      await sql`
-        update orders
-           set trader_settlement_status = 'money_sent_to_trader',
-               updated_at = now(),
-               version = version + 1
-         where id = ${orderId}::uuid and company_id = ${companyId}::uuid
-      `.execute(transaction);
-      await sql`
-        insert into order_status_history (
-          company_id, order_id, status_dimension, from_status, to_status, changed_by_account_id
-        ) values (
-          ${companyId}::uuid, ${orderId}::uuid, 'trader_settlement',
-          'unsettled', 'money_sent_to_trader', ${identity.identityId}::uuid
-        )
-      `.execute(transaction);
-      await sql`
-        insert into order_events (
-          company_id, order_id, event_type, event_category, field_name,
-          previous_value, new_value, actor_account_id, actor_role, source,
-          related_settlement_id, correlation_id
-        ) values (
-          ${companyId}::uuid, ${orderId}::uuid, 'trader_settlement.money_sent',
-          'financial_change', 'trader_settlement_status', to_jsonb('unsettled'::text),
-          to_jsonb('money_sent_to_trader'::text), ${identity.identityId}::uuid,
-          'Company User', 'web_portal', ${settlementId}::uuid, ${correlationId}
-        )
-      `.execute(transaction);
-      await this.audit(transaction, {
-        action: "trader_settlement.confirm",
-        actorId: identity.identityId,
-        after: { netPayable, paymentMethod: payment.method, settlementNumber },
-        companyId,
-        correlationId,
-        subjectId: orderId,
-        subjectType: "order",
-      });
-    });
+    }
+    if (order.settlementStatus !== "unsettled") {
+      throw new ApplicationException(
+        "settlement_not_pending",
+        "Only unsettled trader orders can be settled",
+        HttpStatus.CONFLICT,
+      );
+    }
+    const outstanding = new Decimal(order.netPayable).minus(order.paidAmount);
+    if (!outstanding.greaterThan(0)) {
+      throw new ApplicationException(
+        "settlement_not_pending",
+        "Only unsettled trader orders can be settled",
+        HttpStatus.CONFLICT,
+      );
+    }
+    return { outstanding: outstanding.toFixed(2), traderId: order.traderId, version: order.version };
+  }
+
+  /** The Order as the legacy settle route returned it. */
+  public async orderSummary(orderId: string): Promise<OperationsOrder> {
+    const { companyId } = this.tenants.current();
     return this.orderById(companyId, orderId);
   }
 
@@ -7921,7 +7954,10 @@ export class OperationsService {
   private async createOrderTraderReceivableIfNeeded(
     database: Parameters<Parameters<KyselyTransactionManager["execute"]>[0]>[0],
     input: {
-      readonly actorAccountId: string;
+      /** NULL only for a Platform Repair Center repair (no Company creator). */
+      readonly actorAccountId: string | null;
+      /** Defaults to 'Company User' (every Company-portal caller). */
+      readonly actorRole?: string;
       readonly amountDue: Decimal;
       readonly companyId: string;
       readonly correlationId: string;
@@ -7963,7 +7999,7 @@ export class OperationsService {
         ${input.companyId}::uuid, ${input.orderId}::uuid,
         'trader_receivable.created_from_order', 'financial_change',
         'trader_receivable_due', to_jsonb(${amountDue.toFixed(2)}::text),
-        ${input.actorAccountId}::uuid, 'Company User', 'system', ${input.correlationId}
+        ${input.actorAccountId}::uuid, ${input.actorRole ?? "Company User"}, 'system', ${input.correlationId}
       )
     `.execute(database);
   }
