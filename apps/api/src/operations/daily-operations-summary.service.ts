@@ -19,6 +19,7 @@ import type {
   DailyOperationsSummaryQueryDto,
 } from "./daily-operations-summary.dto.js";
 import { DriverCollectionPdfService } from "./driver-collection-pdf.service.js";
+import { effectiveSettlement } from "./effective-settlement-offsets.js";
 
 /**
  * Daily Operations Summary — read-only management report.
@@ -464,7 +465,12 @@ export class DailyOperationsSummaryService {
           join orders o on o.id = link.order_id and o.company_id = link.company_id
           join traders t on t.id = s.trader_id and t.company_id = s.company_id
          where p.company_id = ${companyId}::uuid
-           and s.status = 'confirmed'
+           -- Effective Settlements only, exactly as the fee deductions below:
+           -- a reversed Settlement's payment is history, so SET-A -> reversal
+           -- -> SET-B is ONE payment, not two. Without this the same Orders are
+           -- listed under both Settlements and the total counts the money twice.
+           -- effectiveSettlement() already asserts status = 'confirmed'.
+           and ${effectiveSettlement("s")}
            and (
              (
                ${dateMode}::text = 'business_day'
@@ -555,7 +561,10 @@ export class DailyOperationsSummaryService {
            left join orders o on o.company_id=r.company_id and r.source_type='service_charge'
                             and o.order_number=r.source_reference
            join traders t on t.id=s.trader_id and t.company_id=s.company_id
-          where x.company_id=${companyId}::uuid and s.status='confirmed'
+          where x.company_id=${companyId}::uuid
+            -- Effective offsets only: a reversed Settlement's offset is history,
+            -- so SET-A -> reversal -> SET-B is one fee deduction, not two.
+            and ${effectiveSettlement("s")}
             and (
               (${dateMode}::text='business_day' and s.business_date >= ${query.dateFrom}::date and s.business_date <= ${query.dateTo}::date)
               or (${dateMode}::text='calendar_day' and p.payment_at >= ${window.startUtc}::timestamptz and p.payment_at < ${window.endUtc}::timestamptz)
