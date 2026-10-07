@@ -542,6 +542,9 @@ class AppLocalizationsAr extends AppLocalizations {
   String get myActiveOrders => 'طلباتي النشطة';
 
   @override
+  String get awaitingCashHandover => 'بانتظار تسليم المبالغ النقدية';
+
+  @override
   String get assignedToMe => 'مسندة لي';
 
   @override

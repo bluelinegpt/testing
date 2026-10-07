@@ -24,6 +24,7 @@ import {
   type VatPolicy,
 } from "./order-financial-model.js";
 import { deriveOrderWorkflowGuidance } from "./order-workflow-guidance.js";
+import { driverWorkPredicate } from "./driver-work-visibility.js";
 import type { DatabaseSchema } from "../infrastructure/database/database.types.js";
 import { KyselyTransactionManager } from "../infrastructure/database/transaction-manager.js";
 import { ApplicationException } from "../presentation/errors/application.exception.js";
@@ -455,6 +456,8 @@ export interface PortalOrder {
   readonly customerMobileNumber: string;
   readonly customerName: string;
   readonly deliveryStatus: string;
+  /** Safe Driver-facing indicator used to distinguish cash handover work. */
+  readonly driverReconciliationStatus?: string;
   readonly id: string;
   readonly notes: string | null;
   readonly orderDate: string;
@@ -923,7 +926,7 @@ export class OperationsService {
          where company_id = ${identity.companyId}::uuid
            and assigned_driver_id = ${driver.id}::uuid
            and order_type <> 'gcc_international'
-           and delivery_status in ('assigned_to_driver', 'out_for_delivery', 'returned_to_branch')
+           and ${driverWorkPredicate("orders")}
          group by delivery_status
       `.execute(this.database),
       sql<{ count: number }>`
@@ -942,9 +945,9 @@ export class OperationsService {
     for (const row of statusCounts.rows) byStatus[row.status] = row.count;
     const assignedToMe = byStatus.assigned_to_driver ?? 0;
     const outForDelivery = byStatus.out_for_delivery ?? 0;
-    const returnPending = byStatus.returned_to_branch ?? 0;
+    const returnPending = 0;
     return {
-      activeTotal: assignedToMe + outForDelivery,
+      activeTotal: statusCounts.rows.reduce((total, row) => total + row.count, 0),
       assignedToMe,
       deliveredToday: deliveredToday.rows[0]?.count ?? 0,
       outForDelivery,
@@ -1144,8 +1147,13 @@ export class OperationsService {
           )
         ))
     `;
+    // A linked Driver User has the same work queue as a driver-kind identity.
+    // Never intersect this with the Operator tabs: those tabs include Office
+    // work such as holds and financial follow-up which is not Driver work.
+    const visibilityPredicate =
+      ownDriverId === undefined ? quickViewPredicate : driverWorkPredicate();
     const tabPredicate = sql`
-      ${quickViewPredicate}
+      ${visibilityPredicate}
       and (${ownDriverId}::uuid is null or o.assigned_driver_id = ${ownDriverId}::uuid)
       and (${deliveredOnly} = false or o.delivered_at is not null)
     `;
@@ -1168,7 +1176,11 @@ export class OperationsService {
       and (${thirdPartyDeliveryCompanyName}::text is null or lower(o.third_party_delivery_company_name) like '%' || lower(${thirdPartyDeliveryCompanyName}::text) || '%')
       and (${destinationCountryName}::text is null or lower(o.destination_country_name) like '%' || lower(${destinationCountryName}::text) || '%')
       and (${cashStatus}::text is null or o.driver_reconciliation_status = ${cashStatus})
-      and (${settlementStatus}::text is null or o.trader_settlement_status = ${settlementStatus})
+      -- Trader settlement is Office-only work. A linked Driver User must not
+      -- have its work list narrowed or broadened by a client settlement value.
+      and (${ownDriverId}::uuid is not null
+           or ${settlementStatus}::text is null
+           or o.trader_settlement_status = ${settlementStatus})
       and (${traderId}::uuid is null or o.trader_id = ${traderId}::uuid)
       and (${driverId}::uuid is null or o.assigned_driver_id = ${driverId}::uuid)
       and (${areaId}::uuid is null or o.area_id = ${areaId}::uuid)
@@ -3095,7 +3107,7 @@ export class OperationsService {
              o.customer_amount_due::text as "customerAmountDue",
              o.amount_collected::text as "amountCollected",
              o.delivery_status as "deliveryStatus",
-             o.trader_settlement_status as "traderSettlementStatus",
+             o.driver_reconciliation_status as "driverReconciliationStatus",
              e.id as "emirateId",
              e.name_en as "emirateNameEn",
              e.name_ar as "emirateNameAr"
@@ -3106,9 +3118,7 @@ export class OperationsService {
       where o.company_id = ${identity.companyId}::uuid
         and o.assigned_driver_id = ${driver.id}::uuid
         and o.order_type <> 'gcc_international'
-        and o.delivery_status in (
-          'assigned_to_driver', 'out_for_delivery', 'delivered', 'returned_to_branch'
-        )
+        and ${driverWorkPredicate()}
       order by o.order_date desc, o.created_at desc, o.order_number
       limit 100
     `.execute(this.database);
@@ -3157,7 +3167,7 @@ export class OperationsService {
              o.customer_amount_due::text as "customerAmountDue",
              o.amount_collected::text as "amountCollected",
              o.delivery_status as "deliveryStatus",
-             o.trader_settlement_status as "traderSettlementStatus",
+             o.driver_reconciliation_status as "driverReconciliationStatus",
              e.id as "emirateId",
              e.name_en as "emirateNameEn",
              e.name_ar as "emirateNameAr"

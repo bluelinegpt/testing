@@ -173,6 +173,7 @@
   "orderHistory": "سجل الطلب",
   "assignedDriverLabel": "السائق المسند",
   "myActiveOrders": "طلباتي النشطة",
+  "awaitingCashHandover": "بانتظار تسليم المبالغ النقدية",
   "assignedToMe": "مسندة لي",
   "orderDate": "تاريخ الطلب",
   "serialNumber": "الرقم التسلسلي",

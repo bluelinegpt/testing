@@ -548,6 +548,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get myActiveOrders => 'My Active Orders';
 
   @override
+  String get awaitingCashHandover => 'Awaiting cash handover';
+
+  @override
   String get assignedToMe => 'Assigned to Me';
 
   @override

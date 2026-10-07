@@ -16,6 +16,7 @@ final class DriverOrder {
     required this.expectedCod,
     required this.amountCollected,
     required this.status,
+    this.driverReconciliationStatus,
     required this.traderName,
     this.reference,
     this.notes,
@@ -35,7 +36,8 @@ final class DriverOrder {
       amountCollected,
       status,
       traderName;
-  final String? psystemSerial, reference, notes, emirateNameEn, emirateNameAr;
+  final String? psystemSerial, reference, notes, emirateNameEn, emirateNameAr,
+      driverReconciliationStatus;
 }
 
 final class DriverOrderHistoryEvent {

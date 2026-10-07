@@ -1130,6 +1130,12 @@ abstract class AppLocalizations {
   /// **'My Active Orders'**
   String get myActiveOrders;
 
+  /// No description provided for @awaitingCashHandover.
+  ///
+  /// In en, this message translates to:
+  /// **'Awaiting cash handover'**
+  String get awaitingCashHandover;
+
   /// No description provided for @assignedToMe.
   ///
   /// In en, this message translates to:

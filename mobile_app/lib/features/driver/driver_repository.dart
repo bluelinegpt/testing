@@ -99,6 +99,7 @@ final class ApiDriverRepository implements DriverRepository {
     expectedCod: _required(value, 'customerAmountDue'),
     amountCollected: _required(value, 'amountCollected'),
     status: _required(value, 'deliveryStatus'),
+    driverReconciliationStatus: value['driverReconciliationStatus'] as String?,
     traderName: _required(value, 'traderName'),
     reference: value['referenceNumber'] as String?,
     notes: value['notes'] as String?,

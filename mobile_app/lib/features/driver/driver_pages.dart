@@ -243,6 +243,19 @@ final class _DriverOrdersPageState extends ConsumerState<DriverOrdersPage> {
                     AppEmptyState(message: l10n.noOrders)
                   else
                     for (final order in orders) ...[
+                      if (order.status == 'delivered' &&
+                          order.driverReconciliationStatus == 'pending')
+                        Padding(
+                          padding: const EdgeInsetsDirectional.only(
+                            start: AppSpacing.xs,
+                            bottom: AppSpacing.xs,
+                          ),
+                          child: Text(
+                            l10n.awaitingCashHandover,
+                            style: Theme.of(context).textTheme.labelMedium
+                                ?.copyWith(color: AppColors.warning),
+                          ),
+                        ),
                       OrderCard(
                         order: OrderCardModel(
                           orderNumber: order.orderNumber,

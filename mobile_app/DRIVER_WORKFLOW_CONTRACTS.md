@@ -28,3 +28,20 @@ Every endpoint must derive Driver and Company from the session, reject cross-Dri
 | Order conversation     | Driver-to-Office only; no Driver-to-Trader or Driver-to-Customer chat                                                                         |
 
 No missing production behavior is simulated locally. Offline actions are not marked successful until confirmed by the server.
+
+## Route planning boundary
+
+An Order that is delivered but awaiting Driver cash handover is financial work,
+not a delivery stop. It must remain visible to the Driver with an explicit
+cash-handover label, but must be excluded from any future Area or map-route
+optimization.
+
+## Known return-status mismatch
+
+The Flutter Driver action currently submits `returned_to_branch`, while the
+server-side Driver transition map permits `out_for_delivery -> in_branch`.
+`returned_to_branch` is an Office return-processing status: workflow guidance
+continues it to `returned_to_trader`. It is therefore not Driver-list work.
+This mismatch is a separate status-transition defect; do not treat
+`returned_to_branch` as an active Driver stop until the mobile action and
+server transition contract are aligned.

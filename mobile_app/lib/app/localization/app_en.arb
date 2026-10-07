@@ -173,6 +173,7 @@
   "orderHistory": "Order History",
   "assignedDriverLabel": "Assigned Driver",
   "myActiveOrders": "My Active Orders",
+  "awaitingCashHandover": "Awaiting cash handover",
   "assignedToMe": "Assigned to Me",
   "orderDate": "Order Date",
   "serialNumber": "Serial No.",

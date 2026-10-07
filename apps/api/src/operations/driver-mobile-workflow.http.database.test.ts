@@ -165,12 +165,80 @@ describe.skipIf(!runHttpTests)("Driver mobile workflow HTTP boundary", () => {
             return { accountId, driverId, token: String(login.body.accessToken) };
           };
 
+          /** A Company User linked through Employee -> Driver. This is the
+           * non-driver-login route used by the office/mobile shared Orders
+           * endpoint, and must have the same work queue as that Driver. */
+          const makeLinkedDriverCompanyUser = async (
+            companyId: string,
+            subdomain: string,
+            driverId: string,
+            label: string,
+          ) => {
+            const accountId = randomUUID();
+            const companyUserId = randomUUID();
+            const employeeId = randomUUID();
+            const roleId = randomUUID();
+            const linkId = randomUUID();
+            const suffix = randomUUID().slice(0, 8);
+            const username = `dmw.driver-user.${label}.${suffix}`;
+            const password = `Rollback-dmw-driver-user-${label}-password`;
+            const hash = await hasher.hash(password);
+            await sql`
+              insert into accounts (
+                id, company_id, account_kind, username, password_hash, status, password_changed_at
+              ) values (${accountId}::uuid, ${companyId}::uuid, 'company_user', ${username}, ${hash},
+                        'active', now())
+            `.execute(transaction);
+            await sql`
+              insert into company_users (id, company_id, account_id, name_en, display_name)
+              values (${companyUserId}::uuid, ${companyId}::uuid, ${accountId}::uuid,
+                      ${`Driver User ${label}`}, ${`Driver User ${label}`})
+            `.execute(transaction);
+            await sql`
+              insert into employees (id, company_id, company_user_id, name_en, mobile_number)
+              values (${employeeId}::uuid, ${companyId}::uuid, ${companyUserId}::uuid,
+                      ${`Driver User ${label}`}, '971500000014')
+            `.execute(transaction);
+            await sql`
+              update drivers
+                 set employee_id = ${employeeId}::uuid
+               where id = ${driverId}::uuid and company_id = ${companyId}::uuid
+            `.execute(transaction);
+            await sql`
+              insert into user_business_links (
+                id, company_id, account_id, entity_type, entity_id, access_status, is_primary,
+                created_by_account_id
+              ) values (${linkId}::uuid, ${companyId}::uuid, ${accountId}::uuid, 'employee',
+                        ${employeeId}::uuid, 'active', true, ${accountId}::uuid)
+            `.execute(transaction);
+            await sql`
+              insert into roles (id, company_id, code, name, is_system)
+              values (${roleId}::uuid, ${companyId}::uuid, ${`dmw_driver_user_${suffix}`},
+                      ${`Driver User ${suffix}`}, true)
+            `.execute(transaction);
+            await sql`
+              insert into role_permissions (role_id, permission_code)
+              values (${roleId}::uuid, 'orders.driver_self_service')
+            `.execute(transaction);
+            await sql`
+              insert into account_roles (account_id, role_id, company_id)
+              values (${accountId}::uuid, ${roleId}::uuid, ${companyId}::uuid)
+            `.execute(transaction);
+            const login = await request(server)
+              .post("/api/v1/auth/login")
+              .set("Host", `${subdomain}.blueline.test`)
+              .send({ identifier: username, password })
+              .expect(200);
+            return { accountId, token: String(login.body.accessToken) };
+          };
+
           const createOrder = async (options: {
             readonly companyId: string;
             readonly createdByAccountId: string;
             readonly deliveryStatus: string;
             readonly driverId?: string | null;
             readonly deliveredAt?: "today" | null;
+            readonly driverReconciliationStatus?: "not_applicable" | "pending" | "reconciled";
           }) => {
             const orderId = randomUUID();
             const traderId = randomUUID();
@@ -194,6 +262,11 @@ describe.skipIf(!runHttpTests)("Driver mobile workflow HTTP boundary", () => {
             `.execute(transaction);
             const initialStatus =
               options.driverId != null ? "assigned_to_driver" : options.deliveryStatus;
+            const driverReconciliationStatus =
+              options.driverReconciliationStatus ??
+              (options.deliveryStatus === "delivered" && options.driverId != null
+                ? "pending"
+                : "not_applicable");
             await sql`
               insert into orders (
                 service_fee_override_reason, id, company_id, order_number, order_date, trader_id, area_id,
@@ -211,7 +284,7 @@ describe.skipIf(!runHttpTests)("Driver mobile workflow HTTP boundary", () => {
                 ${options.createdByAccountId}::uuid, ${options.driverId ?? null},
                 'Driver Customer', '971500000013', 'Driver Address', 1, 'customer_pays_cod_and_fee',
                 0, 55, 7.5, 55, 0, 0, 0, 0, 55,
-                ${initialStatus}, 'not_applicable', 'not_eligible',
+                ${initialStatus}, ${driverReconciliationStatus}, 'not_eligible',
                 ${options.deliveredAt === "today" ? sql`now()` : null},
                 'legacy_unattributed', 0, 'legacy_unattributed'
               )
@@ -247,6 +320,12 @@ describe.skipIf(!runHttpTests)("Driver mobile workflow HTTP boundary", () => {
           ]);
           const operatorB = await makeOperator(companyB.companyId, companyB.subdomain, "b", []);
           const driverA1 = await makeDriver(companyA.companyId, companyA.subdomain, "a1");
+          const driverUserA1 = await makeLinkedDriverCompanyUser(
+            companyA.companyId,
+            companyA.subdomain,
+            driverA1.driverId,
+            "a1",
+          );
           const driverA2 = await makeDriver(companyA.companyId, companyA.subdomain, "a2");
           const driverB1 = await makeDriver(companyB.companyId, companyB.subdomain, "b1");
 
@@ -269,6 +348,14 @@ describe.skipIf(!runHttpTests)("Driver mobile workflow HTTP boundary", () => {
             deliveryStatus: "delivered",
             driverId: driverA1.driverId,
             deliveredAt: "today",
+          });
+          const a1DeliveredCashComplete = await createOrder({
+            companyId: companyA.companyId,
+            createdByAccountId: operatorA.accountId,
+            deliveryStatus: "delivered",
+            driverId: driverA1.driverId,
+            deliveredAt: "today",
+            driverReconciliationStatus: "reconciled",
           });
           const a1ReturnPending = await createOrder({
             companyId: companyA.companyId,
@@ -337,8 +424,8 @@ describe.skipIf(!runHttpTests)("Driver mobile workflow HTTP boundary", () => {
           expect(dashboardA1.body.assignedToMe).toBe(1);
           expect(dashboardA1.body.outForDelivery).toBe(1);
           expect(dashboardA1.body.deliveredToday).toBe(1);
-          expect(dashboardA1.body.returnPending).toBe(1);
-          expect(dashboardA1.body.activeTotal).toBe(2);
+          expect(dashboardA1.body.returnPending).toBe(0);
+          expect(dashboardA1.body.activeTotal).toBe(3);
           // No Company-wide/"new" field is ever exposed on this response.
           expect(JSON.stringify(dashboardA1.body)).not.toContain('"new"');
 
@@ -361,8 +448,10 @@ describe.skipIf(!runHttpTests)("Driver mobile workflow HTTP boundary", () => {
           const ordersA1 = await authed(driverA1.token)("/portal/driver/orders").expect(200);
           const idsA1 = (ordersA1.body as { id: string }[]).map((row) => row.id).sort();
           expect(idsA1).toEqual(
-            [a1Assigned, a1OutForDelivery, a1DeliveredToday, a1ReturnPending].sort(),
+            [a1Assigned, a1OutForDelivery, a1DeliveredToday].sort(),
           );
+          expect(idsA1).not.toContain(a1DeliveredCashComplete);
+          expect(idsA1).not.toContain(a1ReturnPending);
           expect(idsA1).not.toContain(a2Assigned);
           expect(idsA1).not.toContain(unassignedNew);
           expect(idsA1).not.toContain(b1Assigned);
@@ -378,6 +467,39 @@ describe.skipIf(!runHttpTests)("Driver mobile workflow HTTP boundary", () => {
           expect("serialNumber" in a1AssignedRow).toBe(true);
           expect(typeof a1AssignedRow.emirateNameEn).toBe("string");
           expect((a1AssignedRow.emirateNameEn as string).length).toBeGreaterThan(0);
+
+          // The two identities that represent the same Driver must see the
+          // exact same work queue. Keep this fixture intentionally tiny (well
+          // below the portal's 100-row cap) so equality is meaningful rather
+          // than a page-boundary accident.
+          const driverUserOrders = await authed(driverUserA1.token)(
+            "/operations/orders?quickView=all&pageSize=25",
+          ).expect(200);
+          const driverUserIds = (driverUserOrders.body.items as { id: string }[])
+            .map((row) => row.id)
+            .sort();
+          expect(driverUserIds).toEqual(idsA1);
+
+          // A Driver-scoped Company User cannot escape the shared predicate
+          // with Office quick views/status tabs, nor with a settlement filter.
+          for (const query of [
+            "quickView=all",
+            "quickView=all&deliveryStatus=closed",
+            "quickView=all&deliveryStatus=hold",
+            "quickView=all&deliveryStatus=cancelled",
+            "quickView=all&settlementStatus=unsettled",
+            "quickView=all&settlementStatus=money_sent_to_trader",
+          ]) {
+            const response = await authed(driverUserA1.token)(
+              `/operations/orders?${query}&pageSize=25`,
+            ).expect(200);
+            const resultIds = (response.body.items as { id: string }[]).map((row) => row.id).sort();
+            if (query.includes("deliveryStatus=")) {
+              expect(resultIds).toEqual([]);
+            } else {
+              expect(resultIds).toEqual(idsA1);
+            }
+          }
 
           // --- History: on-demand, ownership-scoped independently of the list --
           const historyBefore = await authed(driverA1.token)(
