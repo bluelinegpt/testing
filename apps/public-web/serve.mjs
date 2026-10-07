@@ -1009,19 +1009,32 @@ export function createPublicServer() {
           return;
         }
       }
-      const legacyGuideMatch=pathname.match(/^(\/ar)?\/guides\/([^/]+)$/);
+      const legacyGuideMatch=pathname.match(/^(\/ar)?\/guides\/([^/]+)$/i);
       if (legacyGuideMatch) {
-        const prefix = legacyGuideMatch[1] ?? "";
-        response.writeHead(301, { location: `${prefix}/${legacyGuideMatch[2]}` }).end();
+        const prefix = (legacyGuideMatch[1] ?? "").toLowerCase();
+        response.writeHead(301, { location: `${prefix}/${legacyGuideMatch[2].toLowerCase()}` }).end();
         return;
       }
+      // Service pages live at the site root (/<slug>, /ar/<slug>). Only treat a path as a
+      // service page when no real page or static file exists there, otherwise /pricing,
+      // /about, /robots.txt, /favicon.ico, /ar, images etc. would be swallowed as "Not found".
       const guideMatch=pathname.match(/^(\/ar)?\/([^/]+)$/);
       let guide;
-      if(guideMatch){
+      if(guideMatch && !(await fileResponse(pathname))){
         const language=guideMatch[1]?"ar":"en";
         guide=await api(`/public/guides/${encodeURIComponent(guideMatch[2])}?language=${language}`);
         if(guide?.redirect?.to){response.writeHead(guide.redirect.statusCode===301?301:308,{location:guide.redirect.to}).end();return;}
-        if(!guide){response.writeHead(404).end("Not found");return;}
+        if(!guide){
+          // Service page slugs are lowercase. A mixed-case URL (e.g. typed or linked as
+          // /Delivery-company-software-Dubai) gets a permanent redirect to the canonical
+          // lowercase URL so users land on the page and Google consolidates to one URL.
+          const lowerSlug=guideMatch[2].toLowerCase();
+          if(lowerSlug!==guideMatch[2]){
+            const lowerGuide=await api(`/public/guides/${encodeURIComponent(lowerSlug)}?language=${language}`);
+            if(lowerGuide){response.writeHead(301,{location:`${guideMatch[1]??""}/${lowerSlug}${url.search}`}).end();return;}
+          }
+          response.writeHead(404).end("Not found");return;
+        }
       }
       const helpHomeRequest = /^(\/ar)?\/resources$/.exec(pathname);
       const helpHomePayload = helpHomeRequest
