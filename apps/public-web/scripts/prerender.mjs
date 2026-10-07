@@ -1,10 +1,12 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 // Built by the SSR step this script's own npm `build` script runs first
-// (`vite build --ssr src/entry-server.tsx --outDir dist-ssr`) -- plain Vite
-// SSR, not a second framework. Renders the exact same <App/> tree and
-// react-router routes the browser uses; see entry-server.tsx.
-import { render, routeMetadata } from "../dist-ssr/entry-server.js";
+// (`vite build --ssr src/entry-server.tsx --outDir dist/.server`) -- plain
+// Vite SSR, not a second framework. Renders the exact same <App/> tree and
+// react-router routes the browser uses; see entry-server.tsx. The bundle is
+// kept in dist/.server because serve.mjs also uses it at request time to
+// render Help articles, SEO service pages and Blog articles in full.
+import { render, routeMetadata } from "../dist/.server/entry-server.js";
 
 const siteUrl = "https://tawseelhub.com";
 const endpoint = process.env.PUBLIC_API_BASE_URL ?? "http://127.0.0.1:3000/api/v1";
@@ -149,9 +151,28 @@ async function fetchJson(path) {
   return response.json();
 }
 
+// routeMetadata (src/public-localization.ts) is the single source of truth for
+// static page titles and descriptions -- the browser app applies the same
+// values after it loads, so the server HTML and the live page always agree.
 const routeMap = new Map(
-  staticRoutes.map((route) => [route.path, { type: "website", image: defaultImage, ...route }]),
+  staticRoutes.map((route) => [
+    route.path,
+    {
+      type: "website",
+      image: defaultImage,
+      ...route,
+      ...(routeMetadata.en[route.path]
+        ? { title: routeMetadata.en[route.path].title, description: routeMetadata.en[route.path].description }
+        : {}),
+    },
+  ]),
 );
+// Every English public route with metadata gets a prerendered page, so a
+// route added to routeMetadata (e.g. /faq) can never silently 404 in
+// production while its /ar twin exists.
+for (const [path, metadata] of Object.entries(routeMetadata.en)) {
+  if (!routeMap.has(path)) routeMap.set(path, { path, type: "website", image: defaultImage, ...metadata });
+}
 for (const [path, metadata] of Object.entries(routeMetadata.ar)) {
   const localizedPath = path === "/" ? "/ar" : `/ar${path}`;
   routeMap.set(localizedPath, { path:localizedPath, type:"website", image:defaultImage, locale:"ar_AE", ...metadata,
@@ -297,6 +318,9 @@ try {
 
 const allRoutes = Array.from(routeMap.values());
 const template = await readFile("dist/index.html", "utf8");
+// Pristine template for request-time rendering in serve.mjs (dist/index.html
+// itself is overwritten below with the prerendered homepage).
+await writeFile("dist/.server/template.html", template);
 let bodyRenderFailures = 0;
 for (const route of allRoutes) {
   const canonical = route.canonical ?? `${siteUrl}${route.path}`;

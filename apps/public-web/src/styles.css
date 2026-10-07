@@ -1195,7 +1195,7 @@ footer {
 }
 .footer-main {
   display: grid;
-  grid-template-columns: 1.7fr repeat(5, 1fr);
+  grid-template-columns: 1.7fr repeat(6, 1fr);
   gap: 36px;
   max-width: 1400px;
   margin: auto;

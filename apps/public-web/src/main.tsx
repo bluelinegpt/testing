@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router-dom';
 import { App } from './App';
 import { installCrashReporting } from './error-reporting';
 import { installTracking } from './tracking';
+import { PreloadContext, readEmbeddedPreloadMap } from './preload-context';
 import './styles.css';
 import './quote.css';
 import './blog.css';
@@ -21,10 +22,16 @@ if ("requestIdleCallback" in window) {
   setTimeout(startTracking, 2500);
 }
 
+// Data the server already used to render this page (Help articles, SEO
+// service pages, Blog articles). Undefined on every other page.
+const preloadMap = readEmbeddedPreloadMap();
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <BrowserRouter>
-      <App />
-    </BrowserRouter>
+    <PreloadContext.Provider value={preloadMap}>
+      <BrowserRouter>
+        <App />
+      </BrowserRouter>
+    </PreloadContext.Provider>
   </StrictMode>,
 );

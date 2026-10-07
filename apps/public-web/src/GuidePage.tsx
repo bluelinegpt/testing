@@ -23,8 +23,12 @@ function BlockView({block}:{block:Block}) {
 
 export function GuidePage() {
   const {slug=""}=useParams(),location=useLocation(),locale=localeFromPublicPath(location.pathname),preloads=useContext(PreloadContext);
-  const [guide,setGuide]=useState<Guide|undefined>(()=>getPreloaded(preloads,guidePreloadKey(slug,locale))),[missing,setMissing]=useState(false);
-  useEffect(()=>{if(guide)return;const controller=new AbortController();void fetch(apiUrl(`/public/guides/${encodeURIComponent(slug)}?language=${locale}`),{signal:controller.signal}).then(async response=>{if(!response.ok)throw new Error("not_found");return response.json();}).then((result:Guide)=>{if(result.redirect){window.location.replace(result.redirect.to);return;}setGuide(result);trackEvent("seo_guide_view",{guide_slug:slug,language:locale});}).catch(()=>setMissing(true));return()=>controller.abort();},[slug,locale]);
+  // Keyed by slug+locale: server-rendered data (embedded preload) shows at once,
+  // and moving to another service page never keeps showing the previous one.
+  const key=guidePreloadKey(slug,locale);
+  const [loaded,setLoaded]=useState<{key:string;guide:Guide}|undefined>(()=>{const preloaded=getPreloaded<Guide>(preloads,key);return preloaded?{key,guide:preloaded}:undefined;}),[missingKey,setMissingKey]=useState<string|null>(null);
+  const guide=loaded?.key===key?loaded.guide:undefined,missing=missingKey===key;
+  useEffect(()=>{if(guide){trackEvent("seo_guide_view",{guide_slug:slug,language:locale});return;}const controller=new AbortController();void fetch(apiUrl(`/public/guides/${encodeURIComponent(slug)}?language=${locale}`),{signal:controller.signal}).then(async response=>{if(!response.ok)throw new Error("not_found");return response.json();}).then((result:Guide)=>{if(result.redirect){window.location.replace(result.redirect.to);return;}setLoaded({key,guide:result});}).catch((error)=>{if(error?.name!=="AbortError")setMissingKey(key);});return()=>controller.abort();},[key,guide,slug,locale]);
   useEffect(()=>{if(!guide)return;const seo=guide.seo??{};applyPageMetadata(String(seo.title??guide.title),String(seo.description??guide.summary),location.pathname,{canonical:String(seo.canonical??""),locale,robots:publicRobotsDirective(guide.robotsIndex,guide.robotsFollow),schema:seo.graph,alternates:seo.alternates,xDefault:seo.xDefault,image:publicAssetUrl(seo.image)});},[guide,location.pathname,locale]);
   if(missing)return <section className="article-empty"><h1>{locale==="ar"?"الدليل غير موجود":"Guide not found"}</h1><p>{locale==="ar"?"هذا الدليل غير منشور أو أن العنوان غير صحيح.":"This Guide is not published or the address is incorrect."}</p><Link to={locale==="ar"?"/ar":"/"}>{locale==="ar"?"العودة إلى الرئيسية":"Return home"}</Link></section>;
   if(!guide)return <section className="article-empty">{locale==="ar"?"جاري تحميل الدليل…":"Loading Guide…"}</section>;

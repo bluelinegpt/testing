@@ -1,10 +1,14 @@
 import { createServer } from "node:http";
 import { readFile, stat } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { brotliCompressSync, gzipSync } from "node:zlib";
 
 const directory = join(fileURLToPath(new URL(".", import.meta.url)), "dist");
+// Server-render bundle and pristine HTML template written by `npm run build`
+// (vite --ssr + scripts/prerender.mjs). Kept inside dist so it ships with the
+// built site; dot-prefixed paths are never served publicly (see below).
+const serverDirectory = join(directory, ".server");
 const apiBase = (
   process.env.PUBLIC_API_BASE_URL ??
   process.env.VITE_API_BASE_URL ??
@@ -122,6 +126,12 @@ export const sitemapStylesheet = `<?xml version="1.0" encoding="UTF-8"?>
   </xsl:template>
 </xsl:stylesheet>
 `;
+/** Appends the brand exactly once: "X" -> "X | Tawseelhub"; "X | Tawseelhub" stays as is. */
+export const brandedTitle = (title) => {
+  const value = String(title ?? "").trim();
+  if (!value) return "Tawseelhub";
+  return /tawseelhub/i.test(value) ? value : `${value} | Tawseelhub`;
+};
 const escape = (value) =>
   String(value ?? "")
     .replaceAll("&", "&amp;")
@@ -688,6 +698,7 @@ export function injectArticleMetadata(html, article, pathname) {
     `<link rel="alternate" type="application/rss+xml" title="Tawseelhub Blog RSS" href="${article.language === "ar" ? "/ar" : ""}/blog/rss.xml" />`;
   const metadata = `<meta name="robots" content="${escape(robots)}" /><link rel="canonical" href="${escape(canonical)}" />${alternates}<meta property="og:type" content="article" /><meta property="og:title" content="${escape(title)}" /><meta property="og:description" content="${escape(description)}" /><meta property="og:url" content="${escape(canonical)}" /><meta property="og:site_name" content="Tawseelhub" /><meta property="og:locale" content="${article.language === "ar" ? "ar_AE" : "en_AE"}" />${seo.alternateLocale ? `<meta property="og:locale:alternate" content="${escape(seo.alternateLocale)}" />` : ""}${imageMetadata}<meta name="twitter:card" content="${image ? "summary_large_image" : "summary"}" /><meta name="twitter:title" content="${escape(title)}" /><meta name="twitter:description" content="${escape(description)}" />${seo.graph ? `<script type="application/ld+json" data-seo-schema="true">${safeJson(seo.graph)}</script>` : ""}`;
   const cleaned = html
+    .replace(/<meta name="robots"[^>]*>/g, "")
     .replace(/<link rel="canonical"[^>]*>/g, "")
     .replace(/<link rel="alternate"[^>]*>/g, "")
     .replace(/<meta (?:property="og:[^"]+"|name="twitter:[^"]+")[^>]*>/g, "")
@@ -697,7 +708,7 @@ export function injectArticleMetadata(html, article, pathname) {
       /<html lang="[^"]+"(?: dir="[^"]+")?>/,
       article.language === "ar" ? '<html lang="ar" dir="rtl">' : '<html lang="en" dir="ltr">',
     )
-    .replace(/<title>.*?<\/title>/, `<title>${escape(title)} | Tawseelhub</title>`)
+    .replace(/<title>.*?<\/title>/, `<title>${escape(brandedTitle(title))}</title>`)
     .replace(
       /<meta name="description" content=".*?" \/>/,
       `<meta name="description" content="${escape(description)}" />${metadata}`,
@@ -725,7 +736,7 @@ export function injectLandingMetadata(html, landing) {
     .replace(/<meta name="robots"[^>]*>/g, "")
     .replace(/<meta (?:property="og:[^"]+"|name="twitter:[^"]+")[^>]*>/g, "")
     .replace(/<script type="application\/ld\+json"[^>]*>[\s\S]*?<\/script>/g, "")
-    .replace(/<title>.*?<\/title>/, `<title>${escape(title)} | Tawseelhub</title>`)
+    .replace(/<title>.*?<\/title>/, `<title>${escape(brandedTitle(title))}</title>`)
     .replace(
       /<meta name="description" content=".*?" \/>/,
       `<meta name="description" content="${escape(description)}" />${metadata}`,
@@ -778,6 +789,58 @@ export function injectHelpArticleMetadata(html, article, pathname) {
     },
     pathname,
   ).replace('property="og:type" content="article"', 'property="og:type" content="website"');
+}
+let serverRendererPromise;
+/**
+ * The same <App/> render entry the build-time prerender uses (entry-server.tsx),
+ * loaded once. Returns null when the bundle is missing (e.g. an old build), in
+ * which case callers fall back to the lightweight string shells below.
+ */
+export function loadServerRenderer() {
+  serverRendererPromise ??= import(pathToFileURL(join(serverDirectory, "entry-server.js")).href).catch(
+    (error) => {
+      console.warn("[public-web] server renderer unavailable, using HTML shells:", error?.message ?? error);
+      return null;
+    },
+  );
+  return serverRendererPromise;
+}
+/** The untouched Vite index.html (empty root, default head), saved by prerender.mjs. */
+async function pageTemplate() {
+  try {
+    return { body: await readFile(join(serverDirectory, "template.html")), type: types[".html"] };
+  } catch {
+    return fileResponse("/");
+  }
+}
+/**
+ * Renders the full page body (header, navigation, content, footer) with the
+ * React app, handing it the data this request already fetched. Falls back to
+ * the content-only shell if the renderer is unavailable or throws.
+ */
+export async function renderAppBody(pathname, preloadEntries, fallbackShell) {
+  const renderer = await loadServerRenderer();
+  if (renderer?.render) {
+    try {
+      return renderer.render(pathname, new Map(preloadEntries));
+    } catch (error) {
+      console.warn(`[public-web] server render failed for ${pathname}:`, error?.message ?? error);
+    }
+  }
+  return fallbackShell();
+}
+/**
+ * Hands the data used for the server render to the browser app (main.tsx),
+ * so its first render shows the same content instead of a "Loading…" state
+ * and a second API round trip.
+ */
+export function embedPreloadData(html, preloadEntries) {
+  const json = JSON.stringify(preloadEntries)
+    .replaceAll("<", "\\u003c")
+    .replaceAll("\u2028", "\\u2028")
+    .replaceAll("\u2029", "\\u2029");
+  const script = `<script type="application/json" id="tawseelhub-preload">${json}</script>`;
+  return html.includes("</body>") ? html.replace("</body>", () => `${script}</body>`) : `${html}${script}`;
 }
 async function fileResponse(pathname) {
   const relative = pathname === "/" ? "index.html" : pathname.slice(1);
@@ -874,6 +937,10 @@ export function createPublicServer() {
       const host = request.headers.host ?? "localhost";
       const url = new URL(request.url ?? "/", `http://${host}`);
       const pathname = normalizePath(url.pathname);
+      if (/(^|\/)\./.test(pathname)) {
+        response.writeHead(404).end("Not found");
+        return;
+      }
       if (pathname === "/healthz") {
         response
           .writeHead(200, {
@@ -1049,7 +1116,8 @@ export function createPublicServer() {
           return;
         }
       }
-      let file = await fileResponse(pathname);
+      const appRendered = Boolean(article || guide || helpArticlePayload?.article);
+      let file = appRendered ? await pageTemplate() : await fileResponse(pathname);
       const clientRoute = Boolean(
         article || guide || landing || helpArticlePayload || /^(\/ar)?\/send-a-package\/quote(\/|$)/.test(pathname),
       );
@@ -1060,14 +1128,18 @@ export function createPublicServer() {
       }
       let body = file.body;
       if (article && file.type.startsWith("text/html")) {
+        const preload = [[`blog-article:${articleSlug}:${articleLanguage}`, articlePayload]];
         const rendered = injectRenderedRoot(
           body.toString(),
-          renderArticleShell(article, articlePayload?.related),
+          await renderAppBody(pathname, preload, () =>
+            renderArticleShell(article, articlePayload?.related),
+          ),
         );
-        body = Buffer.from(injectArticleMetadata(rendered, article, pathname));
+        body = Buffer.from(embedPreloadData(injectArticleMetadata(rendered, article, pathname), preload));
       } else if(guide && file.type.startsWith("text/html")) {
         const normalized={...guide,excerpt:guide.summary,featured_image_public_url:guide.featuredImagePublicUrl,featured_image_alt:guide.featuredImageAlt,robots_index:guide.robotsIndex,robots_follow:guide.robotsFollow,social_title:guide.socialTitle,social_description:guide.socialDescription,social_image_url:guide.socialImageUrl};
-        body=Buffer.from(injectArticleMetadata(injectRenderedRoot(body.toString(),renderGuideShell(guide)),normalized,pathname).replace('property="og:type" content="article"','property="og:type" content="website"'));
+        const preload=[[`seo-guide:${guideMatch[2]}:${guideMatch[1]?"ar":"en"}`,guide]];
+        body=Buffer.from(embedPreloadData(injectArticleMetadata(injectRenderedRoot(body.toString(),await renderAppBody(pathname,preload,()=>renderGuideShell(guide))),normalized,pathname).replace('property="og:type" content="article"','property="og:type" content="website"'),preload));
       } else if (landing && file.type.startsWith("text/html"))
         body = Buffer.from(injectLandingMetadata(body.toString(), landing));
       else if (helpHomePayload && file.type.startsWith("text/html"))
@@ -1075,12 +1147,20 @@ export function createPublicServer() {
           injectRenderedRoot(body.toString(), renderHelpHomeShell(helpHomePayload)),
         );
       else if (helpArticlePayload?.article && file.type.startsWith("text/html")) {
+        const preload = [
+          [`help-article:${helpArticleRequest.slug}:${helpArticleRequest.locale}`, helpArticlePayload],
+        ];
         const rendered = injectRenderedRoot(
           body.toString(),
-          renderHelpArticleShell(helpArticlePayload.article, helpArticlePayload.related),
+          await renderAppBody(pathname, preload, () =>
+            renderHelpArticleShell(helpArticlePayload.article, helpArticlePayload.related),
+          ),
         );
         body = Buffer.from(
-          injectHelpArticleMetadata(rendered, helpArticlePayload.article, pathname),
+          embedPreloadData(
+            injectHelpArticleMetadata(rendered, helpArticlePayload.article, pathname),
+            preload,
+          ),
         );
       }
       else if (file.type.startsWith("text/html"))

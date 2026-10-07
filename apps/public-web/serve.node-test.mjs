@@ -1,7 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  brandedTitle,
   cacheControlFor,
+  embedPreloadData,
   blogLandingRequestForPath,
   encodedBody,
   helpArticleRequestForPath,
@@ -275,4 +277,24 @@ test("runtime Help landing exposes published guide links in initial HTML", () =>
   assert.match(html, /href="\/resources\/create-an-order"/);
   assert.match(html, /ما هو Tawseelhub/);
   assert.match(html, /Create an order/);
+});
+
+test("page titles carry the Tawseelhub brand exactly once", () => {
+  assert.equal(brandedTitle("COD Management System UAE"), "COD Management System UAE | Tawseelhub");
+  assert.equal(brandedTitle("COD Management System UAE | Tawseelhub"), "COD Management System UAE | Tawseelhub");
+  assert.equal(brandedTitle("Order statuses | Tawseelhub Help Center"), "Order statuses | Tawseelhub Help Center");
+  const html = injectHelpArticleMetadata(
+    '<html lang="en"><head><title>x</title><meta name="description" content="x" /><meta name="robots" content="index,follow" /></head><body></body></html>',
+    { locale: "en", title: "Order statuses", summary: "s", seo_title: "Order statuses | Tawseelhub Help Center", canonical_path: "/resources/order-statuses" },
+    "/resources/order-statuses",
+  );
+  assert.match(html, /<title>Order statuses \| Tawseelhub Help Center<\/title>/);
+  assert.equal(html.match(/name="robots"/g).length, 1);
+});
+test("server-rendered data is handed to the browser safely", () => {
+  const html = embedPreloadData("<html><body><div id=\"root\"></div></body></html>", [["help-article:x:en", { text: "</script><b>$& $'" }]]);
+  assert.match(html, /<script type="application\/json" id="tawseelhub-preload">/);
+  assert.doesNotMatch(html, /<\/script><b>/);
+  const json = html.match(/id="tawseelhub-preload">(.*)<\/script>/)[1];
+  assert.deepEqual(JSON.parse(json), [["help-article:x:en", { text: "</script><b>$& $'" }]]);
 });

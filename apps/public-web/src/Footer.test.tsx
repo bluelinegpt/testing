@@ -3,7 +3,7 @@ import '@testing-library/jest-dom/vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it } from 'vitest';
-import { Footer } from './App';
+import { Footer, solutionPages } from './App';
 
 /**
  * Privacy Policy and Terms of Service used to both point at /resources (the
@@ -27,5 +27,13 @@ describe('site footer legal links', () => {
     render(<MemoryRouter><Footer /></MemoryRouter>);
     expect(screen.getByRole('link', { name: 'Guides' })).toHaveAttribute('href', '/resources');
     expect(screen.getByRole('link', { name: 'FAQs' })).toHaveAttribute('href', '/faq');
+  });
+
+  it('links every SEO service page from a Solutions column', () => {
+    render(<MemoryRouter><Footer /></MemoryRouter>);
+    expect(screen.getByRole('heading', { name: 'Solutions' })).toBeInTheDocument();
+    for (const [href, label] of solutionPages)
+      expect(screen.getByRole('link', { name: label })).toHaveAttribute('href', href);
+    expect(solutionPages).toHaveLength(9);
   });
 });

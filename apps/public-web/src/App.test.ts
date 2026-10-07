@@ -42,6 +42,16 @@ describe("public website route foundation", () => {
     expect(isDynamicContentRoute("/resources")).toBe(false);
   });
 
+  it("lets root-level SEO service pages keep their own title after the app loads", () => {
+    // Regression: unknown single-segment paths used to fall back to the
+    // homepage metadata, overwriting e.g. "COD Management System UAE".
+    expect(isDynamicContentRoute("/cod-management-system-uae")).toBe(true);
+    expect(isDynamicContentRoute("/ar/cod-management-system-uae")).toBe(true);
+    expect(isDynamicContentRoute("/guides/cod-management-system-uae")).toBe(true);
+    for (const path of ["/pricing", "/about", "/faq", "/contact", "/track", "/ar/pricing", "/ar"])
+      expect(isDynamicContentRoute(path), path).toBe(false);
+  });
+
   it("keeps the Tawseelhub brand un-translated in Arabic metadata", () => {
     const rendered = JSON.stringify(routeMetadata.ar);
     expect(rendered).toContain("Tawseelhub");

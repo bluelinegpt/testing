@@ -106,9 +106,19 @@ function DeferredAgentChat() {
   ) : null;
 }
 
+/**
+ * Routes whose page component loads its own content and sets its own
+ * title/description/canonical (Blog, Help articles, and the root-level SEO
+ * service pages such as /cod-management-system-uae). The layout must never
+ * apply the static route metadata to these: an unknown single-segment path
+ * would otherwise fall back to the homepage metadata and overwrite the
+ * page's own title after the JavaScript loads.
+ */
 export function isDynamicContentRoute(pathname: string): boolean {
-  const path = stripPublicLocale(pathname);
-  return path.startsWith("/blog/") || /^\/resources\/[^/]+\/?$/.test(path);
+  const path = stripPublicLocale(pathname).replace(/\/+$/, "") || "/";
+  if (path.startsWith("/blog/") || /^\/resources\/[^/]+$/.test(path)) return true;
+  if (/^\/guides\/[^/]+$/.test(path)) return true;
+  return /^\/[^/]+$/.test(path) && !Object.hasOwn(routeMetadata.en, path);
 }
 
 const CmsContext = createContext<{
@@ -299,11 +309,12 @@ function AppLayout() {
               ],
             },
       );
-    } else {
-      document.head
-        .querySelectorAll('link[rel="alternate"][hreflang]')
-        .forEach((link) => link.remove());
     }
+    // Dynamic content routes: the page component owns all head metadata
+    // (applyPageMetadata replaces title, description, canonical and hreflang
+    // links itself), so nothing is touched here. Removing hreflang links at
+    // this point used to delete the ones the page had just set, because
+    // child effects run before this layout effect.
     setMenuOpen(false);
     window.scrollTo({ top: 0, behavior: "instant" });
   }, [route, path, locale, location.pathname, homeSeo]);
@@ -421,6 +432,7 @@ function AppLayout() {
               <Route path="/ar/blog/author/:slug" element={<BlogLandingPage />} />
               <Route path="/ar/blog/:slug" element={<BlogArticlePage />} />
               <Route path="/ar/guides/:slug" element={<GuidePage />} />
+              <Route path="/ar/:slug" element={<GuidePage />} />
               <Route path="/ar/faq" element={<FaqPage />} />
               <Route path="/ar/about" element={<AboutPage />} />
               <Route path="/ar/contact" element={<ContactPage />} />
@@ -1843,14 +1855,36 @@ function HelpArticlePage() {
   const { slug = "" } = useParams();
   const { locale } = useCms();
   const preloadMap = useContext(PreloadContext);
-  const [data, setData] = useState<any>(
-    () => getPreloaded(preloadMap, helpArticlePreloadKey(slug, locale)) ?? null,
-  );
+  const key = helpArticlePreloadKey(slug, locale);
+  // Keyed by slug+locale so navigating to another article never shows the
+  // previous one, while an article the server already rendered (embedded
+  // preload data) is shown immediately with no "Loading…" state.
+  const [loaded, setLoaded] = useState<{ key: string; data: any } | null>(() => {
+    const preloaded = getPreloaded(preloadMap, key);
+    return preloaded ? { key, data: preloaded } : null;
+  });
   const [missing, setMissing] = useState(false);
+  const data = loaded?.key === key ? loaded.data : null;
   const isAr = locale === "ar";
   useEffect(() => {
+    const applyArticleMetadata = (result: any) =>
+      applyPageMetadata(
+        result.article.seo_title ?? result.article.title,
+        result.article.meta_description ?? result.article.summary,
+        result.article.canonical_path ?? `/resources/${result.article.slug}`,
+        {
+          robots: publicRobotsDirective(
+            result.article.robots_index !== false,
+            result.article.robots_follow !== false,
+          ),
+          locale: result.article.locale === "ar" ? "ar" : "en",
+        },
+      );
+    if (data) {
+      applyArticleMetadata(data);
+      return;
+    }
     let cancelled = false;
-    setData(null);
     setMissing(false);
     void loadHelpArticle(slug, locale)
       .then((result) => {
@@ -1859,21 +1893,15 @@ function HelpArticlePage() {
           setMissing(true);
           return;
         }
-        setData(result);
-        applyPageMetadata(
-          result.article.seo_title ?? result.article.title,
-          result.article.meta_description ?? result.article.summary,
-          result.article.canonical_path ?? `/resources/${result.article.slug}`,
-          {
-            robots: `${result.article.robots_index === false ? "noindex" : "index"},${result.article.robots_follow === false ? "nofollow" : "follow"}`,
-          },
-        );
+        setLoaded({ key, data: result });
       })
-      .catch(() => setMissing(true));
+      .catch(() => {
+        if (!cancelled) setMissing(true);
+      });
     return () => {
       cancelled = true;
     };
-  }, [slug, locale]);
+  }, [key, data, slug, locale]);
   if (missing) return <NotFoundPage />;
   if (!data)
     return (
@@ -2427,6 +2455,24 @@ function NotFoundPage() {
   );
 }
 
+/**
+ * Root-level SEO service pages (published from Platform > SEO Guides). They
+ * exist in English only, so the links always use the English URL -- the
+ * locale-aware Link would send Arabic visitors to /ar/<slug>, which is not
+ * published. Add a line here when a new service page goes live.
+ */
+export const solutionPages = [
+  ["/delivery-management-software-uae", "Delivery Management Software UAE", "برنامج إدارة التوصيل في الإمارات"],
+  ["/courier-management-software-uae", "Courier Management Software UAE", "برنامج إدارة شركات الشحن في الإمارات"],
+  ["/courier-company-management-system", "Courier Company Management System", "نظام إدارة شركات الشحن"],
+  ["/delivery-company-software-dubai", "Delivery Company Software Dubai", "برنامج شركات التوصيل في دبي"],
+  ["/last-mile-delivery-software-uae", "Last-Mile Delivery Software UAE", "برنامج توصيل الميل الأخير في الإمارات"],
+  ["/delivery-driver-management-software", "Delivery Driver Management Software", "برنامج إدارة سائقي التوصيل"],
+  ["/cod-management-system-uae", "COD Management System UAE", "نظام إدارة الدفع عند الاستلام في الإمارات"],
+  ["/e-commerce-delivery-integration-uae", "E-commerce Delivery Integration UAE", "تكامل توصيل التجارة الإلكترونية في الإمارات"],
+  ["/logistics-software-uae", "Logistics Software UAE", "برنامج الخدمات اللوجستية في الإمارات"],
+] as const;
+
 export function Footer() {
   const { cms, locale } = useCms(),
     copy = publicUi[locale],
@@ -2546,6 +2592,14 @@ export function Footer() {
             ))}
           </div>
         ))}
+        <div className="footer-group footer-group--solutions">
+          <h2>{locale === "ar" ? "الحلول" : "Solutions"}</h2>
+          {solutionPages.map(([href, english, arabic]) => (
+            <RouterLink key={href} to={href}>
+              {locale === "ar" ? arabic : english}
+            </RouterLink>
+          ))}
+        </div>
       </div>
       <div className="footer-bottom">
         <span>
