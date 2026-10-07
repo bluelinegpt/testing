@@ -321,6 +321,20 @@ export function DailyOperationsSummaryReport({
     return params.toString();
   };
 
+  // The driver drill-down binds DailyOperationsSummaryOrdersQueryDto, which
+  // whitelists exactly dateFrom / dateTo / dateMode / driverId. The report
+  // section toggles above are not part of its contract, and the global
+  // ValidationPipe runs with forbidNonWhitelisted, so sending them is a 400 --
+  // not an ignored extra. Keep this separate from query(), which the report
+  // run and the PDF/Excel exports use and whose DTOs do own the toggles.
+  const ordersQuery = (driverId: string) =>
+    new URLSearchParams({
+      dateFrom: normalizeReportDateInput(dateFrom),
+      dateTo: normalizeReportDateInput(dateTo),
+      dateMode,
+      driverId,
+    }).toString();
+
   const changeDateMode = (next: DateMode) => {
     setDateMode(next);
     // A displayed report reflects the mode it was run in; switching modes
@@ -383,7 +397,7 @@ export function DailyOperationsSummaryReport({
     setDriverOrdersLoading(true);
     try {
       const rows = await api.get<readonly DriverOrderRow[]>(
-        `operations/reports/daily-operations-summary/orders?${query()}&driverId=${driverId}`,
+        `operations/reports/daily-operations-summary/orders?${ordersQuery(driverId)}`,
       );
       setDriverOrders(rows);
     } catch (cause) {
