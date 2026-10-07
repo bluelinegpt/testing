@@ -496,9 +496,9 @@ export class OperationsController {
       }
     }
     const arabic = reportLanguage === "ar";
-    const columns: readonly [string, string, string, string, string, string, string, string, string, string] = arabic
-      ? ["رقم الطلب", "التاريخ", "اسم التاجر", "العميل", "جوال العميل", "الإمارة", "المنطقة", "الدفع عند الاستلام", "الرسوم", "الحالة"]
-      : ["Order Number", "Date", "Trader Name", "Customer", "Customer Mobile", "Emirates", "Area", "COD", "Fee", "Status"];
+    const columns: readonly [string, string, string, string, string, string, string, string, string, string, string] = arabic
+      ? ["رقم الطلب", "التاريخ", "اسم التاجر", "العميل", "جوال العميل", "الإمارة", "المنطقة", "الدفع عند الاستلام", "الرسوم", "مبلغ التاجر", "الحالة"]
+      : ["Order Number", "Date", "Trader Name", "Customer", "Customer Mobile", "Emirates", "Area", "COD", "Fee", "Trader Amount", "Status"];
     const statusLabels: Record<string, string> = arabic
       ? { new: "جديد", in_branch: "الصنف في الفرع", assigned_to_driver: "معين للمندوب", out_for_delivery: "خرج للتوصيل", hold: "معلّق", delivered: "تم التسليم", returned_to_branch: "عاد إلى الفرع", returned_to_trader: "عاد إلى التاجر", cancelled: "ملغى", closed: "مغلق", collect_order: "احضار طلب" }
       : { new: "New", in_branch: "Item in branch", assigned_to_driver: "Assigned to driver", out_for_delivery: "Out for delivery", hold: "Hold", delivered: "Delivered", returned_to_branch: "Returned to branch", returned_to_trader: "Returned to trader", cancelled: "Cancelled", closed: "Closed", collect_order: "Collect Order" };
@@ -527,8 +527,13 @@ export class OperationsController {
       rows: rows.map((row) => ({
         [columns[0]]: row.orderNumber, [columns[1]]: row.date, [columns[2]]: arabic ? row.traderNameAr || row.traderName : row.traderName,
         [columns[3]]: row.customer, [columns[4]]: row.customerMobile, [columns[5]]: arabic ? row.emiratesAr || row.emirates : row.emirates,
-        [columns[6]]: arabic ? row.areaAr || row.area : row.area, [columns[7]]: row.cod, [columns[8]]: row.fee, [columns[9]]: statusLabels[row.status] ?? row.status,
-      })),
+        [columns[6]]: arabic ? row.areaAr || row.area : row.area, [columns[7]]: row.cod, [columns[8]]: row.fee,
+        [columns[9]]: row.traderAmount, [columns[10]]: statusLabels[row.status] ?? row.status,
+      })).concat([{
+        // Totals of the whole filtered report, as the last row.
+        [columns[0]]: filterLabels.total, [columns[7]]: first.totals.cod, [columns[8]]: first.totals.fee,
+        [columns[9]]: first.totals.traderAmount,
+      }]),
     };
     const rendered = accountingReportHtml({
       branding,

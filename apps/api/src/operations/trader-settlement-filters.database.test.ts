@@ -342,4 +342,23 @@ describe.skipIf(!run)("Trader Settlements filters and Orders comma-list search",
     // Company B's identical references stay in Company B.
     expect((await orders("2383,1523")).every((number) => [o.o1, o.o2].includes(number))).toBe(true);
   });
+
+  it("Orders Report: Trader Amount per row and whole-report totals (all pages, own Company only)", async () => {
+    const report = (fixture: Fixture, page: number) =>
+      as(fixture, () => get(OperationsService).ordersReport({ page, pageSize: 2 })) as Promise<{
+        items: ReadonlyArray<{ cod: string; fee: string; traderAmount: string }>;
+        totalCount: number;
+        totals: { cod: string; fee: string; traderAmount: string };
+      }>;
+    const first = await report(a, 1);
+    // Company A has 5 Orders: COD 100, fee 25, owed to the Trader 75 each.
+    expect(first.totalCount).toBe(5);
+    expect(first.items).toHaveLength(2);
+    expect(first.items.every((row) => Number(row.traderAmount) === PAYABLE)).toBe(true);
+    // Totals cover all 5 Orders even though the page holds 2, and are identical on every page.
+    expect(first.totals).toEqual({ cod: "500.00", fee: "125.00", traderAmount: "375.00" });
+    expect((await report(a, 3)).totals).toEqual(first.totals);
+    // Company B's 2 Orders are its own.
+    expect((await report(b, 1)).totals).toEqual({ cod: "200.00", fee: "50.00", traderAmount: "150.00" });
+  });
 });

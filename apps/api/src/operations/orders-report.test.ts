@@ -31,4 +31,15 @@ describe("Orders Report contract", () => {
     expect(controller).toContain("جميع التجار");
     expect(controller).toContain("showTelephone: false");
   });
+
+  it("adds the Trader Amount column and whole-report totals to the list, Excel and PDF", () => {
+    expect(service).toContain('coalesce(o.trader_net_payable, 0)::text as "traderAmount"');
+    expect(service).toContain("coalesce(sum(o.cod_amount), 0)");
+    expect(service).toContain("coalesce(sum(o.service_fee), 0)");
+    expect(service).toContain("coalesce(sum(o.trader_net_payable), 0)");
+    expect(service).toContain('"Trader Amount"');
+    expect(service).toContain("report.totals.traderAmount");
+    expect(controller).toContain("مبلغ التاجر");
+    expect(controller).toContain("first.totals.traderAmount");
+  });
 });

@@ -117,7 +117,8 @@ describe.skipIf(!enabled)("Orders Report authenticated export routes", () => {
       expect(Buffer.isBuffer(xlsx.body)).toBe(true);
       expect(xlsx.body.length).toBeGreaterThan(1000);
       const sheetXml = Buffer.from(unzipSync(xlsx.body)["xl/worksheets/sheet1.xml"]).toString("utf8");
-      expect((sheetXml.match(/<row\b/g) ?? []).length).toBe(206);
+      // Header + 205 orders + the totals row.
+      expect((sheetXml.match(/<row\b/g) ?? []).length).toBe(207);
       const allStatuses = await binary(request(app.getHttpServer()).get("/api/v1/operations/reports/orders.xlsx?dateFrom=2026-01-01&dateTo=2027-01-01").set("Authorization", `Bearer ${token}`)).expect(200);
       expect(Buffer.from(allStatuses.body).subarray(0, 2).toString()).toBe("PK");
       const pdf = await binary(request(app.getHttpServer()).get(`/api/v1/operations/reports/orders.pdf?${query}`).set("Authorization", `Bearer ${token}`)).expect(200);

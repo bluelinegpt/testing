@@ -205,7 +205,16 @@ export interface OrdersReportRow {
   readonly areaAr?: string | null;
   readonly cod: string;
   readonly fee: string;
+  /** What the Order owes the Trader (`trader_net_payable`), as on the Orders list. */
+  readonly traderAmount: string;
   readonly status: string;
+}
+
+/** Sums over EVERY order matching the filters, not just the returned page. */
+export interface OrdersReportTotals {
+  readonly cod: string;
+  readonly fee: string;
+  readonly traderAmount: string;
 }
 
 export interface OrdersReportPage {
@@ -213,6 +222,7 @@ export interface OrdersReportPage {
   readonly page: number;
   readonly pageSize: number;
   readonly totalCount: number;
+  readonly totals: OrdersReportTotals;
 }
 
 export interface OrdersReportExcelFile {
@@ -1796,7 +1806,15 @@ export class OperationsService {
         and (${traderId}::uuid is null or o.trader_id=${traderId}::uuid)
         and ${statusPredicate}
     `;
-    const count = await sql<{ count: number }>`select count(*)::int ${base}`.execute(this.database);
+    // Count and totals come from the same filtered set as the rows, before
+    // paging, so the totals always describe the whole report.
+    const summary = await sql<{ count: number; cod: string; fee: string; traderAmount: string }>`
+      select count(*)::int as count,
+             coalesce(sum(o.cod_amount), 0)::numeric(18,2)::text as cod,
+             coalesce(sum(o.service_fee), 0)::numeric(18,2)::text as fee,
+             coalesce(sum(o.trader_net_payable), 0)::numeric(18,2)::text as "traderAmount"
+      ${base}
+    `.execute(this.database);
     const rows = await sql<OrdersReportRow>`
       select o.order_number as "orderNumber",
              (o.created_at at time zone ${timezone})::date::text as date,
@@ -1805,12 +1823,24 @@ export class OperationsService {
              coalesce(e.name_en, '—') as emirates, e.name_ar as "emiratesAr",
              coalesce(a.name_en, '—') as area, a.name_ar as "areaAr",
              o.cod_amount::text as cod, o.service_fee::text as fee,
+             coalesce(o.trader_net_payable, 0)::text as "traderAmount",
              o.delivery_status as status
       ${base}
       order by o.created_at desc, o.id desc
       limit ${pageSize} offset ${(page - 1) * pageSize}
     `.execute(this.database);
-    return { items: rows.rows, page, pageSize, totalCount: count.rows[0]?.count ?? 0 };
+    const totalsRow = summary.rows[0];
+    return {
+      items: rows.rows,
+      page,
+      pageSize,
+      totalCount: totalsRow?.count ?? 0,
+      totals: {
+        cod: totalsRow?.cod ?? "0.00",
+        fee: totalsRow?.fee ?? "0.00",
+        traderAmount: totalsRow?.traderAmount ?? "0.00",
+      },
+    };
   }
 
   public async ordersReportExcel(filters: OrdersReportFilters = {}): Promise<OrdersReportExcelFile> {
@@ -1819,12 +1849,17 @@ export class OperationsService {
     for (let page = 2; page <= Math.ceil(report.totalCount / report.pageSize); page += 1) {
       all.push(...(await this.ordersReport({ ...filters, page, pageSize: 200 })).items);
     }
-    const columns = ["Order Number", "Date", "Trader Name", "Customer", "Customer Mobile", "Emirates", "Area", "COD", "Fee", "Status"] as const;
-    const rows = all.map((row) => ({
+    const columns = ["Order Number", "Date", "Trader Name", "Customer", "Customer Mobile", "Emirates", "Area", "COD", "Fee", "Trader Amount", "Status"] as const;
+    const rows: Record<string, string>[] = all.map((row) => ({
       "Order Number": row.orderNumber, Date: row.date, "Trader Name": row.traderName,
       Customer: row.customer, "Customer Mobile": row.customerMobile, Emirates: row.emirates,
-      Area: row.area, COD: row.cod, Fee: row.fee, Status: row.status,
+      Area: row.area, COD: row.cod, Fee: row.fee, "Trader Amount": row.traderAmount, Status: row.status,
     }));
+    // Totals of the whole filtered report, as the last row.
+    rows.push({
+      "Order Number": "Total", COD: report.totals.cod, Fee: report.totals.fee,
+      "Trader Amount": report.totals.traderAmount,
+    });
     return { bytes: accountingXlsx(columns, rows), filename: `orders-report-${new Date().toISOString().slice(0, 10)}.xlsx` };
   }
 

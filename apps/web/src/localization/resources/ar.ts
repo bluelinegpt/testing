@@ -1444,7 +1444,11 @@ export const arabicTranslations = {
       status: "الحالة",
       empty: "لا توجد طلبات مطابقة.",
       total: "{{count}} طلب مطابق",
-      columns: { orderNumber: "رقم الطلب", date: "التاريخ", traderName: "اسم التاجر", customer: "العميل", customerMobile: "هاتف العميل", emirates: "الإمارة", area: "المنطقة", cod: "الدفع عند الاستلام", fee: "الرسوم", status: "الحالة" },
+      totalCod: "إجمالي الدفع عند الاستلام",
+      totalFee: "إجمالي الرسوم",
+      totalTraderAmount: "إجمالي مبلغ التاجر",
+      totalsRow: "الإجمالي",
+      columns: { orderNumber: "رقم الطلب", date: "التاريخ", traderName: "اسم التاجر", customer: "العميل", customerMobile: "هاتف العميل", emirates: "الإمارة", area: "المنطقة", cod: "الدفع عند الاستلام", fee: "الرسوم", traderAmount: "مبلغ التاجر", status: "الحالة" },
     },
     dailyOperationsSummary: {
       breakEven: "تعادل / صفر",

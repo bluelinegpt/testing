@@ -1468,7 +1468,11 @@ export const englishTranslations = {
       status: "Status",
       empty: "No matching orders.",
       total: "{{count}} matching orders",
-      columns: { orderNumber: "Order Number", date: "Date", traderName: "Trader Name", customer: "Customer", customerMobile: "Customer Mobile", emirates: "Emirates", area: "Area", cod: "COD", fee: "Fee", status: "Status" },
+      totalCod: "Total COD",
+      totalFee: "Total Fee",
+      totalTraderAmount: "Total Trader",
+      totalsRow: "Total",
+      columns: { orderNumber: "Order Number", date: "Date", traderName: "Trader Name", customer: "Customer", customerMobile: "Customer Mobile", emirates: "Emirates", area: "Area", cod: "COD", fee: "Fee", traderAmount: "Trader Amount", status: "Status" },
     },
     dailyOperationsSummary: {
       breakEven: "Break-even / Zero",
