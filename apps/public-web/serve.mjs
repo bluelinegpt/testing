@@ -1009,7 +1009,13 @@ export function createPublicServer() {
           return;
         }
       }
-      const guideMatch=pathname.match(/^(\/ar)?\/guides\/([^/]+)$/);
+      const legacyGuideMatch=pathname.match(/^(\/ar)?\/guides\/([^/]+)$/);
+      if (legacyGuideMatch) {
+        const prefix = legacyGuideMatch[1] ?? "";
+        response.writeHead(301, { location: `${prefix}/${legacyGuideMatch[2]}` }).end();
+        return;
+      }
+      const guideMatch=pathname.match(/^(\/ar)?\/([^/]+)$/);
       let guide;
       if(guideMatch){
         const language=guideMatch[1]?"ar":"en";

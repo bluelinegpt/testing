@@ -11,7 +11,8 @@ import type { SaveSeoGuideDto, SeoGuideStatusDto } from "./seo-guide.dto.js";
 
 const cleanText = (value: string) => value.replace(/[<>]/g, "").replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "").trim();
 const slugPattern = /^(?!\.{1,2}$)(?!.*[\s\u0000-\u001f\u007f/\\?#\u202a-\u202e\u2066-\u2069])[\p{L}\p{N}](?:[\p{L}\p{N}\p{M}-]{0,158}[\p{L}\p{N}\p{M}])?$/u;
-export const localizedGuidePath = (language: string, slug: string) => `${language === "ar" ? "/ar" : ""}/guides/${slug.normalize("NFC")}`;
+export const localizedGuidePath = (language: string, slug: string) => `${language === "ar" ? "/ar" : ""}/${slug.normalize("NFC")}`;
+export const legacyLocalizedGuidePath = (language: string, slug: string) => `${language === "ar" ? "/ar" : ""}/guides/${slug.normalize("NFC")}`;
 
 function validSlug(value: string): string {
   const slug = value.normalize("NFC");
@@ -31,7 +32,9 @@ function cleanBlocks(input: SaveSeoGuideDto["content"]) {
 }
 export function publicGuideSeo(row: Record<string, any>) {
   const path = localizedGuidePath(row.language, row.slug);
-  const canonicalUrl = row.canonical_url || `https://tawseelhub.com${path}`;
+  const canonicalUrl = row.canonical_url && !String(row.canonical_url).includes("/guides/")
+    ? row.canonical_url
+    : `https://tawseelhub.com${path}`;
   const image = row.social_image_url || row.featured_image_public_url || null;
   const language = row.language === "ar" ? "ar" : "en";
   const alternates = [{ language, url: canonicalUrl }, ...(row.translation_slug && ["published", "scheduled"].includes(row.translation_status) ? [{ language: row.translation_language, url: `https://tawseelhub.com${localizedGuidePath(row.translation_language, row.translation_slug)}` }] : [])];
@@ -75,7 +78,7 @@ export class SeoGuideService {
     } catch (error) { if ((error as { code?: string }).code === "23505") throw new ConflictException("seo_guide_slug_or_translation_conflict"); throw error; }
   }
   async update(id: string, input: SaveSeoGuideDto, actor: string) {
-    const before = await this.adminDetail(id), slug = validSlug(input.slug), oldPath = localizedGuidePath(before.language,before.slug), newPath = localizedGuidePath(input.language,slug);
+    const before = await this.adminDetail(id), slug = validSlug(input.slug), oldPath = legacyLocalizedGuidePath(before.language,before.slug), newPath = localizedGuidePath(input.language,slug);
     if (before.language !== input.language) throw new BadRequestException("seo_guide_language_immutable_create_translation_instead");
     try {
       await this.db.transaction().execute(async (trx) => {
@@ -103,7 +106,7 @@ export class SeoGuideService {
     const slug = validSlug(slugValue), locale = language === "ar" ? "ar" : "en";
     const row = (await sql<any>`select g.*,t.slug as translation_slug,t.language as translation_language,t.status as translation_status from platform_seo_guides g left join platform_seo_guides t on t.translation_group_id=g.translation_group_id and t.language<>g.language and ((t.status='published' and t.published_at<=now()) or (t.status='scheduled' and t.scheduled_at<=now())) where g.slug=${slug} and g.language=${locale} and ((g.status='published' and g.published_at<=now()) or (g.status='scheduled' and g.scheduled_at<=now()))`.execute(this.db)).rows[0];
     if (!row) {
-      const redirect = (await sql<any>`update platform_public_redirects set hit_count=hit_count+1,last_hit_at=now() where from_path=${localizedGuidePath(locale,slug)} and active returning to_path,status_code`.execute(this.db)).rows[0];
+      const redirect = (await sql<any>`update platform_public_redirects set hit_count=hit_count+1,last_hit_at=now() where from_path in (${legacyLocalizedGuidePath(locale,slug)},${localizedGuidePath(locale,slug)}) and active returning to_path,status_code`.execute(this.db)).rows[0];
       if (redirect) return { redirect: { to: redirect.to_path, statusCode: redirect.status_code } };
       throw new NotFoundException("seo_guide_not_found");
     }

@@ -396,6 +396,7 @@ function AppLayout() {
               <Route path="/blog/author/:slug" element={<BlogLandingPage />} />
               <Route path="/blog/:slug" element={<BlogArticlePage />} />
               <Route path="/guides/:slug" element={<GuidePage />} />
+              <Route path="/:slug" element={<GuidePage />} />
               <Route path="/faq" element={<FaqPage />} />
               <Route path="/about" element={<AboutPage />} />
               <Route path="/contact" element={<ContactPage />} />

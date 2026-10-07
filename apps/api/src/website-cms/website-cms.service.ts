@@ -383,7 +383,7 @@ export class WebsiteCmsService {
     const guides = (
       await sql<LocalizedEntry>`
       select 'guide:' || translation_group_id::text as key, language as locale,
-             '/guides/' || slug as path,
+             '/' || slug as path,
              coalesce(updated_content_at, published_at, scheduled_at, updated_at) as updated_at
       from platform_seo_guides
       where ((status = 'published' and published_at <= now()) or
