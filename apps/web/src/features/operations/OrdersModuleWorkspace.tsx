@@ -5520,8 +5520,20 @@ function groupVisibleOrders(
     const dimension = dimensions[level];
     return result.sort((left, right) => {
       if (dimension === "status") {
-        const leftStatus = deriveOrderStatus(left.children[0]?.orders[0] ?? left.orders[0]!).key;
-        const rightStatus = deriveOrderStatus(right.children[0]?.orders[0] ?? right.orders[0]!).key;
+        // Read the status off the group key -- `getGroupKey` above writes
+        // `status:<derived key>`, so the group already carries it and no member
+        // Order has to be hunted down again.
+        //
+        // The previous form, `deriveOrderStatus(left.children[0]?.orders[0] ??
+        // left.orders[0]!)`, blanked the whole Orders page. A non-leaf group
+        // holds no Orders of its own (`orders: isLeaf ? groupedOrders : []`),
+        // and with three or more grouping dimensions its children are non-leaf
+        // too -- so `children[0].orders[0]` was undefined, `orders[0]` was
+        // undefined, and the non-null assertion handed `undefined` to
+        // deriveOrderStatus(), which threw inside Array.sort. Grouping by
+        // Status plus two more dimensions was enough to trigger it.
+        const leftStatus = left.key.slice("status:".length);
+        const rightStatus = right.key.slice("status:".length);
         return (statusOrder.get(leftStatus) ?? 999) - (statusOrder.get(rightStatus) ?? 999);
       }
       if (dimension === "driver") {
