@@ -1471,8 +1471,12 @@ export const englishTranslations = {
       totalCod: "Total COD",
       totalFee: "Total Fee",
       totalTraderAmount: "Total Trader",
+      totalPaidToTrader: "Total Paid to Trader",
+      totalCollectedFromTrader: "Total Collected from Trader",
+      totalBalance: "Balance (+ due to Trader, − due from Trader)",
+      traderAmountHint: "Trader Amount is negative when an order's fees are more than its COD: the Trader owes the difference.",
       totalsRow: "Total",
-      columns: { orderNumber: "Order Number", date: "Date", traderName: "Trader Name", customer: "Customer", customerMobile: "Customer Mobile", emirates: "Emirates", area: "Area", cod: "COD", fee: "Fee", traderAmount: "Trader Amount", status: "Status" },
+      columns: { orderNumber: "Order Number", date: "Date", traderName: "Trader Name", customer: "Customer", customerMobile: "Customer Mobile", emirates: "Emirates", area: "Area", cod: "COD", fee: "Fee", traderAmount: "Trader Amount", paidToTrader: "Paid to Trader", collectedFromTrader: "Collected from Trader", balance: "Balance", status: "Status" },
     },
     dailyOperationsSummary: {
       breakEven: "Break-even / Zero",

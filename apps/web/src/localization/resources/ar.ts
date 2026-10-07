@@ -1447,8 +1447,12 @@ export const arabicTranslations = {
       totalCod: "إجمالي الدفع عند الاستلام",
       totalFee: "إجمالي الرسوم",
       totalTraderAmount: "إجمالي مبلغ التاجر",
+      totalPaidToTrader: "إجمالي المدفوع للتاجر",
+      totalCollectedFromTrader: "إجمالي المحصّل من التاجر",
+      totalBalance: "الرصيد (+ مستحق للتاجر، − مستحق على التاجر)",
+      traderAmountHint: "يكون مبلغ التاجر سالباً عندما تزيد رسوم الطلب عن مبلغ الدفع عند الاستلام: الفرق مستحق على التاجر.",
       totalsRow: "الإجمالي",
-      columns: { orderNumber: "رقم الطلب", date: "التاريخ", traderName: "اسم التاجر", customer: "العميل", customerMobile: "هاتف العميل", emirates: "الإمارة", area: "المنطقة", cod: "الدفع عند الاستلام", fee: "الرسوم", traderAmount: "مبلغ التاجر", status: "الحالة" },
+      columns: { orderNumber: "رقم الطلب", date: "التاريخ", traderName: "اسم التاجر", customer: "العميل", customerMobile: "هاتف العميل", emirates: "الإمارة", area: "المنطقة", cod: "الدفع عند الاستلام", fee: "الرسوم", traderAmount: "مبلغ التاجر", paidToTrader: "مدفوع للتاجر", collectedFromTrader: "محصّل من التاجر", balance: "الرصيد", status: "الحالة" },
     },
     dailyOperationsSummary: {
       breakEven: "تعادل / صفر",

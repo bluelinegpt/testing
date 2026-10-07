@@ -205,8 +205,18 @@ export interface OrdersReportRow {
   readonly areaAr?: string | null;
   readonly cod: string;
   readonly fee: string;
-  /** What the Order owes the Trader (`trader_net_payable`), as on the Orders list. */
+  /**
+   * The Order's signed position with the Trader: what it owes the Trader
+   * (`trader_net_payable`) minus the fees the Trader owes for it (its
+   * service-charge Trader Receivables). Negative when fees exceed COD.
+   */
   readonly traderAmount: string;
+  /** Paid to the Trader for this Order through Trader Settlements. */
+  readonly paidToTrader: string;
+  /** Recovered from the Trader against this Order's receivables (collected or offset). */
+  readonly collectedFromTrader: string;
+  /** traderAmount - paidToTrader + collectedFromTrader: + still due to, - still due from the Trader. */
+  readonly balance: string;
   readonly status: string;
 }
 
@@ -215,6 +225,9 @@ export interface OrdersReportTotals {
   readonly cod: string;
   readonly fee: string;
   readonly traderAmount: string;
+  readonly paidToTrader: string;
+  readonly collectedFromTrader: string;
+  readonly balance: string;
 }
 
 export interface OrdersReportPage {
@@ -1792,6 +1805,8 @@ export class OperationsService {
     const page = Number.isInteger(filters.page) && (filters.page ?? 0) > 0 ? filters.page! : 1;
     const pageSize = Math.min(200, Math.max(1, Number(filters.pageSize) || 25));
     const timezone = await this.companyTimezone();
+    const traderAmount = sql`(coalesce(o.trader_net_payable, 0) - trader_owes.due)`;
+    const paidToTrader = sql`coalesce(o.trader_paid_amount, 0)`;
     const statusPredicate = statuses.length === 0
       ? sql`true`
       : sql`o.delivery_status in (${sql.join(statuses)})`;
@@ -1800,6 +1815,18 @@ export class OperationsService {
       join traders t on t.id=o.trader_id and t.company_id=o.company_id
       left join areas a on a.id=o.area_id and a.company_id=o.company_id
       left join emirates e on e.id=a.emirate_id
+      -- What the Trader owes for this Order: its service-charge Trader
+      -- Receivables (fees greater than COD), and how much of that has been
+      -- recovered (collected, or offset in a Trader Settlement). Aggregated,
+      -- so still exactly one row per Order.
+      left join lateral (
+        select coalesce(sum(r.original_amount_due), 0) as due,
+               coalesce(sum(r.amount_collected), 0) as collected
+          from trader_receivables r
+         where r.company_id = o.company_id and r.trader_id = o.trader_id
+           and r.source_type = 'service_charge' and r.source_reference = o.order_number
+           and r.status not in ('cancelled', 'reversed')
+      ) trader_owes on true
       where o.company_id=${companyId}::uuid
         and (${dateFrom}::date is null or (o.created_at at time zone ${timezone})::date >= ${dateFrom}::date)
         and (${dateTo}::date is null or (o.created_at at time zone ${timezone})::date <= ${dateTo}::date)
@@ -1808,11 +1835,14 @@ export class OperationsService {
     `;
     // Count and totals come from the same filtered set as the rows, before
     // paging, so the totals always describe the whole report.
-    const summary = await sql<{ count: number; cod: string; fee: string; traderAmount: string }>`
+    const summary = await sql<{ count: number } & OrdersReportTotals>`
       select count(*)::int as count,
              coalesce(sum(o.cod_amount), 0)::numeric(18,2)::text as cod,
              coalesce(sum(o.service_fee), 0)::numeric(18,2)::text as fee,
-             coalesce(sum(o.trader_net_payable), 0)::numeric(18,2)::text as "traderAmount"
+             coalesce(sum(${traderAmount}), 0)::numeric(18,2)::text as "traderAmount",
+             coalesce(sum(${paidToTrader}), 0)::numeric(18,2)::text as "paidToTrader",
+             coalesce(sum(trader_owes.collected), 0)::numeric(18,2)::text as "collectedFromTrader",
+             coalesce(sum(${traderAmount} - ${paidToTrader} + trader_owes.collected), 0)::numeric(18,2)::text as balance
       ${base}
     `.execute(this.database);
     const rows = await sql<OrdersReportRow>`
@@ -1823,7 +1853,10 @@ export class OperationsService {
              coalesce(e.name_en, '—') as emirates, e.name_ar as "emiratesAr",
              coalesce(a.name_en, '—') as area, a.name_ar as "areaAr",
              o.cod_amount::text as cod, o.service_fee::text as fee,
-             coalesce(o.trader_net_payable, 0)::text as "traderAmount",
+             ${traderAmount}::numeric(18,2)::text as "traderAmount",
+             ${paidToTrader}::numeric(18,2)::text as "paidToTrader",
+             trader_owes.collected::numeric(18,2)::text as "collectedFromTrader",
+             (${traderAmount} - ${paidToTrader} + trader_owes.collected)::numeric(18,2)::text as balance,
              o.delivery_status as status
       ${base}
       order by o.created_at desc, o.id desc
@@ -1839,6 +1872,9 @@ export class OperationsService {
         cod: totalsRow?.cod ?? "0.00",
         fee: totalsRow?.fee ?? "0.00",
         traderAmount: totalsRow?.traderAmount ?? "0.00",
+        paidToTrader: totalsRow?.paidToTrader ?? "0.00",
+        collectedFromTrader: totalsRow?.collectedFromTrader ?? "0.00",
+        balance: totalsRow?.balance ?? "0.00",
       },
     };
   }
@@ -1849,16 +1885,19 @@ export class OperationsService {
     for (let page = 2; page <= Math.ceil(report.totalCount / report.pageSize); page += 1) {
       all.push(...(await this.ordersReport({ ...filters, page, pageSize: 200 })).items);
     }
-    const columns = ["Order Number", "Date", "Trader Name", "Customer", "Customer Mobile", "Emirates", "Area", "COD", "Fee", "Trader Amount", "Status"] as const;
+    const columns = ["Order Number", "Date", "Trader Name", "Customer", "Customer Mobile", "Emirates", "Area", "COD", "Fee", "Trader Amount", "Paid to Trader", "Collected from Trader", "Balance", "Status"] as const;
     const rows: Record<string, string>[] = all.map((row) => ({
       "Order Number": row.orderNumber, Date: row.date, "Trader Name": row.traderName,
       Customer: row.customer, "Customer Mobile": row.customerMobile, Emirates: row.emirates,
-      Area: row.area, COD: row.cod, Fee: row.fee, "Trader Amount": row.traderAmount, Status: row.status,
+      Area: row.area, COD: row.cod, Fee: row.fee, "Trader Amount": row.traderAmount,
+      "Paid to Trader": row.paidToTrader, "Collected from Trader": row.collectedFromTrader, Balance: row.balance,
+      Status: row.status,
     }));
     // Totals of the whole filtered report, as the last row.
     rows.push({
       "Order Number": "Total", COD: report.totals.cod, Fee: report.totals.fee,
-      "Trader Amount": report.totals.traderAmount,
+      "Trader Amount": report.totals.traderAmount, "Paid to Trader": report.totals.paidToTrader,
+      "Collected from Trader": report.totals.collectedFromTrader, Balance: report.totals.balance,
     });
     return { bytes: accountingXlsx(columns, rows), filename: `orders-report-${new Date().toISOString().slice(0, 10)}.xlsx` };
   }

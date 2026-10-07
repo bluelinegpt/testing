@@ -343,22 +343,47 @@ describe.skipIf(!run)("Trader Settlements filters and Orders comma-list search",
     expect((await orders("2383,1523")).every((number) => [o.o1, o.o2].includes(number))).toBe(true);
   });
 
-  it("Orders Report: Trader Amount per row and whole-report totals (all pages, own Company only)", async () => {
-    const report = (fixture: Fixture, page: number) =>
-      as(fixture, () => get(OperationsService).ordersReport({ page, pageSize: 2 })) as Promise<{
-        items: ReadonlyArray<{ cod: string; fee: string; traderAmount: string }>;
+  it("Orders Report: signed Trader Amount, Paid, Collected and Balance per order and in whole-report totals", async () => {
+    type Money = { cod: string; fee: string; traderAmount: string; paidToTrader: string; collectedFromTrader: string; balance: string };
+    const report = (fixture: Fixture, page: number, pageSize = 2) =>
+      as(fixture, () => get(OperationsService).ordersReport({ page, pageSize })) as Promise<{
+        items: ReadonlyArray<Money & { orderNumber: string }>;
         totalCount: number;
-        totals: { cod: string; fee: string; traderAmount: string };
+        totals: Money;
       }>;
     const first = await report(a, 1);
-    // Company A has 5 Orders: COD 100, fee 25, owed to the Trader 75 each.
+    // Company A: 5 Orders, COD 100, fee 25, owed to the Trader 75 each -- all paid in settlements.
     expect(first.totalCount).toBe(5);
     expect(first.items).toHaveLength(2);
-    expect(first.items.every((row) => Number(row.traderAmount) === PAYABLE)).toBe(true);
+    expect(first.items.every((row) => Number(row.traderAmount) === PAYABLE && Number(row.paidToTrader) === PAYABLE && Number(row.balance) === 0)).toBe(true);
     // Totals cover all 5 Orders even though the page holds 2, and are identical on every page.
-    expect(first.totals).toEqual({ cod: "500.00", fee: "125.00", traderAmount: "375.00" });
+    expect(first.totals).toEqual({ balance: "0.00", cod: "500.00", collectedFromTrader: "0.00", fee: "125.00", paidToTrader: "375.00", traderAmount: "375.00" });
     expect((await report(a, 3)).totals).toEqual(first.totals);
-    // Company B's 2 Orders are its own.
-    expect((await report(b, 1)).totals).toEqual({ cod: "200.00", fee: "50.00", traderAmount: "150.00" });
+
+    // Company B gets an Order whose fee is more than its COD: the Trader owes the fee.
+    const created = (await as(b, () =>
+      get(OperationsService).createOrder(
+        {
+          areaId: b.dubai.areaId, codAmount: 0, customerAddress: "Address", customerMobileNumber: "0501234567",
+          customerName: "Customer", driverId: b.driverA, packageCount: 1,
+          paymentCondition: "customer_pays_cod_trader_pays_fee", referenceNumber: "NEG-1",
+          serialNumber: `FLT-${tag}-neg`, traderId: b.traderId,
+        } as never,
+        randomUUID(),
+        key("order-negative"),
+      ),
+    )) as { id: string };
+    const negativeNumber = (await sql<{ n: string }>`select order_number as n from orders where id = ${created.id}::uuid`.execute(db)).rows[0]!.n;
+    const bReport = await report(b, 1, 200);
+    const negative = bReport.items.find((row) => row.orderNumber === negativeNumber)!;
+    expect(negative).toMatchObject({ balance: "-25.00", collectedFromTrader: "0.00", cod: "0.00", paidToTrader: "0.00", traderAmount: "-25.00" });
+    // Company B totals: its own 3 Orders only; Balance = Trader Amount - Paid + Collected.
+    expect(bReport.totalCount).toBe(3);
+    const t = bReport.totals;
+    expect(t.cod).toBe("200.00");
+    expect(Number(t.traderAmount)).toBe(2 * PAYABLE - FEE);
+    expect(Number(t.balance)).toBeCloseTo(Number(t.traderAmount) - Number(t.paidToTrader) + Number(t.collectedFromTrader), 2);
+    // Company A is unchanged by Company B's Order.
+    expect((await report(a, 1)).totals).toEqual(first.totals);
   });
 });
