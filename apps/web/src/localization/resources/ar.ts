@@ -1471,7 +1471,7 @@ export const arabicTranslations = {
       },
       references: "أرقام المرجع",
       referencesPlaceholder: "مثال: 1001, 1002, 1003",
-      columns: { orderDate: "تاريخ الطلب", deliveryDate: "تاريخ التسليم", traderName: "اسم التاجر", customer: "العميل", customerMobile: "هاتف العميل", emirates: "الإمارة", area: "المنطقة", cod: "الدفع عند الاستلام", fee: "الرسوم", traderAmount: "مبلغ التاجر", paidToTrader: "مدفوع للتاجر", collectedFromTrader: "محصّل من التاجر", balance: "الرصيد", status: "الحالة" },
+      columns: { serial: "م", referenceNumber: "رقم المرجع", orderDate: "تاريخ الطلب", deliveryDate: "تاريخ التسليم", traderName: "اسم التاجر", customer: "العميل", customerMobile: "هاتف العميل", emirates: "الإمارة", area: "المنطقة", cod: "الدفع عند الاستلام", fee: "الرسوم", traderAmount: "مبلغ التاجر", paidToTrader: "مدفوع للتاجر", collectedFromTrader: "محصّل من التاجر", balance: "الرصيد", status: "الحالة" },
     },
     dailyOperationsSummary: {
       breakEven: "تعادل / صفر",

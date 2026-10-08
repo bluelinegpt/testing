@@ -22,6 +22,10 @@ describe("Orders Report contract", () => {
     expect(service).toContain("public async ordersReportExcel");
     expect(service).toContain("this.ordersReport({ ...filters, page, pageSize: 200 })");
     expect(service).toContain('"Order Date"');
+    expect(service).toContain('o.reference_number as "referenceNumber"');
+    expect(service).toContain('"Reference Number": row.referenceNumber ?? ""');
+    expect(service).toContain('"No.": String(index + 1)');
+    expect(controller).toContain("[labels.serial]: String(index + 1)");
     expect(service).toContain('"Delivery Date"');
     expect(service).not.toContain('"Order Number"');
     expect(service).toContain('"Customer Mobile"');

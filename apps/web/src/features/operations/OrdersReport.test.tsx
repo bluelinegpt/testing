@@ -26,7 +26,7 @@ describe("Orders Report UI contract", () => {
     expect(source).toContain("p.delete(\"page\")");
     expect(source).toContain("p.delete(\"pageSize\")");
     expect(source).toContain('p.set("language", normalizeLocale(i18n.resolvedLanguage))');
-    for (const column of ["orderDate", "deliveryDate", "traderName", "customer", "customerMobile", "emirates", "area", "cod", "fee", "traderAmount", "paidToTrader", "collectedFromTrader", "balance", "status"]) {
+    for (const column of ["serial", "referenceNumber", "orderDate", "deliveryDate", "traderName", "customer", "customerMobile", "emirates", "area", "cod", "fee", "traderAmount", "paidToTrader", "collectedFromTrader", "balance", "status"]) {
       expect(source).toContain(`\"${column}\"`);
     }
   });
@@ -35,7 +35,7 @@ describe("Orders Report UI contract", () => {
 describe("Orders Report totals", () => {
   it("shows the Trader Amount column and the whole-report totals from the server", async () => {
     await i18nInstance.changeLanguage("en");
-    const row = { orderNumber: "ORD-000344", orderDate: "2026-10-07", deliveryDate: "2026-10-08", traderName: "Trader", customer: "C", customerMobile: "0500000000", emirates: "Sharjah", area: "Al Nabba", cod: "0.00", fee: "18.00", traderAmount: "18.00", paidToTrader: "0.00", collectedFromTrader: "0.00", balance: "18.00", status: "delivered" };
+    const row = { orderNumber: "ORD-000344", referenceNumber: "1457", orderDate: "2026-10-07", deliveryDate: "2026-10-08", traderName: "Trader", customer: "C", customerMobile: "0500000000", emirates: "Sharjah", area: "Al Nabba", cod: "0.00", fee: "18.00", traderAmount: "18.00", paidToTrader: "0.00", collectedFromTrader: "0.00", balance: "18.00", status: "delivered" };
     const api = {
       get: vi.fn((path: string) => path === "operations/traders"
         ? Promise.resolve([])
@@ -55,6 +55,10 @@ describe("Orders Report totals", () => {
     const footer = screen.getByRole("rowheader", { name: "Total" }).closest("tr")!;
     expect(within(footer).getByText("855.00")).toBeInTheDocument();
     expect(within(footer).getByText("273.00")).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Reference Number" })).toBeInTheDocument();
+    expect(screen.getByText("1457")).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "No." })).toBeInTheDocument();
+    expect(screen.getByText("1", { selector: "td" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Order Date" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Delivery Date" })).toBeInTheDocument();
     expect(screen.queryByRole("columnheader", { name: "Order Number" })).toBeNull();

@@ -1495,7 +1495,7 @@ export const englishTranslations = {
       },
       references: "Reference numbers",
       referencesPlaceholder: "e.g. 1001, 1002, 1003",
-      columns: { orderDate: "Order Date", deliveryDate: "Delivery Date", traderName: "Trader Name", customer: "Customer", customerMobile: "Customer Mobile", emirates: "Emirates", area: "Area", cod: "COD", fee: "Fee", traderAmount: "Trader Amount", paidToTrader: "Paid to Trader", collectedFromTrader: "Collected from Trader", balance: "Balance", status: "Status" },
+      columns: { serial: "No.", referenceNumber: "Reference Number", orderDate: "Order Date", deliveryDate: "Delivery Date", traderName: "Trader Name", customer: "Customer", customerMobile: "Customer Mobile", emirates: "Emirates", area: "Area", cod: "COD", fee: "Fee", traderAmount: "Trader Amount", paidToTrader: "Paid to Trader", collectedFromTrader: "Collected from Trader", balance: "Balance", status: "Status" },
     },
     dailyOperationsSummary: {
       breakEven: "Break-even / Zero",

@@ -509,8 +509,8 @@ export class OperationsController {
     }
     const arabic = reportLanguage === "ar";
     const labels = arabic
-      ? { orderDate: "تاريخ الطلب", deliveryDate: "تاريخ التسليم", traderName: "اسم التاجر", customer: "العميل", customerMobile: "جوال العميل", emirates: "الإمارة", area: "المنطقة", cod: "الدفع عند الاستلام", fee: "الرسوم", traderAmount: "مبلغ التاجر", paidToTrader: "مدفوع للتاجر", collectedFromTrader: "محصّل من التاجر", balance: "الرصيد", status: "الحالة" }
-      : { orderDate: "Order Date", deliveryDate: "Delivery Date", traderName: "Trader Name", customer: "Customer", customerMobile: "Customer Mobile", emirates: "Emirates", area: "Area", cod: "COD", fee: "Fee", traderAmount: "Trader Amount", paidToTrader: "Paid to Trader", collectedFromTrader: "Collected from Trader", balance: "Balance", status: "Status" };
+      ? { serial: "م", referenceNumber: "رقم المرجع", orderDate: "تاريخ الطلب", deliveryDate: "تاريخ التسليم", traderName: "اسم التاجر", customer: "العميل", customerMobile: "جوال العميل", emirates: "الإمارة", area: "المنطقة", cod: "الدفع عند الاستلام", fee: "الرسوم", traderAmount: "مبلغ التاجر", paidToTrader: "مدفوع للتاجر", collectedFromTrader: "محصّل من التاجر", balance: "الرصيد", status: "الحالة" }
+      : { serial: "No.", referenceNumber: "Reference Number", orderDate: "Order Date", deliveryDate: "Delivery Date", traderName: "Trader Name", customer: "Customer", customerMobile: "Customer Mobile", emirates: "Emirates", area: "Area", cod: "COD", fee: "Fee", traderAmount: "Trader Amount", paidToTrader: "Paid to Trader", collectedFromTrader: "Collected from Trader", balance: "Balance", status: "Status" };
     const statusLabels: Record<string, string> = arabic
       ? { new: "جديد", in_branch: "الصنف في الفرع", assigned_to_driver: "معين للمندوب", out_for_delivery: "خرج للتوصيل", hold: "معلّق", delivered: "تم التسليم", returned_to_branch: "عاد إلى الفرع", returned_to_trader: "عاد إلى التاجر", cancelled: "ملغى", closed: "مغلق", collect_order: "احضار طلب" }
       : { new: "New", in_branch: "Item in branch", assigned_to_driver: "Assigned to driver", out_for_delivery: "Out for delivery", hold: "Hold", delivered: "Delivered", returned_to_branch: "Returned to branch", returned_to_trader: "Returned to trader", cancelled: "Cancelled", closed: "Closed", collect_order: "Collect Order" };
@@ -527,12 +527,12 @@ export class OperationsController {
     // Trader Name column is dropped, giving that width to the other columns.
     const singleTrader = selectedTraderName !== undefined;
     const columns: readonly string[] = [
-      labels.orderDate, labels.deliveryDate, ...(singleTrader ? [] : [labels.traderName]),
+      labels.serial, labels.referenceNumber, labels.orderDate, labels.deliveryDate, ...(singleTrader ? [] : [labels.traderName]),
       labels.customer, labels.customerMobile, labels.emirates, labels.area, labels.cod, labels.fee,
       labels.traderAmount, labels.paidToTrader, labels.collectedFromTrader, labels.balance, labels.status,
     ];
     const columnWidths: Record<string, number> = {
-      [labels.orderDate]: 7, [labels.deliveryDate]: 7, [labels.traderName]: 9, [labels.customer]: 11,
+      [labels.serial]: 3, [labels.referenceNumber]: 7, [labels.orderDate]: 7, [labels.deliveryDate]: 7, [labels.traderName]: 9, [labels.customer]: 10,
       [labels.customerMobile]: 8.5, [labels.emirates]: 9, [labels.area]: 12, [labels.cod]: 5.5, [labels.fee]: 4.5,
       [labels.traderAmount]: 6, [labels.paidToTrader]: 6, [labels.collectedFromTrader]: 7, [labels.balance]: 5.5, [labels.status]: 8,
     };
@@ -552,7 +552,7 @@ export class OperationsController {
     const document = {
       columns,
       columnWidths,
-      noWrapColumns: [labels.orderDate, labels.deliveryDate, labels.customerMobile],
+      noWrapColumns: [labels.serial, labels.referenceNumber, labels.orderDate, labels.deliveryDate, labels.customerMobile],
       ...(singleTrader ? { highlight: { label: filterLabels.trader, value: selectedTraderName } } : {}),
       filters: filtersForDocument,
       generatedAt: formatDateTime(new Date()),
@@ -560,8 +560,8 @@ export class OperationsController {
       title: "Orders List / قائمة الطلبات",
       warnings: [],
       landscape: true,
-      rows: rows.map((row): Record<string, string | number> => ({
-        [labels.orderDate]: row.orderDate, [labels.deliveryDate]: row.deliveryDate ?? "",
+      rows: rows.map((row, index): Record<string, string | number> => ({
+        [labels.serial]: String(index + 1), [labels.referenceNumber]: row.referenceNumber ?? "", [labels.orderDate]: row.orderDate, [labels.deliveryDate]: row.deliveryDate ?? "",
         ...(singleTrader ? {} : { [labels.traderName]: arabic ? row.traderNameAr || row.traderName : row.traderName }),
         [labels.customer]: row.customer, [labels.customerMobile]: row.customerMobile,
         [labels.emirates]: arabic ? row.emiratesAr || row.emirates : row.emirates,
@@ -571,7 +571,7 @@ export class OperationsController {
       })).concat([{
         // Totals of the whole filtered report, as the last row.
         [LABEL_SPAN]: summaryLabelSpan,
-        [labels.orderDate]: filterLabels.total, [labels.cod]: first.totals.cod, [labels.fee]: first.totals.fee,
+        [labels.serial]: filterLabels.total, [labels.cod]: first.totals.cod, [labels.fee]: first.totals.fee,
         [labels.traderAmount]: first.totals.traderAmount, [labels.paidToTrader]: first.totals.paidToTrader,
         [labels.collectedFromTrader]: first.totals.collectedFromTrader, [labels.balance]: first.totals.balance,
       }]),

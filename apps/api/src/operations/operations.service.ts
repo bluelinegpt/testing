@@ -211,6 +211,8 @@ export interface OrdersReportFilters {
 export interface OrdersReportRow {
   /** Kept on the row for traceability/keys; not shown as a report column. */
   readonly orderNumber: string;
+  /** The Order's Reference Number as entered; null when it has none. */
+  readonly referenceNumber: string | null;
   /** The Order's business date (`order_date`); filtered and sorted on this. */
   readonly orderDate: string;
   /** Company-local date of `delivered_at`; null until the Order is delivered. */
@@ -1952,6 +1954,7 @@ export class OperationsService {
     `.execute(this.database);
     const rows = await sql<OrdersReportRow>`
       select o.order_number as "orderNumber",
+             o.reference_number as "referenceNumber",
              ${orderDate}::text as "orderDate",
              (o.delivered_at at time zone ${timezone})::date::text as "deliveryDate",
              t.name_en as "traderName", t.name_ar as "traderNameAr", o.customer_name as customer,
@@ -1991,9 +1994,9 @@ export class OperationsService {
     for (let page = 2; page <= Math.ceil(report.totalCount / report.pageSize); page += 1) {
       all.push(...(await this.ordersReport({ ...filters, page, pageSize: 200 })).items);
     }
-    const columns = ["Order Date", "Delivery Date", "Trader Name", "Customer", "Customer Mobile", "Emirates", "Area", "COD", "Fee", "Trader Amount", "Paid to Trader", "Collected from Trader", "Balance", "Status"] as const;
-    const rows: Record<string, string>[] = all.map((row) => ({
-      "Order Date": row.orderDate, "Delivery Date": row.deliveryDate ?? "", "Trader Name": row.traderName,
+    const columns = ["No.", "Reference Number", "Order Date", "Delivery Date", "Trader Name", "Customer", "Customer Mobile", "Emirates", "Area", "COD", "Fee", "Trader Amount", "Paid to Trader", "Collected from Trader", "Balance", "Status"] as const;
+    const rows: Record<string, string>[] = all.map((row, index) => ({
+      "No.": String(index + 1), "Reference Number": row.referenceNumber ?? "", "Order Date": row.orderDate, "Delivery Date": row.deliveryDate ?? "", "Trader Name": row.traderName,
       Customer: row.customer, "Customer Mobile": row.customerMobile, Emirates: row.emirates,
       Area: row.area, COD: row.cod, Fee: row.fee, "Trader Amount": row.traderAmount,
       "Paid to Trader": row.paidToTrader, "Collected from Trader": row.collectedFromTrader, Balance: row.balance,
@@ -2001,7 +2004,7 @@ export class OperationsService {
     }));
     // Totals of the whole filtered report, as the last row.
     rows.push({
-      "Order Date": "Total", COD: report.totals.cod, Fee: report.totals.fee,
+      "No.": "Total", COD: report.totals.cod, Fee: report.totals.fee,
       "Trader Amount": report.totals.traderAmount, "Paid to Trader": report.totals.paidToTrader,
       "Collected from Trader": report.totals.collectedFromTrader, Balance: report.totals.balance,
     });
