@@ -1754,13 +1754,17 @@ export class TraderSettlementService {
         );
       }
       const links = (await sql<{ orderId: string; orderNumber: string; status: string }>`
+        -- Plain row lock, no grouping: PostgreSQL rejects FOR UPDATE on grouped rows, which
+        -- made every Reverse Money Received fail with a 500 (XYZ SET-000053).
         select o.id as "orderId", o.order_number as "orderNumber", o.trader_settlement_status as status
-          from order_events e
-          join orders o on o.id=e.order_id and o.company_id=e.company_id
-         where e.company_id=${companyId}::uuid and e.related_settlement_id=${settlementId}::uuid
-           and e.event_type='trader_settlement.money_received'
-         group by o.id, o.order_number, o.trader_settlement_status
-         for update of o
+          from orders o
+         where o.company_id=${companyId}::uuid
+           and o.id in (
+             select e.order_id from order_events e
+              where e.company_id=${companyId}::uuid and e.related_settlement_id=${settlementId}::uuid
+                and e.event_type='trader_settlement.money_received'
+           )
+         for update
       `.execute(transaction)).rows;
       if (links.length === 0) {
         throw new ApplicationException(
