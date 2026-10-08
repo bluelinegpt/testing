@@ -31,4 +31,14 @@ describe("Order edit keeps the Trader fee receivable in step", () => {
     expect(heal).toContain("financials.traderReceivableDue.greaterThan(0)");
     expect(block).toContain("if (receivableUnchanged || (selfHealOnly && !canSelfHeal)) {");
   });
+
+  it("lets a no-change save reach the receivable check instead of returning early", () => {
+    // The Edit dialog always sends the unchanged customer ids, which made the
+    // "safe identifier only" shortcut return before the sync (ORD-000151).
+    expect(service).toContain("if (providedOnlySafeIdentifierContactChange && !noChangeSaveOnEditableOrder) {");
+    expect(service).toContain("const fieldsChanged = changes.length > 0;");
+    expect(service).toContain("if (fieldsChanged) await sql`");
+    const syncAt = service.indexOf("const paymentConditionChanged = nextPaymentCondition !== current.paymentCondition;");
+    expect(service.indexOf("if (!fieldsChanged) return;")).toBeGreaterThan(syncAt);
+  });
 });

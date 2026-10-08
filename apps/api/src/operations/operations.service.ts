@@ -5057,7 +5057,15 @@ export class OperationsService {
         track("reference_number", "user_action", current.referenceNumber, referenceNumber);
       }
 
-      if (providedOnlySafeIdentifierContactChange) {
+      // A no-change save on an Order that is still editable goes through the
+      // full path so the fee-receivable check below can correct an
+      // out-of-step outstanding fee (ORD-000151: fee 15, charge 20).
+      const noChangeSaveOnEditableOrder =
+        changes.length === 0 &&
+        ["new", "in_branch", "assigned_to_driver", "out_for_delivery", "hold"].includes(
+          current.deliveryStatus,
+        );
+      if (providedOnlySafeIdentifierContactChange && !noChangeSaveOnEditableOrder) {
         if (changes.length === 0) return;
         await sql`
           update orders
@@ -5459,7 +5467,10 @@ export class OperationsService {
         });
       }
 
-      if (changes.length === 0) return;
+      // A save with no field changes still runs the fee-receivable check below
+      // (it may correct an out-of-step outstanding fee); it only skips the
+      // Order row update and the change log.
+      const fieldsChanged = changes.length > 0;
 
       const financial = {
         codAmount: financials.codAmount.toFixed(2),
@@ -5478,7 +5489,7 @@ export class OperationsService {
         ? pricing.configuredFee.toFixed(2)
         : current.configuredFee;
 
-      await sql`
+      if (fieldsChanged) await sql`
         update orders
            set serial_number=${serialNumber},
                serial_number_normalized=${serialNumberNormalized},
@@ -5700,6 +5711,8 @@ export class OperationsService {
           });
         }
       }
+
+      if (!fieldsChanged) return;
 
       const role = await sql<{ name: string }>`
         select coalesce(string_agg(distinct r.name, ', ' order by r.name), a.account_kind) as name
