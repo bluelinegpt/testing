@@ -158,6 +158,23 @@ interface TraderSettlementPaymentTable {
   trader_bank_account_snapshot: unknown | null;
 }
 
+interface CompanyMessagingSettingsTable {
+  company_id: string;
+  messaging_enabled: boolean;
+  office_to_driver: boolean;
+  office_to_trader: boolean;
+  driver_to_office: boolean;
+  trader_to_office: boolean;
+  customer_to_office: boolean;
+  driver_trader: boolean;
+  trader_customer_location: boolean;
+  voice_messages_enabled: boolean;
+  presence_enabled: boolean;
+  retention: "keep_forever" | "3" | "6" | "12" | "24";
+  created_at: Generated<TimestampColumn>;
+  updated_at: Generated<TimestampColumn>;
+}
+
 // Exact row contracts are added with each domain repository; this inventory prevents the
 // runtime schema from being represented as empty while those modules are still pending.
 export interface DatabaseSchema {
@@ -180,6 +197,7 @@ export interface DatabaseSchema {
   company_cash_accounts: UntypedTable;
   company_reference_counters: UntypedTable;
   company_settings: UntypedTable;
+  company_messaging_settings: CompanyMessagingSettingsTable;
   company_users: CompanyUserTable;
   company_websites: UntypedTable;
   company_website_agent_conversations: UntypedTable;

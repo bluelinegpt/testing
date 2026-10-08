@@ -31,6 +31,20 @@ interface EmployeeRoleRow {
   nameEn: string;
 }
 
+interface MessagingSettingsRow {
+  messagingEnabled: boolean;
+  officeToDriver: boolean;
+  officeToTrader: boolean;
+  driverToOffice: boolean;
+  traderToOffice: boolean;
+  customerToOffice: boolean;
+  driverTrader: boolean;
+  traderCustomerLocation: boolean;
+  voiceMessagesEnabled: boolean;
+  presenceEnabled: boolean;
+  retention: string;
+}
+
 describe.skipIf(!runDatabaseTests)("company provisioning defaults", () => {
   it("seeds reconciliation Expense Types idempotently for existing and new Companies", async () => {
     loadEnvironment({ path: resolve(process.cwd(), "../../.env") });
@@ -49,6 +63,16 @@ describe.skipIf(!runDatabaseTests)("company provisioning defaults", () => {
          ) < ${defaultExpenseTypes.length}
       `.execute(database);
       expect(existing.rows[0]?.companiesWithoutTypes).toBe(0);
+
+      const messagingRows = await sql<{ companiesWithoutSettings: number }>`
+        select count(*)::int as "companiesWithoutSettings"
+          from companies company
+         where not exists (
+           select 1 from company_messaging_settings settings
+            where settings.company_id = company.id
+         )
+      `.execute(database);
+      expect(messagingRows.rows[0]?.companiesWithoutSettings).toBe(0);
 
       await database.transaction().execute(async (transaction) => {
         const companyId = randomUUID();
@@ -82,6 +106,25 @@ describe.skipIf(!runDatabaseTests)("company provisioning defaults", () => {
           return [...result.rows];
         };
 
+        const readMessagingSettings = async (): Promise<MessagingSettingsRow> => {
+          const result = await sql<MessagingSettingsRow>`
+            select messaging_enabled as "messagingEnabled",
+                   office_to_driver as "officeToDriver",
+                   office_to_trader as "officeToTrader",
+                   driver_to_office as "driverToOffice",
+                   trader_to_office as "traderToOffice",
+                   customer_to_office as "customerToOffice",
+                   driver_trader as "driverTrader",
+                   trader_customer_location as "traderCustomerLocation",
+                   voice_messages_enabled as "voiceMessagesEnabled",
+                   presence_enabled as "presenceEnabled",
+                   retention
+              from company_messaging_settings
+             where company_id = ${companyId}::uuid
+          `.execute(transaction);
+          return result.rows[0]!;
+        };
+
         await seedStandardEmployeeRoles(transaction, companyId);
         const employeeRoles = await readEmployeeRoles();
         expect(employeeRoles).toHaveLength(defaultEmployeeRoles.length);
@@ -104,6 +147,25 @@ describe.skipIf(!runDatabaseTests)("company provisioning defaults", () => {
 
         // A newly provisioned Company receives exactly the approved types, all active.
         await seedCompanyDefaults(transaction, companyId);
+        expect(await readMessagingSettings()).toEqual({
+          messagingEnabled: true,
+          officeToDriver: true,
+          officeToTrader: true,
+          driverToOffice: true,
+          traderToOffice: true,
+          customerToOffice: true,
+          driverTrader: false,
+          traderCustomerLocation: true,
+          voiceMessagesEnabled: true,
+          presenceEnabled: true,
+          retention: "keep_forever",
+        });
+        await seedCompanyDefaults(transaction, companyId);
+        expect(await readMessagingSettings()).toEqual(expect.objectContaining({
+          messagingEnabled: true,
+          driverTrader: false,
+          retention: "keep_forever",
+        }));
         const seeded = await readTypes();
         expect(seeded.map((row) => row.code)).toEqual(
           [...defaultExpenseTypes].map((expenseType) => expenseType.code).sort(),

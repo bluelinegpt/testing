@@ -6,8 +6,13 @@ No communication persistence or transport currently exists. This is the mandator
 
 All authenticated routes derive Company and sender identity from the session. Clients request an Order conversation or Office support conversation and never submit recipient IDs. The server resolves membership: Trader–Office, Driver–Office, Customer–Office, or authorized Operator–mobile user. Cross-Company, cross-owner, unassigned-Driver, revoked-Customer-token, Driver–Trader, Customer–Driver, and Customer–Trader access returns a non-disclosing 403/404 and creates a security audit event.
 
+## Messaging controls
+
+Company messaging settings are server-enforced on every communication route. The master setting disables new messaging, Customer messaging, and presence while preserving read-only access to existing history. Pair settings control Office–Driver, Office–Trader, Driver–Office, Trader–Office, Driver–Trader, and Customer–Office access. Voice and presence have independent controls. Operator actions additionally require their existing dedicated permissions: `communication.operator.read`, `send`, `assign`, `priority`, `resolve`, and `reopen`. Driver and Trader accounts are read-only for Office assignment actions.
+
 ## Required REST contracts
 
+- `GET /communication/permissions`: server-computed caller permissions and Company messaging settings.
 - `POST /communication/conversations/resolve`: type plus optional authorized Order ID; idempotently resolves membership.
 - `GET /communication/conversations`: cursor, limit, unread/type/role/priority/waiting/status filters and bounded search; newest activity first.
 - `GET /communication/conversations/{id}`: membership-authorized header and safe Order context.
@@ -20,7 +25,7 @@ All authenticated routes derive Company and sender identity from the session. Cl
 - `GET /communication/unread-counts`: authoritative total and per-conversation values.
 - Operator-only assignment, priority, resolve and reopen mutations require dedicated permissions and optimistic version conflicts.
 
-Responses require stable codes for unauthorized/not found, validation, rate limit, duplicate/idempotent replay, version conflict, upload expiry, scan rejection, retention/redaction, and service unavailable. Conversation/message lists require cursors and limits. Messages are append-only; legal deletion uses audited redaction.
+Responses require stable codes for unauthorized/not found, messaging disabled, pair not allowed, validation, rate limit, duplicate/idempotent replay, version conflict, upload expiry, scan rejection, retention/redaction, and service unavailable. Conversation/message lists require cursors and limits. Messages are append-only; legal deletion uses audited redaction.
 
 ## Real-time, push, media, and operations
 

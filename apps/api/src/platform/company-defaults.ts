@@ -61,6 +61,11 @@ export async function seedCompanyDefaults(
       from unnest(${codes}::text[], ${names}::text[]) as seed (code, name)
     on conflict (company_id, lower(code)) do nothing
   `.execute(executor);
+  await sql`
+    insert into company_messaging_settings (company_id)
+    values (${companyId}::uuid)
+    on conflict (company_id) do nothing
+  `.execute(executor);
 }
 
 /**
