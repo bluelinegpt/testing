@@ -56,6 +56,9 @@ import { TraderAccountStatementService } from "./trader-account-statement.servic
 import { TraderSettlementService } from "./trader-settlement.service.js";
 import { ReceivableOffsetReversalService } from "./receivable-offset-reversal.service.js";
 import { OrderMaintenanceService } from "./order-maintenance.service.js";
+import { OrderValidationController } from "./order-validation.controller.js";
+import { OrderValidationLookup } from "./order-validation.lookup.js";
+import { OrderValidationService } from "./order-validation.service.js";
 
 @Module({
   // CompanyConfigurationModule exports BusinessDayService and
@@ -68,6 +71,8 @@ import { OrderMaintenanceService } from "./order-maintenance.service.js";
     PayrollController,
     TraderReceivableController,
     DailyOperationsSummaryController,
+    // Platform Repair Center: single-Order lookup and read-only validation.
+    OrderValidationController,
   ],
   providers: [
     // The balance-control chain, in dependency order. Every one of these is
@@ -116,6 +121,8 @@ import { OrderMaintenanceService } from "./order-maintenance.service.js";
     TraderSettlementService,
     ReceivableOffsetReversalService,
     OrderMaintenanceService,
+    OrderValidationLookup,
+    OrderValidationService,
   ],
   // Customer Commerce Prompt C4: `OperationsService` is the single
   // authoritative Delivery Order creation path (`createOrder`). Exporting it

@@ -1,6 +1,9 @@
 import { Controller, Get, Param, ParseUUIDPipe, Query } from "@nestjs/common";
 
-import { RequirePlatformPermissions, PLATFORM_INTEGRITY_READ } from "../platform/platform-authorization.js";
+import {
+  RequirePlatformPermissions,
+  PLATFORM_INTEGRITY_READ,
+} from "../platform/platform-authorization.js";
 // Runtime imports are required for Nest dependency injection and validation metadata.
 /* eslint-disable @typescript-eslint/consistent-type-imports */
 import { OrderValidationLookup } from "./order-validation.lookup.js";
@@ -17,7 +20,10 @@ export class OrderValidationController {
 
   @Get("lookup")
   @RequirePlatformPermissions(PLATFORM_INTEGRITY_READ)
-  public lookupOrder(@Param("companyId", ParseUUIDPipe) companyId: string, @Query() query: OrderLookupQueryDto) {
+  public lookupOrder(
+    @Param("companyId", ParseUUIDPipe) companyId: string,
+    @Query() query: OrderLookupQueryDto,
+  ) {
     return this.lookup.resolve(companyId, query.q);
   }
 
