@@ -20,9 +20,9 @@
       "path": "apps/api",
       "renderService": "bluelinegpt-api-test",
       "status": "needs_deploy",
-      "localCommit": "b6f88889",
+      "localCommit": "8e266181",
       "localCommitDate": "2026-10-08",
-      "lastChangeDescription": "repair-center: complete phase 1 order lookup and validation",
+      "lastChangeDescription": "Messaging 1a: company messaging settings table, defaults and backfill; move communication contract to Documentation",
       "lastChangeBy": "human",
       "confirmedLiveCommit": "f1d5271",
       "confirmedLiveAt": "2026-10-01"
