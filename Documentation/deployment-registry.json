@@ -10,7 +10,7 @@
       "localCommit": "ee4c39df",
       "localCommitDate": "2026-10-07",
       "lastChangeDescription": "public-web: server-render help, service and blog pages; keep page titles after load; brand once; /faq page; Solutions footer",
-      "lastChangeBy": "human",
+      "lastChangeBy": "codex",
       "confirmedLiveCommit": null,
       "confirmedLiveAt": null
     },
@@ -20,9 +20,9 @@
       "path": "apps/api",
       "renderService": "bluelinegpt-api-test",
       "status": "needs_deploy",
-      "localCommit": "d93c4066",
+      "localCommit": "c2a448fb",
       "localCommitDate": "2026-10-08",
-      "lastChangeDescription": "feat(platform): add integrity acceptance review controls",
+      "lastChangeDescription": "fix(platform): omit undefined integrity acceptance ids",
       "lastChangeBy": "codex",
       "confirmedLiveCommit": "f1d5271",
       "confirmedLiveAt": "2026-10-01"
@@ -49,7 +49,7 @@
       "localCommit": "d93c4066",
       "localCommitDate": "2026-10-08",
       "lastChangeDescription": "feat(platform): add integrity acceptance review controls",
-      "lastChangeBy": "human",
+      "lastChangeBy": "codex",
       "confirmedLiveCommit": "aee8bb0",
       "confirmedLiveAt": "2026-08-31"
     },
