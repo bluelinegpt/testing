@@ -153,6 +153,63 @@ export class OutsourcedDriverFeeService {
     );
   }
 
+  /**
+   * An Order that ends undelivered (returned to Trader or cancelled) owes its
+   * Outsourced Driver nothing: reverse the active delivery-fee accrual
+   * (decision 9 Oct 2026; XYZ ORD-000155 kept 15.00 owed after its return).
+   * Reopening a delivery keeps the accrual on purpose, because a redelivery
+   * reuses it; only these final statuses reverse it. Runs inside the caller's
+   * status-change transaction with no separate permission check, like
+   * `createForDeliveredOrder`. An accrual already paid becomes
+   * `recovery_required` (the Driver must repay), exactly as `reverseAccrual`.
+   */
+  public async reverseForUndeliveredOrder(
+    database: Database,
+    input: {
+      readonly actorId: string;
+      readonly correlationId: string;
+      readonly orderId: string;
+      readonly orderStatus: string;
+    },
+  ): Promise<number> {
+    const { companyId } = this.support.context();
+    const accruals = (
+      await sql<{ id: string; paidAmount: string }>`
+        select id, paid_amount::text as "paidAmount"
+          from outsourced_driver_fee_accruals
+         where company_id=${companyId}::uuid and order_id=${input.orderId}::uuid
+           and earning_type='delivery' and status not in ('reversed','recovery_required')
+         for update
+      `.execute(database)
+    ).rows;
+    const reason = `Order ${input.orderStatus === "cancelled" ? "cancelled" : "returned to Trader"}: no delivery, no Driver fee`;
+    for (const accrual of accruals) {
+      const paid = new Decimal(accrual.paidAmount);
+      const status = paid.isZero() ? "reversed" : "recovery_required";
+      await sql`
+        update outsourced_driver_fee_accruals
+           set status=${status}, outstanding_amount=0,
+               recovery_amount=${paid.isZero() ? "0.00" : paid.toFixed(2)},
+               reversed_by_account_id=${input.actorId}::uuid, reversed_at=now(),
+               reversal_reason=${reason}, updated_at=now(), version=version+1
+         where id=${accrual.id}::uuid and company_id=${companyId}::uuid
+      `.execute(database);
+      await this.history.audit(database, {
+        action:
+          status === "reversed"
+            ? "outsourced_driver_fee_accrual_reversed"
+            : "outsourced_driver_fee_accrual_recovery_required",
+        actorId: input.actorId,
+        after: { accrualId: accrual.id, reason, recoveryAmount: paid.toFixed(2), status },
+        companyId,
+        correlationId: input.correlationId,
+        subjectId: accrual.id,
+        subjectType: "outsourced_driver_fee_accrual",
+      });
+    }
+    return accruals.length;
+  }
+
   private async createForDeliveredOrderIdempotently(
     database: Database,
     companyId: string,

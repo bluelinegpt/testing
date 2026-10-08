@@ -6236,6 +6236,17 @@ export class OperationsService {
           correlationId,
         });
       }
+      if (status === "cancelled" || status === "returned_to_trader") {
+        // Undelivered: the Outsourced Driver earns nothing (decision 9 Oct
+        // 2026). Reverses a delivery-fee accrual left from an earlier
+        // delivery that was reopened; a no-op when there is none.
+        await this.outsourcedDriverFees.reverseForUndeliveredOrder(transaction, {
+          actorId: identity.identityId,
+          correlationId,
+          orderId,
+          orderStatus: status,
+        });
+      }
       if (status === "delivered") {
         await this.outsourcedDriverFees.createForDeliveredOrder(
           transaction,
