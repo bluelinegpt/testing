@@ -508,6 +508,7 @@ export class OperationsController {
       }
     }
     const arabic = reportLanguage === "ar";
+    const VOID = "--";
     const labels = arabic
       ? { serial: "م", referenceNumber: "رقم المرجع", orderDate: "تاريخ الطلب", deliveryDate: "تاريخ التسليم", traderName: "اسم التاجر", customer: "العميل", customerMobile: "جوال العميل", emirates: "الإمارة", area: "المنطقة", cod: "الدفع عند الاستلام", fee: "الرسوم", traderAmount: "مبلغ التاجر", paidToTrader: "مدفوع للتاجر", collectedFromTrader: "محصّل من التاجر", balance: "الرصيد", status: "الحالة" }
       : { serial: "No.", referenceNumber: "Reference Number", orderDate: "Order Date", deliveryDate: "Delivery Date", traderName: "Trader Name", customer: "Customer", customerMobile: "Customer Mobile", emirates: "Emirates", area: "Area", cod: "COD", fee: "Fee", traderAmount: "Trader Amount", paidToTrader: "Paid to Trader", collectedFromTrader: "Collected from Trader", balance: "Balance", status: "Status" };
@@ -532,9 +533,9 @@ export class OperationsController {
       labels.traderAmount, labels.paidToTrader, labels.collectedFromTrader, labels.balance, labels.status,
     ];
     const columnWidths: Record<string, number> = {
-      [labels.serial]: 3, [labels.referenceNumber]: 7, [labels.orderDate]: 7, [labels.deliveryDate]: 7, [labels.traderName]: 9, [labels.customer]: 10,
-      [labels.customerMobile]: 8.5, [labels.emirates]: 9, [labels.area]: 12, [labels.cod]: 5.5, [labels.fee]: 4.5,
-      [labels.traderAmount]: 6, [labels.paidToTrader]: 6, [labels.collectedFromTrader]: 7, [labels.balance]: 5.5, [labels.status]: 8,
+      [labels.serial]: 3, [labels.referenceNumber]: 7, [labels.orderDate]: 7, [labels.deliveryDate]: 7, [labels.traderName]: 9, [labels.customer]: 9.5,
+      [labels.customerMobile]: 8.5, [labels.emirates]: 8, [labels.area]: 11, [labels.cod]: 6, [labels.fee]: 5.5,
+      [labels.traderAmount]: 6.5, [labels.paidToTrader]: 6, [labels.collectedFromTrader]: 7, [labels.balance]: 6, [labels.status]: 8,
     };
     // Summary rows: their label spans every column before COD.
     const summaryLabelSpan = columns.indexOf(labels.cod);
@@ -552,7 +553,10 @@ export class OperationsController {
     const document = {
       columns,
       columnWidths,
-      noWrapColumns: [labels.serial, labels.referenceNumber, labels.orderDate, labels.deliveryDate, labels.customerMobile],
+      // Amounts never break mid-number (e.g. a "198.00" total split as "198.0 / 0").
+      // Cancelled Orders: COD, Trader Amount and Balance show "--" in red (not in totals).
+      voidMarker: VOID,
+      noWrapColumns: [labels.serial, labels.referenceNumber, labels.orderDate, labels.deliveryDate, labels.customerMobile, labels.cod, labels.fee, labels.traderAmount, labels.paidToTrader, labels.collectedFromTrader, labels.balance],
       ...(singleTrader ? { highlight: { label: filterLabels.trader, value: selectedTraderName } } : {}),
       filters: filtersForDocument,
       generatedAt: formatDateTime(new Date()),
@@ -565,9 +569,9 @@ export class OperationsController {
         ...(singleTrader ? {} : { [labels.traderName]: arabic ? row.traderNameAr || row.traderName : row.traderName }),
         [labels.customer]: row.customer, [labels.customerMobile]: row.customerMobile,
         [labels.emirates]: arabic ? row.emiratesAr || row.emirates : row.emirates,
-        [labels.area]: arabic ? row.areaAr || row.area : row.area, [labels.cod]: row.cod, [labels.fee]: row.fee,
-        [labels.traderAmount]: row.traderAmount, [labels.paidToTrader]: row.paidToTrader, [labels.collectedFromTrader]: row.collectedFromTrader,
-        [labels.balance]: row.balance, [labels.status]: statusLabels[row.status] ?? row.status,
+        [labels.area]: arabic ? row.areaAr || row.area : row.area, [labels.cod]: row.cod ?? VOID, [labels.fee]: row.fee,
+        [labels.traderAmount]: row.traderAmount ?? VOID, [labels.paidToTrader]: row.paidToTrader, [labels.collectedFromTrader]: row.collectedFromTrader,
+        [labels.balance]: row.balance ?? VOID, [labels.status]: statusLabels[row.status] ?? row.status,
       })).concat([{
         // Totals of the whole filtered report, as the last row.
         [LABEL_SPAN]: summaryLabelSpan,

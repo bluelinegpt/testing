@@ -15,6 +15,8 @@ export interface AccountingReportDocument {
   readonly columnWidths?: Readonly<Record<string, number>>;
   /** Columns whose cells must never wrap (e.g. dates). */
   readonly noWrapColumns?: readonly string[];
+  /** A cell whose value is exactly this text is shown in red (e.g. "--" for a void amount). */
+  readonly voidMarker?: string;
 }
 
 /** Row key: when a number > 1, the first column's value is a label spanning that many columns. */
@@ -54,7 +56,10 @@ export function accountingReportHtml(input: {
     .map(([key, value]) => `<span><b>${escape(key)}:</b> <bdi>${escape(value)}</bdi></span>`)
     .join("");
   const noWrap = new Set(input.document.noWrapColumns ?? []);
-  const cellClass = (column: string): string => (noWrap.has(column) ? ' class="nowrap"' : "");
+  const cellClass = (column: string, value?: unknown): string => {
+    const classes = [noWrap.has(column) ? "nowrap" : "", input.document.voidMarker !== undefined && value === input.document.voidMarker ? "void" : ""].filter(Boolean);
+    return classes.length === 0 ? "" : ` class="${classes.join(" ")}"`;
+  };
   const rows = input.document.rows
     .map((row) => {
       // Optional summary-row label spanning the first N columns (`__labelSpan`).
@@ -63,11 +68,11 @@ export function accountingReportHtml(input: {
       if (span > 1 && first !== undefined) {
         return `<tr class="summary"><th colspan="${span}" scope="row"><bdi>${escape(row[first])}</bdi></th>${rest
           .slice(span - 1)
-          .map((column) => `<td${cellClass(column)}><bdi>${escape(row[column])}</bdi></td>`)
+          .map((column) => `<td${cellClass(column, row[column])}><bdi>${escape(row[column])}</bdi></td>`)
           .join("")}</tr>`;
       }
       return `<tr>${input.document.columns
-        .map((column) => `<td${cellClass(column)}><bdi>${escape(row[column])}</bdi></td>`)
+        .map((column) => `<td${cellClass(column, row[column])}><bdi>${escape(row[column])}</bdi></td>`)
         .join("")}</tr>`;
     })
     .join("");
@@ -91,7 +96,7 @@ header{display:flex;align-items:center;gap:12px;border-bottom:2px solid #3756d9;
 h1{font-size:19px;margin:0}.company{font-size:14px;font-weight:700}.subtitle{color:#596579}.meta,.filters{display:flex;gap:12px;flex-wrap:wrap;margin:7px 0}
 .warning{background:#fff4d6;border:1px solid #e3b341;padding:6px;margin:4px 0}table{width:100%;border-collapse:collapse;margin-top:9px;page-break-inside:auto}
 thead{display:table-header-group}tr{page-break-inside:avoid}th,td{border:1px solid #d5dbe7;padding:5px;text-align:${ar ? "right" : "left"};vertical-align:top}
-th{background:#eef2ff;font-weight:700}tr.summary th,tr.summary td{background:#f6f8fc;font-weight:700}.nowrap{white-space:nowrap}table.fixed{table-layout:fixed}table.fixed td{overflow-wrap:anywhere}table.fixed td.nowrap{overflow-wrap:normal}
+th{background:#eef2ff;font-weight:700}tr.summary th,tr.summary td{background:#f6f8fc;font-weight:700}.nowrap{white-space:nowrap}td.void{color:#c62828;font-weight:700}table.fixed{table-layout:fixed}table.fixed td{overflow-wrap:anywhere}table.fixed td.nowrap{overflow-wrap:normal}
 .highlight{color:#c62828;font-size:15px;font-weight:700;margin:6px 0 2px}bdi{direction:ltr;unicode-bidi:isolate}footer{display:none}
 </style></head><body><header>${input.logoDataUrl === undefined ? "" : `<img src="${input.logoDataUrl}" alt="">`}
 <div><div class="company">${escape(company)}</div>${subtitle === null ? "" : `<div class="subtitle">${escape(subtitle)}</div>`}<h1>${escape(input.document.title)}</h1></div></header>${highlight}

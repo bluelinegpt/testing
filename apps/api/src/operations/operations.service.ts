@@ -225,21 +225,26 @@ export interface OrdersReportRow {
   readonly emiratesAr?: string | null;
   readonly area: string;
   readonly areaAr?: string | null;
-  readonly cod: string;
+  /** Null for a cancelled Order: shown as "--" and left out of the total. */
+  readonly cod: string | null;
   readonly fee: string;
   /**
+   * Null for a cancelled Order (shown as "--", not in the total).
    * The Order's signed position with the Trader: what it owes the Trader
    * (`trader_net_payable`) minus the fees the Trader owes for it (its
    * service-charge Trader Receivables), always shown as a positive number
    * (business decision 2026-10-08: no minus signs on this report).
    */
-  readonly traderAmount: string;
+  readonly traderAmount: string | null;
   /** Paid to the Trader for this Order through Trader Settlements. */
   readonly paidToTrader: string;
+  /** The Order's current Trader Settlement (latest confirmed, not a reversal, not reversed); null when unpaid. */
+  readonly settlementId: string | null;
+  readonly settlementNumber: string | null;
   /** Recovered from the Trader against this Order's receivables (collected or offset). */
   readonly collectedFromTrader: string;
-  /** |traderAmount - paidToTrader + collectedFromTrader|, always shown as a positive number. */
-  readonly balance: string;
+  /** |traderAmount - paidToTrader + collectedFromTrader|, always positive; null for a cancelled Order. */
+  readonly balance: string | null;
   readonly status: string;
 }
 
@@ -1891,7 +1896,14 @@ export class OperationsService {
     const paidToTrader = sql`coalesce(o.trader_paid_amount, 0)`;
     // Signed balance: + still due to the Trader, - still due from the Trader.
     // Used for the balance filter; the report itself shows it without sign.
-    const signedBalance = sql`(${traderAmount} - ${paidToTrader} + trader_owes.collected)`;
+    // A cancelled Order was never delivered, so its COD, Trader Amount and
+    // Balance are not real money: null (shown as "--") and outside every total
+    // and the balance filter. Fee, Paid and Collected stay: they are actual
+    // charges/movements even on a cancelled Order.
+    const cancelled = sql`o.delivery_status = 'cancelled'`;
+    const signedBalance = sql`(case when ${cancelled} then null else (${traderAmount} - ${paidToTrader} + trader_owes.collected) end)`;
+    const shownTraderAmount = sql`(case when ${cancelled} then null else abs(${traderAmount}) end)`;
+    const shownCod = sql`(case when ${cancelled} then null else o.cod_amount end)`;
     const balancePredicate = balanceType === "due_to_trader"
       ? sql`${signedBalance} > 0`
       : balanceType === "due_from_trader"
@@ -1941,9 +1953,9 @@ export class OperationsService {
     // paging, so the totals always describe the whole report.
     const summary = await sql<{ count: number } & OrdersReportTotals>`
       select count(*)::int as count,
-             coalesce(sum(o.cod_amount), 0)::numeric(18,2)::text as cod,
+             coalesce(sum(${shownCod}), 0)::numeric(18,2)::text as cod,
              coalesce(sum(o.service_fee), 0)::numeric(18,2)::text as fee,
-             coalesce(sum(abs(${traderAmount})), 0)::numeric(18,2)::text as "traderAmount",
+             coalesce(sum(${shownTraderAmount}), 0)::numeric(18,2)::text as "traderAmount",
              coalesce(sum(${paidToTrader}), 0)::numeric(18,2)::text as "paidToTrader",
              coalesce(sum(trader_owes.collected), 0)::numeric(18,2)::text as "collectedFromTrader",
              -- No minus signs on this report (business decision 2026-10-08): every
@@ -1961,9 +1973,25 @@ export class OperationsService {
              o.customer_mobile_number as "customerMobile",
              coalesce(e.name_en, '—') as emirates, e.name_ar as "emiratesAr",
              coalesce(a.name_en, '—') as area, a.name_ar as "areaAr",
-             o.cod_amount::text as cod, o.service_fee::text as fee,
-             abs(${traderAmount})::numeric(18,2)::text as "traderAmount",
+             ${shownCod}::numeric(18,2)::text as cod, o.service_fee::text as fee,
+             ${shownTraderAmount}::numeric(18,2)::text as "traderAmount",
              ${paidToTrader}::numeric(18,2)::text as "paidToTrader",
+             (select s.id::text
+                from trader_settlement_orders tso
+                join trader_settlements s on s.id = tso.settlement_id and s.company_id = tso.company_id
+               where tso.company_id = o.company_id and tso.order_id = o.id
+                 and s.status = 'confirmed' and s.reversal_of_id is null
+                 and not exists (select 1 from trader_settlements r
+                                  where r.company_id = s.company_id and r.reversal_of_id = s.id)
+               order by s.created_at desc limit 1) as "settlementId",
+             (select s.settlement_number
+                from trader_settlement_orders tso
+                join trader_settlements s on s.id = tso.settlement_id and s.company_id = tso.company_id
+               where tso.company_id = o.company_id and tso.order_id = o.id
+                 and s.status = 'confirmed' and s.reversal_of_id is null
+                 and not exists (select 1 from trader_settlements r
+                                  where r.company_id = s.company_id and r.reversal_of_id = s.id)
+               order by s.created_at desc limit 1) as "settlementNumber",
              trader_owes.collected::numeric(18,2)::text as "collectedFromTrader",
              abs(${signedBalance})::numeric(18,2)::text as balance,
              o.delivery_status as status
@@ -1998,8 +2026,8 @@ export class OperationsService {
     const rows: Record<string, string>[] = all.map((row, index) => ({
       "No.": String(index + 1), "Reference Number": row.referenceNumber ?? "", "Order Date": row.orderDate, "Delivery Date": row.deliveryDate ?? "", "Trader Name": row.traderName,
       Customer: row.customer, "Customer Mobile": row.customerMobile, Emirates: row.emirates,
-      Area: row.area, COD: row.cod, Fee: row.fee, "Trader Amount": row.traderAmount,
-      "Paid to Trader": row.paidToTrader, "Collected from Trader": row.collectedFromTrader, Balance: row.balance,
+      Area: row.area, COD: row.cod ?? "--", Fee: row.fee, "Trader Amount": row.traderAmount ?? "--",
+      "Paid to Trader": row.paidToTrader, "Collected from Trader": row.collectedFromTrader, Balance: row.balance ?? "--",
       Status: row.status,
     }));
     // Totals of the whole filtered report, as the last row.

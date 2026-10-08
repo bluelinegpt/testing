@@ -88,4 +88,20 @@ describe("Orders Report contract", () => {
     expect(service).toContain("Invalid settlement filter");
     expect(controller.match(/\.\.\.extraOrdersReportFilters\(query\)/g)?.length).toBe(3);
   });
+
+  it("shows cancelled orders' COD, Trader Amount and Balance as a red \"--\" and leaves them out of the totals", () => {
+    expect(service).toContain("const cancelled = sql`o.delivery_status = 'cancelled'`");
+    expect(service).toContain("coalesce(sum(${shownCod}), 0)::numeric(18,2)::text as cod");
+    expect(service).toContain("coalesce(sum(${shownTraderAmount}), 0)");
+    expect(service).toContain("(case when ${cancelled} then null else (${traderAmount} - ${paidToTrader} + trader_owes.collected) end)");
+    expect(service).toContain('Balance: row.balance ?? "--"');
+    expect(controller).toContain("voidMarker: VOID");
+  });
+
+  it("links each row to its current Trader Settlement (not a reversal, not reversed), scoped by company", () => {
+    expect(service).toContain('as "settlementId"');
+    expect(service).toContain("and s.status = 'confirmed' and s.reversal_of_id is null");
+    expect(service).toContain("where r.company_id = s.company_id and r.reversal_of_id = s.id");
+    expect(service).toContain("where tso.company_id = o.company_id and tso.order_id = o.id");
+  });
 });

@@ -235,7 +235,7 @@ export function CompanyWorkspace({
       />
     );
   } else if (path === "/reports/orders") {
-    content = <OrdersReport api={api} />;
+    content = <OrdersReport api={api} onNavigate={(target) => void navigate(target)} />;
   } else if (path === "/reports/daily-operations-summary") {
     content = (
       <DailyOperationsSummaryReport api={api} onNavigate={(target) => void navigate(target)} />

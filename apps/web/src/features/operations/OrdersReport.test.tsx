@@ -120,3 +120,69 @@ describe("Orders Report reference numbers and filters", () => {
     await vi.waitFor(() => expect(reportCalls().some((path) => ["emirateId=e1", "driverId=d1", "balanceType=due_from_trader", "settlementStatus=unsettled", "customer=0501"].every((part) => path.includes(part)))).toBe(true));
   });
 });
+
+describe("Orders Report status groups", () => {
+  it("defaults to Delivered and Closed only, with not-delivered statuses unchecked in their own red group", async () => {
+    await i18nInstance.changeLanguage("en");
+    const get = vi.fn((path: string) => path.startsWith("operations/reports/orders?")
+      ? Promise.resolve({ items: [], page: 1, pageSize: 25, totalCount: 0 })
+      : Promise.resolve([]));
+    render(<OrdersReport api={{ get, getBinary: vi.fn() } as unknown as ApiClient} />);
+    await vi.waitFor(() => expect(get.mock.calls.some(([path]) => String(path).includes("statuses=delivered%2Cclosed"))).toBe(true));
+    const delivered = screen.getByTestId("orders-report-delivered-statuses");
+    expect(within(delivered).getByLabelText("Delivered")).toBeChecked();
+    expect(within(delivered).getByLabelText("Closed")).toBeChecked();
+    const open = screen.getByTestId("orders-report-open-statuses");
+    expect(within(open).getByLabelText("Cancelled")).not.toBeChecked();
+    expect(open).toHaveStyle({ color: "#c62828" });
+  });
+
+  it("exports with the reference typed in the box even before the box loses focus", async () => {
+    await i18nInstance.changeLanguage("en");
+    const get = vi.fn((path: string) => path.startsWith("operations/reports/orders?")
+      ? Promise.resolve({ items: [], page: 1, pageSize: 25, totalCount: 0 })
+      : Promise.resolve([]));
+    const getBinary = vi.fn((_path: string) => Promise.resolve(new Blob(["%PDF-"])));
+    URL.createObjectURL = vi.fn(() => "blob:x"); URL.revokeObjectURL = vi.fn();
+    render(<OrdersReport api={{ get, getBinary } as unknown as ApiClient} />);
+    fireEvent.change(screen.getByTestId("orders-report-references"), { target: { value: "1475" } });
+    fireEvent.click(screen.getByRole("button", { name: "Export PDF" }));
+    await vi.waitFor(() => expect(getBinary).toHaveBeenCalled());
+    expect(String(getBinary.mock.calls[0]![0])).toContain("references=1475");
+  });
+});
+
+describe("Orders Report cancelled orders", () => {
+  it("shows a red -- instead of COD, Trader Amount and Balance for a cancelled order", async () => {
+    await i18nInstance.changeLanguage("en");
+    const row = { orderNumber: "ORD-9", referenceNumber: "1475", orderDate: "2026-10-07", deliveryDate: null, traderName: "T", customer: "C", customerMobile: "0500000000", emirates: "Sharjah", area: "Al Nabba", cod: null, fee: "18.00", traderAmount: null, paidToTrader: "0.00", collectedFromTrader: "0.00", balance: null, status: "cancelled" };
+    const get = vi.fn((path: string) => path.startsWith("operations/reports/orders?")
+      ? Promise.resolve({ items: [row], page: 1, pageSize: 25, totalCount: 1, totals: { cod: "0.00", fee: "18.00", traderAmount: "0.00", paidToTrader: "0.00", collectedFromTrader: "0.00", balance: "0.00" } })
+      : Promise.resolve([]));
+    render(<OrdersReport api={{ get, getBinary: vi.fn() } as unknown as ApiClient} />);
+    const marks = await screen.findAllByTestId("orders-report-void");
+    expect(marks).toHaveLength(3);
+    expect(marks[0]).toHaveStyle({ color: "#c62828" });
+    expect(within(screen.getByTestId("orders-report-open-statuses")).getByLabelText("Collect Order")).not.toBeChecked();
+  });
+});
+
+describe("Orders Report drill-down", () => {
+  it("opens the order from the reference and the payment from Paid to Trader", async () => {
+    await i18nInstance.changeLanguage("en");
+    const row = { orderNumber: "ORD-000165", referenceNumber: "1112", orderDate: "2026-09-27", deliveryDate: "2026-09-29", traderName: "T", customer: "C", customerMobile: "0500000000", emirates: "Ajman", area: "Al Rashidiya 1", cod: "535.00", fee: "18.00", traderAmount: "517.00", paidToTrader: "517.00", settlementId: "s-1", settlementNumber: "SET-000032", collectedFromTrader: "0.00", balance: "0.00", status: "closed" };
+    const get = vi.fn((path: string) => path.startsWith("operations/reports/orders?")
+      ? Promise.resolve({ items: [row], page: 1, pageSize: 25, totalCount: 1, totals: { cod: "535.00", fee: "18.00", traderAmount: "517.00", paidToTrader: "517.00", collectedFromTrader: "0.00", balance: "0.00" } })
+      : Promise.resolve([]));
+    const onNavigate = vi.fn();
+    render(<OrdersReport api={{ get, getBinary: vi.fn() } as unknown as ApiClient} onNavigate={onNavigate} />);
+    const order = await screen.findByRole("link", { name: "1112" });
+    expect(order).toHaveAttribute("href", "/orders/ORD-000165");
+    fireEvent.click(order);
+    expect(onNavigate).toHaveBeenCalledWith("/orders/ORD-000165");
+    const payment = screen.getByTitle("Open payment SET-000032");
+    expect(payment).toHaveAttribute("href", "/trader-settlements/s-1");
+    fireEvent.click(payment);
+    expect(onNavigate).toHaveBeenCalledWith("/trader-settlements/s-1");
+  });
+});
