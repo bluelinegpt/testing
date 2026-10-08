@@ -22,13 +22,14 @@ export function IntegrityCheckPage(): ReactElement {
   const [loading, setLoading] = useState(false);
   const [companyFilter, setCompanyFilter] = useState("");
   const [checkFilter, setCheckFilter] = useState("");
+  const [companies, setCompanies] = useState<readonly { id: string; nameEn: string }[]>([]);
 
   const load = useCallback(() => {
     let cancelled = false;
     setLoading(true);
     setFailed(false);
     void platformApi
-      .integrityFindings()
+      .integrityFindings(companyFilter || undefined)
       .then((result) => {
         if (!cancelled) setFindings(result);
       })
@@ -41,15 +42,21 @@ export function IntegrityCheckPage(): ReactElement {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [companyFilter]);
 
   useEffect(() => load(), [load]);
 
-  const companies = useMemo(() => {
+  const findingCompanies = useMemo(() => {
     const seen = new Map<string, string>();
     for (const finding of findings ?? []) seen.set(finding.companyId, finding.companyName);
     return [...seen.entries()].sort((a, b) => a[1].localeCompare(b[1]));
   }, [findings]);
+
+  useEffect(() => {
+    void platformApi.companies({ pageSize: 100, sort: "name", direction: "asc" })
+      .then((page) => setCompanies(page.items.map((item) => ({ id: item.id, nameEn: item.nameEn }))))
+      .catch(() => setCompanies([]));
+  }, []);
 
   const checks = useMemo(() => {
     const seen = new Map<string, string>();
@@ -95,9 +102,9 @@ export function IntegrityCheckPage(): ReactElement {
               value={companyFilter}
             >
               <option value="">All companies</option>
-              {companies.map(([id, name]) => (
-                <option key={id} value={id}>
-                  {name}
+              {companies.map((company) => (
+                <option key={company.id} value={company.id}>
+                  {company.nameEn}
                 </option>
               ))}
             </select>
