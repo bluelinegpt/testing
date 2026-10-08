@@ -5557,14 +5557,28 @@ export class OperationsService {
          where id = ${orderId}::uuid and company_id = ${companyId}::uuid
       `.execute(transaction);
 
-      if (nextPaymentCondition !== current.paymentCondition) {
+      // Keep the Order's service-charge Trader Receivable in step with the
+      // Order. Originally this ran only when "Who pays" changed, so editing
+      // the fee, COD, additional fees or Trader left the receivable at its old
+      // amount (ORD-000063 / ref 1250: fee 18 -> 15, trader still charged 18).
+      const paymentConditionChanged = nextPaymentCondition !== current.paymentCondition;
+      const receivableAffectingChange =
+        paymentConditionChanged ||
+        changes.some((change) =>
+          ["trader", "cod_amount", "service_fee", "additional_fees"].includes(change.field),
+        );
+      if (receivableAffectingChange) {
         const linkedReceivables = (
           await sql<{
             amountCollected: string;
             id: string;
+            originalAmountDue: string;
             status: string;
+            traderId: string;
           }>`
-            select id, amount_collected::text as "amountCollected", status
+            select id, amount_collected::text as "amountCollected", status,
+                   original_amount_due::text as "originalAmountDue",
+                   trader_id::text as "traderId"
               from trader_receivables
              where company_id=${companyId}::uuid
                and source_type='service_charge'
@@ -5573,19 +5587,6 @@ export class OperationsService {
              for update
           `.execute(transaction)
         ).rows;
-        if (
-          linkedReceivables.some(
-            (receivable) =>
-              receivable.status !== "outstanding" ||
-              new Decimal(receivable.amountCollected).greaterThan(0),
-          )
-        ) {
-          throw new ApplicationException(
-            "order_payment_condition_has_collections",
-            "Who pays cannot be changed after money has been collected from the Trader",
-            HttpStatus.CONFLICT,
-          );
-        }
         if (linkedReceivables.length > 1) {
           throw new ApplicationException(
             "order_payment_condition_receivable_conflict",
@@ -5594,7 +5595,35 @@ export class OperationsService {
           );
         }
         const linkedReceivable = linkedReceivables[0];
-        if (financials.traderReceivableDue.greaterThan(0)) {
+        const receivableUnchanged =
+          linkedReceivable !== undefined &&
+          financials.traderReceivableDue.greaterThan(0) &&
+          new Decimal(linkedReceivable.originalAmountDue).equals(financials.traderReceivableDue) &&
+          linkedReceivable.traderId === traderId;
+        const receivableNeedsChange =
+          !receivableUnchanged &&
+          (linkedReceivable !== undefined || financials.traderReceivableDue.greaterThan(0));
+        if (
+          (paymentConditionChanged || receivableNeedsChange) &&
+          linkedReceivables.some(
+            (receivable) =>
+              receivable.status !== "outstanding" ||
+              new Decimal(receivable.amountCollected).greaterThan(0),
+          )
+        ) {
+          throw new ApplicationException(
+            paymentConditionChanged
+              ? "order_payment_condition_has_collections"
+              : "order_fee_has_collections",
+            paymentConditionChanged
+              ? "Who pays cannot be changed after money has been collected from the Trader"
+              : "The fee, COD or Trader cannot be changed after the Trader has paid this Order's fee. Reverse the Trader collection or settlement first.",
+            HttpStatus.CONFLICT,
+          );
+        }
+        if (receivableUnchanged) {
+          // Nothing to do: the receivable already matches the Order.
+        } else if (financials.traderReceivableDue.greaterThan(0)) {
           if (linkedReceivable === undefined) {
             await this.createOrderTraderReceivableIfNeeded(transaction, {
               actorAccountId: identity.identityId,
@@ -5637,7 +5666,9 @@ export class OperationsService {
             actorId: identity.identityId,
             after: {
               orderNumber: current.orderNumber,
-              reason: "Order payment condition changed",
+              reason: paymentConditionChanged
+                ? "Order payment condition changed"
+                : "Order fee, COD or Trader changed",
             },
             companyId,
             correlationId,
