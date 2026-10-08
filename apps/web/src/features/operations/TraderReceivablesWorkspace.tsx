@@ -23,6 +23,14 @@ import { formatMoneyValue, parseMoneyInput, safeMoneyValue } from "../../utils/n
 import { type PdfAction, useReconciliationPdfActions } from "./reconciliation-pdf.js";
 import { useIdempotencyKey } from "./useIdempotencyKey.js";
 
+/**
+ * Single-Receivable offset reversal is DISABLED (8 Oct 2026): it caused the fee
+ * to be charged twice while the compensating Trader Credit was never applied.
+ * The server refuses it too (receivable-offset-reversal-switch.ts). Flip both
+ * together once Settlements can apply Trader Credits.
+ */
+const RECEIVABLE_OFFSET_REVERSAL_ENABLED = false;
+
 // ---- Server response shapes (mirror trader-receivable.service.ts). ----
 
 interface TraderReceivableSummary {
@@ -161,6 +169,12 @@ interface TraderReceivableSettlementOffsetHistoryLine {
   readonly offsetDate: string;
   readonly settlementId: string;
   readonly settlementNumber: string;
+  /**
+   * False for a HISTORICAL offset whose Settlement was reversed: shown as
+   * history, never as a current settlement of the Receivable. Absent on an
+   * older API response, which is treated as effective (its old behaviour).
+   */
+  readonly effective?: boolean;
 }
 
 interface TraderReceivableDetail {
@@ -2186,11 +2200,15 @@ function ReceivableDetailDialog({
                       <th scope="col">{t("traderReceivables.columnSettlementNumber")}</th>
                       <th scope="col">{t("traderReceivables.columnOffsetDate")}</th>
                       <th scope="col">{t("traderReceivables.amountOffset")}</th>
+                      <th scope="col">{t("traderReceivables.columnOffsetState")}</th>
                     </tr>
                   </thead>
                   <tbody>
                     {detail.settlementOffsets.map((line) => (
-                      <tr key={`${line.settlementId}-${line.offsetDate}`}>
+                      <tr
+                        className={line.effective === false ? "historical-row" : undefined}
+                        key={`${line.settlementId}-${line.offsetDate}`}
+                      >
                         <td className="mono">
                           <OperationalReference
                             identifier={line.settlementId}
@@ -2200,6 +2218,15 @@ function ReceivableDetailDialog({
                         </td>
                         <td>{line.offsetDate.slice(0, 10)}</td>
                         <td>{money(line.amountOffset)}</td>
+                        <td>
+                          {line.effective === false ? (
+                            <span className="badge badge-muted">
+                              {t("traderReceivables.offsetHistoricalReversed")}
+                            </span>
+                          ) : (
+                            <span className="badge">{t("traderReceivables.offsetEffective")}</span>
+                          )}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -2236,8 +2263,9 @@ function ReceivableDetailDialog({
                 receivable-scoped end to end -- it never calls the
                 settlement-scoped reversal. Whether it may RUN is decided by
                 the server's preview, not by this condition. */}
-            {canReverse &&
-            detail.settlementOffsets.length > 0 &&
+            {RECEIVABLE_OFFSET_REVERSAL_ENABLED &&
+            canReverse &&
+            detail.settlementOffsets.some((line) => line.effective !== false) &&
             !["cancelled", "reversed"].includes(detail.status) ? (
               <button
                 onClick={() => {
@@ -2248,6 +2276,14 @@ function ReceivableDetailDialog({
               >
                 {t("traderReceivables.reverseReceivableAction")}
               </button>
+            ) : null}
+            {!RECEIVABLE_OFFSET_REVERSAL_ENABLED &&
+            canReverse &&
+            detail.settlementOffsets.some((line) => line.effective !== false) &&
+            !["cancelled", "reversed"].includes(detail.status) ? (
+              <p className="field-hint" data-testid="receivable-reversal-disabled">
+                {t("traderReceivables.reverseReceivableDisabled")}
+              </p>
             ) : null}
           </div>
         </>

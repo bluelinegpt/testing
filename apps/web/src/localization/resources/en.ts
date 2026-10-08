@@ -3879,6 +3879,7 @@ export const englishTranslations = {
 
     // Reverse Trader Receivable (one settlement-offset Receivable)
     reverseReceivableAction: "Reverse Trader Receivable",
+    reverseReceivableDisabled: "Reversing a single receivable is temporarily disabled until trader credits can be applied in settlements. To undo a deduction, reverse the whole settlement.",
     reverseReceivableTitle: "Reverse Trader Receivable",
     reverseStepPreview: "1. Preview",
     reverseStepReason: "2. Reason",

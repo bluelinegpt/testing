@@ -20,6 +20,12 @@ import {
   RequireAnyPermission,
   RequireIdentityKinds,
 } from "../authentication/authentication.decorators.js";
+import { ApplicationException } from "../presentation/errors/application.exception.js";
+import {
+  RECEIVABLE_OFFSET_REVERSAL_DISABLED_CODE,
+  RECEIVABLE_OFFSET_REVERSAL_DISABLED_MESSAGE,
+  RECEIVABLE_OFFSET_REVERSAL_ENABLED,
+} from "./receivable-offset-reversal-switch.js";
 // Runtime class values are required for Nest validation metadata.
 // eslint-disable-next-line @typescript-eslint/consistent-type-imports
 import {
@@ -325,7 +331,16 @@ export class TraderReceivableController {
   public receivableReversalPreview(
     @Param("receivableId", new ParseUUIDPipe()) receivableId: string,
   ): Promise<ReceivableOffsetReversalPreview> {
-    return this.offsetReversals.preview(receivableId);
+    return this.offsetReversals.preview(receivableId).then((preview) =>
+      RECEIVABLE_OFFSET_REVERSAL_ENABLED
+        ? preview
+        : {
+            ...preview,
+            blockedReason: RECEIVABLE_OFFSET_REVERSAL_DISABLED_MESSAGE,
+            blockedReasonCode: RECEIVABLE_OFFSET_REVERSAL_DISABLED_CODE,
+            executionAvailable: false,
+          },
+    );
   }
 
   /**
@@ -345,6 +360,15 @@ export class TraderReceivableController {
     @Body() input: ReverseTraderReceivableDto,
     @Req() request: Request,
   ): Promise<ReceivableOffsetReversalResult> {
+    // Disabled 8 Oct 2026: see receivable-offset-reversal-switch.ts. An expected
+    // business refusal (409), not a crash, so it is not reported centrally.
+    if (!RECEIVABLE_OFFSET_REVERSAL_ENABLED) {
+      throw new ApplicationException(
+        RECEIVABLE_OFFSET_REVERSAL_DISABLED_CODE,
+        RECEIVABLE_OFFSET_REVERSAL_DISABLED_MESSAGE,
+        HttpStatus.CONFLICT,
+      );
+    }
     return this.offsetReversals.execute(receivableId, input.reason, this.correlationId(request));
   }
 

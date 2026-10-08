@@ -3826,6 +3826,7 @@ export const arabicTranslations = {
 
     // Reverse Trader Receivable (one settlement-offset Receivable)
     reverseReceivableAction: "عكس مستحق التاجر",
+    reverseReceivableDisabled: "عكس مستحق واحد متوقف مؤقتاً حتى يصبح بالإمكان تطبيق أرصدة التاجر الدائنة في التسويات. لإلغاء خصم، اعكس التسوية كاملة.",
     reverseReceivableTitle: "عكس مستحق التاجر",
     reverseStepPreview: "1. المعاينة",
     reverseStepReason: "2. السبب",

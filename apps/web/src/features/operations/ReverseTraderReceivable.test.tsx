@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 
 import type { ApiClient } from "../../api/api-client.js";
@@ -136,82 +136,17 @@ describe("Reverse Trader Receivable", () => {
     window.history.replaceState({}, "", "/trader-receivables");
   });
 
-  it("previews, asks for a reason, confirms, executes ONE receivable-scoped reversal and refreshes", async () => {
+  // DISABLED 8 Oct 2026 (receivable-offset-reversal-switch.ts): the reversal
+  // charged the fee twice and its Trader Credit was never applied. The full
+  // preview -> reason -> confirm -> execute flow is kept in the component for
+  // when it is re-enabled; restore its test from git history at that point.
+  it("is not offered while single-receivable reversal is disabled, and says why", async () => {
     const { gets, posts } = setup();
-    fireEvent.click(await screen.findByRole("button", { name: "Reverse Trader Receivable" }));
-
-    // Preview: read-only, receivable-scoped, and states what stays unchanged.
-    const dialog = await screen.findByRole("dialog", { name: "Reverse Trader Receivable" });
-    expect(
-      await within(dialog).findByText("SET-000007 (confirmed) — remains unchanged"),
-    ).toBeInTheDocument();
-    expect(within(dialog).getByText("5 — untouched")).toBeInTheDocument();
-    expect(within(dialog).getByText("not_eligible — unchanged")).toBeInTheDocument();
-    expect(gets).toContain(`operations/trader-receivables/${receivableId}/reversal-preview`);
-    expect(posts).toHaveLength(0);
-
-    // Reason: required before the confirmation step is reachable.
-    fireEvent.click(within(dialog).getByRole("button", { name: "Continue" }));
-    const reasonContinue = within(dialog).getByRole("button", { name: "Continue" });
-    expect(reasonContinue).toBeDisabled();
-    fireEvent.change(within(dialog).getByLabelText("Reversal reason"), {
-      target: { value: "  Fee taken before delivery  " },
-    });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Continue" }));
-
-    // Confirmation: nothing written until it is explicitly confirmed.
-    expect(
-      within(dialog).getByText(
-        "Reverse RCV-000047 for AED 18.00 and issue a Trader Credit of AED 18.00?",
-      ),
-    ).toBeInTheDocument();
-    expect(posts).toHaveLength(0);
-    const detailLoadsBefore = gets.filter(
-      (path) => path === `operations/trader-receivables/receivables/${receivableId}`,
-    ).length;
-    fireEvent.click(within(dialog).getByRole("button", { name: "Confirm reversal" }));
-
-    // Execute: exactly one write, to the receivable-scoped route, with the
-    // trimmed reason -- never the settlement-scoped reversal.
-    await waitFor(() => expect(posts).toHaveLength(1));
-    expect(posts[0]).toEqual({
-      body: { reason: "Fee taken before delivery" },
-      path: `operations/trader-receivables/${receivableId}/reverse`,
-    });
-    expect(posts.some(({ path }) => path.includes("settlements/payments"))).toBe(false);
-
-    // Refresh: the Receivable detail is reloaded after success.
-    await waitFor(() =>
-      expect(
-        gets.filter((path) => path === `operations/trader-receivables/receivables/${receivableId}`)
-          .length,
-      ).toBeGreaterThan(detailLoadsBefore),
+    expect(await screen.findByTestId("receivable-reversal-disabled")).toHaveTextContent(
+      "temporarily disabled until trader credits can be applied in settlements",
     );
-    expect(
-      await within(dialog).findByText(
-        "RCV-000047 reversed. Trader Credit TCR-000001 for AED 18.00 issued; settlement SET-000007 and the order are unchanged.",
-      ),
-    ).toBeInTheDocument();
-  });
-
-  it("reports the server's refusal and offers no way to execute", async () => {
-    const { posts } = setup({
-      preview: {
-        ...preview,
-        blockedReason: "The clearing Settlement is not confirmed",
-        blockedReasonCode: "trader_settlement_not_confirmed",
-        executionAvailable: false,
-      },
-    });
-    fireEvent.click(await screen.findByRole("button", { name: "Reverse Trader Receivable" }));
-    const dialog = await screen.findByRole("dialog", { name: "Reverse Trader Receivable" });
-    expect(
-      await within(dialog).findByText(
-        "This receivable cannot be reversed: The clearing Settlement is not confirmed",
-      ),
-    ).toBeInTheDocument();
-    expect(within(dialog).queryByRole("button", { name: "Continue" })).toBeNull();
-    expect(within(dialog).queryByRole("button", { name: "Confirm reversal" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Reverse Trader Receivable" })).toBeNull();
+    expect(gets.some((path) => path.endsWith("/reversal-preview"))).toBe(false);
     expect(posts).toHaveLength(0);
   });
 
