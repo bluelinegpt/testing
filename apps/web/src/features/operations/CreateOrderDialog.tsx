@@ -1476,7 +1476,27 @@ export function CreateOrderDialog({
                             </small>
                           )}
                         </>
-                      ) : <input readOnly value={quote?.configuredServiceFee ?? ""} />}
+                      ) : (
+                        <>
+                          {/* Edit mode shows the fee SAVED on the Order (an override
+                              may differ from the configured price), not the
+                              Trader's configured price. */}
+                          <input
+                            data-testid="order-service-fee-display"
+                            readOnly
+                            value={isEdit && editDetail !== undefined ? editDetail.serviceFee : (quote?.configuredServiceFee ?? "")}
+                          />
+                          {isEdit &&
+                          editDetail !== undefined &&
+                          quote?.configuredServiceFee !== undefined &&
+                          quote.configuredServiceFee !== null &&
+                          Number(quote.configuredServiceFee) !== Number(editDetail.serviceFee) ? (
+                            <small className="field-hint" data-testid="order-service-fee-overridden">
+                              {t("operations.serviceFeeOverriddenHint", { configured: quote.configuredServiceFee })}
+                            </small>
+                          ) : null}
+                        </>
+                      )}
                     </label>
                   </div>
                   {orderType === "gcc_international" ? null : <label className="field">

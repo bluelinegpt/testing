@@ -5567,7 +5567,11 @@ export class OperationsService {
         changes.some((change) =>
           ["trader", "cod_amount", "service_fee", "additional_fees"].includes(change.field),
         );
-      if (receivableAffectingChange) {
+      // Always looked at (cheap: one indexed row). A save that changes none of
+      // the fields above may still CORRECT an outstanding receivable whose
+      // amount is out of step with the Order (orders edited before this fix);
+      // it never creates, cancels or refuses anything.
+      {
         const linkedReceivables = (
           await sql<{
             amountCollected: string;
@@ -5587,14 +5591,17 @@ export class OperationsService {
              for update
           `.execute(transaction)
         ).rows;
-        if (linkedReceivables.length > 1) {
+        if (linkedReceivables.length > 1 && !receivableAffectingChange) {
+          // Ambiguous legacy state on a save that changes nothing financial:
+          // leave it for Order Maintenance rather than block the edit.
+        } else if (linkedReceivables.length > 1) {
           throw new ApplicationException(
             "order_payment_condition_receivable_conflict",
             "Who pays cannot be changed because multiple active Trader Receivables exist",
             HttpStatus.CONFLICT,
           );
         }
-        const linkedReceivable = linkedReceivables[0];
+        const linkedReceivable = linkedReceivables.length === 1 ? linkedReceivables[0] : undefined;
         const receivableUnchanged =
           linkedReceivable !== undefined &&
           financials.traderReceivableDue.greaterThan(0) &&
@@ -5603,7 +5610,23 @@ export class OperationsService {
         const receivableNeedsChange =
           !receivableUnchanged &&
           (linkedReceivable !== undefined || financials.traderReceivableDue.greaterThan(0));
-        if (
+        const anyCollected = linkedReceivables.some(
+          (receivable) =>
+            receivable.status !== "outstanding" ||
+            new Decimal(receivable.amountCollected).greaterThan(0),
+        );
+        // A plain re-save only corrects the AMOUNT of one outstanding,
+        // uncollected receivable that should still exist.
+        const selfHealOnly = !receivableAffectingChange;
+        const canSelfHeal =
+          selfHealOnly &&
+          receivableNeedsChange &&
+          linkedReceivable !== undefined &&
+          !anyCollected &&
+          financials.traderReceivableDue.greaterThan(0);
+        if (selfHealOnly && !canSelfHeal) {
+          // Nothing financial changed and nothing safe to correct.
+        } else if (
           (paymentConditionChanged || receivableNeedsChange) &&
           linkedReceivables.some(
             (receivable) =>
@@ -5621,8 +5644,8 @@ export class OperationsService {
             HttpStatus.CONFLICT,
           );
         }
-        if (receivableUnchanged) {
-          // Nothing to do: the receivable already matches the Order.
+        if (receivableUnchanged || (selfHealOnly && !canSelfHeal)) {
+          // Nothing to do: already matches, or a re-save with nothing safe to correct.
         } else if (financials.traderReceivableDue.greaterThan(0)) {
           if (linkedReceivable === undefined) {
             await this.createOrderTraderReceivableIfNeeded(transaction, {

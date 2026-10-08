@@ -2142,6 +2142,7 @@ export const arabicTranslations = {
     },
     inlineCustomerHint: "يؤدي هذا إلى إنشاء سجل عميل رئيسي واستخدامه لهذا الطلب.",
     editOrder: "تعديل الطلب",
+    serviceFeeOverriddenHint: "تم تعديل رسوم هذا الطلب (السعر المعتمد: {{configured}})",
     reopenDelivery: "إعادة فتح التوصيل",
     reopenDeliveryReason: "سبب إعادة فتح هذا الطلب المُسلّم",
     reopenDeliveryFailed: "تعذرت إعادة فتح الطلب. اعكس دفعة التاجر المانعة أولاً.",
