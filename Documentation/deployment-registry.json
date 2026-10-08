@@ -46,10 +46,10 @@
       "path": "apps/platform-web",
       "renderService": "bluelinegpt-platform-test",
       "status": "needs_deploy",
-      "localCommit": "38388d18",
+      "localCommit": "6de261bf",
       "localCommitDate": "2026-10-08",
-      "lastChangeDescription": "fix(platform): complete integrity verification contracts and UI",
-      "lastChangeBy": "codex",
+      "lastChangeDescription": "test(platform): keep integrity checker lint-clean",
+      "lastChangeBy": "human",
       "confirmedLiveCommit": "aee8bb0",
       "confirmedLiveAt": "2026-08-31"
     },
