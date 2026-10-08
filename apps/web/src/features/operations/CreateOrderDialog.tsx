@@ -755,10 +755,11 @@ export function CreateOrderDialog({
             }
           }
         }
-        if (Object.keys(payload).length === 0) {
-          onClose();
-          return;
-        }
+        // Sent even when nothing changed: the server then re-checks the
+        // Order's unpaid Trader fee charge and corrects its amount if it is out
+        // of step with the Order (orders whose fee was edited before that sync
+        // existed, e.g. ORD-000151 fee 15 / charge 20). An empty save changes
+        // no Order field.
         await api.patch(`operations/orders/${edit.orderId}`, payload);
         await onSaved();
         onClose();
