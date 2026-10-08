@@ -46,12 +46,6 @@ export function IntegrityCheckPage(): ReactElement {
 
   useEffect(() => load(), [load]);
 
-  const findingCompanies = useMemo(() => {
-    const seen = new Map<string, string>();
-    for (const finding of findings ?? []) seen.set(finding.companyId, finding.companyName);
-    return [...seen.entries()].sort((a, b) => a[1].localeCompare(b[1]));
-  }, [findings]);
-
   useEffect(() => {
     void platformApi.companies({ pageSize: 100, sort: "name", direction: "asc" })
       .then((page) => setCompanies(page.items.map((item) => ({ id: item.id, nameEn: item.nameEn }))))
