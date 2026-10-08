@@ -5669,25 +5669,40 @@ export class OperationsService {
               traderId,
             });
           } else {
+            // Replace, never re-amount: the receivable's journal is posted by the
+            // trader_receivables trigger only on insert (recognised) and on
+            // cancel (reversed). Changing original_amount_due in place left the
+            // books at the old amount (XYZ ORD-000151: charge 20 -> 14, journal
+            // stayed 20, 6.00 left in Trader receivable). Cancelling posts the
+            // full reversal; the new charge posts the new amount. Only reached
+            // for an outstanding, uncollected charge (collected ones throw above).
             await sql`
-              update trader_receivables
-                 set trader_id=${traderId}::uuid,
-                     original_amount_due=${financials.traderReceivableDue.toFixed(2)}::numeric,
-                     updated_at=now()
+              update trader_receivables set status='cancelled',updated_at=now()
                where id=${linkedReceivable.id}::uuid and company_id=${companyId}::uuid
             `.execute(transaction);
             await this.audit(transaction, {
-              action: "trader_receivable.update_from_order",
+              action: "trader_receivable.cancel_from_order",
               actorId: identity.identityId,
               after: {
-                amountDue: financials.traderReceivableDue.toFixed(2),
+                newAmountDue: financials.traderReceivableDue.toFixed(2),
                 orderNumber: current.orderNumber,
+                previousAmountDue: linkedReceivable.originalAmountDue,
+                reason: "Replaced: Order fee, COD or Trader changed",
                 traderId,
               },
               companyId,
               correlationId,
               subjectId: linkedReceivable.id,
               subjectType: "trader_receivable",
+            });
+            await this.createOrderTraderReceivableIfNeeded(transaction, {
+              actorAccountId: identity.identityId,
+              amountDue: financials.traderReceivableDue,
+              companyId,
+              correlationId,
+              orderId,
+              orderNumber: current.orderNumber,
+              traderId,
             });
           }
         } else if (linkedReceivable !== undefined) {

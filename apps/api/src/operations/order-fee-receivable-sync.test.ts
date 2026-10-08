@@ -21,7 +21,7 @@ describe("Order edit keeps the Trader fee receivable in step", () => {
     expect(block).toContain("new Decimal(linkedReceivable.originalAmountDue).equals(financials.traderReceivableDue)");
     expect(block).toContain('"order_fee_has_collections"');
     expect(block).toContain("Reverse the Trader collection or settlement first.");
-    expect(block.indexOf('"order_fee_has_collections"')).toBeLessThan(block.indexOf("original_amount_due=${financials.traderReceivableDue.toFixed(2)}::numeric"));
+    expect(block.indexOf('"order_fee_has_collections"')).toBeLessThan(block.indexOf("Replaced: Order fee, COD or Trader changed"));
   });
 
   it("on a re-save that changes nothing financial, only corrects the amount of one outstanding, uncollected charge", () => {
@@ -30,6 +30,15 @@ describe("Order edit keeps the Trader fee receivable in step", () => {
     expect(heal).toContain("!anyCollected");
     expect(heal).toContain("financials.traderReceivableDue.greaterThan(0)");
     expect(block).toContain("if (receivableUnchanged || (selfHealOnly && !canSelfHeal)) {");
+  });
+
+  it("replaces the charge (cancel + new) instead of re-amounting it, so the journal follows", () => {
+    // The accounting trigger posts only on insert and on cancel; an in-place
+    // amount change left the books at the old amount (XYZ ORD-000151).
+    expect(block).not.toContain("original_amount_due=${financials.traderReceivableDue.toFixed(2)}::numeric");
+    expect(block).toContain("Replaced: Order fee, COD or Trader changed");
+    const replace = block.slice(block.indexOf("Replace, never re-amount"));
+    expect(replace.indexOf("set status='cancelled'")).toBeLessThan(replace.indexOf("createOrderTraderReceivableIfNeeded"));
   });
 
   it("lets a no-change save reach the receivable check instead of returning early", () => {
