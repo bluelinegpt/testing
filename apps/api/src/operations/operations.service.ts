@@ -1408,13 +1408,21 @@ export class OperationsService {
             from trader_settlements r
             where r.company_id = s.company_id and r.reversal_of_id = s.id
           )
-          and not exists (
-            select 1
-            from audit_events ae
+          -- Confirmable while Money Received is not ACTIVE (confirmations not
+          -- outnumbering their reversals), so a reversed receipt can be
+          -- confirmed again (XYZ SET-000055).
+          and (
+            select count(*) from audit_events ae
             where ae.company_id = s.company_id
               and ae.subject_type = 'trader_settlement'
               and ae.subject_id = s.id::text
               and ae.action = 'trader_settlement.receipt_confirmed'
+          ) <= (
+            select count(*) from audit_events ae
+            where ae.company_id = s.company_id
+              and ae.subject_type = 'trader_settlement'
+              and ae.subject_id = s.id::text
+              and ae.action = 'trader_settlement.receipt_confirmation_reversed'
           )
       ) receipt on true
       left join lateral (

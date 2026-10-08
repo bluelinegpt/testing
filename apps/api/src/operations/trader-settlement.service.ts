@@ -70,6 +70,23 @@ const idempotencyOperationCreate = "trader_settlements.create";
 const idempotencyOperationReceipt = "trader_settlements.money_received";
 const receiptConfirmedAction = "trader_settlement.receipt_confirmed";
 const receiptConfirmationReversedAction = "trader_settlement.receipt_confirmation_reversed";
+/**
+ * Money Received is ACTIVE when the settlement has more confirmations than
+ * reversals of them. Confirm -> reverse -> confirm again is allowed; checking
+ * for "any confirmation ever" left a reversed settlement stuck on "Confirm
+ * receipt" with every confirm refused (XYZ SET-000055, 9 Oct 2026).
+ */
+const activeMoneyReceived = (
+  companyRef: ReturnType<typeof sql.raw>,
+  settlementRef: ReturnType<typeof sql.raw>,
+) => sql`(
+  (select count(*) from audit_events amr
+    where amr.company_id = ${companyRef} and amr.subject_type = 'trader_settlement'
+      and amr.subject_id = ${settlementRef} and amr.action = ${receiptConfirmedAction})
+  > (select count(*) from audit_events amr
+    where amr.company_id = ${companyRef} and amr.subject_type = 'trader_settlement'
+      and amr.subject_id = ${settlementRef} and amr.action = ${receiptConfirmationReversedAction})
+)`;
 
 interface EligibleTraderOrder {
   readonly deliveredAt: string | null;
@@ -1572,15 +1589,13 @@ export class TraderSettlementService {
           HttpStatus.CONFLICT,
         );
       }
-      const alreadyConfirmed = (
-        await sql<{ id: string }>`
-          select id from audit_events
-           where company_id = ${companyId}::uuid and subject_type = 'trader_settlement'
-             and subject_id = ${settlementId} and action = ${receiptConfirmedAction}
-           limit 1
-        `.execute(transaction)
-      ).rows[0];
-      if (alreadyConfirmed !== undefined) {
+      const alreadyConfirmed =
+        (
+          await sql<{ active: boolean }>`
+            select ${activeMoneyReceived(sql`${companyId}::uuid`, sql`${settlementId}`)} as active
+          `.execute(transaction)
+        ).rows[0]?.active === true;
+      if (alreadyConfirmed) {
         throw new ApplicationException(
           "trader_settlement_receipt_already_confirmed",
           "Money Received has already been confirmed for this settlement",
@@ -1740,13 +1755,10 @@ export class TraderSettlementService {
           HttpStatus.CONFLICT,
         );
       }
-      const alreadyReversed = (await sql<{ id: string }>`
-        select id from audit_events
-         where company_id=${companyId}::uuid and subject_type='trader_settlement'
-           and subject_id=${settlementId} and action=${receiptConfirmationReversedAction}
-         limit 1
-      `.execute(transaction)).rows[0];
-      if (alreadyReversed !== undefined) {
+      const receiptActive = (await sql<{ active: boolean }>`
+        select ${activeMoneyReceived(sql`${companyId}::uuid`, sql`${settlementId}`)} as active
+      `.execute(transaction)).rows[0]?.active === true;
+      if (!receiptActive) {
         throw new ApplicationException(
           "settlement_receipt_already_reversed",
           "Money Received has already been reversed",
@@ -1890,24 +1902,13 @@ export class TraderSettlementService {
           HttpStatus.CONFLICT,
         );
       }
-      const moneyReceived = (
-        await sql<{ id: string }>`
-          select id from audit_events
-           where company_id = ${companyId}::uuid and subject_type = 'trader_settlement'
-             and subject_id = ${settlementId} and action = ${receiptConfirmedAction}
-           limit 1
-        `.execute(transaction)
-      ).rows[0];
-      const moneyReceivedReversal = moneyReceived === undefined ? undefined : (
-        await sql<{ id: string }>`
-          select id from audit_events
-           where company_id = ${companyId}::uuid and subject_type = 'trader_settlement'
-             and subject_id = ${settlementId}
-             and action = ${receiptConfirmationReversedAction}
-           limit 1
-        `.execute(transaction)
-      ).rows[0];
-      if (moneyReceived !== undefined && moneyReceivedReversal === undefined) {
+      const moneyReceivedActive =
+        (
+          await sql<{ active: boolean }>`
+            select ${activeMoneyReceived(sql`${companyId}::uuid`, sql`${settlementId}`)} as active
+          `.execute(transaction)
+        ).rows[0]?.active === true;
+      if (moneyReceivedActive) {
         throw new ApplicationException(
           "settlement_reversal_blocked_by_receipt",
           "Cannot reverse: Money Received has already been confirmed for this settlement",
@@ -2251,7 +2252,8 @@ export class TraderSettlementService {
           select id, occurred_at from audit_events
            where company_id = s.company_id and subject_type = 'trader_settlement'
              and subject_id = s.id::text and action = ${receiptConfirmedAction}
-           order by occurred_at limit 1
+             and ${activeMoneyReceived(sql.raw("s.company_id"), sql.raw("s.id::text"))}
+           order by occurred_at desc limit 1
         ) received on true
        where ${filters}
        order by ${sql.raw(sortColumn)} ${sql.raw(direction)}, s.created_at desc
@@ -2326,11 +2328,8 @@ export class TraderSettlementService {
       select
         coalesce(sum(s.net_payable) filter (where s.reversal_of_id is null), 0)::text as "moneySentAmount",
         coalesce(sum(s.net_payable) filter (
-          where s.reversal_of_id is null and exists (
-            select 1 from audit_events a
-             where a.company_id = s.company_id and a.subject_type = 'trader_settlement'
-               and a.subject_id = s.id::text and a.action = ${receiptConfirmedAction}
-          )
+          where s.reversal_of_id is null
+            and ${activeMoneyReceived(sql.raw("s.company_id"), sql.raw("s.id::text"))}
         ), 0)::text as "moneyReceivedAmount",
         count(*) filter (where s.reversal_of_id is not null)::int as "reversedPayments"
         from trader_settlements s
@@ -2631,14 +2630,8 @@ export class TraderSettlementService {
           from audit_events confirmed
          where confirmed.company_id = ${companyId}::uuid and confirmed.subject_type = 'trader_settlement'
            and confirmed.subject_id = ${settlementId} and confirmed.action = ${receiptConfirmedAction}
-           and not exists (
-             select 1 from audit_events reversed
-              where reversed.company_id = confirmed.company_id
-                and reversed.subject_type = 'trader_settlement'
-                and reversed.subject_id = confirmed.subject_id
-                and reversed.action = ${receiptConfirmationReversedAction}
-           )
-         order by confirmed.occurred_at limit 1
+           and ${activeMoneyReceived(sql`${companyId}::uuid`, sql`${settlementId}`)}
+         order by confirmed.occurred_at desc limit 1
       `.execute(this.database)
     ).rows[0];
     // `trader_settlements` has no `notes` column; the create-time note lives on
@@ -2970,16 +2963,10 @@ export class TraderSettlementService {
         )
         and (${query.moneyReceivedStatus ?? null}::text is null
              or ${query.moneyReceivedStatus ?? null}::text = 'all'
-             or (${query.moneyReceivedStatus ?? null}::text = 'received' and exists (
-                  select 1 from audit_events a
-                   where a.company_id = s.company_id and a.subject_type = 'trader_settlement'
-                     and a.subject_id = s.id::text and a.action = ${receiptConfirmedAction}
-                ))
-             or (${query.moneyReceivedStatus ?? null}::text = 'not_received' and not exists (
-                  select 1 from audit_events a
-                   where a.company_id = s.company_id and a.subject_type = 'trader_settlement'
-                     and a.subject_id = s.id::text and a.action = ${receiptConfirmedAction}
-                ))
+             or (${query.moneyReceivedStatus ?? null}::text = 'received'
+                 and ${activeMoneyReceived(sql.raw("s.company_id"), sql.raw("s.id::text"))})
+             or (${query.moneyReceivedStatus ?? null}::text = 'not_received'
+                 and not ${activeMoneyReceived(sql.raw("s.company_id"), sql.raw("s.id::text"))})
         )
         and (${query.paymentMethod ?? null}::text is null or exists (
              select 1 from trader_settlement_payments p
