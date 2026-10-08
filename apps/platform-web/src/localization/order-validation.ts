@@ -1,0 +1,15 @@
+type OrderValidationCopy = { title: string; description: string };
+export const orderValidationLocalization: { en: Record<string, OrderValidationCopy>; ar: Record<string, OrderValidationCopy> } = {
+  en: {
+    L1: { title: "Lifecycle history", description: "Lifecycle history matches delivery status." }, L2: { title: "Lifecycle timestamps", description: "Required delivery and closure timestamps exist." }, L3: { title: "Driver assignment", description: "Driver assignment is consistent." },
+    F1: { title: "Financial model", description: "Stored values match the authoritative calculation." }, F2: { title: "Settlement consistency", description: "Settlement agrees with order obligations." }, F3: { title: "Settlement closure", description: "Closure is complete before the order is closed." }, F4: { title: "Receivable status", description: "Receivable status matches the collected amount." },
+    D1: { title: "Driver reconciliation", description: "Reconciliation agrees with customer amount due." }, A1: { title: "Recognition accounting", description: "Exactly one effective recognition exists when required." }, A2: { title: "Accounting source", description: "Accounting source agrees with the operational order." }, A3: { title: "Accounting processing", description: "No accounting event is failed or permanently blocked." }, A4: { title: "Recognition reversal", description: "Reversal and re-recognition are complete." }, A5: { title: "Journal linkage", description: "Accounting events link to the expected journal." },
+    V1: { title: "Legacy fee risk", description: "No unclassified legacy fee obligation exists." }, V2: { title: "COD transition", description: "No unsafe COD transition exists." },
+  },
+  ar: {
+    L1: { title: "سجل دورة الحياة", description: "يتوافق سجل دورة الحياة مع حالة التسليم." }, L2: { title: "تواريخ دورة الحياة", description: "توجد تواريخ التسليم والإغلاق المطلوبة." }, L3: { title: "تعيين السائق", description: "تعيين السائق متسق." },
+    F1: { title: "النموذج المالي", description: "تتطابق القيم مع الحساب المعتمد." }, F2: { title: "اتساق التسوية", description: "تتوافق التسوية مع التزامات الطلب." }, F3: { title: "إغلاق التسوية", description: "اكتمل الإغلاق قبل إغلاق الطلب." }, F4: { title: "حالة الذمم", description: "تتوافق حالة الذمة مع المبلغ المحصل." },
+    D1: { title: "مطابقة السائق", description: "تتوافق المطابقة مع المبلغ المستحق من العميل." }, A1: { title: "المحاسبة الاعترافية", description: "يوجد اعتراف فعّال واحد عند الحاجة." }, A2: { title: "مصدر المحاسبة", description: "يتوافق مصدر المحاسبة مع الطلب التشغيلي." }, A3: { title: "معالجة المحاسبة", description: "لا يوجد حدث محاسبي فاشل أو متوقف نهائياً." }, A4: { title: "عكس الاعتراف", description: "اكتمل العكس وإعادة الاعتراف." }, A5: { title: "ربط اليومية", description: "ترتبط الأحداث المحاسبية باليومية المتوقعة." },
+    V1: { title: "مخاطر الرسوم القديمة", description: "لا يوجد التزام رسوم قديم غير مصنف." }, V2: { title: "انتقال الدفع عند التسليم", description: "لا يوجد انتقال غير آمن للدفع عند التسليم." },
+  },
+};
