@@ -608,6 +608,18 @@ export class OrdersWorkflowService {
       reason: input.reason,
       source: "web_portal",
     });
+    if (status === "cancelled" || status === "returned_to_trader") {
+      // Undelivered: the Outsourced Driver earns nothing (decision 9 Oct
+      // 2026). This is the office web-portal path (Change delivery status);
+      // operations.service has the same call for the driver path. XYZ
+      // ORD-000156 was cancelled here and kept its 15.00 Driver fee.
+      await this.outsourcedDriverFees.reverseForUndeliveredOrder(database, {
+        actorId: input.actorId,
+        correlationId: input.correlationId,
+        orderId: order.id,
+        orderStatus: status,
+      });
+    }
     if (status === "delivered") {
       await this.outsourcedDriverFees.createForDeliveredOrder(
         database,
@@ -690,24 +702,37 @@ export class OrdersWorkflowService {
           and workflow_event.processing_status = 'failed'
       )
     `;
+    const financiallyPendingClosedPredicate = sql`
+      o.delivery_status = 'closed'
+      and (
+        (o.driver_reconciliation_status = 'pending' and o.customer_amount_due > 0)
+        or (
+          o.driver_reconciliation_status in ('reconciled', 'not_applicable')
+          and o.trader_net_payable > 0
+          and o.trader_settlement_status in ('unsettled', 'partially_settled', 'money_sent_to_trader')
+        )
+        or ${openTraderReceivablePredicate}
+        or ${failedAccountingPredicate}
+      )
+    `;
     const workflowStepPredicate = sql`
       (${workflowStep}::text is null
         or (${workflowStep} = 'collect_from_driver'
-          and o.delivery_status = 'delivered'
+          and o.delivery_status in ('delivered', 'closed')
           and o.driver_reconciliation_status = 'pending'
           and o.customer_amount_due > 0)
         or (${workflowStep} = 'collect_from_trader' and ${openTraderReceivablePredicate})
         or (${workflowStep} = 'settle_trader'
-          and o.delivery_status = 'delivered'
+          and o.delivery_status in ('delivered', 'closed')
           and o.driver_reconciliation_status in ('reconciled', 'not_applicable')
           and o.trader_net_payable > 0
           and o.trader_settlement_status in ('unsettled', 'partially_settled'))
         or (${workflowStep} = 'complete'
           and o.delivery_status in ('delivered', 'closed', 'returned_to_trader', 'cancelled')
-          and not (o.delivery_status = 'delivered'
+          and not (o.delivery_status in ('delivered', 'closed')
             and o.driver_reconciliation_status = 'pending'
             and o.customer_amount_due > 0)
-          and not (o.delivery_status = 'delivered'
+          and not (o.delivery_status in ('delivered', 'closed')
             and o.driver_reconciliation_status in ('reconciled', 'not_applicable')
             and o.trader_net_payable > 0
             and o.trader_settlement_status in ('unsettled', 'partially_settled', 'money_sent_to_trader'))
@@ -730,8 +755,11 @@ export class OrdersWorkflowService {
       join traders t on t.id = o.trader_id and t.company_id = o.company_id
       where o.company_id = ${companyId}::uuid
         and (${quickView} = 'all'
-          or (${quickView} = 'active' and o.delivery_status in ('new','in_branch','assigned_to_driver','out_for_delivery','hold','delivered','returned_to_branch','returned_to_trader','collect_order'))
-          or (${quickView} = 'closed' and o.delivery_status = 'closed')
+        or (${quickView} = 'active' and (
+          o.delivery_status in ('new','in_branch','assigned_to_driver','out_for_delivery','hold','delivered','returned_to_branch','returned_to_trader','collect_order')
+          or ${financiallyPendingClosedPredicate}
+        ))
+        or (${quickView} = 'closed' and o.delivery_status = 'closed' and not ${financiallyPendingClosedPredicate})
           or (${quickView} = 'hold' and o.delivery_status = 'hold')
           or (${quickView} = 'cancelled' and o.delivery_status = 'cancelled'))
         and (${search}::text is null or o.order_number ilike '%' || ${search} || '%'

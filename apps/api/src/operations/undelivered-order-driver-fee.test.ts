@@ -9,12 +9,20 @@ import { describe, expect, it } from "vitest";
  */
 describe("Undelivered Orders reverse the Outsourced Driver delivery fee", () => {
   const operations = readFileSync(resolve(process.cwd(), "src/operations/operations.service.ts"), "utf8");
+  const workflow = readFileSync(resolve(process.cwd(), "src/operations/orders-workflow.service.ts"), "utf8");
   const fees = readFileSync(resolve(process.cwd(), "src/payroll/outsourced-driver-fee.service.ts"), "utf8");
 
   it("calls the reversal when an Order is cancelled or returned to Trader", () => {
     const at = operations.indexOf("await this.outsourcedDriverFees.reverseForUndeliveredOrder(transaction, {");
     expect(at).toBeGreaterThan(-1);
     expect(operations.slice(at - 600, at)).toContain('if (status === "cancelled" || status === "returned_to_trader") {');
+  });
+
+  it("also reverses it on the office web-portal path (Change delivery status)", () => {
+    // XYZ ORD-000156 was cancelled through this path and kept its fee.
+    const at = workflow.indexOf("await this.outsourcedDriverFees.reverseForUndeliveredOrder(database, {");
+    expect(at).toBeGreaterThan(-1);
+    expect(workflow.slice(at - 600, at)).toContain('if (status === "cancelled" || status === "returned_to_trader") {');
   });
 
   it("reverses only active delivery accruals and keeps paid ones recoverable", () => {
