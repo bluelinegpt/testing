@@ -624,7 +624,13 @@ export class IntegrityCheckService {
       const findings = check.findings.map((finding) => {
         const fingerprint = finding.fingerprint ?? fingerprintOf(finding);
         const acceptanceId = acceptanceByKey.get(`${check.code}:${finding.subjectType}:${finding.subjectId}:${fingerprint}`);
-        return { ...finding, code: check.code, fingerprint, accepted: acceptanceId !== undefined, acceptanceId };
+        return {
+          ...finding,
+          code: check.code,
+          fingerprint,
+          accepted: acceptanceId !== undefined,
+          ...(acceptanceId === undefined ? {} : { acceptanceId }),
+        };
       });
       return { ...check, findings, count: includeAccepted ? findings.length : findings.filter((finding) => !finding.accepted).length };
     });
