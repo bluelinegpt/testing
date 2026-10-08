@@ -392,6 +392,25 @@ export interface IntegrityFinding {
   readonly subjectId: string;
   readonly subjectReference: string;
   readonly detail: string;
+  readonly accepted?: boolean;
+  readonly fingerprint?: string;
+  readonly acceptanceId?: string;
+}
+
+export interface CompanyIntegrityCheck {
+  readonly code: string;
+  readonly severity: "critical" | "warning";
+  readonly title: string;
+  readonly count: number;
+  readonly findings: readonly IntegrityFinding[];
+}
+
+export interface CompanyIntegrityReport {
+  readonly companyId: string;
+  readonly criticalCount: number;
+  readonly warningCount: number;
+  readonly previouslyReviewedCount: number;
+  readonly checks: readonly CompanyIntegrityCheck[];
 }
 
 export interface CompanyDetail {
@@ -1491,6 +1510,24 @@ export const platformApi = {
       { method: "GET" },
     );
     return result ?? [];
+  },
+
+  async verifyCompanyIntegrity(companyId: string, includeAccepted = false): Promise<CompanyIntegrityReport> {
+    const query = includeAccepted ? "?includeAccepted=true" : "";
+    const result = await request<CompanyIntegrityReport>(
+      `platform/integrity/companies/${encodeURIComponent(companyId)}/verify${query}`,
+      { method: "GET" },
+    );
+    if (result === undefined) throw new PlatformApiError("Empty integrity response", "empty_response", 0);
+    return result;
+  },
+
+  async acceptIntegrityFinding(companyId: string, body: { check_code: string; subject_type: string; subject_id: string; fingerprint: string; note: string }): Promise<void> {
+    await request(`platform/integrity/companies/${encodeURIComponent(companyId)}/acceptances`, { method: "POST", body });
+  },
+
+  async unacceptIntegrityFinding(companyId: string, id: string): Promise<void> {
+    await request(`platform/integrity/companies/${encodeURIComponent(companyId)}/acceptances/${encodeURIComponent(id)}`, { method: "DELETE" });
   },
 
   async approvedTemplates(): Promise<readonly ApprovedTemplateOption[]> {

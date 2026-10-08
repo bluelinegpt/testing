@@ -31,6 +31,7 @@ export interface IntegrityFinding {
   readonly code?: string;
   readonly accepted?: boolean;
   readonly fingerprint?: string;
+  readonly acceptanceId?: string;
 }
 
 export interface CompanyIntegrityCheck {
@@ -614,16 +615,16 @@ export class IntegrityCheckService {
       this.driverCashAging(companyId, thresholdDays),
       this.duplicateAreas(companyId),
     ]);
-    const accepted = await sql<{ checkCode: string; subjectType: string; subjectId: string; fingerprint: string }>`
-      select check_code as "checkCode", subject_type as "subjectType", subject_id as "subjectId", fingerprint
+    const accepted = await sql<{ id: string; checkCode: string; subjectType: string; subjectId: string; fingerprint: string }>`
+      select id, check_code as "checkCode", subject_type as "subjectType", subject_id as "subjectId", fingerprint
       from integrity_acceptances where company_id = ${companyId}::uuid
     `.execute(this.database);
-    const acceptanceKeys = new Set(accepted.rows.map((row) => `${row.checkCode}:${row.subjectType}:${row.subjectId}:${row.fingerprint}`));
+    const acceptanceByKey = new Map(accepted.rows.map((row) => [`${row.checkCode}:${row.subjectType}:${row.subjectId}:${row.fingerprint}`, row.id]));
     const enriched = checks.map((check) => {
       const findings = check.findings.map((finding) => {
         const fingerprint = finding.fingerprint ?? fingerprintOf(finding);
-        const acceptedFinding = acceptanceKeys.has(`${check.code}:${finding.subjectType}:${finding.subjectId}:${fingerprint}`);
-        return { ...finding, code: check.code, fingerprint, accepted: acceptedFinding };
+        const acceptanceId = acceptanceByKey.get(`${check.code}:${finding.subjectType}:${finding.subjectId}:${fingerprint}`);
+        return { ...finding, code: check.code, fingerprint, accepted: acceptanceId !== undefined, acceptanceId };
       });
       return { ...check, findings, count: includeAccepted ? findings.length : findings.filter((finding) => !finding.accepted).length };
     });

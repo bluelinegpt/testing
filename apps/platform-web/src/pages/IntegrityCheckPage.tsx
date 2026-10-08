@@ -23,13 +23,16 @@ export function IntegrityCheckPage(): ReactElement {
   const [companyFilter, setCompanyFilter] = useState("");
   const [checkFilter, setCheckFilter] = useState("");
   const [companies, setCompanies] = useState<readonly { id: string; nameEn: string }[]>([]);
+  const [accepting, setAccepting] = useState<string>();
 
   const load = useCallback(() => {
     let cancelled = false;
     setLoading(true);
     setFailed(false);
-    void platformApi
-      .integrityFindings(companyFilter || undefined)
+    const request = companyFilter
+      ? platformApi.verifyCompanyIntegrity(companyFilter, true).then((report) => report.checks.flatMap((check) => check.findings))
+      : platformApi.integrityFindings();
+    void request
       .then((result) => {
         if (!cancelled) setFindings(result);
       })
@@ -63,6 +66,31 @@ export function IntegrityCheckPage(): ReactElement {
       (companyFilter === "" || finding.companyId === companyFilter) &&
       (checkFilter === "" || finding.checkId === checkFilter),
   );
+
+  async function accept(finding: IntegrityFinding & { readonly fingerprint?: string }) {
+    if (finding.fingerprint === undefined) return;
+    const note = window.prompt("Reason for accepting this finding:");
+    if (note === null || note.trim() === "") return;
+    setAccepting(`${finding.checkId}:${finding.subjectId}`);
+    try {
+      await platformApi.acceptIntegrityFinding(finding.companyId, {
+        check_code: finding.checkId, subject_type: finding.subjectType,
+        subject_id: finding.subjectId, fingerprint: finding.fingerprint, note: note.trim(),
+      });
+      load();
+    } catch (error) {
+      setFailed(true);
+      window.alert(error instanceof Error ? error.message : "The finding could not be accepted.");
+    } finally { setAccepting(undefined); }
+  }
+
+  async function revoke(finding: IntegrityFinding & { readonly acceptanceId?: string }) {
+    if (finding.acceptanceId === undefined || !window.confirm("Revoke this finding acceptance?")) return;
+    setAccepting(`${finding.checkId}:${finding.subjectId}`);
+    try { await platformApi.unacceptIntegrityFinding(finding.companyId, finding.acceptanceId); load(); }
+    catch (error) { setFailed(true); window.alert(error instanceof Error ? error.message : "The acceptance could not be revoked."); }
+    finally { setAccepting(undefined); }
+  }
 
   return (
     <section className="platform-panel">
@@ -134,6 +162,7 @@ export function IntegrityCheckPage(): ReactElement {
               <th scope="col">Criticality</th>
               <th scope="col">Subject</th>
               <th scope="col">Detail</th>
+              <th scope="col">Review</th>
             </tr>
           </thead>
           <tbody>
@@ -151,6 +180,10 @@ export function IntegrityCheckPage(): ReactElement {
                   <div className="platform-muted">{finding.subjectReference}</div>
                 </td>
                 <td>{finding.detail}</td>
+                <td>
+                  {finding.accepted ? <><span className="platform-badge">Accepted</span>{" "}<button className="platform-button" disabled={accepting !== undefined} onClick={() => void revoke(finding)} type="button">Revoke</button></> :
+                    <button className="platform-button" disabled={accepting !== undefined} onClick={() => void accept(finding)} type="button">Accept</button>}
+                </td>
               </tr>
             ))}
           </tbody>
