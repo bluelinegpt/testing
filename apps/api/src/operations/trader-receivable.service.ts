@@ -2501,6 +2501,8 @@ export class TraderReceivableService {
         customerMobileNumber: string | null;
         sourceReference: string | null;
         sourceType: string;
+        collectionReversed: boolean;
+        earlierCollected: string;
       }>`
         -- The Receivable identifier is what its detail route consumes; the
         -- Receivable Number stays the value the User reads.
@@ -2511,8 +2513,26 @@ export class TraderReceivableService {
                ord.customer_name as "customerName", ord.customer_mobile_number as "customerMobileNumber",
                r.reason, r.original_amount_due::text as "originalAmountDue",
                r.outstanding_amount::text as "outstandingAmount", r.status as "receivableStatus",
-               alloc.amount_allocated as "amountAllocated"
+               alloc.amount_allocated as "amountAllocated",
+               (cur.status = 'reversed') as "collectionReversed",
+               -- What earlier, still-active Collections had already collected
+               -- on this Receivable when this one was made. Used for a REVERSED
+               -- Collection, whose own amount is no longer in amount_collected
+               -- (due - outstanding - allocated then went negative: COL-000014
+               -- showed "Previously collected -20.00").
+               coalesce((
+                 select sum(earlier.amount_allocated)
+                   from trader_collection_allocations earlier
+                   join trader_collections ec
+                     on ec.id = earlier.collection_id and ec.company_id = earlier.company_id
+                  where earlier.company_id = alloc.company_id
+                    and earlier.receivable_id = alloc.receivable_id
+                    and earlier.collection_id <> alloc.collection_id
+                    and ec.status = 'confirmed'
+                    and ec.created_at < cur.created_at
+               ), 0)::text as "earlierCollected"
           from trader_collection_allocations alloc
+          join trader_collections cur on cur.id = alloc.collection_id and cur.company_id = alloc.company_id
           join trader_receivables r on r.id = alloc.receivable_id and r.company_id = alloc.company_id
           left join orders ord on ord.company_id = r.company_id
             and r.source_type = 'service_charge' and ord.order_number = r.source_reference
@@ -2529,10 +2549,13 @@ export class TraderReceivableService {
       customerMobileNumber: row.customerMobileNumber,
       businessDate: row.businessDate,
       originalAmountDue: new Decimal(row.originalAmountDue).toFixed(2),
-      previouslyCollected: new Decimal(row.originalAmountDue)
-        .minus(row.outstandingAmount)
-        .minus(row.amountAllocated)
-        .toFixed(2),
+      previouslyCollected: (row.collectionReversed
+        ? new Decimal(row.earlierCollected)
+        : Decimal.max(
+            0,
+            new Decimal(row.originalAmountDue).minus(row.outstandingAmount).minus(row.amountAllocated),
+          )
+      ).toFixed(2),
       reason: row.reason,
       receivableNumber: row.receivableNumber,
       receivableStatus: row.receivableStatus,

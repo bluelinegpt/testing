@@ -42,11 +42,19 @@ export function RelatedRecords({
   const { t } = useTranslation();
   // A relationship is rendered when it has a reference OR an explicit empty
   // state; the rest are dropped so the panel never lists blank rows.
-  const shown = records.filter(
-    (record) =>
-      (typeof record.reference === "string" && record.reference.trim() !== "") ||
-      (typeof record.emptyState === "string" && record.emptyState.trim() !== ""),
-  );
+  // The same record is listed once: a reversed Collection named JRN-000288
+  // both as "Reversal Journal" and as "Trader Receivable Payment Reversed".
+  // The first label wins, so callers order their records by preference.
+  const seenReferences = new Set<string>();
+  const shown = records.filter((record) => {
+    const reference = typeof record.reference === "string" ? record.reference.trim() : "";
+    if (reference !== "") {
+      if (seenReferences.has(reference)) return false;
+      seenReferences.add(reference);
+      return true;
+    }
+    return typeof record.emptyState === "string" && record.emptyState.trim() !== "";
+  });
   return (
     <section className="accounting-preview-panel accounting-related-records">
       <h3>{title ?? t("accounting.related.title")}</h3>

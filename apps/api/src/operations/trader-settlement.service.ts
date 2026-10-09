@@ -88,6 +88,39 @@ const activeMoneyReceived = (
       and amr.subject_id = ${settlementRef} and amr.action = ${receiptConfirmationReversedAction})
 )`;
 
+/**
+ * "Previously paid" for one Order line of a Settlement. For an effective
+ * Settlement it is the Order's paid amount minus this Settlement's own
+ * allocation (unchanged). For a REVERSED Settlement or a reversal, the Order's
+ * paid amount no longer contains this allocation, so that formula went
+ * negative (SET-000057 showed -80.00): use what earlier, still-effective
+ * Settlements had paid on the Order instead.
+ */
+const previouslyPaidSql = (link: string, settlement: string) => {
+  const l = sql.raw(link);
+  const st = sql.raw(settlement);
+  return sql`case
+    when ${st}.reversal_of_id is null and not exists (
+      select 1 from trader_settlements prv_rv
+       where prv_rv.company_id = ${st}.company_id and prv_rv.reversal_of_id = ${st}.id
+    ) then o.trader_paid_amount - ${l}.allocated_amount
+    else coalesce((
+      select sum(prv_l.allocated_amount)
+        from trader_settlement_orders prv_l
+        join trader_settlements prv_s
+          on prv_s.id = prv_l.settlement_id and prv_s.company_id = prv_l.company_id
+       where prv_l.company_id = ${l}.company_id and prv_l.order_id = ${l}.order_id
+         and prv_l.settlement_id <> ${l}.settlement_id
+         and prv_s.status = 'confirmed' and prv_s.reversal_of_id is null
+         and prv_s.created_at < ${st}.created_at
+         and not exists (
+           select 1 from trader_settlements prv_rv2
+            where prv_rv2.company_id = prv_s.company_id and prv_rv2.reversal_of_id = prv_s.id
+         )
+    ), 0)
+  end`;
+};
+
 interface EligibleTraderOrder {
   readonly deliveredAt: string | null;
   readonly deliveryStatus: string;
@@ -2241,7 +2274,7 @@ export class TraderSettlementService {
         ) p on true
         left join lateral (
           select count(*)::int as total,
-                 coalesce(sum(o.trader_paid_amount - link.allocated_amount), 0) as "previouslyPaid",
+                 coalesce(sum(${previouslyPaidSql("link", "s")}), 0) as "previouslyPaid",
                  coalesce(sum(o.trader_outstanding_balance), 0) as "remainingOutstanding",
                  bool_and(o.trader_settlement_status = 'money_received_by_trader') as "allMoneyReceivedByTrader"
             from trader_settlement_orders link
@@ -2733,6 +2766,7 @@ export class TraderSettlementService {
         totalDeductions: string;
         traderNetPayable: string;
         traderPaidAmount: string;
+        previouslyPaid: string;
         vatAmount: string;
       }>`
         -- Order NUMBER as well as the Serial Number: the Serial is what the
@@ -2751,8 +2785,10 @@ export class TraderSettlementService {
                o.trader_paid_amount::text as "traderPaidAmount",
                o.trader_outstanding_balance::text as "outstandingBalance",
                o.trader_settlement_status as "orderSettlementStatus",
-               link.allocated_amount as "allocatedAmount"
+               link.allocated_amount as "allocatedAmount",
+               (${previouslyPaidSql("link", "cur")})::text as "previouslyPaid"
           from trader_settlement_orders link
+          join trader_settlements cur on cur.id = link.settlement_id and cur.company_id = link.company_id
           join orders o on o.id = link.order_id and o.company_id = link.company_id
           left join areas a on a.id = o.area_id and a.company_id = o.company_id
           left join emirates e on e.id = a.emirate_id
@@ -2772,7 +2808,7 @@ export class TraderSettlementService {
       emirateNameAr: row.emirateNameAr,
       orderSettlementStatus: row.orderSettlementStatus,
       originalTraderPayable: new Decimal(row.traderNetPayable).toFixed(2),
-      previouslyPaid: new Decimal(row.traderPaidAmount).minus(row.allocatedAmount).toFixed(2),
+      previouslyPaid: new Decimal(row.previouslyPaid).toFixed(2),
       referenceNumber: row.referenceNumber,
       remainingOutstanding: new Decimal(row.outstandingBalance).toFixed(2),
       orderNumber: row.orderNumber,
