@@ -475,6 +475,8 @@ export interface OperationsOrder {
   readonly customerMobileNumber: string;
   readonly customerName: string;
   readonly deliveryStatus: string;
+  /** Internal: why a cancelled Order was cancelled (fixed list); null when unknown. */
+  readonly cancellationReason?: string | null;
   readonly internationalCarrierStatus?: "ready_for_carrier" | "handed_to_carrier" | "in_transit" | null;
   readonly driverReconciliationStatus: string;
   readonly id: string;

@@ -178,10 +178,13 @@ function setup() {
       '[placeholder="Search by Trader code, name, or mobile"]',
     ).length,
   });
+  const onClose = vi.fn();
+  const onCreated = vi.fn();
   render(
     <CreateOrderDialog
       api={api as unknown as ApiClient}
-      onClose={vi.fn()}
+      onClose={onClose}
+      onCreated={onCreated}
       onSaved={onSaved}
       permissions={["users_roles.manage", "orders.override_service_fee"]}
       searchDebounceMs={0}
@@ -189,6 +192,8 @@ function setup() {
   );
   return {
     api,
+    onClose,
+    onCreated,
     onSaved,
     reject: (reason: unknown) => rejectOrder?.(reason),
     resolve: (value: unknown) => resolveOrder?.(value),
@@ -338,7 +343,7 @@ describe("CreateOrderDialog", () => {
   });
 
   it("searches by keyboard, treats mobile format as advisory, creates unassigned, prevents duplicates", async () => {
-    const { api, onSaved, resolve } = setup();
+    const { api, onClose, onCreated, onSaved, resolve } = setup();
     await selectTraderAndCustomer();
     const mobile = screen.getAllByPlaceholderText(/9715XXXXXXXX/)[0];
     if (mobile === undefined) throw new Error("Primary mobile input was not rendered");
@@ -372,12 +377,16 @@ describe("CreateOrderDialog", () => {
     expect(creates[0]?.[1]).not.toHaveProperty("driverId");
     expect(creates[0]?.[2]).toHaveProperty("X-Idempotency-Key");
     resolve({ orderNumber: "ORD-000123", serialNumber: "000123" });
-    expect(await screen.findByText(/000123/)).toBeInTheDocument();
+    // The dialog closes right after the Order is created; the page confirms it.
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
     expect(onSaved).toHaveBeenCalledOnce();
+    expect(onCreated).toHaveBeenCalledWith(
+      expect.objectContaining({ orderNumber: "ORD-000123", serialNumber: "000123" }),
+    );
   });
 
   it("creates an Order without a Reference Number while keeping Serial Number required", async () => {
-    const { api, resolve } = setup();
+    const { api, onClose, resolve } = setup();
     await selectTraderAndCustomer();
     fireEvent.change(screen.getByLabelText("Reference Number"), { target: { value: "   " } });
     fireEvent.change(screen.getByLabelText("COD amount"), { target: { value: "100" } });
@@ -396,7 +405,7 @@ describe("CreateOrderDialog", () => {
       ),
     );
     resolve({ orderNumber: "ORD-000124", referenceNumber: null, serialNumber: "000123" });
-    expect(await screen.findByText(/000123/)).toBeInTheDocument();
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
   });
 
   it("creates and automatically selects a missing Area only with the approved permission", async () => {
@@ -759,9 +768,11 @@ describe("CreateOrderDialog validation (Phase 3)", () => {
       ),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Select a valid Trader." })).toBeInTheDocument();
-    // A submit may occur while the generated Serial Number request is still
-    // settling. The ordered validation focus remains deterministic.
-    expect(document.activeElement).toBe(document.getElementById("order-serial"));
+    // A blank Serial Number is no longer an error (the server assigns it on
+    // save), so focus goes to the first real problem: the Trader.
+    expect(document.activeElement).toBe(
+      screen.getByPlaceholderText("Search by Trader code, name, or mobile"),
+    );
   });
 
   it("clicking a summary item focuses the related field", async () => {
@@ -1001,5 +1012,50 @@ describe("CreateOrderDialog validation (Phase 3)", () => {
     // Entered Order values are preserved after the failure.
     expect(screen.getByLabelText("COD amount")).toHaveValue(100);
     expect(mobile).toHaveValue("0506468442");
+  });
+});
+
+describe("Serial Number assigned at save time", () => {
+  it("does not pre-fetch a Serial on open and sends a blank Serial as omitted", async () => {
+    const { api, onClose, onCreated, resolve } = setup();
+    await selectTraderAndCustomer();
+    expect(
+      api.get.mock.calls.some(([path]) => path === "operations/orders/next-serial-number"),
+    ).toBe(false);
+    const serial = screen.getByLabelText("Serial Number");
+    fireEvent.change(serial, { target: { value: "" } });
+    expect(serial).toHaveAttribute("placeholder", "Auto — assigned when saved");
+    fireEvent.change(screen.getByLabelText("COD amount"), { target: { value: "100" } });
+
+    await screen.findAllByText("AED 90.00");
+    fireEvent.click(screen.getByRole("button", { name: "Create order" }));
+
+    await waitFor(() =>
+      expect(api.post.mock.calls.some(([path]) => path === "operations/orders")).toBe(true),
+    );
+    const create = api.post.mock.calls.find(([path]) => path === "operations/orders");
+    expect((create?.[1] as { serialNumber?: string }).serialNumber).toBeUndefined();
+    // The page is told the Serial the server assigned, then the dialog closes.
+    resolve({ orderNumber: "ORD-000777", serialNumber: "64" });
+    await waitFor(() =>
+      expect(onCreated).toHaveBeenCalledWith(expect.objectContaining({ serialNumber: "64" })),
+    );
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("still sends a typed Serial exactly as typed", async () => {
+    const { api } = setup();
+    await selectTraderAndCustomer();
+    fireEvent.change(screen.getByLabelText("Serial Number"), { target: { value: "500" } });
+    fireEvent.change(screen.getByLabelText("COD amount"), { target: { value: "100" } });
+    await screen.findAllByText("AED 90.00");
+    fireEvent.click(screen.getByRole("button", { name: "Create order" }));
+    await waitFor(() =>
+      expect(api.post).toHaveBeenCalledWith(
+        "operations/orders",
+        expect.objectContaining({ serialNumber: "500" }),
+        expect.objectContaining({ "X-Idempotency-Key": expect.any(String) }),
+      ),
+    );
   });
 });

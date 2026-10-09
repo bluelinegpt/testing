@@ -4,6 +4,7 @@ const listStateParameterNames = new Set([
   "areaId",
   "businessDateFrom",
   "businessDateTo",
+  "cancellationReason",
   "dateFrom",
   "dateMode",
   "dateTo",
@@ -26,6 +27,7 @@ const listStateParameterNames = new Set([
   "sort",
   "thirdPartyDeliveryCompanyName",
   "traderId",
+  "viewKey",
   "workflowStep",
 ]);
 

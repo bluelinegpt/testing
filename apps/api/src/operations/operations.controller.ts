@@ -234,6 +234,7 @@ export class OperationsController {
   public orders(
     @Query("search") search?: string,
     @Query("deliveryStatus") deliveryStatus?: string,
+    @Query("cancellationReason") cancellationReason?: string,
     @Query("internationalCarrierStatus") internationalCarrierStatus?: string,
     @Query("orderType") orderType?: "collect_order" | "delivery" | "gcc_international",
     @Query("thirdPartyDeliveryCompanyName") thirdPartyDeliveryCompanyName?: string,
@@ -252,6 +253,7 @@ export class OperationsController {
     @Query("dateTo") dateTo?: string,
     @Query("quickView")
     quickView?: "active" | "all" | "cancelled" | "closed" | "hold" | "accountant",
+    @Query("viewKey") viewKey?: string,
     @Query("deliveredOnly") deliveredOnly?: string,
     @Query("deliveryDateFrom") deliveryDateFrom?: string,
     @Query("deliveryDateTo") deliveryDateTo?: string,
@@ -264,6 +266,7 @@ export class OperationsController {
     @Query("sortDirection") sortDirection?: "asc" | "desc",
   ): Promise<OperationsOrderPage> {
     const filters: OperationsOrderFilters = {
+      cancellationReason,
       cashStatus,
       dateFrom,
       dateTo,
@@ -279,6 +282,8 @@ export class OperationsController {
       search,
       serialNumber,
       quickView,
+      // Orders menu tab; absent for Companies on the standard menu.
+      viewKey,
       // Delivery Activity. `dateFrom`/`dateTo` above still mean Order Date.
       deliveredOnly: deliveredOnly === "true",
       deliveryDateFrom,
@@ -386,6 +391,7 @@ export class OperationsController {
   public exportOrders(
     @Query("search") search?: string,
     @Query("deliveryStatus") deliveryStatus?: string,
+    @Query("cancellationReason") cancellationReason?: string,
     @Query("cashStatus") cashStatus?: string,
     @Query("settlementStatus") settlementStatus?: string,
     @Query("workflowStep")
@@ -400,6 +406,7 @@ export class OperationsController {
     @Query("dateTo") dateTo?: string,
   ): Promise<OperationsExportFile> {
     return this.operations.exportOrders({
+      cancellationReason,
       cashStatus,
       dateFrom,
       dateTo,

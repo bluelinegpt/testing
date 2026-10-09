@@ -429,6 +429,15 @@ describe("DriverCollectionsWorkspace", () => {
       expect(screen.getByRole("button", { name: "Confirm reconciliation" })).toBeDisabled();
     });
 
+    it("shows how many Orders are selected and the amount to collect, live", async () => {
+      const dialog = within(await openCreateDialog());
+      expect(dialog.getByText("Selected orders: 0 · To collect: AED 0.00")).toBeInTheDocument();
+      fireEvent.click(await screen.findByRole("checkbox", { name: /ORD-1/ }));
+      expect(dialog.getByText("Selected orders: 1 · To collect: AED 60.00")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("checkbox", { name: /ORD-1/ }));
+      expect(dialog.getByText("Selected orders: 0 · To collect: AED 0.00")).toBeInTheDocument();
+    });
+
     it("blocks confirmation when Actual Received leaves a non-zero Difference", async () => {
       await openCreateDialog();
       fireEvent.click(await screen.findByRole("checkbox", { name: /ORD-1/ }));

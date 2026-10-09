@@ -20,6 +20,7 @@ import { vi } from "vitest";
 
 import type { ApiClient } from "../../api/api-client.js";
 import { i18nInstance } from "../../localization/i18n.js";
+import { standardOrderViews } from "../configuration/order-views.js";
 import { OrderDetailsWorkspace, OrdersModuleWorkspace } from "./OrdersModuleWorkspace.js";
 
 const order = {
@@ -1402,5 +1403,492 @@ describe("Collect from Driver — consolidated into one workflow", () => {
     expect(screen.queryByText("Traders Represented")).not.toBeInTheDocument();
     expect(screen.queryByText("Net Expected")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Actual Amount Received")).not.toBeInTheDocument();
+  });
+});
+
+describe("Fast Entry Serial Numbers are assigned at save time", () => {
+  it("opens with blank Serials, does not pre-fetch one, and adds blank rows", async () => {
+    const api = {
+      get: vi.fn((path: string) => {
+        if (path.startsWith("operations/orders?")) {
+          return Promise.resolve({
+            filteredCount: 1,
+            items: [order],
+            page: 1,
+            pageSize: 25,
+            totalCount: 1,
+          });
+        }
+        if (path.startsWith("configuration/areas")) {
+          return Promise.resolve({ items: [], page: 1, pageSize: 100, total: 0 });
+        }
+        return Promise.resolve([]);
+      }),
+      post: vi.fn(),
+    };
+    renderWithRouter(
+      <OrdersModuleWorkspace
+        api={api as unknown as ApiClient}
+        onNavigate={vi.fn()}
+        permissions={["users_roles.manage"]}
+      />,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Fast entry" }));
+    const dialog = await screen.findByRole("dialog", { name: /Fast order entry/ });
+    const serials = () => within(dialog).getAllByLabelText("Serial Number") as HTMLInputElement[];
+    expect(serials().map((input) => input.value)).toEqual(["", "", ""]);
+    expect(serials()[0]).toHaveAttribute("placeholder", "Auto — assigned when saved");
+
+    fireEvent.change(within(dialog).getByLabelText("Rows to add"), { target: { value: "2" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Add rows" }));
+    expect(serials().map((input) => input.value)).toEqual(["", "", "", "", ""]);
+
+    expect(
+      api.get.mock.calls.some(([path]) => path === "operations/orders/next-serial-number"),
+    ).toBe(false);
+  });
+});
+
+describe("Fast Entry keeps only filled rows on Create", () => {
+  const listApi = () => ({
+    get: vi.fn((path: string) => {
+      if (path.startsWith("operations/orders?")) {
+        return Promise.resolve({
+          filteredCount: 1,
+          items: [order],
+          page: 1,
+          pageSize: 25,
+          totalCount: 1,
+        });
+      }
+      if (path.startsWith("configuration/areas")) {
+        return Promise.resolve({ items: [], page: 1, pageSize: 100, total: 0 });
+      }
+      return Promise.resolve([]);
+    }),
+    post: vi.fn(),
+  });
+
+  const openSheet = async (api: ReturnType<typeof listApi>) => {
+    renderWithRouter(
+      <OrdersModuleWorkspace
+        api={api as unknown as ApiClient}
+        onNavigate={vi.fn()}
+        permissions={["users_roles.manage"]}
+      />,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Fast entry" }));
+    return screen.findByRole("dialog", { name: /Fast order entry/ });
+  };
+
+  it("removes empty rows and validates a half-filled row instead of dropping it", async () => {
+    const api = listApi();
+    const dialog = await openSheet(api);
+    fireEvent.change(within(dialog).getByLabelText("Rows to add"), { target: { value: "2" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Add rows" }));
+    const serials = () => within(dialog).getAllByLabelText("Serial Number") as HTMLInputElement[];
+    expect(serials()).toHaveLength(5);
+    // Only the fourth row gets anything typed: a Serial on its own.
+    fireEvent.change(serials()[3]!, { target: { value: "77" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Create orders" }));
+
+    // The four empty rows are gone; the half-filled row stays with its errors.
+    await waitFor(() => expect(serials()).toHaveLength(1));
+    expect(serials()[0]).toHaveValue("77");
+    expect((await within(dialog).findAllByText(/Select a valid Trader/)).length).toBeGreaterThan(0);
+    expect(api.post).not.toHaveBeenCalled();
+  });
+
+  it("keeps Create orders disabled while every row is empty", async () => {
+    const dialog = await openSheet(listApi());
+    expect(within(dialog).getByRole("button", { name: "Create orders" })).toBeDisabled();
+    expect(within(dialog).getAllByLabelText("Serial Number")).toHaveLength(3);
+  });
+
+  it("shows the sheet summary with a proper middle dot", async () => {
+    const dialog = await openSheet(listApi());
+    expect(within(dialog).getByText("0 ready · 0 created · 3 rows")).toBeInTheDocument();
+  });
+});
+
+describe("Cancellation type (internal, fixed list)", () => {
+  const listApi = (items: readonly unknown[]) => ({
+    get: vi.fn((path: string) => {
+      if (path.startsWith("operations/orders?")) {
+        return Promise.resolve({
+          filteredCount: items.length,
+          items,
+          page: 1,
+          pageSize: 25,
+          totalCount: items.length,
+        });
+      }
+      if (path.startsWith("configuration/areas")) {
+        return Promise.resolve({ items: [], page: 1, pageSize: 100, total: 0 });
+      }
+      return Promise.resolve([]);
+    }),
+    patch: vi.fn().mockResolvedValue({}),
+    post: vi.fn().mockResolvedValue({ processedCount: 1 }),
+  });
+
+  it("asks for the type when cancelling one Order, defaulting to Cancel Normal", async () => {
+    const api = listApi([order]);
+    renderWithRouter(
+      <OrdersModuleWorkspace
+        api={api as unknown as ApiClient}
+        onNavigate={vi.fn()}
+        permissions={["users_roles.manage"]}
+      />,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Order actions" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel order" }));
+    const dialog = await screen.findByRole("dialog", { name: /Cancel order/ });
+    const type = within(dialog).getByLabelText("Cancellation type") as HTMLSelectElement;
+    expect(type.value).toBe("cancel_normal");
+    expect(within(type).getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "Cancel by Customer",
+      "Cancel by Trader",
+      "Cancel Normal",
+    ]);
+    fireEvent.change(type, { target: { value: "cancel_by_customer" } });
+    // The free-text note is still there and still required.
+    const confirm = within(dialog).getByRole("button", { name: "Confirm" });
+    expect(confirm).toBeDisabled();
+    fireEvent.change(within(dialog).getByRole("textbox"), {
+      target: { value: "Customer refused the parcel" },
+    });
+    fireEvent.click(confirm);
+    await waitFor(() =>
+      expect(api.patch).toHaveBeenCalledWith(`operations/orders/${order.id}/status`, {
+        cancellationReason: "cancel_by_customer",
+        reason: "Customer refused the parcel",
+        status: "cancelled",
+      }),
+    );
+  });
+
+  it("shows the type under a Cancelled badge, and a dash for older cancellations", async () => {
+    const api = listApi([
+      { ...order, cancellationReason: "cancel_by_trader", deliveryStatus: "cancelled" },
+      {
+        ...order,
+        cancellationReason: null,
+        deliveryStatus: "cancelled",
+        id: "10000000-0000-4000-8000-000000000009",
+        orderNumber: "ORD-000009",
+      },
+    ]);
+    renderWithRouter(
+      <OrdersModuleWorkspace
+        api={api as unknown as ApiClient}
+        onNavigate={vi.fn()}
+        permissions={["users_roles.manage"]}
+      />,
+      ["/orders?quickView=cancelled"],
+    );
+    expect(await screen.findByText("Cancel by Trader")).toBeInTheDocument();
+    const notes = document.querySelectorAll(".cancellation-type-note");
+    expect([...notes].map((note) => note.textContent)).toEqual(["Cancel by Trader", "—"]);
+  });
+});
+
+describe("Bulk cancellation sends the cancellation type", () => {
+  it("shows the type only for Cancelled and sends it with the bulk change", async () => {
+    const api = {
+      get: vi.fn((path: string) => {
+        if (path.startsWith("operations/orders?")) {
+          return Promise.resolve({
+            filteredCount: 1,
+            items: [order],
+            page: 1,
+            pageSize: 25,
+            totalCount: 1,
+          });
+        }
+        if (path.startsWith("configuration/areas")) {
+          return Promise.resolve({ items: [], page: 1, pageSize: 100, total: 0 });
+        }
+        return Promise.resolve([]);
+      }),
+      patch: vi.fn().mockResolvedValue({}),
+      post: vi.fn().mockResolvedValue({ processedCount: 1 }),
+    };
+    renderWithRouter(
+      <OrdersModuleWorkspace
+        api={api as unknown as ApiClient}
+        onNavigate={vi.fn()}
+        permissions={["users_roles.manage"]}
+      />,
+    );
+    fireEvent.click(await screen.findByLabelText("Select all Orders on this page"));
+    fireEvent.click(screen.getByRole("button", { name: "Change delivery status" }));
+    const dialog = await screen.findByRole("dialog", { name: /Change delivery status/ });
+    expect(within(dialog).queryByLabelText("Cancellation type")).not.toBeInTheDocument();
+    fireEvent.change(within(dialog).getByLabelText("Delivery status"), {
+      target: { value: "cancelled" },
+    });
+    const type = within(dialog).getByLabelText("Cancellation type") as HTMLSelectElement;
+    expect(type.value).toBe("cancel_normal");
+    fireEvent.change(type, { target: { value: "cancel_by_trader" } });
+    fireEvent.change(within(dialog).getByLabelText("Reason"), {
+      target: { value: "Trader withdrew" },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Confirm" }));
+    await waitFor(() =>
+      expect(api.post).toHaveBeenCalledWith(
+        "operations/orders/bulk-status",
+        expect.objectContaining({
+          cancellationReason: "cancel_by_trader",
+          reason: "Trader withdrew",
+          targetStatus: "cancelled",
+        }),
+      ),
+    );
+  });
+});
+
+describe("Orders menu on the Orders screen", () => {
+  const menuOrdersApi = (menu: unknown) => {
+    const api = {
+      get: vi.fn((path: string) => {
+        if (path === "configuration/order-views") return Promise.resolve(menu);
+        if (path.startsWith("operations/orders?")) {
+          const parameters = new URLSearchParams(path.slice("operations/orders?".length));
+          const total = parameters.get("viewKey") === "custom_today" ? 7 : 40;
+          return Promise.resolve({
+            filteredCount: total,
+            items: [order],
+            matchingCount: total,
+            page: 1,
+            pageSize: 25,
+            tabTotalCount: total,
+            totalCount: total,
+          });
+        }
+        if (path.startsWith("configuration/areas")) {
+          return Promise.resolve({ items: [], page: 1, pageSize: 100, total: 0 });
+        }
+        return Promise.resolve([]);
+      }),
+      post: vi.fn().mockResolvedValue({
+        eligibleCount: 1,
+        ineligible: [],
+        selectedAmountToCollect: "0.00",
+        selectedCount: 1,
+      }),
+    };
+    renderWithRouter(
+      <OrdersModuleWorkspace
+        api={api as unknown as ApiClient}
+        onNavigate={vi.fn()}
+        permissions={["users_roles.manage"]}
+      />,
+    );
+    return api;
+  };
+  const orderRequests = (api: { get: { mock: { calls: unknown[][] } } }) =>
+    api.get.mock.calls
+      .map(([path]) => String(path))
+      .filter((path) => path.startsWith("operations/orders?"));
+
+  it("keeps the standard tabs and requests when the custom menu is off", async () => {
+    const views = standardOrderViews();
+    const api = menuOrdersApi({ enabled: false, isStandard: true, version: 0, views });
+    await screen.findByLabelText("Select all Orders on this page");
+    const tabs = within(screen.getByRole("tablist", { name: "Order quick views" }))
+      .getAllByRole("tab")
+      .map((tab) => tab.textContent?.replace(/\d+$/u, ""));
+    expect(tabs).toEqual([
+      "Active Orders",
+      "Hold",
+      "All Orders",
+      "Closed",
+      "Cancelled",
+      "Operation Activity",
+      "Accountant",
+    ]);
+    expect(orderRequests(api).some((path) => path.includes("viewKey"))).toBe(false);
+  });
+
+  it("shows the Company's tabs, opens the default one and counts it on the server", async () => {
+    const views = [
+      {
+        definition: { dateField: "order_date", dateWindow: "today", statuses: [] },
+        isDefault: true,
+        isVisible: true,
+        key: "custom_today",
+        kind: "custom",
+        labelAr: "طلبات اليوم",
+        labelEn: "Today orders",
+        showCount: true,
+      },
+      ...standardOrderViews().map((view) => ({
+        ...view,
+        isDefault: false,
+        isVisible: view.key !== "closed",
+        labelEn: view.key === "active" ? "Open work" : view.labelEn,
+      })),
+    ];
+    const api = menuOrdersApi({ enabled: true, isStandard: false, version: 3, views });
+    await screen.findByLabelText("Select all Orders on this page");
+    const tablist = screen.getByRole("tablist", { name: "Order quick views" });
+    const tabs = within(tablist).getAllByRole("tab");
+    expect(tabs.map((tab) => tab.textContent?.replace(/\d+$/u, ""))).toEqual([
+      "Today orders",
+      "Open work",
+      "Hold",
+      "All Orders",
+      "Cancelled",
+      "Operation Activity",
+      "Accountant",
+    ]);
+    // The default custom tab opened first, resolved by the server.
+    await waitFor(() => expect(tabs[0]).toHaveAttribute("aria-selected", "true"));
+    await waitFor(() => expect(tabs[0]).toHaveTextContent("Today orders7"));
+    expect(orderRequests(api)).toContainEqual(
+      expect.stringMatching(/quickView=all.*viewKey=custom_today|viewKey=custom_today.*quickView=all/u),
+    );
+    expect(await screen.findByText("7 Today orders")).toBeInTheDocument();
+
+    // Select all matching is not offered on a menu tab.
+    fireEvent.click(screen.getByLabelText("Select all Orders on this page"));
+    expect(screen.queryByRole("button", { name: /Select all \d+ matching Orders/u })).toBeNull();
+
+    // Active Orders sends its menu key so the server applies the chosen statuses.
+    fireEvent.click(within(tablist).getByRole("tab", { name: "Open work" }));
+    await waitFor(() =>
+      expect(
+        orderRequests(api).some((path) =>
+          /quickView=active.*viewKey=active|viewKey=active.*quickView=active/u.test(path),
+        ),
+      ).toBe(true),
+    );
+    expect(within(tablist).getByRole("tab", { name: "Open work" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+
+    // A standard tab sends exactly today's request.
+    fireEvent.click(within(tablist).getByRole("tab", { name: "Cancelled" }));
+    await waitFor(() =>
+      expect(orderRequests(api).some((path) => path.includes("quickView=cancelled") && !path.includes("viewKey"))).toBe(true),
+    );
+  });
+
+  it("falls back to the standard tabs when the menu cannot be read", async () => {
+    const api = {
+      get: vi.fn((path: string) => {
+        if (path === "configuration/order-views") return Promise.reject(new Error("forbidden"));
+        if (path.startsWith("operations/orders?")) {
+          return Promise.resolve({ filteredCount: 1, items: [order], page: 1, pageSize: 25, totalCount: 1 });
+        }
+        if (path.startsWith("configuration/areas")) {
+          return Promise.resolve({ items: [], page: 1, pageSize: 100, total: 0 });
+        }
+        return Promise.resolve([]);
+      }),
+      post: vi.fn().mockResolvedValue({}),
+    };
+    renderWithRouter(
+      <OrdersModuleWorkspace
+        api={api as unknown as ApiClient}
+        onNavigate={vi.fn()}
+        permissions={["users_roles.manage"]}
+      />,
+    );
+    await waitFor(() =>
+      expect(api.get).toHaveBeenCalledWith(expect.stringContaining("quickView=active")),
+    );
+    expect(screen.getByRole("tab", { name: "Active Orders" })).toHaveAttribute("aria-selected", "true");
+    expect(api.get.mock.calls.some(([path]) => String(path).includes("viewKey"))).toBe(false);
+  });
+});
+
+describe("Filtering cancelled Orders by cancellation type", () => {
+  it("offers the type on the Cancelled tab and sends it to the server", async () => {
+    const api = {
+      get: vi.fn((path: string) => {
+        if (path.startsWith("operations/orders?")) {
+          return Promise.resolve({ filteredCount: 0, items: [], page: 1, pageSize: 25, totalCount: 0 });
+        }
+        if (path.startsWith("configuration/areas")) {
+          return Promise.resolve({ items: [], page: 1, pageSize: 100, total: 0 });
+        }
+        return Promise.resolve([]);
+      }),
+      post: vi.fn().mockResolvedValue({}),
+    };
+    renderWithRouter(
+      <OrdersModuleWorkspace
+        api={api as unknown as ApiClient}
+        onNavigate={vi.fn()}
+        permissions={["users_roles.manage"]}
+      />,
+    );
+    await waitFor(() =>
+      expect(api.get).toHaveBeenCalledWith(expect.stringContaining("quickView=active")),
+    );
+    expect(screen.queryByLabelText("Cancellation type")).toBeNull();
+    fireEvent.click(screen.getByRole("tab", { name: "Cancelled" }));
+    const select = await screen.findByLabelText("Cancellation type");
+    fireEvent.change(select, { target: { value: "cancel_by_customer" } });
+    await waitFor(() =>
+      expect(api.get).toHaveBeenCalledWith(
+        expect.stringMatching(/quickView=cancelled.*cancellationReason=cancel_by_customer|cancellationReason=cancel_by_customer.*quickView=cancelled/u),
+      ),
+    );
+    // Leaving the tab clears it, so no other tab is narrowed by a hidden filter.
+    fireEvent.click(screen.getByRole("tab", { name: "All Orders" }));
+    await waitFor(() => expect(screen.queryByLabelText("Cancellation type")).toBeNull());
+  });
+});
+
+describe("Fast Entry keyboard order", () => {
+  it("tabs Reference → Trader → Name → Mobile → Emirate → Area → COD, then the next row", async () => {
+    const api = {
+      get: vi.fn((path: string) => {
+        if (path.startsWith("operations/orders?")) {
+          return Promise.resolve({ filteredCount: 0, items: [], page: 1, pageSize: 25, totalCount: 0 });
+        }
+        if (path.startsWith("configuration/areas")) {
+          return Promise.resolve({ items: [], page: 1, pageSize: 100, total: 0 });
+        }
+        return Promise.resolve([]);
+      }),
+      post: vi.fn(),
+    };
+    renderWithRouter(
+      <OrdersModuleWorkspace
+        api={api as unknown as ApiClient}
+        onNavigate={vi.fn()}
+        permissions={["users_roles.manage"]}
+      />,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Fast entry" }));
+    const dialog = await screen.findByRole("dialog", { name: /Fast order entry/ });
+    const rows = () => [...dialog.querySelectorAll<HTMLElement>("tr[data-row-id]")];
+    const cell = (rowIndex: number, field: string) =>
+      rows()[rowIndex]!.querySelector(`[data-fe="${field}"] input, [data-fe="${field}"] select`) as HTMLElement;
+    const order = ["referenceNumber", "trader", "customerName", "mobile", "emirate", "area", "codAmount"];
+
+    cell(0, "referenceNumber").focus();
+    for (const next of order.slice(1)) {
+      fireEvent.keyDown(document.activeElement!, { key: "Tab" });
+      await waitFor(() => expect(document.activeElement).toBe(cell(0, next)));
+    }
+    // COD → next row's Reference Number.
+    fireEvent.keyDown(document.activeElement!, { key: "Tab" });
+    await waitFor(() => expect(document.activeElement).toBe(cell(1, "referenceNumber")));
+    // Shift+Tab goes back to the previous row's COD.
+    fireEvent.keyDown(document.activeElement!, { key: "Tab", shiftKey: true });
+    await waitFor(() => expect(document.activeElement).toBe(cell(0, "codAmount")));
+
+    // Tab on the last row's COD adds a row and continues there.
+    expect(rows()).toHaveLength(3);
+    cell(2, "codAmount").focus();
+    fireEvent.keyDown(document.activeElement!, { key: "Tab" });
+    await waitFor(() => expect(rows()).toHaveLength(4));
+    await waitFor(() => expect(document.activeElement).toBe(cell(3, "referenceNumber")));
   });
 });

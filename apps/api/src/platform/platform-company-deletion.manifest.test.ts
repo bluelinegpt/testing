@@ -87,7 +87,12 @@ describe("permanent Company deletion manifest", () => {
     // `whatsapp_message_attempts`) — all direct `company_id restrict`, FK DAG
     // with no cycles, no DELETE-firing triggers; see the comment block in
     // `platform-company-deletion.manifest.ts`.
-    expect(COMPANY_DELETION_DIRECT_TABLES.size).toBe(160);
+    // 160 -> 171 (2026-10-10 release): 169 tables were already classified in
+    // the reset manifest without the pin being moved, plus
+    // `company_order_view_menus` (Orders menu configuration) and
+    // `platform_announcement_companies` (Platform announcement targets), both
+    // classified PRESERVE.
+    expect(COMPANY_DELETION_DIRECT_TABLES.size).toBe(171);
     expect(COMPANY_DELETION_MANIFEST_HASH).toMatch(/^[a-f0-9]{64}$/);
   });
 

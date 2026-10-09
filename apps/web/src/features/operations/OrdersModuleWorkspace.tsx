@@ -14,9 +14,11 @@ import {
   Search,
   Truck,
   UserRoundCheck,
+  X,
 } from "lucide-react";
 import {
   Fragment,
+  type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
   useCallback,
   useContext,
@@ -57,6 +59,11 @@ import { PageHeader } from "../../components/PageHeader.js";
 import { FilterCombobox } from "../../components/FilterCombobox.js";
 import { SearchCombobox } from "../../components/SearchCombobox.js";
 import { AreaSelector } from "../configuration/AreaSelector.js";
+import {
+  type OrderView,
+  type OrderViewsMenu,
+  orderViewLabel,
+} from "../configuration/order-views.js";
 import { OrderWhatsAppHistory } from "../configuration/OrderWhatsAppHistory.js";
 import { isUaeMobile, normalizeUaeMobile } from "../../domain/uae-mobile.js";
 import { formatCurrency, formatDate, formatDateTime } from "../../localization/formatters.js";
@@ -100,6 +107,30 @@ type QuickView = "active" | "all" | "hold" | "cancelled" | "closed" | "delivery"
 /** Quick views the backend actually understands. */
 const backendQuickViews = new Set(["active", "all", "hold", "cancelled", "closed", "accountant"]);
 type OrderGrouping = "" | OrdersGroupingDimension[];
+
+/**
+ * The list filters an Orders menu tab stands for. Standard tabs keep their own
+ * quick view and send no `viewKey`; Active Orders and custom tabs are resolved
+ * by the server from the saved menu, so the client never sends a rule.
+ */
+function menuViewFilters(view: OrderView): Record<string, string> {
+  if (view.key === "active") return { quickView: "active", viewKey: "active" };
+  if (view.kind === "custom") return { quickView: "all", viewKey: view.key };
+  return { quickView: view.key, viewKey: "" };
+}
+
+/** The request that counts one menu tab: page 1, smallest page, total only. */
+function menuViewCountQuery(view: OrderView): string {
+  const parameters = new URLSearchParams({ page: "1", pageSize: "25" });
+  if (view.key === "delivery") {
+    parameters.set("deliveredOnly", "true");
+  } else {
+    for (const [key, value] of Object.entries(menuViewFilters(view))) {
+      if (value !== "") parameters.set(key, value);
+    }
+  }
+  return parameters.toString();
+}
 type BulkAction = "assign" | "carrier" | "manifest" | "reactivate" | "status";
 
 interface OrderFilters {
@@ -111,12 +142,20 @@ interface OrderFilters {
   dateFrom: string;
   dateTo: string;
   deliveryStatus: string;
+  /** Cancellation type filter; offered on the Cancelled tab only. */
+  cancellationReason: string;
   internationalCarrierStatus: string;
   driverId: string;
   orderType: string;
   thirdPartyDeliveryCompanyName: string;
   destinationCountryName: string;
   quickView: QuickView;
+  /**
+   * Orders menu tab, only when the Company's custom menu is on: `active`
+   * (statuses from the menu) or a `custom_*` key. Empty on the standard menu,
+   * so the request is exactly what it always was.
+   */
+  viewKey: string;
   // Delivery Activity. Empty in every other view, so `filterQuery` omits them
   // and no other quick view can be affected by a stale value.
   deliveredOnly: string;
@@ -211,12 +250,14 @@ const initialFilters: OrderFilters = {
   dateFrom: "",
   dateTo: "",
   deliveryStatus: "",
+  cancellationReason: "",
   internationalCarrierStatus: "",
   driverId: "",
   orderType: "",
   thirdPartyDeliveryCompanyName: "",
   destinationCountryName: "",
   quickView: "active",
+  viewKey: "",
   deliveredOnly: "",
   deliveryDateFrom: "",
   deliveryDateTo: "",
@@ -301,6 +342,13 @@ export function OrdersModuleWorkspace({
     list.setFilters(update(filters) as unknown as Record<string, string>);
   const [data, setData] = useState<OperationsOrderPage>();
   const [holdCount, setHoldCount] = useState(0);
+  /* Orders menu. `undefined` until the menu request settles, `null` when the
+     Company is on the standard menu (switch off, never saved, or the request
+     failed) -- in which case every tab, request and count below is exactly
+     what it was before the menu existed. */
+  const [orderMenu, setOrderMenu] = useState<readonly OrderView[] | null | undefined>(undefined);
+  const [menuViewCounts, setMenuViewCounts] = useState<Readonly<Record<string, number>>>({});
+  const menuDefaultApplied = useRef(false);
   const [accountantCollect] = useState<readonly OperationsPendingCashOrder[]>([]);
   const [accountantSection, setAccountantSection] = useState<"collect" | "pay">("collect");
   const [, setAccountantRefreshNonce] = useState(0);
@@ -344,6 +392,7 @@ export function OrdersModuleWorkspace({
     filters.dateFrom,
     filters.dateTo,
     filters.deliveryStatus,
+    filters.cancellationReason,
     filters.driverId,
     filters.orderType,
     filters.thirdPartyDeliveryCompanyName,
@@ -362,6 +411,7 @@ export function OrdersModuleWorkspace({
   const [summary, setSummary] = useState<SelectionSummary>();
   const [bulkAction, setBulkAction] = useState<BulkAction>();
   const [createOpen, setCreateOpen] = useState(false);
+  const [createdNotice, setCreatedNotice] = useState<string>();
   const [fastEntryOpen, setFastEntryOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
@@ -478,9 +528,79 @@ export function OrdersModuleWorkspace({
     }
   }, [api, query, t]);
 
+  /* With a custom menu, the tab in the URL is checked against the menu once it
+     arrives. The first list request is NOT held back for it: Companies on the
+     standard menu load exactly when they always did. A custom-menu Company may
+     see one extra request on first open while its default tab is applied. */
+  const menuNormalization = useMemo((): Record<string, string> | null => {
+    if (orderMenu === undefined || orderMenu === null) {
+      // Back on the standard menu: a tab left over from the custom menu has
+      // no meaning any more.
+      return orderMenu === null && filters.viewKey !== ""
+        ? { quickView: "active", viewKey: "" }
+        : null;
+    }
+    const visible = orderMenu.filter((view) => view.isVisible);
+    const fallback = visible.find((view) => view.isDefault) ?? visible[0];
+    const target = (view: OrderView | undefined): Record<string, string> =>
+      view === undefined ? { quickView: "active", viewKey: "" } : menuViewFilters(view);
+    if (filters.viewKey !== "") {
+      // A tab that was deleted or hidden since the URL was written.
+      const known = visible.find((view) => view.key === filters.viewKey);
+      return known === undefined ? target(fallback) : null;
+    }
+    if (!menuDefaultApplied.current && list.filters.quickView === undefined) {
+      return target(fallback);
+    }
+    // Active Orders under a custom menu always follows the menu's statuses.
+    if (filters.quickView === "active") return { viewKey: "active" };
+    return null;
+  }, [filters.quickView, filters.viewKey, list.filters.quickView, orderMenu]);
+
   useEffect(() => {
-    if (listStateRestored) void load();
-  }, [listStateRestored, load]);
+    if (orderMenu === undefined) return;
+    if (orderMenu !== null) menuDefaultApplied.current = true;
+    if (menuNormalization !== null) {
+      list.setFilters({
+        ...menuNormalization,
+        businessDateFrom: "",
+        businessDateTo: "",
+        dateMode: "",
+        deliveredOnly: "",
+        deliveryDateFrom: "",
+        deliveryDateTo: "",
+      });
+    }
+    // Runs when the decision changes; `list` is deliberately not a dependency.
+  }, [menuNormalization, orderMenu]);
+
+  useEffect(() => {
+    if (listStateRestored && menuNormalization === null) void load();
+  }, [listStateRestored, load, menuNormalization]);
+
+  useEffect(() => {
+    let active = true;
+    void api
+      .get<OrderViewsMenu>("configuration/order-views")
+      .then((menu) => {
+        if (!active) return;
+        setOrderMenu(
+          menu !== null &&
+            typeof menu === "object" &&
+            menu.enabled === true &&
+            Array.isArray(menu.views)
+            ? menu.views
+            : null,
+        );
+      })
+      .catch(() => {
+        // The standard menu is always a safe answer.
+        if (active) setOrderMenu(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [api]);
 
   // Reference data that no filter changes: fetched once per mount rather than
   // with every list reload.
@@ -683,6 +803,8 @@ export function OrdersModuleWorkspace({
   const selectQuickView = (view: QuickView) => {
     list.setFilters({
       quickView: view,
+      viewKey: "",
+      cancellationReason: "",
       businessDateFrom: "",
       businessDateTo: "",
       deliveryDateFrom: "",
@@ -692,6 +814,56 @@ export function OrdersModuleWorkspace({
         : { dateMode: "", deliveredOnly: "" }),
     });
   };
+  // Orders menu tabs, in the Company's order; null on the standard menu.
+  const menuTabs = useMemo(
+    () => (orderMenu === undefined || orderMenu === null ? null : orderMenu.filter((view) => view.isVisible)),
+    [orderMenu],
+  );
+  const selectedMenuKey = filters.viewKey !== "" ? filters.viewKey : filters.quickView;
+  const selectedMenuView = menuTabs?.find((view) => view.key === selectedMenuKey);
+  const selectMenuView = (view: OrderView) => {
+    list.setFilters({
+      ...menuViewFilters(view),
+      cancellationReason: "",
+      businessDateFrom: "",
+      businessDateTo: "",
+      dateMode: "",
+      deliveredOnly: "",
+      deliveryDateFrom: "",
+      deliveryDateTo: "",
+    });
+  };
+  const countScope =
+    selectedMenuView !== undefined && selectedMenuView.kind === "custom"
+      ? orderViewLabel(selectedMenuView, i18n.resolvedLanguage ?? "en")
+      : t(`operations.countScope.${filters.quickView}`);
+  /* Counts for the menu tabs that show one. One small request per tab, the
+     same way the Hold count has always been read; refreshed when the user
+     changes tab so a count never lags far behind. The selected tab shows the
+     live total of the list itself. Hold keeps its existing request. */
+  useEffect(() => {
+    if (menuTabs === null) return;
+    let active = true;
+    const counted = menuTabs.filter((view) => view.showCount && view.key !== "hold");
+    void Promise.allSettled(
+      counted.map((view) =>
+        api.get<OperationsOrderPage>(`operations/orders?${menuViewCountQuery(view)}`),
+      ),
+    ).then((results) => {
+      if (!active) return;
+      const next: Record<string, number> = {};
+      results.forEach((result, index) => {
+        if (result.status === "fulfilled" && result.value !== null && typeof result.value === "object") {
+          const count = result.value.tabTotalCount ?? result.value.filteredCount;
+          if (typeof count === "number") next[counted[index]!.key] = count;
+        }
+      });
+      setMenuViewCounts(next);
+    });
+    return () => {
+      active = false;
+    };
+  }, [api, menuTabs, selectedMenuKey]);
   const loadedOrderItems = Array.isArray(data?.items) ? data.items : [];
   const deliveryActivityExcludedActions = new Set([
     "collect_from_driver",
@@ -1123,9 +1295,46 @@ export function OrdersModuleWorkspace({
           {error}
         </div>
       )}
+      {createdNotice === undefined ? null : (
+        <div className="alert alert-success order-created-notice" role="status">
+          <span>{createdNotice}</span>
+          <button
+            aria-label={t("common.close")}
+            className="close-button"
+            onClick={() => setCreatedNotice(undefined)}
+            type="button"
+          >
+            <X aria-hidden="true" size={16} />
+          </button>
+        </div>
+      )}
       <section className="orders-workspace">
         <div className="orders-quick-views" role="tablist" aria-label={t("operations.orderViews")}>
-          {(
+          {menuTabs !== null
+            ? menuTabs.map((view) => {
+                const selected = selectedMenuKey === view.key;
+                const count = selected
+                  ? tabTotalCount
+                  : view.key === "hold"
+                    ? holdCount
+                    : menuViewCounts[view.key];
+                return (
+                  <button
+                    aria-selected={selected}
+                    className={selected ? "active" : undefined}
+                    key={view.key}
+                    onClick={() => selectMenuView(view)}
+                    role="tab"
+                    type="button"
+                  >
+                    {orderViewLabel(view, i18n.resolvedLanguage ?? "en")}
+                    {view.showCount && count !== undefined ? (
+                      <span className="tab-count">{count}</span>
+                    ) : null}
+                  </button>
+                );
+              })
+            : (
             ["active", "hold", "all", "closed", "cancelled", "delivery", "accountant"] as const
           ).map((view) => (
             <button
@@ -1398,6 +1607,21 @@ export function OrdersModuleWorkspace({
                 </option>
               ))}
             </FilterSelect>
+            {filters.quickView === "cancelled" ||
+            filters.deliveryStatus === "cancelled" ||
+            filters.cancellationReason !== "" ? (
+              <FilterSelect
+                label={t("operations.cancellationType")}
+                onChange={(value) => updateFilters({ cancellationReason: value })}
+                value={filters.cancellationReason}
+              >
+                {cancellationTypes.map((type) => (
+                  <option key={type} value={type}>
+                    {t(`operations.cancellationTypes.${type}`)}
+                  </option>
+                ))}
+              </FilterSelect>
+            ) : null}
             <FilterSelect
               label={t("operations.workflowStep")}
               onChange={(value) => updateFilters({ workflowStep: value })}
@@ -1581,6 +1805,7 @@ export function OrdersModuleWorkspace({
                 list.setFilters({
                   ...Object.fromEntries(orderFilterKeys.map((key) => [key, ""])),
                   quickView: filters.quickView,
+                  viewKey: filters.viewKey,
                   ...(filters.quickView === "delivery" ? { dateMode: "", deliveredOnly: "" } : {}),
                 });
                 setFilterEmirateId("");
@@ -1781,6 +2006,12 @@ export function OrdersModuleWorkspace({
           {(grouping === "" || grouping.length === 0) &&
           pageSelected &&
           !allMatching &&
+          // A menu tab's rule lives on the server's list query only; the bulk
+          // "every matching Order" selection rebuilds the set from the filters
+          // and would not apply it. Explicit row selection still works.
+          filters.viewKey === "" &&
+          // Not part of the bulk filter selection either; explicit rows only.
+          filters.cancellationReason === "" &&
           matchingCount > pageIds.length ? (
             <button
               className="select-all-matching"
@@ -1798,12 +2029,12 @@ export function OrdersModuleWorkspace({
               {hasNarrowingFilters
                 ? t("operations.resultCountFilteredScoped", {
                     matching: matchingCount,
-                    scope: t(`operations.countScope.${filters.quickView}`),
+                    scope: countScope,
                     total: tabTotalCount,
                   })
                 : t("operations.resultCountScoped", {
                     count: tabTotalCount,
-                    scope: t(`operations.countScope.${filters.quickView}`),
+                    scope: countScope,
                   })}
             </span>
             <label>
@@ -1846,6 +2077,14 @@ export function OrdersModuleWorkspace({
           api={api}
           permissions={permissions}
           onClose={() => setCreateOpen(false)}
+          onCreated={(created) =>
+            setCreatedNotice(
+              t("operations.orderCreatedNotice", {
+                orderNumber: created.orderNumber,
+                serialNumber: created.serialNumber ?? "—",
+              }),
+            )
+          }
           onSaved={load}
         />
       ) : null}
@@ -1854,6 +2093,7 @@ export function OrdersModuleWorkspace({
           api={api}
           emirates={emirates}
           onClose={() => setFastEntryOpen(false)}
+          onCreated={(notice) => setCreatedNotice(notice)}
           onSaved={load}
           textLanguage={textLanguage}
         />
@@ -1977,6 +2217,21 @@ function createFastEntrySubmissionKey(): string {
     : `fast-entry-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
+/**
+ * Keyboard order in Fast Entry: Tab walks only these columns, and Tab on COD
+ * goes to the next row's Reference Number (adding a row at the end of the
+ * sheet). Other columns stay editable with the mouse.
+ */
+const fastEntryTabOrder = [
+  "referenceNumber",
+  "trader",
+  "customerName",
+  "mobile",
+  "emirate",
+  "area",
+  "codAmount",
+] as const;
+
 function createFastEntryRow(serialNumber = ""): FastEntryRow {
   return {
     additionalFees: "0.00",
@@ -2004,16 +2259,6 @@ function createFastEntryRow(serialNumber = ""): FastEntryRow {
     traderOption: undefined,
     mobile: "",
   };
-}
-
-function incrementSerial(base: string, offset: number): string {
-  const value = base.trim();
-  if (value === "" || offset === 0) return value;
-  const match = /^(.*?)(\d+)$/.exec(value);
-  if (match === null) return value;
-  const prefix = match[1] ?? "";
-  const digits = match[2] ?? "";
-  return `${prefix}${String(Number(digits) + offset).padStart(digits.length, "0")}`;
 }
 
 function parseFastEntryMoney(value: string, required = false): number | undefined {
@@ -2044,15 +2289,23 @@ function normalizedAddress(value: string): string {
   return value.trim().replace(/\s+/g, " ").toLowerCase();
 }
 
+const fastEntryMoneyColumns: ReadonlySet<string> = new Set(["codAmount", "additionalFees"]);
+const fastEntryEmptyMoney: ReadonlySet<string> = new Set(["", "0", "0.0", "0.00"]);
+
+/**
+ * True when the user entered something in the row. The values the sheet fills
+ * in by itself (COD and Additional fees 0.00, Packages 1) do not count; any
+ * other typed value does -- including a Serial or Reference Number alone, so a
+ * half-filled row is validated and shown with its errors instead of being
+ * silently dropped. Empty rows are removed when Create orders is clicked.
+ */
 function rowHasFastEntryContent(row: FastEntryRow): boolean {
-  return fastEntryColumns.some(
-    (column) =>
-      column !== "serialNumber" &&
-      column !== "referenceNumber" &&
-      row[column].trim() !== "" &&
-      row[column] !== "0.00" &&
-      row[column] !== "1",
-  );
+  return fastEntryColumns.some((column) => {
+    const value = row[column].trim();
+    if (fastEntryMoneyColumns.has(column)) return !fastEntryEmptyMoney.has(value);
+    if (column === "packageCount") return value !== "" && value !== "1";
+    return value !== "";
+  });
 }
 
 function resolveApiMessage(requestError: unknown, fallback: string): string {
@@ -2081,12 +2334,15 @@ function FastOrderEntryDialog({
   api,
   emirates,
   onClose,
+  onCreated,
   onSaved,
   textLanguage,
 }: {
   api: ApiClient;
   emirates: readonly Emirate[];
   onClose: () => void;
+  /** Called once every filled row was created; the sheet then closes. */
+  onCreated?: (notice: string) => void;
   onSaved: () => Promise<void> | void;
   textLanguage: "ar" | "en";
 }) {
@@ -2101,6 +2357,49 @@ function FastOrderEntryDialog({
   const [rows, setRows] = useState<FastEntryRow[]>(() =>
     Array.from({ length: 3 }, () => createFastEntryRow()),
   );
+  const fastEntryBodyRef = useRef<HTMLTableSectionElement>(null);
+  const [pendingFocus, setPendingFocus] = useState<{ rowId: string; field: string }>();
+  const focusFastEntryField = useCallback((rowId: string, field: string): boolean => {
+    const target = fastEntryBodyRef.current?.querySelector<HTMLElement>(
+      `tr[data-row-id="${rowId}"] [data-fe="${field}"] :is(input, select)`,
+    );
+    if (target === null || target === undefined) return false;
+    target.focus();
+    if (target instanceof HTMLInputElement) target.select();
+    return true;
+  }, []);
+  useEffect(() => {
+    if (pendingFocus === undefined) return;
+    if (focusFastEntryField(pendingFocus.rowId, pendingFocus.field)) setPendingFocus(undefined);
+  }, [focusFastEntryField, pendingFocus, rows]);
+  const fastEntryKeyDown = (event: ReactKeyboardEvent<HTMLTableRowElement>, rowIndex: number) => {
+    if (event.key !== "Tab" || event.altKey || event.ctrlKey || event.metaKey) return;
+    const field = (event.target as HTMLElement).closest<HTMLElement>("[data-fe]")?.dataset.fe;
+    const position = fastEntryTabOrder.indexOf(field as (typeof fastEntryTabOrder)[number]);
+    if (position < 0) return; // a column outside the order: normal browser Tab
+    let targetRow = rowIndex;
+    let targetPosition = position + (event.shiftKey ? -1 : 1);
+    if (targetPosition >= fastEntryTabOrder.length) {
+      targetRow += 1;
+      targetPosition = 0;
+    } else if (targetPosition < 0) {
+      targetRow -= 1;
+      targetPosition = fastEntryTabOrder.length - 1;
+    }
+    if (targetRow < 0) return;
+    const targetField = fastEntryTabOrder[targetPosition]!;
+    event.preventDefault();
+    const existing = rows[targetRow];
+    if (existing !== undefined) {
+      // Deferred a tick so a combobox can commit its Tab selection first.
+      window.setTimeout(() => focusFastEntryField(existing.id, targetField), 0);
+      return;
+    }
+    // Tab on the last row's COD: add a row and continue there.
+    const added = createFastEntryRow();
+    setRows((current) => [...current, added]);
+    setPendingFocus({ field: targetField, rowId: added.id });
+  };
   const [pasteText, setPasteText] = useState("");
   const [rowsToAdd, setRowsToAdd] = useState("5");
   const [busy, setBusy] = useState(false);
@@ -2115,29 +2414,9 @@ function FastOrderEntryDialog({
     }
   }, []);
 
-  useEffect(() => {
-    let active = true;
-    void api
-      .get<{ serialNumber: string; serverGenerated?: boolean }>(
-        "operations/orders/next-serial-number",
-      )
-      .then((result) => {
-        if (!active) return;
-        setRows((current) =>
-          current.map((row, index) => ({
-            ...row,
-            serialNumber:
-              row.serialNumber.trim() === ""
-                ? incrementSerial(result.serialNumber, index)
-                : row.serialNumber,
-          })),
-        );
-      })
-      .catch(() => undefined);
-    return () => {
-      active = false;
-    };
-  }, [api]);
+  // Serial Numbers are NOT pre-filled when the sheet opens: two users with the
+  // sheet open would both be shown 1, 2, 3. A blank Serial is assigned by the
+  // server when that row is created; a typed Serial is kept as typed.
 
   const updateRow = (id: string, change: Partial<FastEntryRow>) => {
     setRows((current) =>
@@ -2164,16 +2443,10 @@ function FastOrderEntryDialog({
 
   const addRows = (count: number) => {
     const safeCount = Number.isFinite(count) && count > 0 ? Math.min(Math.floor(count), 100) : 5;
-    setRows((current) => {
-      const lastSerial =
-        [...current].reverse().find((row) => row.serialNumber.trim() !== "")?.serialNumber ?? "";
-      return [
-        ...current,
-        ...Array.from({ length: safeCount }, (_, index) =>
-          createFastEntryRow(incrementSerial(lastSerial, index + 1)),
-        ),
-      ];
-    });
+    setRows((current) => [
+      ...current,
+      ...Array.from({ length: safeCount }, () => createFastEntryRow()),
+    ]);
   };
 
   const importPastedRows = () => {
@@ -2229,9 +2502,8 @@ function FastOrderEntryDialog({
             wholeNumber: true,
           });
 
-          if (serial === "")
-            errors.push(t("operations.errors.serialRequired"));
-          if ((serialCounts.get(serial) ?? 0) > 1)
+          // A blank Serial is valid: the server assigns it when the row is created.
+          if (serial !== "" && (serialCounts.get(serial) ?? 0) > 1)
             errors.push(t("operations.fastEntryDuplicateSerial"));
           if (reference !== "" && (referenceCounts.get(reference) ?? 0) > 1)
             errors.push(t("operations.fastEntryDuplicateReference"));
@@ -2279,15 +2551,16 @@ function FastOrderEntryDialog({
             }
           }
 
-          if (errors.length === 0 && serial !== "") {
+          if (errors.length === 0 && (serial !== "" || reference !== "")) {
             try {
-              const query = new URLSearchParams({ serialNumber: serial });
+              const query = new URLSearchParams();
+              if (serial !== "") query.set("serialNumber", serial);
               if (reference !== "") query.set("referenceNumber", reference);
               const availability = await api.get<{
                 referenceNumberAvailable: boolean;
                 serialNumberAvailable: boolean;
               }>(`operations/orders/identifier-availability?${query.toString()}`);
-              if (!availability.serialNumberAvailable)
+              if (serial !== "" && !availability.serialNumberAvailable)
                 errors.push(t("operations.serialNumberExists"));
               if (!availability.referenceNumberAvailable)
                 errors.push(t("operations.referenceNumberExists"));
@@ -2337,7 +2610,17 @@ function FastOrderEntryDialog({
     setBusy(true);
     setMessage(undefined);
     try {
-      const validated = await validateRows(rows);
+      // Only filled rows are created. Empty rows (nothing typed beyond the
+      // sheet's own defaults) are removed from the sheet first, so adding 5
+      // rows and filling 3 creates 3 Orders with no errors for the other 2.
+      // When nothing at all is filled the sheet is left as it is.
+      const filledRows = rows.filter(
+        (row) => row.status === "created" || rowHasFastEntryContent(row),
+      );
+      const hasRowsToCreate = filledRows.some((row) => row.status !== "created");
+      const sourceRows = hasRowsToCreate ? filledRows : rows;
+      if (sourceRows.length !== rows.length) setRows(sourceRows);
+      const validated = await validateRows(sourceRows);
       const activeValidatedRows = validated.filter(
         (row) => rowHasFastEntryContent(row) && row.status !== "created",
       );
@@ -2386,7 +2669,7 @@ function FastOrderEntryDialog({
                   customerId: existingCustomer.id,
                   inlineCustomer: undefined,
                 };
-          await api.post<OperationsOrder>(
+          const createdOrder = await api.post<OperationsOrder>(
             "operations/orders",
             {
               additionalFees,
@@ -2403,7 +2686,8 @@ function FastOrderEntryDialog({
               notes: row.notes.trim() || undefined,
               packageCount: packages.ok ? packages.value : 1,
               referenceNumber: row.referenceNumber.trim() || undefined,
-              serialNumber: row.serialNumber.trim(),
+              // Blank is sent as omitted: the server assigns the next Serial now.
+              serialNumber: row.serialNumber.trim() === "" ? undefined : row.serialNumber.trim(),
               serviceFee,
               serviceFeeOverrideReason:
                 row.serviceFee.trim() === "" ? undefined : row.overrideReason.trim(),
@@ -2416,6 +2700,8 @@ function FastOrderEntryDialog({
           nextRows[index] = {
             ...row,
             message: t("operations.fastEntryCreated"),
+            // Show the Serial the server actually saved (assigned when blank).
+            serialNumber: createdOrder?.serialNumber ?? row.serialNumber,
             status: "created",
           };
         } catch (requestError) {
@@ -2432,8 +2718,28 @@ function FastOrderEntryDialog({
         setRows([...nextRows]);
       }
       await onSaved();
+      // A failed row keeps the sheet open so it can be fixed; rows already
+      // created stay marked and are not sent again.
       if (stoppedOnCreateError) return;
+      const createdNow = nextRows.filter(
+        (row, index) => row.status === "created" && validated[index]?.status !== "created",
+      );
       const createdCount = nextRows.filter((row) => row.status === "created").length;
+      if (onCreated !== undefined) {
+        // Everything was created: close the sheet, like Create order does, and
+        // tell the user on the Orders list which Serial Numbers were saved.
+        onCreated(
+          t("operations.fastEntryCreatedNotice", {
+            count: createdNow.length,
+            serialNumbers: createdNow
+              .map((row) => row.serialNumber.trim())
+              .filter((serial) => serial !== "")
+              .join(", "),
+          }),
+        );
+        onClose();
+        return;
+      }
       setMessage(t("operations.fastEntryCreatedCount", { count: createdCount }));
     } finally {
       setBusy(false);
@@ -2527,17 +2833,24 @@ function FastOrderEntryDialog({
                 <th>{t("common.actions")}</th>
               </tr>
             </thead>
-            <tbody>
+            <tbody ref={fastEntryBodyRef}>
               {rows.map((row, index) => (
-                <tr className={`fast-entry-row-${row.status}`} key={row.id}>
+                <tr
+                  className={`fast-entry-row-${row.status}`}
+                  data-row-id={row.id}
+                  key={row.id}
+                  onKeyDown={(event) => fastEntryKeyDown(event, index)}
+                >
                   <td>{index + 1}</td>
                   <td>
                     <input
+                      aria-label={t("operations.serialNumber")}
+                      placeholder={t("operations.serialNumberAutoPlaceholder")}
                       value={row.serialNumber}
                       onChange={(event) => updateRow(row.id, { serialNumber: event.target.value })}
                     />
                   </td>
-                  <td>
+                  <td data-fe="referenceNumber">
                     <input
                       value={row.referenceNumber}
                       onChange={(event) =>
@@ -2545,7 +2858,7 @@ function FastOrderEntryDialog({
                       }
                     />
                   </td>
-                  <td>
+                  <td data-fe="trader">
                     <SearchCombobox<OperationsTraderOption>
                       api={api}
                       emptyText={t("operations.noTradersFound")}
@@ -2560,22 +2873,23 @@ function FastOrderEntryDialog({
                       }
                       path="operations/traders/search"
                       placeholder={t("operations.searchTrader")}
+                      selectOnTab
                       value={row.traderOption}
                     />
                   </td>
-                  <td>
+                  <td data-fe="customerName">
                     <input
                       value={row.customerName}
                       onChange={(event) => updateRow(row.id, { customerName: event.target.value })}
                     />
                   </td>
-                  <td>
+                  <td data-fe="mobile">
                     <input
                       value={row.mobile}
                       onChange={(event) => updateRow(row.id, { mobile: event.target.value })}
                     />
                   </td>
-                  <td>
+                  <td data-fe="emirate">
                     <select
                       value={row.emirateId}
                       onChange={(event) => {
@@ -2591,7 +2905,7 @@ function FastOrderEntryDialog({
                       ))}
                     </select>
                   </td>
-                  <td>
+                  <td data-fe="area">
                     <SearchCombobox<CompanyArea>
                       api={api}
                       emptyText={t("areas.noneFound")}
@@ -2600,6 +2914,7 @@ function FastOrderEntryDialog({
                       }
                       label={t("operations.areaField")}
                       key={`${row.id}-${row.emirateId}`}
+                      selectOnTab
                       onChange={(area) =>
                         updateRow(row.id, {
                           areaId: area?.id ?? "",
@@ -2624,7 +2939,7 @@ function FastOrderEntryDialog({
                       }
                     />
                   </td>
-                  <td>
+                  <td data-fe="codAmount">
                     <input
                       min="0"
                       step="0.01"
@@ -3936,6 +4251,8 @@ function BulkStatusDialog({
   const { t } = useTranslation();
   const [status, setStatus] = useState("out_for_delivery");
   const [reason, setReason] = useState("");
+  const [cancellationType, setCancellationType] =
+    useState<CancellationType>(defaultCancellationType);
   const [partial, setPartial] = useState(false);
   const [error, setError] = useState<string>();
   const [saving, setSaving] = useState(false);
@@ -3955,6 +4272,7 @@ function BulkStatusDialog({
         await api.post("operations/orders/bulk-status", {
           ...selection,
           allowPartial: partial,
+          ...(status === "cancelled" ? { cancellationReason: cancellationType } : {}),
           reason: reason.trim() || undefined,
           targetStatus: status,
         });
@@ -3985,6 +4303,9 @@ function BulkStatusDialog({
       </label>
       {reopeningDeliveredOrder ? (
         <div className="alert alert-info">{t("operations.reopenDelivery")}</div>
+      ) : null}
+      {status === "cancelled" ? (
+        <CancellationTypeSelect onChange={setCancellationType} value={cancellationType} />
       ) : null}
       <label className="field">
         <span>{t("operations.reason")}</span>
@@ -4461,10 +4782,56 @@ function DeliveryStatusBadge({
 }) {
   const { t } = useTranslation();
   const tone = order.deliveryStatus === "cancelled" ? "disabled" : "neutral";
-  return (
+  const badge = (
     <span className={`status status-${tone}${large ? " order-status-large" : ""}`}>
       {t(`statuses.${order.deliveryStatus}`)}
     </span>
+  );
+  if (order.deliveryStatus !== "cancelled") return badge;
+  // Internal cancellation type under the badge. Orders cancelled before the
+  // type existed show "—" rather than a guessed value.
+  return (
+    <span className="delivery-status-with-note">
+      {badge}
+      <small className="cancellation-type-note" title={t("operations.cancellationType")}>
+        {cancellationTypeLabel(order.cancellationReason, t)}
+      </small>
+    </span>
+  );
+}
+
+const cancellationTypes = ["cancel_by_customer", "cancel_by_trader", "cancel_normal"] as const;
+type CancellationType = (typeof cancellationTypes)[number];
+const defaultCancellationType: CancellationType = "cancel_normal";
+
+function cancellationTypeLabel(value: string | null | undefined, t: TFunction): string {
+  if (value === null || value === undefined || value === "") return "—";
+  return t(`operations.cancellationTypes.${value}`, { defaultValue: value });
+}
+
+/** The fixed cancellation-type list (internal, label only). */
+function CancellationTypeSelect({
+  onChange,
+  value,
+}: {
+  onChange: (value: CancellationType) => void;
+  value: CancellationType;
+}) {
+  const { t } = useTranslation();
+  return (
+    <label className="field">
+      <span>{t("operations.cancellationType")}</span>
+      <select
+        onChange={(event) => onChange(event.target.value as CancellationType)}
+        value={value}
+      >
+        {cancellationTypes.map((type) => (
+          <option key={type} value={type}>
+            {t(`operations.cancellationTypes.${type}`)}
+          </option>
+        ))}
+      </select>
+    </label>
   );
 }
 
@@ -4964,11 +5331,16 @@ function OrderRowActions({
     return `/trader-settlements?${query.toString()}`;
   };
 
-  const patchStatus = async (status: string, reason?: string) => {
+  const patchStatus = async (
+    status: string,
+    reason?: string,
+    cancellationReason?: CancellationType,
+  ) => {
     setBusy(true);
     setError(undefined);
     try {
       await api.patch(`operations/orders/${order.id}/status`, {
+        ...(cancellationReason === undefined ? {} : { cancellationReason }),
         reason: reason?.trim() ? reason.trim() : undefined,
         status,
       });
@@ -5239,11 +5611,12 @@ function OrderRowActions({
                 : t("operations.returnReasonPrompt")
           }
           onClose={() => setReasonFor(undefined)}
-          onSubmit={(reason) => {
+          onSubmit={(reason, cancellationReason) => {
             const target = actionTargetStatus[reasonFor];
-            if (target !== undefined) void patchStatus(target, reason);
+            if (target !== undefined) void patchStatus(target, reason, cancellationReason);
           }}
           title={t(`operations.actions.${reasonFor}`)}
+          withCancellationType={reasonFor === "cancel"}
         />
       )}
       {assignOpen ? (
@@ -5296,15 +5669,20 @@ function ReasonDialog({
   onClose,
   onSubmit,
   title,
+  withCancellationType = false,
 }: {
   busy: boolean;
   label: string;
   onClose: () => void;
-  onSubmit: (reason: string) => void;
+  onSubmit: (reason: string, cancellationReason?: CancellationType) => void;
   title: string;
+  /** Cancel only: also ask for the fixed cancellation type (default Cancel Normal). */
+  withCancellationType?: boolean;
 }) {
   const { t } = useTranslation();
   const [reason, setReason] = useState("");
+  const [cancellationType, setCancellationType] =
+    useState<CancellationType>(defaultCancellationType);
   return (
     <Modal
       closeLabel={t("common.close")}
@@ -5312,6 +5690,9 @@ function ReasonDialog({
       title={title}
       titleId="row-reason-title"
     >
+      {withCancellationType ? (
+        <CancellationTypeSelect onChange={setCancellationType} value={cancellationType} />
+      ) : null}
       <label className="field">
         <span>{label}</span>
         <textarea autoFocus onChange={(event) => setReason(event.target.value)} value={reason} />
@@ -5323,7 +5704,9 @@ function ReasonDialog({
         <button
           className="button button-primary"
           disabled={busy || !reason.trim()}
-          onClick={() => onSubmit(reason)}
+          onClick={() =>
+            withCancellationType ? onSubmit(reason, cancellationType) : onSubmit(reason)
+          }
           type="button"
         >
           {busy ? t("common.working") : t("common.confirm")}

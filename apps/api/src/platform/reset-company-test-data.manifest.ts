@@ -214,6 +214,10 @@ export const PRESERVE_TABLES = new Set([
   "company_bank_accounts",
   "company_business_day_configurations",
   "company_cash_accounts",
+  // Reviewed 2026-10-09: the Company's Orders menu (`20261009020000_company_order_view_menus`)
+  // -- tab names, order and filters. Pure configuration, same category as
+  // `company_settings`; a data reset keeps it, Company deletion removes it.
+  "company_order_view_menus",
   "company_reference_counters",
   // Shipment numbering is identity infrastructure. A development data reset
   // must never rewind it and make a previously issued public serial reusable.
@@ -313,6 +317,9 @@ export const PRESERVE_TABLES = new Set([
   "company_customer_quote_pricing_profiles",
   "company_customer_quote_pricing_rules",
   "platform_agent_actions",
+  // Reviewed 2026-10-10: Platform announcements (`20261010010000_platform_announcements`).
+  // Platform-owned banners with no `company_id`; listed like the other platform_* tables.
+  "platform_announcements",
   "platform_agent_conversation_comments",
   "platform_agent_conversation_status_history",
   "platform_agent_conversations",
@@ -394,6 +401,11 @@ export const PRESERVE_TABLES = new Set([
    */
   "company_whatsapp_message_templates",
   "company_whatsapp_platform_settings",
+  // Reviewed 2026-10-10: which Companies a Platform announcement targets
+  // (`20261010010000_platform_announcements`). Platform-authored configuration,
+  // not Company business data: a data reset keeps it, Company deletion removes
+  // the Company's rows.
+  "platform_announcement_companies",
   "platform_workflow_test_runs",
   "platform_workflow_test_scenarios",
   "platform_workflow_test_steps",
@@ -431,6 +443,9 @@ export const GLOBAL_TABLES = new Set([
   "commerce_integration_credentials",
   "company_customer_quote_pricing_rules",
   "platform_agent_actions",
+  // Reviewed 2026-10-10: Platform announcements (`20261010010000_platform_announcements`).
+  // Platform-owned banners with no `company_id`; listed like the other platform_* tables.
+  "platform_announcements",
   "platform_agent_conversation_comments",
   "platform_agent_conversation_status_history",
   "platform_agent_conversations",

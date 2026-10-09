@@ -22,6 +22,10 @@ import { Transform, Type } from "class-transformer";
 import { OmitType } from "@nestjs/swagger";
 
 import { NormalizeUaeMobile } from "../shared/uae-mobile.js";
+import {
+  ORDER_CANCELLATION_REASONS,
+  type OrderCancellationReason,
+} from "./order-cancellation-reason.js";
 
 const uaeMobileMessage = {
   message: "Enter a UAE mobile number, for example 0506468442 or 9715XXXXXXXX.",
@@ -118,6 +122,15 @@ export class ChangeOrderStatusDto {
   @IsString()
   @MaxLength(300)
   public readonly reason?: string;
+
+  /**
+   * Why the Order is cancelled (only read when `status` is `cancelled`).
+   * Optional: absent means "Cancel Normal", so older clients keep working.
+   * The free-text `reason` above is still required for a cancellation.
+   */
+  @IsOptional()
+  @IsIn(ORDER_CANCELLATION_REASONS)
+  public readonly cancellationReason?: OrderCancellationReason;
 
   /**
    * Prompt 16 (Driver offline sync): the delivery status the caller last knew
@@ -227,6 +240,11 @@ export class BulkChangeOrderStatusDto extends OrderSelectionDto {
   @IsString()
   @MaxLength(300)
   public readonly reason?: string;
+
+  /** As on `ChangeOrderStatusDto`: read only for `cancelled`, default Cancel Normal. */
+  @IsOptional()
+  @IsIn(ORDER_CANCELLATION_REASONS)
+  public readonly cancellationReason?: OrderCancellationReason;
 
   @IsOptional()
   @IsBoolean()
@@ -520,6 +538,19 @@ export class CreateOrderDto {
   @TrimText()
   public readonly freeOrderReason?: string;
 
+  /**
+   * Optional on create. Typed: validated and saved exactly as typed (a
+   * duplicate for the day is refused). Blank or omitted: the server assigns
+   * the next Serial inside the create transaction at the moment of saving
+   * (`order-serial-allocation.ts`). Editing keeps its own rules in
+   * `UpdateOrderDto`.
+   */
+  @ValidateIf(
+    (dto: CreateOrderDto) =>
+      dto.serialNumber !== undefined &&
+      dto.serialNumber !== null &&
+      String(dto.serialNumber).trim() !== "",
+  )
   @IsString()
   @MinLength(1)
   @MaxLength(160)

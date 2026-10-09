@@ -25,6 +25,7 @@ import {
 } from "../theme/theme-preference.js";
 import tawseelhubIcon from "../assets/tawseelhub-icon.png";
 import { CompanyWorkspace } from "./CompanyWorkspace.js";
+import { AnnouncementBanner, clearDismissedAnnouncements } from "../components/AnnouncementBanner.js";
 import { canAccessCompanyPath, firstAuthorizedCompanyPath } from "./company-access.js";
 
 /** Exactly what `GET auth/me` returns: the server-revalidated identity. */
@@ -187,6 +188,8 @@ export function App() {
       // looking signed in.
       await api.post<void>("auth/logout");
     } finally {
+      // Closed Platform announcements show again at the next sign-in.
+      clearDismissedAnnouncements();
       api.setAccessToken(undefined);
       setSession(undefined);
       navigate(requestedPath, { replace: true });
@@ -288,7 +291,15 @@ export function App() {
       ) : session === undefined ? (
         <LoginView api={api} onAuthenticated={authenticate} />
       ) : session.identity.kind === "trader" || session.identity.kind === "driver" ? (
-        <PortalWorkspace api={api} onLogout={logout} session={session} />
+        <>
+          {/* Traders read the Trader-portal banners; Drivers the ones meant
+              for the people out on the road (the "mobile" audience). */}
+          <AnnouncementBanner
+            api={api}
+            surface={session.identity.kind === "trader" ? "trader_portal" : "mobile_app"}
+          />
+          <PortalWorkspace api={api} onLogout={logout} session={session} />
+        </>
       ) : (
         // Every kind this app knows how to render is handled above. Anything
         // else (e.g. a Platform Administrator session reaching this Company

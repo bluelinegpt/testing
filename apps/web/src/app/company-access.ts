@@ -88,6 +88,9 @@ const routePermissions: Readonly<Record<string, readonly string[]>> = {
   "/configuration/general": [manage],
   "/configuration/ai-agent": [manage],
   "/configuration/maintenance": [manage],
+  // The Orders menu (tabs on the Orders screen). Administrators, or a role
+  // given the dedicated permission; the API applies the same pair.
+  "/configuration/order-views": [manage, "order_views.manage"],
   "/configuration/traders": [manage],
   "/configuration/customers": [manage],
   // Areas are Order master data, not user administration: anyone who may

@@ -78,6 +78,8 @@ describe("Platform permission catalogue", () => {
       "platform.agent.whatsapp.read",
       "platform.agent.whatsapp.reply",
       "platform.agent.whatsapp.takeover",
+      "platform.announcements.manage",
+      "platform.announcements.read",
       "platform.audit.read",
       "platform.blog.categories.manage",
       "platform.blog.create",
@@ -217,6 +219,10 @@ describe("Platform permission catalogue", () => {
       ),
       "utf8",
     );
+    const announcementsMigration = readFileSync(
+      resolve(process.cwd(), "../../database/migrations/20261010010000_platform_announcements.ts"),
+      "utf8",
+    );
     const migrations =
       foundationMigration +
       deletionMigration +
@@ -232,7 +238,8 @@ describe("Platform permission catalogue", () => {
       storeOrderConversionMigration +
       agentWhatsappMigration +
       companyWebsiteMigration +
-      companyWhatsappMigration;
+      companyWhatsappMigration +
+      announcementsMigration;
     for (const permission of PLATFORM_PERMISSIONS)
       expect(migrations).toContain(`'${permission.code}'`);
     expect(migrations).toContain(`'${PLATFORM_SUPER_ADMIN_ROLE_CODE}'`);

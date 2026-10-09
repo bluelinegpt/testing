@@ -91,6 +91,11 @@ export const PLATFORM_COMPANIES_RESET = "platform.companies.reset";
 // for the whole surface — viewing a Company's messages is part of managing
 // its WhatsApp, not a separate audience.
 export const PLATFORM_COMPANY_WHATSAPP_MANAGE = "platform.company_whatsapp.manage";
+// Platform announcements to Companies (maintenance / deployment banners).
+// Seeded by 20261010010000 onto the Platform super administrator role. READ
+// lists them; MANAGE creates, edits, ends and cancels them.
+export const PLATFORM_ANNOUNCEMENTS_READ = "platform.announcements.read";
+export const PLATFORM_ANNOUNCEMENTS_MANAGE = "platform.announcements.manage";
 
 /**
  * The Phase 1 permission set, in the order the seed migration writes them.
@@ -184,6 +189,11 @@ export const PLATFORM_PERMISSIONS: readonly { code: string; description: string 
     code: PLATFORM_COMPANY_WHATSAPP_MANAGE,
     description:
       "Enable/disable Company WhatsApp, edit its message templates and view its messages",
+  },
+  { code: PLATFORM_ANNOUNCEMENTS_READ, description: "View Platform announcements to Companies" },
+  {
+    code: PLATFORM_ANNOUNCEMENTS_MANAGE,
+    description: "Create, edit, end and cancel Platform announcements to Companies",
   },
 ];
 

@@ -15,6 +15,7 @@ import { WebsiteAgentConversationsWorkspace } from "../features/configuration/We
 import { WhatsAppConfigurationWorkspace } from "../features/configuration/WhatsAppConfigurationWorkspace.js";
 import { CompanyProfileWorkspace } from "../features/configuration/CompanyProfileWorkspace.js";
 import { OrderMaintenanceWorkspace } from "../features/configuration/OrderMaintenanceWorkspace.js";
+import { OrderViewsWorkspace } from "../features/configuration/OrderViewsWorkspace.js";
 import { ProductCatalogueWorkspace } from "../features/storefront/ProductCatalogueWorkspace.js";
 import { StorefrontConfigurationWorkspace } from "../features/storefront/StorefrontConfigurationWorkspace.js";
 import {
@@ -52,6 +53,7 @@ import { DeploymentStatusPage } from "../features/administration/DeploymentStatu
 import { SupportWorkspace } from "../features/support/SupportWorkspace.js";
 import { CommunicationCenter } from "../features/communication/CommunicationCenter.js";
 import { CompanyAppShell } from "./CompanyAppShell.js";
+import { AnnouncementBanner } from "../components/AnnouncementBanner.js";
 import { CompanyBrandingProvider } from "./CompanyBrandingContext.js";
 import { canAccessCompanyPath, firstAuthorizedCompanyPath } from "./company-access.js";
 import { SessionAccessProvider } from "./SessionAccessContext.js";
@@ -307,6 +309,8 @@ export function CompanyWorkspace({
     content = <WebsiteAgentConversationsWorkspace api={api} />;
   } else if (path === "/configuration/maintenance") {
     content = <OrderMaintenanceWorkspace api={api} />;
+  } else if (path === "/configuration/order-views") {
+    content = <OrderViewsWorkspace api={api} permissions={session.identity.permissions} />;
   } else if (path === "/configuration/whatsapp") {
     content = (
       <WhatsAppConfigurationWorkspace api={api} permissions={session.identity.permissions} />
@@ -451,6 +455,7 @@ export function CompanyWorkspace({
     <SessionAccessProvider value={sessionAccess}>
       <CompanyBrandingProvider api={api}>
         <CompanyAppShell onLogout={onLogout} session={session}>
+          <AnnouncementBanner api={api} surface="office_web" />
           <WorkflowErrorBoundary
             fallbackDescription={t("shell.workflowErrorDescription")}
             fallbackTitle={t("shell.workflowErrorTitle")}

@@ -1147,6 +1147,22 @@ function CreateDriverCollectionDialog({
       return next;
     });
 
+  // Amount to collect for every Order the operator has seen in the list, so the
+  // selection summary stays right when the selection spans several pages.
+  const knownCollectAmounts = useRef(new Map<string, string>());
+  for (const order of ordersPage?.items ?? []) {
+    knownCollectAmounts.current.set(order.id, order.amountCollected);
+  }
+  const selectionCount = selectedIds.size;
+  const selectionTotal = (() => {
+    let cents = 0;
+    for (const id of selectedIds) {
+      const value = Number(knownCollectAmounts.current.get(id) ?? 0);
+      if (Number.isFinite(value)) cents += Math.round(value * 100);
+    }
+    return (cents / 100).toFixed(2);
+  })();
+
   const listedOrderIds = (ordersPage?.items ?? []).map((order) => order.id);
   const allListedSelected =
     listedOrderIds.length > 0 && listedOrderIds.every((id) => selectedIds.has(id));
@@ -1530,6 +1546,13 @@ function CreateDriverCollectionDialog({
                   {ordersError === undefined ? null : (
                     <div className="alert alert-error">{ordersError}</div>
                   )}
+                  {/* Live as Orders are ticked: how many, and how much to collect. */}
+                  <div className="collection-selection-summary" role="status">
+                    {t("operations.collectionSelectionSummary", {
+                      amount: money(selectionTotal),
+                      count: selectionCount,
+                    })}
+                  </div>
                   <div className="detail-line detail-line-total">
                     <span>{t("operations.selectedCollections")}</span>
                     <strong>{money(preview?.grossCollections ?? "0.00")}</strong>
@@ -1739,7 +1762,7 @@ function CreateDriverCollectionDialog({
                         </dd>
                       </div>
                       <div className="detail-line">
-                        <dt>{t("operations.driverFeeOffset.remaining")}</dt>
+                        <dt>{t("operations.driverFeeOffset.remainingSelected")}</dt>
                         <dd>{money(preview?.remainingDriverFeeOutstanding)}</dd>
                       </div>
                     </dl>

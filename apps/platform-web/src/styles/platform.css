@@ -2951,3 +2951,172 @@ button.agent-live-indicator {
 .website-ai-review dd {
   margin: 0.35rem 0 0;
 }
+
+/* ---------------------------------------------------------------------------
+   Announcements (Platform -> Announcements)
+   --------------------------------------------------------------------------- */
+.announcements-page {
+  max-width: 1200px;
+}
+
+.announcement-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.announcement-editor fieldset {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--platform-border);
+  border-radius: 10px;
+}
+
+.announcement-editor fieldset legend {
+  padding: 0 4px;
+  color: var(--platform-muted);
+  font-size: 13px;
+}
+
+.announcement-editor fieldset label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.announcement-editor__languages,
+.announcement-editor__dates {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.announcement-editor__languages > div {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.announcement-editor textarea {
+  resize: vertical;
+}
+
+.announcement-editor__preview {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.announcement-editor__preview h4 {
+  margin: 0;
+  font-size: 13px;
+  color: var(--platform-muted);
+}
+
+.announcement-editor__actions,
+.announcement-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.announcement-companies {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.announcement-companies__chosen,
+.announcement-companies__results {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 220px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.announcement-companies__chosen li,
+.announcement-companies__results li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 8px;
+  border: 1px solid var(--platform-border);
+  border-radius: 8px;
+}
+
+.announcement-preview {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 14px;
+  border: 1px solid var(--announcement-border);
+  border-radius: 10px;
+  background: var(--announcement-background);
+  color: var(--announcement-text);
+  font-size: 14px;
+}
+
+.announcement-preview p {
+  flex: 1;
+  margin: 0;
+}
+
+.announcement-preview__icon,
+.announcement-preview__close {
+  font-weight: 600;
+}
+
+.announcement-preview--info,
+.announcement-badge--info {
+  --announcement-border: var(--platform-accent);
+  --announcement-background: color-mix(in srgb, var(--platform-accent) 12%, transparent);
+  --announcement-text: var(--platform-text);
+}
+
+.announcement-preview--warning,
+.announcement-badge--warning {
+  --announcement-border: var(--platform-warn-border);
+  --announcement-background: color-mix(in srgb, var(--platform-warn-border) 22%, transparent);
+  --announcement-text: var(--platform-warn-text);
+}
+
+.announcement-preview--critical,
+.announcement-badge--critical {
+  --announcement-border: var(--platform-bad-border);
+  --announcement-background: color-mix(in srgb, var(--platform-bad-border) 25%, transparent);
+  --announcement-text: var(--platform-bad-text);
+}
+
+.platform-badge.announcement-badge--info,
+.platform-badge.announcement-badge--warning,
+.platform-badge.announcement-badge--critical {
+  border-color: var(--announcement-border);
+  background: var(--announcement-background);
+  color: var(--announcement-text);
+}
+
+.platform-badge.announcement-status--live {
+  border-color: var(--platform-ok-border);
+  color: var(--platform-ok-text);
+}
+
+.platform-badge.announcement-status--ended,
+.platform-badge.announcement-status--cancelled {
+  color: var(--platform-muted);
+}
+
+@media (max-width: 760px) {
+  .announcement-editor__languages,
+  .announcement-editor__dates {
+    grid-template-columns: 1fr;
+  }
+}

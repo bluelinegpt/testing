@@ -1200,6 +1200,47 @@ export interface CompanyWhatsAppMessagesPage {
   totals: { total: number; pending: number; sent: number; failed: number };
 }
 
+export type AnnouncementType = "info" | "warning" | "critical";
+export type AnnouncementSurface = "office_web" | "trader_portal" | "mobile_app";
+export type AnnouncementAudience = "all_companies" | "selected_companies";
+export type AnnouncementDisplayStatus = "scheduled" | "live" | "ended" | "cancelled";
+
+/** A Platform announcement (maintenance / deployment banner) as the Platform sees it. */
+export interface PlatformAnnouncement {
+  readonly id: string;
+  readonly type: AnnouncementType;
+  readonly titleEn: string | null;
+  readonly titleAr: string | null;
+  readonly bodyEn: string | null;
+  readonly bodyAr: string | null;
+  readonly showFrom: string;
+  readonly showUntil: string;
+  readonly surfaces: readonly AnnouncementSurface[];
+  readonly audience: AnnouncementAudience;
+  readonly companies: readonly { readonly id: string; readonly nameEn: string }[];
+  readonly status: "active" | "cancelled";
+  readonly displayStatus: AnnouncementDisplayStatus;
+  readonly version: number;
+  readonly createdBy: string | null;
+  readonly updatedBy: string | null;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface SaveAnnouncementPayload {
+  readonly type: AnnouncementType;
+  readonly titleEn: string | null;
+  readonly titleAr: string | null;
+  readonly bodyEn: string | null;
+  readonly bodyAr: string | null;
+  /** UTC ISO instants. */
+  readonly showFrom: string;
+  readonly showUntil: string;
+  readonly surfaces: readonly AnnouncementSurface[];
+  readonly audience: AnnouncementAudience;
+  readonly companyIds: readonly string[];
+}
+
 export const platformApi = {
   async login(identifier: string, password: string): Promise<PlatformIdentity> {
     const result = await request<{ identity: PlatformIdentity }>("platform/auth/login", {
@@ -1218,6 +1259,50 @@ export const platformApi = {
 
   async logout(): Promise<void> {
     await request("platform/auth/logout", { method: "POST" });
+  },
+
+  async announcements(): Promise<PlatformAnnouncement[]> {
+    const result = await request<PlatformAnnouncement[]>("platform/announcements", {
+      method: "GET",
+    });
+    return Array.isArray(result) ? result : [];
+  },
+
+  async createAnnouncement(payload: SaveAnnouncementPayload): Promise<PlatformAnnouncement> {
+    const result = await request<PlatformAnnouncement>("platform/announcements", {
+      body: payload,
+      method: "POST",
+    });
+    if (result === undefined) throw new PlatformApiError("Empty announcement response", "empty", 500);
+    return result;
+  },
+
+  async updateAnnouncement(
+    id: string,
+    payload: SaveAnnouncementPayload,
+  ): Promise<PlatformAnnouncement> {
+    const result = await request<PlatformAnnouncement>(`platform/announcements/${id}`, {
+      body: payload,
+      method: "PUT",
+    });
+    if (result === undefined) throw new PlatformApiError("Empty announcement response", "empty", 500);
+    return result;
+  },
+
+  async endAnnouncementNow(id: string): Promise<PlatformAnnouncement> {
+    const result = await request<PlatformAnnouncement>(`platform/announcements/${id}/end-now`, {
+      method: "POST",
+    });
+    if (result === undefined) throw new PlatformApiError("Empty announcement response", "empty", 500);
+    return result;
+  },
+
+  async cancelAnnouncement(id: string): Promise<PlatformAnnouncement> {
+    const result = await request<PlatformAnnouncement>(`platform/announcements/${id}/cancel`, {
+      method: "POST",
+    });
+    if (result === undefined) throw new PlatformApiError("Empty announcement response", "empty", 500);
+    return result;
   },
 
   async companies(filters: CompanyListFilters = {}): Promise<CompanyPage> {

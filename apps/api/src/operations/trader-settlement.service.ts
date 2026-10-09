@@ -2793,7 +2793,15 @@ export class TraderSettlementService {
           left join areas a on a.id = o.area_id and a.company_id = o.company_id
           left join emirates e on e.id = a.emirate_id
          where link.settlement_id = ${settlementId}::uuid and link.company_id = ${companyId}::uuid
-         order by coalesce(o.serial_number, o.order_number)
+         -- Reference Number first, compared NUMERICALLY (lexically '10' sorts
+         -- before '9'); text as the tie-break for references that carry
+         -- letters, Orders without a reference last, then the Serial Number
+         -- (also numeric) and the id so the order is always fixed. Shared by
+         -- the settlement screen and the printed Trader Invoice.
+         order by nullif(regexp_replace(o.reference_number, '[^0-9]', '', 'g'), '')::numeric asc nulls last,
+                  o.reference_number asc nulls last,
+                  nullif(regexp_replace(coalesce(o.serial_number, o.order_number), '[^0-9]', '', 'g'), '')::numeric asc nulls last,
+                  o.id asc
       `.execute(this.database)
     ).rows;
     const lines: TraderSettlementDetailOrder[] = rows.map((row) => ({

@@ -575,6 +575,9 @@ export class DriverCashReconciliationService {
       gross.minus(expenseTotal),
       requestedOffset,
       input.driverFeeAllocations,
+      false,
+      // Only the fees of the selected Orders can be offset (9 Oct 2026).
+      orders.map((order) => order.id),
     );
     const selectedDriverFeeOffset = new Decimal(feeOffset.requestedOffset);
     const net = gross.minus(selectedDriverFeeOffset).minus(expenseTotal);
@@ -713,6 +716,8 @@ export class DriverCashReconciliationService {
         requestedOffset,
         input.driverFeeAllocations,
         true,
+        // Only the fees of the Orders in this collection (9 Oct 2026).
+        orders.map((order) => order.id),
       );
       const selectedDriverFeeOffset = new Decimal(feeOffset.requestedOffset);
       const net = gross.minus(selectedDriverFeeOffset).minus(expenseTotal);
@@ -818,6 +823,7 @@ export class DriverCashReconciliationService {
         correlationId,
         driverId,
         idempotencyKey: key,
+        orderIds: orders.map((order) => order.id),
         paymentDate: header.rows[0]!.businessDate,
         reconciliationId,
         safeCollectionAmount: gross.minus(expenseTotal),

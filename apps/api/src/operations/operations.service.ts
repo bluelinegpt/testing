@@ -24,8 +24,16 @@ import {
   type VatPolicy,
 } from "./order-financial-model.js";
 import { closeSettlementComplete } from "./order-close-eligibility.js";
+import { resolveOrderCancellationReason } from "./order-cancellation-reason.js";
+import { allocateAutomaticOrderSerial, nextAutomaticSerial } from "./order-serial-allocation.js";
 import { deriveOrderWorkflowGuidance } from "./order-workflow-guidance.js";
 import { driverWorkPredicate } from "./driver-work-visibility.js";
+import {
+  type CustomViewDefinition,
+  type ActiveViewDefinition,
+  validateOrderViews,
+} from "../company-configuration/order-views.js";
+import { activeStatusPredicate, customOrderViewPredicate } from "./order-view-predicate.js";
 import type { DatabaseSchema } from "../infrastructure/database/database.types.js";
 import { KyselyTransactionManager } from "../infrastructure/database/transaction-manager.js";
 import { ApplicationException } from "../presentation/errors/application.exception.js";
@@ -132,6 +140,8 @@ export interface OperationsOrderFilters {
   readonly dateFrom?: string | undefined;
   readonly dateTo?: string | undefined;
   readonly deliveryStatus?: string | undefined;
+  /** Cancellation type: cancel_by_customer, cancel_by_trader or cancel_normal. */
+  readonly cancellationReason?: string | undefined;
   readonly internationalCarrierStatus?: string | undefined;
   readonly driverId?: string | undefined;
   readonly orderType?: "collect_order" | "delivery" | "gcc_international" | undefined;
@@ -147,6 +157,12 @@ export interface OperationsOrderFilters {
     "complete" | "collect_from_driver" | "collect_from_trader" | "settle_trader" | undefined;
   readonly quickView?:
     "active" | "all" | "cancelled" | "closed" | "hold" | "accountant" | undefined;
+  /**
+   * Orders menu: a tab from the Company's custom menu. Only `active` (its
+   * statuses come from the menu) and `custom_*` keys are accepted, and only
+   * while the custom menu is switched on. Absent: today's behaviour exactly.
+   */
+  readonly viewKey?: string | undefined;
   /**
    * Delivery Activity: only Orders that actually reached a customer.
    *
@@ -379,6 +395,13 @@ export interface OperationsOrder {
   readonly customerMobileNumber: string;
   readonly customerName: string;
   readonly deliveryStatus: string;
+  /**
+   * Why a cancelled Order was cancelled: `cancel_by_customer`,
+   * `cancel_by_trader` or `cancel_normal`. Null for Orders that are not
+   * cancelled and for Orders cancelled before reasons existed. Internal only:
+   * not projected by any Trader Portal response.
+   */
+  readonly cancellationReason?: string | null;
   readonly internationalCarrierStatus?: "ready_for_carrier" | "handed_to_carrier" | "in_transit" | null;
   readonly driverReconciliationStatus: string;
   readonly id: string;
@@ -1046,6 +1069,7 @@ export class OperationsService {
     const serialNumber = this.optionalFilter(filters.serialNumber);
     const serialTerm = serialNumber === null ? null : this.normalizeOrderIdentifier(serialNumber);
     const deliveryStatus = this.optionalFilter(filters.deliveryStatus);
+    const cancellationReason = this.cancellationReasonFilter(filters.cancellationReason);
     const internationalCarrierStatus = this.optionalFilter(filters.internationalCarrierStatus);
     const orderType = this.optionalFilter(filters.orderType);
     const thirdPartyDeliveryCompanyName = this.optionalFilter(filters.thirdPartyDeliveryCompanyName);
@@ -1065,7 +1089,11 @@ export class OperationsService {
     const emirateId = this.optionalUuidFilter(filters.emirateId);
     const dateFrom = this.optionalDate(filters.dateFrom);
     const dateTo = this.optionalDate(filters.dateTo);
-    const quickView = filters.quickView ?? "active";
+    // Orders menu. A Driver User keeps their own work queue: custom tabs are
+    // an Office layout and never narrow or widen what a Driver sees.
+    const menuView =
+      ownDriverId === undefined ? await this.orderMenuView(companyId, filters.viewKey) : null;
+    const quickView = menuView?.kind === "custom" ? "all" : (filters.quickView ?? "active");
     const openTraderReceivablePredicate = sql`
       exists (
         select 1
@@ -1172,7 +1200,7 @@ export class OperationsService {
     const quickViewPredicate = sql`
       (${quickView} = 'all'
         or (${quickView} = 'active' and (
-          o.delivery_status in ('new','in_branch','assigned_to_driver','out_for_delivery','hold','delivered','returned_to_branch','returned_to_trader','collect_order')
+          ${activeStatusPredicate(menuView?.kind === "active" ? menuView.statuses : null)}
           or ${financiallyPendingClosedPredicate}
         ))
         or (${quickView} = 'closed' and o.delivery_status = 'closed' and not ${financiallyPendingClosedPredicate})
@@ -1225,7 +1253,15 @@ export class OperationsService {
     // work such as holds and financial follow-up which is not Driver work.
     const visibilityPredicate =
       ownDriverId === undefined ? quickViewPredicate : driverWorkPredicate();
-    const tabPredicate = sql`
+    const tabPredicate =
+      menuView?.kind === "custom"
+        ? sql`
+      ${visibilityPredicate}
+      and (${ownDriverId}::uuid is null or o.assigned_driver_id = ${ownDriverId}::uuid)
+      and (${deliveredOnly} = false or o.delivered_at is not null)
+      and ${menuView.predicate}
+    `
+        : sql`
       ${visibilityPredicate}
       and (${ownDriverId}::uuid is null or o.assigned_driver_id = ${ownDriverId}::uuid)
       and (${deliveredOnly} = false or o.delivered_at is not null)
@@ -1243,6 +1279,7 @@ export class OperationsService {
            or o.serial_number_normalized = ${serialTerm}::text)
       and ${unifiedOrderSearchPredicate(search)}
       and (${deliveryStatus}::text is null or o.delivery_status = ${deliveryStatus})
+      and (${cancellationReason}::text is null or o.cancellation_reason_code = ${cancellationReason})
       and (${internationalCarrierStatus}::text is null or o.international_carrier_status = ${internationalCarrierStatus})
       and ${workflowStepPredicate}
       and (${orderType}::text is null or o.order_type = ${orderType})
@@ -1311,6 +1348,7 @@ export class OperationsService {
              o.company_revenue::text as "companyRevenue",
              o.order_profit::text as "orderProfit",
              o.delivery_status as "deliveryStatus",
+             o.cancellation_reason_code as "cancellationReason",
              o.driver_reconciliation_status as "driverReconciliationStatus",
              o.trader_settlement_status as "traderSettlementStatus",
              case
@@ -1631,6 +1669,63 @@ export class OperationsService {
     };
   }
 
+  /**
+   * Resolves an Orders menu tab to the rule the list applies. `null` when no
+   * tab was asked for, so the list runs today's query unchanged.
+   *
+   * The menu is read and re-validated on every request rather than trusted
+   * from the client: a tab's rule is whatever the Company saved, and a tab
+   * that no longer exists, or a menu that was switched off, is refused so the
+   * screen can fall back to the standard tabs instead of silently showing a
+   * different list.
+   */
+  private async orderMenuView(
+    companyId: string,
+    viewKey: string | undefined,
+  ): Promise<
+    | { readonly kind: "active"; readonly statuses: readonly string[] }
+    | { readonly kind: "custom"; readonly predicate: ReturnType<typeof sql> }
+    | null
+  > {
+    const key = viewKey?.trim() ?? "";
+    if (key === "") return null;
+    const unavailable = () =>
+      new ApplicationException(
+        "order_view_unavailable",
+        "This Orders tab is not available. Reload the Orders screen.",
+        HttpStatus.UNPROCESSABLE_ENTITY,
+      );
+    if (key !== "active" && !key.startsWith("custom_")) throw unavailable();
+    const result = await sql<{ enabled: boolean; views: unknown }>`
+      select custom_menu_enabled as enabled, views
+      from company_order_view_menus
+      where company_id = ${companyId}::uuid
+    `.execute(this.database);
+    const row = result.rows[0];
+    if (row === undefined || !row.enabled) throw unavailable();
+    const validation = validateOrderViews(row.views);
+    if (!validation.ok) throw unavailable();
+    const view = validation.views.find((candidate) => candidate.key === key);
+    if (view === undefined || view.definition === null) throw unavailable();
+    if (key === "active") {
+      return { kind: "active", statuses: (view.definition as ActiveViewDefinition).statuses };
+    }
+    const timezone = await this.companyTimezone();
+    return {
+      kind: "custom",
+      predicate: customOrderViewPredicate(view.definition as CustomViewDefinition, timezone),
+    };
+  }
+
+  /** Only the three known cancellation types filter; anything else is ignored. */
+  private cancellationReasonFilter(value: string | undefined): string | null {
+    const reason = this.optionalFilter(value);
+    return reason !== null &&
+      ["cancel_by_customer", "cancel_by_trader", "cancel_normal"].includes(reason)
+      ? reason
+      : null;
+  }
+
   /** Company timezone for Calendar Date mode. One row, cached by Postgres. */
   private async companyTimezone(): Promise<string> {
     const { companyId } = this.tenants.current();
@@ -1653,6 +1748,7 @@ export class OperationsService {
     const serialNumber = this.optionalFilter(filters.serialNumber);
     const serialTerm = serialNumber === null ? null : this.normalizeOrderIdentifier(serialNumber);
     const deliveryStatus = this.optionalFilter(filters.deliveryStatus);
+    const cancellationReason = this.cancellationReasonFilter(filters.cancellationReason);
     const cashStatus = this.optionalFilter(filters.cashStatus);
     const settlementStatus = this.optionalFilter(filters.settlementStatus);
     const workflowStep = this.optionalFilter(filters.workflowStep);
@@ -1752,6 +1848,7 @@ export class OperationsService {
              o.company_revenue::text as "companyRevenue",
              o.order_profit::text as "orderProfit",
              o.delivery_status as "deliveryStatus",
+             o.cancellation_reason_code as "cancellationReason",
              o.international_carrier_status as "internationalCarrierStatus",
              o.driver_reconciliation_status as "driverReconciliationStatus",
              o.trader_settlement_status as "traderSettlementStatus",
@@ -1769,6 +1866,7 @@ export class OperationsService {
              or o.serial_number_normalized = ${serialTerm}::text)
         and ${unifiedOrderSearchPredicate(search)}
         and (${deliveryStatus}::text is null or o.delivery_status = ${deliveryStatus})
+        and (${cancellationReason}::text is null or o.cancellation_reason_code = ${cancellationReason})
         and ${exportWorkflowStepPredicate}
         and (${cashStatus}::text is null or o.driver_reconciliation_status = ${cashStatus})
         and (${settlementStatus}::text is null or o.trader_settlement_status = ${settlementStatus})
@@ -1808,6 +1906,7 @@ export class OperationsService {
         "delivery_status",
         "cash_status",
         "settlement_status",
+        "cancellation_reason",
       ],
       ...result.rows.map((order) => [
         order.serialNumber ?? "",
@@ -1834,6 +1933,7 @@ export class OperationsService {
         order.deliveryStatus,
         order.driverReconciliationStatus,
         order.traderSettlementStatus,
+        order.cancellationReason ?? "",
       ]),
     ]);
     return {
@@ -2822,14 +2922,17 @@ export class OperationsService {
       deliveryCompanyId,
     );
     // Trader Portal serial numbers are Company-owned operational identifiers.
-    // The Trader should not type or control them; generate the next serial in
-    // the target Company tenant scope immediately before creating the Order.
+    // The Trader cannot type or control them (the DTO omits `serialNumber`);
+    // `createOrder` assigns the next one in the target Company tenant scope,
+    // inside the create transaction.
     // Own Company: no override needed, identical to today's behaviour except
     // for server-generated serial numbers.
     if (target.companyId === identity.companyId) {
-      const nextSerial = await this.legacySerialInputForAutomaticPath();
+      // No Serial is passed: `createOrder` assigns it inside its own
+      // transaction, so a Trader and an office user saving at the same moment
+      // can no longer be handed the same number.
       return this.createOrder(
-        { ...pricedByCompany, ...nextSerial, traderId: target.traderId },
+        { ...pricedByCompany, traderId: target.traderId },
         correlationId,
         idempotencyKey,
       );
@@ -2845,9 +2948,9 @@ export class OperationsService {
     return this.tenants.run(
       { companyId: target.companyId, identityId: identity.identityId },
       async () => {
-        const nextSerial = await this.legacySerialInputForAutomaticPath();
+        // Serial assigned by `createOrder` in the TARGET Company's scope.
         return this.createOrder(
-          { ...pricedByCompany, ...nextSerial, traderId: target.traderId },
+          { ...pricedByCompany, traderId: target.traderId },
           correlationId,
           idempotencyKey,
           target.accountId,
@@ -4039,13 +4142,8 @@ export class OperationsService {
       .digest("hex");
 
     return this.transactions.execute(async (transaction) => {
-      if (suppliedSerialNumber === null) {
-        throw new ApplicationException(
-          "serial_number_required",
-          "Serial Number is required",
-          HttpStatus.BAD_REQUEST,
-        );
-      }
+      // A blank Serial Number is no longer refused: it is assigned below, inside
+      // this transaction, once the idempotency reservation has been won.
       const reservation = await sql<{ id: string }>`
         insert into idempotency_records (
           company_id, operation, idempotency_key, request_hash, expires_at
@@ -4092,15 +4190,14 @@ export class OperationsService {
         `.execute(transaction)
         ).rows[0]?.value ?? null;
       const psystemSerialNormalized = psystemSerial?.toLowerCase() ?? null;
-      const serialNumber = suppliedSerialNumber;
-      const serialNumberNormalized = this.normalizeOrderIdentifier(serialNumber);
-
-      await this.assertOrderIdentifiersAvailable(transaction, companyId, {
-        referenceNumber,
-        referenceNumberNormalized,
-        serialNumber,
-        serialNumberNormalized,
-      });
+      // Typed Serial: kept exactly as typed, or refused as a duplicate for the
+      // day. Blank Serial: assigned now, at the moment of saving, under the
+      // per-Company per-day allocator lock (see order-serial-allocation.ts).
+      const { serialNumber, serialNumberNormalized } = await this.assignSerialAndAssertIdentifiers(
+        transaction,
+        companyId,
+        { referenceNumber, referenceNumberNormalized, suppliedSerialNumber },
+      );
 
       const trader = await sql<{ id: string; name: string }>`
         select id, name_en as name
@@ -4648,21 +4745,24 @@ export class OperationsService {
     };
   }
 
+  /**
+   * A READ-ONLY HINT, not a reservation. New Order and Fast Entry no longer
+   * call this: a blank Serial is assigned by `createOrder` at the moment of
+   * saving. Kept for remaining callers (Hold reactivation pre-fill) and uses the
+   * same "smart last number" rule, so a typed outlier such as 500 does not
+   * make the hint jump.
+   */
   public async nextSerialNumber(): Promise<{ serialNumber: string }> {
     const { companyId } = this.tenants.current();
-    const result = await sql<{ serialNumber: string }>`
-      select (coalesce(max(serial_number::bigint), 0) + 1)::text as "serialNumber"
+    const result = await sql<{ serial: string }>`
+      select distinct serial_number as serial
         from orders
        where company_id=${companyId}::uuid
          and order_date=current_date
          and serial_number ~ '^[0-9]+$'
     `.execute(this.database);
 
-    return { serialNumber: result.rows[0]?.serialNumber ?? "1" };
-  }
-
-  private async legacySerialInputForAutomaticPath(): Promise<{ serialNumber?: string }> {
-    return this.nextSerialNumber();
+    return { serialNumber: nextAutomaticSerial(result.rows.map((row) => row.serial)) };
   }
 
   public async importOrdersCsv(
@@ -6042,6 +6142,12 @@ export class OperationsService {
         return;
       }
       const reason = input.reason?.trim() || null;
+      // Fixed-list cancellation reason, a label only (no money effect). Only
+      // written when the Order is cancelled; cancelled is terminal.
+      const cancellationReasonCode =
+        status === "cancelled"
+          ? resolveOrderCancellationReason(identity.kind, input.cancellationReason)
+          : null;
       // Driver Physical Correction (Section F): "Hold" is not a new status —
       // it already exists for Operations (`operationsTransitions` below) with
       // its own reason requirement and audit/history recording, both handled
@@ -6177,6 +6283,8 @@ export class OperationsService {
         update orders
            set delivery_status = ${status},
                delivery_reason = ${reason},
+               cancellation_reason_code = case when ${status} = 'cancelled'
+                 then ${cancellationReasonCode} else cancellation_reason_code end,
                amount_collected = case when ${status} = 'closed' then amount_collected else ${amountCollected} end,
                driver_reconciliation_status = ${reconciliationStatus},
                trader_settlement_status = ${traderSettlementStatus},
@@ -6222,7 +6330,11 @@ export class OperationsService {
       await this.audit(transaction, {
         action: "order.delivery_status_change",
         actorId: identity.identityId,
-        after: { from: order.deliveryStatus, to: status },
+        after: {
+          from: order.deliveryStatus,
+          to: status,
+          ...(cancellationReasonCode === null ? {} : { cancellationReason: cancellationReasonCode }),
+        },
         companyId,
         correlationId,
         subjectId: orderId,
@@ -6854,6 +6966,7 @@ export class OperationsService {
              o.company_revenue::text as "companyRevenue",
              o.order_profit::text as "orderProfit",
              o.delivery_status as "deliveryStatus",
+             o.cancellation_reason_code as "cancellationReason",
              o.driver_reconciliation_status as "driverReconciliationStatus",
              o.trader_settlement_status as "traderSettlementStatus",
              case
@@ -7302,6 +7415,70 @@ export class OperationsService {
         `Reference Number "${input.referenceNumber}" is already used`,
         HttpStatus.CONFLICT,
       );
+    }
+  }
+
+  /**
+   * Serial Number for a new Order, plus the existing identifier check.
+   *
+   * - Typed: normalized and checked exactly as before; a duplicate for the day
+   *   is `409 order_serial_already_exists_for_date`. Never changed.
+   * - Blank: `allocateAutomaticOrderSerial` takes the per-Company per-day lock
+   *   and picks the next number by the smart-last-number rule. The existing
+   *   per-serial lock and re-check in `assertOrderIdentifiersAvailable` still
+   *   run on that number. If a typed Serial committed between the read and that
+   *   lock, the number is stepped over and another is chosen (bounded).
+   *
+   * The Serial day is unchanged: `current_date` from the database, as before.
+   */
+  private async assignSerialAndAssertIdentifiers(
+    transaction: Parameters<Parameters<KyselyTransactionManager["execute"]>[0]>[0],
+    companyId: string,
+    input: {
+      referenceNumber: string | null;
+      referenceNumberNormalized: string | null;
+      suppliedSerialNumber: string | null;
+    },
+  ): Promise<{ serialNumber: string; serialNumberNormalized: string }> {
+    if (input.suppliedSerialNumber !== null) {
+      const serialNumber = input.suppliedSerialNumber;
+      const serialNumberNormalized = this.normalizeOrderIdentifier(serialNumber);
+      await this.assertOrderIdentifiersAvailable(transaction, companyId, {
+        referenceNumber: input.referenceNumber,
+        referenceNumberNormalized: input.referenceNumberNormalized,
+        serialNumber,
+        serialNumberNormalized,
+      });
+      return { serialNumber, serialNumberNormalized };
+    }
+    const maximumAttempts = 5;
+    const lostToTypedSerial: string[] = [];
+    for (let attempt = 1; ; attempt += 1) {
+      const serialNumber = await allocateAutomaticOrderSerial(
+        transaction,
+        companyId,
+        lostToTypedSerial,
+      );
+      const serialNumberNormalized = this.normalizeOrderIdentifier(serialNumber);
+      try {
+        await this.assertOrderIdentifiersAvailable(transaction, companyId, {
+          referenceNumber: input.referenceNumber,
+          referenceNumberNormalized: input.referenceNumberNormalized,
+          serialNumber,
+          serialNumberNormalized,
+        });
+        return { serialNumber, serialNumberNormalized };
+      } catch (error) {
+        if (
+          error instanceof ApplicationException &&
+          error.errorCode === "order_serial_already_exists_for_date" &&
+          attempt < maximumAttempts
+        ) {
+          lostToTypedSerial.push(serialNumber);
+          continue;
+        }
+        throw error;
+      }
     }
   }
 

@@ -20,6 +20,8 @@ import { TraderConfigurationService } from "./trader-configuration.service.js";
 import { DriverRoleProvisioningService } from "../users/driver-role-provisioning.service.js";
 import { CompanyWebsiteAgentInboxController } from "./company-website-agent-inbox.controller.js";
 import { CompanyWebsiteAgentInboxService } from "./company-website-agent-inbox.service.js";
+import { OrderViewsController } from "./order-views.controller.js";
+import { OrderViewsService } from "./order-views.service.js";
 
 @Module({
   imports: [AuthenticationModule],
@@ -30,6 +32,7 @@ import { CompanyWebsiteAgentInboxService } from "./company-website-agent-inbox.s
     TraderConfigurationController,
     CustomerConfigurationController,
     CompanyWebsiteAgentInboxController,
+    OrderViewsController,
   ],
   providers: [
     AreaConfigurationService,
@@ -54,7 +57,14 @@ import { CompanyWebsiteAgentInboxService } from "./company-website-agent-inbox.s
     // cross-module import (see OperationsModule's own comment on this).
     DriverRoleProvisioningService,
     CompanyWebsiteAgentInboxService,
+    OrderViewsService,
   ],
-  exports: [AreaConfigurationService, BusinessDayService, ReportDateModeService],
+  exports: [
+    AreaConfigurationService,
+    BusinessDayService,
+    ReportDateModeService,
+    // The Orders list (next prompt) reads the menu to build its tabs.
+    OrderViewsService,
+  ],
 })
 export class CompanyConfigurationModule {}

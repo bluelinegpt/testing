@@ -53,6 +53,8 @@ import {
 } from "./company-website.controller.js";
 import { CompanyWebsiteService } from "./company-website.service.js";
 import { PlatformCompanyWhatsAppController } from "./platform-company-whatsapp.controller.js";
+import { PlatformAnnouncementController } from "./platform-announcement.controller.js";
+import { AnnouncementsService } from "../announcements/announcements.service.js";
 import { PlatformCompanyWhatsAppService } from "./platform-company-whatsapp.service.js";
 import { CompanyWebsiteDomainService } from "./company-website-domain.service.js";
 import {
@@ -96,6 +98,7 @@ import { CompanyWebsiteAiSetupProvider } from "./company-website-ai-setup.provid
     PlatformCompanyUserController,
     PlatformCompanyWebsiteController,
     PlatformCompanyWhatsAppController,
+    PlatformAnnouncementController,
     PublicCompanyWebsiteController,
   ],
   exports: [PlatformService, PlatformAuditService, PlatformCompanyService],
@@ -129,6 +132,8 @@ import { CompanyWebsiteAiSetupProvider } from "./company-website-ai-setup.provid
     PlatformTargetCompanyGuard,
     CompanyWebsiteService,
     PlatformCompanyWhatsAppService,
+    // Re-provided leaf service (database only), as elsewhere in this module.
+    AnnouncementsService,
     CompanyWebsiteDomainService,
     CloudflareCompanyWebsiteDomainProvider,
     { provide: CompanyWebsiteDomainProvider, useExisting: CloudflareCompanyWebsiteDomainProvider },

@@ -5,6 +5,7 @@ import { ThrottlerGuard, ThrottlerModule } from "@nestjs/throttler";
 import { LoggerModule } from "nestjs-pino";
 
 import { AccountingModule } from "./accounting/accounting.module.js";
+import { AnnouncementsModule } from "./announcements/announcements.module.js";
 import { configuration, validateEnvironment } from "./configuration/environment.js";
 import { AuthenticationModule } from "./authentication/authentication.module.js";
 import { CommerceIntegrationModule } from "./commerce-integrations/commerce-integration.module.js";
@@ -65,6 +66,7 @@ import { WhatsAppModule } from "./whatsapp/whatsapp.module.js";
     CommerceCustomerModule,
     CommerceCheckoutModule,
     AccountingModule,
+    AnnouncementsModule,
     CompanyConfigurationModule,
     CompanyProfileModule,
     CommunicationModule,

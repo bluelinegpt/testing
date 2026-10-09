@@ -820,8 +820,15 @@ export class OutsourcedDriverFeeService {
     requestedAmount = new Decimal(0),
     allocations?: readonly { accrualId: string; amount: number }[],
     lock = false,
+    /**
+     * The Orders in this Driver Collection. When given, only THEIR unpaid fee
+     * accruals can be offset (Aiman, 9 Oct 2026): older outstanding fees from
+     * other Orders are neither shown nor touched and stay for a separate
+     * Driver payment. Omitted keeps the Driver-wide behaviour.
+     */
+    orderIds?: readonly string[],
   ): Promise<CollectionOffsetResult> {
-    const totalRows = await this.payableAccruals(database, companyId, driverId, lock);
+    const totalRows = await this.payableAccruals(database, companyId, driverId, lock, orderIds);
     const total = totalRows.reduce((sum, row) => sum.plus(row.outstanding), new Decimal(0));
     if (total.isPositive()) this.support.assertPermission("outsourced_driver_fees.view");
     const safeMaximum = Decimal.min(total, Decimal.max(0, safeCollectionAmount));
@@ -861,6 +868,8 @@ export class OutsourcedDriverFeeService {
       readonly paymentDate: string;
       readonly reconciliationId: string;
       readonly safeCollectionAmount: Decimal;
+      /** Same scope as `collectionOffsetProposal`: the collection's Orders. */
+      readonly orderIds?: readonly string[];
     },
   ) {
     if (input.amount.isZero()) return null;
@@ -873,6 +882,7 @@ export class OutsourcedDriverFeeService {
       input.amount,
       input.allocations,
       true,
+      input.orderIds,
     );
     return this.createPayment(database, {
       actorId: input.actorId,
@@ -1183,12 +1193,22 @@ export class OutsourcedDriverFeeService {
     companyId: string,
     driverId: string,
     lock: boolean,
+    orderIds?: readonly string[],
   ) {
+    // Scoped to the given Orders when a list is passed; an empty list means
+    // "no Orders", so nothing is payable (never "every Order").
+    const orderScope =
+      orderIds === undefined
+        ? sql``
+        : orderIds.length === 0
+          ? sql`and false`
+          : sql`and f.order_id in (${sql.join(orderIds.map((id) => sql`${id}::uuid`))})`;
     const result = await sql<{ accrualId: string; orderNumber: string; outstanding: string }>`
       select f.id as "accrualId",coalesce(o.order_number,f.source_reference) as "orderNumber",f.outstanding_amount::text as outstanding
       from outsourced_driver_fee_accruals f left join orders o on o.id=f.order_id and o.company_id=f.company_id
       where f.company_id=${companyId}::uuid and f.driver_id=${driverId}::uuid
         and f.status in ('accrued','partially_paid') and f.outstanding_amount>0
+        ${orderScope}
       order by f.accrual_business_date,f.delivery_date,f.created_at,f.id
       ${lock ? sql`for update of f` : sql``}
     `.execute(database);

@@ -29,6 +29,7 @@ import { PlatformWebsiteCmsController } from "./platform-website-cms.controller.
 import { PlatformAgentController } from "./platform-agent.controller.js";
 import { PlatformCompanyWebsiteController } from "./company-website.controller.js";
 import { PlatformCompanyWhatsAppController } from "./platform-company-whatsapp.controller.js";
+import { PlatformAnnouncementController } from "./platform-announcement.controller.js";
 
 /**
  * The Platform route inventory, enumerated rather than assumed.
@@ -62,6 +63,7 @@ const platformControllers = [
   PlatformCompanyUserController,
   PlatformCompanyWebsiteController,
   PlatformCompanyWhatsAppController,
+  PlatformAnnouncementController,
 ];
 
 interface PlatformRoute {
@@ -229,6 +231,8 @@ describe("Platform route inventory", () => {
       "primaryDomain",
       "disableDomain",
       "removeDomain",
+      "endNow", // Platform announcements: stop showing now.
+      "cancel", // Platform announcements: cancel (kept for the record).
     ];
     const bad: string[] = [];
     for (const route of routes) {

@@ -29,6 +29,7 @@ export function CreateOrderDialog({
   api,
   edit,
   onClose,
+  onCreated,
   onSaved,
   permissions = [],
   searchDebounceMs,
@@ -43,6 +44,11 @@ export function CreateOrderDialog({
    */
   edit?: { orderId: string; orderNumber: string };
   onClose: () => void;
+  /**
+   * Called with the new Order right before the dialog closes, so the page can
+   * confirm it (Order Number and the Serial the server assigned).
+   */
+  onCreated?: (order: OperationsOrder) => void;
   onSaved: () => Promise<void>;
   permissions?: readonly string[];
   /** Closed Orders may be inspected without allowing any mutation. */
@@ -127,7 +133,9 @@ export function CreateOrderDialog({
   const [requoteNonce, setRequoteNonce] = useState(0);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string>();
-  const [createdOrder, setCreatedOrder] = useState<OperationsOrder>();
+  // Create now closes the dialog (the Orders list shows the notice), so this
+  // stays undefined; kept so the existing success panel needs no rewrite.
+  const [createdOrder] = useState<OperationsOrder>();
   // Edit mode only: the loaded Order this dialog is editing. The form stays in
   // a loading state until it arrives, so pre-filled values never flash empty.
   const [editDetail, setEditDetail] = useState<OperationsOrderDetail>();
@@ -189,7 +197,9 @@ export function CreateOrderDialog({
   // button stays enabled and a full validation runs on submit, so the operator
   // always sees exactly what is missing or invalid.
   const validationErrors: Record<string, string> = {};
-  if (serialNumber.trim() === "")
+  // Create: a blank Serial Number is assigned by the server at the moment of
+  // saving, so it is not an error. Edit keeps the Order's own Serial.
+  if (isEdit && serialNumber.trim() === "")
     validationErrors.serialNumber = t("operations.errors.serialRequired");
   else if (identifierError !== undefined) validationErrors.serialNumber = identifierError;
   if (trader === undefined) validationErrors.trader = t("operations.errors.traderRequired");
@@ -472,23 +482,9 @@ export function CreateOrderDialog({
     };
   }, [api, edit, t]);
 
-  useEffect(() => {
-    // Edit mode keeps the Order's own Serial Number; never propose a new one.
-    if (isEdit) return;
-    let active = true;
-    void api
-      .get<{ serialNumber: string; serverGenerated?: boolean }>(
-        "operations/orders/next-serial-number",
-      )
-      .then((result) => {
-        if (!active) return;
-        setSerialNumber((current) => (current.trim() === "" ? result.serialNumber : current));
-      })
-      .catch(() => undefined);
-    return () => {
-      active = false;
-    };
-  }, [api, isEdit]);
+  // No Serial Number is pre-fetched when the dialog opens: two users with the
+  // dialog open would both be shown the same number. Left blank, the server
+  // assigns it inside the create transaction at the moment of saving.
 
   useEffect(() => {
     setIdentifierError(undefined);
@@ -803,7 +799,8 @@ export function CreateOrderDialog({
           notes: notes.trim() || undefined,
           packageCount: packageCountInput.ok ? packageCountInput.value : 0,
           referenceNumber: referenceNumber.trim() || undefined,
-          serialNumber: serialNumber.trim(),
+          // Blank is sent as omitted: the server assigns the next Serial.
+          serialNumber: serialNumber.trim() === "" ? undefined : serialNumber.trim(),
           paymentCondition,
           serviceFee: enteredFee,
           serviceFeeOverrideReason: enteredReason,
@@ -826,8 +823,12 @@ export function CreateOrderDialog({
         },
         { "X-Idempotency-Key": idempotencyKeyRef.current },
       );
-      setCreatedOrder(order);
+      // The dialog closes as soon as the Order is created (Aiman, 9 Oct 2026);
+      // the page shows the confirmation instead of a success screen here.
       await onSaved();
+      onCreated?.(order);
+      onClose();
+      return;
     } catch (requestError) {
       const code = requestError instanceof ApiError ? requestError.code : undefined;
       // Map backend error codes to the field the operator can act on, so the
@@ -967,7 +968,9 @@ export function CreateOrderDialog({
                   </div>
                   <div className="form-grid">
                     <label
-                      className={orderType === "collect_order" ? "field" : "field required-field"}
+                      className={
+                        orderType === "collect_order" || !isEdit ? "field" : "field required-field"
+                      }
                     >
                       <span>{t("operations.serialNumber")}</span>
                       <input
@@ -983,7 +986,8 @@ export function CreateOrderDialog({
                           setSerialNumber(event.target.value);
                           clearServerError("serialNumber");
                         }}
-                        required
+                        placeholder={isEdit ? undefined : t("operations.serialNumberAutoPlaceholder")}
+                        required={isEdit}
                         value={serialNumber}
                       />
                     </label>

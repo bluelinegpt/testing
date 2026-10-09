@@ -14,6 +14,7 @@ import { PushOutboxWriter } from "../push/push-outbox-writer.service.js";
 import { EmployeeDeliveryEarningService } from "../payroll/employee-delivery-earning.service.js";
 import { OutsourcedDriverFeeService } from "../payroll/outsourced-driver-fee.service.js";
 import { OperationsHistoryWriter } from "./operations-history.writer.js";
+import { resolveOrderCancellationReason } from "./order-cancellation-reason.js";
 import type {
   BulkAssignDriverDto,
   BulkChangeOrderStatusDto,
@@ -305,6 +306,11 @@ export class OrdersWorkflowService {
     const { companyId } = this.tenants.current();
     const identity = this.identities.current();
     const reason = input.reason?.trim() || null;
+    // Fixed-list cancellation reason (label only); default Cancel Normal.
+    const cancellationReason =
+      input.targetStatus === "cancelled"
+        ? resolveOrderCancellationReason(identity.kind, input.cancellationReason)
+        : null;
     if (
       ["hold", "cancelled", "returned_to_trader"].includes(
         input.targetStatus,
@@ -351,6 +357,7 @@ export class OrdersWorkflowService {
           correlationId,
           order,
           reason,
+          cancellationReason,
           targetStatus: input.targetStatus,
         });
         processedCount += 1;
@@ -523,6 +530,7 @@ export class OrdersWorkflowService {
       readonly correlationId: string;
       readonly order: SelectedOrder;
       readonly reason: string | null;
+      readonly cancellationReason: string | null;
       readonly targetStatus: string;
     },
   ): Promise<void> {
@@ -572,6 +580,8 @@ export class OrdersWorkflowService {
     await sql`
       update orders
          set delivery_status = ${status}, delivery_reason = ${input.reason},
+             cancellation_reason_code = case when ${status} = 'cancelled'
+               then ${input.cancellationReason} else cancellation_reason_code end,
              driver_reconciliation_status = ${reconciliationStatus},
              trader_settlement_status = ${settlementStatus},
              return_status = ${returnStatus},

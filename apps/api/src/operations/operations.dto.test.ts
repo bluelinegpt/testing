@@ -4,6 +4,7 @@ import { plainToInstance } from "class-transformer";
 import { validate } from "class-validator";
 
 import {
+  BulkChangeOrderStatusDto,
   ChangeOrderStatusDto,
   CreateOrderDto,
   CreateTraderSettlementDto,
@@ -333,5 +334,68 @@ describe("Order DTO validation", () => {
     // reject the empty string and leave bad data stuck in place.
     const errors = await validate(plainToInstance(UpdateOrderDto, { customerAddress: "" }));
     expect(errors.some((error) => error.property === "customerAddress")).toBe(false);
+  });
+});
+
+describe("Create Order Serial Number is optional (assigned at save time)", () => {
+  const { serialNumber: _serial, ...withoutSerial } = validCreateOrder;
+  void _serial;
+
+  it.each([
+    ["omitted", withoutSerial],
+    ["empty", { ...withoutSerial, serialNumber: "" }],
+    ["whitespace only", { ...withoutSerial, serialNumber: "   " }],
+    ["null", { ...withoutSerial, serialNumber: null }],
+  ])("accepts a %s Serial Number", async (_label, body) => {
+    const errors = await validate(plainToInstance(CreateOrderDto, body));
+    expect(errors.some((error) => error.property === "serialNumber")).toBe(false);
+  });
+
+  it("still validates a typed Serial Number", async () => {
+    const errors = await validate(
+      plainToInstance(CreateOrderDto, { ...validCreateOrder, serialNumber: "12;DROP" }),
+    );
+    expect(errors.some((error) => error.property === "serialNumber")).toBe(true);
+  });
+});
+
+describe("Order cancellation reason (fixed list, optional)", () => {
+  it.each(["cancel_by_customer", "cancel_by_trader", "cancel_normal"])(
+    "accepts %s on a single and a bulk status change",
+    async (cancellationReason) => {
+      const single = plainToInstance(ChangeOrderStatusDto, {
+        cancellationReason,
+        reason: "Customer refused",
+        status: "cancelled",
+      });
+      await expect(validate(single)).resolves.toEqual([]);
+      const bulk = plainToInstance(BulkChangeOrderStatusDto, {
+        cancellationReason,
+        orderIds: ["10000000-0000-4000-8000-000000000001"],
+        reason: "Customer refused",
+        selectionMode: "ids",
+        targetStatus: "cancelled",
+      });
+      const errors = await validate(bulk);
+      expect(errors.some((error) => error.property === "cancellationReason")).toBe(false);
+    },
+  );
+
+  it("accepts no reason (Cancel Normal is applied by the server)", async () => {
+    const input = plainToInstance(ChangeOrderStatusDto, {
+      reason: "Customer refused",
+      status: "cancelled",
+    });
+    await expect(validate(input)).resolves.toEqual([]);
+  });
+
+  it("rejects a reason outside the fixed list", async () => {
+    const input = plainToInstance(ChangeOrderStatusDto, {
+      cancellationReason: "cancel_by_driver",
+      reason: "x",
+      status: "cancelled",
+    });
+    const errors = await validate(input);
+    expect(errors.some((error) => error.property === "cancellationReason")).toBe(true);
   });
 });

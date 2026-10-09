@@ -24,6 +24,7 @@ export function SearchCombobox<T extends SearchOption>({
   path,
   placeholder,
   required = true,
+  selectOnTab = false,
   value,
 }: {
   api: ApiClient;
@@ -43,6 +44,12 @@ export function SearchCombobox<T extends SearchOption>({
   path: string;
   placeholder: string;
   required?: boolean;
+  /**
+   * Opt-in, for spreadsheet-style entry: Tab also picks the highlighted
+   * suggestion while the list is open and nothing is chosen yet, then focus
+   * moves on as usual. Off by default, so every other screen is unchanged.
+   */
+  selectOnTab?: boolean;
   value: T | undefined;
 }) {
   const { t } = useTranslation();
@@ -117,6 +124,17 @@ export function SearchCombobox<T extends SearchOption>({
       select(options[activeIndex]);
     } else if (event.key === "Escape") {
       setOpen(false);
+    } else if (
+      event.key === "Tab" &&
+      !event.shiftKey &&
+      selectOnTab &&
+      open &&
+      value === undefined &&
+      query.trim() !== "" &&
+      options[activeIndex] !== undefined
+    ) {
+      // No preventDefault: focus still moves to the next field.
+      select(options[activeIndex]);
     }
   };
 

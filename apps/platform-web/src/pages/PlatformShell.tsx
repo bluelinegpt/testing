@@ -29,6 +29,7 @@ import { CustomerQuotesPage } from "./CustomerQuotesPage.js";
 import { WebsiteContentPage } from "./WebsiteContentPage.js";
 import { BlogEditorialSeoPage } from "./BlogEditorialSeoPage.js";
 import { AgentAdminPage } from "./AgentAdminPage.js";
+import { AnnouncementsPage } from "./AnnouncementsPage.js";
 import { CommerceIntegrationsPage } from "./CommerceIntegrationsPage.js";
 import { SeoGuidesPage } from "./SeoGuidesPage.js";
 
@@ -62,6 +63,7 @@ const navigation: readonly NavigationItem[] = [
   { label: "SEO Guides", path: "/website/seo-guides", permission: "platform.website.read" },
   { label: "Agent", path: "/agent", permission: "platform.agent.read" },
   { label: "Commerce Integrations", path: "/commerce-integrations", permission: "platform.access" },
+  { label: "Announcements", path: "/announcements", permission: "platform.announcements.read" },
   { label: "Audit", path: "/audit", permission: "platform.audit.read" },
   // Repo/deploy state, not Company data — gated on the same base permission
   // as Dashboard rather than a Company-scoped one.
@@ -187,6 +189,9 @@ export function PlatformShell(): ReactElement {
             ) : null}
             {session.can("platform.audit.read") ? (
               <Route element={<AuditPage />} path="/audit" />
+            ) : null}
+            {session.can("platform.announcements.read") ? (
+              <Route element={<AnnouncementsPage />} path="/announcements" />
             ) : null}
             {session.can("platform.leads.read") ? (
               <>
