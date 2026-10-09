@@ -306,6 +306,31 @@ export function OrderWorkflowIndicator({
   const actionHref = () => {
     if (nextActionRoute === null) return null;
     const params = new URLSearchParams(guidance.nextActionParams);
+    /* Clicked from the Orders list: keep that list's filters (search, trader,
+       status, dates, page ...) so the operator returns to the same filtered
+       list after the action, instead of every Order. Only the list's own
+       parameters are carried; a previous action's dialog instruction is not. */
+    const currentOrdersList =
+      globalThis.location.pathname.replace(/\/+$/u, "") === "/orders"
+        ? new URLSearchParams(globalThis.location.search)
+        : null;
+    if (currentOrdersList !== null) {
+      for (const key of [
+        "openDialog", "orderId", "orderIds", "orderNumber", "suggestedStatus", "returnTo",
+        "driverId", "settlementId", "receivableId", "collectReceivableId",
+      ]) {
+        currentOrdersList.delete(key);
+      }
+    }
+    const ordersListPath =
+      currentOrdersList === null || currentOrdersList.toString() === ""
+        ? "/orders"
+        : `/orders?${currentOrdersList.toString()}`;
+    if (nextActionRoute === "/orders" && currentOrdersList !== null) {
+      for (const [key, value] of currentOrdersList) {
+        if (!params.has(key)) params.set(key, value);
+      }
+    }
     if (nextActionCode === "collect_trader_receivable") {
       const receivableId = params.get("receivableId");
       if (receivableId !== null && receivableId.trim() !== "") {
@@ -326,7 +351,7 @@ export function OrderWorkflowIndicator({
       // Operational actions return to Order Search. The operator can process
       // the next waiting Order immediately instead of being taken into the
       // originating Order detail page.
-      params.set("returnTo", "/orders");
+      params.set("returnTo", ordersListPath);
     }
     const query = params.toString();
     return query === "" ? nextActionRoute : `${nextActionRoute}?${query}`;
