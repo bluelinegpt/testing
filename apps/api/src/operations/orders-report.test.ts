@@ -52,8 +52,8 @@ describe("Orders Report contract", () => {
     expect(service).toContain('"Collected from Trader"');
     expect(controller).toContain("محصّل من التاجر");
     expect(service).toContain("coalesce(sum(o.cod_amount), 0)");
-    expect(service).toContain("coalesce(sum(o.service_fee), 0)");
-    expect(service).toContain("coalesce(sum(${traderAmount}), 0)");
+    expect(service).toContain("coalesce(sum(${shownFee}), 0)::numeric(18,2)::text as fee");
+    expect(service).toContain("coalesce(sum(${shownTraderAmount}), 0)");
     expect(service).toContain('"Trader Amount"');
     expect(service).toContain("report.totals.traderAmount");
     expect(controller).toContain("مبلغ التاجر");
@@ -68,9 +68,9 @@ describe("Orders Report contract", () => {
   });
 
   it("shows Trader Amount and Balance without minus signs, with one plain-sum total", () => {
-    expect(service).toContain('abs(${traderAmount})::numeric(18,2)::text as "traderAmount"');
+    expect(service).toContain("const shownTraderAmount = sql`(case when ${cancelled} then null else abs(${traderAmount}) end)`");
     expect(service).toContain("abs(${signedBalance})::numeric(18,2)::text as balance,");
-    expect(service).toContain('coalesce(sum(abs(${traderAmount})), 0)::numeric(18,2)::text as "traderAmount"');
+    expect(service).toContain('coalesce(sum(${shownTraderAmount}), 0)::numeric(18,2)::text as "traderAmount"');
     expect(service).toContain("coalesce(sum(abs(${signedBalance})), 0)::numeric(18,2)::text as balance");
     expect(service).not.toContain("balancePositive");
     expect(controller).not.toContain("balanceNegative");
@@ -90,7 +90,11 @@ describe("Orders Report contract", () => {
   });
 
   it("shows cancelled orders' COD, Trader Amount and Balance as a red \"--\" and leaves them out of the totals", () => {
-    expect(service).toContain("const cancelled = sql`o.delivery_status = 'cancelled'`");
+    expect(service).toContain("const cancelled = sql`(o.delivery_status in ('cancelled', 'returned_to_trader') or o.return_status = 'returned_to_trader')`");
+    // No fee on an undelivered Order unless a fee charge exists (9 Oct 2026).
+    expect(service).toContain("(case when ${cancelled} and trader_owes.due = 0 then null else o.service_fee end)");
+    expect(service).toContain('Fee: row.fee ?? "--"');
+    expect(controller).toContain("[labels.fee]: row.fee ?? VOID");
     expect(service).toContain("coalesce(sum(${shownCod}), 0)::numeric(18,2)::text as cod");
     expect(service).toContain("coalesce(sum(${shownTraderAmount}), 0)");
     expect(service).toContain("(case when ${cancelled} then null else (${traderAmount} - ${paidToTrader} + trader_owes.collected) end)");

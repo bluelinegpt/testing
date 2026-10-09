@@ -227,7 +227,8 @@ export interface OrdersReportRow {
   readonly areaAr?: string | null;
   /** Null for a cancelled Order: shown as "--" and left out of the total. */
   readonly cod: string | null;
-  readonly fee: string;
+  /** Null for an undelivered Order with no fee charge: shown as "--". */
+  readonly fee: string | null;
   /**
    * Null for a cancelled Order (shown as "--", not in the total).
    * The Order's signed position with the Trader: what it owes the Trader
@@ -1908,10 +1909,20 @@ export class OperationsService {
     // Balance are not real money: null (shown as "--") and outside every total
     // and the balance filter. Fee, Paid and Collected stay: they are actual
     // charges/movements even on a cancelled Order.
-    const cancelled = sql`o.delivery_status = 'cancelled'`;
+    // Undelivered: cancelled, or returned to the Trader (also after it was
+    // closed). No delivery happened, so no COD, Trader Amount, Balance or fee
+    // is real (decision 9 Oct 2026: no fee on a returned/cancelled Order) --
+    // ORD-000155 (returned, then closed) showed Trader Amount and Balance 80.
+    const cancelled = sql`(o.delivery_status in ('cancelled', 'returned_to_trader') or o.return_status = 'returned_to_trader')`;
     const signedBalance = sql`(case when ${cancelled} then null else (${traderAmount} - ${paidToTrader} + trader_owes.collected) end)`;
     const shownTraderAmount = sql`(case when ${cancelled} then null else abs(${traderAmount}) end)`;
     const shownCod = sql`(case when ${cancelled} then null else o.cod_amount end)`;
+    // A fee is shown on an undelivered Order only if a fee charge actually
+    // exists for it; otherwise "--" and outside the Fee total.
+    const shownFee = sql`(case when ${cancelled} and trader_owes.due = 0 then null else o.service_fee end)`;
+    // A returned Order that was later closed reads "Returned to Trader", not
+    // "Closed", so the report does not suggest a completed delivery.
+    const shownStatus = sql`(case when o.delivery_status = 'closed' and o.return_status = 'returned_to_trader' then 'returned_to_trader' else o.delivery_status end)`;
     const balancePredicate = balanceType === "due_to_trader"
       ? sql`${signedBalance} > 0`
       : balanceType === "due_from_trader"
@@ -1962,7 +1973,7 @@ export class OperationsService {
     const summary = await sql<{ count: number } & OrdersReportTotals>`
       select count(*)::int as count,
              coalesce(sum(${shownCod}), 0)::numeric(18,2)::text as cod,
-             coalesce(sum(o.service_fee), 0)::numeric(18,2)::text as fee,
+             coalesce(sum(${shownFee}), 0)::numeric(18,2)::text as fee,
              coalesce(sum(${shownTraderAmount}), 0)::numeric(18,2)::text as "traderAmount",
              coalesce(sum(${paidToTrader}), 0)::numeric(18,2)::text as "paidToTrader",
              coalesce(sum(trader_owes.collected), 0)::numeric(18,2)::text as "collectedFromTrader",
@@ -1981,7 +1992,7 @@ export class OperationsService {
              o.customer_mobile_number as "customerMobile",
              coalesce(e.name_en, '—') as emirates, e.name_ar as "emiratesAr",
              coalesce(a.name_en, '—') as area, a.name_ar as "areaAr",
-             ${shownCod}::numeric(18,2)::text as cod, o.service_fee::text as fee,
+             ${shownCod}::numeric(18,2)::text as cod, ${shownFee}::numeric(18,2)::text as fee,
              ${shownTraderAmount}::numeric(18,2)::text as "traderAmount",
              ${paidToTrader}::numeric(18,2)::text as "paidToTrader",
              (select s.id::text
@@ -2002,7 +2013,7 @@ export class OperationsService {
                order by s.created_at desc limit 1) as "settlementNumber",
              trader_owes.collected::numeric(18,2)::text as "collectedFromTrader",
              abs(${signedBalance})::numeric(18,2)::text as balance,
-             o.delivery_status as status
+             ${shownStatus} as status
       ${base}
       order by ${orderDate} asc, o.created_at asc, o.id asc
       limit ${pageSize} offset ${(page - 1) * pageSize}
@@ -2034,7 +2045,7 @@ export class OperationsService {
     const rows: Record<string, string>[] = all.map((row, index) => ({
       "No.": String(index + 1), "Reference Number": row.referenceNumber ?? "", "Order Date": row.orderDate, "Delivery Date": row.deliveryDate ?? "", "Trader Name": row.traderName,
       Customer: row.customer, "Customer Mobile": row.customerMobile, Emirates: row.emirates,
-      Area: row.area, COD: row.cod ?? "--", Fee: row.fee, "Trader Amount": row.traderAmount ?? "--",
+      Area: row.area, COD: row.cod ?? "--", Fee: row.fee ?? "--", "Trader Amount": row.traderAmount ?? "--",
       "Paid to Trader": row.paidToTrader, "Collected from Trader": row.collectedFromTrader, Balance: row.balance ?? "--",
       Status: row.status,
     }));

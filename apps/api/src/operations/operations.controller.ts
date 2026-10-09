@@ -569,7 +569,7 @@ export class OperationsController {
         ...(singleTrader ? {} : { [labels.traderName]: arabic ? row.traderNameAr || row.traderName : row.traderName }),
         [labels.customer]: row.customer, [labels.customerMobile]: row.customerMobile,
         [labels.emirates]: arabic ? row.emiratesAr || row.emirates : row.emirates,
-        [labels.area]: arabic ? row.areaAr || row.area : row.area, [labels.cod]: row.cod ?? VOID, [labels.fee]: row.fee,
+        [labels.area]: arabic ? row.areaAr || row.area : row.area, [labels.cod]: row.cod ?? VOID, [labels.fee]: row.fee ?? VOID,
         [labels.traderAmount]: row.traderAmount ?? VOID, [labels.paidToTrader]: row.paidToTrader, [labels.collectedFromTrader]: row.collectedFromTrader,
         [labels.balance]: row.balance ?? VOID, [labels.status]: statusLabels[row.status] ?? row.status,
       })).concat([{
