@@ -213,22 +213,11 @@ export class TraderAccountStatementService {
             on p.settlement_id = s.id and p.company_id = s.company_id
          where s.company_id = ${companyId}::uuid and s.trader_id = ${traderId}::uuid
            and s.reversal_of_id is null and s.status = 'confirmed'
+           -- The Trader sees only transactions that stand (decision 9 Oct
+           -- 2026): a reversed Settlement and its reversal are both left out.
+           and not exists (select 1 from trader_settlements rv
+                where rv.company_id = s.company_id and rv.reversal_of_id = s.id)
            and s.business_date between ${from}::date and ${to}::date
-        union all
-        select r.id, 'reversal'::text, r.business_date::text, r.created_at::text, 3,
-               r.settlement_number, ('Reversal of ' || original.settlement_number),
-               coalesce(p.amount, 0)::text, false,
-               null::text, null::text, null::text, p.bank_reference, '0.00'::text, '0.00'::text,
-               '0.00'::text, '0.00'::text, '0.00'::text, coalesce(p.amount, 0)::text,
-               'reversed'::text, null::text, coalesce(p.amount, 0)::text,
-               r.settlement_number as "settlementNumber"
-          from trader_settlements r
-          join trader_settlements original
-            on original.id = r.reversal_of_id and original.company_id = r.company_id
-          left join trader_settlement_payments p
-            on p.settlement_id = original.id and p.company_id = original.company_id
-         where r.company_id = ${companyId}::uuid and r.trader_id = ${traderId}::uuid
-           and r.business_date between ${from}::date and ${to}::date
         union all
         select r.id, 'receivable'::text, r.business_date::text, r.created_at::text, 2,
                r.receivable_number,
@@ -245,6 +234,9 @@ export class TraderAccountStatementService {
           left join orders linked on linked.company_id = r.company_id
             and r.source_type = 'service_charge' and linked.order_number = r.source_reference
          where r.company_id = ${companyId}::uuid and r.trader_id = ${traderId}::uuid
+           -- A cancelled or reversed charge (e.g. replaced after a fee change)
+           -- is left out together with its cancellation.
+           and r.status not in ('cancelled', 'reversed')
            and r.business_date between ${from}::date and ${to}::date
         union all
         select alloc.id, 'collection'::text, c.payment_date::text, c.created_at::text, 3,
@@ -263,55 +255,8 @@ export class TraderAccountStatementService {
           left join orders linked on linked.company_id = r.company_id
             and r.source_type = 'service_charge' and linked.order_number = r.source_reference
          where c.company_id = ${companyId}::uuid and c.trader_id = ${traderId}::uuid
+           and c.status <> 'reversed'
            and c.payment_date between ${from}::date and ${to}::date
-        union all
-        select alloc.id, 'collection_reversal'::text,
-               (c.reversed_at at time zone 'Asia/Dubai')::date::text, c.reversed_at::text, 4,
-               c.collection_number, 'Reversal of Trader collection ' || c.collection_number
-                 || ' · ' || r.receivable_number
-                 || case when linked.id is null then '' else ' · Order '
-                     || coalesce(linked.serial_number, linked.order_number) || ' (' || linked.order_number || ')' end,
-               alloc.amount_allocated::text, false,
-               linked.order_number, null::text, coalesce(linked.serial_number, linked.order_number),
-               c.payment_reference, '0.00'::text, '0.00'::text, '0.00'::text, '0.00'::text,
-               '0.00'::text, '0.00'::text, 'reversed'::text, c.reversal_reason, (-alloc.amount_allocated)::text,
-               c.collection_number as "settlementNumber"
-          from trader_collection_allocations alloc
-          join trader_collections c on c.id = alloc.collection_id and c.company_id = alloc.company_id
-          join trader_receivables r on r.id = alloc.receivable_id and r.company_id = alloc.company_id
-          left join orders linked on linked.company_id = r.company_id
-            and r.source_type = 'service_charge' and linked.order_number = r.source_reference
-         where c.company_id = ${companyId}::uuid and c.trader_id = ${traderId}::uuid
-           and c.status = 'reversed'
-           and (c.reversed_at at time zone 'Asia/Dubai')::date between ${from}::date and ${to}::date
-        union all
-        select r.id, 'receivable_cancellation'::text,
-               (a.occurred_at at time zone 'Asia/Dubai')::date::text, a.occurred_at::text, 5,
-               r.receivable_number,
-               'Cancellation of Trader receivable · ' || r.receivable_number
-                 || case when linked.id is null then '' else ' · Order '
-                     || coalesce(linked.serial_number, linked.order_number) || ' (' || linked.order_number || ')' end,
-               r.original_amount_due::text, false,
-               linked.order_number, null::text, coalesce(linked.serial_number, linked.order_number),
-               null::text, '0.00'::text, '0.00'::text, '0.00'::text, '0.00'::text,
-               '0.00'::text,
-               '0.00'::text, 'cancelled'::text, a.after_data ->> 'reason',
-               r.original_amount_due::text, null::text as "settlementNumber"
-          from audit_events a
-          join trader_receivables r on r.id::text = a.subject_id and r.company_id = a.company_id
-          left join orders linked on linked.company_id = r.company_id
-            and r.source_type = 'service_charge' and linked.order_number = r.source_reference
-         where a.company_id = ${companyId}::uuid and a.subject_type = 'trader_receivable'
-           -- Both cancel paths. Matching only the direct one left every
-           -- cancellation driven by an Order's payment condition out of the
-           -- statement entirely, so the Trader's statement silently lost
-           -- movements that had definitely happened.
-           and a.action in (
-             'trader_receivable.cancel',
-             'trader_receivable.cancel_from_order'
-           )
-           and r.trader_id = ${traderId}::uuid
-           and (a.occurred_at at time zone 'Asia/Dubai')::date between ${from}::date and ${to}::date
         order by date, "createdAt", sequence, id
       `.execute(this.database)
     ).rows;
@@ -366,6 +311,8 @@ export class TraderAccountStatementService {
           left join trader_settlement_orders link on link.settlement_id = s.id and link.company_id = s.company_id
          where s.company_id = ${companyId}::uuid and s.trader_id = ${traderId}::uuid
            and s.reversal_of_id is null and s.business_date between ${from}::date and ${to}::date
+           and not exists (select 1 from trader_settlements rv
+                where rv.company_id = s.company_id and rv.reversal_of_id = s.id)
          group by s.id, p.id
          order by s.business_date, s.created_at, s.id
       `.execute(this.database)
@@ -614,29 +561,20 @@ export class TraderAccountStatementService {
               join trader_settlement_payments p on p.settlement_id = s.id and p.company_id = s.company_id
             where s.company_id = ${companyId}::uuid and s.trader_id = ${traderId}::uuid
               and s.reversal_of_id is null and s.status = 'confirmed' and s.business_date < ${from}::date
+              -- Same rule as the lines: a reversed Settlement never counts,
+              -- whenever it was reversed.
               and not exists (select 1 from trader_settlements r
-                where r.company_id = s.company_id and r.reversal_of_id = s.id
-                  and r.business_date < ${from}::date)), 0)
+                where r.company_id = s.company_id and r.reversal_of_id = s.id)), 0)
           - coalesce((select sum(r.original_amount_due) from trader_receivables r
             where r.company_id = ${companyId}::uuid and r.trader_id = ${traderId}::uuid
+              and r.status not in ('cancelled', 'reversed')
               and r.business_date < ${from}::date), 0)
-          + coalesce((select sum(a.original_amount_due)
-            from audit_events e join trader_receivables a
-              on a.id::text = e.subject_id and a.company_id = e.company_id
-            where e.company_id = ${companyId}::uuid and e.subject_type = 'trader_receivable'
-              and e.action = 'trader_receivable.cancel' and a.trader_id = ${traderId}::uuid
-              and (e.occurred_at at time zone 'Asia/Dubai')::date < ${from}::date), 0)
           + coalesce((select sum(alloc.amount_allocated)
             from trader_collection_allocations alloc
             join trader_collections c on c.id = alloc.collection_id and c.company_id = alloc.company_id
             where c.company_id = ${companyId}::uuid and c.trader_id = ${traderId}::uuid
+              and c.status <> 'reversed'
               and c.payment_date < ${from}::date), 0)
-          - coalesce((select sum(alloc.amount_allocated)
-            from trader_collection_allocations alloc
-            join trader_collections c on c.id = alloc.collection_id and c.company_id = alloc.company_id
-            where c.company_id = ${companyId}::uuid and c.trader_id = ${traderId}::uuid
-              and c.status = 'reversed'
-              and (c.reversed_at at time zone 'Asia/Dubai')::date < ${from}::date), 0)
         )::text as opening
       `.execute(this.database)
     ).rows[0];
