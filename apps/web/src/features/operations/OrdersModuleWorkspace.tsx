@@ -319,7 +319,9 @@ export function OrdersModuleWorkspace({
   // makes the "clearing the box applies at once" effect erase a restored
   // search before the input has a chance to sync from `filters.search`.
   const [searchText, setSearchText] = useState(filters.search);
-  const [serialSearchText, setSerialSearchText] = useState("");
+  // Seeded from the URL-backed filter like the main search box, so returning
+  // from an Order shows the serial filter that is still applied.
+  const [serialSearchText, setSerialSearchText] = useState(filters.serialNumber);
   const [filterArea, setFilterArea] = useState<CompanyArea>();
   const [drivers, setDrivers] = useState<readonly OperationsDriver[]>([]);
   const [traders, setTraders] = useState<readonly OperationsTrader[]>([]);
@@ -627,6 +629,11 @@ export function OrdersModuleWorkspace({
   useEffect(() => {
     setSearchText((current) => (current === filters.search ? current : filters.search));
   }, [filters.search]);
+  useEffect(() => {
+    setSerialSearchText((current) =>
+      current === filters.serialNumber ? current : filters.serialNumber,
+    );
+  }, [filters.serialNumber]);
 
   /* Clearing the box applies at once. Waiting for Enter to reveal the full list
      again would leave the operator looking at filtered results with an empty
@@ -1278,6 +1285,12 @@ export function OrdersModuleWorkspace({
                   event.preventDefault();
                   updateFilters({ search: searchText });
                 }}
+                // Leaving the box (clicking a row, Edit order, anywhere) applies
+                // what was typed, so the filter stays until Clear filters
+                // instead of being lost when the operator forgets Enter.
+                onBlur={() => {
+                  if (searchText !== filters.search) updateFilters({ search: searchText });
+                }}
                 placeholder={t("operations.searchOrdersPlaceholder")}
                 title={t("operations.searchOrdersListHint")}
                 value={searchText}
@@ -1292,6 +1305,11 @@ export function OrdersModuleWorkspace({
                   if (event.key !== "Enter") return;
                   event.preventDefault();
                   updateFilters({ serialNumber: serialSearchText });
+                }}
+                onBlur={() => {
+                  if (serialSearchText !== filters.serialNumber) {
+                    updateFilters({ serialNumber: serialSearchText });
+                  }
                 }}
                 placeholder={t("operations.searchSerialNumberPlaceholder")}
                 value={serialSearchText}
@@ -4016,7 +4034,7 @@ function DriverShipmentManifestDialog({
   const reportLanguage = locale;
   const [preview, setPreview] = useState<{
     header: { driverMobile: string; driverName: string; orderCount: number };
-    summary: { totalCod: string; totalOrders: number };
+    summary: { totalCustomerAmountToCollect: string; totalOrders: number };
   }>();
   const [error, setError] = useState<string>();
   const pdf = useReconciliationPdfActions(api);
@@ -4026,7 +4044,7 @@ function DriverShipmentManifestDialog({
     try {
       const result = await api.post<{
         header: { driverMobile: string; driverName: string; orderCount: number };
-        summary: { totalCod: string; totalOrders: number };
+        summary: { totalCustomerAmountToCollect: string; totalOrders: number };
       }>("operations/cash/driver-shipment-manifest/data", selection);
       setPreview(result);
     } catch (requestError) {
@@ -4039,7 +4057,7 @@ function DriverShipmentManifestDialog({
     void api
       .post<{
         header: { driverMobile: string; driverName: string; orderCount: number };
-        summary: { totalCod: string; totalOrders: number };
+        summary: { totalCustomerAmountToCollect: string; totalOrders: number };
       }>("operations/cash/driver-shipment-manifest/data", selection)
       .then((result) => active && setPreview(result))
       .catch((requestError) =>
@@ -4120,8 +4138,8 @@ function DriverShipmentManifestDialog({
               <dd>{preview.header.orderCount}</dd>
             </div>
             <div>
-              <dt>{t("operations.manifestTotalCod")}</dt>
-              <dd>{formatCurrency(preview.summary.totalCod, "AED", locale)}</dd>
+              <dt>{t("operations.manifestTotalAmountToCollect")}</dt>
+              <dd>{formatCurrency(preview.summary.totalCustomerAmountToCollect, "AED", locale)}</dd>
             </div>
           </dl>
           {error === undefined ? null : <div className="alert alert-error">{error}</div>}
