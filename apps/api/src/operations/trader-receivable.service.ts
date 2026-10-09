@@ -18,6 +18,13 @@ import {
 
 import { CompanyProfileService } from "../company-profile/company-profile.service.js";
 import { DriverCollectionPdfService } from "./driver-collection-pdf.service.js";
+import { effectiveSettlement } from "./effective-settlement-offsets.js";
+import {
+  correlatedReceivableInputs,
+  expectedReceivableStatus,
+  RECEIVABLE_STATUS_ANOMALIES,
+  receivableAnomalySql,
+} from "./trader-receivable-reconciliation.js";
 import { OperationsHistoryWriter } from "./operations-history.writer.js";
 import { assessOffsetReversal } from "./receivable-offset-reversal-guard.js";
 import { traderReceivablePageSizes } from "./operations.dto.js";
@@ -50,8 +57,28 @@ const collectionNumberPrefix = "COL";
 // the Eligible list, the allocation proposal, or a Collection confirmation.
 const eligibleReceivableStatuses = ["outstanding", "partially_collected"] as const;
 
+/**
+ * A service-charge (Order fee) receivable can be collected only once its Order
+ * has been delivered (decision 9 Oct 2026): a fee taken for an Order that is
+ * later cancelled or returned would be owed back. Every other source type is
+ * collectable as before. Mirrors the delivered-Order rule `eligibleReceivables`
+ * already applies to the Collect Money list, so auto-allocation, confirmation
+ * and the Trader balance agree with what that list shows.
+ */
+const receivableCollectableNow = sql<boolean>`(
+  r.source_type <> 'service_charge'
+  or exists (
+    select 1 from orders collectable_order
+     where collectable_order.company_id = r.company_id
+       and collectable_order.order_number = r.source_reference
+       and collectable_order.delivered_at is not null
+  )
+)`;
+
 interface LockedReceivableRow {
   readonly amountCollected: string;
+  /** False for an Order-fee receivable whose Order is not delivered yet. */
+  readonly collectable?: boolean;
   readonly businessDate: string;
   readonly id: string;
   readonly originalAmountDue: string;
@@ -114,6 +141,11 @@ export interface TraderReceivableSettlementOffsetHistoryLine {
   readonly offsetDate: string;
   readonly settlementId: string;
   readonly settlementNumber: string;
+  /**
+   * False for a HISTORICAL offset: its Settlement was reversed (the row is
+   * kept, never deleted). Only effective offsets count towards the totals.
+   */
+  readonly effective: boolean;
 }
 
 export interface TraderReceivableDetail {
@@ -562,44 +594,64 @@ export class TraderReceivableService {
         HttpStatus.BAD_REQUEST,
       );
     }
-    return this.transactions.execute(async (transaction) => {
-      const receivable = (
-        await sql<{ status: string }>`
-          select status from trader_receivables
-           where id = ${receivableId}::uuid and company_id = ${companyId}::uuid
-           for update
-        `.execute(transaction)
-      ).rows[0];
-      if (receivable === undefined) {
-        throw new ApplicationException(
-          "trader_receivable_not_found",
-          "Trader receivable not found",
-          HttpStatus.NOT_FOUND,
-        );
-      }
-      if (receivable.status !== "outstanding") {
-        throw new ApplicationException(
-          "trader_receivable_not_cancellable",
-          "Only an outstanding receivable with nothing collected can be cancelled",
-          HttpStatus.CONFLICT,
-        );
-      }
-      await sql`
-        update trader_receivables
-           set status = 'cancelled', updated_at = now()
+    return this.transactions.execute((transaction) =>
+      this.cancelReceivableInTransaction(transaction, companyId, receivableId, trimmedReason, correlationId, {
+        actorAccountId: identity.identityId,
+        actorRole: null,
+      }),
+    );
+  }
+
+  /**
+   * The cancellation itself, inside the caller's transaction (Repair Center
+   * Phase 3 Prompt 3). Same guard and same effect as `cancelReceivable`: the
+   * receivable is locked, must be `outstanding`, and only its status changes
+   * (the row is kept; the capture trigger behaves exactly as for a Company
+   * cancellation). `actorAccountId` is null for the Platform Repair Center: a
+   * Platform administrator is never recorded as a Company actor; the audit
+   * row then carries `actorRole` instead.
+   */
+  public async cancelReceivableInTransaction(
+    transaction: Transaction<DatabaseSchema>,
+    companyId: string,
+    receivableId: string,
+    reason: string,
+    correlationId: string,
+    actor: { readonly actorAccountId: string | null; readonly actorRole: string | null },
+  ): Promise<{ readonly receivableId: string; readonly status: string }> {
+    const receivable = (
+      await sql<{ status: string }>`
+        select status from trader_receivables
          where id = ${receivableId}::uuid and company_id = ${companyId}::uuid
-      `.execute(transaction);
-      await this.history.audit(transaction, {
-        action: "trader_receivable.cancel",
-        actorId: identity.identityId,
-        after: { reason: trimmedReason },
-        companyId,
-        correlationId,
-        subjectId: receivableId,
-        subjectType: "trader_receivable",
-      });
-      return { receivableId, status: "cancelled" };
-    });
+         for update
+      `.execute(transaction)
+    ).rows[0];
+    if (receivable === undefined) {
+      throw new ApplicationException(
+        "trader_receivable_not_found",
+        "Trader receivable not found",
+        HttpStatus.NOT_FOUND,
+      );
+    }
+    if (receivable.status !== "outstanding") {
+      throw new ApplicationException(
+        "trader_receivable_not_cancellable",
+        "Only an outstanding receivable with nothing collected can be cancelled",
+        HttpStatus.CONFLICT,
+      );
+    }
+    await sql`
+      update trader_receivables
+         set status = 'cancelled', updated_at = now()
+       where id = ${receivableId}::uuid and company_id = ${companyId}::uuid
+    `.execute(transaction);
+    await sql`
+      insert into audit_events (company_id, actor_account_id, action, subject_type, subject_id, after_data, correlation_id)
+      values (${companyId}::uuid, ${actor.actorAccountId}::uuid, 'trader_receivable.cancel', 'trader_receivable',
+              ${receivableId}, ${JSON.stringify(actor.actorRole === null ? { reason } : { actorRole: actor.actorRole, reason })}::jsonb,
+              ${correlationId})
+    `.execute(transaction);
+    return { receivableId, status: "cancelled" };
   }
 
   /**
@@ -643,7 +695,20 @@ export class TraderReceivableService {
                r.amount_collected::text as "amountCollected",
                r.outstanding_amount::text as "outstandingAmount", r.status, r.reason, r.notes,
                r.created_at::text as "createdAt",
-               coalesce(creator.username, 'Legacy/Unknown') as "createdBy"
+               -- Phase 2 Prompt 4 (Part Q): a receivable with NO Company creator
+               -- reads "Platform Repair" only when a Platform repair audit row
+               -- names this exact receivable; any other missing creator stays
+               -- "Legacy/Unknown". Never inferred from NULL alone.
+               coalesce(
+                 creator.username,
+                 case when r.created_by_account_id is null and exists (
+                   select 1 from platform_repair_executions x
+                    where x.company_id = r.company_id
+                      and x.capability_code = 'REPAIR_TRADER_RECEIVABLE'
+                      and x.result_summary -> 'domainOutcome' ->> 'receivableId' = r.id::text
+                 ) then 'Platform Repair' end,
+                 'Legacy/Unknown'
+               ) as "createdBy"
           from trader_receivables r
           join traders t on t.id = r.trader_id and t.company_id = r.company_id
           left join accounts creator
@@ -716,7 +781,8 @@ export class TraderReceivableService {
         select x.amount_allocated::text as "amountOffset",
                s.business_date::text as "offsetDate",
                s.id as "settlementId",
-               s.settlement_number as "settlementNumber"
+               s.settlement_number as "settlementNumber",
+               ${effectiveSettlement("s")} as "effective"
           from trader_settlement_receivable_offsets x
           join trader_settlements s
             on s.id = x.settlement_id and s.company_id = x.company_id
@@ -729,7 +795,10 @@ export class TraderReceivableService {
       .filter((line) => line.status === "confirmed")
       .reduce((total, line) => total.plus(line.amountCollected), new Decimal(0))
       .toFixed(2);
+    // Effective offsets only: SET-A -> SET-A reversal -> SET-B settles the
+    // Receivable once, not twice (effective-settlement-offsets.ts).
     const settlementOffsetAmount = settlementOffsets
+      .filter((line) => line.effective)
       .reduce((total, line) => total.plus(line.amountOffset), new Decimal(0))
       .toFixed(2);
     const totalSettledAmount = new Decimal(physicalCollectionAmount)
@@ -981,7 +1050,8 @@ export class TraderReceivableService {
                   on setl.id = offset_line.settlement_id
                  and setl.company_id = offset_line.company_id
                where offset_line.receivable_id = r.id
-                 and offset_line.company_id = r.company_id) as "clearedBySettlementNumbers",
+                 and offset_line.company_id = r.company_id
+                 and ${effectiveSettlement("setl")}) as "clearedBySettlementNumbers",
              count(*) over()::int as total
         from trader_receivables r
         join traders t on t.id = r.trader_id and t.company_id = r.company_id
@@ -1274,9 +1344,9 @@ export class TraderReceivableService {
         `.execute(transaction);
         const newCollected = new Decimal(receivable.amountCollected).plus(amount);
         const outstandingAfter = new Decimal(receivable.originalAmountDue).minus(newCollected);
-        const newStatus = outstandingAfter.lessThanOrEqualTo(0)
-          ? "collected"
-          : "partially_collected";
+        // THE domain status rule (trader-receivable-reconciliation.ts), shared
+        // with settlements and with every health / repair reader.
+        const newStatus = expectedReceivableStatus(newCollected, receivable.originalAmountDue);
         await sql`
           update trader_receivables
              set amount_collected = ${this.money(newCollected).toNumber()}, status = ${newStatus},
@@ -1417,19 +1487,53 @@ export class TraderReceivableService {
 
       let restoredAmount = new Decimal(0);
       for (const allocation of allocations) {
-        // Re-read the receivable's CURRENT amount_collected under the lock
-        // just taken above — it may have been advanced by a later collection
-        // since this one was confirmed, and only this collection's own
-        // contribution is ever backed out.
+        // HISTORY STAYS HISTORY (Repair Center Phase 3, Prompt 4). A cancelled
+        // or reversed receivable is never re-derived: reversing a Collection
+        // must not resurrect it as outstanding / partially collected /
+        // collected. The Collection is still reversed (its allocation stops
+        // counting everywhere, by the effective-collection rule) and the
+        // allocation row is kept; the closed receivable is left exactly as it
+        // is, and the audit says so.
+        if (allocation.receivableStatus === "cancelled" || allocation.receivableStatus === "reversed") {
+          await this.history.audit(transaction, {
+            action: "trader_receivable.collection_reversed",
+            actorId: identity.identityId,
+            after: {
+              collectionNumber: collection.collectionNumber,
+              reason: trimmedReason,
+              receivableUnchanged: true,
+              restoredAmount: "0.00",
+              status: allocation.receivableStatus,
+              unchangedBecause: `receivable is ${allocation.receivableStatus} (history)`,
+            },
+            companyId,
+            correlationId,
+            subjectId: allocation.receivableId,
+            subjectType: "trader_receivable",
+          });
+          continue;
+        }
+        // The receivable's collected amount AFTER this reversal is what its
+        // remaining EFFECTIVE collections and offsets settle -- THE
+        // reconciliation equation (trader-receivable-reconciliation.ts),
+        // read under the lock taken above, after this Collection was marked
+        // reversed. In a consistent state this is exactly the old amount
+        // minus this Collection's own allocation; an effective settlement
+        // offset keeps counting (Prompt 2). The amounts CHECK caps it at the
+        // amount due.
+        const inputs = correlatedReceivableInputs("r");
         const current = (
-          await sql<{ amountCollected: string }>`
-            select amount_collected::text as "amountCollected" from trader_receivables
-             where id = ${allocation.receivableId}::uuid and company_id = ${companyId}::uuid
+          await sql<{ originalAmountDue: string; settled: string }>`
+            select r.original_amount_due::text as "originalAmountDue",
+                   (${inputs.physical} + ${inputs.offset})::text as settled
+              from trader_receivables r
+             where r.id = ${allocation.receivableId}::uuid and r.company_id = ${companyId}::uuid
           `.execute(transaction)
         ).rows[0];
-        const currentCollected = new Decimal(current?.amountCollected ?? "0");
-        const newCollected = Decimal.max(0, currentCollected.minus(allocation.amountAllocated));
-        const newStatus = newCollected.lessThanOrEqualTo(0) ? "outstanding" : "partially_collected";
+        const amountDue = new Decimal(current?.originalAmountDue ?? "0");
+        const newCollected = Decimal.min(amountDue, Decimal.max(0, new Decimal(current?.settled ?? "0")));
+        // THE domain status rule (trader-receivable-reconciliation.ts).
+        const newStatus = expectedReceivableStatus(newCollected, amountDue);
         await sql`
           update trader_receivables
              set amount_collected = ${this.money(newCollected).toNumber()}, status = ${newStatus},
@@ -1475,6 +1579,116 @@ export class TraderReceivableService {
         traderId: collection.traderId,
       };
     });
+  }
+
+  /**
+   * RECONCILE A RECEIVABLE'S STATUS (Repair Center Phase 3, Prompt 1).
+   *
+   * The ONLY change: `status` is set to what the domain status rule
+   * (trader-receivable-reconciliation.ts -- the same rule confirmCollection,
+   * reverseCollection and the Settlement writers apply) says for the
+   * receivable's OWN recorded `amount_collected`, and only when the shared
+   * reconciliation decision proves that is the single inconsistency:
+   *
+   *   - the receivable is current (not cancelled / reversed);
+   *   - its recorded amount_collected EQUALS its effective physical
+   *     collections + effective settlement offsets (nothing is re-amounted);
+   *   - the decision is one of the status-only anomalies
+   *     (marked collected without settlement / settled but open / the
+   *     outstanding vs partially_collected confusion).
+   *
+   * No collection, allocation, settlement, offset, credit, journal or event
+   * is written or deleted. A status change between outstanding /
+   * partially_collected / collected is not an accounting fact: the receivable
+   * capture trigger only reacts to cancelled / reversed, so this is identical
+   * with GL Accounting ON or OFF. Idempotent: a receivable already in the
+   * rule's status returns `changed: false`. Runs in the CALLER's transaction,
+   * with the receivable row locked; permission-free (the caller authorises).
+   */
+  public async reconcileReceivableStatusInTransaction(
+    transaction: Transaction<DatabaseSchema>,
+    companyId: string,
+    receivableId: string,
+    correlationId: string,
+    actor: { readonly actorAccountId: string | null; readonly actorRole: string },
+  ): Promise<{
+    readonly changed: boolean;
+    readonly receivableId: string;
+    readonly receivableNumber: string;
+    readonly fromStatus: string;
+    readonly toStatus: string;
+    readonly amountDue: string;
+    readonly amountCollected: string;
+  }> {
+    const locked = (
+      await sql<{ id: string }>`
+        select id from trader_receivables
+         where id = ${receivableId}::uuid and company_id = ${companyId}::uuid for update
+      `.execute(transaction)
+    ).rows[0];
+    if (locked === undefined) {
+      throw new ApplicationException("trader_receivable_not_found", "Trader receivable not found", HttpStatus.NOT_FOUND);
+    }
+    const inputs = correlatedReceivableInputs("r");
+    const row = (
+      await sql<{
+        receivableNumber: string;
+        status: string;
+        amountDue: string;
+        amountCollected: string;
+        settled: string;
+        anomaly: string | null;
+      }>`
+        select r.receivable_number as "receivableNumber", r.status,
+               r.original_amount_due::text as "amountDue", r.amount_collected::text as "amountCollected",
+               (${inputs.physical} + ${inputs.offset})::text as settled,
+               ${receivableAnomalySql(inputs)} as anomaly
+          from trader_receivables r
+         where r.id = ${receivableId}::uuid and r.company_id = ${companyId}::uuid
+      `.execute(transaction)
+    ).rows[0]!;
+    const target = expectedReceivableStatus(row.amountCollected, row.amountDue);
+    const result = {
+      amountCollected: new Decimal(row.amountCollected).toFixed(2),
+      amountDue: new Decimal(row.amountDue).toFixed(2),
+      fromStatus: row.status,
+      receivableId,
+      receivableNumber: row.receivableNumber,
+      toStatus: target,
+    };
+    if (row.status === target && row.anomaly === null) return { ...result, changed: false };
+    if (
+      row.anomaly === null ||
+      !(RECEIVABLE_STATUS_ANOMALIES as readonly string[]).includes(row.anomaly) ||
+      !new Decimal(row.amountCollected).equals(new Decimal(row.settled))
+    ) {
+      throw new ApplicationException(
+        "trader_receivable_reconcile_not_applicable",
+        "Only a receivable whose recorded collected amount reconciles, but whose status does not, can be reconciled",
+        HttpStatus.CONFLICT,
+      );
+    }
+    const updated = await sql`
+      update trader_receivables set status = ${target}, updated_at = now()
+       where id = ${receivableId}::uuid and company_id = ${companyId}::uuid and status = ${row.status}
+    `.execute(transaction);
+    if (Number(updated.numAffectedRows ?? 0) !== 1) {
+      throw new ApplicationException("trader_receivable_changed", "The Trader receivable changed; refresh and retry", HttpStatus.CONFLICT);
+    }
+    await sql`
+      insert into audit_events (company_id, actor_account_id, action, subject_type, subject_id, after_data, correlation_id)
+      values (${companyId}::uuid, ${actor.actorAccountId}::uuid, 'trader_receivable.status_reconciled', 'trader_receivable',
+              ${receivableId}, ${JSON.stringify({
+                actorRole: actor.actorRole,
+                amountCollected: result.amountCollected,
+                amountDue: result.amountDue,
+                fromStatus: row.status,
+                receivableNumber: row.receivableNumber,
+                rule: "domain status rule: collected<=0 outstanding, <due partially_collected, >=due collected",
+                toStatus: target,
+              })}::jsonb, ${correlationId})
+    `.execute(transaction);
+    return { ...result, changed: true };
   }
 
   public async list(query: TraderCollectionListQueryDto): Promise<Page<TraderCollectionListRow>> {
@@ -1759,6 +1973,7 @@ export class TraderReceivableService {
         join traders t on t.id = r.trader_id and t.company_id = r.company_id
        where r.company_id = ${companyId}::uuid
          and r.status in ('outstanding', 'partially_collected')
+         and ${receivableCollectableNow}
        group by t.id, t.name_en
       having sum(r.outstanding_amount) > 0
        order by sum(r.outstanding_amount) desc, t.name_en asc
@@ -1812,6 +2027,7 @@ export class TraderReceivableService {
        where r.company_id = ${companyId}::uuid
          and r.trader_id = ${traderId}::uuid
          and r.status in ('outstanding', 'partially_collected')
+         and ${receivableCollectableNow}
        order by r.business_date asc, r.receivable_number asc, r.id asc
        ${sql.raw(lock ? "for update of r" : "")}
     `.execute(database);
@@ -1829,7 +2045,8 @@ export class TraderReceivableService {
              r.source_type as "sourceType", r.source_reference as "sourceReference",
              r.business_date::text as "businessDate",
              r.original_amount_due::text as "originalAmountDue",
-             r.amount_collected::text as "amountCollected", r.status, r.reason
+             r.amount_collected::text as "amountCollected", r.status, r.reason,
+             ${receivableCollectableNow} as collectable
         from trader_receivables r
        where r.company_id = ${companyId}::uuid
          and r.id in (${sql.join(receivableIds.map((id) => sql`${id}::uuid`))})
@@ -1867,6 +2084,15 @@ export class TraderReceivableService {
         "Every selected receivable must be outstanding or partially collected",
         HttpStatus.CONFLICT,
         ineligible.map((receivable) => receivable.receivableNumber),
+      );
+    }
+    const undelivered = receivables.filter((receivable) => receivable.collectable === false);
+    if (undelivered.length > 0) {
+      throw new ApplicationException(
+        "trader_collection_order_not_delivered",
+        "An Order fee can be collected only after the Order is delivered",
+        HttpStatus.CONFLICT,
+        undelivered.map((receivable) => receivable.receivableNumber),
       );
     }
   }
@@ -2023,6 +2249,7 @@ export class TraderReceivableService {
         correlation_id,
         idempotency_identity,
         accounting_event_id,
+        generated_by_source_type,
         confirmed_by_account_id,
         confirmed_at,
         created_by_account_id,
@@ -2047,6 +2274,9 @@ export class TraderReceivableService {
         ${options.collectionId},
         ${idempotencyKey},
         ${ownerEventId}::uuid,
+        -- Accounting OFF: no owning Event, so mark the trail as generated
+        -- (see migration 20260984000000). ON rows are unchanged.
+        ${ownerEventId === null ? "trader_collection" : null},
         ${options.actorId}::uuid,
         now(),
         ${options.actorId}::uuid,
