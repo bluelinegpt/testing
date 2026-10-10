@@ -29,6 +29,7 @@ import { OperationsModule } from "./operations/operations.module.js";
 import { PlatformModule } from "./platform/platform.module.js";
 import { PushModule } from "./push/push.module.js";
 import { RoleModule } from "./roles/role.module.js";
+import { RoutePlanningModule } from "./route-planning/route-planning.module.js";
 import { MarketplaceModule } from "./marketplace/marketplace.module.js";
 import { StorefrontModule } from "./storefront/storefront.module.js";
 import { StoreOrderModule } from "./store-order/store-order.module.js";
@@ -75,6 +76,7 @@ import { WhatsAppModule } from "./whatsapp/whatsapp.module.js";
     PlatformModule,
     PushModule,
     RoleModule,
+    RoutePlanningModule,
     StorefrontModule,
     StoreOrderModule,
     StoreOrderConversionModule,

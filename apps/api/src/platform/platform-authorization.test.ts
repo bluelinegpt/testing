@@ -90,6 +90,7 @@ describe("Platform permission catalogue", () => {
       "platform.companies.manage",
       "platform.companies.read",
       "platform.companies.reset",
+      "platform.company_route_optimization.manage",
       "platform.company_websites.manage",
       "platform.company_whatsapp.manage",
       "platform.customer_marketplace.manage",
@@ -223,6 +224,13 @@ describe("Platform permission catalogue", () => {
       resolve(process.cwd(), "../../database/migrations/20261010010000_platform_announcements.ts"),
       "utf8",
     );
+    const routeOptimizationMigration = readFileSync(
+      resolve(
+        process.cwd(),
+        "../../database/migrations/20261010200200_platform_route_optimization_permission.ts",
+      ),
+      "utf8",
+    );
     const migrations =
       foundationMigration +
       deletionMigration +
@@ -239,7 +247,8 @@ describe("Platform permission catalogue", () => {
       agentWhatsappMigration +
       companyWebsiteMigration +
       companyWhatsappMigration +
-      announcementsMigration;
+      announcementsMigration +
+      routeOptimizationMigration;
     for (const permission of PLATFORM_PERMISSIONS)
       expect(migrations).toContain(`'${permission.code}'`);
     expect(migrations).toContain(`'${PLATFORM_SUPER_ADMIN_ROLE_CODE}'`);

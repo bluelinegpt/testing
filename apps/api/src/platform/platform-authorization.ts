@@ -96,6 +96,11 @@ export const PLATFORM_COMPANY_WHATSAPP_MANAGE = "platform.company_whatsapp.manag
 // lists them; MANAGE creates, edits, ends and cancels them.
 export const PLATFORM_ANNOUNCEMENTS_READ = "platform.announcements.read";
 export const PLATFORM_ANNOUNCEMENTS_MANAGE = "platform.announcements.manage";
+// Driver route optimization: switch it on or off per Company, choose its
+// provider, set its daily engine-call budget and flip the Platform-wide kill
+// switch. Seeded by 20261010200200. Reading follows platform.companies.read.
+export const PLATFORM_COMPANY_ROUTE_OPTIMIZATION_MANAGE =
+  "platform.company_route_optimization.manage";
 
 /**
  * The Phase 1 permission set, in the order the seed migration writes them.
@@ -194,6 +199,10 @@ export const PLATFORM_PERMISSIONS: readonly { code: string; description: string 
   {
     code: PLATFORM_ANNOUNCEMENTS_MANAGE,
     description: "Create, edit, end and cancel Platform announcements to Companies",
+  },
+  {
+    code: PLATFORM_COMPANY_ROUTE_OPTIMIZATION_MANAGE,
+    description: "Enable and configure Driver route optimization for a Company",
   },
 ];
 

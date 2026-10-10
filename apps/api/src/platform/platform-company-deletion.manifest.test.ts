@@ -92,7 +92,11 @@ describe("permanent Company deletion manifest", () => {
     // `company_order_view_menus` (Orders menu configuration) and
     // `platform_announcement_companies` (Platform announcement targets), both
     // classified PRESERVE.
-    expect(COMPANY_DELETION_DIRECT_TABLES.size).toBe(171);
+    // 171 -> 176 (route planning): `company_route_optimization_settings`
+    // (PRESERVE) plus `company_route_optimization_usage`, `driver_route_runs`,
+    // `driver_route_stops` and `driver_route_actions` (PURGE). All carry a
+    // direct `company_id ... on delete restrict`.
+    expect(COMPANY_DELETION_DIRECT_TABLES.size).toBe(176);
     expect(COMPANY_DELETION_MANIFEST_HASH).toMatch(/^[a-f0-9]{64}$/);
   });
 

@@ -48,6 +48,14 @@ export const PURGE_TABLES = new Set([
   "trader_collection_allocations",
   "trader_collections",
   "trader_receivables",
+  // Driver route planning (20261010200100_route_optimization_runs). Runs,
+  // their stops and their action log are produced by Drivers working; the
+  // daily engine-call counter is usage. All Company-owned, all removed by a
+  // data reset.
+  "company_route_optimization_usage",
+  "driver_route_actions",
+  "driver_route_runs",
+  "driver_route_stops",
   // Driver commissions and outsourced Driver fees
   "driver_commission_calculations",
   "outsourced_driver_fee_accruals",
@@ -218,6 +226,11 @@ export const PRESERVE_TABLES = new Set([
   // -- tab names, order and filters. Pure configuration, same category as
   // `company_settings`; a data reset keeps it, Company deletion removes it.
   "company_order_view_menus",
+  // Reviewed 2026-10-10: Driver route optimization settings
+  // (`20261010200000_route_optimization_foundation`) -- the Platform's on/off
+  // switch, provider and daily budget for this Company. Configuration: a data
+  // reset keeps it, Company deletion removes it.
+  "company_route_optimization_settings",
   "company_reference_counters",
   // Shipment numbering is identity infrastructure. A development data reset
   // must never rewind it and make a previously issued public serial reusable.
@@ -320,6 +333,9 @@ export const PRESERVE_TABLES = new Set([
   // Reviewed 2026-10-10: Platform announcements (`20261010010000_platform_announcements`).
   // Platform-owned banners with no `company_id`; listed like the other platform_* tables.
   "platform_announcements",
+  // Reviewed 2026-10-10: Platform feature flags (`20261010200000_route_optimization_foundation`),
+  // e.g. the route optimization kill switch. Platform-owned, no `company_id`.
+  "platform_feature_flags",
   "platform_agent_conversation_comments",
   "platform_agent_conversation_status_history",
   "platform_agent_conversations",
@@ -446,6 +462,9 @@ export const GLOBAL_TABLES = new Set([
   // Reviewed 2026-10-10: Platform announcements (`20261010010000_platform_announcements`).
   // Platform-owned banners with no `company_id`; listed like the other platform_* tables.
   "platform_announcements",
+  // Reviewed 2026-10-10: Platform feature flags (`20261010200000_route_optimization_foundation`),
+  // e.g. the route optimization kill switch. Platform-owned, no `company_id`.
+  "platform_feature_flags",
   "platform_agent_conversation_comments",
   "platform_agent_conversation_status_history",
   "platform_agent_conversations",
