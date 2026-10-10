@@ -64,13 +64,18 @@ const sample: DriverCollectionReportData = {
   ],
   summary: {
     actualReceived: "100.00",
+    cashNetExpected: "100.00",
+    cashOrderCount: 1,
     cashTotal: "110.00",
+    companyPaidDriver: "0.00",
     difference: "0.00",
     driverExpenses: "10.00",
     grossCollections: "110.00",
     netExpected: "100.00",
     orderCount: 1,
+    visaOrderCount: 0,
     visaTotal: "0.00",
+    zeroOrderCount: 0,
   },
 };
 
@@ -162,5 +167,49 @@ describe("buildDriverCollectionReportHtml", () => {
     };
     const html = buildDriverCollectionReportHtml(reversal, "en", "now");
     expect(html).toContain("REC-000200");
+  });
+  it("prints Cash, Visa and Nothing-to-collect Orders as separate sections with subtotals (11 Oct 2026)", () => {
+    const base = sample.orders[0]!;
+    const mixed: DriverCollectionReportData = {
+      ...sample,
+      header: { ...sample.header, collectionPaymentMethod: "mixed" },
+      orders: [
+        { ...base, serialNumber: "SER-C", customerAmountToCollect: "110.00", paymentMethod: "cash" },
+        { ...base, serialNumber: "SER-V", customerAmountToCollect: "267.00", paymentMethod: "visa" },
+        { ...base, serialNumber: "SER-Z", customerAmountToCollect: "0.00", paymentMethod: "none" },
+      ],
+      summary: {
+        ...sample.summary,
+        cashOrderCount: 1,
+        cashTotal: "110.00",
+        grossCollections: "377.00",
+        orderCount: 3,
+        visaOrderCount: 1,
+        visaTotal: "267.00",
+        zeroOrderCount: 1,
+      },
+    };
+    const html = buildDriverCollectionReportHtml(mixed, "en", "11/10/2026, 12:00 (UAE)");
+    expect(html).toContain("Mixed (Cash + Visa)");
+    expect(html).toContain("Cash Orders (1) &middot; AED 110.00");
+    expect(html).toContain("Visa Orders (1) &middot; AED 267.00");
+    expect(html).toContain("Nothing to collect (1) &middot; AED 0.00");
+    expect(html.indexOf("SER-C")).toBeLessThan(html.indexOf("SER-V"));
+    expect(html.indexOf("SER-V")).toBeLessThan(html.indexOf("SER-Z"));
+    expect(html).toContain("Visa to Bank");
+    const arabic = buildDriverCollectionReportHtml(mixed, "ar", "11/10/2026, 12:00 (UAE)");
+    expect(arabic).toContain("مختلط (نقدي + فيزا)");
+    expect(arabic).toContain("لا يوجد تحصيل");
+  });
+
+  it("shows Company Paid Driver instead of Cash Net Expected when the Company paid the Driver", () => {
+    const payout: DriverCollectionReportData = {
+      ...sample,
+      summary: { ...sample.summary, cashNetExpected: "-30.00", companyPaidDriver: "30.00" },
+    };
+    const html = buildDriverCollectionReportHtml(payout, "en", "11/10/2026, 12:00 (UAE)");
+    expect(html).toContain("Company Paid Driver");
+    expect(html).toContain("AED 30.00");
+    expect(html).not.toContain("Cash Net Expected");
   });
 });

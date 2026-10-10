@@ -1001,7 +1001,10 @@ describe.skipIf(!runDatabaseTests)("driver cash reconciliation confirm()", () =>
               randomUUID(),
               `key-negative-${randomUUID()}`,
             ),
-          "reconciliation_negative_net",
+          // Expenses above the cash are now a Company-pays-Driver collection
+          // (11 Oct 2026): without the cash payout it is still refused, and
+          // nothing is written.
+          "reconciliation_company_payout_required",
         );
         expect(await countsFor(negativeOrder)).toEqual({ events: 0, history: 0, links: 0 });
         expect((await statusOf(negativeOrder)).cashStatus).toBe("pending");
@@ -1455,9 +1458,9 @@ describe.skipIf(!runDatabaseTests)("driver cash reconciliation confirm()", () =>
         `.execute(transaction);
         expect(visaMethods.rows[0]?.headerMethod).toBe("visa");
         expect(visaMethods.rows[0]?.linkMethod).toBe("visa");
-        // One collection carries exactly one method for every linked Order — the
-        // DTO has no per-Order method field, so Cash/Visa mixing within a single
-        // collection cannot even be expressed, let alone submitted.
+        // Without per-Order overrides every linked Order takes the collection's
+        // method. (Per-Order Cash/Visa is covered by
+        // driver-collection-mixed.http.database.test.ts.)
         const cashOrderForMix = await createOrder(companyA, { collected: 15 });
         const mixedResult = await service.confirm(
           selection([cashOrderForMix], {

@@ -64,13 +64,18 @@ const baseData: DriverCollectionReportData = {
   orders: manyOrders(3),
   summary: {
     actualReceived: "150.00",
+    cashNetExpected: "165.00",
+    cashOrderCount: 3,
     cashTotal: "165.00",
+    companyPaidDriver: "0.00",
     difference: "0.00",
     driverExpenses: "0.00",
     grossCollections: "165.00",
     netExpected: "165.00",
     orderCount: 3,
+    visaOrderCount: 0,
     visaTotal: "0.00",
+    zeroOrderCount: 0,
   },
 };
 

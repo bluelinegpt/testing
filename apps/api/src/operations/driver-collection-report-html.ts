@@ -17,8 +17,11 @@ interface Labels {
   readonly amountDueToTrader: string;
   readonly area: string;
   readonly businessDate: string;
+  readonly cashNetExpected: string;
+  readonly cashOrders: string;
   readonly cashTotal: string;
   readonly cod: string;
+  readonly companyPaidDriver: string;
   readonly collectionStatus: string;
   readonly companyApprover: string;
   readonly companyReceiver: string;
@@ -51,6 +54,8 @@ interface Labels {
   readonly orderSerial: string;
   readonly paymentMethod: string;
   readonly paymentMethodCash: string;
+  readonly paymentMethodMixed: string;
+  readonly paymentMethodNone: string;
   readonly paymentMethodNotAssigned: string;
   readonly paymentMethodVisa: string;
   readonly reason: string;
@@ -66,7 +71,10 @@ interface Labels {
   readonly totalDeductions: string;
   readonly trader: string;
   readonly vat: string;
+  readonly visaOrders: string;
+  readonly visaToBank: string;
   readonly visaTotal: string;
+  readonly zeroOrders: string;
 }
 
 const LABELS: Record<ReportLanguage, Labels> = {
@@ -76,8 +84,11 @@ const LABELS: Record<ReportLanguage, Labels> = {
     amountDueToTrader: "المستحق للتاجر",
     area: "المنطقة",
     businessDate: "تاريخ التحصيل",
+    cashNetExpected: "صافي النقدي المتوقع",
+    cashOrders: "طلبات نقدية",
     cashTotal: "إجمالي النقدي",
     cod: "الدفع عند الاستلام",
+    companyPaidDriver: "دفعت الشركة للسائق",
     collectionStatus: "حالة تحصيل السائق",
     companyApprover: "المعتمد",
     companyReceiver: "أمين الصندوق / موظف العمليات",
@@ -110,6 +121,8 @@ const LABELS: Record<ReportLanguage, Labels> = {
     orderSerial: "الرقم التسلسلي للطلب",
     paymentMethod: "طريقة الدفع",
     paymentMethodCash: "نقدي",
+    paymentMethodMixed: "مختلط (نقدي + فيزا)",
+    paymentMethodNone: "لا يوجد تحصيل",
     paymentMethodNotAssigned: "غير محدد",
     paymentMethodVisa: "فيزا (بطاقة / بنك)",
     reason: "السبب",
@@ -125,7 +138,10 @@ const LABELS: Record<ReportLanguage, Labels> = {
     totalDeductions: "إجمالي الخصومات",
     trader: "التاجر",
     vat: "ضريبة القيمة المضافة",
+    visaOrders: "طلبات فيزا",
+    visaToBank: "فيزا إلى البنك",
     visaTotal: "إجمالي الفيزا",
+    zeroOrders: "طلبات بدون تحصيل",
   },
   en: {
     additionalFees: "Additional Fees",
@@ -133,8 +149,11 @@ const LABELS: Record<ReportLanguage, Labels> = {
     amountDueToTrader: "Amount Due to Trader",
     area: "Area",
     businessDate: "Business/Collection Date",
+    cashNetExpected: "Cash Net Expected",
+    cashOrders: "Cash Orders",
     cashTotal: "Cash Total",
     cod: "COD Amount",
+    companyPaidDriver: "Company Paid Driver",
     collectionStatus: "Driver Reconciliation Status",
     companyApprover: "Approver",
     companyReceiver: "Cashier/Operations User",
@@ -167,6 +186,8 @@ const LABELS: Record<ReportLanguage, Labels> = {
     orderSerial: "Order Serial Number",
     paymentMethod: "Payment Method",
     paymentMethodCash: "Cash",
+    paymentMethodMixed: "Mixed (Cash + Visa)",
+    paymentMethodNone: "Nothing to collect",
     paymentMethodNotAssigned: "Not Assigned",
     paymentMethodVisa: "Visa (card / bank)",
     reason: "Reason",
@@ -182,7 +203,10 @@ const LABELS: Record<ReportLanguage, Labels> = {
     totalDeductions: "Total Deductions",
     trader: "Trader",
     vat: "VAT",
+    visaOrders: "Visa Orders",
+    visaToBank: "Visa to Bank",
     visaTotal: "Visa Total",
+    zeroOrders: "Nothing to collect",
   },
 };
 
@@ -199,9 +223,14 @@ function money(value: string): string {
   return `AED ${escapeHtml(value)}`;
 }
 
-function paymentMethodLabel(labels: Labels, method: "cash" | "visa" | null): string {
+function paymentMethodLabel(
+  labels: Labels,
+  method: "cash" | "mixed" | "none" | "visa" | null,
+): string {
   if (method === "cash") return labels.paymentMethodCash;
   if (method === "visa") return labels.paymentMethodVisa;
+  if (method === "mixed") return labels.paymentMethodMixed;
+  if (method === "none") return labels.paymentMethodNone;
   return labels.paymentMethodNotAssigned;
 }
 
@@ -226,7 +255,11 @@ export function buildDriverCollectionReportHtml(
 ): string {
   const labels = LABELS[language];
   const dir = language === "ar" ? "rtl" : "ltr";
-  const orderRows = data.orders
+  // Cash, Visa and Nothing-to-collect Orders are printed as separate
+  // sections, each with its own count and subtotal (11 Oct 2026).
+  const sectionOf = (order: (typeof data.orders)[number]) =>
+    order.paymentMethod === "visa" ? "visa" : order.paymentMethod === "none" ? "none" : "cash";
+  const orderRowsFor = (orders: typeof data.orders) => orders
     .map(
       (order, index) =>
         "<tr>" +
@@ -250,7 +283,7 @@ export function buildDriverCollectionReportHtml(
         "</tr>",
     )
     .join("");
-  const orderTable =
+  const orderTableFor = (orders: typeof data.orders) =>
     `<table class="grid"><thead><tr>` +
     [
       labels.lineNumber,
@@ -273,7 +306,22 @@ export function buildDriverCollectionReportHtml(
     ]
       .map((label) => `<th>${escapeHtml(label)}</th>`)
       .join("") +
-    `</tr></thead><tbody>${orderRows}</tbody></table>`;
+    `</tr></thead><tbody>${orderRowsFor(orders)}</tbody></table>`;
+  const orderSection = (key: "cash" | "none" | "visa", title: string) => {
+    const orders = data.orders.filter((order) => sectionOf(order) === key);
+    if (orders.length === 0) return "";
+    const subtotal = orders
+      .reduce((total, order) => total + Math.round(Number(order.customerAmountToCollect) * 100), 0) / 100;
+    return (
+      `<h3 class="section-title order-section-title">${escapeHtml(title)} (${orders.length}) &middot; ` +
+      `${money(subtotal.toFixed(2))}</h3>` +
+      orderTableFor(orders)
+    );
+  };
+  const orderTable =
+    orderSection("cash", labels.cashOrders) +
+    orderSection("visa", labels.visaOrders) +
+    orderSection("none", labels.zeroOrders);
 
   const expenseRows = data.expenses
     .map(
@@ -365,10 +413,17 @@ export function buildDriverCollectionReportHtml(
     `<section class="summary-section">` +
     `<h2 class="section-title">${escapeHtml(labels.numberOfOrders)}: ${data.summary.orderCount}</h2>` +
     summaryLine(labels.grossCollections, money(data.summary.grossCollections)) +
-    summaryLine(labels.cashTotal, money(data.summary.cashTotal)) +
-    summaryLine(labels.visaTotal, money(data.summary.visaTotal)) +
+    summaryLine(`${labels.cashTotal} (${data.summary.cashOrderCount})`, money(data.summary.cashTotal)) +
+    summaryLine(`${labels.visaTotal} (${data.summary.visaOrderCount})`, money(data.summary.visaTotal)) +
+    (data.summary.zeroOrderCount > 0
+      ? summaryLine(labels.zeroOrders, String(data.summary.zeroOrderCount))
+      : "") +
     summaryLine(labels.driverExpenses, money(data.summary.driverExpenses)) +
     summaryLine(labels.driverFeeOffset, money(data.summary.driverFeeOffset ?? "0")) +
+    (Number(data.summary.companyPaidDriver) > 0
+      ? summaryLine(labels.companyPaidDriver, money(data.summary.companyPaidDriver))
+      : summaryLine(labels.cashNetExpected, money(data.summary.cashNetExpected))) +
+    summaryLine(labels.visaToBank, money(data.summary.visaTotal)) +
     summaryLine(labels.netExpected, money(data.summary.netExpected)) +
     summaryLine(labels.amount, money(data.summary.actualReceived)) +
     summaryLine(labels.difference, money(data.summary.difference)) +

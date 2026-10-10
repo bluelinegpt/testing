@@ -297,6 +297,15 @@ export class ReconciliationPaymentDto {
   @IsIn(paymentMethods)
   public readonly paymentMethod!: (typeof paymentMethods)[number];
 
+  /*
+   * `in` (the default): money received -- cash from the Driver, or Visa money
+   * in the bank. `out`: cash the Company pays the Driver when expenses exceed
+   * the cash collected (Cash only, 11 Oct 2026).
+   */
+  @IsOptional()
+  @IsIn(["in", "out"])
+  public readonly direction?: "in" | "out";
+
   @IsNumber()
   @Min(0.01)
   public readonly amount!: number;
@@ -350,6 +359,15 @@ export class ReconciliationExpenseDto {
 }
 
 const collectionPaymentMethods = ["cash", "visa"] as const;
+
+/** One Order's Cash/Visa choice where it differs from the collection default. */
+export class OrderPaymentMethodDto {
+  @IsUUID()
+  public readonly orderId!: string;
+
+  @IsIn(collectionPaymentMethods)
+  public readonly method!: (typeof collectionPaymentMethods)[number];
+}
 const orderPaymentConditions = [
   "customer_pays_cod_and_fee",
   "customer_pays_cod_trader_pays_fee",
@@ -372,6 +390,23 @@ export class CreateDriverReconciliationDto extends OrderSelectionDto {
   @IsOptional()
   @IsIn(collectionPaymentMethods)
   public readonly collectionPaymentMethod?: (typeof collectionPaymentMethods)[number];
+
+  /*
+   * Cash/Visa per Order (11 Oct 2026). `defaultPaymentMethod` applies to every
+   * selected Order not listed in `orderPaymentMethods`; an Order with nothing
+   * to collect has no method. When absent, `collectionPaymentMethod` is the
+   * default, so older callers keep working unchanged.
+   */
+  @IsOptional()
+  @IsIn(collectionPaymentMethods)
+  public readonly defaultPaymentMethod?: (typeof collectionPaymentMethods)[number];
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(500)
+  @ValidateNested({ each: true })
+  @Type(() => OrderPaymentMethodDto)
+  public readonly orderPaymentMethods?: readonly OrderPaymentMethodDto[];
 
   @IsArray()
   @ArrayMaxSize(100)
@@ -1010,7 +1045,7 @@ const sortDirections = ["asc", "desc"] as const;
 const driverTypeFilters = ["employee", "outsourced"] as const;
 // Collection method filter domain (§3): distinct from `paymentMethods` above, which
 // is the bank-tender method on a settlement payment line.
-const collectionPaymentMethodFilters = ["cash", "visa", "not_assigned"] as const;
+const collectionPaymentMethodFilters = ["cash", "visa", "mixed", "none", "not_assigned"] as const;
 const reconciliationStatusFilters = ["pending", "reconciled", "reversed", "all"] as const;
 // Outsourced Driver Fee payment state for a Collection. Employee drivers accrue
 // no fee, so their Collections match neither 'paid' nor 'unpaid'.

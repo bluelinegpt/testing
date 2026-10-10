@@ -25,6 +25,17 @@ import { EmployeeCollectionEarningService } from "../payroll/employee-collection
 import { OutsourcedDriverFeeService } from "../payroll/outsourced-driver-fee.service.js";
 
 import { OperationsHistoryWriter } from "./operations-history.writer.js";
+import {
+  assertPaymentsMatchExpectation,
+  cashAvailableForOffset,
+  deriveHeaderMethod,
+  type HeaderMethod,
+  type LineMethod,
+  resolveLineMethods,
+  settlementExpectation,
+  signedPaymentTotal,
+  splitTotals,
+} from "./driver-collection-split.js";
 import { reconciliationPageSizes } from "./operations.dto.js";
 import {
   driverCashStatusLabel,
@@ -55,6 +66,16 @@ const defaultPageSize = 25;
 const idempotencyKeyPattern = /^[A-Za-z0-9._:-]{16,128}$/;
 const idempotencyOperation = "driver_reconciliations.create";
 const reversalIdempotencyOperation = "driver_reconciliations.reverse";
+
+/**
+ * A collection payment counted with its sign: money received (`in`) adds,
+ * cash the Company pays the Driver (`out`, 11 Oct 2026) subtracts. Every total
+ * of `driver_reconciliation_payments` must use this, never a plain sum.
+ */
+/** A collection payment line as the movement writer sees it: a Financial payment plus its direction. */
+type CollectionPaymentLine = FinancialPaymentDto & { readonly direction?: "in" | "out" };
+
+const signedPaymentAmount = sql.raw("case when p.direction = 'out' then -p.amount else p.amount end");
 
 interface EligibleOrder {
   readonly amountCollected: string;
@@ -138,7 +159,7 @@ export interface DriverCollectionPrintData {
   readonly driverName: string;
   readonly gross: string;
   readonly netExpected: string;
-  readonly paymentMethod: "cash" | "visa";
+  readonly paymentMethod: HeaderMethod;
   readonly reconciliationNumber: string;
   readonly totalOrders: number;
   readonly totalTraders: number;
@@ -166,6 +187,8 @@ export interface DriverCollectionPrintData {
 
 export interface EligibleOrderRow {
   readonly amountCollected: string;
+  /** Nothing to collect from the customer (COD 0, Trader pays the fee). Has no Cash/Visa. */
+  readonly isZeroCollection: boolean;
   readonly areaName: string;
   readonly cashStatus: string;
   readonly cashStatusLabel: string;
@@ -179,6 +202,17 @@ export interface EligibleOrderRow {
 }
 
 export interface DriverReconciliationPreview {
+  /** Cash Orders total and count (R2). */
+  readonly cashGross: string;
+  readonly cashOrderCount: number;
+  /** Cash after expenses and the fee offset: > 0 the Driver hands it over; < 0 the Company pays the Driver. */
+  readonly cashNetExpected: string;
+  readonly collectionPaymentMethod: HeaderMethod;
+  readonly companyPaysDriver: string;
+  readonly visaExpected: string;
+  readonly visaGross: string;
+  readonly visaOrderCount: number;
+  readonly zeroOrderCount: number;
   readonly companyFees: string;
   readonly difference: string;
   readonly driverId: string;
@@ -198,6 +232,7 @@ export interface DriverReconciliationPreview {
     readonly cashStatusLabel: string;
     readonly id: string;
     readonly orderNumber: string;
+    readonly paymentMethod: LineMethod;
   }[];
   readonly paymentTotal: string;
   readonly remainingDriverFeeOutstanding: string;
@@ -245,6 +280,8 @@ export interface DriverCollectionsSummary {
   readonly driverExpenses: string;
   readonly netExpectedFromDrivers: string;
   readonly outstandingFromDrivers: string;
+  /** Cash the Company paid to Drivers (Company-pays-Driver collections). */
+  readonly paidToDrivers: string;
   readonly pendingAmountToCollect: string;
   readonly pendingOrderCount: number;
   readonly reconciledCollectionsCount: number;
@@ -270,7 +307,7 @@ export interface DriverCollectionReportData {
   }[];
   readonly header: {
     readonly businessDate: string;
-    readonly collectionPaymentMethod: "cash" | "visa" | null;
+    readonly collectionPaymentMethod: HeaderMethod | null;
     readonly company: {
       readonly hasLogo: boolean;
       readonly logoDataUri?: string | null;
@@ -318,7 +355,7 @@ export interface DriverCollectionReportData {
     readonly driverReconciliationStatus: string;
     readonly driverReconciliationStatusLabel: string;
     readonly emirateName: string | null;
-    readonly paymentMethod: "cash" | "visa" | null;
+    readonly paymentMethod: LineMethod | null;
     readonly referenceNumber: string | null;
     readonly serialNumber: string;
     readonly serviceFee: string;
@@ -329,14 +366,20 @@ export interface DriverCollectionReportData {
   }[];
   readonly summary: {
     readonly actualReceived: string;
+    readonly cashOrderCount: number;
+    /** Cash after expenses and the fee offset; negative = the Company paid the Driver. */
+    readonly cashNetExpected: string;
     readonly cashTotal: string;
+    readonly companyPaidDriver: string;
     readonly difference: string;
     readonly driverFeeOffset?: string;
     readonly driverExpenses: string;
     readonly grossCollections: string;
     readonly netExpected: string;
     readonly orderCount: number;
+    readonly visaOrderCount: number;
     readonly visaTotal: string;
+    readonly zeroOrderCount: number;
   };
 }
 
@@ -489,10 +532,11 @@ export class DriverCashReconciliationService {
         and (${query.deliveredTo ?? null}::date is null
              or o.delivered_at::date <= ${query.deliveredTo ?? null}::date)
     `;
-    const result = await sql<Omit<EligibleOrderRow, "cashStatusLabel"> & { total: number }>`
+    const result = await sql<Omit<EligibleOrderRow, "cashStatusLabel" | "isZeroCollection"> & { total: number }>`
       select o.id, o.order_number as "orderNumber", o.serial_number as "serialNumber",
              o.reference_number as "referenceNumber", o.delivered_at::text as "deliveredAt",
-             o.customer_name as "customerName", t.name_en as "traderName",
+             coalesce(nullif(btrim(o.customer_name), ''), o.customer_mobile_number) as "customerName",
+             t.name_en as "traderName",
              a.name_en as "areaName", o.customer_amount_due::text as "amountCollected",
              o.driver_reconciliation_status as "cashStatus",
              count(*) over()::int as total
@@ -512,6 +556,7 @@ export class DriverCashReconciliationService {
     const rows = result.rows.map((row) => ({
       ...row,
       cashStatusLabel: driverCashStatusLabel(row.cashStatus),
+      isZeroCollection: new Decimal(row.amountCollected).isZero(),
     }));
     return {
       ...this.page(rows, page, pageSize),
@@ -565,14 +610,22 @@ export class DriverCashReconciliationService {
         );
       }
     }
-    const gross = this.sumCollections(orders);
+    // Cash/Visa per Order (11 Oct 2026). Expenses and the fee offset come out
+    // of cash only, so the offset is capped by the cash left after expenses.
+    const methods = resolveLineMethods(
+      orders,
+      input.defaultPaymentMethod ?? input.collectionPaymentMethod ?? "cash",
+      input.orderPaymentMethods ?? [],
+    );
+    const split = splitTotals(orders, methods);
+    const gross = split.gross;
     const expenseTotal = this.sumExpenses(input.expenses ?? []);
     const requestedOffset = new Decimal(input.driverFeeOffsetAmount ?? 0);
     const feeOffset = await this.outsourcedDriverFees.collectionOffsetProposal(
       this.database,
       companyId,
       orders[0]?.assignedDriverId ?? "",
-      gross.minus(expenseTotal),
+      cashAvailableForOffset(split.cashGross, expenseTotal),
       requestedOffset,
       input.driverFeeAllocations,
       false,
@@ -580,8 +633,14 @@ export class DriverCashReconciliationService {
       orders.map((order) => order.id),
     );
     const selectedDriverFeeOffset = new Decimal(feeOffset.requestedOffset);
-    const net = gross.minus(selectedDriverFeeOffset).minus(expenseTotal);
-    const paymentTotal = this.sumPayments(input.payments ?? []);
+    const expectation = settlementExpectation({
+      cashGross: split.cashGross,
+      expenseTotal,
+      offset: selectedDriverFeeOffset,
+      visaGross: split.visaGross,
+    });
+    const net = expectation.net;
+    const paymentTotal = signedPaymentTotal(input.payments ?? []);
     // Company Fees and Trader Payable are shown separately and never reduce the amount the Driver
     // hands over (§8). Company Fees = Gross - Trader Payable.
     const traderPayable = orders.reduce(
@@ -590,6 +649,15 @@ export class DriverCashReconciliationService {
     );
     const companyFees = gross.minus(traderPayable);
     return {
+      cashGross: split.cashGross.toFixed(2),
+      cashNetExpected: expectation.cashNet.toFixed(2),
+      cashOrderCount: split.cashCount,
+      collectionPaymentMethod: deriveHeaderMethod(methods),
+      companyPaysDriver: expectation.companyPaysDriver.toFixed(2),
+      visaExpected: expectation.visaExpected.toFixed(2),
+      visaGross: split.visaGross.toFixed(2),
+      visaOrderCount: split.visaCount,
+      zeroOrderCount: split.zeroCount,
       companyFees: companyFees.toFixed(2),
       difference: paymentTotal.minus(net).toFixed(2),
       driverId: orders[0]?.assignedDriverId ?? "",
@@ -609,6 +677,7 @@ export class DriverCashReconciliationService {
         cashStatusLabel: driverCashStatusLabel(order.driverReconciliationStatus),
         id: order.id,
         orderNumber: order.orderNumber,
+        paymentMethod: methods.get(order.id) ?? "none",
       })),
       paymentTotal: paymentTotal.toFixed(2),
       remainingDriverFeeOutstanding: feeOffset.remainingDriverOutstanding,
@@ -692,27 +761,39 @@ export class DriverCashReconciliationService {
       const driverId = this.assertSingleEligibleDriver(orders);
       await this.assertDriverReconcilable(transaction, companyId, driverId, orders);
 
-      // §5: every Driver collection is either Cash or Visa — the collection method
-      // is mandatory and is carried onto the header and each linked Order so Cash
-      // and Visa can never be mixed within one reconciliation.
-      const collectionPaymentMethod = input.collectionPaymentMethod;
-      if (collectionPaymentMethod === undefined) {
+      // Cash/Visa per Order (11 Oct 2026, spec R1). Each Order line is Cash or
+      // Visa -- the default unless overridden -- and an Order with nothing to
+      // collect is `none`. A default is required as soon as any line has money.
+      const defaultPaymentMethod = input.defaultPaymentMethod ?? input.collectionPaymentMethod;
+      if (
+        defaultPaymentMethod === undefined &&
+        orders.some((order) => !new Decimal(order.amountCollected).isZero())
+      ) {
         throw new ApplicationException(
           "reconciliation_payment_method_required",
           "Select Cash or Visa for the Driver collection",
           HttpStatus.BAD_REQUEST,
         );
       }
+      const methods = resolveLineMethods(
+        orders,
+        defaultPaymentMethod ?? "cash",
+        input.orderPaymentMethods ?? [],
+      );
+      const collectionPaymentMethod = deriveHeaderMethod(methods);
 
       // 5. Recalculate totals from the locked rows, never from client input.
-      const gross = this.sumCollections(orders);
+      //    Expenses and the fee offset come out of CASH only (R2).
+      const split = splitTotals(orders, methods);
+      const gross = split.gross;
       const expenseTotal = this.sumExpenses(input.expenses);
+      const cashAvailable = cashAvailableForOffset(split.cashGross, expenseTotal);
       const requestedOffset = new Decimal(input.driverFeeOffsetAmount ?? 0);
       const feeOffset = await this.outsourcedDriverFees.collectionOffsetProposal(
         transaction,
         companyId,
         driverId,
-        gross.minus(expenseTotal),
+        cashAvailable,
         requestedOffset,
         input.driverFeeAllocations,
         true,
@@ -720,33 +801,21 @@ export class DriverCashReconciliationService {
         orders.map((order) => order.id),
       );
       const selectedDriverFeeOffset = new Decimal(feeOffset.requestedOffset);
-      const net = gross.minus(selectedDriverFeeOffset).minus(expenseTotal);
-      if (net.isNegative()) {
-        throw new ApplicationException(
-          "reconciliation_negative_net",
-          "The reconciliation net amount cannot be negative",
-          HttpStatus.CONFLICT,
-        );
-      }
+      const expectation = settlementExpectation({
+        cashGross: split.cashGross,
+        expenseTotal,
+        offset: selectedDriverFeeOffset,
+        visaGross: split.visaGross,
+      });
+      // A negative net is allowed now: it is a Company-pays-Driver collection
+      // (R3), recorded as an `out` cash payment.
+      const net = expectation.net;
 
-      // 6. Validate expenses and payments against the recalculated total.
+      // 6. Validate expenses and payments against the recalculated split.
       await this.validateExpenses(transaction, companyId, input.expenses);
       await this.validatePayments(transaction, companyId, input.payments);
-      const paymentTotal = this.sumPayments(input.payments);
-      if (net.isZero() && input.payments.length > 0) {
-        throw new ApplicationException(
-          "reconciliation_payment_difference",
-          "A zero Net Amount Expected must not carry payments",
-          HttpStatus.BAD_REQUEST,
-        );
-      }
-      if (!paymentTotal.equals(net)) {
-        throw new ApplicationException(
-          "reconciliation_payment_difference",
-          "Payment total must equal the Net Amount Expected",
-          HttpStatus.BAD_REQUEST,
-        );
-      }
+      assertPaymentsMatchExpectation(input.payments, expectation);
+      const paymentTotal = signedPaymentTotal(input.payments);
 
       // 7. Write everything atomically.
       const reconciliationNumber = await this.history.nextReferenceNumber(
@@ -779,7 +848,7 @@ export class DriverCashReconciliationService {
           ) values (
             ${companyId}::uuid, ${reconciliationId}::uuid, ${order.id}::uuid,
             ${order.amountCollected}, ${orderIndex === 0 ? selectedDriverFeeOffset.toFixed(2) : "0.00"},
-            ${collectionPaymentMethod}
+            ${methods.get(order.id) ?? "none"}
           )
         `.execute(transaction);
       }
@@ -800,10 +869,11 @@ export class DriverCashReconciliationService {
       for (const payment of input.payments) {
         const inserted = await sql<{ id: string }>`
           insert into driver_reconciliation_payments (
-            company_id, reconciliation_id, payment_method, amount,
+            company_id, reconciliation_id, payment_method, direction, amount,
             company_cash_account_id, company_bank_account_id, bank_reference, created_by_account_id, payment_at
           ) values (
             ${companyId}::uuid, ${reconciliationId}::uuid, ${payment.paymentMethod},
+            ${payment.direction === "out" ? "out" : "in"},
             ${new Decimal(payment.amount).toFixed(2)}, ${payment.paymentMethod === "cash" ? (payment.cashAccountId ?? null) : null}::uuid,
             ${payment.paymentMethod === "bank_transfer" ? (payment.bankAccountId ?? null) : null}::uuid,
             ${payment.bankReference?.trim() || null}, ${identity.identityId}::uuid,
@@ -826,7 +896,7 @@ export class DriverCashReconciliationService {
         orderIds: orders.map((order) => order.id),
         paymentDate: header.rows[0]!.businessDate,
         reconciliationId,
-        safeCollectionAmount: gross.minus(expenseTotal),
+        safeCollectionAmount: cashAvailable,
       });
       await sql`
         update driver_reconciliations
@@ -947,6 +1017,10 @@ export class DriverCashReconciliationService {
         action: "driver_reconciliation.confirm",
         actorId: identity.identityId,
         after: {
+          cashGross: split.cashGross.toFixed(2),
+          cashNetExpected: expectation.cashNet.toFixed(2),
+          collectionPaymentMethod,
+          companyPaysDriver: expectation.companyPaysDriver.toFixed(2),
           driverPayableDeduction: selectedDriverFeeOffset.toFixed(2),
           expenseTotal: expenseTotal.toFixed(2),
           grossCollections: gross.toFixed(2),
@@ -954,6 +1028,8 @@ export class DriverCashReconciliationService {
           orderCount: orders.length,
           paymentTotal: paymentTotal.toFixed(2),
           reconciliationNumber,
+          visaGross: split.visaGross.toFixed(2),
+          zeroOrderCount: split.zeroCount,
         },
         companyId,
         correlationId,
@@ -1385,10 +1461,20 @@ export class DriverCashReconciliationService {
         traderId: input.traderId ?? null,
       },
       orderIds: [...(input.orderIds ?? [])].sort(),
+      // Cash/Visa per Order (11 Oct 2026): a different method choice is a
+      // different financial outcome, so it must not replay as the same request.
+      paymentMethods: {
+        collection: input.collectionPaymentMethod ?? null,
+        default: input.defaultPaymentMethod ?? null,
+        orders: (input.orderPaymentMethods ?? [])
+          .map((line) => `${line.orderId}|${line.method}`)
+          .sort(),
+      },
       payments: input.payments
         .map((payment) =>
           [
             payment.paymentMethod,
+            payment.direction === "out" ? "out" : "in",
             new Decimal(payment.amount).toFixed(2),
             payment.bankAccountId ?? "",
             payment.bankReference?.trim() ?? "",
@@ -1449,6 +1535,10 @@ export class DriverCashReconciliationService {
         and (${query.collectionPaymentMethod ?? null}::text is null or (
           case ${query.collectionPaymentMethod ?? null}::text
             when 'not_assigned' then r.collection_payment_method is null
+            -- A Mixed collection holds both Cash and Visa Orders, so it is
+            -- listed under either filter (11 Oct 2026).
+            when 'cash' then r.collection_payment_method in ('cash', 'mixed')
+            when 'visa' then r.collection_payment_method in ('visa', 'mixed')
             else r.collection_payment_method = ${query.collectionPaymentMethod ?? null}::text
           end
         ))
@@ -1588,7 +1678,7 @@ export class DriverCashReconciliationService {
            where link.reconciliation_id = r.id and link.company_id = r.company_id
         ) links on true
         left join lateral (
-          select coalesce(sum(p.amount), 0) as total from driver_reconciliation_payments p
+          select coalesce(sum(${signedPaymentAmount}), 0) as total from driver_reconciliation_payments p
            where p.reconciliation_id = r.id and p.company_id = r.company_id
         ) payments on true
        where ${filters}
@@ -1677,16 +1767,18 @@ export class DriverCashReconciliationService {
       collectionsWithDifferenceCount: number;
       driverExpenses: string;
       netExpectedFromDrivers: string;
+      paidToDrivers: string;
       reconciledCollectionsCount: number;
       visaTotal: string;
     }>`
       select
-        coalesce(sum(r.gross_collections) filter (
-          where r.status = 'confirmed' and r.collection_payment_method = 'cash'
-        ), 0)::text as "cashTotal",
-        coalesce(sum(r.gross_collections) filter (
-          where r.status = 'confirmed' and r.collection_payment_method = 'visa'
-        ), 0)::text as "visaTotal",
+        -- Cash/Visa totals come from the Order LINES (11 Oct 2026): a Mixed
+        -- collection splits across both. Lines written before per-line
+        -- methods fall back to the collection's own method.
+        coalesce(sum(lines.cash_total) filter (where r.status = 'confirmed'), 0)::text as "cashTotal",
+        coalesce(sum(lines.visa_total) filter (where r.status = 'confirmed'), 0)::text as "visaTotal",
+        coalesce(sum(coalesce(payments.paid_out, 0)) filter (where r.status = 'confirmed'), 0)::text
+          as "paidToDrivers",
         coalesce(sum(r.reconciliation_expenses) filter (where r.status = 'confirmed'), 0)::text
           as "driverExpenses",
         coalesce(sum(r.net_amount_received) filter (where r.status = 'confirmed'), 0)::text
@@ -1706,9 +1798,22 @@ export class DriverCashReconciliationService {
         from driver_reconciliations r
         join drivers d on d.id = r.driver_id and d.company_id = r.company_id
         left join lateral (
-          select coalesce(sum(p.amount), 0) as total from driver_reconciliation_payments p
+          select coalesce(sum(${signedPaymentAmount}), 0) as total,
+                 coalesce(sum(p.amount) filter (where p.direction = 'out'), 0) as paid_out
+            from driver_reconciliation_payments p
            where p.reconciliation_id = r.id and p.company_id = r.company_id
         ) payments on true
+        left join lateral (
+          select
+            coalesce(sum(link.customer_collection_amount) filter (
+              where coalesce(link.collection_payment_method, r.collection_payment_method) = 'cash'
+            ), 0) as cash_total,
+            coalesce(sum(link.customer_collection_amount) filter (
+              where coalesce(link.collection_payment_method, r.collection_payment_method) = 'visa'
+            ), 0) as visa_total
+            from driver_reconciliation_orders link
+           where link.reconciliation_id = r.id and link.company_id = r.company_id
+        ) lines on true
        where ${filters}
     `.execute(this.database);
 
@@ -1719,6 +1824,7 @@ export class DriverCashReconciliationService {
       collectionsWithDifferenceCount: 0,
       driverExpenses: "0.00",
       netExpectedFromDrivers: "0.00",
+      paidToDrivers: "0.00",
       reconciledCollectionsCount: 0,
       visaTotal: "0.00",
     };
@@ -1733,6 +1839,7 @@ export class DriverCashReconciliationService {
       // there is no separate "confirmed but not yet handed over" state, since
       // `confirm()` requires the payment total to already equal Net Expected.
       outstandingFromDrivers: new Decimal(pendingRow.pendingAmount).toFixed(2),
+      paidToDrivers: new Decimal(confirmedRow.paidToDrivers).toFixed(2),
       pendingAmountToCollect: new Decimal(pendingRow.pendingAmount).toFixed(2),
       pendingOrderCount: pendingRow.pendingOrderCount,
       reconciledCollectionsCount: confirmedRow.reconciledCollectionsCount,
@@ -1764,7 +1871,7 @@ export class DriverCashReconciliationService {
            where link.reconciliation_id = r.id and link.company_id = r.company_id
         ) links on true
         left join lateral (
-          select coalesce(sum(p.amount), 0) as total from driver_reconciliation_payments p
+          select coalesce(sum(${signedPaymentAmount}), 0) as total from driver_reconciliation_payments p
            where p.reconciliation_id = r.id and p.company_id = r.company_id
         ) payments on true
        where r.id = ${reconciliationId}::uuid and r.company_id = ${companyId}::uuid
@@ -1795,7 +1902,7 @@ export class DriverCashReconciliationService {
     // Bank Account exposure is limited to the display fields approved for
     // reconciliation review; account numbers and IBANs are never returned.
     const payments = await sql`
-      select p.id, p.payment_method as "paymentMethod", p.amount::text as amount,
+      select p.id, p.payment_method as "paymentMethod", p.direction, p.amount::text as amount,
              p.bank_reference as "bankReference", p.payment_at::text as "paymentAt",
              bank.bank_name as "bankName", bank.account_name as "bankAccountName",
              coalesce(actor.username, ${legacyUnknown}) as "recordedBy"
@@ -1877,7 +1984,7 @@ export class DriverCashReconciliationService {
           join drivers d on d.id = r.driver_id and d.company_id = r.company_id
           join companies company on company.id = r.company_id
           left join lateral (
-            select coalesce(sum(p.amount), 0) as total from driver_reconciliation_payments p
+            select coalesce(sum(${signedPaymentAmount}), 0) as total from driver_reconciliation_payments p
              where p.reconciliation_id = r.id and p.company_id = r.company_id
           ) pay on true
          where r.id = ${reconciliationId}::uuid and r.company_id = ${companyId}::uuid
@@ -1977,7 +2084,7 @@ export class DriverCashReconciliationService {
       driverName: header.driverName,
       gross: gross.toFixed(2),
       netExpected: netExpected.toFixed(2),
-      paymentMethod: header.paymentMethod === "visa" ? "visa" : "cash",
+      paymentMethod: (header.paymentMethod ?? "cash") as HeaderMethod,
       reconciliationNumber: header.reconciliationNumber,
       totalOrders: rows.length,
       totalTraders: traders.length,
@@ -2029,7 +2136,7 @@ export class DriverCashReconciliationService {
     const header = (
       await sql<{
         businessDate: string;
-        collectionPaymentMethod: "cash" | "visa" | null;
+        collectionPaymentMethod: HeaderMethod | null;
         confirmedAt: string | null;
         confirmedBy: string;
         createdAt: string;
@@ -2107,7 +2214,7 @@ export class DriverCashReconciliationService {
         deliveryDate: string | null;
         driverReconciliationStatus: string;
         emirateName: string | null;
-        paymentMethod: "cash" | "visa" | null;
+        paymentMethod: LineMethod | null;
         orderNumber: string;
         referenceNumber: string | null;
         serialNumber: string;
@@ -2178,7 +2285,7 @@ export class DriverCashReconciliationService {
 
     const paymentTotal = (
       await sql<{ total: string }>`
-        select coalesce(sum(p.amount), 0)::text as total from driver_reconciliation_payments p
+        select coalesce(sum(${signedPaymentAmount}), 0)::text as total from driver_reconciliation_payments p
          where p.reconciliation_id = ${reconciliationId}::uuid and p.company_id = ${companyId}::uuid
       `.execute(this.database)
     ).rows[0]?.total;
@@ -2188,18 +2295,30 @@ export class DriverCashReconciliationService {
       (sum, order) => sum.plus(order.customerAmountToCollect),
       new Decimal(0),
     );
-    const cashTotal = orderRows
-      .filter((order) => order.paymentMethod === "cash")
-      .reduce((sum, order) => sum.plus(order.customerAmountToCollect), new Decimal(0));
-    const visaTotal = orderRows
-      .filter((order) => order.paymentMethod === "visa")
-      .reduce((sum, order) => sum.plus(order.customerAmountToCollect), new Decimal(0));
+    // Lines written before per-line methods carry NULL: they take the
+    // collection's own method. Lines with nothing to collect count as `none`.
+    const lineMethodOf = (order: (typeof orderRows)[number]): LineMethod =>
+      new Decimal(order.customerAmountToCollect).isZero()
+        ? "none"
+        : (order.paymentMethod ??
+          (header.collectionPaymentMethod === "visa" ? "visa" : "cash"));
+    const cashOrders = orderRows.filter((order) => lineMethodOf(order) === "cash");
+    const visaOrders = orderRows.filter((order) => lineMethodOf(order) === "visa");
+    const cashTotal = cashOrders.reduce(
+      (sum, order) => sum.plus(order.customerAmountToCollect),
+      new Decimal(0),
+    );
+    const visaTotal = visaOrders.reduce(
+      (sum, order) => sum.plus(order.customerAmountToCollect),
+      new Decimal(0),
+    );
     const driverExpenses = expenseRows.reduce(
       (sum, expense) => sum.plus(expense.amount),
       new Decimal(0),
     );
     const driverFeeOffset = new Decimal(header.driverPayableDeduction);
     const netExpected = grossCollections.minus(driverExpenses).minus(driverFeeOffset);
+    const cashNetExpected = cashTotal.minus(driverExpenses).minus(driverFeeOffset);
 
     return {
       expenses: expenseRows.map((row) => ({
@@ -2251,7 +2370,7 @@ export class DriverCashReconciliationService {
         driverReconciliationStatus: row.driverReconciliationStatus,
         driverReconciliationStatusLabel: driverCashStatusLabel(row.driverReconciliationStatus),
         emirateName: row.emirateName,
-        paymentMethod: row.paymentMethod,
+        paymentMethod: lineMethodOf(row),
         orderNumber: row.orderNumber,
         referenceNumber: row.referenceNumber,
         serialNumber: row.serialNumber,
@@ -2264,14 +2383,19 @@ export class DriverCashReconciliationService {
       })),
       summary: {
         actualReceived: actualReceived.toFixed(2),
+        cashNetExpected: cashNetExpected.toFixed(2),
+        cashOrderCount: cashOrders.length,
         cashTotal: cashTotal.toFixed(2),
+        companyPaidDriver: (cashNetExpected.isNegative() ? cashNetExpected.abs() : new Decimal(0)).toFixed(2),
         difference: actualReceived.minus(netExpected).toFixed(2),
         driverFeeOffset: driverFeeOffset.toFixed(2),
         driverExpenses: driverExpenses.toFixed(2),
         grossCollections: grossCollections.toFixed(2),
         netExpected: netExpected.toFixed(2),
         orderCount: orderRows.length,
+        visaOrderCount: visaOrders.length,
         visaTotal: visaTotal.toFixed(2),
+        zeroOrderCount: orderRows.length - cashOrders.length - visaOrders.length,
       },
     };
   }
@@ -2366,16 +2490,8 @@ export class DriverCashReconciliationService {
     return { items: rows, page, pageSize, total: rows[0]?.total ?? 0 };
   }
 
-  private sumCollections(orders: readonly EligibleOrder[]): Decimal {
-    return orders.reduce((total, order) => total.plus(order.amountCollected), new Decimal(0));
-  }
-
   private sumExpenses(expenses: readonly ReconciliationExpenseDto[]): Decimal {
     return expenses.reduce((total, expense) => total.plus(expense.amount), new Decimal(0));
-  }
-
-  private sumPayments(payments: readonly ReconciliationPaymentDto[]): Decimal {
-    return payments.reduce((total, payment) => total.plus(payment.amount), new Decimal(0));
   }
 
   private assertSingleEligibleDriver(orders: readonly EligibleOrder[]): string {
@@ -2654,6 +2770,13 @@ export class DriverCashReconciliationService {
     payments: readonly ReconciliationPaymentDto[],
   ): Promise<void> {
     for (const payment of payments) {
+      if (payment.direction === "out" && payment.paymentMethod !== "cash") {
+        throw new ApplicationException(
+          "reconciliation_payout_cash_only",
+          "The Company pays the Driver in cash only, never by transfer",
+          HttpStatus.BAD_REQUEST,
+        );
+      }
       if (payment.paymentMethod === "cash") {
         if (payment.bankAccountId !== undefined || payment.bankReference !== undefined) {
           throw new ApplicationException(
@@ -2710,7 +2833,7 @@ export class DriverCashReconciliationService {
         where ro.reconciliation_id = r.id and ro.company_id = r.company_id
       ) reconciled_orders on true
       left join lateral (
-        select sum(p.amount) as total
+        select sum(${signedPaymentAmount}) as total
         from driver_reconciliation_payments p
         where p.reconciliation_id = r.id and p.company_id = r.company_id
       ) payments on true
@@ -2753,10 +2876,10 @@ export class DriverCashReconciliationService {
   private async populatePaymentAccounts(
     transaction: Kysely<DatabaseSchema>,
     companyId: string,
-    payments: readonly FinancialPaymentDto[],
+    payments: readonly CollectionPaymentLine[],
   ): Promise<
     Array<
-      FinancialPaymentDto & {
+      CollectionPaymentLine & {
         readonly cashAccountId?: string;
         readonly bankAccountId?: string;
       }
@@ -2781,6 +2904,20 @@ export class DriverCashReconciliationService {
 
     const defaultCashAccountId = cashAccounts.rows[0]?.id;
     const defaultBankAccountId = bankAccounts.rows[0]?.id;
+
+    // A Cash payment -- received from the Driver or paid to the Driver --
+    // needs a Cash account. Without one the movement would be rejected by
+    // cash_bank_movements_structure_check and surface as a generic 409.
+    if (
+      defaultCashAccountId === undefined &&
+      payments.some((payment) => payment.paymentMethod === "cash" && !payment.cashAccountId)
+    ) {
+      throw new ApplicationException(
+        "cash_account_not_configured",
+        "No active main Cash account is configured for this Company. Create one under Accounting → Cash Accounts, then confirm the collection again.",
+        HttpStatus.CONFLICT,
+      );
+    }
 
     // Populate payment accounts based on payment method
     return payments.map((payment) => {
@@ -2812,7 +2949,7 @@ export class DriverCashReconciliationService {
     transaction: Kysely<DatabaseSchema>,
     options: {
       readonly companyId: string;
-      readonly payments: readonly FinancialPaymentDto[];
+      readonly payments: readonly CollectionPaymentLine[];
       readonly reconciliationId: string;
       readonly reconciliationNumber: string;
       readonly businessDate: string;
@@ -2860,15 +2997,16 @@ export class DriverCashReconciliationService {
 
       if (!isCash && !isBank) continue;
 
-      // Determine movement type and funding account
-      const movementType = isCash ? "cash_deposit" : "bank_deposit";
-
-      // For deposits: money comes IN TO company's cash/bank account
-      // Source is NULL (external source: driver, customer, bank)
-      // Destination is the company's cash/bank account receiving the money
-      const destinationCashAccountId = isCash ? payment.cashAccountId : null;
+      // Determine movement type and funding account.
+      // Deposits: money comes IN to the Company's cash/bank account (source
+      // NULL -- the Driver, customer or bank). A Company-pays-Driver payment
+      // (`out`, Cash only, 11 Oct 2026) is a cash WITHDRAWAL from the Cash
+      // account to the Driver (destination NULL).
+      const isPayout = isCash && payment.direction === "out";
+      const movementType = isPayout ? "cash_withdrawal" : isCash ? "cash_deposit" : "bank_deposit";
+      const destinationCashAccountId = isCash && !isPayout ? payment.cashAccountId : null;
       const destinationBankAccountId = isBank ? payment.bankAccountId : null;
-      const sourceCashAccountId = null; // Deposits have no company source account
+      const sourceCashAccountId = isPayout ? payment.cashAccountId : null;
       const sourceBankAccountId = null;
 
       // Generate unique movement number
@@ -2915,7 +3053,7 @@ export class DriverCashReconciliationService {
           ${movementType},
           ${options.businessDate}::date,
           ${options.businessDate}::date,
-          ${sourceCashAccountId}::uuid,
+          ${sourceCashAccountId ?? null}::uuid,
           ${sourceBankAccountId}::uuid,
           ${destinationCashAccountId ?? null}::uuid,
           ${destinationBankAccountId ?? null}::uuid,
@@ -2923,7 +3061,7 @@ export class DriverCashReconciliationService {
           '0'::numeric,
           ${paymentMethodForMovement},
           ${options.reconciliationNumber},
-          ${"Driver collection " + options.reconciliationNumber},
+          ${(isPayout ? "Paid to Driver - " : "Driver collection ") + options.reconciliationNumber},
           'confirmed',
           ${options.reconciliationId},
           ${idempotencyKey},
