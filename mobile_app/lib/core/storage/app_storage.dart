@@ -17,7 +17,11 @@ enum SensitiveKey {
   // like `locale`: it identifies WHICH Company this installation belongs to,
   // not who is signed in, so logout and failed logins must not erase it —
   // a Driver who signs out should not have to re-scan the Company QR.
-  companyMobileCode('company_mobile_code');
+  companyMobileCode('company_mobile_code'),
+  // The Driver's last route (route planning), so a run survives losing
+  // signal. Session data: cleared on logout like the access token, because
+  // it holds customer names.
+  driverRouteCache('driver_route_cache');
 
   const SensitiveKey(this.value);
   final String value;

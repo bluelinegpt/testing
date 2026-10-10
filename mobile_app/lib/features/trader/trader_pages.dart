@@ -5,6 +5,7 @@ import 'package:bluelinegpt_mobile/core/auth/auth_models.dart';
 import 'package:bluelinegpt_mobile/core/validation/safe_parsers.dart';
 import 'package:bluelinegpt_mobile/features/common/pages.dart';
 import 'package:bluelinegpt_mobile/features/driver/driver_pages.dart';
+import 'package:bluelinegpt_mobile/features/driver/route/route_pages.dart';
 import 'package:bluelinegpt_mobile/features/operator_workflow/operator_pages.dart';
 import 'package:bluelinegpt_mobile/features/customer/customer_pages.dart';
 import 'package:bluelinegpt_mobile/features/trader/trader_models.dart';
@@ -22,7 +23,9 @@ final class RoleOrdersPage extends ConsumerWidget {
     final user = ref.watch(authenticationProvider).value?.user;
     if (user?.hasRole(UserRole.trader) == true) return const TraderOrdersPage();
     if (user?.hasRole(UserRole.driver) == true) {
-      return DriverOrdersPage(initialDeliveryStatus: initialDeliveryStatus);
+      return DriverOrdersWithRouteTabs(
+        initialDeliveryStatus: initialDeliveryStatus,
+      );
     }
     if (user?.hasRole(UserRole.operatorRole) == true) {
       return hasOperatorOrderAccess(user!.permissions)

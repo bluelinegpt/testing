@@ -1573,6 +1573,162 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Change company'**
   String get changeCompany;
+
+  /// No description provided for @routeTabMyOrders.
+  ///
+  /// In en, this message translates to:
+  /// **'My Orders'**
+  String get routeTabMyOrders;
+
+  /// No description provided for @routeTabRoute.
+  ///
+  /// In en, this message translates to:
+  /// **'Route'**
+  String get routeTabRoute;
+
+  /// No description provided for @routeIntro.
+  ///
+  /// In en, this message translates to:
+  /// **'Plan my route puts your Areas in a good order and ends at the branch. It is not turn-by-turn navigation — open Maps for each address.'**
+  String get routeIntro;
+
+  /// No description provided for @routePlanFromBranch.
+  ///
+  /// In en, this message translates to:
+  /// **'Plan my route'**
+  String get routePlanFromBranch;
+
+  /// No description provided for @routePlanFromArea.
+  ///
+  /// In en, this message translates to:
+  /// **'Start from an Area'**
+  String get routePlanFromArea;
+
+  /// No description provided for @routeChooseArea.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose the start Area'**
+  String get routeChooseArea;
+
+  /// No description provided for @routeReplan.
+  ///
+  /// In en, this message translates to:
+  /// **'Replan'**
+  String get routeReplan;
+
+  /// No description provided for @routeReverse.
+  ///
+  /// In en, this message translates to:
+  /// **'Reverse direction'**
+  String get routeReverse;
+
+  /// No description provided for @routeNextArea.
+  ///
+  /// In en, this message translates to:
+  /// **'Next Area'**
+  String get routeNextArea;
+
+  /// No description provided for @routeOrders.
+  ///
+  /// In en, this message translates to:
+  /// **'orders'**
+  String get routeOrders;
+
+  /// No description provided for @routeCashHandover.
+  ///
+  /// In en, this message translates to:
+  /// **'Cash to hand over'**
+  String get routeCashHandover;
+
+  /// No description provided for @routeDone.
+  ///
+  /// In en, this message translates to:
+  /// **'Done'**
+  String get routeDone;
+
+  /// No description provided for @routeNewArea.
+  ///
+  /// In en, this message translates to:
+  /// **'New — replan to place it'**
+  String get routeNewArea;
+
+  /// No description provided for @routeUnsequenced.
+  ///
+  /// In en, this message translates to:
+  /// **'Not sequenced (no pin)'**
+  String get routeUnsequenced;
+
+  /// No description provided for @routeDefer.
+  ///
+  /// In en, this message translates to:
+  /// **'Defer'**
+  String get routeDefer;
+
+  /// No description provided for @routeDeferred.
+  ///
+  /// In en, this message translates to:
+  /// **'Deferred to the end'**
+  String get routeDeferred;
+
+  /// No description provided for @routeOpenInMaps.
+  ///
+  /// In en, this message translates to:
+  /// **'Open in Google Maps'**
+  String get routeOpenInMaps;
+
+  /// No description provided for @routeFallbackNotice.
+  ///
+  /// In en, this message translates to:
+  /// **'This is a standard Area order, not an optimized route.'**
+  String get routeFallbackNotice;
+
+  /// No description provided for @routePartialNotice.
+  ///
+  /// In en, this message translates to:
+  /// **'Some Areas could not be placed and are listed at the end.'**
+  String get routePartialNotice;
+
+  /// No description provided for @routeOfflineNotice.
+  ///
+  /// In en, this message translates to:
+  /// **'Offline — showing your saved route. Changes are disabled until you reconnect.'**
+  String get routeOfflineNotice;
+
+  /// No description provided for @routeStaleNotice.
+  ///
+  /// In en, this message translates to:
+  /// **'Your route was updated on another device. Showing the latest.'**
+  String get routeStaleNotice;
+
+  /// No description provided for @routeActionFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'The route could not be updated. Please try again.'**
+  String get routeActionFailed;
+
+  /// No description provided for @routeEstimate.
+  ///
+  /// In en, this message translates to:
+  /// **'Estimated'**
+  String get routeEstimate;
+
+  /// No description provided for @routeKm.
+  ///
+  /// In en, this message translates to:
+  /// **'km'**
+  String get routeKm;
+
+  /// No description provided for @routeMinutes.
+  ///
+  /// In en, this message translates to:
+  /// **'min'**
+  String get routeMinutes;
+
+  /// No description provided for @routeNoStops.
+  ///
+  /// In en, this message translates to:
+  /// **'You have no Orders to route right now.'**
+  String get routeNoStops;
 }
 
 class _AppLocalizationsDelegate

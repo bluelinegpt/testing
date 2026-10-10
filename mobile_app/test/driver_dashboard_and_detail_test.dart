@@ -9,6 +9,8 @@ import 'package:bluelinegpt_mobile/features/driver/driver_models.dart';
 import 'package:bluelinegpt_mobile/features/driver/driver_order_detail_view.dart';
 import 'package:bluelinegpt_mobile/features/driver/driver_pages.dart';
 import 'package:bluelinegpt_mobile/features/driver/driver_repository.dart';
+import 'package:bluelinegpt_mobile/features/driver/route/route_models.dart';
+import 'package:bluelinegpt_mobile/features/driver/route/route_repository.dart';
 import 'package:bluelinegpt_mobile/features/operator_workflow/operator_models.dart';
 import 'package:bluelinegpt_mobile/features/operator_workflow/operator_repository.dart';
 import 'package:bluelinegpt_mobile/features/trader/trader_pages.dart';
@@ -447,6 +449,10 @@ void main() {
           ProviderScope(
             overrides: [
               driverRepositoryProvider.overrideWithValue(repository),
+              // Route planning off: the Orders screen stays the plain list.
+              driverRouteRepositoryProvider.overrideWithValue(
+                const _RoutePlanningOff(),
+              ),
               authenticationServiceProvider.overrideWithValue(
                 _FakeAuthenticationService(
                   AuthenticationState(
@@ -1474,4 +1480,28 @@ void main() {
       });
     },
   );
+}
+
+final class _RoutePlanningOff implements DriverRouteRepository {
+  const _RoutePlanningOff();
+  @override
+  Future<RouteState> current() async => const RouteState(enabled: false);
+  @override
+  Future<RouteState> plan(String idempotencyKey, {String? startAreaId}) =>
+      throw UnimplementedError();
+  @override
+  Future<RouteState> replan(
+    String idempotencyKey,
+    int expectedRevision, {
+    String? startAreaId,
+  }) => throw UnimplementedError();
+  @override
+  Future<RouteState> reverse(String idempotencyKey, int expectedRevision) =>
+      throw UnimplementedError();
+  @override
+  Future<RouteState> defer(
+    String idempotencyKey,
+    String orderId,
+    int expectedRevision,
+  ) => throw UnimplementedError();
 }

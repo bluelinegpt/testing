@@ -774,4 +774,82 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String get changeCompany => 'تغيير الشركة';
+
+  @override
+  String get routeTabMyOrders => 'طلباتي';
+
+  @override
+  String get routeTabRoute => 'المسار';
+
+  @override
+  String get routeIntro => 'خطط مساري يرتب مناطقك بترتيب مناسب وينتهي عند الفرع. هذا ليس ملاحة خطوة بخطوة — افتح الخرائط لكل عنوان.';
+
+  @override
+  String get routePlanFromBranch => 'خطط مساري';
+
+  @override
+  String get routePlanFromArea => 'ابدأ من منطقة';
+
+  @override
+  String get routeChooseArea => 'اختر منطقة البداية';
+
+  @override
+  String get routeReplan => 'إعادة التخطيط';
+
+  @override
+  String get routeReverse => 'عكس الاتجاه';
+
+  @override
+  String get routeNextArea => 'المنطقة التالية';
+
+  @override
+  String get routeOrders => 'طلبات';
+
+  @override
+  String get routeCashHandover => 'نقود للتسليم';
+
+  @override
+  String get routeDone => 'تم';
+
+  @override
+  String get routeNewArea => 'جديدة — أعد التخطيط لترتيبها';
+
+  @override
+  String get routeUnsequenced => 'غير مرتبة (بدون موقع)';
+
+  @override
+  String get routeDefer => 'تأجيل';
+
+  @override
+  String get routeDeferred => 'مؤجلة إلى النهاية';
+
+  @override
+  String get routeOpenInMaps => 'فتح في خرائط Google';
+
+  @override
+  String get routeFallbackNotice => 'هذا ترتيب عادي للمناطق، وليس مسارًا محسّنًا.';
+
+  @override
+  String get routePartialNotice => 'تعذّر ترتيب بعض المناطق، وهي معروضة في النهاية.';
+
+  @override
+  String get routeOfflineNotice => 'غير متصل — يُعرض مسارك المحفوظ. التعديل غير متاح حتى يعود الاتصال.';
+
+  @override
+  String get routeStaleNotice => 'تم تحديث مسارك من جهاز آخر. يُعرض الأحدث.';
+
+  @override
+  String get routeActionFailed => 'تعذّر تحديث المسار. يرجى المحاولة مرة أخرى.';
+
+  @override
+  String get routeEstimate => 'تقديري';
+
+  @override
+  String get routeKm => 'كم';
+
+  @override
+  String get routeMinutes => 'دقيقة';
+
+  @override
+  String get routeNoStops => 'لا توجد طلبات لتخطيط مسارها الآن.';
 }

@@ -10,6 +10,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:bluelinegpt_mobile/features/notifications/notifications_repository.dart';
 import 'package:bluelinegpt_mobile/features/trader/trader_repository.dart';
+import 'package:bluelinegpt_mobile/features/driver/route/route_repository.dart';
 import 'package:bluelinegpt_mobile/features/driver/driver_repository.dart';
 import 'package:bluelinegpt_mobile/features/driver/driver_offline_cache_repository.dart';
 import 'package:bluelinegpt_mobile/features/driver/driver_offline_repository.dart';
@@ -96,6 +97,12 @@ final driverOfflineRepositoryProvider = Provider<OfflineAwareDriverRepository>(
 );
 final driverRepositoryProvider = Provider<DriverRepository>(
   (ref) => ref.watch(driverOfflineRepositoryProvider),
+);
+final driverRouteRepositoryProvider = Provider<DriverRouteRepository>(
+  (ref) => CachedDriverRouteRepository(
+    inner: ApiDriverRouteRepository(ref.watch(apiClientProvider)),
+    storage: ref.watch(storageProvider),
+  ),
 );
 final operatorRepositoryProvider = Provider<OperatorRepository>(
   (ref) => ApiOperatorRepository(ref.watch(apiClientProvider)),

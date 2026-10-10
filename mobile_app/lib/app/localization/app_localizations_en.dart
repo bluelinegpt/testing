@@ -781,4 +781,82 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get changeCompany => 'Change company';
+
+  @override
+  String get routeTabMyOrders => 'My Orders';
+
+  @override
+  String get routeTabRoute => 'Route';
+
+  @override
+  String get routeIntro => 'Plan my route puts your Areas in a good order and ends at the branch. It is not turn-by-turn navigation — open Maps for each address.';
+
+  @override
+  String get routePlanFromBranch => 'Plan my route';
+
+  @override
+  String get routePlanFromArea => 'Start from an Area';
+
+  @override
+  String get routeChooseArea => 'Choose the start Area';
+
+  @override
+  String get routeReplan => 'Replan';
+
+  @override
+  String get routeReverse => 'Reverse direction';
+
+  @override
+  String get routeNextArea => 'Next Area';
+
+  @override
+  String get routeOrders => 'orders';
+
+  @override
+  String get routeCashHandover => 'Cash to hand over';
+
+  @override
+  String get routeDone => 'Done';
+
+  @override
+  String get routeNewArea => 'New — replan to place it';
+
+  @override
+  String get routeUnsequenced => 'Not sequenced (no pin)';
+
+  @override
+  String get routeDefer => 'Defer';
+
+  @override
+  String get routeDeferred => 'Deferred to the end';
+
+  @override
+  String get routeOpenInMaps => 'Open in Google Maps';
+
+  @override
+  String get routeFallbackNotice => 'This is a standard Area order, not an optimized route.';
+
+  @override
+  String get routePartialNotice => 'Some Areas could not be placed and are listed at the end.';
+
+  @override
+  String get routeOfflineNotice => 'Offline — showing your saved route. Changes are disabled until you reconnect.';
+
+  @override
+  String get routeStaleNotice => 'Your route was updated on another device. Showing the latest.';
+
+  @override
+  String get routeActionFailed => 'The route could not be updated. Please try again.';
+
+  @override
+  String get routeEstimate => 'Estimated';
+
+  @override
+  String get routeKm => 'km';
+
+  @override
+  String get routeMinutes => 'min';
+
+  @override
+  String get routeNoStops => 'You have no Orders to route right now.';
 }
