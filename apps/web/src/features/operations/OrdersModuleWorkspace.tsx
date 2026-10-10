@@ -4355,7 +4355,7 @@ function DriverShipmentManifestDialog({
   const reportLanguage = locale;
   const [preview, setPreview] = useState<{
     header: { driverMobile: string; driverName: string; orderCount: number };
-    summary: { totalCustomerAmountToCollect: string; totalOrders: number };
+    summary: { totalCustomerAmountToCollect?: string; totalCod?: string; totalOrders: number };
   }>();
   const [error, setError] = useState<string>();
   const pdf = useReconciliationPdfActions(api);
@@ -4365,7 +4365,7 @@ function DriverShipmentManifestDialog({
     try {
       const result = await api.post<{
         header: { driverMobile: string; driverName: string; orderCount: number };
-        summary: { totalCustomerAmountToCollect: string; totalOrders: number };
+        summary: { totalCustomerAmountToCollect?: string; totalCod?: string; totalOrders: number };
       }>("operations/cash/driver-shipment-manifest/data", selection);
       setPreview(result);
     } catch (requestError) {
@@ -4378,7 +4378,7 @@ function DriverShipmentManifestDialog({
     void api
       .post<{
         header: { driverMobile: string; driverName: string; orderCount: number };
-        summary: { totalCustomerAmountToCollect: string; totalOrders: number };
+        summary: { totalCustomerAmountToCollect?: string; totalCod?: string; totalOrders: number };
       }>("operations/cash/driver-shipment-manifest/data", selection)
       .then((result) => active && setPreview(result))
       .catch((requestError) =>
@@ -4460,7 +4460,7 @@ function DriverShipmentManifestDialog({
             </div>
             <div>
               <dt>{t("operations.manifestTotalAmountToCollect")}</dt>
-              <dd>{formatCurrency(preview.summary.totalCustomerAmountToCollect, "AED", locale)}</dd>
+              <dd>{formatCurrency(preview.summary.totalCustomerAmountToCollect ?? preview.summary.totalCod ?? "0", "AED", locale)}</dd>
             </div>
           </dl>
           {error === undefined ? null : <div className="alert alert-error">{error}</div>}
