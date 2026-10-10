@@ -436,10 +436,11 @@ export function buildTraderSettlementStatementHtml(
     headerMeta(labels.paymentReference, header.paymentReference ?? "") +
     headerMeta(labels.moneySentDate, dateTime(header.moneySentAt)) +
     headerMeta(labels.moneyReceivedDate, dateTime(header.moneyReceivedDate)) +
-    // AL Fahd Al Maliky asked for the creating user to be left off its
-    // invoices; every other Company still prints it.
+    // AL Fahd Al Maliky asked for the creating user and the user who sent
+    // the money ("Money Sent By" / "أرسله") to be left off its invoices;
+    // every other Company still prints both.
     (isFahdAlMalikiCompany ? "" : headerMeta(labels.createdBy, header.createdBy)) +
-    headerMeta(labels.confirmedBy, header.confirmedBy) +
+    (isFahdAlMalikiCompany ? "" : headerMeta(labels.confirmedBy, header.confirmedBy)) +
     headerMeta(labels.generatedAt, header.generatedAt) +
     `</div>` +
     bankSection +

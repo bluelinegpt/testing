@@ -262,13 +262,17 @@ describe("buildTraderSettlementStatementHtml", () => {
     expect(html).toContain("Trader disputed the amount");
   });
 
-  it("leaves Created By off AL Fahd Al Maliky's invoice only", () => {
-    const withCreator = { ...sample, header: { ...sample.header, createdBy: "Mostafa" } };
+  it("leaves Created By and Money Sent By off AL Fahd Al Maliky's invoice only", () => {
+    const withCreator = {
+      ...sample,
+      header: { ...sample.header, confirmedBy: "Mostafa", createdBy: "Mostafa" },
+    };
     const fahd = { ...withCreator, companyId: "2f0703c3-2b3b-45ef-a6ab-de9b3694c0a1" };
     for (const language of ["en", "ar"] as const) {
       const html = buildTraderSettlementStatementHtml(fahd, language);
       expect(html).not.toContain("Mostafa");
       expect(html).not.toContain(language === "en" ? "Created By" : "أنشأه");
+      expect(html).not.toContain(language === "en" ? "Money Sent By" : "أرسله");
       expect(html).toContain("SET-000123");
     }
     const other = buildTraderSettlementStatementHtml(
@@ -276,7 +280,13 @@ describe("buildTraderSettlementStatementHtml", () => {
       "en",
     );
     expect(other).toContain("Created By");
+    expect(other).toContain("Money Sent By");
     expect(other).toContain("Mostafa");
+    const otherArabic = buildTraderSettlementStatementHtml(
+      { ...withCreator, companyId: "dd28829b-2b7c-4851-a0be-181b92673e84" },
+      "ar",
+    );
+    expect(otherArabic).toContain("أرسله");
   });
 
   it("omits the notices section entirely for a plain, un-reversed, not-yet-received settlement", () => {
