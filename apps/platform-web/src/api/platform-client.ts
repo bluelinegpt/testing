@@ -1156,6 +1156,34 @@ function toQuery(filters: object): string {
   return query.toString();
 }
 
+/** Platform → Company → Route planning (free stored-pin Area engine). */
+export interface CompanyRouteOptimization {
+  companyId: string;
+  isEnabled: boolean;
+  platformEnabled: boolean;
+  provider: string;
+  dailyCallBudget: number;
+  version: number;
+  branchSet: boolean;
+  areaCount: number;
+  verifiedAreaCount: number;
+  updatedAt: string | null;
+  runsByDay: { businessDate: string; runs: number; fallbackRuns: number }[];
+  usageByDay: {
+    businessDate: string;
+    callCount: number;
+    successCount: number;
+    failureCount: number;
+    fallbackCount: number;
+  }[];
+}
+
+export interface RouteKillSwitch {
+  isEnabled: boolean;
+  note: string | null;
+  updatedAt: string;
+}
+
 export interface CompanyWhatsAppTemplate {
   status: string;
   bodyAr: string;
@@ -1708,6 +1736,41 @@ export const platformApi = {
       { body: { enabled, ...(reason === undefined ? {} : { reason }) }, method: "PUT" },
     );
     if (result === undefined) throw new PlatformApiError("Empty WhatsApp response", "empty", 500);
+    return result;
+  },
+
+  async companyRouteOptimization(companyId: string): Promise<CompanyRouteOptimization> {
+    const result = await request<CompanyRouteOptimization>(
+      `platform/companies/${companyId}/route-optimization`,
+    );
+    if (result === undefined) throw new PlatformApiError("Empty route planning response", "empty", 500);
+    return result;
+  },
+
+  async updateCompanyRouteOptimization(
+    companyId: string,
+    input: { isEnabled: boolean; dailyCallBudget: number; expectedVersion: number },
+  ): Promise<CompanyRouteOptimization> {
+    const result = await request<CompanyRouteOptimization>(
+      `platform/companies/${companyId}/route-optimization`,
+      { body: input, method: "PUT" },
+    );
+    if (result === undefined) throw new PlatformApiError("Empty route planning response", "empty", 500);
+    return result;
+  },
+
+  async routeKillSwitch(): Promise<RouteKillSwitch> {
+    const result = await request<RouteKillSwitch>("platform/route-optimization/kill-switch");
+    if (result === undefined) throw new PlatformApiError("Empty kill switch response", "empty", 500);
+    return result;
+  },
+
+  async configureRouteKillSwitch(input: { isEnabled: boolean; note?: string }): Promise<RouteKillSwitch> {
+    const result = await request<RouteKillSwitch>("platform/route-optimization/kill-switch", {
+      body: input,
+      method: "PUT",
+    });
+    if (result === undefined) throw new PlatformApiError("Empty kill switch response", "empty", 500);
     return result;
   },
 

@@ -21,6 +21,7 @@ import {
 import { usePlatformSession } from "../app/PlatformSession.js";
 import { companyPortalUrl } from "../config/company-portal.js";
 import { CompanyAdministrators } from "./CompanyAdministrators.js";
+import { CompanyRouteOptimizationPanel } from "./CompanyRouteOptimizationPanel.js";
 import { CompanyWhatsAppPanel } from "./CompanyWhatsAppPanel.js";
 
 type CompanyDetailTab =
@@ -28,6 +29,7 @@ type CompanyDetailTab =
   | "administrators"
   | "website"
   | "whatsapp"
+  | "routes"
   | "configuration"
   | "audit"
   | "lifecycle";
@@ -594,6 +596,7 @@ export function CompanyDetailPage(): ReactElement {
             ["administrators", "Administrators & Passwords"],
             ["website", "Website"],
             ["whatsapp", "WhatsApp"],
+            ["routes", "Route planning"],
             ["configuration", "Configuration & Accounting"],
             ["audit", "Audit"],
             ["lifecycle", "Lifecycle"],
@@ -750,6 +753,15 @@ export function CompanyDetailPage(): ReactElement {
         {activeTab === "whatsapp" && companyId ? (
           <CompanyWhatsAppPanel companyId={companyId} />
         ) : null}
+      </section>
+
+      <section
+        aria-labelledby="company-tab-button-routes"
+        hidden={activeTab !== "routes"}
+        id="company-tab-routes"
+        role="tabpanel"
+      >
+        {activeTab === "routes" && companyId ? <CompanyRouteOptimizationPanel companyId={companyId} /> : null}
       </section>
 
       <section hidden={activeTab !== "information"}>

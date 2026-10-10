@@ -16,6 +16,7 @@ import { WhatsAppConfigurationWorkspace } from "../features/configuration/WhatsA
 import { CompanyProfileWorkspace } from "../features/configuration/CompanyProfileWorkspace.js";
 import { OrderMaintenanceWorkspace } from "../features/configuration/OrderMaintenanceWorkspace.js";
 import { OrderViewsWorkspace } from "../features/configuration/OrderViewsWorkspace.js";
+import { RoutePlanningSetupWorkspace } from "../features/configuration/RoutePlanningSetupWorkspace.js";
 import { ProductCatalogueWorkspace } from "../features/storefront/ProductCatalogueWorkspace.js";
 import { StorefrontConfigurationWorkspace } from "../features/storefront/StorefrontConfigurationWorkspace.js";
 import {
@@ -311,6 +312,8 @@ export function CompanyWorkspace({
     content = <OrderMaintenanceWorkspace api={api} />;
   } else if (path === "/configuration/order-views") {
     content = <OrderViewsWorkspace api={api} permissions={session.identity.permissions} />;
+  } else if (path === "/configuration/route-planning") {
+    content = <RoutePlanningSetupWorkspace api={api} />;
   } else if (path === "/configuration/whatsapp") {
     content = (
       <WhatsAppConfigurationWorkspace api={api} permissions={session.identity.permissions} />
