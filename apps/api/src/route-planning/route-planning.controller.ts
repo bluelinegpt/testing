@@ -1,5 +1,16 @@
-import { Body, Controller, Get, Headers, HttpCode, HttpStatus, Inject, Post } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Get,
+  Headers,
+  HttpCode,
+  HttpStatus,
+  Inject,
+  Post,
+  Req,
+} from "@nestjs/common";
 import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
+import type { Request } from "express";
 
 import { RequireIdentityKinds } from "../authentication/authentication.decorators.js";
 import { ApplicationException } from "../presentation/errors/application.exception.js";
@@ -9,8 +20,10 @@ import { ApplicationException } from "../presentation/errors/application.excepti
 import {
   DeferRouteOrderDto,
   PlanRouteDto,
+  ReorderRouteDto,
   ReplanRouteDto,
   ReverseRouteDto,
+  RouteOrderActionDto,
 } from "./route-planning.dto.js";
 import { type RouteResponse, RoutePlanningService } from "./route-planning.service.js";
 
@@ -79,6 +92,38 @@ export class RoutePlanningController {
     @Headers("x-idempotency-key") idempotencyKey: string | undefined,
   ): Promise<RouteResponse> {
     return this.routes.defer(input.orderId, input.expectedRevision, requireKey(idempotencyKey));
+  }
+  @ApiOperation({ summary: "Put the route in my own order (Areas, and Orders inside them)" })
+  @Post("reorder")
+  @HttpCode(HttpStatus.OK)
+  public reorder(
+    @Body() input: ReorderRouteDto,
+    @Headers("x-idempotency-key") idempotencyKey: string | undefined,
+  ): Promise<RouteResponse> {
+    return this.routes.reorder(input, requireKey(idempotencyKey));
+  }
+
+  @ApiOperation({ summary: "Start trip: my Assigned Orders go Out for Delivery" })
+  @Post("start")
+  @HttpCode(HttpStatus.OK)
+  public start(
+    @Req() request: Request,
+    @Headers("x-idempotency-key") idempotencyKey: string | undefined,
+  ): Promise<RouteResponse> {
+    return this.routes.start(
+      requireKey(idempotencyKey),
+      String(request.id ?? request.headers["x-correlation-id"] ?? "unknown"),
+    );
+  }
+
+  @ApiOperation({ summary: "Record that the customer did not answer (the Order is unchanged)" })
+  @Post("no-answer")
+  @HttpCode(HttpStatus.OK)
+  public noAnswer(
+    @Body() input: RouteOrderActionDto,
+    @Headers("x-idempotency-key") idempotencyKey: string | undefined,
+  ): Promise<RouteResponse> {
+    return this.routes.noAnswer(input.orderId, requireKey(idempotencyKey));
   }
 }
 

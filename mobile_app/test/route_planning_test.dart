@@ -18,6 +18,8 @@ Map<String, dynamic> _runJson({
   int revision = 1,
   String resultSource = 'provider',
   List<String> deferred = const [],
+  String? startedAt,
+  int noAnswerOnFirst = 0,
 }) => {
   'id': 'run-1',
   'referenceNumber': 'RUN-000001',
@@ -31,6 +33,10 @@ Map<String, dynamic> _runJson({
   'durationSeconds': 2100,
   'nextAreaId': 'area-ajm',
   'cashHandoverOrderCount': 1,
+  'cashHandoverAmount': '120.00',
+  'startedAt': startedAt,
+  'branchLatitude': 25.40,
+  'branchLongitude': 55.44,
   'areas': [
     {
       'areaId': 'area-ajm',
@@ -52,6 +58,18 @@ Map<String, dynamic> _runJson({
           'orderNumber': 'ORD-000001',
           'customerName': 'Customer A',
           'deliveryStatus': 'assigned_to_driver',
+          'referenceNumber': '4501',
+          'customerMobile': '0506898604',
+          'customerAddress': 'Villa 3',
+          'amountDue': '450.00',
+          'noAnswerCount': noAnswerOnFirst,
+        },
+        {
+          'id': 'order-2',
+          'orderNumber': 'ORD-000002',
+          'customerName': 'Customer B',
+          'deliveryStatus': 'assigned_to_driver',
+          'referenceNumber': '4502',
         },
       ],
     },
@@ -124,6 +142,36 @@ final class _FakeRoutes implements DriverRouteRepository {
     return state = RouteState.fromJson({
       'enabled': true,
       'run': _runJson(revision: expectedRevision + 1, deferred: [orderId]),
+    });
+  }
+
+  @override
+  Future<RouteState> reorder(
+    String idempotencyKey,
+    int expectedRevision,
+    List<String> areaIds, {
+    List<String>? orderIds,
+  }) async {
+    calls.add('reorder:$expectedRevision:${areaIds.join(',')}:${orderIds?.join(',')}');
+    return state;
+  }
+
+  @override
+  Future<RouteState> start(String idempotencyKey) async {
+    calls.add('start');
+    return state = RouteState.fromJson({
+      'enabled': true,
+      'run': _runJson(startedAt: '2026-10-10 09:00:00+04'),
+      'trip': {'changedCount': 2, 'failedOrderIds': <String>[]},
+    });
+  }
+
+  @override
+  Future<RouteState> noAnswer(String idempotencyKey, String orderId) async {
+    calls.add('noAnswer:$orderId');
+    return state = RouteState.fromJson({
+      'enabled': true,
+      'run': _runJson(startedAt: '2026-10-10 09:00:00+04', noAnswerOnFirst: 1),
     });
   }
 }
@@ -308,7 +356,7 @@ void main() {
 
       await tester.tap(find.text('Al Nuaimiya').last);
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Defer'));
+      await tester.tap(find.text('Defer').first);
       await tester.pumpAndSettle();
       expect(routes.calls, contains('defer:order-1:1'));
       expect(find.text('Deferred to the end'), findsOneWidget);
@@ -365,6 +413,107 @@ void main() {
       expect(find.text('عكس الاتجاه'), findsOneWidget);
     });
   });
+
+  group('Trip plan', () {
+    test('works the stops in route order; a no-answer moves on but stays', () {
+      final run = RouteState.fromJson({
+        'enabled': true,
+        'run': _runJson(startedAt: 'x', noAnswerOnFirst: 1),
+      }).run!;
+      final plan = TripPlan.of(run);
+      expect(plan.total, 2);
+      expect(plan.current!.order.id, 'order-2');
+      expect(plan.retry.single.order.id, 'order-1');
+      expect(run.isStarted, isTrue);
+      expect(run.cashHandoverAmount, '120.00');
+    });
+
+    test('order label prefers the reference number', () {
+      final order = RouteOrder.fromJson({
+        'id': 'o',
+        'orderNumber': 'ORD-1',
+        'serialNumber': '7',
+        'referenceNumber': ' ',
+      });
+      expect(order.label, '7');
+    });
+  });
+
+  group('Arrange and start trip', () {
+    testWidgets('moving an Order saves the Driver\'s own order', (tester) async {
+      _tall(tester);
+      final state = RouteState.fromJson({'enabled': true, 'run': _runJson()});
+      final routes = _FakeRoutes(state);
+      await tester.pumpWidget(_wrap(DriverRoutePage(initial: state), routes));
+      await tester.tap(find.text('Al Nuaimiya').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Move down').first);
+      await tester.pumpAndSettle();
+      expect(
+        routes.calls,
+        contains('reorder:1:area-ajm,area-shj:order-2,order-1'),
+      );
+    });
+
+    testWidgets('Start trip asks first, then shows the current stop', (
+      tester,
+    ) async {
+      _tall(tester);
+      final state = RouteState.fromJson({'enabled': true, 'run': _runJson()});
+      final routes = _FakeRoutes(state);
+      await tester.pumpWidget(_wrap(DriverRoutePage(initial: state), routes));
+      await tester.tap(find.widgetWithText(FilledButton, 'Start trip'));
+      await tester.pumpAndSettle();
+      expect(find.text('Start trip?'), findsOneWidget);
+      await tester.tap(find.widgetWithText(FilledButton, 'Start trip').last);
+      await tester.pumpAndSettle();
+      expect(routes.calls, contains('start'));
+      expect(find.text('Current stop'), findsOneWidget);
+      expect(find.text('Collect: AED 450.00'), findsOneWidget);
+      expect(find.widgetWithText(FilledButton, 'Navigate'), findsOneWidget);
+    });
+
+    testWidgets('No answer moves on and keeps the Order to try again', (
+      tester,
+    ) async {
+      _tall(tester);
+      final started = RouteState.fromJson({
+        'enabled': true,
+        'run': _runJson(startedAt: '2026-10-10 09:00:00+04'),
+      });
+      final routes = _FakeRoutes(started);
+      await tester.pumpWidget(_wrap(DriverRoutePage(initial: started), routes));
+      expect(find.text('Customer A'), findsWidgets);
+      await tester.tap(find.text('No answer – next'));
+      await tester.pumpAndSettle();
+      expect(routes.calls, contains('noAnswer:order-1'));
+      expect(find.text('No answer – try again'), findsOneWidget);
+      expect(find.textContaining('No answer ×1'), findsOneWidget);
+    });
+
+    testWidgets('when every stop is done the trip ends at the branch', (
+      tester,
+    ) async {
+      _tall(tester);
+      final json = _runJson(startedAt: 'x');
+      final done = RouteState.fromJson({
+        'enabled': true,
+        'run': {
+          ...json,
+          'areas': [
+            {...(json['areas'] as List).first as Map, 'orders': [], 'orderCount': 0},
+          ],
+        },
+      });
+      await tester.pumpWidget(_wrap(DriverRoutePage(initial: done), _FakeRoutes(done)));
+      expect(find.text('All stops done.'), findsOneWidget);
+      expect(
+        find.textContaining('Return to branch and hand over: AED 120.00'),
+        findsOneWidget,
+      );
+      expect(find.text('Navigate to branch'), findsOneWidget);
+    });
+  });
 }
 
 final class _Failing implements DriverRouteRepository {
@@ -392,4 +541,16 @@ final class _Failing implements DriverRouteRepository {
     String orderId,
     int expectedRevision,
   ) async => throw error;
+  @override
+  Future<RouteState> reorder(
+    String idempotencyKey,
+    int expectedRevision,
+    List<String> areaIds, {
+    List<String>? orderIds,
+  }) async => throw error;
+  @override
+  Future<RouteState> start(String idempotencyKey) async => throw error;
+  @override
+  Future<RouteState> noAnswer(String idempotencyKey, String orderId) async =>
+      throw error;
 }

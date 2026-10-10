@@ -2,6 +2,7 @@ import { Module } from "@nestjs/common";
 
 import { AuthenticationModule } from "../authentication/authentication.module.js";
 import { CompanyConfigurationModule } from "../company-configuration/company-configuration.module.js";
+import { OperationsModule } from "../operations/operations.module.js";
 import { RoutePlanningController } from "./route-planning.controller.js";
 import { RoutePlanningService } from "./route-planning.service.js";
 import { AreaMatrixRouteProvider } from "./area-matrix-route-provider.js";
@@ -18,7 +19,7 @@ import { RouteSetupService } from "./route-setup.service.js";
  */
 @Module({
   controllers: [RoutePlanningController, RouteSetupController],
-  imports: [AuthenticationModule, CompanyConfigurationModule],
+  imports: [AuthenticationModule, CompanyConfigurationModule, OperationsModule],
   providers: [
     RoutePlanningService,
     RouteSetupService,

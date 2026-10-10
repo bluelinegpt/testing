@@ -876,4 +876,85 @@ class AppLocalizationsEn extends AppLocalizations {
   String customerContactMessage(String customer, String order) {
     return 'Hello $customer, this is your delivery driver for order $order.';
   }
+
+  @override
+  String get routeStartTrip => 'Start trip';
+
+  @override
+  String get routeStartTripConfirmTitle => 'Start trip?';
+
+  @override
+  String get routeStartTripConfirmBody => 'Your assigned orders will be marked Out for delivery.';
+
+  @override
+  String routeStartTripDone(int count) {
+    return '$count orders are now Out for delivery.';
+  }
+
+  @override
+  String get routeStartTripSomeFailed => 'Some orders could not be started because the office changed them.';
+
+  @override
+  String get routeArrangeHint => 'Drag the Areas into the order you want. Use the arrows to order the orders inside an Area.';
+
+  @override
+  String get routeReplanConfirm => 'Replace your own order with the suggested route?';
+
+  @override
+  String get routeReplanConfirmAction => 'Replace';
+
+  @override
+  String get routeCancel => 'Cancel';
+
+  @override
+  String get routeMoveUp => 'Move up';
+
+  @override
+  String get routeMoveDown => 'Move down';
+
+  @override
+  String get routeTripStarted => 'Trip started';
+
+  @override
+  String routeStopsLeft(int count) {
+    return '$count stops left';
+  }
+
+  @override
+  String get routeCurrentStop => 'Current stop';
+
+  @override
+  String get routeCollect => 'Collect';
+
+  @override
+  String get routeNavigate => 'Navigate';
+
+  @override
+  String get routeOpenOrder => 'Open order';
+
+  @override
+  String get routeNoAnswerNext => 'No answer – next';
+
+  @override
+  String get routeUpNext => 'Up next';
+
+  @override
+  String get routeRetryTitle => 'No answer – try again';
+
+  @override
+  String get routeNoAnswerCount => 'No answer';
+
+  @override
+  String get routeTripFinished => 'All stops done.';
+
+  @override
+  String get routeReturnToBranch => 'Return to branch and hand over';
+
+  @override
+  String get routeNavigateToBranch => 'Navigate to branch';
+
+  @override
+  String routeOnMyWayMessage(String customer, String order) {
+    return 'Hello $customer, I\'m on my way with your order $order.';
+  }
 }

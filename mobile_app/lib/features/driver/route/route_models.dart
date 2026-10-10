@@ -43,6 +43,10 @@ final class RouteOrder {
     this.customerName,
     this.deliveryStatus,
     this.areaId,
+    this.customerMobile,
+    this.customerAddress,
+    this.amountDue,
+    this.noAnswerCount = 0,
   });
 
   factory RouteOrder.fromJson(Map<String, dynamic> json) => RouteOrder(
@@ -53,6 +57,10 @@ final class RouteOrder {
     customerName: _string(json['customerName']),
     deliveryStatus: _string(json['deliveryStatus']),
     areaId: _string(json['areaId']),
+    customerMobile: _string(json['customerMobile']),
+    customerAddress: _string(json['customerAddress']),
+    amountDue: _string(json['amountDue']),
+    noAnswerCount: _int(json['noAnswerCount']),
   );
 
   final String id;
@@ -61,7 +69,18 @@ final class RouteOrder {
       referenceNumber,
       customerName,
       deliveryStatus,
-      areaId;
+      areaId,
+      customerMobile,
+      customerAddress,
+      amountDue;
+
+  /// Times the Driver recorded "no answer" today. The Order is unchanged.
+  final int noAnswerCount;
+
+  /// Reference number when there is one, otherwise the serial number.
+  String get label => (referenceNumber?.trim().isNotEmpty ?? false)
+      ? referenceNumber!.trim()
+      : (serialNumber ?? orderNumber);
 
   Map<String, dynamic> toJson() => {
     'id': id,
@@ -71,6 +90,10 @@ final class RouteOrder {
     'customerName': customerName,
     'deliveryStatus': deliveryStatus,
     'areaId': areaId,
+    'customerMobile': customerMobile,
+    'customerAddress': customerAddress,
+    'amountDue': amountDue,
+    'noAnswerCount': noAnswerCount,
   };
 }
 
@@ -120,6 +143,24 @@ final class RouteArea {
   final List<RouteOrder> orders;
 
   bool get isDone => status == 'done';
+
+  /// The same Area with its Orders in a new order.
+  RouteArea withOrders(List<RouteOrder> reordered) => RouteArea(
+    areaId: areaId,
+    areaNameEn: areaNameEn,
+    areaNameAr: areaNameAr,
+    emirateNameEn: emirateNameEn,
+    emirateNameAr: emirateNameAr,
+    sequencePosition: sequencePosition,
+    isSequenced: isSequenced,
+    isNew: isNew,
+    status: status,
+    orderCount: orderCount,
+    cashHandoverCount: cashHandoverCount,
+    latitude: latitude,
+    longitude: longitude,
+    orders: reordered,
+  );
   bool get hasPin => latitude != null && longitude != null;
 
   String areaName(String locale) =>
@@ -161,6 +202,11 @@ final class RouteRun {
     required this.deferredOrders,
     this.nextAreaId,
     required this.cashHandoverOrderCount,
+    this.cashHandoverAmount = '0.00',
+    this.startedAt,
+    this.manualOrder = false,
+    this.branchLatitude,
+    this.branchLongitude,
   });
 
   factory RouteRun.fromJson(Map<String, dynamic> json) => RouteRun(
@@ -181,6 +227,11 @@ final class RouteRun {
     ],
     nextAreaId: _string(json['nextAreaId']),
     cashHandoverOrderCount: _int(json['cashHandoverOrderCount']),
+    cashHandoverAmount: _string(json['cashHandoverAmount']) ?? '0.00',
+    startedAt: _string(json['startedAt']),
+    manualOrder: _bool(json['manualOrder']),
+    branchLatitude: _double(json['branchLatitude']),
+    branchLongitude: _double(json['branchLongitude']),
   );
 
   final String id, referenceNumber, businessDate, direction, resultSource;
@@ -190,8 +241,14 @@ final class RouteRun {
   final int? distanceMeters, durationSeconds;
   final List<RouteArea> areas;
   final List<RouteOrder> deferredOrders;
+  final String cashHandoverAmount;
+  final String? startedAt;
+  final bool manualOrder;
+  final double? branchLatitude, branchLongitude;
 
   bool get isFallback => resultSource != 'provider';
+  bool get isStarted => startedAt != null;
+  bool get hasBranch => branchLatitude != null && branchLongitude != null;
   RouteArea? get nextArea {
     for (final area in areas) {
       if (area.areaId == nextAreaId) return area;
@@ -214,7 +271,52 @@ final class RouteRun {
     'deferredOrders': [for (final order in deferredOrders) order.toJson()],
     'nextAreaId': nextAreaId,
     'cashHandoverOrderCount': cashHandoverOrderCount,
+    'cashHandoverAmount': cashHandoverAmount,
+    'startedAt': startedAt,
+    'manualOrder': manualOrder,
+    'branchLatitude': branchLatitude,
+    'branchLongitude': branchLongitude,
   };
+}
+
+/// One stop of the trip: an Order with the Area it is in.
+final class TripStop {
+  const TripStop({required this.order, required this.area});
+  final RouteOrder order;
+  final RouteArea area;
+}
+
+/// The trip as the Driver works it: every Order still to deliver, in route
+/// order (his own order when he arranged it), then the deferred ones.
+///
+/// [current] is the first stop he has not tried yet. A "no answer" only
+/// moves him on: that Order stays in the trip, unchanged, under [retry],
+/// and he can open it whenever he comes back.
+final class TripPlan {
+  TripPlan._(this.stops);
+
+  factory TripPlan.of(RouteRun run) {
+    final stops = <TripStop>[
+      for (final area in run.areas)
+        for (final order in area.orders) TripStop(order: order, area: area),
+    ];
+    final areaById = {for (final area in run.areas) area.areaId: area};
+    for (final order in run.deferredOrders) {
+      final area = areaById[order.areaId];
+      if (area != null) stops.add(TripStop(order: order, area: area));
+    }
+    return TripPlan._(List.unmodifiable(stops));
+  }
+
+  final List<TripStop> stops;
+
+  List<TripStop> get untried =>
+      [for (final stop in stops) if (stop.order.noAnswerCount == 0) stop];
+  List<TripStop> get retry =>
+      [for (final stop in stops) if (stop.order.noAnswerCount > 0) stop];
+  TripStop? get current => untried.isEmpty ? null : untried.first;
+  bool get isFinished => stops.isEmpty;
+  int get total => stops.length;
 }
 
 /// What the Route tab shows. `offline` marks a saved copy served because the
@@ -225,6 +327,8 @@ final class RouteState {
     this.run,
     this.stale = false,
     this.offline = false,
+    this.tripChangedCount,
+    this.tripFailedCount = 0,
   });
 
   factory RouteState.fromJson(
@@ -237,10 +341,23 @@ final class RouteState {
     run: json['run'] is Map
         ? RouteRun.fromJson(Map<String, dynamic>.from(json['run'] as Map))
         : null,
+    tripChangedCount: switch (json['trip']) {
+      {'changedCount': final Object? count} => _int(count),
+      _ => null,
+    },
+    tripFailedCount: switch (json['trip']) {
+      {'failedOrderIds': final List<Object?> failed} => failed.length,
+      _ => 0,
+    },
   );
 
   final bool enabled, stale, offline;
   final RouteRun? run;
+
+  /// Start trip only: Orders moved to Out for Delivery, and how many could
+  /// not be (changed by the office meanwhile).
+  final int? tripChangedCount;
+  final int tripFailedCount;
 
   Map<String, dynamic> toJson() => {
     'enabled': enabled,

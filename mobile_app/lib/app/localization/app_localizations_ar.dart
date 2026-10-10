@@ -867,4 +867,85 @@ class AppLocalizationsAr extends AppLocalizations {
   String customerContactMessage(String customer, String order) {
     return 'مرحباً $customer، معك مندوب التوصيل لطلبك رقم $order.';
   }
+
+  @override
+  String get routeStartTrip => 'ابدأ الرحلة';
+
+  @override
+  String get routeStartTripConfirmTitle => 'بدء الرحلة؟';
+
+  @override
+  String get routeStartTripConfirmBody => 'سيتم تحويل طلباتك المسندة إلى قيد التوصيل.';
+
+  @override
+  String routeStartTripDone(int count) {
+    return 'تم تحويل $count طلب إلى قيد التوصيل.';
+  }
+
+  @override
+  String get routeStartTripSomeFailed => 'تعذّر بدء بعض الطلبات لأن المكتب عدّلها.';
+
+  @override
+  String get routeArrangeHint => 'اسحب المناطق لترتيبها كما تريد، واستخدم الأسهم لترتيب الطلبات داخل كل منطقة.';
+
+  @override
+  String get routeReplanConfirm => 'هل تريد استبدال ترتيبك بالمسار المقترح؟';
+
+  @override
+  String get routeReplanConfirmAction => 'استبدال';
+
+  @override
+  String get routeCancel => 'إلغاء';
+
+  @override
+  String get routeMoveUp => 'تحريك للأعلى';
+
+  @override
+  String get routeMoveDown => 'تحريك للأسفل';
+
+  @override
+  String get routeTripStarted => 'بدأت الرحلة';
+
+  @override
+  String routeStopsLeft(int count) {
+    return '$count محطة متبقية';
+  }
+
+  @override
+  String get routeCurrentStop => 'المحطة الحالية';
+
+  @override
+  String get routeCollect => 'المبلغ المطلوب';
+
+  @override
+  String get routeNavigate => 'ابدأ الملاحة';
+
+  @override
+  String get routeOpenOrder => 'فتح الطلب';
+
+  @override
+  String get routeNoAnswerNext => 'لا يرد – التالي';
+
+  @override
+  String get routeUpNext => 'التالي';
+
+  @override
+  String get routeRetryTitle => 'لم يرد – حاول مجدداً';
+
+  @override
+  String get routeNoAnswerCount => 'لم يرد';
+
+  @override
+  String get routeTripFinished => 'تم الانتهاء من جميع المحطات.';
+
+  @override
+  String get routeReturnToBranch => 'عُد إلى الفرع وسلّم';
+
+  @override
+  String get routeNavigateToBranch => 'الملاحة إلى الفرع';
+
+  @override
+  String routeOnMyWayMessage(String customer, String order) {
+    return 'مرحباً $customer، أنا في الطريق إليك بطلبك رقم $order.';
+  }
 }

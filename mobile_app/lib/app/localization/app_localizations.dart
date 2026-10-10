@@ -1747,6 +1747,156 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Hello {customer}, this is your delivery driver for order {order}.'**
   String customerContactMessage(String customer, String order);
+
+  /// No description provided for @routeStartTrip.
+  ///
+  /// In en, this message translates to:
+  /// **'Start trip'**
+  String get routeStartTrip;
+
+  /// No description provided for @routeStartTripConfirmTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Start trip?'**
+  String get routeStartTripConfirmTitle;
+
+  /// No description provided for @routeStartTripConfirmBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Your assigned orders will be marked Out for delivery.'**
+  String get routeStartTripConfirmBody;
+
+  /// No description provided for @routeStartTripDone.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} orders are now Out for delivery.'**
+  String routeStartTripDone(int count);
+
+  /// No description provided for @routeStartTripSomeFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Some orders could not be started because the office changed them.'**
+  String get routeStartTripSomeFailed;
+
+  /// No description provided for @routeArrangeHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Drag the Areas into the order you want. Use the arrows to order the orders inside an Area.'**
+  String get routeArrangeHint;
+
+  /// No description provided for @routeReplanConfirm.
+  ///
+  /// In en, this message translates to:
+  /// **'Replace your own order with the suggested route?'**
+  String get routeReplanConfirm;
+
+  /// No description provided for @routeReplanConfirmAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Replace'**
+  String get routeReplanConfirmAction;
+
+  /// No description provided for @routeCancel.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancel'**
+  String get routeCancel;
+
+  /// No description provided for @routeMoveUp.
+  ///
+  /// In en, this message translates to:
+  /// **'Move up'**
+  String get routeMoveUp;
+
+  /// No description provided for @routeMoveDown.
+  ///
+  /// In en, this message translates to:
+  /// **'Move down'**
+  String get routeMoveDown;
+
+  /// No description provided for @routeTripStarted.
+  ///
+  /// In en, this message translates to:
+  /// **'Trip started'**
+  String get routeTripStarted;
+
+  /// No description provided for @routeStopsLeft.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} stops left'**
+  String routeStopsLeft(int count);
+
+  /// No description provided for @routeCurrentStop.
+  ///
+  /// In en, this message translates to:
+  /// **'Current stop'**
+  String get routeCurrentStop;
+
+  /// No description provided for @routeCollect.
+  ///
+  /// In en, this message translates to:
+  /// **'Collect'**
+  String get routeCollect;
+
+  /// No description provided for @routeNavigate.
+  ///
+  /// In en, this message translates to:
+  /// **'Navigate'**
+  String get routeNavigate;
+
+  /// No description provided for @routeOpenOrder.
+  ///
+  /// In en, this message translates to:
+  /// **'Open order'**
+  String get routeOpenOrder;
+
+  /// No description provided for @routeNoAnswerNext.
+  ///
+  /// In en, this message translates to:
+  /// **'No answer – next'**
+  String get routeNoAnswerNext;
+
+  /// No description provided for @routeUpNext.
+  ///
+  /// In en, this message translates to:
+  /// **'Up next'**
+  String get routeUpNext;
+
+  /// No description provided for @routeRetryTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'No answer – try again'**
+  String get routeRetryTitle;
+
+  /// No description provided for @routeNoAnswerCount.
+  ///
+  /// In en, this message translates to:
+  /// **'No answer'**
+  String get routeNoAnswerCount;
+
+  /// No description provided for @routeTripFinished.
+  ///
+  /// In en, this message translates to:
+  /// **'All stops done.'**
+  String get routeTripFinished;
+
+  /// No description provided for @routeReturnToBranch.
+  ///
+  /// In en, this message translates to:
+  /// **'Return to branch and hand over'**
+  String get routeReturnToBranch;
+
+  /// No description provided for @routeNavigateToBranch.
+  ///
+  /// In en, this message translates to:
+  /// **'Navigate to branch'**
+  String get routeNavigateToBranch;
+
+  /// No description provided for @routeOnMyWayMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'Hello {customer}, I'm on my way with your order {order}.'**
+  String routeOnMyWayMessage(String customer, String order);
 }
 
 class _AppLocalizationsDelegate

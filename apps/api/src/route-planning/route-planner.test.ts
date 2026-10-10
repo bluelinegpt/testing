@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  applyManualAreaOrder,
+  sortByManualSequence,
   collapseDuplicateAreas,
   deferOrder,
   fallbackOrder,
@@ -299,5 +301,60 @@ describe("reverse and defer", () => {
   it("defer moves an Order to the end, once", () => {
     expect(deferOrder(["x", "y"], "x")).toEqual(["y", "x"]);
     expect(deferOrder([], "x")).toEqual(["x"]);
+  });
+});
+
+describe("applyManualAreaOrder", () => {
+  const stops = [
+    { areaId: "a", isSequenced: true },
+    { areaId: "b", isSequenced: true },
+    { areaId: "c", isSequenced: false },
+  ];
+  const allowed = new Set(["a", "b", "c", "n"]);
+
+  it("puts the named Areas first and keeps the rest in place", () => {
+    expect(applyManualAreaOrder(stops, ["c", "a"], allowed)).toEqual([
+      { areaId: "c", isSequenced: false },
+      { areaId: "a", isSequenced: true },
+      { areaId: "b", isSequenced: true },
+    ]);
+  });
+
+  it("adds a new Area as an unsequenced stop", () => {
+    expect(applyManualAreaOrder(stops, ["n"], allowed)?.[0]).toEqual({
+      areaId: "n",
+      isSequenced: false,
+    });
+  });
+
+  it("refuses an unknown or repeated Area", () => {
+    expect(applyManualAreaOrder(stops, ["x"], allowed)).toBeUndefined();
+    expect(applyManualAreaOrder(stops, ["a", "a"], allowed)).toBeUndefined();
+  });
+});
+
+describe("sortByManualSequence", () => {
+  const orders = [{ id: "1" }, { id: "2" }, { id: "3" }, { id: "4" }];
+
+  it("leaves the order alone without a sequence", () => {
+    expect(sortByManualSequence(orders, [])).toBe(orders);
+  });
+
+  it("puts placed Orders first in the Driver's order, the rest after", () => {
+    expect(sortByManualSequence(orders, ["3", "1"]).map((order) => order.id)).toEqual([
+      "3",
+      "1",
+      "2",
+      "4",
+    ]);
+  });
+
+  it("ignores ids that are not in the list", () => {
+    expect(sortByManualSequence(orders, ["9", "2"]).map((order) => order.id)).toEqual([
+      "2",
+      "1",
+      "3",
+      "4",
+    ]);
   });
 });

@@ -23,6 +23,20 @@ abstract interface class DriverRouteRepository {
     String orderId,
     int expectedRevision,
   );
+
+  /// The Driver's own order: Areas, and optionally the Orders inside them.
+  Future<RouteState> reorder(
+    String idempotencyKey,
+    int expectedRevision,
+    List<String> areaIds, {
+    List<String>? orderIds,
+  });
+
+  /// Start trip: his Assigned Orders go Out for Delivery.
+  Future<RouteState> start(String idempotencyKey);
+
+  /// Records that the customer did not answer. The Order is unchanged.
+  Future<RouteState> noAnswer(String idempotencyKey, String orderId);
 }
 
 final class ApiDriverRouteRepository implements DriverRouteRepository {
@@ -60,6 +74,26 @@ final class ApiDriverRouteRepository implements DriverRouteRepository {
     'orderId': orderId,
     'expectedRevision': expectedRevision,
   });
+
+  @override
+  Future<RouteState> reorder(
+    String idempotencyKey,
+    int expectedRevision,
+    List<String> areaIds, {
+    List<String>? orderIds,
+  }) => _post('reorder', idempotencyKey, {
+    'expectedRevision': expectedRevision,
+    'areaIds': areaIds,
+    'orderIds': ?orderIds,
+  });
+
+  @override
+  Future<RouteState> start(String idempotencyKey) =>
+      _post('start', idempotencyKey, const {});
+
+  @override
+  Future<RouteState> noAnswer(String idempotencyKey, String orderId) =>
+      _post('no-answer', idempotencyKey, {'orderId': orderId});
 
   Future<RouteState> _post(
     String action,
@@ -125,6 +159,29 @@ final class CachedDriverRouteRepository implements DriverRouteRepository {
     String orderId,
     int expectedRevision,
   ) => _guard(() => inner.defer(idempotencyKey, orderId, expectedRevision));
+
+  @override
+  Future<RouteState> reorder(
+    String idempotencyKey,
+    int expectedRevision,
+    List<String> areaIds, {
+    List<String>? orderIds,
+  }) => _guard(
+    () => inner.reorder(
+      idempotencyKey,
+      expectedRevision,
+      areaIds,
+      orderIds: orderIds,
+    ),
+  );
+
+  @override
+  Future<RouteState> start(String idempotencyKey) =>
+      _guard(() => inner.start(idempotencyKey));
+
+  @override
+  Future<RouteState> noAnswer(String idempotencyKey, String orderId) =>
+      _guard(() => inner.noAnswer(idempotencyKey, orderId));
 
   Future<RouteState> _guard(
     Future<RouteState> Function() call, {

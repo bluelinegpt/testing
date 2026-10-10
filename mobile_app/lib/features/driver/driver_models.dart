@@ -332,3 +332,42 @@ Uri? orderMapUri({
     'query': parts.join(', '),
   });
 }
+
+/// Google Maps driving directions to where the Order goes, ready to start
+/// navigation. Uses the address with its Area and Emirate; with no address
+/// it uses the Area's pin when there is one, else the Area by name. `null`
+/// only when there is nothing to aim at.
+Uri? orderDirectionsUri({
+  required String address,
+  required String areaName,
+  String? emirateName,
+  double? latitude,
+  double? longitude,
+}) {
+  final street = address.trim();
+  final String destination;
+  if (street.isEmpty && latitude != null && longitude != null) {
+    destination = '$latitude,$longitude';
+  } else {
+    final search = orderMapUri(
+      address: address,
+      areaName: areaName,
+      emirateName: emirateName,
+    );
+    if (search == null) return null;
+    destination = search.queryParameters['query']!;
+  }
+  return Uri.https('www.google.com', '/maps/dir/', {
+    'api': '1',
+    'destination': destination,
+    'travelmode': 'driving',
+  });
+}
+
+/// Driving directions to a fixed point (the branch).
+Uri pointDirectionsUri(double latitude, double longitude) =>
+    Uri.https('www.google.com', '/maps/dir/', {
+      'api': '1',
+      'destination': '$latitude,$longitude',
+      'travelmode': 'driving',
+    });

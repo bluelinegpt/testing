@@ -1,6 +1,18 @@
 import { ApiPropertyOptional, ApiProperty } from "@nestjs/swagger";
 import { Type } from "class-transformer";
-import { IsInt, IsLatitude, IsLongitude, IsOptional, IsUUID, Max, Min } from "class-validator";
+import {
+  ArrayMaxSize,
+  ArrayMinSize,
+  ArrayUnique,
+  IsArray,
+  IsInt,
+  IsLatitude,
+  IsLongitude,
+  IsOptional,
+  IsUUID,
+  Max,
+  Min,
+} from "class-validator";
 
 /**
  * Route planning request bodies. The global ValidationPipe runs with
@@ -58,6 +70,38 @@ export class DeferRouteOrderDto {
   @Min(1)
   @Max(1_000_000)
   public expectedRevision!: number;
+}
+
+/** The Driver's own Area order, and optionally the Orders inside the Areas. */
+export class ReorderRouteDto {
+  @ApiProperty({ minimum: 1 })
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(1_000_000)
+  public expectedRevision!: number;
+
+  @ApiProperty({ type: [String], format: "uuid" })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(200)
+  @ArrayUnique()
+  @IsUUID("all", { each: true })
+  public areaIds!: string[];
+
+  @ApiPropertyOptional({ type: [String], format: "uuid" })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(500)
+  @ArrayUnique()
+  @IsUUID("all", { each: true })
+  public orderIds?: string[];
+}
+
+export class RouteOrderActionDto {
+  @ApiProperty({ format: "uuid" })
+  @IsUUID()
+  public orderId!: string;
 }
 
 /** One Area pin or the branch location: both coordinates are required. */

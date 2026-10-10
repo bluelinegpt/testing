@@ -1506,4 +1506,17 @@ final class _RoutePlanningOff implements DriverRouteRepository {
     String orderId,
     int expectedRevision,
   ) => throw UnimplementedError();
+  @override
+  Future<RouteState> reorder(
+    String idempotencyKey,
+    int expectedRevision,
+    List<String> areaIds, {
+    List<String>? orderIds,
+  }) => throw UnimplementedError();
+  @override
+  Future<RouteState> start(String idempotencyKey) =>
+      throw UnimplementedError();
+  @override
+  Future<RouteState> noAnswer(String idempotencyKey, String orderId) =>
+      throw UnimplementedError();
 }

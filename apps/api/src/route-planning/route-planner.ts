@@ -198,3 +198,49 @@ export function reverseStops(stops: readonly PlannedStop[]): readonly PlannedSto
 export function deferOrder(deferred: readonly string[], orderId: string): readonly string[] {
   return [...deferred.filter((id) => id !== orderId), orderId];
 }
+
+/**
+ * The Driver's own Area order. [requested] lists the Areas he dragged into
+ * place; any Area of the run he did not mention keeps its relative place
+ * after them, so a partial request never drops a stop. An Area he names that
+ * the run does not hold yet (a new Area) joins as an unsequenced stop.
+ * Returns `undefined` when [requested] names an Area outside [allowed] or
+ * names one twice.
+ */
+export function applyManualAreaOrder(
+  current: readonly PlannedStop[],
+  requested: readonly string[],
+  allowed: ReadonlySet<string>,
+): readonly PlannedStop[] | undefined {
+  if (new Set(requested).size !== requested.length) return undefined;
+  if (requested.some((areaId) => !allowed.has(areaId))) return undefined;
+  const byArea = new Map(current.map((stop) => [stop.areaId, stop]));
+  const named = new Set(requested);
+  return [
+    ...requested.map((areaId) => byArea.get(areaId) ?? { areaId, isSequenced: false }),
+    ...current.filter((stop) => !named.has(stop.areaId)),
+  ];
+}
+
+/**
+ * Orders inside an Area in the Driver's own order: those he placed come
+ * first, in his order; the rest keep their existing order after them.
+ */
+export function sortByManualSequence<T extends { readonly id: string }>(
+  orders: readonly T[],
+  sequence: readonly string[],
+): readonly T[] {
+  if (sequence.length === 0) return orders;
+  const position = new Map(sequence.map((id, index) => [id, index]));
+  return orders
+    .map((order, index) => ({ order, index }))
+    .sort((left, right) => {
+      const a = position.get(left.order.id);
+      const b = position.get(right.order.id);
+      if (a !== undefined && b !== undefined) return a - b;
+      if (a !== undefined) return -1;
+      if (b !== undefined) return 1;
+      return left.index - right.index;
+    })
+    .map((entry) => entry.order);
+}

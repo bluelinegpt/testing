@@ -258,6 +258,8 @@ function serviceFor(
     identities,
     businessDays as BusinessDayService,
     registry,
+    // Start trip is not exercised here; Order status changes have their own tests.
+    { changeOrderStatus: () => Promise.reject(new Error("not used in these tests")) },
   );
 }
 

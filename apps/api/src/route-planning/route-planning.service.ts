@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { HttpStatus, Inject, Injectable } from "@nestjs/common";
 import { type Kysely, sql, type Transaction } from "kysely";
 
@@ -6,9 +8,11 @@ import { DATABASE } from "../infrastructure/database/database.tokens.js";
 import type { DatabaseSchema } from "../infrastructure/database/database.types.js";
 import { KyselyTransactionManager } from "../infrastructure/database/transaction-manager.js";
 import { driverWorkPredicate } from "../operations/driver-work-visibility.js";
+import { OperationsService } from "../operations/operations.service.js";
 import { ApplicationException } from "../presentation/errors/application.exception.js";
 import { IdentityContextAccessor } from "../security/identity-context.js";
 import {
+  applyManualAreaOrder,
   collapseDuplicateAreas,
   deferOrder,
   type PlannedStop,
@@ -17,6 +21,7 @@ import {
   type RouteArea,
   type RouteFallbackReason,
   type RoutePlanResult,
+  sortByManualSequence,
 } from "./route-planner.js";
 import { ROUTE_PROVIDERS, type RoutePoint, type RouteProviderRegistry } from "./route-provider.js";
 
@@ -36,6 +41,13 @@ export interface RouteOrderView {
   readonly customerName: string | null;
   readonly deliveryStatus: string;
   readonly areaId: string | null;
+  readonly customerMobile: string | null;
+  readonly customerAddress: string | null;
+  /** What the Driver collects from the customer at this stop. */
+  readonly amountDue: string | null;
+  /** Times the Driver recorded "no answer" today. The Order itself is unchanged. */
+  readonly noAnswerCount: number;
+  readonly lastNoAnswerAt: string | null;
 }
 
 export interface RouteAreaView {
@@ -77,6 +89,14 @@ export interface RouteRunView {
   readonly deferredOrders: readonly RouteOrderView[];
   readonly nextAreaId: string | null;
   readonly cashHandoverOrderCount: number;
+  /** Cash the Driver holds for delivered Orders, to hand over at the branch. */
+  readonly cashHandoverAmount: string;
+  /** When the Driver tapped Start trip; null before he sets out. */
+  readonly startedAt: string | null;
+  /** True after the Driver put the route in his own order. */
+  readonly manualOrder: boolean;
+  readonly branchLatitude: number | null;
+  readonly branchLongitude: number | null;
 }
 
 export interface RouteResponse {
@@ -85,6 +105,8 @@ export interface RouteResponse {
   /** True when the request carried an older revision; nothing was changed. */
   readonly stale: boolean;
   readonly run: RouteRunView | null;
+  /** Start trip only: Orders moved to Out for Delivery, and any that could not be. */
+  readonly trip?: { readonly changedCount: number; readonly failedOrderIds: readonly string[] };
 }
 
 export type RouteSource = "gps" | "selected_area" | "branch" | "fallback";
@@ -111,10 +133,14 @@ interface RunRow {
   readonly durationSeconds: number | null;
   readonly computedAt: string;
   readonly deferredOrderIds: readonly string[];
+  readonly startedAt: string | null;
+  readonly manualOrder: boolean;
+  readonly orderSequence: readonly string[];
 }
 
 interface LiveOrderRow extends RouteOrderView {
   readonly isStop: boolean;
+  readonly cashHeld: string | null;
 }
 
 interface AreaRow {
@@ -158,7 +184,10 @@ const RUN_COLUMNS = sql`
   r.distance_meters as "distanceMeters",
   r.duration_seconds as "durationSeconds",
   r.computed_at::text as "computedAt",
-  r.deferred_order_ids as "deferredOrderIds"
+  r.deferred_order_ids as "deferredOrderIds",
+  r.started_at::text as "startedAt",
+  r.manual_order as "manualOrder",
+  r.order_sequence as "orderSequence"
 `;
 
 /**
@@ -177,6 +206,8 @@ export class RoutePlanningService {
     @Inject(BusinessDayService)
     private readonly businessDays: Pick<BusinessDayService, "businessDateOf">,
     @Inject(ROUTE_PROVIDERS) private readonly providers: RouteProviderRegistry,
+    @Inject(OperationsService)
+    private readonly operations: Pick<OperationsService, "changeOrderStatus">,
   ) {}
 
   /** The Driver's run for today, rebuilt over live Order data. */
@@ -289,6 +320,8 @@ export class RoutePlanningService {
                fallback_reason = ${computed.result.fallbackReason},
                partial_optimization = ${computed.result.partialOptimization},
                direction = 'recommended',
+               manual_order = false,
+               order_sequence = '[]'::jsonb,
                start_area_id = ${start.areaId}::uuid,
                start_latitude = ${start.coordinates?.latitude ?? null},
                start_longitude = ${start.coordinates?.longitude ?? null},
@@ -389,6 +422,191 @@ export class RoutePlanningService {
     );
   }
 
+  /**
+   * The Driver's own order: Areas he dragged into place, and optionally the
+   * Orders inside them. Saved as a new revision; no engine call. A later
+   * Replan replaces it (the app asks him first).
+   */
+  public async reorder(
+    input: {
+      readonly expectedRevision: number;
+      readonly areaIds: readonly string[];
+      readonly orderIds?: readonly string[];
+    },
+    idempotencyKey: string,
+  ): Promise<RouteResponse> {
+    const scope = await this.scope();
+    const settings = await this.requireEnabled(scope.companyId);
+    return this.mutate(
+      scope,
+      settings.platformEnabled,
+      input.expectedRevision,
+      idempotencyKey,
+      async (transaction, run) => {
+        const current = await this.view(transaction, scope, run);
+        const stops = await sql<{ areaId: string; isSequenced: boolean; status: string }>`
+        select area_id as "areaId", is_sequenced as "isSequenced", status
+          from driver_route_stops
+         where company_id = ${scope.companyId}::uuid and run_id = ${run.id}::uuid
+         order by sequence_position
+      `.execute(transaction);
+        const allowed = new Set(current.areas.map((area) => area.areaId));
+        const ordered = applyManualAreaOrder(stops.rows, input.areaIds, allowed);
+        if (ordered === undefined) {
+          throw new ApplicationException(
+            "route_area_not_in_run",
+            "Every Area must be one of your route's Areas, once",
+            HttpStatus.BAD_REQUEST,
+          );
+        }
+        const stopOrderIds = new Set(
+          current.areas.flatMap((area) => area.orders.map((order) => order.id)),
+        );
+        const orderIds = input.orderIds ?? run.orderSequence;
+        if (
+          new Set(orderIds).size !== orderIds.length ||
+          (input.orderIds !== undefined && orderIds.some((id) => !stopOrderIds.has(id)))
+        ) {
+          throw new ApplicationException(
+            "route_order_not_in_run",
+            "Every Order must be one of your route's stops, once",
+            HttpStatus.BAD_REQUEST,
+          );
+        }
+        const statusOf = new Map(stops.rows.map((stop) => [stop.areaId, stop.status]));
+        await sql`delete from driver_route_stops where company_id = ${scope.companyId}::uuid and run_id = ${run.id}::uuid`.execute(
+          transaction,
+        );
+        await this.writeStops(transaction, scope.companyId, run.id, ordered, statusOf);
+        await sql`
+        update driver_route_runs
+           set revision = revision + 1,
+               manual_order = true,
+               order_sequence = ${JSON.stringify(orderIds)}::jsonb,
+               updated_at = now()
+         where company_id = ${scope.companyId}::uuid and id = ${run.id}::uuid
+      `.execute(transaction);
+        return {
+          action: "manual_reorder",
+          details: { areaCount: input.areaIds.length, orderCount: orderIds.length },
+        };
+      },
+    );
+  }
+
+  /**
+   * Start trip. Every Order still Assigned to the Driver moves to Out for
+   * Delivery through the normal Order status change -- the same rules,
+   * history, audit and events as tapping Start Delivery on each one. An Order
+   * that cannot move (changed by the office meanwhile) is reported back and
+   * left as it is. A repeated request changes nothing twice: only Orders that
+   * are still Assigned are picked up, and the trip start is recorded once.
+   */
+  public async start(idempotencyKey: string, correlationId: string): Promise<RouteResponse> {
+    const scope = await this.scope();
+    const settings = await this.requireEnabled(scope.companyId);
+    const run = await this.requireActiveRun(scope);
+    if (await this.actionKeyUsed(this.database, scope.companyId, run.id, idempotencyKey)) {
+      return this.respond(scope, settings.platformEnabled, run, false);
+    }
+    const assigned = await sql<{ id: string }>`
+      select o.id
+        from orders o
+       where o.company_id = ${scope.companyId}::uuid
+         and o.assigned_driver_id = ${scope.driverId}::uuid
+         and o.order_type <> 'gcc_international'
+         and o.delivery_status = 'assigned_to_driver'
+       order by o.serial_number nulls last, o.order_number, o.id
+    `.execute(this.database);
+    const failedOrderIds: string[] = [];
+    let changedCount = 0;
+    for (const order of assigned.rows) {
+      try {
+        await this.operations.changeOrderStatus(
+          order.id,
+          { status: "out_for_delivery", expectedStatus: "assigned_to_driver" },
+          correlationId,
+          tripStatusKey(idempotencyKey, order.id),
+        );
+        changedCount += 1;
+      } catch {
+        failedOrderIds.push(order.id);
+      }
+    }
+    try {
+      const updated = await this.transactions.execute(async (transaction) => {
+        const locked = await sql<RunRow>`
+          select ${RUN_COLUMNS}
+            from driver_route_runs r
+           where r.company_id = ${scope.companyId}::uuid and r.id = ${run.id}::uuid
+           for update
+        `.execute(transaction);
+        const current = locked.rows[0] ?? run;
+        await sql`
+          update driver_route_runs
+             set started_at = coalesce(started_at, now()), updated_at = now()
+           where company_id = ${scope.companyId}::uuid and id = ${run.id}::uuid
+        `.execute(transaction);
+        await this.recordAction(transaction, scope, run.id, "trip_started", current.revision, {
+          details: { changedCount, failedOrderIds },
+          idempotencyKey,
+        });
+        return (await this.runById(transaction, scope, run.id)) as RunRow;
+      });
+      const response = await this.respond(scope, settings.platformEnabled, updated, false);
+      return { ...response, trip: { changedCount, failedOrderIds } };
+    } catch (error) {
+      if (!isUniqueViolation(error)) throw error;
+      const latest = await this.requireActiveRun(scope);
+      return this.respond(scope, settings.platformEnabled, latest, false);
+    }
+  }
+
+  /**
+   * No answer: records the attempt and nothing else. The Order keeps its
+   * status and its place in the route; the Driver can open it and deliver
+   * it whenever he comes back.
+   */
+  public async noAnswer(orderId: string, idempotencyKey: string): Promise<RouteResponse> {
+    const scope = await this.scope();
+    const settings = await this.requireEnabled(scope.companyId);
+    const run = await this.requireActiveRun(scope);
+    if (await this.actionKeyUsed(this.database, scope.companyId, run.id, idempotencyKey)) {
+      return this.respond(scope, settings.platformEnabled, run, false);
+    }
+    const order = await sql<{ id: string; areaId: string | null }>`
+      select o.id, o.area_id as "areaId"
+        from orders o
+       where o.company_id = ${scope.companyId}::uuid
+         and o.id = ${orderId}::uuid
+         and o.assigned_driver_id = ${scope.driverId}::uuid
+         and o.order_type <> 'gcc_international'
+         and ${driverWorkPredicate("o")}
+         and o.delivery_status <> 'delivered'
+    `.execute(this.database);
+    const found = order.rows[0];
+    if (found === undefined) {
+      throw new ApplicationException(
+        "route_order_not_in_run",
+        "This Order is not a stop in your route",
+        HttpStatus.NOT_FOUND,
+      );
+    }
+    try {
+      await this.transactions.execute(async (transaction) => {
+        await this.recordAction(transaction, scope, run.id, "no_answer", run.revision, {
+          details: {},
+          idempotencyKey,
+          orderId: found.id,
+          areaId: found.areaId,
+        });
+      });
+    } catch (error) {
+      if (!isUniqueViolation(error)) throw error;
+    }
+    return this.respond(scope, settings.platformEnabled, run, false);
+  }
+
   // ---------------------------------------------------------------------------
 
   private async mutate(
@@ -400,7 +618,7 @@ export class RoutePlanningService {
       transaction: Transaction<DatabaseSchema>,
       run: RunRow,
     ) => Promise<{
-      readonly action: "replan" | "reverse" | "defer";
+      readonly action: "replan" | "reverse" | "defer" | "manual_reorder";
       readonly details: Record<string, unknown>;
       readonly orderId?: string;
       readonly areaId?: string | null;
@@ -507,8 +725,7 @@ export class RoutePlanningService {
     // the same explicit `drivers.employee_id` chain `OperationsService`
     // uses for that account's Orders list. Never inferred from a name or
     // mobile number.
-    const isDriverUser =
-      identity.kind === "company_user" && identity.profileType === "employee";
+    const isDriverUser = identity.kind === "company_user" && identity.profileType === "employee";
     if ((!isDriverAccount && !isDriverUser) || identity.companyId === null) {
       throw new ApplicationException(
         "route_driver_required",
@@ -776,7 +993,8 @@ export class RoutePlanningService {
     transaction: Transaction<DatabaseSchema>,
     scope: DriverScope,
     runId: string,
-    action: "plan" | "replan" | "reverse" | "defer",
+    action:
+      "plan" | "replan" | "reverse" | "defer" | "manual_reorder" | "trip_started" | "no_answer",
     revision: number,
     options: {
       readonly details: Record<string, unknown>;
@@ -819,7 +1037,7 @@ export class RoutePlanningService {
    * Area that was not in the plan show as a new Area until Replan.
    */
   private async view(executor: Executor, scope: DriverScope, run: RunRow): Promise<RouteRunView> {
-    const [stopsResult, ordersResult] = await Promise.all([
+    const [stopsResult, ordersResult, settings] = await Promise.all([
       sql<{
         areaId: string;
         position: number;
@@ -839,17 +1057,32 @@ export class RoutePlanningService {
                o.customer_name as "customerName",
                o.delivery_status as "deliveryStatus",
                o.area_id as "areaId",
-               (o.delivery_status <> 'delivered') as "isStop"
+               o.customer_mobile_number as "customerMobile",
+               o.customer_address as "customerAddress",
+               o.customer_amount_due::text as "amountDue",
+               coalesce(o.amount_collected, o.customer_amount_due)::text as "cashHeld",
+               (o.delivery_status <> 'delivered') as "isStop",
+               coalesce(attempts.count, 0)::int as "noAnswerCount",
+               attempts.last_at::text as "lastNoAnswerAt"
           from orders o
+          left join lateral (
+            select count(*) as count, max(ra.created_at) as last_at
+              from driver_route_actions ra
+             where ra.company_id = o.company_id
+               and ra.run_id = ${run.id}::uuid
+               and ra.order_id = o.id
+               and ra.action = 'no_answer'
+          ) attempts on true
          where o.company_id = ${scope.companyId}::uuid
            and o.assigned_driver_id = ${scope.driverId}::uuid
            and o.order_type <> 'gcc_international'
            and ${driverWorkPredicate("o")}
          order by o.serial_number nulls last, o.order_number, o.id
       `.execute(executor),
+      this.settings(executor, scope.companyId),
     ]);
     const stops = stopsResult.rows;
-    const orders = ordersResult.rows;
+    const orders = sortByManualSequence(ordersResult.rows, run.orderSequence);
     const areaIds = [
       ...new Set([
         ...stops.map((stop) => stop.areaId),
@@ -960,6 +1193,13 @@ export class RoutePlanningService {
       deferredOrders,
       nextAreaId: next?.areaId ?? null,
       cashHandoverOrderCount: orders.filter((order) => !order.isStop).length,
+      cashHandoverAmount: sumMoney(
+        orders.filter((order) => !order.isStop).map((order) => order.cashHeld),
+      ),
+      startedAt: run.startedAt,
+      manualOrder: run.manualOrder,
+      branchLatitude: settings.branch?.latitude ?? null,
+      branchLongitude: settings.branch?.longitude ?? null,
     };
   }
 }
@@ -998,7 +1238,35 @@ function orderView(order: LiveOrderRow): RouteOrderView {
     customerName: order.customerName,
     deliveryStatus: order.deliveryStatus,
     areaId: order.areaId,
+    customerMobile: order.customerMobile,
+    customerAddress: order.customerAddress,
+    amountDue: order.amountDue,
+    noAnswerCount: order.noAnswerCount,
+    lastNoAnswerAt: order.lastNoAnswerAt,
   };
+}
+
+/** Exact sum of money strings (fils), never floating point. */
+export function sumMoney(values: readonly (string | null)[]): string {
+  let fils = 0n;
+  for (const value of values) {
+    if (value === null || value.trim() === "") continue;
+    const [whole = "0", fraction = ""] = value.trim().replace(/^-/, "").split(".");
+    const sign = value.trim().startsWith("-") ? -1n : 1n;
+    fils += sign * (BigInt(whole || "0") * 100n + BigInt((fraction + "00").slice(0, 2)));
+  }
+  const negative = fils < 0n;
+  const absolute = negative ? -fils : fils;
+  const text = `${absolute / 100n}.${(absolute % 100n).toString().padStart(2, "0")}`;
+  return negative ? `-${text}` : text;
+}
+
+/**
+ * The status-change key for one Order inside a Start trip, derived from the
+ * trip's own key so a retried Start replays instead of changing twice.
+ */
+export function tripStatusKey(tripKey: string, orderId: string): string {
+  return `route-trip.${createHash("sha256").update(`${tripKey}:${orderId}`).digest("hex").slice(0, 40)}`;
 }
 
 function noActiveRun(): ApplicationException {
