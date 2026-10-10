@@ -1742,6 +1742,7 @@ export const platformApi = {
   async companyRouteOptimization(companyId: string): Promise<CompanyRouteOptimization> {
     const result = await request<CompanyRouteOptimization>(
       `platform/companies/${companyId}/route-optimization`,
+      { method: "GET" },
     );
     if (result === undefined) throw new PlatformApiError("Empty route planning response", "empty", 500);
     return result;
@@ -1760,7 +1761,9 @@ export const platformApi = {
   },
 
   async routeKillSwitch(): Promise<RouteKillSwitch> {
-    const result = await request<RouteKillSwitch>("platform/route-optimization/kill-switch");
+    const result = await request<RouteKillSwitch>("platform/route-optimization/kill-switch", {
+      method: "GET",
+    });
     if (result === undefined) throw new PlatformApiError("Empty kill switch response", "empty", 500);
     return result;
   },
